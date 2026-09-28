@@ -1,5 +1,6 @@
 //! Concatenation: PHPStan's `InitializerExprTypeResolver::resolveConcatType`.
 
+use crate::Repr;
 use crate::{AccessoryKind, ClassHierarchy, PhpString, Type};
 
 /// Real PHPStan's own `CALCULATE_SCALARS_LIMIT` (`InitializerExprTypeResolver
@@ -17,24 +18,24 @@ const CALCULATE_SCALARS_LIMIT: usize = 8;
 /// (the numeric-string propagation's own `$left->isInteger()`/
 /// `$right`-range checks, which run against the un-stringified operand).
 pub fn concat_types(l: &Type, r: &Type, hierarchy: &dyn ClassHierarchy) -> Type {
-    let as_string = |ty: &Type| ty.to_string_type(hierarchy).unwrap_or(Type::String);
+    let as_string = |ty: &Type| ty.to_string_type(hierarchy).unwrap_or(Type(Repr::String));
     let l_str = as_string(l);
     let r_str = as_string(r);
 
     // Empty-string identity shortcuts.
-    if let Type::StringLiteral(s) = &l_str
+    if let Type(Repr::StringLiteral(s)) = &l_str
         && s.is_empty()
     {
         return r_str;
     }
-    if let Type::StringLiteral(s) = &r_str
+    if let Type(Repr::StringLiteral(s)) = &r_str
         && s.is_empty()
     {
         return l_str;
     }
     // Full constant fold when both sides are single literals.
-    if let (Type::StringLiteral(a), Type::StringLiteral(b)) = (&l_str, &r_str) {
-        return Type::StringLiteral(a.concat(b));
+    if let (Type(Repr::StringLiteral(a)), Type(Repr::StringLiteral(b))) = (&l_str, &r_str) {
+        return Type(Repr::StringLiteral(a.concat(b)));
     }
 
     // Bounded constant-string cross product - covers a `Union` of
@@ -62,9 +63,11 @@ pub fn concat_types(l: &Type, r: &Type, hierarchy: &dyn ClassHierarchy) -> Type 
         combos.dedup();
         if !combos.is_empty() {
             return if combos.len() == 1 {
-                Type::StringLiteral(combos.into_iter().next().unwrap())
+                Type(Repr::StringLiteral(combos.into_iter().next().unwrap()))
             } else {
-                Type::Union(combos.into_iter().map(Type::string_literal).collect())
+                Type(Repr::Union(
+                    combos.into_iter().map(Type::string_literal).collect(),
+                ))
             };
         }
     }
@@ -112,7 +115,10 @@ pub fn concat_types(l: &Type, r: &Type, hierarchy: &dyn ClassHierarchy) -> Type 
         .is_refined_string(AccessoryKind::NumericString)
         .yes();
     if l_numeric_capable {
-        let l_is_int = matches!(l, Type::Int | Type::IntLiteral(_) | Type::IntRange(_, _));
+        let l_is_int = matches!(
+            l,
+            Type(Repr::Int) | Type(Repr::IntLiteral(_)) | Type(Repr::IntRange(_, _))
+        );
         let validate: fn(&str) -> bool = if l_is_int {
             |v: &str| !v.starts_with('-')
         } else {
@@ -132,11 +138,11 @@ pub fn concat_types(l: &Type, r: &Type, hierarchy: &dyn ClassHierarchy) -> Type 
     }
 
     if accessories.is_empty() {
-        Type::String
+        Type(Repr::String)
     } else {
-        let mut members = vec![Type::String];
-        members.extend(accessories.into_iter().map(Type::Accessory));
-        Type::Intersection(members)
+        let mut members = vec![Type(Repr::String)];
+        members.extend(accessories.into_iter().map(Type::accessory));
+        Type(Repr::Intersection(members))
     }
 }
 
@@ -149,16 +155,16 @@ pub fn concat_types(l: &Type, r: &Type, hierarchy: &dyn ClassHierarchy) -> Type 
 /// always-possible empty-string member.
 fn strip_empty_string_member(ty: &Type) -> Type {
     match ty {
-        Type::Union(members) => {
+        Type(Repr::Union(members)) => {
             let filtered: Vec<Type> = members
                 .iter()
-                .filter(|m| **m != Type::StringLiteral(PhpString::default()))
+                .filter(|m| **m != Type(Repr::StringLiteral(PhpString::default())))
                 .cloned()
                 .collect();
             match filtered.len() {
                 0 => ty.clone(),
                 1 => filtered.into_iter().next().unwrap(),
-                _ => Type::Union(filtered),
+                _ => Type(Repr::Union(filtered)),
             }
         }
         other => other.clone(),
@@ -170,8 +176,8 @@ fn strip_empty_string_member(ty: &Type) -> Type {
 /// (never guessed at for a bare `String`/accessoried `Intersection`).
 fn constant_strings(ty: &Type) -> Vec<PhpString> {
     match ty {
-        Type::StringLiteral(s) => vec![s.clone()],
-        Type::Union(members) => members.iter().flat_map(constant_strings).collect(),
+        Type(Repr::StringLiteral(s)) => vec![s.clone()],
+        Type(Repr::Union(members)) => members.iter().flat_map(constant_strings).collect(),
         _ => Vec::new(),
     }
 }

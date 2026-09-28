@@ -1,3 +1,4 @@
+use crate::Repr;
 use crate::{Shape, ShapeField, ShapeKey, Type};
 /// A defensive cap on how many distinct members `union_types` will ever
 /// materialize into a real `Type::Union`. Collapsing to `Mixed` past this
@@ -21,10 +22,10 @@ pub fn union_types(a: Type, b: Type) -> Type {
 
 fn union_types_impl(a: Type, b: Type) -> Type {
     // `never` has no values to add.
-    if a == Type::Never {
+    if a == Type(Repr::Never) {
         return normalize_generic_args(b);
     }
-    if b == Type::Never {
+    if b == Type(Repr::Never) {
         return normalize_generic_args(a);
     }
     let (a, b) = (normalize_generic_args(a), normalize_generic_args(b));
@@ -32,24 +33,24 @@ fn union_types_impl(a: Type, b: Type) -> Type {
         return a;
     }
     // An error absorbs everything, as a `mixed` does.
-    if matches!(a, Type::Error) || matches!(b, Type::Error) {
-        return Type::Error;
+    if matches!(a, Type(Repr::Error)) || matches!(b, Type(Repr::Error)) {
+        return Type(Repr::Error);
     }
     // A `mixed` absorbs everything, and stays explicit when either side
     // wrote it.
     if let Some(explicit) = mixed_explicitness(&[&a, &b]) {
-        return Type::Mixed(explicit);
+        return Type(Repr::Mixed(explicit));
     }
     if let Some(merged) = merge_has_offset_value_pair(&a, &b) {
         return merged;
     }
     let mut members = Vec::new();
     match a {
-        Type::Union(m) => members.extend(m),
+        Type(Repr::Union(m)) => members.extend(m),
         other => members.push(other),
     }
     match b {
-        Type::Union(m) => {
+        Type(Repr::Union(m)) => {
             for x in m {
                 if !members.iter().any(|m| crate::types_equal_for_union(m, &x)) {
                     members.push(x);
@@ -80,45 +81,45 @@ fn union_types_impl(a: Type, b: Type) -> Type {
     // (`nullsafe.neverNull` false-firing on a `T|mixed` receiver, since
     // `mixed` already includes `null` but a raw member scan for `Null`
     // specifically wouldn't find it).
-    if members.contains(&Type::Error) {
-        return Type::Error;
+    if members.contains(&Type(Repr::Error)) {
+        return Type(Repr::Error);
     }
     if let Some(explicit) = mixed_explicitness(&members.iter().collect::<Vec<_>>()) {
-        return Type::Mixed(explicit);
+        return Type(Repr::Mixed(explicit));
     }
-    members.retain(|m| *m != Type::Never);
+    members.retain(|m| *m != Type(Repr::Never));
     // `true|false` is `bool`, and `bool` holds both.
-    if members.contains(&Type::True) && members.contains(&Type::False) {
+    if members.contains(&Type(Repr::True)) && members.contains(&Type(Repr::False)) {
         let at = members
             .iter()
-            .position(|m| matches!(m, Type::True | Type::False))
+            .position(|m| matches!(m, Type(Repr::True) | Type(Repr::False)))
             .expect("checked above");
-        members[at] = Type::Bool;
+        members[at] = Type(Repr::Bool);
     }
-    if members.contains(&Type::Bool) {
-        members.retain(|m| !matches!(m, Type::True | Type::False));
+    if members.contains(&Type(Repr::Bool)) {
+        members.retain(|m| !matches!(m, Type(Repr::True) | Type(Repr::False)));
     }
     // An extension payload whose widened form is already a member adds
     // nothing - the union cap's widening stays put once it happened.
     let widened: Vec<Type> = members
         .iter()
         .filter_map(|m| match m {
-            Type::Extension(data) => data.widen(),
+            Type(Repr::Extension(data)) => data.widen(),
             _ => None,
         })
         .filter(|w| members.contains(w))
         .collect();
     if !widened.is_empty() {
         members.retain(|m| match m {
-            Type::Extension(data) => !data.widen().is_some_and(|w| widened.contains(&w)),
+            Type(Repr::Extension(data)) => !data.widen().is_some_and(|w| widened.contains(&w)),
             _ => true,
         });
     }
     // `void` joined with `null` is just `null`, as in real PHPStan's
     // `TypeCombinator::union` (a nullsafe call to a `void` method reads
     // as `null`).
-    if members.contains(&Type::Null) {
-        members.retain(|m| *m != Type::Void);
+    if members.contains(&Type(Repr::Null)) {
+        members.retain(|m| *m != Type(Repr::Void));
     }
     // Drop a literal member whenever its exact base type is also present
     // in the same union - a ternary's two branches
@@ -136,7 +137,11 @@ fn union_types_impl(a: Type, b: Type) -> Type {
         .filter(|m| {
             matches!(
                 m,
-                Type::Int | Type::String | Type::Bool | Type::Array(_, _) | Type::Float
+                Type(Repr::Int)
+                    | Type(Repr::String)
+                    | Type(Repr::Bool)
+                    | Type(Repr::Array(_, _))
+                    | Type(Repr::Float)
             )
         })
         .cloned()
@@ -180,14 +185,14 @@ fn union_types_impl(a: Type, b: Type) -> Type {
     // the two is left as a narrower residual.
     if members
         .iter()
-        .filter(|m| matches!(m, Type::Array(_, _)))
+        .filter(|m| matches!(m, Type(Repr::Array(_, _))))
         .count()
         > 1
     {
         let mut merged_key: Option<Type> = None;
         let mut merged_val: Option<Type> = None;
         members.retain(|m| {
-            let Type::Array(k, v) = m else {
+            let Type(Repr::Array(k, v)) = m else {
                 return true;
             };
             merged_key = Some(match merged_key.take() {
@@ -200,10 +205,10 @@ fn union_types_impl(a: Type, b: Type) -> Type {
             });
             false
         });
-        members.push(Type::Array(
+        members.push(Type(Repr::Array(
             Box::new(merged_key.unwrap()),
             Box::new(merged_val.unwrap()),
-        ));
+        )));
     }
     if members.len() > MAX_UNION_MEMBERS {
         members = generalize_by_key_set(members);
@@ -212,12 +217,12 @@ fn union_types_impl(a: Type, b: Type) -> Type {
         members = widen_extension_types(members);
     }
     if members.len() > MAX_UNION_MEMBERS {
-        return Type::Mixed(false);
+        return Type(Repr::Mixed(false));
     }
     if members.len() == 1 {
         members.into_iter().next().unwrap()
     } else {
-        Type::Union(members)
+        Type(Repr::Union(members))
     }
 }
 
@@ -227,15 +232,18 @@ fn union_types_impl(a: Type, b: Type) -> Type {
 /// stay constants (`1|2`). The merged range takes the place of its first
 /// member.
 pub(crate) fn merge_int_ranges(members: &mut Vec<Type>) {
-    if !members.iter().any(|m| matches!(m, Type::IntRange(..))) {
+    if !members
+        .iter()
+        .any(|m| matches!(m, Type(Repr::IntRange(..))))
+    {
         return;
     }
     let mut intervals: Vec<(usize, Option<i64>, Option<i64>, bool)> = members
         .iter()
         .enumerate()
         .filter_map(|(i, m)| match m {
-            Type::IntRange(min, max) => Some((i, *min, *max, true)),
-            Type::IntLiteral(n) => Some((i, Some(*n), Some(*n), false)),
+            Type(Repr::IntRange(min, max)) => Some((i, *min, *max, true)),
+            Type(Repr::IntLiteral(n)) => Some((i, Some(*n), Some(*n), false)),
             _ => None,
         })
         .collect();
@@ -258,8 +266,8 @@ pub(crate) fn merge_int_ranges(members: &mut Vec<Type>) {
                 .flatten();
             let first = cluster.iter().map(|&(i, ..)| i).min().expect("non-empty");
             let merged = match (min, max) {
-                (None, None) => Type::Int,
-                (min, max) => Type::IntRange(min, max),
+                (None, None) => Type(Repr::Int),
+                (min, max) => Type(Repr::IntRange(min, max)),
             };
             replaced.push((first, merged));
             removed.extend(cluster.iter().map(|&(i, ..)| i).filter(|&i| i != first));
@@ -296,7 +304,7 @@ fn widen_extension_types(members: Vec<Type>) -> Vec<Type> {
     let mut out: Vec<Type> = Vec::new();
     for m in members {
         let m = match &m {
-            Type::Extension(data) => data.widen().unwrap_or(m),
+            Type(Repr::Extension(data)) => data.widen().unwrap_or(m),
             _ => m,
         };
         if !out.contains(&m) {
@@ -323,7 +331,7 @@ pub fn generalize_by_key_set(members: Vec<Type>) -> Vec<Type> {
     let mut passthrough: Vec<Type> = Vec::new();
     for m in members {
         match m {
-            Type::ArrayShape(shape) => {
+            Type(Repr::ArrayShape(shape)) => {
                 let mut keys: Vec<ShapeKey> = shape.fields.iter().map(|f| f.key.clone()).collect();
                 keys.sort();
                 let key_set = (keys, shape.is_sealed());
@@ -337,7 +345,7 @@ pub fn generalize_by_key_set(members: Vec<Type>) -> Vec<Type> {
     }
     for (_, variants) in groups {
         if variants.len() == 1 {
-            passthrough.push(Type::ArrayShape(variants.into_iter().next().unwrap()));
+            passthrough.push(Type(Repr::ArrayShape(variants.into_iter().next().unwrap())));
             continue;
         }
         let fields = variants[0]
@@ -362,7 +370,7 @@ pub fn generalize_by_key_set(members: Vec<Type>) -> Vec<Type> {
             .filter_map(|shape| shape.unsealed.as_deref().cloned())
             .reduce(|(ka, va), (kb, vb)| (union_types(ka, kb), union_types(va, vb)))
             .map(Box::new);
-        passthrough.push(Type::ArrayShape(Shape { fields, unsealed }));
+        passthrough.push(Type(Repr::ArrayShape(Shape { fields, unsealed })));
     }
     passthrough
 }
@@ -382,20 +390,24 @@ pub fn generalize_by_key_set(members: Vec<Type>) -> Vec<Type> {
 /// relation that only holds for compatibility, not equivalence.
 fn literal_base_type(t: &Type) -> Option<Type> {
     match t {
-        Type::IntLiteral(_) => Some(Type::Int),
-        Type::StringLiteral(_) => Some(Type::String),
-        Type::True | Type::False => Some(Type::Bool),
-        Type::FloatLiteral(_) => Some(Type::Float),
-        Type::IntRange(_, _) => Some(Type::Int),
+        Type(Repr::IntLiteral(_)) => Some(Type(Repr::Int)),
+        Type(Repr::StringLiteral(_)) => Some(Type(Repr::String)),
+        Type(Repr::True) | Type(Repr::False) => Some(Type(Repr::Bool)),
+        Type(Repr::FloatLiteral(_)) => Some(Type(Repr::Float)),
+        Type(Repr::IntRange(_, _)) => Some(Type(Repr::Int)),
         // Scoped to intersections that carry an `Accessory` member, so a
         // genuine, unrelated multi-class intersection
         // (`Countable&Iterator`) is never affected - only an
         // accessory-refined intersection is "more specific than its own
         // base type."
-        Type::Intersection(members) if members.iter().any(|m| matches!(m, Type::Accessory(_))) => {
+        Type(Repr::Intersection(members))
+            if members
+                .iter()
+                .any(|m| matches!(m, Type(Repr::Accessory(_)))) =>
+        {
             members
                 .iter()
-                .find(|m| !matches!(m, Type::Accessory(_)))
+                .find(|m| !matches!(m, Type(Repr::Accessory(_))))
                 .cloned()
         }
         _ => None,
@@ -417,20 +429,20 @@ fn literal_base_type(t: &Type) -> Option<Type> {
 /// union merge below.
 pub fn has_offset_value_parts(t: &Type) -> Option<(Type, Vec<(ShapeKey, Type)>)> {
     match t {
-        Type::Array(..) => Some((t.clone(), Vec::new())),
-        Type::Intersection(members)
+        Type(Repr::Array(..)) => Some((t.clone(), Vec::new())),
+        Type(Repr::Intersection(members))
             if members
                 .iter()
-                .all(|m| matches!(m, Type::Array(..) | Type::HasOffsetValue(..))) =>
+                .all(|m| matches!(m, Type(Repr::Array(..)) | Type(Repr::HasOffsetValue(..)))) =>
         {
             let base = members
                 .iter()
-                .find(|m| matches!(m, Type::Array(..)))?
+                .find(|m| matches!(m, Type(Repr::Array(..))))?
                 .clone();
             let pairs = members
                 .iter()
                 .filter_map(|m| match m {
-                    Type::HasOffsetValue(k, v) => Some((k.clone(), (**v).clone())),
+                    Type(Repr::HasOffsetValue(k, v)) => Some((k.clone(), (**v).clone())),
                     _ => None,
                 })
                 .collect();
@@ -472,10 +484,10 @@ fn merge_has_offset_value_pair(a: &Type, b: &Type) -> Option<Type> {
         return None;
     }
     let merged_base = match (base_a, base_b) {
-        (Type::Array(ka, va), Type::Array(kb, vb)) => Type::Array(
+        (Type(Repr::Array(ka, va)), Type(Repr::Array(kb, vb))) => Type(Repr::Array(
             Box::new(union_types(*ka, *kb)),
             Box::new(union_types(*va, *vb)),
-        ),
+        )),
         // Unreachable given `has_offset_value_parts`'s own contract
         // (its `base` is always a `Type::Array`), kept as a safe
         // fallback rather than an `unreachable!()`.
@@ -494,9 +506,9 @@ fn merge_has_offset_value_pair(a: &Type, b: &Type) -> Option<Type> {
     members.extend(
         merged_pairs
             .into_iter()
-            .map(|(k, v)| Type::HasOffsetValue(k, Box::new(v))),
+            .map(|(k, v)| Type(Repr::HasOffsetValue(k, Box::new(v)))),
     );
-    Some(Type::Intersection(members))
+    Some(Type(Repr::Intersection(members)))
 }
 
 /// The array members of a union, as PHPStan's `processArrayTypes` and
@@ -510,18 +522,18 @@ fn merge_has_offset_value_pair(a: &Type, b: &Type) -> Option<Type> {
 fn reduce_array_members(members: &mut Vec<Type>) {
     let shape_count = members
         .iter()
-        .filter(|m| matches!(m, Type::ArrayShape(_)))
+        .filter(|m| matches!(m, Type(Repr::ArrayShape(_))))
         .count();
     if shape_count == 0 {
         return;
     }
-    if members.iter().any(|m| matches!(m, Type::Array(..))) {
+    if members.iter().any(|m| matches!(m, Type(Repr::Array(..)))) {
         for m in members.iter_mut() {
-            if let Type::ArrayShape(shape) = m {
+            if let Type(Repr::ArrayShape(shape)) = m {
                 *m = shape_as_general_array(shape);
             }
         }
-        members.retain(|m| m != &Type::Never);
+        members.retain(|m| m != &Type(Repr::Never));
         return;
     }
     if shape_count == 1 {
@@ -529,7 +541,7 @@ fn reduce_array_members(members: &mut Vec<Type>) {
     }
     let mut shapes: Vec<Option<Shape>> = Vec::new();
     members.retain(|m| match m {
-        Type::ArrayShape(shape) => {
+        Type(Repr::ArrayShape(shape)) => {
             shapes.push(Some(shape.clone()));
             false
         }
@@ -555,7 +567,7 @@ fn reduce_array_members(members: &mut Vec<Type>) {
                 && b.fields.len() == 1
                 && !matches!(
                     union_types(a.fields[0].ty.clone(), b.fields[0].ty.clone()),
-                    Type::Union(_)
+                    Type(Repr::Union(_))
                 );
             if single_key_same_type
                 || (overlapping == a.fields.len() && is_keys_superset(&relation, b, a))
@@ -593,7 +605,7 @@ fn reduce_array_members(members: &mut Vec<Type>) {
             }
         }
     }
-    members.extend(shapes.into_iter().flatten().map(Type::ArrayShape));
+    members.extend(shapes.into_iter().flatten().map(Type::array_shape));
 }
 
 /// A shape as the general array it is: its keys' literal types and its
@@ -609,8 +621,8 @@ fn shape_as_general_array(shape: &Shape) -> Type {
         keys.into_iter().reduce(union_types),
         values.into_iter().reduce(union_types),
     ) {
-        (Some(key), Some(value)) => Type::Array(Box::new(key), Box::new(value)),
-        _ => Type::Never,
+        (Some(key), Some(value)) => Type(Repr::Array(Box::new(key), Box::new(value))),
+        _ => Type(Repr::Never),
     }
 }
 
@@ -736,18 +748,20 @@ fn merge_shapes(sa: &Shape, sb: &Shape, sb_first: bool) -> Shape {
 /// (`Collection<Dog|Dog>` is `Collection<Dog>`).
 fn normalize_generic_args(ty: Type) -> Type {
     match ty {
-        Type::Object(name, args) if args.iter().any(|a| matches!(a, Type::Union(_))) => {
+        Type(Repr::Object(name, args))
+            if args.iter().any(|a| matches!(a, Type(Repr::Union(_)))) =>
+        {
             let args = args
                 .into_iter()
                 .map(|arg| match arg {
-                    Type::Union(members) => members
+                    Type(Repr::Union(members)) => members
                         .into_iter()
                         .reduce(union_types)
-                        .unwrap_or(Type::Never),
+                        .unwrap_or(Type(Repr::Never)),
                     other => other,
                 })
                 .collect();
-            Type::Object(name, args)
+            Type(Repr::Object(name, args))
         }
         other => other,
     }
@@ -758,7 +772,7 @@ fn normalize_generic_args(ty: Type) -> Type {
 fn mixed_explicitness(types: &[&Type]) -> Option<bool> {
     let mut found = None;
     for ty in types {
-        if let Type::Mixed(explicit) = ty {
+        if let Type(Repr::Mixed(explicit)) = ty {
             found = Some(found.unwrap_or(false) || *explicit);
         }
     }

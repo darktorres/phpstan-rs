@@ -14,37 +14,41 @@
 //! need ad hoc generator exclusions purpose-built to dodge this
 //! project's own documented design decisions.
 
+use crate::Repr;
 use crate::{AccessoryKind, Type};
 use proptest::prelude::*;
 
 fn leaf_type() -> impl Strategy<Value = Type> {
     prop_oneof![
-        Just(Type::Mixed(false)),
-        Just(Type::Never),
-        Just(Type::Void),
-        Just(Type::Null),
-        Just(Type::Bool),
-        Just(Type::True),
-        Just(Type::False),
-        Just(Type::Int),
-        Just(Type::Float),
-        Just(Type::String),
-        any::<i64>().prop_map(Type::IntLiteral),
+        Just(Type(Repr::Mixed(false))),
+        Just(Type(Repr::Never)),
+        Just(Type(Repr::Void)),
+        Just(Type(Repr::Null)),
+        Just(Type(Repr::Bool)),
+        Just(Type(Repr::True)),
+        Just(Type(Repr::False)),
+        Just(Type(Repr::Int)),
+        Just(Type(Repr::Float)),
+        Just(Type(Repr::String)),
+        any::<i64>().prop_map(Type::int_literal),
         // `f64::NAN` is generated too (`any::<f64>()` includes it) -
         // exactly the case the reflexivity fix in `is_super_type_of` exists
         // for.
-        any::<f64>().prop_map(Type::FloatLiteral),
-        "[a-z]{0,5}".prop_map(|s| Type::StringLiteral(s.into())),
-        "[A-Z][a-zA-Z]{0,5}".prop_map(|n| Type::Object(n.into(), Vec::new())),
+        any::<f64>().prop_map(Type::float_literal),
+        "[a-z]{0,5}".prop_map(|s| Type(Repr::StringLiteral(s.into()))),
+        "[A-Z][a-zA-Z]{0,5}".prop_map(|n| Type(Repr::Object(n.into(), Vec::new()))),
     ]
 }
 
 fn any_type() -> impl Strategy<Value = Type> {
     leaf_type().prop_recursive(4, 32, 4, |inner| {
         prop_oneof![
-            (inner.clone(), inner.clone()).prop_map(|(k, v)| Type::Array(Box::new(k), Box::new(v))),
-            inner.clone().prop_map(|t| Type::ClassString(Box::new(t))),
-            prop::collection::vec(inner.clone(), 2..4).prop_map(Type::Union),
+            (inner.clone(), inner.clone())
+                .prop_map(|(k, v)| Type(Repr::Array(Box::new(k), Box::new(v)))),
+            inner
+                .clone()
+                .prop_map(|t| Type(Repr::ClassString(Box::new(t)))),
+            prop::collection::vec(inner.clone(), 2..4).prop_map(Type::union_of),
             prop_oneof![
                 Just(AccessoryKind::NonEmptyString),
                 Just(AccessoryKind::NonFalsyString),
@@ -54,7 +58,10 @@ fn any_type() -> impl Strategy<Value = Type> {
                 Just(AccessoryKind::UppercaseString),
                 Just(AccessoryKind::DecimalIntegerString),
             ]
-            .prop_map(|kind| Type::Intersection(vec![Type::String, Type::Accessory(kind)])),
+            .prop_map(|kind| Type(Repr::Intersection(vec![
+                Type(Repr::String),
+                Type(Repr::Accessory(kind))
+            ]))),
         ]
     })
 }
@@ -73,14 +80,14 @@ proptest! {
     /// `Mixed` accepts everything.
     #[test]
     fn mixed_is_top(t in any_type()) {
-        prop_assert!(super::is_subtype(&t, &Type::Mixed(false)));
+        prop_assert!(super::is_subtype(&t, &Type(Repr::Mixed(false))));
     }
 
     /// `(Type::Never, _) => true` is `is_super_type_of`'s own second arm -
     /// `Never` satisfies everything.
     #[test]
     fn never_is_bottom(t in any_type()) {
-        prop_assert!(super::is_subtype(&Type::Never, &t));
+        prop_assert!(super::is_subtype(&Type(Repr::Never), &t));
     }
 
     /// `(_, Type::Union(members)) => members.iter().any(|m| subtype
@@ -89,7 +96,7 @@ proptest! {
     /// finds).
     #[test]
     fn union_injection(members in prop::collection::vec(any_type(), 2..4)) {
-        let union = Type::Union(members.clone());
+        let union = Type(Repr::Union(members.clone()));
         for m in &members {
             prop_assert!(super::is_subtype(m, &union));
         }
@@ -101,7 +108,7 @@ proptest! {
     /// union injection, the dual direction).
     #[test]
     fn intersection_projection(members in prop::collection::vec(any_type(), 2..4)) {
-        let intersection = Type::Intersection(members.clone());
+        let intersection = Type(Repr::Intersection(members.clone()));
         for m in &members {
             prop_assert!(super::is_subtype(&intersection, m));
         }
@@ -114,8 +121,8 @@ proptest! {
 #[test]
 fn nan_float_literal_is_reflexive() {
     assert!(super::is_subtype(
-        &Type::FloatLiteral(f64::NAN),
-        &Type::FloatLiteral(f64::NAN)
+        &Type(Repr::FloatLiteral(f64::NAN)),
+        &Type(Repr::FloatLiteral(f64::NAN))
     ));
 }
 
@@ -127,8 +134,8 @@ fn nan_float_literal_is_reflexive() {
 /// reasoning.
 #[test]
 fn an_intersection_is_a_subtype_of_its_own_union_shaped_member() {
-    let union = Type::Union(vec![Type::Null, Type::Bool]);
-    let intersection = Type::Intersection(vec![Type::Void, union.clone()]);
+    let union = Type(Repr::Union(vec![Type(Repr::Null), Type(Repr::Bool)]));
+    let intersection = Type(Repr::Intersection(vec![Type(Repr::Void), union.clone()]));
     assert!(super::is_subtype(&intersection, &union));
-    assert!(super::is_subtype(&intersection, &Type::Void));
+    assert!(super::is_subtype(&intersection, &Type(Repr::Void)));
 }

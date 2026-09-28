@@ -1,5 +1,6 @@
 //! Display/formatting of `Type` values back to PHPStan-style syntax.
 use super::super::*;
+use crate::Repr;
 
 #[test]
 fn array_shape_display_round_trips_readably() {
@@ -68,17 +69,29 @@ fn equal_types_hash_alike() {
     use std::hash::{BuildHasher, BuildHasherDefault};
     let hash = |ty: &Type| BuildHasherDefault::<rustc_hash::FxHasher>::default().hash_one(ty);
     let pairs = [
-        (Type::Mixed(true), Type::Mixed(false)),
-        (Type::FloatLiteral(0.0), Type::FloatLiteral(-0.0)),
-        (Type::FloatLiteral(f64::NAN), Type::FloatLiteral(-f64::NAN)),
+        (Type(Repr::Mixed(true)), Type(Repr::Mixed(false))),
         (
-            Type::Array(Box::new(Type::Int), Box::new(Type::Mixed(true))),
-            Type::Array(Box::new(Type::Int), Box::new(Type::Mixed(false))),
+            Type(Repr::FloatLiteral(0.0)),
+            Type(Repr::FloatLiteral(-0.0)),
+        ),
+        (
+            Type(Repr::FloatLiteral(f64::NAN)),
+            Type(Repr::FloatLiteral(-f64::NAN)),
+        ),
+        (
+            Type(Repr::Array(
+                Box::new(Type(Repr::Int)),
+                Box::new(Type(Repr::Mixed(true))),
+            )),
+            Type(Repr::Array(
+                Box::new(Type(Repr::Int)),
+                Box::new(Type(Repr::Mixed(false))),
+            )),
         ),
     ];
     for (a, b) in pairs {
         assert_eq!(a, b);
         assert_eq!(hash(&a), hash(&b), "{a:?} and {b:?}");
     }
-    assert_ne!(Type::IntLiteral(1), Type::IntLiteral(2));
+    assert_ne!(Type(Repr::IntLiteral(1)), Type(Repr::IntLiteral(2)));
 }

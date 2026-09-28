@@ -2,6 +2,7 @@
 //! from an excluded one, by key presence, by truthiness, and the array
 //! and integer refinements comparisons and counts prove.
 
+use crate::Repr;
 use crate::{AccessoryKind, PhpString, Relation, ShapeField, ShapeKey, Type};
 use syntax::ast::BinOp;
 
@@ -104,8 +105,10 @@ pub fn narrow_instanceof_true(relation: &Relation, current: &Type, target: &Type
 
 fn is_object_like(ty: &Type) -> bool {
     match ty {
-        Type::Object(..) | Type::ObjectWithoutClass => true,
-        Type::Union(members) | Type::Intersection(members) => members.iter().all(is_object_like),
+        Type(Repr::Object(..)) | Type(Repr::ObjectWithoutClass) => true,
+        Type(Repr::Union(members)) | Type(Repr::Intersection(members)) => {
+            members.iter().all(is_object_like)
+        }
         _ => false,
     }
 }
@@ -124,12 +127,12 @@ fn is_object_like(ty: &Type) -> bool {
 /// strictly more genuinely-compatible members than before, never fewer.
 pub fn narrow_type_to(relation: &Relation, original: &Type, target: &Type) -> Type {
     match original {
-        Type::Union(members) | Type::BenevolentUnion(members) => {
+        Type(Repr::Union(members)) | Type(Repr::BenevolentUnion(members)) => {
             // A member the target covers stays; one it doesn't gives way
             // to the target's members inside it (`?string` narrowed to
             // `'a'|null` is `'a'|null`).
             let target_members: &[Type] = match target {
-                Type::Union(ms) | Type::BenevolentUnion(ms) => ms,
+                Type(Repr::Union(ms)) | Type(Repr::BenevolentUnion(ms)) => ms,
                 other => std::slice::from_ref(other),
             };
             let mut kept: Vec<Type> = Vec::new();
@@ -207,22 +210,22 @@ pub fn narrow_type_to(relation: &Relation, original: &Type, target: &Type) -> Ty
 pub fn is_known_single_value(ty: &Type) -> bool {
     matches!(
         ty,
-        Type::Null
-            | Type::True
-            | Type::False
-            | Type::IntLiteral(_)
-            | Type::StringLiteral(_)
+        Type(Repr::Null)
+            | Type(Repr::True)
+            | Type(Repr::False)
+            | Type(Repr::IntLiteral(_))
+            | Type(Repr::StringLiteral(_))
             // `Suit::Hearts` is exactly as single-valued as any
             // other literal - `$case !== Suit::Hearts` should exclude
             // that one case, the same way `$x !== 'a'` already excludes
             // that one string.
-            | Type::EnumCase(_, _)
+            | Type(Repr::EnumCase(_, _))
     ) ||
     // `$x !== []` (the same idiom `$x !== ''` already gets) also
     // excludes the empty shape - an empty array literal is exactly as
     // exhaustively single-valued as `''`/a literal int, just structural
     // rather than a scalar `Type` variant.
-    matches!(ty, Type::ArrayShape(shape) if shape.is_empty_array())
+    matches!(ty, Type(Repr::ArrayShape(shape)) if shape.is_empty_array())
 }
 
 pub fn narrow_type_excluding(original: &Type, excluded: &Type) -> Type {
@@ -233,7 +236,7 @@ pub fn narrow_type_excluding(original: &Type, excluded: &Type) -> Type {
         // bare one does below - a member that doesn't hit a new arm
         // still falls through to the same `other.clone()` it reached
         // directly before.
-        Type::Union(members) | Type::BenevolentUnion(members) => {
+        Type(Repr::Union(members)) | Type(Repr::BenevolentUnion(members)) => {
             let kept: Vec<Type> = members
                 .iter()
                 .filter(|m| {
@@ -254,7 +257,7 @@ pub fn narrow_type_excluding(original: &Type, excluded: &Type) -> Type {
         // `non-empty-string` to `non-falsy-string` inside a nested
         // `!empty($x)` check) - a real gap, but a rare, redundant
         // double-guard pattern this project doesn't attempt yet.
-        Type::String if *excluded == Type::StringLiteral(PhpString::default()) => {
+        Type(Repr::String) if *excluded == Type(Repr::StringLiteral(PhpString::default())) => {
             Type::intersection_of(vec![
                 Type::string(),
                 Type::accessory(AccessoryKind::NonEmptyString),
@@ -266,7 +269,7 @@ pub fn narrow_type_excluding(original: &Type, excluded: &Type) -> Type {
         // `upgrade_array_to_non_empty` with `!empty($x)`/`count($x) > 0`
         // so the three
         // "prove this array is non-empty" paths can't drift apart.
-        Type::Array(..) | Type::ArrayShape(_) | Type::Intersection(_)
+        Type(Repr::Array(..)) | Type(Repr::ArrayShape(_)) | Type(Repr::Intersection(_))
             if excluded.is_empty_array().yes() =>
         {
             upgrade_array_to_non_empty(original)
@@ -284,15 +287,15 @@ pub fn narrow_type_excluding(original: &Type, excluded: &Type) -> Type {
         // `Traversable` (missing `rewind()`/`valid()`/`current()`)
         // instead of narrowing to the only other structurally possible
         // answer, `Iterator`.
-        Type::Object(name, _)
+        Type(Repr::Object(name, _))
             if name == "Traversable"
-                && matches!(excluded, Type::Object(excl, _) if excl == "IteratorAggregate") =>
+                && matches!(excluded, Type(Repr::Object(excl, _)) if excl == "IteratorAggregate") =>
         {
             Type::object("Iterator".into(), Vec::new())
         }
-        Type::Object(name, _)
+        Type(Repr::Object(name, _))
             if name == "Traversable"
-                && matches!(excluded, Type::Object(excl, _) if excl == "Iterator") =>
+                && matches!(excluded, Type(Repr::Object(excl, _)) if excl == "Iterator") =>
         {
             Type::object("IteratorAggregate".into(), Vec::new())
         }
@@ -307,8 +310,8 @@ pub fn narrow_type_excluding(original: &Type, excluded: &Type) -> Type {
         // { true => ..., false => ... }` (or a bare `if ($b !== true)`)
         // never narrows `$b` down to `false` at all, since `Type::Bool`
         // isn't itself represented as `Union([True, False])`.
-        Type::Bool if *excluded == Type::True => Type::bool_literal(false),
-        Type::Bool if *excluded == Type::False => Type::bool_literal(true),
+        Type(Repr::Bool) if *excluded == Type(Repr::True) => Type::bool_literal(false),
+        Type(Repr::Bool) if *excluded == Type(Repr::False) => Type::bool_literal(true),
         other if other == excluded => Type::never(),
         other => other.clone(),
     }
@@ -316,13 +319,13 @@ pub fn narrow_type_excluding(original: &Type, excluded: &Type) -> Type {
 
 pub fn upgrade_array_to_non_empty(ty: &Type) -> Type {
     match ty {
-        Type::Array(key, inner) => Type::intersection_of(vec![
+        Type(Repr::Array(key, inner)) => Type::intersection_of(vec![
             Type::array((**key).clone(), (**inner).clone()),
             Type::accessory(AccessoryKind::NonEmptyArray),
         ]),
-        Type::Intersection(members)
-            if members.iter().any(|m| matches!(m, Type::Array(_, _)))
-                && !members.contains(&Type::Accessory(AccessoryKind::NonEmptyArray)) =>
+        Type(Repr::Intersection(members))
+            if members.iter().any(|m| matches!(m, Type(Repr::Array(_, _))))
+                && !members.contains(&Type(Repr::Accessory(AccessoryKind::NonEmptyArray))) =>
         {
             let mut members = members.clone();
             members.push(Type::accessory(AccessoryKind::NonEmptyArray));
@@ -334,23 +337,25 @@ pub fn upgrade_array_to_non_empty(ty: &Type) -> Type {
         // falsy`'s own identical arm already uses) rather than staying
         // unchanged, so a `Union` member that's provably empty gets
         // dropped below instead of surviving as a spurious alternative.
-        Type::ArrayShape(shape) if shape.is_empty_array() => Type::never(),
+        Type(Repr::ArrayShape(shape)) if shape.is_empty_array() => Type::never(),
         // A shape whose keys are all optional can't be empty any more.
-        Type::ArrayShape(_) if !ty.is_non_empty_array().yes() => crate::intersect_types(vec![
-            ty.clone(),
-            Type::accessory(AccessoryKind::NonEmptyArray),
-        ]),
+        Type(Repr::ArrayShape(_)) if !ty.is_non_empty_array().yes() => {
+            crate::intersect_types(vec![
+                ty.clone(),
+                Type::accessory(AccessoryKind::NonEmptyArray),
+            ])
+        }
         // A loop-built array whose own entry might still be its
         // pre-loop `[]` is a real `Union` including that empty-shape
         // alternative, which a `count($x) > 0` guard immediately
         // afterward should disprove entirely (dropped via the `Never`
         // arm just above), not merely leave untouched by falling to
         // `_ => ty.clone()`.
-        Type::Union(members) => {
+        Type(Repr::Union(members)) => {
             let kept: Vec<Type> = members
                 .iter()
                 .map(upgrade_array_to_non_empty)
-                .filter(|m| *m != Type::Never)
+                .filter(|m| *m != Type(Repr::Never))
                 .collect();
             match kept.len() {
                 0 => Type::never(),
@@ -371,7 +376,7 @@ pub fn upgrade_array_to_non_empty(ty: &Type) -> Type {
 /// different reasons).
 pub fn numeric_bounds_for_narrowing(ty: &Type) -> Option<(Option<i64>, Option<i64>)> {
     match ty {
-        Type::Int => Some((None, None)),
+        Type(Repr::Int) => Some((None, None)),
         _ => ty.int_range_bounds(),
     }
 }
@@ -444,19 +449,21 @@ pub fn comparison_narrowed_bounds(
 /// everywhere.
 pub fn upgrade_array_to_list(ty: &Type) -> Type {
     match ty {
-        Type::Array(key, inner) => Type::intersection_of(vec![
+        Type(Repr::Array(key, inner)) => Type::intersection_of(vec![
             Type::array((**key).clone(), (**inner).clone()),
             Type::accessory(AccessoryKind::ArrayList),
         ]),
-        Type::Intersection(members)
-            if members.iter().any(|m| matches!(m, Type::Array(_, _)))
-                && !members.contains(&Type::Accessory(AccessoryKind::ArrayList)) =>
+        Type(Repr::Intersection(members))
+            if members.iter().any(|m| matches!(m, Type(Repr::Array(_, _))))
+                && !members.contains(&Type(Repr::Accessory(AccessoryKind::ArrayList))) =>
         {
             let mut members = members.clone();
             members.push(Type::accessory(AccessoryKind::ArrayList));
             Type::intersection_of(members)
         }
-        Type::Union(members) => Type::union_of(members.iter().map(upgrade_array_to_list).collect()),
+        Type(Repr::Union(members)) => {
+            Type::union_of(members.iter().map(upgrade_array_to_list).collect())
+        }
         _ => ty.clone(),
     }
 }
@@ -465,16 +472,16 @@ pub fn upgrade_array_to_list(ty: &Type) -> Type {
 /// does is non-empty, as an empty array is a list.
 pub fn narrow_array_to_non_list(ty: &Type) -> Type {
     match ty {
-        Type::Intersection(members)
-            if members.contains(&Type::Accessory(AccessoryKind::ArrayList)) =>
+        Type(Repr::Intersection(members))
+            if members.contains(&Type(Repr::Accessory(AccessoryKind::ArrayList))) =>
         {
             Type::never()
         }
-        Type::Union(members) => {
+        Type(Repr::Union(members)) => {
             let kept: Vec<Type> = members
                 .iter()
                 .map(narrow_array_to_non_list)
-                .filter(|m| *m != Type::Never)
+                .filter(|m| *m != Type(Repr::Never))
                 .collect();
             match kept.len() {
                 0 => Type::never(),
@@ -496,7 +503,7 @@ pub fn narrow_array_to_non_list(ty: &Type) -> Type {
 /// untouched.
 pub fn narrow_array_shape_by_key_presence(ty: &Type, key: &str, present: bool) -> Type {
     match ty {
-        Type::ArrayShape(shape) => match shape.field(&ShapeKey::from_name(key)) {
+        Type(Repr::ArrayShape(shape)) => match shape.field(&ShapeKey::from_name(key)) {
             Some(field) if !field.optional => {
                 if present {
                     ty.clone()
@@ -532,19 +539,19 @@ pub fn narrow_array_shape_by_key_presence(ty: &Type, key: &str, present: bool) -
             }
         },
         // A general array now has that key.
-        Type::Array(..) if present => {
+        Type(Repr::Array(..)) if present => {
             crate::intersect_types(vec![ty.clone(), Type::has_offset(ShapeKey::from_name(key))])
         }
-        Type::Intersection(members)
-            if present && members.iter().any(|m| matches!(m, Type::Array(..))) =>
+        Type(Repr::Intersection(members))
+            if present && members.iter().any(|m| matches!(m, Type(Repr::Array(..)))) =>
         {
             crate::intersect_types(vec![ty.clone(), Type::has_offset(ShapeKey::from_name(key))])
         }
-        Type::Union(members) => {
+        Type(Repr::Union(members)) => {
             let kept: Vec<Type> = members
                 .iter()
                 .map(|m| narrow_array_shape_by_key_presence(m, key, present))
-                .filter(|m| *m != Type::Never)
+                .filter(|m| *m != Type(Repr::Never))
                 .collect();
             match kept.len() {
                 0 => Type::never(),
@@ -563,22 +570,22 @@ pub fn narrow_array_shape_by_key_presence(ty: &Type, key: &str, present: bool) -
 /// subscript.
 pub fn narrow_isset_container(ty: &Type, key: Option<&str>) -> Type {
     match ty {
-        Type::Null
-        | Type::Void
-        | Type::Bool
-        | Type::True
-        | Type::False
-        | Type::Int
-        | Type::IntLiteral(_)
-        | Type::IntRange(..)
-        | Type::Float
-        | Type::FloatLiteral(_) => Type::never(),
-        Type::ArrayShape(_) => {
+        Type(Repr::Null)
+        | Type(Repr::Void)
+        | Type(Repr::Bool)
+        | Type(Repr::True)
+        | Type(Repr::False)
+        | Type(Repr::Int)
+        | Type(Repr::IntLiteral(_))
+        | Type(Repr::IntRange(..))
+        | Type(Repr::Float)
+        | Type(Repr::FloatLiteral(_)) => Type::never(),
+        Type(Repr::ArrayShape(_)) => {
             let Some(key) = key else {
                 return ty.clone();
             };
             match narrow_array_shape_by_key_presence(ty, key, true) {
-                Type::ArrayShape(mut shape) => {
+                Type(Repr::ArrayShape(mut shape)) => {
                     let key = ShapeKey::from_name(key);
                     // An unsealed shape's tail held it when it isn't
                     // listed.
@@ -598,7 +605,7 @@ pub fn narrow_isset_container(ty: &Type, key: Option<&str>) -> Type {
             }
         }
         // A general array now has that key, with a non-null value.
-        Type::Array(_, value) => match key {
+        Type(Repr::Array(_, value)) => match key {
             Some(key) => Type::intersection_of(vec![
                 ty.clone(),
                 Type::has_offset_value(
@@ -609,9 +616,9 @@ pub fn narrow_isset_container(ty: &Type, key: Option<&str>) -> Type {
             None => ty.clone(),
         },
         // `list<T>`/`non-empty-array<T>` - an accessory-marked array.
-        Type::Intersection(members) => {
+        Type(Repr::Intersection(members)) => {
             let element = members.iter().find_map(|m| match m {
-                Type::Array(_, value) => Some(value),
+                Type(Repr::Array(_, value)) => Some(value),
                 _ => None,
             });
             match (key, element) {
@@ -626,11 +633,11 @@ pub fn narrow_isset_container(ty: &Type, key: Option<&str>) -> Type {
                 _ => ty.clone(),
             }
         }
-        Type::Union(members) => {
+        Type(Repr::Union(members)) => {
             let kept: Vec<Type> = members
                 .iter()
                 .map(|m| narrow_isset_container(m, key))
-                .filter(|m| *m != Type::Never)
+                .filter(|m| *m != Type(Repr::Never))
                 .collect();
             match kept.len() {
                 0 => Type::never(),
@@ -654,11 +661,11 @@ pub fn narrow_isset_container(ty: &Type, key: Option<&str>) -> Type {
 /// simpler than maintaining two parallel "is this falsy" checks.
 pub fn narrow_type_excluding_falsy(original: &Type) -> Type {
     match original {
-        Type::Union(members) => {
+        Type(Repr::Union(members)) => {
             let kept: Vec<Type> = members
                 .iter()
                 .map(narrow_type_excluding_falsy)
-                .filter(|t| *t != Type::Never)
+                .filter(|t| *t != Type(Repr::Never))
                 .collect();
             match kept.len() {
                 0 => Type::never(),
@@ -666,10 +673,10 @@ pub fn narrow_type_excluding_falsy(original: &Type) -> Type {
                 _ => Type::union_of(kept),
             }
         }
-        Type::Null | Type::False | Type::IntLiteral(0) => Type::never(),
-        Type::StringLiteral(s) if s.is_empty() || s == "0" => Type::never(),
-        Type::ArrayShape(shape) if shape.is_empty_array() => Type::never(),
-        Type::Array(_, _) => upgrade_array_to_non_empty(original),
+        Type(Repr::Null) | Type(Repr::False) | Type(Repr::IntLiteral(0)) => Type::never(),
+        Type(Repr::StringLiteral(s)) if s.is_empty() || s == "0" => Type::never(),
+        Type(Repr::ArrayShape(shape)) if shape.is_empty_array() => Type::never(),
+        Type(Repr::Array(_, _)) => upgrade_array_to_non_empty(original),
         // Delegates to the same general-purpose "add one more accessory
         // fact onto a string, bare or already-refined" helper the
         // `is_numeric()` upgrade already uses - a bare `String` gets the

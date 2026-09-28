@@ -1,6 +1,7 @@
 //! What a type relation needs to know about classes. Reflection
 //! implements it (C8); until then `Registry` does.
 
+use crate::Repr;
 use std::sync::Arc;
 
 use rustc_hash::FxHashMap;
@@ -59,9 +60,11 @@ pub fn effective_slot_variance(
     arg: &Type,
 ) -> Option<Variance> {
     match arg {
-        Type::VarianceArg(CallSiteVariance::Covariant, _) => Some(Variance::Covariant),
-        Type::VarianceArg(CallSiteVariance::Contravariant, _) => Some(Variance::Contravariant),
-        Type::VarianceArg(CallSiteVariance::Bivariant, _) => None,
+        Type(Repr::VarianceArg(CallSiteVariance::Covariant, _)) => Some(Variance::Covariant),
+        Type(Repr::VarianceArg(CallSiteVariance::Contravariant, _)) => {
+            Some(Variance::Contravariant)
+        }
+        Type(Repr::VarianceArg(CallSiteVariance::Bivariant, _)) => None,
         _ => hierarchy.slot_variance(class, index),
     }
 }

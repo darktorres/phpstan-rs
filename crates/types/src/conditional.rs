@@ -1,3 +1,4 @@
+use crate::Repr;
 use rustc_hash::FxHashMap;
 
 use crate::Type;
@@ -41,15 +42,15 @@ pub fn conditional_branch(bound: &Type, target: &Type, negated: bool) -> Option<
 
 pub fn resolve_conditional(ty: &Type, param_bindings: &FxHashMap<String, Type>) -> Type {
     match ty {
-        Type::Conditional {
+        Type(Repr::Conditional {
             subject,
             target,
             if_true,
             if_false,
             negated,
             template_subject,
-        } => match param_bindings.get(subject).filter(|_| !*template_subject) {
-            Some(bound) if *bound != Type::Mixed(false) => {
+        }) => match param_bindings.get(subject).filter(|_| !*template_subject) {
+            Some(bound) if *bound != Type(Repr::Mixed(false)) => {
                 match conditional_branch(bound, target, *negated) {
                     Some(true) => resolve_conditional(if_true, param_bindings),
                     Some(false) => resolve_conditional(if_false, param_bindings),

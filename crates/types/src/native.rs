@@ -1,6 +1,7 @@
 //! The native declaration a type can be written as: PHP's own type
 //! syntax, as far as the configured version allows.
 
+use crate::Repr;
 use crate::{PhpVersion, Type};
 
 /// The native declaration `ty` can be written as on `version` (a
@@ -49,38 +50,41 @@ impl Native {
 /// spelling.
 fn collect(ty: &Type, position: Position, out: &mut Native) -> bool {
     match ty {
-        Type::Int | Type::IntLiteral(_) | Type::IntRange(..) => out.add("int"),
-        Type::Float | Type::FloatLiteral(_) => out.add("float"),
-        Type::String | Type::StringLiteral(_) | Type::ClassString(_) | Type::ClassKindString(_) => {
-            out.add("string")
+        Type(Repr::Int) | Type(Repr::IntLiteral(_)) | Type(Repr::IntRange(..)) => out.add("int"),
+        Type(Repr::Float) | Type(Repr::FloatLiteral(_)) => out.add("float"),
+        Type(Repr::String)
+        | Type(Repr::StringLiteral(_))
+        | Type(Repr::ClassString(_))
+        | Type(Repr::ClassKindString(_)) => out.add("string"),
+        Type(Repr::Bool) => out.add("bool"),
+        Type(Repr::True) => out.add("true"),
+        Type(Repr::False) => out.add("false"),
+        Type(Repr::Null) => out.add("null"),
+        Type(Repr::Array(..)) | Type(Repr::ArrayShape(_)) => out.add("array"),
+        Type(Repr::Callable(_)) => out.add("callable"),
+        Type(Repr::ObjectShape(_)) | Type(Repr::ObjectWithoutClass) => out.add("object"),
+        Type(Repr::Mixed(_)) => out.add("mixed"),
+        Type(Repr::Void) if position == Position::Return => out.add("void"),
+        Type(Repr::Never) if position == Position::Return => out.add("never"),
+        Type(Repr::StaticRef(_)) | Type(Repr::This) if position == Position::Return => {
+            out.add("static")
         }
-        Type::Bool => out.add("bool"),
-        Type::True => out.add("true"),
-        Type::False => out.add("false"),
-        Type::Null => out.add("null"),
-        Type::Array(..) | Type::ArrayShape(_) => out.add("array"),
-        Type::Callable(_) => out.add("callable"),
-        Type::ObjectShape(_) | Type::ObjectWithoutClass => out.add("object"),
-        Type::Mixed(_) => out.add("mixed"),
-        Type::Void if position == Position::Return => out.add("void"),
-        Type::Never if position == Position::Return => out.add("never"),
-        Type::StaticRef(_) | Type::This if position == Position::Return => out.add("static"),
-        Type::SelfRef(_) => out.add("self"),
-        Type::ParentRef => out.add("parent"),
-        Type::EnumCase(class, _) => out.add(class),
-        Type::Object(class, _) => out.add(class),
-        Type::TemplateParam(param) => return collect(&param.bound, position, out),
-        Type::Union(members) | Type::BenevolentUnion(members) => {
+        Type(Repr::SelfRef(_)) => out.add("self"),
+        Type(Repr::ParentRef) => out.add("parent"),
+        Type(Repr::EnumCase(class, _)) => out.add(class),
+        Type(Repr::Object(class, _)) => out.add(class),
+        Type(Repr::TemplateParam(param)) => return collect(&param.bound, position, out),
+        Type(Repr::Union(members)) | Type(Repr::BenevolentUnion(members)) => {
             return members.iter().all(|m| collect(m, position, out));
         }
-        Type::Intersection(members) => {
+        Type(Repr::Intersection(members)) => {
             let bases: Vec<&Type> = members.iter().filter(|m| !m.is_accessory()).collect();
             if bases.len() == 1 {
                 return bases.iter().all(|b| collect(b, position, out));
             }
             let mut classes = Vec::new();
             for base in bases {
-                let Type::Object(class, _) = base else {
+                let Type(Repr::Object(class, _)) = base else {
                     return false;
                 };
                 classes.push(class.clone());

@@ -1,6 +1,7 @@
 //! What a declared type leaves unsaid: PHPStan's `MissingTypehintCheck`
 //! walks.
 
+use crate::Repr;
 use crate::Type;
 
 impl Type {
@@ -42,12 +43,12 @@ fn iterable_union_value_type(members: &[Type]) -> Option<&Type> {
         return None;
     }
     let array_inner = members.iter().find_map(|m| match m {
-        Type::Array(_, inner) => Some(inner.as_ref()),
+        Type(Repr::Array(_, inner)) => Some(inner.as_ref()),
         _ => None,
     })?;
-    let has_bare_traversable = members
-        .iter()
-        .any(|m| matches!(m, Type::Object(name, args) if name == "Traversable" && args.is_empty()));
+    let has_bare_traversable = members.iter().any(
+        |m| matches!(m, Type(Repr::Object(name, args)) if name == "Traversable" && args.is_empty()),
+    );
     has_bare_traversable.then_some(array_inner)
 }
 
@@ -75,8 +76,8 @@ fn iterable_union_value_type(members: &[Type]) -> Option<&Type> {
 /// before.
 fn collect_iterable_missing_value_types(ty: &Type, explicit_mixed: bool, out: &mut Vec<String>) {
     match ty {
-        Type::TemplateParam(_) | Type::Accessory(_) => {}
-        Type::Array(_, inner) => {
+        Type(Repr::TemplateParam(_)) | Type(Repr::Accessory(_)) => {}
+        Type(Repr::Array(_, inner)) => {
             if inner.as_ref().is_mixed() {
                 if !explicit_mixed {
                     out.push(format!("iterable type {ty}"));
@@ -85,7 +86,7 @@ fn collect_iterable_missing_value_types(ty: &Type, explicit_mixed: bool, out: &m
                 collect_iterable_missing_value_types(inner, explicit_mixed, out);
             }
         }
-        Type::Union(members) => {
+        Type(Repr::Union(members)) => {
             if let Some(inner) = iterable_union_value_type(members) {
                 if inner.is_mixed() {
                     if !explicit_mixed {
@@ -100,14 +101,14 @@ fn collect_iterable_missing_value_types(ty: &Type, explicit_mixed: bool, out: &m
                 collect_iterable_missing_value_types(m, explicit_mixed, out);
             }
         }
-        Type::Intersection(members) => {
+        Type(Repr::Intersection(members)) => {
             // `list<V>`, `non-empty-array<V>`, `list<V>&non-empty-array`: the
             // value type is whatever any `Array` member specifies, so only
             // an intersection whose every array member is bare lacks one.
             let values: Vec<&Type> = members
                 .iter()
                 .filter_map(|m| match m {
-                    Type::Array(_, inner) => Some(inner.as_ref()),
+                    Type(Repr::Array(_, inner)) => Some(inner.as_ref()),
                     _ => None,
                 })
                 .collect();
@@ -129,18 +130,18 @@ fn collect_iterable_missing_value_types(ty: &Type, explicit_mixed: bool, out: &m
                 collect_iterable_missing_value_types(m, explicit_mixed, out);
             }
         }
-        Type::Object(_, args) => {
+        Type(Repr::Object(_, args)) => {
             for a in args {
                 collect_iterable_missing_value_types(a, explicit_mixed, out);
             }
         }
-        Type::VarianceArg(_, inner) => {
+        Type(Repr::VarianceArg(_, inner)) => {
             collect_iterable_missing_value_types(inner, explicit_mixed, out)
         }
-        Type::ClassString(inner) => {
+        Type(Repr::ClassString(inner)) => {
             collect_iterable_missing_value_types(inner, explicit_mixed, out)
         }
-        Type::ArrayShape(fields) => {
+        Type(Repr::ArrayShape(fields)) => {
             for t in fields.types() {
                 collect_iterable_missing_value_types(t, explicit_mixed, out);
             }
@@ -158,14 +159,14 @@ fn collect_iterable_missing_value_types(ty: &Type, explicit_mixed: bool, out: &m
 /// instead. Each finding is the type's own display text.
 fn collect_callables_with_missing_signature(ty: &Type, out: &mut Vec<String>) {
     match ty {
-        Type::Callable(None) => out.push(ty.to_string()),
-        Type::Callable(Some(sig)) => {
+        Type(Repr::Callable(None)) => out.push(ty.to_string()),
+        Type(Repr::Callable(Some(sig))) => {
             for p in &sig.params {
                 collect_callables_with_missing_signature(&p.ty, out);
             }
             collect_callables_with_missing_signature(&sig.return_type, out);
         }
-        Type::Object(name, args) => {
+        Type(Repr::Object(name, args)) => {
             if args.is_empty()
                 && name
                     .trim_start_matches('\\')
@@ -177,28 +178,28 @@ fn collect_callables_with_missing_signature(ty: &Type, out: &mut Vec<String>) {
                 collect_callables_with_missing_signature(a, out);
             }
         }
-        Type::Array(key, inner) => {
+        Type(Repr::Array(key, inner)) => {
             collect_callables_with_missing_signature(key, out);
             collect_callables_with_missing_signature(inner, out);
         }
-        Type::ClassString(inner) | Type::VarianceArg(_, inner) => {
+        Type(Repr::ClassString(inner)) | Type(Repr::VarianceArg(_, inner)) => {
             collect_callables_with_missing_signature(inner, out)
         }
         // A `Closure(...)` shape (`Closure&callable(...)`) carries its
         // signature; only that signature's own types are walked.
-        Type::Intersection(members) if ty.callable_sig().is_some() => {
+        Type(Repr::Intersection(members)) if ty.callable_sig().is_some() => {
             for m in members {
-                if matches!(m, Type::Callable(Some(_))) {
+                if matches!(m, Type(Repr::Callable(Some(_)))) {
                     collect_callables_with_missing_signature(m, out);
                 }
             }
         }
-        Type::Union(members) | Type::Intersection(members) => {
+        Type(Repr::Union(members)) | Type(Repr::Intersection(members)) => {
             for m in members {
                 collect_callables_with_missing_signature(m, out);
             }
         }
-        Type::ArrayShape(fields) => {
+        Type(Repr::ArrayShape(fields)) => {
             for t in fields.types() {
                 collect_callables_with_missing_signature(t, out);
             }
@@ -209,11 +210,11 @@ fn collect_callables_with_missing_signature(ty: &Type, out: &mut Vec<String>) {
 
 fn collect_bare_object_class_names<'a>(ty: &'a Type, out: &mut Vec<&'a crate::Name>) {
     match ty {
-        Type::TemplateParam(_) => {}
-        Type::VarianceArg(_, inner) | Type::ClassString(inner) => {
+        Type(Repr::TemplateParam(_)) => {}
+        Type(Repr::VarianceArg(_, inner)) | Type(Repr::ClassString(inner)) => {
             collect_bare_object_class_names(inner, out)
         }
-        Type::Object(name, args) => {
+        Type(Repr::Object(name, args)) => {
             if args.is_empty() {
                 if !out.contains(&name) {
                     out.push(name);
@@ -224,16 +225,16 @@ fn collect_bare_object_class_names<'a>(ty: &'a Type, out: &mut Vec<&'a crate::Na
                 }
             }
         }
-        Type::Array(key, inner) => {
+        Type(Repr::Array(key, inner)) => {
             collect_bare_object_class_names(key, out);
             collect_bare_object_class_names(inner, out);
         }
-        Type::Union(members) | Type::Intersection(members) => {
+        Type(Repr::Union(members)) | Type(Repr::Intersection(members)) => {
             for m in members {
                 collect_bare_object_class_names(m, out);
             }
         }
-        Type::ArrayShape(fields) => {
+        Type(Repr::ArrayShape(fields)) => {
             for t in fields.types() {
                 collect_bare_object_class_names(t, out);
             }

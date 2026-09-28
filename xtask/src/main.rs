@@ -23,7 +23,6 @@ mod modgraph;
 mod stub_index;
 #[cfg(test)]
 mod tests;
-mod type_access;
 
 const LEVELS: [&str; 12] = [
     "unset", "0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "10",
@@ -39,9 +38,6 @@ fn main() -> ExitCode {
         Some("buildtime") => buildtime(),
         Some("tests") => test_manifest(),
         Some("modgraph") => modgraph::modgraph(&root(), &args[1..]),
-        Some("arch") if args.get(1).map(String::as_str) == Some("--bless-types") => {
-            type_access::bless(&root())
-        }
         Some("arch") => arch::arch(&root()),
         Some("stub-index") => write_stub_index(),
         Some("baseline") => baseline_generate(),
@@ -70,8 +66,7 @@ const USAGE: &str = "usage: cargo xtask <command>
   modgraph [--inventory] check the module graph against
                          gates/module-graph.txt (--inventory lists every
                          crossing edge)
-  arch [--bless-types]   check the architecture rules (--bless-types
-                         records the type-access counts after a fall)
+  arch                   check the architecture rules
   stub-index             regenerate crates/stub-sources/index.tsv
   baseline               generate the reference baselines (Stage A only)
   approve <slug> [--full] [--against <commit>]

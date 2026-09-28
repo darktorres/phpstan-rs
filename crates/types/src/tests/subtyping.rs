@@ -1,17 +1,24 @@
 //! Subtype relation checks between `Type` values.
 use super::super::*;
 use super::{accepts, is_subtype};
+use crate::Repr;
 
 #[test]
 fn class_string_is_interchangeable_with_plain_string_both_ways() {
-    let cs = Type::ClassString(Box::new(Type::Object("Foo".into(), Vec::new())));
-    assert!(is_subtype(&cs, &Type::String));
+    let cs = Type(Repr::ClassString(Box::new(Type(Repr::Object(
+        "Foo".into(),
+        Vec::new(),
+    )))));
+    assert!(is_subtype(&cs, &Type(Repr::String)));
     // A plain string may name a class: accepted, never provably one.
-    assert!(!is_subtype(&Type::String, &cs));
-    assert!(accepts(&cs, &Type::String));
-    assert!(accepts(&cs, &Type::StringLiteral("Foo".into())));
+    assert!(!is_subtype(&Type(Repr::String), &cs));
+    assert!(accepts(&cs, &Type(Repr::String)));
+    assert!(accepts(&cs, &Type(Repr::StringLiteral("Foo".into()))));
     assert!(is_subtype(&cs, &cs));
-    let cs_other = Type::ClassString(Box::new(Type::Object("Bar".into(), Vec::new())));
+    let cs_other = Type(Repr::ClassString(Box::new(Type(Repr::Object(
+        "Bar".into(),
+        Vec::new(),
+    )))));
     assert!(!is_subtype(&cs, &cs_other));
 }
 
@@ -20,16 +27,16 @@ fn array_shape_is_subtype_of_bare_array_but_not_the_reverse() {
     let shape = parse_type_string("array{name: string}");
     assert!(is_subtype(
         &shape,
-        &Type::Array(
+        &Type(Repr::Array(
             Box::new(Type::unknown_array_key()),
-            Box::new(Type::Mixed(false))
-        )
+            Box::new(Type(Repr::Mixed(false)))
+        ))
     ));
     assert!(!is_subtype(
-        &Type::Array(
+        &Type(Repr::Array(
             Box::new(Type::unknown_array_key()),
-            Box::new(Type::Mixed(false))
-        ),
+            Box::new(Type(Repr::Mixed(false)))
+        )),
         &shape
     ));
 }
@@ -45,7 +52,10 @@ fn a_string_keyed_shape_is_a_subtype_of_a_matching_string_keyed_mixed_valued_arr
     let shape = parse_type_string("array{name: string}");
     assert!(is_subtype(
         &shape,
-        &Type::Array(Box::new(Type::String), Box::new(Type::Mixed(false)))
+        &Type(Repr::Array(
+            Box::new(Type(Repr::String)),
+            Box::new(Type(Repr::Mixed(false)))
+        ))
     ));
 }
 
@@ -54,22 +64,25 @@ fn a_string_keyed_shape_is_not_a_subtype_of_an_int_keyed_mixed_valued_array() {
     let shape = parse_type_string("array{name: string}");
     assert!(!is_subtype(
         &shape,
-        &Type::Array(Box::new(Type::Int), Box::new(Type::Mixed(false)))
+        &Type(Repr::Array(
+            Box::new(Type(Repr::Int)),
+            Box::new(Type(Repr::Mixed(false)))
+        ))
     ));
 }
 
 #[test]
 fn literal_is_subtype_of_its_general_type() {
-    assert!(is_subtype(&Type::IntLiteral(5), &Type::Int));
-    assert!(!is_subtype(&Type::Int, &Type::IntLiteral(5)));
+    assert!(is_subtype(&Type(Repr::IntLiteral(5)), &Type(Repr::Int)));
+    assert!(!is_subtype(&Type(Repr::Int), &Type(Repr::IntLiteral(5))));
 }
 
 #[test]
 fn everything_is_subtype_of_mixed() {
-    assert!(is_subtype(&Type::String, &Type::Mixed(false)));
+    assert!(is_subtype(&Type(Repr::String), &Type(Repr::Mixed(false))));
     assert!(is_subtype(
-        &Type::Object("Foo".into(), Vec::new()),
-        &Type::Mixed(false)
+        &Type(Repr::Object("Foo".into(), Vec::new())),
+        &Type(Repr::Mixed(false))
     ));
 }
 
@@ -77,13 +90,15 @@ fn everything_is_subtype_of_mixed() {
 fn an_unbounded_template_param_is_still_unconditionally_compatible_either_way() {
     // The extremely common bound-free `@template T` is accepted either
     // way, though it's provably neither: its bound is `mixed`.
-    let t = Type::TemplateParam(TemplateParam::unbounded("T".to_string()));
-    assert!(accepts(&Type::String, &t));
-    assert!(accepts(&Type::Object("Foo".into(), Vec::new()), &t));
-    assert!(accepts(&t, &Type::String));
-    assert!(accepts(&t, &Type::Object("Foo".into(), Vec::new())));
-    assert!(!is_subtype(&t, &Type::String));
-    assert!(!is_subtype(&Type::String, &t));
+    let t = Type(Repr::TemplateParam(TemplateParam::unbounded(
+        "T".to_string(),
+    )));
+    assert!(accepts(&Type(Repr::String), &t));
+    assert!(accepts(&Type(Repr::Object("Foo".into(), Vec::new())), &t));
+    assert!(accepts(&t, &Type(Repr::String)));
+    assert!(accepts(&t, &Type(Repr::Object("Foo".into(), Vec::new()))));
+    assert!(!is_subtype(&t, &Type(Repr::String)));
+    assert!(!is_subtype(&Type(Repr::String), &t));
 }
 
 #[test]
@@ -92,17 +107,17 @@ fn a_bounded_template_param_is_a_subtype_of_whatever_its_bound_satisfies() {
     // it's eventually instantiated, so it's a subtype of anything `int`
     // itself is a subtype of; a `float` slot also accepts it, via real
     // PHP's own int-to-float widening rule.
-    let t = Type::TemplateParam(TemplateParam {
+    let t = Type(Repr::TemplateParam(TemplateParam {
         name: "T".to_string(),
-        bound: Box::new(Type::Int),
+        bound: Box::new(Type(Repr::Int)),
         variance: Variance::Invariant,
         scope: None,
         default: None,
-    });
-    assert!(is_subtype(&t, &Type::Int));
-    assert!(!is_subtype(&t, &Type::Float));
-    assert!(accepts(&Type::Float, &t));
-    assert!(!is_subtype(&t, &Type::String));
+    }));
+    assert!(is_subtype(&t, &Type(Repr::Int)));
+    assert!(!is_subtype(&t, &Type(Repr::Float)));
+    assert!(accepts(&Type(Repr::Float), &t));
+    assert!(!is_subtype(&t, &Type(Repr::String)));
 }
 
 // A `@template TKey of array-key` (bound `int|string`, a Union) must be
@@ -113,16 +128,19 @@ fn a_bounded_template_param_is_a_subtype_of_whatever_its_bound_satisfies() {
 // of comparing `TKey`'s union bound against the target as a whole.
 #[test]
 fn a_template_param_whose_own_bound_is_a_union_is_a_subtype_of_that_same_union() {
-    let t = Type::TemplateParam(TemplateParam {
+    let t = Type(Repr::TemplateParam(TemplateParam {
         name: "TKey".to_string(),
-        bound: Box::new(Type::Union(vec![Type::Int, Type::String])),
+        bound: Box::new(Type(Repr::Union(vec![Type(Repr::Int), Type(Repr::String)]))),
         variance: Variance::Invariant,
         scope: None,
         default: None,
-    });
-    assert!(is_subtype(&t, &Type::Union(vec![Type::Int, Type::String])));
-    assert!(!is_subtype(&t, &Type::Int));
-    assert!(!is_subtype(&t, &Type::String));
+    }));
+    assert!(is_subtype(
+        &t,
+        &Type(Repr::Union(vec![Type(Repr::Int), Type(Repr::String)]))
+    ));
+    assert!(!is_subtype(&t, &Type(Repr::Int)));
+    assert!(!is_subtype(&t, &Type(Repr::String)));
 }
 
 #[test]
@@ -131,30 +149,34 @@ fn a_bounded_template_param_still_accepts_anything_as_a_sink() {
     // is accepted regardless of any declared bound, but never provable:
     // knowing a value satisfies T's *upper* bound doesn't prove it
     // satisfies whatever T is actually instantiated to.
-    let t = Type::TemplateParam(TemplateParam {
+    let t = Type(Repr::TemplateParam(TemplateParam {
         name: "T".to_string(),
-        bound: Box::new(Type::Int),
+        bound: Box::new(Type(Repr::Int)),
         variance: Variance::Invariant,
         scope: None,
         default: None,
-    });
-    assert!(accepts(&t, &Type::String));
-    assert!(!is_subtype(&Type::String, &t));
+    }));
+    assert!(accepts(&t, &Type(Repr::String)));
+    assert!(!is_subtype(&Type(Repr::String), &t));
 }
 
 #[test]
 fn never_is_subtype_of_everything() {
-    assert!(is_subtype(&Type::Never, &Type::String));
-    assert!(is_subtype(&Type::Never, &Type::Mixed(false)));
+    assert!(is_subtype(&Type(Repr::Never), &Type(Repr::String)));
+    assert!(is_subtype(&Type(Repr::Never), &Type(Repr::Mixed(false))));
 }
 
 #[test]
 fn union_subtype_rules() {
-    let small = Type::Union(vec![Type::Int, Type::String]);
-    let big = Type::Union(vec![Type::Int, Type::String, Type::Bool]);
+    let small = Type(Repr::Union(vec![Type(Repr::Int), Type(Repr::String)]));
+    let big = Type(Repr::Union(vec![
+        Type(Repr::Int),
+        Type(Repr::String),
+        Type(Repr::Bool),
+    ]));
     assert!(is_subtype(&small, &big));
     assert!(!is_subtype(&big, &small));
-    assert!(is_subtype(&Type::String, &small));
+    assert!(is_subtype(&Type(Repr::String), &small));
 }
 
 #[test]
@@ -162,85 +184,106 @@ fn intersection_subtype_rules() {
     // Coverage measurement found both Intersection arms of subtype
     // had zero executions (registry::accepts's own, separate
     // Intersection handling was covered independently).
-    let both = Type::Intersection(vec![Type::Int, Type::String]);
+    let both = Type(Repr::Intersection(vec![
+        Type(Repr::Int),
+        Type(Repr::String),
+    ]));
     // sub is the intersection: satisfies any one of its members.
-    assert!(is_subtype(&both, &Type::Int));
-    assert!(is_subtype(&both, &Type::String));
-    assert!(!is_subtype(&both, &Type::Bool));
+    assert!(is_subtype(&both, &Type(Repr::Int)));
+    assert!(is_subtype(&both, &Type(Repr::String)));
+    assert!(!is_subtype(&both, &Type(Repr::Bool)));
     // sup is the intersection: must satisfy every member at once - a
     // plain Int alone doesn't also satisfy "and a String".
-    assert!(!is_subtype(&Type::Int, &both));
+    assert!(!is_subtype(&Type(Repr::Int), &both));
 }
 
 #[test]
 fn true_and_false_literals_are_subtypes_of_bool() {
-    assert!(is_subtype(&Type::True, &Type::Bool));
-    assert!(is_subtype(&Type::False, &Type::Bool));
+    assert!(is_subtype(&Type(Repr::True), &Type(Repr::Bool)));
+    assert!(is_subtype(&Type(Repr::False), &Type(Repr::Bool)));
 }
 
 #[test]
 fn int_range_subtype_rules() {
-    let positive = Type::IntRange(Some(1), None);
-    assert!(is_subtype(&Type::IntLiteral(5), &positive));
-    assert!(!is_subtype(&Type::IntLiteral(0), &positive));
-    assert!(!is_subtype(&Type::IntLiteral(-1), &positive));
-    assert!(is_subtype(&positive, &Type::Int));
-    assert!(!is_subtype(&positive, &Type::Float));
-    assert!(accepts(&Type::Float, &positive));
-    assert!(!is_subtype(&Type::Int, &positive));
+    let positive = Type(Repr::IntRange(Some(1), None));
+    assert!(is_subtype(&Type(Repr::IntLiteral(5)), &positive));
+    assert!(!is_subtype(&Type(Repr::IntLiteral(0)), &positive));
+    assert!(!is_subtype(&Type(Repr::IntLiteral(-1)), &positive));
+    assert!(is_subtype(&positive, &Type(Repr::Int)));
+    assert!(!is_subtype(&positive, &Type(Repr::Float)));
+    assert!(accepts(&Type(Repr::Float), &positive));
+    assert!(!is_subtype(&Type(Repr::Int), &positive));
 
-    let narrow = Type::IntRange(Some(1), Some(10));
+    let narrow = Type(Repr::IntRange(Some(1), Some(10)));
     assert!(is_subtype(&narrow, &positive));
     assert!(!is_subtype(&positive, &narrow));
-    let unbounded_below = Type::IntRange(None, Some(10));
+    let unbounded_below = Type(Repr::IntRange(None, Some(10)));
     assert!(!is_subtype(&unbounded_below, &positive));
 }
 
 #[test]
 fn string_accessory_subtype_rules() {
-    let non_empty = Type::Intersection(vec![
-        Type::String,
-        Type::Accessory(AccessoryKind::NonEmptyString),
-    ]);
-    let non_falsy = Type::Intersection(vec![
-        Type::String,
-        Type::Accessory(AccessoryKind::NonFalsyString),
-    ]);
-    assert!(is_subtype(&Type::StringLiteral("a".into()), &non_empty));
-    assert!(!is_subtype(
-        &Type::StringLiteral(PhpString::default()),
+    let non_empty = Type(Repr::Intersection(vec![
+        Type(Repr::String),
+        Type(Repr::Accessory(AccessoryKind::NonEmptyString)),
+    ]));
+    let non_falsy = Type(Repr::Intersection(vec![
+        Type(Repr::String),
+        Type(Repr::Accessory(AccessoryKind::NonFalsyString)),
+    ]));
+    assert!(is_subtype(
+        &Type(Repr::StringLiteral("a".into())),
         &non_empty
     ));
-    assert!(is_subtype(&Type::StringLiteral("0".into()), &non_empty));
-    assert!(!is_subtype(&Type::StringLiteral("0".into()), &non_falsy));
-    assert!(is_subtype(&Type::StringLiteral("a".into()), &non_falsy));
+    assert!(!is_subtype(
+        &Type(Repr::StringLiteral(PhpString::default())),
+        &non_empty
+    ));
+    assert!(is_subtype(
+        &Type(Repr::StringLiteral("0".into())),
+        &non_empty
+    ));
+    assert!(!is_subtype(
+        &Type(Repr::StringLiteral("0".into())),
+        &non_falsy
+    ));
+    assert!(is_subtype(
+        &Type(Repr::StringLiteral("a".into())),
+        &non_falsy
+    ));
     // Every non-falsy string is non-empty, not vice versa.
     assert!(is_subtype(&non_falsy, &non_empty));
     assert!(!is_subtype(&non_empty, &non_falsy));
 
-    let literal = Type::Intersection(vec![
-        Type::String,
-        Type::Accessory(AccessoryKind::LiteralString),
-    ]);
+    let literal = Type(Repr::Intersection(vec![
+        Type(Repr::String),
+        Type(Repr::Accessory(AccessoryKind::LiteralString)),
+    ]));
     assert!(is_subtype(
-        &Type::StringLiteral("anything".into()),
+        &Type(Repr::StringLiteral("anything".into())),
         &literal
     ));
-    assert!(!is_subtype(&Type::String, &literal));
+    assert!(!is_subtype(&Type(Repr::String), &literal));
 
-    let numeric = Type::Intersection(vec![
-        Type::String,
-        Type::Accessory(AccessoryKind::NumericString),
-    ]);
-    assert!(is_subtype(&Type::StringLiteral("123".into()), &numeric));
+    let numeric = Type(Repr::Intersection(vec![
+        Type(Repr::String),
+        Type(Repr::Accessory(AccessoryKind::NumericString)),
+    ]));
     assert!(is_subtype(
-        &Type::StringLiteral(" -1.5e3 ".into()),
+        &Type(Repr::StringLiteral("123".into())),
         &numeric
     ));
-    assert!(!is_subtype(&Type::StringLiteral("abc".into()), &numeric));
+    assert!(is_subtype(
+        &Type(Repr::StringLiteral(" -1.5e3 ".into())),
+        &numeric
+    ));
+    assert!(!is_subtype(
+        &Type(Repr::StringLiteral("abc".into())),
+        &numeric
+    ));
 
     // A plain, unprovable String never satisfies any of these.
-    assert!(!is_subtype(&Type::String, &non_empty));
+    assert!(!is_subtype(&Type(Repr::String), &non_empty));
 }
 
 #[test]
@@ -252,46 +295,52 @@ fn array_accessory_subtype_rules() {
     // (that per-field check is `accepts`'s own job, not
     // `is_super_type_of`'s) - using `Array(Mixed)` here isolates the new
     // accessory logic from that pre-existing, unrelated asymmetry.
-    let list_ty = Type::Intersection(vec![
-        Type::Array(
+    let list_ty = Type(Repr::Intersection(vec![
+        Type(Repr::Array(
             Box::new(Type::unknown_array_key()),
-            Box::new(Type::Mixed(false)),
-        ),
-        Type::Accessory(AccessoryKind::ArrayList),
-    ]);
-    let non_empty_ty = Type::Intersection(vec![
-        Type::Array(
-            Box::new(Type::unknown_array_key()),
-            Box::new(Type::Mixed(false)),
-        ),
-        Type::Accessory(AccessoryKind::NonEmptyArray),
-    ]);
-    let list_shape = Type::ArrayShape(Shape::from_named(vec![
-        ("0".to_string(), Type::IntLiteral(1), false),
-        ("1".to_string(), Type::IntLiteral(2), false),
+            Box::new(Type(Repr::Mixed(false))),
+        )),
+        Type(Repr::Accessory(AccessoryKind::ArrayList)),
     ]));
+    let non_empty_ty = Type(Repr::Intersection(vec![
+        Type(Repr::Array(
+            Box::new(Type::unknown_array_key()),
+            Box::new(Type(Repr::Mixed(false))),
+        )),
+        Type(Repr::Accessory(AccessoryKind::NonEmptyArray)),
+    ]));
+    let list_shape = Type(Repr::ArrayShape(Shape::from_named(vec![
+        ("0".to_string(), Type(Repr::IntLiteral(1)), false),
+        ("1".to_string(), Type(Repr::IntLiteral(2)), false),
+    ])));
     assert!(is_subtype(&list_shape, &list_ty));
     assert!(is_subtype(&list_shape, &non_empty_ty));
 
-    let gapped_shape = Type::ArrayShape(Shape::from_named(vec![
-        ("0".to_string(), Type::IntLiteral(1), false),
-        ("2".to_string(), Type::IntLiteral(2), false),
-    ]));
+    let gapped_shape = Type(Repr::ArrayShape(Shape::from_named(vec![
+        ("0".to_string(), Type(Repr::IntLiteral(1)), false),
+        ("2".to_string(), Type(Repr::IntLiteral(2)), false),
+    ])));
     assert!(!is_subtype(&gapped_shape, &list_ty));
     assert!(is_subtype(&gapped_shape, &non_empty_ty));
 
-    let empty_shape = Type::ArrayShape(Shape::sealed(Vec::new()));
+    let empty_shape = Type(Repr::ArrayShape(Shape::sealed(Vec::new())));
     assert!(!is_subtype(&empty_shape, &non_empty_ty));
 
     // Real PHPStan's own confirmed strictness: a plain Array(_),
     // even with a known element type, never satisfies list<T>/
     // non-empty-array<T> - only a real, provable ArrayShape does.
     assert!(!is_subtype(
-        &Type::Array(Box::new(Type::unknown_array_key()), Box::new(Type::Int)),
+        &Type(Repr::Array(
+            Box::new(Type::unknown_array_key()),
+            Box::new(Type(Repr::Int))
+        )),
         &list_ty
     ));
     assert!(!is_subtype(
-        &Type::Array(Box::new(Type::unknown_array_key()), Box::new(Type::Int)),
+        &Type(Repr::Array(
+            Box::new(Type::unknown_array_key()),
+            Box::new(Type(Repr::Int))
+        )),
         &non_empty_ty
     ));
 }
@@ -303,46 +352,49 @@ fn a_shape_with_a_non_trailing_optional_field_is_not_a_definite_list() {
     // sequential) - `is_list_like`/`shape_fields_are_list_like` must not
     // ignore each field's `optional` flag and answer `true`
     // unconditionally here.
-    let list_ty = Type::Intersection(vec![
-        Type::Array(
+    let list_ty = Type(Repr::Intersection(vec![
+        Type(Repr::Array(
             Box::new(Type::unknown_array_key()),
-            Box::new(Type::Mixed(false)),
-        ),
-        Type::Accessory(AccessoryKind::ArrayList),
-    ]);
-    let non_trailing_optional = Type::ArrayShape(Shape::from_named(vec![
-        ("0".to_string(), Type::Int, false),
-        ("1".to_string(), Type::String, true),
-        ("2".to_string(), Type::Int, false),
+            Box::new(Type(Repr::Mixed(false))),
+        )),
+        Type(Repr::Accessory(AccessoryKind::ArrayList)),
     ]));
+    let non_trailing_optional = Type(Repr::ArrayShape(Shape::from_named(vec![
+        ("0".to_string(), Type(Repr::Int), false),
+        ("1".to_string(), Type(Repr::String), true),
+        ("2".to_string(), Type(Repr::Int), false),
+    ])));
     assert!(!is_subtype(&non_trailing_optional, &list_ty));
 
     // A *trailing* run of optional fields is fine - the shape is still a
     // definite list either way (whether the optional suffix is present or
     // not, the present keys are always sequential from zero).
-    let trailing_optional = Type::ArrayShape(Shape::from_named(vec![
-        ("0".to_string(), Type::Int, false),
-        ("1".to_string(), Type::String, true),
-        ("2".to_string(), Type::Int, true),
-    ]));
+    let trailing_optional = Type(Repr::ArrayShape(Shape::from_named(vec![
+        ("0".to_string(), Type(Repr::Int), false),
+        ("1".to_string(), Type(Repr::String), true),
+        ("2".to_string(), Type(Repr::Int), true),
+    ])));
     assert!(is_subtype(&trailing_optional, &list_ty));
 }
 
 #[test]
 fn nullable_string_accepts_null_and_string() {
     let nullable_string = parse_type_string("?string");
-    assert!(is_subtype(&Type::Null, &nullable_string));
-    assert!(is_subtype(&Type::String, &nullable_string));
-    assert!(!is_subtype(&Type::Int, &nullable_string));
+    assert!(is_subtype(&Type(Repr::Null), &nullable_string));
+    assert!(is_subtype(&Type(Repr::String), &nullable_string));
+    assert!(!is_subtype(&Type(Repr::Int), &nullable_string));
 }
 
 #[test]
 fn array_subtyping_is_covariant_on_value_type() {
-    let ints = Type::Array(Box::new(Type::unknown_array_key()), Box::new(Type::Int));
-    let mixed_arr = Type::Array(
+    let ints = Type(Repr::Array(
         Box::new(Type::unknown_array_key()),
-        Box::new(Type::Mixed(false)),
-    );
+        Box::new(Type(Repr::Int)),
+    ));
+    let mixed_arr = Type(Repr::Array(
+        Box::new(Type::unknown_array_key()),
+        Box::new(Type(Repr::Mixed(false))),
+    ));
     assert!(is_subtype(&ints, &mixed_arr));
     assert!(!is_subtype(&mixed_arr, &ints));
 }
@@ -354,57 +406,57 @@ fn array_subtyping_is_covariant_on_value_type() {
 fn an_unresolved_conditional_as_sub_requires_both_branches_to_satisfy_sup() {
     let conditional = parse_type_string("($x is int ? int : string)");
     assert!(is_subtype(&conditional, &parse_type_string("int|string")));
-    assert!(!is_subtype(&conditional, &Type::Int));
+    assert!(!is_subtype(&conditional, &Type(Repr::Int)));
 }
 
 #[test]
 fn an_unresolved_conditional_as_sup_is_satisfied_by_either_branch() {
     let conditional = parse_type_string("($x is int ? int : string)");
-    assert!(is_subtype(&Type::Int, &conditional));
-    assert!(is_subtype(&Type::String, &conditional));
-    assert!(!is_subtype(&Type::Bool, &conditional));
+    assert!(is_subtype(&Type(Repr::Int), &conditional));
+    assert!(is_subtype(&Type(Repr::String), &conditional));
+    assert!(!is_subtype(&Type(Repr::Bool), &conditional));
 }
 
 // Literal-proving arms + implication arms for
 // `LowercaseString`/`UppercaseString`/`DecimalIntegerString`.
 
 fn lowercase_string() -> Type {
-    Type::Intersection(vec![
-        Type::String,
-        Type::Accessory(AccessoryKind::LowercaseString),
-    ])
+    Type(Repr::Intersection(vec![
+        Type(Repr::String),
+        Type(Repr::Accessory(AccessoryKind::LowercaseString)),
+    ]))
 }
 fn uppercase_string() -> Type {
-    Type::Intersection(vec![
-        Type::String,
-        Type::Accessory(AccessoryKind::UppercaseString),
-    ])
+    Type(Repr::Intersection(vec![
+        Type(Repr::String),
+        Type(Repr::Accessory(AccessoryKind::UppercaseString)),
+    ]))
 }
 fn decimal_int_string() -> Type {
-    Type::Intersection(vec![
-        Type::String,
-        Type::Accessory(AccessoryKind::DecimalIntegerString),
-    ])
+    Type(Repr::Intersection(vec![
+        Type(Repr::String),
+        Type(Repr::Accessory(AccessoryKind::DecimalIntegerString)),
+    ]))
 }
 
 #[test]
 fn a_lowercase_literal_proves_lowercase_string() {
     assert!(is_subtype(
-        &Type::StringLiteral("abc".into()),
+        &Type(Repr::StringLiteral("abc".into())),
         &lowercase_string()
     ));
     assert!(is_subtype(
-        &Type::StringLiteral("abc123".into()),
+        &Type(Repr::StringLiteral("abc123".into())),
         &lowercase_string()
     ));
     assert!(!is_subtype(
-        &Type::StringLiteral("Abc".into()),
+        &Type(Repr::StringLiteral("Abc".into())),
         &lowercase_string()
     ));
     // No letters at all - vacuously lowercase, matching real
     // `strtolower($v) === $v`.
     assert!(is_subtype(
-        &Type::StringLiteral("123".into()),
+        &Type(Repr::StringLiteral("123".into())),
         &lowercase_string()
     ));
 }
@@ -412,15 +464,15 @@ fn a_lowercase_literal_proves_lowercase_string() {
 #[test]
 fn an_uppercase_literal_proves_uppercase_string() {
     assert!(is_subtype(
-        &Type::StringLiteral("ABC".into()),
+        &Type(Repr::StringLiteral("ABC".into())),
         &uppercase_string()
     ));
     assert!(!is_subtype(
-        &Type::StringLiteral("Abc".into()),
+        &Type(Repr::StringLiteral("Abc".into())),
         &uppercase_string()
     ));
     assert!(is_subtype(
-        &Type::StringLiteral("123".into()),
+        &Type(Repr::StringLiteral("123".into())),
         &uppercase_string()
     ));
 }
@@ -430,7 +482,7 @@ fn a_canonical_decimal_integer_literal_proves_decimal_integer_string() {
     for s in ["0", "1", "1234", "-1"] {
         assert!(
             is_subtype(
-                &Type::StringLiteral(s.to_string().into()),
+                &Type(Repr::StringLiteral(s.to_string().into())),
                 &decimal_int_string()
             ),
             "{s} should be a decimal-int-string"
@@ -442,7 +494,7 @@ fn a_canonical_decimal_integer_literal_proves_decimal_integer_string() {
     for s in ["007", "+1", "-0", "", "1.0", "1,3", "foo"] {
         assert!(
             !is_subtype(
-                &Type::StringLiteral(s.to_string().into()),
+                &Type(Repr::StringLiteral(s.to_string().into())),
                 &decimal_int_string()
             ),
             "{s} should NOT be a decimal-int-string"
@@ -455,27 +507,27 @@ fn a_decimal_integer_string_implies_numeric_lowercase_uppercase_and_non_empty() 
     let decimal = decimal_int_string();
     assert!(is_subtype(
         &decimal,
-        &Type::Intersection(vec![
-            Type::String,
-            Type::Accessory(AccessoryKind::NumericString)
-        ])
+        &Type(Repr::Intersection(vec![
+            Type(Repr::String),
+            Type(Repr::Accessory(AccessoryKind::NumericString))
+        ]))
     ));
     assert!(is_subtype(&decimal, &lowercase_string()));
     assert!(is_subtype(&decimal, &uppercase_string()));
     assert!(is_subtype(
         &decimal,
-        &Type::Intersection(vec![
-            Type::String,
-            Type::Accessory(AccessoryKind::NonEmptyString)
-        ])
+        &Type(Repr::Intersection(vec![
+            Type(Repr::String),
+            Type(Repr::Accessory(AccessoryKind::NonEmptyString))
+        ]))
     ));
     // The reverse doesn't hold - an ordinary numeric string isn't
     // necessarily a decimal integer string (e.g. `"1.5"`).
     assert!(!is_subtype(
-        &Type::Intersection(vec![
-            Type::String,
-            Type::Accessory(AccessoryKind::NumericString)
-        ]),
+        &Type(Repr::Intersection(vec![
+            Type(Repr::String),
+            Type(Repr::Accessory(AccessoryKind::NumericString))
+        ])),
         &decimal
     ));
 }
@@ -484,40 +536,43 @@ fn a_decimal_integer_string_implies_numeric_lowercase_uppercase_and_non_empty() 
 fn class_names_are_one_class_whatever_their_case() {
     use std::hash::{BuildHasher, BuildHasherDefault};
     let hash = |t: &Type| BuildHasherDefault::<rustc_hash::FxHasher>::default().hash_one(t);
-    let written = Type::Object("foo".into(), Vec::new());
-    let declared = Type::Object("Foo".into(), Vec::new());
+    let written = Type(Repr::Object("foo".into(), Vec::new()));
+    let declared = Type(Repr::Object("Foo".into(), Vec::new()));
     assert_eq!(written, declared);
     assert_eq!(hash(&written), hash(&declared));
     assert!(is_subtype(&written, &declared));
     assert!(is_subtype(&declared, &written));
     assert_eq!(
-        Type::EnumCase("suit".into(), "Hearts".into()),
-        Type::EnumCase("Suit".into(), "Hearts".into())
+        Type(Repr::EnumCase("suit".into(), "Hearts".into())),
+        Type(Repr::EnumCase("Suit".into(), "Hearts".into()))
     );
     assert_ne!(
-        Type::EnumCase("Suit".into(), "hearts".into()),
-        Type::EnumCase("Suit".into(), "Hearts".into())
+        Type(Repr::EnumCase("Suit".into(), "hearts".into())),
+        Type(Repr::EnumCase("Suit".into(), "Hearts".into()))
     );
 }
 
 #[test]
 fn property_names_keep_their_case_method_names_do_not() {
     assert_ne!(
-        Type::HasProperty("name".into()),
-        Type::HasProperty("Name".into())
+        Type(Repr::HasProperty("name".into())),
+        Type(Repr::HasProperty("Name".into()))
     );
-    assert_eq!(Type::HasMethod("run".into()), Type::HasMethod("Run".into()));
+    assert_eq!(
+        Type(Repr::HasMethod("run".into())),
+        Type(Repr::HasMethod("Run".into()))
+    );
 }
 
 #[test]
 fn an_error_accepts_and_is_accepted_by_everything() {
-    assert!(accepts(&Type::Int, &Type::Error));
-    assert!(accepts(&Type::Error, &Type::String));
+    assert!(accepts(&Type(Repr::Int), &Type(Repr::Error)));
+    assert!(accepts(&Type(Repr::Error), &Type(Repr::String)));
     assert!(
         crate::Relation::structural()
-            .rule_level_accepts(&Type::Int, &Type::Error)
+            .rule_level_accepts(&Type(Repr::Int), &Type(Repr::Error))
             .yes()
     );
-    assert!(is_subtype(&Type::Int, &Type::Error));
-    assert_eq!(Type::Error.to_string(), "*ERROR*");
+    assert!(is_subtype(&Type(Repr::Int), &Type(Repr::Error)));
+    assert_eq!(Type(Repr::Error).to_string(), "*ERROR*");
 }

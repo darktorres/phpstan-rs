@@ -1,3 +1,4 @@
+use crate::Repr;
 use rustc_hash::FxHashMap;
 
 use crate::{CallableSig, TemplateParam, Type};
@@ -12,8 +13,9 @@ use crate::{CallableSig, TemplateParam, Type};
 /// same `T` across multiple params aren't reconciled (no union-widening).
 pub fn bind_template_param(param_ty: &Type, arg_ty: &Type, bindings: &mut FxHashMap<String, Type>) {
     match param_ty {
-        Type::TemplateParam(tp) if tp.scope.as_deref() == Some(crate::CALLABLE_TEMPLATE_SCOPE) => {}
-        Type::TemplateParam(tp) => {
+        Type(Repr::TemplateParam(tp))
+            if tp.scope.as_deref() == Some(crate::CALLABLE_TEMPLATE_SCOPE) => {}
+        Type(Repr::TemplateParam(tp)) => {
             // Reject a bare `T` binding to a *definite scalar* when `T`'s
             // own declared bound requires an object (`@template T of
             // object`) - e.g. `new ReflectionClass($className)` with a
@@ -30,53 +32,55 @@ pub fn bind_template_param(param_ty: &Type, arg_ty: &Type, bindings: &mut FxHash
             // argument, the common case) from an unrelated class - only
             // a scalar-vs-object mismatch is structurally unambiguous
             // without one.
-            let bound_requires_object = matches!(&*tp.bound, Type::ObjectWithoutClass);
+            let bound_requires_object = matches!(&*tp.bound, Type(Repr::ObjectWithoutClass));
             let arg_is_definite_scalar = matches!(
                 arg_ty,
-                Type::String
-                    | Type::StringLiteral(_)
-                    | Type::Int
-                    | Type::IntLiteral(_)
-                    | Type::IntRange(_, _)
-                    | Type::Float
-                    | Type::FloatLiteral(_)
-                    | Type::Bool
-                    | Type::True
-                    | Type::False
-                    | Type::Null
+                Type(Repr::String)
+                    | Type(Repr::StringLiteral(_))
+                    | Type(Repr::Int)
+                    | Type(Repr::IntLiteral(_))
+                    | Type(Repr::IntRange(_, _))
+                    | Type(Repr::Float)
+                    | Type(Repr::FloatLiteral(_))
+                    | Type(Repr::Bool)
+                    | Type(Repr::True)
+                    | Type(Repr::False)
+                    | Type(Repr::Null)
             );
-            if *arg_ty != Type::Mixed(false) && !(bound_requires_object && arg_is_definite_scalar) {
+            if *arg_ty != Type(Repr::Mixed(false))
+                && !(bound_requires_object && arg_is_definite_scalar)
+            {
                 bindings
                     .entry(tp.name.clone())
                     .or_insert_with(|| arg_ty.clone());
             }
         }
-        Type::Array(_, inner) => match arg_ty {
-            Type::Array(_, arg_inner) => bind_template_param(inner, arg_inner, bindings),
+        Type(Repr::Array(_, inner)) => match arg_ty {
+            Type(Repr::Array(_, arg_inner)) => bind_template_param(inner, arg_inner, bindings),
             // `list<V>`/`non-empty-array<V>`/`non-empty-list<V>` - an
             // `Array` member alongside accessory markers.
-            Type::Intersection(members) => {
-                if let Some(Type::Array(_, arg_inner)) =
-                    members.iter().find(|m| matches!(m, Type::Array(..)))
+            Type(Repr::Intersection(members)) => {
+                if let Some(Type(Repr::Array(_, arg_inner))) =
+                    members.iter().find(|m| matches!(m, Type(Repr::Array(..))))
                 {
                     bind_template_param(inner, arg_inner, bindings);
                 }
             }
             // An array shape's element type is the union of its fields'
             // value types (an unsealed tail's excluded).
-            Type::ArrayShape(shape) => {
+            Type(Repr::ArrayShape(shape)) => {
                 let values: Vec<Type> = shape.fields.iter().map(|f| f.ty.clone()).collect();
                 let element = match values.len() {
                     0 => return,
                     1 => values.into_iter().next().expect("len checked"),
-                    _ => Type::Union(values),
+                    _ => Type(Repr::Union(values)),
                 };
                 bind_template_param(inner, &element, bindings);
             }
             _ => {}
         },
-        Type::ClassString(inner) => {
-            if let Type::ClassString(arg_inner) = arg_ty {
+        Type(Repr::ClassString(inner)) => {
+            if let Type(Repr::ClassString(arg_inner)) = arg_ty {
                 bind_template_param(inner, arg_inner, bindings);
             }
         }
@@ -88,7 +92,7 @@ pub fn bind_template_param(param_ty: &Type, arg_ty: &Type, bindings: &mut FxHash
         // half of `class-string<T>|null`) is simply a no-op here, exactly
         // as it already is at the top level for any other type that
         // isn't one of those shapes.
-        Type::Union(members) => {
+        Type(Repr::Union(members)) => {
             for m in members {
                 bind_template_param(m, arg_ty, bindings);
             }
@@ -121,22 +125,24 @@ pub fn promote_class_string_literals(
     resolve_class: &impl Fn(&str) -> Option<String>,
 ) -> Type {
     match (param_ty, arg_ty) {
-        (Type::ClassString(_), Type::StringLiteral(s)) => match s.as_str().and_then(&resolve_class)
-        {
-            Some(canonical) => {
-                Type::ClassString(Box::new(Type::Object(canonical.into(), Vec::new())))
+        (Type(Repr::ClassString(_)), Type(Repr::StringLiteral(s))) => {
+            match s.as_str().and_then(&resolve_class) {
+                Some(canonical) => Type(Repr::ClassString(Box::new(Type(Repr::Object(
+                    canonical.into(),
+                    Vec::new(),
+                ))))),
+                None => arg_ty.clone(),
             }
-            None => arg_ty.clone(),
-        },
-        (Type::Array(_, inner_p), Type::Array(key, inner_a)) => Type::Array(
+        }
+        (Type(Repr::Array(_, inner_p)), Type(Repr::Array(key, inner_a))) => Type(Repr::Array(
             key.clone(),
             Box::new(promote_class_string_literals(
                 inner_p,
                 inner_a,
                 resolve_class,
             )),
-        ),
-        (Type::Union(members), _) => members
+        )),
+        (Type(Repr::Union(members)), _) => members
             .iter()
             .find_map(|m| {
                 let promoted = promote_class_string_literals(m, arg_ty, resolve_class);
@@ -167,13 +173,13 @@ impl CallableSig {
         }
         fn open(ty: &Type) -> Type {
             match ty {
-                Type::TemplateParam(tp)
+                Type(Repr::TemplateParam(tp))
                     if tp.scope.as_deref() == Some(crate::CALLABLE_TEMPLATE_SCOPE) =>
                 {
-                    Type::TemplateParam(TemplateParam {
+                    Type(Repr::TemplateParam(TemplateParam {
                         scope: None,
                         ..tp.clone()
-                    })
+                    }))
                 }
                 other => other.map_children(&mut open),
             }
@@ -205,7 +211,7 @@ impl Type {
         replace: &mut dyn FnMut(&TemplateParam) -> Option<Type>,
     ) -> Type {
         match self {
-            Type::TemplateParam(tp) => replace(tp).unwrap_or_else(|| self.clone()),
+            Type(Repr::TemplateParam(tp)) => replace(tp).unwrap_or_else(|| self.clone()),
             _ => super::late::settle(self.map_children(&mut |t| t.replace_templates(replace))),
         }
     }
@@ -258,34 +264,34 @@ fn substitute(
     to_bound: &dyn Fn(&TemplateParam) -> bool,
 ) -> Type {
     match ty {
-        Type::TemplateParam(tp) if !substituted(tp) => ty.clone(),
-        Type::TemplateParam(tp) => bindings.get(&tp.name).cloned().unwrap_or_else(|| {
+        Type(Repr::TemplateParam(tp)) if !substituted(tp) => ty.clone(),
+        Type(Repr::TemplateParam(tp)) => bindings.get(&tp.name).cloned().unwrap_or_else(|| {
             let fallback = match tp.default.as_deref() {
                 Some(default) => default,
-                None if to_bound(tp) && !matches!(*tp.bound, Type::Mixed(_)) => &tp.bound,
-                None => return Type::Mixed(false),
+                None if to_bound(tp) && !matches!(*tp.bound, Type(Repr::Mixed(_))) => &tp.bound,
+                None => return Type(Repr::Mixed(false)),
             };
             // The template's own name is bound to `Mixed` while its
             // fallback is substituted, so a self-referential bound
             // (`@template T of Foo<T>`), or two templates bounded by each
             // other, can't recurse forever.
             let mut guarded = bindings.clone();
-            guarded.insert(tp.name.clone(), Type::Mixed(false));
+            guarded.insert(tp.name.clone(), Type(Repr::Mixed(false)));
             substitute(fallback, &guarded, substituted, to_bound)
         }),
         // A template-subject conditional (`(T is int ? A : B)`) resolves
         // once `T` is bound, the way real PHPStan's `ConditionalType`
         // does; otherwise both branches stay.
-        Type::Conditional {
+        Type(Repr::Conditional {
             subject,
             target,
             if_true,
             if_false,
             negated,
             template_subject: true,
-        } if bindings
+        }) if bindings
             .get(subject)
-            .is_some_and(|b| !matches!(b, Type::Mixed(_))) =>
+            .is_some_and(|b| !matches!(b, Type(Repr::Mixed(_)))) =>
         {
             let target = substitute(target, bindings, substituted, to_bound);
             match super::conditional::conditional_branch(&bindings[subject], &target, *negated) {

@@ -75,8 +75,20 @@ pub use union::{has_offset_value_parts, union_types};
 // type-hint strings, plus self/parent/static and `@template` generics.
 // Inheritance-chain substitution (a subclass fixing its parent's own type
 // parameter via `@extends Base<Concrete>`) is not modeled.
+/// A PHP type. What it is, what its values can be used as and how it
+/// relates to other types are asked through its methods; how it is
+/// represented is this crate's own.
+#[derive(Clone)]
+pub struct Type(pub(crate) Repr);
+
+impl std::fmt::Debug for Type {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.0.fmt(f)
+    }
+}
+
 #[derive(Debug, Clone)]
-pub enum Type {
+pub(crate) enum Repr {
     // Real PHPStan's own `MixedType::isExplicitMixed()` (Phase 84):
     // `true` when a type-resolution process completed and its own
     // deliberate, definitive answer is `mixed` (the literal `mixed`
@@ -274,79 +286,91 @@ pub enum Type {
 impl PartialEq for Type {
     fn eq(&self, other: &Self) -> bool {
         match (self, other) {
-            (Type::Mixed(_), Type::Mixed(_)) => true,
-            (Type::Error, Type::Error) => true,
-            (Type::Never, Type::Never) => true,
-            (Type::Void, Type::Void) => true,
-            (Type::Null, Type::Null) => true,
-            (Type::Bool, Type::Bool) => true,
-            (Type::True, Type::True) => true,
-            (Type::False, Type::False) => true,
-            (Type::Int, Type::Int) => true,
-            (Type::IntLiteral(a), Type::IntLiteral(b)) => a == b,
-            (Type::Float, Type::Float) => true,
-            (Type::String, Type::String) => true,
-            (Type::StringLiteral(a), Type::StringLiteral(b)) => a == b,
-            (Type::Array(ak, av), Type::Array(bk, bv)) => ak == bk && av == bv,
-            (Type::ClassString(a), Type::ClassString(b)) => a == b,
-            (Type::ClassKindString(a), Type::ClassKindString(b)) => a == b,
-            (Type::ArrayShape(a), Type::ArrayShape(b)) => a == b,
-            (Type::ObjectShape(a), Type::ObjectShape(b)) => a == b,
-            (Type::Object(an, aa), Type::Object(bn, ba)) => an.eq_ignore_case(bn) && aa == ba,
-            (Type::ObjectWithoutClass, Type::ObjectWithoutClass) => true,
-            (Type::Resource { closed: a }, Type::Resource { closed: b }) => a == b,
-            (Type::EnumCase(ae, ac), Type::EnumCase(be, bc)) => ae.eq_ignore_case(be) && ac == bc,
-            (Type::Callable(a), Type::Callable(b)) => a == b,
-            (Type::SelfRef(a), Type::SelfRef(b)) => a == b,
-            (Type::ParentRef, Type::ParentRef) => true,
-            (Type::StaticRef(a), Type::StaticRef(b)) => a == b,
-            (Type::This, Type::This) => true,
-            (Type::TemplateParam(a), Type::TemplateParam(b)) => a == b,
-            (Type::VarianceArg(av, a), Type::VarianceArg(bv, b)) => av == bv && a == b,
-            (Type::Union(a), Type::Union(b)) => a == b,
-            (Type::BenevolentUnion(a), Type::BenevolentUnion(b)) => a == b,
-            (Type::Intersection(a), Type::Intersection(b)) => a == b,
-            (Type::IntRange(amin, amax), Type::IntRange(bmin, bmax)) => {
+            (Type(Repr::Mixed(_)), Type(Repr::Mixed(_))) => true,
+            (Type(Repr::Error), Type(Repr::Error)) => true,
+            (Type(Repr::Never), Type(Repr::Never)) => true,
+            (Type(Repr::Void), Type(Repr::Void)) => true,
+            (Type(Repr::Null), Type(Repr::Null)) => true,
+            (Type(Repr::Bool), Type(Repr::Bool)) => true,
+            (Type(Repr::True), Type(Repr::True)) => true,
+            (Type(Repr::False), Type(Repr::False)) => true,
+            (Type(Repr::Int), Type(Repr::Int)) => true,
+            (Type(Repr::IntLiteral(a)), Type(Repr::IntLiteral(b))) => a == b,
+            (Type(Repr::Float), Type(Repr::Float)) => true,
+            (Type(Repr::String), Type(Repr::String)) => true,
+            (Type(Repr::StringLiteral(a)), Type(Repr::StringLiteral(b))) => a == b,
+            (Type(Repr::Array(ak, av)), Type(Repr::Array(bk, bv))) => ak == bk && av == bv,
+            (Type(Repr::ClassString(a)), Type(Repr::ClassString(b))) => a == b,
+            (Type(Repr::ClassKindString(a)), Type(Repr::ClassKindString(b))) => a == b,
+            (Type(Repr::ArrayShape(a)), Type(Repr::ArrayShape(b))) => a == b,
+            (Type(Repr::ObjectShape(a)), Type(Repr::ObjectShape(b))) => a == b,
+            (Type(Repr::Object(an, aa)), Type(Repr::Object(bn, ba))) => {
+                an.eq_ignore_case(bn) && aa == ba
+            }
+            (Type(Repr::ObjectWithoutClass), Type(Repr::ObjectWithoutClass)) => true,
+            (Type(Repr::Resource { closed: a }), Type(Repr::Resource { closed: b })) => a == b,
+            (Type(Repr::EnumCase(ae, ac)), Type(Repr::EnumCase(be, bc))) => {
+                ae.eq_ignore_case(be) && ac == bc
+            }
+            (Type(Repr::Callable(a)), Type(Repr::Callable(b))) => a == b,
+            (Type(Repr::SelfRef(a)), Type(Repr::SelfRef(b))) => a == b,
+            (Type(Repr::ParentRef), Type(Repr::ParentRef)) => true,
+            (Type(Repr::StaticRef(a)), Type(Repr::StaticRef(b))) => a == b,
+            (Type(Repr::This), Type(Repr::This)) => true,
+            (Type(Repr::TemplateParam(a)), Type(Repr::TemplateParam(b))) => a == b,
+            (Type(Repr::VarianceArg(av, a)), Type(Repr::VarianceArg(bv, b))) => av == bv && a == b,
+            (Type(Repr::Union(a)), Type(Repr::Union(b))) => a == b,
+            (Type(Repr::BenevolentUnion(a)), Type(Repr::BenevolentUnion(b))) => a == b,
+            (Type(Repr::Intersection(a)), Type(Repr::Intersection(b))) => a == b,
+            (Type(Repr::IntRange(amin, amax)), Type(Repr::IntRange(bmin, bmax))) => {
                 amin == bmin && amax == bmax
             }
-            (Type::FloatLiteral(a), Type::FloatLiteral(b)) => a == b || (a.is_nan() && b.is_nan()),
-            (Type::Accessory(a), Type::Accessory(b)) => a == b,
-            (Type::HasOffsetValue(ak, av), Type::HasOffsetValue(bk, bv)) => ak == bk && av == bv,
-            (Type::HasOffset(a), Type::HasOffset(b)) => a == b,
-            (Type::HasMethod(a), Type::HasMethod(b)) => a.eq_ignore_case(b),
-            (Type::HasProperty(a), Type::HasProperty(b)) => a == b,
-            (Type::ReflectedMember(ao, an), Type::ReflectedMember(bo, bn)) => ao == bo && an == bn,
-            (Type::ValueOf(a), Type::ValueOf(b)) => a == b,
-            (Type::Extension(a), Type::Extension(b)) => a.eq_data(&**b),
-            (Type::KeyOf(a), Type::KeyOf(b)) => a == b,
-            (Type::OffsetAccess(ab, ak), Type::OffsetAccess(bb, bk)) => ab == bb && ak == bk,
+            (Type(Repr::FloatLiteral(a)), Type(Repr::FloatLiteral(b))) => {
+                a == b || (a.is_nan() && b.is_nan())
+            }
+            (Type(Repr::Accessory(a)), Type(Repr::Accessory(b))) => a == b,
+            (Type(Repr::HasOffsetValue(ak, av)), Type(Repr::HasOffsetValue(bk, bv))) => {
+                ak == bk && av == bv
+            }
+            (Type(Repr::HasOffset(a)), Type(Repr::HasOffset(b))) => a == b,
+            (Type(Repr::HasMethod(a)), Type(Repr::HasMethod(b))) => a.eq_ignore_case(b),
+            (Type(Repr::HasProperty(a)), Type(Repr::HasProperty(b))) => a == b,
+            (Type(Repr::ReflectedMember(ao, an)), Type(Repr::ReflectedMember(bo, bn))) => {
+                ao == bo && an == bn
+            }
+            (Type(Repr::ValueOf(a)), Type(Repr::ValueOf(b))) => a == b,
+            (Type(Repr::Extension(a)), Type(Repr::Extension(b))) => a.eq_data(&**b),
+            (Type(Repr::KeyOf(a)), Type(Repr::KeyOf(b))) => a == b,
+            (Type(Repr::OffsetAccess(ab, ak)), Type(Repr::OffsetAccess(bb, bk))) => {
+                ab == bb && ak == bk
+            }
             (
-                Type::ClassConstant {
+                Type(Repr::ClassConstant {
                     class: ac,
                     pattern: ap,
-                },
-                Type::ClassConstant {
+                }),
+                Type(Repr::ClassConstant {
                     class: bc,
                     pattern: bp,
-                },
+                }),
             ) => ac == bc && ap == bp,
             (
-                Type::Conditional {
+                Type(Repr::Conditional {
                     subject: a_subject,
                     target: a_target,
                     if_true: a_if_true,
                     if_false: a_if_false,
                     negated: a_negated,
                     template_subject: a_template,
-                },
-                Type::Conditional {
+                }),
+                Type(Repr::Conditional {
                     subject: b_subject,
                     target: b_target,
                     if_true: b_if_true,
                     if_false: b_if_false,
                     negated: b_negated,
                     template_subject: b_template,
-                },
+                }),
             ) => {
                 a_template == b_template
                     && a_subject == b_subject
@@ -356,52 +380,52 @@ impl PartialEq for Type {
                     && a_negated == b_negated
             }
             (
-                Type::Mixed(_)
-                | Type::Error
-                | Type::Never
-                | Type::Void
-                | Type::Null
-                | Type::Bool
-                | Type::True
-                | Type::False
-                | Type::Int
-                | Type::IntLiteral(_)
-                | Type::Float
-                | Type::String
-                | Type::StringLiteral(_)
-                | Type::Array(..)
-                | Type::ClassString(_)
-                | Type::ClassKindString(_)
-                | Type::ArrayShape(_)
-                | Type::ObjectShape(_)
-                | Type::Object(..)
-                | Type::ObjectWithoutClass
-                | Type::Resource { .. }
-                | Type::EnumCase(..)
-                | Type::Callable(_)
-                | Type::SelfRef(_)
-                | Type::ParentRef
-                | Type::StaticRef(_)
-                | Type::This
-                | Type::TemplateParam(_)
-                | Type::VarianceArg(..)
-                | Type::Union(_)
-                | Type::BenevolentUnion(_)
-                | Type::Intersection(_)
-                | Type::IntRange(..)
-                | Type::FloatLiteral(_)
-                | Type::Accessory(_)
-                | Type::HasOffsetValue(..)
-                | Type::HasOffset(_)
-                | Type::HasMethod(_)
-                | Type::HasProperty(_)
-                | Type::ReflectedMember(..)
-                | Type::ValueOf(_)
-                | Type::KeyOf(_)
-                | Type::OffsetAccess(..)
-                | Type::ClassConstant { .. }
-                | Type::Extension(_)
-                | Type::Conditional { .. },
+                Type(Repr::Mixed(_))
+                | Type(Repr::Error)
+                | Type(Repr::Never)
+                | Type(Repr::Void)
+                | Type(Repr::Null)
+                | Type(Repr::Bool)
+                | Type(Repr::True)
+                | Type(Repr::False)
+                | Type(Repr::Int)
+                | Type(Repr::IntLiteral(_))
+                | Type(Repr::Float)
+                | Type(Repr::String)
+                | Type(Repr::StringLiteral(_))
+                | Type(Repr::Array(..))
+                | Type(Repr::ClassString(_))
+                | Type(Repr::ClassKindString(_))
+                | Type(Repr::ArrayShape(_))
+                | Type(Repr::ObjectShape(_))
+                | Type(Repr::Object(..))
+                | Type(Repr::ObjectWithoutClass)
+                | Type(Repr::Resource { .. })
+                | Type(Repr::EnumCase(..))
+                | Type(Repr::Callable(_))
+                | Type(Repr::SelfRef(_))
+                | Type(Repr::ParentRef)
+                | Type(Repr::StaticRef(_))
+                | Type(Repr::This)
+                | Type(Repr::TemplateParam(_))
+                | Type(Repr::VarianceArg(..))
+                | Type(Repr::Union(_))
+                | Type(Repr::BenevolentUnion(_))
+                | Type(Repr::Intersection(_))
+                | Type(Repr::IntRange(..))
+                | Type(Repr::FloatLiteral(_))
+                | Type(Repr::Accessory(_))
+                | Type(Repr::HasOffsetValue(..))
+                | Type(Repr::HasOffset(_))
+                | Type(Repr::HasMethod(_))
+                | Type(Repr::HasProperty(_))
+                | Type(Repr::ReflectedMember(..))
+                | Type(Repr::ValueOf(_))
+                | Type(Repr::KeyOf(_))
+                | Type(Repr::OffsetAccess(..))
+                | Type(Repr::ClassConstant { .. })
+                | Type(Repr::Extension(_))
+                | Type(Repr::Conditional { .. }),
                 _,
             ) => false,
         }
@@ -412,59 +436,59 @@ impl Eq for Type {}
 
 impl Hash for Type {
     fn hash<H: Hasher>(&self, state: &mut H) {
-        std::mem::discriminant(self).hash(state);
+        std::mem::discriminant(&self.0).hash(state);
         match self {
-            Type::Mixed(_)
-            | Type::Error
-            | Type::Never
-            | Type::Void
-            | Type::Null
-            | Type::Bool
-            | Type::True
-            | Type::False
-            | Type::Int
-            | Type::Float
-            | Type::String
-            | Type::ObjectWithoutClass
-            | Type::ParentRef
-            | Type::This => {}
-            Type::IntLiteral(n) => n.hash(state),
-            Type::StringLiteral(s) => s.hash(state),
-            Type::Array(k, v) | Type::OffsetAccess(k, v) => {
+            Type(Repr::Mixed(_))
+            | Type(Repr::Error)
+            | Type(Repr::Never)
+            | Type(Repr::Void)
+            | Type(Repr::Null)
+            | Type(Repr::Bool)
+            | Type(Repr::True)
+            | Type(Repr::False)
+            | Type(Repr::Int)
+            | Type(Repr::Float)
+            | Type(Repr::String)
+            | Type(Repr::ObjectWithoutClass)
+            | Type(Repr::ParentRef)
+            | Type(Repr::This) => {}
+            Type(Repr::IntLiteral(n)) => n.hash(state),
+            Type(Repr::StringLiteral(s)) => s.hash(state),
+            Type(Repr::Array(k, v)) | Type(Repr::OffsetAccess(k, v)) => {
                 k.hash(state);
                 v.hash(state);
             }
-            Type::ClassString(inner) | Type::ValueOf(inner) | Type::KeyOf(inner) => {
-                inner.hash(state)
-            }
-            Type::ClassKindString(kind) => kind.hash(state),
-            Type::ArrayShape(shape) | Type::ObjectShape(shape) => shape.hash(state),
-            Type::Object(name, args) => {
+            Type(Repr::ClassString(inner))
+            | Type(Repr::ValueOf(inner))
+            | Type(Repr::KeyOf(inner)) => inner.hash(state),
+            Type(Repr::ClassKindString(kind)) => kind.hash(state),
+            Type(Repr::ArrayShape(shape)) | Type(Repr::ObjectShape(shape)) => shape.hash(state),
+            Type(Repr::Object(name, args)) => {
                 name.lower().hash(state);
                 args.hash(state);
             }
-            Type::Resource { closed } => closed.hash(state),
-            Type::EnumCase(class, case) => {
+            Type(Repr::Resource { closed }) => closed.hash(state),
+            Type(Repr::EnumCase(class, case)) => {
                 class.lower().hash(state);
                 case.hash(state);
             }
-            Type::Callable(sig) => sig.hash(state),
-            Type::SelfRef(args)
-            | Type::StaticRef(args)
-            | Type::Union(args)
-            | Type::BenevolentUnion(args)
-            | Type::Intersection(args) => args.hash(state),
-            Type::TemplateParam(tp) => tp.hash(state),
-            Type::VarianceArg(variance, inner) => {
+            Type(Repr::Callable(sig)) => sig.hash(state),
+            Type(Repr::SelfRef(args))
+            | Type(Repr::StaticRef(args))
+            | Type(Repr::Union(args))
+            | Type(Repr::BenevolentUnion(args))
+            | Type(Repr::Intersection(args)) => args.hash(state),
+            Type(Repr::TemplateParam(tp)) => tp.hash(state),
+            Type(Repr::VarianceArg(variance, inner)) => {
                 variance.hash(state);
                 inner.hash(state);
             }
-            Type::IntRange(min, max) => {
+            Type(Repr::IntRange(min, max)) => {
                 min.hash(state);
                 max.hash(state);
             }
             // Equal floats hash alike: both zeros, and every NaN.
-            Type::FloatLiteral(f) => {
+            Type(Repr::FloatLiteral(f)) => {
                 let bits = if *f == 0.0 {
                     0
                 } else if f.is_nan() {
@@ -474,34 +498,34 @@ impl Hash for Type {
                 };
                 bits.hash(state)
             }
-            Type::Accessory(kind) => kind.hash(state),
-            Type::HasOffsetValue(key, value) => {
+            Type(Repr::Accessory(kind)) => kind.hash(state),
+            Type(Repr::HasOffsetValue(key, value)) => {
                 key.hash(state);
                 value.hash(state);
             }
-            Type::HasOffset(key) => key.hash(state),
-            Type::HasMethod(name) => name.lower().hash(state),
-            Type::HasProperty(name) => name.hash(state),
-            Type::ReflectedMember(owner, member) => {
+            Type(Repr::HasOffset(key)) => key.hash(state),
+            Type(Repr::HasMethod(name)) => name.lower().hash(state),
+            Type(Repr::HasProperty(name)) => name.hash(state),
+            Type(Repr::ReflectedMember(owner, member)) => {
                 owner.hash(state);
                 member.hash(state);
             }
-            Type::ClassConstant { class, pattern } => {
+            Type(Repr::ClassConstant { class, pattern }) => {
                 class.hash(state);
                 pattern.hash(state);
             }
-            Type::Extension(data) => {
+            Type(Repr::Extension(data)) => {
                 let state: &mut dyn Hasher = state;
                 data.hash_data(state);
             }
-            Type::Conditional {
+            Type(Repr::Conditional {
                 subject,
                 target,
                 if_true,
                 if_false,
                 negated,
                 template_subject,
-            } => {
+            }) => {
                 subject.hash(state);
                 target.hash(state);
                 if_true.hash(state);
@@ -568,7 +592,7 @@ impl TemplateParam {
             // both resolve this exact shape to `MixedType(true)`
             // (explicit), not `false` (confirmed directly against
             // `vendor/phpstan-src`).
-            bound: Box::new(Type::Mixed(true)),
+            bound: Box::new(Type(Repr::Mixed(true))),
             variance: Variance::Invariant,
             scope: None,
             default: None,
@@ -611,9 +635,11 @@ impl CallableSig {
     pub fn rebind_templates(mut self) -> CallableSig {
         fn rebind(ty: &Type, templates: &[TemplateParam]) -> Type {
             match ty {
-                Type::TemplateParam(tp) if tp.scope.as_deref() == Some(CALLABLE_TEMPLATE_SCOPE) => {
+                Type(Repr::TemplateParam(tp))
+                    if tp.scope.as_deref() == Some(CALLABLE_TEMPLATE_SCOPE) =>
+                {
                     match templates.iter().find(|t| t.name == tp.name) {
-                        Some(t) => Type::TemplateParam(t.clone()),
+                        Some(t) => Type(Repr::TemplateParam(t.clone())),
                         None => ty.clone(),
                     }
                 }
@@ -638,11 +664,11 @@ impl Type {
     /// anything else.
     pub fn constant_strings(&self) -> Vec<&str> {
         match self {
-            Type::StringLiteral(s) => s.as_str().into_iter().collect(),
-            Type::Intersection(members) => {
+            Type(Repr::StringLiteral(s)) => s.as_str().into_iter().collect(),
+            Type(Repr::Intersection(members)) => {
                 members.iter().flat_map(Type::constant_strings).collect()
             }
-            Type::Union(members) => {
+            Type(Repr::Union(members)) => {
                 let mut all = Vec::new();
                 for member in members {
                     let strings = member.constant_strings();
@@ -661,17 +687,17 @@ impl Type {
     /// collapse to their plain type.
     pub fn describe_type_only(&self) -> String {
         match self {
-            Type::IntLiteral(_) | Type::IntRange(..) => "int".to_string(),
-            Type::FloatLiteral(_) => "float".to_string(),
-            Type::StringLiteral(_) => "string".to_string(),
-            Type::True | Type::False => "bool".to_string(),
-            Type::Array(..) | Type::ArrayShape(_) => "array".to_string(),
-            Type::Object(class, _) | Type::EnumCase(class, _) => class.to_string(),
-            Type::Intersection(members) => members
+            Type(Repr::IntLiteral(_)) | Type(Repr::IntRange(..)) => "int".to_string(),
+            Type(Repr::FloatLiteral(_)) => "float".to_string(),
+            Type(Repr::StringLiteral(_)) => "string".to_string(),
+            Type(Repr::True) | Type(Repr::False) => "bool".to_string(),
+            Type(Repr::Array(..)) | Type(Repr::ArrayShape(_)) => "array".to_string(),
+            Type(Repr::Object(class, _)) | Type(Repr::EnumCase(class, _)) => class.to_string(),
+            Type(Repr::Intersection(members)) => members
                 .iter()
                 .find(|m| !m.is_accessory())
                 .map_or_else(|| self.to_string(), Type::describe_type_only),
-            Type::Union(members) => {
+            Type(Repr::Union(members)) => {
                 let mut parts: Vec<String> = Vec::new();
                 for member in members {
                     let part = member.describe_type_only();
@@ -691,16 +717,19 @@ impl Type {
     /// a leaf is returned unchanged. `f` decides whether to recurse.
     pub fn map_children(&self, f: &mut impl FnMut(&Type) -> Type) -> Type {
         match self {
-            Type::Array(k, v) => Type::Array(Box::new(f(k)), Box::new(f(v))),
-            Type::ClassString(inner) => Type::ClassString(Box::new(f(inner))),
-            Type::ArrayShape(shape) => Type::ArrayShape(shape.map_types(f)),
-            Type::ObjectShape(shape) => Type::ObjectShape(shape.map_types(f)),
-            Type::Object(name, args) => {
-                Type::Object(name.clone(), args.iter().map(&mut *f).collect())
+            Type(Repr::Array(k, v)) => Type(Repr::Array(Box::new(f(k)), Box::new(f(v)))),
+            Type(Repr::ClassString(inner)) => Type(Repr::ClassString(Box::new(f(inner)))),
+            Type(Repr::ArrayShape(shape)) => Type(Repr::ArrayShape(shape.map_types(f))),
+            Type(Repr::ObjectShape(shape)) => Type(Repr::ObjectShape(shape.map_types(f))),
+            Type(Repr::Object(name, args)) => Type(Repr::Object(
+                name.clone(),
+                args.iter().map(&mut *f).collect(),
+            )),
+            Type(Repr::SelfRef(args)) => Type(Repr::SelfRef(args.iter().map(&mut *f).collect())),
+            Type(Repr::StaticRef(args)) => {
+                Type(Repr::StaticRef(args.iter().map(&mut *f).collect()))
             }
-            Type::SelfRef(args) => Type::SelfRef(args.iter().map(&mut *f).collect()),
-            Type::StaticRef(args) => Type::StaticRef(args.iter().map(&mut *f).collect()),
-            Type::Callable(Some(sig)) => Type::Callable(Some(Arc::new(CallableSig {
+            Type(Repr::Callable(Some(sig))) => Type(Repr::Callable(Some(Arc::new(CallableSig {
                 params: sig
                     .params
                     .iter()
@@ -711,41 +740,47 @@ impl Type {
                     .collect(),
                 return_type: Box::new(f(&sig.return_type)),
                 templates: sig.templates.clone(),
-            }))),
-            Type::VarianceArg(variance, inner) => Type::VarianceArg(*variance, Box::new(f(inner))),
-            Type::Union(ms) => Type::Union(ms.iter().map(&mut *f).collect()),
-            Type::BenevolentUnion(ms) => Type::BenevolentUnion(ms.iter().map(&mut *f).collect()),
-            Type::Intersection(ms) => Type::Intersection(ms.iter().map(&mut *f).collect()),
-            Type::HasOffsetValue(key, inner) => {
-                Type::HasOffsetValue(key.clone(), Box::new(f(inner)))
+            })))),
+            Type(Repr::VarianceArg(variance, inner)) => {
+                Type(Repr::VarianceArg(*variance, Box::new(f(inner))))
             }
-            Type::ReflectedMember(owner, member) => {
-                Type::ReflectedMember(Box::new(f(owner)), member.clone())
+            Type(Repr::Union(ms)) => Type(Repr::Union(ms.iter().map(&mut *f).collect())),
+            Type(Repr::BenevolentUnion(ms)) => {
+                Type(Repr::BenevolentUnion(ms.iter().map(&mut *f).collect()))
             }
-            Type::ValueOf(inner) => Type::ValueOf(Box::new(f(inner))),
-            Type::KeyOf(inner) => Type::KeyOf(Box::new(f(inner))),
-            Type::OffsetAccess(base, key) => {
-                Type::OffsetAccess(Box::new(f(base)), Box::new(f(key)))
+            Type(Repr::Intersection(ms)) => {
+                Type(Repr::Intersection(ms.iter().map(&mut *f).collect()))
             }
-            Type::ClassConstant { class, pattern } => Type::ClassConstant {
+            Type(Repr::HasOffsetValue(key, inner)) => {
+                Type(Repr::HasOffsetValue(key.clone(), Box::new(f(inner))))
+            }
+            Type(Repr::ReflectedMember(owner, member)) => {
+                Type(Repr::ReflectedMember(Box::new(f(owner)), member.clone()))
+            }
+            Type(Repr::ValueOf(inner)) => Type(Repr::ValueOf(Box::new(f(inner)))),
+            Type(Repr::KeyOf(inner)) => Type(Repr::KeyOf(Box::new(f(inner)))),
+            Type(Repr::OffsetAccess(base, key)) => {
+                Type(Repr::OffsetAccess(Box::new(f(base)), Box::new(f(key))))
+            }
+            Type(Repr::ClassConstant { class, pattern }) => Type(Repr::ClassConstant {
                 class: Box::new(f(class)),
                 pattern: pattern.clone(),
-            },
-            Type::Conditional {
+            }),
+            Type(Repr::Conditional {
                 subject,
                 target,
                 if_true,
                 if_false,
                 negated,
                 template_subject,
-            } => Type::Conditional {
+            }) => Type(Repr::Conditional {
                 subject: subject.clone(),
                 target: Box::new(f(target)),
                 if_true: Box::new(f(if_true)),
                 if_false: Box::new(f(if_false)),
                 negated: *negated,
                 template_subject: *template_subject,
-            },
+            }),
             leaf => leaf.clone(),
         }
     }
@@ -754,40 +789,42 @@ impl Type {
     /// `map_children` rebuilds, in the same order.
     pub fn for_each_child<'t>(&'t self, f: &mut impl FnMut(&'t Type)) {
         match self {
-            Type::Array(k, v) => {
+            Type(Repr::Array(k, v)) => {
                 f(k);
                 f(v);
             }
-            Type::ClassString(inner)
-            | Type::VarianceArg(_, inner)
-            | Type::HasOffsetValue(_, inner)
-            | Type::ReflectedMember(inner, _)
-            | Type::ValueOf(inner)
-            | Type::KeyOf(inner)
-            | Type::ClassConstant { class: inner, .. } => f(inner),
-            Type::OffsetAccess(base, key) => {
+            Type(Repr::ClassString(inner))
+            | Type(Repr::VarianceArg(_, inner))
+            | Type(Repr::HasOffsetValue(_, inner))
+            | Type(Repr::ReflectedMember(inner, _))
+            | Type(Repr::ValueOf(inner))
+            | Type(Repr::KeyOf(inner))
+            | Type(Repr::ClassConstant { class: inner, .. }) => f(inner),
+            Type(Repr::OffsetAccess(base, key)) => {
                 f(base);
                 f(key);
             }
-            Type::ArrayShape(shape) | Type::ObjectShape(shape) => shape.types().for_each(f),
-            Type::Object(_, args) | Type::SelfRef(args) | Type::StaticRef(args) => {
-                args.iter().for_each(f)
+            Type(Repr::ArrayShape(shape)) | Type(Repr::ObjectShape(shape)) => {
+                shape.types().for_each(f)
             }
-            Type::Callable(Some(sig)) => {
+            Type(Repr::Object(_, args))
+            | Type(Repr::SelfRef(args))
+            | Type(Repr::StaticRef(args)) => args.iter().for_each(f),
+            Type(Repr::Callable(Some(sig))) => {
                 for p in &sig.params {
                     f(&p.ty);
                 }
                 f(&sig.return_type);
             }
-            Type::Union(ms) | Type::BenevolentUnion(ms) | Type::Intersection(ms) => {
-                ms.iter().for_each(f)
-            }
-            Type::Conditional {
+            Type(Repr::Union(ms))
+            | Type(Repr::BenevolentUnion(ms))
+            | Type(Repr::Intersection(ms)) => ms.iter().for_each(f),
+            Type(Repr::Conditional {
                 target,
                 if_true,
                 if_false,
                 ..
-            } => {
+            }) => {
                 f(target);
                 f(if_true);
                 f(if_false);
@@ -808,11 +845,11 @@ impl Type {
     pub fn is_accessory(&self) -> bool {
         matches!(
             self,
-            Type::Accessory(_)
-                | Type::HasOffsetValue(..)
-                | Type::HasOffset(_)
-                | Type::HasMethod(_)
-                | Type::HasProperty(_)
+            Type(Repr::Accessory(_))
+                | Type(Repr::HasOffsetValue(..))
+                | Type(Repr::HasOffset(_))
+                | Type(Repr::HasMethod(_))
+                | Type(Repr::HasProperty(_))
         )
     }
 
@@ -820,8 +857,8 @@ impl Type {
     /// `self` is a benevolent union, plain otherwise.
     pub fn with_members(&self, members: Vec<Type>) -> Type {
         match self {
-            Type::BenevolentUnion(_) => Type::BenevolentUnion(members),
-            _ => Type::Union(members),
+            Type(Repr::BenevolentUnion(_)) => Type(Repr::BenevolentUnion(members)),
+            _ => Type(Repr::Union(members)),
         }
     }
 
@@ -831,10 +868,10 @@ impl Type {
     /// signature - real PHPStan's `ClosureType`, which is both at once.
     /// `Display` renders this exact pair as `Closure(params): return`.
     pub fn closure_literal(sig: CallableSig) -> Type {
-        Type::Intersection(vec![
-            Type::Object("Closure".into(), Vec::new()),
-            Type::Callable(Some(Arc::new(sig))),
-        ])
+        Type(Repr::Intersection(vec![
+            Type(Repr::Object("Closure".into(), Vec::new())),
+            Type(Repr::Callable(Some(Arc::new(sig)))),
+        ]))
     }
 
     /// The signature a value of this type can be invoked with, when one
@@ -842,9 +879,9 @@ impl Type {
     /// closure literal's `closure_literal` intersection.
     pub fn callable_sig(&self) -> Option<&Arc<CallableSig>> {
         match self {
-            Type::Callable(Some(sig)) => Some(sig),
-            Type::Intersection(members) => members.iter().find_map(|m| match m {
-                Type::Callable(Some(sig)) => Some(sig),
+            Type(Repr::Callable(Some(sig))) => Some(sig),
+            Type(Repr::Intersection(members)) => members.iter().find_map(|m| match m {
+                Type(Repr::Callable(Some(sig))) => Some(sig),
                 _ => None,
             }),
             _ => None,
@@ -853,22 +890,28 @@ impl Type {
 
     /// `list<element>`: an array whose keys are `0..n` in order.
     pub fn list_of(element: Type) -> Type {
-        Type::Intersection(vec![
-            Type::Array(Box::new(Type::unknown_array_key()), Box::new(element)),
-            Type::Accessory(AccessoryKind::ArrayList),
-        ])
+        Type(Repr::Intersection(vec![
+            Type(Repr::Array(
+                Box::new(Type::unknown_array_key()),
+                Box::new(element),
+            )),
+            Type(Repr::Accessory(AccessoryKind::ArrayList)),
+        ]))
     }
 
     /// PHP's full legal-array-key domain (`int|string`) - the default for
     /// a bare `array`/`array<V>` with no key argument given.
     pub fn unknown_array_key() -> Type {
-        Type::Union(vec![Type::Int, Type::String])
+        Type(Repr::Union(vec![Type(Repr::Int), Type(Repr::String)]))
     }
 
     /// `Type::Array(unknown_array_key(), value)`, for a construction site
     /// with no more precise key type available.
     pub fn array_of(value: Type) -> Type {
-        Type::Array(Box::new(Type::unknown_array_key()), Box::new(value))
+        Type(Repr::Array(
+            Box::new(Type::unknown_array_key()),
+            Box::new(value),
+        ))
     }
 
     /// The `int|string` key type PHPDoc's `Type[]` array-shorthand
@@ -899,7 +942,10 @@ impl Type {
     /// construction sites this marker belongs at, not every "no more
     /// precise key" site project-wide.
     pub fn benevolent_array_key() -> Type {
-        Type::BenevolentUnion(vec![Type::Int, Type::String])
+        Type(Repr::BenevolentUnion(vec![
+            Type(Repr::Int),
+            Type(Repr::String),
+        ]))
     }
 }
 

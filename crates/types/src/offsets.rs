@@ -1,6 +1,7 @@
 //! Array offsets: whether a type has one, and the type after writing one
 //! (PHPStan's `hasOffsetValueType()`/`setOffsetValueType()`).
 
+use crate::Repr;
 use crate::{AccessoryKind, Shape, ShapeField, ShapeKey, TrinaryLogic, Type, union_types};
 
 impl Type {
@@ -8,7 +9,7 @@ impl Type {
     /// (`Yes`), surely lacks (`No`), or may have the offset `offset`.
     pub fn has_offset_value_type(&self, offset: &Type) -> TrinaryLogic {
         match self {
-            Type::ArrayShape(shape) => {
+            Type(Repr::ArrayShape(shape)) => {
                 if !shape.is_sealed() {
                     return TrinaryLogic::Maybe;
                 }
@@ -24,18 +25,18 @@ impl Type {
                     None => TrinaryLogic::No,
                 }
             }
-            Type::Array(key, _) => general_array_has_offset(key, false, offset),
-            Type::Intersection(members) => {
-                let is_list = members.contains(&Type::Accessory(AccessoryKind::ArrayList));
+            Type(Repr::Array(key, _)) => general_array_has_offset(key, false, offset),
+            Type(Repr::Intersection(members)) => {
+                let is_list = members.contains(&Type(Repr::Accessory(AccessoryKind::ArrayList)));
                 match members.iter().find_map(|m| match m {
-                    Type::Array(k, _) => Some(k.as_ref()),
+                    Type(Repr::Array(k, _)) => Some(k.as_ref()),
                     _ => None,
                 }) {
                     Some(key) => general_array_has_offset(key, is_list, offset),
                     None => TrinaryLogic::Maybe,
                 }
             }
-            Type::Union(members) => members
+            Type(Repr::Union(members)) => members
                 .iter()
                 .map(|m| m.has_offset_value_type(offset))
                 .reduce(|a, b| if a == b { a } else { TrinaryLogic::Maybe })
@@ -50,31 +51,31 @@ impl Type {
     /// sealed shape surely lacks `key`.
     pub fn offset_value_type(&self, key: Option<&ShapeKey>) -> Option<Type> {
         match self {
-            Type::Array(_, value) => Some((**value).clone()),
-            Type::ArrayShape(shape) => match key {
+            Type(Repr::Array(_, value)) => Some((**value).clone()),
+            Type(Repr::ArrayShape(shape)) => match key {
                 Some(key) => match shape.field(key) {
                     Some(field) => Some(field.ty.clone()),
                     None => shape.unsealed.as_deref().map(|tail| tail.1.clone()),
                 },
-                None if shape.is_empty_array() => Some(Type::Null),
+                None if shape.is_empty_array() => Some(Type(Repr::Null)),
                 None => self.array_value_type(),
             },
-            Type::Intersection(members) => {
+            Type(Repr::Intersection(members)) => {
                 let tracked = key.and_then(|key| {
                     members.iter().find_map(|m| match m {
-                        Type::HasOffsetValue(k, v) if k == key => Some((**v).clone()),
+                        Type(Repr::HasOffsetValue(k, v)) if k == key => Some((**v).clone()),
                         _ => None,
                     })
                 });
                 tracked.or_else(|| members.iter().find_map(|m| m.offset_value_type(key)))
             }
-            Type::Union(members) | Type::BenevolentUnion(members) => members
+            Type(Repr::Union(members)) | Type(Repr::BenevolentUnion(members)) => members
                 .iter()
                 .map(|m| m.offset_value_type(key))
                 .collect::<Option<Vec<_>>>()?
                 .into_iter()
                 .reduce(union_types),
-            Type::TemplateParam(param) => param.bound.offset_value_type(key),
+            Type(Repr::TemplateParam(param)) => param.bound.offset_value_type(key),
             _ => None,
         }
     }
@@ -94,19 +95,15 @@ impl Type {
     ) -> Option<Type> {
         match self {
             // `null` becomes an array on its first write.
-            Type::Null => Type::ArrayShape(Shape::sealed(Vec::new())).set_offset_value_type(
-                offset,
-                value,
-                in_range,
-                track_literal_key,
-            ),
-            Type::ArrayShape(shape) => match offset.and_then(literal_key_name) {
+            Type(Repr::Null) => Type(Repr::ArrayShape(Shape::sealed(Vec::new())))
+                .set_offset_value_type(offset, value, in_range, track_literal_key),
+            Type(Repr::ArrayShape(shape)) => match offset.and_then(literal_key_name) {
                 Some(key) => {
                     let mut shape = shape.clone();
                     // A written key is present afterwards, even one the
                     // shape only had as optional.
                     shape.set(ShapeField::new(ShapeKey::from_name(&key), value, false));
-                    Some(Type::ArrayShape(shape))
+                    Some(Type(Repr::ArrayShape(shape)))
                 }
                 None => {
                     let widened = shape
@@ -117,22 +114,25 @@ impl Type {
                     // surely non-empty. A dynamic key need not be
                     // sequential.
                     if offset.is_none() && self.is_list().yes() {
-                        Some(Type::Intersection(vec![
-                            Type::Array(Box::new(Type::unknown_array_key()), Box::new(widened)),
-                            Type::Accessory(AccessoryKind::ArrayList),
-                            Type::Accessory(AccessoryKind::NonEmptyArray),
-                        ]))
+                        Some(Type(Repr::Intersection(vec![
+                            Type(Repr::Array(
+                                Box::new(Type::unknown_array_key()),
+                                Box::new(widened),
+                            )),
+                            Type(Repr::Accessory(AccessoryKind::ArrayList)),
+                            Type(Repr::Accessory(AccessoryKind::NonEmptyArray)),
+                        ])))
                     } else {
                         let key = offset
                             .map(Type::write_key_type)
                             .unwrap_or_else(Type::unknown_array_key);
-                        Some(Type::Array(Box::new(key), Box::new(widened)))
+                        Some(Type(Repr::Array(Box::new(key), Box::new(widened))))
                     }
                 }
             },
             // Past a literal shape there's no single key to grow; a
             // literal offset still gets a `hasOffsetValue` member.
-            Type::Array(key, inner) => Some(write_literal_key_aware(
+            Type(Repr::Array(key, inner)) => Some(write_literal_key_aware(
                 key,
                 inner,
                 offset,
@@ -142,7 +142,7 @@ impl Type {
             )),
             // Every member takes the write, or a key written one line
             // earlier would read back as missing through the union.
-            Type::Union(members) => {
+            Type(Repr::Union(members)) => {
                 let mut updated = Vec::with_capacity(members.len());
                 for m in members {
                     updated.push(m.set_offset_value_type(
@@ -156,18 +156,18 @@ impl Type {
             }
             // A container carrying `hasOffsetValue` members from earlier
             // literal writes accumulates them.
-            Type::Intersection(members)
+            Type(Repr::Intersection(members))
                 if members
                     .iter()
-                    .any(|m| matches!(m, Type::HasOffsetValue(..))) =>
+                    .any(|m| matches!(m, Type(Repr::HasOffsetValue(..)))) =>
             {
                 let (key, inner) = members.iter().find_map(|m| match m {
-                    Type::Array(k, v) => Some((k.as_ref(), v.as_ref())),
+                    Type(Repr::Array(k, v)) => Some((k.as_ref(), v.as_ref())),
                     _ => None,
                 })?;
                 let existing: Vec<Type> = members
                     .iter()
-                    .filter(|m| matches!(m, Type::HasOffsetValue(..)))
+                    .filter(|m| matches!(m, Type(Repr::HasOffsetValue(..))))
                     .cloned()
                     .collect();
                 Some(write_literal_key_aware(
@@ -183,7 +183,7 @@ impl Type {
             // markers, an append keeps a list a list (now non-empty), and
             // a write within the list's range keeps it a list, non-empty
             // only if it already was.
-            Type::Intersection(members) => {
+            Type(Repr::Intersection(members)) => {
                 let inner = members.iter().find_map(Type::array_value_type)?;
                 let widened = union_types(value, inner);
                 let key = offset
@@ -191,19 +191,20 @@ impl Type {
                     .unwrap_or_else(Type::unknown_array_key);
                 let is_append = offset.is_none();
                 if (is_append || in_range)
-                    && members.contains(&Type::Accessory(AccessoryKind::ArrayList))
+                    && members.contains(&Type(Repr::Accessory(AccessoryKind::ArrayList)))
                 {
                     let mut new_members = vec![
-                        Type::Array(Box::new(key), Box::new(widened)),
-                        Type::Accessory(AccessoryKind::ArrayList),
+                        Type(Repr::Array(Box::new(key), Box::new(widened))),
+                        Type(Repr::Accessory(AccessoryKind::ArrayList)),
                     ];
-                    if is_append || members.contains(&Type::Accessory(AccessoryKind::NonEmptyArray))
+                    if is_append
+                        || members.contains(&Type(Repr::Accessory(AccessoryKind::NonEmptyArray)))
                     {
-                        new_members.push(Type::Accessory(AccessoryKind::NonEmptyArray));
+                        new_members.push(Type(Repr::Accessory(AccessoryKind::NonEmptyArray)));
                     }
-                    Some(Type::Intersection(new_members))
+                    Some(Type(Repr::Intersection(new_members)))
                 } else {
-                    Some(Type::Array(Box::new(key), Box::new(widened)))
+                    Some(Type(Repr::Array(Box::new(key), Box::new(widened))))
                 }
             }
             _ => None,
@@ -216,9 +217,9 @@ impl Type {
     /// read accepts wherever either member would do.
     pub fn write_key_type(&self) -> Type {
         if self.is_int().yes() {
-            Type::Int
+            Type(Repr::Int)
         } else if self.is_string().yes() {
-            Type::String
+            Type(Repr::String)
         } else {
             Type::benevolent_array_key()
         }
@@ -242,21 +243,21 @@ fn write_literal_key_aware(
         Some(new_key) => union_types(key.clone(), new_key),
         None => key.clone(),
     };
-    let base = Type::Array(
+    let base = Type(Repr::Array(
         Box::new(key_ty),
         Box::new(union_types(value.clone(), inner.clone())),
-    );
+    ));
     match offset.and_then(literal_key_name) {
         Some(name) if track_literal_key => {
             let key = ShapeKey::from_name(&name);
             let mut members: Vec<Type> = existing_has_offset_values
                 .iter()
-                .filter(|m| !matches!(m, Type::HasOffsetValue(k, _) if *k == key))
+                .filter(|m| !matches!(m, Type(Repr::HasOffsetValue(k, _)) if *k == key))
                 .cloned()
                 .collect();
-            members.push(Type::HasOffsetValue(key, Box::new(value)));
+            members.push(Type(Repr::HasOffsetValue(key, Box::new(value))));
             members.insert(0, base);
-            Type::Intersection(members)
+            Type(Repr::Intersection(members))
         }
         _ => base,
     }
@@ -265,8 +266,8 @@ fn write_literal_key_aware(
 /// A string or integer literal offset's text.
 fn literal_key_name(offset: &Type) -> Option<String> {
     match offset {
-        Type::StringLiteral(s) => Some(s.to_string()),
-        Type::IntLiteral(n) => Some(n.to_string()),
+        Type(Repr::StringLiteral(s)) => Some(s.to_string()),
+        Type(Repr::IntLiteral(n)) => Some(n.to_string()),
         _ => None,
     }
 }
@@ -275,8 +276,8 @@ fn literal_key_name(offset: &Type) -> Option<String> {
 /// literal offset (`true`/`false`/`null` included).
 fn literal_key(offset: &Type) -> Option<(String, bool)> {
     match offset.to_array_key() {
-        Type::IntLiteral(n) => Some((n.to_string(), true)),
-        Type::StringLiteral(s) => Some((s.to_string(), false)),
+        Type(Repr::IntLiteral(n)) => Some((n.to_string(), true)),
+        Type(Repr::StringLiteral(s)) => Some((s.to_string(), false)),
         _ => None,
     }
 }

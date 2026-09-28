@@ -1,6 +1,7 @@
 //! Where a type uses templates, and the variance of each position
 //! (PHPStan's `getReferencedTemplateTypes()`).
 
+use crate::Repr;
 use crate::{CallSiteVariance, ClassHierarchy, TemplateParam, Type, Variance};
 
 /// The variance of a position a type occurs in (PHPStan's
@@ -92,11 +93,13 @@ impl Type {
         out: &mut Vec<(&'t TemplateParam, PositionVariance)>,
     ) {
         match self {
-            Type::TemplateParam(param) => out.push((param, position)),
-            Type::Object(class, args) => {
+            Type(Repr::TemplateParam(param)) => out.push((param, position)),
+            Type(Repr::Object(class, args)) => {
                 for (i, arg) in args.iter().enumerate() {
                     let (slot, arg) = match arg {
-                        Type::VarianceArg(variance, inner) => ((*variance).into(), inner.as_ref()),
+                        Type(Repr::VarianceArg(variance, inner)) => {
+                            ((*variance).into(), inner.as_ref())
+                        }
                         _ => match hierarchy.slot_variance(class, i) {
                             Some(variance) => (variance.into(), arg),
                             None if hierarchy.find_class(class).is_some() => {
@@ -108,14 +111,17 @@ impl Type {
                     arg.collect_templates(position.compose(slot), hierarchy, out);
                 }
             }
-            Type::VarianceArg(variance, inner) => {
+            Type(Repr::VarianceArg(variance, inner)) => {
                 inner.collect_templates(position.compose((*variance).into()), hierarchy, out)
             }
-            Type::Array(..) | Type::ArrayShape(_) | Type::ObjectShape(_) | Type::ClassString(_) => {
+            Type(Repr::Array(..))
+            | Type(Repr::ArrayShape(_))
+            | Type(Repr::ObjectShape(_))
+            | Type(Repr::ClassString(_)) => {
                 let inner = position.compose(PositionVariance::Covariant);
                 self.for_each_child(&mut |t| t.collect_templates(inner, hierarchy, out));
             }
-            Type::Callable(Some(sig)) => {
+            Type(Repr::Callable(Some(sig))) => {
                 let params = position.compose(PositionVariance::Contravariant);
                 for param in &sig.params {
                     param.ty.collect_templates(params, hierarchy, out);
@@ -123,14 +129,14 @@ impl Type {
                 let ret = position.compose(PositionVariance::Covariant);
                 sig.return_type.collect_templates(ret, hierarchy, out);
             }
-            Type::Union(_)
-            | Type::BenevolentUnion(_)
-            | Type::Intersection(_)
-            | Type::ValueOf(_)
-            | Type::KeyOf(_)
-            | Type::OffsetAccess(..)
-            | Type::ClassConstant { .. }
-            | Type::Conditional { .. } => {
+            Type(Repr::Union(_))
+            | Type(Repr::BenevolentUnion(_))
+            | Type(Repr::Intersection(_))
+            | Type(Repr::ValueOf(_))
+            | Type(Repr::KeyOf(_))
+            | Type(Repr::OffsetAccess(..))
+            | Type(Repr::ClassConstant { .. })
+            | Type(Repr::Conditional { .. }) => {
                 self.for_each_child(&mut |t| t.collect_templates(position, hierarchy, out));
             }
             _ => {}

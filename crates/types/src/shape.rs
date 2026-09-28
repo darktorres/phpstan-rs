@@ -1,6 +1,7 @@
 //! Array and object shapes: `array{name: string, 0: int, ...}`,
 //! `object{name: string}`.
 
+use crate::Repr;
 use std::fmt;
 
 use crate::{Type, parse::canonical_int_key};
@@ -25,16 +26,16 @@ impl ShapeKey {
     /// The key as its literal type (`'name'`, `0`).
     pub fn to_type(&self) -> Type {
         match self {
-            ShapeKey::Int(n) => Type::IntLiteral(*n),
-            ShapeKey::Str(s) => Type::StringLiteral(s.as_str().into()),
+            ShapeKey::Int(n) => Type(Repr::IntLiteral(*n)),
+            ShapeKey::Str(s) => Type(Repr::StringLiteral(s.as_str().into())),
         }
     }
 
     /// The key a literal key type names, if it names one.
     pub fn from_type(ty: &Type) -> Option<ShapeKey> {
         match ty {
-            Type::IntLiteral(n) => Some(ShapeKey::Int(*n)),
-            Type::StringLiteral(s) => Some(ShapeKey::from_name(&s.to_str_lossy())),
+            Type(Repr::IntLiteral(n)) => Some(ShapeKey::Int(*n)),
+            Type(Repr::StringLiteral(s)) => Some(ShapeKey::from_name(&s.to_str_lossy())),
             _ => None,
         }
     }
@@ -103,7 +104,10 @@ impl Shape {
     pub fn unsealed(fields: Vec<ShapeField>) -> Shape {
         Shape {
             fields,
-            unsealed: Some(Box::new((Type::unknown_array_key(), Type::Mixed(false)))),
+            unsealed: Some(Box::new((
+                Type::unknown_array_key(),
+                Type(Repr::Mixed(false)),
+            ))),
         }
     }
 

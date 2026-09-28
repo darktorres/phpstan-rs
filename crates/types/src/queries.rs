@@ -1,22 +1,23 @@
 //! What a type is: the questions asked of a type from outside this crate.
 
+use crate::Repr;
 use crate::{AccessoryKind, CallSiteVariance, Relation, Shape, TrinaryLogic, Type, union_types};
 
 impl Type {
     /// Whether this is `mixed`, written or not.
     pub fn is_mixed(&self) -> bool {
-        matches!(self, Type::Mixed(_))
+        matches!(self, Type(Repr::Mixed(_)))
     }
 
     /// Whether this is a `mixed` a written type resolved to.
     pub fn is_explicit_mixed(&self) -> bool {
-        matches!(self, Type::Mixed(true))
+        matches!(self, Type(Repr::Mixed(true)))
     }
 
     /// A union's members, or this type alone.
     pub fn union_members(&self) -> &[Type] {
         match self {
-            Type::Union(members) | Type::BenevolentUnion(members) => members,
+            Type(Repr::Union(members)) | Type(Repr::BenevolentUnion(members)) => members,
             other => std::slice::from_ref(other),
         }
     }
@@ -25,8 +26,10 @@ impl Type {
     /// enum cases among this type's union and intersection members.
     pub fn object_class_names(&self) -> Vec<&crate::Name> {
         match self {
-            Type::Object(class, _) | Type::EnumCase(class, _) => vec![class],
-            Type::Union(members) | Type::BenevolentUnion(members) | Type::Intersection(members) => {
+            Type(Repr::Object(class, _)) | Type(Repr::EnumCase(class, _)) => vec![class],
+            Type(Repr::Union(members))
+            | Type(Repr::BenevolentUnion(members))
+            | Type(Repr::Intersection(members)) => {
                 members.iter().flat_map(Type::object_class_names).collect()
             }
             _ => Vec::new(),
@@ -40,7 +43,7 @@ impl Type {
     pub fn referenced_class_names(&self) -> Vec<&crate::Name> {
         let mut out: Vec<&crate::Name> = Vec::new();
         self.walk_class_positions(&mut |t| {
-            if let Type::Object(name, _) = t
+            if let Type(Repr::Object(name, _)) = t
                 && !out.contains(&name)
             {
                 out.push(name);
@@ -59,7 +62,7 @@ impl Type {
     }
 
     fn collect_nested_class_names<'t>(&'t self, out: &mut Vec<&'t crate::Name>) {
-        if let Type::Object(name, _) = self {
+        if let Type(Repr::Object(name, _)) = self {
             out.push(name);
         }
         self.for_each_child(&mut |t| t.collect_nested_class_names(out));
@@ -69,23 +72,25 @@ impl Type {
     /// `referenced_class_names`) unresolved.
     pub fn has_parent_ref(&self) -> bool {
         let mut found = false;
-        self.walk_class_positions(&mut |t| found |= matches!(t, Type::ParentRef));
+        self.walk_class_positions(&mut |t| found |= matches!(t, Type(Repr::ParentRef)));
         found
     }
 
     fn walk_class_positions<'a>(&'a self, f: &mut impl FnMut(&'a Type)) {
         match self {
-            Type::Array(key, value) => {
+            Type(Repr::Array(key, value)) => {
                 key.walk_class_positions(f);
                 value.walk_class_positions(f);
             }
-            Type::ClassString(inner) => inner.walk_class_positions(f),
-            Type::Union(members) | Type::BenevolentUnion(members) | Type::Intersection(members) => {
+            Type(Repr::ClassString(inner)) => inner.walk_class_positions(f),
+            Type(Repr::Union(members))
+            | Type(Repr::BenevolentUnion(members))
+            | Type(Repr::Intersection(members)) => {
                 for m in members {
                     m.walk_class_positions(f);
                 }
             }
-            Type::ArrayShape(shape) | Type::ObjectShape(shape) => {
+            Type(Repr::ArrayShape(shape)) | Type(Repr::ObjectShape(shape)) => {
                 for t in shape.types() {
                     t.walk_class_positions(f);
                 }
@@ -99,22 +104,24 @@ impl Type {
     /// `object`, `callable`, `iterable`), or is an object of class `name`.
     pub fn mentions(&self, name: &str) -> bool {
         let direct = match (name, self) {
-            ("float", Type::Float | Type::FloatLiteral(_)) => true,
-            ("int", Type::Int | Type::IntLiteral(_) | Type::IntRange(..)) => true,
+            ("float", Type(Repr::Float) | Type(Repr::FloatLiteral(_))) => true,
+            ("int", Type(Repr::Int) | Type(Repr::IntLiteral(_)) | Type(Repr::IntRange(..))) => true,
             (
                 "string",
-                Type::String
-                | Type::StringLiteral(_)
-                | Type::ClassString(_)
-                | Type::ClassKindString(_),
+                Type(Repr::String)
+                | Type(Repr::StringLiteral(_))
+                | Type(Repr::ClassString(_))
+                | Type(Repr::ClassKindString(_)),
             ) => true,
-            ("bool", Type::Bool | Type::True | Type::False) => true,
-            ("array", Type::Array(..) | Type::ArrayShape(_)) => true,
-            ("mixed", Type::Mixed(_)) => true,
-            ("object", Type::ObjectWithoutClass) => true,
-            ("callable", Type::Callable(_)) => true,
-            ("iterable", Type::Object(n, _)) if n.eq_ignore_ascii_case("Traversable") => true,
-            (class, Type::Object(n, _)) => n.trim_start_matches('\\').eq_ignore_ascii_case(class),
+            ("bool", Type(Repr::Bool) | Type(Repr::True) | Type(Repr::False)) => true,
+            ("array", Type(Repr::Array(..)) | Type(Repr::ArrayShape(_))) => true,
+            ("mixed", Type(Repr::Mixed(_))) => true,
+            ("object", Type(Repr::ObjectWithoutClass)) => true,
+            ("callable", Type(Repr::Callable(_))) => true,
+            ("iterable", Type(Repr::Object(n, _))) if n.eq_ignore_ascii_case("Traversable") => true,
+            (class, Type(Repr::Object(n, _))) => {
+                n.trim_start_matches('\\').eq_ignore_ascii_case(class)
+            }
             _ => false,
         };
         direct || self.any_child(|t| t.mentions(name))
@@ -124,7 +131,7 @@ impl Type {
     /// (`covariant Foo`, `*`); `None` for a plain argument.
     pub fn call_site_variance(&self) -> Option<CallSiteVariance> {
         match self {
-            Type::VarianceArg(variance, _) => Some(*variance),
+            Type(Repr::VarianceArg(variance, _)) => Some(*variance),
             _ => None,
         }
     }
@@ -138,29 +145,29 @@ impl Type {
     pub fn is_supported_template_bound(&self) -> bool {
         matches!(
             self,
-            Type::Mixed(_)
-                | Type::Null
-                | Type::TemplateParam(_)
-                | Type::Array(..)
-                | Type::ArrayShape(_)
-                | Type::String
-                | Type::StringLiteral(_)
-                | Type::Int
-                | Type::IntLiteral(_)
-                | Type::IntRange(..)
-                | Type::Float
-                | Type::FloatLiteral(_)
-                | Type::Bool
-                | Type::True
-                | Type::False
-                | Type::Object(..)
-                | Type::EnumCase(..)
-                | Type::ObjectWithoutClass
-                | Type::ObjectShape(_)
-                | Type::KeyOf(_)
-                | Type::Union(_)
-                | Type::BenevolentUnion(_)
-                | Type::Intersection(_)
+            Type(Repr::Mixed(_))
+                | Type(Repr::Null)
+                | Type(Repr::TemplateParam(_))
+                | Type(Repr::Array(..))
+                | Type(Repr::ArrayShape(_))
+                | Type(Repr::String)
+                | Type(Repr::StringLiteral(_))
+                | Type(Repr::Int)
+                | Type(Repr::IntLiteral(_))
+                | Type(Repr::IntRange(..))
+                | Type(Repr::Float)
+                | Type(Repr::FloatLiteral(_))
+                | Type(Repr::Bool)
+                | Type(Repr::True)
+                | Type(Repr::False)
+                | Type(Repr::Object(..))
+                | Type(Repr::EnumCase(..))
+                | Type(Repr::ObjectWithoutClass)
+                | Type(Repr::ObjectShape(_))
+                | Type(Repr::KeyOf(_))
+                | Type(Repr::Union(_))
+                | Type(Repr::BenevolentUnion(_))
+                | Type(Repr::Intersection(_))
         )
     }
 
@@ -170,15 +177,18 @@ impl Type {
     pub fn contains_deferred(&self) -> bool {
         matches!(
             self,
-            Type::ValueOf(_) | Type::KeyOf(_) | Type::OffsetAccess(..) | Type::ClassConstant { .. }
+            Type(Repr::ValueOf(_))
+                | Type(Repr::KeyOf(_))
+                | Type(Repr::OffsetAccess(..))
+                | Type(Repr::ClassConstant { .. })
         ) || self.any_child(Type::contains_deferred)
     }
 
     /// The object shape this type is, or an intersection refines.
     pub fn object_shape_of(&self) -> Option<&Shape> {
         match self {
-            Type::ObjectShape(shape) => Some(shape),
-            Type::Intersection(members) => members.iter().find_map(Type::object_shape_of),
+            Type(Repr::ObjectShape(shape)) => Some(shape),
+            Type(Repr::Intersection(members)) => members.iter().find_map(Type::object_shape_of),
             _ => None,
         }
     }
@@ -186,8 +196,8 @@ impl Type {
     /// The array shape this type is, or an intersection refines.
     pub fn shape(&self) -> Option<&Shape> {
         match self {
-            Type::ArrayShape(shape) => Some(shape),
-            Type::Intersection(members) => members.iter().find_map(Type::shape),
+            Type(Repr::ArrayShape(shape)) => Some(shape),
+            Type(Repr::Intersection(members)) => members.iter().find_map(Type::shape),
             _ => None,
         }
     }
@@ -195,13 +205,16 @@ impl Type {
     /// Whether this is `static` or `$this`: the class a member is called
     /// on.
     pub fn is_late_static_reference(&self) -> bool {
-        matches!(self, Type::StaticRef(_) | Type::This)
+        matches!(self, Type(Repr::StaticRef(_)) | Type(Repr::This))
     }
 
     /// Whether this names the class it is written in: `self`, `static`
     /// or `$this`.
     pub fn is_self_reference(&self) -> bool {
-        matches!(self, Type::SelfRef(_) | Type::StaticRef(_) | Type::This)
+        matches!(
+            self,
+            Type(Repr::SelfRef(_)) | Type(Repr::StaticRef(_)) | Type(Repr::This)
+        )
     }
 
     /// Every template this type uses, at any depth (not inside a
@@ -214,7 +227,7 @@ impl Type {
 
     fn collect_nested_templates<'t>(&'t self, out: &mut Vec<&'t crate::TemplateParam>) {
         match self {
-            Type::TemplateParam(param) => out.push(param),
+            Type(Repr::TemplateParam(param)) => out.push(param),
             _ => self.for_each_child(&mut |t| t.collect_nested_templates(out)),
         }
     }
@@ -224,26 +237,26 @@ impl Type {
     /// (PHPStan's `isConstantValue()`, with enum cases counted).
     pub fn is_constant_value(&self) -> TrinaryLogic {
         match self {
-            Type::IntLiteral(_)
-            | Type::StringLiteral(_)
-            | Type::FloatLiteral(_)
-            | Type::True
-            | Type::False
-            | Type::Null
-            | Type::EnumCase(..) => TrinaryLogic::Yes,
-            Type::ArrayShape(shape) => TrinaryLogic::from_bool(
+            Type(Repr::IntLiteral(_))
+            | Type(Repr::StringLiteral(_))
+            | Type(Repr::FloatLiteral(_))
+            | Type(Repr::True)
+            | Type(Repr::False)
+            | Type(Repr::Null)
+            | Type(Repr::EnumCase(..)) => TrinaryLogic::Yes,
+            Type(Repr::ArrayShape(shape)) => TrinaryLogic::from_bool(
                 shape.is_sealed()
                     && shape
                         .fields
                         .iter()
                         .all(|f| !f.optional && f.ty.is_constant_value().yes()),
             ),
-            Type::Union(members) => members
+            Type(Repr::Union(members)) => members
                 .iter()
                 .map(Type::is_constant_value)
                 .reduce(TrinaryLogic::and)
                 .unwrap_or(TrinaryLogic::No),
-            Type::Mixed(_) | Type::TemplateParam(_) => TrinaryLogic::Maybe,
+            Type(Repr::Mixed(_)) | Type(Repr::TemplateParam(_)) => TrinaryLogic::Maybe,
             _ => TrinaryLogic::No,
         }
     }
@@ -253,33 +266,33 @@ impl Type {
     /// whether the subject names a template. `None` for any other type.
     pub fn conditional_condition(&self) -> Option<(&str, &Type, bool, bool)> {
         match self {
-            Type::Conditional {
+            Type(Repr::Conditional {
                 subject,
                 target,
                 negated,
                 template_subject,
                 ..
-            } => Some((subject, target, *negated, *template_subject)),
+            }) => Some((subject, target, *negated, *template_subject)),
             _ => None,
         }
     }
 
     /// Whether this is `void`.
     pub fn is_void(&self) -> bool {
-        matches!(self, Type::Void)
+        matches!(self, Type(Repr::Void))
     }
 
     /// An enum case's enum and case name; `None` for any other type.
     pub fn enum_class_and_case(&self) -> Option<(&crate::Name, &crate::Name)> {
         match self {
-            Type::EnumCase(class, case) => Some((class, case)),
+            Type(Repr::EnumCase(class, case)) => Some((class, case)),
             _ => None,
         }
     }
 
     /// Whether this is one case of an enum.
     pub fn is_enum_case(&self) -> bool {
-        matches!(self, Type::EnumCase(..))
+        matches!(self, Type(Repr::EnumCase(..)))
     }
 
     /// PHPStan's `getFiniteTypes()`: the values this type can only be, one
@@ -287,18 +300,18 @@ impl Type {
     pub fn finite_types(&self) -> Vec<Type> {
         const LIMIT: i64 = 256;
         match self {
-            Type::IntLiteral(_)
-            | Type::StringLiteral(_)
-            | Type::FloatLiteral(_)
-            | Type::True
-            | Type::False
-            | Type::Null
-            | Type::EnumCase(..) => vec![self.clone()],
-            Type::Bool => vec![Type::True, Type::False],
-            Type::IntRange(Some(min), Some(max)) if max - min < LIMIT => {
-                (*min..=*max).map(Type::IntLiteral).collect()
+            Type(Repr::IntLiteral(_))
+            | Type(Repr::StringLiteral(_))
+            | Type(Repr::FloatLiteral(_))
+            | Type(Repr::True)
+            | Type(Repr::False)
+            | Type(Repr::Null)
+            | Type(Repr::EnumCase(..)) => vec![self.clone()],
+            Type(Repr::Bool) => vec![Type(Repr::True), Type(Repr::False)],
+            Type(Repr::IntRange(Some(min), Some(max))) if max - min < LIMIT => {
+                (*min..=*max).map(Type::int_literal).collect()
             }
-            Type::Union(members) | Type::BenevolentUnion(members) => {
+            Type(Repr::Union(members)) | Type(Repr::BenevolentUnion(members)) => {
                 let mut all = Vec::new();
                 for member in members {
                     let finite = member.finite_types();
@@ -319,44 +332,44 @@ impl Type {
     /// when it was), and a union's members each.
     pub fn generalize(&self) -> Type {
         match self {
-            Type::IntLiteral(_) | Type::IntRange(..) => Type::Int,
-            Type::StringLiteral(_) => Type::String,
-            Type::FloatLiteral(_) => Type::Float,
-            Type::True | Type::False => Type::Bool,
-            Type::EnumCase(class, _) => Type::Object(class.clone(), Vec::new()),
-            Type::ArrayShape(shape) => {
+            Type(Repr::IntLiteral(_)) | Type(Repr::IntRange(..)) => Type(Repr::Int),
+            Type(Repr::StringLiteral(_)) => Type(Repr::String),
+            Type(Repr::FloatLiteral(_)) => Type(Repr::Float),
+            Type(Repr::True) | Type(Repr::False) => Type(Repr::Bool),
+            Type(Repr::EnumCase(class, _)) => Type(Repr::Object(class.clone(), Vec::new())),
+            Type(Repr::ArrayShape(shape)) => {
                 let key = self
                     .array_key_type()
                     .map_or(Type::unknown_array_key(), |k| k.generalize());
                 let value = self
                     .array_value_type()
-                    .map_or(Type::Mixed(false), |v| v.generalize());
+                    .map_or(Type(Repr::Mixed(false)), |v| v.generalize());
                 let (key, value) = if value.is_never() {
-                    (Type::unknown_array_key(), Type::Mixed(false))
+                    (Type::unknown_array_key(), Type(Repr::Mixed(false)))
                 } else {
                     (key, value)
                 };
-                let mut members = vec![Type::Array(Box::new(key), Box::new(value))];
+                let mut members = vec![Type(Repr::Array(Box::new(key), Box::new(value)))];
                 if shape.is_list() && !shape.fields.is_empty() {
-                    members.push(Type::Accessory(AccessoryKind::ArrayList));
+                    members.push(Type(Repr::Accessory(AccessoryKind::ArrayList)));
                 }
                 if shape.fields.iter().any(|f| !f.optional) {
-                    members.push(Type::Accessory(AccessoryKind::NonEmptyArray));
+                    members.push(Type(Repr::Accessory(AccessoryKind::NonEmptyArray)));
                 }
                 crate::intersect_types(members)
             }
-            Type::Union(members) | Type::BenevolentUnion(members) => members
+            Type(Repr::Union(members)) | Type(Repr::BenevolentUnion(members)) => members
                 .iter()
                 .map(Type::generalize)
                 .reduce(union_types)
-                .unwrap_or(Type::Never),
-            Type::Intersection(members) => crate::intersect_types(
+                .unwrap_or(Type(Repr::Never)),
+            Type(Repr::Intersection(members)) => crate::intersect_types(
                 members
                     .iter()
                     .filter(|m| {
                         !matches!(
                             m,
-                            Type::Accessory(
+                            Type(Repr::Accessory(
                                 AccessoryKind::NonEmptyString
                                     | AccessoryKind::NonFalsyString
                                     | AccessoryKind::LiteralString
@@ -364,8 +377,8 @@ impl Type {
                                     | AccessoryKind::LowercaseString
                                     | AccessoryKind::UppercaseString
                                     | AccessoryKind::DecimalIntegerString
-                            ) | Type::HasOffsetValue(..)
-                                | Type::HasOffset(_)
+                            )) | Type(Repr::HasOffsetValue(..))
+                                | Type(Repr::HasOffset(_))
                         )
                     })
                     .map(Type::generalize)
@@ -377,19 +390,19 @@ impl Type {
 
     /// Whether this is `never`.
     pub fn is_never(&self) -> bool {
-        matches!(self, Type::Never)
+        matches!(self, Type(Repr::Never))
     }
 
     /// Whether this is a `@template` type.
     pub fn is_template(&self) -> bool {
-        matches!(self, Type::TemplateParam(_))
+        matches!(self, Type(Repr::TemplateParam(_)))
     }
 
     /// A `class-string<Foo>`'s class; `None` for any other type, or a
     /// class-string of anything but one named class.
     pub fn class_string_class(&self) -> Option<&crate::Name> {
         match self {
-            Type::ClassString(inner) => inner.object_class_and_args().map(|(class, _)| class),
+            Type(Repr::ClassString(inner)) => inner.object_class_and_args().map(|(class, _)| class),
             _ => None,
         }
     }
@@ -399,7 +412,7 @@ impl Type {
     /// `None` for any other type.
     pub fn reflected_member_of(&self) -> Option<(&Type, &str)> {
         match self {
-            Type::ReflectedMember(owner, name) => Some((owner, name)),
+            Type(Repr::ReflectedMember(owner, name)) => Some((owner, name)),
             _ => None,
         }
     }
@@ -407,33 +420,33 @@ impl Type {
     /// A template's bound; `None` for any other type.
     pub fn template_bound(&self) -> Option<&Type> {
         match self {
-            Type::TemplateParam(param) => Some(&param.bound),
+            Type(Repr::TemplateParam(param)) => Some(&param.bound),
             _ => None,
         }
     }
 
     /// Whether this is a benevolent union.
     pub fn is_benevolent_union(&self) -> bool {
-        matches!(self, Type::BenevolentUnion(_))
+        matches!(self, Type(Repr::BenevolentUnion(_)))
     }
 
     /// An intersection's members, or this type alone.
     pub fn intersection_members(&self) -> &[Type] {
         match self {
-            Type::Intersection(members) => members,
+            Type(Repr::Intersection(members)) => members,
             other => std::slice::from_ref(other),
         }
     }
 
     /// Whether this is a `mixed` with no type information behind it.
     pub fn is_implicit_mixed(&self) -> bool {
-        matches!(self, Type::Mixed(false))
+        matches!(self, Type(Repr::Mixed(false)))
     }
 
     /// Whether every value of this type is one of `of` (`Yes`), none is
     /// (`No`), or some are (`Maybe`). `never` is no kind of value.
     pub fn is_within(&self, of: &Type) -> TrinaryLogic {
-        if matches!(self, Type::Never) {
+        if matches!(self, Type(Repr::Never)) {
             return TrinaryLogic::No;
         }
         Relation::structural().is_super_type_of(of, self)
@@ -441,37 +454,37 @@ impl Type {
 
     /// PHPStan's `isNull()`.
     pub fn is_null(&self) -> TrinaryLogic {
-        self.is_within(&Type::Null)
+        self.is_within(&Type(Repr::Null))
     }
 
     /// PHPStan's `isTrue()`.
     pub fn is_true(&self) -> TrinaryLogic {
-        self.is_within(&Type::True)
+        self.is_within(&Type(Repr::True))
     }
 
     /// PHPStan's `isFalse()`.
     pub fn is_false(&self) -> TrinaryLogic {
-        self.is_within(&Type::False)
+        self.is_within(&Type(Repr::False))
     }
 
     /// PHPStan's `isBoolean()`.
     pub fn is_bool(&self) -> TrinaryLogic {
-        self.is_within(&Type::Bool)
+        self.is_within(&Type(Repr::Bool))
     }
 
     /// PHPStan's `isInteger()`.
     pub fn is_int(&self) -> TrinaryLogic {
-        self.is_within(&Type::Int)
+        self.is_within(&Type(Repr::Int))
     }
 
     /// PHPStan's `isFloat()`.
     pub fn is_float(&self) -> TrinaryLogic {
-        self.is_within(&Type::Float)
+        self.is_within(&Type(Repr::Float))
     }
 
     /// PHPStan's `isString()`.
     pub fn is_string(&self) -> TrinaryLogic {
-        self.is_within(&Type::String)
+        self.is_within(&Type(Repr::String))
     }
 
     /// PHPStan's `isNumericString()`.
@@ -483,10 +496,10 @@ impl Type {
     /// `isNonEmptyString()`, `isNonFalsyString()`, `isLiteralString()`,
     /// `isLowercaseString()`, `isUppercaseString()`, `isNumericString()`.
     pub fn is_refined_string(&self, kind: AccessoryKind) -> TrinaryLogic {
-        self.is_within(&Type::Intersection(vec![
-            Type::String,
-            Type::Accessory(kind),
-        ]))
+        self.is_within(&Type(Repr::Intersection(vec![
+            Type(Repr::String),
+            Type(Repr::Accessory(kind)),
+        ])))
     }
 
     /// This type with its strings refined by `kind`: a `string`, bare or
@@ -494,20 +507,24 @@ impl Type {
     /// as they are.
     pub fn with_string_accessory(&self, kind: AccessoryKind) -> Type {
         match self {
-            Type::String => Type::Intersection(vec![Type::String, Type::Accessory(kind)]),
-            Type::Intersection(members)
-                if members.contains(&Type::String) && !members.contains(&Type::Accessory(kind)) =>
+            Type(Repr::String) => Type(Repr::Intersection(vec![
+                Type(Repr::String),
+                Type(Repr::Accessory(kind)),
+            ])),
+            Type(Repr::Intersection(members))
+                if members.contains(&Type(Repr::String))
+                    && !members.contains(&Type(Repr::Accessory(kind))) =>
             {
                 let mut members = members.clone();
-                members.push(Type::Accessory(kind));
-                Type::Intersection(members)
+                members.push(Type(Repr::Accessory(kind)));
+                Type(Repr::Intersection(members))
             }
-            Type::Union(members) => Type::Union(
+            Type(Repr::Union(members)) => Type(Repr::Union(
                 members
                     .iter()
                     .map(|m| m.with_string_accessory(kind))
                     .collect(),
-            ),
+            )),
             other => other.clone(),
         }
     }
@@ -516,75 +533,78 @@ impl Type {
     /// unbounded; `None` for any other type.
     pub fn int_range_bounds(&self) -> Option<(Option<i64>, Option<i64>)> {
         match self {
-            Type::IntLiteral(n) => Some((Some(*n), Some(*n))),
-            Type::IntRange(min, max) => Some((*min, *max)),
+            Type(Repr::IntLiteral(n)) => Some((Some(*n), Some(*n))),
+            Type(Repr::IntRange(min, max)) => Some((*min, *max)),
             _ => None,
         }
     }
 
     /// PHPStan's `isArray()`.
     pub fn is_array(&self) -> TrinaryLogic {
-        self.is_within(&Type::Array(
-            Box::new(Type::Mixed(false)),
-            Box::new(Type::Mixed(false)),
-        ))
+        self.is_within(&Type(Repr::Array(
+            Box::new(Type(Repr::Mixed(false))),
+            Box::new(Type(Repr::Mixed(false))),
+        )))
     }
 
     /// PHPStan's `isObject()`.
     pub fn is_object(&self) -> TrinaryLogic {
-        self.is_within(&Type::ObjectWithoutClass)
+        self.is_within(&Type(Repr::ObjectWithoutClass))
     }
 
     /// PHPStan's `isScalar()`: a `bool`, `int`, `float` or `string`.
     pub fn is_scalar(&self) -> TrinaryLogic {
-        self.is_within(&Type::Union(vec![
-            Type::Bool,
-            Type::Int,
-            Type::Float,
-            Type::String,
-        ]))
+        self.is_within(&Type(Repr::Union(vec![
+            Type(Repr::Bool),
+            Type(Repr::Int),
+            Type(Repr::Float),
+            Type(Repr::String),
+        ])))
     }
 
     /// PHPStan's `isList()`.
     pub fn is_list(&self) -> TrinaryLogic {
-        self.is_within(&Type::list_of(Type::Mixed(false)))
+        self.is_within(&Type::list_of(Type(Repr::Mixed(false))))
     }
 
     /// Whether every value is a non-empty array.
     pub fn is_non_empty_array(&self) -> TrinaryLogic {
-        self.is_within(&Type::Intersection(vec![
-            Type::Array(Box::new(Type::Mixed(false)), Box::new(Type::Mixed(false))),
-            Type::Accessory(AccessoryKind::NonEmptyArray),
-        ]))
+        self.is_within(&Type(Repr::Intersection(vec![
+            Type(Repr::Array(
+                Box::new(Type(Repr::Mixed(false))),
+                Box::new(Type(Repr::Mixed(false))),
+            )),
+            Type(Repr::Accessory(AccessoryKind::NonEmptyArray)),
+        ])))
     }
 
     /// Whether every value is the empty array.
     pub fn is_empty_array(&self) -> TrinaryLogic {
-        self.is_within(&Type::ArrayShape(Shape::sealed(Vec::new())))
+        self.is_within(&Type(Repr::ArrayShape(Shape::sealed(Vec::new()))))
     }
 
     /// PHPStan's `getIterableValueType()` for a type every value of which
     /// is an array; `None` otherwise. `array{}` holds no value (`never`).
     pub fn array_value_type(&self) -> Option<Type> {
         match self {
-            Type::Array(_, value) => Some((**value).clone()),
-            Type::ArrayShape(shape) => Some(
+            Type(Repr::Array(_, value)) => Some((**value).clone()),
+            Type(Repr::ArrayShape(shape)) => Some(
                 shape
                     .fields
                     .iter()
                     .map(|f| f.ty.clone())
                     .chain(shape.unsealed.as_deref().map(|tail| tail.1.clone()))
                     .reduce(union_types)
-                    .unwrap_or(Type::Never),
+                    .unwrap_or(Type(Repr::Never)),
             ),
-            Type::Intersection(members) => members.iter().find_map(Type::array_value_type),
-            Type::Union(members) | Type::BenevolentUnion(members) => members
+            Type(Repr::Intersection(members)) => members.iter().find_map(Type::array_value_type),
+            Type(Repr::Union(members)) | Type(Repr::BenevolentUnion(members)) => members
                 .iter()
                 .map(Type::array_value_type)
                 .collect::<Option<Vec<_>>>()?
                 .into_iter()
                 .reduce(union_types),
-            Type::TemplateParam(param) => param.bound.array_value_type(),
+            Type(Repr::TemplateParam(param)) => param.bound.array_value_type(),
             _ => None,
         }
     }
@@ -593,8 +613,8 @@ impl Type {
     /// is an array; `None` otherwise. `array{}` holds no key (`never`).
     pub fn array_key_type(&self) -> Option<Type> {
         match self {
-            Type::Array(key, _) => Some((**key).clone()),
-            Type::ArrayShape(shape) => {
+            Type(Repr::Array(key, _)) => Some((**key).clone()),
+            Type(Repr::ArrayShape(shape)) => {
                 let keys = crate::shape_key_type(shape);
                 Some(match shape.unsealed.as_deref() {
                     Some(tail) => union_types(keys, tail.0.clone()),
@@ -602,24 +622,24 @@ impl Type {
                 })
             }
             // A list keys on `int<0, max>` whatever its array member says.
-            Type::Intersection(members) => {
+            Type(Repr::Intersection(members)) => {
                 let key = members.iter().find_map(Type::array_key_type)?;
-                if members.contains(&Type::Accessory(AccessoryKind::ArrayList)) {
+                if members.contains(&Type(Repr::Accessory(AccessoryKind::ArrayList))) {
                     Some(crate::intersect_types(vec![
                         key,
-                        Type::IntRange(Some(0), None),
+                        Type(Repr::IntRange(Some(0), None)),
                     ]))
                 } else {
                     Some(key)
                 }
             }
-            Type::Union(members) | Type::BenevolentUnion(members) => members
+            Type(Repr::Union(members)) | Type(Repr::BenevolentUnion(members)) => members
                 .iter()
                 .map(Type::array_key_type)
                 .collect::<Option<Vec<_>>>()?
                 .into_iter()
                 .reduce(union_types),
-            Type::TemplateParam(param) => param.bound.array_key_type(),
+            Type(Repr::TemplateParam(param)) => param.bound.array_key_type(),
             _ => None,
         }
     }
@@ -638,7 +658,7 @@ impl Type {
         self.union_members()
             .iter()
             .map(|m| match m {
-                Type::ArrayShape(shape) if shape.is_sealed() => Some(shape),
+                Type(Repr::ArrayShape(shape)) if shape.is_sealed() => Some(shape),
                 _ => None,
             })
             .collect::<Option<Vec<_>>>()
@@ -648,7 +668,7 @@ impl Type {
     /// The value of an integer literal; `None` for any other type.
     pub fn int_literal_value(&self) -> Option<i64> {
         match self {
-            Type::IntLiteral(n) => Some(*n),
+            Type(Repr::IntLiteral(n)) => Some(*n),
             _ => None,
         }
     }
@@ -656,7 +676,7 @@ impl Type {
     /// The value of a string literal; `None` for any other type.
     pub fn string_literal_value(&self) -> Option<&crate::PhpString> {
         match self {
-            Type::StringLiteral(s) => Some(s),
+            Type(Repr::StringLiteral(s)) => Some(s),
             _ => None,
         }
     }
@@ -665,7 +685,7 @@ impl Type {
     /// `None` for any other type.
     pub fn object_class_and_args(&self) -> Option<(&crate::Name, &[Type])> {
         match self {
-            Type::Object(class, args) => Some((class, args)),
+            Type(Repr::Object(class, args)) => Some((class, args)),
             _ => None,
         }
     }
@@ -675,8 +695,8 @@ impl Type {
     /// `None` for any other type.
     pub fn instance_class_and_args(&self) -> Option<(&crate::Name, &[Type])> {
         match self {
-            Type::Object(class, args) => Some((class, args)),
-            Type::EnumCase(class, _) => Some((class, &[])),
+            Type(Repr::Object(class, args)) => Some((class, args)),
+            Type(Repr::EnumCase(class, _)) => Some((class, &[])),
             _ => None,
         }
     }
@@ -684,8 +704,8 @@ impl Type {
     /// The value of `true` or `false`; `None` for any other type.
     pub fn bool_literal_value(&self) -> Option<bool> {
         match self {
-            Type::True => Some(true),
-            Type::False => Some(false),
+            Type(Repr::True) => Some(true),
+            Type(Repr::False) => Some(false),
             _ => None,
         }
     }
@@ -694,58 +714,58 @@ impl Type {
     /// when every value is falsy, `bool` otherwise.
     pub fn to_boolean(&self) -> Type {
         match self {
-            Type::True => Type::True,
-            Type::False | Type::Null | Type::Void => Type::False,
-            Type::IntLiteral(n) => Type::bool_literal(*n != 0),
-            Type::FloatLiteral(n) => Type::bool_literal(*n != 0.0),
-            Type::StringLiteral(s) => Type::bool_literal(!s.is_empty() && s != "0"),
-            Type::IntRange(min, max) => {
+            Type(Repr::True) => Type(Repr::True),
+            Type(Repr::False) | Type(Repr::Null) | Type(Repr::Void) => Type(Repr::False),
+            Type(Repr::IntLiteral(n)) => Type::bool_literal(*n != 0),
+            Type(Repr::FloatLiteral(n)) => Type::bool_literal(*n != 0.0),
+            Type(Repr::StringLiteral(s)) => Type::bool_literal(!s.is_empty() && s != "0"),
+            Type(Repr::IntRange(min, max)) => {
                 if min.is_some_and(|m| m > 0) || max.is_some_and(|m| m < 0) {
-                    Type::True
+                    Type(Repr::True)
                 } else if *min == Some(0) && *max == Some(0) {
-                    Type::False
+                    Type(Repr::False)
                 } else {
-                    Type::Bool
+                    Type(Repr::Bool)
                 }
             }
-            Type::Object(..)
-            | Type::ObjectWithoutClass
-            | Type::ObjectShape(_)
-            | Type::Resource { .. }
-            | Type::EnumCase(..)
-            | Type::This
-            | Type::StaticRef(_)
-            | Type::SelfRef(_)
-            | Type::ParentRef
-            | Type::ClassString(_)
-            | Type::ClassKindString(_)
-            | Type::HasOffset(_)
-            | Type::HasOffsetValue(..)
-            | Type::HasMethod(_)
-            | Type::HasProperty(_) => Type::True,
-            Type::ArrayShape(shape) => {
+            Type(Repr::Object(..))
+            | Type(Repr::ObjectWithoutClass)
+            | Type(Repr::ObjectShape(_))
+            | Type(Repr::Resource { .. })
+            | Type(Repr::EnumCase(..))
+            | Type(Repr::This)
+            | Type(Repr::StaticRef(_))
+            | Type(Repr::SelfRef(_))
+            | Type(Repr::ParentRef)
+            | Type(Repr::ClassString(_))
+            | Type(Repr::ClassKindString(_))
+            | Type(Repr::HasOffset(_))
+            | Type(Repr::HasOffsetValue(..))
+            | Type(Repr::HasMethod(_))
+            | Type(Repr::HasProperty(_)) => Type(Repr::True),
+            Type(Repr::ArrayShape(shape)) => {
                 if shape.fields.iter().any(|f| !f.optional) {
-                    Type::True
+                    Type(Repr::True)
                 } else if shape.is_empty_array() {
-                    Type::False
+                    Type(Repr::False)
                 } else {
-                    Type::Bool
+                    Type(Repr::Bool)
                 }
             }
-            Type::Accessory(AccessoryKind::NonFalsyString | AccessoryKind::NonEmptyArray) => {
-                Type::True
+            Type(Repr::Accessory(AccessoryKind::NonFalsyString | AccessoryKind::NonEmptyArray)) => {
+                Type(Repr::True)
             }
-            Type::Union(members) | Type::BenevolentUnion(members) => members
+            Type(Repr::Union(members)) | Type(Repr::BenevolentUnion(members)) => members
                 .iter()
                 .map(Type::to_boolean)
                 .reduce(union_types)
-                .unwrap_or(Type::Never),
-            Type::Intersection(members) => {
+                .unwrap_or(Type(Repr::Never)),
+            Type(Repr::Intersection(members)) => {
                 crate::intersect_types(members.iter().map(Type::to_boolean).collect())
             }
-            Type::TemplateParam(param) => param.bound.to_boolean(),
-            Type::Never => Type::Never,
-            _ => Type::Bool,
+            Type(Repr::TemplateParam(param)) => param.bound.to_boolean(),
+            Type(Repr::Never) => Type(Repr::Never),
+            _ => Type(Repr::Bool),
         }
     }
 }

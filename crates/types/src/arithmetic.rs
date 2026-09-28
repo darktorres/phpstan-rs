@@ -2,6 +2,7 @@
 //! `IntegerRangeType` operations and `InitializerExprTypeResolver`'s
 //! arithmetic, and the outcome of comparing ranges and literals.
 
+use crate::Repr;
 use crate::{Type, union_types};
 use syntax::ast::BinOp;
 
@@ -320,7 +321,7 @@ pub fn compare_range_outcome(
 /// identical answer.
 pub fn numeric_comparison_bounds(ty: &Type) -> Option<(Option<i64>, Option<i64>)> {
     match ty {
-        Type::Int => Some((None, None)),
+        Type(Repr::Int) => Some((None, None)),
         other => other.int_range_bounds(),
     }
 }
@@ -350,24 +351,24 @@ pub fn loose_compare_literals(
     // bool/null vs anything: PHP casts *both* sides to bool and compares
     // - version-independent, and subsumes the same-kind True/False/Null
     // combinations too (no need to special-case them separately below).
-    if matches!(l, Type::True | Type::False | Type::Null)
-        || matches!(r, Type::True | Type::False | Type::Null)
+    if matches!(l, Type(Repr::True) | Type(Repr::False) | Type(Repr::Null))
+        || matches!(r, Type(Repr::True) | Type(Repr::False) | Type(Repr::Null))
     {
         return Some(l.to_boolean().bool_literal_value()? == r.to_boolean().bool_literal_value()?);
     }
     match (l, r) {
-        (Type::IntLiteral(a), Type::IntLiteral(b)) => Some(a == b),
-        (Type::FloatLiteral(a), Type::FloatLiteral(b)) => Some(a == b),
-        (Type::IntLiteral(a), Type::FloatLiteral(b))
-        | (Type::FloatLiteral(b), Type::IntLiteral(a)) => Some(*a as f64 == *b),
-        (Type::StringLiteral(a), Type::StringLiteral(b)) => {
+        (Type(Repr::IntLiteral(a)), Type(Repr::IntLiteral(b))) => Some(a == b),
+        (Type(Repr::FloatLiteral(a)), Type(Repr::FloatLiteral(b))) => Some(a == b),
+        (Type(Repr::IntLiteral(a)), Type(Repr::FloatLiteral(b)))
+        | (Type(Repr::FloatLiteral(b)), Type(Repr::IntLiteral(a))) => Some(*a as f64 == *b),
+        (Type(Repr::StringLiteral(a)), Type(Repr::StringLiteral(b))) => {
             match (numeric_string_value(a), numeric_string_value(b)) {
                 (Some(x), Some(y)) => Some(x == y),
                 _ => Some(a == b),
             }
         }
-        (Type::IntLiteral(n), Type::StringLiteral(s))
-        | (Type::StringLiteral(s), Type::IntLiteral(n)) => {
+        (Type(Repr::IntLiteral(n)), Type(Repr::StringLiteral(s)))
+        | (Type(Repr::StringLiteral(s)), Type(Repr::IntLiteral(n))) => {
             if let Some(x) = numeric_string_value(s) {
                 Some(*n as f64 == x)
             } else if php_version.is_some_and(|v| v >= crate::PhpVersion::new(8, 0)) {
@@ -376,8 +377,8 @@ pub fn loose_compare_literals(
                 None
             }
         }
-        (Type::FloatLiteral(n), Type::StringLiteral(s))
-        | (Type::StringLiteral(s), Type::FloatLiteral(n)) => {
+        (Type(Repr::FloatLiteral(n)), Type(Repr::StringLiteral(s)))
+        | (Type(Repr::StringLiteral(s)), Type(Repr::FloatLiteral(n))) => {
             numeric_string_value(s).map(|x| *n == x)
         }
         _ => None,
@@ -544,7 +545,7 @@ pub fn div_int_range(
         // ever produces a `Never` member to union away), so this handles
         // it explicitly rather than teach that absorption to every other
         // `union_types` caller for the sake of this one.
-        Type::Never => Type::float(),
+        Type(Repr::Never) => Type::float(),
         int_half => union_types(int_half, Type::float()),
     }
 }
@@ -567,9 +568,9 @@ fn numeric_string_value(s: &crate::PhpString) -> Option<f64> {
 /// ...) has no specific value to flip, so it's returned unchanged.
 pub fn negate_numeric_literal(ty: Type) -> Type {
     match ty {
-        Type::IntLiteral(n) => Type::IntLiteral(-n),
-        Type::FloatLiteral(f) => Type::FloatLiteral(-f),
-        Type::IntRange(min, max) => Type::IntRange(max.map(|m| -m), min.map(|m| -m)),
+        Type(Repr::IntLiteral(n)) => Type(Repr::IntLiteral(-n)),
+        Type(Repr::FloatLiteral(f)) => Type(Repr::FloatLiteral(-f)),
+        Type(Repr::IntRange(min, max)) => Type(Repr::IntRange(max.map(|m| -m), min.map(|m| -m))),
         other => other,
     }
 }
@@ -580,13 +581,13 @@ pub fn negate_numeric_literal(ty: Type) -> Type {
 pub fn binary_operation_type(op: &BinOp, lt: &Type, rt: &Type) -> Type {
     let either_float = lt.is_float().yes() || rt.is_float().yes();
     match op {
-        BinOp::Spaceship => Type::IntRange(Some(-1), Some(1)),
+        BinOp::Spaceship => Type(Repr::IntRange(Some(-1), Some(1))),
         BinOp::Add => {
             if lt.is_array().yes() || rt.is_array().yes() {
                 return array_union_type(lt, rt);
             }
             if either_float {
-                return Type::Float;
+                return Type(Repr::Float);
             }
             if let (Some((l_min, l_max)), Some((r_min, r_max))) =
                 (lt.int_range_bounds(), rt.int_range_bounds())
@@ -595,16 +596,16 @@ pub fn binary_operation_type(op: &BinOp, lt: &Type, rt: &Type) -> Type {
                 let (max, max_overflow) = checked_bound_op(l_max, r_max, i64::checked_add);
                 let result = Type::int_interval(min, max);
                 return if min_overflow || max_overflow {
-                    union_types(result, Type::Float)
+                    union_types(result, Type(Repr::Float))
                 } else {
                     result
                 };
             }
-            Type::Int
+            Type(Repr::Int)
         }
         BinOp::Sub => {
             if either_float {
-                return Type::Float;
+                return Type(Repr::Float);
             }
             if let (Some((l_min, l_max)), Some((Some(c), Some(rc)))) =
                 (lt.int_range_bounds(), rt.int_range_bounds())
@@ -614,7 +615,7 @@ pub fn binary_operation_type(op: &BinOp, lt: &Type, rt: &Type) -> Type {
                 let (max, max_overflow) = checked_bound_op(l_max, Some(c), i64::checked_sub);
                 let result = Type::int_interval(min, max);
                 return if min_overflow || max_overflow {
-                    union_types(result, Type::Float)
+                    union_types(result, Type(Repr::Float))
                 } else {
                     result
                 };
@@ -623,58 +624,58 @@ pub fn binary_operation_type(op: &BinOp, lt: &Type, rt: &Type) -> Type {
                 (Some((l_min, l_max)), Some((r_min, r_max))) => {
                     sub_int_range_full(l_min, l_max, r_min, r_max)
                 }
-                _ => Type::Int,
+                _ => Type(Repr::Int),
             }
         }
         BinOp::Mul => {
             if either_float {
-                return Type::Float;
+                return Type(Repr::Float);
             }
             match (lt.int_range_bounds(), rt.int_range_bounds()) {
                 (Some((l_min, l_max)), Some((r_min, r_max))) => {
                     mul_int_range(l_min, l_max, r_min, r_max)
                 }
-                _ => Type::Int,
+                _ => Type(Repr::Int),
             }
         }
         BinOp::Pow => {
             if either_float {
-                return Type::Float;
+                return Type(Repr::Float);
             }
             match (lt.int_range_bounds(), rt.int_range_bounds()) {
                 (Some((l_min, l_max)), Some((r_min, r_max))) => {
                     pow_int_range(l_min, l_max, r_min, r_max)
                 }
-                _ => Type::Int,
+                _ => Type(Repr::Int),
             }
         }
         BinOp::BitAnd | BinOp::BitOr | BinOp::BitXor => {
-            fold_bitwise_int_literals(op, lt, rt).unwrap_or(Type::Int)
+            fold_bitwise_int_literals(op, lt, rt).unwrap_or(Type(Repr::Int))
         }
         BinOp::Shl | BinOp::Shr => match (lt.int_range_bounds(), rt.int_range_bounds()) {
             (Some((l_min, l_max)), Some((Some(amount), Some(r_max)))) if amount == r_max => {
                 shift_int_range(l_min, l_max, amount, matches!(op, BinOp::Shl))
             }
-            _ => Type::Int,
+            _ => Type(Repr::Int),
         },
         BinOp::Mod => match (lt.int_range_bounds(), rt.int_range_bounds()) {
             (Some((l_min, l_max)), Some((r_min, r_max))) => {
                 mod_int_range(l_min, l_max, r_min, r_max)
             }
-            _ => Type::Int,
+            _ => Type(Repr::Int),
         },
         BinOp::Div => {
             if either_float {
-                return Type::Float;
+                return Type(Repr::Float);
             }
             match (lt.int_range_bounds(), rt.int_range_bounds()) {
                 (Some((l_min, l_max)), Some((r_min, r_max))) => {
                     div_int_range(l_min, l_max, r_min, r_max)
                 }
-                _ => Type::Union(vec![Type::Int, Type::Float]),
+                _ => Type(Repr::Union(vec![Type(Repr::Int), Type(Repr::Float)])),
             }
         }
-        _ => Type::Mixed(false),
+        _ => Type(Repr::Mixed(false)),
     }
 }
 
@@ -691,20 +692,20 @@ fn array_union_type(lt: &Type, rt: &Type) -> Type {
         (None, None) => Type::benevolent_array_key(),
     };
     let val_ty = union_types(
-        lt.array_value_type().unwrap_or(Type::Mixed(false)),
-        rt.array_value_type().unwrap_or(Type::Mixed(false)),
+        lt.array_value_type().unwrap_or(Type(Repr::Mixed(false))),
+        rt.array_value_type().unwrap_or(Type(Repr::Mixed(false))),
     );
-    let mut members = vec![Type::Array(Box::new(key_ty), Box::new(val_ty))];
+    let mut members = vec![Type(Repr::Array(Box::new(key_ty), Box::new(val_ty)))];
     if lt.is_list().yes() && rt.is_list().yes() {
-        members.push(Type::Accessory(crate::AccessoryKind::ArrayList));
+        members.push(Type(Repr::Accessory(crate::AccessoryKind::ArrayList)));
     }
     if lt.is_non_empty_array().yes() || rt.is_non_empty_array().yes() {
-        members.push(Type::Accessory(crate::AccessoryKind::NonEmptyArray));
+        members.push(Type(Repr::Accessory(crate::AccessoryKind::NonEmptyArray)));
     }
     if members.len() == 1 {
         members.pop().expect("one member")
     } else {
-        Type::Intersection(members)
+        Type(Repr::Intersection(members))
     }
 }
 
@@ -715,10 +716,10 @@ fn array_union_type(lt: &Type, rt: &Type) -> Type {
 fn fold_bitwise_int_literals(op: &BinOp, l: &Type, r: &Type) -> Option<Type> {
     fn literals(ty: &Type) -> Option<Vec<i64>> {
         match ty {
-            Type::IntLiteral(n) => Some(vec![*n]),
-            Type::True => Some(vec![1]),
-            Type::False | Type::Null => Some(vec![0]),
-            Type::Union(members) => members.iter().try_fold(Vec::new(), |mut acc, m| {
+            Type(Repr::IntLiteral(n)) => Some(vec![*n]),
+            Type(Repr::True) => Some(vec![1]),
+            Type(Repr::False) | Type(Repr::Null) => Some(vec![0]),
+            Type(Repr::Union(members)) => members.iter().try_fold(Vec::new(), |mut acc, m| {
                 acc.extend(literals(m)?);
                 Some(acc)
             }),
@@ -738,7 +739,7 @@ fn fold_bitwise_int_literals(op: &BinOp, l: &Type, r: &Type) -> Option<Type> {
                 .collect();
             values.sort_unstable();
             values.dedup();
-            let mut members = values.into_iter().map(Type::IntLiteral);
+            let mut members = values.into_iter().map(Type::int_literal);
             let first = members.next()?;
             Some(members.fold(first, union_types))
         }

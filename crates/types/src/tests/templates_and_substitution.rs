@@ -1,5 +1,6 @@
 //! Template type substitution.
 use super::super::*;
+use crate::Repr;
 use rustc_hash::FxHashMap;
 
 #[test]
@@ -8,29 +9,34 @@ fn substitute_template_recurses_into_array_and_intersection_types() {
     // exercised by substituting a bare TemplateParam or one nested in a
     // Union, only `T[]`/`array<T>` or an intersection type mentioning T.
     let mut bindings = FxHashMap::default();
-    bindings.insert("T".to_string(), Type::String);
+    bindings.insert("T".to_string(), Type(Repr::String));
 
-    let array_of_t = Type::Array(
+    let array_of_t = Type(Repr::Array(
         Box::new(Type::unknown_array_key()),
-        Box::new(Type::TemplateParam(TemplateParam::unbounded(
+        Box::new(Type(Repr::TemplateParam(TemplateParam::unbounded(
             "T".to_string(),
-        ))),
-    );
+        )))),
+    ));
     assert_eq!(
         substitute_template(&array_of_t, &bindings),
-        Type::Array(Box::new(Type::unknown_array_key()), Box::new(Type::String))
+        Type(Repr::Array(
+            Box::new(Type::unknown_array_key()),
+            Box::new(Type(Repr::String))
+        ))
     );
 
-    let intersection_with_t = Type::Intersection(vec![
-        Type::TemplateParam(TemplateParam::unbounded("T".to_string())),
-        Type::Object("Countable".into(), Vec::new()),
-    ]);
+    let intersection_with_t = Type(Repr::Intersection(vec![
+        Type(Repr::TemplateParam(TemplateParam::unbounded(
+            "T".to_string(),
+        ))),
+        Type(Repr::Object("Countable".into(), Vec::new())),
+    ]));
     assert_eq!(
         substitute_template(&intersection_with_t, &bindings),
-        Type::Intersection(vec![
-            Type::String,
-            Type::Object("Countable".into(), Vec::new())
-        ])
+        Type(Repr::Intersection(vec![
+            Type(Repr::String),
+            Type(Repr::Object("Countable".into(), Vec::new()))
+        ]))
     );
 }
 
@@ -40,17 +46,17 @@ fn substitute_template_recurses_into_a_generic_class_reference() {
     // args)`: `T -> int` through `Box<T>` should produce `Box<int>`,
     // not leave it unchanged.
     let mut bindings = FxHashMap::default();
-    bindings.insert("T".to_string(), Type::Int);
+    bindings.insert("T".to_string(), Type(Repr::Int));
 
-    let box_of_t = Type::Object(
+    let box_of_t = Type(Repr::Object(
         "Box".into(),
-        vec![Type::TemplateParam(TemplateParam::unbounded(
+        vec![Type(Repr::TemplateParam(TemplateParam::unbounded(
             "T".to_string(),
-        ))],
-    );
+        )))],
+    ));
     assert_eq!(
         substitute_template(&box_of_t, &bindings),
-        Type::Object("Box".into(), vec![Type::Int])
+        Type(Repr::Object("Box".into(), vec![Type(Repr::Int)]))
     );
 }
 
@@ -61,26 +67,30 @@ fn substitute_template_recurses_into_a_generic_class_reference() {
 #[test]
 fn substitute_template_recurses_into_a_conditional_types_branches() {
     let mut bindings = FxHashMap::default();
-    bindings.insert("T".to_string(), Type::Int);
+    bindings.insert("T".to_string(), Type(Repr::Int));
 
-    let t = || Type::TemplateParam(TemplateParam::unbounded("T".to_string()));
-    let conditional = Type::Conditional {
+    let t = || {
+        Type(Repr::TemplateParam(TemplateParam::unbounded(
+            "T".to_string(),
+        )))
+    };
+    let conditional = Type(Repr::Conditional {
         subject: "x".to_string(),
         target: Box::new(t()),
         if_true: Box::new(t()),
-        if_false: Box::new(Type::Null),
+        if_false: Box::new(Type(Repr::Null)),
         negated: false,
         template_subject: false,
-    };
+    });
     assert_eq!(
         substitute_template(&conditional, &bindings),
-        Type::Conditional {
+        Type(Repr::Conditional {
             subject: "x".to_string(),
-            target: Box::new(Type::Int),
-            if_true: Box::new(Type::Int),
-            if_false: Box::new(Type::Null),
+            target: Box::new(Type(Repr::Int)),
+            if_true: Box::new(Type(Repr::Int)),
+            if_false: Box::new(Type(Repr::Null)),
             negated: false,
             template_subject: false,
-        }
+        })
     );
 }
