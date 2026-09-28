@@ -1,7 +1,7 @@
 //! Types rewritten into related types: `static` bound, shapes unsealed,
 //! a value stepped by `++`/`--`.
 
-use crate::{Shape, Type, union_types};
+use crate::{AccessoryKind, Shape, ShapeField, Type, union_types};
 
 impl Type {
     /// This type with `static` and `$this` as `class`, at any depth.
@@ -54,6 +54,90 @@ impl Type {
                 .reduce(union_types)
                 .unwrap_or(Type::Mixed(false)),
             other => other.clone(),
+        }
+    }
+
+    /// This array with each value passed through `keep`: a shape field
+    /// `keep` turns into `never` is dropped, and one it changes may be
+    /// dropped (becomes optional). Other types are left as they are.
+    pub fn filter_array_values(&self, keep: &dyn Fn(&Type) -> Type) -> Type {
+        match self {
+            Type::Array(key, value) => Type::Array(key.clone(), Box::new(keep(value))),
+            Type::ArrayShape(shape) => Type::ArrayShape(Shape {
+                fields: shape
+                    .fields
+                    .iter()
+                    .filter_map(|field| {
+                        let kept = keep(&field.ty);
+                        if kept.is_never() {
+                            return None;
+                        }
+                        let maybe_dropped = kept != field.ty;
+                        Some(ShapeField::new(
+                            field.key.clone(),
+                            kept,
+                            field.optional || maybe_dropped,
+                        ))
+                    })
+                    .collect(),
+                unsealed: shape.unsealed.clone(),
+            }),
+            Type::Union(members) => Type::Union(
+                members
+                    .iter()
+                    .map(|m| m.filter_array_values(keep))
+                    .collect(),
+            ),
+            other => other.clone(),
+        }
+    }
+
+    /// This type without its accessory refinements: an intersection's
+    /// base, in each union member.
+    pub fn without_accessories(&self) -> Type {
+        match self {
+            Type::Intersection(members) => members
+                .iter()
+                .find(|m| !matches!(m, Type::Accessory(_)))
+                .cloned()
+                .unwrap_or(Type::Mixed(false)),
+            Type::Union(members) => members
+                .iter()
+                .map(Type::without_accessories)
+                .reduce(union_types)
+                .unwrap_or(Type::Mixed(false)),
+            other => other.clone(),
+        }
+    }
+
+    /// An array of `value`s keeping what this array is known to be: a
+    /// list, non-empty.
+    pub fn with_array_value(&self, value: Type) -> Type {
+        let mut members = vec![Type::Array(
+            Box::new(Type::unknown_array_key()),
+            Box::new(value),
+        )];
+        match self {
+            Type::Intersection(existing) => members.extend(
+                existing
+                    .iter()
+                    .filter(|m| matches!(m, Type::Accessory(_)))
+                    .cloned(),
+            ),
+            Type::Union(_) => {
+                if self.is_list().yes() {
+                    members.push(Type::Accessory(AccessoryKind::ArrayList));
+                }
+                if self.is_non_empty_array().yes() {
+                    members.push(Type::Accessory(AccessoryKind::NonEmptyArray));
+                }
+            }
+            _ => {}
+        }
+        if members.len() == 1 {
+            members.pop().expect("one member")
+        } else {
+            Type::Intersection(members)
         }
     }
 }

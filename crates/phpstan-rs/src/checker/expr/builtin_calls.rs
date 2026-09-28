@@ -368,7 +368,7 @@ impl<'a> Checker<'a> {
                     // Mapping never changes key structure or element
                     // count, so any Accessory marker (list-ness/non-
                     // emptiness) the input had survives onto the result.
-                    return rewrap_with_accessory_markers(mapped, &input_ty);
+                    return input_ty.with_array_value(mapped);
                 }
             }
             // Filtering never transforms elements, so the result is
@@ -384,7 +384,7 @@ impl<'a> Checker<'a> {
                     // Filtering can both leave gaps in a list's sequential
                     // keys and empty out a non-empty array, so neither
                     // marker survives.
-                    let stripped = strip_accessory_markers(arr_ty);
+                    let stripped = arr_ty.without_accessories();
                     if args.len() >= 2 {
                         if is_null_filter_callback(&args[1].value) {
                             return strip_null_from_array_element(stripped);
@@ -419,7 +419,7 @@ impl<'a> Checker<'a> {
                         // exactly `narrow_type_excluding_falsy`'s job
                         // (`list<int|null>` -> `list<non-zero-int>`,
                         // stripping both `0` and `null`, not just `null`).
-                        return narrow_array_element_type_excluding_falsy(stripped);
+                        return stripped.filter_array_values(&narrow_type_excluding_falsy);
                     }
                     return stripped;
                 }
@@ -456,7 +456,7 @@ impl<'a> Checker<'a> {
                     // The result is keyed by $keys, not $values's own
                     // keys, so any Accessory marker $values carried
                     // doesn't survive.
-                    return strip_accessory_markers(values_ty);
+                    return values_ty.without_accessories();
                 }
             }
             // Both preserve list-ness/non-emptiness through to their
@@ -470,7 +470,7 @@ impl<'a> Checker<'a> {
             {
                 let input_ty = self.infer_expr(&args[0].value, locals);
                 if let Some(elem_ty) = input_ty.array_value_type() {
-                    return rewrap_with_accessory_markers(elem_ty, &input_ty);
+                    return input_ty.with_array_value(elem_ty);
                 }
             }
             "array_reverse"
@@ -478,7 +478,7 @@ impl<'a> Checker<'a> {
             {
                 let input_ty = self.infer_expr(&args[0].value, locals);
                 if let Some(elem_ty) = input_ty.array_value_type() {
-                    return rewrap_with_accessory_markers(elem_ty, &input_ty);
+                    return input_ty.with_array_value(elem_ty);
                 }
             }
             // Always returns list<V> regardless of whether the input was
@@ -507,7 +507,7 @@ impl<'a> Checker<'a> {
                 // this same treatment).
                 let arr_ty = self.infer_expr(&args[0].value, locals);
                 if arr_ty.is_array().yes() {
-                    let stripped = strip_accessory_markers(arr_ty.clone());
+                    let stripped = arr_ty.clone().without_accessories();
                     return if arr_ty.is_non_empty_array().yes() {
                         Type::intersection_of(vec![
                             stripped,
@@ -565,7 +565,7 @@ impl<'a> Checker<'a> {
                     self.infer_expr(&args[0].value, locals)
                 };
                 if arr_ty.is_array().yes() {
-                    return strip_accessory_markers(arr_ty);
+                    return arr_ty.without_accessories();
                 }
             }
             // Swaps keys and values - the result's key type is `$array`'s
@@ -584,7 +584,7 @@ impl<'a> Checker<'a> {
                 // value here, or throws - either way the exact resulting
                 // key isn't knowable), so it only unseals the result:
                 // more keys exist, just not statically known which.
-                if let Some(shape) = extract_array_shape(&arr_ty) {
+                if let Some(shape) = arr_ty.shape() {
                     let mut flipped = Shape::sealed(Vec::new());
                     if !shape.is_sealed() {
                         unseal(&mut flipped);
@@ -1211,7 +1211,7 @@ impl<'a> Checker<'a> {
                 // even when every real key written is always an `int`.
                 // Only an `ArrayShape`'s own key type is trustworthy
                 // enough to propagate.
-                if is_or_wraps_array_shape(&arg_ty)
+                if arg_ty.shape().is_some()
                     && let Some(key_ty) = arg_ty.array_key_type()
                 {
                     return Type::intersection_of(vec![
@@ -1986,11 +1986,10 @@ fn mb_convert_case_flags(mode_ty: &Type) -> (bool, bool, bool, bool) {
 }
 
 fn collect_int_literals(ty: &Type) -> Vec<i64> {
-    match ty {
-        Type::IntLiteral(n) => vec![*n],
-        Type::Union(members) => members.iter().flat_map(collect_int_literals).collect(),
-        _ => Vec::new(),
-    }
+    ty.union_members()
+        .iter()
+        .filter_map(Type::int_literal_value)
+        .collect()
 }
 
 fn is_var_named(e: &Expr, name: &str) -> bool {
@@ -2020,27 +2019,6 @@ fn compact_argument_names(e: &Expr) -> Option<Vec<String>> {
         return Some(names);
     }
     None
-}
-
-/// Whether `ty` is a literal `Type::ArrayShape`, or an `Intersection`
-/// wrapping one (the accessory-marker-plus-shape combination
-/// `array_ops.rs`'s `infer_array_literal_type` produces) - `array_keys()`'s
-/// key-type propagation trusts `array_key_type`'s result only for this
-/// shape, not for a plain `Type::Array` (see that call site's doc comment).
-fn is_or_wraps_array_shape(ty: &Type) -> bool {
-    matches!(ty, Type::ArrayShape(_))
-        || matches!(ty, Type::Intersection(members) if members.iter().any(|m| matches!(m, Type::ArrayShape(_))))
-}
-
-/// `is_or_wraps_array_shape`'s own field-extracting counterpart, for a
-/// caller (`array_flip`) that needs the real fields themselves, not just
-/// a yes/no answer.
-fn extract_array_shape(ty: &Type) -> Option<&Shape> {
-    match ty {
-        Type::ArrayShape(shape) => Some(shape),
-        Type::Intersection(members) => members.iter().find_map(extract_array_shape),
-        _ => None,
-    }
 }
 
 /// Marks `shape` unsealed (other, unknown entries may exist), unless it
@@ -2085,43 +2063,7 @@ fn is_null_filter_callback(e: &Expr) -> bool {
 /// element type, not just the accessory markers every `array_filter`
 /// call already loses (`strip_accessory_markers`).
 fn strip_null_from_array_element(ty: Type) -> Type {
-    filter_array_elements(ty, &|elem| narrow_type_excluding(elem, &Type::null()))
-}
-
-/// An `array_filter` whose callback keeps exactly the elements `keep`
-/// narrows an element type to (`Never` when none survive): a plain
-/// array's element type narrows; a shape drops each field that can't
-/// survive and makes one that only might survive optional.
-fn filter_array_elements(ty: Type, keep: &dyn Fn(&Type) -> Type) -> Type {
-    match ty {
-        Type::Array(key, elem) => Type::array(*key, keep(&elem)),
-        Type::ArrayShape(shape) => Type::array_shape(Shape {
-            fields: shape
-                .fields
-                .into_iter()
-                .filter_map(|field| {
-                    let narrowed = keep(&field.ty);
-                    if narrowed.is_never() {
-                        return None;
-                    }
-                    let maybe_dropped = narrowed != field.ty;
-                    Some(ShapeField::new(
-                        field.key,
-                        narrowed,
-                        field.optional || maybe_dropped,
-                    ))
-                })
-                .collect(),
-            unsealed: shape.unsealed,
-        }),
-        Type::Union(members) => Type::union_of(
-            members
-                .into_iter()
-                .map(|m| filter_array_elements(m, keep))
-                .collect(),
-        ),
-        other => other,
-    }
+    ty.filter_array_values(&|elem| narrow_type_excluding(elem, &Type::null()))
 }
 
 /// Recognizes real PHPStan's other `array_filter` callback shape:
@@ -2379,125 +2321,13 @@ fn contains_flag_name_with_options(e: &Expr, target: &str) -> bool {
 /// `is_instanceof_filter_callback` above) narrows the retained element
 /// type to `target` specifically.
 fn narrow_array_element_type_to(relation: &Relation, ty: Type, target: &Type) -> Type {
-    filter_array_elements(ty, &|elem| {
+    ty.filter_array_values(&|elem| {
         if relation.disjoint(elem, target) {
             Type::never()
         } else {
             narrow_type_to(relation, elem, target)
         }
     })
-}
-
-/// `array_filter($x)` with no callback at all - real PHP's default,
-/// dropping every falsy element - shares the same falsy-exclusion rule
-/// `!empty($x)`'s narrowing already uses.
-fn narrow_array_element_type_excluding_falsy(ty: Type) -> Type {
-    match ty {
-        Type::Array(key, elem) => Type::array(*key, narrow_type_excluding_falsy(&elem)),
-        // A fixed-position `ArrayShape` input needs the identical
-        // narrowing applied per field, not just per homogeneous element
-        // type - real PHP's no-callback filtering can drop a specific
-        // field entirely when it's provably always-falsy, and can no
-        // longer guarantee a field's presence when it's merely possibly
-        // falsy.
-        Type::ArrayShape(shape) => Type::array_shape(Shape {
-            fields: shape
-                .fields
-                .into_iter()
-                .filter_map(|field| {
-                    let narrowed = narrow_type_excluding_falsy(&field.ty);
-                    if narrowed.is_never() {
-                        // Provably always-falsy (a bare `null`, `false`,
-                        // literal `0`/`''`/`'0'`) - array_filter always
-                        // drops it, so the field is genuinely gone.
-                        None
-                    } else {
-                        // Anything narrow_type_excluding_falsy actually
-                        // changed *could* have been falsy at runtime, so
-                        // its presence in the filtered result is no
-                        // longer guaranteed - the field becomes optional
-                        // (or stays optional, if it already was), same as
-                        // real PHP's own "may or may not survive"
-                        // filtering.
-                        let could_be_falsy = narrowed != field.ty;
-                        Some(ShapeField::new(
-                            field.key,
-                            narrowed,
-                            field.optional || could_be_falsy,
-                        ))
-                    }
-                })
-                .collect(),
-            unsealed: shape.unsealed,
-        }),
-        other => other,
-    }
-}
-
-/// Drops any `Accessory` marker from `ty`, collapsing an Intersection
-/// back to its own plain base - used by array functions that can't
-/// guarantee they preserve list-ness/non-emptiness (`array_filter`/
-/// `array_combine`/`array_unique`).
-///
-/// Recurses into a `Union` branch of `ty` (e.g. `non-empty-list<T>|
-/// array{}` - the shape a loop-conditionally-appended array literal
-/// gets), not just a bare top-level `Intersection` - otherwise every
-/// member's `Accessory` marker survives unstripped.
-fn strip_accessory_markers(ty: Type) -> Type {
-    match ty {
-        Type::Intersection(members) => members
-            .into_iter()
-            .find(|m| !matches!(m, Type::Accessory(_)))
-            .unwrap_or(Type::mixed()),
-        Type::Union(members) => members
-            .into_iter()
-            .map(strip_accessory_markers)
-            .reduce(union_types)
-            .unwrap_or(Type::mixed()),
-        other => other,
-    }
-}
-
-/// Rewraps `mapped_elem` in whatever `Accessory` markers `input_ty` had -
-/// list-ness/non-emptiness are unaffected by mapping/slicing/reversing
-/// with default arguments, none of which change key structure or element
-/// count - used by `array_map`/`array_slice`/`array_reverse`'s "preserve
-/// the input's own markers" cases.
-///
-/// Also handles `input_ty` arriving as a `Union` rather than an
-/// `Intersection` - `$x = []; if (...) { foreach (...) { $x[] = ...; } }`
-/// control-flow-merges to `array{}|list<T>`, which is still every bit as
-/// list-like as a bare `list<T>` (`Checker::is_list_like` recognizes this
-/// shape), so it must not be dropped just because it came from a merge
-/// rather than a single literal/return.
-fn rewrap_with_accessory_markers(mapped_elem: Type, input_ty: &Type) -> Type {
-    match input_ty {
-        Type::Intersection(members) => {
-            let mut result = vec![Type::array(Type::unknown_array_key(), mapped_elem)];
-            result.extend(
-                members
-                    .iter()
-                    .filter(|m| matches!(m, Type::Accessory(_)))
-                    .cloned(),
-            );
-            Type::intersection_of(result)
-        }
-        Type::Union(_) => {
-            let mut result = vec![Type::array(Type::unknown_array_key(), mapped_elem)];
-            if input_ty.is_list().yes() {
-                result.push(Type::accessory(AccessoryKind::ArrayList));
-            }
-            if input_ty.is_non_empty_array().yes() {
-                result.push(Type::accessory(AccessoryKind::NonEmptyArray));
-            }
-            if result.len() > 1 {
-                Type::intersection_of(result)
-            } else {
-                result.remove(0)
-            }
-        }
-        _ => Type::array(Type::unknown_array_key(), mapped_elem),
-    }
 }
 
 /// Removes any `Array`/`ArrayShape` member from `ty` - the array-ish
@@ -2508,21 +2338,15 @@ fn rewrap_with_accessory_markers(mapped_elem: Type, input_ty: &Type) -> Type {
 /// always-possible-per-the-stub `array` member while leaving everything
 /// else (a real declared `null`, say) untouched.
 fn strip_array_member(ty: Type) -> Type {
-    match ty {
-        Type::Union(members) => {
-            let kept: Vec<Type> = members
-                .into_iter()
-                .filter(|m| !matches!(m, Type::Array(_, _) | Type::ArrayShape(_)))
-                .collect();
-            match kept.len() {
-                0 => Type::mixed(),
-                1 => kept.into_iter().next().unwrap(),
-                _ => Type::union_of(kept),
-            }
-        }
-        Type::Array(_, _) | Type::ArrayShape(_) => Type::mixed(),
-        other => other,
-    }
+    let kept: Vec<Type> = ty
+        .union_members()
+        .iter()
+        .filter(|m| !m.is_array().yes())
+        .cloned()
+        .collect();
+    kept.into_iter()
+        .reduce(union_types)
+        .unwrap_or(Type::mixed())
 }
 
 /// The counterpart of `strip_array_member` above, for an arbitrary
@@ -2533,18 +2357,15 @@ fn strip_array_member(ty: Type) -> Type {
 /// narrowing: the failure-fallback member is definitely gone once the
 /// call is guaranteed to throw instead.
 fn strip_type_member(ty: Type, target: &Type) -> Type {
-    match ty {
-        Type::Union(members) => {
-            let kept: Vec<Type> = members.into_iter().filter(|m| m != target).collect();
-            match kept.len() {
-                0 => Type::mixed(),
-                1 => kept.into_iter().next().unwrap(),
-                _ => Type::union_of(kept),
-            }
-        }
-        other if other == *target => Type::mixed(),
-        other => other,
-    }
+    let kept: Vec<Type> = ty
+        .union_members()
+        .iter()
+        .filter(|m| *m != target)
+        .cloned()
+        .collect();
+    kept.into_iter()
+        .reduce(union_types)
+        .unwrap_or(Type::mixed())
 }
 
 /// Whether `e` is (or bitwise-ORs together, to any depth) a `Name`
@@ -2667,42 +2488,45 @@ fn curl_getinfo_component_type(name: &str) -> Option<Type> {
 /// method, so `Checker::get_debug_type_result`'s union handling can call
 /// it once per member without fighting the borrow checker over `&self`.
 fn get_debug_type_for(ty: &Type, registry: &Registry) -> Option<Type> {
-    match ty {
-        Type::Null => Some(Type::string_literal("null".into())),
-        Type::Bool | Type::True | Type::False => Some(Type::string_literal("bool".into())),
-        Type::Int | Type::IntLiteral(_) | Type::IntRange(_, _) => {
-            Some(Type::string_literal("int".into()))
-        }
-        Type::Float | Type::FloatLiteral(_) => Some(Type::string_literal("float".into())),
-        Type::String | Type::StringLiteral(_) => Some(Type::string_literal("string".into())),
-        Type::Array(_, _) | Type::ArrayShape(_) => Some(Type::string_literal("array".into())),
-        Type::Object(class, _) => Some(
-            if registry
-                .classes
-                .get(class.as_str())
-                .is_some_and(|info| info.is_final())
-            {
-                Type::string_literal(class.clone().to_string().into())
+    let named = |name: &str| Type::string_literal(name.into());
+    let mut result: Option<Type> = None;
+    for member in ty.union_members() {
+        let answer = if member.is_null().yes() {
+            named("null")
+        } else if member.is_bool().yes() {
+            named("bool")
+        } else if member.is_int().yes() {
+            named("int")
+        } else if member.is_float().yes() {
+            named("float")
+        } else if member.is_string().yes() {
+            named("string")
+        } else if member.is_array().yes() {
+            named("array")
+        } else if member.is_object().yes()
+            && let [class] = member.object_class_names()[..]
+        {
+            // An enum is final by definition; another class's own name
+            // is the answer only when no subclass can stand in for it.
+            let exact = member.is_enum_case()
+                || registry
+                    .classes
+                    .get(class.as_str())
+                    .is_some_and(|info| info.is_final());
+            if exact {
+                named(class.as_str())
             } else {
                 Type::string()
-            },
-        ),
-        // An enum is always implicitly final (real PHP forbids `extends`
-        // on one entirely), so a specific case's class name is always the
-        // exact runtime answer - same rule as the `Object` arm's
-        // `is_final` branch above, just unconditional.
-        Type::EnumCase(fqn, _) => Some(Type::string_literal(fqn.clone().to_string().into())),
-        Type::Intersection(members) => members.iter().find_map(|m| get_debug_type_for(m, registry)),
-        Type::Union(members) => {
-            let mut iter = members.iter();
-            let mut acc = get_debug_type_for(iter.next()?, registry)?;
-            for m in iter {
-                acc = union_types(acc, get_debug_type_for(m, registry)?);
             }
-            Some(acc)
-        }
-        _ => None,
+        } else {
+            return None;
+        };
+        result = Some(match result {
+            Some(acc) => union_types(acc, answer),
+            None => answer,
+        });
     }
+    result
 }
 
 /// `gettype()`'s per-kind runtime-string answer (real PHP's historically
@@ -2711,18 +2535,27 @@ fn get_debug_type_for(ty: &Type, registry: &Registry) -> Option<Type> {
 /// returns instead). `None` for anything this project can't confidently
 /// classify, leaving plain `string` unchanged instead of guessing.
 fn gettype_string_for(ty: &Type) -> Option<&'static str> {
-    match ty {
-        Type::String | Type::StringLiteral(_) => Some("string"),
-        Type::Array(_, _) | Type::ArrayShape(_) => Some("array"),
-        Type::Bool | Type::True | Type::False => Some("boolean"),
-        Type::Int | Type::IntLiteral(_) | Type::IntRange(_, _) => Some("integer"),
-        Type::Float | Type::FloatLiteral(_) => Some("double"),
-        Type::Null => Some("NULL"),
-        Type::Object(_, _) | Type::ObjectWithoutClass | Type::EnumCase(_, _) => Some("object"),
-        Type::Resource { closed: false } => Some("resource"),
-        Type::Resource { closed: true } => Some("resource (closed)"),
-        Type::Intersection(members) => members.iter().find_map(gettype_string_for),
-        _ => None,
+    let resource = |closed| ty.is_within(&Type::resource(closed)).yes();
+    if ty.is_string().yes() {
+        Some("string")
+    } else if ty.is_array().yes() {
+        Some("array")
+    } else if ty.is_bool().yes() {
+        Some("boolean")
+    } else if ty.is_int().yes() {
+        Some("integer")
+    } else if ty.is_float().yes() {
+        Some("double")
+    } else if ty.is_null().yes() {
+        Some("NULL")
+    } else if ty.is_object().yes() {
+        Some("object")
+    } else if resource(false) {
+        Some("resource")
+    } else if resource(true) {
+        Some("resource (closed)")
+    } else {
+        None
     }
 }
 
@@ -2757,17 +2590,8 @@ fn single_char(s: &str) -> Option<char> {
 /// matching side - `None` for anything else, meaning "unbounded" to
 /// whichever caller asked.
 fn int_bound(ty: &Type, want_min: bool) -> Option<i64> {
-    match ty {
-        Type::IntLiteral(n) => Some(*n),
-        Type::IntRange(min, max) => {
-            if want_min {
-                *min
-            } else {
-                *max
-            }
-        }
-        _ => None,
-    }
+    ty.int_range_bounds()
+        .and_then(|(min, max)| if want_min { min } else { max })
 }
 
 /// `idate()`'s per-character numeric bound, transcribed from real

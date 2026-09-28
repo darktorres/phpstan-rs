@@ -88,6 +88,15 @@ impl Type {
         ) || self.any_child(Type::contains_deferred)
     }
 
+    /// The array shape this type is, or an intersection refines.
+    pub fn shape(&self) -> Option<&Shape> {
+        match self {
+            Type::ArrayShape(shape) => Some(shape),
+            Type::Intersection(members) => members.iter().find_map(Type::shape),
+            _ => None,
+        }
+    }
+
     /// Whether this is `void`.
     pub fn is_void(&self) -> bool {
         matches!(self, Type::Void)
