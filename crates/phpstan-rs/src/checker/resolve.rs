@@ -750,6 +750,6 @@ fn collect_scoped_template_params(
 /// The class a receiver's value is an instance of, when its type names
 /// one.
 pub(crate) fn receiver_class(ty: Type) -> Option<String> {
-    ty.object_class_and_args()
+    ty.instance_class_and_args()
         .map(|(class, _)| class.to_string())
 }

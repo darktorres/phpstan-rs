@@ -9,7 +9,7 @@ use types::PhpString;
 use types::{self, AccessoryKind, Relation, Shape, ShapeField, ShapeKey, Type};
 use types::{has_offset_value_parts, union_types};
 
-use super::{is_false_literal, is_non_falsy_string, is_true_literal};
+use super::{is_false_literal, is_true_literal};
 
 impl<'a> Checker<'a> {
     /// Bespoke per-function return-type extensions, mirroring real
@@ -56,7 +56,9 @@ impl<'a> Checker<'a> {
             "sprintf" | "vsprintf" if !args.is_empty() => {
                 if let Some(fmt) = literal_string_value(&args[0].value)
                     && let Some(remainder) = sprintf_literal_remainder(&fmt)
-                    && is_non_falsy_string(&Type::string_literal(remainder.into()))
+                    && Type::string_literal(remainder.into())
+                        .is_refined_string(AccessoryKind::NonFalsyString)
+                        .yes()
                 {
                     return Type::intersection_of(vec![
                         Type::string(),
@@ -119,8 +121,14 @@ impl<'a> Checker<'a> {
             // wrong upper bound would be worse than the stub's honest
             // `int`.
             "random_int" | "rand" | "mt_rand" if args.len() == 2 => {
-                let min = int_bound(&self.infer_expr(&args[0].value, locals), true);
-                let max = int_bound(&self.infer_expr(&args[1].value, locals), false);
+                let min = self
+                    .infer_expr(&args[0].value, locals)
+                    .int_range_bounds()
+                    .and_then(|(min, _)| min);
+                let max = self
+                    .infer_expr(&args[1].value, locals)
+                    .int_range_bounds()
+                    .and_then(|(_, max)| max);
                 return Type::int_range(min, max);
             }
             // `hrtime()`/`hrtime(false)` return a 2-element list
@@ -1424,7 +1432,11 @@ impl<'a> Checker<'a> {
                 let count_is_at_least_one = count_ty
                     .int_range_bounds()
                     .is_some_and(|(min, _)| min.is_some_and(|m| m >= 1));
-                if count_is_at_least_one && is_non_falsy_string(&input_ty) {
+                if count_is_at_least_one
+                    && input_ty
+                        .is_refined_string(AccessoryKind::NonFalsyString)
+                        .yes()
+                {
                     return Type::intersection_of(vec![
                         Type::string(),
                         Type::accessory(AccessoryKind::NonFalsyString),
@@ -1943,7 +1955,10 @@ impl<'a> Checker<'a> {
         }
         if arg_ty.is_refined_string(AccessoryKind::NumericString).yes() {
             accessories.push(AccessoryKind::NumericString);
-        } else if is_non_falsy_string(&arg_ty) {
+        } else if arg_ty
+            .is_refined_string(AccessoryKind::NonFalsyString)
+            .yes()
+        {
             accessories.push(AccessoryKind::NonFalsyString);
         } else if arg_ty
             .is_refined_string(AccessoryKind::NonEmptyString)
@@ -2528,15 +2543,6 @@ fn single_char(s: &str) -> Option<char> {
         return None;
     }
     Some(c)
-}
-
-/// Extracts a definite lower (`want_min: true`) or upper (`false`)
-/// integer bound from `ty` - a literal's value, or `Type::IntRange`'s
-/// matching side - `None` for anything else, meaning "unbounded" to
-/// whichever caller asked.
-fn int_bound(ty: &Type, want_min: bool) -> Option<i64> {
-    ty.int_range_bounds()
-        .and_then(|(min, max)| if want_min { min } else { max })
 }
 
 /// `idate()`'s per-character numeric bound, transcribed from real

@@ -146,39 +146,24 @@ impl Type {
         }
     }
 
-    /// Whether `@template T of <this>` declares a bound a template can
-    /// take (PHPStan's `TemplateTypeFactory`): `mixed`, `null`, a
-    /// scalar, integer range or literal, an array or array shape, an
-    /// object, object shape or enum case, `key-of`, a union or an
-    /// intersection, or another template. A class-string, a callable or
-    /// a `resource` is not one.
-    pub fn is_supported_template_bound(&self) -> bool {
-        matches!(
-            self,
-            Type(Repr::Mixed(_))
-                | Type(Repr::Null)
-                | Type(Repr::TemplateParam(_))
-                | Type(Repr::Array(..))
-                | Type(Repr::ArrayShape(_))
-                | Type(Repr::String)
-                | Type(Repr::StringLiteral(_))
-                | Type(Repr::Int)
-                | Type(Repr::IntLiteral(_))
-                | Type(Repr::IntRange(..))
-                | Type(Repr::Float)
-                | Type(Repr::FloatLiteral(_))
-                | Type(Repr::Bool)
-                | Type(Repr::True)
-                | Type(Repr::False)
-                | Type(Repr::Object(..))
-                | Type(Repr::EnumCase(..))
-                | Type(Repr::ObjectWithoutClass)
-                | Type(Repr::ObjectShape(_))
-                | Type(Repr::KeyOf(_))
-                | Type(Repr::Union(_))
-                | Type(Repr::BenevolentUnion(_))
-                | Type(Repr::Intersection(_))
-        )
+    /// Whether `@template T of <this>` can bound a template: any type
+    /// that describes values, but not `void` or `never` (which describe
+    /// none), an error, a conditional (which a call-site parameter
+    /// decides) or a bare refinement. A union or intersection can when
+    /// each of its members can.
+    pub fn can_bound_a_template(&self) -> bool {
+        match self {
+            Type(Repr::Void)
+            | Type(Repr::Never)
+            | Type(Repr::Error)
+            | Type(Repr::Conditional { .. }) => false,
+            Type(Repr::Union(members))
+            | Type(Repr::BenevolentUnion(members))
+            | Type(Repr::Intersection(members)) => members
+                .iter()
+                .all(|m| m.is_accessory() || m.can_bound_a_template()),
+            other => !other.is_accessory(),
+        }
     }
 
     /// Whether a `value-of`, `key-of`, offset access or class-constant

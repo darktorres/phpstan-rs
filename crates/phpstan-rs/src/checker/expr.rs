@@ -17,7 +17,7 @@ use diagnostics::DiagnosticBuilder;
 use syntax::ast::*;
 use syntax::token::Span;
 use syntax::visit::{body_contains_yield, expr_contains_yield};
-use types::{self, AccessoryKind, Shape, Type};
+use types::{self, Shape, Type};
 
 mod array_ops;
 mod builtin_calls;
@@ -63,13 +63,8 @@ fn bare_name_literal_type(name: &str) -> Type {
     }
 }
 
-/// Does `ty`'s value-space unconditionally exclude `null`? `Mixed`/`Never`
-/// are left alone (a `Mixed` slot could always turn out to hold `null` at
-/// runtime; `Never` means unreachable code) - everything else is settled
-/// by comparing against `narrow_type_excluding(ty, &Type::Null)` (the
-/// same "subtract null" operation `??`/`?->`'s type inference relies on
-/// elsewhere in this file): if removing `null` changes nothing, `ty`
-/// never carried it to begin with.
+/// Whether no value of `ty` is `null`, for a reachable `ty` (`never`, the
+/// type of unreachable code, isn't judged).
 pub(crate) fn type_definitely_excludes_null(ty: &Type) -> bool {
     !ty.is_never() && ty.is_null().no()
 }
@@ -5314,13 +5309,6 @@ fn merge_new_variable_definitions(locals: &mut Locals, narrowed: &Locals) {
             locals.insert_with_provenance(key.clone(), ty.clone(), provenance);
         }
     }
-}
-
-/// Whether `ty` is provably a `non-falsy-string` (non-empty and never
-/// exactly `"0"`) - a one-line delegate to the generalized
-/// `string_type_has_accessory`.
-fn is_non_falsy_string(ty: &Type) -> bool {
-    ty.is_refined_string(AccessoryKind::NonFalsyString).yes()
 }
 
 /// Whether `ty` is a type PHP itself can never legally use as an array

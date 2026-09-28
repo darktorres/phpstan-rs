@@ -552,7 +552,7 @@ impl<'a> Checker<'a> {
                 );
             }
             if let Some(bound) = bounds.get(name)
-                && !bound.is_supported_template_bound()
+                && !bound.can_bound_a_template()
             {
                 self.report(
                     subject.unsupported_bound(name, bound),
