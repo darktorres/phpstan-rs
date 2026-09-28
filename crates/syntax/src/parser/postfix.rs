@@ -264,6 +264,7 @@ impl Parser {
             };
             let value = self.parse_expression()?;
             args.push(Arg {
+                id: self.node_id(),
                 name,
                 spread,
                 value,

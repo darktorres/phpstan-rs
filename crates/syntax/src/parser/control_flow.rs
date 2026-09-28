@@ -293,6 +293,7 @@ impl Parser {
             self.expect(&Token::RParen)?;
             let body = self.parse_stmt_list_block()?;
             catches.push(CatchClause {
+                id: self.node_id(),
                 types,
                 types_spans,
                 var,

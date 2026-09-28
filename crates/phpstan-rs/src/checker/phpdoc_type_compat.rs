@@ -284,6 +284,7 @@ impl<'a> Checker<'a> {
                 let value = match param {
                     Some(p) => p.clone(),
                     None => Param {
+                        id: syntax::ast::NodeId::SYNTHETIC,
                         name: "value".into(),
                         name_span: span,
                         type_hint: property_type_hint.cloned(),

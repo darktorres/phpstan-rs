@@ -29,6 +29,7 @@ impl Parser {
                     end: self.previous_end(),
                 };
                 uses.push(ClosureUse {
+                    id: self.node_id(),
                     name,
                     by_ref: use_by_ref,
                     span,
@@ -126,6 +127,7 @@ impl Parser {
             self.expect(&Token::FatArrow)?;
             let body = self.parse_expression()?;
             arms.push(MatchArm {
+                id: self.node_id(),
                 conditions,
                 body,
                 span: Span {

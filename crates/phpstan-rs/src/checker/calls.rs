@@ -783,6 +783,7 @@ impl<'a> Checker<'a> {
             let synthesized: Vec<Arg> = items
                 .iter()
                 .map(|item| Arg {
+                    id: syntax::ast::NodeId::SYNTHETIC,
                     name: None,
                     spread: false,
                     value: item.value.clone(),
