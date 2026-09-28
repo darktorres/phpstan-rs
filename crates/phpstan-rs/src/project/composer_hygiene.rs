@@ -808,7 +808,10 @@ fn collect_declared_classes(stmts: &[Stmt], ctx: &mut NameContext, out: &mut Vec
                 out.push((ctx.declared_name(class_decl_name(c)), c.name_span))
             }
             StmtKind::EnumDecl(e) => out.push((ctx.declared_name(&e.name), e.name_span)),
-            StmtKind::Block(body) => collect_declared_classes(body, ctx, out),
+            StmtKind::Block(body)
+            | StmtKind::Declare {
+                body: Some(body), ..
+            } => collect_declared_classes(body, ctx, out),
             _ => {}
         }
     }

@@ -18,15 +18,9 @@ fn is_whitespace_run(html: &str) -> bool {
 fn section_ends(program: &[Stmt]) -> Vec<&Stmt> {
     let mut ends = Vec::new();
     for (i, stmt) in program.iter().enumerate() {
-        if let StmtKind::Block(body) = &stmt.kind
-            && matches!(
-                body.first().map(|s| &s.kind),
-                Some(StmtKind::Declare {
-                    block_mode: true,
-                    ..
-                })
-            )
-            && body.len() > 1
+        if let StmtKind::Declare {
+            body: Some(body), ..
+        } = &stmt.kind
         {
             ends.extend(body.last());
         }

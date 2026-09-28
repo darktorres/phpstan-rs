@@ -54,7 +54,10 @@ fn aliases(stmts: &[Stmt]) -> Aliases {
                     out.push((alias.name.clone(), kind));
                 }
             }
-            StmtKind::Block(inner) => out.extend(aliases(inner)),
+            StmtKind::Block(inner)
+            | StmtKind::Declare {
+                body: Some(inner), ..
+            } => out.extend(aliases(inner)),
             _ => {}
         }
     }
@@ -330,7 +333,10 @@ impl Pass {
 impl VisitorMut for Pass {
     fn visit_stmt(&mut self, stmt: &mut Stmt) {
         match &mut stmt.kind {
-            StmtKind::Block(stmts) => {
+            StmtKind::Block(stmts)
+            | StmtKind::Declare {
+                body: Some(stmts), ..
+            } => {
                 self.retain_stmts(stmts);
                 walk_stmt_mut(self, stmt);
             }

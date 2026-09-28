@@ -154,9 +154,12 @@ pub fn walk_stmt<'ast, V: Visitor<'ast> + ?Sized>(v: &mut V, stmt: &'ast Stmt) {
             v.visit_expr(value);
             v.visit_stmt(body);
         }
-        StmtKind::Declare { directives, .. } => {
-            for (_, _, value) in directives {
+        StmtKind::Declare { directives, body } => {
+            for (_, value) in directives {
                 v.visit_expr(value);
+            }
+            if let Some(body) = body {
+                walk_stmts(v, body);
             }
         }
         StmtKind::Global(vars) => {
@@ -846,9 +849,12 @@ pub fn walk_stmt_mut<V: VisitorMut + ?Sized>(v: &mut V, stmt: &mut Stmt) {
             v.visit_expr(value);
             v.visit_stmt(body);
         }
-        StmtKind::Declare { directives, .. } => {
-            for (_, _, value) in directives {
+        StmtKind::Declare { directives, body } => {
+            for (_, value) in directives {
                 v.visit_expr(value);
+            }
+            if let Some(body) = body {
+                walk_stmts_mut(v, body);
             }
         }
         StmtKind::Global(vars) => {

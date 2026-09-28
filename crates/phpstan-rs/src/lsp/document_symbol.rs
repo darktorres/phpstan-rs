@@ -33,7 +33,10 @@ pub(super) fn document_symbols(stmts: &[Stmt]) -> Vec<DocumentSymbol> {
                     symbols.extend(document_symbols(std::slice::from_ref(else_branch)));
                 }
             }
-            StmtKind::Block(inner) => symbols.extend(document_symbols(inner)),
+            StmtKind::Block(inner)
+            | StmtKind::Declare {
+                body: Some(inner), ..
+            } => symbols.extend(document_symbols(inner)),
             _ => {}
         }
     }

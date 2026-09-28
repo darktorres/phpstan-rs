@@ -32,7 +32,10 @@ fn collect_classes<'a>(
             StmtKind::Namespace(name) => ctx.set_namespace(name),
             StmtKind::Use(imports) => ctx.add_uses(imports),
             StmtKind::ClassDecl(c) => out.push((ctx.declared_name(class_decl_name(c)), c)),
-            StmtKind::Block(body) => collect_classes(body, ctx, out),
+            StmtKind::Block(body)
+            | StmtKind::Declare {
+                body: Some(body), ..
+            } => collect_classes(body, ctx, out),
             _ => {}
         }
     }

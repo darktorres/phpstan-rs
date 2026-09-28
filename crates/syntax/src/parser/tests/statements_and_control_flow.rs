@@ -38,20 +38,17 @@ fn declare_simple_and_block_forms_parse() {
     );
     assert!(matches!(
         &program[0].kind,
-        StmtKind::Declare { directives, block_mode: false }
-            if directives.len() == 1 && &*directives[0].0 == "strict_types"
+        StmtKind::Declare { directives, body: None }
+            if directives.len() == 1 && directives[0].0.name == "strict_types"
     ));
-    let StmtKind::Block(stmts) = &program[1].kind else {
-        panic!("expected a block, got {:?}", program[1].kind);
+    let StmtKind::Declare {
+        body: Some(body), ..
+    } = &program[1].kind
+    else {
+        panic!("expected a declare block, got {:?}", program[1].kind);
     };
-    assert!(matches!(
-        &stmts[0].kind,
-        StmtKind::Declare {
-            block_mode: true,
-            ..
-        }
-    ));
-    assert_eq!(stmts.len(), 2);
+    assert!(matches!(&body[0].kind, StmtKind::Echo(_)));
+    assert_eq!(program.len(), 2);
 }
 
 #[test]

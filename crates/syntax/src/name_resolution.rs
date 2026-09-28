@@ -62,8 +62,8 @@ pub struct NameContext {
 }
 
 /// Calls `f` with each top-level statement of a file, in order, and the
-/// context in effect there. A block's statements are visited in its
-/// place, so a braced namespace body sees its `namespace` and `use`
+/// context in effect there. A block's or a `declare` block's statements
+/// are visited in its place, so a braced namespace body sees its `namespace` and `use`
 /// statements; a `namespace` or `use` statement is passed after it takes
 /// effect.
 pub fn for_each_in_context<'a>(stmts: &'a [Stmt], mut f: impl FnMut(&'a Stmt, &NameContext)) {
@@ -76,7 +76,10 @@ pub fn for_each_in_context<'a>(stmts: &'a [Stmt], mut f: impl FnMut(&'a Stmt, &N
             match &stmt.kind {
                 StmtKind::Namespace(name) => ctx.set_namespace(name),
                 StmtKind::Use(imports) => ctx.add_uses(imports),
-                StmtKind::Block(inner) => {
+                StmtKind::Block(inner)
+                | StmtKind::Declare {
+                    body: Some(inner), ..
+                } => {
                     walk(inner, ctx, f);
                     continue;
                 }

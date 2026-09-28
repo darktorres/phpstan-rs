@@ -106,7 +106,10 @@ impl DuplicateClassSites {
                         );
                     }
                 }
-                StmtKind::Block(inner) => self.index(inner, ctx, path, conditional, is_stub),
+                StmtKind::Block(inner)
+                | StmtKind::Declare {
+                    body: Some(inner), ..
+                } => self.index(inner, ctx, path, conditional, is_stub),
                 _ => {}
             }
         }

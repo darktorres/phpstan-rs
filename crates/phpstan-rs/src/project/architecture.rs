@@ -76,7 +76,10 @@ fn collect_declared<'a>(
                     },
                 );
             }
-            StmtKind::Block(body) => collect_declared(body, ctx, out),
+            StmtKind::Block(body)
+            | StmtKind::Declare {
+                body: Some(body), ..
+            } => collect_declared(body, ctx, out),
             _ => {}
         }
     }

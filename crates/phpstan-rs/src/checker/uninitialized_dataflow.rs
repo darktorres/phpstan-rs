@@ -262,7 +262,10 @@ fn stmt_definitely_terminates(stmt: &Stmt) -> bool {
         StmtKind::Return(_) | StmtKind::Throw(_) | StmtKind::Break(_) | StmtKind::Continue(_) => {
             true
         }
-        StmtKind::Block(stmts) => stmts.iter().any(stmt_definitely_terminates),
+        StmtKind::Block(stmts)
+        | StmtKind::Declare {
+            body: Some(stmts), ..
+        } => stmts.iter().any(stmt_definitely_terminates),
         StmtKind::If {
             then_branch,
             else_branch: Some(else_branch),
@@ -295,7 +298,10 @@ fn walk_stmt(
             }
             state
         }
-        StmtKind::Block(stmts) => walk_stmts(stmts, state, ctx, declaring_class),
+        StmtKind::Block(stmts)
+        | StmtKind::Declare {
+            body: Some(stmts), ..
+        } => walk_stmts(stmts, state, ctx, declaring_class),
         StmtKind::If {
             cond,
             then_branch,

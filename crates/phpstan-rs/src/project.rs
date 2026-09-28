@@ -2254,7 +2254,10 @@ fn declared_names_with_context(
                     classes.extend(c);
                 }
             }
-            StmtKind::Block(inner) => {
+            StmtKind::Block(inner)
+            | StmtKind::Declare {
+                body: Some(inner), ..
+            } => {
                 let (f, c) = declared_names_with_context(inner, ctx);
                 functions.extend(f);
                 classes.extend(c);

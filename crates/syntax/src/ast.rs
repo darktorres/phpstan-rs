@@ -100,13 +100,12 @@ pub enum StmtKind {
         by_ref: bool,
         body: Box<Stmt>,
     },
-    // `declare(name=value, ...);` - each directive's name, its span, and
-    // its value. The block form (`declare(...) { ... }`/`: ...
-    // enddeclare;`) parses as a `Block` whose first statement is this
-    // node with `block_mode` set, followed by the body's statements.
+    // `declare(name=value, ...)`: each directive's name and value, and
+    // the statements of a `declare(...) { ... }` or `declare(...): ...
+    // enddeclare;` block.
     Declare {
-        directives: Vec<(Arc<str>, Span, Expr)>,
-        block_mode: bool,
+        directives: Vec<(Ident, Expr)>,
+        body: Option<Vec<Stmt>>,
     },
     Break(Option<i64>),
     Continue(Option<i64>),

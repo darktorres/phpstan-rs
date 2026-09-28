@@ -88,7 +88,10 @@ impl DuplicateFunctionSites {
                         );
                     }
                 }
-                StmtKind::Block(inner) => self.index(inner, ctx, path, conditional),
+                StmtKind::Block(inner)
+                | StmtKind::Declare {
+                    body: Some(inner), ..
+                } => self.index(inner, ctx, path, conditional),
                 _ => {}
             }
         }

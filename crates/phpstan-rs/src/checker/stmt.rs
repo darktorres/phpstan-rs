@@ -720,7 +720,10 @@ impl<'a> Checker<'a> {
                     self.check_implicit_tostring_usage(&ty, e.span);
                 }
             }
-            StmtKind::Block(stmts) => self.check_block(stmts, locals, declared_return, label),
+            StmtKind::Block(stmts)
+            | StmtKind::Declare {
+                body: Some(stmts), ..
+            } => self.check_block(stmts, locals, declared_return, label),
             StmtKind::If {
                 cond,
                 then_branch,

@@ -228,14 +228,10 @@ impl<'a> Checker<'a> {
         let mut declares: Vec<(&Stmt, bool)> = Vec::new();
         collect_declares(program, true, &mut declares);
         for (stmt, is_first) in declares {
-            let StmtKind::Declare {
-                directives,
-                block_mode,
-            } = &stmt.kind
-            else {
+            let StmtKind::Declare { directives, body } = &stmt.kind else {
                 continue;
             };
-            for (name, name_span, value) in directives {
+            for (name, value) in directives {
                 let literal_int = match &value.kind {
                     ExprKind::Literal(Literal::Int(n)) => Some(*n),
                     _ => None,
@@ -251,7 +247,7 @@ impl<'a> Checker<'a> {
                                 value.span,
                                 "declareStrictTypes.value",
                             );
-                        } else if *block_mode {
+                        } else if body.is_some() {
                             self.report_keyword(
                                 "Declare strict_types must not use block mode.".to_string(),
                                 stmt.span,
@@ -287,7 +283,7 @@ impl<'a> Checker<'a> {
                     "ticks" | "encoding" => {}
                     _ => self.report_keyword(
                         format!("Unsupported declare '{name}'."),
-                        *name_span,
+                        name.span,
                         "declare.unsupported",
                     ),
                 }
@@ -305,7 +301,12 @@ impl<'a> Checker<'a> {
 fn collect_declares<'s>(stmts: &'s [Stmt], top: bool, out: &mut Vec<(&'s Stmt, bool)>) {
     for (i, stmt) in stmts.iter().enumerate() {
         match &stmt.kind {
-            StmtKind::Declare { .. } => out.push((stmt, top && i == 0)),
+            StmtKind::Declare { body, .. } => {
+                out.push((stmt, top && i == 0));
+                if let Some(body) = body {
+                    collect_declares(body, false, out);
+                }
+            }
             StmtKind::FunctionDecl(f) => collect_declares(&f.body, false, out),
             StmtKind::ClassDecl(c) => {
                 for m in &c.methods {

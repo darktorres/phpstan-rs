@@ -44,7 +44,10 @@ pub(crate) fn is_switch_break_equivalent(stmt: &Stmt) -> bool {
     match &stmt.kind {
         StmtKind::Break(_) => true,
         StmtKind::Continue(level) => level.is_none() || *level == Some(1),
-        StmtKind::Block(stmts) => stmts.last().is_some_and(is_switch_break_equivalent),
+        StmtKind::Block(stmts)
+        | StmtKind::Declare {
+            body: Some(stmts), ..
+        } => stmts.last().is_some_and(is_switch_break_equivalent),
         StmtKind::If {
             then_branch,
             else_branch,
@@ -102,7 +105,10 @@ impl<'a> Checker<'a> {
             // `deadCode.unreachable` (`check_block`) is this arm's
             // mirror image: it's the one that actually names that dead
             // code, while this arm just needs to know it exists.
-            StmtKind::Block(stmts) => stmts.iter().any(|s| self.always_terminates(s, locals)),
+            StmtKind::Block(stmts)
+            | StmtKind::Declare {
+                body: Some(stmts), ..
+            } => stmts.iter().any(|s| self.always_terminates(s, locals)),
             StmtKind::If {
                 then_branch,
                 else_branch,
@@ -220,7 +226,10 @@ impl<'a> Checker<'a> {
             StmtKind::Continue(level) => matches!(level, Some(n) if *n > 1),
             StmtKind::Break(_) => false,
             StmtKind::Expression(e) => self.infer_expr(e, locals) == Type::Never,
-            StmtKind::Block(stmts) => stmts
+            StmtKind::Block(stmts)
+            | StmtKind::Declare {
+                body: Some(stmts), ..
+            } => stmts
                 .last()
                 .is_some_and(|s| self.exits_function_or_loop(s, locals)),
             StmtKind::If {
@@ -731,7 +740,10 @@ pub(crate) fn collect_exit_point_statements(stmt: &Stmt) -> Vec<&Stmt> {
         StmtKind::Return(_) | StmtKind::Throw(_) | StmtKind::Break(_) | StmtKind::Continue(_) => {
             vec![stmt]
         }
-        StmtKind::Block(stmts) => stmts
+        StmtKind::Block(stmts)
+        | StmtKind::Declare {
+            body: Some(stmts), ..
+        } => stmts
             .last()
             .map(collect_exit_point_statements)
             .unwrap_or_default(),

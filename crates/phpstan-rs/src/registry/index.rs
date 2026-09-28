@@ -682,9 +682,10 @@ fn build_declarations_with_context(
             // `namespace` statement clears them (see `set_namespace`).
             // Inherits whatever `conditional` its enclosing context
             // already has.
-            StmtKind::Block(inner) => {
-                build_declarations_with_context(inner, origin, ctx, conditional, out)
-            }
+            StmtKind::Block(inner)
+            | StmtKind::Declare {
+                body: Some(inner), ..
+            } => build_declarations_with_context(inner, origin, ctx, conditional, out),
             StmtKind::GlobalConst(consts) => {
                 for c in consts {
                     let name = intern(&ctx.declared_name(&c.name));

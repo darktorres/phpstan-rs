@@ -92,7 +92,10 @@ impl Walk<'_, '_> {
     fn stmts(&mut self, stmts: &[Stmt]) {
         for stmt in stmts {
             match &stmt.kind {
-                StmtKind::Block(inner) => self.stmts(inner),
+                StmtKind::Block(inner)
+                | StmtKind::Declare {
+                    body: Some(inner), ..
+                } => self.stmts(inner),
                 StmtKind::If {
                     then_branch,
                     else_branch,

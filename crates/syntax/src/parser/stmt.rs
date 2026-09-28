@@ -345,15 +345,10 @@ impl Parser {
                 self.expect(&Token::LParen)?;
                 let mut directives = Vec::new();
                 while !self.check(&Token::RParen) {
-                    let name_start = self.current_pos();
-                    let name = self.expect_ident()?;
-                    let name_span = Span {
-                        start: name_start,
-                        end: self.previous_end(),
-                    };
+                    let name = self.expect_ident_spanned()?;
                     self.expect(&Token::Equals)?;
                     let value = self.parse_expression()?;
-                    directives.push((name, name_span, value));
+                    directives.push((name, value));
                     if !self.eat(&Token::Comma) {
                         break;
                     }
@@ -378,21 +373,7 @@ impl Parser {
                     self.expect_semicolon()?;
                     None
                 };
-                let declare = self.stmt(
-                    StmtKind::Declare {
-                        directives,
-                        block_mode: body.is_some(),
-                    },
-                    start,
-                );
-                match body {
-                    Some(stmts) => {
-                        let mut all = vec![declare];
-                        all.extend(stmts);
-                        self.stmt(StmtKind::Block(all), start)
-                    }
-                    None => declare,
-                }
+                self.stmt(StmtKind::Declare { directives, body }, start)
             }
             // `__halt_compiler();` - tells the *real* compiler to stop
             // parsing right here; everything after it (often binary PHAR
