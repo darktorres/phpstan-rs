@@ -267,12 +267,12 @@ impl Type {
 }
 
 impl Type {
-    /// A union of `members` of the same kind as `self`: benevolent when
-    /// `self` is a benevolent union, plain otherwise.
+    /// The union of `members`, of the same kind as `self`: benevolent
+    /// when `self` is a benevolent union, plain otherwise.
     pub fn with_members(&self, members: Vec<Type>) -> Type {
         match self {
-            Type(Repr::BenevolentUnion(_)) => Type(Repr::BenevolentUnion(members)),
-            _ => Type(Repr::Union(members)),
+            Type(Repr::BenevolentUnion(_)) => Type::benevolent_union_of(members),
+            _ => Type::union_of(members),
         }
     }
 

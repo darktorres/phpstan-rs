@@ -147,6 +147,11 @@ fn union_types_impl(a: Type, b: Type) -> Type {
         .cloned()
         .collect();
     members.retain(|m| match literal_base_type(m) {
+        Some(base) if matches!(m, Type(Repr::Intersection(_))) => !present_bases.iter().any(|b| {
+            crate::Relation::structural()
+                .is_super_type_of(b, &base)
+                .yes()
+        }),
         Some(base) => !present_bases.contains(&base),
         None => true,
     });
