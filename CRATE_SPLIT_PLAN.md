@@ -1341,7 +1341,10 @@ Follow-ups:
   reported error doesn't cascade. Today the rule reports and the expression
   keeps a guessed type: `-'blabla'` is `int`, `$c / 0` is `int|float`,
   `$o->missing` and `[$a] = 5` give `mixed` (289 nsrt `*ERROR*`
-  expectations). D3's handlers produce it.
+  expectations; Appendix H's `error-type` has 110 of them in files cited
+  nowhere else: a missing member on a union or intersection, GMP operators
+  with a non-numeric string, a PHPDoc for a missing parameter, `$this` in a
+  static closure). D3's handlers produce it.
 - **Subtracted types.** `mixed~T` and `object~T`/`Foo~Bar` (PHPStan's
   `subtractedType`) are variants: narrowing `mixed` away from a type keeps
   what was removed. Today `$m !== null`, `isset($m)` and `!is_int($m)` on a
@@ -3079,7 +3082,11 @@ deleted; the file-size gate.
       float. A float literal types as its value; `1.5` is `float` today.
       `%` on ranges follows PHP's sign rule: `int<0, 30> % -9` and
       `int<-30, 30> % -9` are `never` today where PHPStan has `int<0, 8>` and
-      `int<-8, 8>`, and a range divisor gives `int` (nsrt `bug-15242.php`).
+      `int<-8, 8>`, and a range divisor gives `int` (nsrt `bug-15242.php`;
+      with `%` of a range divisor, bitwise `|`/`^`/`&` on ranges and
+      numeric-string arithmetic, Appendix H's `operator-ranges` is 85
+      mismatches: `modulo-operator.php`, `bug-14654.php`, `bug-15243.php`,
+      `bug-9384.php`, `mixed-to-number.php`).
       A shift covers every operand: `int<1, 3> << 63` is
       `-9223372036854775808` today, missing the `0` that `2 << 63` gives.
       `int ** int` is `int` today, where a negative exponent or an overflow
@@ -3746,6 +3753,14 @@ building on the previous one:
       '';` `$logs` is `array<int, ''>` today where it is
       `non-empty-array<int, ''>`, and `$l[$i][$s] = ''` gives
       `array<int, array<string, ''>>` (the rules oracle's `bug-13538.php`).
+      With the list cases above this is Appendix H's `list-write` (114 nsrt
+      mismatches, 12 files: `bug-14245.php`, `bug-12274.php`,
+      `list-type.php`, `bug-15245.php`, `bug-13857.php`); an append to
+      `mixed` stays `mixed` (`bug-12447.php`). A write with a literal-union
+      key builds optional keys, `$a[$k] = 256` with `$k` `'a'|'b'` on
+      `array{foo: int}` giving `array{foo: int, a?: 256, b?: 256}` where it
+      is `array<string, int>` today (`literal-key-writes`, 39:
+      `set-constant-union-offset-on-constant-array.php`, `bug-11716.php`).
       An offset write on a property's array updates the property as one on
       a variable does: after `if (!isset($this->arr['foo'])) {
       $this->arr['foo'] = true; }` on `array{foo?: bool}`, `$this->arr` is
