@@ -3246,6 +3246,10 @@ fixture:
     arguments and returns are already reported);
   - a by-reference argument PHP creates on the call is not type-checked
     against the parameter;
+  - `@no-named-arguments` forbids named arguments and string-keyed
+    unpacking: `nn(b: 1, a: 2)` for a `@no-named-arguments` function isn't
+    `argument.named` today (11 oracle findings, PHPUnit's
+    `Generator::testDouble()` among them);
   - a `void` call's result is reported where it is used (`method.void`,
     `staticMethod.void`, `function.void`): `$x = $o->v();` for `v(): void`
     isn't reported today (49 oracle findings, e.g. PSR-3
@@ -3280,6 +3284,10 @@ fixture:
     (`property.uninitializedReadonly`; PHP throws an `Error`): `echo
     $this->x; $this->x = 1;` in a constructor isn't reported today (12
     oracle findings in revolt's event loop drivers);
+  - an offset write into an `ArrayAccess` object checks the key against
+    `offsetSet`'s key type: `$w['str'] = 1` on `WeakMap<stdClass, int>`
+    and `$s[5] = 1` on `SplObjectStorage` are unreported today
+    (`offsetAssign.dimType`);
   - an offset write or append checks its container as a read does:
     `$i['x'] = 3` on an `int` throws at runtime and isn't reported today,
     and at level 10 neither is `$m['k'] = 1` or `$m[] = 2` on `mixed`
