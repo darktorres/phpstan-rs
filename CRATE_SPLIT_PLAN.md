@@ -3406,8 +3406,8 @@ for the analyser.
      `disallowedBacktick`, `disallowedEmpty`, `disallowedShortTernary`,
      `noVariableVariables` (with the dynamic method, property, static
      method and static property names), `closureUsesThis`,
-     `matchingInheritedMethodNames` and `booleansInLoopConditions`, plus the
-     core parameters the package sets (C1's list);
+     `matchingInheritedMethodNames` (`method.nameCase`), plus the core
+     parameters the package sets (C1's list);
   7. ext-deprecation-rules;
   8. ext-disallowed-calls;
   9. ext-shipmonk, ext-type-perfect, ext-voku, ext-sidz, ext-slam,
