@@ -684,7 +684,11 @@ Visitor-based walk.
   - stale baseline entries and unmatched ignores;
   - startup warnings (SQL drift, lexer warnings).
 - **Result finalizer**, a fixed, documented order:
-  1. inline ignores (with unmatched reporting);
+  1. inline ignores (with unmatched reporting, on by default as PHPStan's
+     `reportUnmatchedIgnoredErrors`: today
+     `Session::report_unmatched_ignored_errors` has no config key and is
+     always `false`, so a stale `@phpstan-ignore` or
+     `@phpstan-ignore-line` is never reported; the corpus oracle finds 67);
   2. ignoreErrors (with `IgnoreErrorExtension`), reporting unmatched
      entries as PHPStan does: `ignore.unmatched` (non-ignorable, skipped
      after internal errors, a path entry only when its file was analysed)
@@ -1951,7 +1955,11 @@ the LSP's per-edit invalidation.
   (185 declarations change type at 8.4 or later), the functionMap deltas
   (C6) and the version-specific `.stub` files. Member and parameter gates
   are inside the files, so the layer parses per version. `php_version`
-  accepts the range and patch forms in the same commit;
+  accepts the range and patch forms in the same commit. A function removed
+  before the analysed range is unknown: `mysql_connect()` under PHP 8.5
+  resolves today where PHPStan reports `function.notFound` (the corpus
+  oracle finds 42 such calls, all `mysql_*` or `ldap_control_paged_*`
+  among them);
 - `stub_attributes` fixes: a property's or class constant's
   `LanguageLevelTypeAware` type becomes `@var`, not `@return`;
   `newest_type` reads every entry; a function deprecated in one
@@ -2341,7 +2349,11 @@ deleted; the file-size gate.
 - isset/`empty`/`??` resolve through one issetability descriptor, which the
   engine and the isset rules share. On a constant array, `empty($a['nope'])`
   and `empty($a[3])` for a falsy value are `true` (`bool` today; nsrt
-  `isset-coalesce-empty-type.php`). The isset rules read the same
+  `isset-coalesce-empty-type.php`), and `isset($this->p)` on an
+  initialized non-nullable property is `true`, so `isset($this->r) ||
+  isset($this->i)` is `booleanOr.alwaysTrue` in PHPStan and `bool` today;
+  `$a?->b ?? $c` is `nullsafe.neverNull` ("unnecessary on left side of
+  ??"). The isset rules read the same
   certainty: `isset($bar)`, `empty($foo)` and `$baz ?? 1` on a variable
   that is never defined are `isset.variable`/`empty.variable`/
   `nullCoalesce.variable` "is never defined", unreported today.
@@ -3221,6 +3233,10 @@ fixture:
     is), and the oracle finds 21 `booleanAnd.leftAlwaysTrue` and 23
     `booleanOr.alwaysFalse` phpstan-rs misses.
 - (c) calls and member access:
+  - a method call or property read on a plain `object` is
+    `method.notFound`/`property.notFound` (it declares no members):
+    `$o->getItem()` and `$o->x` on `object $o` are unreported today (the
+    oracle finds 59 "undefined method/property object::");
   - a method call or property read on a possibly-null receiver is
     reported from level 8 (`findTypeToCheck`'s `checkNullables`), as a
     `null` receiver throws an `Error`: `$c->has()` and `$c->p` on `?C` are
@@ -3271,6 +3287,10 @@ fixture:
     (383 oracle findings). A read inside `isset()`/`??`/`empty()` can't
     fail and stays unreported (331 PHPStan reports on `mixed`).
 - (e) declarations, generics checks and PHPDoc:
+  - a PHPDoc type resolving to `never` (`int&string`, a template whose
+    bound makes it empty) is `return.unresolvableType`/
+    `parameter.unresolvableType`/`assert.unresolvableType`, unreported
+    today (32 oracle findings);
   - the type-alias checks: a cycle (`@phpstan-type A = B`, `B = A`) is
     `typeAlias.circular`, and `class.notFound` today; an alias resolving
     to `never` (`int&string`) is `typeAlias.unresolvableType`; an invalid
