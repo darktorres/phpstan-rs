@@ -474,7 +474,7 @@ through `check-project`.
   literal's shape has the wrong key. The rule follows the configured PHP
   versions, with the key unknown when the range spans 8.3. (found fixing
   F29, probed with php 8.5) Done in `139709f2`.
-- [ ] **F59. Declarations inside a function body are never registered.**
+- [x] **F59. Declarations inside a function body are never registered.**
   `function outer() { function inner(): int {} }` then `inner()` is
   `function.notFound`, and `class Inner {}` in a function body is
   `class.notFound` at `new Inner()`. PHP declares both when the enclosing
@@ -482,6 +482,7 @@ through `check-project`.
   those in top-level control flow (`if (...) { function f() {} }` works),
   so nested ones also miss every per-declaration rule that goes through
   it (banned types in their signatures, for one). (found fixing F24)
+  Done in `b895fa8d`; top-level `try`, loop and `switch` bodies were missed too.
 - [ ] **F60. A float literal is typed `float`, not its value.** `1.7`
   infers `float` in both `check_expr` and `infer_expr` (`checker/expr.rs`),
   so nothing downstream can fold it: `~1.7` is `int` rather than `-2`,
