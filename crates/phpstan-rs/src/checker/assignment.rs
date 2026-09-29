@@ -11,7 +11,7 @@ use types::{Shape, ShapeKey, Type};
 /// all (see `ExprKind::DynamicPropertyAccess`'s own doc comment), a
 /// real, disclosed gap matching how rare it is in practice.
 pub(crate) fn contains_nullsafe(expr: &Expr) -> bool {
-    syntax::stack::guard(|| match &unwrap_grouping(expr).kind {
+    syntax::stack::guard(|| match &expr.peeled().kind {
         ExprKind::PropertyAccess(base, _, nullsafe) => *nullsafe || contains_nullsafe(base),
         ExprKind::MethodCall(base, _, _, nullsafe) => *nullsafe || contains_nullsafe(base),
         ExprKind::Index(base, _) => contains_nullsafe(base),
@@ -39,7 +39,7 @@ pub(crate) fn contains_nullsafe(expr: &Expr) -> bool {
 /// since neither is ever a valid assignment target in real PHP either.
 pub(crate) fn is_non_assignable_target(expr: &Expr) -> bool {
     syntax::stack::guard(|| {
-        match &unwrap_grouping(expr).kind {
+        match &expr.peeled().kind {
             ExprKind::Variable(_)
             | ExprKind::PropertyAccess(..)
             | ExprKind::DynamicPropertyAccess(..)

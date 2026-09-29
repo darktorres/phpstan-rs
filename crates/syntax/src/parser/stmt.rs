@@ -470,9 +470,9 @@ impl Parser {
 /// `parse_optional_level`'s own constant-folder - see that function's
 /// doc comment for why only these three shapes matter.
 fn const_fold_level(e: &Expr) -> Option<i64> {
+    let e = e.peeled();
     crate::stack::guard(|| match &e.kind {
         ExprKind::Literal(Literal::Int(n)) => Some(*n),
-        ExprKind::Grouping(inner) | ExprKind::ErrorSuppress(inner) => const_fold_level(inner),
         ExprKind::Unary(UnaryOp::Neg, inner) => const_fold_level(inner).map(|n| -n),
         _ => None,
     })

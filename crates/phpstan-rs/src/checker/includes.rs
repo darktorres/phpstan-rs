@@ -182,10 +182,8 @@ impl<'a> Checker<'a> {
                     .then(|| self.resolve_paths_at(init, &Locals::default(), depth + 1))
                     .flatten();
             }
+            let e = e.peeled();
             match &e.kind {
-                ExprKind::Grouping(inner) | ExprKind::ErrorSuppress(inner) => {
-                    self.resolve_paths_at(inner, locals, depth)
-                }
                 // The platform's own separators - the paths are checked
                 // against this machine's filesystem.
                 ExprKind::Name(n) if n.trim_start_matches('\\') == "PATH_SEPARATOR" => {

@@ -265,12 +265,10 @@ fn combine_predicate_parts(parts: &[(bool, String)]) -> Option<String> {
 }
 
 fn looks_like_dbal_query_builder_chain(e: &Expr) -> bool {
+    let e = e.peeled();
     syntax::stack::guard(|| match &e.kind {
         ExprKind::MethodCall(_, method, _, _) if **method == *"createQueryBuilder" => true,
         ExprKind::MethodCall(inner, _, _, _) => looks_like_dbal_query_builder_chain(inner),
-        ExprKind::Grouping(inner) | ExprKind::ErrorSuppress(inner) => {
-            looks_like_dbal_query_builder_chain(inner)
-        }
         _ => false,
     })
 }
@@ -330,7 +328,7 @@ impl<'a> Checker<'a> {
         let mut calls: Vec<ChainCall> = Vec::new();
         let mut cursor = Cursor::Borrowed(recv);
         loop {
-            match &cursor.kind {
+            match &cursor.peeled().kind {
                 ExprKind::MethodCall(_, method, _, _) if **method == *"createQueryBuilder" => break,
                 ExprKind::MethodCall(inner, method, args, _) => {
                     calls.push(ChainCall {
@@ -338,9 +336,6 @@ impl<'a> Checker<'a> {
                         args: args.clone(),
                     });
                     cursor = Cursor::Owned(std::rc::Rc::new((**inner).clone()));
-                }
-                ExprKind::Grouping(inner) | ExprKind::ErrorSuppress(inner) => {
-                    cursor = Cursor::Owned(std::rc::Rc::new((**inner).clone()))
                 }
                 ExprKind::Variable(name) => {
                     let rhs = locals.query_builder_aliases.get(name.as_ref())?;

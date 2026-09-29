@@ -1040,7 +1040,7 @@ impl<'a> Checker<'a> {
         recv: &Expr,
         locals: &Locals,
     ) -> Option<DoctrineQuerySource> {
-        match &unwrap_grouping(recv).kind {
+        match &recv.peeled().kind {
             ExprKind::MethodCall(qb, method, call_args, _)
                 if **method == *"getQuery" && call_args.is_empty() =>
             {

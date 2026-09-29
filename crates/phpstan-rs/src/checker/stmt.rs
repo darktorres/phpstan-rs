@@ -1166,7 +1166,7 @@ impl<'a> Checker<'a> {
             // unconditionally afterward, matching an ordinary stack
             // discipline regardless of how `then_branch`'s own check
             // returns.
-            let or_disjuncts = match &unwrap_grouping(cond).kind {
+            let or_disjuncts = match &cond.peeled().kind {
                 ExprKind::Binary(BinOp::Or | BinOp::LogicalOr, l, r) => {
                     Some(((**l).clone(), (**r).clone()))
                 }
@@ -1180,7 +1180,7 @@ impl<'a> Checker<'a> {
             // currently-recognized shape, matching this project's own
             // "narrow correctly first" precedent for a new fact-tracking
             // trigger.
-            let discriminant_subject = match &unwrap_grouping(cond).kind {
+            let discriminant_subject = match &cond.peeled().kind {
                 ExprKind::Variable(name) => Some(name.to_string()),
                 _ => None,
             };

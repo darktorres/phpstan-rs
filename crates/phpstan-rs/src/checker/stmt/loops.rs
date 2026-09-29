@@ -20,7 +20,7 @@ use types::Type;
 /// genuinely isn't preserved for that shape, only for a fresh `count()`
 /// re-evaluated in the condition itself.
 fn in_range_index_write_loop_vars(cond: &Expr) -> Option<(String, String)> {
-    let ExprKind::Binary(op, l, r) = &unwrap_grouping(cond).kind else {
+    let ExprKind::Binary(op, l, r) = &cond.peeled().kind else {
         return None;
     };
     if !matches!(op, BinOp::Lt | BinOp::Gt) {
@@ -37,10 +37,10 @@ fn in_range_index_write_loop_vars(cond: &Expr) -> Option<(String, String)> {
         (BinOp::Gt, true) => r,
         _ => return None,
     };
-    let ExprKind::Variable(idx_name) = &unwrap_grouping(idx_expr).kind else {
+    let ExprKind::Variable(idx_name) = &idx_expr.peeled().kind else {
         return None;
     };
-    let ExprKind::Variable(container_name) = &unwrap_grouping(count_arg).kind else {
+    let ExprKind::Variable(container_name) = &count_arg.peeled().kind else {
         return None;
     };
     Some((container_name.to_string(), idx_name.to_string()))

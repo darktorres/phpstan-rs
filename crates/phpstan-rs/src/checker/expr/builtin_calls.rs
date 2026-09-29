@@ -2443,13 +2443,11 @@ fn filter_validate_type_for_constant(name: &str) -> Option<Type> {
 /// what this is used for, so it just answers "is `target` definitely one
 /// of them" for whatever it does recognize.
 pub(crate) fn contains_flag_name(e: &Expr, target: &str) -> bool {
+    let e = e.peeled();
     syntax::stack::guard(|| match &e.kind {
         ExprKind::Name(name) => name.trim_start_matches('\\') == target,
         ExprKind::Binary(BinOp::BitOr, l, r) => {
             contains_flag_name(l, target) || contains_flag_name(r, target)
-        }
-        ExprKind::Grouping(inner) | ExprKind::ErrorSuppress(inner) => {
-            contains_flag_name(inner, target)
         }
         _ => false,
     })
@@ -2501,13 +2499,11 @@ fn narrow_array_element_type_to(relation: &Relation, ty: Type, target: &Type) ->
 /// (`JSON_HEX_TAG | JSON_HEX_AMP | ... | JSON_THROW_ON_ERROR`). Tolerates
 /// a leading-backslash global name (`\JSON_THROW_ON_ERROR`) too.
 fn contains_json_throw_on_error(e: &Expr) -> bool {
+    let e = e.peeled();
     syntax::stack::guard(|| match &e.kind {
         ExprKind::Name(name) => name.trim_start_matches('\\') == "JSON_THROW_ON_ERROR",
         ExprKind::Binary(BinOp::BitOr, l, r) => {
             contains_json_throw_on_error(l) || contains_json_throw_on_error(r)
-        }
-        ExprKind::Grouping(inner) | ExprKind::ErrorSuppress(inner) => {
-            contains_json_throw_on_error(inner)
         }
         _ => false,
     })

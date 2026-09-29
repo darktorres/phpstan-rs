@@ -26,12 +26,10 @@ use syntax::ast::{Arg, Expr, ExprKind};
 /// `->getQuery()`), but costs a real `Expr` clone per assignment,
 /// project-wide; this keeps that cost to the rare, actually-relevant one.
 fn looks_like_query_builder_chain(e: &Expr) -> bool {
+    let e = e.peeled();
     syntax::stack::guard(|| match &e.kind {
         ExprKind::MethodCall(_, method, _, _) if **method == *"createQueryBuilder" => true,
         ExprKind::MethodCall(inner, _, _, _) => looks_like_query_builder_chain(inner),
-        ExprKind::Grouping(inner) | ExprKind::ErrorSuppress(inner) => {
-            looks_like_query_builder_chain(inner)
-        }
         _ => false,
     })
 }
@@ -150,7 +148,7 @@ impl<'a> Checker<'a> {
         let mut calls: Vec<ChainCall> = Vec::new();
         let mut cursor = Cursor::Borrowed(recv);
         loop {
-            match &cursor.kind {
+            match &cursor.peeled().kind {
                 // `createQueryBuilder(...)` is the chain root itself
                 // (`resolve_chain_root`'s own job to interpret), not
                 // just another call to collect and descend past -
@@ -163,9 +161,6 @@ impl<'a> Checker<'a> {
                         args: args.clone(),
                     });
                     cursor = Cursor::Owned(std::rc::Rc::new((**inner).clone()));
-                }
-                ExprKind::Grouping(inner) | ExprKind::ErrorSuppress(inner) => {
-                    cursor = Cursor::Owned(std::rc::Rc::new((**inner).clone()))
                 }
                 // `$qb = $this->createQueryBuilder(...)->...; ...; $qb->
                 // getQuery()...` - a chain split into a variable before

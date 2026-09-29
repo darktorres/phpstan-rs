@@ -34,8 +34,8 @@ use rustc_hash::FxHashSet;
 use std::path::{Path, PathBuf};
 
 use crate::registry::Registry;
+use syntax::ast::literal_string_value;
 use syntax::ast::{Arg, Expr, ExprKind, StaticTarget, Stmt, StmtKind};
-use syntax::ast::{literal_string_value, unwrap_grouping};
 use types::Type;
 
 /// The seven Pest functions whose closure argument gets `$this` rebound.
@@ -88,7 +88,7 @@ pub(crate) fn file_local_this_type(program: &[Stmt]) -> Option<Type> {
         let StmtKind::Expression(e) = &stmt.kind else {
             return None;
         };
-        let ExprKind::Call(callee, args) = &unwrap_grouping(e).kind else {
+        let ExprKind::Call(callee, args) = &e.peeled().kind else {
             return None;
         };
         let ExprKind::Name(name) = &callee.kind else {
@@ -132,7 +132,7 @@ pub(crate) fn file_local_hook_properties(program: &[Stmt]) -> FxHashSet<String> 
         let StmtKind::Expression(e) = &stmt.kind else {
             continue;
         };
-        let ExprKind::Call(callee, args) = &unwrap_grouping(e).kind else {
+        let ExprKind::Call(callee, args) = &e.peeled().kind else {
             continue;
         };
         let ExprKind::Name(name) = &callee.kind else {
@@ -162,8 +162,7 @@ fn collect_hook_closure_properties(expr: &Expr, props: &mut FxHashSet<String>) {
         let StmtKind::Expression(e) = &stmt.kind else {
             continue;
         };
-        let (ExprKind::Assign(lhs, _) | ExprKind::AssignRef(lhs, _)) = &unwrap_grouping(e).kind
-        else {
+        let (ExprKind::Assign(lhs, _) | ExprKind::AssignRef(lhs, _)) = &e.peeled().kind else {
             continue;
         };
         let ExprKind::PropertyAccess(base, prop, _) = &lhs.kind else {
@@ -185,7 +184,7 @@ fn collect_hook_closure_properties(expr: &Expr, props: &mut FxHashSet<String>) {
 /// arguments, or `None` if the chain doesn't bottom out in a real
 /// `uses(...)` call.
 fn walk_uses_chain<'e>(expr: &'e Expr, hook_props: &mut FxHashSet<String>) -> Option<&'e [Arg]> {
-    syntax::stack::guard(|| match &unwrap_grouping(expr).kind {
+    syntax::stack::guard(|| match &expr.peeled().kind {
         ExprKind::Call(callee, args) => {
             let ExprKind::Name(name) = &callee.kind else {
                 return None;
@@ -234,8 +233,7 @@ impl PestConfig {
                 let StmtKind::Expression(e) = &stmt.kind else {
                     continue;
                 };
-                let ExprKind::MethodCall(inner, method, in_args, _) = &unwrap_grouping(e).kind
-                else {
+                let ExprKind::MethodCall(inner, method, in_args, _) = &e.peeled().kind else {
                     continue;
                 };
                 if **method != *"in" {

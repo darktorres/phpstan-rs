@@ -34,6 +34,7 @@ impl<'a> Checker<'a> {
     }
 
     fn numeric_literal_value(&self, e: &Expr) -> Option<f64> {
+        let e = e.peeled();
         syntax::stack::guard(|| match &e.kind {
             ExprKind::Literal(Literal::Int(i)) => Some(*i as f64),
             ExprKind::Literal(Literal::Float(f)) => Some(*f),
@@ -45,9 +46,6 @@ impl<'a> Checker<'a> {
             ExprKind::Unary(UnaryOp::Neg, inner) => self.numeric_literal_value(inner).map(|v| -v),
             ExprKind::Unary(UnaryOp::Plus, inner) => self.numeric_literal_value(inner),
             ExprKind::Cast(cast, inner) if cast.kind() == CastKind::String => {
-                self.numeric_literal_value(inner)
-            }
-            ExprKind::Grouping(inner) | ExprKind::ErrorSuppress(inner) => {
                 self.numeric_literal_value(inner)
             }
             _ => None,

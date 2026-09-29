@@ -1766,20 +1766,19 @@ impl<'a> Checker<'a> {
             let StmtKind::Expression(e) = &stmt.kind else {
                 return;
             };
-            let ExprKind::Assign(lhs, rhs) = &unwrap_grouping(e).kind else {
+            let ExprKind::Assign(lhs, rhs) = &e.peeled().kind else {
                 return;
             };
-            let ExprKind::PropertyAccess(recv, prop_name, false) = &unwrap_grouping(lhs).kind
-            else {
+            let ExprKind::PropertyAccess(recv, prop_name, false) = &lhs.peeled().kind else {
                 return;
             };
-            if !matches!(&unwrap_grouping(recv).kind, ExprKind::Variable(v) if **v == *"this") {
+            if !matches!(&recv.peeled().kind, ExprKind::Variable(v) if **v == *"this") {
                 return;
             }
             if **prop_name != *param.name {
                 return;
             }
-            if !matches!(&unwrap_grouping(rhs).kind, ExprKind::Variable(v) if v == &param.name) {
+            if !matches!(&rhs.peeled().kind, ExprKind::Variable(v) if v == &param.name) {
                 return;
             }
             let Some(prop) = c.properties.iter().find(|p| *p.name == **prop_name) else {
@@ -1943,7 +1942,7 @@ fn body_calls_parent_construct(stmts: &[Stmt]) -> bool {
 
 fn stmt_calls_parent_construct(stmt: &Stmt) -> bool {
     if let StmtKind::Expression(e) = &stmt.kind
-        && let ExprKind::StaticCall(class, method, _) = &unwrap_grouping(e).kind
+        && let ExprKind::StaticCall(class, method, _) = &e.peeled().kind
         && class
             .as_name()
             .is_some_and(|n| n.eq_ignore_ascii_case("parent"))

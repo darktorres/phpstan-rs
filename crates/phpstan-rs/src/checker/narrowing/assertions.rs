@@ -77,7 +77,7 @@ impl<'a> Checker<'a> {
         haystack: &Expr,
         locals: &Locals,
     ) -> Option<(Type, Option<Type>)> {
-        if let ExprKind::ArrayLiteral(items) = &unwrap_grouping(haystack).kind
+        if let ExprKind::ArrayLiteral(items) = &haystack.peeled().kind
             && let Some(target) = self.in_array_target_type(items, locals)
         {
             let excluded = single_values_of(&target);

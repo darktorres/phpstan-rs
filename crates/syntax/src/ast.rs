@@ -1140,6 +1140,15 @@ pub struct Expr {
 }
 
 impl Expr {
+    /// This expression inside any parentheses and `@`s: what it
+    /// evaluates to, the wrappers being transparent.
+    pub fn peeled(&self) -> &Expr {
+        crate::stack::guard(|| match &self.kind {
+            ExprKind::Grouping(inner) | ExprKind::ErrorSuppress(inner) => inner.peeled(),
+            _ => self,
+        })
+    }
+
     /// The expression's kind, taken out of it.
     pub fn into_kind(mut self) -> ExprKind {
         std::mem::replace(&mut self.kind, ExprKind::Literal(Literal::Null))
@@ -1352,19 +1361,6 @@ pub fn match_default(arms: &[MatchArm]) -> Option<&Expr> {
         .map(|arm| &arm.body)
 }
 
-/// Peels through any `(...)`-grouping wrapper(s) to the real expression
-/// underneath - `ExprKind::Grouping` is a genuine, distinct AST node,
-/// not something parens collapse away during parsing, so a closure-
-/// literal-shaped check like the `Closure::bind`/`->bindTo()` special-
-/// casing needs to see through `(function () {...})` the same as a bare
-/// `function () {...}`.
-pub fn unwrap_grouping(e: &Expr) -> &Expr {
-    crate::stack::guard(|| match &e.kind {
-        ExprKind::Grouping(inner) | ExprKind::ErrorSuppress(inner) => unwrap_grouping(inner),
-        _ => e,
-    })
-}
-
 /// A literal string's text, or a statically-foldable `.`-concatenation of
 /// nothing but literal strings (and parenthesized groupings of the same),
 /// folded into one owned value. `None` for anything not fully foldable
@@ -1375,9 +1371,9 @@ pub fn unwrap_grouping(e: &Expr) -> &Expr {
 /// resolved here even if a caller's type tracking knows it's a literal
 /// value, since this function only sees the raw `Expr`.
 pub fn literal_string_value(e: &Expr) -> Option<std::borrow::Cow<'_, str>> {
+    let e = e.peeled();
     crate::stack::guard(|| match &e.kind {
         ExprKind::Literal(Literal::String(s)) => s.as_str().map(std::borrow::Cow::Borrowed),
-        ExprKind::Grouping(inner) | ExprKind::ErrorSuppress(inner) => literal_string_value(inner),
         ExprKind::Binary(BinOp::Concat, lhs, rhs) => {
             let l = literal_string_value(lhs)?;
             let r = literal_string_value(rhs)?;

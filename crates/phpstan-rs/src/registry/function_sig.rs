@@ -414,6 +414,7 @@ fn infer_const_type_with(
 ) -> Type {
     syntax::stack::guard(|| {
         use syntax::ast::Literal;
+        let value = value.peeled();
         match &value.kind {
             ExprKind::Literal(Literal::Int(n)) => Type::int_literal(*n),
             ExprKind::Literal(Literal::Float(_)) => Type::float(),
@@ -443,9 +444,6 @@ fn infer_const_type_with(
             // widen every array literal/argument this const then feeds
             // into.
             ExprKind::Binary(syntax::ast::BinOp::Concat, ..) => Type::string(),
-            ExprKind::Grouping(inner) | ExprKind::ErrorSuppress(inner) => {
-                infer_const_type_with(inner, class_const_ref)
-            }
             ExprKind::ClassConstFetch(StaticTarget::Name(class, _), name) => {
                 class_const_ref(class, name).unwrap_or(Type::mixed())
             }

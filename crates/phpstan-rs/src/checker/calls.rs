@@ -499,7 +499,7 @@ impl<'a> Checker<'a> {
             }
             let index = positional_index;
             positional_index += 1;
-            let literal = match &unwrap_grouping(&arg.value).kind {
+            let literal = match &arg.value.peeled().kind {
                 ExprKind::Literal(Literal::Bool(v)) => *v,
                 _ => continue,
             };
@@ -548,7 +548,7 @@ impl<'a> Checker<'a> {
             }
             let index = positional_index;
             positional_index += 1;
-            if let ExprKind::Variable(_) = &unwrap_grouping(&arg.value).kind {
+            if let ExprKind::Variable(_) = &arg.value.peeled().kind {
                 positional.push((index, &arg.value));
             }
         }
@@ -557,10 +557,10 @@ impl<'a> Checker<'a> {
             if *j != *i + 1 {
                 continue;
             }
-            let ExprKind::Variable(a_name) = &unwrap_grouping(a).kind else {
+            let ExprKind::Variable(a_name) = &a.peeled().kind else {
                 continue;
             };
-            let ExprKind::Variable(b_name) = &unwrap_grouping(b).kind else {
+            let ExprKind::Variable(b_name) = &b.peeled().kind else {
                 continue;
             };
             let (Some(param_a), Some(param_b)) = (sig.params().get(*i), sig.params().get(*j))
@@ -630,7 +630,7 @@ impl<'a> Checker<'a> {
         let Some(pattern_arg) = args.first() else {
             return;
         };
-        let pattern_expr = unwrap_grouping(&pattern_arg.value);
+        let pattern_expr = pattern_arg.value.peeled();
         let ExprKind::Binary(BinOp::Concat, _, _) = &pattern_expr.kind else {
             return;
         };
@@ -696,7 +696,7 @@ impl<'a> Checker<'a> {
         callable_expr: &Expr,
         locals: &Locals,
     ) -> Option<&FunctionReflection> {
-        let callable_expr = unwrap_grouping(callable_expr);
+        let callable_expr = callable_expr.peeled();
         if let Some(name) = literal_string_value(callable_expr) {
             return self.registry.lookup_function(name.trim_start_matches('\\'));
         }
@@ -765,7 +765,7 @@ impl<'a> Checker<'a> {
                 return;
             };
             let sig = sig.clone();
-            let ExprKind::ArrayLiteral(items) = &unwrap_grouping(&args[1].value).kind else {
+            let ExprKind::ArrayLiteral(items) = &args[1].value.peeled().kind else {
                 return;
             };
             if items.iter().any(|item| item.spread || item.key.is_some()) {
@@ -908,7 +908,7 @@ pub(crate) fn call_arg_param_name_hints(
 /// function call) - don't guess.
 fn concat_leftmost_delimiter(e: &Expr) -> Option<char> {
     syntax::stack::guard(|| {
-        let e = unwrap_grouping(e);
+        let e = e.peeled();
         if let ExprKind::Binary(BinOp::Concat, l, _) = &e.kind {
             return concat_leftmost_delimiter(l);
         }
@@ -922,14 +922,14 @@ fn concat_leftmost_delimiter(e: &Expr) -> Option<char> {
 /// argument list found anywhere in it.
 fn find_preg_quote_calls<'a>(e: &'a Expr, out: &mut Vec<&'a [Arg]>) {
     syntax::stack::guard(|| {
-        let e = unwrap_grouping(e);
+        let e = e.peeled();
         match &e.kind {
             ExprKind::Binary(BinOp::Concat, l, r) => {
                 find_preg_quote_calls(l, out);
                 find_preg_quote_calls(r, out);
             }
             ExprKind::Call(callee, args) => {
-                if let ExprKind::Name(n) = &unwrap_grouping(callee).kind
+                if let ExprKind::Name(n) = &callee.peeled().kind
                     && n.rsplit('\\')
                         .next()
                         .unwrap_or(n)
@@ -952,7 +952,7 @@ fn find_preg_quote_calls<'a>(e: &'a Expr, out: &mut Vec<&'a [Arg]>) {
 /// location, which is exactly what passing an argument by reference
 /// needs.
 pub(crate) fn contains_nullsafe_access(expr: &Expr) -> bool {
-    syntax::stack::guard(|| match &unwrap_grouping(expr).kind {
+    syntax::stack::guard(|| match &expr.peeled().kind {
         ExprKind::PropertyAccess(base, _, nullsafe) => *nullsafe || contains_nullsafe_access(base),
         ExprKind::MethodCall(base, _, _, nullsafe) => *nullsafe || contains_nullsafe_access(base),
         ExprKind::DynamicPropertyAccess(base, _) => contains_nullsafe_access(base),
@@ -981,7 +981,7 @@ pub(crate) fn contains_nullsafe_access(expr: &Expr) -> bool {
 /// conservatively treated as illegal.
 pub(crate) fn is_valid_byref_argument_expr(expr: &Expr) -> bool {
     matches!(
-        unwrap_grouping(expr).kind,
+        expr.peeled().kind,
         ExprKind::Variable(_)
             | ExprKind::DynamicVariable(_)
             | ExprKind::Index(_, _)

@@ -21,8 +21,8 @@ use types::Type;
 /// what lets `is_int($x['k'] ?? null)` see `$x['k']`'s own true type
 /// (`int|null`), not the coalesce result's already-narrower one.
 pub(crate) fn narrowing_infer_target(e: &Expr) -> &Expr {
+    let e = e.peeled();
     syntax::stack::guard(|| match &e.kind {
-        ExprKind::Grouping(inner) | ExprKind::ErrorSuppress(inner) => narrowing_infer_target(inner),
         ExprKind::Binary(BinOp::Coalesce, lhs, rhs)
             if matches!(&rhs.kind, ExprKind::Literal(Literal::Null)) =>
         {
@@ -63,6 +63,7 @@ pub(crate) fn narrowing_infer_target(e: &Expr) -> &Expr {
 /// `bind_assignment_target`.
 pub(crate) fn narrowing_key(e: &Expr) -> Option<String> {
     syntax::stack::guard(|| {
+        let e = e.peeled();
         match &e.kind {
             // No prefix - `locals` is keyed by bare variable name everywhere
             // else in this checker (`ExprKind::Variable(name) => locals.get(name)`),
@@ -129,7 +130,6 @@ pub(crate) fn narrowing_key(e: &Expr) -> Option<String> {
             // `Assign` node directly as the comparison's own operand - but
             // plenty of real code still writes the parens out of habit, so
             // both arms stay.
-            ExprKind::Grouping(inner) | ExprKind::ErrorSuppress(inner) => narrowing_key(inner),
             // `is_int($decoded['status'] ?? null)` - a
             // common defensive-coding idiom (json_decode results,
             // `$_SERVER`/`$_GET` reads, ...). Scoped to a literal `null`
@@ -205,12 +205,12 @@ pub(crate) fn is_real_variable_key(key: &str) -> bool {
 /// Returns `(pattern_arg, matches_arg, branch_true_means_matched)`.
 pub(crate) fn preg_match_condition(cond: &Expr) -> Option<(&Expr, &Expr, bool)> {
     fn as_preg_match_args(e: &Expr) -> Option<&[Arg]> {
+        let e = e.peeled();
         match &e.kind {
             ExprKind::Call(callee, args) => match &callee.kind {
                 ExprKind::Name(name) if name.trim_start_matches('\\') == "preg_match" => Some(args),
                 _ => None,
             },
-            ExprKind::Grouping(inner) | ExprKind::ErrorSuppress(inner) => as_preg_match_args(inner),
             _ => None,
         }
     }
@@ -406,14 +406,12 @@ impl<'a> Checker<'a> {
         locals: &Locals,
     ) -> Option<(String, Type, &'e Expr)> {
         syntax::stack::guard(|| {
+            let cond = cond.peeled();
             match &cond.kind {
                 ExprKind::Binary(BinOp::Or | BinOp::LogicalOr, l, r) => {
                     let (lk, lt, le) = self.or_chain_narrowing_target(l, locals)?;
                     let (rk, rt, _) = self.or_chain_narrowing_target(r, locals)?;
                     (lk == rk).then(|| (lk, Type::union(lt, rt), le))
-                }
-                ExprKind::Grouping(inner) | ExprKind::ErrorSuppress(inner) => {
-                    self.or_chain_narrowing_target(inner, locals)
                 }
                 ExprKind::Call(callee, args) => {
                     let (ExprKind::Name(name), [single_arg]) = (&callee.kind, args.as_slice())
@@ -476,14 +474,12 @@ impl<'a> Checker<'a> {
         cond: &'e Expr,
         locals: &Locals,
     ) -> Option<(String, Type, &'e Expr)> {
+        let cond = cond.peeled();
         syntax::stack::guard(|| match &cond.kind {
             ExprKind::Binary(BinOp::And | BinOp::LogicalAnd, l, r) => {
                 let (lk, lt, le) = self.and_chain_narrowing_target(l, locals)?;
                 let (rk, rt, _) = self.and_chain_narrowing_target(r, locals)?;
                 (lk == rk).then(|| (lk, Type::union(lt, rt), le))
-            }
-            ExprKind::Grouping(inner) | ExprKind::ErrorSuppress(inner) => {
-                self.and_chain_narrowing_target(inner, locals)
             }
             ExprKind::Unary(UnaryOp::Not, inner) => self.or_chain_narrowing_target(inner, locals),
             _ => None,

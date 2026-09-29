@@ -9,7 +9,6 @@
 //! project already accepts for its PCRE work.
 
 use crate::checker::Checker;
-use syntax::ast::unwrap_grouping;
 use syntax::ast::{Arg, ExprKind, Literal};
 use syntax::token::Span;
 
@@ -31,7 +30,7 @@ impl<'a> Checker<'a> {
         if arg.name.is_some() || arg.spread {
             return;
         }
-        let ExprKind::Literal(Literal::String(xml)) = &unwrap_grouping(&arg.value).kind else {
+        let ExprKind::Literal(Literal::String(xml)) = &arg.value.peeled().kind else {
             return;
         };
         if let Some(xml) = xml.as_str()
@@ -57,7 +56,7 @@ impl<'a> Checker<'a> {
         if arg.name.is_some() || arg.spread {
             return;
         }
-        let ExprKind::Literal(Literal::String(xml)) = &unwrap_grouping(&arg.value).kind else {
+        let ExprKind::Literal(Literal::String(xml)) = &arg.value.peeled().kind else {
             return;
         };
         if let Some(xml) = xml.as_str()

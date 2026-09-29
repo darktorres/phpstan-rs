@@ -10,7 +10,6 @@
 //! namespace-restricted `NCName` one.
 
 use crate::checker::Checker;
-use syntax::ast::unwrap_grouping;
 use syntax::ast::{Arg, ExprKind, Literal};
 use syntax::token::Span;
 
@@ -34,7 +33,7 @@ impl<'a> Checker<'a> {
         if arg.name.is_some() || arg.spread {
             return;
         }
-        let ExprKind::Literal(Literal::String(name)) = &unwrap_grouping(&arg.value).kind else {
+        let ExprKind::Literal(Literal::String(name)) = &arg.value.peeled().kind else {
             return;
         };
         if name.as_str().is_none_or(is_valid_xml_name) {

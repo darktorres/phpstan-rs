@@ -645,6 +645,7 @@ impl<'a> Checker<'a> {
 /// caught by this check's own manual verification pass, not a test
 /// written in advance of knowing this gap existed.
 fn expr_reads_a_mutable_property(e: &Expr) -> bool {
+    let e = e.peeled();
     syntax::stack::guard(|| match &e.kind {
         ExprKind::PropertyAccess(..) | ExprKind::DynamicPropertyAccess(..) => true,
         ExprKind::StaticPropertyFetch(..) => true,
@@ -659,9 +660,7 @@ fn expr_reads_a_mutable_property(e: &Expr) -> bool {
         ExprKind::Binary(_, l, r) => {
             expr_reads_a_mutable_property(l) || expr_reads_a_mutable_property(r)
         }
-        ExprKind::Unary(_, inner) | ExprKind::Grouping(inner) | ExprKind::ErrorSuppress(inner) => {
-            expr_reads_a_mutable_property(inner)
-        }
+        ExprKind::Unary(_, inner) => expr_reads_a_mutable_property(inner),
         ExprKind::Index(base, idx) => {
             expr_reads_a_mutable_property(base)
                 || idx.as_deref().is_some_and(expr_reads_a_mutable_property)

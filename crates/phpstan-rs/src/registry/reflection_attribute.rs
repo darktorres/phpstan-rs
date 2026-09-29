@@ -113,6 +113,7 @@ fn argument(arg: &Arg, ctx: &NameContext) -> AttributeArgument {
 }
 
 fn value(expr: &Expr, ctx: &NameContext) -> AttributeValue {
+    let expr = expr.peeled();
     syntax::stack::guard(|| match &expr.kind {
         ExprKind::Literal(Literal::Null) => AttributeValue::Null,
         ExprKind::Literal(Literal::Bool(b)) => AttributeValue::Bool(*b),
@@ -162,7 +163,6 @@ fn value(expr: &Expr, ctx: &NameContext) -> AttributeValue {
             }
             AttributeValue::BitOr(operands)
         }
-        ExprKind::Grouping(inner) | ExprKind::ErrorSuppress(inner) => value(inner, ctx),
         _ => AttributeValue::Unsupported,
     })
 }

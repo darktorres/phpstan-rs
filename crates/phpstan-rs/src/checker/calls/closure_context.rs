@@ -90,9 +90,8 @@ impl<'a> Checker<'a> {
         locals: &mut Locals,
         label: &str,
     ) -> bool {
+        let closure_expr = closure_expr.peeled();
         match &closure_expr.kind {
-            ExprKind::Grouping(inner) | ExprKind::ErrorSuppress(inner) => self
-                .check_closure_literal_with_param_overrides(inner, param_overrides, locals, label),
             ExprKind::ArrowFn {
                 params,
                 body,

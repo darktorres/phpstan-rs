@@ -26,7 +26,6 @@ use crate::checker::expr::contains_flag_name;
 use crate::checker::xml_name::is_valid_xml_name;
 use crate::checker::xml_wellformedness::is_well_formed_xml;
 use crate::checker::{Checker, Locals};
-use syntax::ast::unwrap_grouping;
 use syntax::ast::{Arg, ExprKind, Literal, UnaryOp};
 use types::Type;
 
@@ -40,9 +39,9 @@ fn literal_int_value(a: &Arg) -> Option<i64> {
     if a.name.is_some() || a.spread {
         return None;
     }
-    match &unwrap_grouping(&a.value).kind {
+    match &a.value.peeled().kind {
         ExprKind::Literal(Literal::Int(n)) => Some(*n),
-        ExprKind::Unary(UnaryOp::Neg, inner) => match &unwrap_grouping(inner).kind {
+        ExprKind::Unary(UnaryOp::Neg, inner) => match &inner.peeled().kind {
             ExprKind::Literal(Literal::Int(n)) => Some(-*n),
             _ => None,
         },
@@ -138,7 +137,7 @@ impl<'a> Checker<'a> {
                 if arg.name.is_some() || arg.spread {
                     return None;
                 }
-                match &unwrap_grouping(&arg.value).kind {
+                match &arg.value.peeled().kind {
                     // Same `void` sentinel as `intdiv` above.
                     ExprKind::Literal(Literal::String(spec)) => {
                         if is_valid_date_interval_spec(&spec.to_str_lossy()) {
@@ -159,7 +158,7 @@ impl<'a> Checker<'a> {
                 if arg.name.is_some() || arg.spread {
                     return Some(throwable("Exception"));
                 }
-                match &unwrap_grouping(&arg.value).kind {
+                match &arg.value.peeled().kind {
                     ExprKind::Literal(Literal::String(xml)) => {
                         if xml
                             .as_str()
@@ -196,7 +195,7 @@ impl<'a> Checker<'a> {
             if arg.name.is_some() || arg.spread {
                 return Some(throwable("DOMException"));
             }
-            return match &unwrap_grouping(&arg.value).kind {
+            return match &arg.value.peeled().kind {
                 ExprKind::Literal(Literal::String(name)) => {
                     if name.as_str().is_some_and(is_valid_xml_name) {
                         Some(Type::void())

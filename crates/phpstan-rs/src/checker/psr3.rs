@@ -341,6 +341,7 @@ impl<'a> Checker<'a> {
     }
 
     fn is_risky_log_expr(&self, e: &Expr, locals: &Locals) -> bool {
+        let e = e.peeled();
         syntax::stack::guard(|| match &e.kind {
             ExprKind::Binary(BinOp::Concat, l, r) => {
                 self.is_risky_log_expr(l, locals) || self.is_risky_log_expr(r, locals)
@@ -349,9 +350,6 @@ impl<'a> Checker<'a> {
                 !matches!(part.kind, ExprKind::Literal(Literal::String(_)))
                     && self.is_risky_value(part, locals)
             }),
-            ExprKind::Grouping(inner) | ExprKind::ErrorSuppress(inner) => {
-                self.is_risky_log_expr(inner, locals)
-            }
             _ => false,
         })
     }

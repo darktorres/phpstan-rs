@@ -32,7 +32,6 @@ use syntax::visit::{Visitor, any_stmt_in_body, walk_expr_in_scope, walk_stmt};
 use types::{Shape, Type};
 
 use super::Registry;
-use syntax::ast::unwrap_grouping;
 use syntax::name_resolution::NameContext;
 
 /// Mirrors `types::MAX_UNION_MEMBERS`'s own naming style -
@@ -294,7 +293,7 @@ fn path_ends_with_suffix(path: &Path, suffix: &str) -> bool {
 /// suffix needs to match a real file's path, never the constant's actual
 /// value.
 fn resolve_include_target_suffix(expr: &Expr) -> Option<String> {
-    syntax::stack::guard(|| match &unwrap_grouping(expr).kind {
+    syntax::stack::guard(|| match &expr.peeled().kind {
         ExprKind::Literal(Literal::String(s)) => Some(s.to_string()),
         ExprKind::Name(_) => Some(String::new()),
         ExprKind::Binary(BinOp::Concat, l, r) => {
@@ -481,7 +480,7 @@ fn handle_assignment_target<'a>(
     out: &mut WalkOutput<'a>,
     force_mixed: bool,
 ) {
-    match &unwrap_grouping(lhs).kind {
+    match &lhs.peeled().kind {
         ExprKind::Variable(name) if is_site(name) => {
             let contribution = if force_mixed {
                 SiteContribution::WholeValue(Type::mixed())
@@ -499,7 +498,7 @@ fn handle_assignment_target<'a>(
         }
         ExprKind::Index(base, key_opt) => {
             if let Some(key) = key_opt
-                && let ExprKind::Variable(name) = &unwrap_grouping(base).kind
+                && let ExprKind::Variable(name) = &base.peeled().kind
                 && is_site(name)
                 && let Some(key_str) = literal_string_key(key)
             {
@@ -554,10 +553,10 @@ fn handle_assignment_target<'a>(
 /// case, `key.as_ref()` on `None` already falls through to `None`).
 fn root_variable_and_first_key(expr: &Expr) -> Option<(&Arc<str>, String)> {
     syntax::stack::guard(|| {
-        let ExprKind::Index(base, key) = &unwrap_grouping(expr).kind else {
+        let ExprKind::Index(base, key) = &expr.peeled().kind else {
             return None;
         };
-        match &unwrap_grouping(base).kind {
+        match &base.peeled().kind {
             ExprKind::Variable(name) => key
                 .as_deref()
                 .and_then(literal_string_key)
@@ -580,16 +579,16 @@ fn array_merge_self_fields(
     ctx: &NameContext,
     registry: &Registry,
 ) -> Option<Vec<FieldContribution>> {
-    let ExprKind::Call(callee, args) = &unwrap_grouping(rhs).kind else {
+    let ExprKind::Call(callee, args) = &rhs.peeled().kind else {
         return None;
     };
-    let ExprKind::Name(callee_name) = &unwrap_grouping(callee).kind else {
+    let ExprKind::Name(callee_name) = &callee.peeled().kind else {
         return None;
     };
     if callee_name != "array_merge" || args.len() != 2 {
         return None;
     }
-    let ExprKind::Variable(first_name) = &unwrap_grouping(&args[0].value).kind else {
+    let ExprKind::Variable(first_name) = &args[0].value.peeled().kind else {
         return None;
     };
     if first_name != name {
@@ -611,7 +610,7 @@ fn array_merge_self_fields(
 }
 
 fn literal_string_key(expr: &Expr) -> Option<String> {
-    match &unwrap_grouping(expr).kind {
+    match &expr.peeled().kind {
         ExprKind::Literal(Literal::String(s)) => Some(s.to_string()),
         ExprKind::Literal(Literal::Int(n)) => Some(n.to_string()),
         _ => None,
@@ -623,10 +622,10 @@ fn literal_string_key(expr: &Expr) -> Option<String> {
 /// `Locals`, neither exists yet at this point in the pipeline.
 fn resolve_static_expr_type(expr: &Expr, registry: &Registry, ctx: &NameContext) -> Type {
     syntax::stack::guard(|| {
-        let expr = unwrap_grouping(expr);
+        let expr = expr.peeled();
         match &expr.kind {
             ExprKind::New(callee, _args) => {
-                if let ExprKind::Name(name) = &unwrap_grouping(callee).kind {
+                if let ExprKind::Name(name) = &callee.peeled().kind {
                     return Type::object(ctx.resolve(name).into(), vec![]);
                 }
                 Type::mixed()
@@ -646,7 +645,7 @@ fn resolve_static_expr_type(expr: &Expr, registry: &Registry, ctx: &NameContext)
                 Type::array_shape(Shape::from_named(fields))
             }
             ExprKind::Call(callee, _args) => {
-                let ExprKind::Name(name) = &unwrap_grouping(callee).kind else {
+                let ExprKind::Name(name) = &callee.peeled().kind else {
                     return Type::mixed();
                 };
                 let (primary, fallback) = ctx.resolve_function_candidates(name);

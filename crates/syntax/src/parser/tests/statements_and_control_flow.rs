@@ -271,7 +271,7 @@ fn error_suppression_is_kept_as_a_node() {
         panic!("expected an error suppression, got {:?}", rhs.kind);
     };
     assert!(matches!(&inner.kind, ExprKind::Call(..)));
-    assert!(matches!(&unwrap_grouping(rhs).kind, ExprKind::Call(..)));
+    assert!(matches!(&rhs.peeled().kind, ExprKind::Call(..)));
 }
 
 #[test]

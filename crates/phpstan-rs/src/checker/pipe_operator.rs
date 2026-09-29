@@ -54,12 +54,12 @@ impl<'a> Checker<'a> {
     /// PHPStan's own `foreach` over zero parameters never entering its
     /// loop body at all.
     fn pipe_target_first_param_is_by_ref(&self, expr: &Expr, locals: &Locals) -> Option<bool> {
-        match &unwrap_grouping(expr).kind {
+        match &expr.peeled().kind {
             ExprKind::Closure { params, .. } | ExprKind::ArrowFn { params, .. } => {
                 Some(params.first().is_some_and(|p| p.by_ref))
             }
             ExprKind::FirstClassCallable(inner) => {
-                self.first_class_callable_first_param_by_ref(&unwrap_grouping(inner).kind, locals)
+                self.first_class_callable_first_param_by_ref(&inner.peeled().kind, locals)
             }
             ExprKind::Literal(Literal::String(name)) => self
                 .registry
@@ -72,11 +72,11 @@ impl<'a> Checker<'a> {
                     if recv_item.key.is_none() && method_item.key.is_none() =>
                 {
                     let ExprKind::Literal(Literal::String(method)) =
-                        &unwrap_grouping(&method_item.value).kind
+                        &method_item.value.peeled().kind
                     else {
                         return None;
                     };
-                    let class = match &unwrap_grouping(&recv_item.value).kind {
+                    let class = match &recv_item.value.peeled().kind {
                         ExprKind::Literal(Literal::String(name)) => name.to_string(),
                         _ => self
                             .infer_expr(&recv_item.value, locals)

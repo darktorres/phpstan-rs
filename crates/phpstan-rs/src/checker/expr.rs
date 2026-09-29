@@ -471,7 +471,7 @@ impl<'a> Checker<'a> {
                     }
                     if is_this_binding_call
                         && matches!(
-                            unwrap_grouping(&a.value).kind,
+                            a.value.peeled().kind,
                             ExprKind::Closure { .. } | ExprKind::ArrowFn { .. }
                         )
                     {
@@ -487,7 +487,7 @@ impl<'a> Checker<'a> {
                             _ => None,
                         };
                         self.check_closure_literal_with_this_and_scope(
-                            unwrap_grouping(&a.value),
+                            a.value.peeled(),
                             locals,
                             label,
                             this_ty,
@@ -496,12 +496,12 @@ impl<'a> Checker<'a> {
                         if self.settings.phpunit.check_risky_tests
                             && let Some(name) = pest_call_name
                         {
-                            self.check_pest_risky_test(name, unwrap_grouping(&a.value), e.span);
+                            self.check_pest_risky_test(name, a.value.peeled(), e.span);
                         }
                     } else if i == 0
                         && let Some(elem_ty) = &array_map_elem_override
                         && self.check_closure_literal_with_param_overrides(
-                            unwrap_grouping(&a.value),
+                            a.value.peeled(),
                             std::slice::from_ref(elem_ty),
                             locals,
                             label,
@@ -512,7 +512,7 @@ impl<'a> Checker<'a> {
                     } else if let Some((idx, overrides)) = &contextual_callback_override
                         && i == *idx
                         && self.check_closure_literal_with_param_overrides(
-                            unwrap_grouping(&a.value),
+                            a.value.peeled(),
                             overrides,
                             locals,
                             label,
@@ -525,7 +525,7 @@ impl<'a> Checker<'a> {
                         .and_then(|s| s.params().get(i))
                         .and_then(|p| p.closure_this_type().clone())
                         && matches!(
-                            unwrap_grouping(&a.value).kind,
+                            a.value.peeled().kind,
                             ExprKind::Closure { .. } | ExprKind::ArrowFn { .. }
                         )
                     {
@@ -538,7 +538,7 @@ impl<'a> Checker<'a> {
                         // a closure passed by variable falls through to
                         // plain `check_expr`, unchanged.
                         self.check_closure_literal_with_this_and_scope(
-                            unwrap_grouping(&a.value),
+                            a.value.peeled(),
                             locals,
                             label,
                             this_ty,
@@ -548,11 +548,11 @@ impl<'a> Checker<'a> {
                         .and_then(|s| s.params().get(i))
                         .and_then(|p| p.ty().callable_sig())
                         && matches!(
-                            unwrap_grouping(&a.value).kind,
+                            a.value.peeled().kind,
                             ExprKind::Closure { .. } | ExprKind::ArrowFn { .. }
                         )
                         && self.check_closure_literal_with_param_overrides(
-                            unwrap_grouping(&a.value),
+                            a.value.peeled(),
                             &callable_sig
                                 .params
                                 .iter()
@@ -953,7 +953,7 @@ impl<'a> Checker<'a> {
                 // `infer_expr` call there specifically.
                 let recv_ty = if **method == *"bindTo"
                     && matches!(
-                        unwrap_grouping(recv).kind,
+                        recv.peeled().kind,
                         ExprKind::Closure { .. } | ExprKind::ArrowFn { .. }
                     ) {
                     let this_ty = args
@@ -964,7 +964,7 @@ impl<'a> Checker<'a> {
                         .get(1)
                         .and_then(|a| self.literal_class_name_from_expr(&a.value));
                     self.check_closure_literal_with_this_and_scope(
-                        unwrap_grouping(recv),
+                        recv.peeled(),
                         locals,
                         label,
                         this_ty,
@@ -1125,14 +1125,14 @@ impl<'a> Checker<'a> {
                         .and_then(|p| p.closure_this_type().clone());
                     if let Some(this_ty) = closure_this
                         && matches!(
-                            unwrap_grouping(&a.value).kind,
+                            a.value.peeled().kind,
                             ExprKind::Closure { .. } | ExprKind::ArrowFn { .. }
                         )
                     {
                         // `@param-closure-this` - see `ExprKind::Call`'s
                         // identical branch.
                         self.check_closure_literal_with_this_and_scope(
-                            unwrap_grouping(&a.value),
+                            a.value.peeled(),
                             locals,
                             label,
                             this_ty,
@@ -1169,7 +1169,7 @@ impl<'a> Checker<'a> {
                     // recorded against.
                     let method_exists_guarded = !locals.guarded_methods.is_empty()
                         && matches!(
-                            &unwrap_grouping(recv).kind,
+                            &recv.peeled().kind,
                             ExprKind::Variable(name)
                                 if locals
                                     .guarded_methods
@@ -1894,8 +1894,8 @@ impl<'a> Checker<'a> {
                 // from the ordinary `narrowing_key` fast path, so this is
                 // deliberately gated to the dynamic-key case only.
                 if let ExprKind::Variable(target_name) = &lhs.kind
-                    && let ExprKind::Index(base, Some(idx)) = &unwrap_grouping(rhs).kind
-                    && let ExprKind::Variable(container_name) = &unwrap_grouping(base).kind
+                    && let ExprKind::Index(base, Some(idx)) = &rhs.peeled().kind
+                    && let ExprKind::Variable(container_name) = &base.peeled().kind
                     && literal_string_key(idx).is_none()
                 {
                     propagate_container_field_facts(locals, target_name, container_name);
@@ -2193,14 +2193,14 @@ impl<'a> Checker<'a> {
                         .and_then(|p| p.closure_this_type().clone());
                     if let Some(this_ty) = closure_this
                         && matches!(
-                            unwrap_grouping(&a.value).kind,
+                            a.value.peeled().kind,
                             ExprKind::Closure { .. } | ExprKind::ArrowFn { .. }
                         )
                     {
                         // `@param-closure-this` - see `ExprKind::Call`'s
                         // identical branch.
                         self.check_closure_literal_with_this_and_scope(
-                            unwrap_grouping(&a.value),
+                            a.value.peeled(),
                             locals,
                             label,
                             this_ty,
@@ -2459,7 +2459,7 @@ impl<'a> Checker<'a> {
                     && method == "bind"
                     && !args.is_empty()
                     && matches!(
-                        unwrap_grouping(&args[0].value).kind,
+                        args[0].value.peeled().kind,
                         ExprKind::Closure { .. } | ExprKind::ArrowFn { .. }
                     )
                 {
@@ -2471,7 +2471,7 @@ impl<'a> Checker<'a> {
                         .get(2)
                         .and_then(|a| self.literal_class_name_from_expr(&a.value));
                     self.check_closure_literal_with_this_and_scope(
-                        unwrap_grouping(&args[0].value),
+                        args[0].value.peeled(),
                         locals,
                         label,
                         this_ty,
@@ -2517,14 +2517,14 @@ impl<'a> Checker<'a> {
                             .and_then(|p| p.closure_this_type().clone());
                         if let Some(this_ty) = closure_this
                             && matches!(
-                                unwrap_grouping(&a.value).kind,
+                                a.value.peeled().kind,
                                 ExprKind::Closure { .. } | ExprKind::ArrowFn { .. }
                             )
                         {
                             // `@param-closure-this` - see
                             // `ExprKind::Call`'s identical branch.
                             self.check_closure_literal_with_this_and_scope(
-                                unwrap_grouping(&a.value),
+                                a.value.peeled(),
                                 locals,
                                 label,
                                 this_ty,
@@ -5663,7 +5663,7 @@ impl<'a> Checker<'a> {
             .callable_sig()
             .or_else(|| expected.union_members().iter().find_map(Type::callable_sig))?;
         let overrides: Vec<Type> = sig.params.iter().map(|p| p.ty.clone()).collect();
-        match &unwrap_grouping(arg).kind {
+        match &arg.peeled().kind {
             ExprKind::ArrowFn {
                 params,
                 return_type,
@@ -6191,15 +6191,13 @@ impl<'a> Checker<'a> {
 /// and re-widening its result to include `Null` here would risk masking
 /// further bugs rather than fixing anything.
 pub(crate) fn postfix_chain_has_nullsafe(base: &Expr) -> bool {
+    let base = base.peeled();
     syntax::stack::guard(|| match &base.kind {
         ExprKind::PropertyAccess(inner, _, nullsafe) => {
             *nullsafe || postfix_chain_has_nullsafe(inner)
         }
         ExprKind::MethodCall(inner, _, _, nullsafe) => {
             *nullsafe || postfix_chain_has_nullsafe(inner)
-        }
-        ExprKind::Grouping(inner) | ExprKind::ErrorSuppress(inner) => {
-            postfix_chain_has_nullsafe(inner)
         }
         _ => false,
     })

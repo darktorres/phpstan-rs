@@ -172,9 +172,9 @@ fn cond_references_variable(e: &Expr, name: &str) -> bool {
 /// `narrowing_key` only ever identifies the *subject*, not the value
 /// compared against.
 fn disjunctive_syllogism_atom_key(e: &Expr) -> Option<String> {
+    let e = e.peeled();
     let inner = match &e.kind {
         ExprKind::Cast(cast, inner) if cast.kind() == CastKind::Bool => inner,
-        ExprKind::Grouping(inner) | ExprKind::ErrorSuppress(inner) => inner,
         _ => e,
     };
     match &inner.kind {
@@ -211,7 +211,7 @@ impl<'a> Checker<'a> {
     /// A true `isset($a['x'][$k])` also proves every container along the
     /// chain held an offset - see `Type::to_isset_container`.
     fn narrow_isset_containers(&self, arg: &Expr, locals: &mut Locals) {
-        let mut e = unwrap_grouping(arg);
+        let mut e = arg.peeled();
         loop {
             let (base, lit_key) = match &e.kind {
                 ExprKind::Index(base, Some(idx)) => (base, crate::checker::literal_shape_key(idx)),
@@ -220,7 +220,7 @@ impl<'a> Checker<'a> {
                         let current = self.current_narrowed_type(base, &base_key, locals);
                         locals.insert(base_key, current.without(&Type::null()));
                     }
-                    e = unwrap_grouping(base);
+                    e = base.peeled();
                     continue;
                 }
                 _ => return,
@@ -232,7 +232,7 @@ impl<'a> Checker<'a> {
                     locals.insert(base_key, narrowed);
                 }
             }
-            e = unwrap_grouping(base);
+            e = base.peeled();
         }
     }
 
@@ -662,8 +662,8 @@ impl<'a> Checker<'a> {
         // already recurses into this for free (`if (function_exists('foo')
         // && ...)`).
         if branch_true
-            && let ExprKind::Call(callee, args) = &unwrap_grouping(cond).kind
-            && let ExprKind::Name(fn_name) = &unwrap_grouping(callee).kind
+            && let ExprKind::Call(callee, args) = &cond.peeled().kind
+            && let ExprKind::Name(fn_name) = &callee.peeled().kind
             && fn_name
                 .rsplit('\\')
                 .next()
@@ -679,8 +679,8 @@ impl<'a> Checker<'a> {
         // `class_exists('X')`'s true branch (or `interface_exists`,
         // `trait_exists`, `enum_exists`) proves the class-like `X` declared.
         if branch_true
-            && let ExprKind::Call(callee, args) = &unwrap_grouping(cond).kind
-            && let ExprKind::Name(fn_name) = &unwrap_grouping(callee).kind
+            && let ExprKind::Call(callee, args) = &cond.peeled().kind
+            && let ExprKind::Name(fn_name) = &callee.peeled().kind
             && matches!(
                 fn_name
                     .rsplit('\\')
@@ -700,8 +700,8 @@ impl<'a> Checker<'a> {
         // `defined('NAME')`'s true branch proves the global constant
         // `NAME` exists, the constant counterpart of `function_exists`.
         if branch_true
-            && let ExprKind::Call(callee, args) = &unwrap_grouping(cond).kind
-            && let ExprKind::Name(fn_name) = &unwrap_grouping(callee).kind
+            && let ExprKind::Call(callee, args) = &cond.peeled().kind
+            && let ExprKind::Name(fn_name) = &callee.peeled().kind
             && fn_name
                 .rsplit('\\')
                 .next()
@@ -724,10 +724,10 @@ impl<'a> Checker<'a> {
         // per-receiver fact instead of a global one): only the exact
         // (bare variable, literal string) shape is recognized.
         if branch_true
-            && let ExprKind::Call(callee, args) = &unwrap_grouping(cond).kind
-            && let ExprKind::Name(fn_name) = &unwrap_grouping(callee).kind
+            && let ExprKind::Call(callee, args) = &cond.peeled().kind
+            && let ExprKind::Name(fn_name) = &callee.peeled().kind
             && let [recv_arg, name_arg] = args.as_slice()
-            && let ExprKind::Variable(recv_name) = &unwrap_grouping(&recv_arg.value).kind
+            && let ExprKind::Variable(recv_name) = &recv_arg.value.peeled().kind
             && let Some(member_name) = literal_string_value(&name_arg.value)
         {
             let bare = fn_name.rsplit('\\').next().unwrap_or(fn_name);

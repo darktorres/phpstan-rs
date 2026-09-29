@@ -13,7 +13,7 @@ impl<'a> Checker<'a> {
         if !self.settings.extras.check_new_exception_discarded {
             return;
         }
-        let inner = unwrap_grouping(e);
+        let inner = e.peeled();
         if !matches!(inner.kind, ExprKind::New(..)) {
             return;
         }

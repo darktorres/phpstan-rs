@@ -33,7 +33,6 @@
 //! not a good trade for a rule whose whole point is confidence.
 
 use crate::checker::Checker;
-use syntax::ast::unwrap_grouping;
 use syntax::ast::{BinOp, Expr, ExprKind, Literal, UnaryOp};
 use syntax::token::Span;
 use types::Type;
@@ -685,17 +684,15 @@ pub(crate) fn binop_sigil(op: &BinOp) -> &'static str {
 /// mean "IS the same" there. Never a literal either - `1 === 1` isn't
 /// a copy-paste mistake the way `$x === $x` is.
 fn is_duplicate_side_effect_free_operand(l: &Expr, r: &Expr) -> bool {
-    syntax::stack::guard(
-        || match (&unwrap_grouping(l).kind, &unwrap_grouping(r).kind) {
-            (ExprKind::Variable(a), ExprKind::Variable(b)) => a == b,
-            (ExprKind::PropertyAccess(la, lp, ln), ExprKind::PropertyAccess(ra, rp, rn)) => {
-                ln == rn && lp.name == rp.name && is_duplicate_side_effect_free_operand(la, ra)
-            }
-            (ExprKind::Index(la, Some(li)), ExprKind::Index(ra, Some(ri))) => {
-                is_duplicate_side_effect_free_operand(la, ra)
-                    && is_duplicate_side_effect_free_operand(li, ri)
-            }
-            _ => false,
-        },
-    )
+    syntax::stack::guard(|| match (&l.peeled().kind, &r.peeled().kind) {
+        (ExprKind::Variable(a), ExprKind::Variable(b)) => a == b,
+        (ExprKind::PropertyAccess(la, lp, ln), ExprKind::PropertyAccess(ra, rp, rn)) => {
+            ln == rn && lp.name == rp.name && is_duplicate_side_effect_free_operand(la, ra)
+        }
+        (ExprKind::Index(la, Some(li)), ExprKind::Index(ra, Some(ri))) => {
+            is_duplicate_side_effect_free_operand(la, ra)
+                && is_duplicate_side_effect_free_operand(li, ri)
+        }
+        _ => false,
+    })
 }

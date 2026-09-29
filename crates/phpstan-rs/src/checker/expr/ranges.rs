@@ -22,6 +22,7 @@ use types::{self, Type};
 /// means this guard occasionally under-protects, never over-flags,
 /// matching this project's own "favor false negatives" precedent.
 pub(crate) fn expr_reads_a_property(e: &Expr) -> bool {
+    let e = e.peeled();
     syntax::stack::guard(|| match &e.kind {
         ExprKind::PropertyAccess(..)
         | ExprKind::DynamicPropertyAccess(..)
@@ -36,9 +37,7 @@ pub(crate) fn expr_reads_a_property(e: &Expr) -> bool {
             expr_reads_a_property(base) || args.iter().any(|a| expr_reads_a_property(&a.value))
         }
         ExprKind::Binary(_, l, r) => expr_reads_a_property(l) || expr_reads_a_property(r),
-        ExprKind::Unary(_, inner) | ExprKind::Grouping(inner) | ExprKind::ErrorSuppress(inner) => {
-            expr_reads_a_property(inner)
-        }
+        ExprKind::Unary(_, inner) => expr_reads_a_property(inner),
         ExprKind::Index(base, idx) => {
             expr_reads_a_property(base) || idx.as_deref().is_some_and(expr_reads_a_property)
         }

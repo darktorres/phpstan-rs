@@ -6,7 +6,7 @@
 
 use crate::checker::{Checker, Locals};
 use crate::registry::FunctionReflection;
-use syntax::ast::{Arg, Expr, ExprKind};
+use syntax::ast::{Arg, Expr};
 use types::Type;
 
 const SORT_REGULAR: i64 = 0;
@@ -194,10 +194,7 @@ impl<'a> Checker<'a> {
                 "Parameter {param_name} of function {function} expects {}, {array_ty} given.",
                 cast.expectation()
             ),
-            match &value.kind {
-                ExprKind::Grouping(inner) | ExprKind::ErrorSuppress(inner) => inner.span,
-                _ => value.span,
-            },
+            value.peeled().span,
             5,
             "argument.type",
         );

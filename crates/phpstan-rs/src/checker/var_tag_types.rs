@@ -22,8 +22,8 @@ enum ValueShape {
 }
 
 fn value_shape(e: &Expr) -> ValueShape {
+    let e = e.peeled();
     syntax::stack::guard(|| match &e.kind {
-        ExprKind::Grouping(inner) | ExprKind::ErrorSuppress(inner) => value_shape(inner),
         ExprKind::Literal(_) | ExprKind::Interpolated(_) | ExprKind::Name(_) => ValueShape::Literal,
         ExprKind::ArrayLiteral(items) => ValueShape::ArrayLiteral {
             empty: items.is_empty(),

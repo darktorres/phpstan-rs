@@ -679,7 +679,7 @@ impl<'a> Checker<'a> {
 /// the literal value kept around) - checked directly off the AST here
 /// instead, the one shape this function needs it for.
 fn array_key_cast_description(expr: &Expr, ty: &Type) -> Option<(String, String)> {
-    if let ExprKind::Literal(Literal::Float(f)) = &unwrap_grouping(expr).kind {
+    if let ExprKind::Literal(Literal::Float(f)) = &expr.peeled().kind {
         return Some((f.to_string(), (*f as i64).to_string()));
     }
     if ty.finite_types().len() != 1 {

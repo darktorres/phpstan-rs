@@ -255,6 +255,7 @@ fn eval_concat(
     generated_dir: &Path,
 ) -> Option<String> {
     syntax::stack::guard(|| {
+        let expr = expr.peeled();
         match &expr.kind {
             ExprKind::Literal(Literal::String(s)) => Some(s.to_string()),
             // The directory containing the generated file itself, i.e.
@@ -275,9 +276,6 @@ fn eval_concat(
                 let right = eval_concat(rhs, vendor_dir, base_dir, generated_dir)?;
                 left.push_str(&right);
                 Some(left)
-            }
-            ExprKind::Grouping(inner) | ExprKind::ErrorSuppress(inner) => {
-                eval_concat(inner, vendor_dir, base_dir, generated_dir)
             }
             _ => None,
         }
