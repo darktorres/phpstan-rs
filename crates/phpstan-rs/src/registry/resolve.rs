@@ -1252,7 +1252,7 @@ impl types::ClassConstants for DeclaredConstants<'_> {
 }
 
 /// A `ClassConstant`'s value: the union of every matching
-/// constant's own type (an enum case's enum case, a literal
+/// constant's own type (an enum case's own case type, a literal
 /// constant's literal type), mirroring real PHPStan's `TypeNodeResolver`
 /// for a `ConstTypeNode` - a `*` in the name matches any run of
 /// characters. Matches are ordered by name for a deterministic union

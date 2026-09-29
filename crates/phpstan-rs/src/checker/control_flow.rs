@@ -704,16 +704,9 @@ pub(crate) fn merge_scopes(then_locals: &Locals, else_locals: &Locals) -> Locals
             if let Some(else_provenance) = else_locals.get_provenance(name) {
                 provenance.extend(else_provenance.iter().copied());
             }
-            // `Type::union` itself already short-circuits to `a` unchanged
-            // when `a`/`b` are equal (`Type::equals_for_union`) - but by
-            // then both are already-cloned owned `Type`s, since it takes
-            // its arguments by value. For a variable neither branch
-            // touched (the common case - most locals in scope at a
-            // branch point aren't reassigned by either specific branch),
-            // `then_ty`/`else_ty` are the exact same value, so checking
-            // equality here first avoids ever cloning `else_ty` at all,
-            // rather than cloning it just to have `Type::union` discard
-            // it a moment later.
+            // `Type::union` takes its operands by value, so equal types
+            // (a variable neither branch reassigned, the common case) are
+            // kept without cloning both.
             let merged_ty = if then_ty == else_ty {
                 then_ty.clone()
             } else {

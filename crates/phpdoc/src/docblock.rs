@@ -796,22 +796,10 @@ fn apply_tag(block: &mut DocBlock, tag: &str, rest: &str) {
                 }
             }
             "return" => {
-                // Conditional return types (`(\$param
-                // is Foo ? Bar : Baz)`, real PHPStan syntax Doctrine
-                // DBAL's own `DriverManager::getConnection()` uses) used
-                // to be deliberately excluded here - this project had no
-                // per-call-site binding for them, and `types::
-                // parse_type_string` collapsed one to an eager union of
-                // both branches, discarding the condition entirely, so
-                // setting `return_type` from one was worse than leaving
-                // it unset. Now that conditional type/
-                // `resolve_conditional` exist and do real per-call-site
-                // resolution, that exclusion is gone -
-                // `grammar`'s own `parse_paren_or_conditional`
-                // parses the whole `(...)` shape as a real `TypeNode::
-                // Conditional`, and `to_source_string` re-emits it in
-                // exactly the `" is "`/`"?"`/`":"` shape `types::
-                // parse_type_string`'s own conditional parser expects.
+                // A conditional return type (`($param is Foo ? Bar :
+                // Baz)`) parses as a `TypeNode::Conditional`, which
+                // `to_source_string` re-emits in the shape the types
+                // crate's conditional parser reads.
                 let (value, errors) = grammar::parse_tag_rest("return", rest);
                 block.parse_errors.extend(errors);
                 if let PhpDocTagValue::Type { ty: Some(ty), .. } = value {

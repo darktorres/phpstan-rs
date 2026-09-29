@@ -288,8 +288,8 @@ impl<'a> Checker<'a> {
     /// truthiness discriminant shape - `subject` is the same canonical
     /// string `truthiness_discriminant_subject` would have produced for
     /// the condition currently being narrowed (a bare variable's own
-    /// name, or `"isset(key)"`). Looked up under whichever of `Type::
-    /// True`/`false` matches `branch_true`, mirroring how the
+    /// name, or `"isset(key)"`). Looked up under whichever of `true` and
+    /// `false` matches `branch_true`, mirroring how the
     /// equality discriminant's own replay (`apply_equality_narrowing`)
     /// looks itself up by `(subject, value)`.
     pub(crate) fn replay_truthiness_discriminant_facts(

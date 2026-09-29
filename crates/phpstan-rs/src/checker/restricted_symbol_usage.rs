@@ -136,7 +136,7 @@ impl<'a> Checker<'a> {
     /// literal-preserving evaluator here instead. Recognizes exactly the
     /// shapes a real PHP flag mask is built from: an int literal, a
     /// unary minus of one, a bare `Name` resolving through `Registry::
-    /// global_constants` (already a literal integer literal for a
+    /// global_constants` (already an integer literal for a
     /// stub's `define('JSON_HEX_APOS', 4)` - confirmed live against the
     /// vendored phpstorm-stubs), and a bitwise combination of two
     /// foldable operands. `None` for anything else, including a class

@@ -369,7 +369,7 @@ impl<'a> Checker<'a> {
     /// parameter, built by `check_function` itself (before its own
     /// variadic-collects-into-`array` rewrite, which would otherwise mask
     /// e.g. a genuinely untyped `...$args`'s own per-argument `mixed`
-    /// behind a already-array-shaped `array<mixed>`).
+    /// behind an `array<mixed>`).
     ///
     /// `sig` is the same `Option<&FunctionReflection>` `check_function`
     /// itself already looked up - when present, its `ParameterReflection::

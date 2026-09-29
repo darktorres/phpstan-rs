@@ -179,8 +179,9 @@ impl<'a> Checker<'a> {
 
     /// `find_property_owner`'s own richer sibling, used by `checker::
     /// assignment::check_property_assignment`, the identical shape as the
-    /// read-side one just above: the write side must not match
-    /// object directly, silently skipping every one of its checks
+    /// read-side one just above: the write side must see through a
+    /// union or intersection too, not only a plain object, or it would
+    /// skip every one of its checks
     /// (readonly, visibility,
     /// `@internal`/`@deprecated`, and the assigned value's own type) for
     /// a `Union`/`Intersection`-typed target. Also returns the matching
@@ -566,15 +567,9 @@ impl<'a> Checker<'a> {
                 .registry
                 .is_subclass_of(class, "Doctrine\\ORM\\EntityManagerInterface")
         {
-            // `EntityManager::createQuery($dql)` (ROADMAP Phase 168
-            // 168g) - the same DQL-aware row-shape inference as
-            // `QueryBuilder::getQuery()` just below, fed a literal DQL
-            // string directly instead of a `QueryBuilder`-reconstructed
-            // one. Not corpus-confirmed necessary (the real corpus's only
-            // literal-DQL-string usages are `DELETE`/`UPDATE` DML, never
-            // `SELECT`), but the same select-item grammar doing strictly
-            // less work, so building it keeps the feature honestly
-            // general rather than `QueryBuilder`-only.
+            // `EntityManager::createQuery($dql)`: the same DQL row-shape
+            // inference as `QueryBuilder::getQuery()` below, fed a literal
+            // DQL string instead of a reconstructed builder chain.
             let source = args
                 .first()
                 .and_then(|arg| self.doctrine_dql_source(&arg.value, locals));
@@ -585,15 +580,11 @@ impl<'a> Checker<'a> {
                 .registry
                 .is_subclass_of(class, "Doctrine\\ORM\\QueryBuilder")
         {
-            // `QueryBuilder::getQuery()` (ROADMAP Phase 168 168e) -
-            // resolves the fluent chain (168b), parses its own select
-            // items (168c) and builds the row shape (168d), carrying it
-            // as `Doctrine\ORM\Query`'s own generic-argument slot (see
-            // `doctrine_query_row_type`'s own doc comment for why this
-            // reuses object's existing slot rather than a new
-            // `Type` variant). An undecidable chain/select falls back to
-            // today's plain, argument-less `Query` object - no worse
-            // than before this phase existed.
+            // `QueryBuilder::getQuery()`: the fluent chain is resolved,
+            // its select items parsed and the row shape built, carried as
+            // `Doctrine\ORM\Query`'s generic argument (see
+            // `doctrine_query_row_type`). An undecidable chain or select
+            // gives a plain, argument-less `Query`.
             let source = self.doctrine_query_builder_source(recv, locals);
             self.doctrine_query_type(source)
         } else if matches!(
@@ -667,27 +658,20 @@ impl<'a> Checker<'a> {
         } else if matches!(method, "getMethod" | "getProperty")
             && self.registry.is_subclass_of(class, "ReflectionClass")
         {
-            // Phase 77's reflected-member-binding stretch item:
-            // `ReflectionClass<T>::getMethod('name')`/`getProperty('name')` -
-            // once the member name is a genuine string literal (or a
-            // variable whose own inferred type is one, matching this
-            // project's own established literal-or-string-literal-typed-
-            // variable convention, e.g. the DQL literal-string arm above),
-            // attaches a reflected-member fact (`T`, `name`) onto the
-            // stub's own `ReflectionMethod<T>`/`ReflectionProperty<T>`
-            // return type so a later `->invoke()`/`->getValue()` call
-            // (below) can resolve the real member's own value type - see
-            // reflected member's own doc comment. A non-literal
-            // name just keeps the stub's own untargeted return type,
-            // unchanged from before this feature existed.
+            // `ReflectionClass<T>::getMethod('name')`/`getProperty('name')`
+            // with a literal name (or a value typed as one) attaches a
+            // reflected-member type (`T`, `name`) to the stub's
+            // `ReflectionMethod<T>`/`ReflectionProperty<T>` return, so a
+            // later `->invoke()`/`->getValue()` resolves the member's own
+            // type. Any other name keeps the stub's return type.
             let base =
                 self.generic_object_method_return_type(class, type_args, method, args, locals);
             // An erased receiver `T` (`substitute_class_templates`'s
             // own unbound-template fallback, `mixed`) can never
             // resolve a real member type either - skip the wrap
             // entirely rather than attach a fact that can only ever
-            // stay unresolved, matching reflected member's own
-            // "don't guess" leniency for a not-genuinely-concrete
+            // stay unresolved, the same "don't guess" leniency a
+            // reflected member keeps for a not-genuinely-concrete
             // owner.
             let owner_ty = type_args.first().cloned().filter(|t| !t.is_mixed());
             let name = args
@@ -859,9 +843,8 @@ impl<'a> Checker<'a> {
             .unwrap_or(Type::mixed())
     }
 
-    /// `generic_object_method_return_type`'s property-typed sibling -
-    /// Phase 77's reflected-member-binding feature's own `getValue()`
-    /// consumer (reflected member's own doc comment).
+    /// `generic_object_method_return_type`'s property-typed sibling,
+    /// which a reflected property's `getValue()` resolves through.
     fn generic_object_property_type(&self, class: &str, type_args: &[Type], prop: &str) -> Type {
         self.registry
             .lookup_property_with_owner(class, prop)

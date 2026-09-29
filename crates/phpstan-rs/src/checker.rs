@@ -201,7 +201,7 @@ type ContainerFieldFactsMap = imbl::GenericHashMap<
 // instead of) the ordinary, single-flat-type tracking every other
 // container already gets - see `Checker::active_discriminant`'s own doc
 // comment for the write-side trigger. Consulted only when checking a
-// `return` statement whose declared type is conditional type and the
+// `return` statement whose declared type is a conditional type and the
 // ordinary (still-flat, still-corrupted) tracked type would otherwise
 // fail: reconstructing `Union([true-slot, false-slot])` from here and
 // re-checking against the same declared type's own already-flattened
