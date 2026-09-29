@@ -1793,7 +1793,7 @@ impl<'a> Checker<'a> {
         self.name_ctx = NameContext::default();
         for stmt in program {
             if !self.facts_only {
-                self.check_function_like_declarations_in_stmt(stmt, "<main>");
+                self.check_function_like_declarations_in_stmt(stmt);
             }
             match &stmt.kind {
                 StmtKind::Namespace(name) => self.name_ctx.set_namespace(name),

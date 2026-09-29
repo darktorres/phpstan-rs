@@ -17,7 +17,7 @@ use crate::registry::{class_decl_fqn, class_decl_name};
 use diagnostics::DiagnosticBuilder;
 use syntax::ast::*;
 use syntax::token::Span;
-use syntax::visit::{Visitor, any_child_expr, any_stmt_in_body, walk_stmt};
+use syntax::visit::{Visitor, any_stmt_in_body, walk_args, walk_expr, walk_stmt, walk_stmts};
 use types::php_version::PhpFeature;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -51,36 +51,18 @@ fn collect_return_exprs<'s>(body: &'s [Stmt], out: &mut Vec<&'s Expr>) {
     }
 }
 
-/// Hands a statement's own expressions and the statements directly in it
-/// back to the promotion walk.
-struct PromotionChildren<'c, 'a, 'l> {
+/// The function-like declarations in one body - named functions,
+/// methods, closures, arrow functions and property hooks, however deeply
+/// nested.
+struct Promotions<'c, 'a> {
     checker: &'c mut Checker<'a>,
-    label: &'l str,
 }
 
-impl<'ast> Visitor<'ast> for PromotionChildren<'_, '_, '_> {
+impl<'ast> Visitor<'ast> for Promotions<'_, '_> {
     fn visit_stmt(&mut self, stmt: &'ast Stmt) {
-        self.checker
-            .check_function_like_declarations_in_stmt(stmt, self.label);
-    }
-    fn visit_expr(&mut self, e: &'ast Expr) {
-        self.checker.walk_promoted_in_expr(e, self.label);
-    }
-    fn visit_function_decl(&mut self, _: &'ast FunctionDecl) {}
-    fn visit_class_decl(&mut self, _: &'ast ClassDecl) {}
-}
-
-fn is_promoted(p: &Param) -> bool {
-    p.promoted_visibility.is_some() || p.hooks.is_some()
-}
-
-impl<'a> Checker<'a> {
-    /// Entry point for one top-level statement of `check_program`'s own
-    /// loop, so class names resolve against the positional `name_ctx`.
-    pub(crate) fn check_function_like_declarations_in_stmt(&mut self, stmt: &Stmt, label: &str) {
         match &stmt.kind {
             StmtKind::FunctionDecl(f) => {
-                self.check_function_like_declaration(
+                self.checker.check_function_like_declaration(
                     &f.params,
                     (
                         f.return_type.as_ref(),
@@ -90,32 +72,21 @@ impl<'a> Checker<'a> {
                     f.by_ref,
                     Some(ReturnSource::Body(&f.body)),
                 );
-                self.walk_promoted_in_body(&f.body, &f.name);
+                self.checker.walk_promoted_in_body(&f.body);
             }
             StmtKind::ClassDecl(c) => {
                 let fqn = class_decl_fqn(c).to_string();
-                let previous_class = self.current_class.replace(fqn.clone());
-                self.check_promoted_in_methods(&fqn, c.kind, &c.methods);
-                self.walk_promoted_in_property_hooks(&fqn, &c.properties);
-                self.current_class = previous_class;
+                let previous_class = self.checker.current_class.replace(fqn.clone());
+                self.checker
+                    .check_promoted_in_methods(&fqn, c.kind, &c.methods);
+                self.checker.walk_promoted_in_property_hooks(&c.properties);
+                self.checker.current_class = previous_class;
             }
-            _ => walk_stmt(
-                &mut PromotionChildren {
-                    checker: self,
-                    label,
-                },
-                stmt,
-            ),
+            _ => walk_stmt(self, stmt),
         }
     }
 
-    fn walk_promoted_in_body(&mut self, body: &[Stmt], label: &str) {
-        for stmt in body {
-            self.check_function_like_declarations_in_stmt(stmt, label);
-        }
-    }
-
-    fn walk_promoted_in_expr(&mut self, e: &Expr, label: &str) {
+    fn visit_expr(&mut self, e: &'ast Expr) {
         syntax::stack::guard(|| match &e.kind {
             ExprKind::Closure {
                 params,
@@ -124,15 +95,16 @@ impl<'a> Checker<'a> {
                 return_type,
                 ..
             } => {
-                self.check_function_like_declaration(
+                self.checker.check_function_like_declaration(
                     params,
                     (return_type.as_deref(), e.span),
                     PromotionSite::NotConstructor,
                     *by_ref,
                     Some(ReturnSource::Body(body)),
                 );
-                self.check_literal_default_parameter_types(params, "anonymous function");
-                self.walk_promoted_in_body(body, label);
+                self.checker
+                    .check_literal_default_parameter_types(params, "anonymous function");
+                walk_stmts(self, body);
             }
             ExprKind::ArrowFn {
                 params,
@@ -141,39 +113,57 @@ impl<'a> Checker<'a> {
                 return_type,
                 ..
             } => {
-                self.check_function_like_declaration(
+                self.checker.check_function_like_declaration(
                     params,
                     (return_type.as_deref(), e.span),
                     PromotionSite::NotConstructor,
                     *by_ref,
                     Some(ReturnSource::Arrow(body)),
                 );
-                self.check_literal_default_parameter_types(params, "arrow function");
-                self.walk_promoted_in_expr(body, label);
+                self.checker
+                    .check_literal_default_parameter_types(params, "arrow function");
+                self.visit_expr(body);
             }
             ExprKind::NewAnonymousClass(decl, args) => {
-                for a in args {
-                    self.walk_promoted_in_expr(&a.value, label);
-                }
-                let registry_name = self.anonymous_class_names.get(&e.span).cloned();
+                walk_args(self, args);
+                let registry_name = self.checker.anonymous_class_names.get(&e.span).cloned();
                 let previous_class =
-                    std::mem::replace(&mut self.current_class, registry_name.clone());
-                self.check_promoted_in_methods(class_decl_name(decl), decl.kind, &decl.methods);
-                self.walk_promoted_in_property_hooks(class_decl_name(decl), &decl.properties);
-                self.current_class = previous_class;
+                    std::mem::replace(&mut self.checker.current_class, registry_name);
+                self.checker.check_promoted_in_methods(
+                    class_decl_name(decl),
+                    decl.kind,
+                    &decl.methods,
+                );
+                self.checker
+                    .walk_promoted_in_property_hooks(&decl.properties);
+                self.checker.current_class = previous_class;
             }
-            _ => {
-                any_child_expr(e, &mut |child| {
-                    self.walk_promoted_in_expr(child, label);
-                    false
-                });
-            }
+            _ => walk_expr(self, e),
         })
+    }
+}
+
+fn is_promoted(p: &Param) -> bool {
+    p.promoted_visibility.is_some() || p.hooks.is_some()
+}
+
+impl<'a> Checker<'a> {
+    /// Entry point for one top-level statement of `check_program`'s own
+    /// loop, so class names resolve against the positional `name_ctx`.
+    pub(crate) fn check_function_like_declarations_in_stmt(&mut self, stmt: &Stmt) {
+        Promotions { checker: self }.visit_stmt(stmt);
+    }
+
+    fn walk_promoted_in_body(&mut self, body: &[Stmt]) {
+        walk_stmts(&mut Promotions { checker: self }, body);
+    }
+
+    fn walk_promoted_in_expr(&mut self, e: &Expr) {
+        Promotions { checker: self }.visit_expr(e);
     }
 
     fn check_promoted_in_methods(&mut self, fqn: &str, kind: ClassKind, methods: &[MethodDecl]) {
         for m in methods {
-            let label = format!("{fqn}::{}", m.function.name);
             let is_constructor = m.function.is_constructor()
                 || (kind == ClassKind::Trait
                     && self.trait_method_aliased_as_constructor(fqn, &m.function.name));
@@ -202,16 +192,15 @@ impl<'a> Checker<'a> {
                 m.function.by_ref,
                 returns,
             );
-            self.walk_promoted_in_body(&m.function.body, &label);
+            self.walk_promoted_in_body(&m.function.body);
         }
     }
 
-    fn walk_promoted_in_property_hooks(&mut self, fqn: &str, properties: &[PropertyDecl]) {
+    fn walk_promoted_in_property_hooks(&mut self, properties: &[PropertyDecl]) {
         for p in properties {
             let Some(hooks) = &p.hooks else {
                 continue;
             };
-            let label = format!("{fqn}::${}", p.name);
             if let Some((Some(param), _)) = &hooks.set {
                 self.check_parameter_name(param);
             }
@@ -221,8 +210,8 @@ impl<'a> Checker<'a> {
                 .chain(hooks.set.iter().map(|(_, body)| body));
             for body in bodies {
                 match body {
-                    PropertyHookBody::Arrow(e) => self.walk_promoted_in_expr(e, &label),
-                    PropertyHookBody::Block(stmts) => self.walk_promoted_in_body(stmts, &label),
+                    PropertyHookBody::Arrow(e) => self.walk_promoted_in_expr(e),
+                    PropertyHookBody::Block(stmts) => self.walk_promoted_in_body(stmts),
                     PropertyHookBody::Abstract => {}
                 }
             }

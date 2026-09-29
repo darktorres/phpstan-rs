@@ -9,7 +9,7 @@ use diagnostics::DiagnosticBuilder;
 use phpdoc::docblock;
 use syntax::ast::*;
 use syntax::token::Span;
-use syntax::visit::any_child_stmt;
+use syntax::visit::any_stmt_in_body;
 use types::{self, Type};
 
 mod attributes;
@@ -1913,25 +1913,18 @@ impl<'a> Checker<'a> {
 }
 
 /// Whether `stmts` contains a `parent::__construct(...)` call as a
-/// direct statement anywhere in the body, recursing into nested blocks
-/// (`if`/`else`/`try`/`switch`/loops) the same way `any_child_stmt`'s
-/// other consumers do - real PHP call resolution is case-insensitive,
-/// so the class/method names are compared that way too.
+/// statement anywhere in the body, nested blocks (`if`/`else`/`try`/
+/// `switch`/loops) included - real PHP call resolution is
+/// case-insensitive, so the class/method names are compared that way too.
 fn body_calls_parent_construct(stmts: &[Stmt]) -> bool {
-    stmts.iter().any(stmt_calls_parent_construct)
-}
-
-fn stmt_calls_parent_construct(stmt: &Stmt) -> bool {
-    if let StmtKind::Expression(e) = &stmt.kind
-        && let ExprKind::StaticCall(class, method, _) = &e.peeled().kind
-        && class
-            .as_name()
-            .is_some_and(|n| n.eq_ignore_ascii_case("parent"))
-        && syntax::ast::is_constructor_name(method)
-    {
-        return true;
-    }
-    any_child_stmt(stmt, &mut stmt_calls_parent_construct)
+    stmts.iter().any(|stmt| {
+        any_stmt_in_body(stmt, |s| {
+            matches!(&s.kind, StmtKind::Expression(e)
+                if matches!(&e.peeled().kind, ExprKind::StaticCall(class, method, _)
+                    if class.as_name().is_some_and(|n| n.is_keyword("parent"))
+                        && syntax::ast::is_constructor_name(method)))
+        })
+    })
 }
 
 fn is_php_identifier(s: &str) -> bool {
