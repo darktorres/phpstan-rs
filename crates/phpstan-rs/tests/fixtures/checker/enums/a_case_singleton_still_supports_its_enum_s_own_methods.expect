@@ -1,1 +1,2 @@
+7:17-7:38 method.resultUnused L4 | Call to method Suit::label() on a separate line has no effect.
 8:17-8:40 method.notFound L0 | call to undefined method Suit::Hearts::missing()

@@ -1,1 +1,2 @@
+10:13-10:40 function.resultUnused L4 | Call to function App\\needsInt() on a separate line has no effect.
 10:22-10:39 argument.type L5 | Parameter #1 $x of function App\\needsInt expects int, 'wrong' given.

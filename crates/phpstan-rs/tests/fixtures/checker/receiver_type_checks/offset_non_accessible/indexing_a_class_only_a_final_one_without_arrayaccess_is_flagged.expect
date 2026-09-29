@@ -1,0 +1,2 @@
+4:17-7:18 missingType.return L6 | Function f() has no return type specified.
+6:29-6:32 offsetAccess.nonOffsetAccessible L3 | Cannot access offset on Sealed.

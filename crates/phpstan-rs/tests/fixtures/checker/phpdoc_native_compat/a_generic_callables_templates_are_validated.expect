@@ -1,7 +1,6 @@
 6:24-6:26 callable.shadowTemplate L2 | PHPDoc tag @var template T of callable<T>(T): T shadows @template T for class Box.
 15:33-15:34 callable.shadowTemplate L2 | PHPDoc tag @param for parameter $a template U of callable<U>(U): U shadows @template U for method Box::m.
 15:33-15:34 generics.existingClass L6 | PHPDoc tag @param for parameter $b template of callable<Foo>(Foo): void cannot have existing class Foo as its name.
-15:33-15:34 generics.notSupportedBound L6 | PHPDoc tag @param for parameter $d template X of callable<X of callable>(X): X with bound type callable is not supported.
 15:33-15:34 generics.requiredTypeAfterOptional L6 | PHPDoc tag @param for parameter $c template W of callable<V = int, W>(V): W does not have a default type but follows an optional template V.
 15:33-15:34 generics.templateDefaultOutOfBounds L6 | Default type string in PHPDoc tag @return template Y of Closure<Y of int = string>(Y): Y is not subtype of bound type int.
 19:22-19:23 callable.shadowTemplate L2 | PHPDoc tag @param for parameter $a template T of callable<T>(T): T shadows @template T for function g.

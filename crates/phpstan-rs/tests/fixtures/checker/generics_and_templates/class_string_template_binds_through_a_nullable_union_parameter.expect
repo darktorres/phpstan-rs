@@ -1,1 +1,2 @@
+11:32-11:48 new.nonObject L8 | cannot instantiate class using class-string<R>|null
 15:24-15:63 return.type L3 | return type mismatch: expected int, got Derived

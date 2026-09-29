@@ -1,0 +1,2 @@
+4:17-7:18 missingType.return L6 | Function f() has no return type specified.
+6:21-6:23 callable.nonCallable L2 | Trying to invoke Sealed but it's not a callable.

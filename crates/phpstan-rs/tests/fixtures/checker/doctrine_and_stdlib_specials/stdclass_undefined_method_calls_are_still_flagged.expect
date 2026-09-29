@@ -1,1 +1,1 @@
-4:17-4:33 method.nonObject L0 | call to method someMethod() on a non-object type stdClass
+4:17-4:33 method.notFound L0 | call to undefined method stdClass::someMethod()

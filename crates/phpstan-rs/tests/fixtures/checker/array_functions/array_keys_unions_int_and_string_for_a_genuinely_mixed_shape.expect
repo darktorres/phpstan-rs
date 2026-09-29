@@ -1,2 +1,2 @@
 4:13-7:14 missingType.return L6 | Function f() has no return type specified.
-6:27-6:45 argument.type L5 | Parameter #1 $xs of function needsInts expects array<(int|string), int>, list<0|string> given.
+6:27-6:45 argument.type L5 | Parameter #1 $xs of function needsInts expects array<(int|string), int>, list<0|'name'> given.

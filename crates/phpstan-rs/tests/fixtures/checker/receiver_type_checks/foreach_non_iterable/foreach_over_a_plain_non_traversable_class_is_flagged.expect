@@ -1,2 +1,0 @@
-3:17-6:18 missingType.return L6 | Function f() has no return type specified.
-4:30-4:32 foreach.nonIterable L3 | Argument of an invalid type Plain supplied for foreach, only iterables are supported.

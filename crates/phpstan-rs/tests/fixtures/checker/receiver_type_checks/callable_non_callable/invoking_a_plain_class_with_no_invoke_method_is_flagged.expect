@@ -1,2 +1,0 @@
-3:17-5:18 missingType.return L6 | Function f() has no return type specified.
-4:21-4:23 callable.nonCallable L2 | Trying to invoke Plain but it's not a callable.
