@@ -2238,7 +2238,7 @@ fn filter_validate_result(
             .and_then(|t| t.int_bounds())
             .and_then(|(_, max)| max);
         if min.is_some() || max.is_some() {
-            Type::int_interval(min, max)
+            Type::int_range(min, max)
         } else {
             base_ty
         }

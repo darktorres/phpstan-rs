@@ -145,7 +145,7 @@ impl Type {
             Type(Repr::FloatLiteral(f)) => Type::float_literal(f + by as f64),
             Type(Repr::IntRange(min, max)) => {
                 let edge = if by > 0 { i64::MAX } else { i64::MIN };
-                let stepped = Type::int_interval(
+                let stepped = Type::int_range(
                     min.map(|v| v.checked_add(by).unwrap_or(edge)),
                     max.map(|v| v.checked_add(by).unwrap_or(edge)),
                 );

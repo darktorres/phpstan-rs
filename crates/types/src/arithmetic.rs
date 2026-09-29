@@ -79,7 +79,7 @@ pub(crate) fn mul_int_range(
     let min = min1.min(min2).min(max1).min(max2);
     let max = min1.max(min2).max(max1).max(max2);
     let (min_bound, max_bound) = (finite_bound(min), finite_bound(max));
-    let result = Type::int_interval(min_bound, max_bound);
+    let result = Type::int_range(min_bound, max_bound);
     // With every input bound present (no `?? -INF`/`?? INF` substitution
     // ever used above), a non-finite corner can only be a genuine `i64`
     // overflow, not a propagated unbounded operand - the same real-PHP
@@ -158,7 +158,7 @@ pub(crate) fn sub_int_range_full(
             (min, max)
         }
     };
-    let result = Type::int_interval(min, max);
+    let result = Type::int_range(min, max);
     if overflow {
         Type::union(result, Type::float())
     } else {
@@ -198,7 +198,7 @@ pub(crate) fn pow_int_range(
     let min = l_min.zip(r_min).and_then(|(b, e)| checked_i64_pow(b, e));
     let max = l_max.zip(r_max).and_then(|(b, e)| checked_i64_pow(b, e));
     if min.is_some() || max.is_some() {
-        Type::int_interval(min, max)
+        Type::int_range(min, max)
     } else {
         Type(Repr::Union(vec![Type::int(), Type::float()]))
     }
@@ -243,12 +243,12 @@ pub(crate) fn shift_int_range(
             }
         };
         match (shift(l_min), shift(l_max)) {
-            (Ok(min), Ok(max)) => Type::int_interval(min, max),
+            (Ok(min), Ok(max)) => Type::int_range(min, max),
             _ => Type::int(),
         }
     } else {
         let amount = amount.min(63);
-        Type::int_interval(l_min.map(|v| v >> amount), l_max.map(|v| v >> amount))
+        Type::int_range(l_min.map(|v| v >> amount), l_max.map(|v| v >> amount))
     }
 }
 
@@ -439,7 +439,7 @@ pub(crate) fn mod_int_range(
     };
     let narrow =
         |v: Option<i128>| v.map(|v| i64::try_from(v).expect("within an i64 operand's range"));
-    Type::int_interval(narrow(min), narrow(max))
+    Type::int_range(narrow(min), narrow(max))
 }
 
 /// An unbounded end (or a `0` swapped to the nearest representable
@@ -553,7 +553,7 @@ pub(crate) fn div_int_range(
         if min_i.is_none() && max_i.is_none() {
             return Type(Repr::Union(vec![Type::int(), Type::float()]));
         }
-        match Type::int_interval(min_i, max_i) {
+        match Type::int_range(min_i, max_i) {
             // The rounding step (`ceil`ing the min, `floor`ing the max
             // independently) can invert an otherwise-valid range into one
             // with no real int members at all - `normalize_int_range`'s own
@@ -595,7 +595,7 @@ impl Type {
             },
             Type(Repr::FloatLiteral(f)) => Type::float_literal(-f),
             Type(Repr::IntRange(min, max)) => {
-                let negated = Type::int_interval(
+                let negated = Type::int_range(
                     max.map(|m| m.checked_neg().unwrap_or(i64::MAX)),
                     min.map(|m| m.checked_neg().unwrap_or(i64::MAX)),
                 );
@@ -630,7 +630,7 @@ impl Type {
                 {
                     let (min, min_overflow) = checked_bound_op(l_min, r_min, i64::checked_add);
                     let (max, max_overflow) = checked_bound_op(l_max, r_max, i64::checked_add);
-                    let result = Type::int_interval(min, max);
+                    let result = Type::int_range(min, max);
                     return if min_overflow || max_overflow {
                         Type::union(result, Type::float())
                     } else {
@@ -649,7 +649,7 @@ impl Type {
                 {
                     let (min, min_overflow) = checked_bound_op(l_min, Some(c), i64::checked_sub);
                     let (max, max_overflow) = checked_bound_op(l_max, Some(c), i64::checked_sub);
-                    let result = Type::int_interval(min, max);
+                    let result = Type::int_range(min, max);
                     return if min_overflow || max_overflow {
                         Type::union(result, Type::float())
                     } else {

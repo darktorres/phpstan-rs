@@ -228,7 +228,7 @@ impl Type {
     pub fn to_absolute_number(&self) -> Type {
         match self {
             Type(Repr::IntRange(min, max)) if *min == Some(i64::MIN) => Type::union(
-                Type::int_interval(Some(i64::MIN + 1), *max).to_absolute_number(),
+                Type::int_range(Some(i64::MIN + 1), *max).to_absolute_number(),
                 Type::float_literal(-(i64::MIN as f64)),
             ),
             Type(Repr::IntRange(min, max)) => {
@@ -244,7 +244,7 @@ impl Type {
                     Type::int_range(Some(0), upper)
                 } else {
                     let max = max.expect("max < 0 is always Some");
-                    Type::int_interval(Some(max.checked_neg().unwrap_or(i64::MAX)), inversed_min)
+                    Type::int_range(Some(max.checked_neg().unwrap_or(i64::MAX)), inversed_min)
                 }
             }
             // `abs(PHP_INT_MIN)` is past `PHP_INT_MAX`: a float.

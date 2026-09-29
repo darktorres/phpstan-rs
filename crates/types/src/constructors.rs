@@ -60,15 +60,11 @@ impl Type {
         Type(Repr::IntLiteral(value))
     }
 
-    /// `int<min, max>`, `None` unbounded.
+    /// The integers from `min` to `max` (`None` unbounded) as the
+    /// narrowest type: `int` when unbounded both ways, a literal when
+    /// they meet, `never` when they cross (PHPStan's
+    /// `IntegerRangeType::fromInterval`).
     pub const fn int_range(min: Option<i64>, max: Option<i64>) -> Type {
-        Type(Repr::IntRange(min, max))
-    }
-
-    /// The integers from `min` to `max` as the narrowest type: `int` when
-    /// unbounded both ways, a literal when they meet, `never` when they
-    /// cross (PHPStan's `IntegerRangeType::fromInterval`).
-    pub fn int_interval(min: Option<i64>, max: Option<i64>) -> Type {
         match (min, max) {
             (None, None) => Type(Repr::Int),
             (Some(a), Some(b)) if a > b => Type(Repr::Never),

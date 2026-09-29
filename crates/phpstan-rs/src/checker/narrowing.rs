@@ -884,7 +884,7 @@ impl<'a> Checker<'a> {
                                 bound,
                             )
                         {
-                            locals.insert(key, Type::int_interval(new_min, new_max));
+                            locals.insert(key, Type::int_range(new_min, new_max));
                         }
                     }
                 }
