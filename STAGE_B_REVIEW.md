@@ -483,14 +483,15 @@ through `check-project`.
   so nested ones also miss every per-declaration rule that goes through
   it (banned types in their signatures, for one). (found fixing F24)
   Done in `b895fa8d`; top-level `try`, loop and `switch` bodies were missed too.
-- [ ] **F60. A float literal is typed `float`, not its value.** `1.7`
+- [x] **F60. A float literal is typed `float`, not its value.** `1.7`
   infers `float` in both `check_expr` and `infer_expr` (`checker/expr.rs`),
   so nothing downstream can fold it: `~1.7` is `int` rather than `-2`,
   `$f = 0.5; $f * 2` is `float` rather than `1.0`, and a float-keyed
   array literal's key is unknown. The types crate already has
   `FloatLiteral` and folds it where it appears (casts, `to_array_key`,
   `~`); the literal needs to reach it, with float arithmetic folding
-  alongside. (found fixing F31)
+  alongside. (found fixing F31) Done in `89da4c25`, with F51's float display;
+  loops had no widening, so a string built in one was its first six literals.
 - [>] **F61. A bare `class-string` is `string`.** `@param class-string $c`
   reads as `string` (`parse.rs`), though `class-string<T>` keeps its
   type and the types crate has `ClassKindString(Class)` for the bare
@@ -705,8 +706,8 @@ through `check-project`.
 
   (`0e309c03`)
 - [ ] **F51. Displayed types lose information.**
-  - A float literal prints with Rust's `{n}`: `1.0|2.5` shows `1|2.5`, the
-    same as an int literal. PHPStan prints `1.0`.
+  - [x] A float literal prints with Rust's `{n}`: `1.0|2.5` shows `1|2.5`, the
+    same as an int literal. PHPStan prints `1.0`. (Done in `89da4c25`.)
   - `describe_accessory_intersection`'s else-if chains drop parts:
     `literal-string&numeric-string` shows `literal-string`, and
     decimal-int hides literal. The `[shape, non-empty]` match is
