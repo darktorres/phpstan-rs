@@ -9,6 +9,7 @@ pub mod constraint;
 pub mod manifest;
 pub mod vendor;
 
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use manifest::{ComposerManifest, lexically_normalized};
@@ -74,6 +75,10 @@ pub struct PackageIndex {
     /// Every owned directory, absolute: each root's own, and each
     /// installed package's `vendor/` link and install directory.
     dirs: Vec<OwnedDir>,
+    // Indices into `dirs` by directory as written, and by its normalized
+    // form: a file's owners are among its ancestors.
+    by_dir: HashMap<PathBuf, Vec<usize>>,
+    by_normalized: HashMap<PathBuf, Vec<usize>>,
 }
 
 /// A directory some package owns, with what `PackageIndex::owner`
@@ -113,7 +118,21 @@ impl PackageIndex {
                 dirs.push(OwnedDir::new(package.install_dir.clone(), owner));
             }
         }
-        PackageIndex { manifests, dirs }
+        let mut by_dir: HashMap<PathBuf, Vec<usize>> = HashMap::new();
+        let mut by_normalized: HashMap<PathBuf, Vec<usize>> = HashMap::new();
+        for (index, dir) in dirs.iter().enumerate() {
+            by_dir.entry(dir.dir.clone()).or_default().push(index);
+            by_normalized
+                .entry(dir.normalized.clone())
+                .or_default()
+                .push(index);
+        }
+        PackageIndex {
+            manifests,
+            dirs,
+            by_dir,
+            by_normalized,
+        }
     }
 
     pub fn manifests(&self) -> &[ComposerManifest] {
@@ -123,14 +142,19 @@ impl PackageIndex {
     /// The package owning the absolute `file`: the one whose directory
     /// containing it is deepest.
     pub fn owner(&self, file: &Path) -> Option<PackageOwner> {
-        // `path_starts_with`, with `file` normalized once for every
-        // directory.
+        // The directories `path_starts_with(file, dir)` holds for: an
+        // ancestor of `file` as written, or of it normalized. Of equally
+        // deep ones the last listed wins.
         let normalized = lexically_normalized(file);
-        self.dirs
-            .iter()
-            .filter(|d| file.starts_with(&d.dir) || normalized.starts_with(&d.normalized))
-            .max_by_key(|d| d.depth)
-            .map(|d| d.owner)
+        let as_written = file.ancestors().filter_map(|a| self.by_dir.get(a));
+        let resolved = normalized
+            .ancestors()
+            .filter_map(|a| self.by_normalized.get(a));
+        as_written
+            .chain(resolved)
+            .flatten()
+            .max_by_key(|&&index| (self.dirs[index].depth, index))
+            .map(|&index| self.dirs[index].owner)
     }
 
     /// `owner`'s package name; a root package may have none.

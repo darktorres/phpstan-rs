@@ -22,6 +22,7 @@
 //! for context, never reported" and its bugs would stop being reported
 //! with no warning.
 
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use syntax::ast::{BinOp, ClassDecl, Expr, ExprKind, Literal, Stmt, StmtKind};
@@ -97,6 +98,7 @@ fn parse_static_file(path: &Path, vendor_dir: &Path, base_dir: &Path) -> Option<
     let class = find_class_decl(&stmts)?;
 
     let mut ctx = VendorContext::default();
+    let mut resolver = Resolver::new(vendor_dir, base_dir, generated_dir);
     for prop in &class.def.properties {
         if !prop.is_static {
             continue;
@@ -105,12 +107,8 @@ fn parse_static_file(path: &Path, vendor_dir: &Path, base_dir: &Path) -> Option<
             continue;
         };
         match prop.name.as_ref() {
-            "classMap" | "files" => {
-                collect_files(default, vendor_dir, base_dir, generated_dir, &mut ctx.files)
-            }
-            "prefixDirsPsr4" => {
-                collect_dirs(default, vendor_dir, base_dir, generated_dir, &mut ctx.dirs)
-            }
+            "classMap" | "files" => resolver.collect_files(default, &mut ctx.files),
+            "prefixDirsPsr4" => resolver.collect_dirs(default, &mut ctx.dirs),
             _ => {}
         }
     }
@@ -120,16 +118,17 @@ fn parse_static_file(path: &Path, vendor_dir: &Path, base_dir: &Path) -> Option<
 
 fn parse_separate_files(composer_dir: &Path, vendor_dir: &Path, base_dir: &Path) -> VendorContext {
     let mut ctx = VendorContext::default();
+    let mut resolver = Resolver::new(vendor_dir, base_dir, composer_dir);
     for name in ["autoload_classmap.php", "autoload_files.php"] {
         let path = composer_dir.join(name);
         if let Some(arr) = parse_top_level_array(&path) {
-            collect_files(&arr, vendor_dir, base_dir, composer_dir, &mut ctx.files);
+            resolver.collect_files(&arr, &mut ctx.files);
         }
     }
     for name in ["autoload_psr4.php", "autoload_namespaces.php"] {
         let path = composer_dir.join(name);
         if let Some(arr) = parse_top_level_array(&path) {
-            collect_dirs(&arr, vendor_dir, base_dir, composer_dir, &mut ctx.dirs);
+            resolver.collect_dirs(&arr, &mut ctx.dirs);
         }
     }
     dedup(&mut ctx);
@@ -163,67 +162,91 @@ fn parse_generated_file(path: &Path) -> Option<Vec<Stmt>> {
         .map(|parsed| parsed.stmts)
 }
 
-fn collect_files(
-    array: &Expr,
-    vendor_dir: &Path,
-    base_dir: &Path,
-    generated_dir: &Path,
-    out: &mut Vec<PathBuf>,
-) {
-    let ExprKind::ArrayLiteral(items) = &array.kind else {
-        return;
-    };
-    for item in items {
-        if let Some(path) = eval_path(&item.value, vendor_dir, base_dir, generated_dir) {
-            out.push(path);
-        }
-    }
+/// Resolves a generated autoloader's path expressions against its vendor,
+/// base and generated directories.
+struct Resolver<'p> {
+    vendor_dir: &'p Path,
+    base_dir: &'p Path,
+    generated_dir: &'p Path,
+    // Each directory's canonical form, found once: autoload entries share
+    // a few thousand directories among tens of thousands of files.
+    canonical_dirs: HashMap<PathBuf, Option<PathBuf>>,
 }
 
-fn collect_dirs(
-    array: &Expr,
-    vendor_dir: &Path,
-    base_dir: &Path,
-    generated_dir: &Path,
-    out: &mut Vec<PathBuf>,
-) {
-    let ExprKind::ArrayLiteral(items) = &array.kind else {
-        return;
-    };
-    for item in items {
-        let ExprKind::ArrayLiteral(dirs) = &item.value.kind else {
-            continue;
+impl<'p> Resolver<'p> {
+    fn new(vendor_dir: &'p Path, base_dir: &'p Path, generated_dir: &'p Path) -> Self {
+        Resolver {
+            vendor_dir,
+            base_dir,
+            generated_dir,
+            canonical_dirs: HashMap::new(),
+        }
+    }
+
+    fn collect_files(&mut self, array: &Expr, out: &mut Vec<PathBuf>) {
+        let ExprKind::ArrayLiteral(items) = &array.kind else {
+            return;
         };
-        for dir_item in dirs {
-            if let Some(path) = eval_path(&dir_item.value, vendor_dir, base_dir, generated_dir) {
+        for item in items {
+            if let Some(path) = self.path(&item.value) {
                 out.push(path);
             }
         }
     }
-}
 
-/// Resolves one array value to an absolute path under `vendor_dir`, or
-/// `None` if it can't be evaluated, doesn't exist, or (the common,
-/// load-bearing case) resolves outside `vendor_dir` entirely - a
-/// `$baseDir`/`__DIR__`-with-extra-`/..`-rooted, first-party location,
-/// which must never be silently treated as vendor context.
-fn eval_path(
-    expr: &Expr,
-    vendor_dir: &Path,
-    base_dir: &Path,
-    generated_dir: &Path,
-) -> Option<PathBuf> {
-    let raw = eval_concat(expr, vendor_dir, base_dir, generated_dir)?;
-    // Containment is decided on the path as written, not its canonical
-    // form: a path-repository package is a `vendor/<name>` symlink to a
-    // directory outside `vendor/`, and still belongs to vendor context.
-    let resolved = std::fs::canonicalize(&raw).ok()?;
-    if resolved.starts_with(vendor_dir) {
-        return Some(resolved);
+    fn collect_dirs(&mut self, array: &Expr, out: &mut Vec<PathBuf>) {
+        let ExprKind::ArrayLiteral(items) = &array.kind else {
+            return;
+        };
+        for item in items {
+            let ExprKind::ArrayLiteral(dirs) = &item.value.kind else {
+                continue;
+            };
+            for dir_item in dirs {
+                if let Some(path) = self.path(&dir_item.value) {
+                    out.push(path);
+                }
+            }
+        }
     }
-    let lexical = lexically_normalized(Path::new(&raw));
-    let vendor_as_written = lexically_normalized(&generated_dir.join(".."));
-    (lexical.starts_with(vendor_dir) || lexical.starts_with(&vendor_as_written)).then_some(lexical)
+
+    /// Resolves one array value to an absolute path under `vendor_dir`, or
+    /// `None` if it can't be evaluated, doesn't exist, or (the common,
+    /// load-bearing case) resolves outside `vendor_dir` entirely - a
+    /// `$baseDir`/`__DIR__`-with-extra-`/..`-rooted, first-party location,
+    /// which must never be silently treated as vendor context.
+    fn path(&mut self, expr: &Expr) -> Option<PathBuf> {
+        let raw = eval_concat(expr, self.vendor_dir, self.base_dir, self.generated_dir)?;
+        // Containment is decided on the path as written, not its canonical
+        // form: a path-repository package is a `vendor/<name>` symlink to a
+        // directory outside `vendor/`, and still belongs to vendor context.
+        let resolved = self.canonical(Path::new(&raw))?;
+        if resolved.starts_with(self.vendor_dir) {
+            return Some(resolved);
+        }
+        let lexical = lexically_normalized(Path::new(&raw));
+        let vendor_as_written = lexically_normalized(&self.generated_dir.join(".."));
+        (lexical.starts_with(self.vendor_dir) || lexical.starts_with(&vendor_as_written))
+            .then_some(lexical)
+    }
+
+    /// `std::fs::canonicalize(path)`, through its directory's canonical
+    /// form when the entry itself isn't a link.
+    fn canonical(&mut self, path: &Path) -> Option<PathBuf> {
+        let entry = std::fs::symlink_metadata(path).ok()?;
+        let (Some(dir), Some(name)) = (path.parent(), path.file_name()) else {
+            return std::fs::canonicalize(path).ok();
+        };
+        if entry.file_type().is_symlink() || dir.as_os_str().is_empty() {
+            return std::fs::canonicalize(path).ok();
+        }
+        let dir = self
+            .canonical_dirs
+            .entry(dir.to_path_buf())
+            .or_insert_with(|| std::fs::canonicalize(dir).ok())
+            .as_ref()?;
+        Some(dir.join(name))
+    }
 }
 
 /// `path` with `.` and `..` components folded away, without resolving
