@@ -474,7 +474,7 @@ impl Type {
 
     /// Whether every value of this type is one of `of` (`Yes`), none is
     /// (`No`), or some are (`Maybe`). `never` is no kind of value.
-    pub fn is_within(&self, of: &Type) -> TrinaryLogic {
+    pub(crate) fn is_within(&self, of: &Type) -> TrinaryLogic {
         if matches!(self, Type(Repr::Never)) {
             return TrinaryLogic::No;
         }
@@ -610,6 +610,12 @@ impl Type {
     /// PHPStan's `isObject()`.
     pub fn is_object(&self) -> TrinaryLogic {
         self.is_within(&Type::object_without_class())
+    }
+
+    /// Whether every value is a resource that is open (`closed` false) or
+    /// has been closed (`closed` true).
+    pub fn is_resource(&self, closed: bool) -> TrinaryLogic {
+        self.is_within(&Type::resource(closed))
     }
 
     /// PHPStan's `isScalar()`: a `bool`, `int`, `float` or `string`.

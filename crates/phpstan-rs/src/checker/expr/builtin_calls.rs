@@ -2658,7 +2658,6 @@ fn get_debug_type_for(ty: &Type, registry: &Registry) -> Option<Type> {
 /// returns instead). `None` for anything this project can't confidently
 /// classify, leaving plain `string` unchanged instead of guessing.
 fn gettype_string_for(ty: &Type) -> Option<&'static str> {
-    let resource = |closed| ty.is_within(&Type::resource(closed)).yes();
     if ty.is_string().yes() {
         Some("string")
     } else if ty.is_array().yes() {
@@ -2673,9 +2672,9 @@ fn gettype_string_for(ty: &Type) -> Option<&'static str> {
         Some("NULL")
     } else if ty.is_object().yes() {
         Some("object")
-    } else if resource(false) {
+    } else if ty.is_resource(false).yes() {
         Some("resource")
-    } else if resource(true) {
+    } else if ty.is_resource(true).yes() {
         Some("resource (closed)")
     } else {
         None

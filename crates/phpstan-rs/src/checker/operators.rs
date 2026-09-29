@@ -60,7 +60,7 @@ impl<'a> Checker<'a> {
             Type::resource(true),
         ]);
         ty.union_members().iter().any(|m| {
-            if m.is_within(&not_a_number).yes() {
+            if self.relation().is_super_type_of(&not_a_number, m).yes() {
                 false
             } else if m.is_string().yes() {
                 m.is_numeric_string().yes()
@@ -464,9 +464,13 @@ impl<'a> Checker<'a> {
         let nullable_object_or_array = |ty: &Type| {
             let or_null = |kind: Type| Type::union_of(vec![kind, Type::null()]);
             !ty.is_null().yes()
-                && (ty.is_within(&or_null(Type::object_without_class())).yes()
-                    || ty
-                        .is_within(&or_null(Type::array(Type::mixed(), Type::mixed())))
+                && (self
+                    .relation()
+                    .is_super_type_of(&or_null(Type::object_without_class()), ty)
+                    .yes()
+                    || self
+                        .relation()
+                        .is_super_type_of(&or_null(Type::array(Type::mixed(), Type::mixed())), ty)
                         .yes())
         };
         let invalid =
@@ -490,7 +494,7 @@ impl<'a> Checker<'a> {
     /// is one of those passes.
     fn bitnot_operand_is_valid(&self, ty: &Type) -> bool {
         let operand = Type::union_of(vec![Type::int(), Type::float(), Type::string()]);
-        !ty.is_within(&operand).no() || self.type_is_instance_of(ty, "GMP")
+        !self.relation().is_super_type_of(&operand, ty).no() || self.type_is_instance_of(ty, "GMP")
     }
 
     /// Real PHPStan's `InvalidUnaryOperationRule` (`unaryOp.invalid`).
@@ -593,7 +597,8 @@ impl<'a> Checker<'a> {
     /// matching this project's own existing number-castable-class
     /// precedent everywhere else in this file/`coercion.rs`.
     fn is_strictly_number(&self, ty: &Type) -> bool {
-        ty.is_within(&Type::union_of(vec![Type::int(), Type::float()]))
+        self.relation()
+            .is_super_type_of(&Type::union_of(vec![Type::int(), Type::float()]), ty)
             .yes()
             || self.instance_of_any(ty, &["SimpleXMLElement", "GMP", "BcMath\\Number"])
     }
@@ -609,7 +614,7 @@ impl<'a> Checker<'a> {
             Type::class_string(Type::mixed()),
         ]);
         ty.union_members().iter().any(|m| {
-            if m.is_within(&invalid).yes() {
+            if self.relation().is_super_type_of(&invalid, m).yes() {
                 false
             } else if m.is_object().yes() {
                 self.instance_of_any(m, &["SimpleXMLElement", "GMP"])

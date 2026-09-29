@@ -235,7 +235,7 @@ impl<'a> Checker<'a> {
                 Type::accessory(AccessoryKind::NumericString),
             ]),
         ]);
-        let is_number = ty.is_within(&number);
+        let is_number = self.relation().is_super_type_of(&number, ty);
         if is_number.yes() || (ty.is_benevolent_union() && !is_number.no()) {
             return true;
         }
@@ -252,7 +252,7 @@ impl<'a> Checker<'a> {
                 ]);
                 ty.union_members()
                     .iter()
-                    .any(|m| m.is_within(&not_a_number).yes())
+                    .any(|m| self.relation().is_super_type_of(&not_a_number, m).yes())
             }
             Operand::Increment | Operand::Decrement => {
                 (operand == Operand::Increment && ty.is_string().yes())
@@ -410,8 +410,11 @@ impl<'a> Checker<'a> {
         let prefix = if compound { "assignOp" } else { "binaryOp" };
         for (one, other) in [(&left, &right), (&right, &left)] {
             let string_or_null = Type::union_of(vec![Type::string(), Type::null()]);
-            let is_string_or_nullable_string =
-                other.is_within(&string_or_null).yes() && !other.is_null().yes();
+            let is_string_or_nullable_string = self
+                .relation()
+                .is_super_type_of(&string_or_null, other)
+                .yes()
+                && !other.is_null().yes();
             let kind =
                 if one.is_string().yes() && !other.is_mixed() && !is_string_or_nullable_string {
                     if converts_to_string_ok
@@ -454,7 +457,10 @@ impl<'a> Checker<'a> {
         ty.union_members().iter().all(|m| {
             m.to_string_type(self.registry).is_some()
                 && !(m.is_object().yes() && m.object_class_names().is_empty())
-                && !m.is_within(&Type::callable(None)).yes()
+                && !self
+                    .relation()
+                    .is_super_type_of(&Type::callable(None), m)
+                    .yes()
         })
     }
 
