@@ -306,7 +306,7 @@ impl<'a> Checker<'a> {
             // arm below, which does the same insert under the identical key
             // for that one case.
             purge_aliased_index_entries(lhs, locals);
-            if let Some(key) = narrowing_key(lhs) {
+            let own_entry = narrowing_key(lhs).map(|key| {
                 // Also drops any deeper stale entry rooted at this exact
                 // key (`"key->prop"`, `"key[lit]"`) or that used `key` as a
                 // variable subscript elsewhere (`"other[$key]"`) - real
@@ -315,8 +315,9 @@ impl<'a> Checker<'a> {
                 // index chain), not just a bare variable.
                 purge_stale_narrowing_for(locals, &key);
                 let stored = self.property_value_after_write(lhs, &ty, locals);
-                locals.insert(key, stored);
-            }
+                locals.insert(key.clone(), stored.clone());
+                (key, stored)
+            });
             match &lhs.kind {
                 // The one real "this variable is now bound to a fresh
                 // value" site in this whole function - a plain assignment
@@ -549,6 +550,14 @@ impl<'a> Checker<'a> {
                 }
                 _ => {}
             }
+            // Rebinding an element's base forgets what depends on the base,
+            // this very element among them - which is exactly what was just
+            // written.
+            if matches!(lhs.kind, ExprKind::Index(..))
+                && let Some((key, stored)) = own_entry
+            {
+                locals.insert(key, stored);
+            }
         })
     }
 
@@ -774,9 +783,12 @@ fn purge_aliased_index_entries(lhs: &Expr, locals: &mut Locals) {
         } else {
             &siblings
         };
+        // The written element itself isn't an alias of itself: the write
+        // rewrites its entry, and a deeper write reads it as its container.
+        let own = narrowing_key(lhs);
         let stale: Vec<String> = locals
             .iter()
-            .filter(|(k, _)| k.starts_with(prefix.as_str()))
+            .filter(|(k, _)| k.starts_with(prefix.as_str()) && own.as_deref() != Some(k.as_str()))
             .map(|(k, _)| k.clone())
             .collect();
         for k in stale {
