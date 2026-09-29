@@ -310,7 +310,7 @@ Each fix needs a fixture.
   (`get`, `get_by_ref`, `get_attrs`, `get_doc`, `get_final`, and the same
   set for `set`); make them `get: Option<Hook>` and `set: Option<Hook>`,
   with the `set` parameter on the hook.
-- [ ] **S7. A body is optional.** `FunctionDecl.has_body` sits beside an
+- [x] **S7. A body is optional.** Done in `096a444f`. `FunctionDecl.has_body` sits beside an
   always-present `body`; make `body` an `Option`.
 - [x] **S8. Nullsafe is named.** Done in `18708302`; a dynamic access carries it too (`e03f6ac9`). `PropertyAccess` and `MethodCall` carry
   the nullsafe flag as a bare positional `bool`; give it a name (a named
