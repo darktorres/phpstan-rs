@@ -28,13 +28,12 @@
 //! and merged into this same index by `Project::ensure_member_index_built`/
 //! `Project::reindex_tier2_for_file`.
 
-use crate::registry::class_decl_fqn;
 use rustc_hash::FxHashMap;
 use std::path::{Path, PathBuf};
 
 use syntax::ast::*;
 use syntax::token::Span;
-use syntax::visit::{any_child_expr, any_child_stmt};
+use syntax::visit::{Visitor, walk_catch_clause, walk_class_decl, walk_expr, walk_stmts};
 
 /// What a reference site points at - no local-variable variant (see
 /// this item's own edge-case notes: local-variable rename/references is
@@ -124,12 +123,12 @@ fn resolve_class_ref(name: &QualifiedName) -> Option<String> {
 /// unneeded for Tier 1's own class/function scope; the member half is
 /// Tier 2's job entirely, via a real Checker-resolved declaring owner).
 pub(crate) fn index_class_fn_refs(stmts: &[Stmt], source: &str) -> Vec<(Span, RefTarget)> {
-    let mut out = Vec::new();
-    let w = ClassFnRefWalker {
+    let mut w = ClassFnRefWalker {
         source: Some(source),
+        out: Vec::new(),
     };
-    w.stmts(stmts, None, &mut out);
-    out
+    walk_stmts(&mut w, stmts);
+    w.out
 }
 
 /// Same walk, for a caller with no retained source text at all (a batch
@@ -148,272 +147,102 @@ pub(crate) fn index_class_fn_refs(stmts: &[Stmt], source: &str) -> Vec<(Span, Re
 /// `retain_source` on, so it always gets `index_class_fn_refs`'s own exact
 /// version above, never this one.
 pub(crate) fn index_class_fn_refs_without_source(stmts: &[Stmt]) -> Vec<(Span, RefTarget)> {
-    let mut out = Vec::new();
-    let w = ClassFnRefWalker { source: None };
-    w.stmts(stmts, None, &mut out);
-    out
+    let mut w = ClassFnRefWalker {
+        source: None,
+        out: Vec::new(),
+    };
+    walk_stmts(&mut w, stmts);
+    w.out
 }
 
 struct ClassFnRefWalker<'a> {
     source: Option<&'a str>,
+    out: Vec<(Span, RefTarget)>,
 }
 
-impl<'a> ClassFnRefWalker<'a> {
-    fn record_type_hint(&self, out: &mut Vec<(Span, RefTarget)>, hint: &TypeHint) {
+impl ClassFnRefWalker<'_> {
+    /// Records `name`, a class name, at `span`, or at `whole` without the
+    /// source: then a site is the span its node already has.
+    fn class_at(&mut self, name: &QualifiedName, span: Span, whole: Span) {
+        if let Some(fqn) = resolve_class_ref(name) {
+            let span = if self.source.is_some() { span } else { whole };
+            self.out.push((span, RefTarget::Class(fqn)));
+        }
+    }
+
+    /// Records `name`, a function name as a call or callable names it.
+    fn function_at(&mut self, name: &QualifiedName, span: Span) {
+        let fqn = name.candidates().0.to_string();
+        self.out.push((span, RefTarget::Function(fqn)));
+    }
+}
+
+impl<'ast> Visitor<'ast> for ClassFnRefWalker<'_> {
+    fn visit_type_hint(&mut self, hint: &'ast TypeHint) {
         for (name, name_span) in hint.class_names() {
-            if let Some(fqn) = resolve_class_ref(name) {
-                // Without the source, a site is the whole declaration.
-                let span = if self.source.is_some() {
-                    name_span
-                } else {
-                    hint.span
-                };
-                out.push((span, RefTarget::Class(fqn)));
+            self.class_at(name, name_span, hint.span);
+        }
+    }
+
+    fn visit_class_decl(&mut self, class: &'ast ClassDecl) {
+        let named = [
+            (&class.extends, &class.extends_spans),
+            (&class.implements, &class.implements_spans),
+            (&class.uses, &class.uses_spans),
+        ];
+        for (names, spans) in named {
+            for (name, span) in names.iter().zip(spans) {
+                self.class_at(name, *span, *span);
             }
         }
+        walk_class_decl(self, class);
     }
 
-    /// A parameter's own default-value expression (including a promoted
-    /// constructor parameter's own default) - not visited by
-    /// `lsp::navigation::Walker::param` at all (that walker only ever
-    /// needs a parameter's type-hint/name-declaration site for
-    /// cursor-driven hover/definition), but a legitimate home for a bare
-    /// `Name`/`ClassNameFetch` reference this item's own index
-    /// must not silently miss.
-    fn param(&self, p: &Param, current_class: Option<&str>, out: &mut Vec<(Span, RefTarget)>) {
-        if let Some(hint) = &p.type_hint {
-            self.record_type_hint(out, hint);
+    fn visit_catch_clause(&mut self, clause: &'ast CatchClause) {
+        for (name, span) in clause.types.iter().zip(&clause.types_spans) {
+            self.class_at(name, *span, *span);
         }
-        if let Some(d) = &p.default {
-            self.expr(d, current_class, out);
-        }
+        walk_catch_clause(self, clause);
     }
 
-    fn stmts(&self, stmts: &[Stmt], current_class: Option<&str>, out: &mut Vec<(Span, RefTarget)>) {
-        for stmt in stmts {
-            self.stmt(stmt, current_class, out);
-        }
-    }
-
-    fn stmt(&self, stmt: &Stmt, current_class: Option<&str>, out: &mut Vec<(Span, RefTarget)>) {
-        syntax::stack::guard(|| {
-            match &stmt.kind {
-                StmtKind::Expression(e) | StmtKind::Throw(e) => self.expr(e, current_class, out),
-                StmtKind::Return(Some(e)) => self.expr(e, current_class, out),
-                StmtKind::Echo(exprs) | StmtKind::Unset(exprs) => {
-                    for e in exprs {
-                        self.expr(e, current_class, out);
-                    }
-                }
-                StmtKind::If(if_stmt) => {
-                    for cond in if_stmt.conditions() {
-                        self.expr(cond, current_class, out);
-                    }
-                }
-                StmtKind::While { cond, .. } | StmtKind::DoWhile { cond, .. } => {
-                    self.expr(cond, current_class, out);
-                }
-                StmtKind::For {
-                    init, cond, step, ..
-                } => {
-                    for e in init.iter().chain(cond).chain(step) {
-                        self.expr(e, current_class, out);
-                    }
-                }
-                StmtKind::Foreach { subject, .. } => {
-                    self.expr(subject, current_class, out);
-                }
-                StmtKind::FunctionDecl(f) => {
-                    self.function(f, current_class, out);
-                }
-                StmtKind::ClassDecl(c) => self.class(c, out),
-                StmtKind::GlobalConst(consts) => {
-                    for c in consts {
-                        self.expr(&c.value, current_class, out);
-                    }
-                }
-                StmtKind::StaticVar(vars) => {
-                    for (_, d) in vars {
-                        if let Some(e) = d {
-                            self.expr(e, current_class, out);
-                        }
-                    }
-                }
-                StmtKind::Switch { subject, cases } => {
-                    self.expr(subject, current_class, out);
-                    for case in cases {
-                        if let Some(t) = &case.test {
-                            self.expr(t, current_class, out);
-                        }
-                    }
-                }
-                StmtKind::Try { catches, .. } => {
-                    for c in catches {
-                        for (name, span) in c.types.iter().zip(c.types_spans.iter()) {
-                            if let Some(fqn) = resolve_class_ref(name) {
-                                out.push((*span, RefTarget::Class(fqn)));
-                            }
-                        }
-                    }
-                }
-                _ => {}
-            }
-            any_child_stmt(stmt, |child| {
-                self.stmt(child, current_class, out);
-                false
-            });
-        })
-    }
-
-    fn expr(&self, expr: &Expr, current_class: Option<&str>, out: &mut Vec<(Span, RefTarget)>) {
+    fn visit_expr(&mut self, expr: &'ast Expr) {
         syntax::stack::guard(|| {
             match &expr.kind {
-                ExprKind::Call(callee, args) => {
-                    if let ExprKind::Name(n) = &callee.kind {
-                        let fqn = n.candidates().0.to_string();
-                        out.push((callee.span, RefTarget::Function(fqn)));
+                // The callee's name is recorded here, as a function or a
+                // class; only the arguments are walked.
+                ExprKind::Call(callee, args) | ExprKind::New(callee, args)
+                    if matches!(callee.kind, ExprKind::Name(_)) =>
+                {
+                    let ExprKind::Name(n) = &callee.kind else {
+                        unreachable!()
+                    };
+                    if matches!(expr.kind, ExprKind::Call(..)) {
+                        self.function_at(n, callee.span);
                     } else {
-                        self.expr(callee, current_class, out);
+                        self.class_at(n, callee.span, callee.span);
                     }
-                    for a in args {
-                        self.expr(&a.value, current_class, out);
+                    for arg in args {
+                        self.visit_arg(arg);
                     }
                     return;
                 }
-                ExprKind::New(callee, args) => {
-                    if let ExprKind::Name(n) = &callee.kind {
-                        if let Some(fqn) = resolve_class_ref(n) {
-                            out.push((callee.span, RefTarget::Class(fqn)));
-                        }
-                    } else {
-                        self.expr(callee, current_class, out);
-                    }
-                    for a in args {
-                        self.expr(&a.value, current_class, out);
-                    }
-                    return;
-                }
-                ExprKind::Name(n) => {
-                    // A bare `Name` node reached any other way than a
-                    // `Call`/`New` callee (e.g. a first-class-callable
-                    // target `foo(...)`) is taken as a function.
-                    let fqn = n.candidates().0.to_string();
-                    out.push((expr.span, RefTarget::Function(fqn)));
-                }
+                // A bare `Name` reached any other way than a callee (e.g. a
+                // first-class-callable target `foo(...)`) is taken as a
+                // function.
+                ExprKind::Name(n) => self.function_at(n, expr.span),
                 ExprKind::ClassConstFetch(StaticTarget::Name(class, class_span), _)
                 | ExprKind::ClassNameFetch(StaticTarget::Name(class, class_span))
                 | ExprKind::StaticPropertyFetch(StaticTarget::Name(class, class_span), _)
-                | ExprKind::DynamicStaticPropertyFetch(StaticTarget::Name(class, class_span), _) => {
-                    if let Some(fqn) = resolve_class_ref(class) {
-                        let span = if self.source.is_some() {
-                            *class_span
-                        } else {
-                            expr.span
-                        };
-                        out.push((span, RefTarget::Class(fqn)));
-                    }
-                }
-                // A genuinely dynamic receiver has no class-name text to
-                // record a reference for here at all - any name reference
-                // buried inside it is still picked up by the generic
-                // `any_child_expr` walk below (it's a real child of this
-                // node now, not a discarded `"?"` sentinel).
-                ExprKind::StaticCall(StaticTarget::Name(class, class_span), _, _) => {
-                    if let Some(fqn) = resolve_class_ref(class) {
-                        let span = if self.source.is_some() {
-                            *class_span
-                        } else {
-                            expr.span
-                        };
-                        out.push((span, RefTarget::Class(fqn)));
-                    }
+                | ExprKind::DynamicStaticPropertyFetch(StaticTarget::Name(class, class_span), _)
+                | ExprKind::StaticCall(StaticTarget::Name(class, class_span), _, _) => {
+                    self.class_at(class, *class_span, expr.span);
                 }
                 ExprKind::Instanceof(_, InstanceofTarget::Name(name, span)) => {
-                    if let Some(fqn) = resolve_class_ref(name) {
-                        out.push((*span, RefTarget::Class(fqn)));
-                    }
-                }
-                ExprKind::NewAnonymousClass(decl, args) => {
-                    self.class(decl, out);
-                    for a in args {
-                        self.expr(&a.value, current_class, out);
-                    }
-                    return;
-                }
-                ExprKind::Closure { params, body, .. } => {
-                    for p in params {
-                        self.param(p, current_class, out);
-                    }
-                    self.stmts(body, current_class, out);
-                    return;
-                }
-                ExprKind::ArrowFn { params, body, .. } => {
-                    for p in params {
-                        self.param(p, current_class, out);
-                    }
-                    self.expr(body, current_class, out);
-                    return;
+                    self.class_at(name, *span, *span);
                 }
                 _ => {}
             }
-            any_child_expr(expr, |child| {
-                self.expr(child, current_class, out);
-                false
-            });
+            walk_expr(self, expr);
         })
-    }
-
-    fn function(
-        &self,
-        f: &FunctionDecl,
-        current_class: Option<&str>,
-        out: &mut Vec<(Span, RefTarget)>,
-    ) {
-        for p in &f.params {
-            self.param(p, current_class, out);
-        }
-        if let Some(rt) = &f.return_type {
-            self.record_type_hint(out, rt);
-        }
-        self.stmts(&f.body, current_class, out);
-    }
-
-    fn class(&self, c: &ClassDecl, out: &mut Vec<(Span, RefTarget)>) {
-        let fqn = class_decl_fqn(c).to_string();
-        for (name, span) in c.extends.iter().zip(c.extends_spans.iter()) {
-            if let Some(target) = resolve_class_ref(name) {
-                out.push((*span, RefTarget::Class(target)));
-            }
-        }
-        for (name, span) in c.implements.iter().zip(c.implements_spans.iter()) {
-            if let Some(target) = resolve_class_ref(name) {
-                out.push((*span, RefTarget::Class(target)));
-            }
-        }
-        for (name, span) in c.uses.iter().zip(c.uses_spans.iter()) {
-            if let Some(target) = resolve_class_ref(name) {
-                out.push((*span, RefTarget::Class(target)));
-            }
-        }
-        for p in &c.properties {
-            if let Some(hint) = &p.type_hint {
-                self.record_type_hint(out, hint);
-            }
-            if let Some(d) = &p.default {
-                self.expr(d, Some(&fqn), out);
-            }
-        }
-        for m in &c.methods {
-            self.function(&m.function, Some(&fqn), out);
-        }
-        for cst in &c.consts {
-            if let Some(hint) = &cst.type_hint {
-                self.record_type_hint(out, hint);
-            }
-            self.expr(&cst.value, Some(&fqn), out);
-        }
-        for v in c.enum_cases.iter().filter_map(|case| case.value.as_ref()) {
-            self.expr(v, Some(&fqn), out);
-        }
     }
 }
