@@ -2,7 +2,7 @@ use rustc_hash::FxHashSet;
 use types::Name;
 
 use syntax::ast::*;
-use syntax::visit::{any_child_expr, any_child_stmt};
+use syntax::visit::{Visitor, walk_expr, walk_stmts};
 
 // ---------------------------------------------------------------------
 // Variable-name usage (constructor parameters / closure `use(...)`)
@@ -41,160 +41,86 @@ impl VarUsage {
 }
 
 pub(crate) fn collect_var_usage(stmts: &[Stmt]) -> VarUsage {
-    let mut names = FxHashSet::default();
-    let mut escaped = false;
-    for stmt in stmts {
-        walk_stmt_for_vars(stmt, &mut names, &mut escaped);
-    }
-    if escaped {
+    let mut vars = Vars {
+        names: FxHashSet::default(),
+        escaped: false,
+    };
+    walk_stmts(&mut vars, stmts);
+    if vars.escaped {
         VarUsage::Escaped
     } else {
-        VarUsage::Names(names)
+        VarUsage::Names(vars.names)
     }
 }
 
+/// Whether `callee` names the global function `target`, as an unqualified
+/// call in a namespace falls back to.
 fn is_call_to(callee: &Expr, target: &str) -> bool {
-    matches!(&callee.kind, ExprKind::Name(n) if n.trim_start_matches('\\').eq_ignore_ascii_case(target))
-}
-
-fn walk_stmt_for_vars(stmt: &Stmt, names: &mut FxHashSet<Name>, escaped: &mut bool) {
-    syntax::stack::guard(|| {
-        match &stmt.kind {
-            StmtKind::Expression(e) | StmtKind::Throw(e) => walk_expr_for_vars(e, names, escaped),
-            StmtKind::Return(Some(e)) => walk_expr_for_vars(e, names, escaped),
-            StmtKind::Echo(exprs) | StmtKind::Unset(exprs) => {
-                for e in exprs {
-                    walk_expr_for_vars(e, names, escaped);
-                }
-            }
-            StmtKind::If(if_stmt) => {
-                for cond in if_stmt.conditions() {
-                    walk_expr_for_vars(cond, names, escaped);
-                }
-            }
-            StmtKind::While { cond, .. } | StmtKind::DoWhile { cond, .. } => {
-                walk_expr_for_vars(cond, names, escaped)
-            }
-            StmtKind::For {
-                init, cond, step, ..
-            } => {
-                for e in init.iter().chain(cond).chain(step) {
-                    walk_expr_for_vars(e, names, escaped);
-                }
-            }
-            StmtKind::Foreach {
-                subject,
-                key,
-                value,
-                ..
-            } => {
-                walk_expr_for_vars(subject, names, escaped);
-                if let Some(k) = key {
-                    walk_expr_for_vars(k, names, escaped);
-                }
-                walk_expr_for_vars(value, names, escaped);
-            }
-            StmtKind::GlobalConst(consts) => {
-                for c in consts {
-                    walk_expr_for_vars(&c.value, names, escaped);
-                }
-            }
-            StmtKind::StaticVar(vars) => {
-                for (_, d) in vars {
-                    if let Some(e) = d {
-                        walk_expr_for_vars(e, names, escaped);
-                    }
-                }
-            }
-            StmtKind::Switch { subject, cases } => {
-                walk_expr_for_vars(subject, names, escaped);
-                for case in cases {
-                    if let Some(t) = &case.test {
-                        walk_expr_for_vars(t, names, escaped);
-                    }
-                }
-            }
-            _ => {}
-        }
-        any_child_stmt(stmt, |child| {
-            walk_stmt_for_vars(child, names, escaped);
-            false
-        });
+    matches!(&callee.kind, ExprKind::Name(n) if {
+        let (primary, fallback) = n.candidates();
+        fallback.unwrap_or(primary).eq_ignore_ascii_case(target)
     })
 }
 
-fn walk_expr_for_vars(expr: &Expr, names: &mut FxHashSet<Name>, escaped: &mut bool) {
-    syntax::stack::guard(|| {
-        match &expr.kind {
-            ExprKind::Variable(name) => {
-                if **name != *"this" {
-                    names.insert(name.clone());
-                }
-            }
-            ExprKind::DynamicVariable(inner) => {
-                if let ExprKind::Literal(Literal::String(s)) = &inner.kind {
-                    names.insert(Name::from(&*s.to_str_lossy()));
-                } else {
-                    *escaped = true;
-                }
-            }
-            // The included file or evaluated code can read any variable.
-            ExprKind::Include(..) | ExprKind::Eval(_) => *escaped = true,
-            ExprKind::Call(callee, args) => {
-                if is_call_to(callee, "func_get_args") || is_call_to(callee, "get_defined_vars") {
-                    *escaped = true;
-                } else if is_call_to(callee, "compact") {
-                    for arg in args {
-                        collect_compact_names(&arg.value, names, escaped);
+/// The variable names one body references. A nested named function or
+/// class declaration has its own scope and is not entered; an anonymous
+/// class's constructor arguments run in this one.
+struct Vars {
+    names: FxHashSet<Name>,
+    escaped: bool,
+}
+
+impl<'ast> Visitor<'ast> for Vars {
+    fn visit_function_decl(&mut self, _: &'ast FunctionDecl) {}
+
+    fn visit_class_decl(&mut self, _: &'ast ClassDecl) {}
+
+    fn visit_expr(&mut self, expr: &'ast Expr) {
+        syntax::stack::guard(|| {
+            match &expr.kind {
+                ExprKind::Variable(name) => {
+                    if **name != *"this" {
+                        self.names.insert(name.clone());
                     }
                 }
-            }
-            // Mirrors real PHPStan's own `UnusedFunctionParametersCheck::
-            // getUsedVariables`: only a closure's own `use(...)` list counts
-            // as a reference to the *enclosing* scope's variable of the same
-            // name - its `params`/`body` have their own, independent scope,
-            // and naively recursing into them risks reading a same-named but
-            // unrelated inner parameter/local as if it were a use of the
-            // outer one. `any_child_expr` already excludes `Closure`'s
-            // children entirely (see `visit`'s own module doc comment), so
-            // this is the only place its variables are ever collected from.
-            ExprKind::Closure { uses, .. } => {
-                for u in uses {
-                    names.insert(u.name.clone());
-                }
-            }
-            // Unlike `Closure`, an arrow function implicitly captures every
-            // outer variable it references by value - so, unlike above, its
-            // `params`/`body` genuinely do need a normal recursive walk here.
-            // `any_child_expr` excludes `ArrowFn`'s children too, so this is
-            // the only place they're walked from.
-            ExprKind::ArrowFn { params, body, .. } => {
-                for p in params {
-                    if let Some(d) = &p.default {
-                        walk_expr_for_vars(d, names, escaped);
+                ExprKind::DynamicVariable(inner) => {
+                    if let ExprKind::Literal(Literal::String(s)) = &inner.kind {
+                        self.names.insert(Name::from(&*s.to_str_lossy()));
+                    } else {
+                        self.escaped = true;
                     }
                 }
-                walk_expr_for_vars(body, names, escaped);
-            }
-            // Real PHP anonymous classes don't implicitly capture the
-            // enclosing scope's variables at all - only the constructor
-            // arguments (evaluated in the enclosing scope before being passed
-            // in) can reference an outer variable. `any_child_expr` excludes
-            // `NewAnonymousClass`'s children entirely, so the constructor args
-            // need an explicit walk here; the class's own method bodies
-            // deliberately aren't recursed into (a separate, unrelated scope).
-            ExprKind::NewAnonymousClass(_, args) => {
-                for a in args {
-                    walk_expr_for_vars(&a.value, names, escaped);
+                // The included file or evaluated code can read any variable.
+                ExprKind::Include(..) | ExprKind::Eval(_) => self.escaped = true,
+                ExprKind::Call(callee, args) => {
+                    if is_call_to(callee, "func_get_args") || is_call_to(callee, "get_defined_vars")
+                    {
+                        self.escaped = true;
+                    } else if is_call_to(callee, "compact") {
+                        for arg in args {
+                            collect_compact_names(&arg.value, &mut self.names, &mut self.escaped);
+                        }
+                    }
                 }
+                // Mirrors real PHPStan's own `UnusedFunctionParametersCheck::
+                // getUsedVariables`: only a closure's own `use(...)` list
+                // counts as a reference to the enclosing scope's variable of
+                // the same name - its parameters and body have their own,
+                // independent scope, where a same-named but unrelated inner
+                // variable would otherwise read as a use of the outer one.
+                // An arrow function implicitly captures every outer variable
+                // it references by value, so its body is walked.
+                ExprKind::Closure { uses, .. } => {
+                    for u in uses {
+                        self.names.insert(u.name.clone());
+                    }
+                    return;
+                }
+                _ => {}
             }
-            _ => {}
-        }
-        any_child_expr(expr, |child| {
-            walk_expr_for_vars(child, names, escaped);
-            false
-        });
-    })
+            walk_expr(self, expr);
+        })
+    }
 }
 
 /// `compact('a', 'b')` / `compact(['a', 'b'])` reads the named variables
