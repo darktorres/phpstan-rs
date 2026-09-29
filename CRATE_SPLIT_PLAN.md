@@ -2729,7 +2729,10 @@ adapter (`registry::type_node`) and the checker's `resolve_type_node`:
     constructors (F47);
   - a bare `class-string` is the class-string type
     (`ClassKindString(Class)`), not `string`, so it stays non-empty and
-    a class-string array key stays a string key (F61).
+    a class-string array key stays a string key (F61);
+  - a PHPDoc type the resolver can't resolve leaves the position its
+    native type in the reflection itself, so callers see it too (F63
+    does this for the function's own body only).
 - assert targets `$param->prop`, `$param->method()` and `$this->method()` are
   kept; `@throws` and assert types get alias substitution; a written
   `Traversable` resolves like any name.
