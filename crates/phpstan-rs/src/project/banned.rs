@@ -401,7 +401,11 @@ impl<'ast> Visitor<'ast> for Walker<'_> {
             if let Some(prop) = self.registry.lookup_property(&fqn, &p.name) {
                 self.ban_type(p.span, format!("Property {fqn}::${}", p.name), prop.ty());
             }
-            if p.hooks.as_ref().is_some_and(|h| h.get_by_ref) {
+            if p.hooks
+                .as_ref()
+                .and_then(|h| h.get.as_ref())
+                .is_some_and(|get| get.by_ref)
+            {
                 self.by_ref_return(p.span, &format!("{fqn}::${}'s get hook", p.name));
             }
         }

@@ -22,7 +22,7 @@ pub(crate) fn property_hook_set_type(
     template_params: &FxHashMap<String, TemplateParam>,
     ctx: &NameContext,
 ) -> (Option<Type>, Vec<(Name, Name)>) {
-    let Some((Some(param), _)) = hooks.and_then(|h| h.set.as_ref()) else {
+    let Some(param) = hooks.and_then(|h| h.set.as_ref()?.param.as_ref()) else {
         return (None, Vec::new());
     };
     let declared = declared_type(None, param.type_hint.as_ref(), template_params, ctx);
@@ -37,13 +37,8 @@ pub(crate) fn property_hook_set_type(
 /// storage, even if the other never does.
 pub(crate) fn hooks_reference_backing_storage(hooks: &PropertyHooks, prop_name: &str) -> bool {
     hooks
-        .get
-        .as_ref()
-        .is_some_and(|body| hook_body_references_property(body, prop_name))
-        || hooks
-            .set
-            .as_ref()
-            .is_some_and(|(_, body)| hook_body_references_property(body, prop_name))
+        .iter()
+        .any(|hook| hook_body_references_property(&hook.body, prop_name))
 }
 
 /// `pub(crate)`: also reused by `checker::oop::check_property_hooks` to

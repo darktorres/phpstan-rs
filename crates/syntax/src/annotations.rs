@@ -343,17 +343,16 @@ impl<'ast> Visitor<'ast> for Builder {
     }
 
     fn visit_property_hooks(&mut self, hooks: &'ast PropertyHooks) {
-        for attr in hooks.get_attrs.iter().chain(&hooks.set_attrs) {
-            self.visit_attribute(attr);
+        for hook in hooks.iter() {
+            for attr in &hook.attrs {
+                self.visit_attribute(attr);
+            }
         }
-        if let Some((Some(param), _)) = &hooks.set {
+        if let Some(param) = hooks.set.as_ref().and_then(|hook| hook.param.as_ref()) {
             self.visit_param(param);
         }
-        for body in [hooks.get.as_ref(), hooks.set.as_ref().map(|(_, b)| b)]
-            .into_iter()
-            .flatten()
-        {
-            match body {
+        for hook in hooks.iter() {
+            match &hook.body {
                 PropertyHookBody::Arrow(e) => self.arrow_body(e),
                 PropertyHookBody::Block(stmts) => self.body(stmts),
                 PropertyHookBody::Abstract => {}

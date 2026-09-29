@@ -38,38 +38,18 @@ impl<'a> Checker<'a> {
             let Some(prop_sig) = info.properties().get(p.name.as_ref()).cloned() else {
                 continue;
             };
-            if let Some(body) = &hooks.get {
+            if let Some(hook) = &hooks.get {
                 self.check_hook_phpdoc_types(
                     fqn,
                     p.type_hint.as_ref(),
                     None,
-                    hooks.get_doc.as_deref(),
+                    hook.doc.as_deref(),
                     p.span,
                 );
-                self.check_get_hook(
-                    fqn,
-                    &p.name,
-                    p.span,
-                    body,
-                    &prop_sig,
-                    &hooks.get_attrs,
-                    hooks.get_doc.as_deref(),
-                    hooks.get_final,
-                );
+                self.check_get_hook(fqn, &p.name, p.span, hook, &prop_sig);
             }
-            if let Some((param, body)) = &hooks.set {
-                self.check_set_hook(
-                    fqn,
-                    &p.name,
-                    p.span,
-                    p.type_hint.as_ref(),
-                    param.as_ref(),
-                    body,
-                    &prop_sig,
-                    &hooks.set_attrs,
-                    hooks.set_doc.as_deref(),
-                    hooks.set_final,
-                );
+            if let Some(hook) = &hooks.set {
+                self.check_set_hook(fqn, &p.name, p.span, p.type_hint.as_ref(), hook, &prop_sig);
             }
         }
         if let Some(ctor) = c.constructor() {
@@ -83,37 +63,24 @@ impl<'a> Checker<'a> {
                 let Some(prop_sig) = info.properties().get(param.name.as_ref()).cloned() else {
                     continue;
                 };
-                if let Some(body) = &hooks.get {
+                if let Some(hook) = &hooks.get {
                     self.check_hook_phpdoc_types(
                         fqn,
                         param.type_hint.as_ref(),
                         None,
-                        hooks.get_doc.as_deref(),
+                        hook.doc.as_deref(),
                         param.span,
                     );
-                    self.check_get_hook(
-                        fqn,
-                        &param.name,
-                        param.span,
-                        body,
-                        &prop_sig,
-                        &hooks.get_attrs,
-                        hooks.get_doc.as_deref(),
-                        hooks.get_final,
-                    );
+                    self.check_get_hook(fqn, &param.name, param.span, hook, &prop_sig);
                 }
-                if let Some((set_param, body)) = &hooks.set {
+                if let Some(hook) = &hooks.set {
                     self.check_set_hook(
                         fqn,
                         &param.name,
                         param.span,
                         param.type_hint.as_ref(),
-                        set_param.as_ref(),
-                        body,
+                        hook,
                         &prop_sig,
-                        &hooks.set_attrs,
-                        hooks.set_doc.as_deref(),
-                        hooks.set_final,
                     );
                 }
             }
@@ -188,18 +155,16 @@ impl<'a> Checker<'a> {
     /// Scalar `name`/`span`/`type_hint` (rather than a whole
     /// `&PropertyDecl`) let this and `check_set_hook` handle both a plain
     /// property and a promoted constructor parameter uniformly.
-    #[allow(clippy::too_many_arguments)]
     fn check_get_hook(
         &mut self,
         fqn: &str,
         name: &str,
         span: Span,
-        body: &PropertyHookBody,
+        hook: &PropertyHook,
         prop_sig: &PropertyReflection,
-        attrs: &[Attribute],
-        doc: Option<&str>,
-        hook_final: bool,
     ) {
+        let (body, attrs, doc, hook_final) =
+            (&hook.body, &hook.attrs, hook.doc.as_deref(), hook.is_final);
         let label = format!("{fqn}::${name} (get hook)");
         self.check_hook_attributes(attrs, &label);
         // `InvalidThrowsPhpDocValueRule`'s @throws-validity check runs
@@ -364,20 +329,22 @@ impl<'a> Checker<'a> {
         self.current_class = previous_class;
     }
 
-    #[allow(clippy::too_many_arguments)]
     fn check_set_hook(
         &mut self,
         fqn: &str,
         name: &str,
         span: Span,
         type_hint: Option<&TypeHint>,
-        param: Option<&Param>,
-        body: &PropertyHookBody,
+        hook: &PropertyHook,
         prop_sig: &PropertyReflection,
-        attrs: &[Attribute],
-        doc: Option<&str>,
-        hook_final: bool,
     ) {
+        let (param, body, attrs, doc, hook_final) = (
+            hook.param.as_ref(),
+            &hook.body,
+            &hook.attrs,
+            hook.doc.as_deref(),
+            hook.is_final,
+        );
         let label = format!("{fqn}::${name} (set hook)");
         self.check_hook_attributes(attrs, &label);
         self.check_hook_phpdoc_types(fqn, type_hint, Some(param), doc, span);

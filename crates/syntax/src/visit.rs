@@ -536,20 +536,14 @@ fn walk_hook_body<'ast, V: Visitor<'ast> + ?Sized>(v: &mut V, body: &'ast Proper
 }
 
 pub fn walk_property_hooks<'ast, V: Visitor<'ast> + ?Sized>(v: &mut V, h: &'ast PropertyHooks) {
-    for attr in &h.get_attrs {
-        v.visit_attribute(attr);
-    }
-    if let Some(body) = &h.get {
-        walk_hook_body(v, body);
-    }
-    for attr in &h.set_attrs {
-        v.visit_attribute(attr);
-    }
-    if let Some((param, body)) = &h.set {
-        if let Some(param) = param {
+    for hook in h.iter() {
+        for attr in &hook.attrs {
+            v.visit_attribute(attr);
+        }
+        if let Some(param) = &hook.param {
             v.visit_param(param);
         }
-        walk_hook_body(v, body);
+        walk_hook_body(v, &hook.body);
     }
 }
 
@@ -1243,20 +1237,14 @@ fn walk_hook_body_mut<V: VisitorMut + ?Sized>(v: &mut V, body: &mut PropertyHook
 }
 
 pub fn walk_property_hooks_mut<V: VisitorMut + ?Sized>(v: &mut V, h: &mut PropertyHooks) {
-    for attr in h.get_attrs.iter_mut() {
-        v.visit_attribute(attr);
-    }
-    if let Some(body) = &mut h.get {
-        walk_hook_body_mut(v, body);
-    }
-    for attr in h.set_attrs.iter_mut() {
-        v.visit_attribute(attr);
-    }
-    if let Some((param, body)) = &mut h.set {
-        if let Some(param) = param {
+    for hook in h.iter_mut() {
+        for attr in hook.attrs.iter_mut() {
+            v.visit_attribute(attr);
+        }
+        if let Some(param) = &mut hook.param {
             v.visit_param(param);
         }
-        walk_hook_body_mut(v, body);
+        walk_hook_body_mut(v, &mut hook.body);
     }
 }
 

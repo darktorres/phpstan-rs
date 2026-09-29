@@ -379,30 +379,41 @@ pub enum PropertyHookBody {
 
 #[derive(Debug, Clone)]
 pub struct PropertyHooks {
-    pub get: Option<PropertyHookBody>,
+    pub get: Option<PropertyHook>,
+    pub set: Option<PropertyHook>,
+}
+
+impl PropertyHooks {
+    /// The hooks declared, `get` first.
+    pub fn iter(&self) -> impl Iterator<Item = &PropertyHook> {
+        self.get.iter().chain(self.set.iter())
+    }
+
+    pub fn iter_mut(&mut self) -> impl Iterator<Item = &mut PropertyHook> {
+        self.get.iter_mut().chain(self.set.iter_mut())
+    }
+}
+
+/// One `get` or `set` hook of a property.
+#[derive(Debug, Clone)]
+pub struct PropertyHook {
+    pub body: PropertyHookBody,
     // `&get`: the hook returns its value by reference.
-    pub get_by_ref: bool,
-    // The optional `(Type $value)` parameter list is just the one param
-    // PHP allows there; None when the hook omits it (`set { ... }` uses an
-    // implicit $value).
-    pub set: Option<(Option<Param>, PropertyHookBody)>,
-    // The `#[Attr]` group(s) immediately preceding this hook's
-    // own `get`/`set` keyword - see `PropertyHookAttributesRule`. Empty
-    // (not `None`) when the hook has no attributes, matching every other
-    // `attrs: Vec<Attribute>` field in this file.
-    pub get_attrs: Vec<Attribute>,
-    pub set_attrs: Vec<Attribute>,
-    // The `/** ... */` doc comment immediately preceding this
-    // hook's own `get`/`set` keyword (after any `#[Attr]` group(s)) -
-    // mirrors `FunctionDecl::doc_comment` exactly, needed so a hook can
-    // carry its own `@throws` tag the same way an ordinary method does.
-    pub get_doc: Option<Arc<str>>,
-    pub set_doc: Option<Arc<str>>,
-    // Whether this hook itself carries its own `final` modifier
-    // (independent of the property's own/declaring class's finality) -
-    // see `TooWideMethodThrowTypeRule`'s property-hook sibling's own gate.
-    pub get_final: bool,
-    pub set_final: bool,
+    pub by_ref: bool,
+    // `set(Type $value)`: the one parameter PHP allows there; `None` when
+    // the hook omits it (`set { ... }` uses an implicit `$value`), and
+    // always for `get`.
+    pub param: Option<Param>,
+    // The `#[Attr]` group(s) immediately preceding the hook's own
+    // `get`/`set` keyword - see `PropertyHookAttributesRule`.
+    pub attrs: Vec<Attribute>,
+    // The `/** ... */` doc comment immediately preceding the hook's own
+    // keyword (after any `#[Attr]` group(s)), so a hook can carry its own
+    // `@throws` tag the way a method does.
+    pub doc: Option<Arc<str>>,
+    // The hook's own `final` modifier (independent of the property's or
+    // its class's finality).
+    pub is_final: bool,
 }
 
 #[derive(Debug, Clone)]

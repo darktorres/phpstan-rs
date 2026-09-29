@@ -10,14 +10,7 @@ impl Parser {
     pub(crate) fn parse_property_hooks(&mut self) -> Result<PropertyHooks, ParseError> {
         self.expect(&Token::LBrace)?;
         let mut get = None;
-        let mut get_by_ref = false;
         let mut set = None;
-        let mut get_attrs = Vec::new();
-        let mut set_attrs = Vec::new();
-        let mut get_doc = None;
-        let mut set_doc = None;
-        let mut get_final = false;
-        let mut set_final = false;
         while !self.check(&Token::RBrace) && !self.at_eof() {
             // `#[Attr]` group(s) directly preceding this hook's own
             // `get`/`set` keyword - must be parsed before anything else
@@ -90,9 +83,9 @@ impl Parser {
             let body = if self.eat(&Token::FatArrow) {
                 let e = self.parse_expression()?;
                 self.expect_semicolon()?;
-                Some(PropertyHookBody::Arrow(e))
+                PropertyHookBody::Arrow(e)
             } else if self.check(&Token::LBrace) {
-                Some(PropertyHookBody::Block(self.parse_stmt_list_block()?))
+                PropertyHookBody::Block(self.parse_stmt_list_block()?)
             } else {
                 // Abstract form: `get;` / `set;`, no body at all - a
                 // hook that's declared but has no body, unambiguously
@@ -100,33 +93,24 @@ impl Parser {
                 // `if`/`else` chain only runs once `is_set` has already
                 // confirmed a real `get`/`set` keyword was consumed).
                 self.expect_semicolon()?;
-                Some(PropertyHookBody::Abstract)
+                PropertyHookBody::Abstract
             };
 
+            let hook = PropertyHook {
+                body,
+                by_ref: hook_by_ref,
+                param,
+                attrs: hook_attrs,
+                doc: hook_doc,
+                is_final: hook_final,
+            };
             if is_set {
-                set = body.map(|b| (param, b));
-                set_attrs = hook_attrs;
-                set_doc = hook_doc;
-                set_final = hook_final;
+                set = Some(hook);
             } else {
-                get = body;
-                get_by_ref = hook_by_ref;
-                get_attrs = hook_attrs;
-                get_doc = hook_doc;
-                get_final = hook_final;
+                get = Some(hook);
             }
         }
         self.expect(&Token::RBrace)?;
-        Ok(PropertyHooks {
-            get,
-            get_by_ref,
-            set,
-            get_attrs,
-            set_attrs,
-            get_doc,
-            set_doc,
-            get_final,
-            set_final,
-        })
+        Ok(PropertyHooks { get, set })
     }
 }

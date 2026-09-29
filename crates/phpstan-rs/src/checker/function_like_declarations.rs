@@ -202,15 +202,11 @@ impl<'a> Checker<'a> {
             let Some(hooks) = &p.hooks else {
                 continue;
             };
-            if let Some((Some(param), _)) = &hooks.set {
+            if let Some(param) = hooks.set.as_ref().and_then(|hook| hook.param.as_ref()) {
                 self.check_parameter_name(param);
             }
-            let bodies = hooks
-                .get
-                .iter()
-                .chain(hooks.set.iter().map(|(_, body)| body));
-            for body in bodies {
-                match body {
+            for hook in hooks.iter() {
+                match &hook.body {
                     PropertyHookBody::Arrow(e) => self.walk_promoted_in_expr(e),
                     PropertyHookBody::Block(stmts) => self.walk_promoted_in_body(stmts),
                     PropertyHookBody::Abstract => {}

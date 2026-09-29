@@ -34,11 +34,8 @@ impl PropertyView<'_> {
             return Vec::new();
         };
         let mut bodies = Vec::new();
-        if let Some(body) = &hooks.get {
-            bodies.push((body, hooks.get_final));
-        }
-        if let Some((_, body)) = &hooks.set {
-            bodies.push((body, hooks.set_final));
+        for hook in hooks.iter() {
+            bodies.push((&hook.body, hook.is_final));
         }
         bodies
     }

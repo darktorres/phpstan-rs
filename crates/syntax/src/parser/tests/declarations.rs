@@ -438,8 +438,12 @@ fn property_hooks_parse() {
     assert_eq!(c.properties.len(), 2);
 
     let hooks = c.properties[0].hooks.as_ref().expect("expected hooks");
-    assert!(matches!(hooks.get, Some(PropertyHookBody::Arrow(_))));
-    let (param, body) = hooks.set.as_ref().expect("expected set hook");
+    assert!(matches!(
+        hooks.get.as_ref().map(|hook| &hook.body),
+        Some(PropertyHookBody::Arrow(_))
+    ));
+    let set_hook = hooks.set.as_ref().expect("expected set hook");
+    let (param, body) = (&set_hook.param, &set_hook.body);
     assert_eq!(param.as_ref().unwrap().name, "value");
     assert!(matches!(body, PropertyHookBody::Block(_)));
 
@@ -449,8 +453,12 @@ fn property_hooks_parse() {
     // declared with no body" from "no hook at all", which `None` alone
     // couldn't tell apart.
     let bare_hooks = c.properties[1].hooks.as_ref().expect("expected hooks");
-    assert!(matches!(bare_hooks.get, Some(PropertyHookBody::Abstract)));
-    let (set_param, set_body) = bare_hooks.set.as_ref().expect("expected set hook");
+    assert!(matches!(
+        bare_hooks.get.as_ref().map(|hook| &hook.body),
+        Some(PropertyHookBody::Abstract)
+    ));
+    let set_hook = bare_hooks.set.as_ref().expect("expected set hook");
+    let (set_param, set_body) = (&set_hook.param, &set_hook.body);
     assert!(set_param.is_none());
     assert!(matches!(set_body, PropertyHookBody::Abstract));
 }
@@ -473,10 +481,10 @@ fn an_attribute_on_a_property_hook_parses() {
         panic!("expected ClassDecl");
     };
     let hooks = c.properties[0].hooks.as_ref().expect("expected hooks");
-    assert_eq!(hooks.get_attrs.len(), 1);
-    assert_eq!(hooks.get_attrs[0].name, "Foo");
-    assert_eq!(hooks.set_attrs.len(), 1);
-    assert_eq!(hooks.set_attrs[0].name, "Bar");
+    assert_eq!(hooks.get.as_ref().unwrap().attrs.len(), 1);
+    assert_eq!(hooks.get.as_ref().unwrap().attrs[0].name, "Foo");
+    assert_eq!(hooks.set.as_ref().unwrap().attrs.len(), 1);
+    assert_eq!(hooks.set.as_ref().unwrap().attrs[0].name, "Bar");
 }
 
 #[test]
@@ -496,7 +504,10 @@ fn property_hook_declared_abstract_with_no_body_is_distinct_from_no_hook_at_all(
         .hooks
         .as_ref()
         .expect("expected hooks on $x");
-    assert!(matches!(x_hooks.get, Some(PropertyHookBody::Abstract)));
+    assert!(matches!(
+        x_hooks.get.as_ref().map(|hook| &hook.body),
+        Some(PropertyHookBody::Abstract)
+    ));
     assert!(x_hooks.set.is_none());
     assert!(c.properties[1].hooks.is_none());
 }
@@ -538,7 +549,10 @@ fn by_reference_property_hook_parses() {
         panic!("expected ClassDecl");
     };
     let hooks = c.properties[0].hooks.as_ref().expect("expected hooks");
-    assert!(matches!(hooks.get, Some(PropertyHookBody::Arrow(_))));
+    assert!(matches!(
+        hooks.get.as_ref().map(|hook| &hook.body),
+        Some(PropertyHookBody::Arrow(_))
+    ));
 }
 
 #[test]
@@ -609,7 +623,10 @@ fn hooks_on_promoted_constructor_property_parse() {
     };
     let ctor = &c.methods[0].function;
     let hooks = ctor.params[0].hooks.as_ref().expect("expected hooks");
-    assert!(matches!(hooks.get, Some(PropertyHookBody::Block(_))));
+    assert!(matches!(
+        hooks.get.as_ref().map(|hook| &hook.body),
+        Some(PropertyHookBody::Block(_))
+    ));
     assert!(hooks.set.is_some());
 }
 
@@ -800,5 +817,14 @@ fn a_by_reference_get_hook_is_recorded() {
     let StmtKind::ClassDecl(c) = &program[0].kind else {
         panic!("expected ClassDecl");
     };
-    assert!(c.properties[0].hooks.as_ref().unwrap().get_by_ref);
+    assert!(
+        c.properties[0]
+            .hooks
+            .as_ref()
+            .unwrap()
+            .get
+            .as_ref()
+            .unwrap()
+            .by_ref
+    );
 }
