@@ -11,7 +11,7 @@ pub mod vendor;
 
 use std::path::{Path, PathBuf};
 
-use manifest::{ComposerManifest, path_starts_with};
+use manifest::{ComposerManifest, lexically_normalized};
 use vendor::VendorContext;
 
 /// Everything a Composer project root provides, read once.
@@ -73,18 +73,44 @@ pub struct PackageIndex {
     manifests: Vec<ComposerManifest>,
     /// Every owned directory, absolute: each root's own, and each
     /// installed package's `vendor/` link and install directory.
-    dirs: Vec<(PathBuf, PackageOwner)>,
+    dirs: Vec<OwnedDir>,
+}
+
+/// A directory some package owns, with what `PackageIndex::owner`
+/// compares a file against computed once.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct OwnedDir {
+    dir: PathBuf,
+    // `dir` with `.` and `..` resolved.
+    normalized: PathBuf,
+    depth: usize,
+    owner: PackageOwner,
+}
+
+impl OwnedDir {
+    fn new(dir: PathBuf, owner: PackageOwner) -> OwnedDir {
+        let normalized = lexically_normalized(&dir);
+        OwnedDir {
+            depth: dir.components().count(),
+            dir,
+            normalized,
+            owner,
+        }
+    }
 }
 
 impl PackageIndex {
     pub fn new(manifests: Vec<ComposerManifest>) -> PackageIndex {
         let mut dirs = Vec::new();
         for (i, manifest) in manifests.iter().enumerate() {
-            dirs.push((manifest.absolute_root.clone(), PackageOwner::Root(i)));
+            dirs.push(OwnedDir::new(
+                manifest.absolute_root.clone(),
+                PackageOwner::Root(i),
+            ));
             for (j, package) in manifest.installed.iter().enumerate() {
                 let owner = PackageOwner::Installed(i, j);
-                dirs.push((manifest.absolute(&package.vendor_dir), owner));
-                dirs.push((package.install_dir.clone(), owner));
+                dirs.push(OwnedDir::new(manifest.absolute(&package.vendor_dir), owner));
+                dirs.push(OwnedDir::new(package.install_dir.clone(), owner));
             }
         }
         PackageIndex { manifests, dirs }
@@ -97,11 +123,14 @@ impl PackageIndex {
     /// The package owning the absolute `file`: the one whose directory
     /// containing it is deepest.
     pub fn owner(&self, file: &Path) -> Option<PackageOwner> {
+        // `path_starts_with`, with `file` normalized once for every
+        // directory.
+        let normalized = lexically_normalized(file);
         self.dirs
             .iter()
-            .filter(|(dir, _)| path_starts_with(file, dir))
-            .max_by_key(|(dir, _)| dir.components().count())
-            .map(|(_, owner)| *owner)
+            .filter(|d| file.starts_with(&d.dir) || normalized.starts_with(&d.normalized))
+            .max_by_key(|d| d.depth)
+            .map(|d| d.owner)
     }
 
     /// `owner`'s package name; a root package may have none.
