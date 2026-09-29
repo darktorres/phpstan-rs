@@ -303,7 +303,7 @@ Each fix needs a fixture.
 - [x] **S4. Variables are names.** Done with F14b. `ExprKind::Variable`, `Param.name`,
   `ClosureUse.name` and `CatchClause.var` are `Arc<str>` while every other
   name is an interned `Name`.
-- [ ] **S5. Promotion is one option.** `Param`'s `promoted_visibility`,
+- [x] **S5. Promotion is one option.** Done in `ac5240a9`. `Param`'s `promoted_visibility`,
   `promoted_set_visibility`, `promoted_readonly` and `promoted_final` mean
   something only together; make them `promotion: Option<Promotion>`.
 - [ ] **S6. A hook is one value.** `PropertyHooks` holds parallel fields
