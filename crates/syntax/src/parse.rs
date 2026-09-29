@@ -66,6 +66,12 @@ pub fn parse(source: &[u8], interner: &Arc<Interner>) -> Result<ParsedFile, Pars
         }
     }
     comments.sort_by_key(|c| (c.start.line, c.start.col));
+    if let Some(error) = warnings.iter().find(|w| w.is_error) {
+        return Err(ParseError {
+            message: error.message.clone(),
+            span: error.span,
+        });
+    }
     let stmts = Parser::new(tokens)
         .with_interner(interner)
         .parse_program()?;
@@ -77,4 +83,17 @@ pub fn parse(source: &[u8], interner: &Arc<Interner>) -> Result<ParsedFile, Pars
         warnings,
         annotations,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_leading_zero_literal_with_an_8_or_9_is_a_parse_error() {
+        let interner = Arc::new(Interner::new());
+        let error = parse(b"<?php $x = 08;", &interner).unwrap_err();
+        assert_eq!(error.message, "Invalid numeric literal");
+        assert!(parse(b"<?php $x = 07; $y = 09.5;", &interner).is_ok());
+    }
 }

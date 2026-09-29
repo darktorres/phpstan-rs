@@ -6,11 +6,13 @@ use std::sync::Arc;
 
 mod strings;
 
-/// Something the lexer skipped over rather than failing on.
+/// Something the lexer skipped over, or (`is_error`) something PHP
+/// refuses to parse, such as `08` ("Invalid numeric literal").
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LexWarning {
     pub span: Span,
     pub message: String,
+    pub is_error: bool,
 }
 
 pub struct Lexer<'a> {
@@ -658,11 +660,20 @@ impl<'a> Lexer<'a> {
         let text = Self::strip_digit_separators(&self.src[start..self.pos]);
         if is_float {
             Token::Float(text.parse().unwrap_or(0.0))
-        } else if text.len() > 1
-            && text.starts_with('0')
-            && text.bytes().all(|b| (b'0'..=b'7').contains(&b))
-        {
-            // A legacy octal literal (`0775`).
+        } else if text.len() > 1 && text.starts_with('0') {
+            // A legacy octal literal (`0775`); an `8` or `9` in one is a
+            // parse error in PHP.
+            if !text.bytes().all(|b| (b'0'..=b'7').contains(&b)) {
+                let span = Span {
+                    start: self.line_col_at(start),
+                    end: self.line_col_at(self.pos),
+                };
+                self.warnings.push(LexWarning {
+                    span,
+                    message: "Invalid numeric literal".to_string(),
+                    is_error: true,
+                });
+            }
             radix_literal(&text[1..], 8)
         } else {
             match text.parse::<i64>() {
@@ -876,6 +887,7 @@ impl<'a> Lexer<'a> {
                 self.warnings.push(LexWarning {
                     span,
                     message: format!("unexpected byte 0x{other:02x} in PHP source, skipping"),
+                    is_error: false,
                 });
                 self.next_token()
             }

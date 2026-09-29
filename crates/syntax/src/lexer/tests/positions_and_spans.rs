@@ -184,6 +184,7 @@ fn an_unexpected_byte_is_a_warning_at_its_position_not_output() {
                 end: Position { line: 2, col: 9 },
             },
             message: "unexpected byte 0x01 in PHP source, skipping".to_string(),
+            is_error: false,
         }]
     );
     assert!(
