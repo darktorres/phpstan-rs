@@ -415,35 +415,10 @@ impl Relation<'_> {
     }
 }
 
-/// A practical approximation of PHP's real numeric-string grammar, not
-/// a byte-exact port - matches this project's existing "approximation,
-/// not full grammar" convention already used for `is_scalar`. Trims
-/// leading/trailing whitespace (real PHP's own numeric-string leniency)
-/// then accepts an optional sign, digits, an optional single `.` with
-/// more digits, and an optional exponent.
+/// Whether `s` is a numeric string, as `is_numeric()` decides
+/// (`numeric_value`).
 pub fn is_numeric_string_literal(s: &str) -> bool {
-    let s = s.trim();
-    let s = s.strip_prefix(['+', '-']).unwrap_or(s);
-    if s.is_empty() {
-        return false;
-    }
-    let (mantissa, exponent) = match s.split_once(['e', 'E']) {
-        Some((m, e)) => (m, Some(e)),
-        None => (s, None),
-    };
-    let mantissa_ok = match mantissa.split_once('.') {
-        Some((int_part, frac_part)) => {
-            !(int_part.is_empty() && frac_part.is_empty())
-                && int_part.bytes().all(|b| b.is_ascii_digit())
-                && frac_part.bytes().all(|b| b.is_ascii_digit())
-        }
-        None => !mantissa.is_empty() && mantissa.bytes().all(|b| b.is_ascii_digit()),
-    };
-    let exponent_ok = exponent.is_none_or(|e| {
-        let e = e.strip_prefix(['+', '-']).unwrap_or(e);
-        !e.is_empty() && e.bytes().all(|b| b.is_ascii_digit())
-    });
-    mantissa_ok && exponent_ok
+    crate::numeric_value(s.as_bytes()).is_some()
 }
 
 /// Mirrors real `ConstantStringType::isDecimalIntegerString`

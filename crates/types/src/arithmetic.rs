@@ -571,11 +571,10 @@ pub(crate) fn div_int_range(
 
 /// A numeric string literal's value, `None` for any other string.
 fn numeric_string_value(s: &crate::PhpString) -> Option<f64> {
-    let text = s.as_str()?;
-    if !crate::is_numeric_string_literal(text) {
-        return None;
+    match crate::numeric_value(s.as_bytes())? {
+        crate::PhpNumber::Int(n) => Some(n as f64),
+        crate::PhpNumber::Float(f) => Some(f),
     }
-    text.trim().parse::<f64>().ok()
 }
 
 impl Type {

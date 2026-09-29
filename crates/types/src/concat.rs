@@ -108,32 +108,50 @@ impl Type {
                 accessories.push(AccessoryKind::UppercaseString);
             }
 
-            // Numeric-string propagation - only from the left operand, after
-            // excluding an always-possible empty-string member, matching real
-            // PHPStan's own `TypeCombinator::remove($leftStringType, new
-            // ConstantStringType(''))` guard exactly.
-            let l_numeric_capable = strip_empty_string_member(&l_str)
+            // A numeric left operand stays numeric with digits appended
+            // (`'1.5' . '0'`, `'1e5' . '5'`), unless it ends in the
+            // whitespace a numeric string may carry (`'1 ' . '5'` is
+            // `'1 5'`). An int's text is plain digits, so after one any
+            // right side that keeps `1<right>` numeric does. An always-
+            // possible `''` left member is set aside first (PHPStan's
+            // `TypeCombinator::remove($leftStringType, new
+            // ConstantStringType(''))`).
+            let l_nonempty = strip_empty_string_member(&l_str);
+            if l_nonempty
                 .is_refined_string(AccessoryKind::NumericString)
-                .yes();
-            if l_numeric_capable {
+                .yes()
+            {
                 let l_is_int = matches!(
                     self,
                     Type(Repr::Int) | Type(Repr::IntLiteral(_)) | Type(Repr::IntRange(_, _))
                 );
-                let validate: fn(&str) -> bool = if l_is_int {
-                    |v: &str| !v.starts_with('-')
-                } else {
-                    |v: &str| !v.is_empty() && v.bytes().all(|b| b.is_ascii_digit())
+                let l_consts = constant_strings(&l_nonempty);
+                let l_no_trailing_space = l_is_int
+                    || l_nonempty
+                        .is_refined_string(AccessoryKind::DecimalIntegerString)
+                        .yes()
+                    || (!l_consts.is_empty()
+                        && l_consts.iter().all(|c| {
+                            c.as_bytes()
+                                .last()
+                                .is_none_or(|b| !b" \t\n\r\x0b\x0c".contains(b))
+                        }));
+                let keeps_numeric = |right: &PhpString| {
+                    let right = right.as_bytes();
+                    if l_is_int {
+                        crate::numeric_value(&[b"1", right].concat()).is_some()
+                    } else {
+                        right.iter().all(u8::is_ascii_digit)
+                    }
                 };
                 let right_is_non_negative_int_range = r
                     .int_bounds()
                     .is_some_and(|(min, _)| min.is_some_and(|m| m >= 0));
-                let all_right_constants_zero_or_more = !r_consts.is_empty()
-                    && r_consts.iter().filter(|v| !v.is_empty()).all(|v| {
-                        v.as_str()
-                            .is_some_and(|v| crate::is_numeric_string_literal(v) && validate(v))
-                    });
-                if all_right_constants_zero_or_more || right_is_non_negative_int_range {
+                let all_right_constants_keep_it = !r_consts.is_empty()
+                    && r_consts.iter().filter(|v| !v.is_empty()).all(keeps_numeric);
+                if l_no_trailing_space
+                    && (all_right_constants_keep_it || right_is_non_negative_int_range)
+                {
                     accessories.push(AccessoryKind::NumericString);
                 }
             }
