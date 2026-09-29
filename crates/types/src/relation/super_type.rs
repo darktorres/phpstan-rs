@@ -3,6 +3,24 @@ use crate::{AccessoryKind, Repr, Shape, TrinaryLogic, Type};
 use syntax::ast::ClassKind;
 
 impl Relation<'_> {
+    /// Whether every value of `ty` (a template read through its bound) is
+    /// an enum case: an enum, `UnitEnum` or anything extending it.
+    fn is_enum_like(&self, ty: &Type) -> bool {
+        match &crate::late::upper_bound(ty) {
+            Type(Repr::Object(name, _)) => {
+                let name = name.as_str().trim_start_matches('\\');
+                name.eq_ignore_ascii_case("UnitEnum")
+                    || self
+                        .hierarchy
+                        .find_class(name)
+                        .is_some_and(|facts| facts.kind == ClassKind::Enum)
+                    || self.hierarchy.is_subclass_of(name, "UnitEnum")
+            }
+            Type(Repr::EnumCase(..)) => true,
+            _ => false,
+        }
+    }
+
     /// Whether no value is both an `a` and a `b`: `is_super_type_of`
     /// answers no one way round or the other.
     pub fn disjoint(&self, a: &Type, b: &Type) -> bool {
@@ -61,6 +79,18 @@ impl Relation<'_> {
                 (_, Type(Repr::Extension(b))) => self.is_super_type_of(sup, &b.base()),
                 (_, Type(Repr::KeyOf(_)) | Type(Repr::OffsetAccess(..))) => {
                     self.is_super_type_of(sup, &sub.resolve_late_to_bounds())
+                }
+                // Only enums have case values, and each is an int or a
+                // string, whichever enum an enum-bounded template becomes.
+                (_, Type(Repr::ValueOf(inner))) if self.is_enum_like(inner) => {
+                    if self
+                        .is_super_type_of(sup, &Type::union_of(vec![Type::int(), Type::string()]))
+                        .yes()
+                    {
+                        TrinaryLogic::Yes
+                    } else {
+                        TrinaryLogic::Maybe
+                    }
                 }
                 // A benevolent union (`(int|string)`) is its members for
                 // `isSuperTypeOf`; only `accepts` is lenient about it.

@@ -172,7 +172,7 @@ impl Type {
 }
 
 /// A template's bound, recursively (`T of U`, `U of array`).
-fn upper_bound(ty: &Type) -> Type {
+pub(crate) fn upper_bound(ty: &Type) -> Type {
     syntax::stack::guard(|| match ty {
         Type(Repr::TemplateParam(tp)) => upper_bound(&tp.bound),
         other => other.clone(),

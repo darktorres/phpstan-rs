@@ -1406,6 +1406,10 @@ fn unresolved_class_const_to_mixed(ty: Type) -> Type {
 /// property) is already the exact union-of-case-literal-values type real
 /// PHPStan computes independently - reused directly, not recomputed.
 fn resolve_value_of_target(target_fqn: &str, classes: &NameTable<ClassReflection>) -> Type {
+    // Any enum's case values, whichever enum it turns out to be.
+    if is_enum_interface(target_fqn, classes, 0) {
+        return Type::union_of(vec![Type::int(), Type::string()]);
+    }
     let Some(info) = classes.get(target_fqn) else {
         return Type::mixed();
     };
@@ -1416,6 +1420,24 @@ fn resolve_value_of_target(target_fqn: &str, classes: &NameTable<ClassReflection
         Some(sig) => sig.ty.clone(),
         None => Type::never(),
     }
+}
+
+/// Whether `fqn` is `UnitEnum`, `BackedEnum` or an interface extending
+/// one, which only enums implement.
+fn is_enum_interface(fqn: &str, classes: &NameTable<ClassReflection>, depth: usize) -> bool {
+    let fqn = fqn.trim_start_matches('\\');
+    if fqn.eq_ignore_ascii_case("UnitEnum") || fqn.eq_ignore_ascii_case("BackedEnum") {
+        return true;
+    }
+    depth < 32
+        && classes.get(fqn).is_some_and(|info| {
+            info.kind == ClassKind::Interface
+                && info
+                    .extends
+                    .iter()
+                    .chain(&info.implements)
+                    .any(|parent| is_enum_interface(parent, classes, depth + 1))
+        })
 }
 
 /// Resolves `ty` (a param/return type that may contain a `ValueOf`)

@@ -12,6 +12,6 @@
                 }
             }
             function f(Coercer $c): void {
-                assertType('string|int', $c->coerce('x'));
+                assertType('int|string', $c->coerce('x'));
             }
         

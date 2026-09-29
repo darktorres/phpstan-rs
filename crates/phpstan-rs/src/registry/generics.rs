@@ -90,11 +90,22 @@ impl Registry {
                 return None;
             }
             let info = self.classes.get(class)?;
+            // A template given no argument (a bare `Collection`) is its
+            // default, or else its bound.
             let own_bindings: FxHashMap<String, Type> = info
                 .templates
                 .iter()
-                .map(|s| s.to_string())
-                .zip(type_args.iter().cloned())
+                .enumerate()
+                .map(|(i, name)| {
+                    let ty = type_args.get(i).cloned().unwrap_or_else(|| {
+                        info.template_defaults
+                            .get(name)
+                            .or_else(|| info.template_bounds.get(name))
+                            .cloned()
+                            .unwrap_or(Type::mixed())
+                    });
+                    (name.to_string(), ty)
+                })
                 .collect();
 
             if class == target {

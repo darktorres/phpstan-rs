@@ -458,6 +458,19 @@ impl<'a> Checker<'a> {
         resolved: &[Option<&Expr>],
         locals: &Locals,
     ) -> Type {
+        // A `value-of<Enum>` the call's bindings made concrete needs the
+        // enum's cases.
+        self.registry
+            .resolve_deferred_value_of_now(self.bound_call_return_type(sig, resolved, locals))
+    }
+
+    /// `infer_call_return_type` before class references are resolved.
+    fn bound_call_return_type(
+        &self,
+        sig: &FunctionReflection,
+        resolved: &[Option<&Expr>],
+        locals: &Locals,
+    ) -> Type {
         let mut bindings: TemplateBindings = TemplateBindings::default();
         let mut param_bindings: rustc_hash::FxHashMap<String, Type> =
             rustc_hash::FxHashMap::default();
