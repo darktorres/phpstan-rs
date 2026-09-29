@@ -273,6 +273,8 @@ through `check-project`.
     `function.alreadyNarrowedType` and `is_float($s + 1)`
     `function.impossibleType`; PHP gives `true` for
     `is_float("1.5" + 1)`.
+  - Unary `-`/`+` (`checker/expr.rs`, both arms) make any string
+    operand `int`: `-'1.5'` is `-1.5`.
 
   Done: a base range that spans zero or is negative is split by sign
   (even and odd exponents differ), an overflowing bound adds `float`, and
@@ -393,6 +395,31 @@ through `check-project`.
   shape keys, array-key conversion, the declared parent only for a final
   class, non-emptiness only when it survives, every scanf conversion
   counted), with a fixture for each.
+
+- [ ] **F52. A closure argument whose last statement is an `if` with a
+  `return` in each branch is typed as possibly returning `null`**
+  (`closure_syntactic_return_type`, `checker/expr.rs`; also before the
+  window). The argument path decides "falls off the end" from the last
+  statement's kind alone, so passing
+  `function (int $x) { if ($x > 0) { return 1; } else { return 2; } }`
+  to a `Closure(int): int` parameter reports `argument.type` ("expects
+  Closure(int): int, Closure(int): 2|1|null given"). The same closure
+  assigned to a variable, typed through `check_expr`'s converged body,
+  is `Closure(int): 1|2`. Done: falling off the end is decided with
+  `always_terminates` over the body, as `check_expr`'s arm does, with a
+  fixture.
+- [ ] **F53. An exhaustive `match (true)` is reported unhandled**
+  (`condition_is_provably_true`, `checker/expr.rs`; also before the
+  window). The last arm counts as covering the rest only when
+  `inferred_constant_condition` or an integer ordering comparison proves
+  it true. `match (true) { $x instanceof A => 1, $x instanceof B => 2 }`
+  on `A|B`, `{ is_int($v) => 1, is_string($v) => 2 }` on `int|string`
+  and `{ $b === true => 1, $b === false => 2 }` on `bool` all report
+  `match.unhandled` ("does not handle remaining value: true") at level 4.
+  Done: the last arm's condition is judged against the scope where every
+  earlier arm failed, with `instanceof`, the type-check predicates and
+  `===` recognized (the same narrowing the arm bodies already get), with
+  fixtures.
 
 ### Wrong types and missed reports (probed)
 
@@ -556,6 +583,9 @@ through `check-project`.
   - `names_with_assert_tags` (`apply_bare_statement_assert_narrowing`)
     holds names as declared, so `A::ISSTR($a)`, `$o->ISINT($b)` and
     `ISFL($c)` narrow nothing where the declared spelling does.
+  - A call to `extract` drops the body's diagnostics only when written
+    exactly `extract(...)` (`name == "extract"`), though
+    `any_variable_may_exist` is set for any spelling.
   - `bare_assert_condition` compares with `"assert"`, and the narrowing
     arms for `count`, `in_array`, `array_key_exists`, `str_contains`,
     `str_starts_with`, `str_ends_with` and `is_a` compare the name as
@@ -564,6 +594,19 @@ through `check-project`.
 
   Done: the tagged-name set and every name comparison fold case (and
   resolve the function the way `called_function_name` does).
+
+- [ ] **F54. Two expressions that are always `mixed`** (`checker/expr.rs`;
+  also before the window):
+  - The short ternary: `$s ?: 'd'` with `?string $s` is `mixed` in both
+    `check_expr` and `infer_expr` (the `then` branch is `None`, and the
+    arm returns `mixed` for it), so what's assigned from it goes
+    unchecked. It is `$s` without its falsy values, or `'d'`.
+  - A compound assignment's value: `$z = ($n += 1)` makes `$z` `mixed`
+    (`check_expr`'s arm returns `mixed` after binding the result).
+
+  Done: the short ternary is the condition's truthy type unioned with
+  the `else` type, and a compound assignment is the value it assigns,
+  with fixtures.
 
 ### Design
 
@@ -744,6 +787,15 @@ through `check-project`.
     leave", "Loosened from an exact `string` match");
     `sscanf_result_fields` says its fields are keyed by strings
     (`"0"`, `"1"`), and it builds `ShapeKey::Int`.
+  - `expr.rs`: the `Index` arm says it "calls the shared
+    `index_result_type`", which no longer exists (it calls
+    `offset_value_type`); `widen_coalesce_result`'s doc says `??`'s
+    result "is usually just `r`'s type" and that widening is "not a
+    blanket always-union", while the code unions the left side's
+    non-null type with `r` in the general case; "A synthetic
+    `target::method(args)` call" is the doc of `unhandled_match_error`
+    rather than `static_call`; the first-class-callable arm narrates
+    ("Closes a real, live bypass ... previously went unchecked").
 
   Done: each doc sits on its item and says what the code does.
 
@@ -1069,6 +1121,8 @@ all of its diffs above, but not again whole.
 - [x] The checker's `function_decl`, `assignment`, `stmt`,
   `control_flow`, `narrowing`, `member_resolution` and `builtin_calls`,
   read at `3cea2a20`: F44 to F51. `function_decl` carries none.
-- [ ] Not re-read whole: the checker's `expr`, the registry's
+- [x] The checker's `expr`: F39's unary bullet, F50, F51, F52, F53,
+  F54.
+- [ ] Not re-read whole: the registry's
   `class_info` and `purity`, `project`, `lsp::navigation`, and
   `syntax::{ast, visit, parser}`.
