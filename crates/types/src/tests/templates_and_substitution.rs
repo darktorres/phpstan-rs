@@ -83,3 +83,14 @@ fn substitute_template_recurses_into_a_conditional_types_branches() {
         })
     );
 }
+
+#[test]
+fn renaming_class_names_leaves_a_template_placeholders_bound_as_declared() {
+    let placeholder = Type::template_param(TemplateParam {
+        bound: Box::new(Type::object("Lib\\Repo".into(), Vec::new())),
+        ..TemplateParam::unbounded("R".to_string())
+    });
+    let written = Type::object("Box".into(), vec![placeholder.clone()]);
+    let renamed = written.map_class_names(&mut |name| format!("App\\{name}").as_str().into());
+    assert_eq!(renamed, Type::object("App\\Box".into(), vec![placeholder]));
+}

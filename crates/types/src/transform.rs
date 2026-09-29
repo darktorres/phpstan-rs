@@ -56,9 +56,12 @@ impl Type {
 
     /// This type with each object's class renamed by `rename`, at any
     /// depth: generic arguments, and callable signatures with their
-    /// templates' bounds and defaults.
+    /// templates' bounds and defaults. A template placeholder is kept as
+    /// it is: its bound and default belong to the template's declaration,
+    /// already named there.
     pub fn map_class_names(&self, rename: &mut dyn FnMut(&Name) -> Name) -> Type {
         syntax::stack::guard(|| match self.repr() {
+            Repr::TemplateParam(_) => self.clone(),
             Repr::Object(name, args) => Type::object(
                 rename(name),
                 args.iter().map(|a| a.map_class_names(rename)).collect(),
