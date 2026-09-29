@@ -21,7 +21,7 @@
                     // `$x`'s open `...` part may already hold any of these
                     // keys, so a branch that writes one only narrows it
                     // to "maybe written".
-                    "array{seed?: int, a?: mixed, b?: mixed, c?: mixed, d?: mixed, e?: mixed, g?: mixed, h?: mixed, ...}",
+                    "array{seed?: int, a?: mixed, b?: mixed, c?: mixed, d?: mixed, e?: mixed, g?: mixed, h?: mixed, ...<string, mixed>}",
                     $x
                 );
             }
