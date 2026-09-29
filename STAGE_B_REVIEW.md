@@ -801,12 +801,14 @@ through `check-project`.
   class-like arm that varies by kind where PHP does. An enum's `ClassDecl`
   also says `is_final: false`, but an enum is implicitly final.
   (`8e373302`)
-- [ ] **F17. Destructuring targets are two node kinds.** `[...]` on the
+- [x] **F17. Destructuring targets are two node kinds.** `[...]` on the
   left is an `ArrayLiteral` and `list(...)` a `List`, so about 15 sites
   match `ArrayLiteral(items) | List(items)`. Make an assignment or
   `foreach` target its own pattern node, keeping `ArrayLiteral` for values;
   the parser then rejects `list()` as a value (the checker's `List` arm now
-  returns `mixed`). (`f9651cf4`)
+  returns `mixed`). (`f9651cf4`) Done in `e5301ef6`, with PHP's other
+  compile-time destructuring errors (empty slots outside a target, spread,
+  mixed keys, `[]` inside `list()`) as parse errors.
 - [x] **F18. Transparent wrappers are matched by hand.**
   `Grouping(inner) | ErrorSuppress(inner)` appears at about 30 sites
   instead of one peel helper. `unwrap_grouping` also peels `@` but keeps
