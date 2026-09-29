@@ -2974,9 +2974,12 @@ impl<'a> Checker<'a> {
             // type is known or not, the *name* itself never is - falls
             // back to `escape_targets_for_receiver_type`'s conservative
             // whole-class escape hatch.
-            ExprKind::DynamicPropertyAccess(base, name_expr) => {
+            ExprKind::DynamicPropertyAccess(base, name_expr, operator) => {
                 let base_ty = self.check_expr(base, locals, label);
                 self.check_expr(name_expr, locals, label);
+                // Whatever the name, a value that can't have properties
+                // can't have this one.
+                self.check_dynamic_member_receiver(&base_ty, *operator, false, e.span);
                 if let ExprKind::Literal(Literal::String(name)) = &name_expr.kind
                     && let Some(name) = name.as_str()
                 {
@@ -2998,9 +3001,10 @@ impl<'a> Checker<'a> {
             }
             // Same literal-name-is-real-usage/genuinely-dynamic-name-
             // escapes split as `DynamicPropertyAccess` just above.
-            ExprKind::DynamicMethodCall(recv, name_expr, args) => {
+            ExprKind::DynamicMethodCall(recv, name_expr, args, operator) => {
                 let recv_ty = self.check_expr(recv, locals, label);
                 self.check_expr(name_expr, locals, label);
+                self.check_dynamic_member_receiver(&recv_ty, *operator, true, e.span);
                 for a in args {
                     self.check_expr(&a.value, locals, label);
                 }
@@ -4200,7 +4204,7 @@ impl<'a> Checker<'a> {
                             }
                         }
                     }
-                    ExprKind::DynamicMethodCall(recv, name_expr, _) => {
+                    ExprKind::DynamicMethodCall(recv, name_expr, _, _) => {
                         self.check_expr(recv, locals, label);
                         self.check_expr(name_expr, locals, label);
                     }
@@ -6170,6 +6174,57 @@ impl<'a> Checker<'a> {
             return false;
         };
         ordering_op(op).and_then(|op| compare_range_outcome(op, l_bounds, r_bounds)) == Some(true)
+    }
+
+    /// `property.nonObject`/`method.nonObject` for an access whose member
+    /// name is computed (`$x->$name`, `$x->{$name}()`): the receiver must
+    /// be able to have properties (or methods) at all; `?->` excuses
+    /// `null`.
+    fn check_dynamic_member_receiver(
+        &mut self,
+        receiver: &Type,
+        operator: ObjectOperator,
+        is_call: bool,
+        span: Span,
+    ) {
+        let checked = if operator.is_nullsafe() {
+            receiver.without(&Type::null())
+        } else {
+            receiver.clone()
+        };
+        let Some(level) = self.failing_level(&checked, 0, |m| {
+            if is_call {
+                self.relation().can_call_methods(m).no()
+            } else {
+                self.relation().can_access_properties(m).no()
+            }
+        }) else {
+            // A `mixed` receiver, on the levels that check it.
+            if let Some(level) = self.strict_mixed_receiver_level(&checked) {
+                let (message, identifier) = if is_call {
+                    ("Cannot call a dynamic method on mixed.", "method.nonObject")
+                } else {
+                    (
+                        "Cannot access a dynamic property on mixed.",
+                        "property.nonObject",
+                    )
+                };
+                self.report(message.to_string(), span, level, identifier);
+            }
+            return;
+        };
+        let (message, identifier) = if is_call {
+            (
+                format!("call to a dynamic method on a non-object type {receiver}"),
+                "method.nonObject",
+            )
+        } else {
+            (
+                format!("access to a dynamic property on a non-object type {receiver}"),
+                "property.nonObject",
+            )
+        };
+        self.report(message, span, level, identifier);
     }
 
     /// `ty` without `excluded`, where a check for it failed. Excluding

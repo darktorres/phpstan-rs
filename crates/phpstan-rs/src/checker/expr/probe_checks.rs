@@ -92,7 +92,7 @@ impl<'a> Checker<'a> {
                     }
                     Type::mixed()
                 }
-                ExprKind::DynamicPropertyAccess(base, name_expr) => {
+                ExprKind::DynamicPropertyAccess(base, name_expr, _) => {
                     self.check_expr_quiet_root(base, locals, label);
                     self.check_expr(name_expr, locals, label);
                     Type::mixed()

@@ -217,7 +217,7 @@ impl<'ast> Visitor<'ast> for Walker<'_> {
                 // A dynamic name or an anonymous class's constructor has no
                 // signature to offer.
                 ExprKind::DynamicStaticCall(_, _, args)
-                | ExprKind::DynamicMethodCall(_, _, args)
+                | ExprKind::DynamicMethodCall(_, _, args, _)
                 | ExprKind::NewAnonymousClass(_, args) => {
                     self.offer(expr.span, expr.span.start, args, None);
                 }

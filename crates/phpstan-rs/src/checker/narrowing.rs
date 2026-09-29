@@ -215,7 +215,8 @@ impl<'a> Checker<'a> {
         loop {
             let (base, lit_key) = match &e.kind {
                 ExprKind::Index(base, Some(idx)) => (base, crate::checker::literal_shape_key(idx)),
-                ExprKind::PropertyAccess(base, _, _) | ExprKind::DynamicPropertyAccess(base, _) => {
+                ExprKind::PropertyAccess(base, _, _)
+                | ExprKind::DynamicPropertyAccess(base, _, _) => {
                     if let Some(base_key) = narrowing_key(base) {
                         let current = self.current_narrowed_type(base, &base_key, locals);
                         locals.insert(base_key, current.without(&Type::null()));

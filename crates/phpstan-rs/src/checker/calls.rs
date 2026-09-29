@@ -958,8 +958,8 @@ pub(crate) fn contains_nullsafe_access(expr: &Expr) -> bool {
         ExprKind::MethodCall(base, _, _, nullsafe) => {
             nullsafe.is_nullsafe() || contains_nullsafe_access(base)
         }
-        ExprKind::DynamicPropertyAccess(base, _) => contains_nullsafe_access(base),
-        ExprKind::DynamicMethodCall(base, _, _) => contains_nullsafe_access(base),
+        ExprKind::DynamicPropertyAccess(base, _, _) => contains_nullsafe_access(base),
+        ExprKind::DynamicMethodCall(base, _, _, _) => contains_nullsafe_access(base),
         ExprKind::StaticPropertyFetch(StaticTarget::Expr(base), _)
         | ExprKind::DynamicStaticPropertyFetch(StaticTarget::Expr(base), _) => {
             contains_nullsafe_access(base)
@@ -989,7 +989,7 @@ pub(crate) fn is_valid_byref_argument_expr(expr: &Expr) -> bool {
             | ExprKind::DynamicVariable(_)
             | ExprKind::Index(_, _)
             | ExprKind::PropertyAccess(_, _, _)
-            | ExprKind::DynamicPropertyAccess(_, _)
+            | ExprKind::DynamicPropertyAccess(_, _, _)
             | ExprKind::ClassConstFetch(..)
             | ExprKind::ClassNameFetch(_)
             | ExprKind::StaticPropertyFetch(..)

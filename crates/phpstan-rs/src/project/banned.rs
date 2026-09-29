@@ -193,7 +193,7 @@ impl<'a> Walker<'a> {
             ExprKind::New(_, args)
             | ExprKind::MethodCall(_, _, args, _)
             | ExprKind::StaticCall(_, _, args)
-            | ExprKind::DynamicMethodCall(_, _, args)
+            | ExprKind::DynamicMethodCall(_, _, args, _)
             | ExprKind::DynamicStaticCall(_, _, args) => {
                 self.arguments(args, e.span);
             }

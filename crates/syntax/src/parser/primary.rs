@@ -117,14 +117,22 @@ impl Parser {
                             let name = self.parse_expression()?;
                             self.expect(&Token::RBrace)?;
                             self.expr(
-                                ExprKind::DynamicPropertyAccess(Box::new(expr), Box::new(name)),
+                                ExprKind::DynamicPropertyAccess(
+                                    Box::new(expr),
+                                    Box::new(name),
+                                    ObjectOperator::from_nullsafe(nullsafe),
+                                ),
                                 start,
                             )
                         }
                         Token::Variable(_) | Token::Dollar | Token::DollarBrace => {
                             let name = self.parse_primary()?;
                             self.expr(
-                                ExprKind::DynamicPropertyAccess(Box::new(expr), Box::new(name)),
+                                ExprKind::DynamicPropertyAccess(
+                                    Box::new(expr),
+                                    Box::new(name),
+                                    ObjectOperator::from_nullsafe(nullsafe),
+                                ),
                                 start,
                             )
                         }

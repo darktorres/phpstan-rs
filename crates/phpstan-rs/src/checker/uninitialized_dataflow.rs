@@ -293,7 +293,7 @@ fn walk_quiet_probe(
 ) -> PropertyInitState {
     syntax::stack::guard(|| match &e.kind {
         ExprKind::PropertyAccess(base, _, _) => walk_quiet_probe(base, state, ctx, declaring_class),
-        ExprKind::DynamicPropertyAccess(base, name_expr) => {
+        ExprKind::DynamicPropertyAccess(base, name_expr, _) => {
             state = walk_quiet_probe(base, state, ctx, declaring_class);
             walk_expr(name_expr, state, ctx, declaring_class)
         }

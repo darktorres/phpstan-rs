@@ -283,7 +283,7 @@ pub fn walk_expr<'ast, V: Visitor<'ast> + ?Sized>(v: &mut V, expr: &'ast Expr) {
         | ExprKind::Assign(l, r)
         | ExprKind::AssignRef(l, r)
         | ExprKind::CompoundAssign(_, l, r)
-        | ExprKind::DynamicPropertyAccess(l, r) => {
+        | ExprKind::DynamicPropertyAccess(l, r, _) => {
             v.visit_expr(l);
             v.visit_expr(r);
         }
@@ -302,7 +302,7 @@ pub fn walk_expr<'ast, V: Visitor<'ast> + ?Sized>(v: &mut V, expr: &'ast Expr) {
             v.visit_expr(receiver);
             walk_args(v, args);
         }
-        ExprKind::DynamicMethodCall(receiver, name, args) => {
+        ExprKind::DynamicMethodCall(receiver, name, args, _) => {
             v.visit_expr(receiver);
             v.visit_expr(name);
             walk_args(v, args);
@@ -1021,7 +1021,7 @@ pub fn walk_expr_mut<V: VisitorMut + ?Sized>(v: &mut V, expr: &mut Expr) {
         | ExprKind::Assign(l, r)
         | ExprKind::AssignRef(l, r)
         | ExprKind::CompoundAssign(_, l, r)
-        | ExprKind::DynamicPropertyAccess(l, r) => {
+        | ExprKind::DynamicPropertyAccess(l, r, _) => {
             v.visit_expr(l);
             v.visit_expr(r);
         }
@@ -1040,7 +1040,7 @@ pub fn walk_expr_mut<V: VisitorMut + ?Sized>(v: &mut V, expr: &mut Expr) {
             v.visit_expr(receiver);
             walk_args_mut(v, args);
         }
-        ExprKind::DynamicMethodCall(receiver, name, args) => {
+        ExprKind::DynamicMethodCall(receiver, name, args, _) => {
             v.visit_expr(receiver);
             v.visit_expr(name);
             walk_args_mut(v, args);

@@ -168,7 +168,7 @@ fn is_variable_chain(e: &Expr) -> bool {
         ExprKind::Variable(_) | ExprKind::DynamicVariable(_) => true,
         ExprKind::PropertyAccess(base, ..)
         | ExprKind::MethodCall(base, ..)
-        | ExprKind::DynamicPropertyAccess(base, _)
+        | ExprKind::DynamicPropertyAccess(base, _, _)
         | ExprKind::DynamicMethodCall(base, ..)
         | ExprKind::Index(base, _)
         | ExprKind::Call(base, _) => is_variable_chain(base),

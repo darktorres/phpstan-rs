@@ -372,14 +372,14 @@ fn write_expr_unguarded(out: &mut String, e: &Expr) {
             out.push_str(name);
             write_args(out, args);
         }
-        ExprKind::DynamicPropertyAccess(object, name) => {
+        ExprKind::DynamicPropertyAccess(object, name, operator) => {
             write_expr(out, object);
-            out.push_str("->");
+            out.push_str(if operator.is_nullsafe() { "?->" } else { "->" });
             write_member_name(out, name);
         }
-        ExprKind::DynamicMethodCall(object, name, args) => {
+        ExprKind::DynamicMethodCall(object, name, args, operator) => {
             write_expr(out, object);
-            out.push_str("->");
+            out.push_str(if operator.is_nullsafe() { "?->" } else { "->" });
             write_member_name(out, name);
             write_args(out, args);
         }

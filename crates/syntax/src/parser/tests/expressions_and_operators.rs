@@ -687,12 +687,15 @@ fn dynamic_property_and_method_access_parse() {
     else {
         panic!("expected assignment");
     };
-    assert!(matches!(&rhs.kind, ExprKind::DynamicPropertyAccess(_, _)));
+    assert!(matches!(
+        &rhs.kind,
+        ExprKind::DynamicPropertyAccess(_, _, _)
+    ));
 
     assert!(matches!(
         &program[1].kind,
         StmtKind::Expression(Expr {
-            kind: ExprKind::DynamicMethodCall(_, _, _),
+            kind: ExprKind::DynamicMethodCall(_, _, _, _),
             ..
         })
     ));
@@ -723,7 +726,7 @@ fn dollar_brace_variable_variable_forms_parse() {
     ));
     assert!(matches!(
         &program[1].kind,
-        StmtKind::Expression(Expr { kind: ExprKind::Assign(lhs, _), .. }) if matches!(&lhs.kind, ExprKind::DynamicPropertyAccess(_, _))
+        StmtKind::Expression(Expr { kind: ExprKind::Assign(lhs, _), .. }) if matches!(&lhs.kind, ExprKind::DynamicPropertyAccess(_, _, _))
     ));
     assert!(matches!(
         &program[2].kind,
@@ -1054,7 +1057,7 @@ fn double_dollar_variable_variable_in_member_position_parses() {
     assert!(matches!(
         &program[0].kind,
         StmtKind::Expression(Expr {
-            kind: ExprKind::DynamicPropertyAccess(_, _),
+            kind: ExprKind::DynamicPropertyAccess(_, _, _),
             ..
         })
     ));
@@ -1065,7 +1068,7 @@ fn double_dollar_variable_variable_in_member_position_parses() {
     assert!(matches!(
         &program[2].kind,
         StmtKind::Expression(Expr {
-            kind: ExprKind::DynamicMethodCall(_, _, _),
+            kind: ExprKind::DynamicMethodCall(_, _, _, _),
             ..
         })
     ));
@@ -1089,14 +1092,14 @@ fn bare_variable_in_member_position_parses_as_dynamic() {
     assert!(matches!(
         &program[0].kind,
         StmtKind::Expression(Expr {
-            kind: ExprKind::DynamicPropertyAccess(_, _),
+            kind: ExprKind::DynamicPropertyAccess(_, _, _),
             ..
         })
     ));
     assert!(matches!(
         &program[1].kind,
         StmtKind::Expression(Expr {
-            kind: ExprKind::DynamicMethodCall(_, _, _),
+            kind: ExprKind::DynamicMethodCall(_, _, _, _),
             ..
         })
     ));
@@ -1126,7 +1129,7 @@ fn a_variable_variable_member_name_keeps_both_levels_of_indirection() {
     );
     let name_of = |i: usize| match &program[i].kind {
         StmtKind::Expression(Expr {
-            kind: ExprKind::DynamicPropertyAccess(_, name),
+            kind: ExprKind::DynamicPropertyAccess(_, name, _),
             ..
         }) => &name.kind,
         other => panic!("expected a dynamic property access, got {other:?}"),

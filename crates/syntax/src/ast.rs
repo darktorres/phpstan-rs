@@ -1386,8 +1386,8 @@ pub enum ExprKind {
     // worth its own base+name-expr(+args) checking (undefined variables
     // inside the {} can still be caught), even though the accessed
     // member's own type never can be.
-    DynamicPropertyAccess(Box<Expr>, Box<Expr>),
-    DynamicMethodCall(Box<Expr>, Box<Expr>, Vec<Arg>),
+    DynamicPropertyAccess(Box<Expr>, Box<Expr>, ObjectOperator),
+    DynamicMethodCall(Box<Expr>, Box<Expr>, Vec<Arg>, ObjectOperator),
     /// `Foo::BAR`.
     ClassConstFetch(StaticTarget, Ident),
     /// `Foo::class` (any case).

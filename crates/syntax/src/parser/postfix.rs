@@ -44,6 +44,7 @@ impl Parser {
                                     Box::new(expr),
                                     Box::new(name_expr),
                                     args,
+                                    ObjectOperator::from_nullsafe(nullsafe),
                                 ),
                                 start,
                             );
@@ -57,6 +58,7 @@ impl Parser {
                                 ExprKind::DynamicPropertyAccess(
                                     Box::new(expr),
                                     Box::new(name_expr),
+                                    ObjectOperator::from_nullsafe(nullsafe),
                                 ),
                                 start,
                             )
