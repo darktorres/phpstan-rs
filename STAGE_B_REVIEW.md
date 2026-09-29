@@ -691,10 +691,10 @@ through `check-project`.
 
 ### Precision (probed)
 
-- [ ] **F11. `isset`/`empty` narrow one branch only.** `!isset($i)` on a
+- [x] **F11. `isset`/`empty` narrow one branch only.** `!isset($i)` on a
   defined `?int` leaves `int|null` (should be `null`); `empty($j)` true
   leaves `int|string|null` (should be `0|''|'0'|null`). For a single
-  operand that is a defined variable, both branches narrow. (`6bdce4ce`)
+  operand that is a defined variable, both branches narrow. (`6bdce4ce`) Done in `b224eb02`.
 - [ ] **F49. Disjointness misses provable cases.** None of these are
   reported: `int<0, 5> === int<10, 20>`, `non-empty-string === ''`,
   `numeric-string === 'abc'`, `non-empty-array === []`, and `array<int>`
