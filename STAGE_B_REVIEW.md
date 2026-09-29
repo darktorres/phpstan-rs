@@ -504,13 +504,15 @@ through `check-project`.
   parameter (`checker/resolve.rs`'s `check_no_parent_ref` runs on a type
   the PHPDoc check already found unresolvable). One finding, `noParent`,
   says what's wrong. (found fixing F34) Done in `48f02f39`.
-- [ ] **F63. An unresolvable PHPDoc type still declares the type.**
+- [x] **F63. An unresolvable PHPDoc type still declares the type.**
   `/** @return parent */` in a class without a parent is
   `return.unresolvableType`, and then `return 1;` is also `return.type`
   "expected parent, got 1": the unresolvable type stays the declared
   one. PHPStan ignores a PHPDoc type it can't resolve and checks against
   the native type (here none). The same goes for parameters and
-  properties. (found fixing F62)
+  properties. (found fixing F62) Done in `22d4ff21` for a function's own body
+  and its missing-type check; a caller still sees the registry's merged
+  type, which C7's resolver owns.
 
 ### False positives (from reading)
 
