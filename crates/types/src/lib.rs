@@ -63,10 +63,6 @@ pub use template_references::PositionVariance;
 pub use trinary::TrinaryLogic;
 pub use union::generalize_by_key_set;
 
-// A slice of PHPStan's type system covering what the parser captures as
-// type-hint strings, plus self/parent/static and `@template` generics.
-// Inheritance-chain substitution (a subclass fixing its parent's own type
-// parameter via `@extends Base<Concrete>`) is not modeled.
 /// A PHP type. What it is, what its values can be used as and how it
 /// relates to other types are asked through its methods; how it is
 /// represented is this crate's own.
@@ -97,22 +93,10 @@ impl std::fmt::Debug for Type {
 
 #[derive(Debug, Clone)]
 pub(crate) enum Repr {
-    // Real PHPStan's own `MixedType::isExplicitMixed()` (Phase 84):
-    // `true` when a type-resolution process completed and its own
-    // deliberate, definitive answer is `mixed` (the literal `mixed`
-    // keyword written somewhere in a type expression; an unbounded
-    // `@template T` with no `of` clause, which real PHPStan's own
-    // `TemplateTypeFactory`/`PhpDocNodeResolver` both resolve to
-    // `MixedType(true)`, not `false`, confirmed directly against
-    // `vendor/phpstan-src`); `false` for a genuine "we have no type
-    // information at all" fallback (an unresolvable expression, a
-    // missing-typehint default, an error-recovery path). Real PHPStan's
-    // own `MixedType::equals()` ignores this flag entirely (`vendor/
-    // phpstan-src/src/Type/MixedType.php`, confirmed directly) - `Type`'s
-    // own `PartialEq` impl below (deliberately not derived) does the
-    // same, so every one of this project's own pre-existing `==
-    // Repr::Mixed(false)`-shaped comparisons keeps working unchanged regardless
-    // of which flag either side carries.
+    // PHPStan's `MixedType::isExplicitMixed()`: `true` when `mixed` was
+    // written (the keyword, or an unbounded `@template T`), `false` when
+    // nothing is known (an unresolvable expression, a missing type). Type
+    // equality ignores the flag, as `MixedType::equals()` does.
     Mixed(bool),
     // PHPStan's `ErrorType`: the value of an expression a rule reports as
     // invalid. A `mixed` that accepts and is accepted by everything, so the
@@ -144,15 +128,13 @@ pub(crate) enum Repr {
     // `array{name: string, age?: int}` - PHPDoc's structural array type.
     ArrayShape(Shape),
     // `object{name: string, age?: int}` - the `object`-flavored sibling
-    // of `ArrayShape`. Structural, not a real registered class:
-    // `registry::accepts` checks a real instance against it
-    // property-by-property.
+    // of `ArrayShape`. Structural, not a registered class: an instance is
+    // accepted when it has every listed property with an accepted type.
     ObjectShape(Shape),
     // A class name plus its resolved `@template` type arguments, if any;
     // empty for a non-generic class or a generic one referenced bare
-    // (unspecified/erased, as real PHPStan treats it). Deliberately
-    // invariant, call-site-only substitution - no variance checking or
-    // template bound enforcement.
+    // (unspecified/erased, as real PHPStan treats it). Arguments compare
+    // by each template's declared variance.
     Object(Name, Vec<Type>),
     // The native `object` type: an instance of no particular class.
     ObjectWithoutClass,
@@ -162,9 +144,8 @@ pub(crate) enum Repr {
         closed: bool,
     },
     // A single enum case's singleton type (enum fqn, case name), distinct
-    // from the coarser `Object(Suit, [])`. Not a subtype target in
-    // `Relation::is_super_type_of`'s class-hierarchy sense; `registry::accepts`
-    // handles `EnumCase -> Object(enum_fqn)` assignability instead.
+    // from the coarser `Object(Suit, [])`: an instance of its enum and of
+    // everything the enum implements.
     EnumCase(Name, Name),
     // `None` = unknown shape; `Some(sig)` = a parsed `Closure(int):
     // string`/`callable(int): string` signature. `Arc` since `Type` is
@@ -228,25 +209,13 @@ pub(crate) enum Repr {
     HasOffset(ShapeKey),
     HasMethod(Name),
     HasProperty(Name),
-    // A `ReflectionMethod`/`ReflectionProperty` bound to one specific,
-    // literally-named member (owner type, member name) of a
-    // `ReflectionClass<T>`'s own reflected `T` - Phase 77's "binding a
-    // specific reflected member's own value type" stretch item. Only
-    // ever a member of a `Repr::Intersection` alongside its own coarse
-    // `Repr::Object("ReflectionMethod"|"ReflectionProperty", [TClass])`
-    // base (mirrors `HasOffsetValue`'s own shape exactly), constructed at
-    // `getMethod('name')`/`getProperty('name')`'s own call site
-    // (`checker::expr::member_resolution`) and consumed at
-    // `invoke()`/`getValue()`'s own call site, which resolves the real
-    // member's declared type on the owner, substituting the owner's own
-    // `@template` bindings the same way an ordinary generic method call
-    // already does. The owner is stored as a full `Type` (not a bare
-    // class-name string) so a generic reflected class
-    // (`ReflectionClass<Foo<Bar>>`) keeps its own resolved type
-    // arguments too. A dynamic (non-literal) member name, or a variable
-    // whose own inferred type isn't a string literal either, never
-    // produces this - matching this project's own "don't guess" leniency
-    // for every other literal-key-aware construction site.
+    // A `ReflectionMethod`/`ReflectionProperty` bound to one literally
+    // named member (owner type, member name) of a `ReflectionClass<T>`'s
+    // `T`: a member of an intersection with the `ReflectionMethod`/
+    // `ReflectionProperty` object, made by `getMethod('name')`/
+    // `getProperty('name')` and read by `invoke()`/`getValue()` for the
+    // member's declared type. The owner is a full type, so a generic
+    // reflected class keeps its arguments.
     ReflectedMember(Box<Type>, Name),
     // `value-of<T>` whose `T` a parse alone can't see through - an enum,
     // a class-constant reference or a template - resolved once the
@@ -265,12 +234,12 @@ pub(crate) enum Repr {
         class: Box<Type>,
         pattern: Name,
     },
+    // An extension's own payload (`crate::ExtensionTypeData`).
+    Extension(Arc<dyn ExtensionTypeData>),
     // `($subject is $target ? $if_true : $if_false)` - PHPDoc's
     // conditional-return-type syntax, lazily resolved once the real type
     // of `subject` is known. A consumer that can't resolve this variant
     // falls back to the eager `Union([if_true, if_false])`.
-    // An extension's own payload (`crate::ExtensionTypeData`).
-    Extension(Arc<dyn ExtensionTypeData>),
     Conditional {
         subject: ConditionalSubject,
         target: Box<Type>,

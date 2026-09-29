@@ -223,16 +223,6 @@ impl Type {
     }
 }
 
-/// Applies a set of template bindings through a type tree, replacing every
-/// `TemplateParam` with its bound type. A name left unbound falls back
-/// to that template's own declared `@template T = Default` when it has
-/// one, rather than unconditionally `Mixed` - e.g. a function-own
-/// `@template T = int` whose `T` never actually gets bound from any real
-/// call-site argument (used only in the return type, say) resolves to
-/// `int` instead of `Mixed`. `checker::generics::
-/// substitute_scoped` mirrors this same fallback for the separate
-/// class-level substitution path (an "erased" - too-few-arguments, or
-/// bare - generic class reference).
 impl CallableSig {
     /// The return type of calling a value of this callable type with
     /// arguments of `arg_types`: its own templates bound from them, an

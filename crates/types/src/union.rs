@@ -1,8 +1,9 @@
 use crate::{Repr, Shape, ShapeField, ShapeKey, Type};
+
 /// A defensive cap on how many distinct members `Type::union` will ever
 /// materialize into a real `Repr::Union`. Collapsing to `Mixed` past this
-/// point is a stable fixed point (`Type::union(Mixed, _) == Mixed` is
-/// this function's first special case below), so a variable that blows
+/// point is a stable fixed point (a union with `mixed` is `mixed`), so a
+/// variable that blows
 /// past the cap once stays collapsed rather than being recomputed on
 /// every subsequent merge. Needed because `Repr::Union` sticks across
 /// reads/writes instead of immediately collapsing to `Mixed`: a function
@@ -12,9 +13,6 @@ use crate::{Repr, Shape, ShapeField, ShapeKey, Type};
 /// each member's own recursive `PartialEq`) grows right along with it.
 const MAX_UNION_MEMBERS: usize = 12;
 
-/// Union of two types for a scope-merge join point - flattens nested
-/// unions and keeps `Mixed` "unknown" rather than let it compose into a
-/// falsely-precise-looking Union (same principle as the ternary inference).
 impl Type {
     /// The union of this type and `other`, normalized: nested unions
     /// flattened, subsumed members absorbed, `mixed` kept unknown.

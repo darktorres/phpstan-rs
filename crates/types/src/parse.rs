@@ -20,9 +20,8 @@ pub fn parse_type_string(raw: &str) -> Type {
 /// leading `\` kept: the class names a PHPDoc type names, still to be
 /// resolved in its file's namespace and imports. A class this syntax
 /// names itself (`iterable`'s `Traversable`, `Closure(...)`'s `Closure`)
-/// is written fully qualified. Does not handle mixed union+intersection
-/// (DNF types) or parentheses - PHPStan's own stub/native syntax rarely
-/// needs them outside advanced generic bounds.
+/// is written fully qualified. A `|`/`&` mix needs parentheses (a DNF
+/// `(A&B)|null`), as PHPDoc requires.
 pub fn parse_written_type(raw: &str) -> Type {
     syntax::stack::guard(|| {
         let mut s = raw.trim();
@@ -168,17 +167,6 @@ fn try_parse_callable_shape(stripped: &str) -> Option<Type> {
     }
 }
 
-/// Splits `s` on `sep`, but only where `sep` appears outside any
-/// `<>`/`{}`/`()`/`[]` nesting. Always returns at least one part, mirroring
-/// `str::split` - callers check `.len() > 1` to know whether a real
-/// top-level separator was found at all.
-///
-/// A `'...'`/`"..."` string-literal segment is tracked as one opaque
-/// run, since a bracket-shaped character *inside* the quotes (real
-/// shape: PHPUnit's own literal-string union `'->'|'::' `) would
-/// otherwise be read as a real closing bracket, permanently
-/// decrementing `depth` below zero and swallowing every top-level
-/// separator for the rest of the string.
 /// The index of the bracket closing the one at `open`.
 fn matching_close(s: &str, open: usize) -> Option<usize> {
     let mut depth = 0i32;
@@ -299,6 +287,17 @@ fn mark_callable_templates(sig: CallableSig) -> CallableSig {
     }
 }
 
+/// Splits `s` on `sep`, but only where `sep` appears outside any
+/// `<>`/`{}`/`()`/`[]` nesting. Always returns at least one part, mirroring
+/// `str::split` - callers check `.len() > 1` to know whether a real
+/// top-level separator was found at all.
+///
+/// A `'...'`/`"..."` string-literal segment is tracked as one opaque
+/// run, since a bracket-shaped character *inside* the quotes (real
+/// shape: PHPUnit's own literal-string union `'->'|'::' `) would
+/// otherwise be read as a real closing bracket, permanently
+/// decrementing `depth` below zero and swallowing every top-level
+/// separator for the rest of the string.
 fn split_top_level(s: &str, sep: char) -> Vec<&str> {
     let mut parts = Vec::new();
     let mut depth = 0i32;
@@ -1015,11 +1014,7 @@ fn parse_type_keyword_or_class(bare: &str, original: &str, generic_args: &[&str]
         "bool" | "boolean" => Type::bool(),
         "true" => Type::bool_literal(true),
         "false" => Type::bool_literal(false),
-        // Real, documented PHPStan/Psalm pseudo-types. `numeric` is an
-        // honest approximation of real PHPStan's own
-        // `int|float|numeric-string`: this project doesn't model
-        // numeric-string as a distinct literal-set from plain `string`,
-        // so `string` is the closest fit.
+        // Real, documented PHPStan/Psalm pseudo-types.
         "array-key" => Type(Repr::Union(vec![Type::int(), Type::string()])),
         "scalar" => Type(Repr::Union(vec![
             Type::int(),
@@ -1030,7 +1025,10 @@ fn parse_type_keyword_or_class(bare: &str, original: &str, generic_args: &[&str]
         "numeric" => Type(Repr::Union(vec![
             Type::int(),
             Type::float(),
-            Type::string(),
+            Type(Repr::Intersection(vec![
+                Type::string(),
+                Type::accessory(AccessoryKind::NumericString),
+            ])),
         ])),
         // A real, if untyped-at-the-language-level, PHP value kind
         // (file/curl/... handles). `open-resource` is an ordinary (open)
@@ -1081,12 +1079,7 @@ fn parse_type_keyword_or_class(bare: &str, original: &str, generic_args: &[&str]
         },
         "null" => Type::null(),
         "void" => Type::void(),
-        // The one genuine source of explicit `mixed` (Phase 84's own
-        // `Repr::Mixed`'s doc comment, `types.rs`) - the literal keyword
-        // was written somewhere in this type expression, real PHPStan's
-        // own `ParserNodeTypeToPHPStanType`/`TypeNodeResolver` both
-        // resolving it to `MixedType(true)` too (confirmed directly
-        // against `vendor/phpstan-src`).
+        // The written keyword is explicit `mixed` (`Repr::Mixed`).
         "mixed" => Type::explicit_mixed(),
         "never" | "noreturn" | "never-return" | "never-returns" | "no-return" => Type::never(),
         // `array<K, V>`'s key argument is real

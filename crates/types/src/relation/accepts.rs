@@ -612,33 +612,6 @@ impl Relation<'_> {
         })
     }
 
-    /// `accepts`, additionally aware of real PHPStan's own level
-    /// 9/10 `checkExplicitMixed`/`checkImplicitMixed`.
-    ///
-    /// This project's `is_super_type_of`/`accepts` never actually gave
-    /// `Mixed` a blanket "accepted anywhere" structural rule the way real
-    /// PHPStan's own `MixedType::isAcceptedBy()` unconditionally does
-    /// (confirmed directly: there is no `(Repr::Mixed(_), _) => true` arm
-    /// in `Relation::is_super_type_of`, only the mirror-image `(_, Repr::Mixed(_))
-    /// => true`, a different direction entirely) - every one of dozens of
-    /// existing call sites instead bails out ad hoc, on its own, whenever
-    /// its *own* actual type happens to be `Mixed`. Rather than widen
-    /// `is_super_type_of` itself with a new unconditional arm (real, foundational
-    /// surgery with unknown blast radius across every existing caller,
-    /// not something this one opt-in feature should force), this method
-    /// supplies that same "accepted anywhere below the matching strict
-    /// level" leniency directly and only here - self-contained, so
-    /// nothing outside a caller that opts into `accepts_at_configured_
-    /// level` ever sees a behavior change. Once at or past the matching
-    /// level, `sub` only survives when `sup` itself accepts `Mixed` too -
-    /// mirrors `RuleLevelHelper::transformCommonType`/`accepts` wrapping
-    /// a matching `MixedType` as `StrictMixedType` before the real
-    /// `accepts()` call, whose own `isAcceptedBy()` (`vendor/phpstan-src/
-    /// src/Type/StrictMixedType.php`) returns Yes only when the accepting
-    /// type is itself `(Strict)MixedType`, Maybe otherwise - collapsed to
-    /// a plain `false` here, this method's own boolean-only API (see
-    /// `rule_level_accepts`'s own doc comment on why a full
-    /// trinary rewrite isn't attempted).
     /// The level at which real PHPStan's `RuleLevelHelper::
     /// findTypeToCheck` turns `ty` into a `StrictMixedType` receiver -
     /// one that can't have a method called, a property read, or an
@@ -659,6 +632,11 @@ impl Relation<'_> {
         (self.configured_level? >= threshold).then_some(threshold)
     }
 
+    /// `accepts` at rule level `level`, with PHPStan's level 9/10
+    /// `checkExplicitMixed`/`checkImplicitMixed`: below its level a
+    /// `mixed` value (or a template bounded by nothing) is accepted
+    /// anywhere; at or past it, only where `mixed` itself is
+    /// (`StrictMixedType::isAcceptedBy`).
     fn accepts_at_level(&self, sub: &Type, sup: &Type, level: u8) -> bool {
         // A template bounded by nothing is as unknown as an explicit
         // `mixed` (PHPStan's `TemplateMixedType`).
