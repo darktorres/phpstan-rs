@@ -986,8 +986,8 @@ impl<'a> Checker<'a> {
                                 // An unsealed argument's own untracked
                                 // keys could still be present in the
                                 // merge too.
-                                if !inner.is_sealed() {
-                                    unseal(&mut merged);
+                                if let Some(tail) = &inner.unsealed {
+                                    unseal_with(&mut merged, &tail.0, &tail.1);
                                 }
                             }
                             _ => {
@@ -1004,8 +1004,11 @@ impl<'a> Checker<'a> {
                                     f.ty = Type::union(f.ty.clone(), elem_ty.clone());
                                 }
                                 // Mark unsealed - the plain array may also
-                                // contribute keys this shape never had.
-                                unseal(&mut merged);
+                                // contribute keys this shape never had, of
+                                // its own key and value types.
+                                let key_ty =
+                                    arg_ty.array_key_type().unwrap_or(Type::unknown_array_key());
+                                unseal_with(&mut merged, &key_ty, &elem_ty);
                                 // On top of the coarse widening above, a
                                 // `hasOffsetValue`-tracked key gets
                                 // promoted to a real, precise field via
@@ -1060,8 +1063,8 @@ impl<'a> Checker<'a> {
                                     return Type::never();
                                 }
                             }
-                            if !inner.is_sealed() {
-                                unseal(&mut merged);
+                            if let Some(tail) = &inner.unsealed {
+                                unseal_with(&mut merged, &tail.0, &tail.1);
                             }
                         }
                     }
@@ -2205,6 +2208,18 @@ fn unseal(shape: &mut Shape) {
     if shape.is_sealed() {
         *shape = Shape::unsealed(std::mem::take(&mut shape.fields));
     }
+}
+
+/// `shape` unsealed with other entries of `key` and `value` types, joined
+/// with the ones it may already have.
+fn unseal_with(shape: &mut Shape, key: &Type, value: &Type) {
+    shape.unsealed = Some(Box::new(match shape.unsealed.take() {
+        Some(tail) => (
+            Type::union(tail.0, key.clone()),
+            Type::union(tail.1, value.clone()),
+        ),
+        None => (key.clone(), value.clone()),
+    }));
 }
 
 fn is_null_literal(e: &Expr) -> bool {

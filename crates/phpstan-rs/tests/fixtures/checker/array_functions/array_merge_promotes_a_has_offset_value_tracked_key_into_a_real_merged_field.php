@@ -11,6 +11,6 @@
                 $page = [];
                 $page['a'] = 1;
                 $page = array_merge($page, parseIt());
-                assertType("array{a: 1, b?: string, ...}", $page);
+                assertType("array{a: 1, b?: string, ...<string, mixed>}", $page);
             }
         
