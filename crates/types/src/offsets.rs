@@ -64,6 +64,26 @@ impl Type {
         })
     }
 
+    /// The value at an offset of type `offset`: when every value it may
+    /// be is a literal key, the values at those keys joined (`'sql'|'dql'`
+    /// reads those two fields); otherwise the value at any key.
+    pub fn offset_value_type_at(&self, offset: &Type) -> Option<Type> {
+        let keys: Option<Vec<ShapeKey>> = offset
+            .union_members()
+            .iter()
+            .map(ShapeKey::from_type)
+            .collect();
+        match keys {
+            Some(keys) if !keys.is_empty() => keys
+                .iter()
+                .map(|key| self.offset_value_type(Some(key)))
+                .collect::<Option<Vec<_>>>()?
+                .into_iter()
+                .reduce(Type::union),
+            _ => self.offset_value_type(None),
+        }
+    }
+
     /// PHPStan's `getOffsetValueType()` for an array: the value at `key`,
     /// `None` for an offset not known literally (every value it could
     /// be; `null` from `array{}`). `None` when this isn't an array, or a

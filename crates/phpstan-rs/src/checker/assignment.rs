@@ -339,9 +339,12 @@ impl<'a> Checker<'a> {
                         let Some(target) = &item.target else {
                             continue;
                         };
-                        let element_ty = ty
-                            .offset_value_type(destructured_key(item, position).as_ref())
-                            .unwrap_or(Type::mixed());
+                        let key_ty = match (destructured_key(item, position), &item.key) {
+                            (Some(key), _) => key.to_type(),
+                            (None, Some(key)) => self.infer_expr(key, locals).to_array_key(),
+                            (None, None) => Type::unknown_array_key(),
+                        };
+                        let element_ty = ty.offset_value_type_at(&key_ty).unwrap_or(Type::mixed());
                         self.bind_assignment_target(target, element_ty, locals);
                     }
                 }
@@ -680,9 +683,8 @@ impl<'a> Checker<'a> {
                     continue;
                 }
                 if let ExprKind::Destructure(inner, _) = &target.kind {
-                    let key = types::ShapeKey::from_type(&dim.to_array_key());
                     let inner_container = container
-                        .offset_value_type(key.as_ref())
+                        .offset_value_type_at(&dim.to_array_key())
                         .unwrap_or(Type::mixed());
                     self.check_destructuring_offsets(inner, &inner_container, locals);
                 }

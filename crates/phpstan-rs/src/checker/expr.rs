@@ -2321,8 +2321,12 @@ impl<'a> Checker<'a> {
                         // across a loop's multi-pass fixed-point
                         // convergence must resolve here exactly as
                         // `infer_expr`'s identical read does.
+                        let key_ty = match crate::checker::literal_shape_key(i) {
+                            Some(key) => key.to_type(),
+                            None => self.infer_expr(i, locals),
+                        };
                         base_ty
-                            .offset_value_type(crate::checker::literal_shape_key(i).as_ref())
+                            .offset_value_type_at(&key_ty)
                             .unwrap_or(Type::mixed())
                     }
                     // `OffsetAccessWithoutDimForReadingRule` - every
@@ -4427,8 +4431,12 @@ impl<'a> Checker<'a> {
                 {
                     return narrowed.clone();
                 }
+                let key_ty = match crate::checker::literal_shape_key(idx) {
+                    Some(key) => key.to_type(),
+                    None => self.infer_expr(idx, locals),
+                };
                 self.chain_link_type(base, locals)
-                    .offset_value_type(crate::checker::literal_shape_key(idx).as_ref())
+                    .offset_value_type_at(&key_ty)
                     .unwrap_or(Type::mixed())
             }
             // Parentheses don't end a chain.

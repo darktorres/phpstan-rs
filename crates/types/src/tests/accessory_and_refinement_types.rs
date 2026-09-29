@@ -585,3 +585,21 @@ fn an_offset_an_intersection_records_is_surely_there() {
     });
     assert_eq!(template.has_offset_value_type(&key()), TrinaryLogic::Yes);
 }
+
+#[test]
+fn an_offset_of_several_literal_keys_reads_those_fields_joined() {
+    let shape = Type::array_shape(Shape::from_named(vec![
+        ("sql", Type::string(), false),
+        ("dql", Type::string(), false),
+        ("labels", Type::null(), false),
+    ]));
+    let key = Type::union(
+        Type::string_literal("sql".into()),
+        Type::string_literal("dql".into()),
+    );
+    assert_eq!(shape.offset_value_type_at(&key), Some(Type::string()));
+    assert_eq!(
+        shape.offset_value_type_at(&Type::string()),
+        Some(Type::union(Type::string(), Type::null()))
+    );
+}
