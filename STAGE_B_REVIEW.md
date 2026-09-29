@@ -16,7 +16,10 @@ Legend: `[x]` done (commit given), `[>]` moved to the crate-split plan
 
 ## Validation
 
-- [ ] **V1. Run the fixture suite.** `cargo test --workspace` skips it
+- [x] **V1. Run the fixture suite.** Done at `96027afd`: all 3,756
+  fixtures and `cargo test --workspace` pass; the one stale fixture
+  (`5400b17b`) and the stub index's float spellings (`96027afd`) were
+  correct changes. `cargo test --workspace` skips it
   (`test = false` on the `fixtures` test in `crates/phpstan-rs/Cargo.toml`),
   so it has not run since before "Type behaviour lives on the type" began.
   Run `cargo test -q -p phpstan-rs --test fixtures` (about 3,700 fixtures)
