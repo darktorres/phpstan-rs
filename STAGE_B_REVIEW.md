@@ -695,14 +695,14 @@ through `check-project`.
   defined `?int` leaves `int|null` (should be `null`); `empty($j)` true
   leaves `int|string|null` (should be `0|''|'0'|null`). For a single
   operand that is a defined variable, both branches narrow. (`6bdce4ce`) Done in `b224eb02`.
-- [ ] **F49. Disjointness misses provable cases.** None of these are
+- [x] **F49. Disjointness misses provable cases.** None of these are
   reported: `int<0, 5> === int<10, 20>`, `non-empty-string === ''`,
   `numeric-string === 'abc'`, `non-empty-array === []`, and `array<int>`
   against a shape with a string value. `scalars_disjoint` never compares
   two ranges, `accessory_refuses` compares families only, and a shape
   supertype of an array is always Maybe. A float literal expression is
   typed `float` (`$f = 1.5` is `float`), so `1.5 === 2.5` is never
-  constant. (`91bc9e49`)
+  constant. (`91bc9e49`) Done in `d89ea9e5` (the float literal with F60).
 - [ ] **F50. Late types and traversal ignore parts of a type.**
   - `key_of`, `value_of` and `offset_access` ignore an unsealed shape's
     tail: `key-of<array{a: 1, ...<int, string>}>` is `'a'`, not `'a'|int`,
