@@ -615,7 +615,7 @@ through `check-project`.
   so `array{a: array, b: mixed}` hides `a`'s missing value type; that part
   moved to C7, whose resolver keeps the flag.
   (`dbe500c5`) Done in `2b1ce22b` (the walks; the flag stays C7's).
-- [ ] **F47. Raw constructors break the canonical forms.** `Type::int_range`
+- [x] **F47. Raw constructors break the canonical forms.** `Type::int_range`
   is public and builds any pair beside the normalizing `int_interval`
   (about 29 callers outside the crate, plus `transform::step`, `coercion`'s
   abs and bitwise-not, `arithmetic`'s negation, `union.rs`). As a result,
@@ -625,7 +625,7 @@ through `check-project`.
   `Repr::Union` directly (no deduplication or absorption, `?T` included),
   as does `parse_native_type_string`; that part moved to C7, which deletes
   both. One normalizing constructor per
-  form, with raw construction kept private. (`5fc4e990`, `4dc6a4b7`)
+  form, with raw construction kept private. (`5fc4e990`, `4dc6a4b7`) Done in `dedc1ad8` (the int range; the parser unions stay C7's).
 - [ ] **F48. Numeric strings are recognized too widely.**
   `is_numeric_string_literal` trims with Rust's Unicode `trim()`, so
   `"\u{a0}1"` is a `numeric-string` (PHP's `is_numeric` says false; its
