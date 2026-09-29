@@ -306,7 +306,7 @@ Each fix needs a fixture.
 - [x] **S5. Promotion is one option.** Done in `ac5240a9`. `Param`'s `promoted_visibility`,
   `promoted_set_visibility`, `promoted_readonly` and `promoted_final` mean
   something only together; make them `promotion: Option<Promotion>`.
-- [ ] **S6. A hook is one value.** `PropertyHooks` holds parallel fields
+- [x] **S6. A hook is one value.** Done in `8fdbd80a`. `PropertyHooks` holds parallel fields
   (`get`, `get_by_ref`, `get_attrs`, `get_doc`, `get_final`, and the same
   set for `set`); make them `get: Option<Hook>` and `set: Option<Hook>`,
   with the `set` parameter on the hook.
