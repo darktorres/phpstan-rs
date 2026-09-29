@@ -206,7 +206,7 @@ Each fix needs a fixture.
   always false and a nullable argument check can't use it. `Mixed` carries
   the members removed from it, as PHPStan's `MixedType` subtraction does.
   (found fixing F2, probed)
-- [ ] **P7. A class template infers a literal.** `new Box(5)` is
+- [x] **P7. A class template infers a literal.** Done in `ea4d7175`. `new Box(5)` is
   `Box<5>` where PHPStan has `Box<int>`: a literal inferred for an
   invariant class template generalizes (`TemplateTypeHelper::
   generalizeInferredTemplateType`), so `Box<5>` doesn't refuse a later
