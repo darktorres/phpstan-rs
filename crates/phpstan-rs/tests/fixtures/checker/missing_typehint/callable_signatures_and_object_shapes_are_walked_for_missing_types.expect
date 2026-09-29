@@ -1,0 +1,6 @@
+10:12-10:23 missingType.iterableValue L6 | Function f() has parameter $a with no value type specified in iterable type array.
+    tip: See: https://phpstan.org/blog/solving-phpstan-no-value-type-specified-in-iterable-type
+10:25-10:34 missingType.iterableValue L6 | Function f() has parameter $b with no value type specified in iterable type array.
+    tip: See: https://phpstan.org/blog/solving-phpstan-no-value-type-specified-in-iterable-type
+10:36-10:47 missingType.generics L6 | Function f() has parameter $c with generic class Coll but does not specify its types: T
+10:49-10:58 missingType.callable L6 | Function f() has parameter $d with no signature specified for callable.

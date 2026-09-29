@@ -13,9 +13,8 @@ impl Type {
         out
     }
 
-    /// The classes this type names with no generic arguments, looking
-    /// inside other classes' arguments, arrays, class-strings, unions,
-    /// intersections and shapes, but not templates. Each once, in order.
+    /// The classes this type names with no generic arguments, at any
+    /// depth but inside a template. Each once, in order.
     pub fn bare_object_class_names(&self) -> Vec<&crate::Name> {
         let mut out = Vec::new();
         collect_bare_object_class_names(self, &mut out);
@@ -59,9 +58,9 @@ fn iterable_union_value_type(members: &[Type]) -> Option<&Type> {
 /// {desc}."` message: `iterable type ` plus the type's display, exactly
 /// as real PHPStan's own descriptions read. Mirrors real
 /// PHPStan's `MissingTypehintCheck::getIterableTypesWithMissingValueTypehint`,
-/// recursing into everything (a class's own generic type arguments, a
-/// union/intersection's own members, an array shape's own field types)
-/// except a `@template` placeholder itself, matching that function's own
+/// recursing into every nested type (generic arguments, union and
+/// intersection members, shape fields, callable signatures) except a
+/// `@template` placeholder itself, matching that function's own
 /// `TemplateType` early-return.
 ///
 /// `explicit_mixed` suppresses a finding whose own element type is
@@ -75,117 +74,73 @@ fn iterable_union_value_type(members: &[Type]) -> Option<&Type> {
 /// before.
 fn collect_iterable_missing_value_types(ty: &Type, explicit_mixed: bool, out: &mut Vec<String>) {
     syntax::stack::guard(|| {
+        let mut missing = |desc: String| {
+            if !explicit_mixed {
+                out.push(desc);
+            }
+        };
         match ty {
-            Type(Repr::TemplateParam(_)) | Type(Repr::Accessory(_)) => {}
-            Type(Repr::Array(_, inner)) => {
-                if inner.as_ref().is_mixed() {
-                    if !explicit_mixed {
-                        out.push(format!("iterable type {ty}"));
-                    }
-                } else {
-                    collect_iterable_missing_value_types(inner, explicit_mixed, out);
-                }
+            Type(Repr::TemplateParam(_)) => return,
+            Type(Repr::Array(_, inner)) if inner.is_mixed() => {
+                return missing(format!("iterable type {ty}"));
             }
             Type(Repr::Union(members)) => {
                 if let Some(inner) = iterable_union_value_type(members) {
                     if inner.is_mixed() {
-                        if !explicit_mixed {
-                            out.push("iterable type iterable".to_string());
-                        }
+                        missing("iterable type iterable".to_string());
                     } else {
                         collect_iterable_missing_value_types(inner, explicit_mixed, out);
                     }
                     return;
                 }
-                for m in members {
-                    collect_iterable_missing_value_types(m, explicit_mixed, out);
-                }
             }
-            Type(Repr::Intersection(members)) => {
-                // `list<V>`, `non-empty-array<V>`, `list<V>&non-empty-array`: the
-                // value type is whatever any `Array` member specifies, so only
-                // an intersection whose every array member is bare lacks one.
-                let values: Vec<&Type> = members
+            // `list<V>`, `non-empty-array<V>`, `list<V>&non-empty-array`: the
+            // value type is whatever any `Array` member specifies, so only
+            // an intersection whose every array member is bare lacks one.
+            Type(Repr::Intersection(members))
+                if members.iter().any(|m| matches!(m, Type(Repr::Array(..)))) =>
+            {
+                let specified: Vec<&Type> = members
                     .iter()
                     .filter_map(|m| match m {
-                        Type(Repr::Array(_, inner)) => Some(inner.as_ref()),
+                        Type(Repr::Array(_, inner)) if !inner.is_mixed() => Some(inner.as_ref()),
                         _ => None,
                     })
                     .collect();
-                if !values.is_empty() {
-                    let specified: Vec<&Type> =
-                        values.iter().copied().filter(|v| !v.is_mixed()).collect();
-                    if specified.is_empty() {
-                        if !explicit_mixed {
-                            out.push(format!("iterable type {ty}"));
-                        }
-                    } else {
-                        for inner in specified {
-                            collect_iterable_missing_value_types(inner, explicit_mixed, out);
-                        }
-                    }
-                    return;
+                if specified.is_empty() {
+                    return missing(format!("iterable type {ty}"));
                 }
-                for m in members {
-                    collect_iterable_missing_value_types(m, explicit_mixed, out);
+                for inner in specified {
+                    collect_iterable_missing_value_types(inner, explicit_mixed, out);
                 }
-            }
-            Type(Repr::Object(_, args)) => {
-                for a in args {
-                    collect_iterable_missing_value_types(a, explicit_mixed, out);
-                }
-            }
-            Type(Repr::VarianceArg(_, inner)) => {
-                collect_iterable_missing_value_types(inner, explicit_mixed, out)
-            }
-            Type(Repr::ClassString(inner)) => {
-                collect_iterable_missing_value_types(inner, explicit_mixed, out)
-            }
-            Type(Repr::ArrayShape(fields)) => {
-                for t in fields.types() {
-                    collect_iterable_missing_value_types(t, explicit_mixed, out);
-                }
+                return;
             }
             _ => {}
         }
+        ty.for_each_child(&mut |child| {
+            collect_iterable_missing_value_types(child, explicit_mixed, out)
+        });
     })
 }
 
 /// Mirrors real PHPStan's `MissingTypehintCheck::
 /// getCallablesWithMissingSignature`: every `callable`/`Closure` in `ty`
-/// written with no `(params): return` signature. `Repr::Callable(None)`
-/// is exactly a bare `callable` (a written signature parses to
-/// `Repr::Callable(Some(sig))`, whose own parameter/return types are
-/// still walked); a bare `Closure` resolves to a plain class reference
-/// instead. Each finding is the type's own display text.
+/// written with no `(params): return` signature, at any depth - a
+/// written signature's own parameter and return types included. A bare
+/// `callable` is `Repr::Callable(None)`; a bare `Closure` is a plain
+/// class reference. Each finding is the type's own display text.
 fn collect_callables_with_missing_signature(ty: &Type, out: &mut Vec<String>) {
     syntax::stack::guard(|| {
         match ty {
-            Type(Repr::Callable(None)) => out.push(ty.to_string()),
-            Type(Repr::Callable(Some(sig))) => {
-                for p in &sig.params {
-                    collect_callables_with_missing_signature(&p.ty, out);
-                }
-                collect_callables_with_missing_signature(&sig.return_type, out);
-            }
-            Type(Repr::Object(name, args)) => {
+            Type(Repr::TemplateParam(_)) => return,
+            Type(Repr::Callable(None)) => return out.push(ty.to_string()),
+            Type(Repr::Object(name, args))
                 if args.is_empty()
                     && name
                         .trim_start_matches('\\')
-                        .eq_ignore_ascii_case("Closure")
-                {
-                    out.push("Closure".to_string());
-                }
-                for a in args {
-                    collect_callables_with_missing_signature(a, out);
-                }
-            }
-            Type(Repr::Array(key, inner)) => {
-                collect_callables_with_missing_signature(key, out);
-                collect_callables_with_missing_signature(inner, out);
-            }
-            Type(Repr::ClassString(inner)) | Type(Repr::VarianceArg(_, inner)) => {
-                collect_callables_with_missing_signature(inner, out)
+                        .eq_ignore_ascii_case("Closure") =>
+            {
+                return out.push("Closure".to_string());
             }
             // A `Closure(...)` shape (`Closure&callable(...)`) carries its
             // signature; only that signature's own types are walked.
@@ -195,53 +150,24 @@ fn collect_callables_with_missing_signature(ty: &Type, out: &mut Vec<String>) {
                         collect_callables_with_missing_signature(m, out);
                     }
                 }
-            }
-            Type(Repr::Union(members)) | Type(Repr::Intersection(members)) => {
-                for m in members {
-                    collect_callables_with_missing_signature(m, out);
-                }
-            }
-            Type(Repr::ArrayShape(fields)) => {
-                for t in fields.types() {
-                    collect_callables_with_missing_signature(t, out);
-                }
+                return;
             }
             _ => {}
         }
+        ty.for_each_child(&mut |child| collect_callables_with_missing_signature(child, out));
     })
 }
 
+/// Every class `ty` names with no generic arguments, at any depth but
+/// inside a template.
 fn collect_bare_object_class_names<'a>(ty: &'a Type, out: &mut Vec<&'a crate::Name>) {
     syntax::stack::guard(|| match ty {
         Type(Repr::TemplateParam(_)) => {}
-        Type(Repr::VarianceArg(_, inner)) | Type(Repr::ClassString(inner)) => {
-            collect_bare_object_class_names(inner, out)
-        }
-        Type(Repr::Object(name, args)) => {
-            if args.is_empty() {
-                if !out.contains(&name) {
-                    out.push(name);
-                }
-            } else {
-                for a in args {
-                    collect_bare_object_class_names(a, out);
-                }
+        Type(Repr::Object(name, args)) if args.is_empty() => {
+            if !out.contains(&name) {
+                out.push(name);
             }
         }
-        Type(Repr::Array(key, inner)) => {
-            collect_bare_object_class_names(key, out);
-            collect_bare_object_class_names(inner, out);
-        }
-        Type(Repr::Union(members)) | Type(Repr::Intersection(members)) => {
-            for m in members {
-                collect_bare_object_class_names(m, out);
-            }
-        }
-        Type(Repr::ArrayShape(fields)) => {
-            for t in fields.types() {
-                collect_bare_object_class_names(t, out);
-            }
-        }
-        _ => {}
+        _ => ty.for_each_child(&mut |child| collect_bare_object_class_names(child, out)),
     })
 }
