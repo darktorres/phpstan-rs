@@ -135,9 +135,11 @@ fn is_object_like(ty: &Type) -> bool {
 
 impl Relation<'_> {
     /// `original` where a check that its value is of `target` passed. A
-    /// member `target` accepts, through this relation's class hierarchy,
-    /// stays whole: a class implementing the target interface only through
-    /// an ancestor keeps its own members.
+    /// member that is a subtype of `target`, through this relation's class
+    /// hierarchy, stays whole: a class implementing the target interface
+    /// only through an ancestor keeps its own members. Subtyping, not
+    /// acceptance: `is_float()` of `int|float` leaves `float`, though a
+    /// `float` parameter accepts an `int`.
     pub fn narrow(&self, original: &Type, target: &Type) -> Type {
         match original {
             Type(Repr::Union(members)) | Type(Repr::BenevolentUnion(members)) => {
@@ -150,14 +152,14 @@ impl Relation<'_> {
                 };
                 let mut kept: Vec<Type> = Vec::new();
                 for m in members {
-                    if self.accepts(target, m).yes() {
+                    if self.is_super_type_of(target, m).yes() {
                         if !kept.contains(m) {
                             kept.push(m.clone());
                         }
                         continue;
                     }
                     for t in target_members {
-                        if self.accepts(m, t).yes() && !kept.contains(t) {
+                        if self.is_super_type_of(m, t).yes() && !kept.contains(t) {
                             kept.push(t.clone());
                         }
                     }
@@ -185,7 +187,7 @@ impl Relation<'_> {
             // interface inherited from an ancestor, not declared directly)
             // must still keep its own, more specific type here rather than
             // needlessly widening to the bare interface.
-            _ if self.accepts(target, original).yes() => original.clone(),
+            _ if self.is_super_type_of(target, original).yes() => original.clone(),
             _ => target.clone(),
         }
     }
