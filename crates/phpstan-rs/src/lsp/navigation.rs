@@ -18,16 +18,8 @@
 //! `Anchor` variant gates whether a candidate gets recorded, never the
 //! traversal itself.
 //!
-//! Structured after (not sharing code with) `deps.rs`'s own
-//! `collect_stmt`/`collect_expr`/`collect_function`/`collect_class`/
-//! `collect_enum` - the same proven-exhaustive traversal shape (including
-//! `visit`'s own documented `any_child_stmt`/`any_child_expr`
-//! exclusions: `FunctionDecl`/`ClassDecl`/`ClassDecl` bodies and
-//! `Closure`/`ArrowFn`/`NewAnonymousClass`), reused here for a different
-//! purpose (checking spans against a cursor, not collecting names into a
-//! `HashSet`) rather than generalized, to avoid risking `deps.rs`'s own
-//! existing, load-bearing dependency-tracking correctness for an
-//! unrelated new consumer.
+//! A `Visitor` over the whole file, recording each name, member and
+//! variable site it reaches, a node before the nodes inside it.
 //!
 //! Deliberately does **not** resolve an instance receiver's own type
 //! (`$x->method()`, `$x->prop`) or a local variable *read*'s own

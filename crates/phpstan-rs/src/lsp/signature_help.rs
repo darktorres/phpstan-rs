@@ -1,13 +1,7 @@
 //! `textDocument/signatureHelp` - an active-parameter tooltip while
-//! typing inside a call's parens. Structured after (not sharing code
-//! with) `navigation::Walker`: the same exhaustive per-`StmtKind` field
-//! extraction is unavoidable here too (a call can appear inside any
-//! statement's own condition/subject/return-value/... - `any_child_stmt`
-//! alone only reaches nested *statements*, never a statement's own
-//! `Expr` fields - see `visit`'s own doc comment), but the payload at
-//! each call-shaped `Expr` is different: not "what does this resolve
-//! to", but "is the cursor inside this call's own argument list, and if
-//! so, which argument".
+//! typing inside a call's parens. A `Visitor` over the file: at each
+//! call-shaped `Expr` it asks whether the cursor is inside this call's own
+//! argument list, and if so, which argument.
 //!
 //! **Claim-and-clear, not overwrite-only-on-match.** Every call-shaped
 //! node (`Call`, `New`, `MethodCall`, `DynamicMethodCall`, `StaticCall`,
