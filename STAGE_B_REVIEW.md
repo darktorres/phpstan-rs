@@ -202,6 +202,11 @@ Each fix needs a fixture.
   `Box<6>`. A function's own template keeps the literal (`identity(5)` is
   `5`). (found fixing F38, probed)
 
+- [ ] **P8. `is_numeric()` of a literal isn't folded.** `is_numeric("\u{a0}1")`
+  is `bool`, not `false`, and `is_numeric(" 1\n")` `bool`, not `true`;
+  a string literal's answer is known (`numeric_value`), as is an int's
+  or a float's (`true`) and an array's (`false`). (found fixing F48)
+
 ## Review 2: structure, types crate
 
 - [ ] **T1. One absorption rule for unions.** `union_types_impl` in
@@ -626,12 +631,12 @@ through `check-project`.
   as does `parse_native_type_string`; that part moved to C7, which deletes
   both. One normalizing constructor per
   form, with raw construction kept private. (`5fc4e990`, `4dc6a4b7`) Done in `dedc1ad8` (the int range; the parser unions stay C7's).
-- [ ] **F48. Numeric strings are recognized too widely.**
+- [x] **F48. Numeric strings are recognized too widely.**
   `is_numeric_string_literal` trims with Rust's Unicode `trim()`, so
   `"\u{a0}1"` is a `numeric-string` (PHP's `is_numeric` says false; its
   whitespace is `" \t\n\r\v\f"`). `concat` keeps `numeric` for a left
   operand with trailing whitespace: `'1 ' . '5'` is `'1 5'`, not numeric.
-  (`56e1f538`)
+  (`56e1f538`) Done in `05fb20f6`; `$int . '+5'` and `$int . ' 5'` were numeric too.
 - [ ] **F57. An interpolated `$a[01]` reads key 1.** `classify_index_key`
   (`lexer/strings.rs`) reads a simple-interpolation key with
   `parse::<i64>()`, so `"$a[01]"` gives `$a[1]` where PHP reads the string
