@@ -538,8 +538,18 @@ impl<'a> Checker<'a> {
                     };
                     self.check_type_class_names_exist(&checked, &subject, ast_param.span);
                     self.check_type_trait_refs(&ty, &subject, ast_param.span, "parameter.trait");
-                    // `ty` above is already `resolve_pseudo`'d.
-                    self.check_no_parent_ref(&ty, &subject, ast_param.span, "parameter.noParent");
+                    // A native `parent` without a parent class; one written in
+                    // PHPDoc is its unresolvable-type check's.
+                    let native = match class_name {
+                        Some(c) => self.resolve_pseudo(param.ty_native(), c),
+                        None => param.ty_native().clone(),
+                    };
+                    self.check_no_parent_ref(
+                        &native,
+                        &subject,
+                        ast_param.span,
+                        "parameter.noParent",
+                    );
                     self.check_type_class_name_case(param.case_refs(), ast_param.span);
                     self.check_type_internal_usage(param.case_refs(), ast_param.span);
                     resolved_params.push((param.name().to_string(), ty.clone(), ast_param.span));
@@ -829,8 +839,11 @@ impl<'a> Checker<'a> {
         // parent" - a top-level function has no enclosing class `parent`
         // could meaningfully reference.
         if let Some(c) = class_name {
-            let resolved_return =
-                self.resolve_pseudo(declared_return.as_ref().unwrap_or(&Type::mixed()), c);
+            let native_return = match sig {
+                Some(s) => s.return_type_native().clone(),
+                None => declared_return.clone().unwrap_or(Type::mixed()),
+            };
+            let resolved_return = self.resolve_pseudo(&native_return, c);
             self.check_no_parent_ref(&resolved_return, &subject, f.span, "return.noParent");
         }
         // `@throws` tag validity - see `checker::throws`'s module doc
