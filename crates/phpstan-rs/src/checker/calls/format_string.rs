@@ -769,7 +769,7 @@ mod tests {
             ("%10$s %3$d", Some(10)),
         ];
         for (format, expected) in cases {
-            assert_eq!(scanf_placeholder_count(&format), *expected, "{format}");
+            assert_eq!(scanf_placeholder_count(format), *expected, "{format}");
         }
     }
 }
