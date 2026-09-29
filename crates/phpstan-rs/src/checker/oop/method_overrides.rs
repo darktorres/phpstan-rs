@@ -11,7 +11,12 @@ impl<'a> Checker<'a> {
         let Some(info) = self.registry.classes.get(fqn) else {
             return;
         };
-        for m in &c.methods {
+        // Redeclaring a native enum method is itself the error.
+        for m in c
+            .methods
+            .iter()
+            .filter(|m| !super::enums::is_native_enum_method(c, &m.function.name))
+        {
             let decl = DeclSpans {
                 name: m.function.name_span,
                 override_removal: m

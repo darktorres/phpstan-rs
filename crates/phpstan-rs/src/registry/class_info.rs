@@ -895,14 +895,7 @@ impl<'a> MemberSpans<'a> {
         for p in &c.properties {
             spans.properties.insert(&p.name, p.name_span);
         }
-        spans
-    }
-
-    pub(crate) fn of_enum(e: &'a ClassDecl) -> MemberSpans<'a> {
-        let mut spans = MemberSpans::default();
-        spans.add_methods(&e.methods);
-        spans.add_consts(&e.consts);
-        for case in &e.enum_cases {
+        for case in &c.enum_cases {
             spans.consts.insert(&case.name, case.name_span);
         }
         spans
@@ -945,8 +938,9 @@ impl ClassReflection {
     #[hotpath::measure]
     pub(crate) fn from_decl(c: &ClassDecl, ctx: &NameContext) -> ClassReflection {
         let class_doc: Option<DocBlock> = c.doc_comment.as_deref().map(docblock::parse);
-        let templates: Vec<Name> = class_doc
-            .as_ref()
+        // An enum can't be generic; its `@template` tags declare nothing.
+        let template_doc = class_doc.as_ref().filter(|_| c.kind != ClassKind::Enum);
+        let templates: Vec<Name> = template_doc
             .map(|d| d.templates.iter().map(Name::from).collect())
             .unwrap_or_default();
         // This class's `@template` metadata (bound/variance/default),
@@ -958,8 +952,7 @@ impl ClassReflection {
         // method's params/return type below) carries the real metadata
         // from here instead of a bare name.
         let class_scope = class_decl_fqn(c).to_string();
-        let template_params: FxHashMap<String, TemplateParam> = class_doc
-            .as_ref()
+        let template_params: FxHashMap<String, TemplateParam> = template_doc
             .map(|d| build_template_params(d, &class_scope, ctx))
             .unwrap_or_default();
         // `@phpstan-type Name TypeExpr` local aliases - resolved once,
@@ -1590,7 +1583,7 @@ impl ClassReflection {
         let attribute_targets = compute_attribute_targets(&c.attrs);
         let doctrine_entity = compute_doctrine_entity(c, &properties);
 
-        ClassReflection {
+        let mut info = ClassReflection {
             is_anonymous: false,
             provenance: Provenance::default(),
             kind: c.kind,
@@ -1642,72 +1635,25 @@ impl ClassReflection {
             type_imports,
             method_tags,
             doctrine_entity,
+        };
+        if c.kind == ClassKind::Enum {
+            info.add_enum_members(c, &class_scope);
         }
+        info
     }
 
-    /// An enum participates in the class hierarchy the same way a class
-    /// does (methods, `implements`, `use`) - it just can't extend anything
-    /// or declare instance properties. Cases aren't registered as anything
-    /// yet: resolving `Suit::Hearts`'s type would need static-access type
-    /// inference, which nothing in the checker does for *any* class today,
-    /// not just enums - a separate, pre-existing gap this doesn't attempt
-    /// to close.
-    #[hotpath::measure]
-    pub(crate) fn from_enum_decl(e: &ClassDecl, ctx: &NameContext) -> ClassReflection {
-        // Enums can't be generic in real PHP (no `@template` on an enum
-        // means anything), so there's no enclosing-class template list to
-        // pass down here, unlike ClassReflection::from_decl. An enum CAN
-        // `implements` a genuinely generic interface though (`enum Suit
-        // implements \IteratorAggregate<int, self> {}`-shaped code is
-        // real), so `@implements` tags are still worth resolving - just
-        // with an empty `template_params` map, since there's no class-
-        // level template a tag's argument could reference.
-        let fqn = class_decl_fqn(e).to_string();
-        let class_doc: Option<DocBlock> = e.doc_comment.as_deref().map(docblock::parse);
-        let implements_args: FxHashMap<Name, Vec<Type>> = class_doc
-            .iter()
-            .flat_map(|d| &d.implements)
-            .filter_map(|raw| class_and_args(&resolve_names_in_type(parse_type_node(raw), ctx)))
-            .collect();
-        // See `ClassReflection::from_decl`'s identical `uses_args`
-        // construction - the reasoning (`@use` lives on the `use`
-        // statement's own doc comment) is unrelated to whether the
-        // enclosing declaration is a class or an enum.
-        let uses_args: FxHashMap<Name, Vec<Type>> = e
-            .uses_doc_comments
-            .iter()
-            .filter_map(|d| d.as_deref())
-            .collect::<FxHashSet<_>>()
-            .into_iter()
-            .map(docblock::parse)
-            .flat_map(|d| d.uses)
-            .filter_map(|raw| class_and_args(&resolve_names_in_type(parse_type_node(&raw), ctx)))
-            .collect();
-        let (mut methods, redeclared_methods) = collect_merged_methods(
-            e.methods
-                .iter()
-                .map(|m| {
-                    (
-                        Name::from(&m.function.name),
-                        name_site(&m.function),
-                        FunctionReflection::from_decl(
-                            &m.function,
-                            ctx,
-                            &FxHashMap::default(),
-                            &FxHashMap::default(),
-                            m.visibility,
-                        ),
-                    )
-                })
-                .collect(),
-        );
+    /// Adds what the language gives every enum: its cases, as constants
+    /// typed as the case; `cases()`, and a backed enum's `from()` and
+    /// `tryFrom()`; the `name` property, and a backed enum's `value`; and
+    /// `UnitEnum`/`BackedEnum` among its interfaces.
+    fn add_enum_members(&mut self, e: &ClassDecl, fqn: &str) {
         // `cases(): array` is a real, built-in static method every enum
         // gets from the language itself (`UnitEnum`), and a backed
         // enum's `from(int|string $value): static`/`tryFrom(...): ?static`
         // (`BackedEnum`) likewise - none declared in source. Without
         // these, undefined-static-method detection would flag every real
         // `Enum::cases()`/`::tryFrom()` call.
-        let self_ty = Type::object(fqn.clone().into(), Vec::new());
+        let self_ty = Type::object(fqn.into(), Vec::new());
         // Real PHPStan's own `functionMap.php` declares
         // `UnitEnum::cases()` as `list<static>` outright - a bare,
         // unmarked `Array` here would leave every caller's result
@@ -1717,7 +1663,7 @@ impl ClassReflection {
             Type::array(Type::unknown_array_key(), self_ty.clone()),
             Type::accessory(AccessoryKind::ArrayList),
         ]);
-        methods.insert(
+        self.methods.insert(
             Name::from("cases"),
             FunctionReflection {
                 provenance: Provenance::default(),
@@ -1777,7 +1723,7 @@ impl ClassReflection {
                 closure_this_type: None,
                 out_ty: None,
             };
-            methods.insert(
+            self.methods.insert(
                 Name::from("from"),
                 FunctionReflection {
                     provenance: Provenance::default(),
@@ -1810,7 +1756,7 @@ impl ClassReflection {
                     is_magic: true,
                 },
             );
-            methods.insert(
+            self.methods.insert(
                 Name::from("tryFrom"),
                 FunctionReflection {
                     provenance: Provenance::default(),
@@ -1841,28 +1787,6 @@ impl ClassReflection {
                 },
             );
         }
-        let mut consts: IndexMap<Name, ConstantReflection> = e
-            .consts
-            .iter()
-            .map(|cc| {
-                let doc = cc.doc_comment.as_deref().map(docblock::parse);
-                (
-                    Name::from(&cc.name),
-                    ConstantReflection {
-                        attributes: ReflectionAttribute::all(&cc.attrs),
-                        provenance: Provenance::default(),
-                        ty: resolve_names_in_type(infer_class_const_type(&cc.value), ctx),
-                        visibility: cc.visibility,
-                        is_final: cc.is_final,
-                        native_ty: native_const_type(cc),
-                        has_phpdoc_type: false,
-                        value_ty: resolve_names_in_type(infer_class_const_type(&cc.value), ctx),
-                        is_internal: doc.as_ref().is_some_and(|d| d.internal),
-                        deprecated: doc.as_ref().and_then(|d| d.deprecated.clone()),
-                    },
-                )
-            })
-            .collect();
         // A case is accessed exactly like a constant (`Suit::Hearts`,
         // same `ClassName::member` syntax as `Suit::SOME_CONST`) and has
         // a real, useful static type: the enum itself. Folding it into
@@ -1871,17 +1795,17 @@ impl ClassReflection {
         // work, with no new lookup path needed. A case has no visibility
         // syntax in real PHP - always public.
         for case in &e.enum_cases {
-            consts.insert(
+            self.consts.insert(
                 Name::from(&case.name),
                 ConstantReflection {
                     attributes: ReflectionAttribute::all(&case.attrs),
                     provenance: Provenance::default(),
-                    ty: Type::enum_case(Name::from(&*fqn), Name::from(&*case.name)),
+                    ty: Type::enum_case(Name::from(fqn), Name::from(&*case.name)),
                     visibility: Visibility::Public,
                     is_final: true,
                     native_ty: None,
                     has_phpdoc_type: false,
-                    value_ty: Type::enum_case(Name::from(&*fqn), Name::from(&*case.name)),
+                    value_ty: Type::enum_case(Name::from(fqn), Name::from(&*case.name)),
                     // A case has no doc-comment/`@internal`/`@deprecated`
                     // convention of its own in real PHP either - same
                     // reasoning as its always-`Visibility::Public` above.
@@ -1904,7 +1828,7 @@ impl ClassReflection {
                 })
                 .map(|span| (span.start.line, span.start.col))
         };
-        consts.sort_by_cached_key(|name, _| position(name));
+        self.consts.sort_by_cached_key(|name, _| position(name));
 
         // Each case's own literal backing value, independent of whether
         // every case happens to be a bare literal (unlike `->value`'s
@@ -1912,7 +1836,7 @@ impl ClassReflection {
         // `::from()`/`::tryFrom()` narrowing only needs to know a given
         // literal argument's matching case, if any, and a partial map
         // still answers that for the literal-valued cases it covers.
-        let enum_case_values: FxHashMap<Name, Type> = e
+        self.enum_case_values = e
             .enum_cases
             .iter()
             .filter_map(|c| {
@@ -1933,8 +1857,7 @@ impl ClassReflection {
         // itself (`UnitEnum`/`BackedEnum`). Without registering these as
         // properties, undefined-property-on-read detection would flag
         // every real `$case->value` access.
-        let mut properties = FxHashMap::default();
-        properties.insert(
+        self.properties.insert(
             Name::from("name"),
             PropertyReflection {
                 attributes: Vec::new(),
@@ -1989,7 +1912,7 @@ impl ClassReflection {
             let case_values: Vec<Type> = e
                 .enum_cases
                 .iter()
-                .filter_map(|c| enum_case_values.get(c.name.as_ref()).cloned())
+                .filter_map(|c| self.enum_case_values.get(c.name.as_ref()).cloned())
                 .collect();
             let value_ty = if !case_values.is_empty() && case_values.len() == e.enum_cases.len() {
                 match case_values.len() {
@@ -1999,7 +1922,7 @@ impl ClassReflection {
             } else {
                 types::native_type(backing)
             };
-            properties.insert(
+            self.properties.insert(
                 Name::from("value"),
                 PropertyReflection {
                     attributes: Vec::new(),
@@ -2048,139 +1971,20 @@ impl ClassReflection {
         // Without this, real code narrowing/typing an enum against
         // `UnitEnum` would be flagged as a bound violation despite being
         // exactly what real PHP guarantees.
-        let mut implements: Vec<Name> = e.implements.iter().map(class_ref).collect();
-        implements.push(Name::from("UnitEnum"));
+        self.implements.push(Name::from("UnitEnum"));
         if e.backing_type.is_some() {
-            implements.push(Name::from("BackedEnum"));
+            self.implements.push(Name::from("BackedEnum"));
         }
 
-        // One pass over `e.methods` instead of 3 separate filtered ones -
-        // see `ClassReflection::from_decl`'s equivalent loop for the same
-        // reasoning.
-        let mut abstract_methods: FxHashSet<Name> = FxHashSet::default();
-        let mut final_methods: FxHashSet<Name> = FxHashSet::default();
-        let mut static_methods: FxHashSet<Name> = FxHashSet::default();
-        for m in &e.methods {
-            if m.is_abstract {
-                abstract_methods.insert(Name::from(&m.function.name));
-            }
-            if m.is_final && m.visibility != Visibility::Private {
-                final_methods.insert(Name::from(&m.function.name));
-            }
-            if m.is_static {
-                static_methods.insert(Name::from(&m.function.name));
-            }
-        }
         for builtin in ["cases", "from", "tryFrom"] {
-            if methods.contains_key(builtin)
+            if self.methods.contains_key(builtin)
                 && !e
                     .methods
                     .iter()
                     .any(|m| m.function.name.eq_ignore_ascii_case(builtin))
             {
-                static_methods.insert(Name::from(builtin));
+                self.static_methods.insert(Name::from(builtin));
             }
-        }
-        let trait_aliases: Vec<TraitAlias> = e
-            .trait_aliases
-            .iter()
-            .filter_map(|a| {
-                Some(TraitAlias {
-                    trait_name: a.trait_name.as_ref().map(class_ref),
-                    method: Name::from(&a.method),
-                    alias: Name::from(a.alias.as_deref()?),
-                })
-            })
-            .collect();
-
-        ClassReflection {
-            is_anonymous: false,
-            provenance: Provenance::default(),
-            kind: ClassKind::Enum,
-            is_abstract: false,
-            is_final: true,
-            is_final_by_phpdoc: false,
-            // Real PHP rejects `readonly enum` at parse time - an enum
-            // can never be `readonly`.
-            is_readonly: false,
-            // An enum can carry `@phpstan-immutable` on its own docblock
-            // same as a class can - reuse the identical computation.
-            is_immutable: class_doc
-                .as_ref()
-                .is_some_and(|d| d.immutable || d.readonly),
-            extends: Vec::new(),
-            implements,
-            methods,
-            redeclared_methods,
-            properties,
-            consts,
-            uses: e.uses.iter().map(class_ref).collect(),
-            abstract_methods,
-            final_methods,
-            static_methods,
-            // An enum can't declare instance properties at all (see
-            // `ast::ClassDecl`'s doc comment) - never a `final`-property
-            // candidate either.
-            final_properties: FxHashSet::default(),
-            // An enum can never be `extends`-subclassed by anything
-            // (`is_final: true` above already reflects this) - no
-            // ancestor walk could ever reach these sets.
-            final_methods_by_phpdoc: FxHashSet::default(),
-            final_properties_by_phpdoc: FxHashSet::default(),
-            trait_aliases,
-            resolved_trait_conflicts: e.resolved_trait_conflicts.iter().map(Name::from).collect(),
-            templates: Vec::new(),
-            extends_args: Vec::new(),
-            implements_args,
-            uses_args,
-            template_bounds: FxHashMap::default(),
-            template_defaults: FxHashMap::default(),
-            covariant_templates: FxHashSet::default(),
-            contravariant_templates: FxHashSet::default(),
-            // Real PHPStan's API surface has no enums to mark `@api`
-            // anyway.
-            is_api: false,
-            is_api_do_not_implement: false,
-            is_internal: class_doc.as_ref().is_some_and(|d| d.internal),
-            // An enum can never `extends` anything, so no subclass could
-            // ever exist to hold it to a consistent constructor contract.
-            is_consistent_constructor: false,
-            // An enum can technically `implements`/`use` a tagged
-            // interface/trait, but not `extends` at all - a rare
-            // combination, not modeled here.
-            require_extends: Vec::new(),
-            require_implements: Vec::new(),
-            sealed: Vec::new(),
-            access: crate::registry::access_attributes::access_attributes(
-                &e.attrs,
-                ctx.namespace(),
-            ),
-            method_access: e
-                .methods
-                .iter()
-                .filter_map(|m| {
-                    let a = crate::registry::access_attributes::access_attributes(
-                        &m.function.attrs,
-                        ctx.namespace(),
-                    );
-                    (!a.is_empty()).then(|| (Name::from(&m.function.name.to_ascii_lowercase()), a))
-                })
-                .collect(),
-            // An enum can `@mixin` in real PHPStan's grammar, but this is
-            // a rare combination not modeled here.
-            mixins: Vec::new(),
-            mixin_case_refs: Vec::new(),
-            deprecated: class_doc.as_ref().and_then(|d| d.deprecated.clone()),
-            attribute_targets: compute_attribute_targets(&e.attrs),
-            attributes: ReflectionAttribute::all(&e.attrs),
-            enum_case_values,
-            type_aliases: FxHashMap::default(),
-            type_alias_case_refs: FxHashMap::default(),
-            type_imports: Vec::new(),
-            // Same scope trim as `mixins` above - a real `@method` on an
-            // enum's own docblock is a rare combination not modeled here.
-            method_tags: Vec::new(),
-            doctrine_entity: None,
         }
     }
 

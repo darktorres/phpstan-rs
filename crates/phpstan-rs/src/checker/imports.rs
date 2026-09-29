@@ -244,28 +244,6 @@ impl<'a> Checker<'a> {
                         }
                     }
                 }
-                StmtKind::ClassDecl(e) if e.kind == ClassKind::Enum => {
-                    let scope = used_names
-                        .entry(current_namespace_lower.clone())
-                        .or_default();
-                    if !scope.insert(class_decl_name(e).to_ascii_lowercase()) {
-                        let qualified = if current_namespace.is_empty() {
-                            class_decl_name(e).to_string()
-                        } else {
-                            format!("{current_namespace}\\{}", class_decl_name(e))
-                        };
-                        self.report_builder(
-                            DiagnosticBuilder::new(format!(
-                                    "Cannot declare enum {qualified} because the name is already in use."
-                                ),
-                                e.span,
-                                0,
-                                "enum.nameInUse".to_string(),
-                            )
-                            .non_ignorable(),
-                        );
-                    }
-                }
                 StmtKind::ClassDecl(c) => {
                     let kind = class_kind_identifier(&c.kind);
                     let scope = used_names

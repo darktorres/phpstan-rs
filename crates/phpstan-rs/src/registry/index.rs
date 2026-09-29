@@ -23,17 +23,12 @@ pub(crate) enum BuiltDecl {
     Class {
         name: Name,
         conditional: bool,
-        info: ClassReflection,
-    },
-    Enum {
-        name: Name,
-        conditional: bool,
-        info: ClassReflection,
+        info: Box<ClassReflection>,
     },
     Function {
         name: Name,
         conditional: bool,
-        sig: FunctionReflection,
+        sig: Box<FunctionReflection>,
         // The declaration's name position, `(line, col)`.
         site: (u32, u32),
     },
@@ -113,6 +108,7 @@ impl Registry {
                 conditional,
                 info: new_info,
             } => {
+                let new_info = *new_info;
                 if conditional && self.built_in_stub_classes.contains(&name) {
                     // A plain `or_insert_with` no-op (the shape every
                     // other conditional case below uses) fully discards
@@ -280,23 +276,13 @@ impl Registry {
                     self.classes.insert(name, new_info);
                 }
             }
-            BuiltDecl::Enum {
-                name,
-                conditional,
-                info,
-            } => {
-                if conditional {
-                    self.classes.get_or_insert_with(name, || info);
-                } else {
-                    self.classes.insert(name, info);
-                }
-            }
             BuiltDecl::Function {
                 name,
                 conditional,
                 sig: new_sig,
                 site,
             } => {
+                let new_sig = *new_sig;
                 if conditional {
                     // Gated on arity and not losing any type precision
                     // the existing slot already had (see
@@ -410,7 +396,7 @@ impl Registry {
                     self.names_with_assert_tags.insert(Name::from(bare));
                 }
             }
-            BuiltDecl::Class { info, .. } | BuiltDecl::Enum { info, .. } => {
+            BuiltDecl::Class { info, .. } => {
                 for (method_name, sig) in &info.methods {
                     if !sig.assert.is_empty() {
                         self.names_with_assert_tags.insert(method_name.clone());
@@ -575,23 +561,13 @@ pub(crate) fn build_declarations(stmts: &[Stmt], origin: &Origin) -> Vec<BuiltDe
         match declaration.declared {
             Declared::Class(c) => {
                 let name = Name::from(&declaration.name());
-                if c.kind == syntax::ast::ClassKind::Enum {
-                    let mut info = ClassReflection::from_enum_decl(c, ctx);
-                    info.record_provenance(origin, &name, c.name_span, &MemberSpans::of_enum(c));
-                    out.push(BuiltDecl::Enum {
-                        name,
-                        conditional,
-                        info,
-                    });
-                } else {
-                    let mut info = ClassReflection::from_decl(c, ctx);
-                    info.record_provenance(origin, &name, c.name_span, &MemberSpans::of_class(c));
-                    out.push(BuiltDecl::Class {
-                        name,
-                        conditional,
-                        info,
-                    });
-                }
+                let mut info = ClassReflection::from_decl(c, ctx);
+                info.record_provenance(origin, &name, c.name_span, &MemberSpans::of_class(c));
+                out.push(BuiltDecl::Class {
+                    name,
+                    conditional,
+                    info: Box::new(info),
+                });
             }
             Declared::Function(f) => {
                 let mut sig = FunctionReflection::from_decl(
@@ -605,7 +581,7 @@ pub(crate) fn build_declarations(stmts: &[Stmt], origin: &Origin) -> Vec<BuiltDe
                 out.push(BuiltDecl::Function {
                     name: Name::from(&declaration.name()),
                     conditional,
-                    sig,
+                    sig: Box::new(sig),
                     site: (f.name_span.start.line, f.name_span.start.col),
                 });
             }

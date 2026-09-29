@@ -43,7 +43,7 @@ use crate::project::Project;
 use crate::registry::Registry;
 use crate::registry::class_decl_fqn;
 use syntax::ast::{
-    Arg, ClassDecl, ClassKind, Expr, ExprKind, FunctionDecl, Param, StaticTarget, Stmt, StmtKind,
+    Arg, ClassDecl, Expr, ExprKind, FunctionDecl, Param, StaticTarget, Stmt, StmtKind,
 };
 use syntax::token::{Position, Span};
 use syntax::visit::{any_child_expr, any_child_stmt};
@@ -172,7 +172,6 @@ impl<'a> Walker<'a> {
                 StmtKind::FunctionDecl(f) => {
                     self.function(f, current_class, false, best);
                 }
-                StmtKind::ClassDecl(e) if e.kind == ClassKind::Enum => self.enum_decl(e, best),
                 StmtKind::ClassDecl(c) => self.class(c, best),
                 StmtKind::GlobalConst(consts) => {
                     for c in consts {
@@ -246,20 +245,8 @@ impl<'a> Walker<'a> {
         for cst in &c.consts {
             self.expr(&cst.value, Some(&fqn), best);
         }
-    }
-
-    fn enum_decl(&mut self, e: &ClassDecl, best: &mut Option<SigHelp>) {
-        let fqn = class_decl_fqn(e).to_string();
-        for m in &e.methods {
-            self.function(&m.function, Some(&fqn), m.is_static, best);
-        }
-        for cst in &e.consts {
-            self.expr(&cst.value, Some(&fqn), best);
-        }
-        for case in &e.enum_cases {
-            if let Some(v) = &case.value {
-                self.expr(v, Some(&fqn), best);
-            }
+        for v in c.enum_cases.iter().filter_map(|case| case.value.as_ref()) {
+            self.expr(v, Some(&fqn), best);
         }
     }
 

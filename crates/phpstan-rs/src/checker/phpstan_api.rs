@@ -902,6 +902,9 @@ impl<'a> Walker<'a> {
         for cst in &c.consts {
             self.check_expr(&cst.value, ctx, &empty, &fqn);
         }
+        for value in c.enum_cases.iter().filter_map(|case| case.value.as_ref()) {
+            self.check_expr(value, ctx, &empty, &fqn);
+        }
         self.current_prop_types = class_prop_types(c);
         self.current_class_implements_phpstan_interface =
             class_implements_phpstan_interface(&fqn, self.registry);
@@ -911,42 +914,6 @@ impl<'a> Walker<'a> {
             self.check_function(&m.function, ctx, &method_label);
         }
         self.current_prop_types = ParamTypes::default();
-        self.current_class_implements_phpstan_interface = false;
-        self.current_class_fqn = None;
-    }
-
-    fn check_enum(&mut self, e: &ClassDecl, ctx: &NameContext) {
-        let fqn = declared_class_name(e);
-        for iface in &e.implements {
-            if let Some(ifqn) = self.resolve_if_phpstan(iface) {
-                let action = format!("implementing {ifqn}");
-                self.report_inheritance(&ifqn, &action, e.span, "phpstanApi.interface", true, ctx);
-            }
-        }
-        for used in &e.uses {
-            if let Some(ufqn) = self.resolve_if_phpstan(used)
-                && self.registry.classes.contains_key(ufqn.as_str())
-            {
-                let action = format!("using trait {ufqn}");
-                self.report_always(&ufqn, &action, e.span, "phpstanApi.trait", ctx);
-            }
-        }
-        let empty = ParamTypes::default();
-        for cst in &e.consts {
-            self.check_expr(&cst.value, ctx, &empty, &fqn);
-        }
-        for case in &e.enum_cases {
-            if let Some(v) = &case.value {
-                self.check_expr(v, ctx, &empty, &fqn);
-            }
-        }
-        self.current_class_implements_phpstan_interface =
-            class_implements_phpstan_interface(&fqn, self.registry);
-        self.current_class_fqn = Some(fqn.clone());
-        for m in &e.methods {
-            let method_label = format!("{fqn}::{}", m.function.name);
-            self.check_function(&m.function, ctx, &method_label);
-        }
         self.current_class_implements_phpstan_interface = false;
         self.current_class_fqn = None;
     }
@@ -1130,7 +1097,6 @@ impl<'a> Walker<'a> {
                 self.check_expr(value, ctx, param_types, label);
             }
             StmtKind::FunctionDecl(f) => self.check_function(f, ctx, &f.name),
-            StmtKind::ClassDecl(e) if e.kind == ClassKind::Enum => self.check_enum(e, ctx),
             StmtKind::ClassDecl(c) => self.check_class(c, ctx),
             StmtKind::GlobalConst(consts) => {
                 for c in consts {

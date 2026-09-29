@@ -463,7 +463,6 @@ impl<'a> Walker<'a> {
                     );
                     self.function(f, current_class, false, out);
                 }
-                StmtKind::ClassDecl(e) if e.kind == ClassKind::Enum => self.enum_decl(e, out),
                 StmtKind::ClassDecl(c) => self.class(c, out),
                 StmtKind::GlobalConst(consts) => {
                     for c in consts {
@@ -900,42 +899,7 @@ impl<'a> Walker<'a> {
             }
             self.expr(&cst.value, Some(&fqn), out);
         }
-    }
-
-    fn enum_decl(&mut self, e: &ClassDecl, out: &mut Vec<(Span, Resolved)>) {
-        let fqn = class_decl_fqn(e).to_string();
-        self.record(out, e.name_span, Resolved::Class(fqn.clone()));
-        for (name, span) in e.implements.iter().zip(e.implements_spans.iter()) {
-            if self.anchor.matches(*span)
-                && let Some(target) = resolve_class_ref(name, Some(&fqn), self.registry)
-            {
-                out.push((*span, Resolved::Class(target)));
-            }
-        }
-        for (name, span) in e.uses.iter().zip(e.uses_spans.iter()) {
-            if self.anchor.matches(*span)
-                && let Some(target) = resolve_class_ref(name, Some(&fqn), self.registry)
-            {
-                out.push((*span, Resolved::Class(target)));
-            }
-        }
-        for m in &e.methods {
-            self.record(
-                out,
-                m.function.name_span,
-                Resolved::Member(fqn.clone(), m.function.name.to_string()),
-            );
-            self.function(&m.function, Some(&fqn), m.is_static, out);
-        }
-        for cst in &e.consts {
-            self.record(
-                out,
-                cst.name_span,
-                Resolved::Member(fqn.clone(), cst.name.to_string()),
-            );
-            self.expr(&cst.value, Some(&fqn), out);
-        }
-        for case in &e.enum_cases {
+        for case in &c.enum_cases {
             self.record(
                 out,
                 case.name_span,

@@ -4942,14 +4942,6 @@ impl<'a> Checker<'a> {
     fn collect_member_ref_defaults_decl(&mut self, stmt: &Stmt) {
         match &stmt.kind {
             StmtKind::FunctionDecl(f) => self.collect_member_ref_defaults_function(f),
-            StmtKind::ClassDecl(e) if e.kind == ClassKind::Enum => {
-                for cst in &e.consts {
-                    self.infer_expr(&cst.value, &Locals::default());
-                }
-                for m in &e.methods {
-                    self.collect_member_ref_defaults_function(&m.function);
-                }
-            }
             StmtKind::ClassDecl(c) => {
                 for p in &c.properties {
                     if let Some(d) = &p.default {

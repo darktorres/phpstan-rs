@@ -19,21 +19,12 @@ use diagnostics::DiagnosticBuilder;
 use syntax::ast::*;
 
 impl<'a> Checker<'a> {
-    /// `DuplicateDeclarationHelper::checkClassLike`'s equivalent for a
-    /// `class`/`interface`/`trait`. Enums use `check_duplicate_enum_members`
-    /// instead - `ClassDecl` is its own AST node, not a `ClassDecl` with
-    /// `ClassKind::Enum` (see this project's own `ast.rs`).
+    /// `DuplicateDeclarationHelper::checkClassLike`'s equivalent.
     pub(crate) fn check_duplicate_class_members(&mut self, fqn: &str, c: &ClassDecl) {
         let kind = class_kind_identifier(&c.kind);
-        self.check_duplicate_consts(fqn, kind, &[], &c.consts);
+        self.check_duplicate_consts(fqn, kind, &c.enum_cases, &c.consts);
         self.check_duplicate_properties(fqn, kind, &c.properties, &c.methods);
         self.check_duplicate_methods(fqn, kind, &c.methods);
-    }
-
-    pub(crate) fn check_duplicate_enum_members(&mut self, fqn: &str, e: &ClassDecl) {
-        self.check_duplicate_consts(fqn, "enum", &e.enum_cases, &e.consts);
-        self.check_duplicate_properties(fqn, "enum", &[], &e.methods);
-        self.check_duplicate_methods(fqn, "enum", &e.methods);
     }
 
     /// A class constant and an enum case share one real namespace (both

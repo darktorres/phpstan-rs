@@ -18,7 +18,6 @@ pub(super) fn document_symbols(stmts: &[Stmt]) -> Vec<DocumentSymbol> {
         for stmt in stmts {
             match &stmt.kind {
                 StmtKind::FunctionDecl(f) => symbols.push(function_symbol(f, SymbolKind::FUNCTION)),
-                StmtKind::ClassDecl(e) if e.kind == ClassKind::Enum => symbols.push(enum_symbol(e)),
                 StmtKind::ClassDecl(c) => symbols.push(class_symbol(c)),
                 StmtKind::Namespace(_) | StmtKind::Use(_) => {}
                 // A conditional top-level declaration (`if (...) { class Foo {} }`)
@@ -93,6 +92,15 @@ pub(super) fn class_kind_symbol_kind(kind: ClassKind) -> SymbolKind {
 fn class_symbol(c: &ClassDecl) -> DocumentSymbol {
     let kind = class_kind_symbol_kind(c.kind);
     let mut children: Vec<DocumentSymbol> = c.consts.iter().map(const_symbol).collect();
+    children.extend(c.enum_cases.iter().map(|case| {
+        symbol(
+            case.name.to_string(),
+            SymbolKind::ENUM_MEMBER,
+            case.span,
+            case.name_span,
+            Vec::new(),
+        )
+    }));
     children.extend(c.properties.iter().map(|p| {
         symbol(
             p.name.to_string(),
@@ -108,27 +116,6 @@ fn class_symbol(c: &ClassDecl) -> DocumentSymbol {
         kind,
         c.span,
         c.name_span,
-        children,
-    )
-}
-
-fn enum_symbol(e: &ClassDecl) -> DocumentSymbol {
-    let mut children: Vec<DocumentSymbol> = e.consts.iter().map(const_symbol).collect();
-    children.extend(e.enum_cases.iter().map(|case| {
-        symbol(
-            case.name.to_string(),
-            SymbolKind::ENUM_MEMBER,
-            case.span,
-            case.name_span,
-            Vec::new(),
-        )
-    }));
-    children.extend(e.methods.iter().map(method_symbol));
-    symbol(
-        class_decl_name(e).to_string(),
-        SymbolKind::ENUM,
-        e.span,
-        e.name_span,
         children,
     )
 }

@@ -135,7 +135,34 @@ impl<'a> Checker<'a> {
                     c.span,
                 );
             }
-            ClassKind::Trait | ClassKind::Enum => {}
+            ClassKind::Enum => {
+                let implements: Vec<String> = c
+                    .implements
+                    .iter()
+                    .map(|n| self.resolve_class_ref(n))
+                    .collect();
+                let messages = enum_messages(fqn, AncestorTag::Extends);
+                self.check_ancestor_tags(
+                    fqn,
+                    &templates,
+                    doc,
+                    AncestorTag::Extends,
+                    &[],
+                    &messages,
+                    c.span,
+                );
+                let messages = enum_messages(fqn, AncestorTag::Implements);
+                self.check_ancestor_tags(
+                    fqn,
+                    &templates,
+                    doc,
+                    AncestorTag::Implements,
+                    &implements,
+                    &messages,
+                    c.span,
+                );
+            }
+            ClassKind::Trait => {}
         }
         self.check_used_traits(
             fqn,
@@ -144,45 +171,6 @@ impl<'a> Checker<'a> {
             &c.uses,
             &c.uses_doc_comments,
             c.span,
-        );
-    }
-
-    /// The ancestor checks of an enum declaration.
-    pub(crate) fn check_enum_ancestors(&mut self, fqn: &str, e: &ClassDecl) {
-        let doc = e.doc_comment.as_deref();
-        let templates = self.declared_templates(fqn, doc);
-        let implements: Vec<String> = e
-            .implements
-            .iter()
-            .map(|n| self.resolve_class_ref(n))
-            .collect();
-        let messages = enum_messages(fqn, AncestorTag::Extends);
-        self.check_ancestor_tags(
-            fqn,
-            &templates,
-            doc,
-            AncestorTag::Extends,
-            &[],
-            &messages,
-            e.span,
-        );
-        let messages = enum_messages(fqn, AncestorTag::Implements);
-        self.check_ancestor_tags(
-            fqn,
-            &templates,
-            doc,
-            AncestorTag::Implements,
-            &implements,
-            &messages,
-            e.span,
-        );
-        self.check_used_traits(
-            fqn,
-            &templates,
-            ClassKind::Enum,
-            &e.uses,
-            &e.uses_doc_comments,
-            e.span,
         );
     }
 

@@ -33,6 +33,15 @@ pub(crate) fn is_magic_method_name(lower: &str) -> bool {
     )
 }
 
+/// Whether `name` is a method PHP gives `e` natively when `e` is an enum:
+/// `cases()`, and a backed enum's `from()` and `tryFrom()`.
+pub(crate) fn is_native_enum_method(e: &ClassDecl, name: &str) -> bool {
+    e.kind == ClassKind::Enum
+        && (name.eq_ignore_ascii_case("cases")
+            || (e.backing_type.is_some()
+                && (name.eq_ignore_ascii_case("from") || name.eq_ignore_ascii_case("tryFrom"))))
+}
+
 impl<'a> Checker<'a> {
     /// `EnumCaseOutsideEnumRule`: a `case` in a class, interface, trait
     /// or anonymous class body - PHP parses it, then refuses to compile it.
@@ -113,8 +122,19 @@ impl<'a> Checker<'a> {
     /// declared backing type. `Serializable` is the one exception - PHP
     /// itself doesn't reject it at parse time, but real PHPStan still
     /// flags it as a design-level error (an enum has no identity to
-    /// serialize/unserialize into).
+    /// serialize/unserialize into). A property is a compile error too.
     pub(crate) fn check_enum_sanity(&mut self, fqn: &str, e: &ClassDecl) {
+        if let Some(property) = e.properties.first() {
+            self.report_builder(
+                DiagnosticBuilder::new(
+                    format!("Enum {fqn} cannot include properties."),
+                    property.span,
+                    0,
+                    "enum.property",
+                )
+                .non_ignorable(),
+            );
+        }
         for m in &e.methods {
             let lower = m.function.name.to_ascii_lowercase();
             if is_magic_method_name(&lower) {
@@ -150,9 +170,7 @@ impl<'a> Checker<'a> {
                     );
                 }
             }
-            let redeclares_native = lower == "cases"
-                || (e.backing_type.is_some() && matches!(lower.as_str(), "from" | "tryfrom"));
-            if redeclares_native {
+            if is_native_enum_method(e, &m.function.name) {
                 self.report_builder(
                     DiagnosticBuilder::new(
                         format!(

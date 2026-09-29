@@ -1,0 +1,1 @@
+11:5-14:6 method.childParameterType L0 | Suit::label() parameter #1 ($x) narrows the inherited parameter type: expects string, ancestor expects int

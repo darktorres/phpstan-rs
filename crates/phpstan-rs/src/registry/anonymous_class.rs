@@ -106,14 +106,10 @@ pub(crate) fn collect_anonymous_classes(
         let mut info = ClassReflection::from_decl(decl, &contexts[at]);
         info.is_anonymous = true;
         info.record_provenance(origin, &name, expr.span, &MemberSpans::of_class(decl));
-        // Not `Name::from()`: every anonymous class in the whole corpus gets
-        // its own unique md5-hashed name (file+line+index), so there is
-        // no repeated text here to deduplicate - only a permanent,
-        // never-evicted interner-table entry to avoid.
         decls.push(BuiltDecl::Class {
             name,
             conditional: false,
-            info,
+            info: Box::new(info),
         });
     }
     (decls, names)

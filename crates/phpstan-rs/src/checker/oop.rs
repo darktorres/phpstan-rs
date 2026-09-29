@@ -1011,24 +1011,6 @@ impl<'a> Checker<'a> {
         }
     }
 
-    /// `check_nested_class_declaration`'s enum counterpart.
-    pub(crate) fn check_nested_enum_declaration(&mut self, fqn: &str, e: &ClassDecl) {
-        if self.facts_only {
-            return;
-        }
-        self.check_method_declaration_sanity(fqn, ClassKind::Enum, false, &e.methods);
-        self.check_class_constant_modifiers(fqn, ClassKind::Enum, &e.consts);
-        let own = crate::registry::ClassReflection::from_enum_decl(e, &self.name_ctx);
-        let registry_matches = self.registry.classes.get(fqn).is_some_and(|info| {
-            *info.implements() == *own.implements() && *info.uses() == *own.uses()
-        });
-        if registry_matches {
-            self.check_inheritance_target_kinds(fqn, false, e.span);
-            self.check_constant_overrides(fqn, &e.consts);
-            self.check_trait_constant_conflicts(fqn, &e.consts);
-        }
-    }
-
     /// `OverridingConstantRule`: a class constant redeclaring one from an
     /// immediate interface (checked first) or a non-private parent
     /// constant - it can't override a `final` one (`classConstant.final`)

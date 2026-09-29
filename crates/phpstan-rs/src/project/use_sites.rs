@@ -226,7 +226,6 @@ impl<'a> ClassFnRefWalker<'a> {
                 StmtKind::FunctionDecl(f) => {
                     self.function(f, current_class, out);
                 }
-                StmtKind::ClassDecl(e) if e.kind == ClassKind::Enum => self.enum_decl(e, out),
                 StmtKind::ClassDecl(c) => self.class(c, out),
                 StmtKind::GlobalConst(consts) => {
                     for c in consts {
@@ -413,30 +412,8 @@ impl<'a> ClassFnRefWalker<'a> {
             }
             self.expr(&cst.value, Some(&fqn), out);
         }
-    }
-
-    fn enum_decl(&self, e: &ClassDecl, out: &mut Vec<(Span, RefTarget)>) {
-        let fqn = class_decl_fqn(e).to_string();
-        for (name, span) in e.implements.iter().zip(e.implements_spans.iter()) {
-            if let Some(target) = resolve_class_ref(name) {
-                out.push((*span, RefTarget::Class(target)));
-            }
-        }
-        for (name, span) in e.uses.iter().zip(e.uses_spans.iter()) {
-            if let Some(target) = resolve_class_ref(name) {
-                out.push((*span, RefTarget::Class(target)));
-            }
-        }
-        for m in &e.methods {
-            self.function(&m.function, Some(&fqn), out);
-        }
-        for cst in &e.consts {
-            self.expr(&cst.value, Some(&fqn), out);
-        }
-        for case in &e.enum_cases {
-            if let Some(v) = &case.value {
-                self.expr(v, Some(&fqn), out);
-            }
+        for v in c.enum_cases.iter().filter_map(|case| case.value.as_ref()) {
+            self.expr(v, Some(&fqn), out);
         }
     }
 }

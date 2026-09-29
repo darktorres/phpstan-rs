@@ -863,33 +863,6 @@ impl<'a> Checker<'a> {
             // exempt from every diagnostic, undefined-variable detection
             // included.
             StmtKind::FunctionDecl(f) => self.check_function(f, None, false, true),
-            StmtKind::ClassDecl(e) if e.kind == ClassKind::Enum => {
-                let fqn = class_decl_fqn(e).to_string();
-                self.check_nested_enum_declaration(&fqn, e);
-                self.check_attributes(&e.attrs, &fqn);
-                self.check_attribute_targets(&e.attrs, ATTRIBUTE_TARGET_CLASS, "class");
-                self.check_self_attribute_class_declaration(&e.attrs, &fqn, ClassKind::Enum, false);
-                self.check_class_like_marker_attributes(&e.attrs, ClassKind::Enum, false, &fqn);
-                for case in &e.enum_cases {
-                    self.check_attributes(&case.attrs, &fqn);
-                    self.check_attribute_targets(
-                        &case.attrs,
-                        ATTRIBUTE_TARGET_CLASS_CONSTANT,
-                        "class constant",
-                    );
-                }
-                for cc in &e.consts {
-                    self.check_attributes(&cc.attrs, &fqn);
-                    self.check_attribute_targets(
-                        &cc.attrs,
-                        ATTRIBUTE_TARGET_CLASS_CONSTANT,
-                        "class constant",
-                    );
-                }
-                for m in &e.methods {
-                    self.check_function(&m.function, Some(&fqn), m.is_static, !m.is_abstract);
-                }
-            }
             StmtKind::ClassDecl(c) => {
                 let fqn = class_decl_fqn(c).to_string();
                 self.check_nested_class_declaration(&fqn, c);
@@ -900,7 +873,17 @@ impl<'a> Checker<'a> {
                 self.check_attribute_targets(&c.attrs, ATTRIBUTE_TARGET_CLASS, "class");
                 self.check_self_attribute_class_declaration(&c.attrs, &fqn, c.kind, c.is_abstract);
                 self.check_class_like_marker_attributes(&c.attrs, c.kind, c.is_readonly, &fqn);
-                self.check_enum_cases_outside_enum(&c.enum_cases);
+                if c.kind != ClassKind::Enum {
+                    self.check_enum_cases_outside_enum(&c.enum_cases);
+                }
+                for case in &c.enum_cases {
+                    self.check_attributes(&case.attrs, &fqn);
+                    self.check_attribute_targets(
+                        &case.attrs,
+                        ATTRIBUTE_TARGET_CLASS_CONSTANT,
+                        "class constant",
+                    );
+                }
                 for p in &c.properties {
                     self.check_attributes(&p.attrs, &fqn);
                     self.check_attribute_targets(&p.attrs, ATTRIBUTE_TARGET_PROPERTY, "property");

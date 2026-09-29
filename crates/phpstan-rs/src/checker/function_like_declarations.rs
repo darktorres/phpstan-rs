@@ -92,12 +92,6 @@ impl<'a> Checker<'a> {
                 );
                 self.walk_promoted_in_body(&f.body, &f.name);
             }
-            StmtKind::ClassDecl(e) if e.kind == ClassKind::Enum => {
-                let fqn = class_decl_fqn(e).to_string();
-                let previous_class = self.current_class.replace(fqn.clone());
-                self.check_promoted_in_methods(&fqn, ClassKind::Enum, &e.methods);
-                self.current_class = previous_class;
-            }
             StmtKind::ClassDecl(c) => {
                 let fqn = class_decl_fqn(c).to_string();
                 let previous_class = self.current_class.replace(fqn.clone());
