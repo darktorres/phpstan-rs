@@ -315,7 +315,7 @@ Each fix needs a fixture.
 - [x] **S8. Nullsafe is named.** Done in `18708302`; a dynamic access carries it too (`e03f6ac9`). `PropertyAccess` and `MethodCall` carry
   the nullsafe flag as a bare positional `bool`; give it a name (a named
   field or an enum).
-- [ ] **S9. The `"?"` sentinel survives.**
+- [x] **S9. The `"?"` sentinel survives.** Already gone (F12).
   `target.as_name().unwrap_or("?")` in `registry/global_vars.rs`,
   `checker/phpstan_api.rs` and `checker/calls/misc_rules.rs`, and
   `resolve_static_class_name`'s `class_name == "?"` check. Take the
@@ -330,7 +330,7 @@ Each fix needs a fixture.
   `ctx.declared_name(class_decl_name(c))`. A statement declares a named
   class (`name` and `namespaced_name` not optional); an anonymous class is
   its own node with no name. (`9742818c`)
-- [ ] **S11. Stale syntax docs.**
+- [x] **S11. Stale syntax docs.** Done in `a7a86e6f` (`as_name` was already fixed).
   - `ClassDecl.name_span` still describes the `class@anonymous`
     placeholder;
   - `Literal::String` documents an `Arc<str>` it no longer holds;
