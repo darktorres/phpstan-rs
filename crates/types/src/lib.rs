@@ -19,6 +19,7 @@ mod decide;
 mod display;
 mod extension;
 mod hierarchy;
+mod intern;
 mod intersection;
 mod late;
 mod missing;
@@ -72,19 +73,19 @@ pub use union::generalize_by_key_set;
 #[derive(Clone)]
 pub struct Type(Arc<Node>);
 
-/// A type's representation, with its hash computed once: equal types
-/// hash alike (`Hash for Type`), so unequal ones mostly compare in one
-/// step.
+/// A type's representation, interned (`intern`), with its hashes computed
+/// once: equal types hash alike (`Hash for Type`), so unequal ones mostly
+/// compare in one step, and one exact form is one node.
 pub(crate) struct Node {
-    repr: Repr,
-    hash: u64,
+    pub(crate) repr: Repr,
+    pub(crate) hash: u64,
+    pub(crate) exact: u64,
 }
 
 impl Type {
     /// The type `repr` represents.
     pub(crate) fn new(repr: Repr) -> Type {
-        let hash = semantic_hash(&repr);
-        Type(Arc::new(Node { repr, hash }))
+        Type(intern::intern(repr, semantic_hash))
     }
 
     /// The representation.

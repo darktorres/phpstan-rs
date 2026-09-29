@@ -1,0 +1,460 @@
+//! Hash-consing: a type is built once per exact form, so two types of the
+//! same exact form are one node, and comparing them is comparing pointers.
+//!
+//! "Exact" is stricter than type equality (`PartialEq for Type`): it keeps
+//! what equality ignores - a union's member order, a class name's letter
+//! case, whether a `mixed` was written, a shape's next append index - so a
+//! shared node never changes how a type prints or behaves. Children are
+//! compared by pointer, being interned themselves.
+//!
+//! The table holds weak references: a type nothing uses any more is freed,
+//! and its entry is dropped the next time its bucket or shard is visited.
+
+use std::hash::{Hash, Hasher};
+use std::sync::{Arc, LazyLock, Mutex, OnceLock, Weak};
+
+use rustc_hash::{FxHashMap, FxHasher};
+
+use crate::{CallableSig, Node, Repr, Shape, TemplateParam, Type};
+
+const SHARDS: usize = 64;
+
+struct Shard {
+    entries: FxHashMap<u64, Vec<Weak<Node>>>,
+    // The entry count after the last sweep of dead entries; the next
+    // sweep waits until the shard has doubled.
+    swept_at: usize,
+}
+
+static TABLE: LazyLock<Vec<Mutex<Shard>>> = LazyLock::new(|| {
+    (0..SHARDS)
+        .map(|_| {
+            Mutex::new(Shard {
+                entries: FxHashMap::default(),
+                swept_at: 1024,
+            })
+        })
+        .collect()
+});
+
+/// The node for `repr`: the existing one of its exact form, or a new one.
+pub(crate) fn intern(repr: Repr, semantic_hash: fn(&Repr) -> u64) -> Arc<Node> {
+    if let Some(node) = constant(&repr, semantic_hash) {
+        return node;
+    }
+    insert(repr, semantic_hash)
+}
+
+/// The node of a type with nothing in it (`int`, `null`, `mixed`, ...),
+/// built once and kept, so the most common types skip the table.
+fn constant(repr: &Repr, semantic_hash: fn(&Repr) -> u64) -> Option<Arc<Node>> {
+    static CONSTANTS: OnceLock<Vec<Arc<Node>>> = OnceLock::new();
+    const FORMS: [fn() -> Repr; 15] = [
+        || Repr::Mixed(false, None),
+        || Repr::Mixed(true, None),
+        || Repr::Error,
+        || Repr::Never,
+        || Repr::Void,
+        || Repr::Null,
+        || Repr::Bool,
+        || Repr::True,
+        || Repr::False,
+        || Repr::Int,
+        || Repr::Float,
+        || Repr::String,
+        || Repr::ObjectWithoutClass,
+        || Repr::ParentRef,
+        || Repr::This,
+    ];
+    let index = match repr {
+        Repr::Mixed(false, None) => 0,
+        Repr::Mixed(true, None) => 1,
+        Repr::Error => 2,
+        Repr::Never => 3,
+        Repr::Void => 4,
+        Repr::Null => 5,
+        Repr::Bool => 6,
+        Repr::True => 7,
+        Repr::False => 8,
+        Repr::Int => 9,
+        Repr::Float => 10,
+        Repr::String => 11,
+        Repr::ObjectWithoutClass => 12,
+        Repr::ParentRef => 13,
+        Repr::This => 14,
+        _ => return None,
+    };
+    let constants = CONSTANTS.get_or_init(|| {
+        FORMS
+            .iter()
+            .map(|form| insert(form(), semantic_hash))
+            .collect()
+    });
+    Some(constants[index].clone())
+}
+
+fn insert(repr: Repr, semantic_hash: fn(&Repr) -> u64) -> Arc<Node> {
+    let exact = exact_hash(&repr);
+    let shard = &TABLE[(exact as usize) % SHARDS];
+    let mut shard = shard
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    if let Some(bucket) = shard.entries.get_mut(&exact) {
+        bucket.retain(|weak| weak.strong_count() > 0);
+        for weak in bucket.iter() {
+            if let Some(node) = weak.upgrade()
+                && exact_eq(&node.repr, &repr)
+            {
+                return node;
+            }
+        }
+    }
+    let hash = semantic_hash(&repr);
+    let node = Arc::new(Node { repr, hash, exact });
+    shard
+        .entries
+        .entry(exact)
+        .or_default()
+        .push(Arc::downgrade(&node));
+    if shard.entries.len() > 2 * shard.swept_at {
+        shard.entries.retain(|_, bucket| {
+            bucket.retain(|weak| weak.strong_count() > 0);
+            !bucket.is_empty()
+        });
+        shard.swept_at = shard.entries.len().max(1024);
+    }
+    node
+}
+
+fn same(a: &Type, b: &Type) -> bool {
+    Arc::ptr_eq(&a.0, &b.0)
+}
+
+fn same_all(a: &[Type], b: &[Type]) -> bool {
+    a.len() == b.len() && a.iter().zip(b).all(|(x, y)| same(x, y))
+}
+
+fn same_option(a: &Option<Type>, b: &Option<Type>) -> bool {
+    match (a, b) {
+        (None, None) => true,
+        (Some(a), Some(b)) => same(a, b),
+        _ => false,
+    }
+}
+
+fn same_shape(a: &Shape, b: &Shape) -> bool {
+    a.fields.len() == b.fields.len()
+        && a.fields
+            .iter()
+            .zip(&b.fields)
+            .all(|(x, y)| x.key == y.key && same(&x.ty, &y.ty) && x.optional == y.optional)
+        && match (&a.unsealed, &b.unsealed) {
+            (None, None) => true,
+            (Some(a), Some(b)) => same(&a.0, &b.0) && same(&a.1, &b.1),
+            _ => false,
+        }
+        && a.next_index == b.next_index
+}
+
+fn same_template(a: &TemplateParam, b: &TemplateParam) -> bool {
+    a.name == b.name
+        && same(&a.bound, &b.bound)
+        && a.variance == b.variance
+        && a.scope == b.scope
+        && match (&a.default, &b.default) {
+            (None, None) => true,
+            (Some(a), Some(b)) => same(a, b),
+            _ => false,
+        }
+}
+
+fn same_callable(a: &CallableSig, b: &CallableSig) -> bool {
+    a.params.len() == b.params.len()
+        && a.params.iter().zip(&b.params).all(|(x, y)| {
+            same(&x.ty, &y.ty)
+                && x.variadic == y.variadic
+                && x.optional == y.optional
+                && x.by_ref == y.by_ref
+        })
+        && same(&a.return_type, &b.return_type)
+        && a.templates.len() == b.templates.len()
+        && a.templates
+            .iter()
+            .zip(&b.templates)
+            .all(|(x, y)| same_template(x, y))
+}
+
+/// Whether `a` and `b` are the same exact form.
+fn exact_eq(a: &Repr, b: &Repr) -> bool {
+    match (a, b) {
+        (Repr::Mixed(aw, a), Repr::Mixed(bw, b)) => aw == bw && same_option(a, b),
+        (Repr::Error, Repr::Error)
+        | (Repr::Never, Repr::Never)
+        | (Repr::Void, Repr::Void)
+        | (Repr::Null, Repr::Null)
+        | (Repr::Bool, Repr::Bool)
+        | (Repr::True, Repr::True)
+        | (Repr::False, Repr::False)
+        | (Repr::Int, Repr::Int)
+        | (Repr::Float, Repr::Float)
+        | (Repr::String, Repr::String)
+        | (Repr::ObjectWithoutClass, Repr::ObjectWithoutClass)
+        | (Repr::ParentRef, Repr::ParentRef)
+        | (Repr::This, Repr::This) => true,
+        (Repr::IntLiteral(a), Repr::IntLiteral(b)) => a == b,
+        (Repr::StringLiteral(a), Repr::StringLiteral(b)) => a == b,
+        (Repr::Array(ak, av), Repr::Array(bk, bv))
+        | (Repr::OffsetAccess(ak, av), Repr::OffsetAccess(bk, bv)) => same(ak, bk) && same(av, bv),
+        (Repr::ClassString(a), Repr::ClassString(b))
+        | (Repr::ValueOf(a), Repr::ValueOf(b))
+        | (Repr::KeyOf(a), Repr::KeyOf(b)) => same(a, b),
+        (Repr::ClassKindString(a), Repr::ClassKindString(b)) => a == b,
+        (Repr::ArrayShape(a), Repr::ArrayShape(b))
+        | (Repr::ObjectShape(a), Repr::ObjectShape(b)) => Arc::ptr_eq(a, b) || same_shape(a, b),
+        (Repr::Object(an, aa), Repr::Object(bn, ba)) => an == bn && same_all(aa, ba),
+        (Repr::Resource { closed: a }, Repr::Resource { closed: b }) => a == b,
+        (Repr::EnumCase(ae, ac), Repr::EnumCase(be, bc)) => ae == be && ac == bc,
+        (Repr::Callable(a), Repr::Callable(b)) => match (a, b) {
+            (None, None) => true,
+            (Some(a), Some(b)) => Arc::ptr_eq(a, b) || same_callable(a, b),
+            _ => false,
+        },
+        (Repr::SelfRef(a), Repr::SelfRef(b)) | (Repr::StaticRef(a), Repr::StaticRef(b)) => {
+            same_all(a, b)
+        }
+        (Repr::TemplateParam(a), Repr::TemplateParam(b)) => same_template(a, b),
+        (Repr::VarianceArg(av, a), Repr::VarianceArg(bv, b)) => av == bv && same(a, b),
+        (Repr::Union(a), Repr::Union(b))
+        | (Repr::BenevolentUnion(a), Repr::BenevolentUnion(b))
+        | (Repr::Intersection(a), Repr::Intersection(b)) => same_all(a, b),
+        (Repr::IntRange(amin, amax), Repr::IntRange(bmin, bmax)) => amin == bmin && amax == bmax,
+        (Repr::FloatLiteral(a), Repr::FloatLiteral(b)) => a.to_bits() == b.to_bits(),
+        (Repr::Accessory(a), Repr::Accessory(b)) => a == b,
+        (Repr::HasOffsetValue(ak, av), Repr::HasOffsetValue(bk, bv)) => ak == bk && same(av, bv),
+        (Repr::HasOffset(a), Repr::HasOffset(b)) => a == b,
+        (Repr::HasMethod(a), Repr::HasMethod(b)) | (Repr::HasProperty(a), Repr::HasProperty(b)) => {
+            a == b
+        }
+        (Repr::ReflectedMember(ao, an), Repr::ReflectedMember(bo, bn)) => same(ao, bo) && an == bn,
+        (
+            Repr::ClassConstant {
+                class: ac,
+                pattern: ap,
+            },
+            Repr::ClassConstant {
+                class: bc,
+                pattern: bp,
+            },
+        ) => same(ac, bc) && ap == bp,
+        (Repr::Extension(a), Repr::Extension(b)) => Arc::ptr_eq(a, b) || a.eq_data(&**b),
+        (
+            Repr::Conditional {
+                subject: a_subject,
+                target: a_target,
+                if_true: a_if_true,
+                if_false: a_if_false,
+                negated: a_negated,
+            },
+            Repr::Conditional {
+                subject: b_subject,
+                target: b_target,
+                if_true: b_if_true,
+                if_false: b_if_false,
+                negated: b_negated,
+            },
+        ) => {
+            a_subject == b_subject
+                && same(a_target, b_target)
+                && same(a_if_true, b_if_true)
+                && same(a_if_false, b_if_false)
+                && a_negated == b_negated
+        }
+        _ => false,
+    }
+}
+
+fn hash_type(ty: &Type, state: &mut FxHasher) {
+    state.write_u64(ty.0.exact);
+}
+
+fn hash_template(tp: &TemplateParam, state: &mut FxHasher) {
+    tp.name.hash(state);
+    hash_type(&tp.bound, state);
+    tp.variance.hash(state);
+    tp.scope.hash(state);
+    if let Some(default) = &tp.default {
+        hash_type(default, state);
+    }
+}
+
+/// The hash of `repr`'s exact form, from its children's.
+fn exact_hash(repr: &Repr) -> u64 {
+    let mut hasher = FxHasher::default();
+    let state = &mut hasher;
+    std::mem::discriminant(repr).hash(state);
+    match repr {
+        Repr::Mixed(written, subtracted) => {
+            written.hash(state);
+            if let Some(subtracted) = subtracted {
+                hash_type(subtracted, state);
+            }
+        }
+        Repr::Error
+        | Repr::Never
+        | Repr::Void
+        | Repr::Null
+        | Repr::Bool
+        | Repr::True
+        | Repr::False
+        | Repr::Int
+        | Repr::Float
+        | Repr::String
+        | Repr::ObjectWithoutClass
+        | Repr::ParentRef
+        | Repr::This => {}
+        Repr::IntLiteral(n) => n.hash(state),
+        Repr::StringLiteral(s) => s.hash(state),
+        Repr::Array(a, b) | Repr::OffsetAccess(a, b) => {
+            hash_type(a, state);
+            hash_type(b, state);
+        }
+        Repr::ClassString(inner) | Repr::ValueOf(inner) | Repr::KeyOf(inner) => {
+            hash_type(inner, state)
+        }
+        Repr::ClassKindString(kind) => kind.hash(state),
+        Repr::ArrayShape(shape) | Repr::ObjectShape(shape) => {
+            for field in &shape.fields {
+                field.key.hash(state);
+                hash_type(&field.ty, state);
+                field.optional.hash(state);
+            }
+            if let Some(tail) = &shape.unsealed {
+                hash_type(&tail.0, state);
+                hash_type(&tail.1, state);
+            }
+        }
+        Repr::Object(name, args) => {
+            name.hash(state);
+            for arg in args {
+                hash_type(arg, state);
+            }
+        }
+        Repr::Resource { closed } => closed.hash(state),
+        Repr::EnumCase(class, case) => {
+            class.hash(state);
+            case.hash(state);
+        }
+        Repr::Callable(sig) => {
+            if let Some(sig) = sig {
+                for param in &sig.params {
+                    hash_type(&param.ty, state);
+                    (param.variadic, param.optional, param.by_ref).hash(state);
+                }
+                hash_type(&sig.return_type, state);
+                for tp in &sig.templates {
+                    hash_template(tp, state);
+                }
+            }
+        }
+        Repr::SelfRef(args)
+        | Repr::StaticRef(args)
+        | Repr::Union(args)
+        | Repr::BenevolentUnion(args)
+        | Repr::Intersection(args) => {
+            for arg in args {
+                hash_type(arg, state);
+            }
+        }
+        Repr::TemplateParam(tp) => hash_template(tp, state),
+        Repr::VarianceArg(variance, inner) => {
+            variance.hash(state);
+            hash_type(inner, state);
+        }
+        Repr::IntRange(min, max) => {
+            min.hash(state);
+            max.hash(state);
+        }
+        Repr::FloatLiteral(f) => f.to_bits().hash(state),
+        Repr::Accessory(kind) => kind.hash(state),
+        Repr::HasOffsetValue(key, value) => {
+            key.hash(state);
+            hash_type(value, state);
+        }
+        Repr::HasOffset(key) => key.hash(state),
+        Repr::HasMethod(name) | Repr::HasProperty(name) => name.hash(state),
+        Repr::ReflectedMember(owner, member) => {
+            hash_type(owner, state);
+            member.hash(state);
+        }
+        Repr::ClassConstant { class, pattern } => {
+            hash_type(class, state);
+            pattern.hash(state);
+        }
+        Repr::Extension(data) => {
+            let state: &mut dyn Hasher = state;
+            data.hash_data(state);
+        }
+        Repr::Conditional {
+            subject,
+            target,
+            if_true,
+            if_false,
+            negated,
+        } => {
+            subject.hash(state);
+            hash_type(target, state);
+            hash_type(if_true, state);
+            hash_type(if_false, state);
+            negated.hash(state);
+        }
+    }
+    hasher.finish()
+}
+
+/// Which operation a memoized result is of.
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+pub(crate) enum Operation {
+    Union,
+    Without,
+    Intersect,
+}
+
+// A memo entry keeps its arguments alive, so their nodes (and addresses)
+// stay the ones its key names.
+type MemoEntry = (Vec<Type>, Type);
+
+const MEMO_CAPACITY: usize = 1 << 16;
+
+thread_local! {
+    static MEMO: std::cell::RefCell<FxHashMap<(Operation, Vec<usize>), MemoEntry>> =
+        std::cell::RefCell::new(FxHashMap::default());
+}
+
+/// `compute`'s result for `operation` over `arguments`, computed once per
+/// argument tuple on each thread: the arguments are interned, so the same
+/// tuple is the same nodes. Only for an operation that asks nothing but
+/// the types (no class hierarchy), whose result `compute` alone decides.
+pub(crate) fn memoized(
+    operation: Operation,
+    arguments: &[&Type],
+    compute: impl FnOnce() -> Type,
+) -> Type {
+    let key: Vec<usize> = arguments
+        .iter()
+        .map(|ty| Arc::as_ptr(&ty.0) as usize)
+        .collect();
+    let key = (operation, key);
+    if let Some(result) = MEMO.with(|memo| memo.borrow().get(&key).map(|(_, r)| r.clone())) {
+        return result;
+    }
+    let result = compute();
+    MEMO.with(|memo| {
+        let mut memo = memo.borrow_mut();
+        if memo.len() >= MEMO_CAPACITY {
+            memo.clear();
+        }
+        let kept = arguments.iter().map(|ty| (*ty).clone()).collect();
+        memo.insert(key, (kept, result.clone()));
+    });
+    result
+}
