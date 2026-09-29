@@ -1,0 +1,1 @@
+8:1-8:9 function.resultUnused L4 | Call to function App\\twice() on a separate line has no effect.

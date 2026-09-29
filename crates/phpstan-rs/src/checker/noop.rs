@@ -243,14 +243,18 @@ impl<'a> Checker<'a> {
                 let ExprKind::Name(name) = &callee.kind else {
                     return;
                 };
-                let Some(sig) = self.registry.lookup_function(name) else {
+                let Some((resolved, sig)) = self.registry.resolve_function(name) else {
                     return;
                 };
                 if !sig.is_transitively_pure() {
                     return;
                 }
+                let declared = self
+                    .registry
+                    .lookup_function_with_name(resolved)
+                    .map_or(resolved, |(declared, _)| declared);
                 (
-                    format!("Call to function {name}() on a separate line has no effect."),
+                    format!("Call to function {declared}() on a separate line has no effect."),
                     "function.resultUnused",
                 )
             }
