@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use crate::{
     AccessoryKind, CallSiteVariance, CallableSig, ConditionalSubject, Relation, Repr, Shape,
-    TrinaryLogic, Type,
+    ShapeField, TrinaryLogic, Type,
 };
 
 impl Type {
@@ -318,9 +318,40 @@ impl Type {
 
     /// The loop widening of this type as it grows into `next`: an int
     /// keeps a bound that stayed put and opens the one that moved
-    /// (`0` then `0|1` is `int<0, max>`); anything else is `next`
-    /// generalized.
+    /// (`0` then `0|1` is `int<0, max>`); an array shape keeping its keys
+    /// widens field by field, so a counter inside it doesn't cost its
+    /// siblings their types; anything else is `next` generalized.
     pub fn widen_towards(&self, next: &Type) -> Type {
+        if let (Repr::ArrayShape(before), Repr::ArrayShape(after)) = (self.repr(), next.repr())
+            && before.fields.len() == after.fields.len()
+            && before.is_sealed() == after.is_sealed()
+            && after.fields.iter().all(|f| before.field(&f.key).is_some())
+        {
+            let widen = |old: &Type, new: &Type| {
+                if old == new {
+                    new.clone()
+                } else {
+                    old.widen_towards(new)
+                }
+            };
+            let fields = after
+                .fields
+                .iter()
+                .map(|f| {
+                    let old = before.field(&f.key).map_or(&f.ty, |old| &old.ty);
+                    ShapeField::new(f.key.clone(), widen(old, &f.ty), f.optional)
+                })
+                .collect();
+            let unsealed = after.unsealed.as_ref().map(|tail| {
+                let old = before.unsealed.as_ref().map_or(&tail.1, |old| &old.1);
+                Box::new((tail.0.clone(), widen(old, &tail.1)))
+            });
+            return Type::array_shape(Shape {
+                fields,
+                unsealed,
+                next_index: after.next_index,
+            });
+        }
         /// The smallest range holding every member, when all are ints.
         fn hull(ty: &Type) -> Option<(Option<i64>, Option<i64>)> {
             ty.union_members()
