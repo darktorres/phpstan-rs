@@ -154,7 +154,16 @@ Each fix needs a fixture.
   literals to their base type (and ranges to `int`) before giving up; `mixed`
   only when that still exceeds the cap.
 
-- [ ] **P2. Nested expressions are inferred again at every level.** Deep
+- [ ] **P2. Nested expressions are inferred again at every level.**
+  Three bullets done: the inference cache (`2750baf2`, scoped to one
+  outermost expression check rather than a function body, since the
+  checker's own state moves on between statements), shared nested types
+  (`07648b5e`, with the guarded clone in `d71abba1`), and the constant
+  factors (`8c36d84f`, `f51447bd`). Measured after them (debug build):
+  1,600 nested calls under 1 s past startup (was 236 s), 20,000 nested
+  arrays 12 s (was 57 min, 19 GB), a 20,000-term `.`/`+` chain 4 s (was
+  186 s); no profile shows union or intersection algebra. Interning stays
+  open. Deep
   input is slow far beyond its size (debug build, probed): 3,000 nested
   array literals take about 7 minutes, and nested calls `g(g(…))` take
   7 s at 800 levels but 183 s at 1,600. The profile is
