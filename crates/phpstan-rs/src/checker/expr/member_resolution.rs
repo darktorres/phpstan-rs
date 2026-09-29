@@ -348,7 +348,7 @@ impl<'a> Checker<'a> {
                     .lookup_property_with_owner(class, prop)
                     .map(|(owner, p)| {
                         let bindings = self.class_template_bindings(class, type_args, &owner);
-                        let resolved = p.ty().substitute_templates(&bindings);
+                        let resolved = p.ty().substitute_templates(&bindings, &self.relation());
                         self.resolve_pseudo_at(&resolved, &owner, class)
                     })
                     .unwrap_or_else(|| {

@@ -84,7 +84,8 @@ impl<'a> Checker<'a> {
                     if !bindings.contains_key(name.as_ref())
                         && let Some(default) = info.template_defaults().get(name)
                     {
-                        let default = default.substitute_templates_of(&bindings, owner);
+                        let default =
+                            default.substitute_templates_of(&bindings, owner, &self.relation());
                         bindings.insert(name.to_string(), default);
                     }
                 }
@@ -147,7 +148,7 @@ impl<'a> Checker<'a> {
             scoped_bindings
                 .iter()
                 .fold(ty.clone(), |acc, (scope, bindings)| {
-                    acc.substitute_templates_of(bindings, scope)
+                    acc.substitute_templates_of(bindings, scope, &self.relation())
                 })
         };
         std::borrow::Cow::Owned(sig.map_types(subst))
@@ -180,7 +181,7 @@ impl<'a> Checker<'a> {
             return ty.clone();
         }
         let bindings = self.class_template_bindings(class, type_args, owner);
-        ty.substitute_templates_of(&bindings, owner)
+        ty.substitute_templates_of(&bindings, owner, &self.relation())
     }
 }
 

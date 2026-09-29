@@ -368,7 +368,7 @@ impl Relation<'_> {
         is_sub: &dyn Fn(&Type, &Type) -> bool,
         mixed_as_any: bool,
     ) -> bool {
-        let b = b.own_templates_as_bounds();
+        let b = b.own_templates_as_bounds(self);
         let a = a.instantiated_against(&b, self);
         let fits = |sub: &Type, sup: &Type| {
             (mixed_as_any

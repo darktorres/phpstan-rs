@@ -269,6 +269,7 @@ impl CallableSig {
             &bindings,
             &outside_callable,
             &|_| true,
+            relation,
         )
     }
 }
@@ -276,12 +277,12 @@ impl CallableSig {
 impl CallableSig {
     /// This signature with its own templates replaced by their bounds:
     /// what it must work for whatever they are bound to.
-    pub(crate) fn own_templates_as_bounds(&self) -> CallableSig {
+    pub(crate) fn own_templates_as_bounds(&self, relation: &Relation) -> CallableSig {
         if self.templates.is_empty() {
             return self.clone();
         }
         let own = |tp: &TemplateParam| tp.scope.as_deref() == Some(crate::CALLABLE_TEMPLATE_SCOPE);
-        self.map_types(&mut |ty| substitute(ty, &FxHashMap::default(), &own, &|_| true))
+        self.map_types(&mut |ty| substitute(ty, &FxHashMap::default(), &own, &|_| true, relation))
     }
 
     /// This signature with its own templates bound as far as `other`'s
@@ -318,7 +319,7 @@ impl CallableSig {
         relation.infer_template_bindings(&opened.return_type, &other.return_type, &mut bindings);
         let is_open = |tp: &TemplateParam| tp.scope.as_deref() == Some(OPEN);
         let mut instance =
-            opened.map_types(&mut |ty| substitute(ty, &bindings, &is_open, &|_| true));
+            opened.map_types(&mut |ty| substitute(ty, &bindings, &is_open, &|_| true, relation));
         instance.templates.clear();
         instance
     }
@@ -356,20 +357,33 @@ impl Type {
 }
 
 impl Type {
-    pub fn substitute_templates(&self, bindings: &FxHashMap<String, Type>) -> Type {
-        substitute(self, bindings, &outside_callable, &|_| false)
+    /// This type with each template `bindings` binds replaced, an unbound
+    /// one by its default or `mixed`; a conditional over a template
+    /// resolves by `relation`.
+    pub fn substitute_templates(
+        &self,
+        bindings: &FxHashMap<String, Type>,
+        relation: &Relation,
+    ) -> Type {
+        substitute(self, bindings, &outside_callable, &|_| false, relation)
     }
 }
 
 impl Type {
     /// `Type::substitute_templates` for the templates `scope` declares only: every
     /// other template stays as it is.
-    pub fn substitute_templates_of(&self, bindings: &FxHashMap<String, Type>, scope: &str) -> Type {
+    pub fn substitute_templates_of(
+        &self,
+        bindings: &FxHashMap<String, Type>,
+        scope: &str,
+        relation: &Relation,
+    ) -> Type {
         substitute(
             self,
             bindings,
             &|tp| tp.scope.as_deref() == Some(scope),
             &|_| false,
+            relation,
         )
     }
 }
@@ -393,8 +407,9 @@ impl Type {
         &self,
         bindings: &FxHashMap<String, Type>,
         to_bound: &dyn Fn(&TemplateParam) -> bool,
+        relation: &Relation,
     ) -> Type {
-        substitute(self, bindings, &outside_callable, to_bound)
+        substitute(self, bindings, &outside_callable, to_bound, relation)
     }
 }
 
@@ -406,6 +421,7 @@ fn substitute(
     bindings: &FxHashMap<String, Type>,
     substituted: &dyn Fn(&TemplateParam) -> bool,
     to_bound: &dyn Fn(&TemplateParam) -> bool,
+    relation: &Relation,
 ) -> Type {
     syntax::stack::guard(|| {
         match ty {
@@ -422,7 +438,7 @@ fn substitute(
                 // other, can't recurse forever.
                 let mut guarded = bindings.clone();
                 guarded.insert(tp.name.clone(), Type::mixed());
-                substitute(fallback, &guarded, substituted, to_bound)
+                substitute(fallback, &guarded, substituted, to_bound, relation)
             }),
             // A template-subject conditional (`(T is int ? A : B)`) resolves
             // once `T` is bound, the way real PHPStan's `ConditionalType`
@@ -438,14 +454,18 @@ fn substitute(
                 .get(subject)
                 .is_some_and(|b| !matches!(b, Type(Repr::Mixed(_)))) =>
             {
-                let target = substitute(target, bindings, substituted, to_bound);
-                match super::conditional::conditional_branch(&bindings[subject], &target, *negated)
-                {
-                    Some(true) => substitute(if_true, bindings, substituted, to_bound),
-                    Some(false) => substitute(if_false, bindings, substituted, to_bound),
+                let target = substitute(target, bindings, substituted, to_bound, relation);
+                match super::conditional::conditional_branch(
+                    relation,
+                    &bindings[subject],
+                    &target,
+                    *negated,
+                ) {
+                    Some(true) => substitute(if_true, bindings, substituted, to_bound, relation),
+                    Some(false) => substitute(if_false, bindings, substituted, to_bound, relation),
                     None => Type::union(
-                        substitute(if_true, bindings, substituted, to_bound),
-                        substitute(if_false, bindings, substituted, to_bound),
+                        substitute(if_true, bindings, substituted, to_bound, relation),
+                        substitute(if_false, bindings, substituted, to_bound, relation),
                     ),
                 }
             }
@@ -454,9 +474,11 @@ fn substitute(
             // conditional return type's branches (`subject` is a raw
             // parameter name, not a `Type`, so there's nothing to substitute
             // there).
-            _ => super::late::settle(
-                ty.map_children(&mut |t| substitute(t, bindings, substituted, to_bound)),
-            ),
+            _ => {
+                super::late::settle(ty.map_children(&mut |t| {
+                    substitute(t, bindings, substituted, to_bound, relation)
+                }))
+            }
         }
     })
 }

@@ -134,7 +134,7 @@ impl<'a> Checker<'a> {
                 .unwrap_or_default();
             let concrete_args: Vec<Type> = raw_args
                 .iter()
-                .map(|t| t.substitute_templates(own_bindings))
+                .map(|t| t.substitute_templates(own_bindings, &self.relation()))
                 .collect();
             self.visit_ancestor(iface, &concrete_args, found, diagnostics, &visited);
         }
@@ -162,7 +162,7 @@ impl<'a> Checker<'a> {
             let concrete_args: Vec<Type> = info
                 .extends_args()
                 .iter()
-                .map(|t| t.substitute_templates(own_bindings))
+                .map(|t| t.substitute_templates(own_bindings, &self.relation()))
                 .collect();
             self.visit_ancestor(parent, &concrete_args, found, diagnostics, &visited);
         }

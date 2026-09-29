@@ -94,7 +94,7 @@ impl<'a> Checker<'a> {
                         let Some(bound) = info.template_bounds().get(name) else {
                             continue;
                         };
-                        let bound = bound.substitute_templates(&bindings);
+                        let bound = bound.substitute_templates(&bindings, &self.relation());
                         let Some(checked_arg) = arg.without_call_site_variance() else {
                             continue;
                         };

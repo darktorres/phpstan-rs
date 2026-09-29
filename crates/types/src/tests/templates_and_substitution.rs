@@ -18,7 +18,7 @@ fn substitute_template_recurses_into_array_and_intersection_types() {
         ))),
     );
     assert_eq!(
-        array_of_t.substitute_templates(&bindings),
+        array_of_t.substitute_templates(&bindings, &crate::Relation::structural()),
         Type::array(Type::unknown_array_key(), Type(Repr::String))
     );
 
@@ -27,7 +27,7 @@ fn substitute_template_recurses_into_array_and_intersection_types() {
         Type::object("Countable".into(), Vec::new()),
     ]));
     assert_eq!(
-        intersection_with_t.substitute_templates(&bindings),
+        intersection_with_t.substitute_templates(&bindings, &crate::Relation::structural()),
         Type(Repr::Intersection(vec![
             Type::string(),
             Type::object("Countable".into(), Vec::new())
@@ -50,7 +50,7 @@ fn substitute_template_recurses_into_a_generic_class_reference() {
         )))],
     );
     assert_eq!(
-        box_of_t.substitute_templates(&bindings),
+        box_of_t.substitute_templates(&bindings, &crate::Relation::structural()),
         Type::object("Box".into(), vec![Type(Repr::Int)])
     );
 }
@@ -74,7 +74,7 @@ fn substitute_template_recurses_into_a_conditional_types_branches() {
         template_subject: false,
     });
     assert_eq!(
-        conditional.substitute_templates(&bindings),
+        conditional.substitute_templates(&bindings, &crate::Relation::structural()),
         Type(Repr::Conditional {
             subject: "x".to_string(),
             target: Box::new(Type::int()),

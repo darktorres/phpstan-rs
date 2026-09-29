@@ -1,15 +1,21 @@
 use rustc_hash::FxHashMap;
 
-use crate::{Repr, Type};
+use crate::{Relation, Repr, Type};
 
 /// Which branch a conditional takes for a subject of type `bound`:
 /// `Some(true)` the `if_true` one, `Some(false)` the other, `None` both.
 /// Real PHPStan's `ConditionalType`/`ConditionalTypeForParameter` are
 /// trinary: `target->isSuperTypeOf(subject)` yes picks one branch, no
 /// the other, and maybe (a possibly-empty `array<T>` checked against
-/// `non-empty-array<T>`) keeps both.
-pub(crate) fn conditional_branch(bound: &Type, target: &Type, negated: bool) -> Option<bool> {
-    let matches = match crate::Relation::structural().is_super_type_of(target, bound) {
+/// `non-empty-array<T>`) keeps both. `relation` knows the classes, so
+/// `$x is Foo` picks a branch for a subclass or an unrelated final class.
+pub(crate) fn conditional_branch(
+    relation: &Relation,
+    bound: &Type,
+    target: &Type,
+    negated: bool,
+) -> Option<bool> {
+    let matches = match relation.is_super_type_of(target, bound) {
         crate::TrinaryLogic::Yes => Some(true),
         crate::TrinaryLogic::No => Some(false),
         crate::TrinaryLogic::Maybe => None,
@@ -40,7 +46,11 @@ impl Type {
     /// conditional shape). A real bound resolves trinarily: a subtype of
     /// `target` picks one branch, a provably disjoint one the other, and
     /// anything else keeps both (see the arm's own comment).
-    pub fn resolve_conditional(&self, param_bindings: &FxHashMap<String, Type>) -> Type {
+    pub fn resolve_conditional(
+        &self,
+        param_bindings: &FxHashMap<String, Type>,
+        relation: &Relation,
+    ) -> Type {
         syntax::stack::guard(|| match self {
             Type(Repr::Conditional {
                 subject,
@@ -51,21 +61,21 @@ impl Type {
                 template_subject,
             }) => match param_bindings.get(subject).filter(|_| !*template_subject) {
                 Some(bound) if *bound != Type::mixed() => {
-                    match conditional_branch(bound, target, *negated) {
-                        Some(true) => if_true.resolve_conditional(param_bindings),
-                        Some(false) => if_false.resolve_conditional(param_bindings),
+                    match conditional_branch(relation, bound, target, *negated) {
+                        Some(true) => if_true.resolve_conditional(param_bindings, relation),
+                        Some(false) => if_false.resolve_conditional(param_bindings, relation),
                         None => Type::union(
-                            if_true.resolve_conditional(param_bindings),
-                            if_false.resolve_conditional(param_bindings),
+                            if_true.resolve_conditional(param_bindings, relation),
+                            if_false.resolve_conditional(param_bindings, relation),
                         ),
                     }
                 }
                 _ => Type::union(
-                    if_true.resolve_conditional(param_bindings),
-                    if_false.resolve_conditional(param_bindings),
+                    if_true.resolve_conditional(param_bindings, relation),
+                    if_false.resolve_conditional(param_bindings, relation),
                 ),
             },
-            _ => self.map_children(&mut |t| t.resolve_conditional(param_bindings)),
+            _ => self.map_children(&mut |t| t.resolve_conditional(param_bindings, relation)),
         })
     }
 }

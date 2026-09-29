@@ -105,7 +105,7 @@ impl Registry {
                 let parent_args: Vec<Type> = info
                     .extends_args
                     .iter()
-                    .map(|t| t.substitute_templates(&own_bindings))
+                    .map(|t| t.substitute_templates(&own_bindings, &self.relation()))
                     .collect();
                 if let Some(found) = self.class_template_bindings_rec(
                     parent,
@@ -122,7 +122,7 @@ impl Registry {
                     .get(iface)
                     .map(|args| {
                         args.iter()
-                            .map(|t| t.substitute_templates(&own_bindings))
+                            .map(|t| t.substitute_templates(&own_bindings, &self.relation()))
                             .collect()
                     })
                     .unwrap_or_default();

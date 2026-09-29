@@ -309,7 +309,9 @@ impl<'a> Checker<'a> {
             if param.out_ty().is_some() {
                 continue;
             }
-            let substituted = param.ty().substitute_templates(&FxHashMap::default());
+            let substituted = param
+                .ty()
+                .substitute_templates(&FxHashMap::default(), &self.relation());
             // `Type::is_array` also trusts a `list<T>`/
             // `non-empty-array<T>`-declared by-ref parameter (an
             // `Intersection`), rather than falling into the "anything
@@ -357,7 +359,7 @@ impl<'a> Checker<'a> {
             else {
                 continue;
             };
-            let out_ty = out_ty.substitute_templates(&FxHashMap::default());
+            let out_ty = out_ty.substitute_templates(&FxHashMap::default(), &self.relation());
             locals.clear_native(name);
             purge_stale_narrowing_for(locals, name);
             locals.insert(name.to_string(), out_ty);

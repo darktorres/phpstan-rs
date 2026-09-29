@@ -4949,7 +4949,9 @@ impl<'a> Checker<'a> {
                             &mut bindings,
                         );
                     }
-                    let substituted = s.return_type().substitute_templates(&bindings);
+                    let substituted = s
+                        .return_type()
+                        .substitute_templates(&bindings, &self.relation());
                     match &class {
                         Some(class) => self.resolve_pseudo(&substituted, class),
                         None => substituted,

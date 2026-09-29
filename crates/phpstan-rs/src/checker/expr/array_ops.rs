@@ -486,14 +486,17 @@ impl<'a> Checker<'a> {
         // not to a class) that no argument inferred resolve to their
         // bounds; a class template left unbound here belongs to an
         // erased receiver and stays `Mixed`.
-        let substituted =
-            sig.return_type()
-                .substitute_templates_resolving_to_bounds(&bindings, &|tp| {
-                    tp.scope
-                        .as_deref()
-                        .is_some_and(|scope| !self.registry.classes.contains_key(scope))
-                });
-        substituted.resolve_conditional(&param_bindings)
+        let relation = self.relation();
+        let substituted = sig.return_type().substitute_templates_resolving_to_bounds(
+            &bindings,
+            &|tp| {
+                tp.scope
+                    .as_deref()
+                    .is_some_and(|scope| !self.registry.classes.contains_key(scope))
+            },
+            &relation,
+        );
+        substituted.resolve_conditional(&param_bindings, &relation)
     }
 
     /// `Suit::from(1)`/`Suit::tryFrom(1)` called with a literal
