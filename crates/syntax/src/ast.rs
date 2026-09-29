@@ -287,6 +287,19 @@ pub struct FunctionDecl {
     pub span: Span,
 }
 
+impl FunctionDecl {
+    /// Whether this is a `__construct` method (PHP names are
+    /// case-insensitive).
+    pub fn is_constructor(&self) -> bool {
+        is_constructor_name(&self.name)
+    }
+}
+
+/// Whether a method name is `__construct`, compared as PHP does.
+pub fn is_constructor_name(name: &str) -> bool {
+    name.eq_ignore_ascii_case("__construct")
+}
+
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Visibility {
     Public,
@@ -539,6 +552,13 @@ pub struct ClassDecl {
     // the class itself usable as an attribute).
     pub attrs: Vec<Attribute>,
     pub span: Span,
+}
+
+impl ClassDecl {
+    /// Its `__construct` method, matched case-insensitively.
+    pub fn constructor(&self) -> Option<&MethodDecl> {
+        self.methods.iter().find(|m| m.function.is_constructor())
+    }
 }
 
 #[derive(Debug, Clone)]

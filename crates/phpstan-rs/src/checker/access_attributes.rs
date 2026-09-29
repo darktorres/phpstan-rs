@@ -75,7 +75,7 @@ impl<'a> Checker<'a> {
         if self.calling_class_is(owner) {
             return;
         }
-        let target = if method.eq_ignore_ascii_case("__construct") {
+        let target = if syntax::ast::is_constructor_name(method) {
             format!("{owner}::__construct()")
         } else {
             format!("{owner}::{method}()")
@@ -193,7 +193,7 @@ impl<'a> Checker<'a> {
             }
         }
         for m in &c.methods {
-            let checked = m.function.name.eq_ignore_ascii_case("__construct")
+            let checked = m.function.is_constructor()
                 || info
                     .method_access()
                     .get(m.function.name.to_ascii_lowercase().as_str())

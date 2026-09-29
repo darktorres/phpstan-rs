@@ -91,10 +91,7 @@ impl<'a> Checker<'a> {
                 doc_comment: p.doc_comment.as_deref(),
             })
             .collect();
-        if let Some(ctor) = methods
-            .iter()
-            .find(|m| m.function.name.eq_ignore_ascii_case("__construct"))
-        {
+        if let Some(ctor) = methods.iter().find(|m| m.function.is_constructor()) {
             views.extend(
                 ctor.function
                     .params

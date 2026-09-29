@@ -1062,11 +1062,7 @@ impl ClassReflection {
         // override final property" for it - unlike `abstract`, which
         // really is impossible there (an abstract constructor can't
         // declare any promoted property, a real fatal error).
-        if let Some(ctor) = c
-            .methods
-            .iter()
-            .find(|m| m.function.name.eq_ignore_ascii_case("__construct"))
-        {
+        if let Some(ctor) = c.constructor() {
             final_properties.extend(
                 ctor.function
                     .params
@@ -1093,11 +1089,7 @@ impl ClassReflection {
             })
             .map(|p| intern(&p.name))
             .collect();
-        if let Some(ctor) = c
-            .methods
-            .iter()
-            .find(|m| m.function.name.eq_ignore_ascii_case("__construct"))
-        {
+        if let Some(ctor) = c.constructor() {
             final_properties_by_phpdoc.extend(
                 ctor.function
                     .params
@@ -1203,11 +1195,7 @@ impl ClassReflection {
         // parameter - the parser records this via Param::promoted_visibility.
         // A `@param` on the constructor's own docblock describes the same
         // promoted property, so it gets the same PHPDoc-wins treatment.
-        if let Some(ctor) = c
-            .methods
-            .iter()
-            .find(|m| m.function.name.eq_ignore_ascii_case("__construct"))
-        {
+        if let Some(ctor) = c.constructor() {
             let ctor_doc = ctor.function.doc_comment.as_deref().map(docblock::parse);
             for p in &ctor.function.params {
                 if p.promoted_visibility.is_none() {

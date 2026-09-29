@@ -49,7 +49,7 @@ impl<'a> Checker<'a> {
                 .methods()
                 .keys()
                 .filter(|name| {
-                    name.as_ref() != "__construct"
+                    !syntax::ast::is_constructor_name(name)
                         && !own_method_names.contains(name.as_ref())
                         && !info.abstract_methods().contains(*name)
                 })
@@ -88,7 +88,7 @@ impl<'a> Checker<'a> {
         if !self.settings.rules.check_method_throw_type_covariance {
             return;
         }
-        if method_name == "__construct" || *own_visibility == Visibility::Private {
+        if syntax::ast::is_constructor_name(method_name) || *own_visibility == Visibility::Private {
             return;
         }
         let Some(info) = self.registry.classes.get(fqn) else {
@@ -390,7 +390,7 @@ impl<'a> Checker<'a> {
         // genuinely different ancestor than `ancestor` above (which the
         // `#[\Override]` check needs to keep using regardless of any
         // tag).
-        let compatibility_ancestor = if method_name == "__construct" {
+        let compatibility_ancestor = if syntax::ast::is_constructor_name(method_name) {
             self.registry
                 .find_consistent_constructor_ancestor(fqn)
                 .map(|(owner, sig)| (owner, sig, true))

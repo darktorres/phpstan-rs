@@ -424,11 +424,7 @@ fn class_prop_types(c: &ClassDecl, ctx: &NameContext) -> ParamTypes {
             out.insert(p.name.to_string(), fqn);
         }
     }
-    if let Some(ctor) = c
-        .methods
-        .iter()
-        .find(|m| m.function.name.eq_ignore_ascii_case("__construct"))
-    {
+    if let Some(ctor) = c.constructor() {
         for p in &ctor.function.params {
             if p.promoted_visibility.is_some()
                 && let Some(fqn) = resolved_param_class(p, ctx)
@@ -494,7 +490,7 @@ impl<'a> Checker<'a> {
         let Some(owner_info) = self.registry.classes.get(owner) else {
             return;
         };
-        if owner_info.is_api() && method != "__construct" {
+        if owner_info.is_api() && !syntax::ast::is_constructor_name(method) {
             return;
         }
         self.report(format!(
@@ -768,7 +764,7 @@ impl<'a> Walker<'a> {
         let Some(owner_info) = self.registry.classes.get(&owner) else {
             return;
         };
-        if owner_info.is_api() && method != "__construct" {
+        if owner_info.is_api() && !syntax::ast::is_constructor_name(method) {
             return;
         }
         let action = format!("calling {owner}::{method}()");

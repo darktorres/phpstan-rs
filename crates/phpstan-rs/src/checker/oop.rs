@@ -1584,10 +1584,7 @@ impl<'a> Checker<'a> {
             // constructor is a real, common, legitimate singleton-
             // pattern idiom, not the "forgot final does nothing here"
             // mistake this check otherwise exists to catch.
-            if m.is_final
-                && m.visibility == Visibility::Private
-                && !m.function.name.eq_ignore_ascii_case("__construct")
-            {
+            if m.is_final && m.visibility == Visibility::Private && !m.function.is_constructor() {
                 self.report(format!(
                         "private method {fqn}::{}() cannot be final as it is never overridden by other classes",
                         m.function.name
@@ -1622,9 +1619,7 @@ impl<'a> Checker<'a> {
             // constructor's own return value is never meaningful (it
             // always yields the new instance), so a native return type
             // is always a mistake, never legitimate.
-            if m.function.name.eq_ignore_ascii_case("__construct")
-                && m.function.return_type.is_some()
-            {
+            if m.function.is_constructor() && m.function.return_type.is_some() {
                 self.report(
                     format!("constructor of class {fqn} has a return type"),
                     m.span,
@@ -1692,11 +1687,7 @@ impl<'a> Checker<'a> {
         if c.kind == ClassKind::Trait || c.kind == ClassKind::Interface {
             return;
         }
-        let Some(ctor) = c
-            .methods
-            .iter()
-            .find(|m| m.function.name.eq_ignore_ascii_case("__construct"))
-        else {
+        let Some(ctor) = c.constructor() else {
             return;
         };
         if ctor.is_abstract {
@@ -1756,11 +1747,7 @@ impl<'a> Checker<'a> {
         {
             return;
         }
-        let Some(ctor) = c
-            .methods
-            .iter()
-            .find(|m| m.function.name.eq_ignore_ascii_case("__construct"))
-        else {
+        let Some(ctor) = c.constructor() else {
             return;
         };
         let params = &ctor.function.params;
@@ -1960,7 +1947,7 @@ fn stmt_calls_parent_construct(stmt: &Stmt) -> bool {
         && class
             .as_name()
             .is_some_and(|n| n.eq_ignore_ascii_case("parent"))
-        && method.eq_ignore_ascii_case("__construct")
+        && syntax::ast::is_constructor_name(method)
     {
         return true;
     }

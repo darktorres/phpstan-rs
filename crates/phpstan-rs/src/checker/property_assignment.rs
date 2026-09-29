@@ -193,7 +193,7 @@ impl<'a> Checker<'a> {
             .to_ascii_lowercase();
         let in_clone =
             method == "__clone" && supports(PhpFeature::ReadonlyPropertyReinitializationOnClone);
-        if method == "__construct" || method == "__unserialize" || in_clone {
+        if syntax::ast::is_constructor_name(&method) || method == "__unserialize" || in_clone {
             if !on_this {
                 return Some((
                     format!("Readonly property {owner}::${prop} is not assigned on $this."),
@@ -244,7 +244,7 @@ impl<'a> Checker<'a> {
             .as_deref()
             .unwrap_or("")
             .to_ascii_lowercase();
-        if method == "__construct" || method == "__unserialize" {
+        if syntax::ast::is_constructor_name(&method) || method == "__unserialize" {
             return (!on_this).then(|| {
                 (
                     format!("@readonly property {owner}::${prop} is not assigned on $this."),

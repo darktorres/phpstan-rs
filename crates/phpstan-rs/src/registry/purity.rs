@@ -130,7 +130,7 @@ impl Registry {
                 let mut per_class = Vec::new();
                 for method_name in method_names {
                     let sig = &registry.classes[class_name].methods[&method_name];
-                    if !purity_gate_passes(sig, method_name.eq_ignore_ascii_case("__construct")) {
+                    if !purity_gate_passes(sig, syntax::ast::is_constructor_name(&method_name)) {
                         continue;
                     }
                     let Some(body) = bodies.body(&sig.provenance) else {

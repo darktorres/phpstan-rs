@@ -186,7 +186,7 @@ impl<'a> Checker<'a> {
     fn check_promoted_in_methods(&mut self, fqn: &str, kind: ClassKind, methods: &[MethodDecl]) {
         for m in methods {
             let label = format!("{fqn}::{}", m.function.name);
-            let is_constructor = m.function.name.eq_ignore_ascii_case("__construct")
+            let is_constructor = m.function.is_constructor()
                 || (kind == ClassKind::Trait
                     && self.trait_method_aliased_as_constructor(fqn, &m.function.name));
             let site = if !is_constructor {
@@ -254,7 +254,7 @@ impl<'a> Checker<'a> {
             .filter_map(|host| self.registry.classes.get(host))
             .flat_map(|info| info.trait_aliases().iter())
             .any(|a| {
-                a.alias.eq_ignore_ascii_case("__construct")
+                syntax::ast::is_constructor_name(&a.alias)
                     && a.method.eq_ignore_ascii_case(method)
                     && a.trait_name
                         .as_deref()

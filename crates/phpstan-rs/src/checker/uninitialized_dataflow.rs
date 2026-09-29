@@ -112,10 +112,7 @@ impl<'a> Checker<'a> {
         if !self.settings.rules.check_uninitialized_properties || c.kind != ClassKind::Class {
             return;
         }
-        let constructor = c
-            .methods
-            .iter()
-            .find(|m| m.function.name.eq_ignore_ascii_case("__construct"));
+        let constructor = c.constructor();
         // A property with a default or promoted from the constructor is
         // initialized before any code runs; one without either needs an
         // assignment somewhere for a premature read to mean anything.
@@ -194,7 +191,7 @@ impl<'a> Checker<'a> {
         for method in &c.methods {
             if method.is_static
                 || method.is_abstract
-                || method.function.name.eq_ignore_ascii_case("__construct")
+                || method.function.is_constructor()
                 || !unsets_this_property(&method.function.body)
             {
                 continue;

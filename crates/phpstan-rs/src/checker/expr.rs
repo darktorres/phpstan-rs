@@ -2304,9 +2304,7 @@ impl<'a> Checker<'a> {
             ExprKind::NewAnonymousClass(decl, args) => {
                 self.check_enum_cases_outside_enum(&decl.enum_cases);
                 let ctor_params = decl
-                    .methods
-                    .iter()
-                    .find(|m| m.function.name.eq_ignore_ascii_case("__construct"))
+                    .constructor()
                     .map(|m| m.function.params.as_slice())
                     .unwrap_or_default();
                 for (i, a) in args.iter().enumerate() {

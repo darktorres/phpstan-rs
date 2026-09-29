@@ -247,7 +247,7 @@ impl Project {
                 if m.is_abstract
                     || m.is_final
                     || m.visibility == Visibility::Private
-                    || name.eq_ignore_ascii_case("__construct")
+                    || syntax::ast::is_constructor_name(name)
                     || overridden.contains(&(lower.clone(), name.to_ascii_lowercase()))
                 {
                     continue;

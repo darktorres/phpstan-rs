@@ -44,7 +44,7 @@ impl<'a> Checker<'a> {
         let Some(fqn) = class_name else {
             return;
         };
-        if !f.name.eq_ignore_ascii_case("__construct") || !f.has_body {
+        if !f.is_constructor() || !f.has_body {
             return;
         }
         let candidates: Vec<&Param> = f
@@ -100,7 +100,7 @@ impl<'a> Checker<'a> {
                     && ancestor
                         .methods()
                         .keys()
-                        .any(|m| m.eq_ignore_ascii_case("__construct"))
+                        .any(|m| syntax::ast::is_constructor_name(m))
             })
         })
     }
@@ -161,9 +161,7 @@ impl<'a> Checker<'a> {
         }
 
         let mut usage = MemberUsage::default();
-        let ctor = methods
-            .iter()
-            .find(|m| m.function.name.eq_ignore_ascii_case("__construct"));
+        let ctor = methods.iter().find(|m| m.function.is_constructor());
         for m in methods {
             usage.aliases.clear();
             seed_self_typed_param_aliases(&m.function.params, fqn, &self.name_ctx, &mut usage);
@@ -238,7 +236,7 @@ impl<'a> Checker<'a> {
 
         for m in methods {
             if m.visibility != Visibility::Private
-                || m.function.name.eq_ignore_ascii_case("__construct")
+                || m.function.is_constructor()
                 || m.function.name.eq_ignore_ascii_case("__clone")
                 || usage
                     .methods

@@ -102,7 +102,7 @@ impl<'a> Checker<'a> {
         // `$declaredProperties` set for exactly this reason.
         let mut seen_promoted: rustc_hash::FxHashSet<&str> = rustc_hash::FxHashSet::default();
         for m in methods {
-            if !m.function.name.eq_ignore_ascii_case("__construct") {
+            if !m.function.is_constructor() {
                 continue;
             }
             for param in &m.function.params {

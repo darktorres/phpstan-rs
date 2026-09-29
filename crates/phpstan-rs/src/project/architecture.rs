@@ -51,7 +51,7 @@ fn collect_declared<'a>(
                                 .iter()
                                 .filter(|m| {
                                     m.visibility == Visibility::Public
-                                        && !m.function.name.eq_ignore_ascii_case("__construct")
+                                        && !m.function.is_constructor()
                                 })
                                 .map(|m| m.function.name.as_ref())
                                 .collect(),

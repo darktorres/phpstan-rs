@@ -226,11 +226,7 @@ pub(crate) fn compute_doctrine_entity(
     for p in &c.properties {
         attrs_by_property.insert(&p.name, &p.attrs);
     }
-    if let Some(ctor) = c
-        .methods
-        .iter()
-        .find(|m| m.function.name.eq_ignore_ascii_case("__construct"))
-    {
+    if let Some(ctor) = c.constructor() {
         for p in &ctor.function.params {
             if p.promoted_visibility.is_some() {
                 attrs_by_property.insert(&p.name, &p.attrs);

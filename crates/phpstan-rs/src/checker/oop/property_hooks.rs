@@ -72,11 +72,7 @@ impl<'a> Checker<'a> {
                 );
             }
         }
-        if let Some(ctor) = c
-            .methods
-            .iter()
-            .find(|m| m.function.name.eq_ignore_ascii_case("__construct"))
-        {
+        if let Some(ctor) = c.constructor() {
             for param in &ctor.function.params {
                 if param.promoted_visibility.is_none() {
                     continue;

@@ -1074,7 +1074,7 @@ impl Registry {
                     // real vendored userland base class (Symfony's
                     // `Command`, Doctrine's console commands, ...), which
                     // must still participate in this pass normally.
-                    if method_name.as_ref() == "__construct"
+                    if syntax::ast::is_constructor_name(method_name)
                         && registry.built_in_stub_classes.contains(&owner)
                     {
                         continue;
@@ -1092,7 +1092,7 @@ impl Registry {
                         // (`resolveMethodPhpDocFromParentClass`'s
                         // `$lowercaseMethodName !== '__construct'` guard):
                         // match by parameter name instead.
-                        if method_name.as_ref() == "__construct" {
+                        if syntax::ast::is_constructor_name(method_name) {
                             for (i, p) in sig.params.iter().enumerate() {
                                 if p.has_own_doc {
                                     continue;

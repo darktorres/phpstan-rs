@@ -679,7 +679,7 @@ impl<'a> Checker<'a> {
                     let ty = if doc_ty.is_none() {
                         ancestor_sig_hint
                             .and_then(|s| {
-                                if f.name.as_ref() == "__construct" {
+                                if f.is_constructor() {
                                     s.params()
                                         .iter()
                                         .find(|ap| ap.name().as_ref() == p.name.as_ref())
@@ -977,7 +977,7 @@ impl<'a> Checker<'a> {
             // covariant `T` constructor parameter doesn't actually violate
             // covariance safety.
             if let (Some(sig), Some(c)) = (sig, class_name)
-                && !f.name.eq_ignore_ascii_case("__construct")
+                && !f.is_constructor()
             {
                 self.check_variance(sig, c, f.span);
             }

@@ -348,10 +348,7 @@ impl<'a> Checker<'a> {
         }
         // A promoted property's PHPDoc type is its constructor `@param`,
         // else its own inline `@var`.
-        let ctor = c
-            .methods
-            .iter()
-            .find(|m| m.function.name.as_ref() == "__construct");
+        let ctor = c.methods.iter().find(|m| m.function.is_constructor());
         let ctor_nodes = ctor
             .and_then(|m| m.function.doc_comment.as_deref())
             .map(super::phpdoc_unresolvable::tag_type_nodes)

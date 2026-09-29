@@ -306,7 +306,7 @@ impl<'a> Checker<'a> {
                 // the established idiom for constructor-name detection
                 // elsewhere, e.g. `checker/phpstan_api.rs`,
                 // `checker/duplicates.rs`).
-                if method.eq_ignore_ascii_case("__construct") {
+                if syntax::ast::is_constructor_name(method) {
                     return;
                 }
                 let Some(resolved_class) = self.infer_static_target_class(target, locals) else {
@@ -483,7 +483,7 @@ impl<'a> Checker<'a> {
             }
         }
         if sig.return_type().is_void()
-            && !f.name.eq_ignore_ascii_case("__construct")
+            && !f.is_constructor()
             && sig.throws().is_none()
             && sig.assert().is_empty()
             && sig.assert_if_true().is_empty()

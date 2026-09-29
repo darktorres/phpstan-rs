@@ -138,7 +138,7 @@ impl<'a> Checker<'a> {
         if self.settings.strict_rules.check_illegal_constructor_calls {
             match &e.kind {
                 ExprKind::MethodCall(_, method, _, _)
-                    if method.eq_ignore_ascii_case("__construct") =>
+                    if syntax::ast::is_constructor_name(method) =>
                 {
                     self.report(
                         "Call to __construct() on an existing object is not allowed.".to_string(),
@@ -148,7 +148,7 @@ impl<'a> Checker<'a> {
                     );
                 }
                 ExprKind::StaticCall(target, method, _)
-                    if method.eq_ignore_ascii_case("__construct")
+                    if syntax::ast::is_constructor_name(method)
                         && !self.is_parent_constructor_call(target) =>
                 {
                     self.report("Static call to __construct() is only allowed on a parent class in the constructor.".to_string(),
@@ -742,9 +742,9 @@ impl<'a> Checker<'a> {
                     info.uses()
                         .iter()
                         .any(|u| u.eq_ignore_ascii_case(trait_name))
-                        && (method.eq_ignore_ascii_case("__construct")
+                        && (syntax::ast::is_constructor_name(method)
                             || info.trait_aliases().iter().any(|alias| {
-                                alias.alias.eq_ignore_ascii_case("__construct")
+                                syntax::ast::is_constructor_name(&alias.alias)
                                     && alias.method.eq_ignore_ascii_case(method)
                                     && alias
                                         .trait_name
@@ -766,7 +766,7 @@ impl<'a> Checker<'a> {
                     .any(|p| p.eq_ignore_ascii_case(&called))
             });
         }
-        if !method.eq_ignore_ascii_case("__construct") {
+        if !syntax::ast::is_constructor_name(method) {
             return false;
         }
         let Some(class) = self.current_class.as_deref() else {
