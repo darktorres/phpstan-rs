@@ -92,16 +92,19 @@ fn match_exposes_subject_every_arm_condition_result_and_default() {
     assert_eq!(child_expr_count(&e), 5);
 }
 
+/// A closure's and an arrow function's bodies are their own scope; an
+/// anonymous class's constructor arguments are evaluated in the
+/// enclosing one, its body is not.
 #[test]
-fn closure_arrow_fn_and_new_anonymous_class_expose_no_automatic_children() {
+fn a_closure_and_an_arrow_fn_expose_no_children_and_an_anonymous_class_its_arguments() {
     assert_eq!(
         child_expr_count(&parse_expr("function () use ($x) { return $x; }")),
         0
     );
     assert_eq!(child_expr_count(&parse_expr("fn($x) => $x + 1")), 0);
     assert_eq!(
-        child_expr_count(&parse_expr("new class($a) { public $p; }")),
-        0
+        child_expr_count(&parse_expr("new class($a) { public $p = 1; }")),
+        1
     );
 }
 

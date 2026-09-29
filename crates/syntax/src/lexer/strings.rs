@@ -238,7 +238,7 @@ impl<'a> Lexer<'a> {
             }
         }
         let raw = &self.src[start..self.pos];
-        let parts = self.scan_interpolated(raw, start, false, None);
+        let parts = self.scan_interpolated(raw, start, Some(delim), None);
         self.pos = (self.pos + 1).min(self.src.len()); // closing delimiter
         parts
     }
@@ -342,13 +342,14 @@ impl<'a> Lexer<'a> {
             // start is an honest, coarser approximation for this one
             // case (still the right heredoc, not a precise per-occurrence
             // position within it).
-            Token::InterpString(self.scan_interpolated(&content, body_start, true, Some(&offsets)))
+            Token::InterpString(self.scan_interpolated(&content, body_start, None, Some(&offsets)))
         }
     }
 }
 
 impl<'a> Lexer<'a> {
-    /// Shared body of double-quoted-string and heredoc interpolation:
+    /// Shared body of double-quoted-string, shell-exec and heredoc
+    /// interpolation (`delimiter` the closing quote, `None` for a heredoc):
     /// escapes, `$var` / `$var->prop` / `$var[key]` simple syntax, and
     /// `{$expr}` complex syntax. Operates on an already-delimited byte
     /// slice (quotes/markers already stripped by the caller) - `abs_base`
@@ -361,7 +362,7 @@ impl<'a> Lexer<'a> {
         &mut self,
         bytes: &[u8],
         abs_base: usize,
-        heredoc: bool,
+        delimiter: Option<u8>,
         offsets: Option<&[usize]>,
     ) -> Vec<StringPart> {
         let mut parts = Vec::new();
@@ -423,13 +424,15 @@ impl<'a> Lexer<'a> {
                         literal.push(0x0C);
                         i += 2;
                     }
-                    // A heredoc has no `\"` escape.
-                    b'"' if heredoc => {
-                        literal.extend_from_slice(b"\\\"");
+                    // `\"` escapes only in `"..."` and `` \` `` only in
+                    // `` `...` ``; elsewhere (a heredoc included) both stay
+                    // two bytes.
+                    quote @ (b'"' | b'`') if delimiter == Some(quote) => {
+                        literal.push(quote);
                         i += 2;
                     }
-                    b'"' => {
-                        literal.push(b'"');
+                    quote @ (b'"' | b'`') => {
+                        literal.extend_from_slice(&[b'\\', quote]);
                         i += 2;
                     }
                     b'\\' => {

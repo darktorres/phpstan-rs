@@ -325,3 +325,31 @@ fn a_complex_interpolation_fragment_with_an_extreme_base_position_does_not_panic
     // the arithmetic-overflow panic itself.
     let _ = result;
 }
+
+/// `\"` escapes only in a double-quoted string and `` \` `` only in a
+/// backtick one; elsewhere, a heredoc included, each stays two bytes.
+#[test]
+fn quote_escapes_decode_only_for_their_own_delimiter() {
+    fn literal_bytes(e: &Expr) -> Vec<u8> {
+        match &e.kind {
+            ExprKind::Literal(Literal::String(s)) => s.as_bytes().to_vec(),
+            ExprKind::ShellExec(inner) => literal_bytes(inner),
+            other => panic!("expected a string, got {other:?}"),
+        }
+    }
+    for (src, expected) in [
+        ("<?php $x = \"a\\\"b\\`c\";", &b"a\"b\\`c"[..]),
+        ("<?php $x = `a\\`b\\\"c`;", &b"a`b\\\"c"[..]),
+        ("<?php $x = <<<EOT\na\\\"b\\`c\nEOT;\n", &b"a\\\"b\\`c"[..]),
+    ] {
+        let program = parse(src);
+        let StmtKind::Expression(Expr {
+            kind: ExprKind::Assign(_, rhs),
+            ..
+        }) = &program[0].kind
+        else {
+            panic!("expected assignment, got {:?}", program[0].kind);
+        };
+        assert_eq!(literal_bytes(rhs), expected, "{src}");
+    }
+}

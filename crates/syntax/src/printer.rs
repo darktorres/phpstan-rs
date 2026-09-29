@@ -63,7 +63,7 @@ fn write_php_string(out: &mut String, s: &PhpString) {
         Some(text) => write_single_quoted(out, text),
         None => {
             out.push('"');
-            write_double_quoted_bytes(out, s.as_bytes());
+            write_double_quoted_bytes(out, s.as_bytes(), b'"');
             out.push('"');
         }
     }
@@ -71,11 +71,17 @@ fn write_php_string(out: &mut String, s: &PhpString) {
 
 /// The body of a double-quoted string: valid UTF-8 as text, every other
 /// byte as `\xNN`.
-fn write_double_quoted_bytes(out: &mut String, bytes: &[u8]) {
+/// `bytes` between `delimiter` quotes (`"` or `` ` ``), escaped as that
+/// string reads them: the delimiter itself, `\\`, `$` and the control
+/// characters.
+fn write_double_quoted_bytes(out: &mut String, bytes: &[u8], delimiter: u8) {
     for chunk in bytes.utf8_chunks() {
         for c in chunk.valid().chars() {
             match c {
-                '"' => out.push_str("\\\""),
+                c if c == char::from(delimiter) => {
+                    out.push('\\');
+                    out.push(c);
+                }
                 '\\' => out.push_str("\\\\"),
                 '$' => out.push_str("\\$"),
                 '\n' => out.push_str("\\n"),
@@ -180,10 +186,12 @@ fn write_member_name(out: &mut String, name: &Expr) {
     }
 }
 
-fn write_interpolated_parts(out: &mut String, parts: &[Expr]) {
+fn write_interpolated_parts(out: &mut String, parts: &[Expr], delimiter: u8) {
     for part in parts {
         match &part.kind {
-            ExprKind::Literal(Literal::String(s)) => write_double_quoted_bytes(out, s.as_bytes()),
+            ExprKind::Literal(Literal::String(s)) => {
+                write_double_quoted_bytes(out, s.as_bytes(), delimiter)
+            }
             _ => {
                 out.push('{');
                 write_expr(out, part);
@@ -446,9 +454,9 @@ fn write_expr_unguarded(out: &mut String, e: &Expr) {
         ExprKind::ShellExec(cmd) => {
             out.push('`');
             match &cmd.kind {
-                ExprKind::Interpolated(parts) => write_interpolated_parts(out, parts),
+                ExprKind::Interpolated(parts) => write_interpolated_parts(out, parts, b'`'),
                 ExprKind::Literal(Literal::String(s)) => {
-                    out.push_str(&s.to_str_lossy());
+                    write_double_quoted_bytes(out, s.as_bytes(), b'`')
                 }
                 _ => write_expr(out, cmd),
             }
@@ -483,7 +491,7 @@ fn write_expr_unguarded(out: &mut String, e: &Expr) {
         }
         ExprKind::Interpolated(parts) => {
             out.push('"');
-            write_interpolated_parts(out, parts);
+            write_interpolated_parts(out, parts, b'"');
             out.push('"');
         }
         ExprKind::Closure {
