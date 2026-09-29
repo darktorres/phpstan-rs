@@ -44,8 +44,8 @@ impl<'a> Checker<'a> {
     /// `coercion.rs` already special-cases for `(float)`/`(string)` -
     /// never an array, a `resource`, a `class-string`, or any other
     /// registered class. `Mixed`, an unresolvable class, and a PHPDoc
-    /// type alias this project doesn't resolve (both surface as
-    /// object with no matching registry entry - see
+    /// type alias this project doesn't resolve (both surface as an
+    /// object type naming no registered class - see
     /// `self.registry.classes.contains_key`) all fall through the
     /// catch-all, matching this project's usual "don't know, don't
     /// guess" leniency - this arm must tell "confidently not a

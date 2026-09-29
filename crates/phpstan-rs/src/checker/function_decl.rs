@@ -1592,20 +1592,9 @@ impl<'a> Checker<'a> {
     /// attempted here. A variadic parameter can never have a real
     /// default in valid PHP, so it's skipped outright.
     ///
-    /// `param_ty` mirrors real PHPStan's own explicit `TemplateTypeHelper::
-    /// resolveToBounds` step - without it, a `@template T`-typed
-    /// parameter's own default would be checked against the bare,
-    /// unresolved `TemplateParam` itself, which `registry::accepts`
-    /// has no dedicated rule for on the *super*-type side (only the
-    /// *sub*-type side, a template on the sub-type side answers for its bound (`self.
-    /// accepts(&tp.bound, sup)`, already used elsewhere for the
-    /// opposite direction). Deliberately shallow - only a bare top-level
-    /// `T $x = ...`, not real PHPStan's own recursive substitution
-    /// through the whole type tree (e.g. a template nested inside
-    /// `array<T> $x = []`) - a disclosed narrower scope: a default value
-    /// is overwhelmingly a scalar literal/array/`null`, where a *nested*
-    /// unresolved template essentially never actually decides whether
-    /// that literal is assignable to it.
+    /// The parameter's templates are resolved to their bounds at any
+    /// depth (PHPStan's `TemplateTypeHelper::resolveToBounds`): a default
+    /// is checked against what every binding of them allows.
     ///
     /// The real rule calls `Type::accepts` directly rather than through
     /// `RuleLevelHelper`, and a `mixed` value is accepted everywhere
@@ -1626,7 +1615,11 @@ impl<'a> Checker<'a> {
             let Some(param_sig) = sig.params().get(i) else {
                 continue;
             };
-            let param_ty = param_sig.ty().template_bound().unwrap_or(param_sig.ty());
+            let param_ty = &param_sig.ty().substitute_templates_resolving_to_bounds(
+                &rustc_hash::FxHashMap::default(),
+                &|_| true,
+                &self.relation(),
+            );
             let default_ty = self.infer_expr(default, &Locals::default());
             if default_ty.is_mixed() || self.accepts(param_ty, &default_ty).yes() {
                 continue;

@@ -591,10 +591,10 @@ impl<'a> Checker<'a> {
     ///
     /// A used generic template parameter's type could otherwise leak
     /// through as a bogus, namespace-qualified `Object` reference instead
-    /// of staying template (e.g. `amphp/sync`'s own
+    /// of staying a template (e.g. `amphp/sync`'s own
     /// `PriorityQueue<T of int|string>`) - reusing this project's own,
     /// already-shared `invalid_array_key_description` verbatim sidesteps
-    /// that: it has no arm for template at all, so it
+    /// that: it has no arm for a template at all, so it
     /// already falls to the safe "don't know, don't flag" catch-all for
     /// one, exactly the leniency a still-generic key type needs.
     ///

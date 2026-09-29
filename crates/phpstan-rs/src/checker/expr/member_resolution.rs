@@ -50,8 +50,8 @@ impl<'a> Checker<'a> {
     /// `checker::calls::check_no_discard_statement`: a `#[\NoDiscard]`-marked
     /// method called through a `Union`/`Intersection` receiver (a value
     /// narrowed via `instanceof` from an unrelated interface) must not
-    /// be silently skipped just because the receiver's own type isn't
-    /// literally object. Same registry-tied lifetime as
+    /// be silently skipped just because the receiver's own type isn't a
+    /// plain object. Same registry-tied lifetime as
     /// `find_property_owner` above, for the same reason.
     pub(crate) fn find_method_owner(
         &self,
@@ -84,8 +84,8 @@ impl<'a> Checker<'a> {
     /// (possibly different, inherited-from) declaring owner - late static
     /// binding needs the real runtime receiver a `self`/`static` pseudo-
     /// return type resolves against, via a plain `lookup_method`, never
-    /// `_with_owner`. Must not require the receiver's own type to be
-    /// literally object - a `Union`/`Intersection` receiver
+    /// `_with_owner`. Must not require the receiver's own type to be a
+    /// plain object - a `Union`/`Intersection` receiver
     /// needs the same treatment. Same registry-tied lifetime as
     /// `find_property_owner` above, for the same reason.
     pub(crate) fn find_method_receiver_class(
