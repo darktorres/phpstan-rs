@@ -17,7 +17,7 @@
                 $page = array_merge($page, parseIt());
                 if (isset($page['chronology_field'])) {
                     $calendar_date = is_array($page['chronology_date'] ?? null) ? $page['chronology_date'] : [];
-                    assertType('list<string>|array{}', $calendar_date);
+                    assertType('list<string>', $calendar_date);
                 }
             }
         

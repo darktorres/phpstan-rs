@@ -120,10 +120,13 @@ impl Type {
                                 Type::accessory(AccessoryKind::NonEmptyArray),
                             ]))
                         } else {
-                            let key = offset
+                            // The shape's own keys stay possible beside the
+                            // written one.
+                            let written = offset
                                 .map(Type::write_key_type)
                                 .unwrap_or_else(Type::unknown_array_key);
-                            Some(Type::array(key, widened))
+                            let key = Type::union(shape.key_type().generalize(), written);
+                            Some(non_empty(Type::array(key, widened)))
                         }
                     }
                 },
@@ -183,7 +186,7 @@ impl Type {
                 Type(Repr::Intersection(members)) => {
                     let inner = members.iter().find_map(Type::array_value_type)?;
                     let widened = Type::union(value, inner);
-                    let key = offset
+                    let written = offset
                         .map(Type::write_key_type)
                         .unwrap_or_else(Type::unknown_array_key);
                     let is_append = offset.is_none();
@@ -191,7 +194,7 @@ impl Type {
                         && members.contains(&Type::accessory(AccessoryKind::ArrayList))
                     {
                         let mut new_members = vec![
-                            Type::array(key, widened),
+                            Type::array(written, widened),
                             Type::accessory(AccessoryKind::ArrayList),
                         ];
                         if is_append
@@ -201,7 +204,16 @@ impl Type {
                         }
                         Some(crate::intersect_types(new_members))
                     } else {
-                        Some(Type::array(key, widened))
+                        let key = members
+                            .iter()
+                            .find_map(|m| match m {
+                                Type(Repr::Array(k, _)) => {
+                                    Some(Type::union((**k).clone(), written.clone()))
+                                }
+                                _ => None,
+                            })
+                            .unwrap_or(written);
+                        Some(non_empty(Type::array(key, widened)))
                     }
                 }
                 _ => None,
@@ -312,12 +324,14 @@ fn write_literal_key_aware(
     track_literal_key: bool,
     existing_has_offset_values: &[Type],
 ) -> Type {
-    let key_ty = match offset.map(Type::write_key_type) {
-        Some(new_key) => Type::union(key.clone(), new_key),
-        None => key.clone(),
-    };
+    // An append takes the next int key.
+    let key_ty = Type::union(
+        key.clone(),
+        offset.map_or_else(Type::int, Type::write_key_type),
+    );
     let base = Type::array(key_ty, Type::union(value.clone(), inner.clone()));
     match offset.and_then(literal_key) {
+        // A `hasOffsetValue` member says the array isn't empty.
         Some(key) if track_literal_key => {
             let mut members: Vec<Type> = existing_has_offset_values
                 .iter()
@@ -328,8 +342,13 @@ fn write_literal_key_aware(
             members.insert(0, base);
             Type(Repr::Intersection(members))
         }
-        _ => base,
+        _ => non_empty(base),
     }
+}
+
+/// `array` known to hold an element, as it does after a write.
+fn non_empty(array: Type) -> Type {
+    crate::intersect_types(vec![array, Type::accessory(AccessoryKind::NonEmptyArray)])
 }
 
 /// A literal offset's array key (`true` is `1`, `null` is `''`).

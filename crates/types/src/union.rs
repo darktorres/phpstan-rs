@@ -1,4 +1,4 @@
-use crate::{Repr, Shape, ShapeField, ShapeKey, Type};
+use crate::{AccessoryKind, Repr, Shape, ShapeField, ShapeKey, Type};
 
 /// A defensive cap on how many distinct members `Type::union` will ever
 /// materialize into a real `Repr::Union`. Collapsing to `Mixed` past this
@@ -203,38 +203,6 @@ fn union_types_impl(a: Type, b: Type) -> Type {
         // is correctly still kept apart.
         merge_int_ranges(&mut members);
         reduce_array_members(&mut members);
-        // Two structurally different `Array(key, val)` members merge into
-        // one precise `Array(key1|key2, val1|val2)` instead of staying
-        // separate union members - `array_element_type`'s `Union` arm, and
-        // every other consumer wanting "the" element type of a plain array,
-        // would otherwise silently only see the first matching member.
-        // Scoped to a bare `Repr::Array` only, not an accessory-refined
-        // `list<T>`/`non-empty-array<T>` (a real `Intersection`) - a mix of
-        // the two is left as a narrower residual.
-        if members
-            .iter()
-            .filter(|m| matches!(m, Type(Repr::Array(_, _))))
-            .count()
-            > 1
-        {
-            let mut merged_key: Option<Type> = None;
-            let mut merged_val: Option<Type> = None;
-            members.retain(|m| {
-                let Type(Repr::Array(k, v)) = m else {
-                    return true;
-                };
-                merged_key = Some(match merged_key.take() {
-                    None => (**k).clone(),
-                    Some(acc) => Type::union(acc, (**k).clone()),
-                });
-                merged_val = Some(match merged_val.take() {
-                    None => (**v).clone(),
-                    Some(acc) => Type::union(acc, (**v).clone()),
-                });
-                false
-            });
-            members.push(Type::array(merged_key.unwrap(), merged_val.unwrap()));
-        }
         if members.len() > MAX_UNION_MEMBERS {
             members = generalize_by_key_set(members);
         }
@@ -536,20 +504,15 @@ fn merge_has_offset_value_pair(a: &Type, b: &Type) -> Option<Type> {
 /// two members and `array{}` stays its own unless an all-optional shape
 /// absorbs it.
 fn reduce_array_members(members: &mut Vec<Type>) {
+    if members.iter().any(|m| general_array_parts(m).is_some()) {
+        merge_general_arrays(members);
+        return;
+    }
     let shape_count = members
         .iter()
         .filter(|m| matches!(m, Type(Repr::ArrayShape(_))))
         .count();
     if shape_count == 0 {
-        return;
-    }
-    if members.iter().any(|m| matches!(m, Type(Repr::Array(..)))) {
-        for m in members.iter_mut() {
-            if let Type(Repr::ArrayShape(shape)) = m {
-                *m = shape_as_general_array(shape);
-            }
-        }
-        members.retain(|m| m != &Type::never());
         return;
     }
     if shape_count == 1 {
@@ -626,6 +589,90 @@ fn reduce_array_members(members: &mut Vec<Type>) {
 
 /// A shape as the general array it is: its keys' literal types and its
 /// values unioned, an unsealed tail's included. `never` for `array{}`.
+/// A general array's parts, as `processArrayTypes` reads them: its key
+/// and value types, and whether it is a list and non-empty. `None` for
+/// anything but a plain or `list`/`non-empty-array`-refined `array<K, V>`.
+fn general_array_parts(ty: &Type) -> Option<(Type, Type, bool, bool)> {
+    match ty {
+        Type(Repr::Array(key, value)) => Some(((**key).clone(), (**value).clone(), false, false)),
+        Type(Repr::Intersection(members)) => {
+            let mut array = None;
+            let (mut list, mut non_empty) = (false, false);
+            for m in members {
+                match m {
+                    Type(Repr::Array(key, value)) if array.is_none() => {
+                        array = Some(((**key).clone(), (**value).clone()));
+                    }
+                    Type(Repr::Accessory(AccessoryKind::ArrayList)) => list = true,
+                    Type(Repr::Accessory(AccessoryKind::NonEmptyArray)) => non_empty = true,
+                    _ => return None,
+                }
+            }
+            let (key, value) = array?;
+            Some((key, value, list, non_empty))
+        }
+        _ => None,
+    }
+}
+
+/// With a general array among `members`, every array member - general,
+/// refined or a shape - becomes one general array of their keys and
+/// values, a list or non-empty only when every one of them is
+/// (`processArrayTypes`): `array{}|non-empty-array<int, V>` is
+/// `array<int, V>`.
+fn merge_general_arrays(members: &mut Vec<Type>) {
+    let mut keys = Vec::new();
+    let mut values = Vec::new();
+    let (mut list, mut non_empty) = (true, true);
+    let mut first = None;
+    let mut index = 0;
+    members.retain(|m| {
+        let parts = match m {
+            Type(Repr::ArrayShape(shape)) => {
+                let (key, value) = match &shape_as_general_array(shape) {
+                    Type(Repr::Array(key, value)) => {
+                        (Some((**key).clone()), Some((**value).clone()))
+                    }
+                    _ => (None, None),
+                };
+                let shape_non_empty = shape.fields.iter().any(|f| !f.optional);
+                Some((key, value, shape.is_list(), shape_non_empty))
+            }
+            other => {
+                general_array_parts(other).map(|(key, value, l, n)| (Some(key), Some(value), l, n))
+            }
+        };
+        index += 1;
+        let Some((key, value, l, n)) = parts else {
+            return true;
+        };
+        first.get_or_insert(index - 1);
+        keys.extend(key);
+        values.extend(value);
+        list &= l;
+        non_empty &= n;
+        false
+    });
+    let key = keys
+        .into_iter()
+        .reduce(Type::union)
+        .unwrap_or_else(Type::unknown_array_key);
+    let value = values
+        .into_iter()
+        .reduce(Type::union)
+        .unwrap_or_else(Type::mixed);
+    let mut parts = vec![Type::array(key, value)];
+    if list {
+        parts.push(Type::accessory(AccessoryKind::ArrayList));
+    }
+    if non_empty {
+        parts.push(Type::accessory(AccessoryKind::NonEmptyArray));
+    }
+    let merged = crate::intersect_types(parts);
+    let at = first.unwrap_or(0).min(members.len());
+    members.insert(at, merged);
+}
+
 fn shape_as_general_array(shape: &Shape) -> Type {
     let mut keys: Vec<Type> = shape.fields.iter().map(|f| f.key.to_type()).collect();
     let mut values: Vec<Type> = shape.fields.iter().map(|f| f.ty.clone()).collect();

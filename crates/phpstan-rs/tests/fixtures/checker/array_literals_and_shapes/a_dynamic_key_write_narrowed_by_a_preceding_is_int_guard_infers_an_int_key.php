@@ -5,7 +5,7 @@
                 $arr = [];
                 if (is_int($row['id'])) {
                     $arr[$row['id']] = $val;
-                    assertType('array<int, string>', $arr);
+                    assertType('non-empty-array<int, string>', $arr);
                 }
             }
         

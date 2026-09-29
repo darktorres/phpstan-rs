@@ -7,6 +7,6 @@
             function nested(array $items): void {
                 $x = [];
                 foreach ($items as $i) { foreach ($items as $j) { $x[$i][$j][] = 1; } }
-                \PHPStan\Testing\assertType('array<(int|string), array<(int|string), non-empty-list<1>>>', $x);
+                \PHPStan\Testing\assertType('array<(int|string), non-empty-array<(int|string), non-empty-list<1>>>', $x);
             }
         
