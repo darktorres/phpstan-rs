@@ -129,7 +129,7 @@ impl Type {
                     Type::accessory(AccessoryKind::DecimalIntegerString),
                 ]))
             };
-            if !matches!(self, Type(Repr::Mixed(_)) | Type(Repr::Never))
+            if !matches!(self, Type(Repr::Mixed(..)) | Type(Repr::Never))
                 && crate::Relation::structural()
                     .is_super_type_of(&Type::string(), self)
                     .yes()
@@ -295,7 +295,7 @@ impl Type {
                 .reduce(Type::union)
                 .unwrap_or_else(Type::never),
             Type(Repr::TemplateParam(param)) => param.bound.to_bitwise_not(),
-            Type(Repr::Mixed(_)) => Type::union(Type::int(), Type::string()),
+            Type(Repr::Mixed(..)) => Type::union(Type::int(), Type::string()),
             _ if self.is_string().yes() => {
                 if self.is_refined_string(AccessoryKind::NonEmptyString).yes() {
                     Type::string().with_string_accessory(AccessoryKind::NonEmptyString)

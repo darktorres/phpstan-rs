@@ -188,6 +188,7 @@ impl Relation<'_> {
             // must still keep its own, more specific type here rather than
             // needlessly widening to the bare interface.
             _ if self.is_super_type_of(target, original).yes() => original.clone(),
+            Type(Repr::Mixed(_, Some(lacks))) => target.without(lacks),
             _ => target.clone(),
         }
     }
@@ -203,6 +204,20 @@ impl Type {
     /// `array<mixed>`, which must drop an `array<string>` too.
     pub fn without(&self, excluded: &Type) -> Type {
         syntax::stack::guard(|| {
+            // `mixed` without a type is `mixed~type`: what it can't be is
+            // remembered (`isset($x)` leaves `mixed~null`).
+            if let Type(Repr::Mixed(explicit, lacks)) = self
+                && !matches!(
+                    excluded,
+                    Type(Repr::Mixed(..)) | Type(Repr::Never) | Type(Repr::Error)
+                )
+            {
+                let lacks = match lacks {
+                    Some(lacks) => Type::union((**lacks).clone(), excluded.clone()),
+                    None => excluded.clone(),
+                };
+                return Type(Repr::Mixed(*explicit, Some(Box::new(lacks))));
+            }
             match self {
                 // Recurses into `Type::without` for each kept member,
                 // rather than just cloning it, so a `String`/`Array` member
@@ -693,6 +708,15 @@ impl Type {
             }
             Type(Repr::Null) | Type(Repr::False) | Type(Repr::IntLiteral(0)) => Type::never(),
             Type(Repr::FloatLiteral(f)) if *f == 0.0 => Type::never(),
+            Type(Repr::Mixed(..)) => self.without(&Type::union_of(vec![
+                Type::null(),
+                Type::bool_literal(false),
+                Type::int_literal(0),
+                Type::float_literal(0.0),
+                Type::string_literal(PhpString::default()),
+                Type::string_literal("0".into()),
+                Type::array_shape(Shape::sealed(Vec::new())),
+            ])),
             Type(Repr::Bool) => Type::bool_literal(true),
             Type(Repr::Int) => without_zero(None, None),
             Type(Repr::IntRange(min, max)) => without_zero(*min, *max),

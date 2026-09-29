@@ -92,11 +92,11 @@ fn never_true_and_false_fold_away() {
 fn a_union_keeps_an_explicit_mixed_explicit() {
     assert!(matches!(
         Type::union(Type::explicit_mixed(), Type::null()),
-        Type(Repr::Mixed(true))
+        Type(Repr::Mixed(true, None))
     ));
     assert!(matches!(
         Type::union(Type::mixed(), Type::null()),
-        Type(Repr::Mixed(false))
+        Type(Repr::Mixed(false, None))
     ));
 }
 

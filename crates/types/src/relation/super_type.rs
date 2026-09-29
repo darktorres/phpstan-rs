@@ -22,7 +22,17 @@ impl Relation<'_> {
             match (sup, sub) {
                 (Type(Repr::Error), _) => TrinaryLogic::Yes,
                 (_, Type(Repr::Error)) => self.is_super_type_of(sup, &Type::mixed()),
-                (Type(Repr::Mixed(_)), _) | (_, Type(Repr::Never)) => TrinaryLogic::Yes,
+                // `mixed~S` holds everything but `S`.
+                (Type(Repr::Mixed(_, Some(subtracted))), sub) if !sub.is_never() => {
+                    if self.is_super_type_of(subtracted, sub).yes() {
+                        TrinaryLogic::No
+                    } else if self.disjoint(subtracted, sub) {
+                        TrinaryLogic::Yes
+                    } else {
+                        TrinaryLogic::Maybe
+                    }
+                }
+                (Type(Repr::Mixed(..)), _) | (_, Type(Repr::Never)) => TrinaryLogic::Yes,
                 // `NAN` is itself, as `ConstantFloatType::equals()` has it.
                 (Type(Repr::FloatLiteral(a)), Type(Repr::FloatLiteral(b)))
                     if a.is_nan() && b.is_nan() =>
@@ -87,7 +97,13 @@ impl Relation<'_> {
                         _ => by_member,
                     }
                 }
-                (_, Type(Repr::Mixed(_))) | (Type(Repr::TemplateParam(_)), _) => {
+                // No value of `mixed~S` is one of `S`'s.
+                (sup, Type(Repr::Mixed(_, Some(subtracted))))
+                    if self.is_super_type_of(subtracted, sup).yes() =>
+                {
+                    TrinaryLogic::No
+                }
+                (_, Type(Repr::Mixed(..))) | (Type(Repr::TemplateParam(_)), _) => {
                     TrinaryLogic::Maybe
                 }
                 (Type(Repr::Void), Type(Repr::Void)) => TrinaryLogic::Yes,
@@ -429,7 +445,10 @@ fn accessory_refuses(kind: &AccessoryKind, sub: &Type) -> bool {
         AccessoryKind::NonEmptyArray | AccessoryKind::ArrayList => {
             !is_array
                 && scalars_disjoint(
-                    &Type::array(Type(Repr::Mixed(false)), Type(Repr::Mixed(false))),
+                    &Type::array(
+                        Type(Repr::Mixed(false, None)),
+                        Type(Repr::Mixed(false, None)),
+                    ),
                     sub,
                 )
         }

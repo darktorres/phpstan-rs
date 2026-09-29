@@ -198,9 +198,22 @@ impl Relation<'_> {
     /// The narrower of two types when one contains the other, `never`
     /// when they share no value, both otherwise.
     fn narrower(&self, a: Type, b: Type) -> Type {
-        if matches!(b, Type(Repr::Mixed(_))) || self.is_super_type_of(&b, &a).yes() {
+        // `mixed~S` narrows the other side to it without `S`.
+        if let Type(Repr::Mixed(_, lacks)) = &b {
+            return match lacks {
+                Some(lacks) => a.without(lacks),
+                None => a,
+            };
+        }
+        if let Type(Repr::Mixed(_, lacks)) = &a {
+            return match lacks {
+                Some(lacks) => b.without(lacks),
+                None => b,
+            };
+        }
+        if self.is_super_type_of(&b, &a).yes() {
             a
-        } else if matches!(a, Type(Repr::Mixed(_))) || self.is_super_type_of(&a, &b).yes() {
+        } else if self.is_super_type_of(&a, &b).yes() {
             b
         } else if self.disjoint(&a, &b) {
             Type::never()

@@ -335,7 +335,7 @@ impl Relation<'_> {
                 // real PHPStan's own level-9-style "be strict about values
                 // with mixed type" philosophy.
                 (Type(Repr::Array(_, a)), Type(Repr::Array(_, b))) => {
-                    (!self.strict_mixed_arrays && matches!(**a, Type(Repr::Mixed(_))))
+                    (!self.strict_mixed_arrays && matches!(**a, Type(Repr::Mixed(..))))
                         || self.accepts_type(a, b)
                 }
                 // Same leniency, same reason, for an array of unknown structure
@@ -361,7 +361,7 @@ impl Relation<'_> {
                 // `Repr::String`) is held to the real subtyping check.
                 (Type(Repr::Array(key, a)), Type(Repr::ArrayShape(shape))) => {
                     !self.strict_mixed_arrays
-                        && matches!(**a, Type(Repr::Mixed(_)))
+                        && matches!(**a, Type(Repr::Mixed(..)))
                         && (**key == Type::unknown_array_key()
                             || self.accepts_type(key, &shape.key_type()))
                 }
@@ -386,7 +386,7 @@ impl Relation<'_> {
                 (Type(Repr::ArrayShape(shape)), Type(Repr::Array(key, b))) => {
                     self.accepts_type(&shape.key_type(), key)
                         && shape.fields.iter().all(|f| {
-                            (!self.strict_mixed_arrays && matches!(f.ty, Type(Repr::Mixed(_))))
+                            (!self.strict_mixed_arrays && matches!(f.ty, Type(Repr::Mixed(..))))
                                 || self.accepts_type(&f.ty, b)
                         })
                 }
@@ -621,7 +621,7 @@ impl Relation<'_> {
     /// "`checkExplicitMixed`/`checkImplicitMixed` stay off unless opted
     /// into" default `rule_level_accepts` documents.
     pub fn strict_mixed_receiver_level(&self, ty: &Type) -> Option<u8> {
-        let Type(Repr::Mixed(is_explicit)) = ty else {
+        let Type(Repr::Mixed(is_explicit, _)) = ty else {
             return None;
         };
         let threshold = if *is_explicit {
@@ -641,12 +641,12 @@ impl Relation<'_> {
         // A template bounded by nothing is as unknown as an explicit
         // `mixed` (PHPStan's `TemplateMixedType`).
         if let Type(Repr::TemplateParam(tp)) = sub
-            && matches!(*tp.bound, Type(Repr::Mixed(_)))
+            && matches!(*tp.bound, Type(Repr::Mixed(..)))
             && level < EXPLICIT_MIXED_CHECK_LEVEL
         {
             return true;
         }
-        if let Type(Repr::Mixed(is_explicit)) = sub {
+        if let Type(Repr::Mixed(is_explicit, _)) = sub {
             let strict_level = if *is_explicit {
                 EXPLICIT_MIXED_CHECK_LEVEL
             } else {
@@ -655,7 +655,7 @@ impl Relation<'_> {
             if level < strict_level {
                 return true;
             }
-            return matches!(sup, Type(Repr::Mixed(_)));
+            return matches!(sup, Type(Repr::Mixed(..)));
         }
         self.accepts_type(sub, sup)
     }

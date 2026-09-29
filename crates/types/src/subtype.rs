@@ -305,7 +305,7 @@ impl Relation<'_> {
             let Some(b_i) = b_i.without_call_site_variance() else {
                 return true;
             };
-            if matches!(b_i, Type(Repr::Mixed(_))) {
+            if matches!(b_i, Type(Repr::Mixed(..))) {
                 return true;
             }
             let a_i = effective_args_a.get(i).cloned().unwrap_or(Type::mixed());
@@ -368,7 +368,7 @@ impl Relation<'_> {
         let a = a.instantiated_against(&b, self);
         let fits = |sub: &Type, sup: &Type| {
             (mixed_as_any
-                && (matches!(sub, Type(Repr::Mixed(_))) || matches!(sup, Type(Repr::Mixed(_)))))
+                && (matches!(sub, Type(Repr::Mixed(..))) || matches!(sup, Type(Repr::Mixed(..)))))
                 || is_sub(sub, sup)
         };
         // A `void` return accepts `null` (`VoidType::accepts`).
@@ -398,7 +398,7 @@ impl Relation<'_> {
                 return false;
             }
             if let Type(Repr::TemplateParam(tp)) = &bp.ty {
-                if !(matches!(*tp.bound, Type(Repr::Mixed(_))) || fits(&ap.ty, &tp.bound)) {
+                if !(matches!(*tp.bound, Type(Repr::Mixed(..))) || fits(&ap.ty, &tp.bound)) {
                     return false;
                 }
                 continue;

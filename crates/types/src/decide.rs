@@ -43,7 +43,7 @@ impl Type {
         // separate "resolved to bare `Mixed`? use the native type instead"
         // swap once its real value is known - unioning native
         // members in early would corrupt that later check's own `resolved ==
-        // Repr::Mixed(false)` test (a real regression caught by this project's own
+        // Repr::Mixed(false, None)` test (a real regression caught by this project's own
         // existing `value_of_on_an_unresolvable_template_falls_back_to_the_native_return_type`
         // test).
         //

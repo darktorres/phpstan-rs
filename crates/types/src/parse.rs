@@ -48,7 +48,7 @@ pub fn parse_written_type(raw: &str) -> Type {
             if let Some(explicit) = members
                 .iter()
                 .filter_map(|m| match m {
-                    Type(Repr::Mixed(explicit)) => Some(*explicit),
+                    Type(Repr::Mixed(explicit, _)) => Some(*explicit),
                     _ => None,
                 })
                 .reduce(|a, b| a || b)
@@ -1227,7 +1227,7 @@ fn parse_type_keyword_or_class(bare: &str, original: &str, generic_args: &[&str]
 fn parse_generic_arg(a: &str) -> Type {
     let trimmed = a.trim();
     if trimmed == "*" {
-        return Type::variance_arg(CallSiteVariance::Bivariant, Type(Repr::Mixed(false)));
+        return Type::variance_arg(CallSiteVariance::Bivariant, Type(Repr::Mixed(false, None)));
     }
     if let Some(rest) = trimmed.strip_prefix("covariant ") {
         return Type::variance_arg(CallSiteVariance::Covariant, parse_written_type(rest));

@@ -67,7 +67,7 @@ fn collect(ty: &Type, position: Position, out: &mut Native) -> bool {
             Type(Repr::Array(..)) | Type(Repr::ArrayShape(_)) => out.add("array"),
             Type(Repr::Callable(_)) => out.add("callable"),
             Type(Repr::ObjectShape(_)) | Type(Repr::ObjectWithoutClass) => out.add("object"),
-            Type(Repr::Mixed(_)) => out.add("mixed"),
+            Type(Repr::Mixed(..)) => out.add("mixed"),
             Type(Repr::Void) if position == Position::Return => out.add("void"),
             Type(Repr::Never) if position == Position::Return => out.add("never"),
             Type(Repr::StaticRef(_)) | Type(Repr::This) if position == Position::Return => {

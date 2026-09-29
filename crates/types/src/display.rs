@@ -36,7 +36,7 @@ fn write_callable_sig(f: &mut fmt::Formatter<'_>, keyword: &str, sig: &CallableS
             .iter()
             .map(|t| {
                 let mut s = t.name.clone();
-                if !matches!(*t.bound, Type(Repr::Mixed(_))) {
+                if !matches!(*t.bound, Type(Repr::Mixed(..))) {
                     s.push_str(&format!(" of {}", t.bound));
                 }
                 if let Some(default) = &t.default {
@@ -54,7 +54,14 @@ impl fmt::Display for Type {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         syntax::stack::guard(|| {
             match self {
-                Type(Repr::Mixed(_)) => write!(f, "mixed"),
+                Type(Repr::Mixed(_, None)) => write!(f, "mixed"),
+                Type(Repr::Mixed(_, Some(subtracted))) => {
+                    if subtracted.union_members().len() > 1 {
+                        write!(f, "mixed~({subtracted})")
+                    } else {
+                        write!(f, "mixed~{subtracted}")
+                    }
+                }
                 Type(Repr::Error) => write!(f, "*ERROR*"),
                 Type(Repr::Never) => write!(f, "never"),
                 Type(Repr::Void) => write!(f, "void"),
@@ -70,7 +77,7 @@ impl fmt::Display for Type {
                 Type(Repr::Array(key, value)) => {
                     let known_key = **key != Type::unknown_array_key();
                     match (known_key, value.as_ref()) {
-                        (false, Type(Repr::Mixed(_))) => write!(f, "array"),
+                        (false, Type(Repr::Mixed(..))) => write!(f, "array"),
                         (false, v) => write!(f, "array<{v}>"),
                         (true, v) => write!(f, "array<{key}, {v}>"),
                     }
@@ -325,7 +332,7 @@ fn write_shape(f: &mut fmt::Formatter<'_>, keyword: &str, shape: &Shape) -> fmt:
         .collect();
     if let Some(tail) = &shape.unsealed {
         let (key, value) = &**tail;
-        if *key == Type::unknown_array_key() && matches!(value, Type(Repr::Mixed(_))) {
+        if *key == Type::unknown_array_key() && matches!(value, Type(Repr::Mixed(..))) {
             parts.push("...".to_string());
         } else {
             parts.push(format!("...<{key}, {value}>"));

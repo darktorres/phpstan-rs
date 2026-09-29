@@ -1,0 +1,1 @@
+6:13-6:24 identical.alwaysFalse L4 | Strict comparison using === between mixed~null and null will always evaluate to false.

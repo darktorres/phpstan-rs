@@ -40,8 +40,8 @@ fn union_types_impl(a: Type, b: Type) -> Type {
         }
         // A `mixed` absorbs everything, and stays explicit when either side
         // wrote it.
-        if let Some(explicit) = mixed_explicitness(&[&a, &b]) {
-            return Type::mixed_with(explicit);
+        if let Some(mixed) = union_with_mixed(&[&a, &b]) {
+            return mixed;
         }
         if let Some(merged) = merge_has_offset_value_pair(&a, &b) {
             return merged;
@@ -71,7 +71,7 @@ fn union_types_impl(a: Type, b: Type) -> Type {
         // once flattened out of a multi-member `Union` operand (real shape:
         // `?mixed`'s own union-with-`Null` construction, `types/parse.rs`'s
         // `parse_type_string`, before its own analogous fix), which the
-        // fast-path's `a == Repr::Mixed(false)`/`b == Repr::Mixed(false)`
+        // fast-path's `a == Repr::Mixed(false, None)`/`b == Repr::Mixed(false, None)`
         // checks never see since neither whole operand is bare `Mixed` -
         // only one of its now-flattened members is. Without this, a
         // `Mixed`-containing union merged with anything else keeps
@@ -84,8 +84,8 @@ fn union_types_impl(a: Type, b: Type) -> Type {
         if members.contains(&Type::error()) {
             return Type::error();
         }
-        if let Some(explicit) = mixed_explicitness(&members.iter().collect::<Vec<_>>()) {
-            return Type::mixed_with(explicit);
+        if let Some(mixed) = union_with_mixed(&members.iter().collect::<Vec<_>>()) {
+            return mixed;
         }
         members.retain(|m| *m != Type::never());
         // `true|false` is `bool`, and `bool` holds both.
@@ -855,14 +855,29 @@ fn normalize_generic_args(ty: Type) -> Type {
     }
 }
 
-/// Whether any of `types` is `mixed`, and if so whether one is written
-/// out explicitly.
-fn mixed_explicitness(types: &[&Type]) -> Option<bool> {
-    let mut found = None;
+/// The union of `types` when one is `mixed`: `mixed`, explicit when one
+/// is written out, still without what every `mixed` among them lacks and
+/// no other member adds back (`mixed~null|int` is `mixed~null`,
+/// `mixed~null|null` is `mixed`). `None` when none is `mixed`.
+fn union_with_mixed(types: &[&Type]) -> Option<Type> {
+    let mut explicit = None;
+    let mut subtracted: Option<Option<Type>> = None;
     for ty in types {
-        if let Type(Repr::Mixed(explicit)) = ty {
-            found = Some(found.unwrap_or(false) || *explicit);
+        if let Type(Repr::Mixed(written, lacks)) = ty {
+            explicit = Some(explicit.unwrap_or(false) || *written);
+            subtracted = Some(match (subtracted, lacks.as_deref()) {
+                (None, lacks) => lacks.cloned(),
+                (Some(Some(before)), Some(lacks)) if before == *lacks => Some(before),
+                _ => None,
+            });
         }
     }
-    found
+    let explicit = explicit?;
+    let mut subtracted = subtracted.flatten();
+    for ty in types {
+        if !matches!(ty, Type(Repr::Mixed(..))) {
+            subtracted = subtracted.map(|s| s.without(ty)).filter(|s| !s.is_never());
+        }
+    }
+    Some(Type(Repr::Mixed(explicit, subtracted.map(Box::new))))
 }

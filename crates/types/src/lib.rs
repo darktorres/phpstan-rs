@@ -97,7 +97,7 @@ pub(crate) enum Repr {
     // written (the keyword, or an unbounded `@template T`), `false` when
     // nothing is known (an unresolvable expression, a missing type). Type
     // equality ignores the flag, as `MixedType::equals()` does.
-    Mixed(bool),
+    Mixed(bool, Option<Box<Type>>),
     // PHPStan's `ErrorType`: the value of an expression a rule reports as
     // invalid. A `mixed` that accepts and is accepted by everything, so the
     // reported error doesn't cascade into more.
@@ -285,7 +285,7 @@ fn same_members(a: &[Type], b: &[Type]) -> bool {
 impl PartialEq for Type {
     fn eq(&self, other: &Self) -> bool {
         syntax::stack::guard(|| match (self, other) {
-            (Type(Repr::Mixed(_)), Type(Repr::Mixed(_))) => true,
+            (Type(Repr::Mixed(_, a)), Type(Repr::Mixed(_, b))) => a == b,
             (Type(Repr::Error), Type(Repr::Error)) => true,
             (Type(Repr::Never), Type(Repr::Never)) => true,
             (Type(Repr::Void), Type(Repr::Void)) => true,
@@ -376,7 +376,7 @@ impl PartialEq for Type {
                     && a_negated == b_negated
             }
             (
-                Type(Repr::Mixed(_))
+                Type(Repr::Mixed(..))
                 | Type(Repr::Error)
                 | Type(Repr::Never)
                 | Type(Repr::Void)
@@ -435,8 +435,8 @@ impl Hash for Type {
         syntax::stack::guard(|| {
             std::mem::discriminant(&self.0).hash(state);
             match self {
-                Type(Repr::Mixed(_))
-                | Type(Repr::Error)
+                Type(Repr::Mixed(_, subtracted)) => subtracted.hash(state),
+                Type(Repr::Error)
                 | Type(Repr::Never)
                 | Type(Repr::Void)
                 | Type(Repr::Null)

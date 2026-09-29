@@ -7,6 +7,6 @@
                 if (! isset($page['section'])) {
                     $page['section'] = Section::Categories;
                 }
-                assertType('array{items: mixed, section: mixed, ...}', $page);
+                assertType('array{items: mixed, section: mixed~null, ...}', $page);
             }
         

@@ -10,7 +10,7 @@ use crate::{
 impl Type {
     /// Whether this is `mixed`, written or not.
     pub fn is_mixed(&self) -> bool {
-        matches!(self, Type(Repr::Mixed(_)))
+        matches!(self, Type(Repr::Mixed(..)))
     }
 
     /// Whether this is the error type: an expression already reported
@@ -21,7 +21,7 @@ impl Type {
 
     /// Whether this is a `mixed` a written type resolved to.
     pub fn is_explicit_mixed(&self) -> bool {
-        matches!(self, Type(Repr::Mixed(true)))
+        matches!(self, Type(Repr::Mixed(true, _)))
     }
 
     /// A union's members, or this type alone.
@@ -93,7 +93,7 @@ impl Type {
             ) => true,
             ("bool", Type(Repr::Bool) | Type(Repr::True) | Type(Repr::False)) => true,
             ("array", Type(Repr::Array(..)) | Type(Repr::ArrayShape(_))) => true,
-            ("mixed", Type(Repr::Mixed(_))) => true,
+            ("mixed", Type(Repr::Mixed(..))) => true,
             ("object", Type(Repr::ObjectWithoutClass)) => true,
             ("callable", Type(Repr::Callable(_))) => true,
             ("iterable", Type(Repr::Object(n, _))) if n.eq_ignore_ascii_case("Traversable") => true,
@@ -490,7 +490,7 @@ impl Type {
 
     /// Whether this is a `mixed` with no type information behind it.
     pub fn is_implicit_mixed(&self) -> bool {
-        matches!(self, Type(Repr::Mixed(false)))
+        matches!(self, Type(Repr::Mixed(false, None)))
     }
 
     /// Whether every value of this type is one of `of` (`Yes`), none is
@@ -623,8 +623,8 @@ impl Type {
     /// PHPStan's `isArray()`.
     pub fn is_array(&self) -> TrinaryLogic {
         self.is_within(&Type::array(
-            Type(Repr::Mixed(false)),
-            Type(Repr::Mixed(false)),
+            Type(Repr::Mixed(false, None)),
+            Type(Repr::Mixed(false, None)),
         ))
     }
 
@@ -657,7 +657,10 @@ impl Type {
     /// Whether every value is a non-empty array.
     pub fn is_non_empty_array(&self) -> TrinaryLogic {
         self.is_within(&Type(Repr::Intersection(vec![
-            Type::array(Type(Repr::Mixed(false)), Type(Repr::Mixed(false))),
+            Type::array(
+                Type(Repr::Mixed(false, None)),
+                Type(Repr::Mixed(false, None)),
+            ),
             Type::accessory(AccessoryKind::NonEmptyArray),
         ])))
     }

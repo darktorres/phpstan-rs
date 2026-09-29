@@ -43,7 +43,7 @@ impl Relation<'_> {
                     }
                     // `T of array<K, V>` binds `K` and `V` too.
                     self.infer_template_bindings(&tp.bound, arg, bindings);
-                    if matches!(*tp.bound, Type(Repr::Mixed(_)))
+                    if matches!(*tp.bound, Type(Repr::Mixed(..)))
                         || self.is_super_type_of(&tp.bound, arg).yes()
                     {
                         bind(bindings, &tp.name, arg.clone());
@@ -419,7 +419,9 @@ fn substitute(
             Type(Repr::TemplateParam(tp)) => bindings.get(&tp.name).cloned().unwrap_or_else(|| {
                 let fallback = match tp.default.as_deref() {
                     Some(default) => default,
-                    None if to_bound(tp) && !matches!(*tp.bound, Type(Repr::Mixed(_))) => &tp.bound,
+                    None if to_bound(tp) && !matches!(*tp.bound, Type(Repr::Mixed(..))) => {
+                        &tp.bound
+                    }
                     None => return Type::mixed(),
                 };
                 // The template's own name is bound to `Mixed` while its
@@ -441,7 +443,7 @@ fn substitute(
                 negated,
             }) if bindings
                 .get(subject.as_str())
-                .is_some_and(|b| !matches!(b, Type(Repr::Mixed(_)))) =>
+                .is_some_and(|b| !matches!(b, Type(Repr::Mixed(..)))) =>
             {
                 let target = substitute(target, bindings, substituted, to_bound, relation);
                 match super::conditional::conditional_branch(

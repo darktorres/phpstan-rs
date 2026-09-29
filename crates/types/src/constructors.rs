@@ -10,17 +10,17 @@ use crate::{
 impl Type {
     /// `mixed` with no type information behind it.
     pub const fn mixed() -> Type {
-        Type(Repr::Mixed(false))
+        Type(Repr::Mixed(false, None))
     }
 
     /// `mixed` as a type written somewhere resolved to it.
     pub const fn explicit_mixed() -> Type {
-        Type(Repr::Mixed(true))
+        Type(Repr::Mixed(true, None))
     }
 
     /// `mixed`, explicit or not.
     pub const fn mixed_with(explicit: bool) -> Type {
-        Type(Repr::Mixed(explicit))
+        Type(Repr::Mixed(explicit, None))
     }
 
     pub const fn error() -> Type {

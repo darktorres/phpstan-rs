@@ -20,7 +20,7 @@ fn two_shapes_intersect_into_one() {
     ]));
     let b = Type::array_shape(Shape::sealed(vec![
         field(0, literals.clone(), false),
-        field(1, Type(Repr::Mixed(false)), false),
+        field(1, Type(Repr::Mixed(false, None)), false),
     ]));
     assert_eq!(
         intersect_types(vec![a, b]),
@@ -42,7 +42,7 @@ fn a_required_key_the_other_sealed_shape_lacks_is_never() {
 fn a_shape_within_an_array_takes_its_value_type() {
     let shape = Type::array_shape(Shape::sealed(vec![field(
         0,
-        Type(Repr::Mixed(false)),
+        Type(Repr::Mixed(false, None)),
         false,
     )]));
     let array = Type::array(Type(Repr::Int), Type(Repr::String));

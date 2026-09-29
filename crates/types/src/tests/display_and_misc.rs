@@ -76,8 +76,8 @@ fn equal_types_hash_alike() {
             Type::float_literal(-f64::NAN),
         ),
         (
-            Type::array(Type(Repr::Int), Type(Repr::Mixed(true))),
-            Type::array(Type(Repr::Int), Type(Repr::Mixed(false))),
+            Type::array(Type(Repr::Int), Type(Repr::Mixed(true, None))),
+            Type::array(Type(Repr::Int), Type(Repr::Mixed(false, None))),
         ),
         (
             Type(Repr::Union(vec![Type::int(), Type::string()])),

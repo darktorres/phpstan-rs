@@ -374,7 +374,10 @@ fn array_shape_with_an_unsealed_marker_still_parses_its_real_fields() {
                 Type(Repr::Int),
                 false
             )],
-            unsealed: Some(Box::new((Type(Repr::String), Type(Repr::Mixed(false))))),
+            unsealed: Some(Box::new((
+                Type(Repr::String),
+                Type(Repr::Mixed(false, None))
+            ))),
             next_index: None,
         })
     );

@@ -20,7 +20,7 @@ function f(string $s, string $ne, string $ns, int $i, array $l, array $m): void 
     assertType('non-empty-array<(int|numeric-string), 1>', [$ns => 1]);
     $b = [];
     $b[$s] = 1;
-    assertType('array<(int|string), 1>', $b);
+    assertType('non-empty-array<(int|string), 1>', $b);
     $c = [];
     $c['5'] = 1;
     assertType('array{5: 1}', $c);

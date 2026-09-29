@@ -54,7 +54,7 @@ impl Type {
 /// anything whose keys aren't known from the type alone.
 pub(crate) fn key_of(ty: &Type) -> Option<Type> {
     match ty {
-        Type(Repr::Mixed(_)) => Some(Type::mixed()),
+        Type(Repr::Mixed(..)) => Some(Type::mixed()),
         Type(Repr::Array(key, _)) => Some((**key).clone()),
         Type(Repr::ArrayShape(shape)) => Some(join(
             shape
@@ -74,7 +74,7 @@ pub(crate) fn key_of(ty: &Type) -> Option<Type> {
 /// case values need the registry (`Registry::resolve_deferred_value_of`).
 pub(crate) fn value_of(ty: &Type) -> Option<Type> {
     match ty {
-        Type(Repr::Mixed(_)) => Some(Type::mixed()),
+        Type(Repr::Mixed(..)) => Some(Type::mixed()),
         Type(Repr::Array(_, value)) => Some((**value).clone()),
         Type(Repr::ArrayShape(shape)) => Some(join(shape.types().cloned().collect())),
         Type(Repr::Intersection(members)) => members.iter().find_map(value_of),
