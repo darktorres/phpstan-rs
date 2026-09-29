@@ -13,22 +13,22 @@ fn substitute_template_recurses_into_array_and_intersection_types() {
 
     let array_of_t = Type::array(
         Type::unknown_array_key(),
-        Type(Repr::TemplateParam(TemplateParam::unbounded(
+        Type::new(Repr::TemplateParam(TemplateParam::unbounded(
             "T".to_string(),
         ))),
     );
     assert_eq!(
         array_of_t.substitute_templates(&bindings, &crate::Relation::structural()),
-        Type::array(Type::unknown_array_key(), Type(Repr::String))
+        Type::array(Type::unknown_array_key(), Type::new(Repr::String))
     );
 
-    let intersection_with_t = Type(Repr::Intersection(vec![
+    let intersection_with_t = Type::new(Repr::Intersection(vec![
         Type::template_param(TemplateParam::unbounded("T".to_string())),
         Type::object("Countable".into(), Vec::new()),
     ]));
     assert_eq!(
         intersection_with_t.substitute_templates(&bindings, &crate::Relation::structural()),
-        Type(Repr::Intersection(vec![
+        Type::new(Repr::Intersection(vec![
             Type::string(),
             Type::object("Countable".into(), Vec::new())
         ]))
@@ -45,13 +45,13 @@ fn substitute_template_recurses_into_a_generic_class_reference() {
 
     let box_of_t = Type::object(
         "Box".into(),
-        vec![Type(Repr::TemplateParam(TemplateParam::unbounded(
+        vec![Type::new(Repr::TemplateParam(TemplateParam::unbounded(
             "T".to_string(),
         )))],
     );
     assert_eq!(
         box_of_t.substitute_templates(&bindings, &crate::Relation::structural()),
-        Type::object("Box".into(), vec![Type(Repr::Int)])
+        Type::object("Box".into(), vec![Type::new(Repr::Int)])
     );
 }
 
@@ -65,7 +65,7 @@ fn substitute_template_recurses_into_a_conditional_types_branches() {
     bindings.insert("T".to_string(), Type::int());
 
     let t = || Type::template_param(TemplateParam::unbounded("T".to_string()));
-    let conditional = Type(Repr::Conditional {
+    let conditional = Type::new(Repr::Conditional {
         subject: ConditionalSubject::Parameter("x".into()),
         target: std::sync::Arc::new(t()),
         if_true: std::sync::Arc::new(t()),
@@ -74,7 +74,7 @@ fn substitute_template_recurses_into_a_conditional_types_branches() {
     });
     assert_eq!(
         conditional.substitute_templates(&bindings, &crate::Relation::structural()),
-        Type(Repr::Conditional {
+        Type::new(Repr::Conditional {
             subject: ConditionalSubject::Parameter("x".into()),
             target: std::sync::Arc::new(Type::int()),
             if_true: std::sync::Arc::new(Type::int()),

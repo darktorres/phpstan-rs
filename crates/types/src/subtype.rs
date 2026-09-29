@@ -47,7 +47,7 @@ impl Shape {
         let literals = match key_types.len() {
             0 => Type::never(),
             1 => key_types.into_iter().next().expect("len checked above"),
-            _ => Type(Repr::Union(key_types)),
+            _ => Type::new(Repr::Union(key_types)),
         };
         match self.unsealed.as_deref() {
             Some(tail) => Type::union(literals, tail.0.clone()),
@@ -62,44 +62,36 @@ impl Relation<'_> {
     /// answer itself first.
     pub(crate) fn proves_super_type(&self, sup: &Type, sub: &Type) -> bool {
         syntax::stack::guard(|| {
-            match (sub, sup) {
+            match (sub.repr(), sup.repr()) {
                 // A shaped callable is always compatible with a bare marker.
-                (Type(Repr::Callable(Some(_))), Type(Repr::Callable(None))) => true,
+                (Repr::Callable(Some(_)), Repr::Callable(None)) => true,
                 // Parameters contravariant, the return covariant.
-                (Type(Repr::Callable(Some(a))), Type(Repr::Callable(Some(b)))) => {
+                (Repr::Callable(Some(a)), Repr::Callable(Some(b))) => {
                     self.callable_sig_fits(a, b, &|x, y| self.is_super_type_of(y, x).yes(), false)
                 }
 
-                (Type(Repr::IntLiteral(_)), Type(Repr::Int)) => true,
-                (Type(Repr::StringLiteral(_)), Type(Repr::String)) => true,
+                (Repr::IntLiteral(_), Repr::Int) => true,
+                (Repr::StringLiteral(_), Repr::String) => true,
                 // `$this`, `static`, `self` and `parent` are always objects.
                 (
-                    Type(Repr::This)
-                    | Type(Repr::StaticRef(_))
-                    | Type(Repr::SelfRef(_))
-                    | Type(Repr::ParentRef),
-                    Type(Repr::ObjectWithoutClass),
+                    Repr::This | Repr::StaticRef(_) | Repr::SelfRef(_) | Repr::ParentRef,
+                    Repr::ObjectWithoutClass,
                 ) => true,
-                (Type(Repr::True), Type(Repr::Bool)) | (Type(Repr::False), Type(Repr::Bool)) => {
-                    true
-                }
-                (Type(Repr::FloatLiteral(_)), Type(Repr::Float)) => true,
+                (Repr::True, Repr::Bool) | (Repr::False, Repr::Bool) => true,
+                (Repr::FloatLiteral(_), Repr::Float) => true,
 
                 // `int<min, max>` ranges. `IntRange` fully replaces
                 // `Int`'s own range (the same relationship `IntLiteral` has to
                 // `Int`), so an `IntLiteral`/narrower `IntRange` widens to it
                 // the same way a literal widens to its own base type.
-                (Type(Repr::IntLiteral(n)), Type(Repr::IntRange(min, max))) => {
+                (Repr::IntLiteral(n), Repr::IntRange(min, max)) => {
                     min.is_none_or(|m| *n >= m) && max.is_none_or(|m| *n <= m)
                 }
-                (
-                    Type(Repr::IntRange(sub_min, sub_max)),
-                    Type(Repr::IntRange(sup_min, sup_max)),
-                ) => {
+                (Repr::IntRange(sub_min, sub_max), Repr::IntRange(sup_min, sup_max)) => {
                     sup_min.is_none_or(|m| sub_min.is_some_and(|s| s >= m))
                         && sup_max.is_none_or(|m| sub_max.is_some_and(|s| s <= m))
                 }
-                (Type(Repr::IntRange(_, _)), Type(Repr::Int)) => true,
+                (Repr::IntRange(_, _), Repr::Int) => true,
 
                 // String/array accessory kinds. A literal directly
                 // proves or disproves each kind from its own exact value - no
@@ -110,103 +102,90 @@ impl Relation<'_> {
                 // deliberately never satisfies either, matching real PHPStan's
                 // own confirmed strictness (a `list<int>`-typed parameter
                 // rejects even a known-element `int[]` argument).
-                (
-                    Type(Repr::StringLiteral(s)),
-                    Type(Repr::Accessory(AccessoryKind::NonEmptyString)),
-                ) => !s.is_empty(),
-                (
-                    Type(Repr::StringLiteral(s)),
-                    Type(Repr::Accessory(AccessoryKind::NonFalsyString)),
-                ) => !s.is_empty() && s != "0",
-                (
-                    Type(Repr::StringLiteral(_)),
-                    Type(Repr::Accessory(AccessoryKind::LiteralString)),
-                ) => true,
-                (
-                    Type(Repr::StringLiteral(s)),
-                    Type(Repr::Accessory(AccessoryKind::NumericString)),
-                ) => s.as_str().is_some_and(is_numeric_string_literal),
+                (Repr::StringLiteral(s), Repr::Accessory(AccessoryKind::NonEmptyString)) => {
+                    !s.is_empty()
+                }
+                (Repr::StringLiteral(s), Repr::Accessory(AccessoryKind::NonFalsyString)) => {
+                    !s.is_empty() && s != "0"
+                }
+                (Repr::StringLiteral(_), Repr::Accessory(AccessoryKind::LiteralString)) => true,
+                (Repr::StringLiteral(s), Repr::Accessory(AccessoryKind::NumericString)) => {
+                    s.as_str().is_some_and(is_numeric_string_literal)
+                }
                 // Mirrors real `ConstantStringType::isLowercaseString`/
                 // `isUppercaseString` (`strtolower($v) === $v`/`strtoupper($v) ===
                 // $v`) - ASCII-only, matching PHP 8.2+'s own locale-independent
                 // `strtolower`/`strtoupper` (this project's only supported PHP
                 // version range).
-                (
-                    Type(Repr::StringLiteral(s)),
-                    Type(Repr::Accessory(AccessoryKind::LowercaseString)),
-                ) => s.as_bytes().iter().all(|b| !b.is_ascii_uppercase()),
-                (
-                    Type(Repr::StringLiteral(s)),
-                    Type(Repr::Accessory(AccessoryKind::UppercaseString)),
-                ) => s.as_bytes().iter().all(|b| !b.is_ascii_lowercase()),
+                (Repr::StringLiteral(s), Repr::Accessory(AccessoryKind::LowercaseString)) => {
+                    s.as_bytes().iter().all(|b| !b.is_ascii_uppercase())
+                }
+                (Repr::StringLiteral(s), Repr::Accessory(AccessoryKind::UppercaseString)) => {
+                    s.as_bytes().iter().all(|b| !b.is_ascii_lowercase())
+                }
                 // Mirrors real `ConstantStringType::isDecimalIntegerString`
                 // (`(string) (int) $v === $v`) - round-trips through `i64`, so a
                 // leading zero (`"007"`), an explicit sign (`"+1"`), `"-0"`, an
                 // empty string, or a non-integer numeric string (`"1.0"`) are all
                 // correctly excluded.
-                (
-                    Type(Repr::StringLiteral(s)),
-                    Type(Repr::Accessory(AccessoryKind::DecimalIntegerString)),
-                ) => s.as_str().is_some_and(is_decimal_integer_string_literal),
+                (Repr::StringLiteral(s), Repr::Accessory(AccessoryKind::DecimalIntegerString)) => {
+                    s.as_str().is_some_and(is_decimal_integer_string_literal)
+                }
                 // Every non-falsy string is non-empty, and so is every numeric
                 // one (`""` isn't numeric).
                 (
-                    Type(Repr::Accessory(
-                        AccessoryKind::NonFalsyString | AccessoryKind::NumericString,
-                    )),
-                    Type(Repr::Accessory(AccessoryKind::NonEmptyString)),
+                    Repr::Accessory(AccessoryKind::NonFalsyString | AccessoryKind::NumericString),
+                    Repr::Accessory(AccessoryKind::NonEmptyString),
                 ) => true,
                 // A decimal integer string (`"0"`, `"123"`, `"-1"`) is always
                 // also numeric, "lowercase" and "uppercase" (no letters to fail
                 // either check), and non-empty (mirrors real
                 // `AccessoryDecimalIntegerStringType`).
                 (
-                    Type(Repr::Accessory(AccessoryKind::DecimalIntegerString)),
-                    Type(Repr::Accessory(
+                    Repr::Accessory(AccessoryKind::DecimalIntegerString),
+                    Repr::Accessory(
                         AccessoryKind::NumericString
                         | AccessoryKind::LowercaseString
                         | AccessoryKind::UppercaseString
                         | AccessoryKind::NonEmptyString,
-                    )),
+                    ),
                 ) => true,
-                (Type(Repr::ArrayShape(shape)), Type(Repr::HasOffset(key))) => {
+                (Repr::ArrayShape(shape), Repr::HasOffset(key)) => {
                     shape.field(key).is_some_and(|f| !f.optional)
                 }
-                (
-                    Type(Repr::ArrayShape(shape)),
-                    Type(Repr::Accessory(AccessoryKind::NonEmptyArray)),
-                ) => shape.fields.iter().any(|f| !f.optional),
+                (Repr::ArrayShape(shape), Repr::Accessory(AccessoryKind::NonEmptyArray)) => {
+                    shape.fields.iter().any(|f| !f.optional)
+                }
                 // An array with a known offset isn't empty.
                 (
-                    Type(Repr::HasOffset(_)) | Type(Repr::HasOffsetValue(..)),
-                    Type(Repr::Accessory(AccessoryKind::NonEmptyArray)),
+                    Repr::HasOffset(_) | Repr::HasOffsetValue(..),
+                    Repr::Accessory(AccessoryKind::NonEmptyArray),
                 ) => true,
-                (
-                    Type(Repr::ArrayShape(shape)),
-                    Type(Repr::Accessory(AccessoryKind::ArrayList)),
-                ) => shape.is_list(),
+                (Repr::ArrayShape(shape), Repr::Accessory(AccessoryKind::ArrayList)) => {
+                    shape.is_list()
+                }
 
                 // An unresolved `Conditional` - either it leaked into a
                 // position `resolve_conditional` never runs against, or its
                 // subject was left unbound - is either branch.
                 (
                     _,
-                    Type(Repr::Conditional {
+                    Repr::Conditional {
                         if_true, if_false, ..
-                    }),
+                    },
                 ) => self
                     .is_super_type_of(
-                        &Type(Repr::Union(vec![(**if_true).clone(), (**if_false).clone()])),
+                        &Type::new(Repr::Union(vec![(**if_true).clone(), (**if_false).clone()])),
                         sub,
                     )
                     .yes(),
-                (Type(Repr::Intersection(_)), Type(Repr::Intersection(sup_members))) => sup_members
+                (Repr::Intersection(_), Repr::Intersection(sup_members)) => sup_members
                     .iter()
                     .all(|m| self.is_super_type_of(m, sub).yes()),
-                (Type(Repr::Intersection(members)), _) => {
+                (Repr::Intersection(members), _) => {
                     members.iter().any(|m| self.is_super_type_of(sup, m).yes())
                 }
-                (_, Type(Repr::Intersection(members))) => {
+                (_, Repr::Intersection(members)) => {
                     members.iter().all(|m| self.is_super_type_of(m, sub).yes())
                 }
 
@@ -214,20 +193,15 @@ impl Relation<'_> {
                 // is not a subtype of `array<string, T>`. The common "don't know
                 // the real key" case (`unknown_array_key()`, `int|string`) still
                 // passes via the ordinary `Union` subtype rule above.
-                (Type(Repr::Array(ka, a)), Type(Repr::Array(kb, b))) => {
+                (Repr::Array(ka, a), Repr::Array(kb, b)) => {
                     self.is_super_type_of(kb, ka).yes() && self.is_super_type_of(b, a).yes()
                 }
 
                 // `class-string<T>` is a string; two recurse like `Array` does.
-                (Type(Repr::ClassString(a)), Type(Repr::ClassString(b))) => {
-                    self.is_super_type_of(b, a).yes()
-                }
-                (
-                    Type(Repr::ClassString(_)) | Type(Repr::ClassKindString(_)),
-                    Type(Repr::String),
-                ) => true,
-                (Type(Repr::ClassString(a)), Type(Repr::ClassKindString(kind))) => match &**a {
-                    Type(Repr::Object(name, _)) => self
+                (Repr::ClassString(a), Repr::ClassString(b)) => self.is_super_type_of(b, a).yes(),
+                (Repr::ClassString(_) | Repr::ClassKindString(_), Repr::String) => true,
+                (Repr::ClassString(a), Repr::ClassKindString(kind)) => match a.repr() {
+                    Repr::Object(name, _) => self
                         .hierarchy
                         .find_class(name)
                         .is_some_and(|class| class.kind == *kind),
@@ -238,7 +212,7 @@ impl Relation<'_> {
                 // whose values all fit its value type (an unsealed tail's too).
                 // The reverse - does some array have these exact keys - is never
                 // provable.
-                (Type(Repr::ArrayShape(shape)), Type(Repr::Array(key, value))) => {
+                (Repr::ArrayShape(shape), Repr::Array(key, value)) => {
                     self.is_super_type_of(key, &shape.key_type()).yes()
                         && shape.types().all(|t| self.is_super_type_of(value, t).yes())
                 }
@@ -246,18 +220,15 @@ impl Relation<'_> {
                 // An object shape is structurally an object, as is every class
                 // instance and enum case. Whether a class has a shape's
                 // properties is `accepts`'s question.
-                (Type(Repr::ObjectShape(_)), Type(Repr::ObjectWithoutClass)) => true,
-                (
-                    Type(Repr::Object(..)) | Type(Repr::EnumCase(..)),
-                    Type(Repr::ObjectWithoutClass),
-                ) => true,
+                (Repr::ObjectShape(_), Repr::ObjectWithoutClass) => true,
+                (Repr::Object(..) | Repr::EnumCase(..), Repr::ObjectWithoutClass) => true,
 
-                (Type(Repr::Object(a, args_a)), Type(Repr::Object(b, args_b))) => {
+                (Repr::Object(a, args_a), Repr::Object(b, args_b)) => {
                     self.object_subtype(a, args_a, b, args_b)
                 }
                 // A case is an instance of its own enum and of whatever that
                 // enum implements (`UnitEnum`/`BackedEnum` included).
-                (Type(Repr::EnumCase(fqn, _)), Type(Repr::Object(name, _))) => {
+                (Repr::EnumCase(fqn, _), Repr::Object(name, _)) => {
                     fqn == name || self.hierarchy.is_subclass_of(fqn, name)
                 }
 
@@ -305,7 +276,7 @@ impl Relation<'_> {
             let Some(b_i) = b_i.without_call_site_variance() else {
                 return true;
             };
-            if matches!(b_i, Type(Repr::Mixed(..))) {
+            if matches!(b_i.repr(), Repr::Mixed(..)) {
                 return true;
             }
             let a_i = effective_args_a.get(i).cloned().unwrap_or(Type::mixed());
@@ -368,7 +339,7 @@ impl Relation<'_> {
         let a = a.instantiated_against(&b, self);
         let fits = |sub: &Type, sup: &Type| {
             (mixed_as_any
-                && (matches!(sub, Type(Repr::Mixed(..))) || matches!(sup, Type(Repr::Mixed(..)))))
+                && (matches!(sub.repr(), Repr::Mixed(..)) || matches!(sup.repr(), Repr::Mixed(..))))
                 || is_sub(sub, sup)
         };
         // A `void` return accepts `null` (`VoidType::accepts`).
@@ -397,8 +368,8 @@ impl Relation<'_> {
             if ap.by_ref && !bp.by_ref {
                 return false;
             }
-            if let Type(Repr::TemplateParam(tp)) = &bp.ty {
-                if !(matches!(*tp.bound, Type(Repr::Mixed(..))) || fits(&ap.ty, &tp.bound)) {
+            if let Repr::TemplateParam(tp) = bp.ty.repr() {
+                if !(matches!((*tp.bound).repr(), Repr::Mixed(..)) || fits(&ap.ty, &tp.bound)) {
                     return false;
                 }
                 continue;

@@ -38,12 +38,12 @@ fn iterable_union_value_type(members: &[Type]) -> Option<&Type> {
     if members.len() != 2 {
         return None;
     }
-    let array_inner = members.iter().find_map(|m| match m {
-        Type(Repr::Array(_, inner)) => Some(inner.as_ref()),
+    let array_inner = members.iter().find_map(|m| match m.repr() {
+        Repr::Array(_, inner) => Some(inner.as_ref()),
         _ => None,
     })?;
     let has_traversable = members.iter().any(|m| {
-        matches!(m, Type(Repr::Object(name, _)) if name.trim_start_matches('\\') == "Traversable")
+        matches!(m.repr(), Repr::Object(name, _) if name.trim_start_matches('\\') == "Traversable")
     });
     has_traversable.then_some(array_inner)
 }
@@ -77,12 +77,12 @@ fn collect_iterable_missing_value_types(ty: &Type, explicit_mixed: bool, out: &m
                 out.push(desc);
             }
         };
-        match ty {
-            Type(Repr::TemplateParam(_)) => return,
-            Type(Repr::Array(_, inner)) if inner.is_mixed() => {
+        match ty.repr() {
+            Repr::TemplateParam(_) => return,
+            Repr::Array(_, inner) if inner.is_mixed() => {
                 return missing(format!("iterable type {ty}"));
             }
-            Type(Repr::Union(members)) => {
+            Repr::Union(members) => {
                 if let Some(inner) = iterable_union_value_type(members) {
                     if inner.is_mixed() {
                         missing("iterable type iterable".to_string());
@@ -95,13 +95,13 @@ fn collect_iterable_missing_value_types(ty: &Type, explicit_mixed: bool, out: &m
             // `list<V>`, `non-empty-array<V>`, `list<V>&non-empty-array`: the
             // value type is whatever any `Array` member specifies, so only
             // an intersection whose every array member is bare lacks one.
-            Type(Repr::Intersection(members))
-                if members.iter().any(|m| matches!(m, Type(Repr::Array(..)))) =>
+            Repr::Intersection(members)
+                if members.iter().any(|m| matches!(m.repr(), Repr::Array(..))) =>
             {
                 let specified: Vec<&Type> = members
                     .iter()
-                    .filter_map(|m| match m {
-                        Type(Repr::Array(_, inner)) if !inner.is_mixed() => Some(inner.as_ref()),
+                    .filter_map(|m| match m.repr() {
+                        Repr::Array(_, inner) if !inner.is_mixed() => Some(inner.as_ref()),
                         _ => None,
                     })
                     .collect();
@@ -129,10 +129,10 @@ fn collect_iterable_missing_value_types(ty: &Type, explicit_mixed: bool, out: &m
 /// class reference. Each finding is the type's own display text.
 fn collect_callables_with_missing_signature(ty: &Type, out: &mut Vec<String>) {
     syntax::stack::guard(|| {
-        match ty {
-            Type(Repr::TemplateParam(_)) => return,
-            Type(Repr::Callable(None)) => return out.push(ty.to_string()),
-            Type(Repr::Object(name, args))
+        match ty.repr() {
+            Repr::TemplateParam(_) => return,
+            Repr::Callable(None) => return out.push(ty.to_string()),
+            Repr::Object(name, args)
                 if args.is_empty()
                     && name
                         .trim_start_matches('\\')
@@ -142,9 +142,9 @@ fn collect_callables_with_missing_signature(ty: &Type, out: &mut Vec<String>) {
             }
             // A `Closure(...)` shape (`Closure&callable(...)`) carries its
             // signature; only that signature's own types are walked.
-            Type(Repr::Intersection(members)) if ty.callable_sig().is_some() => {
+            Repr::Intersection(members) if ty.callable_sig().is_some() => {
                 for m in members {
-                    if matches!(m, Type(Repr::Callable(Some(_)))) {
+                    if matches!(m.repr(), Repr::Callable(Some(_))) {
                         collect_callables_with_missing_signature(m, out);
                     }
                 }
@@ -159,9 +159,9 @@ fn collect_callables_with_missing_signature(ty: &Type, out: &mut Vec<String>) {
 /// Every class `ty` names with no generic arguments, at any depth but
 /// inside a template.
 fn collect_bare_object_class_names<'a>(ty: &'a Type, out: &mut Vec<&'a crate::Name>) {
-    syntax::stack::guard(|| match ty {
-        Type(Repr::TemplateParam(_)) => {}
-        Type(Repr::Object(name, args)) if args.is_empty() => {
+    syntax::stack::guard(|| match ty.repr() {
+        Repr::TemplateParam(_) => {}
+        Repr::Object(name, args) if args.is_empty() => {
             if !out.contains(&name) {
                 out.push(name);
             }

@@ -36,7 +36,7 @@ fn union_types_impl(a: Type, b: Type) -> Type {
             return a;
         }
         // An error absorbs everything, as a `mixed` does.
-        if matches!(a, Type(Repr::Error)) || matches!(b, Type(Repr::Error)) {
+        if matches!(a.repr(), Repr::Error) || matches!(b.repr(), Repr::Error) {
             return Type::error();
         }
         // A `mixed` absorbs everything, and stays explicit when either side
@@ -50,7 +50,7 @@ fn union_types_impl(a: Type, b: Type) -> Type {
         let mut members = Vec::new();
         match a.into_repr() {
             Repr::Union(m) => members.extend(m),
-            other => members.push(Type(other)),
+            other => members.push(Type::new(other)),
         }
         match b.into_repr() {
             Repr::Union(m) => {
@@ -61,7 +61,7 @@ fn union_types_impl(a: Type, b: Type) -> Type {
                 }
             }
             other => {
-                let other = Type(other);
+                let other = Type::new(other);
                 if !members.contains(&other) {
                     members.push(other);
                 }
@@ -95,26 +95,26 @@ fn union_types_impl(a: Type, b: Type) -> Type {
         {
             let at = members
                 .iter()
-                .position(|m| matches!(m, Type(Repr::True) | Type(Repr::False)))
+                .position(|m| matches!(m.repr(), Repr::True | Repr::False))
                 .expect("checked above");
             members[at] = Type::bool();
         }
         if members.contains(&Type::bool()) {
-            members.retain(|m| !matches!(m, Type(Repr::True) | Type(Repr::False)));
+            members.retain(|m| !matches!(m.repr(), Repr::True | Repr::False));
         }
         // An extension payload whose widened form is already a member adds
         // nothing - the union cap's widening stays put once it happened.
         let widened: Vec<Type> = members
             .iter()
-            .filter_map(|m| match m {
-                Type(Repr::Extension(data)) => data.widen(),
+            .filter_map(|m| match m.repr() {
+                Repr::Extension(data) => data.widen(),
                 _ => None,
             })
             .filter(|w| members.contains(w))
             .collect();
         if !widened.is_empty() {
-            members.retain(|m| match m {
-                Type(Repr::Extension(data)) => !data.widen().is_some_and(|w| widened.contains(&w)),
+            members.retain(|m| match m.repr() {
+                Repr::Extension(data) => !data.widen().is_some_and(|w| widened.contains(&w)),
                 _ => true,
             });
         }
@@ -129,14 +129,14 @@ fn union_types_impl(a: Type, b: Type) -> Type {
         // `(int|string)`.
         let benevolent: Vec<Vec<Type>> = members
             .iter()
-            .filter_map(|m| match m {
-                Type(Repr::BenevolentUnion(inner)) => Some(inner.clone()),
+            .filter_map(|m| match m.repr() {
+                Repr::BenevolentUnion(inner) => Some(inner.clone()),
                 _ => None,
             })
             .collect();
         if !benevolent.is_empty() {
             members.retain(|m| {
-                matches!(m, Type(Repr::BenevolentUnion(_)))
+                matches!(m.repr(), Repr::BenevolentUnion(_))
                     || !benevolent
                         .iter()
                         .flatten()
@@ -158,18 +158,14 @@ fn union_types_impl(a: Type, b: Type) -> Type {
             .iter()
             .filter(|m| {
                 matches!(
-                    m,
-                    Type(Repr::Int)
-                        | Type(Repr::String)
-                        | Type(Repr::Bool)
-                        | Type(Repr::Array(_, _))
-                        | Type(Repr::Float)
+                    m.repr(),
+                    Repr::Int | Repr::String | Repr::Bool | Repr::Array(_, _) | Repr::Float
                 )
             })
             .cloned()
             .collect();
         members.retain(|m| match literal_base_type(m) {
-            Some(base) if matches!(m, Type(Repr::Intersection(_))) => {
+            Some(base) if matches!(m.repr(), Repr::Intersection(_)) => {
                 !present_bases.iter().any(|b| {
                     crate::Relation::structural()
                         .is_super_type_of(b, &base)
@@ -220,7 +216,7 @@ fn union_types_impl(a: Type, b: Type) -> Type {
         if members.len() == 1 {
             members.into_iter().next().unwrap()
         } else {
-            Type(Repr::Union(members))
+            Type::new(Repr::Union(members))
         }
     })
 }
@@ -233,16 +229,16 @@ fn union_types_impl(a: Type, b: Type) -> Type {
 pub(crate) fn merge_int_ranges(members: &mut Vec<Type>) {
     if !members
         .iter()
-        .any(|m| matches!(m, Type(Repr::IntRange(..))))
+        .any(|m| matches!(m.repr(), Repr::IntRange(..)))
     {
         return;
     }
     let mut intervals: Vec<(usize, Option<i64>, Option<i64>, bool)> = members
         .iter()
         .enumerate()
-        .filter_map(|(i, m)| match m {
-            Type(Repr::IntRange(min, max)) => Some((i, *min, *max, true)),
-            Type(Repr::IntLiteral(n)) => Some((i, Some(*n), Some(*n), false)),
+        .filter_map(|(i, m)| match m.repr() {
+            Repr::IntRange(min, max) => Some((i, *min, *max, true)),
+            Repr::IntLiteral(n) => Some((i, Some(*n), Some(*n), false)),
             _ => None,
         })
         .collect();
@@ -311,11 +307,11 @@ fn absorb_contained_members(members: &mut Vec<Type>) {
         !m.references_template()
             && !m.contains_late()
             && !matches!(
-                m,
-                Type(Repr::ValueOf(_))
-                    | Type(Repr::ClassConstant { .. })
-                    | Type(Repr::Conditional { .. })
-                    | Type(Repr::Extension(_))
+                m.repr(),
+                Repr::ValueOf(_)
+                    | Repr::ClassConstant { .. }
+                    | Repr::Conditional { .. }
+                    | Repr::Extension(_)
             )
     };
     let settled: Vec<bool> = members.iter().map(settled).collect();
@@ -359,7 +355,7 @@ fn generalize_members(members: Vec<Type>) -> Vec<Type> {
         }
     }
     if generalized.contains(&Type::bool()) {
-        generalized.retain(|m| !matches!(m, Type(Repr::True) | Type(Repr::False)));
+        generalized.retain(|m| !matches!(m.repr(), Repr::True | Repr::False));
     }
     reduce_array_members(&mut generalized);
     generalized
@@ -371,8 +367,8 @@ fn generalize_members(members: Vec<Type>) -> Vec<Type> {
 fn widen_extension_types(members: Vec<Type>) -> Vec<Type> {
     let mut out: Vec<Type> = Vec::new();
     for m in members {
-        let m = match &m {
-            Type(Repr::Extension(data)) => data.widen().unwrap_or(m),
+        let m = match m.repr() {
+            Repr::Extension(data) => data.widen().unwrap_or(m),
             _ => m,
         };
         if !out.contains(&m) {
@@ -409,7 +405,7 @@ pub fn generalize_by_key_set(members: Vec<Type>) -> Vec<Type> {
                     None => groups.push((key_set, vec![shape])),
                 }
             }
-            other => passthrough.push(Type(other)),
+            other => passthrough.push(Type::new(other)),
         }
     }
     for (_, variants) in groups {
@@ -453,25 +449,25 @@ pub fn generalize_by_key_set(members: Vec<Type>) -> Vec<Type> {
 /// union holding that base type already holds the member, so the member
 /// goes.
 fn literal_base_type(t: &Type) -> Option<Type> {
-    match t {
-        Type(Repr::IntLiteral(_)) => Some(Type::int()),
-        Type(Repr::StringLiteral(_)) => Some(Type::string()),
-        Type(Repr::True) | Type(Repr::False) => Some(Type::bool()),
-        Type(Repr::FloatLiteral(_)) => Some(Type::float()),
-        Type(Repr::IntRange(_, _)) => Some(Type::int()),
+    match t.repr() {
+        Repr::IntLiteral(_) => Some(Type::int()),
+        Repr::StringLiteral(_) => Some(Type::string()),
+        Repr::True | Repr::False => Some(Type::bool()),
+        Repr::FloatLiteral(_) => Some(Type::float()),
+        Repr::IntRange(_, _) => Some(Type::int()),
         // Scoped to intersections that carry an `Accessory` member, so a
         // genuine, unrelated multi-class intersection
         // (`Countable&Iterator`) is never affected - only an
         // accessory-refined intersection is "more specific than its own
         // base type."
-        Type(Repr::Intersection(members))
+        Repr::Intersection(members)
             if members
                 .iter()
-                .any(|m| matches!(m, Type(Repr::Accessory(_)))) =>
+                .any(|m| matches!(m.repr(), Repr::Accessory(_))) =>
         {
             members
                 .iter()
-                .find(|m| !matches!(m, Type(Repr::Accessory(_))))
+                .find(|m| !matches!(m.repr(), Repr::Accessory(_)))
                 .cloned()
         }
         _ => None,
@@ -493,21 +489,21 @@ impl Type {
     /// into real merged-shape fields, not just this module's own pairwise
     /// union merge below.
     pub fn has_offset_value_parts(&self) -> Option<(Type, Vec<(ShapeKey, Type)>)> {
-        match self {
-            Type(Repr::Array(..)) => Some((self.clone(), Vec::new())),
-            Type(Repr::Intersection(members))
-                if members.iter().all(|m| {
-                    matches!(m, Type(Repr::Array(..)) | Type(Repr::HasOffsetValue(..)))
-                }) =>
+        match self.repr() {
+            Repr::Array(..) => Some((self.clone(), Vec::new())),
+            Repr::Intersection(members)
+                if members
+                    .iter()
+                    .all(|m| matches!(m.repr(), Repr::Array(..) | Repr::HasOffsetValue(..))) =>
             {
                 let base = members
                     .iter()
-                    .find(|m| matches!(m, Type(Repr::Array(..))))?
+                    .find(|m| matches!(m.repr(), Repr::Array(..)))?
                     .clone();
                 let pairs = members
                     .iter()
-                    .filter_map(|m| match m {
-                        Type(Repr::HasOffsetValue(k, v)) => Some((k.clone(), (**v).clone())),
+                    .filter_map(|m| match m.repr() {
+                        Repr::HasOffsetValue(k, v) => Some((k.clone(), (**v).clone())),
                         _ => None,
                     })
                     .collect();
@@ -555,7 +551,7 @@ fn merge_has_offset_value_pair(a: &Type, b: &Type) -> Option<Type> {
             Type::union(Type::clone(&va), Type::clone(&vb)),
         ),
         // `has_offset_value_parts`' base is always an array.
-        (base_a, _) => Type(base_a),
+        (base_a, _) => Type::new(base_a),
     };
     let mut merged_pairs: Vec<(ShapeKey, Type)> = Vec::new();
     for (k, va) in &pairs_a {
@@ -572,7 +568,7 @@ fn merge_has_offset_value_pair(a: &Type, b: &Type) -> Option<Type> {
             .into_iter()
             .map(|(k, v)| Type::has_offset_value(k, v)),
     );
-    Some(Type(Repr::Intersection(members)))
+    Some(Type::new(Repr::Intersection(members)))
 }
 
 /// The array members of a union, as PHPStan's `processArrayTypes` and
@@ -590,7 +586,7 @@ fn reduce_array_members(members: &mut Vec<Type>) {
     }
     let shape_count = members
         .iter()
-        .filter(|m| matches!(m, Type(Repr::ArrayShape(_))))
+        .filter(|m| matches!(m.repr(), Repr::ArrayShape(_)))
         .count();
     if shape_count == 0 {
         return;
@@ -599,8 +595,8 @@ fn reduce_array_members(members: &mut Vec<Type>) {
         return;
     }
     let mut shapes: Vec<Option<Shape>> = Vec::new();
-    members.retain(|m| match m {
-        Type(Repr::ArrayShape(shape)) => {
+    members.retain(|m| match m.repr() {
+        Repr::ArrayShape(shape) => {
             shapes.push(Some(Shape::clone(shape)));
             false
         }
@@ -625,8 +621,8 @@ fn reduce_array_members(members: &mut Vec<Type>) {
                 && a.fields.len() == 1
                 && b.fields.len() == 1
                 && !matches!(
-                    Type::union(a.fields[0].ty.clone(), b.fields[0].ty.clone()),
-                    Type(Repr::Union(_))
+                    (Type::union(a.fields[0].ty.clone(), b.fields[0].ty.clone())).repr(),
+                    Repr::Union(_)
                 );
             if single_key_same_type
                 || (overlapping == a.fields.len() && is_keys_superset(&relation, b, a))
@@ -673,18 +669,18 @@ fn reduce_array_members(members: &mut Vec<Type>) {
 /// and value types, and whether it is a list and non-empty. `None` for
 /// anything but a plain or `list`/`non-empty-array`-refined `array<K, V>`.
 fn general_array_parts(ty: &Type) -> Option<(Type, Type, bool, bool)> {
-    match ty {
-        Type(Repr::Array(key, value)) => Some(((**key).clone(), (**value).clone(), false, false)),
-        Type(Repr::Intersection(members)) => {
+    match ty.repr() {
+        Repr::Array(key, value) => Some(((**key).clone(), (**value).clone(), false, false)),
+        Repr::Intersection(members) => {
             let mut array = None;
             let (mut list, mut non_empty) = (false, false);
             for m in members {
-                match m {
-                    Type(Repr::Array(key, value)) if array.is_none() => {
+                match m.repr() {
+                    Repr::Array(key, value) if array.is_none() => {
                         array = Some(((**key).clone(), (**value).clone()));
                     }
-                    Type(Repr::Accessory(AccessoryKind::ArrayList)) => list = true,
-                    Type(Repr::Accessory(AccessoryKind::NonEmptyArray)) => non_empty = true,
+                    Repr::Accessory(AccessoryKind::ArrayList) => list = true,
+                    Repr::Accessory(AccessoryKind::NonEmptyArray) => non_empty = true,
                     _ => return None,
                 }
             }
@@ -707,20 +703,16 @@ fn merge_general_arrays(members: &mut Vec<Type>) {
     let mut first = None;
     let mut index = 0;
     members.retain(|m| {
-        let parts = match m {
-            Type(Repr::ArrayShape(shape)) => {
-                let (key, value) = match &shape_as_general_array(shape) {
-                    Type(Repr::Array(key, value)) => {
-                        (Some((**key).clone()), Some((**value).clone()))
-                    }
+        let parts = match m.repr() {
+            Repr::ArrayShape(shape) => {
+                let (key, value) = match shape_as_general_array(shape).repr() {
+                    Repr::Array(key, value) => (Some((**key).clone()), Some((**value).clone())),
                     _ => (None, None),
                 };
                 let shape_non_empty = shape.fields.iter().any(|f| !f.optional);
                 Some((key, value, shape.is_list(), shape_non_empty))
             }
-            other => {
-                general_array_parts(other).map(|(key, value, l, n)| (Some(key), Some(value), l, n))
-            }
+            _ => general_array_parts(m).map(|(key, value, l, n)| (Some(key), Some(value), l, n)),
         };
         index += 1;
         let Some((key, value, l, n)) = parts else {
@@ -897,7 +889,7 @@ fn union_with_mixed(types: &[&Type]) -> Option<Type> {
     let mut explicit = None;
     let mut subtracted: Option<Option<Type>> = None;
     for ty in types {
-        if let Type(Repr::Mixed(written, lacks)) = ty {
+        if let Repr::Mixed(written, lacks) = ty.repr() {
             explicit = Some(explicit.unwrap_or(false) || *written);
             subtracted = Some(match (subtracted, lacks.as_deref()) {
                 (None, lacks) => lacks.cloned(),
@@ -909,9 +901,9 @@ fn union_with_mixed(types: &[&Type]) -> Option<Type> {
     let explicit = explicit?;
     let mut subtracted = subtracted.flatten();
     for ty in types {
-        if !matches!(ty, Type(Repr::Mixed(..))) {
+        if !matches!(ty.repr(), Repr::Mixed(..)) {
             subtracted = subtracted.map(|s| s.without(ty)).filter(|s| !s.is_never());
         }
     }
-    Some(Type(Repr::Mixed(explicit, subtracted.map(Arc::new))))
+    Some(Type::new(Repr::Mixed(explicit, subtracted.map(Arc::new))))
 }

@@ -66,35 +66,54 @@ pub use union::generalize_by_key_set;
 /// A PHP type. What it is, what its values can be used as and how it
 /// relates to other types are asked through its methods; how it is
 /// represented is this crate's own.
-pub struct Type(pub(crate) Repr);
+///
+/// A type is shared: cloning one is a pointer copy, and a type is never
+/// changed once built.
+#[derive(Clone)]
+pub struct Type(Arc<Node>);
 
-/// Cloning a type goes one level at a time on a guarded stack, as
-/// dropping one does.
-impl Clone for Type {
-    fn clone(&self) -> Self {
-        syntax::stack::guard(|| Type(self.0.clone()))
-    }
+/// A type's representation, with its hash computed once: equal types
+/// hash alike (`Hash for Type`), so unequal ones mostly compare in one
+/// step.
+pub(crate) struct Node {
+    repr: Repr,
+    hash: u64,
 }
 
 impl Type {
-    /// The representation, taken out of the type.
-    pub(crate) fn into_repr(mut self) -> Repr {
-        std::mem::replace(&mut self.0, Repr::Never)
+    /// The type `repr` represents.
+    pub(crate) fn new(repr: Repr) -> Type {
+        let hash = semantic_hash(&repr);
+        Type(Arc::new(Node { repr, hash }))
+    }
+
+    /// The representation.
+    pub(crate) fn repr(&self) -> &Repr {
+        &self.0.repr
+    }
+
+    /// The representation, taken out of the type, or a copy of it while
+    /// the type is shared.
+    pub(crate) fn into_repr(self) -> Repr {
+        match Arc::try_unwrap(self.0) {
+            Ok(mut node) => std::mem::replace(&mut node.repr, Repr::Never),
+            Err(shared) => shared.repr.clone(),
+        }
     }
 }
 
 /// Dropping a type goes one level at a time on a guarded stack, so a
 /// deeply nested type drops without overflowing it.
-impl Drop for Type {
+impl Drop for Node {
     fn drop(&mut self) {
-        let repr = std::mem::replace(&mut self.0, Repr::Never);
+        let repr = std::mem::replace(&mut self.repr, Repr::Never);
         syntax::stack::guard(|| drop(repr));
     }
 }
 
 impl std::fmt::Debug for Type {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        syntax::stack::guard(|| self.0.fmt(f))
+        syntax::stack::guard(|| self.repr().fmt(f))
     }
 }
 
@@ -279,8 +298,39 @@ impl ConditionalSubject {
 /// an intersection is a set of types, `int|string` the same as
 /// `string|int`.
 fn same_members(a: &[Type], b: &[Type]) -> bool {
-    let count = |members: &[Type], m: &Type| members.iter().filter(|x| *x == m).count();
-    a.len() == b.len() && a.iter().all(|m| count(a, m) == count(b, m))
+    if a.len() != b.len() {
+        return false;
+    }
+    if a.iter().zip(b).all(|(x, y)| x == y) {
+        return true;
+    }
+    // Equal types hash alike, so each side sorted by hash lines up equal
+    // members within a run of one hash.
+    fn by_hash(members: &[Type]) -> Vec<&Type> {
+        let mut sorted: Vec<&Type> = members.iter().collect();
+        sorted.sort_by_key(|m| m.0.hash);
+        sorted
+    }
+    let (a, b) = (by_hash(a), by_hash(b));
+    let mut start = 0;
+    while start < a.len() {
+        let hash = a[start].0.hash;
+        let end = start + a[start..].iter().take_while(|m| m.0.hash == hash).count();
+        if b.get(end - 1).is_none_or(|m| m.0.hash != hash)
+            || b.get(start).is_none_or(|m| m.0.hash != hash)
+            || b.get(end).is_some_and(|m| m.0.hash == hash)
+        {
+            return false;
+        }
+        let run_a = &a[start..end];
+        let run_b = &b[start..end];
+        let count = |run: &[&Type], m: &Type| run.iter().filter(|x| **x == m).count();
+        if !run_a.iter().all(|m| count(run_a, m) == count(run_b, m)) {
+            return false;
+        }
+        start = end;
+    }
+    true
 }
 
 /// Deliberately not derived: `Mixed`'s own `bool` is ignored entirely
@@ -291,147 +341,141 @@ fn same_members(a: &[Type], b: &[Type]) -> bool {
 /// below agrees with it.
 impl PartialEq for Type {
     fn eq(&self, other: &Self) -> bool {
-        syntax::stack::guard(|| match (self, other) {
-            (Type(Repr::Mixed(_, a)), Type(Repr::Mixed(_, b))) => a == b,
-            (Type(Repr::Error), Type(Repr::Error)) => true,
-            (Type(Repr::Never), Type(Repr::Never)) => true,
-            (Type(Repr::Void), Type(Repr::Void)) => true,
-            (Type(Repr::Null), Type(Repr::Null)) => true,
-            (Type(Repr::Bool), Type(Repr::Bool)) => true,
-            (Type(Repr::True), Type(Repr::True)) => true,
-            (Type(Repr::False), Type(Repr::False)) => true,
-            (Type(Repr::Int), Type(Repr::Int)) => true,
-            (Type(Repr::IntLiteral(a)), Type(Repr::IntLiteral(b))) => a == b,
-            (Type(Repr::Float), Type(Repr::Float)) => true,
-            (Type(Repr::String), Type(Repr::String)) => true,
-            (Type(Repr::StringLiteral(a)), Type(Repr::StringLiteral(b))) => a == b,
-            (Type(Repr::Array(ak, av)), Type(Repr::Array(bk, bv))) => ak == bk && av == bv,
-            (Type(Repr::ClassString(a)), Type(Repr::ClassString(b))) => a == b,
-            (Type(Repr::ClassKindString(a)), Type(Repr::ClassKindString(b))) => a == b,
-            (Type(Repr::ArrayShape(a)), Type(Repr::ArrayShape(b))) => a == b,
-            (Type(Repr::ObjectShape(a)), Type(Repr::ObjectShape(b))) => a == b,
-            (Type(Repr::Object(an, aa)), Type(Repr::Object(bn, ba))) => {
-                an.eq_ignore_case(bn) && aa == ba
-            }
-            (Type(Repr::ObjectWithoutClass), Type(Repr::ObjectWithoutClass)) => true,
-            (Type(Repr::Resource { closed: a }), Type(Repr::Resource { closed: b })) => a == b,
-            (Type(Repr::EnumCase(ae, ac)), Type(Repr::EnumCase(be, bc))) => {
-                ae.eq_ignore_case(be) && ac == bc
-            }
-            (Type(Repr::Callable(a)), Type(Repr::Callable(b))) => a == b,
-            (Type(Repr::SelfRef(a)), Type(Repr::SelfRef(b))) => a == b,
-            (Type(Repr::ParentRef), Type(Repr::ParentRef)) => true,
-            (Type(Repr::StaticRef(a)), Type(Repr::StaticRef(b))) => a == b,
-            (Type(Repr::This), Type(Repr::This)) => true,
-            (Type(Repr::TemplateParam(a)), Type(Repr::TemplateParam(b))) => a == b,
-            (Type(Repr::VarianceArg(av, a)), Type(Repr::VarianceArg(bv, b))) => av == bv && a == b,
-            (Type(Repr::Union(a)), Type(Repr::Union(b)))
-            | (Type(Repr::BenevolentUnion(a)), Type(Repr::BenevolentUnion(b)))
-            | (Type(Repr::Intersection(a)), Type(Repr::Intersection(b))) => same_members(a, b),
-            (Type(Repr::IntRange(amin, amax)), Type(Repr::IntRange(bmin, bmax))) => {
-                amin == bmin && amax == bmax
-            }
-            (Type(Repr::FloatLiteral(a)), Type(Repr::FloatLiteral(b))) => {
-                a == b || (a.is_nan() && b.is_nan())
-            }
-            (Type(Repr::Accessory(a)), Type(Repr::Accessory(b))) => a == b,
-            (Type(Repr::HasOffsetValue(ak, av)), Type(Repr::HasOffsetValue(bk, bv))) => {
-                ak == bk && av == bv
-            }
-            (Type(Repr::HasOffset(a)), Type(Repr::HasOffset(b))) => a == b,
-            (Type(Repr::HasMethod(a)), Type(Repr::HasMethod(b))) => a.eq_ignore_case(b),
-            (Type(Repr::HasProperty(a)), Type(Repr::HasProperty(b))) => a == b,
-            (Type(Repr::ReflectedMember(ao, an)), Type(Repr::ReflectedMember(bo, bn))) => {
-                ao == bo && an == bn
-            }
-            (Type(Repr::ValueOf(a)), Type(Repr::ValueOf(b))) => a == b,
-            (Type(Repr::Extension(a)), Type(Repr::Extension(b))) => a.eq_data(&**b),
-            (Type(Repr::KeyOf(a)), Type(Repr::KeyOf(b))) => a == b,
-            (Type(Repr::OffsetAccess(ab, ak)), Type(Repr::OffsetAccess(bb, bk))) => {
-                ab == bb && ak == bk
-            }
-            (
-                Type(Repr::ClassConstant {
-                    class: ac,
-                    pattern: ap,
-                }),
-                Type(Repr::ClassConstant {
-                    class: bc,
-                    pattern: bp,
-                }),
-            ) => ac == bc && ap == bp,
-            (
-                Type(Repr::Conditional {
-                    subject: a_subject,
-                    target: a_target,
-                    if_true: a_if_true,
-                    if_false: a_if_false,
-                    negated: a_negated,
-                }),
-                Type(Repr::Conditional {
-                    subject: b_subject,
-                    target: b_target,
-                    if_true: b_if_true,
-                    if_false: b_if_false,
-                    negated: b_negated,
-                }),
-            ) => {
-                a_subject == b_subject
-                    && a_target == b_target
-                    && a_if_true == b_if_true
-                    && a_if_false == b_if_false
-                    && a_negated == b_negated
-            }
-            (
-                Type(Repr::Mixed(..))
-                | Type(Repr::Error)
-                | Type(Repr::Never)
-                | Type(Repr::Void)
-                | Type(Repr::Null)
-                | Type(Repr::Bool)
-                | Type(Repr::True)
-                | Type(Repr::False)
-                | Type(Repr::Int)
-                | Type(Repr::IntLiteral(_))
-                | Type(Repr::Float)
-                | Type(Repr::String)
-                | Type(Repr::StringLiteral(_))
-                | Type(Repr::Array(..))
-                | Type(Repr::ClassString(_))
-                | Type(Repr::ClassKindString(_))
-                | Type(Repr::ArrayShape(_))
-                | Type(Repr::ObjectShape(_))
-                | Type(Repr::Object(..))
-                | Type(Repr::ObjectWithoutClass)
-                | Type(Repr::Resource { .. })
-                | Type(Repr::EnumCase(..))
-                | Type(Repr::Callable(_))
-                | Type(Repr::SelfRef(_))
-                | Type(Repr::ParentRef)
-                | Type(Repr::StaticRef(_))
-                | Type(Repr::This)
-                | Type(Repr::TemplateParam(_))
-                | Type(Repr::VarianceArg(..))
-                | Type(Repr::Union(_))
-                | Type(Repr::BenevolentUnion(_))
-                | Type(Repr::Intersection(_))
-                | Type(Repr::IntRange(..))
-                | Type(Repr::FloatLiteral(_))
-                | Type(Repr::Accessory(_))
-                | Type(Repr::HasOffsetValue(..))
-                | Type(Repr::HasOffset(_))
-                | Type(Repr::HasMethod(_))
-                | Type(Repr::HasProperty(_))
-                | Type(Repr::ReflectedMember(..))
-                | Type(Repr::ValueOf(_))
-                | Type(Repr::KeyOf(_))
-                | Type(Repr::OffsetAccess(..))
-                | Type(Repr::ClassConstant { .. })
-                | Type(Repr::Extension(_))
-                | Type(Repr::Conditional { .. }),
-                _,
-            ) => false,
-        })
+        Arc::ptr_eq(&self.0, &other.0)
+            || (self.0.hash == other.0.hash
+                && syntax::stack::guard(|| repr_eq(self.repr(), other.repr())))
+    }
+}
+
+/// Whether two representations are the same type, their members compared
+/// as types.
+fn repr_eq(a: &Repr, b: &Repr) -> bool {
+    match (a, b) {
+        (Repr::Mixed(_, a), Repr::Mixed(_, b)) => a == b,
+        (Repr::Error, Repr::Error) => true,
+        (Repr::Never, Repr::Never) => true,
+        (Repr::Void, Repr::Void) => true,
+        (Repr::Null, Repr::Null) => true,
+        (Repr::Bool, Repr::Bool) => true,
+        (Repr::True, Repr::True) => true,
+        (Repr::False, Repr::False) => true,
+        (Repr::Int, Repr::Int) => true,
+        (Repr::IntLiteral(a), Repr::IntLiteral(b)) => a == b,
+        (Repr::Float, Repr::Float) => true,
+        (Repr::String, Repr::String) => true,
+        (Repr::StringLiteral(a), Repr::StringLiteral(b)) => a == b,
+        (Repr::Array(ak, av), Repr::Array(bk, bv)) => ak == bk && av == bv,
+        (Repr::ClassString(a), Repr::ClassString(b)) => a == b,
+        (Repr::ClassKindString(a), Repr::ClassKindString(b)) => a == b,
+        (Repr::ArrayShape(a), Repr::ArrayShape(b)) => a == b,
+        (Repr::ObjectShape(a), Repr::ObjectShape(b)) => a == b,
+        (Repr::Object(an, aa), Repr::Object(bn, ba)) => an.eq_ignore_case(bn) && aa == ba,
+        (Repr::ObjectWithoutClass, Repr::ObjectWithoutClass) => true,
+        (Repr::Resource { closed: a }, Repr::Resource { closed: b }) => a == b,
+        (Repr::EnumCase(ae, ac), Repr::EnumCase(be, bc)) => ae.eq_ignore_case(be) && ac == bc,
+        (Repr::Callable(a), Repr::Callable(b)) => a == b,
+        (Repr::SelfRef(a), Repr::SelfRef(b)) => a == b,
+        (Repr::ParentRef, Repr::ParentRef) => true,
+        (Repr::StaticRef(a), Repr::StaticRef(b)) => a == b,
+        (Repr::This, Repr::This) => true,
+        (Repr::TemplateParam(a), Repr::TemplateParam(b)) => a == b,
+        (Repr::VarianceArg(av, a), Repr::VarianceArg(bv, b)) => av == bv && a == b,
+        (Repr::Union(a), Repr::Union(b))
+        | (Repr::BenevolentUnion(a), Repr::BenevolentUnion(b))
+        | (Repr::Intersection(a), Repr::Intersection(b)) => same_members(a, b),
+        (Repr::IntRange(amin, amax), Repr::IntRange(bmin, bmax)) => amin == bmin && amax == bmax,
+        (Repr::FloatLiteral(a), Repr::FloatLiteral(b)) => a == b || (a.is_nan() && b.is_nan()),
+        (Repr::Accessory(a), Repr::Accessory(b)) => a == b,
+        (Repr::HasOffsetValue(ak, av), Repr::HasOffsetValue(bk, bv)) => ak == bk && av == bv,
+        (Repr::HasOffset(a), Repr::HasOffset(b)) => a == b,
+        (Repr::HasMethod(a), Repr::HasMethod(b)) => a.eq_ignore_case(b),
+        (Repr::HasProperty(a), Repr::HasProperty(b)) => a == b,
+        (Repr::ReflectedMember(ao, an), Repr::ReflectedMember(bo, bn)) => ao == bo && an == bn,
+        (Repr::ValueOf(a), Repr::ValueOf(b)) => a == b,
+        (Repr::Extension(a), Repr::Extension(b)) => a.eq_data(&**b),
+        (Repr::KeyOf(a), Repr::KeyOf(b)) => a == b,
+        (Repr::OffsetAccess(ab, ak), Repr::OffsetAccess(bb, bk)) => ab == bb && ak == bk,
+        (
+            Repr::ClassConstant {
+                class: ac,
+                pattern: ap,
+            },
+            Repr::ClassConstant {
+                class: bc,
+                pattern: bp,
+            },
+        ) => ac == bc && ap == bp,
+        (
+            Repr::Conditional {
+                subject: a_subject,
+                target: a_target,
+                if_true: a_if_true,
+                if_false: a_if_false,
+                negated: a_negated,
+            },
+            Repr::Conditional {
+                subject: b_subject,
+                target: b_target,
+                if_true: b_if_true,
+                if_false: b_if_false,
+                negated: b_negated,
+            },
+        ) => {
+            a_subject == b_subject
+                && a_target == b_target
+                && a_if_true == b_if_true
+                && a_if_false == b_if_false
+                && a_negated == b_negated
+        }
+        (
+            Repr::Mixed(..)
+            | Repr::Error
+            | Repr::Never
+            | Repr::Void
+            | Repr::Null
+            | Repr::Bool
+            | Repr::True
+            | Repr::False
+            | Repr::Int
+            | Repr::IntLiteral(_)
+            | Repr::Float
+            | Repr::String
+            | Repr::StringLiteral(_)
+            | Repr::Array(..)
+            | Repr::ClassString(_)
+            | Repr::ClassKindString(_)
+            | Repr::ArrayShape(_)
+            | Repr::ObjectShape(_)
+            | Repr::Object(..)
+            | Repr::ObjectWithoutClass
+            | Repr::Resource { .. }
+            | Repr::EnumCase(..)
+            | Repr::Callable(_)
+            | Repr::SelfRef(_)
+            | Repr::ParentRef
+            | Repr::StaticRef(_)
+            | Repr::This
+            | Repr::TemplateParam(_)
+            | Repr::VarianceArg(..)
+            | Repr::Union(_)
+            | Repr::BenevolentUnion(_)
+            | Repr::Intersection(_)
+            | Repr::IntRange(..)
+            | Repr::FloatLiteral(_)
+            | Repr::Accessory(_)
+            | Repr::HasOffsetValue(..)
+            | Repr::HasOffset(_)
+            | Repr::HasMethod(_)
+            | Repr::HasProperty(_)
+            | Repr::ReflectedMember(..)
+            | Repr::ValueOf(_)
+            | Repr::KeyOf(_)
+            | Repr::OffsetAccess(..)
+            | Repr::ClassConstant { .. }
+            | Repr::Extension(_)
+            | Repr::Conditional { .. },
+            _,
+        ) => false,
     }
 }
 
@@ -439,115 +483,114 @@ impl Eq for Type {}
 
 impl Hash for Type {
     fn hash<H: Hasher>(&self, state: &mut H) {
-        syntax::stack::guard(|| {
-            std::mem::discriminant(&self.0).hash(state);
-            match self {
-                Type(Repr::Mixed(_, subtracted)) => subtracted.hash(state),
-                Type(Repr::Error)
-                | Type(Repr::Never)
-                | Type(Repr::Void)
-                | Type(Repr::Null)
-                | Type(Repr::Bool)
-                | Type(Repr::True)
-                | Type(Repr::False)
-                | Type(Repr::Int)
-                | Type(Repr::Float)
-                | Type(Repr::String)
-                | Type(Repr::ObjectWithoutClass)
-                | Type(Repr::ParentRef)
-                | Type(Repr::This) => {}
-                Type(Repr::IntLiteral(n)) => n.hash(state),
-                Type(Repr::StringLiteral(s)) => s.hash(state),
-                Type(Repr::Array(k, v)) | Type(Repr::OffsetAccess(k, v)) => {
-                    k.hash(state);
-                    v.hash(state);
-                }
-                Type(Repr::ClassString(inner))
-                | Type(Repr::ValueOf(inner))
-                | Type(Repr::KeyOf(inner)) => inner.hash(state),
-                Type(Repr::ClassKindString(kind)) => kind.hash(state),
-                Type(Repr::ArrayShape(shape)) | Type(Repr::ObjectShape(shape)) => shape.hash(state),
-                Type(Repr::Object(name, args)) => {
-                    name.lower().hash(state);
-                    args.hash(state);
-                }
-                Type(Repr::Resource { closed }) => closed.hash(state),
-                Type(Repr::EnumCase(class, case)) => {
-                    class.lower().hash(state);
-                    case.hash(state);
-                }
-                Type(Repr::Callable(sig)) => sig.hash(state),
-                Type(Repr::SelfRef(args)) | Type(Repr::StaticRef(args)) => args.hash(state),
-                Type(Repr::Union(members))
-                | Type(Repr::BenevolentUnion(members))
-                | Type(Repr::Intersection(members)) => {
-                    members.len().hash(state);
-                    members
-                        .iter()
-                        .map(|m| {
-                            let mut hasher = rustc_hash::FxHasher::default();
-                            m.hash(&mut hasher);
-                            hasher.finish()
-                        })
-                        .fold(0u64, u64::wrapping_add)
-                        .hash(state);
-                }
-                Type(Repr::TemplateParam(tp)) => tp.hash(state),
-                Type(Repr::VarianceArg(variance, inner)) => {
-                    variance.hash(state);
-                    inner.hash(state);
-                }
-                Type(Repr::IntRange(min, max)) => {
-                    min.hash(state);
-                    max.hash(state);
-                }
-                // Equal floats hash alike: both zeros, and every NaN.
-                Type(Repr::FloatLiteral(f)) => {
-                    let bits = if *f == 0.0 {
-                        0
-                    } else if f.is_nan() {
-                        f64::NAN.to_bits()
-                    } else {
-                        f.to_bits()
-                    };
-                    bits.hash(state)
-                }
-                Type(Repr::Accessory(kind)) => kind.hash(state),
-                Type(Repr::HasOffsetValue(key, value)) => {
-                    key.hash(state);
-                    value.hash(state);
-                }
-                Type(Repr::HasOffset(key)) => key.hash(state),
-                Type(Repr::HasMethod(name)) => name.lower().hash(state),
-                Type(Repr::HasProperty(name)) => name.hash(state),
-                Type(Repr::ReflectedMember(owner, member)) => {
-                    owner.hash(state);
-                    member.hash(state);
-                }
-                Type(Repr::ClassConstant { class, pattern }) => {
-                    class.hash(state);
-                    pattern.hash(state);
-                }
-                Type(Repr::Extension(data)) => {
-                    let state: &mut dyn Hasher = state;
-                    data.hash_data(state);
-                }
-                Type(Repr::Conditional {
-                    subject,
-                    target,
-                    if_true,
-                    if_false,
-                    negated,
-                }) => {
-                    subject.hash(state);
-                    target.hash(state);
-                    if_true.hash(state);
-                    if_false.hash(state);
-                    negated.hash(state);
-                }
-            }
-        })
+        state.write_u64(self.0.hash);
     }
+}
+
+/// `repr`'s hash, what `Hash for Type` gives: its members' own hashes
+/// combined, a union's or an intersection's in any order.
+fn semantic_hash(repr: &Repr) -> u64 {
+    let mut hasher = rustc_hash::FxHasher::default();
+    let state = &mut hasher;
+    std::mem::discriminant(repr).hash(state);
+    match repr {
+        Repr::Mixed(_, subtracted) => subtracted.hash(state),
+        Repr::Error
+        | Repr::Never
+        | Repr::Void
+        | Repr::Null
+        | Repr::Bool
+        | Repr::True
+        | Repr::False
+        | Repr::Int
+        | Repr::Float
+        | Repr::String
+        | Repr::ObjectWithoutClass
+        | Repr::ParentRef
+        | Repr::This => {}
+        Repr::IntLiteral(n) => n.hash(state),
+        Repr::StringLiteral(s) => s.hash(state),
+        Repr::Array(k, v) | Repr::OffsetAccess(k, v) => {
+            k.hash(state);
+            v.hash(state);
+        }
+        Repr::ClassString(inner) | Repr::ValueOf(inner) | Repr::KeyOf(inner) => inner.hash(state),
+        Repr::ClassKindString(kind) => kind.hash(state),
+        Repr::ArrayShape(shape) | Repr::ObjectShape(shape) => shape.hash(state),
+        Repr::Object(name, args) => {
+            name.lower().hash(state);
+            args.hash(state);
+        }
+        Repr::Resource { closed } => closed.hash(state),
+        Repr::EnumCase(class, case) => {
+            class.lower().hash(state);
+            case.hash(state);
+        }
+        Repr::Callable(sig) => sig.hash(state),
+        Repr::SelfRef(args) | Repr::StaticRef(args) => args.hash(state),
+        Repr::Union(members) | Repr::BenevolentUnion(members) | Repr::Intersection(members) => {
+            members.len().hash(state);
+            members
+                .iter()
+                .map(|m| m.0.hash)
+                .fold(0u64, u64::wrapping_add)
+                .hash(state);
+        }
+        Repr::TemplateParam(tp) => tp.hash(state),
+        Repr::VarianceArg(variance, inner) => {
+            variance.hash(state);
+            inner.hash(state);
+        }
+        Repr::IntRange(min, max) => {
+            min.hash(state);
+            max.hash(state);
+        }
+        // Equal floats hash alike: both zeros, and every NaN.
+        Repr::FloatLiteral(f) => {
+            let bits = if *f == 0.0 {
+                0
+            } else if f.is_nan() {
+                f64::NAN.to_bits()
+            } else {
+                f.to_bits()
+            };
+            bits.hash(state)
+        }
+        Repr::Accessory(kind) => kind.hash(state),
+        Repr::HasOffsetValue(key, value) => {
+            key.hash(state);
+            value.hash(state);
+        }
+        Repr::HasOffset(key) => key.hash(state),
+        Repr::HasMethod(name) => name.lower().hash(state),
+        Repr::HasProperty(name) => name.hash(state),
+        Repr::ReflectedMember(owner, member) => {
+            owner.hash(state);
+            member.hash(state);
+        }
+        Repr::ClassConstant { class, pattern } => {
+            class.hash(state);
+            pattern.hash(state);
+        }
+        Repr::Extension(data) => {
+            let state: &mut dyn Hasher = state;
+            data.hash_data(state);
+        }
+        Repr::Conditional {
+            subject,
+            target,
+            if_true,
+            if_false,
+            negated,
+        } => {
+            subject.hash(state);
+            target.hash(state);
+            if_true.hash(state);
+            if_false.hash(state);
+            negated.hash(state);
+        }
+    }
+    hasher.finish()
 }
 
 // Whether a class's own `@template` may vary co-/contravariantly with a
@@ -648,7 +691,7 @@ impl CallableSig {
     /// own: `f(...)` of a generic `f` is a generic `Closure`.
     pub fn with_own_templates(mut self, is_own: &dyn Fn(&str) -> bool) -> CallableSig {
         fn collect(ty: &Type, is_own: &dyn Fn(&str) -> bool, out: &mut Vec<TemplateParam>) {
-            if let Type(Repr::TemplateParam(tp)) = ty
+            if let Repr::TemplateParam(tp) = ty.repr()
                 && tp.scope.as_deref().is_some_and(is_own)
             {
                 if !out.iter().any(|t| t.name == tp.name) {
@@ -662,14 +705,14 @@ impl CallableSig {
             ty.for_each_child(&mut |c| collect(c, is_own, out));
         }
         fn rescope(ty: &Type, is_own: &dyn Fn(&str) -> bool) -> Type {
-            match ty {
-                Type(Repr::TemplateParam(tp)) if tp.scope.as_deref().is_some_and(is_own) => {
+            match ty.repr() {
+                Repr::TemplateParam(tp) if tp.scope.as_deref().is_some_and(is_own) => {
                     Type::template_param(TemplateParam {
                         scope: Some(CALLABLE_TEMPLATE_SCOPE.to_string()),
                         ..tp.clone()
                     })
                 }
-                other => other.map_children(&mut |c| rescope(c, is_own)),
+                _ => ty.map_children(&mut |c| rescope(c, is_own)),
             }
         }
         let mut own = Vec::new();
@@ -692,16 +735,14 @@ impl CallableSig {
     /// current `templates` entries - after their bounds changed.
     pub fn rebind_templates(mut self) -> CallableSig {
         fn rebind(ty: &Type, templates: &[TemplateParam]) -> Type {
-            match ty {
-                Type(Repr::TemplateParam(tp))
-                    if tp.scope.as_deref() == Some(CALLABLE_TEMPLATE_SCOPE) =>
-                {
+            match ty.repr() {
+                Repr::TemplateParam(tp) if tp.scope.as_deref() == Some(CALLABLE_TEMPLATE_SCOPE) => {
                     match templates.iter().find(|t| t.name == tp.name) {
                         Some(t) => Type::template_param(t.clone()),
                         None => ty.clone(),
                     }
                 }
-                other => other.map_children(&mut |c| rebind(c, templates)),
+                _ => ty.map_children(&mut |c| rebind(c, templates)),
             }
         }
         if self.templates.is_empty() {

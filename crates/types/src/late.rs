@@ -20,18 +20,18 @@ impl Type {
     /// reference answered by `consts`, and each late type over them
     /// settled.
     pub fn resolve_class_references(&self, consts: &dyn ClassConstants) -> Type {
-        syntax::stack::guard(|| match self {
+        syntax::stack::guard(|| match self.repr() {
             // An enum's case values need `consts`; any other target settles
             // like `key-of` does, a template staying until a call binds it.
-            Type(Repr::ValueOf(target)) => {
+            Repr::ValueOf(target) => {
                 let target = target.resolve_class_references(consts);
-                match &target {
-                    Type(Repr::Object(class, _)) => consts.enum_values(class),
+                match target.repr() {
+                    Repr::Object(class, _) => consts.enum_values(class),
                     _ => settle(Type::value_of(target)),
                 }
             }
-            Type(Repr::ClassConstant { class, pattern }) => consts.class_constants(class, pattern),
-            Type(Repr::KeyOf(_)) | Type(Repr::OffsetAccess(..)) => {
+            Repr::ClassConstant { class, pattern } => consts.class_constants(class, pattern),
+            Repr::KeyOf(_) | Repr::OffsetAccess(..) => {
                 settle(self.map_children(&mut |t| t.resolve_class_references(consts)))
             }
             _ => self.map_children(&mut |t| t.resolve_class_references(consts)),
@@ -41,8 +41,8 @@ impl Type {
     /// This type with each class constant reference replaced by `f`'s
     /// answer for its class and name pattern, kept where `f` gives none.
     pub fn map_class_constants(&self, f: &mut dyn FnMut(&Type, &str) -> Option<Type>) -> Type {
-        syntax::stack::guard(|| match self {
-            Type(Repr::ClassConstant { class, pattern }) => {
+        syntax::stack::guard(|| match self.repr() {
+            Repr::ClassConstant { class, pattern } => {
                 f(class, pattern).unwrap_or_else(|| self.clone())
             }
             _ => self.map_children(&mut |t| t.map_class_constants(&mut *f)),
@@ -53,10 +53,10 @@ impl Type {
 /// `key-of<ty>` when `ty` is an array type: its key type. `None` for
 /// anything whose keys aren't known from the type alone.
 pub(crate) fn key_of(ty: &Type) -> Option<Type> {
-    match ty {
-        Type(Repr::Mixed(..)) => Some(Type::mixed()),
-        Type(Repr::Array(key, _)) => Some((**key).clone()),
-        Type(Repr::ArrayShape(shape)) => Some(join(
+    match ty.repr() {
+        Repr::Mixed(..) => Some(Type::mixed()),
+        Repr::Array(key, _) => Some((**key).clone()),
+        Repr::ArrayShape(shape) => Some(join(
             shape
                 .fields
                 .iter()
@@ -64,8 +64,8 @@ pub(crate) fn key_of(ty: &Type) -> Option<Type> {
                 .chain(shape.unsealed.as_deref().map(|tail| tail.0.clone()))
                 .collect(),
         )),
-        Type(Repr::Intersection(members)) => members.iter().find_map(key_of),
-        Type(Repr::Union(members)) => members.iter().map(key_of).collect::<Option<_>>().map(join),
+        Repr::Intersection(members) => members.iter().find_map(key_of),
+        Repr::Union(members) => members.iter().map(key_of).collect::<Option<_>>().map(join),
         _ => None,
     }
 }
@@ -73,12 +73,12 @@ pub(crate) fn key_of(ty: &Type) -> Option<Type> {
 /// `value-of<ty>` when `ty` is an array type: its value type. An enum's
 /// case values need the registry (`Registry::resolve_deferred_value_of`).
 pub(crate) fn value_of(ty: &Type) -> Option<Type> {
-    match ty {
-        Type(Repr::Mixed(..)) => Some(Type::mixed()),
-        Type(Repr::Array(_, value)) => Some((**value).clone()),
-        Type(Repr::ArrayShape(shape)) => Some(join(shape.types().cloned().collect())),
-        Type(Repr::Intersection(members)) => members.iter().find_map(value_of),
-        Type(Repr::Union(members)) => members
+    match ty.repr() {
+        Repr::Mixed(..) => Some(Type::mixed()),
+        Repr::Array(_, value) => Some((**value).clone()),
+        Repr::ArrayShape(shape) => Some(join(shape.types().cloned().collect())),
+        Repr::Intersection(members) => members.iter().find_map(value_of),
+        Repr::Union(members) => members
             .iter()
             .map(value_of)
             .collect::<Option<_>>()
@@ -91,23 +91,23 @@ pub(crate) fn value_of(ty: &Type) -> Option<Type> {
 /// type `base` holds at `key`. A shape without the key, or a non-array
 /// `base`, gives `Mixed`; `None` when `base` isn't known yet.
 pub(crate) fn offset_access(base: &Type, key: &Type) -> Option<Type> {
-    syntax::stack::guard(|| match base {
+    syntax::stack::guard(|| match base.repr() {
         // A key the shape doesn't list is its unsealed tail's.
-        Type(Repr::ArrayShape(shape)) | Type(Repr::ObjectShape(shape)) => Some(
+        Repr::ArrayShape(shape) | Repr::ObjectShape(shape) => Some(
             ShapeKey::from_type(key)
                 .and_then(|key| shape.field(&key))
                 .map(|field| field.ty.clone())
                 .or_else(|| shape.unsealed.as_deref().map(|tail| tail.1.clone()))
                 .unwrap_or(Type::mixed()),
         ),
-        Type(Repr::Array(_, value)) => Some((**value).clone()),
-        Type(Repr::Intersection(members)) => members.iter().find_map(|m| offset_access(m, key)),
-        Type(Repr::Union(members)) => members
+        Repr::Array(_, value) => Some((**value).clone()),
+        Repr::Intersection(members) => members.iter().find_map(|m| offset_access(m, key)),
+        Repr::Union(members) => members
             .iter()
             .map(|m| offset_access(m, key))
             .collect::<Option<_>>()
             .map(join),
-        Type(Repr::TemplateParam(_)) | Type(Repr::Object(_, _)) => None,
+        Repr::TemplateParam(_) | Repr::Object(_, _) => None,
         _ => Some(Type::mixed()),
     })
 }
@@ -118,13 +118,11 @@ pub(crate) fn offset_access(base: &Type, key: &Type) -> Option<Type> {
 /// when the operand isn't an array type; a `value-of` is answered only
 /// over an array type (an enum's needs the registry).
 pub(crate) fn settle(ty: Type) -> Type {
-    match &ty {
-        Type(Repr::KeyOf(inner)) | Type(Repr::OffsetAccess(inner, _))
-            if !inner.references_template() =>
-        {
+    match ty.repr() {
+        Repr::KeyOf(inner) | Repr::OffsetAccess(inner, _) if !inner.references_template() => {
             resolve_node(&ty, &|t| t.clone()).unwrap_or(Type::mixed())
         }
-        Type(Repr::ValueOf(_)) => resolve_node(&ty, &|t| t.clone()).unwrap_or(ty),
+        Repr::ValueOf(_) => resolve_node(&ty, &|t| t.clone()).unwrap_or(ty),
         _ => ty,
     }
 }
@@ -133,12 +131,12 @@ impl Type {
     /// Whether this type names a template anywhere: a template parameter, or a
     /// conditional whose subject is one.
     pub fn references_template(&self) -> bool {
-        match self {
-            Type(Repr::TemplateParam(_)) => true,
-            Type(Repr::Conditional {
+        match self.repr() {
+            Repr::TemplateParam(_) => true,
+            Repr::Conditional {
                 subject: ConditionalSubject::Template(_),
                 ..
-            }) => true,
+            } => true,
             _ => self.any_child(Type::references_template),
         }
     }
@@ -151,14 +149,14 @@ impl Type {
     /// give is `Mixed`.
     pub fn resolve_late_to_bounds(&self) -> Type {
         let ty = self.map_children(&mut Type::resolve_late_to_bounds);
-        match ty {
-            Type(Repr::KeyOf(_)) | Type(Repr::OffsetAccess(..)) => {
+        match ty.repr() {
+            Repr::KeyOf(_) | Repr::OffsetAccess(..) => {
                 resolve_node(&ty, &upper_bound).unwrap_or(Type::mixed())
             }
-            Type(Repr::ValueOf(ref inner)) if matches!(**inner, Type(Repr::TemplateParam(_))) => {
+            Repr::ValueOf(inner) if matches!(inner.repr(), Repr::TemplateParam(_)) => {
                 resolve_node(&ty, &upper_bound).unwrap_or(Type::mixed())
             }
-            other => other,
+            _ => ty,
         }
     }
 }
@@ -166,16 +164,16 @@ impl Type {
 impl Type {
     /// Whether this type holds a `key-of` or offset access anywhere.
     pub fn contains_late(&self) -> bool {
-        matches!(self, Type(Repr::KeyOf(_)) | Type(Repr::OffsetAccess(..)))
+        matches!(self.repr(), Repr::KeyOf(_) | Repr::OffsetAccess(..))
             || self.any_child(Type::contains_late)
     }
 }
 
 /// A template's bound, recursively (`T of U`, `U of array`).
 pub(crate) fn upper_bound(ty: &Type) -> Type {
-    syntax::stack::guard(|| match ty {
-        Type(Repr::TemplateParam(tp)) => upper_bound(&tp.bound),
-        other => other.clone(),
+    syntax::stack::guard(|| match ty.repr() {
+        Repr::TemplateParam(tp) => upper_bound(&tp.bound),
+        _ => ty.clone(),
     })
 }
 
@@ -183,10 +181,10 @@ pub(crate) fn upper_bound(ty: &Type) -> Type {
 /// `operand`; `None` when it isn't late-resolvable or can't be answered
 /// yet.
 fn resolve_node(ty: &Type, operand: &dyn Fn(&Type) -> Type) -> Option<Type> {
-    match ty {
-        Type(Repr::KeyOf(inner)) => key_of(&operand(inner)),
-        Type(Repr::ValueOf(inner)) => value_of(&operand(inner)),
-        Type(Repr::OffsetAccess(base, key)) => offset_access(&operand(base), key),
+    match ty.repr() {
+        Repr::KeyOf(inner) => key_of(&operand(inner)),
+        Repr::ValueOf(inner) => value_of(&operand(inner)),
+        Repr::OffsetAccess(base, key) => offset_access(&operand(base), key),
         _ => None,
     }
 }

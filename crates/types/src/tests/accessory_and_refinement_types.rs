@@ -11,7 +11,7 @@ fn list_is_treated_as_a_real_refinement_not_a_class_reference() {
     // `int<0, max>` - the one encoding every list has, parsed or built.
     assert_eq!(
         parse_type_string("list<int>"),
-        Type(Repr::Intersection(vec![
+        Type::new(Repr::Intersection(vec![
             Type::array(Type::int_range(Some(0), None), Type::int()),
             Type::accessory(AccessoryKind::ArrayList),
         ]))
@@ -37,13 +37,13 @@ fn enum_string_is_a_class_string_bound_to_unit_enum() {
     // own registry sees already synthesizes `implements UnitEnum`.
     assert_eq!(
         parse_type_string("enum-string"),
-        Type::class_string(Type(Repr::Object("UnitEnum".into(), vec![])))
+        Type::class_string(Type::new(Repr::Object("UnitEnum".into(), vec![])))
     );
     assert_eq!(
         parse_type_string("enum-string<Suit>"),
-        Type::class_string(Type(Repr::Intersection(vec![
-            Type(Repr::Object("Suit".into(), vec![])),
-            Type(Repr::Object("UnitEnum".into(), vec![])),
+        Type::class_string(Type::new(Repr::Intersection(vec![
+            Type::new(Repr::Object("Suit".into(), vec![])),
+            Type::new(Repr::Object("UnitEnum".into(), vec![])),
         ])))
     );
 }
@@ -55,7 +55,7 @@ fn callable_string_is_a_string_and_callable_intersection() {
     // unrelated to the `class-string` family despite the shared name.
     assert_eq!(
         parse_type_string("callable-string"),
-        Type(Repr::Intersection(vec![
+        Type::new(Repr::Intersection(vec![
             Type::string(),
             Type::callable(None)
         ]))
@@ -70,11 +70,11 @@ fn interface_string_and_trait_string_are_class_kind_strings() {
     // real `ClassKind` at `registry::accepts`.
     assert_eq!(
         parse_type_string("interface-string"),
-        Type(Repr::ClassKindString(crate::ClassKind::Interface))
+        Type::new(Repr::ClassKindString(crate::ClassKind::Interface))
     );
     assert_eq!(
         parse_type_string("trait-string"),
-        Type(Repr::ClassKindString(crate::ClassKind::Trait))
+        Type::new(Repr::ClassKindString(crate::ClassKind::Trait))
     );
 }
 
@@ -90,21 +90,21 @@ fn interface_string_and_trait_string_are_class_kind_strings() {
 fn case_refinement_string_pseudo_types_are_now_real_accessory_types() {
     assert_eq!(
         parse_type_string("lowercase-string"),
-        Type(Repr::Intersection(vec![
+        Type::new(Repr::Intersection(vec![
             Type::string(),
             Type::accessory(AccessoryKind::LowercaseString)
         ]))
     );
     assert_eq!(
         parse_type_string("uppercase-string"),
-        Type(Repr::Intersection(vec![
+        Type::new(Repr::Intersection(vec![
             Type::string(),
             Type::accessory(AccessoryKind::UppercaseString)
         ]))
     );
     assert_eq!(
         parse_type_string("non-empty-lowercase-string"),
-        Type(Repr::Intersection(vec![
+        Type::new(Repr::Intersection(vec![
             Type::string(),
             Type::accessory(AccessoryKind::NonEmptyString),
             Type::accessory(AccessoryKind::LowercaseString)
@@ -112,7 +112,7 @@ fn case_refinement_string_pseudo_types_are_now_real_accessory_types() {
     );
     assert_eq!(
         parse_type_string("non-empty-uppercase-string"),
-        Type(Repr::Intersection(vec![
+        Type::new(Repr::Intersection(vec![
             Type::string(),
             Type::accessory(AccessoryKind::NonEmptyString),
             Type::accessory(AccessoryKind::UppercaseString)
@@ -124,7 +124,7 @@ fn case_refinement_string_pseudo_types_are_now_real_accessory_types() {
 fn decimal_int_string_is_a_real_accessory_type() {
     assert_eq!(
         parse_type_string("decimal-int-string"),
-        Type(Repr::Intersection(vec![
+        Type::new(Repr::Intersection(vec![
             Type::string(),
             Type::accessory(AccessoryKind::DecimalIntegerString)
         ]))
@@ -154,7 +154,7 @@ fn string_refinement_pseudo_types_with_verifiable_content_are_real_accessory_typ
     // representation.
     assert_eq!(
         parse_type_string("non-empty-string"),
-        Type(Repr::Intersection(vec![
+        Type::new(Repr::Intersection(vec![
             Type::string(),
             Type::accessory(AccessoryKind::NonEmptyString)
         ]))
@@ -162,7 +162,7 @@ fn string_refinement_pseudo_types_with_verifiable_content_are_real_accessory_typ
     for name in ["non-falsy-string", "truthy-string"] {
         assert_eq!(
             parse_type_string(name),
-            Type(Repr::Intersection(vec![
+            Type::new(Repr::Intersection(vec![
                 Type::string(),
                 Type::accessory(AccessoryKind::NonFalsyString)
             ])),
@@ -171,14 +171,14 @@ fn string_refinement_pseudo_types_with_verifiable_content_are_real_accessory_typ
     }
     assert_eq!(
         parse_type_string("literal-string"),
-        Type(Repr::Intersection(vec![
+        Type::new(Repr::Intersection(vec![
             Type::string(),
             Type::accessory(AccessoryKind::LiteralString)
         ]))
     );
     assert_eq!(
         parse_type_string("numeric-string"),
-        Type(Repr::Intersection(vec![
+        Type::new(Repr::Intersection(vec![
             Type::string(),
             Type::accessory(AccessoryKind::NumericString)
         ]))
@@ -189,7 +189,7 @@ fn string_refinement_pseudo_types_with_verifiable_content_are_real_accessory_typ
 fn class_string_with_a_generic_argument_is_tracked_precisely() {
     assert_eq!(
         parse_type_string("class-string<Foo>"),
-        Type::class_string(Type(Repr::Object("Foo".into(), Vec::new())))
+        Type::class_string(Type::new(Repr::Object("Foo".into(), Vec::new())))
     );
     // Two or more args isn't real PHPStan syntax - falls back to plain
     // string rather than guessing which one is meant.
@@ -238,7 +238,7 @@ fn accessory_intersection_display_composes_every_combination() {
         parse_type_string("non-empty-uppercase-string").to_string(),
         "non-empty-uppercase-string"
     );
-    let date_y_shaped = Type(Repr::Intersection(vec![
+    let date_y_shaped = Type::new(Repr::Intersection(vec![
         Type::string(),
         Type::accessory(AccessoryKind::NonEmptyString),
         Type::accessory(AccessoryKind::NumericString),
@@ -269,7 +269,7 @@ fn int_refinement_pseudo_types_are_real_int_ranges() {
     // union of two ranges, not its own type.
     assert_eq!(
         parse_type_string("non-zero-int"),
-        Type(Repr::Union(vec![
+        Type::new(Repr::Union(vec![
             Type::int_range(None, Some(-1)),
             Type::int_range(Some(1), None),
         ]))
@@ -301,8 +301,8 @@ fn array_refinement_pseudo_types_are_real_accessory_intersections() {
     // representation.
     assert_eq!(
         parse_type_string("non-empty-array<int>"),
-        Type(Repr::Intersection(vec![
-            Type::array(Type::unknown_array_key(), Type(Repr::Int)),
+        Type::new(Repr::Intersection(vec![
+            Type::array(Type::unknown_array_key(), Type::new(Repr::Int)),
             Type::accessory(AccessoryKind::NonEmptyArray),
         ]))
     );
@@ -310,8 +310,8 @@ fn array_refinement_pseudo_types_are_real_accessory_intersections() {
         // A list keys on `int<0, max>`, unlike the unknown `int|string`
         // default plain non-empty-array keeps above.
         parse_type_string("non-empty-list<string>"),
-        Type(Repr::Intersection(vec![
-            Type::array(Type::int_range(Some(0), None), Type(Repr::String)),
+        Type::new(Repr::Intersection(vec![
+            Type::array(Type::int_range(Some(0), None), Type::new(Repr::String)),
             Type::accessory(AccessoryKind::ArrayList),
             Type::accessory(AccessoryKind::NonEmptyArray),
         ]))
@@ -321,11 +321,10 @@ fn array_refinement_pseudo_types_are_real_accessory_intersections() {
     assert_eq!(
         parse_type_string("class-string-map<Foo, int>"),
         Type::array(
-            Type(Repr::ClassString(std::sync::Arc::new(Type(Repr::Object(
-                "Foo".into(),
-                Vec::new()
-            ))))),
-            Type(Repr::Int)
+            Type::new(Repr::ClassString(std::sync::Arc::new(Type::new(
+                Repr::Object("Foo".into(), Vec::new())
+            )))),
+            Type::new(Repr::Int)
         )
     );
 }
@@ -336,8 +335,8 @@ fn array_shape_parses_required_and_optional_fields() {
     assert_eq!(
         shape,
         Type::array_shape(Shape::from_named(vec![
-            ("name".to_string(), Type(Repr::String), false),
-            ("age".to_string(), Type(Repr::Int), true),
+            ("name".to_string(), Type::new(Repr::String), false),
+            ("age".to_string(), Type::new(Repr::Int), true),
         ]))
     );
 }
@@ -349,7 +348,10 @@ fn array_shape_field_can_itself_be_a_union() {
         shape,
         Type::array_shape(Shape::from_named(vec![(
             "value".to_string(),
-            Type(Repr::Union(vec![Type(Repr::Int), Type(Repr::String)])),
+            Type::new(Repr::Union(vec![
+                Type::new(Repr::Int),
+                Type::new(Repr::String)
+            ])),
             false
         )]))
     );
@@ -371,12 +373,12 @@ fn array_shape_with_an_unsealed_marker_still_parses_its_real_fields() {
         Type::array_shape(crate::Shape {
             fields: vec![crate::ShapeField::new(
                 crate::ShapeKey::from_name("items"),
-                Type(Repr::Int),
+                Type::new(Repr::Int),
                 false
             )],
             unsealed: Some(Box::new((
-                Type(Repr::String),
-                Type(Repr::Mixed(false, None))
+                Type::new(Repr::String),
+                Type::new(Repr::Mixed(false, None))
             ))),
             next_index: None,
         })
@@ -387,7 +389,7 @@ fn array_shape_with_an_unsealed_marker_still_parses_its_real_fields() {
         shape2,
         Type::array_shape(crate::Shape::unsealed(vec![crate::ShapeField::new(
             crate::ShapeKey::from_name("items"),
-            Type(Repr::Int),
+            Type::new(Repr::Int),
             false
         ),]))
     );
@@ -404,8 +406,8 @@ fn array_shape_with_positional_fields_numbers_them_like_a_real_array_literal() {
     assert_eq!(
         shape,
         Type::array_shape(Shape::from_named(vec![
-            ("0".to_string(), Type(Repr::Int), false),
-            ("1".to_string(), Type(Repr::String), false),
+            ("0".to_string(), Type::new(Repr::Int), false),
+            ("1".to_string(), Type::new(Repr::String), false),
         ]))
     );
 }
@@ -419,17 +421,17 @@ fn array_shape_with_positional_int_range_fields_parses() {
         Type::array_shape(Shape::from_named(vec![
             (
                 "0".to_string(),
-                Type(Repr::IntRange(Some(0), Some(255))),
+                Type::new(Repr::IntRange(Some(0), Some(255))),
                 false
             ),
             (
                 "1".to_string(),
-                Type(Repr::IntRange(Some(0), Some(255))),
+                Type::new(Repr::IntRange(Some(0), Some(255))),
                 false
             ),
             (
                 "2".to_string(),
-                Type(Repr::IntRange(Some(0), Some(255))),
+                Type::new(Repr::IntRange(Some(0), Some(255))),
                 false
             ),
         ]))
@@ -442,8 +444,8 @@ fn array_shape_mixing_explicit_int_keys_and_named_keys_still_parses_correctly() 
     assert_eq!(
         shape,
         Type::array_shape(Shape::from_named(vec![
-            ("0".to_string(), Type(Repr::Int), false),
-            ("name".to_string(), Type(Repr::String), false),
+            ("0".to_string(), Type::new(Repr::Int), false),
+            ("name".to_string(), Type::new(Repr::String), false),
         ]))
     );
 }
@@ -456,8 +458,8 @@ fn array_shape_with_a_hyphenated_bare_key_still_parses_as_keyed() {
     assert_eq!(
         shape,
         Type::array_shape(Shape::from_named(vec![
-            ("domain".to_string(), Type(Repr::String), false),
-            ("plural-forms".to_string(), Type(Repr::String), false),
+            ("domain".to_string(), Type::new(Repr::String), false),
+            ("plural-forms".to_string(), Type::new(Repr::String), false),
         ]))
     );
 }
@@ -467,7 +469,7 @@ fn array_shape_with_a_hyphenated_bare_key_still_parses_as_keyed() {
 #[test]
 fn array_shape_with_a_positional_closure_field_is_not_split_at_its_own_colon() {
     let shape = parse_type_string("array{Closure(int): string, int}");
-    let Type(Repr::ArrayShape(fields)) = &shape else {
+    let Repr::ArrayShape(fields) = shape.repr() else {
         panic!("expected an array shape, got {shape:?}");
     };
     let fields = fields.named_fields();
@@ -481,7 +483,7 @@ fn array_shape_with_a_positional_closure_field_is_not_split_at_its_own_colon() {
 #[test]
 fn a_positional_class_constant_field_is_not_read_as_a_key() {
     let shape = parse_type_string("array{self::STRATEGY_*, non-empty-list<self::STRATEGY_*>}");
-    let Type(Repr::ArrayShape(fields)) = &shape else {
+    let Repr::ArrayShape(fields) = shape.repr() else {
         panic!("expected an array shape, got {shape:?}");
     };
     let fields = fields.named_fields();
@@ -539,14 +541,14 @@ fn an_integer_range_absorbs_the_constants_and_ranges_touching_it() {
     );
     assert_eq!(
         Type::union(range(Some(3), Some(5)), Type::int_literal(1)),
-        Type(Repr::Union(vec![
+        Type::new(Repr::Union(vec![
             range(Some(3), Some(5)),
             Type::int_literal(1)
         ]))
     );
     assert_eq!(
         Type::union(Type::int_literal(1), Type::int_literal(2)),
-        Type(Repr::Union(vec![
+        Type::new(Repr::Union(vec![
             Type::int_literal(1),
             Type::int_literal(2)
         ]))
@@ -558,12 +560,12 @@ fn an_integer_range_absorbs_the_constants_and_ranges_touching_it() {
 fn an_offset_an_intersection_records_is_surely_there() {
     let key = || Type::string_literal("k".into());
     let base = || Type::array(Type::string(), Type::int());
-    let with_offset = Type(Repr::Intersection(vec![
+    let with_offset = Type::new(Repr::Intersection(vec![
         base(),
         Type::has_offset(ShapeKey::Str("k".into())),
     ]));
     assert_eq!(with_offset.has_offset_value_type(&key()), TrinaryLogic::Yes);
-    let with_value = Type(Repr::Intersection(vec![
+    let with_value = Type::new(Repr::Intersection(vec![
         base(),
         Type::has_offset_value(ShapeKey::Str("k".into()), Type::int()),
     ]));

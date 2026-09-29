@@ -9,157 +9,157 @@ use crate::{
 
 impl Type {
     /// `mixed` with no type information behind it.
-    pub const fn mixed() -> Type {
-        Type(Repr::Mixed(false, None))
+    pub fn mixed() -> Type {
+        Type::new(Repr::Mixed(false, None))
     }
 
     /// `mixed` as a type written somewhere resolved to it.
-    pub const fn explicit_mixed() -> Type {
-        Type(Repr::Mixed(true, None))
+    pub fn explicit_mixed() -> Type {
+        Type::new(Repr::Mixed(true, None))
     }
 
     /// `mixed`, explicit or not.
-    pub const fn mixed_with(explicit: bool) -> Type {
-        Type(Repr::Mixed(explicit, None))
+    pub fn mixed_with(explicit: bool) -> Type {
+        Type::new(Repr::Mixed(explicit, None))
     }
 
-    pub const fn error() -> Type {
-        Type(Repr::Error)
+    pub fn error() -> Type {
+        Type::new(Repr::Error)
     }
 
-    pub const fn never() -> Type {
-        Type(Repr::Never)
+    pub fn never() -> Type {
+        Type::new(Repr::Never)
     }
 
-    pub const fn void() -> Type {
-        Type(Repr::Void)
+    pub fn void() -> Type {
+        Type::new(Repr::Void)
     }
 
-    pub const fn null() -> Type {
-        Type(Repr::Null)
+    pub fn null() -> Type {
+        Type::new(Repr::Null)
     }
 
-    pub const fn bool() -> Type {
-        Type(Repr::Bool)
+    pub fn bool() -> Type {
+        Type::new(Repr::Bool)
     }
 
     /// `true` or `false`.
-    pub const fn bool_literal(value: bool) -> Type {
+    pub fn bool_literal(value: bool) -> Type {
         if value {
-            Type(Repr::True)
+            Type::new(Repr::True)
         } else {
-            Type(Repr::False)
+            Type::new(Repr::False)
         }
     }
 
-    pub const fn int() -> Type {
-        Type(Repr::Int)
+    pub fn int() -> Type {
+        Type::new(Repr::Int)
     }
 
-    pub const fn int_literal(value: i64) -> Type {
-        Type(Repr::IntLiteral(value))
+    pub fn int_literal(value: i64) -> Type {
+        Type::new(Repr::IntLiteral(value))
     }
 
     /// The integers from `min` to `max` (`None` unbounded) as the
     /// narrowest type: `int` when unbounded both ways, a literal when
     /// they meet, `never` when they cross (PHPStan's
     /// `IntegerRangeType::fromInterval`).
-    pub const fn int_range(min: Option<i64>, max: Option<i64>) -> Type {
+    pub fn int_range(min: Option<i64>, max: Option<i64>) -> Type {
         match (min, max) {
-            (None, None) => Type(Repr::Int),
-            (Some(a), Some(b)) if a > b => Type(Repr::Never),
-            (Some(a), Some(b)) if a == b => Type(Repr::IntLiteral(a)),
-            (min, max) => Type(Repr::IntRange(min, max)),
+            (None, None) => Type::new(Repr::Int),
+            (Some(a), Some(b)) if a > b => Type::new(Repr::Never),
+            (Some(a), Some(b)) if a == b => Type::new(Repr::IntLiteral(a)),
+            (min, max) => Type::new(Repr::IntRange(min, max)),
         }
     }
 
-    pub const fn float() -> Type {
-        Type(Repr::Float)
+    pub fn float() -> Type {
+        Type::new(Repr::Float)
     }
 
-    pub const fn float_literal(value: f64) -> Type {
-        Type(Repr::FloatLiteral(value))
+    pub fn float_literal(value: f64) -> Type {
+        Type::new(Repr::FloatLiteral(value))
     }
 
-    pub const fn string() -> Type {
-        Type(Repr::String)
+    pub fn string() -> Type {
+        Type::new(Repr::String)
     }
 
     pub fn string_literal(value: PhpString) -> Type {
-        Type(Repr::StringLiteral(value))
+        Type::new(Repr::StringLiteral(value))
     }
 
     /// `class-string<inner>`.
     pub fn class_string(inner: Type) -> Type {
-        Type(Repr::ClassString(Arc::new(inner)))
+        Type::new(Repr::ClassString(Arc::new(inner)))
     }
 
     /// `interface-string`, `trait-string` or `enum-string`.
-    pub const fn class_kind_string(kind: ClassKind) -> Type {
-        Type(Repr::ClassKindString(kind))
+    pub fn class_kind_string(kind: ClassKind) -> Type {
+        Type::new(Repr::ClassKindString(kind))
     }
 
     /// `array<key, value>`.
     pub fn array(key: Type, value: Type) -> Type {
-        Type(Repr::Array(Arc::new(key), Arc::new(value)))
+        Type::new(Repr::Array(Arc::new(key), Arc::new(value)))
     }
 
     pub fn array_shape(shape: Shape) -> Type {
-        Type(Repr::ArrayShape(Arc::new(shape)))
+        Type::new(Repr::ArrayShape(Arc::new(shape)))
     }
 
     pub fn object_shape(shape: Shape) -> Type {
-        Type(Repr::ObjectShape(Arc::new(shape)))
+        Type::new(Repr::ObjectShape(Arc::new(shape)))
     }
 
     /// An instance of `class`, with its generic arguments.
     pub fn object(class: Name, args: Vec<Type>) -> Type {
-        Type(Repr::Object(class, args))
+        Type::new(Repr::Object(class, args))
     }
 
     /// `object`.
-    pub const fn object_without_class() -> Type {
-        Type(Repr::ObjectWithoutClass)
+    pub fn object_without_class() -> Type {
+        Type::new(Repr::ObjectWithoutClass)
     }
 
-    pub const fn resource(closed: bool) -> Type {
-        Type(Repr::Resource { closed })
+    pub fn resource(closed: bool) -> Type {
+        Type::new(Repr::Resource { closed })
     }
 
     /// The case `case` of the enum `class`.
     pub fn enum_case(class: Name, case: Name) -> Type {
-        Type(Repr::EnumCase(class, case))
+        Type::new(Repr::EnumCase(class, case))
     }
 
     /// `callable`, or a callable with a known signature.
     pub fn callable(sig: Option<Arc<CallableSig>>) -> Type {
-        Type(Repr::Callable(sig))
+        Type::new(Repr::Callable(sig))
     }
 
     pub fn self_ref(args: Vec<Type>) -> Type {
-        Type(Repr::SelfRef(args))
+        Type::new(Repr::SelfRef(args))
     }
 
-    pub const fn parent_ref() -> Type {
-        Type(Repr::ParentRef)
+    pub fn parent_ref() -> Type {
+        Type::new(Repr::ParentRef)
     }
 
     pub fn static_ref(args: Vec<Type>) -> Type {
-        Type(Repr::StaticRef(args))
+        Type::new(Repr::StaticRef(args))
     }
 
     /// `$this`.
-    pub const fn this() -> Type {
-        Type(Repr::This)
+    pub fn this() -> Type {
+        Type::new(Repr::This)
     }
 
     pub fn template_param(param: TemplateParam) -> Type {
-        Type(Repr::TemplateParam(param))
+        Type::new(Repr::TemplateParam(param))
     }
 
     /// A generic argument written with a call-site variance.
     pub fn variance_arg(variance: CallSiteVariance, arg: Type) -> Type {
-        Type(Repr::VarianceArg(variance, Arc::new(arg)))
+        Type::new(Repr::VarianceArg(variance, Arc::new(arg)))
     }
 
     /// The union of `members`: nested unions flattened, members another
@@ -168,15 +168,15 @@ impl Type {
         members
             .into_iter()
             .reduce(Type::union)
-            .unwrap_or(Type(Repr::Never))
+            .unwrap_or(Type::new(Repr::Never))
     }
 
     /// The union of `members`, benevolent: a value checked against it
     /// passes when it passes against any member.
     pub fn benevolent_union_of(members: Vec<Type>) -> Type {
         match Type::union_of(members).into_repr() {
-            Repr::Union(members) => Type(Repr::BenevolentUnion(members)),
-            other => Type(other),
+            Repr::Union(members) => Type::new(Repr::BenevolentUnion(members)),
+            other => Type::new(other),
         }
     }
 
@@ -186,58 +186,58 @@ impl Type {
         crate::intersect_types(members)
     }
 
-    pub const fn accessory(kind: AccessoryKind) -> Type {
-        Type(Repr::Accessory(kind))
+    pub fn accessory(kind: AccessoryKind) -> Type {
+        Type::new(Repr::Accessory(kind))
     }
 
     /// `hasOffsetValue(key, value)`.
     pub fn has_offset_value(key: ShapeKey, value: Type) -> Type {
-        Type(Repr::HasOffsetValue(key, Arc::new(value)))
+        Type::new(Repr::HasOffsetValue(key, Arc::new(value)))
     }
 
     /// `hasOffset(key)`.
     pub fn has_offset(key: ShapeKey) -> Type {
-        Type(Repr::HasOffset(key))
+        Type::new(Repr::HasOffset(key))
     }
 
     pub fn has_method(method: Name) -> Type {
-        Type(Repr::HasMethod(method))
+        Type::new(Repr::HasMethod(method))
     }
 
     pub fn has_property(property: Name) -> Type {
-        Type(Repr::HasProperty(property))
+        Type::new(Repr::HasProperty(property))
     }
 
     /// The member `member` of `owner`'s reflected class.
     pub fn reflected_member(owner: Type, member: Name) -> Type {
-        Type(Repr::ReflectedMember(Arc::new(owner), member))
+        Type::new(Repr::ReflectedMember(Arc::new(owner), member))
     }
 
     /// `value-of<of>`.
     pub fn value_of(of: Type) -> Type {
-        Type(Repr::ValueOf(Arc::new(of)))
+        Type::new(Repr::ValueOf(Arc::new(of)))
     }
 
     /// `key-of<of>`.
     pub fn key_of(of: Type) -> Type {
-        Type(Repr::KeyOf(Arc::new(of)))
+        Type::new(Repr::KeyOf(Arc::new(of)))
     }
 
     /// `container[offset]`.
     pub fn offset_access(container: Type, offset: Type) -> Type {
-        Type(Repr::OffsetAccess(Arc::new(container), Arc::new(offset)))
+        Type::new(Repr::OffsetAccess(Arc::new(container), Arc::new(offset)))
     }
 
     /// The constants of `class` matching `pattern` (`Foo::BAR_*`).
     pub fn class_constant(class: Type, pattern: Name) -> Type {
-        Type(Repr::ClassConstant {
+        Type::new(Repr::ClassConstant {
             class: Arc::new(class),
             pattern,
         })
     }
 
     pub fn extension(data: Arc<dyn ExtensionTypeData>) -> Type {
-        Type(Repr::Extension(data))
+        Type::new(Repr::Extension(data))
     }
 
     /// `(subject is target ? if_true : if_false)`, `is not` when
@@ -249,7 +249,7 @@ impl Type {
         if_false: Type,
         negated: bool,
     ) -> Type {
-        Type(Repr::Conditional {
+        Type::new(Repr::Conditional {
             subject,
             target: Arc::new(target),
             if_true: Arc::new(if_true),
@@ -263,8 +263,8 @@ impl Type {
     /// The union of `members`, of the same kind as `self`: benevolent
     /// when `self` is a benevolent union, plain otherwise.
     pub fn with_members(&self, members: Vec<Type>) -> Type {
-        match self {
-            Type(Repr::BenevolentUnion(_)) => Type::benevolent_union_of(members),
+        match self.repr() {
+            Repr::BenevolentUnion(_) => Type::benevolent_union_of(members),
             _ => Type::union_of(members),
         }
     }
@@ -275,9 +275,9 @@ impl Type {
     /// signature - real PHPStan's `ClosureType`, which is both at once.
     /// `Display` renders this exact pair as `Closure(params): return`.
     pub fn closure_literal(sig: CallableSig) -> Type {
-        Type(Repr::Intersection(vec![
-            Type(Repr::Object("Closure".into(), Vec::new())),
-            Type(Repr::Callable(Some(Arc::new(sig)))),
+        Type::new(Repr::Intersection(vec![
+            Type::new(Repr::Object("Closure".into(), Vec::new())),
+            Type::new(Repr::Callable(Some(Arc::new(sig)))),
         ]))
     }
 
@@ -292,13 +292,16 @@ impl Type {
     /// PHP's full legal-array-key domain (`int|string`) - the default for
     /// a bare `array`/`array<V>` with no key argument given.
     pub fn unknown_array_key() -> Type {
-        Type(Repr::Union(vec![Type(Repr::Int), Type(Repr::String)]))
+        Type::new(Repr::Union(vec![
+            Type::new(Repr::Int),
+            Type::new(Repr::String),
+        ]))
     }
 
     /// `Repr::Array(unknown_array_key(), value)`, for a construction site
     /// with no more precise key type available.
     pub fn array_of(value: Type) -> Type {
-        Type(Repr::Array(
+        Type::new(Repr::Array(
             Arc::new(Type::unknown_array_key()),
             Arc::new(value),
         ))
@@ -332,9 +335,9 @@ impl Type {
     /// construction sites this marker belongs at, not every "no more
     /// precise key" site project-wide.
     pub fn benevolent_array_key() -> Type {
-        Type(Repr::BenevolentUnion(vec![
-            Type(Repr::Int),
-            Type(Repr::String),
+        Type::new(Repr::BenevolentUnion(vec![
+            Type::new(Repr::Int),
+            Type::new(Repr::String),
         ]))
     }
 }

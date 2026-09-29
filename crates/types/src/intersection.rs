@@ -23,7 +23,7 @@ impl Relation<'_> {
             for member in members {
                 match member.into_repr() {
                     Repr::Intersection(inner) => flat.extend(inner),
-                    other => flat.push(Type(other)),
+                    other => flat.push(Type::new(other)),
                 }
             }
             if flat.contains(&Type::never()) {
@@ -34,7 +34,7 @@ impl Relation<'_> {
             const DISTRIBUTE_LIMIT: usize = 16;
             if let Some(at) = flat
                 .iter()
-                .position(|m| matches!(m, Type(Repr::Union(ms)) if ms.len() <= DISTRIBUTE_LIMIT))
+                .position(|m| matches!(m.repr(), Repr::Union(ms) if ms.len() <= DISTRIBUTE_LIMIT))
             {
                 let Repr::Union(alternatives) = flat.remove(at).into_repr() else {
                     unreachable!("matched a union above")
@@ -74,7 +74,7 @@ impl Relation<'_> {
                         };
                     }
                     other => {
-                        let other = Type(other);
+                        let other = Type::new(other);
                         if !rest.contains(&other) {
                             rest.push(other);
                         }
@@ -129,7 +129,7 @@ impl Relation<'_> {
             match kept.len() {
                 0 => Type::mixed(),
                 1 => kept.pop().expect("one member"),
-                _ => Type(Repr::Intersection(kept)),
+                _ => Type::new(Repr::Intersection(kept)),
             }
         })
     }
@@ -142,13 +142,13 @@ impl Relation<'_> {
     /// under a native type with `float` and not `int` (`: float`,
     /// `: float|string`) is coerced at runtime, so it reads as the `float`.
     pub fn intersect_but_not_never(&self, native: &Type, inferred: Type) -> Type {
-        let native_members: Vec<&Type> = match native {
-            Type(Repr::Union(ms)) => ms.iter().collect(),
-            other => vec![other],
+        let native_members: Vec<&Type> = match native.repr() {
+            Repr::Union(ms) => ms.iter().collect(),
+            _ => vec![native],
         };
         let inferred_members = match inferred.into_repr() {
             Repr::Union(ms) => ms,
-            other => vec![Type(other)],
+            other => vec![Type::new(other)],
         };
         let mut kept: Vec<Type> = Vec::new();
         for m in inferred_members {
@@ -156,12 +156,12 @@ impl Relation<'_> {
                 return native.clone();
             }
             let int_like = matches!(
-                m,
-                Type(Repr::Int) | Type(Repr::IntLiteral(_)) | Type(Repr::IntRange(..))
+                m.repr(),
+                Repr::Int | Repr::IntLiteral(_) | Repr::IntRange(..)
             );
-            let fits = !matches!(m, Type(Repr::Void))
+            let fits = !matches!(m.repr(), Repr::Void)
                 && native_members.iter().any(|n| {
-                    !(int_like && matches!(n, Type(Repr::Float))) && self.accepts(n, &m).yes()
+                    !(int_like && matches!(n.repr(), Repr::Float)) && self.accepts(n, &m).yes()
                 });
             if fits {
                 kept.push(m);
@@ -172,10 +172,10 @@ impl Relation<'_> {
             if int_like
                 && native_members
                     .iter()
-                    .any(|n| matches!(n, Type(Repr::Float)))
+                    .any(|n| matches!(n.repr(), Repr::Float))
             {
-                kept.push(match m {
-                    Type(Repr::IntLiteral(n)) => Type::float_literal(n as f64),
+                kept.push(match m.repr() {
+                    Repr::IntLiteral(n) => Type::float_literal(*n as f64),
                     _ => Type::float(),
                 });
                 continue;
@@ -183,14 +183,17 @@ impl Relation<'_> {
             kept.extend(
                 native_members
                     .iter()
-                    .filter(|n| !matches!(n, Type(Repr::Null)) && self.accepts(&m, n).yes())
+                    .filter(|n| !matches!(n.repr(), Repr::Null) && self.accepts(&m, n).yes())
                     .map(|n| (*n).clone()),
             );
         }
         if kept.is_empty() {
             return native.clone();
         }
-        if native_members.iter().any(|n| matches!(n, Type(Repr::Null))) {
+        if native_members
+            .iter()
+            .any(|n| matches!(n.repr(), Repr::Null))
+        {
             kept.push(Type::null());
         }
         kept.sort_by_key(|m| *m == Type::null());
@@ -203,13 +206,13 @@ impl Relation<'_> {
     /// when they share no value, both otherwise.
     fn narrower(&self, a: Type, b: Type) -> Type {
         // `mixed~S` narrows the other side to it without `S`.
-        if let Type(Repr::Mixed(_, lacks)) = &b {
+        if let Repr::Mixed(_, lacks) = b.repr() {
             return match lacks {
                 Some(lacks) => a.without(lacks),
                 None => a,
             };
         }
-        if let Type(Repr::Mixed(_, lacks)) = &a {
+        if let Repr::Mixed(_, lacks) = a.repr() {
             return match lacks {
                 Some(lacks) => b.without(lacks),
                 None => b,
@@ -308,13 +311,13 @@ impl Relation<'_> {
     fn apply_offsets(&self, mut shape: Shape, rest: &mut Vec<Type>) -> Option<Shape> {
         let mut unapplied = Vec::new();
         for member in rest.drain(..) {
-            match member {
-                Type(Repr::HasOffset(ref key)) => match shape.field(key).cloned() {
+            match member.repr() {
+                Repr::HasOffset(key) => match shape.field(key).cloned() {
                     Some(f) => shape.set(ShapeField::new(f.key, f.ty, false)),
                     None if shape.is_sealed() => return None,
                     None => unapplied.push(member),
                 },
-                Type(Repr::HasOffsetValue(ref key, ref value)) => match shape.field(key).cloned() {
+                Repr::HasOffsetValue(key, value) => match shape.field(key).cloned() {
                     Some(f) => {
                         let ty = self.narrower(f.ty, (**value).clone());
                         if ty == Type::never() {
@@ -325,7 +328,7 @@ impl Relation<'_> {
                     None if shape.is_sealed() => return None,
                     None => unapplied.push(member),
                 },
-                Type(Repr::Accessory(AccessoryKind::NonEmptyArray))
+                Repr::Accessory(AccessoryKind::NonEmptyArray)
                     if shape.is_sealed() && shape.fields.is_empty() =>
                 {
                     return None;
@@ -333,7 +336,7 @@ impl Relation<'_> {
                 // A list has only the keys 0, 1, ...: a shape requiring any
                 // other key can't be one, and a shape that is a list already
                 // says so.
-                Type(Repr::Accessory(AccessoryKind::ArrayList)) => {
+                Repr::Accessory(AccessoryKind::ArrayList) => {
                     let list_keys_only = shape
                         .fields
                         .iter()
@@ -346,7 +349,7 @@ impl Relation<'_> {
                         unapplied.push(member);
                     }
                 }
-                other => unapplied.push(other),
+                _ => unapplied.push(member),
             }
         }
         *rest = unapplied;
@@ -358,12 +361,12 @@ impl Relation<'_> {
 /// type on its own.
 fn is_refinement(ty: &Type) -> bool {
     matches!(
-        ty,
-        Type(Repr::Accessory(_))
-            | Type(Repr::HasOffset(_))
-            | Type(Repr::HasOffsetValue(..))
-            | Type(Repr::HasMethod(_))
-            | Type(Repr::HasProperty(_))
-            | Type(Repr::ReflectedMember(..))
+        ty.repr(),
+        Repr::Accessory(_)
+            | Repr::HasOffset(_)
+            | Repr::HasOffsetValue(..)
+            | Repr::HasMethod(_)
+            | Repr::HasProperty(_)
+            | Repr::ReflectedMember(..)
     )
 }

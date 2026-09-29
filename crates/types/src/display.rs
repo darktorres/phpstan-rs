@@ -36,7 +36,7 @@ fn write_callable_sig(f: &mut fmt::Formatter<'_>, keyword: &str, sig: &CallableS
             .iter()
             .map(|t| {
                 let mut s = t.name.clone();
-                if !matches!(*t.bound, Type(Repr::Mixed(..))) {
+                if !matches!((*t.bound).repr(), Repr::Mixed(..)) {
                     s.push_str(&format!(" of {}", t.bound));
                 }
                 if let Some(default) = &t.default {
@@ -53,87 +53,86 @@ fn write_callable_sig(f: &mut fmt::Formatter<'_>, keyword: &str, sig: &CallableS
 impl fmt::Display for Type {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         syntax::stack::guard(|| {
-            match self {
-                Type(Repr::Mixed(_, None)) => write!(f, "mixed"),
-                Type(Repr::Mixed(_, Some(subtracted))) => {
+            match self.repr() {
+                Repr::Mixed(_, None) => write!(f, "mixed"),
+                Repr::Mixed(_, Some(subtracted)) => {
                     if subtracted.union_members().len() > 1 {
                         write!(f, "mixed~({subtracted})")
                     } else {
                         write!(f, "mixed~{subtracted}")
                     }
                 }
-                Type(Repr::Error) => write!(f, "*ERROR*"),
-                Type(Repr::Never) => write!(f, "never"),
-                Type(Repr::Void) => write!(f, "void"),
-                Type(Repr::Null) => write!(f, "null"),
-                Type(Repr::Bool) => write!(f, "bool"),
-                Type(Repr::True) => write!(f, "true"),
-                Type(Repr::False) => write!(f, "false"),
-                Type(Repr::Int) => write!(f, "int"),
-                Type(Repr::IntLiteral(n)) => write!(f, "{n}"),
-                Type(Repr::Float) => write!(f, "float"),
-                Type(Repr::String) => write!(f, "string"),
-                Type(Repr::StringLiteral(s)) => f.write_str(&quote_php_string(s)),
-                Type(Repr::Array(key, value)) => {
+                Repr::Error => write!(f, "*ERROR*"),
+                Repr::Never => write!(f, "never"),
+                Repr::Void => write!(f, "void"),
+                Repr::Null => write!(f, "null"),
+                Repr::Bool => write!(f, "bool"),
+                Repr::True => write!(f, "true"),
+                Repr::False => write!(f, "false"),
+                Repr::Int => write!(f, "int"),
+                Repr::IntLiteral(n) => write!(f, "{n}"),
+                Repr::Float => write!(f, "float"),
+                Repr::String => write!(f, "string"),
+                Repr::StringLiteral(s) => f.write_str(&quote_php_string(s)),
+                Repr::Array(key, value) => {
                     let known_key = **key != Type::unknown_array_key();
-                    match (known_key, value.as_ref()) {
-                        (false, Type(Repr::Mixed(..))) => write!(f, "array"),
-                        (false, v) => write!(f, "array<{v}>"),
-                        (true, v) => write!(f, "array<{key}, {v}>"),
+                    match (known_key, value.repr()) {
+                        (false, Repr::Mixed(..)) => write!(f, "array"),
+                        (false, _) => write!(f, "array<{value}>"),
+                        (true, _) => write!(f, "array<{key}, {value}>"),
                     }
                 }
-                Type(Repr::ClassString(inner)) => write!(f, "class-string<{inner}>"),
-                Type(Repr::ClassKindString(ClassKind::Interface)) => write!(f, "interface-string"),
-                Type(Repr::ClassKindString(ClassKind::Trait)) => write!(f, "trait-string"),
-                Type(Repr::ClassKindString(ClassKind::Enum)) => write!(f, "enum-string"),
-                Type(Repr::ClassKindString(ClassKind::Class)) => write!(f, "class-string"),
-                Type(Repr::ArrayShape(shape)) => write_shape(f, "array", shape),
-                Type(Repr::ObjectShape(shape)) => write_shape(f, "object", shape),
+                Repr::ClassString(inner) => write!(f, "class-string<{inner}>"),
+                Repr::ClassKindString(ClassKind::Interface) => write!(f, "interface-string"),
+                Repr::ClassKindString(ClassKind::Trait) => write!(f, "trait-string"),
+                Repr::ClassKindString(ClassKind::Enum) => write!(f, "enum-string"),
+                Repr::ClassKindString(ClassKind::Class) => write!(f, "class-string"),
+                Repr::ArrayShape(shape) => write_shape(f, "array", shape),
+                Repr::ObjectShape(shape) => write_shape(f, "object", shape),
                 // Real PHPStan's own `GenericTypeNode::__toString()` format.
-                Type(Repr::VarianceArg(CallSiteVariance::Bivariant, _)) => write!(f, "*"),
-                Type(Repr::VarianceArg(CallSiteVariance::Covariant, inner)) => {
+                Repr::VarianceArg(CallSiteVariance::Bivariant, _) => write!(f, "*"),
+                Repr::VarianceArg(CallSiteVariance::Covariant, inner) => {
                     write!(f, "covariant {inner}")
                 }
-                Type(Repr::VarianceArg(CallSiteVariance::Contravariant, inner)) => {
+                Repr::VarianceArg(CallSiteVariance::Contravariant, inner) => {
                     write!(f, "contravariant {inner}")
                 }
                 // Normally resolved away before display; shown in its source
                 // form if it ever isn't (an unknown class).
-                Type(Repr::ClassConstant { class, pattern }) => write!(f, "{class}::{pattern}"),
-                Type(Repr::ValueOf(inner)) => write!(f, "value-of<{inner}>"),
-                Type(Repr::Extension(data)) => data.describe(f),
-                Type(Repr::KeyOf(inner)) => write!(f, "key-of<{inner}>"),
-                Type(Repr::OffsetAccess(base, key)) => write!(f, "{base}[{key}]"),
-                Type(Repr::Object(name, args)) => write_generic(f, name, args),
-                Type(Repr::ObjectWithoutClass) => write!(f, "object"),
-                Type(Repr::Resource { closed: false }) => write!(f, "resource"),
-                Type(Repr::Resource { closed: true }) => write!(f, "closed-resource"),
-                Type(Repr::EnumCase(fqn, case)) => write!(f, "{fqn}::{case}"),
-                Type(Repr::Callable(None)) => write!(f, "callable"),
-                Type(Repr::Callable(Some(sig))) => write_callable_sig(f, "callable", sig),
-                Type(Repr::SelfRef(args)) => write_generic(f, "self", args),
-                Type(Repr::ParentRef) => write!(f, "parent"),
-                Type(Repr::StaticRef(args)) => write_generic(f, "static", args),
-                Type(Repr::This) => write!(f, "$this"),
-                Type(Repr::TemplateParam(tp)) => write!(f, "{}", tp.name),
+                Repr::ClassConstant { class, pattern } => write!(f, "{class}::{pattern}"),
+                Repr::ValueOf(inner) => write!(f, "value-of<{inner}>"),
+                Repr::Extension(data) => data.describe(f),
+                Repr::KeyOf(inner) => write!(f, "key-of<{inner}>"),
+                Repr::OffsetAccess(base, key) => write!(f, "{base}[{key}]"),
+                Repr::Object(name, args) => write_generic(f, name, args),
+                Repr::ObjectWithoutClass => write!(f, "object"),
+                Repr::Resource { closed: false } => write!(f, "resource"),
+                Repr::Resource { closed: true } => write!(f, "closed-resource"),
+                Repr::EnumCase(fqn, case) => write!(f, "{fqn}::{case}"),
+                Repr::Callable(None) => write!(f, "callable"),
+                Repr::Callable(Some(sig)) => write_callable_sig(f, "callable", sig),
+                Repr::SelfRef(args) => write_generic(f, "self", args),
+                Repr::ParentRef => write!(f, "parent"),
+                Repr::StaticRef(args) => write_generic(f, "static", args),
+                Repr::This => write!(f, "$this"),
+                Repr::TemplateParam(tp) => write!(f, "{}", tp.name),
                 // Parenthesized, as PHPStan describes a benevolent union, so
                 // a message tells it apart from a plain one.
-                Type(Repr::BenevolentUnion(members)) => {
+                Repr::BenevolentUnion(members) => {
                     let parts: Vec<String> = members.iter().map(Type::to_string).collect();
                     write!(f, "({})", parts.join("|"))
                 }
-                Type(Repr::Union(members)) => {
+                Repr::Union(members) => {
                     let parts: Vec<String> = members.iter().map(Type::to_string).collect();
                     write!(f, "{}", parts.join("|"))
                 }
-                Type(Repr::Intersection(members)) => {
+                Repr::Intersection(members) => {
                     if let Some(name) = describe_accessory_intersection(members) {
                         return write!(f, "{name}");
                     }
-                    if let [
-                        Type(Repr::Object(class, args)),
-                        Type(Repr::Callable(Some(sig))),
-                    ] = members.as_slice()
+                    if let [object, callable] = members.as_slice()
+                        && let Repr::Object(class, args) = object.repr()
+                        && let Repr::Callable(Some(sig)) = callable.repr()
                         && class == "Closure"
                         && args.is_empty()
                     {
@@ -142,16 +141,14 @@ impl fmt::Display for Type {
                     let parts: Vec<String> = members.iter().map(Type::to_string).collect();
                     write!(f, "{}", parts.join("&"))
                 }
-                Type(Repr::IntRange(min, max)) => write!(
+                Repr::IntRange(min, max) => write!(
                     f,
                     "int<{}, {}>",
                     min.map_or("min".to_string(), |n| n.to_string()),
                     max.map_or("max".to_string(), |n| n.to_string()),
                 ),
-                Type(Repr::FloatLiteral(n)) => {
-                    f.write_str(&syntax::php_float::var_export_float(*n))
-                }
-                Type(Repr::Accessory(kind)) => write!(f, "{}", accessory_kind_name(*kind)),
+                Repr::FloatLiteral(n) => f.write_str(&syntax::php_float::var_export_float(*n)),
+                Repr::Accessory(kind) => write!(f, "{}", accessory_kind_name(*kind)),
                 // Mirrors real PHPStan's own `HasOffsetValueType::describe()`
                 // format exactly (confirmed via `assertType()` against the
                 // vendored phar) - never intercepted by
@@ -160,25 +157,25 @@ impl fmt::Display for Type {
                 // so this always reaches the generic `&`-joined
                 // `Repr::Intersection` fallback alongside its own base
                 // `Repr::Array`.
-                Type(Repr::HasOffsetValue(key, value)) => {
+                Repr::HasOffsetValue(key, value) => {
                     write!(f, "hasOffsetValue('{key}', {value})")
                 }
-                Type(Repr::HasOffset(key)) => write!(f, "hasOffset('{key}')"),
-                Type(Repr::HasMethod(name)) => write!(f, "hasMethod({name})"),
-                Type(Repr::HasProperty(name)) => write!(f, "hasProperty({name})"),
+                Repr::HasOffset(key) => write!(f, "hasOffset('{key}')"),
+                Repr::HasMethod(name) => write!(f, "hasMethod({name})"),
+                Repr::HasProperty(name) => write!(f, "hasProperty({name})"),
                 // No real PHPStan equivalent to mirror (this variant is a
                 // this-project-only synthesis, see its own doc comment) -
                 // a plain, self-describing debug format.
-                Type(Repr::ReflectedMember(owner, name)) => {
+                Repr::ReflectedMember(owner, name) => {
                     write!(f, "reflectedMember({owner}, '{name}')")
                 }
-                Type(Repr::Conditional {
+                Repr::Conditional {
                     subject,
                     target,
                     if_true,
                     if_false,
                     negated,
-                }) => write!(
+                } => write!(
                     f,
                     "({}{} is {}{target} ? {if_true} : {if_false})",
                     match subject {
@@ -226,7 +223,7 @@ fn describe_accessory_intersection(members: &[Type]) -> Option<String> {
         && has(AccessoryKind::NonEmptyArray)
         && let Some(shape) = members
             .iter()
-            .find(|m| matches!(m, Type(Repr::ArrayShape(_))))
+            .find(|m| matches!(m.repr(), Repr::ArrayShape(_)))
     {
         let shape = shape.to_string();
         return Some(match shape.strip_prefix("array") {
@@ -234,8 +231,8 @@ fn describe_accessory_intersection(members: &[Type]) -> Option<String> {
             None => shape,
         });
     }
-    if let Some((key, elem)) = members.iter().find_map(|m| match m {
-        Type(Repr::Array(k, e)) => Some((k.as_ref(), e.as_ref())),
+    if let Some((key, elem)) = members.iter().find_map(|m| match m.repr() {
+        Repr::Array(k, e) => Some((k.as_ref(), e.as_ref())),
         _ => None,
     }) {
         let is_list = has(AccessoryKind::ArrayList);
@@ -332,7 +329,7 @@ fn write_shape(f: &mut fmt::Formatter<'_>, keyword: &str, shape: &Shape) -> fmt:
         .collect();
     if let Some(tail) = &shape.unsealed {
         let (key, value) = &**tail;
-        if *key == Type::unknown_array_key() && matches!(value, Type(Repr::Mixed(..))) {
+        if *key == Type::unknown_array_key() && matches!(value.repr(), Repr::Mixed(..)) {
             parts.push("...".to_string());
         } else {
             parts.push(format!("...<{key}, {value}>"));
@@ -345,18 +342,18 @@ impl Type {
     /// `VerbosityLevel::typeOnly()`: literal values and array shapes
     /// collapse to their plain type.
     pub fn describe_type_only(&self) -> String {
-        match self {
-            Type(Repr::IntLiteral(_)) | Type(Repr::IntRange(..)) => "int".to_string(),
-            Type(Repr::FloatLiteral(_)) => "float".to_string(),
-            Type(Repr::StringLiteral(_)) => "string".to_string(),
-            Type(Repr::True) | Type(Repr::False) => "bool".to_string(),
-            Type(Repr::Array(..)) | Type(Repr::ArrayShape(_)) => "array".to_string(),
-            Type(Repr::Object(class, _)) | Type(Repr::EnumCase(class, _)) => class.to_string(),
-            Type(Repr::Intersection(members)) => members
+        match self.repr() {
+            Repr::IntLiteral(_) | Repr::IntRange(..) => "int".to_string(),
+            Repr::FloatLiteral(_) => "float".to_string(),
+            Repr::StringLiteral(_) => "string".to_string(),
+            Repr::True | Repr::False => "bool".to_string(),
+            Repr::Array(..) | Repr::ArrayShape(_) => "array".to_string(),
+            Repr::Object(class, _) | Repr::EnumCase(class, _) => class.to_string(),
+            Repr::Intersection(members) => members
                 .iter()
                 .find(|m| !m.is_accessory())
                 .map_or_else(|| self.to_string(), Type::describe_type_only),
-            Type(Repr::Union(members)) => {
+            Repr::Union(members) => {
                 let mut parts: Vec<String> = Vec::new();
                 for member in members {
                     let part = member.describe_type_only();
@@ -366,7 +363,7 @@ impl Type {
                 }
                 parts.join("|")
             }
-            other => other.to_string(),
+            _ => self.to_string(),
         }
     }
 }

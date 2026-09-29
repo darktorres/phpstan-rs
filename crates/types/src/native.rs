@@ -51,47 +51,41 @@ impl Native {
 /// spelling.
 fn collect(ty: &Type, position: Position, out: &mut Native) -> bool {
     syntax::stack::guard(|| {
-        match ty {
-            Type(Repr::Int) | Type(Repr::IntLiteral(_)) | Type(Repr::IntRange(..)) => {
-                out.add("int")
-            }
-            Type(Repr::Float) | Type(Repr::FloatLiteral(_)) => out.add("float"),
-            Type(Repr::String)
-            | Type(Repr::StringLiteral(_))
-            | Type(Repr::ClassString(_))
-            | Type(Repr::ClassKindString(_)) => out.add("string"),
-            Type(Repr::Bool) => out.add("bool"),
-            Type(Repr::True) => out.add("true"),
-            Type(Repr::False) => out.add("false"),
-            Type(Repr::Null) => out.add("null"),
-            Type(Repr::Array(..)) | Type(Repr::ArrayShape(_)) => out.add("array"),
-            Type(Repr::Callable(_)) => out.add("callable"),
-            Type(Repr::ObjectShape(_)) | Type(Repr::ObjectWithoutClass) => out.add("object"),
-            Type(Repr::Mixed(..)) => out.add("mixed"),
-            Type(Repr::Void) if position == Position::Return => out.add("void"),
-            Type(Repr::Never) if position == Position::Return => out.add("never"),
-            Type(Repr::StaticRef(_)) | Type(Repr::This) if position == Position::Return => {
-                out.add("static")
-            }
-            Type(Repr::SelfRef(_)) => out.add("self"),
-            Type(Repr::ParentRef) => out.add("parent"),
+        match ty.repr() {
+            Repr::Int | Repr::IntLiteral(_) | Repr::IntRange(..) => out.add("int"),
+            Repr::Float | Repr::FloatLiteral(_) => out.add("float"),
+            Repr::String
+            | Repr::StringLiteral(_)
+            | Repr::ClassString(_)
+            | Repr::ClassKindString(_) => out.add("string"),
+            Repr::Bool => out.add("bool"),
+            Repr::True => out.add("true"),
+            Repr::False => out.add("false"),
+            Repr::Null => out.add("null"),
+            Repr::Array(..) | Repr::ArrayShape(_) => out.add("array"),
+            Repr::Callable(_) => out.add("callable"),
+            Repr::ObjectShape(_) | Repr::ObjectWithoutClass => out.add("object"),
+            Repr::Mixed(..) => out.add("mixed"),
+            Repr::Void if position == Position::Return => out.add("void"),
+            Repr::Never if position == Position::Return => out.add("never"),
+            Repr::StaticRef(_) | Repr::This if position == Position::Return => out.add("static"),
+            Repr::SelfRef(_) => out.add("self"),
+            Repr::ParentRef => out.add("parent"),
             // Fully qualified, so the declaration names the same class
             // wherever it is written.
-            Type(Repr::EnumCase(class, _)) | Type(Repr::Object(class, _)) => {
-                out.add(&fully_qualified(class))
-            }
-            Type(Repr::TemplateParam(param)) => return collect(&param.bound, position, out),
-            Type(Repr::Union(members)) | Type(Repr::BenevolentUnion(members)) => {
+            Repr::EnumCase(class, _) | Repr::Object(class, _) => out.add(&fully_qualified(class)),
+            Repr::TemplateParam(param) => return collect(&param.bound, position, out),
+            Repr::Union(members) | Repr::BenevolentUnion(members) => {
                 return members.iter().all(|m| collect(m, position, out));
             }
-            Type(Repr::Intersection(members)) => {
+            Repr::Intersection(members) => {
                 let bases: Vec<&Type> = members.iter().filter(|m| !m.is_accessory()).collect();
                 if bases.len() == 1 {
                     return bases.iter().all(|b| collect(b, position, out));
                 }
                 let mut classes = Vec::new();
                 for base in bases {
-                    let Type(Repr::Object(class, _)) = base else {
+                    let Repr::Object(class, _) = base.repr() else {
                         return false;
                     };
                     classes.push(fully_qualified(class));

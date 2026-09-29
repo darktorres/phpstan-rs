@@ -76,19 +76,19 @@ fn equal_types_hash_alike() {
             Type::float_literal(-f64::NAN),
         ),
         (
-            Type::array(Type(Repr::Int), Type(Repr::Mixed(true, None))),
-            Type::array(Type(Repr::Int), Type(Repr::Mixed(false, None))),
+            Type::array(Type::new(Repr::Int), Type::new(Repr::Mixed(true, None))),
+            Type::array(Type::new(Repr::Int), Type::new(Repr::Mixed(false, None))),
         ),
         (
-            Type(Repr::Union(vec![Type::int(), Type::string()])),
-            Type(Repr::Union(vec![Type::string(), Type::int()])),
+            Type::new(Repr::Union(vec![Type::int(), Type::string()])),
+            Type::new(Repr::Union(vec![Type::string(), Type::int()])),
         ),
         (
-            Type(Repr::Intersection(vec![
+            Type::new(Repr::Intersection(vec![
                 Type::object("A".into(), Vec::new()),
                 Type::object("B".into(), Vec::new()),
             ])),
-            Type(Repr::Intersection(vec![
+            Type::new(Repr::Intersection(vec![
                 Type::object("B".into(), Vec::new()),
                 Type::object("A".into(), Vec::new()),
             ])),
@@ -100,8 +100,8 @@ fn equal_types_hash_alike() {
     }
     assert_ne!(Type::int_literal(1), Type::int_literal(2));
     assert_ne!(
-        Type(Repr::Union(vec![Type::int(), Type::int(), Type::string()])),
-        Type(Repr::Union(vec![
+        Type::new(Repr::Union(vec![Type::int(), Type::int(), Type::string()])),
+        Type::new(Repr::Union(vec![
             Type::int(),
             Type::string(),
             Type::string()

@@ -11,8 +11,8 @@ impl Type {
     /// PHPStan's `hasOffsetValueType()`: whether this array surely has
     /// (`Yes`), surely lacks (`No`), or may have the offset `offset`.
     pub fn has_offset_value_type(&self, offset: &Type) -> TrinaryLogic {
-        syntax::stack::guard(|| match self {
-            Type(Repr::ArrayShape(shape)) => {
+        syntax::stack::guard(|| match self.repr() {
+            Repr::ArrayShape(shape) => {
                 if !shape.is_sealed() {
                     return TrinaryLogic::Maybe;
                 }
@@ -28,22 +28,22 @@ impl Type {
                     None => TrinaryLogic::No,
                 }
             }
-            Type(Repr::Array(key, _)) => general_array_has_offset(key, false, offset),
+            Repr::Array(key, _) => general_array_has_offset(key, false, offset),
             // A value of an intersection is each member's: one member
             // proving the offset there (`hasOffset('k')`) or absent settles it.
-            Type(Repr::Intersection(members)) => {
+            Repr::Intersection(members) => {
                 let is_list = members.contains(&Type::accessory(AccessoryKind::ArrayList));
                 let key = literal_key(offset);
                 let answers: Vec<TrinaryLogic> = members
                     .iter()
-                    .map(|m| match m {
-                        Type(Repr::Array(k, _)) => general_array_has_offset(k, is_list, offset),
-                        Type(Repr::HasOffset(k)) | Type(Repr::HasOffsetValue(k, _))
+                    .map(|m| match m.repr() {
+                        Repr::Array(k, _) => general_array_has_offset(k, is_list, offset),
+                        Repr::HasOffset(k) | Repr::HasOffsetValue(k, _)
                             if key.as_ref() == Some(k) =>
                         {
                             TrinaryLogic::Yes
                         }
-                        other => other.has_offset_value_type(offset),
+                        _ => m.has_offset_value_type(offset),
                     })
                     .collect();
                 if answers.contains(&TrinaryLogic::Yes) {
@@ -54,8 +54,8 @@ impl Type {
                     TrinaryLogic::Maybe
                 }
             }
-            Type(Repr::TemplateParam(param)) => param.bound.has_offset_value_type(offset),
-            Type(Repr::Union(members)) => members
+            Repr::TemplateParam(param) => param.bound.has_offset_value_type(offset),
+            Repr::Union(members) => members
                 .iter()
                 .map(|m| m.has_offset_value_type(offset))
                 .reduce(|a, b| if a == b { a } else { TrinaryLogic::Maybe })
@@ -69,9 +69,9 @@ impl Type {
     /// be; `null` from `array{}`). `None` when this isn't an array, or a
     /// sealed shape surely lacks `key`.
     pub fn offset_value_type(&self, key: Option<&ShapeKey>) -> Option<Type> {
-        syntax::stack::guard(|| match self {
-            Type(Repr::Array(_, value)) => Some((**value).clone()),
-            Type(Repr::ArrayShape(shape)) => match key {
+        syntax::stack::guard(|| match self.repr() {
+            Repr::Array(_, value) => Some((**value).clone()),
+            Repr::ArrayShape(shape) => match key {
                 Some(key) => match shape.field(key) {
                     Some(field) => Some(field.ty.clone()),
                     None => shape.unsealed.as_deref().map(|tail| tail.1.clone()),
@@ -79,22 +79,22 @@ impl Type {
                 None if shape.is_empty_array() => Some(Type::null()),
                 None => self.array_value_type(),
             },
-            Type(Repr::Intersection(members)) => {
+            Repr::Intersection(members) => {
                 let tracked = key.and_then(|key| {
-                    members.iter().find_map(|m| match m {
-                        Type(Repr::HasOffsetValue(k, v)) if k == key => Some((**v).clone()),
+                    members.iter().find_map(|m| match m.repr() {
+                        Repr::HasOffsetValue(k, v) if k == key => Some((**v).clone()),
                         _ => None,
                     })
                 });
                 tracked.or_else(|| members.iter().find_map(|m| m.offset_value_type(key)))
             }
-            Type(Repr::Union(members)) | Type(Repr::BenevolentUnion(members)) => members
+            Repr::Union(members) | Repr::BenevolentUnion(members) => members
                 .iter()
                 .map(|m| m.offset_value_type(key))
                 .collect::<Option<Vec<_>>>()?
                 .into_iter()
                 .reduce(Type::union),
-            Type(Repr::TemplateParam(param)) => param.bound.offset_value_type(key),
+            Repr::TemplateParam(param) => param.bound.offset_value_type(key),
             _ => None,
         })
     }
@@ -113,13 +113,17 @@ impl Type {
         track_literal_key: bool,
     ) -> Option<Type> {
         syntax::stack::guard(|| {
-            match self {
+            match self.repr() {
                 // `null` becomes an array on its first write.
-                Type(Repr::Null) => Type::array_shape(Shape::sealed(Vec::new()))
-                    .set_offset_value_type(offset, value, in_range, track_literal_key),
+                Repr::Null => Type::array_shape(Shape::sealed(Vec::new())).set_offset_value_type(
+                    offset,
+                    value,
+                    in_range,
+                    track_literal_key,
+                ),
                 // An append onto a sealed shape takes its next index, when
                 // known (`['x' => 1] + [] = 2` is `array{x: 1, 0: 2}`).
-                Type(Repr::ArrayShape(shape))
+                Repr::ArrayShape(shape)
                     if offset.is_none()
                         && track_literal_key
                         && shape.is_sealed()
@@ -132,7 +136,7 @@ impl Type {
                     shape.next_index = Some(next);
                     Some(Type::array_shape(shape))
                 }
-                Type(Repr::ArrayShape(shape)) => match offset.and_then(literal_key) {
+                Repr::ArrayShape(shape) => match offset.and_then(literal_key) {
                     Some(key) => {
                         let mut shape = Shape::clone(shape);
                         // A written key is present afterwards, even one the
@@ -167,7 +171,7 @@ impl Type {
                 },
                 // Past a literal shape there's no single key to grow; a
                 // literal offset still gets a `hasOffsetValue` member.
-                Type(Repr::Array(key, inner)) => Some(write_literal_key_aware(
+                Repr::Array(key, inner) => Some(write_literal_key_aware(
                     key,
                     inner,
                     offset,
@@ -177,7 +181,7 @@ impl Type {
                 )),
                 // Every member takes the write, or a key written one line
                 // earlier would read back as missing through the union.
-                Type(Repr::Union(members)) => {
+                Repr::Union(members) => {
                     let mut updated = Vec::with_capacity(members.len());
                     for m in members {
                         updated.push(m.set_offset_value_type(
@@ -191,18 +195,18 @@ impl Type {
                 }
                 // A container carrying `hasOffsetValue` members from earlier
                 // literal writes accumulates them.
-                Type(Repr::Intersection(members))
+                Repr::Intersection(members)
                     if members
                         .iter()
-                        .any(|m| matches!(m, Type(Repr::HasOffsetValue(..)))) =>
+                        .any(|m| matches!(m.repr(), Repr::HasOffsetValue(..))) =>
                 {
-                    let (key, inner) = members.iter().find_map(|m| match m {
-                        Type(Repr::Array(k, v)) => Some((k.as_ref(), v.as_ref())),
+                    let (key, inner) = members.iter().find_map(|m| match m.repr() {
+                        Repr::Array(k, v) => Some((k.as_ref(), v.as_ref())),
                         _ => None,
                     })?;
                     let existing: Vec<Type> = members
                         .iter()
-                        .filter(|m| matches!(m, Type(Repr::HasOffsetValue(..))))
+                        .filter(|m| matches!(m.repr(), Repr::HasOffsetValue(..)))
                         .cloned()
                         .collect();
                     Some(write_literal_key_aware(
@@ -218,7 +222,7 @@ impl Type {
                 // markers, an append keeps a list a list (now non-empty), and
                 // a write within the list's range keeps it a list, non-empty
                 // only if it already was.
-                Type(Repr::Intersection(members)) => {
+                Repr::Intersection(members) => {
                     let inner = members.iter().find_map(Type::array_value_type)?;
                     let widened = Type::union(value, inner);
                     let written = offset
@@ -241,8 +245,8 @@ impl Type {
                     } else {
                         let key = members
                             .iter()
-                            .find_map(|m| match m {
-                                Type(Repr::Array(k, _)) => {
+                            .find_map(|m| match m.repr() {
+                                Repr::Array(k, _) => {
                                     Some(Type::union((**k).clone(), written.clone()))
                                 }
                                 _ => None,
@@ -278,8 +282,8 @@ impl Type {
                     ShapeKey::Str(_) => !key.is_string().no(),
                 },
             };
-            match self {
-                Type(Repr::ArrayShape(shape)) => {
+            match self.repr() {
+                Repr::ArrayShape(shape) => {
                     let mut shape = Shape::clone(shape);
                     // Removing the highest int key doesn't move the next
                     // index back.
@@ -296,35 +300,31 @@ impl Type {
                     }
                     Type::array_shape(shape)
                 }
-                Type(Repr::Intersection(members))
-                    if members.iter().any(|m| matches!(m, Type(Repr::Array(..)))) =>
+                Repr::Intersection(members)
+                    if members.iter().any(|m| matches!(m.repr(), Repr::Array(..))) =>
                 {
                     let was_list = members.contains(&Type::accessory(AccessoryKind::ArrayList));
                     let kept = members
                         .iter()
-                        .filter_map(|m| match m {
-                            Type(Repr::Array(_, v)) if was_list => {
+                        .filter_map(|m| match m.repr() {
+                            Repr::Array(_, v) if was_list => {
                                 Some(Type::array(Type::int_range(Some(0), None), Type::clone(v)))
                             }
-                            Type(Repr::Accessory(
+                            Repr::Accessory(
                                 AccessoryKind::ArrayList | AccessoryKind::NonEmptyArray,
-                            )) => None,
-                            Type(Repr::HasOffset(k)) | Type(Repr::HasOffsetValue(k, _))
-                                if may_name(k) =>
-                            {
-                                None
-                            }
-                            other => Some(other.clone()),
+                            ) => None,
+                            Repr::HasOffset(k) | Repr::HasOffsetValue(k, _) if may_name(k) => None,
+                            _ => Some(m.clone()),
                         })
                         .collect();
                     crate::intersect_types(kept)
                 }
-                Type(Repr::Union(members)) => members
+                Repr::Union(members) => members
                     .iter()
                     .map(|m| m.unset_offset(offset))
                     .reduce(Type::union)
                     .unwrap_or_else(|| self.clone()),
-                Type(Repr::BenevolentUnion(members)) => Type::benevolent_union_of(
+                Repr::BenevolentUnion(members) => Type::benevolent_union_of(
                     members.iter().map(|m| m.unset_offset(offset)).collect(),
                 ),
                 _ => self.clone(),
@@ -373,12 +373,12 @@ fn write_literal_key_aware(
         Some(key) if track_literal_key => {
             let mut members: Vec<Type> = existing_has_offset_values
                 .iter()
-                .filter(|m| !matches!(m, Type(Repr::HasOffsetValue(k, _)) if *k == key))
+                .filter(|m| !matches!(m.repr(), Repr::HasOffsetValue(k, _) if *k == key))
                 .cloned()
                 .collect();
             members.push(Type::has_offset_value(key, value));
             members.insert(0, base);
-            Type(Repr::Intersection(members))
+            Type::new(Repr::Intersection(members))
         }
         _ => non_empty(base),
     }

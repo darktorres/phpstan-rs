@@ -13,7 +13,7 @@ impl Type {
     pub fn reconcile_with_native(self, native_ty: Type) -> Type {
         let members: Vec<Type> = match self.into_repr() {
             Repr::Union(members) => members,
-            other => vec![Type(other)],
+            other => vec![Type::new(other)],
         };
         let mut kept: Vec<Type> = members
             .into_iter()
@@ -57,12 +57,12 @@ impl Type {
         // naming a template is skipped the same way: the template's binding
         // is the alternative the native member stands for, so `TKey|null`
         // over a native `string|int|null` stays `TKey|null`.
-        if let Type(Repr::Union(native_members)) = &native_ty
+        if let Repr::Union(native_members) = native_ty.repr()
             && !kept.is_empty()
             && !kept.iter().any(Type::contains_deferred)
             && !kept
                 .iter()
-                .any(|k| matches!(k, Type(Repr::Conditional { .. })))
+                .any(|k| matches!(k.repr(), Repr::Conditional { .. }))
             && !kept.iter().any(Type::references_template)
         {
             for nm in native_members {
@@ -78,7 +78,7 @@ impl Type {
         match kept.len() {
             0 => native_ty,
             1 => kept.into_iter().next().unwrap(),
-            _ => Type(Repr::Union(kept)),
+            _ => Type::new(Repr::Union(kept)),
         }
     }
 }
@@ -113,13 +113,13 @@ impl Type {
 /// refined by `@param array<int, string>` - is one of these).
 fn native_member_addable(native_member: &Type) -> bool {
     !matches!(
-        native_member,
-        Type(Repr::Object(_, _))
-            | Type(Repr::ObjectWithoutClass)
-            | Type(Repr::SelfRef(_))
-            | Type(Repr::StaticRef(_))
-            | Type(Repr::This)
-            | Type(Repr::ParentRef)
+        native_member.repr(),
+        Repr::Object(_, _)
+            | Repr::ObjectWithoutClass
+            | Repr::SelfRef(_)
+            | Repr::StaticRef(_)
+            | Repr::This
+            | Repr::ParentRef
     )
 }
 
@@ -129,23 +129,25 @@ fn native_member_addable(native_member: &Type) -> bool {
 /// otherwise lose it.
 fn refine_callable_member(m: Type, native_ty: &Type) -> Type {
     // A `callable(...)` shape says more than the native class does.
-    if !matches!(m, Type(Repr::Callable(None))) {
+    if !matches!(m.repr(), Repr::Callable(None)) {
         return m;
     }
-    match native_ty {
-        Type(Repr::Object(_, _)) | Type(Repr::ObjectWithoutClass) => native_ty.clone(),
-        Type(Repr::Union(members)) => {
+    match native_ty.repr() {
+        Repr::Object(_, _) | Repr::ObjectWithoutClass => native_ty.clone(),
+        Repr::Union(members) => {
             match members
                 .iter()
                 .filter(|t| **t != Type::null())
                 .collect::<Vec<_>>()
                 .as_slice()
             {
-                [Type(Repr::Object(_, _)) | Type(Repr::ObjectWithoutClass)] => members
-                    .iter()
-                    .find(|t| **t != Type::null())
-                    .cloned()
-                    .unwrap_or(m),
+                [only] if matches!(only.repr(), Repr::Object(_, _) | Repr::ObjectWithoutClass) => {
+                    members
+                        .iter()
+                        .find(|t| **t != Type::null())
+                        .cloned()
+                        .unwrap_or(m)
+                }
                 _ => m,
             }
         }
@@ -205,7 +207,7 @@ fn member_possible_given_native(m: &Type, native_ty: &Type) -> bool {
         if *native_ty == Type::void() && *m != Type::void() && *m != Type::never() {
             return false;
         }
-        match m {
+        match m.repr() {
             // A class reference or a template can't be verified this early. A late-
             // resolvable type or a `ClassConstant` is trusted the same way - `Registry::
             // resolve_deferred_value_of`'s own later, whole-registry pass
@@ -213,47 +215,40 @@ fn member_possible_given_native(m: &Type, native_ty: &Type) -> bool {
             // when the resolved doc type turns out to be Mixed" behavior this
             // function would otherwise have given for free, once its real
             // value is actually known.
-            Type(Repr::Object(_, _))
-            | Type(Repr::TemplateParam(_))
-            | Type(Repr::ObjectWithoutClass)
-            | Type(Repr::ValueOf(_))
-            | Type(Repr::KeyOf(_))
-            | Type(Repr::OffsetAccess(..))
-            | Type(Repr::ClassConstant { .. }) => true,
+            Repr::Object(_, _)
+            | Repr::TemplateParam(_)
+            | Repr::ObjectWithoutClass
+            | Repr::ValueOf(_)
+            | Repr::KeyOf(_)
+            | Repr::OffsetAccess(..)
+            | Repr::ClassConstant { .. } => true,
             // `@return static` under a native `self`/`static`/class hint: the
             // late-bound class is always an instance of the declaring one.
-            Type(Repr::StaticRef(_)) | Type(Repr::This) | Type(Repr::SelfRef(_)) => !matches!(
-                native_ty,
-                Type(Repr::Int)
-                    | Type(Repr::Float)
-                    | Type(Repr::String)
-                    | Type(Repr::Bool)
-                    | Type(Repr::Array(..))
-                    | Type(Repr::Null)
+            Repr::StaticRef(_) | Repr::This | Repr::SelfRef(_) => !matches!(
+                native_ty.repr(),
+                Repr::Int | Repr::Float | Repr::String | Repr::Bool | Repr::Array(..) | Repr::Null
             ),
             // A callable doc member (`callable(int): string`) may be a
             // `Closure` under a native `Closure` hint, though not every
             // callable is one.
-            Type(Repr::Callable(_)) => true,
+            Repr::Callable(_) => true,
             // A conditional return type (`($p is X ? A : B)`) is possible if
             // either branch is - each call site picks (or unions) its own.
             // Checked branch-wise through this same function, so a branch
             // naming a template or a class is trusted the same way a plain
             // one is, instead of failing the structural relation's
             // hierarchy-blind object check against the native class.
-            Type(Repr::Conditional {
+            Repr::Conditional {
                 if_true, if_false, ..
-            }) => {
+            } => {
                 member_possible_given_native(if_true, native_ty)
                     || member_possible_given_native(if_false, native_ty)
             }
             // An array's key is never checked against `native_ty`: a native
             // `array` hint carries no key information to contradict, so only
             // the value side is checked against the native's own.
-            Type(Repr::Array(_, elem)) => match native_ty {
-                Type(Repr::Array(_, native_elem)) => {
-                    member_possible_given_native(elem, native_elem)
-                }
+            Repr::Array(_, elem) => match native_ty.repr() {
+                Repr::Array(_, native_elem) => member_possible_given_native(elem, native_elem),
                 _ => Relation::structural().is_super_type_of(native_ty, m).yes(),
             },
             // Same reasoning as the plain `Repr::Array` arm just above, for
@@ -264,14 +259,14 @@ fn member_possible_given_native(m: &Type, native_ty: &Type) -> bool {
             // hint (which states nothing about list-ness/non-emptiness
             // either), so this only needs to find the `Array` member inside
             // and re-run the same key-ignoring check on it.
-            Type(Repr::Intersection(members)) => match (
-                members.iter().find_map(|inner| match inner {
-                    Type(Repr::Array(_, elem)) => Some(elem.as_ref()),
+            Repr::Intersection(members) => match (
+                members.iter().find_map(|inner| match inner.repr() {
+                    Repr::Array(_, elem) => Some(elem.as_ref()),
                     _ => None,
                 }),
-                native_ty,
+                native_ty.repr(),
             ) {
-                (Some(elem), Type(Repr::Array(_, native_elem))) => {
+                (Some(elem), Repr::Array(_, native_elem)) => {
                     member_possible_given_native(elem, native_elem)
                 }
                 (Some(_), _) => Relation::structural().is_super_type_of(native_ty, m).yes(),

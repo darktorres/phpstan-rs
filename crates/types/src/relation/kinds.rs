@@ -10,10 +10,8 @@ impl Relation<'_> {
     /// subclass, `No` for a non-object and for a class no subclass of which
     /// can be a `class`, `Maybe` otherwise (see `class_is`).
     pub fn is_instance_of(&self, ty: &Type, class: &str) -> TrinaryLogic {
-        self.answer(ty, &mut |leaf| match leaf {
-            Type(Repr::Object(name, _)) | Type(Repr::EnumCase(name, _)) => {
-                self.class_is(name, class)
-            }
+        self.answer(ty, &mut |leaf| match leaf.repr() {
+            Repr::Object(name, _) | Repr::EnumCase(name, _) => self.class_is(name, class),
             _ if leaf.is_object().yes() || leaf.is_mixed() => TrinaryLogic::Maybe,
             _ if leaf.is_object().no() => TrinaryLogic::No,
             _ => TrinaryLogic::Maybe,
@@ -24,11 +22,11 @@ impl Relation<'_> {
     /// `Traversable`.
     pub fn is_iterable(&self, ty: &Type) -> TrinaryLogic {
         self.answer(ty, &mut |leaf| {
-            if leaf.is_array().yes() || matches!(leaf, Type(Repr::HasOffsetValue(..))) {
+            if leaf.is_array().yes() || matches!(leaf.repr(), Repr::HasOffsetValue(..)) {
                 TrinaryLogic::Yes
             } else if is_scalar_or_null(leaf) {
                 TrinaryLogic::No
-            } else if let Type(Repr::Object(name, _)) | Type(Repr::EnumCase(name, _)) = leaf {
+            } else if let Repr::Object(name, _) | Repr::EnumCase(name, _) = leaf.repr() {
                 self.class_is(name, "Traversable")
             } else {
                 TrinaryLogic::Maybe
@@ -41,14 +39,14 @@ impl Relation<'_> {
     pub fn is_offset_accessible(&self, ty: &Type) -> TrinaryLogic {
         self.answer(ty, &mut |leaf| {
             if leaf.is_array().yes()
-                || matches!(leaf, Type(Repr::HasOffsetValue(..)))
+                || matches!(leaf.repr(), Repr::HasOffsetValue(..))
                 || leaf.is_string().yes()
                 || leaf.is_null().yes()
             {
                 TrinaryLogic::Yes
             } else if is_scalar_or_null(leaf) {
                 TrinaryLogic::No
-            } else if let Type(Repr::Object(name, _)) | Type(Repr::EnumCase(name, _)) = leaf {
+            } else if let Repr::Object(name, _) | Repr::EnumCase(name, _) = leaf.repr() {
                 self.class_is(name, "ArrayAccess")
             } else {
                 TrinaryLogic::Maybe
@@ -61,11 +59,11 @@ impl Relation<'_> {
     /// destructured.
     pub fn is_destructurable(&self, ty: &Type) -> TrinaryLogic {
         self.answer(ty, &mut |leaf| {
-            if leaf.is_array().yes() || matches!(leaf, Type(Repr::HasOffsetValue(..))) {
+            if leaf.is_array().yes() || matches!(leaf.repr(), Repr::HasOffsetValue(..)) {
                 TrinaryLogic::Yes
             } else if is_scalar_or_null(leaf) {
                 TrinaryLogic::No
-            } else if let Type(Repr::Object(name, _)) | Type(Repr::EnumCase(name, _)) = leaf {
+            } else if let Repr::Object(name, _) | Repr::EnumCase(name, _) = leaf.repr() {
                 self.class_is(name, "ArrayAccess")
             } else {
                 TrinaryLogic::Maybe
@@ -78,19 +76,19 @@ impl Relation<'_> {
     /// final class (or enum) without `__invoke()`, which no subclass can
     /// add. A string or an array may name a callable.
     pub fn is_callable(&self, ty: &Type) -> TrinaryLogic {
-        self.answer(ty, &mut |leaf| match leaf {
-            Type(Repr::Null)
-            | Type(Repr::Void)
-            | Type(Repr::Bool)
-            | Type(Repr::True)
-            | Type(Repr::False)
-            | Type(Repr::Int)
-            | Type(Repr::IntLiteral(_))
-            | Type(Repr::IntRange(..))
-            | Type(Repr::Float)
-            | Type(Repr::FloatLiteral(_))
-            | Type(Repr::Resource { .. }) => TrinaryLogic::No,
-            Type(Repr::Object(name, _)) | Type(Repr::EnumCase(name, _)) => {
+        self.answer(ty, &mut |leaf| match leaf.repr() {
+            Repr::Null
+            | Repr::Void
+            | Repr::Bool
+            | Repr::True
+            | Repr::False
+            | Repr::Int
+            | Repr::IntLiteral(_)
+            | Repr::IntRange(..)
+            | Repr::Float
+            | Repr::FloatLiteral(_)
+            | Repr::Resource { .. } => TrinaryLogic::No,
+            Repr::Object(name, _) | Repr::EnumCase(name, _) => {
                 if name.as_str() == "Closure" || self.hierarchy.has_method(name, "__invoke") {
                     TrinaryLogic::Yes
                 } else if self.hierarchy.find_class(name).is_some_and(|facts| {
@@ -102,7 +100,7 @@ impl Relation<'_> {
                     TrinaryLogic::Maybe
                 }
             }
-            Type(Repr::Callable(_)) => TrinaryLogic::Yes,
+            Repr::Callable(_) => TrinaryLogic::Yes,
             _ => TrinaryLogic::Maybe,
         })
     }
@@ -128,7 +126,7 @@ impl Relation<'_> {
                 TrinaryLogic::Yes
             } else if is_scalar_or_null(leaf)
                 || leaf.is_array().yes()
-                || matches!(leaf, Type(Repr::HasOffsetValue(..)))
+                || matches!(leaf.repr(), Repr::HasOffsetValue(..))
             {
                 TrinaryLogic::No
             } else {
@@ -149,32 +147,32 @@ impl Relation<'_> {
     /// agree or give `Maybe`, an intersection needs one member's `Yes`,
     /// a template answers for its bound.
     fn answer(&self, ty: &Type, leaf: &mut dyn FnMut(&Type) -> TrinaryLogic) -> TrinaryLogic {
-        syntax::stack::guard(|| match ty {
-            Type(Repr::Union(members)) | Type(Repr::BenevolentUnion(members)) => {
+        syntax::stack::guard(|| match ty.repr() {
+            Repr::Union(members) | Repr::BenevolentUnion(members) => {
                 let answers: Vec<TrinaryLogic> =
                     members.iter().map(|m| self.answer(m, leaf)).collect();
                 TrinaryLogic::extreme_identity(answers.into_iter())
             }
-            Type(Repr::Intersection(members)) => members
+            Repr::Intersection(members) => members
                 .iter()
                 .map(|m| self.answer(m, leaf))
                 .reduce(TrinaryLogic::or)
                 .unwrap_or(TrinaryLogic::Maybe),
-            Type(Repr::TemplateParam(param)) => self.answer(&param.bound, leaf),
-            Type(Repr::Conditional {
+            Repr::TemplateParam(param) => self.answer(&param.bound, leaf),
+            Repr::Conditional {
                 if_true, if_false, ..
-            }) => {
+            } => {
                 let answers = [self.answer(if_true, leaf), self.answer(if_false, leaf)];
                 TrinaryLogic::extreme_identity(answers.into_iter())
             }
-            other => leaf(other),
+            _ => leaf(ty),
         })
     }
 }
 
 /// A boolean, number, string, `null` or `void`.
 fn is_scalar_or_null(ty: &Type) -> bool {
-    ty.is_scalar().yes() || ty.is_null().yes() || matches!(ty, Type(Repr::Void))
+    ty.is_scalar().yes() || ty.is_null().yes() || matches!(ty.repr(), Repr::Void)
 }
 
 /// `Yes` for an object, `No` for a value that is never one.
@@ -183,7 +181,7 @@ fn object_like(ty: &Type) -> TrinaryLogic {
         TrinaryLogic::Yes
     } else if is_scalar_or_null(ty)
         || ty.is_array().yes()
-        || matches!(ty, Type(Repr::HasOffsetValue(..)))
+        || matches!(ty.repr(), Repr::HasOffsetValue(..))
     {
         TrinaryLogic::No
     } else {

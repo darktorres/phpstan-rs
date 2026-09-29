@@ -67,12 +67,10 @@ pub(crate) fn effective_slot_variance(
     index: usize,
     arg: &Type,
 ) -> Option<Variance> {
-    match arg {
-        Type(Repr::VarianceArg(CallSiteVariance::Covariant, _)) => Some(Variance::Covariant),
-        Type(Repr::VarianceArg(CallSiteVariance::Contravariant, _)) => {
-            Some(Variance::Contravariant)
-        }
-        Type(Repr::VarianceArg(CallSiteVariance::Bivariant, _)) => None,
+    match arg.repr() {
+        Repr::VarianceArg(CallSiteVariance::Covariant, _) => Some(Variance::Covariant),
+        Repr::VarianceArg(CallSiteVariance::Contravariant, _) => Some(Variance::Contravariant),
+        Repr::VarianceArg(CallSiteVariance::Bivariant, _) => None,
         _ => hierarchy.slot_variance(class, index),
     }
 }

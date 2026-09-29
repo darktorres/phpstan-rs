@@ -7,7 +7,7 @@ use crate::Repr;
 fn nullable_parses_as_union_with_null() {
     assert_eq!(
         parse_type_string("?string"),
-        Type(Repr::Union(vec![Type::string(), Type::null()]))
+        Type::new(Repr::Union(vec![Type::string(), Type::null()]))
     );
 }
 
@@ -15,7 +15,7 @@ fn nullable_parses_as_union_with_null() {
 fn union_parses_flat() {
     assert_eq!(
         parse_type_string("int|string"),
-        Type(Repr::Union(vec![Type::int(), Type::string()]))
+        Type::new(Repr::Union(vec![Type::int(), Type::string()]))
     );
 }
 
@@ -46,7 +46,7 @@ fn a_leading_nullable_mark_on_mixed_still_collapses_to_plain_mixed() {
 fn an_ordinary_union_with_no_mixed_member_is_unaffected() {
     assert_eq!(
         parse_type_string("int|string"),
-        Type(Repr::Union(vec![Type::int(), Type::string()]))
+        Type::new(Repr::Union(vec![Type::int(), Type::string()]))
     );
 }
 
@@ -58,7 +58,7 @@ fn quoted_literal_string_union_members_are_string_literals_not_class_names() {
     // once that machinery runs.
     assert_eq!(
         parse_type_string("'ASC'|'DESC'"),
-        Type(Repr::Union(vec![
+        Type::new(Repr::Union(vec![
             Type::string_literal("ASC".into()),
             Type::string_literal("DESC".into()),
         ]))
@@ -73,7 +73,7 @@ fn quoted_literal_string_union_members_are_string_literals_not_class_names() {
 fn intersection_parses_flat() {
     assert_eq!(
         parse_type_string("Countable&Iterator"),
-        Type(Repr::Intersection(vec![
+        Type::new(Repr::Intersection(vec![
             Type::object("Countable".into(), Vec::new()),
             Type::object("Iterator".into(), Vec::new())
         ]))
@@ -101,14 +101,14 @@ fn a_type_string_resolves_in_the_global_namespace() {
 fn the_classes_the_syntax_names_itself_are_written_fully_qualified() {
     assert_eq!(
         parse_written_type("iterable"),
-        Type(Repr::Union(vec![
+        Type::new(Repr::Union(vec![
             Type::array(Type::unknown_array_key(), Type::mixed()),
             Type::object("\\Traversable".into(), Vec::new()),
         ]))
     );
     assert_eq!(
         parse_written_type("Closure(): void"),
-        Type(Repr::Intersection(vec![
+        Type::new(Repr::Intersection(vec![
             Type::object("\\Closure".into(), Vec::new()),
             Type::callable(Some(Arc::new(CallableSig {
                 params: Vec::new(),
@@ -123,15 +123,15 @@ fn the_classes_the_syntax_names_itself_are_written_fully_qualified() {
 fn phpdoc_array_shorthand_parses() {
     assert_eq!(
         parse_type_string("int[]"),
-        Type::array(Type::benevolent_array_key(), Type(Repr::Int))
+        Type::array(Type::benevolent_array_key(), Type::new(Repr::Int))
     );
     assert_eq!(
         parse_type_string("string[][]"),
         Type::array(
             Type::benevolent_array_key(),
-            Type(Repr::Array(
+            Type::new(Repr::Array(
                 std::sync::Arc::new(Type::benevolent_array_key()),
-                std::sync::Arc::new(Type(Repr::String))
+                std::sync::Arc::new(Type::new(Repr::String))
             ))
         )
     );
@@ -147,7 +147,10 @@ fn phpdoc_array_shorthand_with_a_parenthesized_union_element_type_parses() {
         parse_type_string("(string|int)[]"),
         Type::array(
             Type::benevolent_array_key(),
-            Type(Repr::Union(vec![Type(Repr::String), Type(Repr::Int)]))
+            Type::new(Repr::Union(vec![
+                Type::new(Repr::String),
+                Type::new(Repr::Int)
+            ]))
         )
     );
 }
@@ -158,9 +161,9 @@ fn phpdoc_array_shorthand_with_a_parenthesized_intersection_element_type_parses(
         parse_type_string("(Foo&Bar)[]"),
         Type::array(
             Type::benevolent_array_key(),
-            Type(Repr::Intersection(vec![
-                Type(Repr::Object("Foo".into(), Vec::new())),
-                Type(Repr::Object("Bar".into(), Vec::new()))
+            Type::new(Repr::Intersection(vec![
+                Type::new(Repr::Object("Foo".into(), Vec::new())),
+                Type::new(Repr::Object("Bar".into(), Vec::new()))
             ]))
         )
     );
@@ -179,9 +182,9 @@ fn a_positional_array_shape_wrapped_in_array_shorthand_parses() {
         Type::array(
             Type::benevolent_array_key(),
             Type::array_shape(Shape::from_named(vec![
-                ("0".to_string(), Type(Repr::Int), false),
-                ("1".to_string(), Type(Repr::String), false),
-                ("2".to_string(), Type(Repr::String), false),
+                ("0".to_string(), Type::new(Repr::Int), false),
+                ("1".to_string(), Type::new(Repr::String), false),
+                ("2".to_string(), Type::new(Repr::String), false),
             ]))
         )
     );
@@ -232,8 +235,8 @@ fn a_list_shape_parses_identically_to_the_array_shape_spelling() {
     assert_eq!(
         parse_type_string("list{int, string}"),
         Type::array_shape(Shape::from_named(vec![
-            ("0".to_string(), Type(Repr::Int), false),
-            ("1".to_string(), Type(Repr::String), false),
+            ("0".to_string(), Type::new(Repr::Int), false),
+            ("1".to_string(), Type::new(Repr::String), false),
         ]))
     );
 }
@@ -244,7 +247,7 @@ fn a_non_empty_array_shape_and_a_non_empty_list_shape_both_parse() {
         parse_type_string("non-empty-array{a: int}"),
         Type::array_shape(Shape::from_named(vec![(
             "a".to_string(),
-            Type(Repr::Int),
+            Type::new(Repr::Int),
             false
         )]))
     );
@@ -252,7 +255,7 @@ fn a_non_empty_array_shape_and_a_non_empty_list_shape_both_parse() {
         parse_type_string("non-empty-list{int}"),
         Type::array_shape(Shape::from_named(vec![(
             "0".to_string(),
-            Type(Repr::Int),
+            Type::new(Repr::Int),
             false
         )]))
     );
@@ -272,7 +275,7 @@ fn a_negative_shape_key_parses_as_a_real_int_literal() {
         parse_type_string("array{-5: int}"),
         Type::array_shape(Shape::from_named(vec![(
             "-5".to_string(),
-            Type(Repr::Int),
+            Type::new(Repr::Int),
             false
         )]))
     );
@@ -284,7 +287,7 @@ fn a_leading_zero_shape_key_stays_a_string_literal_not_an_int() {
         parse_type_string("array{'01': int}"),
         Type::array_shape(Shape::from_named(vec![(
             "01".to_string(),
-            Type(Repr::Int),
+            Type::new(Repr::Int),
             false
         )]))
     );
@@ -305,7 +308,7 @@ fn an_explicit_zero_key_collides_with_and_overwrites_an_earlier_positional_field
         parse_type_string("array{int, 0: string}"),
         Type::array_shape(Shape::from_named(vec![(
             "0".to_string(),
-            Type(Repr::String),
+            Type::new(Repr::String),
             false
         )]))
     );
@@ -317,7 +320,7 @@ fn a_literal_duplicate_shape_key_is_merged_last_one_wins() {
         parse_type_string("array{foo: int, foo: string}"),
         Type::array_shape(Shape::from_named(vec![(
             "foo".to_string(),
-            Type(Repr::String),
+            Type::new(Repr::String),
             false
         )]))
     );
@@ -331,7 +334,7 @@ fn a_keyed_array_shape_wrapped_in_array_shorthand_parses() {
             Type::benevolent_array_key(),
             Type::array_shape(Shape::from_named(vec![(
                 "a".to_string(),
-                Type(Repr::Int),
+                Type::new(Repr::Int),
                 false
             )]))
         )
@@ -346,7 +349,7 @@ fn an_object_shape_wrapped_in_array_shorthand_parses() {
             Type::benevolent_array_key(),
             Type::object_shape(Shape::from_named(vec![(
                 "a".to_string(),
-                Type(Repr::Int),
+                Type::new(Repr::Int),
                 false
             )]))
         )
@@ -394,7 +397,7 @@ fn an_empty_bracket_after_offset_access_still_parses_as_array_shorthand() {
     // be empty).
     assert_eq!(
         parse_type_string("array{age: int}['age'][]"),
-        Type::array(Type::benevolent_array_key(), Type(Repr::Int))
+        Type::array(Type::benevolent_array_key(), Type::new(Repr::Int))
     );
 }
 
@@ -402,7 +405,7 @@ fn an_empty_bracket_after_offset_access_still_parses_as_array_shorthand() {
 fn offset_access_type_recurses_through_a_union() {
     assert_eq!(
         parse_type_string("(array{a: int}|array{a: string})['a']"),
-        Type(Repr::Union(vec![Type::int(), Type::string()]))
+        Type::new(Repr::Union(vec![Type::int(), Type::string()]))
     );
 }
 
@@ -428,7 +431,7 @@ fn class_constant_reference_types_parse_to_a_class_constant() {
     // (`registry::resolve`'s `resolve_class_const_type`) - never a
     // literal class named "self::RFC_*".
     let sentinel = |class: Type, pattern: &str| {
-        Type(Repr::ClassConstant {
+        Type::new(Repr::ClassConstant {
             class: std::sync::Arc::new(class),
             pattern: pattern.into(),
         })
@@ -444,14 +447,14 @@ fn class_constant_reference_types_parse_to_a_class_constant() {
     // `Foo::class` is a class-string, not a constant reference.
     assert_eq!(
         parse_type_string("Foo::class"),
-        Type::class_string(Type(Repr::Object("Foo".into(), vec![])))
+        Type::class_string(Type::new(Repr::Object("Foo".into(), vec![])))
     );
     // The array-wrapping machinery still applies around it.
     assert_eq!(
         parse_type_string("self::RFC_*[]"),
         Type::array(
             Type::benevolent_array_key(),
-            sentinel(Type(Repr::SelfRef(Vec::new())), "RFC_*")
+            sentinel(Type::new(Repr::SelfRef(Vec::new())), "RFC_*")
         )
     );
 }
@@ -466,7 +469,7 @@ fn generic_array_with_one_type_arg_parses_as_value_type() {
     // which get the benevolent marker.
     assert_eq!(
         parse_type_string("array<int>"),
-        Type::array(Type::benevolent_array_key(), Type(Repr::Int))
+        Type::array(Type::benevolent_array_key(), Type::new(Repr::Int))
     );
 }
 
@@ -476,7 +479,7 @@ fn generic_array_with_key_and_value_uses_both() {
     // silently discarded.
     assert_eq!(
         parse_type_string("array<string, int>"),
-        Type::array(Type(Repr::String), Type(Repr::Int))
+        Type::array(Type::new(Repr::String), Type::new(Repr::Int))
     );
 }
 
@@ -486,7 +489,7 @@ fn generic_user_class_keeps_base_name_and_type_args() {
         parse_type_string("Collection<User>"),
         Type::object(
             "Collection".into(),
-            vec![Type(Repr::Object("User".into(), Vec::new()))]
+            vec![Type::new(Repr::Object("User".into(), Vec::new()))]
         )
     );
 }
@@ -507,9 +510,9 @@ fn generic_arg_with_covariant_marker_parses_to_a_variance_arg() {
         parse_type_string("Collection<covariant Foo>"),
         Type::object(
             "Collection".into(),
-            vec![Type(Repr::VarianceArg(
+            vec![Type::new(Repr::VarianceArg(
                 CallSiteVariance::Covariant,
-                std::sync::Arc::new(Type(Repr::Object("Foo".into(), Vec::new())))
+                std::sync::Arc::new(Type::new(Repr::Object("Foo".into(), Vec::new())))
             ))]
         )
     );
@@ -521,9 +524,9 @@ fn generic_arg_with_contravariant_marker_parses_to_a_variance_arg() {
         parse_type_string("Collection<contravariant Foo>"),
         Type::object(
             "Collection".into(),
-            vec![Type(Repr::VarianceArg(
+            vec![Type::new(Repr::VarianceArg(
                 CallSiteVariance::Contravariant,
-                std::sync::Arc::new(Type(Repr::Object("Foo".into(), Vec::new())))
+                std::sync::Arc::new(Type::new(Repr::Object("Foo".into(), Vec::new())))
             ))]
         )
     );
@@ -535,9 +538,9 @@ fn generic_arg_with_bivariant_marker_parses_to_a_variance_arg() {
         parse_type_string("Collection<*>"),
         Type::object(
             "Collection".into(),
-            vec![Type(Repr::VarianceArg(
+            vec![Type::new(Repr::VarianceArg(
                 CallSiteVariance::Bivariant,
-                std::sync::Arc::new(Type(Repr::Mixed(false, None)))
+                std::sync::Arc::new(Type::new(Repr::Mixed(false, None)))
             ))]
         )
     );
@@ -552,9 +555,12 @@ fn a_call_site_variance_marker_survives_nested_inside_the_wrapped_type() {
         parse_type_string("Collection<covariant Box<int>>"),
         Type::object(
             "Collection".into(),
-            vec![Type(Repr::VarianceArg(
+            vec![Type::new(Repr::VarianceArg(
                 CallSiteVariance::Covariant,
-                std::sync::Arc::new(Type(Repr::Object("Box".into(), vec![Type(Repr::Int)])))
+                std::sync::Arc::new(Type::new(Repr::Object(
+                    "Box".into(),
+                    vec![Type::new(Repr::Int)]
+                )))
             ))]
         )
     );
@@ -568,7 +574,10 @@ fn union_inside_generic_args_is_not_a_top_level_union() {
         parse_type_string("Collection<int|string>"),
         Type::object(
             "Collection".into(),
-            vec![Type(Repr::Union(vec![Type(Repr::Int), Type(Repr::String)]))]
+            vec![Type::new(Repr::Union(vec![
+                Type::new(Repr::Int),
+                Type::new(Repr::String)
+            ]))]
         )
     );
 }
@@ -577,8 +586,8 @@ fn union_inside_generic_args_is_not_a_top_level_union() {
 fn top_level_union_around_a_generic_still_splits_correctly() {
     assert_eq!(
         parse_type_string("Collection<int>|null"),
-        Type(Repr::Union(vec![
-            Type::object("Collection".into(), vec![Type(Repr::Int)]),
+        Type::new(Repr::Union(vec![
+            Type::object("Collection".into(), vec![Type::new(Repr::Int)]),
             Type::null()
         ]))
     );
@@ -587,11 +596,11 @@ fn top_level_union_around_a_generic_still_splits_correctly() {
 #[test]
 fn dnf_type_group_resolves_to_a_real_intersection_inside_the_union() {
     let ty = parse_type_string("(Countable&Iterator)|null");
-    let Type(Repr::Union(members)) = &ty else {
+    let Repr::Union(members) = ty.repr() else {
         panic!("expected a top-level union");
     };
     assert_eq!(members.len(), 2);
-    assert!(matches!(&members[0], Type(Repr::Intersection(parts)) if parts.len() == 2));
+    assert!(matches!(members[0].repr(), Repr::Intersection(parts) if parts.len() == 2));
     assert_eq!(members[1], Type::null());
 }
 
@@ -606,13 +615,13 @@ fn dnf_type_group_resolves_to_a_real_intersection_inside_the_union() {
 #[test]
 fn conditional_return_type_syntax_parses_into_a_real_conditional_type() {
     let ty = parse_type_string("($action is 'send' ? list<string> : list<int>)");
-    let Type(Repr::Conditional {
+    let Repr::Conditional {
         subject,
         target,
         if_true,
         if_false,
         negated,
-    }) = &ty
+    } = ty.repr()
     else {
         panic!("expected a real Conditional type, got {ty:?}");
     };
@@ -626,9 +635,9 @@ fn conditional_return_type_syntax_parses_into_a_real_conditional_type() {
 #[test]
 fn conditional_return_type_syntax_with_is_not_sets_negated() {
     let ty = parse_type_string("($action is not 'send' ? list<string> : list<int>)");
-    let Type(Repr::Conditional {
+    let Repr::Conditional {
         subject, negated, ..
-    }) = &ty
+    } = ty.repr()
     else {
         panic!("expected a real Conditional type, got {ty:?}");
     };
@@ -640,7 +649,7 @@ fn conditional_return_type_syntax_with_is_not_sets_negated() {
 #[test]
 fn conditional_return_type_syntax_with_a_template_subject_keeps_its_condition() {
     let ty = parse_type_string("(T is 'send' ? list<string> : list<int>)");
-    let Type(Repr::Conditional { subject, .. }) = &ty else {
+    let Repr::Conditional { subject, .. } = ty.repr() else {
         panic!("expected a template-subject conditional, got {ty:?}");
     };
     assert_eq!(*subject, ConditionalSubject::Template("T".into()));
@@ -707,7 +716,7 @@ fn closure_shape_syntax_parses_into_a_real_shape() {
 #[test]
 fn closure_shape_syntax_still_works_inside_a_union() {
     let ty = parse_type_string("Closure(self):T|null");
-    let Type(Repr::Union(members)) = &ty else {
+    let Repr::Union(members) = ty.repr() else {
         panic!("expected a top-level union, got {ty:?}");
     };
     assert_eq!(members.len(), 2);
@@ -761,7 +770,7 @@ fn fully_qualified_closure_shape_syntax_with_a_return_type_parses_into_a_real_sh
 fn a_quoted_literal_containing_a_bracket_shaped_character_does_not_corrupt_the_union_split() {
     assert_eq!(
         parse_type_string("'->'|'::'"),
-        Type(Repr::Union(vec![
+        Type::new(Repr::Union(vec![
             Type::string_literal("->".into()),
             Type::string_literal("::".into()),
         ]))
@@ -774,9 +783,9 @@ fn a_quoted_literal_containing_a_bracket_shaped_character_inside_an_array_shape(
         parse_type_string("array{type?: '->'|'::'}"),
         Type::array_shape(Shape::from_named(vec![(
             "type".to_string(),
-            Type(Repr::Union(vec![
-                Type(Repr::StringLiteral("->".into())),
-                Type(Repr::StringLiteral("::".into())),
+            Type::new(Repr::Union(vec![
+                Type::new(Repr::StringLiteral("->".into())),
+                Type::new(Repr::StringLiteral("::".into())),
             ])),
             true,
         )]))

@@ -38,9 +38,9 @@ impl ShapeKey {
 
     /// The key a literal key type names, if it names one.
     pub fn from_type(ty: &Type) -> Option<ShapeKey> {
-        match ty {
-            Type(Repr::IntLiteral(n)) => Some(ShapeKey::Int(*n)),
-            Type(Repr::StringLiteral(s)) => Some(ShapeKey::from_bytes(s.as_bytes())),
+        match ty.repr() {
+            Repr::IntLiteral(n) => Some(ShapeKey::Int(*n)),
+            Repr::StringLiteral(s) => Some(ShapeKey::from_bytes(s.as_bytes())),
             _ => None,
         }
     }

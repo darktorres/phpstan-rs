@@ -54,7 +54,7 @@ fn any_type() -> impl Strategy<Value = Type> {
                 Just(AccessoryKind::UppercaseString),
                 Just(AccessoryKind::DecimalIntegerString),
             ]
-            .prop_map(|kind| Type(Repr::Intersection(vec![
+            .prop_map(|kind| Type::new(Repr::Intersection(vec![
                 Type::string(),
                 Type::accessory(kind)
             ]))),
@@ -87,7 +87,7 @@ proptest! {
     /// A member is a subtype of the union containing it.
     #[test]
     fn union_injection(members in prop::collection::vec(any_type(), 2..4)) {
-        let union = Type(Repr::Union(members.clone()));
+        let union = Type::new(Repr::Union(members.clone()));
         for m in &members {
             prop_assert!(super::is_subtype(m, &union));
         }
@@ -96,7 +96,7 @@ proptest! {
     /// An intersection is a subtype of each of its members.
     #[test]
     fn intersection_projection(members in prop::collection::vec(any_type(), 2..4)) {
-        let intersection = Type(Repr::Intersection(members.clone()));
+        let intersection = Type::new(Repr::Intersection(members.clone()));
         for m in &members {
             prop_assert!(super::is_subtype(&intersection, m));
         }
@@ -122,8 +122,8 @@ fn nan_float_literal_is_reflexive() {
 /// reasoning.
 #[test]
 fn an_intersection_is_a_subtype_of_its_own_union_shaped_member() {
-    let union = Type(Repr::Union(vec![Type::null(), Type::bool()]));
-    let intersection = Type(Repr::Intersection(vec![Type::void(), union.clone()]));
+    let union = Type::new(Repr::Union(vec![Type::null(), Type::bool()]));
+    let intersection = Type::new(Repr::Intersection(vec![Type::void(), union.clone()]));
     assert!(super::is_subtype(&intersection, &union));
     assert!(super::is_subtype(&intersection, &Type::void()));
 }

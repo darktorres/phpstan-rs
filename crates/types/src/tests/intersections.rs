@@ -12,15 +12,15 @@ fn non_empty() -> Type {
 
 #[test]
 fn two_shapes_intersect_into_one() {
-    let literals = Type(Repr::Union((0..4).map(Type::int_literal).collect()));
+    let literals = Type::new(Repr::Union((0..4).map(Type::int_literal).collect()));
     let payload = Type::object("Payload".into(), Vec::new());
     let a = Type::array_shape(Shape::sealed(vec![
-        field(0, Type(Repr::Int), false),
+        field(0, Type::new(Repr::Int), false),
         field(1, payload.clone(), false),
     ]));
     let b = Type::array_shape(Shape::sealed(vec![
         field(0, literals.clone(), false),
-        field(1, Type(Repr::Mixed(false, None)), false),
+        field(1, Type::new(Repr::Mixed(false, None)), false),
     ]));
     assert_eq!(
         intersect_types(vec![a, b]),
@@ -33,8 +33,8 @@ fn two_shapes_intersect_into_one() {
 
 #[test]
 fn a_required_key_the_other_sealed_shape_lacks_is_never() {
-    let a = Type::array_shape(Shape::sealed(vec![field(0, Type(Repr::Int), false)]));
-    let b = Type::array_shape(Shape::sealed(vec![field(1, Type(Repr::Int), true)]));
+    let a = Type::array_shape(Shape::sealed(vec![field(0, Type::new(Repr::Int), false)]));
+    let b = Type::array_shape(Shape::sealed(vec![field(1, Type::new(Repr::Int), true)]));
     assert_eq!(intersect_types(vec![a, b]), Type::never());
 }
 
@@ -42,36 +42,48 @@ fn a_required_key_the_other_sealed_shape_lacks_is_never() {
 fn a_shape_within_an_array_takes_its_value_type() {
     let shape = Type::array_shape(Shape::sealed(vec![field(
         0,
-        Type(Repr::Mixed(false, None)),
+        Type::new(Repr::Mixed(false, None)),
         false,
     )]));
-    let array = Type::array(Type(Repr::Int), Type(Repr::String));
+    let array = Type::array(Type::new(Repr::Int), Type::new(Repr::String));
     assert_eq!(
         intersect_types(vec![shape, array]),
-        Type::array_shape(Shape::sealed(vec![field(0, Type(Repr::String), false)]))
+        Type::array_shape(Shape::sealed(vec![field(
+            0,
+            Type::new(Repr::String),
+            false
+        )]))
     );
 }
 
 #[test]
 fn an_all_optional_shape_stays_a_shape_that_cant_be_empty() {
-    let shape = Type::array_shape(Shape::sealed(vec![field(0, Type(Repr::String), true)]));
+    let shape = Type::array_shape(Shape::sealed(vec![field(0, Type::new(Repr::String), true)]));
     let ty = intersect_types(vec![shape.clone(), non_empty()]);
-    assert_eq!(ty, Type(Repr::Intersection(vec![shape, non_empty()])));
+    assert_eq!(ty, Type::new(Repr::Intersection(vec![shape, non_empty()])));
     assert_eq!(ty.to_string(), "non-empty-array{0?: string}");
 }
 
 #[test]
 fn a_shape_with_a_required_key_absorbs_non_empty() {
-    let shape = Type::array_shape(Shape::sealed(vec![field(0, Type(Repr::String), false)]));
+    let shape = Type::array_shape(Shape::sealed(vec![field(
+        0,
+        Type::new(Repr::String),
+        false,
+    )]));
     assert_eq!(intersect_types(vec![shape.clone(), non_empty()]), shape);
 }
 
 #[test]
 fn an_offset_makes_an_optional_key_required() {
-    let shape = Type::array_shape(Shape::sealed(vec![field(0, Type(Repr::String), true)]));
+    let shape = Type::array_shape(Shape::sealed(vec![field(0, Type::new(Repr::String), true)]));
     assert_eq!(
         intersect_types(vec![shape, Type::has_offset(ShapeKey::Int(0))]),
-        Type::array_shape(Shape::sealed(vec![field(0, Type(Repr::String), false)]))
+        Type::array_shape(Shape::sealed(vec![field(
+            0,
+            Type::new(Repr::String),
+            false
+        )]))
     );
 }
 
@@ -99,7 +111,7 @@ fn a_refinement_never_replaces_its_base() {
     ];
     assert_eq!(
         intersect_types(refined.clone()),
-        Type(Repr::Intersection(refined))
+        Type::new(Repr::Intersection(refined))
     );
 }
 

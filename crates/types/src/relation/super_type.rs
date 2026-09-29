@@ -6,8 +6,8 @@ impl Relation<'_> {
     /// Whether every value of `ty` (a template read through its bound) is
     /// an enum case: an enum, `UnitEnum` or anything extending it.
     fn is_enum_like(&self, ty: &Type) -> bool {
-        match &crate::late::upper_bound(ty) {
-            Type(Repr::Object(name, _)) => {
+        match crate::late::upper_bound(ty).repr() {
+            Repr::Object(name, _) => {
                 let name = name.as_str().trim_start_matches('\\');
                 name.eq_ignore_ascii_case("UnitEnum")
                     || self
@@ -16,7 +16,7 @@ impl Relation<'_> {
                         .is_some_and(|facts| facts.kind == ClassKind::Enum)
                     || self.hierarchy.is_subclass_of(name, "UnitEnum")
             }
-            Type(Repr::EnumCase(..)) => true,
+            Repr::EnumCase(..) => true,
             _ => false,
         }
     }
@@ -37,11 +37,11 @@ impl Relation<'_> {
     /// registry doesn't know.
     pub fn is_super_type_of(&self, sup: &Type, sub: &Type) -> TrinaryLogic {
         syntax::stack::guard(|| {
-            match (sup, sub) {
-                (Type(Repr::Error), _) => TrinaryLogic::Yes,
-                (_, Type(Repr::Error)) => self.is_super_type_of(sup, &Type::mixed()),
+            match (sup.repr(), sub.repr()) {
+                (Repr::Error, _) => TrinaryLogic::Yes,
+                (_, Repr::Error) => self.is_super_type_of(sup, &Type::mixed()),
                 // `mixed~S` holds everything but `S`.
-                (Type(Repr::Mixed(_, Some(subtracted))), sub) if !sub.is_never() => {
+                (Repr::Mixed(_, Some(subtracted)), _) if !sub.is_never() => {
                     if self.is_super_type_of(subtracted, sub).yes() {
                         TrinaryLogic::No
                     } else if self.disjoint(subtracted, sub) {
@@ -50,39 +50,37 @@ impl Relation<'_> {
                         TrinaryLogic::Maybe
                     }
                 }
-                (Type(Repr::Mixed(..)), _) | (_, Type(Repr::Never)) => TrinaryLogic::Yes,
+                (Repr::Mixed(..), _) | (_, Repr::Never) => TrinaryLogic::Yes,
                 // `NAN` is itself, as `ConstantFloatType::equals()` has it.
-                (Type(Repr::FloatLiteral(a)), Type(Repr::FloatLiteral(b)))
-                    if a.is_nan() && b.is_nan() =>
-                {
+                (Repr::FloatLiteral(a), Repr::FloatLiteral(b)) if a.is_nan() && b.is_nan() => {
                     TrinaryLogic::Yes
                 }
-                (a, b) if a == b => TrinaryLogic::Yes,
+                _ if sup == sub => TrinaryLogic::Yes,
                 // `A & B` is within whatever either member is.
-                (_, Type(Repr::Intersection(members)))
+                (_, Repr::Intersection(members))
                     if members.iter().any(|m| self.is_super_type_of(sup, m).yes()) =>
                 {
                     TrinaryLogic::Yes
                 }
-                (Type(Repr::Never), _) => TrinaryLogic::No,
-                (Type(Repr::KeyOf(_)) | Type(Repr::OffsetAccess(..)), _) => {
+                (Repr::Never, _) => TrinaryLogic::No,
+                (Repr::KeyOf(_) | Repr::OffsetAccess(..), _) => {
                     self.is_super_type_of(&sup.resolve_late_to_bounds(), sub)
                 }
-                (Type(Repr::Extension(a)), Type(Repr::Extension(b))) => a
+                (Repr::Extension(a), Repr::Extension(b)) => a
                     .is_super_type_of(&**b, self.hierarchy)
                     .unwrap_or_else(|| self.is_super_type_of(&a.base(), &b.base())),
                 // A plain base value may or may not carry the payload.
-                (Type(Repr::Extension(a)), _) => match self.is_super_type_of(&a.base(), sub) {
+                (Repr::Extension(a), _) => match self.is_super_type_of(&a.base(), sub) {
                     TrinaryLogic::No => TrinaryLogic::No,
                     _ => TrinaryLogic::Maybe,
                 },
-                (_, Type(Repr::Extension(b))) => self.is_super_type_of(sup, &b.base()),
-                (_, Type(Repr::KeyOf(_)) | Type(Repr::OffsetAccess(..))) => {
+                (_, Repr::Extension(b)) => self.is_super_type_of(sup, &b.base()),
+                (_, Repr::KeyOf(_) | Repr::OffsetAccess(..)) => {
                     self.is_super_type_of(sup, &sub.resolve_late_to_bounds())
                 }
                 // Only enums have case values, and each is an int or a
                 // string, whichever enum an enum-bounded template becomes.
-                (_, Type(Repr::ValueOf(inner))) if self.is_enum_like(inner) => {
+                (_, Repr::ValueOf(inner)) if self.is_enum_like(inner) => {
                     if self
                         .is_super_type_of(sup, &Type::union_of(vec![Type::int(), Type::string()]))
                         .yes()
@@ -94,29 +92,29 @@ impl Relation<'_> {
                 }
                 // A benevolent union (`(int|string)`) is its members for
                 // `isSuperTypeOf`; only `accepts` is lenient about it.
-                (_, Type(Repr::Union(members)) | Type(Repr::BenevolentUnion(members))) => {
+                (_, Repr::Union(members) | Repr::BenevolentUnion(members)) => {
                     TrinaryLogic::extreme_identity(
                         members.iter().map(|m| self.is_super_type_of(sup, m)),
                     )
                 }
-                (_, Type(Repr::TemplateParam(tp))) => self.is_super_type_of(sup, &tp.bound),
+                (_, Repr::TemplateParam(tp)) => self.is_super_type_of(sup, &tp.bound),
                 (
                     _,
-                    Type(Repr::Conditional {
+                    Repr::Conditional {
                         if_true, if_false, ..
-                    }),
+                    },
                 ) => TrinaryLogic::extreme_identity(
                     [if_true, if_false]
                         .into_iter()
                         .map(|branch| self.is_super_type_of(sup, branch)),
                 ),
-                (Type(Repr::Union(members)) | Type(Repr::BenevolentUnion(members)), _) => {
+                (Repr::Union(members) | Repr::BenevolentUnion(members), _) => {
                     let by_member = TrinaryLogic::max_min(
                         members.iter().map(|m| self.is_super_type_of(m, sub)),
                     );
                     // `A & B` is within a union one of its own members is.
-                    match sub {
-                        Type(Repr::Intersection(sub_members))
+                    match sub.repr() {
+                        Repr::Intersection(sub_members)
                             if by_member != TrinaryLogic::Yes
                                 && sub_members
                                     .iter()
@@ -128,20 +126,18 @@ impl Relation<'_> {
                     }
                 }
                 // No value of `mixed~S` is one of `S`'s.
-                (sup, Type(Repr::Mixed(_, Some(subtracted))))
+                (_, Repr::Mixed(_, Some(subtracted)))
                     if self.is_super_type_of(subtracted, sup).yes() =>
                 {
                     TrinaryLogic::No
                 }
-                (_, Type(Repr::Mixed(..))) | (Type(Repr::TemplateParam(_)), _) => {
-                    TrinaryLogic::Maybe
-                }
-                (Type(Repr::Void), Type(Repr::Void)) => TrinaryLogic::Yes,
-                (Type(Repr::Void), _) | (_, Type(Repr::Void)) => TrinaryLogic::No,
+                (_, Repr::Mixed(..)) | (Repr::TemplateParam(_), _) => TrinaryLogic::Maybe,
+                (Repr::Void, Repr::Void) => TrinaryLogic::Yes,
+                (Repr::Void, _) | (_, Repr::Void) => TrinaryLogic::No,
                 // An object whose class declares `__invoke()` is callable
                 // (`ObjectType::isCallable()`); its signature is not compared
                 // with a callable's.
-                (Type(Repr::Callable(sig)), Type(Repr::Object(class, _)))
+                (Repr::Callable(sig), Repr::Object(class, _))
                     if self.hierarchy.has_method(class, "__invoke") =>
                 {
                     match sig {
@@ -149,7 +145,7 @@ impl Relation<'_> {
                         Some(_) => TrinaryLogic::Maybe,
                     }
                 }
-                (Type(Repr::Intersection(members)), _) => {
+                (Repr::Intersection(members), _) => {
                     let results: Vec<TrinaryLogic> = members
                         .iter()
                         .map(|m| self.is_super_type_of(m, sub))
@@ -163,51 +159,44 @@ impl Relation<'_> {
                     }
                 }
                 (
-                    Type(Repr::Float) | Type(Repr::FloatLiteral(_)),
-                    Type(Repr::Int) | Type(Repr::IntLiteral(_)) | Type(Repr::IntRange(..)),
+                    Repr::Float | Repr::FloatLiteral(_),
+                    Repr::Int | Repr::IntLiteral(_) | Repr::IntRange(..),
                 ) => TrinaryLogic::No,
                 // A plain string may or may not name a class.
                 (
-                    Type(Repr::ClassString(_)) | Type(Repr::ClassKindString(_)),
-                    Type(Repr::String) | Type(Repr::StringLiteral(_)),
+                    Repr::ClassString(_) | Repr::ClassKindString(_),
+                    Repr::String | Repr::StringLiteral(_),
                 ) => TrinaryLogic::Maybe,
-                (
-                    Type(Repr::ClassString(_)) | Type(Repr::ClassKindString(_)),
-                    Type(Repr::Intersection(ms)),
-                ) if !ms.iter().any(|m| {
-                    matches!(
-                        m,
-                        Type(Repr::ClassString(_)) | Type(Repr::ClassKindString(_))
-                    )
-                }) =>
+                (Repr::ClassString(_) | Repr::ClassKindString(_), Repr::Intersection(ms))
+                    if !ms.iter().any(|m| {
+                        matches!(m.repr(), Repr::ClassString(_) | Repr::ClassKindString(_))
+                    }) =>
                 {
                     TrinaryLogic::Maybe
                 }
                 // An unresolved constant reference proves nothing.
-                (Type(Repr::ValueOf(_)) | Type(Repr::ClassConstant { .. }), _)
-                | (_, Type(Repr::ValueOf(_)) | Type(Repr::ClassConstant { .. })) => {
-                    TrinaryLogic::Maybe
-                }
-                (Type(Repr::Object(a, a_args)), Type(Repr::Object(b, b_args)))
+                (Repr::ValueOf(_) | Repr::ClassConstant { .. }, _)
+                | (_, Repr::ValueOf(_) | Repr::ClassConstant { .. }) => TrinaryLogic::Maybe,
+                (Repr::Object(a, a_args), Repr::Object(b, b_args))
                     if a.eq_ignore_case(b) && a_args.is_empty() && b_args.is_empty() =>
                 {
                     TrinaryLogic::Yes
                 }
-                (Type(Repr::Object(a, _)), Type(Repr::Object(b, _)))
+                (Repr::Object(a, _), Repr::Object(b, _))
                     if [a, b]
                         .iter()
                         .any(|n| self.hierarchy.find_class(n).is_none()) =>
                 {
                     TrinaryLogic::Maybe
                 }
-                (Type(Repr::ArrayShape(sup_shape)), Type(Repr::ArrayShape(sub_shape))) => {
+                (Repr::ArrayShape(sup_shape), Repr::ArrayShape(sub_shape)) => {
                     self.shape_super_type_of(sup_shape, sub_shape)
                 }
                 // Arrays compare structurally: `accepts` reads an
                 // `array<mixed>` value as "unknown" and lets it fit any array,
                 // right for accepting an argument but not for "always". An
                 // empty array fits every array type, so this is never `No`.
-                (Type(Repr::Array(sk, sv)), Type(Repr::Array(k, v))) => {
+                (Repr::Array(sk, sv), Repr::Array(k, v)) => {
                     // Every PHP array key is an `int|string`.
                     let key = if self.is_super_type_of(sk, &Type::unknown_array_key())
                         == TrinaryLogic::Yes
@@ -225,8 +214,8 @@ impl Relation<'_> {
                 }
                 // A field the shape requires that the array's keys or values
                 // can't hold keeps any value from being both.
-                (Type(Repr::ArrayShape(shape)), Type(Repr::Array(k, v)))
-                | (Type(Repr::Array(k, v)), Type(Repr::ArrayShape(shape)))
+                (Repr::ArrayShape(shape), Repr::Array(k, v))
+                | (Repr::Array(k, v), Repr::ArrayShape(shape))
                     if shape.fields.iter().any(|f| {
                         !f.optional
                             && (self.disjoint(k, &f.key.to_type()) || self.disjoint(v, &f.ty))
@@ -235,9 +224,9 @@ impl Relation<'_> {
                     TrinaryLogic::No
                 }
                 // A general array may or may not carry a shape's keys.
-                (Type(Repr::ArrayShape(_)), Type(Repr::Array(..))) => TrinaryLogic::Maybe,
+                (Repr::ArrayShape(_), Repr::Array(..)) => TrinaryLogic::Maybe,
                 _ if self.proves_super_type(sup, sub) => TrinaryLogic::Yes,
-                (_, Type(Repr::Intersection(members))) => {
+                (_, Repr::Intersection(members)) => {
                     let refused = members
                         .iter()
                         .filter(|m| !m.is_accessory())
@@ -250,15 +239,13 @@ impl Relation<'_> {
                 }
                 // `proves_super_type` has already answered the generic-aware
                 // `Yes`; the classes being related is only a `Maybe` here.
-                (Type(Repr::Object(a, _)), Type(Repr::Object(b, _))) => {
-                    match self.object_super_type_of(a, b) {
-                        TrinaryLogic::No => TrinaryLogic::No,
-                        _ => TrinaryLogic::Maybe,
-                    }
-                }
+                (Repr::Object(a, _), Repr::Object(b, _)) => match self.object_super_type_of(a, b) {
+                    TrinaryLogic::No => TrinaryLogic::No,
+                    _ => TrinaryLogic::Maybe,
+                },
                 // A case is an instance of its enum: within a class its enum
                 // is within, when the class takes no type arguments.
-                (Type(Repr::Object(a, args)), Type(Repr::EnumCase(b, _))) => {
+                (Repr::Object(a, args), Repr::EnumCase(b, _)) => {
                     match self.object_super_type_of(a, b) {
                         TrinaryLogic::Yes if args.is_empty() => TrinaryLogic::Yes,
                         TrinaryLogic::No => TrinaryLogic::No,
@@ -266,21 +253,17 @@ impl Relation<'_> {
                     }
                 }
                 // An object of `a` may be the case when the classes overlap.
-                (Type(Repr::EnumCase(b, _)), Type(Repr::Object(a, _))) => {
+                (Repr::EnumCase(b, _), Repr::Object(a, _)) => {
                     match self.object_super_type_of(a, b) {
                         TrinaryLogic::No => TrinaryLogic::No,
                         _ => TrinaryLogic::Maybe,
                     }
                 }
-                (Type(Repr::EnumCase(a, _)), Type(Repr::EnumCase(b, _)))
-                    if !a.eq_ignore_ascii_case(b) =>
-                {
+                (Repr::EnumCase(a, _), Repr::EnumCase(b, _)) if !a.eq_ignore_ascii_case(b) => {
                     TrinaryLogic::No
                 }
                 _ if scalars_disjoint(sup, sub) => TrinaryLogic::No,
-                (Type(Repr::Accessory(kind)), _) if accessory_refuses(kind, sub) => {
-                    TrinaryLogic::No
-                }
+                (Repr::Accessory(kind), _) if accessory_refuses(kind, sub) => TrinaryLogic::No,
                 _ => TrinaryLogic::Maybe,
             }
         })
@@ -335,7 +318,7 @@ impl Relation<'_> {
     /// other member strictly contains is dropped (`object|Foo` is
     /// `object`, `int|1` is `int`).
     pub fn absorb_union_subtypes(&self, ty: &Type) -> Type {
-        let Type(Repr::Union(members)) = ty else {
+        let Repr::Union(members) = ty.repr() else {
             return ty.clone();
         };
         let strictly_within = |m: &Type, n: &Type| {
@@ -350,7 +333,7 @@ impl Relation<'_> {
             .collect();
         match kept.len() {
             1 => kept.into_iter().next().unwrap(),
-            _ => Type(Repr::Union(kept)),
+            _ => Type::new(Repr::Union(kept)),
         }
     }
 
@@ -401,7 +384,7 @@ impl Relation<'_> {
 /// (`non-empty-string` over `''`, `numeric-string` over `'abc'`,
 /// `non-empty-array` over `array{}`, `list` over `array{a: int}`).
 fn accessory_refuses(kind: &AccessoryKind, sub: &Type) -> bool {
-    if let Type(Repr::StringLiteral(value)) = sub {
+    if let Repr::StringLiteral(value) = sub.repr() {
         let bytes = value.as_bytes();
         let has = match kind {
             AccessoryKind::NonEmptyString => !bytes.is_empty(),
@@ -417,7 +400,7 @@ fn accessory_refuses(kind: &AccessoryKind, sub: &Type) -> bool {
         };
         return !has;
     }
-    if let Type(Repr::ArrayShape(shape)) = sub {
+    if let Repr::ArrayShape(shape) = sub.repr() {
         match kind {
             AccessoryKind::NonEmptyArray if shape.is_empty_array() => return true,
             AccessoryKind::ArrayList
@@ -432,20 +415,17 @@ fn accessory_refuses(kind: &AccessoryKind, sub: &Type) -> bool {
         }
     }
     let is_string = matches!(
-        sub,
-        Type(Repr::String)
-            | Type(Repr::StringLiteral(_))
-            | Type(Repr::ClassString(_))
-            | Type(Repr::ClassKindString(_))
+        sub.repr(),
+        Repr::String | Repr::StringLiteral(_) | Repr::ClassString(_) | Repr::ClassKindString(_)
     );
-    let is_array = matches!(sub, Type(Repr::Array(..)) | Type(Repr::ArrayShape(_)));
+    let is_array = matches!(sub.repr(), Repr::Array(..) | Repr::ArrayShape(_));
     match kind {
         AccessoryKind::NonEmptyArray | AccessoryKind::ArrayList => {
             !is_array
                 && scalars_disjoint(
                     &Type::array(
-                        Type(Repr::Mixed(false, None)),
-                        Type(Repr::Mixed(false, None)),
+                        Type::new(Repr::Mixed(false, None)),
+                        Type::new(Repr::Mixed(false, None)),
                     ),
                     sub,
                 )
@@ -468,36 +448,34 @@ fn accessory_refuses(kind: &AccessoryKind, sub: &Type) -> bool {
 /// Anything else is not proven disjoint.
 fn scalars_disjoint(a: &Type, b: &Type) -> bool {
     syntax::stack::guard(|| {
-        match (a, b) {
-            (Type(Repr::Union(members)) | Type(Repr::BenevolentUnion(members)), _) => {
+        match (a.repr(), b.repr()) {
+            (Repr::Union(members) | Repr::BenevolentUnion(members), _) => {
                 members.iter().all(|m| scalars_disjoint(m, b))
             }
-            (_, Type(Repr::Union(members)) | Type(Repr::BenevolentUnion(members))) => {
+            (_, Repr::Union(members) | Repr::BenevolentUnion(members)) => {
                 members.iter().all(|m| scalars_disjoint(a, m))
             }
             // Two different values of the same kind can never overlap - real
             // PHPStan's `ConstantStringType('send')->isSuperTypeOf(
             // 'list_to_send')` is a definite no, not a maybe.
-            (Type(Repr::StringLiteral(x)), Type(Repr::StringLiteral(y))) => x != y,
-            (Type(Repr::IntLiteral(x)), Type(Repr::IntLiteral(y))) => x != y,
-            (Type(Repr::True), Type(Repr::False)) | (Type(Repr::False), Type(Repr::True)) => true,
+            (Repr::StringLiteral(x), Repr::StringLiteral(y)) => x != y,
+            (Repr::IntLiteral(x), Repr::IntLiteral(y)) => x != y,
+            (Repr::True, Repr::False) | (Repr::False, Repr::True) => true,
             // An open and a closed resource are never the same value.
-            (Type(Repr::Resource { closed: a }), Type(Repr::Resource { closed: b })) => a != b,
-            (Type(Repr::EnumCase(class_a, case_a)), Type(Repr::EnumCase(class_b, case_b))) => {
+            (Repr::Resource { closed: a }, Repr::Resource { closed: b }) => a != b,
+            (Repr::EnumCase(class_a, case_a), Repr::EnumCase(class_b, case_b)) => {
                 class_a == class_b && case_a != case_b
             }
-            (Type(Repr::IntLiteral(n)), Type(Repr::IntRange(min, max)))
-            | (Type(Repr::IntRange(min, max)), Type(Repr::IntLiteral(n))) => {
+            (Repr::IntLiteral(n), Repr::IntRange(min, max))
+            | (Repr::IntRange(min, max), Repr::IntLiteral(n)) => {
                 min.is_some_and(|m| *n < m) || max.is_some_and(|m| *n > m)
             }
-            (Type(Repr::IntRange(a_min, a_max)), Type(Repr::IntRange(b_min, b_max))) => {
+            (Repr::IntRange(a_min, a_max), Repr::IntRange(b_min, b_max)) => {
                 a_max.zip(*b_min).is_some_and(|(a, b)| a < b)
                     || b_max.zip(*a_min).is_some_and(|(b, a)| b < a)
             }
             // `NAN` is itself (see `is_super_type_of`).
-            (Type(Repr::FloatLiteral(x)), Type(Repr::FloatLiteral(y))) => {
-                x != y && !(x.is_nan() && y.is_nan())
-            }
+            (Repr::FloatLiteral(x), Repr::FloatLiteral(y)) => x != y && !(x.is_nan() && y.is_nan()),
             _ => match (scalar_family(a), scalar_family(b)) {
                 (Some(fa), Some(fb)) => fa != fb,
                 _ => false,
@@ -519,23 +497,20 @@ enum ScalarFamily {
 }
 
 fn scalar_family(ty: &Type) -> Option<ScalarFamily> {
-    match ty {
-        Type(Repr::Int) | Type(Repr::IntLiteral(_)) | Type(Repr::IntRange(_, _)) => {
-            Some(ScalarFamily::Int)
+    match ty.repr() {
+        Repr::Int | Repr::IntLiteral(_) | Repr::IntRange(_, _) => Some(ScalarFamily::Int),
+        Repr::Float | Repr::FloatLiteral(_) => Some(ScalarFamily::Float),
+        Repr::String | Repr::StringLiteral(_) | Repr::ClassString(_) | Repr::ClassKindString(_) => {
+            Some(ScalarFamily::String)
         }
-        Type(Repr::Float) | Type(Repr::FloatLiteral(_)) => Some(ScalarFamily::Float),
-        Type(Repr::String)
-        | Type(Repr::StringLiteral(_))
-        | Type(Repr::ClassString(_))
-        | Type(Repr::ClassKindString(_)) => Some(ScalarFamily::String),
-        Type(Repr::Bool) | Type(Repr::True) | Type(Repr::False) => Some(ScalarFamily::Bool),
-        Type(Repr::Null) => Some(ScalarFamily::Null),
-        Type(Repr::Array(_, _)) | Type(Repr::ArrayShape(_)) => Some(ScalarFamily::Array),
-        Type(Repr::Object(_, _))
-        | Type(Repr::ObjectWithoutClass)
-        | Type(Repr::EnumCase(_, _))
-        | Type(Repr::ObjectShape(_)) => Some(ScalarFamily::Object),
-        Type(Repr::Resource { .. }) => Some(ScalarFamily::Resource),
+        Repr::Bool | Repr::True | Repr::False => Some(ScalarFamily::Bool),
+        Repr::Null => Some(ScalarFamily::Null),
+        Repr::Array(_, _) | Repr::ArrayShape(_) => Some(ScalarFamily::Array),
+        Repr::Object(_, _)
+        | Repr::ObjectWithoutClass
+        | Repr::EnumCase(_, _)
+        | Repr::ObjectShape(_) => Some(ScalarFamily::Object),
+        Repr::Resource { .. } => Some(ScalarFamily::Resource),
         _ => None,
     }
 }

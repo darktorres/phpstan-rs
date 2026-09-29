@@ -11,32 +11,32 @@ use crate::{
 impl Type {
     /// This type with `static` and `$this` as `class`, at any depth.
     pub fn bind_static(&self, class: &str) -> Type {
-        syntax::stack::guard(|| match self {
-            Type(Repr::StaticRef(args)) => Type::object(
+        syntax::stack::guard(|| match self.repr() {
+            Repr::StaticRef(args) => Type::object(
                 class.into(),
                 args.iter().map(|a| a.bind_static(class)).collect(),
             ),
-            Type(Repr::This) => Type::object(class.into(), Vec::new()),
-            other => other.map_children(&mut |t| t.bind_static(class)),
+            Repr::This => Type::object(class.into(), Vec::new()),
+            _ => self.map_children(&mut |t| t.bind_static(class)),
         })
     }
 
     /// This type with `self` as `class`, at any depth.
     pub fn bind_self(&self, class: &str) -> Type {
-        syntax::stack::guard(|| match self {
-            Type(Repr::SelfRef(args)) => Type::object(
+        syntax::stack::guard(|| match self.repr() {
+            Repr::SelfRef(args) => Type::object(
                 class.into(),
                 args.iter().map(|a| a.bind_self(class)).collect(),
             ),
-            other => other.map_children(&mut |t| t.bind_self(class)),
+            _ => self.map_children(&mut |t| t.bind_self(class)),
         })
     }
 
     /// This type with `parent` as `class`, at any depth.
     pub fn bind_parent(&self, class: &str) -> Type {
-        syntax::stack::guard(|| match self {
-            Type(Repr::ParentRef) => Type::object(class.into(), Vec::new()),
-            other => other.map_children(&mut |t| t.bind_parent(class)),
+        syntax::stack::guard(|| match self.repr() {
+            Repr::ParentRef => Type::object(class.into(), Vec::new()),
+            _ => self.map_children(&mut |t| t.bind_parent(class)),
         })
     }
 
@@ -45,7 +45,7 @@ impl Type {
     /// type's children are walked.
     pub fn replace_objects(&self, replace: &mut dyn FnMut(&Name) -> Option<Type>) -> Type {
         syntax::stack::guard(|| {
-            if let Type(Repr::Object(name, _)) = self
+            if let Repr::Object(name, _) = self.repr()
                 && let Some(replacement) = replace(name)
             {
                 return replacement;
@@ -58,12 +58,12 @@ impl Type {
     /// depth: generic arguments, and callable signatures with their
     /// templates' bounds and defaults.
     pub fn map_class_names(&self, rename: &mut dyn FnMut(&Name) -> Name) -> Type {
-        syntax::stack::guard(|| match self {
-            Type(Repr::Object(name, args)) => Type::object(
+        syntax::stack::guard(|| match self.repr() {
+            Repr::Object(name, args) => Type::object(
                 rename(name),
                 args.iter().map(|a| a.map_class_names(rename)).collect(),
             ),
-            Type(Repr::Callable(Some(sig))) => {
+            Repr::Callable(Some(sig)) => {
                 let mut map = |t: &Type| t.map_class_names(rename);
                 Type::callable(Some(Arc::new(
                     CallableSig {
@@ -96,14 +96,14 @@ impl Type {
     /// This type with each sealed array shape unsealed, so a key it
     /// doesn't list isn't proven absent.
     pub fn unsealed_shapes(&self) -> Type {
-        match self {
-            Type(Repr::ArrayShape(shape)) if shape.is_sealed() => {
+        match self.repr() {
+            Repr::ArrayShape(shape) if shape.is_sealed() => {
                 Type::array_shape(Shape::unsealed(shape.fields.clone()))
             }
-            Type(Repr::Union(members)) => {
+            Repr::Union(members) => {
                 Type::union_of(members.iter().map(Type::unsealed_shapes).collect())
             }
-            other => other.clone(),
+            _ => self.clone(),
         }
     }
 
@@ -122,15 +122,15 @@ impl Type {
     }
 
     fn step(&self, by: i64) -> Type {
-        syntax::stack::guard(|| match self {
-            Type(Repr::Null) if by > 0 => Type::int_literal(1),
+        syntax::stack::guard(|| match self.repr() {
+            Repr::Null if by > 0 => Type::int_literal(1),
             // Stepping past `PHP_INT_MAX` or `PHP_INT_MIN` gives a float.
-            Type(Repr::IntLiteral(n)) => match n.checked_add(by) {
+            Repr::IntLiteral(n) => match n.checked_add(by) {
                 Some(v) => Type::int_literal(v),
                 None => Type::float_literal(*n as f64 + by as f64),
             },
-            Type(Repr::FloatLiteral(f)) => Type::float_literal(f + by as f64),
-            Type(Repr::IntRange(min, max)) => {
+            Repr::FloatLiteral(f) => Type::float_literal(f + by as f64),
+            Repr::IntRange(min, max) => {
                 let edge = if by > 0 { i64::MAX } else { i64::MIN };
                 let stepped = Type::int_range(
                     min.map(|v| v.checked_add(by).unwrap_or(edge)),
@@ -142,7 +142,7 @@ impl Type {
                     stepped
                 }
             }
-            Type(Repr::StringLiteral(s)) => match crate::numeric_value(s.as_bytes()) {
+            Repr::StringLiteral(s) => match crate::numeric_value(s.as_bytes()) {
                 Some(crate::PhpNumber::Int(n)) => Type::int_literal(n).step(by),
                 Some(crate::PhpNumber::Float(f)) => Type::float_literal(f).step(by),
                 None if s.as_bytes().is_empty() => {
@@ -157,7 +157,7 @@ impl Type {
                 )),
                 None => self.clone(),
             },
-            Type(Repr::Union(members)) | Type(Repr::BenevolentUnion(members)) => members
+            Repr::Union(members) | Repr::BenevolentUnion(members) => members
                 .iter()
                 .map(|m| m.step(by))
                 .reduce(Type::union)
@@ -178,7 +178,7 @@ impl Type {
                     Type::union(number, self.clone())
                 }
             }
-            other => other.clone(),
+            _ => self.clone(),
         })
     }
 
@@ -186,13 +186,13 @@ impl Type {
     /// array's, and each shape field's and unsealed tail's, in union and
     /// intersection members too. Other types are left as they are.
     pub fn map_array_values(&self, f: &mut dyn FnMut(&Type) -> Type) -> Type {
-        syntax::stack::guard(|| match self {
-            Type(Repr::Array(key, value)) => Type(Repr::Array(key.clone(), Arc::new(f(value)))),
-            Type(Repr::ArrayShape(shape)) => Type::array_shape(shape.map_types(&mut |t| f(t))),
-            Type(Repr::Union(_)) | Type(Repr::BenevolentUnion(_)) | Type(Repr::Intersection(_)) => {
+        syntax::stack::guard(|| match self.repr() {
+            Repr::Array(key, value) => Type::new(Repr::Array(key.clone(), Arc::new(f(value)))),
+            Repr::ArrayShape(shape) => Type::array_shape(shape.map_types(&mut |t| f(t))),
+            Repr::Union(_) | Repr::BenevolentUnion(_) | Repr::Intersection(_) => {
                 self.map_children(&mut |m| m.map_array_values(&mut *f))
             }
-            other => other.clone(),
+            _ => self.clone(),
         })
     }
 
@@ -200,12 +200,12 @@ impl Type {
     /// `value`, in union and intersection members too; an array shape
     /// keeps its fields.
     pub fn with_general_array_value(&self, value: &Type) -> Type {
-        syntax::stack::guard(|| match self {
-            Type(Repr::Array(key, _)) => Type(Repr::Array(key.clone(), Arc::new(value.clone()))),
-            Type(Repr::Union(_)) | Type(Repr::BenevolentUnion(_)) | Type(Repr::Intersection(_)) => {
+        syntax::stack::guard(|| match self.repr() {
+            Repr::Array(key, _) => Type::new(Repr::Array(key.clone(), Arc::new(value.clone()))),
+            Repr::Union(_) | Repr::BenevolentUnion(_) | Repr::Intersection(_) => {
                 self.map_children(&mut |m| m.with_general_array_value(value))
             }
-            other => other.clone(),
+            _ => self.clone(),
         })
     }
 
@@ -215,9 +215,9 @@ impl Type {
     /// change may have lost elements, so is neither. Other types are left
     /// as they are.
     pub fn filter_array_values(&self, keep: &dyn Fn(&Type) -> Type) -> Type {
-        syntax::stack::guard(|| match self {
-            Type(Repr::Array(key, value)) => Type(Repr::Array(key.clone(), Arc::new(keep(value)))),
-            Type(Repr::ArrayShape(shape)) => Type::array_shape(Shape {
+        syntax::stack::guard(|| match self.repr() {
+            Repr::Array(key, value) => Type::new(Repr::Array(key.clone(), Arc::new(keep(value)))),
+            Repr::ArrayShape(shape) => Type::array_shape(Shape {
                 fields: shape
                     .fields
                     .iter()
@@ -237,7 +237,7 @@ impl Type {
                 unsealed: shape.unsealed.clone(),
                 next_index: shape.next_index,
             }),
-            Type(Repr::Union(members)) => Type::union_of(
+            Repr::Union(members) => Type::union_of(
                 members
                     .iter()
                     .map(|m| m.filter_array_values(keep))
@@ -246,9 +246,9 @@ impl Type {
             // A refined array (`list<T>`, `non-empty-array<T>`): filtered as
             // its array is, no longer a list or non-empty once an element
             // may have been dropped.
-            Type(Repr::Intersection(members)) => {
-                let Some((key, value)) = members.iter().find_map(|m| match m {
-                    Type(Repr::Array(key, value)) => Some((key, value)),
+            Repr::Intersection(members) => {
+                let Some((key, value)) = members.iter().find_map(|m| match m.repr() {
+                    Repr::Array(key, value) => Some((key, value)),
                     _ => None,
                 }) else {
                     return self.clone();
@@ -260,25 +260,25 @@ impl Type {
                     Type::array(Type::clone(key), kept)
                 }
             }
-            other => other.clone(),
+            _ => self.clone(),
         })
     }
 
     /// This type without its accessory refinements: an intersection's
     /// base, in each union member.
     pub fn without_accessories(&self) -> Type {
-        match self {
-            Type(Repr::Intersection(members)) => members
+        match self.repr() {
+            Repr::Intersection(members) => members
                 .iter()
-                .find(|m| !matches!(m, Type(Repr::Accessory(_))))
+                .find(|m| !matches!(m.repr(), Repr::Accessory(_)))
                 .cloned()
                 .unwrap_or(Type::mixed()),
-            Type(Repr::Union(members)) => members
+            Repr::Union(members) => members
                 .iter()
                 .map(Type::without_accessories)
                 .reduce(Type::union)
                 .unwrap_or(Type::mixed()),
-            other => other.clone(),
+            _ => self.clone(),
         }
     }
 
@@ -286,14 +286,14 @@ impl Type {
     /// list, non-empty.
     pub fn with_array_value(&self, value: Type) -> Type {
         let mut members = vec![Type::array(Type::unknown_array_key(), value)];
-        match self {
-            Type(Repr::Intersection(existing)) => members.extend(
+        match self.repr() {
+            Repr::Intersection(existing) => members.extend(
                 existing
                     .iter()
-                    .filter(|m| matches!(m, Type(Repr::Accessory(_))))
+                    .filter(|m| matches!(m.repr(), Repr::Accessory(_)))
                     .cloned(),
             ),
-            Type(Repr::Union(_)) => {
+            Repr::Union(_) => {
                 if self.is_list().yes() {
                     members.push(Type::accessory(AccessoryKind::ArrayList));
                 }

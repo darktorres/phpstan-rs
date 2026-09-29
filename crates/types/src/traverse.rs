@@ -10,18 +10,18 @@ impl Type {
     /// members, callable parameters and return, conditional branches);
     /// a leaf is returned unchanged. `f` decides whether to recurse.
     pub fn map_children(&self, f: &mut impl FnMut(&Type) -> Type) -> Type {
-        syntax::stack::guard(|| match self {
-            Type(Repr::Array(k, v)) => Type::array(f(k), f(v)),
-            Type(Repr::ClassString(inner)) => Type::class_string(f(inner)),
-            Type(Repr::ArrayShape(shape)) => Type::array_shape(map_shape(shape, f)),
-            Type(Repr::ObjectShape(shape)) => Type::object_shape(map_shape(shape, f)),
-            Type(Repr::TemplateParam(tp)) => Type::template_param(map_template(tp, f)),
-            Type(Repr::Object(name, args)) => {
+        syntax::stack::guard(|| match self.repr() {
+            Repr::Array(k, v) => Type::array(f(k), f(v)),
+            Repr::ClassString(inner) => Type::class_string(f(inner)),
+            Repr::ArrayShape(shape) => Type::array_shape(map_shape(shape, f)),
+            Repr::ObjectShape(shape) => Type::object_shape(map_shape(shape, f)),
+            Repr::TemplateParam(tp) => Type::template_param(map_template(tp, f)),
+            Repr::Object(name, args) => {
                 Type::object(name.clone(), args.iter().map(&mut *f).collect())
             }
-            Type(Repr::SelfRef(args)) => Type::self_ref(args.iter().map(&mut *f).collect()),
-            Type(Repr::StaticRef(args)) => Type::static_ref(args.iter().map(&mut *f).collect()),
-            Type(Repr::Callable(Some(sig))) => Type::callable(Some(Arc::new(CallableSig {
+            Repr::SelfRef(args) => Type::self_ref(args.iter().map(&mut *f).collect()),
+            Repr::StaticRef(args) => Type::static_ref(args.iter().map(&mut *f).collect()),
+            Repr::Callable(Some(sig)) => Type::callable(Some(Arc::new(CallableSig {
                 params: sig
                     .params
                     .iter()
@@ -33,63 +33,63 @@ impl Type {
                 return_type: Box::new(f(&sig.return_type)),
                 templates: sig.templates.iter().map(|tp| map_template(tp, f)).collect(),
             }))),
-            Type(Repr::VarianceArg(variance, inner)) => Type::variance_arg(*variance, f(inner)),
+            Repr::VarianceArg(variance, inner) => Type::variance_arg(*variance, f(inner)),
             // Rebuilt as a union, so members a mapping made equal merge.
-            Type(Repr::Union(ms)) => Type::union_of(ms.iter().map(&mut *f).collect()),
-            Type(Repr::BenevolentUnion(ms)) => {
+            Repr::Union(ms) => Type::union_of(ms.iter().map(&mut *f).collect()),
+            Repr::BenevolentUnion(ms) => {
                 Type::benevolent_union_of(ms.iter().map(&mut *f).collect())
             }
-            Type(Repr::Intersection(ms)) => {
-                Type(Repr::Intersection(ms.iter().map(&mut *f).collect()))
+            Repr::Intersection(ms) => {
+                Type::new(Repr::Intersection(ms.iter().map(&mut *f).collect()))
             }
-            Type(Repr::HasOffsetValue(key, inner)) => Type::has_offset_value(key.clone(), f(inner)),
-            Type(Repr::ReflectedMember(owner, member)) => {
+            Repr::HasOffsetValue(key, inner) => Type::has_offset_value(key.clone(), f(inner)),
+            Repr::ReflectedMember(owner, member) => {
                 Type::reflected_member(f(owner), member.clone())
             }
-            Type(Repr::ValueOf(inner)) => Type::value_of(f(inner)),
-            Type(Repr::KeyOf(inner)) => Type::key_of(f(inner)),
-            Type(Repr::OffsetAccess(base, key)) => Type::offset_access(f(base), f(key)),
-            Type(Repr::ClassConstant { class, pattern }) => Type(Repr::ClassConstant {
+            Repr::ValueOf(inner) => Type::value_of(f(inner)),
+            Repr::KeyOf(inner) => Type::key_of(f(inner)),
+            Repr::OffsetAccess(base, key) => Type::offset_access(f(base), f(key)),
+            Repr::ClassConstant { class, pattern } => Type::new(Repr::ClassConstant {
                 class: Arc::new(f(class)),
                 pattern: pattern.clone(),
             }),
-            Type(Repr::Conditional {
+            Repr::Conditional {
                 subject,
                 target,
                 if_true,
                 if_false,
                 negated,
-            }) => Type(Repr::Conditional {
+            } => Type::new(Repr::Conditional {
                 subject: subject.clone(),
                 target: Arc::new(f(target)),
                 if_true: Arc::new(f(if_true)),
                 if_false: Arc::new(f(if_false)),
                 negated: *negated,
             }),
-            leaf => leaf.clone(),
+            _ => self.clone(),
         })
     }
 
     /// Calls `f` on each directly nested type - the children
     /// `map_children` rebuilds, in the same order.
     pub fn for_each_child<'t>(&'t self, f: &mut impl FnMut(&'t Type)) {
-        syntax::stack::guard(|| match self {
-            Type(Repr::Array(k, v)) => {
+        syntax::stack::guard(|| match self.repr() {
+            Repr::Array(k, v) => {
                 f(k);
                 f(v);
             }
-            Type(Repr::ClassString(inner))
-            | Type(Repr::VarianceArg(_, inner))
-            | Type(Repr::HasOffsetValue(_, inner))
-            | Type(Repr::ReflectedMember(inner, _))
-            | Type(Repr::ValueOf(inner))
-            | Type(Repr::KeyOf(inner))
-            | Type(Repr::ClassConstant { class: inner, .. }) => f(inner),
-            Type(Repr::OffsetAccess(base, key)) => {
+            Repr::ClassString(inner)
+            | Repr::VarianceArg(_, inner)
+            | Repr::HasOffsetValue(_, inner)
+            | Repr::ReflectedMember(inner, _)
+            | Repr::ValueOf(inner)
+            | Repr::KeyOf(inner)
+            | Repr::ClassConstant { class: inner, .. } => f(inner),
+            Repr::OffsetAccess(base, key) => {
                 f(base);
                 f(key);
             }
-            Type(Repr::ArrayShape(shape)) | Type(Repr::ObjectShape(shape)) => {
+            Repr::ArrayShape(shape) | Repr::ObjectShape(shape) => {
                 for field in &shape.fields {
                     f(&field.ty);
                 }
@@ -98,11 +98,11 @@ impl Type {
                     f(value);
                 }
             }
-            Type(Repr::TemplateParam(tp)) => template_children(tp, f),
-            Type(Repr::Object(_, args))
-            | Type(Repr::SelfRef(args))
-            | Type(Repr::StaticRef(args)) => args.iter().for_each(f),
-            Type(Repr::Callable(Some(sig))) => {
+            Repr::TemplateParam(tp) => template_children(tp, f),
+            Repr::Object(_, args) | Repr::SelfRef(args) | Repr::StaticRef(args) => {
+                args.iter().for_each(f)
+            }
+            Repr::Callable(Some(sig)) => {
                 for p in &sig.params {
                     f(&p.ty);
                 }
@@ -111,15 +111,15 @@ impl Type {
                     template_children(tp, f);
                 }
             }
-            Type(Repr::Union(ms))
-            | Type(Repr::BenevolentUnion(ms))
-            | Type(Repr::Intersection(ms)) => ms.iter().for_each(f),
-            Type(Repr::Conditional {
+            Repr::Union(ms) | Repr::BenevolentUnion(ms) | Repr::Intersection(ms) => {
+                ms.iter().for_each(f)
+            }
+            Repr::Conditional {
                 target,
                 if_true,
                 if_false,
                 ..
-            }) => {
+            } => {
                 f(target);
                 f(if_true);
                 f(if_false);

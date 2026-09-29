@@ -21,30 +21,30 @@ impl Relation<'_> {
         bindings: &mut FxHashMap<String, Type>,
     ) {
         syntax::stack::guard(|| {
-            if matches!(arg, Type(Repr::Never)) {
+            if matches!(arg.repr(), Repr::Never) {
                 return;
             }
             // A union argument binds member by member, unless the parameter
             // itself is a union or a bare template to match it whole.
-            if let Type(Repr::Union(members)) | Type(Repr::BenevolentUnion(members)) = arg
-                && !matches!(param, Type(Repr::Union(_)) | Type(Repr::TemplateParam(_)))
+            if let Repr::Union(members) | Repr::BenevolentUnion(members) = arg.repr()
+                && !matches!(param.repr(), Repr::Union(_) | Repr::TemplateParam(_))
             {
                 for member in members {
                     self.infer_template_bindings(param, member, bindings);
                 }
                 return;
             }
-            match param {
-                Type(Repr::TemplateParam(tp))
+            match param.repr() {
+                Repr::TemplateParam(tp)
                     if tp.scope.as_deref() == Some(crate::CALLABLE_TEMPLATE_SCOPE) => {}
-                Type(Repr::TemplateParam(tp)) => {
+                Repr::TemplateParam(tp) => {
                     // An argument without type information binds nothing.
                     if arg.is_mixed() {
                         return;
                     }
                     // `T of array<K, V>` binds `K` and `V` too.
                     self.infer_template_bindings(&tp.bound, arg, bindings);
-                    if matches!(*tp.bound, Type(Repr::Mixed(..)))
+                    if matches!((*tp.bound).repr(), Repr::Mixed(..))
                         || self.is_super_type_of(&tp.bound, arg).yes()
                     {
                         bind(bindings, &tp.name, arg.clone());
@@ -53,7 +53,7 @@ impl Relation<'_> {
                 // `T|null` given `int|null` binds `T` to `int`: an argument
                 // member a parameter member without templates surely holds
                 // is that member's, and the rest binds the templates.
-                Type(Repr::Union(param_members)) => {
+                Repr::Union(param_members) => {
                     let mut remaining: Vec<Type> = Vec::new();
                     'members: for arg_member in arg.union_members() {
                         for param_member in param_members {
@@ -78,12 +78,12 @@ impl Relation<'_> {
                         self.infer_template_bindings(param_member, &rest, bindings);
                     }
                 }
-                Type(Repr::Intersection(members)) => {
+                Repr::Intersection(members) => {
                     for member in members {
                         self.infer_template_bindings(member, arg, bindings);
                     }
                 }
-                Type(Repr::Array(key, value)) => {
+                Repr::Array(key, value) => {
                     if let Some(arg_key) = arg.array_key_type() {
                         self.infer_template_bindings(key, &arg_key, bindings);
                     }
@@ -91,7 +91,7 @@ impl Relation<'_> {
                         self.infer_template_bindings(value, &arg_value, bindings);
                     }
                 }
-                Type(Repr::ArrayShape(shape)) => {
+                Repr::ArrayShape(shape) => {
                     for field in &shape.fields {
                         if let Some(arg_value) = arg.offset_value_type(Some(&field.key)) {
                             self.infer_template_bindings(&field.ty, &arg_value, bindings);
@@ -106,12 +106,12 @@ impl Relation<'_> {
                         }
                     }
                 }
-                Type(Repr::ClassString(inner)) => {
-                    if let Type(Repr::ClassString(arg_inner)) = arg {
+                Repr::ClassString(inner) => {
+                    if let Repr::ClassString(arg_inner) = arg.repr() {
                         self.infer_template_bindings(inner, arg_inner, bindings);
                     }
                 }
-                Type(Repr::Object(class, params)) if !params.is_empty() => {
+                Repr::Object(class, params) if !params.is_empty() => {
                     let Some(args) = self.object_arguments_as(arg, class) else {
                         return;
                     };
@@ -120,7 +120,7 @@ impl Relation<'_> {
                         self.infer_template_bindings(param, arg, bindings);
                     }
                 }
-                Type(Repr::Callable(Some(sig))) => {
+                Repr::Callable(Some(sig)) => {
                     if let Some(arg_sig) = arg.callable_sig() {
                         for (param, arg_param) in sig.params.iter().zip(&arg_sig.params) {
                             self.infer_template_bindings(&param.ty, &arg_param.ty, bindings);
@@ -137,9 +137,7 @@ impl Relation<'_> {
                         self.infer_template_bindings(&sig.return_type, &return_type, bindings);
                     }
                 }
-                Type(Repr::VarianceArg(_, inner)) => {
-                    self.infer_template_bindings(inner, arg, bindings)
-                }
+                Repr::VarianceArg(_, inner) => self.infer_template_bindings(inner, arg, bindings),
                 _ => {}
             }
         })
@@ -150,13 +148,11 @@ impl Relation<'_> {
     /// `Container<int>` through its `@implements`. `None` when `arg` isn't
     /// an object of `class`.
     fn object_arguments_as(&self, arg: &Type, class: &str) -> Option<Vec<Type>> {
-        match arg {
-            Type(Repr::Object(arg_class, args)) if arg_class.eq_ignore_ascii_case(class) => {
+        match arg.repr() {
+            Repr::Object(arg_class, args) if arg_class.eq_ignore_ascii_case(class) => {
                 Some(args.clone())
             }
-            Type(Repr::Object(arg_class, args))
-                if self.hierarchy.is_subclass_of(arg_class, class) =>
-            {
+            Repr::Object(arg_class, args) if self.hierarchy.is_subclass_of(arg_class, class) => {
                 let bound = self
                     .hierarchy
                     .ancestor_template_bindings(arg_class, args, class);
@@ -168,10 +164,10 @@ impl Relation<'_> {
                         .collect(),
                 )
             }
-            Type(Repr::Intersection(members)) => members
+            Repr::Intersection(members) => members
                 .iter()
                 .find_map(|member| self.object_arguments_as(member, class)),
-            Type(Repr::TemplateParam(tp)) => self.object_arguments_as(&tp.bound, class),
+            Repr::TemplateParam(tp) => self.object_arguments_as(&tp.bound, class),
             _ => None,
         }
     }
@@ -199,20 +195,20 @@ impl Type {
         arg_ty: &Type,
         resolve_class: &impl Fn(&str) -> Option<String>,
     ) -> Type {
-        syntax::stack::guard(|| match (self, arg_ty) {
-            (Type(Repr::ClassString(_)), Type(Repr::StringLiteral(s))) => {
+        syntax::stack::guard(|| match (self.repr(), arg_ty.repr()) {
+            (Repr::ClassString(_), Repr::StringLiteral(s)) => {
                 match s.as_str().and_then(&resolve_class) {
                     Some(canonical) => {
-                        Type::class_string(Type(Repr::Object(canonical.into(), Vec::new())))
+                        Type::class_string(Type::new(Repr::Object(canonical.into(), Vec::new())))
                     }
                     None => arg_ty.clone(),
                 }
             }
-            (Type(Repr::Array(_, inner_p)), Type(Repr::Array(key, inner_a))) => Type(Repr::Array(
+            (Repr::Array(_, inner_p), Repr::Array(key, inner_a)) => Type::new(Repr::Array(
                 key.clone(),
                 Arc::new(inner_p.promote_class_string_literals(inner_a, resolve_class)),
             )),
-            (Type(Repr::Union(members)), _) => members
+            (Repr::Union(members), _) => members
                 .iter()
                 .find_map(|m| {
                     let promoted = m.promote_class_string_literals(arg_ty, resolve_class);
@@ -233,8 +229,8 @@ impl CallableSig {
             return (*self.return_type).clone();
         }
         fn open(ty: &Type) -> Type {
-            match ty {
-                Type(Repr::TemplateParam(tp))
+            match ty.repr() {
+                Repr::TemplateParam(tp)
                     if tp.scope.as_deref() == Some(crate::CALLABLE_TEMPLATE_SCOPE) =>
                 {
                     Type::template_param(TemplateParam {
@@ -242,7 +238,7 @@ impl CallableSig {
                         ..tp.clone()
                     })
                 }
-                other => other.map_children(&mut open),
+                _ => ty.map_children(&mut open),
             }
         }
         let mut bindings = FxHashMap::default();
@@ -290,8 +286,8 @@ impl CallableSig {
         }
         const OPEN: &str = "callable-open";
         fn open(ty: &Type) -> Type {
-            match ty {
-                Type(Repr::TemplateParam(tp))
+            match ty.repr() {
+                Repr::TemplateParam(tp)
                     if tp.scope.as_deref() == Some(crate::CALLABLE_TEMPLATE_SCOPE) =>
                 {
                     Type::template_param(TemplateParam {
@@ -299,7 +295,7 @@ impl CallableSig {
                         ..tp.clone()
                     })
                 }
-                other => other.map_children(&mut open),
+                _ => ty.map_children(&mut open),
             }
         }
         let opened = self.map_types(&mut open);
@@ -340,8 +336,8 @@ impl Type {
         &self,
         replace: &mut dyn FnMut(&TemplateParam) -> Option<Type>,
     ) -> Type {
-        syntax::stack::guard(|| match self {
-            Type(Repr::TemplateParam(tp)) => replace(tp).unwrap_or_else(|| self.clone()),
+        syntax::stack::guard(|| match self.repr() {
+            Repr::TemplateParam(tp) => replace(tp).unwrap_or_else(|| self.clone()),
             _ => super::late::settle(self.map_children(&mut |t| t.replace_templates(replace))),
         })
     }
@@ -415,12 +411,12 @@ fn substitute(
     relation: &Relation,
 ) -> Type {
     syntax::stack::guard(|| {
-        match ty {
-            Type(Repr::TemplateParam(tp)) if !substituted(tp) => ty.clone(),
-            Type(Repr::TemplateParam(tp)) => bindings.get(&tp.name).cloned().unwrap_or_else(|| {
+        match ty.repr() {
+            Repr::TemplateParam(tp) if !substituted(tp) => ty.clone(),
+            Repr::TemplateParam(tp) => bindings.get(&tp.name).cloned().unwrap_or_else(|| {
                 let fallback = match tp.default.as_deref() {
                     Some(default) => default,
-                    None if to_bound(tp) && !matches!(*tp.bound, Type(Repr::Mixed(..))) => {
+                    None if to_bound(tp) && !matches!((*tp.bound).repr(), Repr::Mixed(..)) => {
                         &tp.bound
                     }
                     None => return Type::mixed(),
@@ -436,15 +432,15 @@ fn substitute(
             // A template-subject conditional (`(T is int ? A : B)`) resolves
             // once `T` is bound, the way real PHPStan's `ConditionalType`
             // does; otherwise both branches stay.
-            Type(Repr::Conditional {
+            Repr::Conditional {
                 subject: ConditionalSubject::Template(subject),
                 target,
                 if_true,
                 if_false,
                 negated,
-            }) if bindings
+            } if bindings
                 .get(subject.as_str())
-                .is_some_and(|b| !matches!(b, Type(Repr::Mixed(..)))) =>
+                .is_some_and(|b| !matches!(b.repr(), Repr::Mixed(..))) =>
             {
                 let target = substitute(target, bindings, substituted, to_bound, relation);
                 match super::conditional::conditional_branch(

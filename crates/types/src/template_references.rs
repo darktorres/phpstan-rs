@@ -91,14 +91,12 @@ impl Type {
         hierarchy: &dyn ClassHierarchy,
         out: &mut Vec<(&'t TemplateParam, PositionVariance)>,
     ) {
-        match self {
-            Type(Repr::TemplateParam(param)) => out.push((param, position)),
-            Type(Repr::Object(class, args)) => {
+        match self.repr() {
+            Repr::TemplateParam(param) => out.push((param, position)),
+            Repr::Object(class, args) => {
                 for (i, arg) in args.iter().enumerate() {
-                    let (slot, arg) = match arg {
-                        Type(Repr::VarianceArg(variance, inner)) => {
-                            ((*variance).into(), inner.as_ref())
-                        }
+                    let (slot, arg) = match arg.repr() {
+                        Repr::VarianceArg(variance, inner) => ((*variance).into(), inner.as_ref()),
                         _ => match hierarchy.slot_variance(class, i) {
                             Some(variance) => (variance.into(), arg),
                             None if hierarchy.find_class(class).is_some() => {
@@ -110,17 +108,14 @@ impl Type {
                     arg.collect_templates(position.compose(slot), hierarchy, out);
                 }
             }
-            Type(Repr::VarianceArg(variance, inner)) => {
+            Repr::VarianceArg(variance, inner) => {
                 inner.collect_templates(position.compose((*variance).into()), hierarchy, out)
             }
-            Type(Repr::Array(..))
-            | Type(Repr::ArrayShape(_))
-            | Type(Repr::ObjectShape(_))
-            | Type(Repr::ClassString(_)) => {
+            Repr::Array(..) | Repr::ArrayShape(_) | Repr::ObjectShape(_) | Repr::ClassString(_) => {
                 let inner = position.compose(PositionVariance::Covariant);
                 self.for_each_child(&mut |t| t.collect_templates(inner, hierarchy, out));
             }
-            Type(Repr::Callable(Some(sig))) => {
+            Repr::Callable(Some(sig)) => {
                 let params = position.compose(PositionVariance::Contravariant);
                 for param in &sig.params {
                     param.ty.collect_templates(params, hierarchy, out);
@@ -128,14 +123,14 @@ impl Type {
                 let ret = position.compose(PositionVariance::Covariant);
                 sig.return_type.collect_templates(ret, hierarchy, out);
             }
-            Type(Repr::Union(_))
-            | Type(Repr::BenevolentUnion(_))
-            | Type(Repr::Intersection(_))
-            | Type(Repr::ValueOf(_))
-            | Type(Repr::KeyOf(_))
-            | Type(Repr::OffsetAccess(..))
-            | Type(Repr::ClassConstant { .. })
-            | Type(Repr::Conditional { .. }) => {
+            Repr::Union(_)
+            | Repr::BenevolentUnion(_)
+            | Repr::Intersection(_)
+            | Repr::ValueOf(_)
+            | Repr::KeyOf(_)
+            | Repr::OffsetAccess(..)
+            | Repr::ClassConstant { .. }
+            | Repr::Conditional { .. } => {
                 self.for_each_child(&mut |t| t.collect_templates(position, hierarchy, out));
             }
             _ => {}

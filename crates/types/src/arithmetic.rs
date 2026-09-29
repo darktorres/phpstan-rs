@@ -199,7 +199,7 @@ pub(crate) fn pow_int_range(
     if min.is_some() || max.is_some() {
         Type::int_range(min, max)
     } else {
-        Type(Repr::Union(vec![Type::int(), Type::float()]))
+        Type::new(Repr::Union(vec![Type::int(), Type::float()]))
     }
 }
 
@@ -353,28 +353,26 @@ impl Type {
         // bool/null vs anything: PHP casts *both* sides to bool and compares
         // - version-independent, and subsumes the same-kind True/False/Null
         // combinations too (no need to special-case them separately below).
-        if matches!(
-            self,
-            Type(Repr::True) | Type(Repr::False) | Type(Repr::Null)
-        ) || matches!(r, Type(Repr::True) | Type(Repr::False) | Type(Repr::Null))
+        if matches!(self.repr(), Repr::True | Repr::False | Repr::Null)
+            || matches!(r.repr(), Repr::True | Repr::False | Repr::Null)
         {
             return Some(
                 self.to_boolean().bool_literal_value()? == r.to_boolean().bool_literal_value()?,
             );
         }
-        match (self, r) {
-            (Type(Repr::IntLiteral(a)), Type(Repr::IntLiteral(b))) => Some(a == b),
-            (Type(Repr::FloatLiteral(a)), Type(Repr::FloatLiteral(b))) => Some(a == b),
-            (Type(Repr::IntLiteral(a)), Type(Repr::FloatLiteral(b)))
-            | (Type(Repr::FloatLiteral(b)), Type(Repr::IntLiteral(a))) => Some(*a as f64 == *b),
-            (Type(Repr::StringLiteral(a)), Type(Repr::StringLiteral(b))) => {
+        match (self.repr(), r.repr()) {
+            (Repr::IntLiteral(a), Repr::IntLiteral(b)) => Some(a == b),
+            (Repr::FloatLiteral(a), Repr::FloatLiteral(b)) => Some(a == b),
+            (Repr::IntLiteral(a), Repr::FloatLiteral(b))
+            | (Repr::FloatLiteral(b), Repr::IntLiteral(a)) => Some(*a as f64 == *b),
+            (Repr::StringLiteral(a), Repr::StringLiteral(b)) => {
                 match (numeric_string_value(a), numeric_string_value(b)) {
                     (Some(x), Some(y)) => Some(x == y),
                     _ => Some(a == b),
                 }
             }
-            (Type(Repr::IntLiteral(n)), Type(Repr::StringLiteral(s)))
-            | (Type(Repr::StringLiteral(s)), Type(Repr::IntLiteral(n))) => {
+            (Repr::IntLiteral(n), Repr::StringLiteral(s))
+            | (Repr::StringLiteral(s), Repr::IntLiteral(n)) => {
                 if let Some(x) = numeric_string_value(s) {
                     Some(*n as f64 == x)
                 } else if php_version.is_some_and(|v| v >= crate::PhpVersion::new(8, 0)) {
@@ -383,8 +381,8 @@ impl Type {
                     None
                 }
             }
-            (Type(Repr::FloatLiteral(n)), Type(Repr::StringLiteral(s)))
-            | (Type(Repr::StringLiteral(s)), Type(Repr::FloatLiteral(n))) => {
+            (Repr::FloatLiteral(n), Repr::StringLiteral(s))
+            | (Repr::StringLiteral(s), Repr::FloatLiteral(n)) => {
                 numeric_string_value(s).map(|x| *n == x)
             }
             _ => None,
@@ -549,9 +547,10 @@ pub(crate) fn div_int_range(
         }
 
         if min_i.is_none() && max_i.is_none() {
-            return Type(Repr::Union(vec![Type::int(), Type::float()]));
+            return Type::new(Repr::Union(vec![Type::int(), Type::float()]));
         }
-        match Type::int_range(min_i, max_i) {
+        let int_half = Type::int_range(min_i, max_i);
+        match int_half.repr() {
             // The rounding step (`ceil`ing the min, `floor`ing the max
             // independently) can invert an otherwise-valid range into one
             // with no real int members at all - `normalize_int_range`'s own
@@ -561,8 +560,8 @@ pub(crate) fn div_int_range(
             // ever produces a `Never` member to union away), so this handles
             // it explicitly rather than teach that absorption to every other
             // `Type::union` caller for the sake of this one.
-            Type(Repr::Never) => Type::float(),
-            int_half => Type::union(int_half, Type::float()),
+            Repr::Never => Type::float(),
+            _ => Type::union(int_half, Type::float()),
         }
     })
 }
@@ -584,25 +583,25 @@ impl Type {
     /// negation handling. Anything else (a bare `Repr::Int`, `Repr::Float`,
     /// ...) has no specific value to flip, so it's returned unchanged.
     pub fn negate(self) -> Type {
-        match self {
-            Type(Repr::IntLiteral(n)) => match n.checked_neg() {
+        match self.repr() {
+            Repr::IntLiteral(n) => match n.checked_neg() {
                 Some(v) => Type::int_literal(v),
                 // `-PHP_INT_MIN` is past `PHP_INT_MAX`: a float.
-                None => Type::float_literal(-(n as f64)),
+                None => Type::float_literal(-(*n as f64)),
             },
-            Type(Repr::FloatLiteral(f)) => Type::float_literal(-f),
-            Type(Repr::IntRange(min, max)) => {
+            Repr::FloatLiteral(f) => Type::float_literal(-f),
+            Repr::IntRange(min, max) => {
                 let negated = Type::int_range(
                     max.map(|m| m.checked_neg().unwrap_or(i64::MAX)),
                     min.map(|m| m.checked_neg().unwrap_or(i64::MAX)),
                 );
-                if min == Some(i64::MIN) {
+                if *min == Some(i64::MIN) {
                     Type::union(negated, Type::float_literal(-(i64::MIN as f64)))
                 } else {
                     negated
                 }
             }
-            other => other,
+            _ => self,
         }
     }
 }
@@ -740,7 +739,7 @@ impl Type {
                     (Some((l_min, l_max)), Some((r_min, r_max))) => {
                         div_int_range(l_min, l_max, r_min, r_max)
                     }
-                    _ => Type(Repr::Union(vec![Type::int(), Type::float()])),
+                    _ => Type::new(Repr::Union(vec![Type::int(), Type::float()])),
                 }
             }
         }
@@ -786,9 +785,9 @@ fn fold_float_constants(op: ArithmeticOp, lt: &Type, rt: &Type) -> Option<Type> 
     fn numbers(ty: &Type) -> Option<Vec<Number>> {
         ty.union_members()
             .iter()
-            .map(|t| match t {
-                Type(Repr::IntLiteral(n)) => Some(Number::Int(*n)),
-                Type(Repr::FloatLiteral(f)) => Some(Number::Float(*f)),
+            .map(|t| match t.repr() {
+                Repr::IntLiteral(n) => Some(Number::Int(*n)),
+                Repr::FloatLiteral(f) => Some(Number::Float(*f)),
                 _ => None,
             })
             .collect()
@@ -897,8 +896,8 @@ fn string_bitwise(op: ArithmeticOp, l: &Type, r: &Type) -> Type {
         }
         finite
             .into_iter()
-            .map(|t| match &t {
-                Type(Repr::StringLiteral(s)) => Some(s.clone()),
+            .map(|t| match t.repr() {
+                Repr::StringLiteral(s) => Some(s.clone()),
                 _ => None,
             })
             .collect()
@@ -948,11 +947,11 @@ fn string_bitwise(op: ArithmeticOp, l: &Type, r: &Type) -> Type {
 /// whatever `$x` is.
 fn fold_bitwise_int_literals(op: ArithmeticOp, l: &Type, r: &Type) -> Option<Type> {
     fn literals(ty: &Type) -> Option<Vec<i64>> {
-        match ty {
-            Type(Repr::IntLiteral(n)) => Some(vec![*n]),
-            Type(Repr::True) => Some(vec![1]),
-            Type(Repr::False) | Type(Repr::Null) => Some(vec![0]),
-            Type(Repr::Union(members)) => members.iter().try_fold(Vec::new(), |mut acc, m| {
+        match ty.repr() {
+            Repr::IntLiteral(n) => Some(vec![*n]),
+            Repr::True => Some(vec![1]),
+            Repr::False | Repr::Null => Some(vec![0]),
+            Repr::Union(members) => members.iter().try_fold(Vec::new(), |mut acc, m| {
                 acc.extend(literals(m)?);
                 Some(acc)
             }),

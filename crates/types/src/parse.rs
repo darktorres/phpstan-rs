@@ -46,7 +46,7 @@ pub fn parse_written_type(raw: &str) -> Type {
         };
 
         if nullable && ty != Type::mixed() {
-            Type(Repr::Union(vec![ty, Type::null()]))
+            Type::new(Repr::Union(vec![ty, Type::null()]))
         } else {
             ty
         }
@@ -136,7 +136,7 @@ fn try_parse_callable_shape(stripped: &str) -> Option<Type> {
     // (PHPStan's `ClosureType`), stricter than `callable(...)`, which a
     // string or invokable object satisfies too.
     if matches!(keyword.as_str(), "closure" | "pure-closure") {
-        Some(Type(Repr::Intersection(vec![
+        Some(Type::new(Repr::Intersection(vec![
             Type::object("\\Closure".into(), Vec::new()),
             Type::callable(Some(Arc::new(sig))),
         ])))
@@ -236,14 +236,14 @@ fn top_level_find(s: &str, pat: &str) -> Option<usize> {
 /// `TemplateParam`.
 fn mark_callable_templates(sig: CallableSig) -> CallableSig {
     fn mark(ty: &Type, templates: &[crate::TemplateParam]) -> Type {
-        match ty {
-            Type(Repr::Object(name, args)) if args.is_empty() => {
+        match ty.repr() {
+            Repr::Object(name, args) if args.is_empty() => {
                 match templates.iter().find(|t| t.name == *name) {
                     Some(t) => Type::template_param(t.clone()),
                     None => ty.clone(),
                 }
             }
-            other => other.map_children(&mut |c| mark(c, templates)),
+            _ => ty.map_children(&mut |c| mark(c, templates)),
         }
     }
     if sig.templates.is_empty() {
@@ -336,7 +336,7 @@ fn try_parse_conditional_type(s: &str) -> Option<Type> {
         Some(param) => ConditionalSubject::Parameter(param.into()),
         None => ConditionalSubject::Template(subject_raw.into()),
     };
-    Some(Type(Repr::Conditional {
+    Some(Type::new(Repr::Conditional {
         subject,
         target: Arc::new(parse_written_type(target_raw)),
         if_true: Arc::new(if_true),
@@ -737,7 +737,7 @@ fn parse_type_atom(s: &str) -> Type {
                 Some(ty) => ty,
                 // Possibly a template, known once `mark_template_params`
                 // runs; resolved when a call binds it.
-                None if matches!(&base_ty, Type(Repr::Object(_, args)) if args.is_empty()) => {
+                None if matches!(base_ty.repr(), Repr::Object(_, args) if args.is_empty()) => {
                     Type::offset_access(base_ty, key_ty)
                 }
                 None => Type::mixed(),
@@ -782,7 +782,7 @@ fn parse_type_atom(s: &str) -> Type {
         if const_part.eq_ignore_ascii_case("class") {
             Type::class_string(class_ty)
         } else {
-            Type(Repr::ClassConstant {
+            Type::new(Repr::ClassConstant {
                 class: Arc::new(class_ty),
                 pattern: const_part.into(),
             })
@@ -806,11 +806,13 @@ pub fn native_type(hint: &syntax::ast::TypeHint) -> Type {
             name.resolved_class().unwrap_or(&name.written).into(),
             Vec::new(),
         ),
-        TypeHintKind::Nullable(inner) => Type(Repr::Union(vec![native_type(inner), Type::null()])),
-        TypeHintKind::Union(members) => {
-            Type(Repr::Union(members.iter().map(native_type).collect()))
+        TypeHintKind::Nullable(inner) => {
+            Type::new(Repr::Union(vec![native_type(inner), Type::null()]))
         }
-        TypeHintKind::Intersection(members) => Type(Repr::Intersection(
+        TypeHintKind::Union(members) => {
+            Type::new(Repr::Union(members.iter().map(native_type).collect()))
+        }
+        TypeHintKind::Intersection(members) => Type::new(Repr::Intersection(
             members.iter().map(native_type).collect(),
         )),
     })
@@ -859,7 +861,7 @@ fn parse_type_keyword_or_class(bare: &str, original: &str, generic_args: &[&str]
         "non-positive-int" => Type::int_range(None, Some(0)),
         // Real PHPStan represents this as a union of two ranges, not its
         // own type (confirmed via dumpType()) - composed the same way.
-        "non-zero-int" => Type(Repr::Union(vec![
+        "non-zero-int" => Type::new(Repr::Union(vec![
             Type::int_range(None, Some(-1)),
             Type::int_range(Some(1), None),
         ])),
@@ -888,20 +890,20 @@ fn parse_type_keyword_or_class(bare: &str, original: &str, generic_args: &[&str]
         // `crate::subtype`'s `LowercaseString`/`UppercaseString`
         // literal-fact arms and the `strtolower`/`strtoupper`/etc.
         // case-tracking producers (`checker/expr/builtin_calls.rs`).
-        "lowercase-string" => Type(Repr::Intersection(vec![
+        "lowercase-string" => Type::new(Repr::Intersection(vec![
             Type::string(),
             Type::accessory(AccessoryKind::LowercaseString),
         ])),
-        "uppercase-string" => Type(Repr::Intersection(vec![
+        "uppercase-string" => Type::new(Repr::Intersection(vec![
             Type::string(),
             Type::accessory(AccessoryKind::UppercaseString),
         ])),
-        "non-empty-lowercase-string" => Type(Repr::Intersection(vec![
+        "non-empty-lowercase-string" => Type::new(Repr::Intersection(vec![
             Type::string(),
             Type::accessory(AccessoryKind::NonEmptyString),
             Type::accessory(AccessoryKind::LowercaseString),
         ])),
-        "non-empty-uppercase-string" => Type(Repr::Intersection(vec![
+        "non-empty-uppercase-string" => Type::new(Repr::Intersection(vec![
             Type::string(),
             Type::accessory(AccessoryKind::NonEmptyString),
             Type::accessory(AccessoryKind::UppercaseString),
@@ -914,23 +916,23 @@ fn parse_type_keyword_or_class(bare: &str, original: &str, generic_args: &[&str]
         // consumer this project doesn't build - aliasing it to a kind
         // with no real consumer would be a silent, false claim of
         // support.
-        "decimal-int-string" => Type(Repr::Intersection(vec![
+        "decimal-int-string" => Type::new(Repr::Intersection(vec![
             Type::string(),
             Type::accessory(AccessoryKind::DecimalIntegerString),
         ])),
-        "non-empty-string" => Type(Repr::Intersection(vec![
+        "non-empty-string" => Type::new(Repr::Intersection(vec![
             Type::string(),
             Type::accessory(AccessoryKind::NonEmptyString),
         ])),
-        "non-falsy-string" | "truthy-string" => Type(Repr::Intersection(vec![
+        "non-falsy-string" | "truthy-string" => Type::new(Repr::Intersection(vec![
             Type::string(),
             Type::accessory(AccessoryKind::NonFalsyString),
         ])),
-        "literal-string" => Type(Repr::Intersection(vec![
+        "literal-string" => Type::new(Repr::Intersection(vec![
             Type::string(),
             Type::accessory(AccessoryKind::LiteralString),
         ])),
-        "numeric-string" => Type(Repr::Intersection(vec![
+        "numeric-string" => Type::new(Repr::Intersection(vec![
             Type::string(),
             Type::accessory(AccessoryKind::NumericString),
         ])),
@@ -939,7 +941,7 @@ fn parse_type_keyword_or_class(bare: &str, original: &str, generic_args: &[&str]
         // (`IntersectionType([StringType, CallableType])`) -
         // architecturally unrelated to the `class-string` family below
         // despite the shared "-string" name.
-        "callable-string" => Type(Repr::Intersection(vec![
+        "callable-string" => Type::new(Repr::Intersection(vec![
             Type::string(),
             Type::callable(None),
         ])),
@@ -957,7 +959,7 @@ fn parse_type_keyword_or_class(bare: &str, original: &str, generic_args: &[&str]
         "enum-string" => {
             let unit_enum = Type::object("UnitEnum".into(), Vec::new());
             match generic_args {
-                [single] => Type::class_string(Type(Repr::Intersection(vec![
+                [single] => Type::class_string(Type::new(Repr::Intersection(vec![
                     parse_written_type(single),
                     unit_enum,
                 ]))),
@@ -971,8 +973,8 @@ fn parse_type_keyword_or_class(bare: &str, original: &str, generic_args: &[&str]
         // `<T>` form: real PHPStan has none for `trait-string`, and
         // `interface-string<T>` has no real corpus evidence calling for
         // it.
-        "interface-string" => Type(Repr::ClassKindString(ClassKind::Interface)),
-        "trait-string" => Type(Repr::ClassKindString(ClassKind::Trait)),
+        "interface-string" => Type::new(Repr::ClassKindString(ClassKind::Interface)),
+        "trait-string" => Type::new(Repr::ClassKindString(ClassKind::Trait)),
         // Unlike its string-refinement neighbors above, `class-string<T>`
         // carries a real, template-bindable inner type when given one -
         // needed for `@template R of Base` / `@param class-string<R> $x`
@@ -988,17 +990,17 @@ fn parse_type_keyword_or_class(bare: &str, original: &str, generic_args: &[&str]
         "true" => Type::bool_literal(true),
         "false" => Type::bool_literal(false),
         // Real, documented PHPStan/Psalm pseudo-types.
-        "array-key" => Type(Repr::Union(vec![Type::int(), Type::string()])),
-        "scalar" => Type(Repr::Union(vec![
+        "array-key" => Type::new(Repr::Union(vec![Type::int(), Type::string()])),
+        "scalar" => Type::new(Repr::Union(vec![
             Type::int(),
             Type::float(),
             Type::string(),
             Type::bool(),
         ])),
-        "numeric" => Type(Repr::Union(vec![
+        "numeric" => Type::new(Repr::Union(vec![
             Type::int(),
             Type::float(),
-            Type(Repr::Intersection(vec![
+            Type::new(Repr::Intersection(vec![
                 Type::string(),
                 Type::accessory(AccessoryKind::NumericString),
             ])),
@@ -1007,8 +1009,8 @@ fn parse_type_keyword_or_class(bare: &str, original: &str, generic_args: &[&str]
         // (file/curl/... handles). `open-resource` is an ordinary (open)
         // `resource`; a `closed-resource` is its own kind, one
         // `is_resource()` rejects (PHPStan's `ClosedResourceType`).
-        "resource" | "open-resource" => Type(Repr::Resource { closed: false }),
-        "closed-resource" => Type(Repr::Resource { closed: true }),
+        "resource" | "open-resource" => Type::new(Repr::Resource { closed: false }),
+        "closed-resource" => Type::new(Repr::Resource { closed: true }),
         // `value-of<T>`/`key-of<T>` - real PHPStan's own
         // `ValueOfType`/`KeyOfType`, both evaluated against `T`'s
         // resolved type only once needed. This project has no general
@@ -1021,33 +1023,31 @@ fn parse_type_keyword_or_class(bare: &str, original: &str, generic_args: &[&str]
         // so it stays a `Repr::ValueOf`, resolved later by
         // `Registry::resolve_deferred_value_of`.
         "value-of" => match generic_args {
-            [single] => match parse_written_type(single) {
-                ty @ (Type(Repr::Array(..)) | Type(Repr::ArrayShape(_))) => {
-                    late::value_of(&ty).unwrap_or(Type::mixed())
+            [single] => {
+                let ty = parse_written_type(single);
+                match ty.repr() {
+                    Repr::Array(..) | Repr::ArrayShape(_) => {
+                        late::value_of(&ty).unwrap_or(Type::mixed())
+                    }
+                    Repr::Object(_, args) if args.is_empty() => Type::value_of(ty),
+                    Repr::ClassConstant { .. } => Type::value_of(ty),
+                    _ => Type::mixed(),
                 }
-                ty @ Type(Repr::Object(..))
-                    if ty.as_object().is_some_and(|(_, args)| args.is_empty()) =>
-                {
-                    Type::value_of(ty)
-                }
-                target @ Type(Repr::ClassConstant { .. }) => Type::value_of(target),
-                _ => Type::mixed(),
-            },
+            }
             _ => Type::mixed(),
         },
         "key-of" => match generic_args {
-            [single] => match parse_written_type(single) {
-                ty @ (Type(Repr::Array(..)) | Type(Repr::ArrayShape(_))) => {
-                    late::key_of(&ty).unwrap_or(Type::mixed())
+            [single] => {
+                let ty = parse_written_type(single);
+                match ty.repr() {
+                    Repr::Array(..) | Repr::ArrayShape(_) => {
+                        late::key_of(&ty).unwrap_or(Type::mixed())
+                    }
+                    // Possibly a template: kept until a call binds it.
+                    Repr::Object(_, args) if args.is_empty() => Type::key_of(ty),
+                    _ => Type::mixed(),
                 }
-                // Possibly a template: kept until a call binds it.
-                ty @ Type(Repr::Object(..))
-                    if ty.as_object().is_some_and(|(_, args)| args.is_empty()) =>
-                {
-                    Type::key_of(ty)
-                }
-                _ => Type::mixed(),
-            },
+            }
             _ => Type::mixed(),
         },
         "null" => Type::null(),
@@ -1137,7 +1137,7 @@ fn parse_type_keyword_or_class(bare: &str, original: &str, generic_args: &[&str]
             } else {
                 vec![key_ty, element_ty.clone()]
             };
-            Type(Repr::Union(vec![
+            Type::new(Repr::Union(vec![
                 Type::array(Type::unknown_array_key(), element_ty),
                 Type::object("\\Traversable".into(), traversable_args),
             ]))
@@ -1205,7 +1205,10 @@ fn parse_type_keyword_or_class(bare: &str, original: &str, generic_args: &[&str]
 fn parse_generic_arg(a: &str) -> Type {
     let trimmed = a.trim();
     if trimmed == "*" {
-        return Type::variance_arg(CallSiteVariance::Bivariant, Type(Repr::Mixed(false, None)));
+        return Type::variance_arg(
+            CallSiteVariance::Bivariant,
+            Type::new(Repr::Mixed(false, None)),
+        );
     }
     if let Some(rest) = trimmed.strip_prefix("covariant ") {
         return Type::variance_arg(CallSiteVariance::Covariant, parse_written_type(rest));

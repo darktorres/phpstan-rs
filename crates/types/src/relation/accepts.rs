@@ -28,34 +28,34 @@ impl Relation<'_> {
     /// `Relation::is_super_type_of`, which has no notion of class context.
     pub(crate) fn accepts_type(&self, sub: &Type, sup: &Type) -> bool {
         syntax::stack::guard(|| {
-            match (sub, sup) {
-                (Type(Repr::Error), _) | (_, Type(Repr::Error)) => true,
+            match (sub.repr(), sup.repr()) {
+                (Repr::Error, _) | (_, Repr::Error) => true,
                 // No value to reject.
-                (Type(Repr::Never), _) => true,
+                (Repr::Never, _) => true,
                 // A `key-of<T>`/`T[K]` still over a template is what `T`'s
                 // bound makes it.
-                (Type(Repr::KeyOf(_)) | Type(Repr::OffsetAccess(..)), _) => {
+                (Repr::KeyOf(_) | Repr::OffsetAccess(..), _) => {
                     self.accepts_type(&sub.resolve_late_to_bounds(), sup)
                 }
-                (_, Type(Repr::KeyOf(_)) | Type(Repr::OffsetAccess(..))) => {
+                (_, Repr::KeyOf(_) | Repr::OffsetAccess(..)) => {
                     self.accepts_type(sub, &sup.resolve_late_to_bounds())
                 }
                 // Two payloads ask the extension; anything else reads a
                 // payload as its base type.
-                (Type(Repr::Extension(a)), Type(Repr::Extension(b))) => {
+                (Repr::Extension(a), Repr::Extension(b)) => {
                     match b.is_super_type_of(&**a, self.hierarchy) {
                         Some(result) => result.yes(),
                         None => self.accepts_type(&a.base(), &b.base()),
                     }
                 }
-                (Type(Repr::Extension(a)), _) => self.accepts_type(&a.base(), sup),
-                (_, Type(Repr::Extension(b))) => self.accepts_type(sub, &b.base()),
+                (Repr::Extension(a), _) => self.accepts_type(&a.base(), sup),
+                (_, Repr::Extension(b)) => self.accepts_type(sub, &b.base()),
                 // The native `object` type hint is satisfied by *any* class
                 // instance - an extremely common pattern, e.g. Doctrine's
                 // `EntityRepository<T of object>` - and satisfies no
                 // particular known class.
-                (Type(Repr::Object(_, _)), Type(Repr::ObjectWithoutClass)) => true,
-                (Type(Repr::ObjectWithoutClass), Type(Repr::Object(b, _))) => {
+                (Repr::Object(_, _), Repr::ObjectWithoutClass) => true,
+                (Repr::ObjectWithoutClass, Repr::Object(b, _)) => {
                     self.hierarchy.find_class(b).is_none()
                 }
                 // A value is callable as PHP's `is_callable()` says: an
@@ -63,17 +63,17 @@ impl Relation<'_> {
                 // callable), a string naming a function or a static
                 // `Class::method`, or `[object|class-string, method]`. What
                 // the type doesn't settle is accepted.
-                (Type(Repr::Object(class, _)), Type(Repr::Callable(sig))) => {
+                (Repr::Object(class, _), Repr::Callable(sig)) => {
                     self.object_is_callable(class, sig.as_deref())
                 }
                 (
-                    Type(Repr::String)
-                    | Type(Repr::StringLiteral(_))
-                    | Type(Repr::ClassString(_))
-                    | Type(Repr::ClassKindString(_)),
-                    Type(Repr::Callable(_)),
+                    Repr::String
+                    | Repr::StringLiteral(_)
+                    | Repr::ClassString(_)
+                    | Repr::ClassKindString(_),
+                    Repr::Callable(_),
                 ) => self.string_is_callable(sub),
-                (Type(Repr::Array(..)) | Type(Repr::ArrayShape(_)), Type(Repr::Callable(_))) => {
+                (Repr::Array(..) | Repr::ArrayShape(_), Repr::Callable(_)) => {
                     self.array_is_callable(sub)
                 }
                 // Type arguments are compared with real variance
@@ -87,7 +87,7 @@ impl Relation<'_> {
                 // parse), falls back to a plain name/hierarchy-only
                 // comparison - the one deliberate leniency left in this
                 // design.
-                (Type(Repr::Object(a, args_a)), Type(Repr::Object(b, args_b))) => {
+                (Repr::Object(a, args_a), Repr::Object(b, args_b)) => {
                     if !a.eq_ignore_case(b) && !self.hierarchy.is_subclass_of(a, b) {
                         return false;
                     }
@@ -195,8 +195,8 @@ impl Relation<'_> {
                         // position.
                         if a_i == Type::mixed()
                             || b_i == Type::mixed()
-                            || matches!(a_i, Type(Repr::TemplateParam(_)))
-                            || matches!(b_i, Type(Repr::TemplateParam(_)))
+                            || matches!(a_i.repr(), Repr::TemplateParam(_))
+                            || matches!(b_i.repr(), Repr::TemplateParam(_))
                         {
                             continue;
                         }
@@ -227,11 +227,11 @@ impl Relation<'_> {
                 // A case is an instance of its enum and of everything the
                 // enum implements: `UnitEnum`, `BackedEnum` and its declared
                 // interfaces.
-                (Type(Repr::EnumCase(fqn, _)), Type(Repr::Object(b, _))) => {
+                (Repr::EnumCase(fqn, _), Repr::Object(b, _)) => {
                     fqn == b || self.hierarchy.is_subclass_of(fqn, b)
                 }
                 // A case is only ever itself; no hierarchy to widen through.
-                (Type(Repr::EnumCase(class_a, case_a)), Type(Repr::EnumCase(class_b, case_b))) => {
+                (Repr::EnumCase(class_a, case_a), Repr::EnumCase(class_b, case_b)) => {
                     class_a == class_b && case_a == case_b
                 }
                 // `class-string<A>` is accepted where `class-string<B>` is
@@ -240,40 +240,38 @@ impl Relation<'_> {
                 // distinction from bare `class-string` here, but this project
                 // is allowed to check more strictly - `ClassReflection::kind`
                 // already tracks exactly this.
-                (Type(Repr::ClassString(a)), Type(Repr::ClassKindString(kind))) => {
+                (Repr::ClassString(a), Repr::ClassKindString(kind)) => {
                     self.class_string_may_be_kind(a, *kind)
                 }
-                (Type(Repr::ClassString(a)), Type(Repr::ClassString(b))) => self.accepts_type(a, b),
+                (Repr::ClassString(a), Repr::ClassString(b)) => self.accepts_type(a, b),
                 // A template is accepted as its bound is, before the union
                 // arms below take the bound apart (`TNodeType of
                 // PreInc|PreDec` where a `Node` is expected, each member
                 // extending `Node` through `Expr`).
-                (Type(Repr::TemplateParam(tp)), _) => self.accepts_type(&tp.bound, sup),
+                (Repr::TemplateParam(tp), _) => self.accepts_type(&tp.bound, sup),
                 // An unresolved conditional, on either side, is its two
                 // branches' union. Before the arms that take `sub` apart: a
                 // `list<T>`'s members, checked one by one, aren't lists.
                 (
-                    Type(Repr::Conditional {
+                    Repr::Conditional {
                         if_true, if_false, ..
-                    }),
+                    },
                     _,
                 ) => self.accepts_type(
-                    &Type(Repr::Union(vec![(**if_true).clone(), (**if_false).clone()])),
+                    &Type::new(Repr::Union(vec![(**if_true).clone(), (**if_false).clone()])),
                     sup,
                 ),
                 (
                     _,
-                    Type(Repr::Conditional {
+                    Repr::Conditional {
                         if_true, if_false, ..
-                    }),
+                    },
                 ) => self.accepts_type(
                     sub,
-                    &Type(Repr::Union(vec![(**if_true).clone(), (**if_false).clone()])),
+                    &Type::new(Repr::Union(vec![(**if_true).clone(), (**if_false).clone()])),
                 ),
-                (Type(Repr::Union(members)), _) => {
-                    members.iter().all(|m| self.accepts_type(m, sup))
-                }
-                (_, Type(Repr::Union(members)) | Type(Repr::BenevolentUnion(members))) => {
+                (Repr::Union(members), _) => members.iter().all(|m| self.accepts_type(m, sup)),
+                (_, Repr::Union(members) | Repr::BenevolentUnion(members)) => {
                     members.iter().any(|m| self.accepts_type(sub, m))
                 }
                 // Mirrors `Relation::is_super_type_of`'s own dedicated
@@ -285,20 +283,20 @@ impl Relation<'_> {
                 // asks whether one bare member of `sub` alone satisfies the
                 // whole `sup` intersection, never whether `sub`'s own
                 // combination does.
-                (Type(Repr::Intersection(_)), Type(Repr::Intersection(sup_members))) => {
+                (Repr::Intersection(_), Repr::Intersection(sup_members)) => {
                     sup_members.iter().all(|m| self.accepts_type(sub, m))
                 }
                 // A benevolent union given (`RuleLevelHelper::accepts()`) is
                 // accepted if *any* member matches `sup`, not only when *all*
                 // do - the behavioral difference a benevolent union exists
                 // for.
-                (Type(Repr::BenevolentUnion(members)), _) => {
+                (Repr::BenevolentUnion(members), _) => {
                     members.iter().any(|m| self.accepts_type(m, sup))
                 }
                 // Each parameter/return comparison consults the class
                 // hierarchy: `Closure(Animal): Dog` fits `callable(Dog):
                 // Animal`, and `Event` fits a `T of object` template's bound.
-                (Type(Repr::Callable(Some(a))), Type(Repr::Callable(Some(b)))) => {
+                (Repr::Callable(Some(a)), Repr::Callable(Some(b))) => {
                     self.callable_sig_fits(a, b, &|x, y| self.accepts_type(x, y), true)
                 }
                 // A closure literal (`Type::closure_literal`) checked against a
@@ -308,20 +306,20 @@ impl Relation<'_> {
                 // object member alone (`Closure` declares `__invoke`, which
                 // satisfies every callable shape), skipping the structural
                 // comparison entirely.
-                (Type(Repr::Intersection(members)), Type(Repr::Callable(Some(_))))
+                (Repr::Intersection(members), Repr::Callable(Some(_)))
                     if members
                         .iter()
-                        .any(|m| matches!(m, Type(Repr::Callable(Some(_))))) =>
+                        .any(|m| matches!(m.repr(), Repr::Callable(Some(_)))) =>
                 {
                     members
                         .iter()
-                        .filter(|m| matches!(m, Type(Repr::Callable(Some(_)))))
+                        .filter(|m| matches!(m.repr(), Repr::Callable(Some(_))))
                         .any(|m| self.accepts_type(m, sup))
                 }
-                (Type(Repr::Intersection(members)), _) => {
+                (Repr::Intersection(members), _) => {
                     members.iter().any(|m| self.accepts_type(m, sup))
                 }
-                (_, Type(Repr::Intersection(members))) => {
+                (_, Repr::Intersection(members)) => {
                     members.iter().all(|m| self.accepts_type(sub, m))
                 }
                 // Deliberately more lenient here than Relation::is_super_type_of's pure
@@ -334,8 +332,8 @@ impl Relation<'_> {
                 // `strict_mixed_arrays` opts out of this leniency, matching
                 // real PHPStan's own level-9-style "be strict about values
                 // with mixed type" philosophy.
-                (Type(Repr::Array(_, a)), Type(Repr::Array(_, b))) => {
-                    (!self.strict_mixed_arrays && matches!(**a, Type(Repr::Mixed(..))))
+                (Repr::Array(_, a), Repr::Array(_, b)) => {
+                    (!self.strict_mixed_arrays && matches!(a.repr(), Repr::Mixed(..)))
                         || self.accepts_type(a, b)
                 }
                 // Same leniency, same reason, for an array of unknown structure
@@ -359,9 +357,9 @@ impl Relation<'_> {
                 // the value-side `Mixed` check right next to it - only a
                 // *genuinely narrower, known* key type (a real `Repr::Int`/
                 // `Repr::String`) is held to the real subtyping check.
-                (Type(Repr::Array(key, a)), Type(Repr::ArrayShape(shape))) => {
+                (Repr::Array(key, a), Repr::ArrayShape(shape)) => {
                     !self.strict_mixed_arrays
-                        && matches!(**a, Type(Repr::Mixed(..)))
+                        && matches!(a.repr(), Repr::Mixed(..))
                         && (**key == Type::unknown_array_key()
                             || self.accepts_type(key, &shape.key_type()))
                 }
@@ -383,10 +381,10 @@ impl Relation<'_> {
                 // `array{name: string}` (an all-string-keyed shape) would be
                 // silently accepted as satisfying `array<int, string>`,
                 // checking only whether every field's value type matched.
-                (Type(Repr::ArrayShape(shape)), Type(Repr::Array(key, b))) => {
+                (Repr::ArrayShape(shape), Repr::Array(key, b)) => {
                     self.accepts_type(&shape.key_type(), key)
                         && shape.fields.iter().all(|f| {
-                            (!self.strict_mixed_arrays && matches!(f.ty, Type(Repr::Mixed(..))))
+                            (!self.strict_mixed_arrays && matches!(f.ty.repr(), Repr::Mixed(..)))
                                 || self.accepts_type(&f.ty, b)
                         })
                 }
@@ -398,7 +396,7 @@ impl Relation<'_> {
                 // "structural, not exact" spirit `Array(Mixed)`'s own
                 // leniency already uses elsewhere in this match. Either
                 // side's unsealed tail takes no part.
-                (Type(Repr::ArrayShape(sub)), Type(Repr::ArrayShape(sup))) => {
+                (Repr::ArrayShape(sub), Repr::ArrayShape(sup)) => {
                     self.shape_accepts_fields(sub, sup)
                         // A key `sup` doesn't list must fit its unsealed
                         // tail; a sealed `sup` has none.
@@ -432,20 +430,20 @@ impl Relation<'_> {
                 // track the real fields of) are accepted unconditionally,
                 // matching `Array(Mixed)`'s own established leniency for the
                 // identical "can't verify, don't guess wrong" situation.
-                (Type(Repr::ObjectWithoutClass), Type(Repr::ObjectShape(_))) => true,
+                (Repr::ObjectWithoutClass, Repr::ObjectShape(_)) => true,
                 // A class the registry never saw can't be checked either way.
-                (Type(Repr::Object(class, _)), Type(Repr::HasMethod(method))) => {
+                (Repr::Object(class, _), Repr::HasMethod(method)) => {
                     self.hierarchy.find_class(class).is_none()
                         || self.hierarchy.has_method(class, method)
                 }
-                (Type(Repr::Object(class, _)), Type(Repr::HasProperty(property))) => {
+                (Repr::Object(class, _), Repr::HasProperty(property)) => {
                     self.hierarchy.find_class(class).is_none()
                         || self.hierarchy.property_type(class, property).is_some()
                 }
-                (Type(Repr::ObjectShape(shape)), Type(Repr::HasProperty(property))) => shape
+                (Repr::ObjectShape(shape), Repr::HasProperty(property)) => shape
                     .field(&ShapeKey::from_name(property))
                     .is_some_and(|f| !f.optional),
-                (Type(Repr::Object(class, _)), Type(Repr::ObjectShape(shape))) => {
+                (Repr::Object(class, _), Repr::ObjectShape(shape)) => {
                     class == "stdClass"
                         || shape.fields.iter().all(|f| {
                             match self.hierarchy.property_type(class, &f.key.to_string()) {
@@ -455,17 +453,17 @@ impl Relation<'_> {
                         })
                 }
                 // An object may have more properties than a shape lists.
-                (Type(Repr::ObjectShape(sub)), Type(Repr::ObjectShape(sup))) => {
+                (Repr::ObjectShape(sub), Repr::ObjectShape(sup)) => {
                     self.shape_accepts_fields(sub, sup)
                 }
                 // A class the registry doesn't know may be any class: a value
                 // that may be an object may be one; a scalar or an array
                 // never is.
-                (_, Type(Repr::Object(name, _))) if self.hierarchy.find_class(name).is_none() => {
+                (_, Repr::Object(name, _)) if self.hierarchy.find_class(name).is_none() => {
                     !sub.is_object().no()
                 }
                 // An unresolved `value-of<T>`/`Foo::BAR` is just as unknown.
-                (_, Type(Repr::ValueOf(_)) | Type(Repr::ClassConstant { .. })) => true,
+                (_, Repr::ValueOf(_) | Repr::ClassConstant { .. }) => true,
                 _ => self.is_super_type_of(sup, sub).yes() || accepted_though_no_subtype(sub, sup),
             }
         })
@@ -492,7 +490,7 @@ impl Relation<'_> {
     /// member is (PHPStan accepts its `Maybe`); from it on, every member
     /// must be.
     fn rule_level_accepts_type(&self, sub: &Type, sup: &Type) -> bool {
-        if matches!(sub, Type(Repr::Error)) || matches!(sup, Type(Repr::Error)) {
+        if matches!(sub.repr(), Repr::Error) || matches!(sup.repr(), Repr::Error) {
             return true;
         }
         // Never configured means "assume the strictest threshold for
@@ -525,7 +523,7 @@ impl Relation<'_> {
             // `checkUnionTypes`/`checkExplicitMixed`/`checkImplicitMixed`) still
             // applies per-member exactly as it would for an ordinary Union.
             if self.check_benevolent_union_types
-                && let Type(Repr::BenevolentUnion(wrapped)) = sub
+                && let Repr::BenevolentUnion(wrapped) = sub.repr()
             {
                 return wrapped
                     .iter()
@@ -553,7 +551,7 @@ impl Relation<'_> {
             // `accepts_at_level` too (the `Union` arms below are the
             // only ones this method ever needs to diverge from plain
             // assignability on).
-            if !matches!(sub, Type(Repr::Union(_))) && !matches!(sup, Type(Repr::Union(_))) {
+            if !matches!(sub.repr(), Repr::Union(_)) && !matches!(sup.repr(), Repr::Union(_)) {
                 return self.accepts_at_level(sub, sup, level);
             }
 
@@ -572,7 +570,7 @@ impl Relation<'_> {
             let stripped_sub = if level < NULLABLES_CHECK_LEVEL
                 && *sup != Type::null()
                 && *sub != Type::null()
-                && let Type(Repr::Union(members)) = sub
+                && let Repr::Union(members) = sub.repr()
                 && members.contains(&Type::null())
             {
                 let non_null: Vec<Type> = members
@@ -587,7 +585,7 @@ impl Relation<'_> {
                     // total fallback rather than an `unwrap`/panic.
                     0 => Type::never(),
                     1 => non_null.into_iter().next().unwrap(),
-                    _ => Type(Repr::Union(non_null)),
+                    _ => Type::new(Repr::Union(non_null)),
                 })
             } else {
                 None
@@ -597,14 +595,14 @@ impl Relation<'_> {
             // Both sides recurse here rather than through plain `accepts`, so
             // the level-gated leniencies reach every member: a nullable
             // declared type (`?string`) is itself a union.
-            match (sub, sup) {
-                (Type(Repr::Union(members)), _) if level < UNION_TYPES_CHECK_LEVEL => members
+            match (sub.repr(), sup.repr()) {
+                (Repr::Union(members), _) if level < UNION_TYPES_CHECK_LEVEL => members
                     .iter()
                     .any(|m| self.rule_level_accepts_rec(m, sup, level)),
-                (Type(Repr::Union(members)), _) => members
+                (Repr::Union(members), _) => members
                     .iter()
                     .all(|m| self.rule_level_accepts_rec(m, sup, level)),
-                (_, Type(Repr::Union(members))) => members
+                (_, Repr::Union(members)) => members
                     .iter()
                     .any(|m| self.rule_level_accepts_rec(sub, m, level)),
                 _ => self.accepts_at_level(sub, sup, level),
@@ -621,7 +619,7 @@ impl Relation<'_> {
     /// "`checkExplicitMixed`/`checkImplicitMixed` stay off unless opted
     /// into" default `rule_level_accepts` documents.
     pub fn strict_mixed_receiver_level(&self, ty: &Type) -> Option<u8> {
-        let Type(Repr::Mixed(is_explicit, _)) = ty else {
+        let Repr::Mixed(is_explicit, _) = ty.repr() else {
             return None;
         };
         let threshold = if *is_explicit {
@@ -640,13 +638,13 @@ impl Relation<'_> {
     fn accepts_at_level(&self, sub: &Type, sup: &Type, level: u8) -> bool {
         // A template bounded by nothing is as unknown as an explicit
         // `mixed` (PHPStan's `TemplateMixedType`).
-        if let Type(Repr::TemplateParam(tp)) = sub
-            && matches!(*tp.bound, Type(Repr::Mixed(..)))
+        if let Repr::TemplateParam(tp) = sub.repr()
+            && matches!((*tp.bound).repr(), Repr::Mixed(..))
             && level < EXPLICIT_MIXED_CHECK_LEVEL
         {
             return true;
         }
-        if let Type(Repr::Mixed(is_explicit, _)) = sub {
+        if let Repr::Mixed(is_explicit, _) = sub.repr() {
             let strict_level = if *is_explicit {
                 EXPLICIT_MIXED_CHECK_LEVEL
             } else {
@@ -655,7 +653,7 @@ impl Relation<'_> {
             if level < strict_level {
                 return true;
             }
-            return matches!(sup, Type(Repr::Mixed(..)));
+            return matches!(sup.repr(), Repr::Mixed(..));
         }
         self.accepts_type(sub, sup)
     }
@@ -689,7 +687,7 @@ impl Relation<'_> {
     /// A string is callable when it names a function or a static
     /// `Class::method`; one not known literally may be.
     fn string_is_callable(&self, sub: &Type) -> bool {
-        let Type(Repr::StringLiteral(text)) = sub else {
+        let Repr::StringLiteral(text) = sub.repr() else {
             return true;
         };
         let text = text.to_str_lossy();
@@ -704,8 +702,8 @@ impl Relation<'_> {
     /// there (static for a class name); an array not known to be such a
     /// pair may be one if its elements may be objects or strings.
     fn array_is_callable(&self, sub: &Type) -> bool {
-        match sub {
-            Type(Repr::ArrayShape(shape)) => {
+        match sub.repr() {
+            Repr::ArrayShape(shape) => {
                 let (Some(target), Some(method)) = (
                     shape.field(&ShapeKey::Int(0)),
                     shape.field(&ShapeKey::Int(1)),
@@ -720,29 +718,27 @@ impl Relation<'_> {
                 {
                     return false;
                 }
-                let Type(Repr::StringLiteral(name)) = &method.ty else {
+                let Repr::StringLiteral(name) = method.ty.repr() else {
                     return true;
                 };
                 let name = name.to_str_lossy();
-                match &target.ty {
-                    Type(Repr::Object(class, _)) => {
+                match target.ty.repr() {
+                    Repr::Object(class, _) => {
                         self.hierarchy.find_class(class).is_none()
                             || self.hierarchy.has_method(class, &name)
                             || self.hierarchy.has_method(class, "__call")
                     }
-                    Type(Repr::ClassString(inner)) => match &**inner {
-                        Type(Repr::Object(class, _)) => {
-                            self.static_method_may_be_callable(class, &name)
-                        }
+                    Repr::ClassString(inner) => match inner.repr() {
+                        Repr::Object(class, _) => self.static_method_may_be_callable(class, &name),
                         _ => true,
                     },
-                    Type(Repr::StringLiteral(class)) => {
+                    Repr::StringLiteral(class) => {
                         self.static_method_may_be_callable(&class.to_str_lossy(), &name)
                     }
                     _ => true,
                 }
             }
-            Type(Repr::Array(key, value)) => {
+            Repr::Array(key, value) => {
                 !key.is_int().no() && !(value.is_object().no() && value.is_string().no())
             }
             _ => true,
@@ -773,18 +769,18 @@ impl Relation<'_> {
         if kind == ClassKind::Class {
             return true;
         }
-        match inner {
-            Type(Repr::Object(name, _)) => self
+        match inner.repr() {
+            Repr::Object(name, _) => self
                 .hierarchy
                 .find_class(name)
                 .is_none_or(|class| class.kind == kind),
-            Type(Repr::Union(members)) | Type(Repr::BenevolentUnion(members)) => members
+            Repr::Union(members) | Repr::BenevolentUnion(members) => members
                 .iter()
                 .all(|m| self.class_string_may_be_kind(m, kind)),
-            Type(Repr::Intersection(members)) => members
+            Repr::Intersection(members) => members
                 .iter()
                 .any(|m| self.class_string_may_be_kind(m, kind)),
-            Type(Repr::TemplateParam(tp)) => self.class_string_may_be_kind(&tp.bound, kind),
+            Repr::TemplateParam(tp) => self.class_string_may_be_kind(&tp.bound, kind),
             _ => true,
         }
     }
@@ -829,22 +825,19 @@ impl Relation<'_> {
 /// where a template not yet bound is.
 fn accepted_though_no_subtype(sub: &Type, sup: &Type) -> bool {
     matches!(
-        (sub, sup),
+        (sub.repr(), sup.repr()),
         (
-            Type(Repr::Int) | Type(Repr::IntLiteral(_)) | Type(Repr::IntRange(..)),
-            Type(Repr::Float)
+            Repr::Int | Repr::IntLiteral(_) | Repr::IntRange(..),
+            Repr::Float
         ) | (
-            Type(Repr::String) | Type(Repr::StringLiteral(_)),
-            Type(Repr::ClassString(_)) | Type(Repr::ClassKindString(_))
-        ) | (Type(Repr::Callable(None)), Type(Repr::Callable(Some(_))))
+            Repr::String | Repr::StringLiteral(_),
+            Repr::ClassString(_) | Repr::ClassKindString(_)
+        ) | (Repr::Callable(None), Repr::Callable(Some(_)))
             | (
-                Type(Repr::SelfRef(_))
-                    | Type(Repr::ParentRef)
-                    | Type(Repr::StaticRef(_))
-                    | Type(Repr::This),
-                Type(Repr::Object(..)) | Type(Repr::ObjectWithoutClass)
+                Repr::SelfRef(_) | Repr::ParentRef | Repr::StaticRef(_) | Repr::This,
+                Repr::Object(..) | Repr::ObjectWithoutClass
             )
-            | (_, Type(Repr::TemplateParam(_)))
+            | (_, Repr::TemplateParam(_))
     )
 }
 
@@ -860,13 +853,13 @@ fn accepted_though_no_subtype(sub: &Type, sup: &Type) -> bool {
 /// *independently* inferred operands.
 fn is_finite_scalar_type(ty: &Type) -> bool {
     matches!(
-        ty,
-        Type(Repr::Null)
-            | Type(Repr::True)
-            | Type(Repr::False)
-            | Type(Repr::IntLiteral(_))
-            | Type(Repr::StringLiteral(_))
-            | Type(Repr::FloatLiteral(_))
-            | Type(Repr::EnumCase(_, _))
-    ) || matches!(ty, Type(Repr::ArrayShape(shape)) if shape.is_empty_array())
+        ty.repr(),
+        Repr::Null
+            | Repr::True
+            | Repr::False
+            | Repr::IntLiteral(_)
+            | Repr::StringLiteral(_)
+            | Repr::FloatLiteral(_)
+            | Repr::EnumCase(_, _)
+    ) || matches!(ty.repr(), Repr::ArrayShape(shape) if shape.is_empty_array())
 }

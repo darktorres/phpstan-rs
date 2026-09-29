@@ -34,14 +34,14 @@ impl Type {
         param_bindings: &FxHashMap<String, Type>,
         relation: &Relation,
     ) -> Type {
-        syntax::stack::guard(|| match self {
-            Type(Repr::Conditional {
+        syntax::stack::guard(|| match self.repr() {
+            Repr::Conditional {
                 subject,
                 target,
                 if_true,
                 if_false,
                 negated,
-            }) => match match subject {
+            } => match match subject {
                 ConditionalSubject::Parameter(param) => param_bindings.get(param.as_str()),
                 ConditionalSubject::Template(_) => None,
             } {

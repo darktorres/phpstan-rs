@@ -24,18 +24,18 @@ impl Type {
             let r_str = as_string(r);
 
             // Empty-string identity shortcuts.
-            if let Type(Repr::StringLiteral(s)) = &l_str
+            if let Repr::StringLiteral(s) = l_str.repr()
                 && s.is_empty()
             {
                 return r_str;
             }
-            if let Type(Repr::StringLiteral(s)) = &r_str
+            if let Repr::StringLiteral(s) = r_str.repr()
                 && s.is_empty()
             {
                 return l_str;
             }
             // Full constant fold when both sides are single literals.
-            if let (Type(Repr::StringLiteral(a)), Type(Repr::StringLiteral(b))) = (&l_str, &r_str) {
+            if let (Repr::StringLiteral(a), Repr::StringLiteral(b)) = (l_str.repr(), r_str.repr()) {
                 return Type::string_literal(a.concat(b));
             }
 
@@ -66,7 +66,7 @@ impl Type {
                     return if combos.len() == 1 {
                         Type::string_literal(combos.into_iter().next().unwrap())
                     } else {
-                        Type(Repr::Union(
+                        Type::new(Repr::Union(
                             combos.into_iter().map(Type::string_literal).collect(),
                         ))
                     };
@@ -122,8 +122,8 @@ impl Type {
                 .yes()
             {
                 let l_is_int = matches!(
-                    self,
-                    Type(Repr::Int) | Type(Repr::IntLiteral(_)) | Type(Repr::IntRange(_, _))
+                    self.repr(),
+                    Repr::Int | Repr::IntLiteral(_) | Repr::IntRange(_, _)
                 );
                 let l_consts = constant_strings(&l_nonempty);
                 let l_no_trailing_space = l_is_int
@@ -161,7 +161,7 @@ impl Type {
             } else {
                 let mut members = vec![Type::string()];
                 members.extend(accessories.into_iter().map(Type::accessory));
-                Type(Repr::Intersection(members))
+                Type::new(Repr::Intersection(members))
             }
         })
     }
@@ -175,8 +175,8 @@ impl Type {
 /// doesn't fail `NumericString` proof-checking purely because of its own
 /// always-possible empty-string member.
 fn strip_empty_string_member(ty: &Type) -> Type {
-    match ty {
-        Type(Repr::Union(members)) => {
+    match ty.repr() {
+        Repr::Union(members) => {
             let filtered: Vec<Type> = members
                 .iter()
                 .filter(|m| **m != Type::string_literal(PhpString::default()))
@@ -185,10 +185,10 @@ fn strip_empty_string_member(ty: &Type) -> Type {
             match filtered.len() {
                 0 => ty.clone(),
                 1 => filtered.into_iter().next().unwrap(),
-                _ => Type(Repr::Union(filtered)),
+                _ => Type::new(Repr::Union(filtered)),
             }
         }
-        other => other.clone(),
+        _ => ty.clone(),
     }
 }
 
@@ -196,9 +196,9 @@ fn strip_empty_string_member(ty: &Type) -> Type {
 /// `StringLiteral` or a `Union` of one - `vec![]` for anything else
 /// (never guessed at for a bare `String`/accessoried `Intersection`).
 fn constant_strings(ty: &Type) -> Vec<PhpString> {
-    match ty {
-        Type(Repr::StringLiteral(s)) => vec![s.clone()],
-        Type(Repr::Union(members)) => members.iter().flat_map(constant_strings).collect(),
+    match ty.repr() {
+        Repr::StringLiteral(s) => vec![s.clone()],
+        Repr::Union(members) => members.iter().flat_map(constant_strings).collect(),
         _ => Vec::new(),
     }
 }
