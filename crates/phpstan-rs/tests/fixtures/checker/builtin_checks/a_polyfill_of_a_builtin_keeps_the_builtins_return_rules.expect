@@ -1,0 +1,8 @@
+6:5-9:6 missingType.iterableValue L6 | Function mb_convert_encoding() return type has no value type specified in iterable type array.
+    tip: See: https://phpstan.org/blog/solving-phpstan-no-value-type-specified-in-iterable-type
+6:5-9:6 return.unusedType L4 | Function mb_convert_encoding() never returns array so it can be removed from the return type.
+6:5-9:6 return.unusedType L4 | Function mb_convert_encoding() never returns string so it can be removed from the return type.
+6:34-6:59 missingType.iterableValue L6 | Function mb_convert_encoding() has parameter $string with no value type specified in iterable type array.
+    tip: See: https://phpstan.org/blog/solving-phpstan-no-value-type-specified-in-iterable-type
+6:83-6:122 missingType.iterableValue L6 | Function mb_convert_encoding() has parameter $from_encoding with no value type specified in iterable type array.
+    tip: See: https://phpstan.org/blog/solving-phpstan-no-value-type-specified-in-iterable-type
