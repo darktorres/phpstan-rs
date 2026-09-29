@@ -7,8 +7,8 @@ namespace App {
 use function PHPStan\Testing\assertType;
 function f(?string $s, bool $b): void {
     \Tester\Assert::notNull($s);
-    assertType('?', $s);
+    assertType('string', $s);
     \Tester\Assert::true($b);
-    assertType('?', $b);
+    assertType('true', $b);
 }
 }

@@ -6,8 +6,8 @@ use function PHPStan\Testing\assertType;
 final class Mailer {}
 final class Locator { public function get(string $id): mixed { return null; } }
 function f(Locator $l): void {
-    assertType('?', \Mockery::mock(Mailer::class));
-    assertType('?', $l->get(Mailer::class));
-    assertType('?', $l->get('nope'));
+    assertType('App\\Mailer&Mockery\\MockInterface', \Mockery::mock(Mailer::class));
+    assertType('App\\Mailer', $l->get(Mailer::class));
+    assertType('mixed', $l->get('nope'));
 }
 }
