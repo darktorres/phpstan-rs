@@ -549,3 +549,32 @@ fn an_integer_range_absorbs_the_constants_and_ranges_touching_it() {
     );
     assert_eq!(parse_type_string("0|positive-int"), range(Some(0), None));
 }
+
+#[test]
+fn an_offset_an_intersection_records_is_surely_there() {
+    let key = || Type::string_literal("k".into());
+    let base = || Type::array(Type::string(), Type::int());
+    let with_offset = Type(Repr::Intersection(vec![
+        base(),
+        Type::has_offset(ShapeKey::Str("k".into())),
+    ]));
+    assert_eq!(with_offset.has_offset_value_type(&key()), TrinaryLogic::Yes);
+    let with_value = Type(Repr::Intersection(vec![
+        base(),
+        Type::has_offset_value(ShapeKey::Str("k".into()), Type::int()),
+    ]));
+    assert_eq!(with_value.has_offset_value_type(&key()), TrinaryLogic::Yes);
+    assert_eq!(
+        with_value.has_offset_value_type(&Type::string_literal("other".into())),
+        TrinaryLogic::Maybe
+    );
+    let template = Type::template_param(TemplateParam {
+        bound: Box::new(Type::array_shape(Shape::sealed(vec![ShapeField::new(
+            ShapeKey::Str("k".into()),
+            Type::int(),
+            false,
+        )]))),
+        ..TemplateParam::unbounded("T".to_string())
+    });
+    assert_eq!(template.has_offset_value_type(&key()), TrinaryLogic::Yes);
+}

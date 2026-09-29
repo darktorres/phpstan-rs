@@ -25,16 +25,32 @@ impl Type {
                 }
             }
             Type(Repr::Array(key, _)) => general_array_has_offset(key, false, offset),
+            // A value of an intersection is each member's: one member
+            // proving the offset there (`hasOffset('k')`) or absent settles it.
             Type(Repr::Intersection(members)) => {
                 let is_list = members.contains(&Type::accessory(AccessoryKind::ArrayList));
-                match members.iter().find_map(|m| match m {
-                    Type(Repr::Array(k, _)) => Some(k.as_ref()),
-                    _ => None,
-                }) {
-                    Some(key) => general_array_has_offset(key, is_list, offset),
-                    None => TrinaryLogic::Maybe,
+                let key = literal_key(offset);
+                let answers: Vec<TrinaryLogic> = members
+                    .iter()
+                    .map(|m| match m {
+                        Type(Repr::Array(k, _)) => general_array_has_offset(k, is_list, offset),
+                        Type(Repr::HasOffset(k)) | Type(Repr::HasOffsetValue(k, _))
+                            if key.as_ref() == Some(k) =>
+                        {
+                            TrinaryLogic::Yes
+                        }
+                        other => other.has_offset_value_type(offset),
+                    })
+                    .collect();
+                if answers.contains(&TrinaryLogic::Yes) {
+                    TrinaryLogic::Yes
+                } else if answers.contains(&TrinaryLogic::No) {
+                    TrinaryLogic::No
+                } else {
+                    TrinaryLogic::Maybe
                 }
             }
+            Type(Repr::TemplateParam(param)) => param.bound.has_offset_value_type(offset),
             Type(Repr::Union(members)) => members
                 .iter()
                 .map(|m| m.has_offset_value_type(offset))
