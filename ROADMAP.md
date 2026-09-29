@@ -898,11 +898,10 @@ definite no flags a member" comparison, not a boolean one) and
 `parameterByRef.type`/`.executionEnd`/`.tooWide` built on a genuine
 per-exit-point accumulator, not a flat "ever assigned" union. Destructuring
 targets and `foreach`-rebind coverage included. The property-assignment
-sibling needed a genuinely new two-pass (collect-then-consume) project-
-wide checking architecture (`Project::collect_property_assign_facts`/
-`check_file_with_property_assign_facts`) to resolve a trait-donated
-write correctly regardless of file-processing order - `check_file`
-itself is unchanged, so incremental/LSP use pays no cost.
+sibling judges each class's private property types once every file
+writing them is checked (`Project::check_files`): its own file, and
+those declaring the traits it uses, so a trait-donated write counts
+regardless of file-processing order, from one checking pass.
 
 **Collector/cross-file aggregation architecture** (Phase 82, fully
 closed): real PHPStan's own `Collector` machinery reconciles results

@@ -166,6 +166,7 @@ impl<'a> Checker<'a> {
         for m in &def.methods {
             self.check_function(&m.function, Some(name), m.is_static, true);
         }
+        self.record_property_type_site(name, vec![Name::from(name)], def);
         for p in &def.properties {
             self.check_attributes(&p.attrs, name);
             self.check_attribute_targets(&p.attrs, ATTRIBUTE_TARGET_PROPERTY, "property");
@@ -1309,9 +1310,7 @@ impl<'a> Checker<'a> {
                             class, method, recv, args, locals, e.span,
                         );
                         // Renamed named arguments - see `checker::named_argument_renames`'s own
-                        // module doc comment. Always on (not gated on
-                        // `facts_only`) - this arm's whole body already
-                        // runs unconditionally.
+                        // module doc comment.
                         self.record_named_argument_call(
                             owner,
                             method,

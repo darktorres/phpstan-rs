@@ -108,14 +108,13 @@ impl<'a> Checker<'a> {
         let expected = write_ty.substitute_templates(&bindings, &self.relation());
         let expected = self.resolve_pseudo(&expected, &class);
         let actual = self.infer_expr(rhs, locals);
-        // `check_too_wide_property_types`'s own accumulation half - scoped
-        // to `write_visibility == Private` since that's the only
-        // visibility for which every real write is guaranteed to reach
-        // this exact choke point (a protected/public property could be
-        // written from a subclass this project never sees, so "every
-        // write we've seen" would be an unsound undercount for anything
-        // wider than private).
-        if prop_sig.write_visibility() == Visibility::Private {
+        // `check_too_wide_property_types`'s facts - scoped to
+        // `write_visibility == Private`, the only visibility for which
+        // every write reaches this choke point (a protected/public
+        // property could be written from a subclass this project never
+        // sees). A write the scope may not make fails at runtime, so it
+        // assigns nothing.
+        if prop_sig.write_visibility() == Visibility::Private && can_write && !not_writable {
             self.property_assign_facts
                 .entry(Name::from(&owner))
                 .or_default()

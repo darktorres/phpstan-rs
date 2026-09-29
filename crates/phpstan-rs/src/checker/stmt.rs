@@ -931,6 +931,7 @@ impl<'a> Checker<'a> {
                             !m.is_abstract && c.def.kind != ClassKind::Interface,
                         );
                     }
+                    self.record_property_type_site(&fqn, vec![Name::from(&fqn)], &c.def);
                 }
             }
             // A bare `break;` (`None`, level 1) or an explicit `break N;`

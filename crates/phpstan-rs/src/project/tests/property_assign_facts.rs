@@ -1,148 +1,165 @@
-//! `Project::collect_property_assign_facts`'s facts-only mode agrees with
-//! the full pass. The `property.unusedType` check itself is covered by the
+//! Judging private property types against the writes of every file that
+//! makes them. The `property.unusedType` check itself is covered by the
 //! fixtures under `tests/fixtures/project/property_assign_facts`.
 
 use super::super::*;
 
-/// Test-only: replicates `Project::collect_property_assign_facts`'s own
-/// merge loop but with an explicit `facts_only` flag, so the fully-
-/// gated collect pass and the ungated real pass can be compared
-/// directly on the exact same files - catches a future accidentally-
-/// skipped `Checker::check_program`/`check_function_impl` block that
-/// turns out to have a hidden side effect beyond pushing diagnostics,
-/// which a diagnostic-only assertion could miss.
-fn collect_property_assign_facts_with_mode(
-    project: &Project,
-    facts_only: bool,
-) -> PropertyAssignFacts {
-    let mut merged: PropertyAssignFacts = FxHashMap::default();
-    for path in project.files.keys() {
-        let Some(file) = project.files.get(path) else {
-            continue;
-        };
-        let mut checker = Checker::new(&project.registry).with_settings(&project.settings);
-        checker.set_facts_only(facts_only);
-        checker.check_program(&file.ast);
-        for (fqn, props) in checker.take_property_assign_facts() {
-            let entry = merged.entry(fqn).or_default();
-            for (prop, mut types) in props {
-                entry.entry(prop).or_default().append(&mut types);
-            }
+fn load(files: &[(&str, &str)]) -> Project {
+    let mut project = Project::new();
+    for (path, source) in files {
+        project.load_file(PathBuf::from(path), source).unwrap();
+    }
+    project.finish_loading();
+    project
+}
+
+/// The `property.unusedType` messages among `diagnostics`.
+fn messages(diagnostics: &[Diagnostic]) -> Vec<&str> {
+    diagnostics
+        .iter()
+        .filter(|d| *d.identifier == *"property.unusedType")
+        .map(|d| d.message.as_str())
+        .collect()
+}
+const TRAIT_WRITING_AN_INT: &str = r#"<?php
+    trait T {
+        public function set(): void {
+            $this->x = 1;
         }
     }
-    merged
+"#;
+
+const HOST_OF_T: &str = r#"<?php
+    class Foo {
+        use T;
+        /** @var int|string|null */
+        private $x;
+        public function clear(): void {
+            $this->x = null;
+        }
+    }
+"#;
+
+#[test]
+fn a_trait_file_left_out_of_the_checked_paths_still_contributes_its_writes() {
+    let project = load(&[("trait.php", TRAIT_WRITING_AN_INT), ("host.php", HOST_OF_T)]);
+    let host = PathBuf::from("host.php");
+    let results = project.check_paths(std::slice::from_ref(&host), &worker_pool());
+    assert_eq!(
+        messages(&results[&host]),
+        ["Foo::$x is never assigned string so it can be removed from the property type."]
+    );
 }
 
 #[test]
-fn facts_only_mode_agrees_with_the_full_pass_on_a_trait_donated_property_write() {
-    let mut project = Project::new();
-    project
-        .load_file(
-            PathBuf::from("trait.php"),
+fn a_single_file_check_reads_the_writes_of_its_classes_traits_in_other_files() {
+    let project = load(&[("trait.php", TRAIT_WRITING_AN_INT), ("host.php", HOST_OF_T)]);
+    assert_eq!(
+        messages(&project.check_file(Path::new("host.php"))),
+        ["Foo::$x is never assigned string so it can be removed from the property type."]
+    );
+}
+
+#[test]
+fn a_property_a_trait_declares_is_judged_against_every_hosts_writes() {
+    let project = load(&[
+        (
+            "trait.php",
             r#"<?php
                 trait T {
-                    public function set(): void {
-                        $this->x = 1;
-                        $this->x = "a";
-                    }
-                }
-            "#,
-        )
-        .unwrap();
-    project
-        .load_file(
-            PathBuf::from("host.php"),
-            r#"<?php
-                class Foo {
-                    use T;
-                    /** @var int|string */
+                    /** @var int|string|bool */
                     private $x;
                 }
             "#,
-        )
-        .unwrap();
-    project.finish_loading();
-
-    let facts_only = collect_property_assign_facts_with_mode(&project, true);
-    let full = collect_property_assign_facts_with_mode(&project, false);
+        ),
+        (
+            "a.php",
+            r#"<?php
+                class A {
+                    use T;
+                    public function set(): void { $this->x = 1; }
+                }
+            "#,
+        ),
+        (
+            "b.php",
+            r#"<?php
+                class B {
+                    use T;
+                    public function set(): void { $this->x = "b"; }
+                }
+            "#,
+        ),
+    ]);
+    let path = PathBuf::from("trait.php");
+    let results = project.check_paths(std::slice::from_ref(&path), &worker_pool());
     assert_eq!(
-        facts_only, full,
-        "facts_only=true and facts_only=false disagree on a trait-donated write"
-    );
-    assert!(
-        facts_only
-            .get("Foo")
-            .and_then(|props| props.get("x"))
-            .is_some_and(|types| types.len() == 2),
-        "expected both $this->x writes to be recorded, got: {facts_only:?}"
+        messages(&results[&path]),
+        ["T::$x is never assigned bool so it can be removed from the property type."]
     );
 }
 
 #[test]
-fn facts_only_mode_agrees_with_the_full_pass_on_a_pest_test_closures_property_write() {
-    // The file-local `uses(...)` (no `->in(...)`) override is read
-    // directly inside `check_program` itself, and `collect_property_
-    // assign_facts` constructs its Checker with no `set_pest_this_type`
-    // call beforehand (unlike the real pass) - this file-local override
-    // is the *only* source of Pest `$this`-type info the collect pass
-    // ever gets, so it must stay ungated in facts_only mode or every
-    // Pest test closure's own property writes would be silently lost.
-    let mut project = Project::new();
-    project.apply_settings(ProjectSettings {
-        extensions: crate::ext::ActiveExtensions {
-            pest: true,
-            ..Default::default()
-        },
-        ..ProjectSettings::default()
-    });
-    project
-        .load_file(
-            PathBuf::from("Bound.php"),
-            r#"<?php
-                class Bound {
-                    /** @var int|string */
-                    private $x;
-                }
-            "#,
-        )
-        .unwrap();
-    project
-        .load_file(
-            PathBuf::from("FooTest.php"),
-            r#"<?php
-                function it($description, $callback) {}
-                uses(Bound::class);
-                it('writes a property', function (): void {
+fn a_write_the_scope_may_not_make_assigns_nothing() {
+    let project = load(&[(
+        "a.php",
+        r#"<?php
+            class A {
+                /** @var int|string */
+                private $x;
+                public function set(): void { $this->x = 1; }
+            }
+            function outside(A $a): void {
+                $a->x = "a";
+            }
+        "#,
+    )]);
+    let found = project.check_file(Path::new("a.php"));
+    assert!(
+        messages(&found).contains(
+            &"A::$x is never assigned string so it can be removed from the property type."
+        ),
+        "{found:?}"
+    );
+}
+
+#[test]
+fn a_standalone_check_judges_a_host_declared_before_its_trait() {
+    let project = load(&[(
+        "a.php",
+        r#"<?php
+            class Foo {
+                use T;
+                /** @var int|string */
+                private $x;
+            }
+            trait T {
+                public function set(): void {
                     $this->x = 1;
                     $this->x = "a";
-                });
-            "#,
-        )
-        .unwrap();
-    project.finish_loading();
-
-    let facts_only = collect_property_assign_facts_with_mode(&project, true);
-    let full = collect_property_assign_facts_with_mode(&project, false);
-    assert_eq!(
-        facts_only, full,
-        "facts_only=true and facts_only=false disagree on a Pest test closure's property write"
-    );
+                }
+            }
+        "#,
+    )]);
+    let file = project.files.get(Path::new("a.php")).unwrap();
+    let mut checker = Checker::new(&project.registry).with_settings(&project.settings);
+    checker.check_program(&file.ast);
+    let found = checker.into_diagnostics();
     assert!(
-        facts_only
-            .get("Bound")
-            .and_then(|props| props.get("x"))
-            .is_some_and(|types| types.len() == 2),
-        "expected both $this->x writes inside the Pest closure to be recorded, got: {facts_only:?}"
+        !found
+            .iter()
+            .any(|d| *d.identifier == *"property.unusedType"),
+        "{found:?}"
     );
 }
 
 #[test]
-fn a_file_whose_facts_panic_costs_only_its_own_facts() {
-    let mut project = Project::new();
+fn a_file_whose_check_panics_costs_only_its_own_results() {
     let panicking = PathBuf::from("facts_panic_injected_a.php");
-    project
-        .load_file(
-            panicking.clone(),
+    let survivor = PathBuf::from("facts_panic_survivor_b.php");
+    let project = load(&[
+        (
+            "facts_panic_injected_a.php",
             r#"<?php
                 class A {
                     /** @var int|string */
@@ -150,11 +167,9 @@ fn a_file_whose_facts_panic_costs_only_its_own_facts() {
                     public function set(): void { $this->x = 1; }
                 }
             "#,
-        )
-        .unwrap();
-    project
-        .load_file(
-            PathBuf::from("facts_panic_survivor_b.php"),
+        ),
+        (
+            "facts_panic_survivor_b.php",
             r#"<?php
                 class B {
                     /** @var int|string */
@@ -162,12 +177,16 @@ fn a_file_whose_facts_panic_costs_only_its_own_facts() {
                     public function set(): void { $this->y = 1; }
                 }
             "#,
-        )
-        .unwrap();
-    project.finish_loading();
+        ),
+    ]);
     super::panic_injection::inject_panic(&panicking);
 
-    let facts = project.collect_property_assign_facts(&crate::project::worker_pool());
-    assert!(!facts.contains_key("A"), "facts: {facts:?}");
-    assert!(facts.contains_key("B"), "facts: {facts:?}");
+    let (results, panics) = project
+        .check_paths_isolating_panics(&[panicking.clone(), survivor.clone()], &worker_pool());
+    assert_eq!(panics.len(), 1, "{panics:?}");
+    assert_eq!(panics[0].0, panicking);
+    assert_eq!(
+        messages(&results[&survivor]),
+        ["B::$y is never assigned string so it can be removed from the property type."]
+    );
 }

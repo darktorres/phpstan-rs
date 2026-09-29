@@ -32,14 +32,14 @@ pub(crate) type NamedArgumentCallFacts = FxHashMap<(Name, Name, Name), Vec<Span>
 
 impl<'a> Checker<'a> {
     /// Drains this run's own `named_argument_call_facts`, which
-    /// `check_file_impl` returns with the file's other main-pass data.
+    /// `Project::run_checker` returns with the file's other main-pass data.
     pub(crate) fn take_named_argument_call_facts(&mut self) -> NamedArgumentCallFacts {
         std::mem::take(&mut self.named_argument_call_facts)
     }
 
     /// Called from `ExprKind::MethodCall`'s own resolved-receiver arm
-    /// (`checker/expr.rs`), once per real method call, regardless of
-    /// `facts_only` - every named argument this call uses against a
+    /// (`checker/expr.rs`), once per real method call - every named
+    /// argument this call uses against a
     /// genuinely overridable method is recorded, keyed by the method's
     /// real *declaring* class (`owner`, from `find_method_receiver`),
     /// not the receiver's own possibly-narrower static class - matching

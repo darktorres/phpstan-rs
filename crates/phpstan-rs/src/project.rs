@@ -14,12 +14,13 @@ use crate::pest_config::PestConfig;
 use crate::registry::stubs;
 use crate::registry::{BodySource, FileBodies, Origin, Provenance, Registry};
 use diagnostics::{self, Diagnostic, DiagnosticBuilder};
-use syntax::ast::{ClassKind, Stmt, StmtKind, Visibility};
+use syntax::ast::{Stmt, StmtKind};
 use syntax::declarations::Declared;
 use syntax::lexer::LexWarning;
 use syntax::name::Interner;
 use syntax::parser::ParseError;
 use syntax::token::Span;
+use types::Name;
 use whole_program::renamed_named_arguments::NamedArgumentCallFactsWithPath;
 
 mod architecture;
@@ -241,6 +242,52 @@ pub(crate) struct FileCheck {
     /// The `--dump-types` lines (`line:col [host] vars`, one per
     /// statement); empty unless requested.
     pub(crate) type_dump: Vec<String>,
+    /// The file's writes to private properties.
+    property_assign_facts: PropertyAssignFacts,
+    /// The file's private property types, until judged against the
+    /// writes of every file (`Project::judge_property_types`).
+    property_type_sites: Vec<checker::PropertyTypeSite>,
+}
+
+impl FileCheck {
+    fn empty() -> FileCheck {
+        FileCheck {
+            diagnostics: Vec::new(),
+            member_refs: Vec::new(),
+            escaped_enums: FxHashSet::default(),
+            escaped_member_classes: FxHashSet::default(),
+            named_argument_calls: FxHashMap::default(),
+            type_dump: Vec::new(),
+            property_assign_facts: FxHashMap::default(),
+            property_type_sites: Vec::new(),
+        }
+    }
+}
+
+/// What checking a file came to: its check, or the message it panicked
+/// with.
+pub(crate) type CheckOutcome = Result<FileCheck, String>;
+
+/// A panic payload's message.
+fn panic_message(payload: Box<dyn std::any::Any + Send>) -> String {
+    payload
+        .downcast_ref::<String>()
+        .cloned()
+        .or_else(|| payload.downcast_ref::<&str>().map(|s| s.to_string()))
+        .unwrap_or_else(|| "unknown panic".to_string())
+}
+
+/// `f` over `items`, in parallel on `pool` when there is one, the results
+/// in `items`' order.
+fn map_on_pool<T: Sync, R: Send>(
+    pool: Option<&rayon::ThreadPool>,
+    items: &[T],
+    f: impl Fn(&T) -> R + Sync + Send,
+) -> Vec<R> {
+    match pool {
+        Some(pool) => pool.install(|| items.par_iter().map(&f).collect()),
+        None => items.iter().map(f).collect(),
+    }
 }
 
 /// Everything a project is configured with, applied together
@@ -833,7 +880,7 @@ impl Project {
         }
         let paths: Vec<PathBuf> = self.files.keys().cloned().collect();
         for path in paths {
-            let check = self.check_file_impl(&path, None, true, false);
+            let check = self.run_checker(&path, true, false);
             self.seed_member_refs(
                 &path,
                 check.member_refs,
@@ -849,7 +896,7 @@ impl Project {
     /// cases`/`escaped_member_classes` - the per-file work `ensure_
     /// member_index_built`'s own loop body does above, factored out so
     /// `check-project`'s own primary pass can feed it data it already
-    /// computed inline (via `check_analysed_file`) instead of
+    /// computed inline (via `check_files`) instead of
     /// `ensure_member_index_built`
     /// re-deriving it via a second, redundant pass. Caller must call
     /// `mark_member_index_built` once every file has been seeded.
@@ -1210,16 +1257,12 @@ impl Project {
     }
 
     /// Type-checks one already-loaded file against the project's current
-    /// registry, returning its diagnostics. Same-file property-too-wide-
-    /// type facts only (see `Checker::cross_file_property_assign_facts`'s
-    /// own doc comment) - correct for incremental/LSP use (a single-file
-    /// re-check has no cheap way to also re-derive every other file's own
-    /// contribution), and for every caller that doesn't need the full
-    /// two-pass project-wide merge. `check_file_with_property_assign_facts`
-    /// is the batch counterpart that does.
+    /// registry, returning its diagnostics. Its private property types are
+    /// judged against the writes of every file making them - its own, and
+    /// those declaring its classes' traits (`check_files`).
     #[hotpath::measure]
     pub fn check_file(&self, path: &Path) -> Vec<Diagnostic> {
-        self.check_file_impl(path, None, false, false).diagnostics
+        self.check_one(path, false).diagnostics
     }
 
     /// The Tier-2 (member-reference) counterpart of `check_file` - the
@@ -1228,55 +1271,148 @@ impl Project {
     /// second, independent `Checker` pass over the same file. Only
     /// `update_file`'s own affected-file loop calls this, and only once
     /// `member_index_built` is true - see `ensure_member_index_built`'s
-    /// own doc comment for why a file's own use-sites have no cross-file
-    /// ordering dependency the way `property_assign_facts` does, so no
-    /// separate first pass is needed here the way it is there.
+    /// own doc comment.
     pub(crate) fn check_file_and_member_refs(
         &self,
         path: &Path,
     ) -> (Vec<Diagnostic>, Vec<(Span, String, String)>) {
-        let check = self.check_file_impl(path, None, true, false);
+        let check = self.check_one(path, true);
         (check.diagnostics, check.member_refs)
     }
 
-    /// The two-pass counterpart of `check_file` - `facts` is the whole-
-    /// project merge `collect_property_assign_facts` computed from a
-    /// prior pass over every loaded file, letting a trait-donated
-    /// property write discovered while checking a *different* file
-    /// reach this file's own `check_too_wide_property_types` call.
-    #[hotpath::measure]
-    pub fn check_file_with_property_assign_facts(
-        &self,
-        path: &Path,
-        facts: &Arc<PropertyAssignFacts>,
-    ) -> Vec<Diagnostic> {
-        self.check_file_impl(path, Some(facts), false, false)
-            .diagnostics
+    /// `check_files` for one file, whose panic propagates.
+    fn check_one(&self, path: &Path, collect_member_refs: bool) -> FileCheck {
+        let paths = [path.to_path_buf()];
+        let mut checks = self.check_files(&paths, None, collect_member_refs, false);
+        match checks.pop() {
+            Some((_, Ok(check))) => check,
+            Some((_, Err(message))) => panic!("{message}"),
+            None => FileCheck::empty(),
+        }
     }
 
-    /// The session's main-pass check of an analysed file, with the
-    /// project-wide property-assign `facts`: its diagnostics and the data
-    /// the whole-program checks read afterwards. With
-    /// `collect_member_refs`, the Tier-2 member-reference data too (fed to
-    /// `seed_member_refs`), so no second pass is needed for it; with
-    /// `dump_types`, the file's `--dump-types` lines.
-    pub(crate) fn check_analysed_file(
+    /// Checks `paths` (in parallel on `pool` when there is one), each
+    /// file's panic caught as its outcome. With `collect_member_refs`, the
+    /// Tier-2 member-reference data too (fed to `seed_member_refs`); with
+    /// `dump_types`, the file's `--dump-types` lines. The private property
+    /// types each file declares are judged once every file is checked,
+    /// against the writes all of them made plus those of any other file
+    /// writing the same properties (`judge_property_types`).
+    pub(crate) fn check_files(
         &self,
-        path: &Path,
-        facts: &Arc<PropertyAssignFacts>,
+        paths: &[PathBuf],
+        pool: Option<&rayon::ThreadPool>,
         collect_member_refs: bool,
         dump_types: bool,
-    ) -> FileCheck {
-        self.check_file_impl(path, Some(facts), collect_member_refs, dump_types)
+    ) -> Vec<(PathBuf, CheckOutcome)> {
+        let mut checks = map_on_pool(pool, paths, |path| {
+            let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                self.run_checker(path, collect_member_refs, dump_types)
+            }))
+            .map_err(panic_message);
+            (path.clone(), outcome)
+        });
+        self.judge_property_types(&mut checks, pool);
+        for (path, outcome) in &mut checks {
+            if let Ok(check) = outcome {
+                let diagnostics = std::mem::take(&mut check.diagnostics);
+                check.diagnostics = self.finish_diagnostics(path, diagnostics);
+            }
+        }
+        checks
+    }
+
+    /// Judges the private property types `checks` recorded against the
+    /// writes made in the scope of their classes: those in `checks`, and
+    /// those of the other files declaring one of those classes or a trait
+    /// they use (transitively), which are checked for their writes alone.
+    /// Facts merge in path order, so a union's member order doesn't
+    /// depend on scheduling. A file that panicked contributes nothing.
+    fn judge_property_types(
+        &self,
+        checks: &mut [(PathBuf, CheckOutcome)],
+        pool: Option<&rayon::ThreadPool>,
+    ) {
+        let mut writers: FxHashSet<Name> = FxHashSet::default();
+        for (_, outcome) in checks.iter() {
+            if let Ok(check) = outcome {
+                for site in &check.property_type_sites {
+                    writers.extend(site.writers().iter().cloned());
+                }
+            }
+        }
+        if writers.is_empty() {
+            return;
+        }
+        let mut scopes: FxHashSet<Name> = FxHashSet::default();
+        let mut stack: Vec<Name> = writers.iter().cloned().collect();
+        while let Some(class) = stack.pop() {
+            if let Some(info) = self.registry.classes.get(class.as_ref()) {
+                stack.extend(info.uses().iter().cloned());
+            }
+            scopes.insert(class);
+        }
+        let checked: FxHashSet<&PathBuf> = checks.iter().map(|(path, _)| path).collect();
+        let mut others: Vec<PathBuf> = self
+            .files
+            .iter()
+            .filter(|(path, file)| {
+                !checked.contains(path)
+                    && file
+                        .classes
+                        .iter()
+                        .any(|class| scopes.contains(class.as_str()))
+            })
+            .map(|(path, _)| path.clone())
+            .collect();
+        others.sort();
+        let other_facts = map_on_pool(pool, &others, |path| {
+            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                self.run_checker(path, false, false).property_assign_facts
+            }))
+            .ok()
+        });
+        let mut sources: Vec<(&PathBuf, PropertyAssignFacts)> = others
+            .iter()
+            .zip(other_facts)
+            .filter_map(|(path, facts)| Some((path, facts?)))
+            .collect();
+        for (path, outcome) in checks.iter_mut() {
+            if let Ok(check) = outcome {
+                sources.push((path, std::mem::take(&mut check.property_assign_facts)));
+            }
+        }
+        sources.sort_by(|a, b| a.0.cmp(b.0));
+        let mut merged: PropertyAssignFacts = FxHashMap::default();
+        for (_, facts) in sources {
+            for (class, props) in facts {
+                if !writers.contains(&class) {
+                    continue;
+                }
+                let entry = merged.entry(class).or_default();
+                for (prop, mut types) in props {
+                    entry.entry(prop).or_default().append(&mut types);
+                }
+            }
+        }
+        let relation = self.settings.rule_levels.relation(&self.registry);
+        for (_, outcome) in checks.iter_mut() {
+            if let Ok(check) = outcome {
+                let sites = std::mem::take(&mut check.property_type_sites);
+                check
+                    .diagnostics
+                    .extend(checker::check_too_wide_property_types(
+                        &sites, &merged, &relation,
+                    ));
+            }
+        }
     }
 
     /// A bare, un-run `Checker` for `path` plus its AST, for an LSP
     /// feature that needs to drive `check_program` itself with extra
     /// collection flags set first (e.g. `textDocument/inlayHint`'s
-    /// `collect_inlay_hints`) rather than through `check_file_impl`'s own
-    /// fixed diagnostic pipeline. Mirrors `check_file_impl`'s Pest
-    /// setup exactly, minus the cross-file property-assign-facts wiring (an LSP one-off request has no batch-wide
-    /// facts pass to plug in).
+    /// `collect_inlay_hints`) rather than through `check_files`'
+    /// fixed diagnostic pipeline. Mirrors `run_checker`'s setup exactly.
     pub(crate) fn checker_for(&self, path: &Path) -> Option<(Checker<'_>, &[Stmt])> {
         let file = self.files.get(path)?;
         let mut checker = Checker::new(&self.registry)
@@ -1306,47 +1442,39 @@ impl Project {
         checker.take_semantic_tokens()
     }
 
-    fn check_file_impl(
-        &self,
-        path: &Path,
-        cross_file_property_assign_facts: Option<&Arc<PropertyAssignFacts>>,
-        collect_member_refs: bool,
-        dump_types: bool,
-    ) -> FileCheck {
-        let Some(file) = self.files.get(path) else {
-            return FileCheck {
-                diagnostics: Vec::new(),
-                member_refs: Vec::new(),
-                escaped_enums: FxHashSet::default(),
-                escaped_member_classes: FxHashSet::default(),
-                named_argument_calls: FxHashMap::default(),
-                type_dump: Vec::new(),
-            };
+    /// Runs the checker over `path`, leaving its private property types
+    /// unjudged and its diagnostics unfiltered (`finish_diagnostics`).
+    fn run_checker(&self, path: &Path, collect_member_refs: bool, dump_types: bool) -> FileCheck {
+        #[cfg(test)]
+        tests::panic_injection::panic_if_injected(path);
+        let Some((mut checker, ast)) = self.checker_for(path) else {
+            return FileCheck::empty();
         };
-        let mut checker = Checker::new(&self.registry)
-            .with_sql(&self.sql)
-            .with_settings(&self.settings)
-            .with_bodies(&self.files);
-        checker.set_pest_this_type(self.pest_config.resolve_this_type(path, &self.registry));
-        checker.set_pest_hook_properties(self.pest_config.resolve_hook_properties(path));
-        checker.set_current_file(path);
-        checker.set_current_file_absolute(self.absolute_path(path));
-        checker.set_working_dir(self.working_dir.clone());
-        if let Some(facts) = cross_file_property_assign_facts {
-            checker.set_cross_file_property_assign_facts(Arc::clone(facts));
-        }
+        checker.set_defer_property_type_checks(true);
         checker.set_collect_member_refs(collect_member_refs);
         checker.set_dump_types(dump_types);
-        checker.check_program(&file.ast);
+        checker.check_program(ast);
         if collect_member_refs {
-            checker.collect_default_and_const_value_member_refs(&file.ast);
+            checker.collect_default_and_const_value_member_refs(ast);
         }
-        let member_refs = checker.take_member_ref_sites();
-        let escaped_enums = checker.take_escaped_enums();
-        let escaped_member_classes = checker.take_escaped_member_classes();
-        let named_argument_calls = checker.take_named_argument_call_facts();
-        let type_dump = checker.take_type_dump();
-        let mut diagnostics = checker.into_diagnostics();
+        FileCheck {
+            member_refs: checker.take_member_ref_sites(),
+            escaped_enums: checker.take_escaped_enums(),
+            escaped_member_classes: checker.take_escaped_member_classes(),
+            named_argument_calls: checker.take_named_argument_call_facts(),
+            type_dump: checker.take_type_dump(),
+            property_assign_facts: checker.take_property_assign_facts(),
+            property_type_sites: checker.take_property_type_sites(),
+            diagnostics: checker.into_diagnostics(),
+        }
+    }
+
+    /// `path`'s checker `diagnostics` with the project-level ones added,
+    /// sorted, and its inline ignore comments applied.
+    fn finish_diagnostics(&self, path: &Path, mut diagnostics: Vec<Diagnostic>) -> Vec<Diagnostic> {
+        let Some(file) = self.files.get(path) else {
+            return diagnostics;
+        };
         if self.settings.rules.check_duplicate_function_declarations {
             diagnostics.extend(duplicate_functions::check_duplicate_function_declarations(
                 path,
@@ -1414,14 +1542,7 @@ impl Project {
                         .is_some_and(|ids| ids.iter().any(|id| **id == *d.identifier))
             });
         }
-        FileCheck {
-            diagnostics,
-            member_refs,
-            escaped_enums,
-            escaped_member_classes,
-            named_argument_calls,
-            type_dump,
-        }
+        diagnostics
     }
 
     pub fn registry(&self) -> &Registry {
@@ -1455,167 +1576,36 @@ impl Project {
         out
     }
 
-    /// A file whose classes (including anonymous ones) can structurally
-    /// never contribute a `property_assign_facts` entry is safe to skip -
-    /// `Checker::check_property_assignment` only records a `$this->prop
-    /// = expr` write when `prop_sig.write_visibility ==
-    /// Visibility::Private` (see that function's own gate). Skipping such
-    /// a file lets `collect_property_assign_facts` avoid constructing a
-    /// `Checker` and running the full diagnostic-producing
-    /// `check_program` pass on it purely to discover nothing.
-    ///
-    /// Two things a naive "does this class declare a private property"
-    /// check would miss:
-    /// - Anonymous classes: checked via `file.anonymous_classes` too,
-    ///   not just `file.classes` - an anonymous class's own
-    ///   private-property writes are processed the same way during the
-    ///   same file's `check_program` walk (via `check_expr`'s
-    ///   `NewAnonymousClass` handling).
-    /// - Traits: a trait's own methods are re-checked once per *real
-    ///   host* that uses it (`Checker::check_trait_methods`), with that
-    ///   host's own class context - a `$this->prop = ...` write inside a
-    ///   trait method can assign to a *host's* private property even
-    ///   though the trait itself declares none. A file declaring a trait
-    ///   is only skippable if none of its (transitively resolved) real
-    ///   hosts have a private property either.
-    ///
-    /// `Registry::classes`' own `ClassReflection::properties` map is already
-    /// trait-flattened by the time this runs (`Project::finish_loading`
-    /// flattens traits before `collect_property_assign_facts` is ever
-    /// called), so a plain lookup here is sound.
-    fn file_may_write_private_property(&self, file: &FileState) -> bool {
-        fn has_private_property(info: &crate::registry::ClassReflection) -> bool {
-            info.properties()
-                .values()
-                .any(|p| p.write_visibility() == Visibility::Private)
-        }
-        let class_may_write = |name: &str| {
-            let Some(info) = self.registry.classes.get(name) else {
-                return false;
-            };
-            if has_private_property(info) {
-                return true;
-            }
-            info.kind() == ClassKind::Trait
-                && self.registry.classes_using_trait(name).iter().any(|host| {
-                    self.registry
-                        .classes
-                        .get(host)
-                        .is_some_and(has_private_property)
-                })
-        };
-        file.classes
-            .iter()
-            .chain(&file.anonymous_classes)
-            .any(|name| class_may_write(name))
-    }
-
-    /// The collect half of the two-pass (collect-then-consume) checking
-    /// architecture: runs the checker once over every currently-loaded
-    /// file that may write a private property, purely to gather
-    /// `Checker::property_assign_facts` (this pass's own diagnostics are
-    /// discarded - `check_file`/`check_file_with_property_assign_facts`
-    /// are the real, diagnostic-producing pass), then merges every file's
-    /// own per-fqn/per-property contribution into one whole-project map.
-    /// A trait re-checked once per host (`check_trait_methods`) already
-    /// attributes its own contribution to each host's real fqn (see
-    /// `property_assign_facts`'s own doc comment), so merging here needs
-    /// no extra trait-awareness of its own - just concatenating every
-    /// file's own per-key `Vec`.
-    ///
-    /// Files are checked in parallel on `pool` and merged in path order,
-    /// so the result doesn't depend on scheduling or on how the file map
-    /// was built. A file whose check panics contributes nothing; the
-    /// others keep their facts.
-    pub fn collect_property_assign_facts(&self, pool: &rayon::ThreadPool) -> PropertyAssignFacts {
-        let mut files: Vec<(&PathBuf, &FileState)> = self
-            .files
-            .iter()
-            .filter(|(_, file)| self.file_may_write_private_property(file))
-            .collect();
-        files.sort_by(|a, b| a.0.cmp(b.0));
-        let per_file: Vec<Option<PropertyAssignFacts>> = pool.install(|| {
-            files
-                .par_iter()
-                .map(|(path, file)| {
-                    std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                        self.file_property_assign_facts(path, file)
-                    }))
-                    .ok()
-                })
-                .collect()
-        });
-        let mut merged: PropertyAssignFacts = FxHashMap::default();
-        for facts in per_file.into_iter().flatten() {
-            for (fqn, props) in facts {
-                let entry = merged.entry(fqn).or_default();
-                for (prop, mut types) in props {
-                    entry.entry(prop).or_default().append(&mut types);
-                }
-            }
-        }
-        merged
-    }
-
-    /// One file's contribution to `collect_property_assign_facts`.
-    fn file_property_assign_facts(&self, path: &Path, file: &FileState) -> PropertyAssignFacts {
-        #[cfg(test)]
-        tests::panic_injection::panic_if_injected(path);
-        #[cfg(not(test))]
-        let _ = path;
-        let mut checker = Checker::new(&self.registry)
-            .with_sql(&self.sql)
-            .with_settings(&self.settings)
-            .with_bodies(&self.files);
-        checker.set_facts_only(true);
-        checker.check_program(&file.ast);
-        checker.take_property_assign_facts()
-    }
-
     /// Runs the checker over exactly `paths` (which must already be
-    /// loaded) - the two-pass `collect_property_assign_facts`-then-
-    /// `check_file_with_property_assign_facts` architecture `check_all`
-    /// uses, but scoped to a caller-chosen subset rather than every
-    /// loaded file. The facts pass itself still runs over every loaded
-    /// file regardless of `paths` (see `collect_property_assign_facts`'s
-    /// own doc comment for why: a trait-donated property write
-    /// discovered in a file outside `paths` must still reach a host
-    /// inside it). The facts pass runs on `pool`. Panic-transparent - a
-    /// real checker panic in `paths` propagates to the caller, which is
-    /// what a unit test wants; see `check_paths_isolating_panics` for the
-    /// batch-safe counterpart.
+    /// loaded), on `pool`. Panic-transparent - a real checker panic in
+    /// `paths` propagates to the caller, which is what a unit test wants;
+    /// see `check_paths_isolating_panics` for the batch-safe counterpart.
     pub fn check_paths(
         &self,
         paths: &[PathBuf],
         pool: &rayon::ThreadPool,
     ) -> FxHashMap<PathBuf, Vec<Diagnostic>> {
-        let facts = Arc::new(self.collect_property_assign_facts(pool));
-        paths
-            .iter()
-            .map(|path| {
-                (
-                    path.clone(),
-                    self.check_file_with_property_assign_facts(path, &facts),
-                )
+        self.check_files(paths, Some(pool), false, false)
+            .into_iter()
+            .map(|(path, outcome)| match outcome {
+                Ok(check) => (path, check.diagnostics),
+                Err(message) => panic!("checking {} panicked: {message}", path.display()),
             })
             .collect()
     }
 
-    /// Same as `check_paths`, but a panic while checking one file (or
-    /// while collecting property-assign facts) is caught and reported
-    /// rather than aborting every other file's result - mirrors
-    /// `main/check_project.rs`'s own catch_unwind-with-silenced-hook
-    /// pattern exactly, for the same reason: a whole-workspace pass runs
-    /// over uncurated code the caller doesn't control, where one file's
-    /// latent checker bug must not take down every other file's
-    /// diagnostics. `Registry.sql_reflector`'s only interior mutability is
+    /// Same as `check_paths`, but a panic while checking one file is
+    /// caught and reported rather than aborting every other file's
+    /// result, with the panic hook silenced meanwhile, since a
+    /// whole-workspace pass runs over uncurated code the caller doesn't
+    /// control, where one file's latent checker bug must not take down
+    /// every other file's diagnostics. `Registry.sql_reflector`'s only interior mutability is
     /// a plain `OnceLock` - if its lazy-init closure panics mid-connection
     /// attempt, the cell is left simply uninitialized (not corrupted;
     /// `OnceLock::get_or_init`'s own contract), so a later observer sees
     /// either "not yet initialized" or a real, valid reflector - never a
-    /// torn/partial one. `AssertUnwindSafe` here is that specific, checked
-    /// claim, not a blanket "trust me" (matches `check_project.rs`'s own
-    /// identical reasoning). The paths are checked in parallel on `pool`.
+    /// torn/partial one. `AssertUnwindSafe` in `check_files` is that
+    /// specific, checked claim, not a blanket "trust me".
     pub fn check_paths_isolating_panics(
         &self,
         paths: &[PathBuf],
@@ -1623,46 +1613,21 @@ impl Project {
     ) -> CheckPathsIsolatingPanics {
         let default_hook = std::panic::take_hook();
         std::panic::set_hook(Box::new(|_| {}));
-        let facts = Arc::new(self.collect_property_assign_facts(pool));
-        let outcomes = pool.install(|| self.check_paths_catching_panics(paths, &facts));
+        let outcomes = self.check_files(paths, Some(pool), false, false);
         std::panic::set_hook(default_hook);
 
         let mut results = FxHashMap::default();
         let mut panics = Vec::new();
         for (path, outcome) in outcomes {
             match outcome {
-                Ok(diagnostics) => {
-                    results.insert(path, diagnostics);
+                Ok(check) => {
+                    results.insert(path, check.diagnostics);
                 }
                 Err(msg) => panics.push((path, msg)),
             }
         }
         panics.sort();
         (results, panics)
-    }
-
-    /// `check_paths_isolating_panics`' per-path checks, run on its pool.
-    fn check_paths_catching_panics(
-        &self,
-        paths: &[PathBuf],
-        facts: &Arc<PropertyAssignFacts>,
-    ) -> Vec<(PathBuf, Result<Vec<Diagnostic>, String>)> {
-        paths
-            .par_iter()
-            .map(|path| {
-                let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                    self.check_file_with_property_assign_facts(path, facts)
-                }))
-                .map_err(|payload| {
-                    payload
-                        .downcast_ref::<String>()
-                        .cloned()
-                        .or_else(|| payload.downcast_ref::<&str>().map(|s| s.to_string()))
-                        .unwrap_or_else(|| "unknown panic".to_string())
-                });
-                (path.clone(), outcome)
-            })
-            .collect()
     }
 
     /// Runs the checker over every currently-loaded file, not just one -
@@ -1681,16 +1646,15 @@ impl Project {
     /// Resolves one whole-program finding's own reportable location and
     /// applies the same two things every per-file diagnostic already
     /// gets for free, that a diagnostic built entirely outside
-    /// `check_file_impl` would otherwise never see at all: "only report
+    /// `check_files` would otherwise never see at all: "only report
     /// first-party files, never vendor/context ones swept in only
     /// because the registry records every loaded file's declarations, analyzed or
     /// not" (a real bug on an earlier pass of this exact method - a
     /// vendor-only dead enum case used to create a brand new, never-
     /// otherwise-checked entry in `check-project`'s own `results` map),
     /// and `@phpstan-ignore-line`/`-next-line`/`@phpstan-ignore
-    /// <identifiers>` suppression (`check_file_impl`'s own identical
-    /// `retain` calls only ever run *inside* the per-file `Checker`
-    /// pass). `None` for an unloaded/context path, or one whose own
+    /// <identifiers>` suppression (`finish_diagnostics`' own identical
+    /// `retain` calls only ever see the per-file diagnostics). `None` for an unloaded/context path, or one whose own
     /// ignore-comment already covers `identifier` on `span`'s line.
     fn whole_program_diagnostic(
         &self,

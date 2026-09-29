@@ -1,6 +1,5 @@
 use rustc_hash::{FxHashMap, FxHashSet};
 use std::cell::{Cell, RefCell};
-use std::sync::Arc;
 use types::Name;
 
 use crate::pest_config;
@@ -231,8 +230,7 @@ pub(crate) type TemplateBindings = rustc_hash::FxHashMap<String, Type>;
 
 /// A private property's every discovered assigned type, keyed by
 /// (declaring class fqn, property name) - see `Checker::
-/// property_assign_facts`/`cross_file_property_assign_facts`'s own doc
-/// comments. Both keys are `Name`s; `Name: Borrow<str>` keeps every
+/// property_assign_facts`' own doc comment. Both keys are `Name`s; `Name: Borrow<str>` keeps every
 /// `&str` lookup/`.get()` call site unchanged.
 pub(crate) type PropertyAssignFacts = FxHashMap<Name, FxHashMap<Name, Vec<Type>>>;
 
@@ -572,37 +570,20 @@ pub struct Checker<'a> {
     // accepts an empty dim, since it creates the element.
     pub(crate) by_ref_empty_dim_args:
         std::cell::RefCell<rustc_hash::FxHashSet<syntax::token::Span>>,
-    // Every private property write's own assigned type, discovered
-    // anywhere in this file's own `check_program` run - keyed by
-    // (declaring class fqn, property name), never reset per-class:
-    // `check_trait_methods` re-checks a trait's own methods once per
-    // host with `current_class` set to that host, so a trait-donated
-    // property write's own contribution must accumulate under the
-    // host's fqn regardless of which `ClassDecl` node `check_program`
-    // happens to be visiting when it runs - a per-class reset would
-    // wipe out an earlier host's own entries the moment a *different*
-    // class starts being checked. Consumed by
-    // `check_too_wide_property_types`, this project's own
-    // `TooWideFunctionReturnTypehintRule`-equivalent for properties.
+    // The type of every legal write to a private property, keyed by the
+    // declaring class and the property. A trait's methods are checked once
+    // per host, so a write in one lands under the host's name.
     pub(crate) property_assign_facts: PropertyAssignFacts,
     // Named-argument call sites against overridable methods - see
     // `checker::named_argument_renames`'s module doc comment.
     pub(crate) named_argument_call_facts: NamedArgumentCallFacts,
-    // The project-wide merge of every file's own `property_assign_facts`
-    // - set via `set_cross_file_property_assign_facts` (by `Project::
-    // check_file`, from a first, fact-collecting pass over every loaded
-    // file) before `check_program` runs. `None` for a standalone
-    // `Checker` never wired through that two-pass orchestration (most
-    // unit tests): `check_too_wide_property_types` then falls back to
-    // this run's own same-file `property_assign_facts`, correct for the
-    // common case where a trait and the host using it are declared (and
-    // visited, in that order) in the one file being checked.
-    pub(crate) cross_file_property_assign_facts: Option<Arc<PropertyAssignFacts>>,
-    // When set, `check_program`/`check_function_impl` skip every
-    // diagnostic-only check that doesn't feed `property_assign_facts` -
-    // see `set_facts_only`'s own doc comment for why this exists and what
-    // stays unconditional regardless.
-    pub(crate) facts_only: bool,
+    // The classes whose private property types wait for every write to
+    // them to be known (`property_type_too_wide`).
+    pub(crate) property_type_sites: Vec<PropertyTypeSite>,
+    // Whether `check_program` leaves `property_type_sites` for its caller
+    // to judge against facts merged across files, instead of judging them
+    // against this run's own facts when it ends.
+    pub(crate) defer_property_type_checks: bool,
     // Every externally-registered `rule::Rule`, dispatched from
     // `check_expr`/`check_stmt`'s own thin wrappers - see `set_
     // external_rules`'s own doc comment. Empty (the default for every
@@ -941,6 +922,7 @@ pub(crate) use oop::{
     ATTRIBUTE_TARGET_METHOD, ATTRIBUTE_TARGET_PARAMETER, ATTRIBUTE_TARGET_PROPERTY,
 };
 pub(crate) use operators::binop_sigil;
+pub(crate) use property_type_too_wide::{PropertyTypeSite, check_too_wide_property_types};
 pub(crate) use semantic_tokens::UsageTokenKind;
 pub(crate) use throws::{body_contains_explicit_throw, expr_contains_explicit_throw};
 #[cfg(test)]
@@ -1057,8 +1039,8 @@ impl<'a> Checker<'a> {
             by_ref_empty_dim_args: Default::default(),
             property_assign_facts: FxHashMap::default(),
             named_argument_call_facts: FxHashMap::default(),
-            cross_file_property_assign_facts: None,
-            facts_only: false,
+            property_type_sites: Vec::new(),
+            defer_property_type_checks: false,
             external_rules: &[],
             loop_break_states: Vec::new(),
             loop_continue_states: Vec::new(),
@@ -1115,27 +1097,11 @@ impl<'a> Checker<'a> {
         self.current_file_absolute = Some(path);
     }
 
-    /// Seeds the whole-project merge of every file's own `property_
-    /// assign_facts`, computed by `Project`'s own collect pass before the
-    /// real, diagnostic-producing pass runs - see `cross_file_property_
-    /// assign_facts`'s own doc comment.
-    pub fn set_cross_file_property_assign_facts(&mut self, facts: Arc<PropertyAssignFacts>) {
-        self.cross_file_property_assign_facts = Some(facts);
-    }
-
-    /// Puts this `Checker` in "collect-only" mode: `check_program`/
-    /// `check_function_impl` skip every diagnostic-only check that
-    /// doesn't feed `property_assign_facts`, so `Project::collect_
-    /// property_assign_facts`'s throwaway per-file pass (whose only
-    /// purpose is harvesting that one fact, with every diagnostic it
-    /// would otherwise produce discarded) doesn't pay for computing
-    /// diagnostics nobody will ever read. The `check_function`/
-    /// `check_trait_methods` dispatch itself - the only path that
-    /// reaches `check_property_assignment` - and everything it needs
-    /// (`Locals` construction, the two Pest file-local overrides, name
-    /// resolution) always stay unconditional, in both modes.
-    pub fn set_facts_only(&mut self, facts_only: bool) {
-        self.facts_only = facts_only;
+    /// Leaves the private property type checks to the caller, who takes
+    /// them with `take_property_type_sites` and judges them against the
+    /// facts of every file that writes those properties.
+    pub(crate) fn set_defer_property_type_checks(&mut self, defer: bool) {
+        self.defer_property_type_checks = defer;
     }
 
     /// Registers every third-party `rule::Rule` this `Checker` should
@@ -1151,11 +1117,7 @@ impl<'a> Checker<'a> {
         self.external_rules = rules;
     }
 
-    /// This run's own `property_assign_facts` - the collect half of the
-    /// two-pass architecture reads this back out of a finished `Checker`
-    /// (one per file) to build the project-wide merge every other file's
-    /// own real pass then consumes via `set_cross_file_property_assign_
-    /// facts`.
+    /// This run's `property_assign_facts`.
     pub fn take_property_assign_facts(&mut self) -> PropertyAssignFacts {
         std::mem::take(&mut self.property_assign_facts)
     }
@@ -1416,26 +1378,21 @@ impl<'a> Checker<'a> {
                 Vec::new()
             };
         self.constant_facts = global_constants::constant_facts(program);
-        if !self.facts_only {
-            if self.current_file.is_some() {
-                self.include_constant_initializers = includes::file_constant_initializers(program);
-                (self.include_guarded_paths, self.include_path_dirs) =
-                    self.collect_include_guards(program);
-            }
-            self.check_declare_directives(program);
-            self.check_file_whitespace(program);
-            self.check_statement_keywords(program);
+        if self.current_file.is_some() {
+            self.include_constant_initializers = includes::file_constant_initializers(program);
+            (self.include_guarded_paths, self.include_path_dirs) =
+                self.collect_include_guards(program);
         }
-        if !self.facts_only {
-            self.check_use_function_imports(program);
-            self.check_use_const_imports(program);
-            self.check_use_class_imports(program);
-            self.check_used_names(program);
-            let (rebind_targets, rebind_escape_all) =
-                unused::scan_program_for_rebind_targets(program);
-            self.rebind_target_classes = rebind_targets;
-            self.rebind_escape_all = rebind_escape_all;
-        }
+        self.check_declare_directives(program);
+        self.check_file_whitespace(program);
+        self.check_statement_keywords(program);
+        self.check_use_function_imports(program);
+        self.check_use_const_imports(program);
+        self.check_use_class_imports(program);
+        self.check_used_names(program);
+        let (rebind_targets, rebind_escape_all) = unused::scan_program_for_rebind_targets(program);
+        self.rebind_target_classes = rebind_targets;
+        self.rebind_escape_all = rebind_escape_all;
         // A file-local `uses(...)` call (no `->in(...)`) wins over
         // whatever `Project::check_file` already set via
         // `set_pest_this_type` from directory-scoped Pest.php config -
@@ -1469,9 +1426,7 @@ impl<'a> Checker<'a> {
         // namespace against a later one.
         self.name_ctx = NameContext::default();
         for stmt in program {
-            if !self.facts_only {
-                self.check_function_like_declarations_in_stmt(stmt);
-            }
+            self.check_function_like_declarations_in_stmt(stmt);
             match &stmt.kind {
                 StmtKind::Namespace(name) => self.name_ctx.set_namespace(name),
                 StmtKind::Use(imports) => self.name_ctx.add_uses(imports),
@@ -1485,149 +1440,143 @@ impl<'a> Checker<'a> {
                     // FQN-keyed.
                     let fqn = c.fq_name().to_string();
                     let is_enum = c.def.kind == ClassKind::Enum;
-                    if !self.facts_only {
-                        if is_enum {
-                            self.check_enum_template_tag(&fqn, &c.def);
-                            self.check_enum_case_values(&fqn, &c.def);
-                            self.check_enum_sanity(&fqn, c);
-                        } else {
-                            self.check_enum_cases_outside_enum(&c.def.enum_cases);
-                        }
-                        self.check_class_generic_bounds(&fqn, c);
-                        let description = match c.def.kind {
-                            ClassKind::Interface => Some("an interface"),
-                            ClassKind::Trait => None,
-                            ClassKind::Enum => Some("an enum"),
-                            ClassKind::Class => Some("a class"),
-                        };
-                        if let Some(description) = description {
-                            self.check_misplaced_var_tag(
-                                c.def.doc_comment.as_deref(),
-                                description,
-                                c.name.span,
-                            );
-                        }
-                        self.check_class_completeness(&fqn, c.def.span);
-                        self.check_inheritance_target_kinds(&fqn, false, c.def.span);
-                        self.check_readonly_class_version(c.def.is_readonly, false, c.name.span);
-                        self.check_magic_serialization_methods(&fqn, &fqn, c.name.span);
-                        self.check_class_references_exist(&fqn, c.def.span);
-                        self.check_internal_inheritance(&fqn, c.def.kind, c.def.span);
-                        self.check_restricted_class_inheritance(&fqn, c.def.span);
-                        for name in c
-                            .def
-                            .extends
-                            .iter()
-                            .chain(&c.def.implements)
-                            .chain(c.def.used_traits())
-                        {
-                            self.check_class_name_case(name);
-                        }
-                        self.check_method_tag_types(&fqn, c.def.span);
-                        self.check_method_tag_templates(
-                            &fqn,
+                    if is_enum {
+                        self.check_enum_template_tag(&fqn, &c.def);
+                        self.check_enum_case_values(&fqn, &c.def);
+                        self.check_enum_sanity(&fqn, c);
+                    } else {
+                        self.check_enum_cases_outside_enum(&c.def.enum_cases);
+                    }
+                    self.check_class_generic_bounds(&fqn, c);
+                    let description = match c.def.kind {
+                        ClassKind::Interface => Some("an interface"),
+                        ClassKind::Trait => None,
+                        ClassKind::Enum => Some("an enum"),
+                        ClassKind::Class => Some("a class"),
+                    };
+                    if let Some(description) = description {
+                        self.check_misplaced_var_tag(
                             c.def.doc_comment.as_deref(),
-                            c.def.span,
+                            description,
+                            c.name.span,
                         );
-                        self.check_mixin_types(&fqn, c.def.span);
-                        self.check_type_alias_types(&fqn, c.def.span);
-                        self.check_method_overrides(&fqn, c);
-                        self.check_property_overrides(&fqn, &c.def);
-                        self.check_require_tags(&fqn, c.def.span);
-                        self.check_require_tag_types(&c.def);
-                        self.check_sealed_hierarchy(&fqn, c.def.span);
-                        self.check_sealed_tag_types(&c.def);
-                        self.check_unknown_phpstan_tags_in_class(c);
-                        if self.settings.sidz.check_magic_numbers {
-                            self.check_magic_numbers_in_properties(&c.def.properties);
-                        }
-                        self.check_property_hooks(&fqn, &c.def);
-                        self.check_property_variances(&fqn, &c.def);
-                        self.check_trait_conflicts(&fqn, c.def.span);
-                        self.check_uninitialized_properties(&fqn, c);
-                        self.check_default_property_types(&fqn, &c.def);
-                        self.check_premature_property_access(&fqn, c);
-                        self.check_duplicate_class_members(&fqn, &c.def);
-                        if self.settings.phpunit.check_risky_tests {
-                            self.check_risky_test_methods(&fqn, &c.def);
-                        }
-                        self.check_method_declaration_sanity(
-                            &fqn,
-                            c.def.kind,
-                            c.def.is_abstract,
-                            &c.def.methods,
+                    }
+                    self.check_class_completeness(&fqn, c.def.span);
+                    self.check_inheritance_target_kinds(&fqn, false, c.def.span);
+                    self.check_readonly_class_version(c.def.is_readonly, false, c.name.span);
+                    self.check_magic_serialization_methods(&fqn, &fqn, c.name.span);
+                    self.check_class_references_exist(&fqn, c.def.span);
+                    self.check_internal_inheritance(&fqn, c.def.kind, c.def.span);
+                    self.check_restricted_class_inheritance(&fqn, c.def.span);
+                    for name in c
+                        .def
+                        .extends
+                        .iter()
+                        .chain(&c.def.implements)
+                        .chain(c.def.used_traits())
+                    {
+                        self.check_class_name_case(name);
+                    }
+                    self.check_method_tag_types(&fqn, c.def.span);
+                    self.check_method_tag_templates(&fqn, c.def.doc_comment.as_deref(), c.def.span);
+                    self.check_mixin_types(&fqn, c.def.span);
+                    self.check_type_alias_types(&fqn, c.def.span);
+                    self.check_method_overrides(&fqn, c);
+                    self.check_property_overrides(&fqn, &c.def);
+                    self.check_require_tags(&fqn, c.def.span);
+                    self.check_require_tag_types(&c.def);
+                    self.check_sealed_hierarchy(&fqn, c.def.span);
+                    self.check_sealed_tag_types(&c.def);
+                    self.check_unknown_phpstan_tags_in_class(c);
+                    if self.settings.sidz.check_magic_numbers {
+                        self.check_magic_numbers_in_properties(&c.def.properties);
+                    }
+                    self.check_property_hooks(&fqn, &c.def);
+                    self.check_property_variances(&fqn, &c.def);
+                    self.check_trait_conflicts(&fqn, c.def.span);
+                    self.check_uninitialized_properties(&fqn, c);
+                    self.check_default_property_types(&fqn, &c.def);
+                    self.check_premature_property_access(&fqn, c);
+                    self.check_duplicate_class_members(&fqn, &c.def);
+                    if self.settings.phpunit.check_risky_tests {
+                        self.check_risky_test_methods(&fqn, &c.def);
+                    }
+                    self.check_method_declaration_sanity(
+                        &fqn,
+                        c.def.kind,
+                        c.def.is_abstract,
+                        &c.def.methods,
+                    );
+                    self.check_property_declarations(
+                        &fqn,
+                        &fqn,
+                        c.def.kind,
+                        c.def.is_abstract,
+                        &c.def.properties,
+                        &c.def.methods,
+                    );
+                    self.check_reserved_class_constant_name(&c.def.consts);
+                    self.check_typed_class_constant_values(&fqn, &c.def.consts);
+                    self.check_class_constant_modifiers(&fqn, c.def.kind, &c.def.consts);
+                    self.check_constant_overrides(&fqn, &c.def.consts);
+                    self.check_trait_constant_conflicts(&fqn, &c.def.consts);
+                    // The class's own attributes, plus every property's/
+                    // const's - method/param attributes are checked
+                    // per-declaration inside `check_function` below
+                    // instead, the one place that runs for every method
+                    // regardless of how it's reached (a direct method
+                    // here, or via `check_trait_methods`'s per-host loop
+                    // for a trait).
+                    self.check_attributes(&c.def.attrs, &fqn);
+                    self.check_attribute_targets(&c.def.attrs, ATTRIBUTE_TARGET_CLASS, "class");
+                    self.check_self_attribute_class_declaration(
+                        &c.def.attrs,
+                        &fqn,
+                        c.def.kind,
+                        c.def.is_abstract,
+                    );
+                    self.check_class_like_marker_attributes(
+                        &c.def.attrs,
+                        c.def.kind,
+                        c.def.is_readonly,
+                        &fqn,
+                    );
+                    for p in &c.def.properties {
+                        self.check_attributes(&p.attrs, &fqn);
+                        self.check_attribute_targets(
+                            &p.attrs,
+                            ATTRIBUTE_TARGET_PROPERTY,
+                            "property",
                         );
-                        self.check_property_declarations(
-                            &fqn,
-                            &fqn,
-                            c.def.kind,
-                            c.def.is_abstract,
-                            &c.def.properties,
-                            &c.def.methods,
+                    }
+                    for case in &c.def.enum_cases {
+                        self.check_attributes(&case.attrs, &fqn);
+                        self.check_attribute_targets(
+                            &case.attrs,
+                            ATTRIBUTE_TARGET_CLASS_CONSTANT,
+                            "class constant",
                         );
-                        self.check_reserved_class_constant_name(&c.def.consts);
-                        self.check_typed_class_constant_values(&fqn, &c.def.consts);
-                        self.check_class_constant_modifiers(&fqn, c.def.kind, &c.def.consts);
-                        self.check_constant_overrides(&fqn, &c.def.consts);
-                        self.check_trait_constant_conflicts(&fqn, &c.def.consts);
-                        // The class's own attributes, plus every property's/
-                        // const's - method/param attributes are checked
-                        // per-declaration inside `check_function` below
-                        // instead, the one place that runs for every method
-                        // regardless of how it's reached (a direct method
-                        // here, or via `check_trait_methods`'s per-host loop
-                        // for a trait).
-                        self.check_attributes(&c.def.attrs, &fqn);
-                        self.check_attribute_targets(&c.def.attrs, ATTRIBUTE_TARGET_CLASS, "class");
-                        self.check_self_attribute_class_declaration(
-                            &c.def.attrs,
-                            &fqn,
-                            c.def.kind,
-                            c.def.is_abstract,
+                    }
+                    for cc in &c.def.consts {
+                        self.check_attributes(&cc.attrs, &fqn);
+                        self.check_attribute_targets(
+                            &cc.attrs,
+                            ATTRIBUTE_TARGET_CLASS_CONSTANT,
+                            "class constant",
                         );
-                        self.check_class_like_marker_attributes(
-                            &c.def.attrs,
-                            c.def.kind,
-                            c.def.is_readonly,
-                            &fqn,
-                        );
-                        for p in &c.def.properties {
-                            self.check_attributes(&p.attrs, &fqn);
-                            self.check_attribute_targets(
-                                &p.attrs,
-                                ATTRIBUTE_TARGET_PROPERTY,
-                                "property",
-                            );
-                        }
-                        for case in &c.def.enum_cases {
-                            self.check_attributes(&case.attrs, &fqn);
-                            self.check_attribute_targets(
-                                &case.attrs,
-                                ATTRIBUTE_TARGET_CLASS_CONSTANT,
-                                "class constant",
-                            );
-                        }
-                        for cc in &c.def.consts {
-                            self.check_attributes(&cc.attrs, &fqn);
-                            self.check_attribute_targets(
-                                &cc.attrs,
-                                ATTRIBUTE_TARGET_CLASS_CONSTANT,
-                                "class constant",
-                            );
-                        }
-                        // A property/const's missing-typehint completeness is
-                        // about where it's textually declared, not which
-                        // class(es) end up using it - so it's checked once
-                        // here, regardless of trait-ness, unlike
-                        // `check_function` below, which runs once per host for
-                        // a trait's methods (a method's `$this`-dependent body
-                        // needs a real host; a property/const's declared type
-                        // never does).
-                        self.check_missing_property_typehints(&fqn, &c.def.properties);
-                        self.check_missing_class_constant_typehints(&fqn, &c.def.consts);
-                        if self.settings.extras.check_native_type_hints {
-                            self.check_native_class_constant_types(&fqn, &c.def.consts);
-                        }
+                    }
+                    // A property/const's missing-typehint completeness is
+                    // about where it's textually declared, not which
+                    // class(es) end up using it - so it's checked once
+                    // here, regardless of trait-ness, unlike
+                    // `check_function` below, which runs once per host for
+                    // a trait's methods (a method's `$this`-dependent body
+                    // needs a real host; a property/const's declared type
+                    // never does).
+                    self.check_missing_property_typehints(&fqn, &c.def.properties);
+                    self.check_missing_class_constant_typehints(&fqn, &c.def.consts);
+                    if self.settings.extras.check_native_type_hints {
+                        self.check_native_class_constant_types(&fqn, &c.def.consts);
                     }
                     if c.def.kind == ClassKind::Trait {
                         self.check_trait_methods(&fqn, c);
@@ -1645,19 +1594,17 @@ impl<'a> Checker<'a> {
                         // check_function's per-body checks - "was this
                         // ever referenced" needs every one of the class's
                         // bodies scanned together, not one at a time.
-                        if !self.facts_only {
-                            self.check_unused_private_members(
-                                &fqn,
-                                c.def.kind,
-                                &c.def.methods,
-                                &c.def.properties,
-                                &c.def.consts,
-                            );
-                            self.check_too_wide_property_types(&fqn, &c.def);
-                            self.check_parent_constructor_call(&fqn, &c.def);
-                            self.check_class_access_attributes(&fqn, c);
-                            self.check_promoted_property_candidate(&fqn, &c.def);
-                        }
+                        self.check_unused_private_members(
+                            &fqn,
+                            c.def.kind,
+                            &c.def.methods,
+                            &c.def.properties,
+                            &c.def.consts,
+                        );
+                        self.record_property_type_site(&fqn, vec![Name::from(&fqn)], &c.def);
+                        self.check_parent_constructor_call(&fqn, &c.def);
+                        self.check_class_access_attributes(&fqn, c);
+                        self.check_promoted_property_candidate(&fqn, &c.def);
                     }
                 }
                 // Top-level script statements share one scope across the
@@ -1668,7 +1615,17 @@ impl<'a> Checker<'a> {
         }
         if self.saw_dynamic_var_construct {
             self.diagnostics.truncate(diagnostics_before);
+            self.property_type_sites.clear();
             self.saw_dynamic_var_construct = false;
+        }
+        if !self.defer_property_type_checks {
+            let sites = std::mem::take(&mut self.property_type_sites);
+            let found = check_too_wide_property_types(
+                &sites,
+                &self.property_assign_facts,
+                &self.relation(),
+            );
+            self.diagnostics.extend(found);
         }
     }
 }

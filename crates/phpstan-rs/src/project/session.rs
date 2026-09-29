@@ -30,7 +30,7 @@ use crate::rules_settings::RulesSettings;
 use crate::{ext, ignore_errors};
 
 use super::whole_program::renamed_named_arguments::merge_named_argument_calls;
-use super::{FileCheck, ParsedFile, Project, ProjectSettings};
+use super::{ParsedFile, Project, ProjectSettings};
 use diagnostics::{self, Diagnostic};
 
 /// The level reported when neither the command line nor the config sets
@@ -696,33 +696,14 @@ impl Session {
             lex_warnings,
         } = loaded;
 
-        let property_assign_facts = Arc::new(project.collect_property_assign_facts(&self.pool));
-        type CheckOutcome = Result<FileCheck, String>;
         let needs_tier_2 =
             self.settings.rules.check_dead_enum_cases || self.settings.rules.check_dead_members;
-        let checked_results: Vec<(PathBuf, CheckOutcome)> = self.pool.install(|| {
-            analyze_files_by_size
-                .par_iter()
-                .map(|path| {
-                    let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                        project.check_analysed_file(
-                            path,
-                            &property_assign_facts,
-                            needs_tier_2,
-                            dump_types,
-                        )
-                    }));
-                    let outcome = outcome.map_err(|payload| {
-                        payload
-                            .downcast_ref::<String>()
-                            .cloned()
-                            .or_else(|| payload.downcast_ref::<&str>().map(|s| s.to_string()))
-                            .unwrap_or_else(|| "unknown panic".to_string())
-                    });
-                    (path.clone(), outcome)
-                })
-                .collect()
-        });
+        let checked_results = project.check_files(
+            &analyze_files_by_size,
+            Some(&self.pool),
+            needs_tier_2,
+            dump_types,
+        );
 
         let mut results: FxHashMap<PathBuf, Vec<Diagnostic>> = FxHashMap::default();
         let mut check_panics: Vec<(PathBuf, String)> = Vec::new();

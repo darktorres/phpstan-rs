@@ -975,9 +975,6 @@ impl<'a> Checker<'a> {
     /// this very declaration's `extends`/`implements`/`use` lists, since
     /// conditional duplicate declarations share one entry.
     pub(crate) fn check_nested_class_declaration(&mut self, fqn: &str, c: &ClassDecl) {
-        if self.facts_only {
-            return;
-        }
         self.check_readonly_class_version(c.def.is_readonly, false, c.name.span);
         self.check_method_declaration_sanity(fqn, c.def.kind, c.def.is_abstract, &c.def.methods);
         self.check_property_declarations(
