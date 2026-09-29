@@ -56,9 +56,14 @@ pub(crate) fn key_of(ty: &Type) -> Option<Type> {
     match ty {
         Type(Repr::Mixed(_)) => Some(Type::mixed()),
         Type(Repr::Array(key, _)) => Some((**key).clone()),
-        Type(Repr::ArrayShape(shape)) => {
-            Some(join(shape.fields.iter().map(|f| f.key.to_type()).collect()))
-        }
+        Type(Repr::ArrayShape(shape)) => Some(join(
+            shape
+                .fields
+                .iter()
+                .map(|f| f.key.to_type())
+                .chain(shape.unsealed.as_deref().map(|tail| tail.0.clone()))
+                .collect(),
+        )),
         Type(Repr::Intersection(members)) => members.iter().find_map(key_of),
         Type(Repr::Union(members)) => members.iter().map(key_of).collect::<Option<_>>().map(join),
         _ => None,
@@ -71,9 +76,7 @@ pub(crate) fn value_of(ty: &Type) -> Option<Type> {
     match ty {
         Type(Repr::Mixed(_)) => Some(Type::mixed()),
         Type(Repr::Array(_, value)) => Some((**value).clone()),
-        Type(Repr::ArrayShape(shape)) => {
-            Some(join(shape.fields.iter().map(|f| f.ty.clone()).collect()))
-        }
+        Type(Repr::ArrayShape(shape)) => Some(join(shape.types().cloned().collect())),
         Type(Repr::Intersection(members)) => members.iter().find_map(value_of),
         Type(Repr::Union(members)) => members
             .iter()
@@ -89,10 +92,12 @@ pub(crate) fn value_of(ty: &Type) -> Option<Type> {
 /// `base`, gives `Mixed`; `None` when `base` isn't known yet.
 pub(crate) fn offset_access(base: &Type, key: &Type) -> Option<Type> {
     syntax::stack::guard(|| match base {
+        // A key the shape doesn't list is its unsealed tail's.
         Type(Repr::ArrayShape(shape)) | Type(Repr::ObjectShape(shape)) => Some(
             ShapeKey::from_type(key)
                 .and_then(|key| shape.field(&key))
                 .map(|field| field.ty.clone())
+                .or_else(|| shape.unsealed.as_deref().map(|tail| tail.1.clone()))
                 .unwrap_or(Type::mixed()),
         ),
         Type(Repr::Array(_, value)) => Some((**value).clone()),

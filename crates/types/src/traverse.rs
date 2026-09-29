@@ -2,7 +2,7 @@
 
 use std::sync::Arc;
 
-use crate::{CallableParam, CallableSig, Repr, Type};
+use crate::{CallableParam, CallableSig, Repr, Shape, ShapeField, TemplateParam, Type};
 
 impl Type {
     /// This type with `f` applied to each directly nested type (generic
@@ -13,8 +13,9 @@ impl Type {
         syntax::stack::guard(|| match self {
             Type(Repr::Array(k, v)) => Type::array(f(k), f(v)),
             Type(Repr::ClassString(inner)) => Type::class_string(f(inner)),
-            Type(Repr::ArrayShape(shape)) => Type::array_shape(shape.map_types(f)),
-            Type(Repr::ObjectShape(shape)) => Type::object_shape(shape.map_types(f)),
+            Type(Repr::ArrayShape(shape)) => Type::array_shape(map_shape(shape, f)),
+            Type(Repr::ObjectShape(shape)) => Type::object_shape(map_shape(shape, f)),
+            Type(Repr::TemplateParam(tp)) => Type::template_param(map_template(tp, f)),
             Type(Repr::Object(name, args)) => {
                 Type::object(name.clone(), args.iter().map(&mut *f).collect())
             }
@@ -30,7 +31,7 @@ impl Type {
                     })
                     .collect(),
                 return_type: Box::new(f(&sig.return_type)),
-                templates: sig.templates.clone(),
+                templates: sig.templates.iter().map(|tp| map_template(tp, f)).collect(),
             }))),
             Type(Repr::VarianceArg(variance, inner)) => Type::variance_arg(*variance, f(inner)),
             Type(Repr::Union(ms)) => Type(Repr::Union(ms.iter().map(&mut *f).collect())),
@@ -90,8 +91,15 @@ impl Type {
                 f(key);
             }
             Type(Repr::ArrayShape(shape)) | Type(Repr::ObjectShape(shape)) => {
-                shape.types().for_each(f)
+                for field in &shape.fields {
+                    f(&field.ty);
+                }
+                if let Some((key, value)) = shape.unsealed.as_deref() {
+                    f(key);
+                    f(value);
+                }
             }
+            Type(Repr::TemplateParam(tp)) => template_children(tp, f),
             Type(Repr::Object(_, args))
             | Type(Repr::SelfRef(args))
             | Type(Repr::StaticRef(args)) => args.iter().for_each(f),
@@ -100,6 +108,9 @@ impl Type {
                     f(&p.ty);
                 }
                 f(&sig.return_type);
+                for tp in &sig.templates {
+                    template_children(tp, f);
+                }
             }
             Type(Repr::Union(ms))
             | Type(Repr::BenevolentUnion(ms))
@@ -123,5 +134,38 @@ impl Type {
         let mut found = false;
         self.for_each_child(&mut |t| found = found || f(t));
         found
+    }
+}
+
+/// A shape with `f` applied to each field's type and to its unsealed
+/// tail's key and value types.
+fn map_shape(shape: &Shape, f: &mut impl FnMut(&Type) -> Type) -> Shape {
+    Shape {
+        fields: shape
+            .fields
+            .iter()
+            .map(|field| ShapeField::new(field.key.clone(), f(&field.ty), field.optional))
+            .collect(),
+        unsealed: shape
+            .unsealed
+            .as_deref()
+            .map(|(key, value)| Box::new((f(key), f(value)))),
+    }
+}
+
+/// A template with `f` applied to its bound and default.
+fn map_template(tp: &TemplateParam, f: &mut impl FnMut(&Type) -> Type) -> TemplateParam {
+    TemplateParam {
+        bound: Box::new(f(&tp.bound)),
+        default: tp.default.as_deref().map(|d| Box::new(f(d))),
+        ..tp.clone()
+    }
+}
+
+/// A template's bound and default.
+fn template_children<'t>(tp: &'t TemplateParam, f: &mut impl FnMut(&'t Type)) {
+    f(&tp.bound);
+    if let Some(default) = tp.default.as_deref() {
+        f(default);
     }
 }
