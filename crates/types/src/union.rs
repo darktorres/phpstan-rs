@@ -210,6 +210,9 @@ fn union_types_impl(a: Type, b: Type) -> Type {
             members = widen_extension_types(members);
         }
         if members.len() > MAX_UNION_MEMBERS {
+            members = generalize_members(members);
+        }
+        if members.len() > MAX_UNION_MEMBERS {
             return Type::mixed();
         }
         if members.len() == 1 {
@@ -289,6 +292,24 @@ pub(crate) fn merge_int_ranges(members: &mut Vec<Type>) {
         index += 1;
         keep
     });
+}
+
+/// The union cap's third fallback: each member generalized (a literal to
+/// its base type, a range to `int`, a shape to a general array), then
+/// merged again - thirteen string literals are `string`, not `mixed`.
+fn generalize_members(members: Vec<Type>) -> Vec<Type> {
+    let mut generalized: Vec<Type> = Vec::new();
+    for m in members {
+        let m = m.generalize();
+        if !generalized.contains(&m) {
+            generalized.push(m);
+        }
+    }
+    if generalized.contains(&Type::bool()) {
+        generalized.retain(|m| !matches!(m, Type(Repr::True) | Type(Repr::False)));
+    }
+    reduce_array_members(&mut generalized);
+    generalized
 }
 
 /// The union cap's second fallback: each extension payload widened the
