@@ -1,2 +1,4 @@
 2:13-4:14 missingType.return L6 | Function test() has no return type specified.
 2:27-2:29 missingType.parameter L6 | Function test() has parameter $x with no type specified.
+3:22-3:31 cast.real L0 | The (real) cast has been removed, use (float) instead.
+    non-ignorable
