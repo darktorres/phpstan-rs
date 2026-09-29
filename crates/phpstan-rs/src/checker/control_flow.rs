@@ -313,9 +313,14 @@ impl<'a> Checker<'a> {
         zero_iterations: LoopZeroIterations<'_>,
         mut run_pass: impl FnMut(&mut Self, &mut Locals, Option<&Type>, &str, usize),
     ) -> (Locals, Vec<Locals>) {
-        // No early widening happens per pass here, unlike PHPStan's own
-        // Scope, so a higher cap costs more compute but never precision.
+        // A variable still changing after `WIDEN_FROM_PASS` passes (a
+        // counter, a string built up, an array grown key by key) is
+        // widened so the next pass can converge - an int only on the side
+        // it's moving, anything else to its general type; its literal values
+        // would otherwise run out the passes and leave the exit state
+        // short of what later iterations produce.
         const MAX_PASSES: usize = 6;
+        const WIDEN_FROM_PASS: usize = 2;
         let mut pass_entry = entry.clone();
         for pass in 0..MAX_PASSES {
             let is_last_allowed_pass = pass == MAX_PASSES - 1;
@@ -329,6 +334,30 @@ impl<'a> Checker<'a> {
             let mut next_entry = merge_scopes(entry, &body_locals);
             for state in &continue_states {
                 next_entry = merge_scopes(&next_entry, state);
+            }
+            if pass >= WIDEN_FROM_PASS && next_entry != pass_entry {
+                // Only a growing value widens; one that shrank back inside
+                // an earlier widening narrows to what the pass gave.
+                let relation = self.relation();
+                let changing: Vec<(String, Type)> = next_entry
+                    .iter()
+                    .filter(|(name, ty)| match pass_entry.get(name.as_str()) {
+                        Some(before) => {
+                            before != *ty && !relation.is_super_type_of(before, ty).yes()
+                        }
+                        None => true,
+                    })
+                    .map(|(name, ty)| {
+                        let widened = match pass_entry.get(name.as_str()) {
+                            Some(before) => before.widen_towards(ty),
+                            None => ty.generalize(),
+                        };
+                        (name.clone(), widened)
+                    })
+                    .collect();
+                for (name, ty) in changing {
+                    next_entry.insert(name, ty);
+                }
             }
             if next_entry == pass_entry || is_last_allowed_pass {
                 // The kept pass's own `body_locals`, returned to the

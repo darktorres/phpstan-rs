@@ -13,8 +13,8 @@ function f(string $s, string $num, string $ne, ?int $ni): void {
     $e2 = ''; $e2--; assertType('-1', $e2);
     $n = '5'; $n++; assertType('6', $n);
     $n2 = ' 5.5'; $n2--; assertType('4.5', $n2);
-    $x = '1e3'; $x++; assertType('1001', $x);
-    $big = '9223372036854775807'; $big++; assertType('9223372036854776000', $big);
+    $x = '1e3'; $x++; assertType('1001.0', $x);
+    $big = '9223372036854775807'; $big++; assertType('9.223372036854776E+18', $big);
     $nl = null; $nl++; assertType('1', $nl);
     $nd = null; $nd--; assertType('null', $nd);
     $b = true; $b++; assertType('true', $b);

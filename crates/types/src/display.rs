@@ -139,7 +139,7 @@ impl fmt::Display for Type {
                     min.map_or("min".to_string(), |n| n.to_string()),
                     max.map_or("max".to_string(), |n| n.to_string()),
                 ),
-                Type(Repr::FloatLiteral(n)) => write!(f, "{n}"),
+                Type(Repr::FloatLiteral(n)) => f.write_str(&crate::format_php_float_exact(*n)),
                 Type(Repr::Accessory(kind)) => write!(f, "{}", accessory_kind_name(*kind)),
                 // Mirrors real PHPStan's own `HasOffsetValueType::describe()`
                 // format exactly (confirmed via `assertType()` against the

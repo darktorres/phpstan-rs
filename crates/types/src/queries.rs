@@ -321,6 +321,34 @@ impl Type {
         })
     }
 
+    /// The loop widening of this type as it grows into `next`: an int
+    /// keeps a bound that stayed put and opens the one that moved
+    /// (`0` then `0|1` is `int<0, max>`); anything else is `next`
+    /// generalized.
+    pub fn widen_towards(&self, next: &Type) -> Type {
+        /// The smallest range holding every member, when all are ints.
+        fn hull(ty: &Type) -> Option<(Option<i64>, Option<i64>)> {
+            ty.union_members()
+                .iter()
+                .map(Type::int_bounds)
+                .reduce(|a, b| {
+                    let ((a_min, a_max), (b_min, b_max)) = (a?, b?);
+                    Some((
+                        a_min.zip(b_min).map(|(x, y)| x.min(y)),
+                        a_max.zip(b_max).map(|(x, y)| x.max(y)),
+                    ))
+                })
+                .flatten()
+        }
+        match (hull(self), hull(next)) {
+            (Some((min, max)), Some((next_min, next_max))) => Type::int_range(
+                (next_min == min).then_some(min).flatten(),
+                (next_max == max).then_some(max).flatten(),
+            ),
+            _ => next.generalize(),
+        }
+    }
+
     /// PHPStan's `generalize(lessSpecific)`: literals and ranges widen to
     /// their base type, an enum case to its class, a shape to the array
     /// of its generalized keys and values (still a list, still non-empty,

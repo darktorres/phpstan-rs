@@ -1,1 +1,5 @@
+7:31-7:65 missingType.iterableValue L6 | Method S::f() return type has no value type specified in iterable type non-empty-array.
+    tip: See: https://phpstan.org/blog/solving-phpstan-no-value-type-specified-in-iterable-type
+10:31-10:60 missingType.iterableValue L6 | Method S::g() return type has no value type specified in iterable type array.
+    tip: See: https://phpstan.org/blog/solving-phpstan-no-value-type-specified-in-iterable-type
 10:40-10:41 conditionalType.alwaysFalse L2 | Condition "int|string is array" in conditional return type is always false.

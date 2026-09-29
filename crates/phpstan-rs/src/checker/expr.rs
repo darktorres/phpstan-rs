@@ -4217,7 +4217,7 @@ impl<'a> Checker<'a> {
             }
             ExprKind::Literal(lit) => match lit {
                 Literal::Int(n) => Type::int_literal(*n),
-                Literal::Float(_) => Type::float(),
+                Literal::Float(f) => Type::float_literal(*f),
                 Literal::String(s) => Type::string_literal(s.clone()),
                 Literal::Bool(true) => Type::bool_literal(true),
                 Literal::Bool(false) => Type::bool_literal(false),
@@ -4244,7 +4244,7 @@ impl<'a> Checker<'a> {
         match &e.kind {
             ExprKind::Literal(lit) => match lit {
                 Literal::Int(n) => Type::int_literal(*n),
-                Literal::Float(_) => Type::float(),
+                Literal::Float(f) => Type::float_literal(*f),
                 Literal::String(s) => Type::string_literal(s.clone()),
                 Literal::Bool(true) => Type::bool_literal(true),
                 Literal::Bool(false) => Type::bool_literal(false),

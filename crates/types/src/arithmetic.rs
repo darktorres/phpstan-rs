@@ -614,6 +614,9 @@ impl Type {
     /// or `<=>` over operands of these types, operator overloading aside
     /// (PHPStan's `InitializerExprTypeResolver`).
     pub fn binary_operation(op: &BinOp, lt: &Type, rt: &Type) -> Type {
+        if let Some(folded) = fold_float_constants(op, lt, rt) {
+            return folded;
+        }
         let either_float = lt.is_float().yes() || rt.is_float().yes();
         match op {
             BinOp::Spaceship => Type::int_range(Some(-1), Some(1)),
@@ -718,6 +721,119 @@ impl Type {
             _ => Type::mixed(),
         }
     }
+}
+
+/// An int or float value.
+#[derive(Clone, Copy)]
+enum Number {
+    Int(i64),
+    Float(f64),
+}
+
+impl Number {
+    fn as_f64(self) -> f64 {
+        match self {
+            Number::Int(n) => n as f64,
+            Number::Float(f) => f,
+        }
+    }
+
+    /// `(int)` of it, as `%` reads its operands.
+    fn as_i64(self) -> i64 {
+        match self {
+            Number::Int(n) => n,
+            Number::Float(f) => crate::coercion::php_float_to_int(f),
+        }
+    }
+
+    fn into_type(self) -> Type {
+        match self {
+            Number::Int(n) => Type::int_literal(n),
+            Number::Float(f) => Type::float_literal(f),
+        }
+    }
+}
+
+/// `l op r` computed value by value when both sides are a few int or
+/// float literals and a float takes part, or the operator is `/`. A pair
+/// that throws (a division or modulo by zero) contributes nothing.
+fn fold_float_constants(op: &BinOp, lt: &Type, rt: &Type) -> Option<Type> {
+    const LIMIT: usize = 64;
+    fn numbers(ty: &Type) -> Option<Vec<Number>> {
+        ty.union_members()
+            .iter()
+            .map(|t| match t {
+                Type(Repr::IntLiteral(n)) => Some(Number::Int(*n)),
+                Type(Repr::FloatLiteral(f)) => Some(Number::Float(*f)),
+                _ => None,
+            })
+            .collect()
+    }
+    if !matches!(
+        op,
+        BinOp::Add
+            | BinOp::Sub
+            | BinOp::Mul
+            | BinOp::Div
+            | BinOp::Mod
+            | BinOp::Pow
+            | BinOp::Spaceship
+    ) {
+        return None;
+    }
+    let (ls, rs) = (numbers(lt)?, numbers(rt)?);
+    let has_float = |ns: &[Number]| ns.iter().any(|n| matches!(n, Number::Float(_)));
+    // Int-only operands are the range arithmetic's, but a division of
+    // literals is exact here where a range can only say `int|float`.
+    let takes_part = has_float(&ls) || has_float(&rs) || matches!(op, BinOp::Div);
+    if !takes_part || ls.len() * rs.len() > LIMIT {
+        return None;
+    }
+    let apply = |a: Number, b: Number| -> Option<Number> {
+        use Number::{Float, Int};
+        let checked = |f: fn(i64, i64) -> Option<i64>, g: fn(f64, f64) -> f64| match (a, b) {
+            (Int(x), Int(y)) => Some(f(x, y).map_or_else(|| Float(g(x as f64, y as f64)), Int)),
+            _ => Some(Float(g(a.as_f64(), b.as_f64()))),
+        };
+        match op {
+            BinOp::Add => checked(i64::checked_add, |x, y| x + y),
+            BinOp::Sub => checked(i64::checked_sub, |x, y| x - y),
+            BinOp::Mul => checked(i64::checked_mul, |x, y| x * y),
+            BinOp::Div => match (a, b) {
+                (_, Int(0)) => None,
+                (_, Float(0.0)) => None,
+                (Int(x), Int(y)) if x.checked_rem(y) == Some(0) => {
+                    Some(x.checked_div(y).map_or(Float(x as f64 / y as f64), Int))
+                }
+                _ => Some(Float(a.as_f64() / b.as_f64())),
+            },
+            BinOp::Mod => {
+                let divisor = b.as_i64();
+                (divisor != 0).then(|| Int(a.as_i64().checked_rem(divisor).unwrap_or(0)))
+            }
+            BinOp::Pow => match (a, b) {
+                (Int(x), Int(y)) if y >= 0 => Some(
+                    u32::try_from(y)
+                        .ok()
+                        .and_then(|y| x.checked_pow(y))
+                        .map_or(Float((x as f64).powf(y as f64)), Int),
+                ),
+                _ => Some(Float(a.as_f64().powf(b.as_f64()))),
+            },
+            _ => Some(Int(match a.as_f64().partial_cmp(&b.as_f64()) {
+                Some(std::cmp::Ordering::Less) => -1,
+                Some(std::cmp::Ordering::Equal) => 0,
+                _ => 1,
+            })),
+        }
+    };
+    Some(
+        ls.iter()
+            .flat_map(|&a| rs.iter().filter_map(move |&b| apply(a, b)))
+            .map(Number::into_type)
+            .reduce(Type::union)
+            .unwrap_or_else(Type::never),
+    )
 }
 
 /// `$a + $b` over arrays: the keys and values of both, a list when both

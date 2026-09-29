@@ -1,6 +1,6 @@
 <?php
             use function PHPStan\Testing\assertType;
             function f(): void {
-                assertType('float', 10 / 4);
+                assertType('2.5', 10 / 4);
             }
         
