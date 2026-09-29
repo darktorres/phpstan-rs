@@ -385,7 +385,11 @@ pub fn generalize_by_key_set(members: Vec<Type>) -> Vec<Type> {
             .filter_map(|shape| shape.unsealed.as_deref().cloned())
             .reduce(|(ka, va), (kb, vb)| (Type::union(ka, kb), Type::union(va, vb)))
             .map(Box::new);
-        passthrough.push(Type::array_shape(Shape { fields, unsealed }));
+        passthrough.push(Type::array_shape(Shape {
+            fields,
+            unsealed,
+            next_index: None,
+        }));
     }
     passthrough
 }

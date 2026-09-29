@@ -123,6 +123,7 @@ fn cross_reference_entity_fields(registry: &Registry, sql: &str, row_type: Type)
     Type::array_shape(Shape {
         fields: refined,
         unsealed: fields.unsealed.clone(),
+        next_index: fields.next_index,
     })
 }
 

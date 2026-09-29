@@ -375,6 +375,7 @@ fn array_shape_with_an_unsealed_marker_still_parses_its_real_fields() {
                 false
             )],
             unsealed: Some(Box::new((Type(Repr::String), Type(Repr::Mixed(false))))),
+            next_index: None,
         })
     );
     // A bare `...` (no generic args) is valid too.

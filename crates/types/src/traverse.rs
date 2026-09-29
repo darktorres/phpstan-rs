@@ -148,6 +148,7 @@ fn map_shape(shape: &Shape, f: &mut impl FnMut(&Type) -> Type) -> Shape {
             .unsealed
             .as_deref()
             .map(|(key, value)| Box::new((f(key), f(value)))),
+        next_index: shape.next_index,
     }
 }
 

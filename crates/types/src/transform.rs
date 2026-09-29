@@ -233,6 +233,7 @@ impl Type {
                     })
                     .collect(),
                 unsealed: shape.unsealed.clone(),
+                next_index: shape.next_index,
             }),
             Type(Repr::Union(members)) => Type(Repr::Union(
                 members

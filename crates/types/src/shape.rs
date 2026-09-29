@@ -174,10 +174,30 @@ impl ShapeField {
 /// A shape's fields, in order, and - when the shape is unsealed
 /// (`array{a: int, ...}`: other keys may exist too) - the key and value
 /// types those other entries have.
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone)]
 pub struct Shape {
     pub fields: Vec<ShapeField>,
     pub unsealed: Option<Box<(Type, Type)>>,
+    /// The key an append would take, when it isn't the one the int keys
+    /// give: after `unset($a[2])` on `[1, 2, 3]` it stays 3. Bookkeeping
+    /// about how the array was built, not part of its type: equality and
+    /// hashing ignore it.
+    pub next_index: Option<NextArrayIndex>,
+}
+
+impl PartialEq for Shape {
+    fn eq(&self, other: &Self) -> bool {
+        self.fields == other.fields && self.unsealed == other.unsealed
+    }
+}
+
+impl Eq for Shape {}
+
+impl std::hash::Hash for Shape {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.fields.hash(state);
+        self.unsealed.hash(state);
+    }
 }
 
 impl Shape {
@@ -186,6 +206,7 @@ impl Shape {
         Shape {
             fields,
             unsealed: None,
+            next_index: None,
         }
     }
 
@@ -207,7 +228,27 @@ impl Shape {
         Shape {
             fields,
             unsealed: Some(Box::new((Type::unknown_array_key(), Type::mixed()))),
+            next_index: None,
         }
+    }
+
+    /// The next index an append takes (PHPStan's `nextAutoIndexes`): the
+    /// one carried, else one past the highest int key. `None` when an
+    /// optional int key leaves it open.
+    pub fn next_append_index(&self) -> Option<NextArrayIndex> {
+        if let Some(next) = self.next_index {
+            return Some(next);
+        }
+        let mut next = NextArrayIndex::default();
+        for field in &self.fields {
+            if let ShapeKey::Int(key) = field.key {
+                if field.optional {
+                    return None;
+                }
+                next.observe(key);
+            }
+        }
+        Some(next)
     }
 
     pub fn is_sealed(&self) -> bool {
@@ -246,6 +287,7 @@ impl Shape {
                 .unsealed
                 .as_ref()
                 .map(|tail| Box::new((tail.0.clone(), f(&tail.1)))),
+            next_index: self.next_index,
         }
     }
 

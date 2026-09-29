@@ -249,7 +249,11 @@ impl Relation<'_> {
             ))),
             _ => None,
         };
-        Some(Shape { fields, unsealed })
+        Some(Shape {
+            fields,
+            unsealed,
+            next_index: None,
+        })
     }
 
     /// `field`, from one shape, as the other shape `other` holds it: its
@@ -276,6 +280,7 @@ impl Relation<'_> {
         let tail = Shape {
             fields: Vec::new(),
             unsealed: Some(Box::new((key.clone(), value.clone()))),
+            next_index: None,
         };
         self.intersect_shapes(shape, &tail)
     }

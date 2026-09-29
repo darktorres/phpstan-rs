@@ -1,7 +1,11 @@
 //! Array offsets: whether a type has one, and the type after writing one
 //! (PHPStan's `hasOffsetValueType()`/`setOffsetValueType()`).
 
-use crate::{AccessoryKind, Repr, Shape, ShapeField, ShapeKey, TrinaryLogic, Type};
+use crate::{AccessoryKind, AppendKey, Repr, Shape, ShapeField, ShapeKey, TrinaryLogic, Type};
+
+/// The most fields an append grows a shape to; past it, the array is
+/// general.
+const MAX_SHAPE_FIELDS: usize = 256;
 
 impl Type {
     /// PHPStan's `hasOffsetValueType()`: whether this array surely has
@@ -113,6 +117,21 @@ impl Type {
                 // `null` becomes an array on its first write.
                 Type(Repr::Null) => Type::array_shape(Shape::sealed(Vec::new()))
                     .set_offset_value_type(offset, value, in_range, track_literal_key),
+                // An append onto a sealed shape takes its next index, when
+                // known (`['x' => 1] + [] = 2` is `array{x: 1, 0: 2}`).
+                Type(Repr::ArrayShape(shape))
+                    if offset.is_none()
+                        && track_literal_key
+                        && shape.is_sealed()
+                        && shape.fields.len() < MAX_SHAPE_FIELDS
+                        && let Some(mut next) = shape.next_append_index()
+                        && let AppendKey::Key(key) = next.take() =>
+                {
+                    let mut shape = shape.clone();
+                    shape.set(ShapeField::new(ShapeKey::Int(key), value, false));
+                    shape.next_index = Some(next);
+                    Some(Type::array_shape(shape))
+                }
                 Type(Repr::ArrayShape(shape)) => match offset.and_then(literal_key) {
                     Some(key) => {
                         let mut shape = shape.clone();
@@ -262,6 +281,9 @@ impl Type {
             match self {
                 Type(Repr::ArrayShape(shape)) => {
                     let mut shape = shape.clone();
+                    // Removing the highest int key doesn't move the next
+                    // index back.
+                    shape.next_index = shape.next_append_index();
                     match literal_keys.as_deref() {
                         Some([only]) => shape.fields.retain(|f| f.key != *only),
                         _ => {

@@ -2,7 +2,7 @@
             function straight(): void {
                 $x = [];
                 $x['a']['b'][] = 1;
-                \PHPStan\Testing\assertType('array{a: array{b: non-empty-list<1>}}', $x);
+                \PHPStan\Testing\assertType('array{a: array{b: array{0: 1}}}', $x);
             }
             function nested(array $items): void {
                 $x = [];
