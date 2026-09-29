@@ -62,6 +62,16 @@ Legend: `[x]` done (commit given), `[>]` moved to the crate-split plan
       gains a level-8 finding;
     - `enums/a_case_singleton_still_supports_its_enum_s_own_methods` gains
       `method.resultUnused` on a pure method's result.
+    - `control_flow/for_loop_that_can_run_zero_times_does_not_define_a_body_only_variable`
+      gains `postInc.type` "Cannot use ++ on never." on `$i++` of a
+      `for ($i = 0; $i < 0; $i++)` whose body never runs;
+    - `misc_and_regressions/class_names_compare_case_insensitively_in_types_catches_and_static_calls`
+      gains `method.notFound` "undefined method foo::name()" on a
+      lowercase-hinted `foo $x` (class `Foo`) and `missingType.generics`
+      naming "generic interface traversable" for a `\traversable` hint;
+    - `generics_and_templates/template_binds_from_argument_in_a_namespaced_file`
+      gains `function.resultUnused` on a pure namespaced function's
+      discarded call (the namespaced-purity fix in `e3b91513`).
 - [ ] **V2. Corpus run and delta approval** after V1, saved to
   `.corpus-runs/<scope>/<hash>.txt`.
 
