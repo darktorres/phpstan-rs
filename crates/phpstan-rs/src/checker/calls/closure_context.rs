@@ -315,6 +315,7 @@ impl<'a> Checker<'a> {
                     &closure_label,
                     LoopZeroIterations::Possible {
                         subject_exempt: None,
+                        subject_key: None,
                     },
                     |this, pass_locals, declared_return, label, _pass| {
                         this.check_block(body, pass_locals, declared_return, label);

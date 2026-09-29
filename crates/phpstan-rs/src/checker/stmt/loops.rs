@@ -106,6 +106,7 @@ impl<'a> Checker<'a> {
             label,
             LoopZeroIterations::Possible {
                 subject_exempt: None,
+                subject_key: None,
             },
             |this, pass_locals, declared_return, label, _pass| {
                 this.in_condition_position = true;
@@ -375,6 +376,7 @@ impl<'a> Checker<'a> {
                     label,
                     LoopZeroIterations::Possible {
                         subject_exempt: None,
+                        subject_key: None,
                     },
                     |this, pass_locals, declared_return, label, _pass| {
                         for e in &cond[..cond.len() - 1] {
@@ -694,7 +696,16 @@ impl<'a> Checker<'a> {
         let zero_iterations = if subject_ty.is_non_empty_array().yes() {
             LoopZeroIterations::Impossible
         } else {
-            LoopZeroIterations::Possible { subject_exempt }
+            LoopZeroIterations::Possible {
+                subject_exempt,
+                subject_key: match key {
+                    Some(Expr {
+                        kind: ExprKind::Variable(name),
+                        ..
+                    }) if !by_ref => Some(name.as_ref()),
+                    _ => None,
+                },
+            }
         };
         // Captured from *inside* the last accepted pass, before
         // `converge_loop_body`'s own "may not run" merge (which drops

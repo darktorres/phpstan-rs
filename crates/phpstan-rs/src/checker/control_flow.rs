@@ -72,7 +72,13 @@ pub(crate) enum LoopZeroIterations<'a> {
     /// when it's a bare `$variable` name - excluded from that merge
     /// specifically (see `converge_loop_body`'s own doc comment on this
     /// field for why a self-mutating `foreach` needs it kept out).
-    Possible { subject_exempt: Option<&'a str> },
+    /// `subject_key` is that `foreach`'s bare `$key` variable, by value:
+    /// every element the loop visits ends as the body leaves
+    /// `$subject[$key]`.
+    Possible {
+        subject_exempt: Option<&'a str>,
+        subject_key: Option<&'a str>,
+    },
 }
 
 impl<'a> Checker<'a> {
@@ -401,9 +407,40 @@ impl<'a> Checker<'a> {
                 // old one. Restored from `exit_locals`'s own (pre-union)
                 // value after the general union, rather than being
                 // excluded from it.
-                if let LoopZeroIterations::Possible { subject_exempt } = zero_iterations {
-                    let subject_override =
-                        subject_exempt.and_then(|name| exit_locals.get(name).cloned());
+                if let LoopZeroIterations::Possible {
+                    subject_exempt,
+                    subject_key,
+                } = zero_iterations
+                {
+                    // Every element visited ends as the body leaves the
+                    // element its key names, when the body's exit knows
+                    // it; iterating zero times left the subject as it
+                    // was, which for an array is empty.
+                    let subject_override = subject_exempt.and_then(|name| {
+                        let iterated = exit_locals.get(name).cloned()?;
+                        let iterated = match subject_key
+                            .and_then(|key| exit_locals.get(&format!("{name}[${key}]")))
+                        {
+                            Some(element) if iterated.is_array().yes() => {
+                                iterated.with_general_array_value(element)
+                            }
+                            _ => iterated,
+                        };
+                        Some(match entry.get(name) {
+                            Some(before) if before.is_array().yes() => {
+                                if before.is_non_empty_array().yes() {
+                                    iterated
+                                } else {
+                                    Type::union(
+                                        iterated,
+                                        Type::array_shape(types::Shape::sealed(Vec::new())),
+                                    )
+                                }
+                            }
+                            Some(before) => Type::union(iterated, before.clone()),
+                            None => iterated,
+                        })
+                    });
                     exit_locals = next_entry;
                     if let (Some(name), Some(ty)) = (subject_exempt, subject_override) {
                         exit_locals.insert(name.to_string(), ty);
