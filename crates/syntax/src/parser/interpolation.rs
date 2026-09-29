@@ -37,6 +37,15 @@ impl Parser {
                     sub.next_node_id.set(self.next_node_id.get());
                     let parsed = sub.parse_expression()?;
                     sub.check_pattern_only()?;
+                    // `{$x = 1}`: PHP's grammar takes a variable there, not
+                    // any expression.
+                    if !is_variable_chain(&parsed) {
+                        return Err(ParseError {
+                            message: "syntax error, a string's {$...} holds a variable, not an expression"
+                                .to_string(),
+                            span: parsed.span,
+                        });
+                    }
                     // `{$a b}`: the braces hold one expression.
                     if !sub.at_eof() {
                         return Err(ParseError {
@@ -148,5 +157,25 @@ impl Parser {
             return Ok(exprs.pop().expect("one part"));
         }
         Ok(self.expr(ExprKind::Interpolated(exprs), base))
+    }
+}
+
+/// Whether `e` is what PHP's `variable` production allows: a variable
+/// with property fetches, method or static calls, and offsets chained on
+/// it (`$a->b[0]->c()`, `$f()`, `$c::$p`).
+fn is_variable_chain(e: &Expr) -> bool {
+    match &e.kind {
+        ExprKind::Variable(_) | ExprKind::DynamicVariable(_) => true,
+        ExprKind::PropertyAccess(base, ..)
+        | ExprKind::MethodCall(base, ..)
+        | ExprKind::DynamicPropertyAccess(base, _)
+        | ExprKind::DynamicMethodCall(base, ..)
+        | ExprKind::Index(base, _)
+        | ExprKind::Call(base, _) => is_variable_chain(base),
+        ExprKind::StaticPropertyFetch(StaticTarget::Expr(base), _)
+        | ExprKind::DynamicStaticPropertyFetch(StaticTarget::Expr(base), _)
+        | ExprKind::StaticCall(StaticTarget::Expr(base), ..)
+        | ExprKind::DynamicStaticCall(StaticTarget::Expr(base), ..) => is_variable_chain(base),
+        _ => false,
     }
 }

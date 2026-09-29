@@ -353,3 +353,29 @@ fn quote_escapes_decode_only_for_their_own_delimiter() {
         assert_eq!(literal_bytes(rhs), expected, "{src}");
     }
 }
+
+#[test]
+fn a_braced_interpolation_holds_a_variable_chain_not_any_expression() {
+    let parses = |src: &str| {
+        Parser::new(crate::lexer::Lexer::new(src).tokenize_with_spans())
+            .parse_program()
+            .is_ok()
+    };
+    for valid in [
+        r#"<?php echo "{$a->b[0]->c()}";"#,
+        r#"<?php echo "{$f()}";"#,
+        r#"<?php echo "{$c::$p}";"#,
+        r#"<?php echo "{$c::m()}";"#,
+        r#"<?php echo "{$a?->b}";"#,
+        r#"<?php echo "{$a->{$b}}";"#,
+    ] {
+        assert!(parses(valid), "{valid} should parse");
+    }
+    for invalid in [
+        r#"<?php echo "{$x = 1}";"#,
+        r#"<?php echo "{$x + 1}";"#,
+        r#"<?php echo "{$c::K}";"#,
+    ] {
+        assert!(!parses(invalid), "{invalid} should not parse");
+    }
+}
