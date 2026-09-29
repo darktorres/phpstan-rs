@@ -318,13 +318,23 @@ fn absorb_contained_members(members: &mut Vec<Type>) {
                     | Type(Repr::Extension(_))
             )
     };
+    let settled: Vec<bool> = members.iter().map(settled).collect();
+    // A single value contains only itself, and equal members are already
+    // one, so only a member with more than one value can contain another:
+    // a union of literals costs nothing to normalize.
+    let containers: Vec<usize> = (0..members.len())
+        .filter(|&j| settled[j] && !members[j].is_single_value())
+        .collect();
+    if containers.is_empty() {
+        return;
+    }
     let dropped: Vec<bool> = (0..members.len())
         .map(|i| {
             let m = &members[i];
-            settled(m)
-                && members.iter().enumerate().any(|(j, n)| {
+            settled[i]
+                && containers.iter().any(|&j| {
+                    let n = &members[j];
                     j != i
-                        && settled(n)
                         && relation.is_super_type_of(n, m).yes()
                         && (j < i || !relation.is_super_type_of(m, n).yes())
                 })
