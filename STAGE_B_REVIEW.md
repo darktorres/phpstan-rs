@@ -119,29 +119,29 @@ Legend: `[x]` done (commit given), `[>]` moved to the crate-split plan
 Each was reproduced with an `assertType` probe through `check-project`.
 Each fix needs a fixture.
 
-- [ ] **C1. Narrowing keeps coercible members.** `Relation::narrow` in
+- [x] **C1. Narrowing keeps coercible members.** Done in `f18bc022`. `Relation::narrow` in
   `crates/types/src/narrowing.rs` decides a member survives with `accepts`,
   which allows argument coercion. So `is_float($x)` on `int|float|string`
   gives `int|float` instead of `float`. Use `is_super_type_of`, which knows
   the class hierarchy, contrary to the doc comment's claim; fix that comment
   too.
-- [ ] **C2. A write at a non-literal key loses the array's keys and
-  non-emptiness.** `set_offset_value_type` in `crates/types/src/offsets.rs`,
+- [x] **C2. A write at a non-literal key loses the array's keys and
+  non-emptiness.** Done in `637f1b67`. `set_offset_value_type` in `crates/types/src/offsets.rs`,
   shape branch and refined non-list branch. `array{a: 1}` followed by
   `$arr[$int] = 2` gives `array<int, 2|1>` instead of
   `non-empty-array<int|string, 1|2>`. The key becomes the union of the
   existing keys and the written key's type, and the array is non-empty
   after the write.
-- [ ] **C3. Truthiness doesn't remove whole kinds.** `Type::without_falsy`:
+- [x] **C3. Truthiness doesn't remove whole kinds.** Done in `a5c24e13`. `Type::without_falsy`:
   `if ($b)` leaves `bool` (should be `true`), and `if ($i)` leaves `int`
   (should be `int<min, -1>|int<1, max>`). It also misses `0.0`, a range
   that includes `0`, and `false` inside a refined string. This is the plan's
   B4 item "Truthiness removes whole members"; do it here or there, not both.
-- [ ] **C4. Offset presence ignores what the type records.**
+- [x] **C4. Offset presence ignores what the type records.** Done in `32929ce4`.
   `has_offset_value_type` doesn't answer `Yes` for an intersection
   carrying `hasOffset(k)`/`hasOffsetValue(k, _)`, and a template doesn't
   answer for its bound.
-- [ ] **C5. `to_number` accepts non-numeric strings.** PHP 8 throws a
+- [x] **C5. `to_number` accepts non-numeric strings.** Done in `1f4b45bf`. PHP 8 throws a
   `TypeError` for arithmetic on a non-numeric string (`'abc' + 1`), and a
   leading-numeric one warns. `Type::to_number` needs the PHP version to say
   so. Pair with version-aware work; only `castable_arguments` uses it today.
