@@ -819,8 +819,13 @@ impl<'a> Checker<'a> {
                     if let Some(level) =
                         self.failing_level(&callee_ty, 2, |m| self.relation().is_callable(m).no())
                     {
+                        let verdict = if self.relation().is_callable(&callee_ty).no() {
+                            "it's not a callable"
+                        } else {
+                            "it might not be a callable"
+                        };
                         self.report(
-                            format!("Trying to invoke {callee_ty} but it's not a callable."),
+                            format!("Trying to invoke {callee_ty} but {verdict}."),
                             callee.span,
                             level,
                             "callable.nonCallable",
@@ -1025,6 +1030,13 @@ impl<'a> Checker<'a> {
                 } else {
                     self.check_expr(recv, locals, label)
                 };
+                // A nullsafe access earlier in the chain that met `null`
+                // skipped this call.
+                let recv_ty = if postfix_chain_has_nullsafe(recv) {
+                    self.chain_link_type(recv, locals)
+                } else {
+                    recv_ty
+                };
                 // See `probe_span`'s doc comment.
                 self.probe_hit_at(recv.span, &recv_ty);
                 // `$x?->method()` is pointless once `$x`'s type already
@@ -1080,7 +1092,10 @@ impl<'a> Checker<'a> {
                     self.relation().can_call_methods(m).no()
                 }) {
                     self.report(
-                        format!("call to method {method}() on a non-object type {recv_ty}"),
+                        format!(
+                            "call to method {method}() on {} {recv_ty}",
+                            non_object_kind(level)
+                        ),
                         e.span,
                         level,
                         "method.nonObject",
@@ -2140,6 +2155,13 @@ impl<'a> Checker<'a> {
             }
             ExprKind::Index(base, idx) => {
                 let base_ty = self.check_expr(base, locals, label);
+                // A nullsafe access earlier in the chain that met `null`
+                // skipped this one.
+                let base_ty = if postfix_chain_has_nullsafe(base) {
+                    self.chain_link_type(base, locals)
+                } else {
+                    base_ty
+                };
                 match idx {
                     Some(i) => {
                         self.check_expr(i, locals, label);
@@ -2756,6 +2778,13 @@ impl<'a> Checker<'a> {
                 let base_ty = self.check_expr(base, locals, label);
                 // See `probe_span`'s doc comment.
                 self.probe_hit_at(base.span, &base_ty);
+                // A nullsafe access earlier in the chain that met `null`
+                // skipped this one.
+                let base_ty = if postfix_chain_has_nullsafe(base) {
+                    self.chain_link_type(base, locals)
+                } else {
+                    base_ty
+                };
                 // `$x?->prop` is pointless once `$x`'s type already
                 // proves it's never null - mirrors real PHPStan's
                 // `NullsafePropertyFetchRule` exactly. Guarded by
@@ -2818,7 +2847,10 @@ impl<'a> Checker<'a> {
                 });
                 if let Some(level) = non_object_level {
                     self.report(
-                        format!("access to property ${prop} on a non-object type {base_ty}"),
+                        format!(
+                            "access to property ${prop} on {} {base_ty}",
+                            non_object_kind(level)
+                        ),
                         e.span,
                         level,
                         "property.nonObject",
@@ -2923,6 +2955,13 @@ impl<'a> Checker<'a> {
             // whole-class escape hatch.
             ExprKind::DynamicPropertyAccess(base, name_expr, operator) => {
                 let base_ty = self.check_expr(base, locals, label);
+                // A nullsafe access earlier in the chain that met `null`
+                // skipped this one.
+                let base_ty = if postfix_chain_has_nullsafe(base) {
+                    self.chain_link_type(base, locals)
+                } else {
+                    base_ty
+                };
                 self.check_expr(name_expr, locals, label);
                 // Whatever the name, a value that can't have properties
                 // can't have this one.
@@ -2950,6 +2989,13 @@ impl<'a> Checker<'a> {
             // escapes split as `DynamicPropertyAccess` just above.
             ExprKind::DynamicMethodCall(recv, name_expr, args, operator) => {
                 let recv_ty = self.check_expr(recv, locals, label);
+                // A nullsafe access earlier in the chain that met `null`
+                // skipped this one.
+                let recv_ty = if postfix_chain_has_nullsafe(recv) {
+                    self.chain_link_type(recv, locals)
+                } else {
+                    recv_ty
+                };
                 self.check_expr(name_expr, locals, label);
                 self.check_dynamic_member_receiver(&recv_ty, *operator, true, e.span);
                 for a in args {
@@ -4197,6 +4243,54 @@ impl<'a> Checker<'a> {
         }
     }
 
+    /// A property access's or method call's own type as the next link of
+    /// its chain sees it: a nullsafe access earlier in the chain that met
+    /// `null` skipped the rest of it, so that `null` isn't this link's.
+    /// Anything else's type is its inferred one.
+    pub(crate) fn chain_link_type(&self, e: &Expr, locals: &Locals) -> Type {
+        match &e.kind {
+            ExprKind::MethodCall(recv, method, args, _) => {
+                // What the method is looked up on is the receiver's object
+                // part; a `null` one is reported where it's checked.
+                let recv_ty = self.chain_link_type(recv, locals).without(&Type::null());
+                self.method_call_return_type(recv, &recv_ty, method, args, locals)
+            }
+            ExprKind::PropertyAccess(base, prop, _) => {
+                if locals.may_have_member_narrowing()
+                    && let Some(base_key) = narrowing_key(base)
+                    && let Some(narrowed) = locals.get(&format!("{base_key}->{prop}"))
+                {
+                    return narrowed.clone();
+                }
+                let base_ty = self.chain_link_type(base, locals).without(&Type::null());
+                // See `property_access_type`'s doc comment - shared
+                // with `check_expr`'s identical arm.
+                self.property_access_type(&base_ty, prop)
+            }
+            // A homogeneous array's element type applies regardless of
+            // which key is accessed; optimistically assumes the access is
+            // in bounds/present rather than widening to `V|null` for a
+            // possibly-missing element.
+            ExprKind::Index(base, Some(idx)) => {
+                // The narrowed key first: `apply_narrowing` writes a
+                // narrowed type under `narrowing_key`'s `"base[key]"`
+                // (e.g. after `is_string($info['code'])`).
+                if locals.may_have_member_narrowing()
+                    && let Some(key) = narrowing_key(e)
+                    && let Some(narrowed) = locals.get(&key)
+                {
+                    return narrowed.clone();
+                }
+                self.chain_link_type(base, locals)
+                    .offset_value_type(crate::checker::literal_shape_key(idx).as_ref())
+                    .unwrap_or(Type::mixed())
+            }
+            // Parentheses don't end a chain.
+            ExprKind::Grouping(inner) => self.chain_link_type(inner, locals),
+            _ => self.infer_expr(e, locals),
+        }
+    }
+
     pub(crate) fn infer_expr(&self, e: &Expr, locals: &Locals) -> Type {
         if e.id == NodeId::SYNTHETIC || self.infer_cache.borrow().is_none() {
             return syntax::stack::guard(|| self.infer_expr_unguarded(e, locals));
@@ -4456,25 +4550,16 @@ impl<'a> Checker<'a> {
                     .unwrap_or_else(|| self.call_fallback_return_type(callee, args, locals)),
                 _ => self.call_fallback_return_type(callee, args, locals),
             },
-            ExprKind::MethodCall(recv, method, args, nullsafe) => {
-                // A nullsafe receiver is virtually always nullable
-                // (that's the entire reason to write `?->`), so its own
-                // inferred type is virtually always `Union([Object(...),
-                // Null])`, not a bare `Object` - strip `Null` out before
-                // matching, the same real class the method is actually
-                // being looked up on either way.
-                let recv_ty = self.infer_expr(recv, locals).without(&Type::null());
-                let result = self.method_call_return_type(recv, &recv_ty, method, args, locals);
-                // `$x?->method()` short-circuits to `null` when `$x` is
-                // null, on top of whatever the method's own return type
-                // is - real, implicit nullability a plain `->` doesn't
-                // carry.
-                if (nullsafe.is_nullsafe() || postfix_chain_has_nullsafe(recv))
-                    && !result.is_mixed()
-                {
-                    Type::union(result, Type::null())
+            ExprKind::MethodCall(..)
+            | ExprKind::PropertyAccess(..)
+            | ExprKind::Index(_, Some(_)) => {
+                let link = self.chain_link_type(e, locals);
+                // A nullsafe access in the chain that meets `null` makes the
+                // whole chain `null`.
+                if postfix_chain_has_nullsafe(e) && !link.is_mixed() {
+                    Type::union(link, Type::null())
                 } else {
-                    result
+                    link
                 }
             }
             ExprKind::StaticCall(target, method, args) => {
@@ -4648,51 +4733,12 @@ impl<'a> Checker<'a> {
                     .collect(),
                 self.registry,
             ),
-            ExprKind::PropertyAccess(base, prop, nullsafe) => {
-                if locals.may_have_member_narrowing()
-                    && let Some(base_key) = narrowing_key(base)
-                    && let Some(narrowed) = locals.get(&format!("{base_key}->{prop}"))
-                {
-                    return narrowed.clone();
-                }
-                let base_ty = self.infer_expr(base, locals).without(&Type::null());
-                // See `property_access_type`'s doc comment - shared
-                // with `check_expr`'s identical arm.
-                let result = self.property_access_type(&base_ty, prop);
-                // Same implicit nullability as `?->method()` just above,
-                // for `$x?->prop`.
-                if (nullsafe.is_nullsafe() || postfix_chain_has_nullsafe(base))
-                    && !result.is_mixed()
-                {
-                    Type::union(result, Type::null())
-                } else {
-                    result
-                }
-            }
             // A homogeneous array's element type applies regardless of
             // which key is accessed; optimistically assumes the access is
             // in bounds/present rather than widening to `V|null` for a
             // possibly-missing element - consistent with this checker's
             // general preference for fewer false positives over catching
             // every possible runtime-undefined access.
-            ExprKind::Index(base, Some(idx)) => {
-                // The `Index` counterpart of `PropertyAccess`'s "check
-                // the narrowed key first" fast path above - without this,
-                // `apply_narrowing` writes a narrowed type under
-                // `narrowing_key`'s `"base[key]"` format (e.g. after
-                // `is_string($info['code'])`), but nothing reads it back:
-                // this arm would re-derive the type from `$info`'s
-                // declared/inferred shape, discarding the narrowing.
-                if locals.may_have_member_narrowing()
-                    && let Some(key) = narrowing_key(e)
-                    && let Some(narrowed) = locals.get(&key)
-                {
-                    return narrowed.clone();
-                }
-                (self.infer_expr(base, locals))
-                    .offset_value_type(crate::checker::literal_shape_key(idx).as_ref())
-                    .unwrap_or(Type::mixed())
-            }
             ExprKind::Name(name) => self
                 .global_constant_type(name)
                 .unwrap_or_else(|| bare_name_literal_type(name)),
@@ -6162,12 +6208,18 @@ impl<'a> Checker<'a> {
         };
         let (message, identifier) = if is_call {
             (
-                format!("call to a dynamic method on a non-object type {receiver}"),
+                format!(
+                    "call to a dynamic method on {} {receiver}",
+                    non_object_kind(level)
+                ),
                 "method.nonObject",
             )
         } else {
             (
-                format!("access to a dynamic property on a non-object type {receiver}"),
+                format!(
+                    "access to a dynamic property on {} {receiver}",
+                    non_object_kind(level)
+                ),
                 "property.nonObject",
             )
         };
@@ -6270,12 +6322,13 @@ impl<'a> Checker<'a> {
 pub(crate) fn postfix_chain_has_nullsafe(base: &Expr) -> bool {
     let base = base.peeled();
     syntax::stack::guard(|| match &base.kind {
-        ExprKind::PropertyAccess(inner, _, nullsafe) => {
-            nullsafe.is_nullsafe() || postfix_chain_has_nullsafe(inner)
+        ExprKind::PropertyAccess(inner, _, operator)
+        | ExprKind::MethodCall(inner, _, _, operator)
+        | ExprKind::DynamicPropertyAccess(inner, _, operator)
+        | ExprKind::DynamicMethodCall(inner, _, _, operator) => {
+            operator.is_nullsafe() || postfix_chain_has_nullsafe(inner)
         }
-        ExprKind::MethodCall(inner, _, _, nullsafe) => {
-            nullsafe.is_nullsafe() || postfix_chain_has_nullsafe(inner)
-        }
+        ExprKind::Index(inner, _) => postfix_chain_has_nullsafe(inner),
         _ => false,
     })
 }
@@ -6346,4 +6399,14 @@ fn anonymous_class_type(class: &AnonymousClass) -> Type {
         .name
         .as_ref()
         .map_or(Type::mixed(), |name| Type::object(name.clone(), Vec::new()))
+}
+
+/// How a receiver failing at `level` is described: wholly a non-object at
+/// level 0, only in part (a union member, `null`) above it.
+fn non_object_kind(level: u8) -> &'static str {
+    if level == 0 {
+        "a non-object type"
+    } else {
+        "a possibly non-object type"
+    }
 }

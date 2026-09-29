@@ -1,3 +1,4 @@
 3:13-5:14 missingType.return L6 | Function test() has no return type specified.
 4:23-4:36 nullsafe.byRef L0 | Nullsafe operator cannot be on right side of assignment by reference.
     non-ignorable
+4:23-4:36 property.nonObject L8 | access to property $baz on a possibly non-object type Foo|null

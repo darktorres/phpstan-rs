@@ -5,3 +5,4 @@
 7:13-7:61 missingType.return L6 | Function notByRef() has no return type specified.
 8:35-8:41 nullsafe.byRef L0 | Nullsafe cannot be returned by reference.
     non-ignorable
+9:97-9:102 property.nonObject L8 | access to property $v on a possibly non-object type Box|null

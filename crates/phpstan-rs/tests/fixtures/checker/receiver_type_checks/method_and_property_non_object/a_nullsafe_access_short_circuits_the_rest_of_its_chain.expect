@@ -1,0 +1,1 @@
+14:10-14:17 property.nonObject L8 | access to property $bar on a possibly non-object type Foo|null
