@@ -697,7 +697,7 @@ impl<'a> Checker<'a> {
                 }
             }
             "get_defined_vars" if args.is_empty() => {
-                if locals.any_variable_may_exist {
+                if locals.any_variable_may_exist() {
                     return Type::array(Type::string(), Type::mixed());
                 }
                 let fields: Vec<ShapeField> = locals

@@ -812,7 +812,7 @@ impl<'a> Checker<'a> {
             // bound from it (a plain `$x = $container[$dyn];`, or a
             // later, non-by-ref `foreach`) can still find it.
             locals
-                .container_field_facts
+                .container_field_facts_mut()
                 .insert(subject_name.to_string(), Rc::new(last_field_facts));
             locals.insert(
                 subject_name.to_string(),

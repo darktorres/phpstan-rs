@@ -203,7 +203,7 @@ impl<'a> Checker<'a> {
             }
             if in_clone
                 && locals
-                    .clone_reinitialized
+                    .clone_reinitialized_mut()
                     .insert(prop.to_string())
                     .is_some()
             {

@@ -212,7 +212,7 @@ impl<'a> Checker<'a> {
         // ordinary narrowing above.
         if matches_when_true
             && let Some(implied) = locals
-                .branch_implied_facts
+                .branch_implied_facts()
                 .get(&Discriminant::new(&key, &target_ty))
                 .cloned()
         {
@@ -232,7 +232,7 @@ impl<'a> Checker<'a> {
         // the chain's.
         if !matches_when_true
             && target_ty.is_null().yes()
-            && let Some((alias_targets, alias_expr)) = locals.condition_aliases.get(&key).cloned()
+            && let Some((alias_targets, alias_expr)) = locals.condition_aliases().get(&key).cloned()
             && let Some(receiver) = super::nullsafe_receiver(&alias_expr)
             && let [alias_target] = alias_targets.as_slice()
         {

@@ -169,7 +169,8 @@ impl<'a> Checker<'a> {
                 // claimed. Substitutes the stored assignment expression
                 // and keeps walking - `$qb2 = $qb;` chains of aliases
                 // resolve the same way, one substitution at a time.
-                ExprKind::Variable(name) => match locals.query_builder_aliases.get(name.as_ref()) {
+                ExprKind::Variable(name) => match locals.query_builder_aliases().get(name.as_ref())
+                {
                     Some(rhs) => cursor = Cursor::Owned(rhs.clone()),
                     None => break,
                 },

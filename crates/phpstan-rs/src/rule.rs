@@ -135,7 +135,7 @@ impl<'s, 'r> Scope<'s, 'r> {
     /// true on this exact control-flow path.
     pub fn is_function_guarded(&self, name: &str) -> bool {
         self.locals
-            .guarded_functions
+            .guarded_functions()
             .contains(&name.to_ascii_lowercase())
     }
 
@@ -145,7 +145,7 @@ impl<'s, 'r> Scope<'s, 'r> {
     /// narrowing engine keys this fact.
     pub fn is_method_guarded(&self, receiver_var: &str, method: &str) -> bool {
         self.locals
-            .guarded_methods
+            .guarded_methods()
             .contains(&(receiver_var.to_string(), method.to_string()))
     }
 
@@ -153,7 +153,7 @@ impl<'s, 'r> Scope<'s, 'r> {
     /// `property_exists()` sibling.
     pub fn is_property_guarded(&self, receiver_var: &str, property: &str) -> bool {
         self.locals
-            .guarded_properties
+            .guarded_properties()
             .contains(&(receiver_var.to_string(), property.to_string()))
     }
 }

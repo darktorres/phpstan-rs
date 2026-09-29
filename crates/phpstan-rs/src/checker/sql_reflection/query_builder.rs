@@ -338,7 +338,7 @@ impl<'a> Checker<'a> {
                     cursor = Cursor::Owned(std::rc::Rc::new((**inner).clone()));
                 }
                 ExprKind::Variable(name) => {
-                    let rhs = locals.query_builder_aliases.get(name.as_ref())?;
+                    let rhs = locals.query_builder_aliases().get(name.as_ref())?;
                     cursor = Cursor::Owned(rhs.clone());
                 }
                 _ => return None,

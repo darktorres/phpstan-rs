@@ -525,8 +525,9 @@ fn discriminant_may_hold(locals: &Locals, key: &Discriminant) -> bool {
 
 pub(crate) fn merge_scopes(then_locals: &Locals, else_locals: &Locals) -> Locals {
     let mut merged = then_locals.fresh_scope();
-    merged.any_variable_may_exist =
-        then_locals.any_variable_may_exist || else_locals.any_variable_may_exist;
+    merged.set_any_variable_may_exist(
+        then_locals.any_variable_may_exist() || else_locals.any_variable_may_exist(),
+    );
     // A `function_exists()` guard only survives a merge
     // point when both incoming branches agree it's guaranteed - the same
     // reasoning every other narrowed fact here already gets (`Type::union`
@@ -541,35 +542,35 @@ pub(crate) fn merge_scopes(then_locals: &Locals, else_locals: &Locals) -> Locals
     // the "unconditional early return in the negative branch persists the
     // fact past the `if`" idiom work, by handing back the whole surviving
     // branch's `Locals` (guard set included) instead of a merge at all.
-    merged.guarded_functions = then_locals
-        .guarded_functions
+    *merged.guarded_functions_mut() = then_locals
+        .guarded_functions()
         .clone()
-        .intersection(else_locals.guarded_functions.clone());
-    merged.guarded_constants = then_locals
-        .guarded_constants
+        .intersection(else_locals.guarded_functions().clone());
+    *merged.guarded_constants_mut() = then_locals
+        .guarded_constants()
         .clone()
-        .intersection(else_locals.guarded_constants.clone());
-    merged.guarded_classes = then_locals
-        .guarded_classes
+        .intersection(else_locals.guarded_constants().clone());
+    *merged.guarded_classes_mut() = then_locals
+        .guarded_classes()
         .clone()
-        .intersection(else_locals.guarded_classes.clone());
+        .intersection(else_locals.guarded_classes().clone());
     // Identical intersection treatment for the
     // method_exists()/property_exists() guard sets - a member is only
     // still provably guarded after an if/else join when both branches
     // proved it, same as guarded_functions above.
-    merged.guarded_methods = then_locals
-        .guarded_methods
+    *merged.guarded_methods_mut() = then_locals
+        .guarded_methods()
         .clone()
-        .intersection(else_locals.guarded_methods.clone());
-    merged.guarded_properties = then_locals
-        .guarded_properties
+        .intersection(else_locals.guarded_methods().clone());
+    *merged.guarded_properties_mut() = then_locals
+        .guarded_properties()
         .clone()
-        .intersection(else_locals.guarded_properties.clone());
+        .intersection(else_locals.guarded_properties().clone());
     // Reinitialized on either path is possibly reinitialized.
-    merged.clone_reinitialized = then_locals
-        .clone_reinitialized
+    *merged.clone_reinitialized_mut() = then_locals
+        .clone_reinitialized()
         .clone()
-        .union(else_locals.clone_reinitialized.clone());
+        .union(else_locals.clone_reinitialized().clone());
     // A condition alias only survives a merge point when both incoming
     // branches still
     // agree on the exact same stored condition - `Rc::ptr_eq` (not a
@@ -584,12 +585,12 @@ pub(crate) fn merge_scopes(then_locals: &Locals, else_locals: &Locals) -> Locals
     // drops it too) - no case needs comparing two independently-
     // constructed-but-textually-identical conditions from different
     // branches, so no `Expr: PartialEq` bound is needed anywhere.
-    merged.condition_aliases = then_locals
-        .condition_aliases
+    *merged.condition_aliases_mut() = then_locals
+        .condition_aliases()
         .iter()
         .filter(|(k, (_, rc))| {
             else_locals
-                .condition_aliases
+                .condition_aliases()
                 .get(*k)
                 .is_some_and(|(_, other_rc)| std::rc::Rc::ptr_eq(rc, other_rc))
         })
@@ -604,12 +605,12 @@ pub(crate) fn merge_scopes(then_locals: &Locals, else_locals: &Locals) -> Locals
     // Same "both branches inherited the identical, unchanged alias"
     // dedup as `condition_aliases` above - a `QueryBuilder` alias has no
     // separate target to intersect against, just the one stored `Rc<Expr>`.
-    merged.query_builder_aliases = then_locals
-        .query_builder_aliases
+    *merged.query_builder_aliases_mut() = then_locals
+        .query_builder_aliases()
         .iter()
         .filter(|(k, rc)| {
             else_locals
-                .query_builder_aliases
+                .query_builder_aliases()
                 .get(*k)
                 .is_some_and(|other_rc| std::rc::Rc::ptr_eq(rc, other_rc))
         })
@@ -624,12 +625,12 @@ pub(crate) fn merge_scopes(then_locals: &Locals, else_locals: &Locals) -> Locals
     // both sides still carry *unchanged*, never resurrect one only one
     // side still has - unlike `branch_implied_facts` below, this is not a
     // durable structural fact safe to union.
-    merged.container_field_facts = then_locals
-        .container_field_facts
+    *merged.container_field_facts_mut() = then_locals
+        .container_field_facts()
         .iter()
         .filter(|(k, rc)| {
             else_locals
-                .container_field_facts
+                .container_field_facts()
                 .get(*k)
                 .is_some_and(|other_rc| std::rc::Rc::ptr_eq(rc, other_rc))
         })
@@ -646,18 +647,18 @@ pub(crate) fn merge_scopes(then_locals: &Locals, else_locals: &Locals) -> Locals
     // not expected for the single-`if` shape this mechanism currently
     // triggers on, but possible from nested control flow) is unioned,
     // never silently overwritten by one side.
-    merged.discriminant_array_facts = then_locals.discriminant_array_facts.clone();
-    for (key, else_ty) in else_locals.discriminant_array_facts.iter() {
-        match merged.discriminant_array_facts.get(key) {
-            Some(then_ty) if then_ty == else_ty => {}
+    *merged.discriminant_array_facts_mut() = then_locals.discriminant_array_facts().clone();
+    for (key, else_ty) in else_locals.discriminant_array_facts().iter() {
+        match merged.discriminant_array_facts().get(key).cloned() {
+            Some(then_ty) if then_ty == *else_ty => {}
             Some(then_ty) => {
                 merged
-                    .discriminant_array_facts
-                    .insert(key.clone(), Type::union(then_ty.clone(), else_ty.clone()));
+                    .discriminant_array_facts_mut()
+                    .insert(key.clone(), Type::union(then_ty, else_ty.clone()));
             }
             None => {
                 merged
-                    .discriminant_array_facts
+                    .discriminant_array_facts_mut()
                     .insert(key.clone(), else_ty.clone());
             }
         }
@@ -672,9 +673,9 @@ pub(crate) fn merge_scopes(then_locals: &Locals, else_locals: &Locals) -> Locals
     // before this split), otherwise both sides' own fact lists are kept
     // (a genuinely new fact recorded independently on each side, from
     // two different `if`s sharing one discriminant).
-    merged.branch_implied_facts = then_locals.branch_implied_facts.clone();
-    for (key, else_facts) in else_locals.branch_implied_facts.iter() {
-        let combined = match then_locals.branch_implied_facts.get(key) {
+    *merged.branch_implied_facts_mut() = then_locals.branch_implied_facts().clone();
+    for (key, else_facts) in else_locals.branch_implied_facts().iter() {
+        let combined = match then_locals.branch_implied_facts().get(key) {
             Some(then_facts) if std::rc::Rc::ptr_eq(then_facts, else_facts) => continue,
             Some(then_facts) => {
                 merge_implied_facts(then_facts, else_facts, then_locals, else_locals)
@@ -682,17 +683,17 @@ pub(crate) fn merge_scopes(then_locals: &Locals, else_locals: &Locals) -> Locals
             None => widen_implied_facts(else_facts, key, then_locals),
         };
         match combined {
-            Some(facts) => merged.branch_implied_facts.insert(key.clone(), facts),
-            None => merged.branch_implied_facts.remove(key),
+            Some(facts) => merged.branch_implied_facts_mut().insert(key.clone(), facts),
+            None => merged.branch_implied_facts_mut().remove(key),
         };
     }
-    for (key, then_facts) in then_locals.branch_implied_facts.iter() {
-        if else_locals.branch_implied_facts.contains_key(key) {
+    for (key, then_facts) in then_locals.branch_implied_facts().iter() {
+        if else_locals.branch_implied_facts().contains_key(key) {
             continue;
         }
         match widen_implied_facts(then_facts, key, else_locals) {
-            Some(facts) => merged.branch_implied_facts.insert(key.clone(), facts),
-            None => merged.branch_implied_facts.remove(key),
+            Some(facts) => merged.branch_implied_facts_mut().insert(key.clone(), facts),
+            None => merged.branch_implied_facts_mut().remove(key),
         };
     }
     for (name, then_ty) in then_locals.iter() {

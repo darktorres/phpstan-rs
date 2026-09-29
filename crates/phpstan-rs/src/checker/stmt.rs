@@ -19,7 +19,7 @@ fn reconstructed_discriminant_return_types(e: &Expr, locals: &Locals) -> Vec<Typ
         return Vec::new();
     };
     locals
-        .discriminant_array_facts
+        .discriminant_array_facts()
         .iter()
         .filter(|((container, _, _), _)| container.as_str() == name.as_ref())
         .map(|(_, ty)| ty.clone())
@@ -1231,9 +1231,9 @@ impl<'a> Checker<'a> {
                     // branch, so its facts stay as that branch recorded them.
                     for (branch, branch_true) in [(&then_locals, true), (&else_locals, false)] {
                         if let Some(key) = self.primary_discriminant_key(cond, locals, branch_true)
-                            && let Some(facts) = branch.branch_implied_facts.get(&key)
+                            && let Some(facts) = branch.branch_implied_facts().get(&key)
                         {
-                            merged.branch_implied_facts.insert(key, facts.clone());
+                            merged.branch_implied_facts_mut().insert(key, facts.clone());
                         }
                     }
                     merged

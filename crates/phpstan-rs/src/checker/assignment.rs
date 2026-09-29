@@ -445,7 +445,7 @@ impl<'a> Checker<'a> {
                             {
                                 let key = (name.to_string(), subject, value);
                                 let prior = locals
-                                    .discriminant_array_facts
+                                    .discriminant_array_facts()
                                     .get(&key)
                                     .cloned()
                                     .unwrap_or_else(|| {
@@ -457,7 +457,9 @@ impl<'a> Checker<'a> {
                                     false,
                                     self.loop_depth == 0,
                                 ) {
-                                    locals.discriminant_array_facts.insert(key, new_slot_ty);
+                                    locals
+                                        .discriminant_array_facts_mut()
+                                        .insert(key, new_slot_ty);
                                 }
                             }
                             // A dynamic-key write whose index *expression* is
@@ -578,7 +580,7 @@ impl<'a> Checker<'a> {
             ExprKind::Variable(name) => {
                 locals.purge_branch_implied_facts_depending_on(name);
                 locals
-                    .discriminant_array_facts
+                    .discriminant_array_facts_mut()
                     .retain(|(container, _, _), _| container != name.as_ref());
                 locals.insert(name.to_string(), after);
             }

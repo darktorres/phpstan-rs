@@ -304,7 +304,7 @@ impl<'a> Checker<'a> {
             Type::bool_literal(false)
         };
         if let Some(implied) = locals
-            .branch_implied_facts
+            .branch_implied_facts()
             .get(&Discriminant::new(subject, &marker))
             .cloned()
         {
@@ -330,7 +330,7 @@ impl<'a> Checker<'a> {
         locals: &mut Locals,
     ) {
         if let Some(implied) = locals
-            .branch_implied_facts
+            .branch_implied_facts()
             .get(&Discriminant::new(subject, resolved_class))
             .cloned()
         {
@@ -530,7 +530,7 @@ fn record_implied_facts(
     for (subject_key, value_ty) in subjects {
         let key = Discriminant::new(subject_key, value_ty);
         let mut combined = after
-            .branch_implied_facts
+            .branch_implied_facts()
             .get(&key)
             .map(|existing| (**existing).clone())
             .unwrap_or_default();
@@ -538,7 +538,7 @@ fn record_implied_facts(
             crate::checker::control_flow::add_implied_fact(&mut combined, name, ty);
         }
         after
-            .branch_implied_facts
+            .branch_implied_facts_mut()
             .insert(key, std::rc::Rc::new(combined));
     }
 }
@@ -669,7 +669,7 @@ impl<'a> Checker<'a> {
             && let Some(guarded_name) = literal_string_value(&guarded_arg.value)
         {
             locals
-                .guarded_functions
+                .guarded_functions_mut()
                 .insert(guarded_name.trim_start_matches('\\').to_ascii_lowercase());
         }
         // `class_exists('X')`'s true branch (or `interface_exists`,
@@ -690,7 +690,7 @@ impl<'a> Checker<'a> {
             && let Some(guarded_name) = literal_string_value(&guarded_arg.value)
         {
             locals
-                .guarded_classes
+                .guarded_classes_mut()
                 .insert(guarded_name.trim_start_matches('\\').to_ascii_lowercase());
         }
         // `defined('NAME')`'s true branch proves the global constant
@@ -707,7 +707,7 @@ impl<'a> Checker<'a> {
             && let Some(guarded_name) = literal_string_value(&guarded_arg.value)
         {
             locals
-                .guarded_constants
+                .guarded_constants_mut()
                 .insert(guarded_name.trim_start_matches('\\').to_string());
         }
         // Real PHPStan's own `MethodExistsTypeSpecifyingExtension`/
@@ -729,11 +729,11 @@ impl<'a> Checker<'a> {
             let bare = fn_name.rsplit('\\').next().unwrap_or(fn_name);
             if bare.eq_ignore_ascii_case("method_exists") {
                 locals
-                    .guarded_methods
+                    .guarded_methods_mut()
                     .insert((recv_name.to_string(), member_name.into_owned()));
             } else if bare.eq_ignore_ascii_case("property_exists") {
                 locals
-                    .guarded_properties
+                    .guarded_properties_mut()
                     .insert((recv_name.to_string(), member_name.into_owned()));
             }
         }
@@ -1332,7 +1332,7 @@ impl<'a> Checker<'a> {
             // condition, never a behavior change when there's no alias
             // to replay.
             ExprKind::Variable(name) => {
-                if let Some((_, alias)) = locals.condition_aliases.get(name.as_ref()).cloned() {
+                if let Some((_, alias)) = locals.condition_aliases().get(name.as_ref()).cloned() {
                     self.apply_narrowing(&alias, locals, branch_true);
                 }
                 self.replay_truthiness_discriminant_facts(name, locals, branch_true);

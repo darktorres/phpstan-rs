@@ -123,7 +123,7 @@ impl<'a> Checker<'a> {
             return;
         }
         let (primary, fallback) = name.candidates();
-        let guarded = |n: &str| locals.guarded_constants.contains(n);
+        let guarded = |n: &str| locals.guarded_constants().contains(n);
         if guarded(bare) || guarded(primary) || fallback.is_some_and(guarded) {
             return;
         }

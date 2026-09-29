@@ -358,9 +358,9 @@ impl<'a> Checker<'a> {
     /// Whether a `class_exists()`-style guard in `locals` proved `name`
     /// declared.
     pub(crate) fn class_guarded(name: &str, locals: &Locals) -> bool {
-        !locals.guarded_classes.is_empty()
+        !locals.guarded_classes().is_empty()
             && locals
-                .guarded_classes
+                .guarded_classes()
                 .contains(&name.trim_start_matches('\\').to_ascii_lowercase())
     }
 

@@ -171,6 +171,18 @@ impl<'a> Checker<'a> {
     /// recursive calls needing to know about rule dispatch at all (see
     /// `rule`'s own module doc comment).
     pub(crate) fn check_expr(&mut self, e: &Expr, locals: &mut Locals, label: &str) -> Type {
+        let outermost = self.infer_cache.borrow().is_none();
+        if outermost {
+            *self.infer_cache.borrow_mut() = Some(Default::default());
+        }
+        let ty = self.check_expr_cached(e, locals, label);
+        if outermost {
+            *self.infer_cache.borrow_mut() = None;
+        }
+        ty
+    }
+
+    fn check_expr_cached(&mut self, e: &Expr, locals: &mut Locals, label: &str) -> Type {
         syntax::stack::guard(|| {
             let ty = crate::checker::profiling::measure_outermost!("checker::check_expr", {
                 self.check_expr_impl(e, locals, label)
@@ -319,7 +331,7 @@ impl<'a> Checker<'a> {
                         .trim_start_matches('\\')
                         .eq_ignore_ascii_case("extract")
                 {
-                    locals.any_variable_may_exist = true;
+                    locals.set_any_variable_may_exist(true);
                 }
                 // Resolved once up front (namespace/`use`-import rules
                 // applied, with the same global-namespace fallback real
@@ -747,8 +759,8 @@ impl<'a> Checker<'a> {
                         if !is_bare_statement {
                             self.check_useless_return_value_call(name, args, locals, e.span);
                         }
-                    } else if locals.guarded_functions.is_empty()
-                        || !locals.guarded_functions.contains(
+                    } else if locals.guarded_functions().is_empty()
+                        || !locals.guarded_functions().contains(
                             &name
                                 .rsplit('\\')
                                 .next()
@@ -1191,12 +1203,12 @@ impl<'a> Checker<'a> {
                     // `apply_narrowing`). Only fires when the receiver is
                     // the exact bare-variable shape the guard was
                     // recorded against.
-                    let method_exists_guarded = !locals.guarded_methods.is_empty()
+                    let method_exists_guarded = !locals.guarded_methods().is_empty()
                         && matches!(
                             &recv.peeled().kind,
                             ExprKind::Variable(name)
                                 if locals
-                                    .guarded_methods
+                                    .guarded_methods()
                                     .contains(&(name.to_string(), method.to_string()))
                         );
                     if !method_exists_guarded
@@ -1689,7 +1701,7 @@ impl<'a> Checker<'a> {
             ExprKind::Eval(code) => {
                 self.check_expr(code, locals, label);
                 self.saw_dynamic_var_construct = true;
-                locals.any_variable_may_exist = true;
+                locals.set_any_variable_may_exist(true);
                 Type::mixed()
             }
             // The included file can define any variable.
@@ -1701,7 +1713,7 @@ impl<'a> Checker<'a> {
                     locals,
                     e.span,
                 );
-                locals.any_variable_may_exist = true;
+                locals.set_any_variable_may_exist(true);
                 Type::mixed()
             }
             ExprKind::ShellExec(cmd) => {
@@ -2835,12 +2847,12 @@ impl<'a> Checker<'a> {
                 // `PropertyExistsTypeSpecifyingExtension` - the
                 // `property_exists()` mirror of the `method_exists()`
                 // guard on `MethodCall` above.
-                let property_exists_guarded = !locals.guarded_properties.is_empty()
+                let property_exists_guarded = !locals.guarded_properties().is_empty()
                     && matches!(
                         &base.kind,
                         ExprKind::Variable(name)
                             if locals
-                                .guarded_properties
+                                .guarded_properties()
                                 .contains(&(name.to_string(), prop.to_string()))
                     );
                 // `property.nonObject` - same reasoning and nullsafe
@@ -3483,7 +3495,7 @@ impl<'a> Checker<'a> {
                 // genuinely-uncaptured reference to the same bare name.
                 let captured_names: rustc_hash::FxHashSet<&str> =
                     uses.iter().map(|u| u.name.as_ref()).collect();
-                for (key, implied) in locals.branch_implied_facts.iter() {
+                for (key, implied) in locals.branch_implied_facts().iter() {
                     let filtered: Vec<(String, Type)> = implied
                         .iter()
                         .filter(|(name, _)| captured_names.contains(name.as_str()))
@@ -3491,7 +3503,7 @@ impl<'a> Checker<'a> {
                         .collect();
                     if !filtered.is_empty() {
                         closure_locals
-                            .branch_implied_facts
+                            .branch_implied_facts_mut()
                             .insert(key.clone(), std::rc::Rc::new(filtered));
                     }
                 }
@@ -4033,8 +4045,8 @@ impl<'a> Checker<'a> {
                                     // suppression as the ordinary-call
                                     // site above.
                                     let primary = name.candidates().0;
-                                    let guarded = !locals.guarded_functions.is_empty()
-                                        && locals.guarded_functions.contains(
+                                    let guarded = !locals.guarded_functions().is_empty()
+                                        && locals.guarded_functions().contains(
                                             primary
                                                 .rsplit('\\')
                                                 .next()
@@ -4231,7 +4243,18 @@ impl<'a> Checker<'a> {
     }
 
     pub(crate) fn infer_expr(&self, e: &Expr, locals: &Locals) -> Type {
-        syntax::stack::guard(|| self.infer_expr_unguarded(e, locals))
+        if e.id == NodeId::SYNTHETIC || self.infer_cache.borrow().is_none() {
+            return syntax::stack::guard(|| self.infer_expr_unguarded(e, locals));
+        }
+        let key = (std::ptr::from_ref(e) as usize, e.id, locals.version());
+        if let Some(ty) = self.infer_cache.borrow().as_ref().and_then(|c| c.get(&key)) {
+            return ty.clone();
+        }
+        let ty = syntax::stack::guard(|| self.infer_expr_unguarded(e, locals));
+        if let Some(cache) = self.infer_cache.borrow_mut().as_mut() {
+            cache.insert(key, ty.clone());
+        }
+        ty
     }
 
     fn infer_expr_unguarded(&self, e: &Expr, locals: &Locals) -> Type {

@@ -289,7 +289,7 @@ pub(crate) fn purge_stale_narrowing_for(locals: &mut Locals, key: &str) {
     // variable a new value outside `Locals::declare` (which purges it
     // itself), so riding along here covers all of them uniformly rather
     // than needing its own separate call at each one.
-    locals.container_field_facts.remove(key);
+    locals.container_field_facts_mut().remove(key);
     locals.purge_branch_implied_facts_depending_on(key);
     // Same reasoning for `key`'s own per-discriminant accumulator facts
     // (see `DiscriminantArrayFactsMap`'s doc comment) - a wholesale
@@ -297,7 +297,7 @@ pub(crate) fn purge_stale_narrowing_for(locals: &mut Locals, key: &str) {
     // over from scratch, so any accumulated per-branch history recorded
     // for it is stale too.
     locals
-        .discriminant_array_facts
+        .discriminant_array_facts_mut()
         .retain(|(container, _, _), _| container != key);
 }
 
@@ -326,7 +326,11 @@ pub(crate) fn propagate_container_field_facts(
     target_name: &str,
     source_container: &str,
 ) {
-    let Some(facts) = locals.container_field_facts.get(source_container).cloned() else {
+    let Some(facts) = locals
+        .container_field_facts()
+        .get(source_container)
+        .cloned()
+    else {
         return;
     };
     for (field, ty) in facts.iter() {
