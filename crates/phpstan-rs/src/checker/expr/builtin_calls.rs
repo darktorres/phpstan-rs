@@ -30,6 +30,9 @@ impl<'a> Checker<'a> {
         args: &[Arg],
         locals: &Locals,
     ) -> Type {
+        if let Some(outcome) = self.type_check_call_outcome(name, args, locals) {
+            return Type::bool_literal(outcome);
+        }
         match name {
             // Mirrors real PHPStan's `AbsFunctionDynamicReturnTypeExtension` -
             // delegates entirely to `Type::toAbsoluteNumber()`.

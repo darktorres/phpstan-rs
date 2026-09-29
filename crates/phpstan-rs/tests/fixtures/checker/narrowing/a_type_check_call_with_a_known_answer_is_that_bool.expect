@@ -1,0 +1,5 @@
+6:25-6:46 function.impossibleType L4 | Call to function is_numeric() with ' 1' will always evaluate to false.
+7:24-7:42 function.alreadyNarrowedType L4 | Call to function is_numeric() with " 1\\n" will always evaluate to true.
+8:24-8:38 function.alreadyNarrowedType L4 | Call to function is_numeric() with float will always evaluate to true.
+9:25-9:39 function.impossibleType L4 | Call to function is_numeric() with list<int> will always evaluate to false.
+11:9-11:19 function.alreadyNarrowedType L4 | Call to function is_int() with int will always evaluate to true.

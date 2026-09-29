@@ -194,24 +194,21 @@ pub(crate) fn is_truthy_literal(e: &Expr) -> bool {
 /// only ever answers for the shapes that genuinely have nowhere else to
 /// be caught.
 ///
-/// A bare function/method/static call condition (real PHPStan's own
-/// `FunctionCallConstantConditionRule`/`*Helper`) is not excluded here:
-/// it isn't a separate rule at all, but the exact same
-/// `if`/`while`/`elseif`/`ternary`/`&&`/`||` rules this project already
-/// has, deferring their own reporting - through a shared helper, not a
-/// Collector - only when their own condition happens to be a call, for
-/// two narrow reasons neither of which needs whole-codebase aggregation:
-/// (1) dedup against a sibling `ImpossibleCheckType*` rule family this
-/// project has no equivalent of at all, so this concern doesn't apply
-/// here; (2) reconciling a trait method's own call condition across
-/// every class that `use`s it, which `check_trait_methods`'s own
-/// existing per-host re-check plus its own span+message dedup already
-/// provides generically, no new mechanism needed. So a bare call
-/// condition is just another shape `inferred_constant_condition` answers
-/// for directly, the same as any other - real PHPStan's own message/
-/// identifier for it is always whichever rule's own (`if.alwaysTrue`,
-/// `while.alwaysTrue`, ...), never a separate one of its own.
+/// A type-check call (`is_int($x)`) is excluded too: the impossible-
+/// type-check rule reports it (`function.alreadyNarrowedType`/
+/// `function.impossibleType`). Any other call condition is answered like
+/// any other shape.
 fn should_skip_constant_condition(e: &Expr) -> bool {
+    // A type-check call (`is_int($x)`) reports itself
+    // (`function.alreadyNarrowedType`/`function.impossibleType`).
+    if let ExprKind::Call(callee, _) = &e.kind
+        && let ExprKind::Name(name) = &callee.kind
+    {
+        let name = name.trim_start_matches('\\').to_ascii_lowercase();
+        if name == "is_numeric" || crate::checker::narrowing_type_for_predicate(&name).is_some() {
+            return true;
+        }
+    }
     matches!(
         &e.kind,
         ExprKind::Binary(

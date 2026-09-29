@@ -586,14 +586,45 @@ impl<'a> Checker<'a> {
             return;
         };
         let name = name.trim_start_matches('\\');
-        let Some(target_ty) = narrowing_type_for_predicate(name) else {
+        let Some(outcome) = self.type_check_call_outcome(name, args, locals) else {
             return;
+        };
+        let arg_ty = self.infer_expr(&args[0].value, locals);
+        if !outcome {
+            self.report(
+                format!("Call to function {name}() with {arg_ty} will always evaluate to false."),
+                span,
+                4,
+                "function.impossibleType",
+            );
+        } else if !is_exempt_last_condition {
+            self.report(
+                format!("Call to function {name}() with {arg_ty} will always evaluate to true."),
+                span,
+                4,
+                "function.alreadyNarrowedType",
+            );
+        }
+    }
+
+    /// A type-check call's (`is_int($x)`, `is_numeric($x)`, ...) known
+    /// answer: `true` when every value its argument can have passes,
+    /// `false` when none does, `None` otherwise.
+    pub(crate) fn type_check_call_outcome(
+        &self,
+        name: &str,
+        args: &[Arg],
+        locals: &Locals,
+    ) -> Option<bool> {
+        let target_ty = match name.to_ascii_lowercase().as_str() {
+            "is_numeric" => types::parse_type_string("int|float|numeric-string"),
+            other => narrowing_type_for_predicate(other)?,
         };
         let [single_arg] = args else {
-            return;
+            return None;
         };
         if single_arg.spread {
-            return;
+            return None;
         }
         // Deliberately plain `infer_expr` on the whole argument
         // expression, not `narrowing_key`/`current_narrowed_type` (the
@@ -611,24 +642,14 @@ impl<'a> Checker<'a> {
         // regression pass.
         let arg_ty = self.infer_expr(&single_arg.value, locals);
         if arg_ty.is_mixed() || arg_ty.is_never() {
-            return;
+            return None;
         }
         if self.relation().disjoint(&target_ty, &arg_ty) {
-            self.report(
-                format!("Call to function {name}() with {arg_ty} will always evaluate to false."),
-                span,
-                4,
-                "function.impossibleType",
-            );
-        } else if !is_exempt_last_condition
-            && self.registry.is_super_type_of(&target_ty, &arg_ty) == types::TrinaryLogic::Yes
-        {
-            self.report(
-                format!("Call to function {name}() with {arg_ty} will always evaluate to true."),
-                span,
-                4,
-                "function.alreadyNarrowedType",
-            );
+            Some(false)
+        } else if self.registry.is_super_type_of(&target_ty, &arg_ty) == types::TrinaryLogic::Yes {
+            Some(true)
+        } else {
+            None
         }
     }
 }
