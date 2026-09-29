@@ -769,7 +769,7 @@ through `check-project`.
   Native hints become types straight from the `TypeHint`, and
   `type_declarations.rs` reads the hint's nodes.
 
-- [ ] **F13. Declarations' namespaced names are computed and ignored.**
+- [x] **F13. Declarations' namespaced names are computed and ignored.**
   `namespaced_name` is read only by xtask's stub index. The registry
   (`class_info.rs` `ctx.declared_name`, `index.rs`'s namespace walk,
   `global_vars.rs`, `resolve.rs` `declared_name_in_namespace`, which
@@ -778,7 +778,11 @@ through `check-project`.
   One iterator over a file's declarations, yielding each with its
   namespaced name and whether it is conditional, replaces them; it also
   removes the `Block(s) | Declare { body: Some(s) }` arm repeated at about
-  20 sites. (`47f973e9`, `cd23db61`)
+  20 sites. (`47f973e9`, `cd23db61`) Done in `d82888a8`
+  (`syntax::declarations`). The remaining `Block | Declare` arms are
+  control flow, the outline, and a pass editing the tree. The same commit
+  fixes F12's function navigation in a namespaced file (a function name's
+  resolution isn't a class name's).
 - [ ] **F14. Names leave the project's interner.** AST names are `Name`s
   from the project's `Interner`, but the registry re-interns them as
   `Arc<str>` through `syntax::intern::intern`, the process-global interner
@@ -1013,6 +1017,8 @@ through `check-project`.
     - `interpolation.rs`: "simple interpolation syntax has no `?->` form"
       (F56).
     - The yield arm says generators "aren't modeled".
+  - `project/use_sites.rs` compares itself three times with
+    `DeclLocations`, which no longer exists.
     - `scan_interpolated` still calls the heredoc anchor "the best
       available".
     - `NameContext`'s doc cites "the extensive comment on this in
