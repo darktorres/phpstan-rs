@@ -289,7 +289,7 @@ Each fix needs a fixture.
   - `ClosureUse` has `name` plus `span`.
 
   Each becomes one `Ident`.
-- [ ] **S2. `QualifiedName` has no span,** so `InstanceofTarget::Name`,
+- [x] **S2. `QualifiedName` has no span,** Done in `ab1dcd7f` (`uses_spans` too). so `InstanceofTarget::Name`,
   `StaticTarget::Name` and `Attribute` pair it with one. Give it its span.
   The parallel vectors `CatchClause.types`/`types_spans` and
   `ClassDecl.extends`/`extends_spans`, `implements`/`implements_spans` then
