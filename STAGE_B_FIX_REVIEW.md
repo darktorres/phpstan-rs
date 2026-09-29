@@ -279,6 +279,10 @@ through `check-project`.
   - an `||` of 10,000 `instanceof` checks: 705 s;
   - 1,000 nested `match`: 71 s.
 
+  The fixes did cut both chains a long way: on the pre-window binary,
+  4,000 concatenated literals took 21.4 s (9.8 s now), and a 4,000-term
+  `&&` chain was still running after 46 minutes (15.8 s now).
+
   A chain of traits each using the previous one (`trait T1 { use T0; }`
   … `class A { use Tn; }`) grows about cubically, and the pre-window
   binary grows the same way (400 traits: 9.4 s before, 9.0 s now):
