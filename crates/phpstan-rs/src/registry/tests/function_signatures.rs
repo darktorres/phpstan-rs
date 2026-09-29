@@ -5,8 +5,8 @@ use super::helpers::*;
 
 #[test]
 fn a_native_mixed_parameter_hint_resolves_to_explicit_mixed() {
-    // Phase 84's own `mixed` - the literal `mixed` keyword,
-    // written natively here, is real PHPStan's own definition of
+    // The literal `mixed` keyword, written natively here, is real
+    // PHPStan's own definition of
     // *explicit* mixed (`vendor/phpstan-src/src/Type/
     // ParserNodeTypeToPHPStanType.php`).
     let r = build_registry(r#"<?php function g(mixed $m): void {}"#);

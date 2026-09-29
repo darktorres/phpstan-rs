@@ -13,7 +13,7 @@ use crate::restricted_symbols::{
 };
 use diagnostics::DiagnosticBuilder;
 use syntax::ast::TypeHint;
-use syntax::ast::{Arg, ClassKind, Expr, ExprKind, FunctionDecl, Literal, Param, UnaryOp};
+use syntax::ast::{Arg, ClassKind, Expr, FunctionDecl, Param};
 use syntax::token::Span;
 use types::Name;
 use types::Type;
@@ -128,76 +128,48 @@ fn scalar_value_matches(ty: &Type, value: &ParamScalarValue, case_insensitive: b
 }
 
 impl<'a> Checker<'a> {
-    /// Best-effort literal-preserving constant fold for the `ParamFlags`
-    /// family only - ordinary type inference for `BinOp::{BitOr,BitAnd,
-    /// BitXor}` deliberately widens two folded int literals to plain
-    /// `int` (confirmed via direct grep, `checker/expr.rs:5101`),
-    /// so a flag mask like `JSON_HEX_TAG | JSON_HEX_APOS` needs its own
-    /// literal-preserving evaluator here instead. Recognizes exactly the
-    /// shapes a real PHP flag mask is built from: an int literal, a
-    /// unary minus of one, a bare `Name` resolving through `Registry::
-    /// global_constants` (already an integer literal for a
-    /// stub's `define('JSON_HEX_APOS', 4)` - confirmed live against the
-    /// vendored phpstorm-stubs), and a bitwise combination of two
-    /// foldable operands. `None` for anything else, including a class
-    /// constant (real flag families like `JSON_HEX_*`/`PREG_*` are
-    /// always global constants, never class constants) - a disclosed,
-    /// narrower scope, not a guess.
-    fn fold_int_flags(&self, e: &Expr) -> Option<i64> {
-        let e = e.peeled();
-        syntax::stack::guard(|| match &e.kind {
-            ExprKind::Literal(Literal::Int(n)) => Some(*n),
-            ExprKind::Unary(UnaryOp::Neg, inner) => {
-                self.fold_int_flags(inner).and_then(i64::checked_neg)
-            }
-            ExprKind::Name(name) => self.global_constant_type(name)?.int_literal_value(),
-            ExprKind::Binary(syntax::ast::BinOp::BitOr, l, r) => {
-                Some(self.fold_int_flags(l)? | self.fold_int_flags(r)?)
-            }
-            ExprKind::Binary(syntax::ast::BinOp::BitAnd, l, r) => {
-                Some(self.fold_int_flags(l)? & self.fold_int_flags(r)?)
-            }
-            ExprKind::Binary(syntax::ast::BinOp::BitXor, l, r) => {
-                Some(self.fold_int_flags(l)? ^ self.fold_int_flags(r)?)
-            }
-            _ => None,
-        })
-    }
-
     /// One `ParamFlagsCondition`'s own match - the argument's own
     /// resolved integer value must have every bit of `value` (a single
     /// flag) set, or every bit of *any one* member of `type_string`'s
     /// own parsed union set (real docs: "if you want to (dis)allow a
     /// parameter when either the flag `1` or `2` is set, use
     /// `typeString: 1 | 2`" - this `|` is a PHPDoc union, not PHP's own
-    /// bitwise-or). An argument that can't be resolved, or can't be
-    /// constant-folded to an integer at all, never matches.
-    fn param_flags_condition_matches(&self, cond: &ParamFlagsCondition, args: &[Arg]) -> bool {
+    /// bitwise-or). Every integer the argument's type allows must match;
+    /// an argument that isn't there, or whose type isn't a set of integer
+    /// values, never matches.
+    fn param_flags_condition_matches(
+        &self,
+        cond: &ParamFlagsCondition,
+        args: &[Arg],
+        locals: &Locals,
+    ) -> bool {
         let Some(expr) = resolve_arg(args, cond.position, cond.name.as_deref()) else {
             return false;
         };
-        let Some(actual) = self.fold_int_flags(expr) else {
-            return false;
+        let actual_values = self.infer_expr(expr, locals).constant_ints();
+        let matches = |actual: i64| {
+            if let Some(type_string) = &cond.type_string {
+                return types::parse_type_string(type_string)
+                    .constant_ints()
+                    .iter()
+                    .any(|flag| (actual & flag) == *flag);
+            }
+            cond.value.is_some_and(|value| (actual & value) == value)
         };
-        if let Some(type_string) = &cond.type_string {
-            let configured = types::parse_type_string(type_string);
-            return configured
-                .constant_ints()
-                .iter()
-                .any(|flag| (actual & flag) == *flag);
-        }
-        if let Some(value) = cond.value {
-            return (actual & value) == value;
-        }
-        false
+        !actual_values.is_empty() && actual_values.into_iter().all(matches)
     }
 
     /// `all_conditions_match`'s own `ParamFlagsCondition` sibling.
-    fn all_flags_conditions_match(&self, conditions: &[ParamFlagsCondition], args: &[Arg]) -> bool {
+    fn all_flags_conditions_match(
+        &self,
+        conditions: &[ParamFlagsCondition],
+        args: &[Arg],
+        locals: &Locals,
+    ) -> bool {
         !conditions.is_empty()
             && conditions
                 .iter()
-                .all(|c| self.param_flags_condition_matches(c, args))
+                .all(|c| self.param_flags_condition_matches(c, args, locals))
     }
 
     /// One `ParamCondition`'s own match against the real call site -
@@ -291,7 +263,7 @@ impl<'a> Checker<'a> {
         if has_allow
             && (self.all_conditions_match(&entry.allow_params_anywhere, args, locals, false)
                 || self.all_refs_present(&entry.allow_params_anywhere_any_value, args)
-                || self.all_flags_conditions_match(&entry.allow_param_flags_anywhere, args))
+                || self.all_flags_conditions_match(&entry.allow_param_flags_anywhere, args, locals))
         {
             return true;
         }
@@ -309,7 +281,11 @@ impl<'a> Checker<'a> {
                         locals,
                         true,
                     )
-                    || self.all_flags_conditions_match(&entry.allow_except_param_flags, args);
+                    || self.all_flags_conditions_match(
+                        &entry.allow_except_param_flags,
+                        args,
+                        locals,
+                    );
             return !disallowed_here;
         }
         false
@@ -338,8 +314,11 @@ impl<'a> Checker<'a> {
                 args,
                 locals,
                 false,
-            ) || self
-                .all_flags_conditions_match(&entry.allow_except_param_flags_in_allowed, args);
+            ) || self.all_flags_conditions_match(
+                &entry.allow_except_param_flags_in_allowed,
+                args,
+                locals,
+            );
             return Some(!disallow_matched);
         }
         if !entry.allow_params_in_allowed.is_empty()
@@ -349,7 +328,11 @@ impl<'a> Checker<'a> {
             return Some(
                 self.all_conditions_match(&entry.allow_params_in_allowed, args, locals, false)
                     || self.all_refs_present(&entry.allow_params_in_allowed_any_value, args)
-                    || self.all_flags_conditions_match(&entry.allow_param_flags_in_allowed, args),
+                    || self.all_flags_conditions_match(
+                        &entry.allow_param_flags_in_allowed,
+                        args,
+                        locals,
+                    ),
             );
         }
         None

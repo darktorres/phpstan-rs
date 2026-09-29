@@ -886,7 +886,7 @@ impl<'a> Checker<'a> {
     }
 }
 
-/// Sub-phase D's own "one row type, N per-method transforms" table -
+/// The "one row type, N per-method transforms" table -
 /// shared between `Doctrine\DBAL\Result`'s own no-argument terminal
 /// methods and `Connection`/`QueryBuilder`'s own directly-resolved
 /// forms, which otherwise duplicate this exact dispatch. `row_type` is

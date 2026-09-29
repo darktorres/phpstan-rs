@@ -249,13 +249,9 @@ fn an_ancestors_mixed_tag_is_never_inherited() {
     );
 }
 
-// This project doesn't model cross-inheritance `@template` binding
-// (`@extends Base<Concrete>` fixing a parent's own type parameter - see
-// object's own doc comment) - a template-parameterized ancestor
-// type is only meaningful within the ancestor's own `@template` scope,
-// so backfilling it verbatim onto an unrelated descendant must never
-// happen, or the binding is silently lost, resolving to the far less
-// specific interface type.
+// A descendant that implements a generic ancestor without binding its
+// template (no `@implements Container10<X>`) doesn't inherit the
+// ancestor's template-typed return: `T` means nothing in its scope.
 #[test]
 fn an_ancestors_template_parameterized_type_is_never_inherited() {
     let r = build_registry(

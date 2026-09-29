@@ -506,7 +506,7 @@ pub struct ClassReflection {
     // For a backed enum only, each case's literal backing value
     // (`StringLiteral`/`IntLiteral`), keyed by case name - lets
     // `::from()`/`::tryFrom()` narrow a literal-argument call to the
-    // exact matching case's enum case instead of the coarse
+    // exact matching case instead of the coarse
     // `self`/`?self`. Only populated when every case's value is a bare
     // literal (mirrors the "don't guess" restriction the existing
     // `->value` union-of-literals property type applies) - empty for a
@@ -1405,8 +1405,8 @@ impl ClassReflection {
         // come after `resolve_names_in_type`, not before): otherwise two
         // classes each declaring a same-named but locally-scoped
         // `@phpstan-type` alias, then referencing it in their own
-        // `@implements` tag, would stay distinct opaque object
-        // nodes instead of each expanding to its real underlying shape,
+        // `@implements` tag, would stay distinct unexpanded alias
+        // references instead of each expanding to its real underlying shape,
         // making `check_cross_path_interface_conflicts`'s exact-equality
         // comparison see two "different" types where real PHPStan (which
         // always compares the expanded shape) sees an equivalent one.
