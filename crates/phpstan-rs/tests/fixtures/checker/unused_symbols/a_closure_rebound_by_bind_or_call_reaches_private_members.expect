@@ -1,0 +1,4 @@
+6:27-6:63 method.unused L4 | private method App\\Baz::unused() is unused
+    fix: Remove method unused() => ""
+8:37-8:42 variable.undefined L0 | undefined variable $this
+9:36-9:41 variable.undefined L0 | undefined variable $this
