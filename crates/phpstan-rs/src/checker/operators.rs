@@ -567,7 +567,8 @@ impl<'a> Checker<'a> {
             );
             return;
         }
-        if self.is_incdec_operand_valid(inner_ty) {
+        // A `never` operand is unreachable code, not a bad operand.
+        if inner_ty.is_never() || self.is_incdec_operand_valid(inner_ty) {
             return;
         }
         self.report(
