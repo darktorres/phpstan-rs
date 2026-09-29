@@ -1216,5 +1216,28 @@ all of its diffs above, but not again whole.
   F54.
 - [x] The registry's `class_info` and `purity`, `project` (with
   `use_sites` and `banned`), `lsp::navigation`, and
-  `syntax::{ast, visit, parser}`, read at `3cea2a20`: F7 (extended), F42,
-  F55, F56, F57, F58, F59. `visit` carries none.
+  `syntax::{ast, parser}`, read at `3cea2a20`: F7 (extended), F42,
+  F55, F56, F57, F58, F59.
+
+The items above read each named file, not the submodule files under it;
+those, and two files read only in part, are the items below. Each is read
+whole at `43f54302` (the same code as `2a31cc0c`), tests aside.
+
+- [ ] The checker's `expr` submodules: `array_ops`, `mysqli`,
+  `preg_shapes`, `probe_checks`, `ranges`.
+- [ ] The checker's `stmt` submodules: `loops`, `switch`, `try_catch`,
+  `new_exception_discarded`.
+- [ ] The checker's `control_flow` submodules: `boolean_conditions`,
+  `generators`.
+- [ ] The checker's `narrowing` submodules: `assertions`, `predicates`
+  (only excerpts reached from call sites were read before).
+- [ ] The registry's `class_info` submodules: `attributes`,
+  `doctrine_entity`, `tag_synthesis`, `virtual_property`.
+- [ ] The `project` submodules: `architecture`, `class_shape`,
+  `composer_hygiene`, `duplicate_class_sites`, `duplicate_classes`,
+  `duplicate_fn_sites`, `duplicate_functions`, `mock_hygiene`, `session`,
+  and `whole_program` with its six rules.
+- [ ] `syntax::visit` (its last mutable walkers were cut off) and
+  `syntax::parser::tokens` (its comments were filtered out).
+- [ ] `types::arithmetic`'s `div_int_range` and `sub_int_range_full`,
+  checked exhaustively over small ranges against PHP.
