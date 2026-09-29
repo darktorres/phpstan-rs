@@ -4,9 +4,8 @@
 use crate::{Relation, Repr, Type};
 
 impl Type {
-    /// Filters this PHPDoc type's members down to whichever are subtypes of
-    /// `native_ty` - see `resolve_type`'s own doc comment for the reasoning.
-    /// Falls back to `native_ty` itself when *no* doc member survives (rather
+    /// Filters this PHPDoc type's members down to whichever `native_ty`
+    /// could hold (PHPStan's `TypehintHelper::decideType`). Falls back to `native_ty` itself when *no* doc member survives (rather
     /// than collapsing to `Mixed`), so a doc type that's entirely stale
     /// (`finfo_file`'s bare `resource` against a modern `finfo` native) still
     /// resolves to the real, useful native type instead of losing all
@@ -124,28 +123,12 @@ fn native_member_addable(native_member: &Type) -> bool {
     )
 }
 
-/// A surviving `Repr::Callable` member (kept only because
-/// `member_possible_given_native` can't disprove it) is itself a coarse
-/// marker with strictly less information than a real, present native
-/// type already carries - left as `Callable`, it can wrongly *lose* to
-/// the native type in an unrelated later comparison that only sees this
-/// resolved signature, not the native hint that produced it - e.g. a
-/// method's own `@phpstan-param Closure(TKey, T):bool $p` resolving to
-/// bare `Callable` instead of the exactly-known native `Closure` would
-/// make a subclass's own identically-typed override look like an
-/// illegal narrowing purely because the ancestor's resolved type had
-/// lost precision the child's never did. Substitutes the
-/// native type's own concrete counterpart back in whenever there is
-/// one - a plain class-typed native, or (when native itself is
-/// nullable) its sole non-null member - leaving `Callable` alone
-/// otherwise (an untyped-native `callable $p`, or one this project
-/// still can't say anything more precise about).
+/// A bare `callable` doc member under a native class hint (`callable
+/// $p` documented on a `Closure $p`) is that class: the native type says
+/// more, and a later comparison that sees only the resolved type would
+/// otherwise lose it.
 fn refine_callable_member(m: Type, native_ty: &Type) -> Type {
-    // Only the bare marker is "coarse" in the sense this function
-    // exists to fix - a real parsed `Closure(...)`/
-    // `callable(...)` shape (`Some(sig)`) is already a genuine
-    // refinement in its own right and shouldn't be thrown away in favor
-    // of a plain native class type.
+    // A `callable(...)` shape says more than the native class does.
     if !matches!(m, Type(Repr::Callable(None))) {
         return m;
     }

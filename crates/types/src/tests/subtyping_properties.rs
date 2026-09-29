@@ -72,24 +72,19 @@ proptest! {
         prop_assert!(super::is_subtype(&t, &t));
     }
 
-    /// `(_, Repr::Mixed(false)) => true` is `is_super_type_of`'s own first arm -
-    /// `Mixed` accepts everything.
+    /// `mixed` is a super type of everything.
     #[test]
     fn mixed_is_top(t in any_type()) {
         prop_assert!(super::is_subtype(&t, &Type::mixed()));
     }
 
-    /// `(Repr::Never, _) => true` is `is_super_type_of`'s own second arm -
-    /// `Never` satisfies everything.
+    /// `never` is a subtype of everything.
     #[test]
     fn never_is_bottom(t in any_type()) {
         prop_assert!(super::is_subtype(&Type::never(), &t));
     }
 
-    /// `(_, Repr::Union(members)) => members.iter().any(|m| subtype
-    /// (sub, m))` - a member is always a subtype of the union containing
-    /// it (found via reflexivity: `subtype(m, m)` is what the `.any()`
-    /// finds).
+    /// A member is a subtype of the union containing it.
     #[test]
     fn union_injection(members in prop::collection::vec(any_type(), 2..4)) {
         let union = Type(Repr::Union(members.clone()));
@@ -98,10 +93,7 @@ proptest! {
         }
     }
 
-    /// `(Repr::Intersection(members), _) => members.iter().any(|m|
-    /// subtype(m, sup))` - an intersection is always a subtype of
-    /// each of its own members (same reflexivity-driven reasoning as
-    /// union injection, the dual direction).
+    /// An intersection is a subtype of each of its members.
     #[test]
     fn intersection_projection(members in prop::collection::vec(any_type(), 2..4)) {
         let intersection = Type(Repr::Intersection(members.clone()));

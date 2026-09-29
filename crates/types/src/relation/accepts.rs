@@ -249,25 +249,9 @@ impl Relation<'_> {
                 // PreInc|PreDec` where a `Node` is expected, each member
                 // extending `Node` through `Expr`).
                 (Type(Repr::TemplateParam(tp)), _) => self.accepts_type(&tp.bound, sup),
-                // Mirrors `Relation::is_super_type_of`'s own identically-placed
-                // `Repr::Conditional` arm exactly (see that arm's own doc
-                // comment) - a real, independent gap this project's own
-                // `Repr::Conditional`-returning-function corpus checks were
-                // silently missing: without this, a `sub` that's itself an
-                // `Intersection` (any `list<T>`/`non-empty-array<T>`-typed
-                // value - an extremely common real return type) hits this
-                // function's own generic `(Intersection, _) => any(...)` rule
-                // below *first*, decomposing `sub`'s own members (`Array`,
-                // a bare `Accessory(ArrayList)`, a bare `Accessory(
-                // NonEmptyArray)`) and checking each *in isolation* against
-                // the still-unflattened `Conditional` - none of which,
-                // stripped from its own `Intersection` wrapper, actually
-                // represents "a real list" any more, so a value that
-                // genuinely satisfies one of the two conditional arms was
-                // wrongly rejected. Placed before every arm that could
-                // decompose `sub` first, exactly like `is_super_type_of`'s own
-                // arm, so `sup`'s real shape is always resolved before
-                // `sub`'s is.
+                // An unresolved conditional, on either side, is its two
+                // branches' union. Before the arms that take `sub` apart: a
+                // `list<T>`'s members, checked one by one, aren't lists.
                 (
                     Type(Repr::Conditional {
                         if_true, if_false, ..
