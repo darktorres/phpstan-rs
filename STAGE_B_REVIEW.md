@@ -294,7 +294,7 @@ Each fix needs a fixture.
   The parallel vectors `CatchClause.types`/`types_spans` and
   `ClassDecl.extends`/`extends_spans`, `implements`/`implements_spans` then
   go.
-- [ ] **S3. Trait uses keep their statements.** `ClassDecl` holds `uses`,
+- [x] **S3. Trait uses keep their statements.** Done in `4ed3cfe3`. `ClassDecl` holds `uses`,
   `uses_spans`, `uses_doc_comments`, `trait_aliases`, `trait_precedences`
   and `resolved_trait_conflicts` as flat lists, losing which adaptations
   belong to which `use` statement. Replace them with one `trait_uses` list
