@@ -807,10 +807,11 @@ through `check-project`.
   `foreach` target its own pattern node, keeping `ArrayLiteral` for values;
   the parser then rejects `list()` as a value (the checker's `List` arm now
   returns `mixed`). (`f9651cf4`)
-- [ ] **F18. Transparent wrappers are matched by hand.**
+- [x] **F18. Transparent wrappers are matched by hand.**
   `Grouping(inner) | ErrorSuppress(inner)` appears at about 30 sites
   instead of one peel helper. `unwrap_grouping` also peels `@` but keeps
   the grouping-only name. Nothing reads `ErrorSuppress`. (`5d93a01c`)
+  Done in `57b7f6e7`; `ErrorSuppress` stays a node, as `banned.rs` reports `@`.
 - [ ] **F19. Variable names have two representations.** `StaticVar` and
   `GlobalVar::Name` are `Ident`s (a `Name`), while `ExprKind::Variable` is
   `Arc<str>`, so call sites convert through the global interner. Extends
