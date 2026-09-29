@@ -703,7 +703,7 @@ through `check-project`.
   supertype of an array is always Maybe. A float literal expression is
   typed `float` (`$f = 1.5` is `float`), so `1.5 === 2.5` is never
   constant. (`91bc9e49`) Done in `d89ea9e5` (the float literal with F60).
-- [ ] **F50. Late types and traversal ignore parts of a type.**
+- [x] **F50. Late types and traversal ignore parts of a type.**
   - `key_of`, `value_of` and `offset_access` ignore an unsealed shape's
     tail: `key-of<array{a: 1, ...<int, string>}>` is `'a'`, not `'a'|int`,
     and an offset missing from an unsealed shape is `mixed`, not the tail's
@@ -713,7 +713,7 @@ through `check-project`.
     or a callable's own templates' bounds, so substitution, settling and
     `references_template` don't see types there.
 
-  (`0e309c03`)
+  (`0e309c03`) Done in `ac00409c`.
 - [ ] **F51. Displayed types lose information.**
   - [x] A float literal prints with Rust's `{n}`: `1.0|2.5` shows `1|2.5`, the
     same as an int literal. PHPStan prints `1.0`. (Done in `89da4c25`.)
