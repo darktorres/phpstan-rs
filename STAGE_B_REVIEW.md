@@ -148,7 +148,7 @@ Each fix needs a fixture.
 
 ## Review 2: precision
 
-- [ ] **P1. The union cap gives up to `mixed`.** Past `MAX_UNION_MEMBERS`
+- [x] **P1. The union cap gives up to `mixed`.** Done in `b9ca6c05`. Past `MAX_UNION_MEMBERS`
   (12), after shapes are generalized, `Type::union` returns `mixed`. So
   thirteen string literals become `mixed` rather than `string`. Generalize
   literals to their base type (and ranges to `int`) before giving up; `mixed`
@@ -194,7 +194,8 @@ Each fix needs a fixture.
   `instanceof`) from an enum's object type expands the enum to its cases
   first, as PHPStan's `EnumCaseObjectType` subtraction does.
 
-- [ ] **P5. A first-class callable has no signature.** `strlen(...)`,
+- [x] **P5. A first-class callable has no signature.** Done in `b3412c22`
+  (F65). `strlen(...)`,
   `exit(...)` and `$obj->method(...)` are a bare `Closure`; their type is
   the function's signature as a closure (`Closure(string): int<0, max>`),
   so a call through the value is checked and typed.
