@@ -1468,62 +1468,33 @@ impl<'a> Checker<'a> {
             // comment), otherwise the matching case accessory is composed
             // with whatever numeric/non-empty/non-falsy accessory the
             // argument already carried.
-            "strtolower" | "mb_strtolower" if !args.is_empty() => {
+            "strtolower" | "strtoupper" | "lcfirst" | "ucfirst" | "mb_strtolower"
+            | "mb_strtoupper" | "mb_lcfirst" | "mb_ucfirst"
+                if !args.is_empty() =>
+            {
+                let op = match name.trim_start_matches("mb_") {
+                    "strtolower" => CaseOp::Lower,
+                    "strtoupper" => CaseOp::Upper,
+                    "lcfirst" => CaseOp::LowerFirst,
+                    _ => CaseOp::UpperFirst,
+                };
                 return self.infer_case_function_call(
                     &args[0].value,
                     locals,
-                    true,
-                    false,
-                    false,
-                    false,
+                    &[op],
+                    name.starts_with("mb_"),
                 );
             }
-            "strtoupper" | "mb_strtoupper" if !args.is_empty() => {
-                return self.infer_case_function_call(
-                    &args[0].value,
-                    locals,
-                    false,
-                    false,
-                    true,
-                    false,
-                );
-            }
-            "lcfirst" | "mb_lcfirst" if !args.is_empty() => {
-                return self.infer_case_function_call(
-                    &args[0].value,
-                    locals,
-                    false,
-                    true,
-                    false,
-                    false,
-                );
-            }
-            "ucfirst" | "mb_ucfirst" if !args.is_empty() => {
-                return self.infer_case_function_call(
-                    &args[0].value,
-                    locals,
-                    false,
-                    false,
-                    false,
-                    true,
-                );
-            }
-            // Unlike `ucwords`/`mb_convert_kana` (which never touch these
-            // booleans), `mb_convert_case` derives the same force/keep-
-            // lowercase/uppercase booleans from its resolvable `$mode`
-            // argument, composed through the identical machinery.
+            // A mode that isn't known literally could be any of them.
             "mb_convert_case" if args.len() >= 2 => {
                 let mode_ty = self.infer_expr(&args[1].value, locals);
-                let (force_lower, keep_lower, force_upper, keep_upper) =
-                    mb_convert_case_flags(&mode_ty);
-                return self.infer_case_function_call(
-                    &args[0].value,
-                    locals,
-                    force_lower,
-                    keep_lower,
-                    force_upper,
-                    keep_upper,
-                );
+                let ops: Vec<CaseOp> = mode_ty
+                    .constant_ints()
+                    .iter()
+                    .map(|&m| CaseOp::from_mb_mode(m))
+                    .collect::<Option<Vec<CaseOp>>>()
+                    .unwrap_or_default();
+                return self.infer_case_function_call(&args[0].value, locals, &ops, true);
             }
             // The vendored stub's `@return string[]|false` reflects PHP
             // 7's behavior for an empty `$separator` - PHP 8+ throws a
@@ -1912,57 +1883,50 @@ impl<'a> Checker<'a> {
         }
     }
 
-    /// Shared by every case-conversion builtin (`strtolower`/`strtoupper`/
-    /// `lcfirst`/`ucfirst` and their `mb_` siblings, plus
-    /// `mb_convert_case`): constant-folds a literal argument outright
-    /// (ASCII-only case flip, matching PHP 8.2+'s locale-independent
-    /// semantics), otherwise composes the matching case accessory
-    /// (`force_lower`/`force_upper` always applies it; `keep_lower`/
-    /// `keep_upper` only when the argument already provably carries it)
-    /// with whatever numeric/non-falsy/non-empty accessory the argument's
-    /// type already carries.
+    /// A case function's result: a literal argument folded as the
+    /// function would fold it (`multibyte`: by Unicode, else ASCII), each
+    /// of `ops` when the mode is one of several, and otherwise a string
+    /// carrying the case accessory the operations guarantee and the
+    /// argument's numeric/non-falsy/non-empty one. `ops` empty is a mode
+    /// that isn't known.
     fn infer_case_function_call(
         &self,
         arg: &Expr,
         locals: &Locals,
-        force_lower: bool,
-        keep_lower: bool,
-        force_upper: bool,
-        keep_upper: bool,
+        ops: &[CaseOp],
+        multibyte: bool,
     ) -> Type {
         let arg_ty = self.infer_expr(arg, locals);
-        if let Some(s) = arg_ty.string_literal_value() {
-            let folded = if force_lower {
-                s.to_ascii_lowercase()
-            } else if force_upper {
-                s.to_ascii_uppercase()
-            } else if keep_lower || keep_upper {
-                let mut bytes = s.as_bytes().to_vec();
-                if let Some(first) = bytes.first_mut() {
-                    if keep_lower {
-                        first.make_ascii_lowercase();
-                    } else {
-                        first.make_ascii_uppercase();
-                    }
-                }
-                PhpString::from(bytes)
-            } else {
-                s.clone()
-            };
-            return Type::string_literal(folded);
+        if let Some(s) = arg_ty.string_literal_value()
+            && !ops.is_empty()
+            && let Some(folded) = ops
+                .iter()
+                .map(|op| op.fold(s, multibyte).map(Type::string_literal))
+                .collect::<Option<Vec<Type>>>()
+        {
+            return folded
+                .into_iter()
+                .reduce(Type::union)
+                .unwrap_or_else(Type::never);
         }
 
+        let all = |f: fn(&CaseOp) -> bool| !ops.is_empty() && ops.iter().all(f);
         let mut accessories = Vec::new();
-        if force_lower
-            || (keep_lower
+        if all(CaseOp::makes_lowercase)
+            || (all(CaseOp::keeps_lowercase)
                 && arg_ty
                     .is_refined_string(AccessoryKind::LowercaseString)
                     .yes())
         {
             accessories.push(AccessoryKind::LowercaseString);
         }
-        if force_upper
-            || (keep_upper
+        // A multibyte titlecase can bring in ASCII lowercase (`ß` is `Ss`).
+        let keeps_uppercase = !ops.is_empty()
+            && ops
+                .iter()
+                .all(|op| op.keeps_uppercase() && !(multibyte && *op == CaseOp::UpperFirst));
+        if all(CaseOp::makes_uppercase)
+            || (keeps_uppercase
                 && arg_ty
                     .is_refined_string(AccessoryKind::UppercaseString)
                     .yes())
@@ -1993,24 +1957,196 @@ impl<'a> Checker<'a> {
     }
 }
 
-/// `mb_convert_case`'s `$mode` resolution - derives the same four
-/// force/keep-lowercase/uppercase booleans every other case function
-/// above has, from whichever `MB_CASE_*` constant value(s) `mode_ty`
-/// resolves to (a bare integer literal for the common single-constant
-/// call, or a `Union` for a conditional/computed mode).
-/// `MB_CASE_FOLD`/`MB_CASE_FOLD_SIMPLE` (`3`/`7`) count toward `keep_*`
-/// but not `force_*`.
-fn mb_convert_case_flags(mode_ty: &Type) -> (bool, bool, bool, bool) {
-    let modes = mode_ty.constant_ints();
-    if modes.is_empty() {
-        return (false, false, false, false);
+/// A string case operation: what `strtolower`/`mb_strtolower` and
+/// friends, and each `mb_convert_case` mode, do.
+#[derive(Clone, Copy, PartialEq)]
+enum CaseOp {
+    Lower,
+    Upper,
+    LowerFirst,
+    UpperFirst,
+    Title,
+    Fold,
+    /// A `*_SIMPLE` mode: one character to one.
+    Simple(SimpleCaseOp),
+}
+
+#[derive(Clone, Copy, PartialEq)]
+enum SimpleCaseOp {
+    Lower,
+    Upper,
+    Title,
+    Fold,
+}
+
+impl CaseOp {
+    /// `mb_convert_case`'s `MB_CASE_*` mode.
+    fn from_mb_mode(mode: i64) -> Option<CaseOp> {
+        Some(match mode {
+            0 => CaseOp::Upper,
+            1 => CaseOp::Lower,
+            2 => CaseOp::Title,
+            3 => CaseOp::Fold,
+            4 => CaseOp::Simple(SimpleCaseOp::Upper),
+            5 => CaseOp::Simple(SimpleCaseOp::Lower),
+            6 => CaseOp::Simple(SimpleCaseOp::Title),
+            7 => CaseOp::Simple(SimpleCaseOp::Fold),
+            _ => return None,
+        })
     }
-    let is_subset_of = |allowed: &[i64]| modes.iter().all(|m| allowed.contains(m));
-    let force_lower = is_subset_of(&[1, 5]); // MB_CASE_LOWER, MB_CASE_LOWER_SIMPLE
-    let keep_lower = is_subset_of(&[1, 5, 3, 7]); // + MB_CASE_FOLD, MB_CASE_FOLD_SIMPLE
-    let force_upper = is_subset_of(&[0, 4]); // MB_CASE_UPPER, MB_CASE_UPPER_SIMPLE
-    let keep_upper = is_subset_of(&[0, 4, 3, 7]);
-    (force_lower, keep_lower, force_upper, keep_upper)
+
+    /// Leaves no ASCII uppercase letter (the `lowercase-string` sense).
+    fn makes_lowercase(&self) -> bool {
+        matches!(
+            self,
+            CaseOp::Lower | CaseOp::Fold | CaseOp::Simple(SimpleCaseOp::Lower | SimpleCaseOp::Fold)
+        )
+    }
+
+    fn keeps_lowercase(&self) -> bool {
+        self.makes_lowercase() || *self == CaseOp::LowerFirst
+    }
+
+    fn makes_uppercase(&self) -> bool {
+        matches!(self, CaseOp::Upper | CaseOp::Simple(SimpleCaseOp::Upper))
+    }
+
+    fn keeps_uppercase(&self) -> bool {
+        self.makes_uppercase() || *self == CaseOp::UpperFirst
+    }
+
+    /// `s` after the operation, `None` where it isn't certain: a
+    /// multibyte fold of a string that isn't UTF-8 (PHP substitutes `?`),
+    /// or of characters whose titlecase, case folding or title-mode word
+    /// boundary Rust's Unicode data doesn't give.
+    fn fold(self, s: &PhpString, multibyte: bool) -> Option<PhpString> {
+        if !multibyte {
+            let mut bytes = s.as_bytes().to_vec();
+            match self {
+                CaseOp::Lower => bytes.make_ascii_lowercase(),
+                CaseOp::Upper => bytes.make_ascii_uppercase(),
+                CaseOp::LowerFirst => {
+                    if let Some(first) = bytes.first_mut() {
+                        first.make_ascii_lowercase();
+                    }
+                }
+                CaseOp::UpperFirst => {
+                    if let Some(first) = bytes.first_mut() {
+                        first.make_ascii_uppercase();
+                    }
+                }
+                _ => return None,
+            }
+            return Some(PhpString::from(bytes));
+        }
+        let text = s.as_str()?;
+        let first_then = |first: Option<String>, rest: &str| -> Option<PhpString> {
+            Some(PhpString::from(format!("{}{rest}", first?)))
+        };
+        let simple = |c: char, map: fn(char) -> String| -> Option<char> {
+            let mapped = map(c);
+            let mut mapped = mapped.chars();
+            match (mapped.next(), mapped.next()) {
+                (Some(one), None) => Some(one),
+                _ => None,
+            }
+        };
+        match self {
+            CaseOp::Lower => Some(PhpString::from(text.to_lowercase())),
+            CaseOp::Upper => Some(PhpString::from(text.to_uppercase())),
+            CaseOp::LowerFirst | CaseOp::UpperFirst => {
+                let mut chars = text.chars();
+                let Some(first) = chars.next() else {
+                    return Some(s.clone());
+                };
+                let mapped = if self == CaseOp::LowerFirst {
+                    Some(first.to_lowercase().collect())
+                } else {
+                    titlecase(first)
+                };
+                first_then(mapped, chars.as_str())
+            }
+            CaseOp::Title => title_case(text, |c| c.to_lowercase().collect::<String>(), titlecase),
+            CaseOp::Fold | CaseOp::Simple(SimpleCaseOp::Fold) => text
+                .is_ascii()
+                .then(|| PhpString::from(text.to_ascii_lowercase())),
+            CaseOp::Simple(SimpleCaseOp::Lower) => text
+                .chars()
+                .map(|c| simple(c, |c| c.to_lowercase().collect()))
+                .collect::<Option<String>>()
+                .map(PhpString::from),
+            CaseOp::Simple(SimpleCaseOp::Upper) => text
+                .chars()
+                .map(|c| simple(c, |c| c.to_uppercase().collect()))
+                .collect::<Option<String>>()
+                .map(PhpString::from),
+            CaseOp::Simple(SimpleCaseOp::Title) => title_case(
+                text,
+                |c| {
+                    let mut lower = c.to_lowercase();
+                    match (lower.next(), lower.next()) {
+                        (Some(one), None) => one.to_string(),
+                        _ => c.to_string(),
+                    }
+                },
+                |c| titlecase(c).filter(|t| t.chars().count() == 1),
+            ),
+        }
+    }
+}
+
+/// A character's titlecase: the Unicode digraphs have their own
+/// (`ǆ` is `ǅ`); any other with a one-character uppercase has that.
+/// `None` for one whose titlecase isn't its uppercase and isn't known
+/// here (`ß` is `Ss`, `ŉ` is `ʼN`).
+fn titlecase(c: char) -> Option<String> {
+    let digraph = match c {
+        '\u{01C4}'..='\u{01C6}' => Some('\u{01C5}'),
+        '\u{01C7}'..='\u{01C9}' => Some('\u{01C8}'),
+        '\u{01CA}'..='\u{01CC}' => Some('\u{01CB}'),
+        '\u{01F1}'..='\u{01F3}' => Some('\u{01F2}'),
+        _ => None,
+    };
+    if let Some(t) = digraph {
+        return Some(t.to_string());
+    }
+    let mut upper = c.to_uppercase();
+    match (upper.next(), upper.next()) {
+        (Some(one), None) => Some(one.to_string()),
+        _ => None,
+    }
+}
+
+/// `MB_CASE_TITLE`: a cased letter is titlecased where a word starts and
+/// lowercased elsewhere; a case-ignorable character (`'`, `.`, `:`, `^`,
+/// `` ` ``) keeps the word going, any other character ends it (`3rd` is
+/// `3Rd`, `o'neil` is `O'neil`). `None` when an uncased character isn't
+/// ASCII, whose case-ignorability isn't known here.
+fn title_case(
+    text: &str,
+    lower: impl Fn(char) -> String,
+    title: impl Fn(char) -> Option<String>,
+) -> Option<PhpString> {
+    let mut out = String::with_capacity(text.len());
+    let mut in_word = false;
+    for c in text.chars() {
+        // The titlecase digraphs are cased but neither lower nor upper.
+        let cased = c.is_lowercase()
+            || c.is_uppercase()
+            || matches!(c, '\u{01C5}' | '\u{01C8}' | '\u{01CB}' | '\u{01F2}');
+        if cased {
+            out.push_str(&if in_word { lower(c) } else { title(c)? });
+            in_word = true;
+        } else if matches!(c, '\'' | '.' | ':' | '^' | '`') {
+            out.push(c);
+        } else if c.is_ascii() {
+            out.push(c);
+            in_word = false;
+        } else {
+            return None;
+        }
+    }
+    Some(PhpString::from(out))
 }
 
 fn is_var_named(e: &Expr, name: &str) -> bool {
