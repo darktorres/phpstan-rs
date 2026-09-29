@@ -604,7 +604,7 @@ through `check-project`.
   `Traversable` bare, so a `foreach` over `iterable<string, int>` gives
   `mixed` key and value. `Traversable<K, V>` carries them. (parse.rs final
   state)
-- [ ] **F46. The missing-typehint walks skip callable signatures and object
+- [x] **F46. The missing-typehint walks skip callable signatures and object
   shapes.** `callable(array): void` and `object{a: array}` get no
   `missingType.iterableValue`, `callable(Coll): void` (generic `Coll`) no
   `missingType.generics`, `object{c: callable}` no `missingType.callable`.
@@ -614,7 +614,7 @@ through `check-project`.
   (`text_mentions_mixed`), not the `Mixed(true)` flag each node carries,
   so `array{a: array, b: mixed}` hides `a`'s missing value type; that part
   moved to C7, whose resolver keeps the flag.
-  (`dbe500c5`)
+  (`dbe500c5`) Done in `2b1ce22b` (the walks; the flag stays C7's).
 - [ ] **F47. Raw constructors break the canonical forms.** `Type::int_range`
   is public and builds any pair beside the normalizing `int_interval`
   (about 29 callers outside the crate, plus `transform::step`, `coercion`'s
