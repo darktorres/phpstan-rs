@@ -338,9 +338,9 @@ fn try_parse_conditional_type(s: &str) -> Option<Type> {
     };
     Some(Type::new(Repr::Conditional {
         subject,
-        target: Arc::new(parse_written_type(target_raw)),
-        if_true: Arc::new(if_true),
-        if_false: Arc::new(if_false),
+        target: parse_written_type(target_raw),
+        if_true,
+        if_false,
         negated,
     }))
 }
@@ -783,7 +783,7 @@ fn parse_type_atom(s: &str) -> Type {
             Type::class_string(class_ty)
         } else {
             Type::new(Repr::ClassConstant {
-                class: Arc::new(class_ty),
+                class: class_ty,
                 pattern: const_part.into(),
             })
         }

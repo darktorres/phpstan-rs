@@ -4,7 +4,6 @@
 
 use crate::OrderingOp;
 use crate::{AccessoryKind, PhpString, Relation, Repr, Shape, ShapeField, ShapeKey, Type};
-use std::sync::Arc;
 
 /// A comparison's own truth value, canonicalized to "the narrowed side
 /// is smaller/smaller-or-equal/greater/greater-or-equal than the bound" -
@@ -201,10 +200,10 @@ impl Type {
                 && !matches!(excluded.repr(), Repr::Mixed(..) | Repr::Never | Repr::Error)
             {
                 let lacks = match lacks {
-                    Some(lacks) => Type::union((**lacks).clone(), excluded.clone()),
+                    Some(lacks) => Type::union((*lacks).clone(), excluded.clone()),
                     None => excluded.clone(),
                 };
-                return Type::new(Repr::Mixed(*explicit, Some(Arc::new(lacks))));
+                return Type::new(Repr::Mixed(*explicit, Some(lacks)));
             }
             match self.repr() {
                 // Recurses into `Type::without` for each kept member,

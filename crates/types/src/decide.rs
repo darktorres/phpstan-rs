@@ -261,7 +261,7 @@ fn member_possible_given_native(m: &Type, native_ty: &Type) -> bool {
             // and re-run the same key-ignoring check on it.
             Repr::Intersection(members) => match (
                 members.iter().find_map(|inner| match inner.repr() {
-                    Repr::Array(_, elem) => Some(elem.as_ref()),
+                    Repr::Array(_, elem) => Some(elem),
                     _ => None,
                 }),
                 native_ty.repr(),

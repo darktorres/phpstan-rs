@@ -70,7 +70,7 @@ impl Type {
     /// sealed shape surely lacks `key`.
     pub fn offset_value_type(&self, key: Option<&ShapeKey>) -> Option<Type> {
         syntax::stack::guard(|| match self.repr() {
-            Repr::Array(_, value) => Some((**value).clone()),
+            Repr::Array(_, value) => Some((*value).clone()),
             Repr::ArrayShape(shape) => match key {
                 Some(key) => match shape.field(key) {
                     Some(field) => Some(field.ty.clone()),
@@ -82,7 +82,7 @@ impl Type {
             Repr::Intersection(members) => {
                 let tracked = key.and_then(|key| {
                     members.iter().find_map(|m| match m.repr() {
-                        Repr::HasOffsetValue(k, v) if k == key => Some((**v).clone()),
+                        Repr::HasOffsetValue(k, v) if k == key => Some((*v).clone()),
                         _ => None,
                     })
                 });
@@ -201,7 +201,7 @@ impl Type {
                         .any(|m| matches!(m.repr(), Repr::HasOffsetValue(..))) =>
                 {
                     let (key, inner) = members.iter().find_map(|m| match m.repr() {
-                        Repr::Array(k, v) => Some((k.as_ref(), v.as_ref())),
+                        Repr::Array(k, v) => Some((k, v)),
                         _ => None,
                     })?;
                     let existing: Vec<Type> = members
@@ -247,7 +247,7 @@ impl Type {
                             .iter()
                             .find_map(|m| match m.repr() {
                                 Repr::Array(k, _) => {
-                                    Some(Type::union((**k).clone(), written.clone()))
+                                    Some(Type::union((*k).clone(), written.clone()))
                                 }
                                 _ => None,
                             })

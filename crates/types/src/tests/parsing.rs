@@ -130,8 +130,8 @@ fn phpdoc_array_shorthand_parses() {
         Type::array(
             Type::benevolent_array_key(),
             Type::new(Repr::Array(
-                std::sync::Arc::new(Type::benevolent_array_key()),
-                std::sync::Arc::new(Type::new(Repr::String))
+                Type::benevolent_array_key(),
+                Type::new(Repr::String)
             ))
         )
     );
@@ -432,7 +432,7 @@ fn class_constant_reference_types_parse_to_a_class_constant() {
     // literal class named "self::RFC_*".
     let sentinel = |class: Type, pattern: &str| {
         Type::new(Repr::ClassConstant {
-            class: std::sync::Arc::new(class),
+            class,
             pattern: pattern.into(),
         })
     };
@@ -512,7 +512,7 @@ fn generic_arg_with_covariant_marker_parses_to_a_variance_arg() {
             "Collection".into(),
             vec![Type::new(Repr::VarianceArg(
                 CallSiteVariance::Covariant,
-                std::sync::Arc::new(Type::new(Repr::Object("Foo".into(), Vec::new())))
+                Type::new(Repr::Object("Foo".into(), Vec::new()))
             ))]
         )
     );
@@ -526,7 +526,7 @@ fn generic_arg_with_contravariant_marker_parses_to_a_variance_arg() {
             "Collection".into(),
             vec![Type::new(Repr::VarianceArg(
                 CallSiteVariance::Contravariant,
-                std::sync::Arc::new(Type::new(Repr::Object("Foo".into(), Vec::new())))
+                Type::new(Repr::Object("Foo".into(), Vec::new()))
             ))]
         )
     );
@@ -540,7 +540,7 @@ fn generic_arg_with_bivariant_marker_parses_to_a_variance_arg() {
             "Collection".into(),
             vec![Type::new(Repr::VarianceArg(
                 CallSiteVariance::Bivariant,
-                std::sync::Arc::new(Type::new(Repr::Mixed(false, None)))
+                Type::new(Repr::Mixed(false, None))
             ))]
         )
     );
@@ -557,10 +557,7 @@ fn a_call_site_variance_marker_survives_nested_inside_the_wrapped_type() {
             "Collection".into(),
             vec![Type::new(Repr::VarianceArg(
                 CallSiteVariance::Covariant,
-                std::sync::Arc::new(Type::new(Repr::Object(
-                    "Box".into(),
-                    vec![Type::new(Repr::Int)]
-                )))
+                Type::new(Repr::Object("Box".into(), vec![Type::new(Repr::Int)]))
             ))]
         )
     );
@@ -626,9 +623,9 @@ fn conditional_return_type_syntax_parses_into_a_real_conditional_type() {
         panic!("expected a real Conditional type, got {ty:?}");
     };
     assert_eq!(*subject, ConditionalSubject::Parameter("action".into()));
-    assert_eq!(**target, Type::string_literal("send".into()));
-    assert_eq!(**if_true, parse_type_string("list<string>"));
-    assert_eq!(**if_false, parse_type_string("list<int>"));
+    assert_eq!(*target, Type::string_literal("send".into()));
+    assert_eq!(*if_true, parse_type_string("list<string>"));
+    assert_eq!(*if_false, parse_type_string("list<int>"));
     assert!(!negated);
 }
 

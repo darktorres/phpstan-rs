@@ -319,7 +319,7 @@ impl Relation<'_> {
                 },
                 Repr::HasOffsetValue(key, value) => match shape.field(key).cloned() {
                     Some(f) => {
-                        let ty = self.narrower(f.ty, (**value).clone());
+                        let ty = self.narrower(f.ty, (*value).clone());
                         if ty == Type::never() {
                             return None;
                         }

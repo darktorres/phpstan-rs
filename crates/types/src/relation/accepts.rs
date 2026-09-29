@@ -258,7 +258,7 @@ impl Relation<'_> {
                     },
                     _,
                 ) => self.accepts_type(
-                    &Type::new(Repr::Union(vec![(**if_true).clone(), (**if_false).clone()])),
+                    &Type::new(Repr::Union(vec![(*if_true).clone(), (*if_false).clone()])),
                     sup,
                 ),
                 (
@@ -268,7 +268,7 @@ impl Relation<'_> {
                     },
                 ) => self.accepts_type(
                     sub,
-                    &Type::new(Repr::Union(vec![(**if_true).clone(), (**if_false).clone()])),
+                    &Type::new(Repr::Union(vec![(*if_true).clone(), (*if_false).clone()])),
                 ),
                 (Repr::Union(members), _) => members.iter().all(|m| self.accepts_type(m, sup)),
                 (_, Repr::Union(members) | Repr::BenevolentUnion(members)) => {
@@ -360,7 +360,7 @@ impl Relation<'_> {
                 (Repr::Array(key, a), Repr::ArrayShape(shape)) => {
                     !self.strict_mixed_arrays
                         && matches!(a.repr(), Repr::Mixed(..))
-                        && (**key == Type::unknown_array_key()
+                        && (*key == Type::unknown_array_key()
                             || self.accepts_type(key, &shape.key_type()))
                 }
                 // Now that an array literal carries a real per-position/

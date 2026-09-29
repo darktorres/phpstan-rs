@@ -1,5 +1,4 @@
 use rustc_hash::FxHashMap;
-use std::sync::Arc;
 
 use crate::{CallableParam, CallableSig, ConditionalSubject, Relation, Repr, TemplateParam, Type};
 
@@ -206,7 +205,7 @@ impl Type {
             }
             (Repr::Array(_, inner_p), Repr::Array(key, inner_a)) => Type::new(Repr::Array(
                 key.clone(),
-                Arc::new(inner_p.promote_class_string_literals(inner_a, resolve_class)),
+                inner_p.promote_class_string_literals(inner_a, resolve_class),
             )),
             (Repr::Union(members), _) => members
                 .iter()

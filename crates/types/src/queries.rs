@@ -662,7 +662,7 @@ impl Type {
     /// is an array; `None` otherwise. `array{}` holds no value (`never`).
     pub fn array_value_type(&self) -> Option<Type> {
         syntax::stack::guard(|| match self.repr() {
-            Repr::Array(_, value) => Some((**value).clone()),
+            Repr::Array(_, value) => Some((*value).clone()),
             Repr::ArrayShape(shape) => Some(
                 shape
                     .fields
@@ -689,7 +689,7 @@ impl Type {
     pub fn array_key_type(&self) -> Option<Type> {
         syntax::stack::guard(|| {
             match self.repr() {
-                Repr::Array(key, _) => Some((**key).clone()),
+                Repr::Array(key, _) => Some((*key).clone()),
                 Repr::ArrayShape(shape) => Some(shape.key_type()),
                 // A list keys on `int<0, max>` whatever its array member says.
                 Repr::Intersection(members) => {

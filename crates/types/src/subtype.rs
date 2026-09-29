@@ -175,7 +175,7 @@ impl Relation<'_> {
                     },
                 ) => self
                     .is_super_type_of(
-                        &Type::new(Repr::Union(vec![(**if_true).clone(), (**if_false).clone()])),
+                        &Type::new(Repr::Union(vec![(*if_true).clone(), (*if_false).clone()])),
                         sub,
                     )
                     .yes(),

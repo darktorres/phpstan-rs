@@ -39,7 +39,7 @@ fn iterable_union_value_type(members: &[Type]) -> Option<&Type> {
         return None;
     }
     let array_inner = members.iter().find_map(|m| match m.repr() {
-        Repr::Array(_, inner) => Some(inner.as_ref()),
+        Repr::Array(_, inner) => Some(inner),
         _ => None,
     })?;
     let has_traversable = members.iter().any(|m| {
@@ -101,7 +101,7 @@ fn collect_iterable_missing_value_types(ty: &Type, explicit_mixed: bool, out: &m
                 let specified: Vec<&Type> = members
                     .iter()
                     .filter_map(|m| match m.repr() {
-                        Repr::Array(_, inner) if !inner.is_mixed() => Some(inner.as_ref()),
+                        Repr::Array(_, inner) if !inner.is_mixed() => Some(inner),
                         _ => None,
                     })
                     .collect();

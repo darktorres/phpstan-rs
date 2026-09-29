@@ -55,7 +55,7 @@ impl Type {
 pub(crate) fn key_of(ty: &Type) -> Option<Type> {
     match ty.repr() {
         Repr::Mixed(..) => Some(Type::mixed()),
-        Repr::Array(key, _) => Some((**key).clone()),
+        Repr::Array(key, _) => Some((*key).clone()),
         Repr::ArrayShape(shape) => Some(join(
             shape
                 .fields
@@ -75,7 +75,7 @@ pub(crate) fn key_of(ty: &Type) -> Option<Type> {
 pub(crate) fn value_of(ty: &Type) -> Option<Type> {
     match ty.repr() {
         Repr::Mixed(..) => Some(Type::mixed()),
-        Repr::Array(_, value) => Some((**value).clone()),
+        Repr::Array(_, value) => Some((*value).clone()),
         Repr::ArrayShape(shape) => Some(join(shape.types().cloned().collect())),
         Repr::Intersection(members) => members.iter().find_map(value_of),
         Repr::Union(members) => members
@@ -100,7 +100,7 @@ pub(crate) fn offset_access(base: &Type, key: &Type) -> Option<Type> {
                 .or_else(|| shape.unsealed.as_deref().map(|tail| tail.1.clone()))
                 .unwrap_or(Type::mixed()),
         ),
-        Repr::Array(_, value) => Some((**value).clone()),
+        Repr::Array(_, value) => Some((*value).clone()),
         Repr::Intersection(members) => members.iter().find_map(|m| offset_access(m, key)),
         Repr::Union(members) => members
             .iter()

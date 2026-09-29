@@ -75,7 +75,7 @@ impl fmt::Display for Type {
                 Repr::String => write!(f, "string"),
                 Repr::StringLiteral(s) => f.write_str(&quote_php_string(s)),
                 Repr::Array(key, value) => {
-                    let known_key = **key != Type::unknown_array_key();
+                    let known_key = *key != Type::unknown_array_key();
                     match (known_key, value.repr()) {
                         (false, Repr::Mixed(..)) => write!(f, "array"),
                         (false, _) => write!(f, "array<{value}>"),
@@ -232,7 +232,7 @@ fn describe_accessory_intersection(members: &[Type]) -> Option<String> {
         });
     }
     if let Some((key, elem)) = members.iter().find_map(|m| match m.repr() {
-        Repr::Array(k, e) => Some((k.as_ref(), e.as_ref())),
+        Repr::Array(k, e) => Some((k, e)),
         _ => None,
     }) {
         let is_list = has(AccessoryKind::ArrayList);

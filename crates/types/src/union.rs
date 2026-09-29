@@ -1,5 +1,3 @@
-use std::sync::Arc;
-
 use crate::{AccessoryKind, Repr, Shape, ShapeField, ShapeKey, Type};
 
 /// A defensive cap on how many distinct members `Type::union` will ever
@@ -503,7 +501,7 @@ impl Type {
                 let pairs = members
                     .iter()
                     .filter_map(|m| match m.repr() {
-                        Repr::HasOffsetValue(k, v) => Some((k.clone(), (**v).clone())),
+                        Repr::HasOffsetValue(k, v) => Some((k.clone(), (*v).clone())),
                         _ => None,
                     })
                     .collect();
@@ -670,14 +668,14 @@ fn reduce_array_members(members: &mut Vec<Type>) {
 /// anything but a plain or `list`/`non-empty-array`-refined `array<K, V>`.
 fn general_array_parts(ty: &Type) -> Option<(Type, Type, bool, bool)> {
     match ty.repr() {
-        Repr::Array(key, value) => Some(((**key).clone(), (**value).clone(), false, false)),
+        Repr::Array(key, value) => Some(((*key).clone(), (*value).clone(), false, false)),
         Repr::Intersection(members) => {
             let mut array = None;
             let (mut list, mut non_empty) = (false, false);
             for m in members {
                 match m.repr() {
                     Repr::Array(key, value) if array.is_none() => {
-                        array = Some(((**key).clone(), (**value).clone()));
+                        array = Some(((*key).clone(), (*value).clone()));
                     }
                     Repr::Accessory(AccessoryKind::ArrayList) => list = true,
                     Repr::Accessory(AccessoryKind::NonEmptyArray) => non_empty = true,
@@ -706,7 +704,7 @@ fn merge_general_arrays(members: &mut Vec<Type>) {
         let parts = match m.repr() {
             Repr::ArrayShape(shape) => {
                 let (key, value) = match shape_as_general_array(shape).repr() {
-                    Repr::Array(key, value) => (Some((**key).clone()), Some((**value).clone())),
+                    Repr::Array(key, value) => (Some((*key).clone()), Some((*value).clone())),
                     _ => (None, None),
                 };
                 let shape_non_empty = shape.fields.iter().any(|f| !f.optional);
@@ -891,7 +889,7 @@ fn union_with_mixed(types: &[&Type]) -> Option<Type> {
     for ty in types {
         if let Repr::Mixed(written, lacks) = ty.repr() {
             explicit = Some(explicit.unwrap_or(false) || *written);
-            subtracted = Some(match (subtracted, lacks.as_deref()) {
+            subtracted = Some(match (subtracted, lacks.as_ref()) {
                 (None, lacks) => lacks.cloned(),
                 (Some(Some(before)), Some(lacks)) if before == *lacks => Some(before),
                 _ => None,
@@ -905,5 +903,5 @@ fn union_with_mixed(types: &[&Type]) -> Option<Type> {
             subtracted = subtracted.map(|s| s.without(ty)).filter(|s| !s.is_never());
         }
     }
-    Some(Type::new(Repr::Mixed(explicit, subtracted.map(Arc::new))))
+    Some(Type::new(Repr::Mixed(explicit, subtracted)))
 }

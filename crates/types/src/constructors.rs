@@ -91,7 +91,7 @@ impl Type {
 
     /// `class-string<inner>`.
     pub fn class_string(inner: Type) -> Type {
-        Type::new(Repr::ClassString(Arc::new(inner)))
+        Type::new(Repr::ClassString(inner))
     }
 
     /// `interface-string`, `trait-string` or `enum-string`.
@@ -101,7 +101,7 @@ impl Type {
 
     /// `array<key, value>`.
     pub fn array(key: Type, value: Type) -> Type {
-        Type::new(Repr::Array(Arc::new(key), Arc::new(value)))
+        Type::new(Repr::Array(key, value))
     }
 
     pub fn array_shape(shape: Shape) -> Type {
@@ -159,7 +159,7 @@ impl Type {
 
     /// A generic argument written with a call-site variance.
     pub fn variance_arg(variance: CallSiteVariance, arg: Type) -> Type {
-        Type::new(Repr::VarianceArg(variance, Arc::new(arg)))
+        Type::new(Repr::VarianceArg(variance, arg))
     }
 
     /// The union of `members`: nested unions flattened, members another
@@ -192,7 +192,7 @@ impl Type {
 
     /// `hasOffsetValue(key, value)`.
     pub fn has_offset_value(key: ShapeKey, value: Type) -> Type {
-        Type::new(Repr::HasOffsetValue(key, Arc::new(value)))
+        Type::new(Repr::HasOffsetValue(key, value))
     }
 
     /// `hasOffset(key)`.
@@ -210,30 +210,27 @@ impl Type {
 
     /// The member `member` of `owner`'s reflected class.
     pub fn reflected_member(owner: Type, member: Name) -> Type {
-        Type::new(Repr::ReflectedMember(Arc::new(owner), member))
+        Type::new(Repr::ReflectedMember(owner, member))
     }
 
     /// `value-of<of>`.
     pub fn value_of(of: Type) -> Type {
-        Type::new(Repr::ValueOf(Arc::new(of)))
+        Type::new(Repr::ValueOf(of))
     }
 
     /// `key-of<of>`.
     pub fn key_of(of: Type) -> Type {
-        Type::new(Repr::KeyOf(Arc::new(of)))
+        Type::new(Repr::KeyOf(of))
     }
 
     /// `container[offset]`.
     pub fn offset_access(container: Type, offset: Type) -> Type {
-        Type::new(Repr::OffsetAccess(Arc::new(container), Arc::new(offset)))
+        Type::new(Repr::OffsetAccess(container, offset))
     }
 
     /// The constants of `class` matching `pattern` (`Foo::BAR_*`).
     pub fn class_constant(class: Type, pattern: Name) -> Type {
-        Type::new(Repr::ClassConstant {
-            class: Arc::new(class),
-            pattern,
-        })
+        Type::new(Repr::ClassConstant { class, pattern })
     }
 
     pub fn extension(data: Arc<dyn ExtensionTypeData>) -> Type {
@@ -251,9 +248,9 @@ impl Type {
     ) -> Type {
         Type::new(Repr::Conditional {
             subject,
-            target: Arc::new(target),
-            if_true: Arc::new(if_true),
-            if_false: Arc::new(if_false),
+            target,
+            if_true,
+            if_false,
             negated,
         })
     }
@@ -301,10 +298,7 @@ impl Type {
     /// `Repr::Array(unknown_array_key(), value)`, for a construction site
     /// with no more precise key type available.
     pub fn array_of(value: Type) -> Type {
-        Type::new(Repr::Array(
-            Arc::new(Type::unknown_array_key()),
-            Arc::new(value),
-        ))
+        Type::new(Repr::Array(Type::unknown_array_key(), value))
     }
 
     /// The `int|string` key type PHPDoc's `Type[]` array-shorthand

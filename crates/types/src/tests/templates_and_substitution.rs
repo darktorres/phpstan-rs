@@ -67,18 +67,18 @@ fn substitute_template_recurses_into_a_conditional_types_branches() {
     let t = || Type::template_param(TemplateParam::unbounded("T".to_string()));
     let conditional = Type::new(Repr::Conditional {
         subject: ConditionalSubject::Parameter("x".into()),
-        target: std::sync::Arc::new(t()),
-        if_true: std::sync::Arc::new(t()),
-        if_false: std::sync::Arc::new(Type::null()),
+        target: t(),
+        if_true: t(),
+        if_false: Type::null(),
         negated: false,
     });
     assert_eq!(
         conditional.substitute_templates(&bindings, &crate::Relation::structural()),
         Type::new(Repr::Conditional {
             subject: ConditionalSubject::Parameter("x".into()),
-            target: std::sync::Arc::new(Type::int()),
-            if_true: std::sync::Arc::new(Type::int()),
-            if_false: std::sync::Arc::new(Type::null()),
+            target: Type::int(),
+            if_true: Type::int(),
+            if_false: Type::null(),
             negated: false,
         })
     );

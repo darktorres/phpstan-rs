@@ -187,7 +187,7 @@ impl Type {
     /// intersection members too. Other types are left as they are.
     pub fn map_array_values(&self, f: &mut dyn FnMut(&Type) -> Type) -> Type {
         syntax::stack::guard(|| match self.repr() {
-            Repr::Array(key, value) => Type::new(Repr::Array(key.clone(), Arc::new(f(value)))),
+            Repr::Array(key, value) => Type::new(Repr::Array(key.clone(), f(value))),
             Repr::ArrayShape(shape) => Type::array_shape(shape.map_types(&mut |t| f(t))),
             Repr::Union(_) | Repr::BenevolentUnion(_) | Repr::Intersection(_) => {
                 self.map_children(&mut |m| m.map_array_values(&mut *f))
@@ -201,7 +201,7 @@ impl Type {
     /// keeps its fields.
     pub fn with_general_array_value(&self, value: &Type) -> Type {
         syntax::stack::guard(|| match self.repr() {
-            Repr::Array(key, _) => Type::new(Repr::Array(key.clone(), Arc::new(value.clone()))),
+            Repr::Array(key, _) => Type::new(Repr::Array(key.clone(), value.clone())),
             Repr::Union(_) | Repr::BenevolentUnion(_) | Repr::Intersection(_) => {
                 self.map_children(&mut |m| m.with_general_array_value(value))
             }
@@ -216,7 +216,7 @@ impl Type {
     /// as they are.
     pub fn filter_array_values(&self, keep: &dyn Fn(&Type) -> Type) -> Type {
         syntax::stack::guard(|| match self.repr() {
-            Repr::Array(key, value) => Type::new(Repr::Array(key.clone(), Arc::new(keep(value)))),
+            Repr::Array(key, value) => Type::new(Repr::Array(key.clone(), keep(value))),
             Repr::ArrayShape(shape) => Type::array_shape(Shape {
                 fields: shape
                     .fields
@@ -254,7 +254,7 @@ impl Type {
                     return self.clone();
                 };
                 let kept = keep(value);
-                if kept == **value {
+                if kept == *value {
                     self.clone()
                 } else {
                     Type::array(Type::clone(key), kept)
