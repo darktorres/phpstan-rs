@@ -66,8 +66,15 @@ pub use union::generalize_by_key_set;
 /// A PHP type. What it is, what its values can be used as and how it
 /// relates to other types are asked through its methods; how it is
 /// represented is this crate's own.
-#[derive(Clone)]
 pub struct Type(pub(crate) Repr);
+
+/// Cloning a type goes one level at a time on a guarded stack, as
+/// dropping one does.
+impl Clone for Type {
+    fn clone(&self) -> Self {
+        syntax::stack::guard(|| Type(self.0.clone()))
+    }
+}
 
 impl Type {
     /// The representation, taken out of the type.
@@ -87,7 +94,7 @@ impl Drop for Type {
 
 impl std::fmt::Debug for Type {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        self.0.fmt(f)
+        syntax::stack::guard(|| self.0.fmt(f))
     }
 }
 
