@@ -257,15 +257,15 @@ Each fix needs a fixture.
   in `transform.rs` (`unsealed_shapes`, `filter_array_values`). Use
   `Type::union_of`.
 - [x] **T4. `is_object_like`** (done in `65a73cd1`) in `narrowing.rs` duplicates `Type::is_object`.
-- [ ] **T5. Two literal-key helpers disagree.** In `offsets.rs`,
+- [x] **T5. Two literal-key helpers disagree.** Already one, `literal_key`. In `offsets.rs`,
   `literal_key_name` and `literal_key`: only the second sees through
   `to_array_key` (`true`, a float, `"1"`). Keep one, built on
   `to_array_key`.
-- [ ] **T6. Redundant list arm.** The list-vs-list arm in
+- [x] **T6. Redundant list arm.** Done in `69c76cef`. The list-vs-list arm in
   `Relation::is_super_type_of` (`relation/super_type.rs`) is redundant now
   that lists have one encoding; the general intersection arms answer the
   same.
-- [ ] **T7. Misplaced doc comments.** `object_super_type_of`'s doc is fused
+- [x] **T7. Misplaced doc comments.** Done with F53. `object_super_type_of`'s doc is fused
   onto `absorb_union_subtypes`, as `resolve_conditional`'s was onto
   `conditional_branch`. Check the crate for other doc blocks sitting on the
   wrong item.
