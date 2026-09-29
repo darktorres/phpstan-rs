@@ -190,6 +190,15 @@ Each fix needs a fixture.
   a string literal's answer is known (`numeric_value`), as is an int's
   or a float's (`true`) and an array's (`false`). (found fixing F48)
 
+- [ ] **P9. Private-property facts cost a second check of most files.**
+  Profiled on Piwigo (release, frame pointers, after P2):
+  `Project::collect_property_assign_facts` runs `check_program` over every
+  file that may write a private property, only to harvest
+  `property_assign_facts`, before the diagnostic pass checks the same files
+  again - about 27% of the run, next to 45% for the real check and a third
+  for parsing. Collect the facts from a walk of the assignments alone, or
+  from the one checking pass with the cross-file merge moved after it.
+
 ## Review 2: structure, types crate
 
 - [x] **T1. One absorption rule for unions.** Done in `a3853ad8`: the
