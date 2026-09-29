@@ -905,7 +905,7 @@ impl<'ast> syntax::visit::Visitor<'ast> for Assigned {
                 for (name, _) in vars {
                     out.push(AssignedVariable {
                         name: name.name.clone(),
-                        span: stmt.span,
+                        span: name.span,
                         loops: loops.clone(),
                     });
                 }

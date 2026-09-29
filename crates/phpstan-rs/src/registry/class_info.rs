@@ -1475,21 +1475,11 @@ impl ClassReflection {
             .unwrap_or_default();
         let covariant_templates: FxHashSet<Name> = class_doc
             .as_ref()
-            .map(|d| {
-                d.covariant_templates
-                    .iter()
-                    .map(Name::from)
-                    .collect()
-            })
+            .map(|d| d.covariant_templates.iter().map(Name::from).collect())
             .unwrap_or_default();
         let contravariant_templates: FxHashSet<Name> = class_doc
             .as_ref()
-            .map(|d| {
-                d.contravariant_templates
-                    .iter()
-                    .map(Name::from)
-                    .collect()
-            })
+            .map(|d| d.contravariant_templates.iter().map(Name::from).collect())
             .unwrap_or_default();
 
         // Real PHP (8.0+) makes any class declaring a public
@@ -1622,11 +1612,7 @@ impl ClassReflection {
             final_methods_by_phpdoc,
             final_properties_by_phpdoc,
             trait_aliases,
-            resolved_trait_conflicts: c
-                .resolved_trait_conflicts
-                .iter()
-                .map(Name::from)
-                .collect(),
+            resolved_trait_conflicts: c.resolved_trait_conflicts.iter().map(Name::from).collect(),
             templates,
             extends_args,
             implements_args,
@@ -2142,11 +2128,7 @@ impl ClassReflection {
             final_methods_by_phpdoc: FxHashSet::default(),
             final_properties_by_phpdoc: FxHashSet::default(),
             trait_aliases,
-            resolved_trait_conflicts: e
-                .resolved_trait_conflicts
-                .iter()
-                .map(Name::from)
-                .collect(),
+            resolved_trait_conflicts: e.resolved_trait_conflicts.iter().map(Name::from).collect(),
             templates: Vec::new(),
             extends_args: Vec::new(),
             implements_args,
