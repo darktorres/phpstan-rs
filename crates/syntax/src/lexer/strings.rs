@@ -334,14 +334,9 @@ impl<'a> Lexer<'a> {
         if nowdoc {
             Token::StringLit(PhpString::from(content))
         } else {
-            // `content` has already had its per-line indentation stripped
-            // (PHP 7.3+ flexible heredoc syntax), so a byte offset within
-            // it no longer maps 1:1 to a real offset in the original
-            // source the way the plain double-quoted-string case does -
-            // anchoring every `{$...}` in this heredoc at the body's own
-            // start is an honest, coarser approximation for this one
-            // case (still the right heredoc, not a precise per-occurrence
-            // position within it).
+            // `content` has its per-line indentation stripped (PHP 7.3+
+            // flexible heredoc syntax); `offsets` maps each of its bytes
+            // back to the source.
             Token::InterpString(self.scan_interpolated(&content, body_start, None, Some(&offsets)))
         }
     }
@@ -353,9 +348,11 @@ impl<'a> Lexer<'a> {
     /// escapes, `$var` / `$var->prop` / `$var[key]` simple syntax, and
     /// `{$expr}` complex syntax. Operates on an already-delimited byte
     /// slice (quotes/markers already stripped by the caller) - `abs_base`
-    /// is that slice's own byte offset in the *original* source (or the
-    /// best available anchor - see the heredoc call site's own comment),
-    /// used to give each `ComplexExpr` a real file position via
+    /// is that slice's own byte offset in the *original* source, and
+    /// `offsets` maps a heredoc's indent-stripped bytes back to it. A
+    /// `{$expr}`'s text is taken from the source itself, so a re-lexed
+    /// expression spanning lines keeps its columns; each `ComplexExpr` gets
+    /// a real file position via
     /// `line_col_at`, not one relative to a throwaway fragment
     /// `parser::build_interpolated` re-lexes in isolation.
     fn scan_interpolated(
@@ -598,13 +595,18 @@ impl<'a> Lexer<'a> {
                                 });
                             }
                             None => {
-                                let inner = String::from_utf8_lossy(inner_bytes).into_owned();
+                                let inner = String::from_utf8_lossy(
+                                    &self.src[off(start)..off(close_brace_pos)],
+                                )
+                                .into_owned();
                                 parts.push(StringPart::ComplexExpr(inner, base));
                             }
                         }
                     }
                     None => {
-                        let inner = String::from_utf8_lossy(inner_bytes).into_owned();
+                        let inner =
+                            String::from_utf8_lossy(&self.src[off(start)..off(close_brace_pos)])
+                                .into_owned();
                         parts.push(StringPart::ComplexExpr(inner, base));
                     }
                 }
@@ -633,7 +635,7 @@ impl<'a> Lexer<'a> {
                         i += 1;
                     }
                 }
-                let inner = String::from_utf8_lossy(&bytes[start..i]).into_owned();
+                let inner = String::from_utf8_lossy(&self.src[off(start)..off(i)]).into_owned();
                 i = (i + 1).min(bytes.len());
                 let name_len = inner.bytes().take_while(|&c| is_ident_continue(c)).count();
                 let starts_with_name = inner.bytes().next().is_some_and(is_ident_start);
