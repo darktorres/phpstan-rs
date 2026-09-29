@@ -1026,7 +1026,9 @@ impl<'a> Checker<'a> {
                                 Type::null(),
                             ]
                             .into_iter()
-                            .fold(current.into_owned(), |acc, excluded| acc.without(&excluded));
+                            .fold(current.into_owned(), |acc, excluded| {
+                                self.exclude(&acc, &excluded)
+                            });
                             excluded.with_string_accessory(AccessoryKind::NumericString)
                         } else {
                             // Int/Float are unconditionally numeric, so
@@ -1034,7 +1036,9 @@ impl<'a> Checker<'a> {
                             // one - nothing else can be dropped this way.
                             [Type::int(), Type::float()]
                                 .into_iter()
-                                .fold(current.into_owned(), |acc, excluded| acc.without(&excluded))
+                                .fold(current.into_owned(), |acc, excluded| {
+                                    self.exclude(&acc, &excluded)
+                                })
                         };
                         locals.insert(key, narrowed);
                     } else if let Some(target_ty) = narrowing_type_for_predicate(name) {
@@ -1042,7 +1046,7 @@ impl<'a> Checker<'a> {
                         let narrowed = if branch_true {
                             self.relation().narrow(&current, &target_ty)
                         } else {
-                            current.without(&target_ty)
+                            self.exclude(&current, &target_ty)
                         };
                         locals.insert(key, narrowed);
                     } else if let ExprKind::Name(raw) = &callee.kind {
@@ -1063,7 +1067,7 @@ impl<'a> Checker<'a> {
                     let narrowed = if branch_true {
                         Some(self.relation().narrow(&current, &target_ty))
                     } else {
-                        excluded_ty.map(|excluded| current.without(&excluded))
+                        excluded_ty.map(|excluded| self.exclude(&current, &excluded))
                     };
                     if let Some(narrowed) = narrowed {
                         locals.insert(key, narrowed);
@@ -1186,7 +1190,7 @@ impl<'a> Checker<'a> {
                                 self.relation().narrow_to_instance(&current, &resolved),
                             );
                         } else {
-                            locals.insert(key, current.without(&resolved));
+                            locals.insert(key, self.exclude(&current, &resolved));
                         }
                     }
                 } else if let ExprKind::Name(name) = &callee.kind {
@@ -1256,7 +1260,7 @@ impl<'a> Checker<'a> {
                         locals.insert(key, self.relation().narrow_to_instance(&current, &resolved));
                     } else {
                         let current = self.current_narrowed_type(inner, &key, locals);
-                        locals.insert(key, current.without(&resolved));
+                        locals.insert(key, self.exclude(&current, &resolved));
                     }
                 }
             }

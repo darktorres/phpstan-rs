@@ -433,7 +433,12 @@ impl<'a> Checker<'a> {
         {
             return;
         }
-        if !matches!(op, BinOp::Identical | BinOp::NotIdentical) {
+        // A `never` operand is never evaluated (every case of an enum
+        // already handled).
+        if !matches!(op, BinOp::Identical | BinOp::NotIdentical)
+            || l_ty.is_never()
+            || r_ty.is_never()
+        {
             return;
         }
         let Some(identical_outcome) = self.registry.identical_result(l_ty, r_ty) else {

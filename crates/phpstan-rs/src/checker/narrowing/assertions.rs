@@ -198,7 +198,7 @@ impl<'a> Checker<'a> {
         let narrowed = if matches_when_true {
             self.relation().narrow(&current, &target_ty)
         } else if target_ty.is_single_value() {
-            current.without(&target_ty)
+            self.exclude(&current, &target_ty)
         } else {
             current.into_owned()
         };
@@ -319,7 +319,7 @@ impl<'a> Checker<'a> {
                 && let Some(key) = narrowing_key(&arg.value)
             {
                 let current = self.current_narrowed_type(&arg.value, &key, locals);
-                locals.insert(key, current.without(excluded));
+                locals.insert(key, self.exclude(&current, excluded));
             }
         };
         match method {
@@ -386,7 +386,7 @@ impl<'a> Checker<'a> {
                 continue;
             };
             let narrowed = if info.negated {
-                current.without(&info.ty)
+                self.exclude(&current, &info.ty)
             } else {
                 self.relation().narrow(&current, &info.ty)
             };

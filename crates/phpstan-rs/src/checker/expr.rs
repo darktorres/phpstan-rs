@@ -6141,6 +6141,27 @@ impl<'a> Checker<'a> {
         ordering_op(op).and_then(|op| compare_range_outcome(op, l_bounds, r_bounds)) == Some(true)
     }
 
+    /// `ty` without `excluded`, where a check for it failed. Excluding
+    /// an enum case removes it from the enum's cases (`Suit` without
+    /// `Suit::Hearts` is `Suit::Clubs|Suit::Spades`); an exclusion that
+    /// removes nothing leaves `ty` as it was.
+    pub(crate) fn exclude(&self, ty: &Type, excluded: &Type) -> Type {
+        let names_a_case = excluded
+            .union_members()
+            .iter()
+            .any(|m| m.as_enum_case().is_some());
+        if !names_a_case {
+            return ty.without(excluded);
+        }
+        let expanded = self.expand_enum_cases(ty);
+        let remaining = expanded.without(excluded);
+        if remaining == expanded {
+            ty.clone()
+        } else {
+            remaining
+        }
+    }
+
     /// `match.unhandled`'s own case-expansion step: a plain enum-typed
     /// `EnumClass` has no case list of its own for
     /// `Type::without`'s existing `Union`-member-filtering to
@@ -6162,7 +6183,7 @@ impl<'a> Checker<'a> {
     /// "don't guess" precedent: the exhaustiveness check simply won't
     /// fire for that narrower shape, rather than report something
     /// unproven.
-    fn expand_enum_cases(&self, ty: &Type) -> Type {
+    pub(crate) fn expand_enum_cases(&self, ty: &Type) -> Type {
         syntax::stack::guard(|| {
             let members = ty.union_members();
             if members.len() > 1 {
@@ -6175,6 +6196,9 @@ impl<'a> Checker<'a> {
                     1 => expanded.into_iter().next().unwrap(),
                     _ => ty.with_members(expanded),
                 };
+            }
+            if ty.as_enum_case().is_some() {
+                return ty.clone();
             }
             let Some((class_name, _)) = ty.as_object() else {
                 return ty.clone();
