@@ -1005,7 +1005,9 @@ through `check-project`.
       `docblock/tests/param_and_return_tags.rs:283`).
 
     Re-read every comment that commit touched.
-- [ ] **F53. Stale or misplaced comments in the final state.**
+- [x] **F53. Stale or misplaced comments in the final state.** Done in
+  `3e80be89`, `45ea7652` and `408caaf4` (with every other roadmap-phase
+  reference in comments).
   - Docs sitting on the wrong item:
     - `union.rs`: an orphan doc on `impl Type`;
     - `union.rs`: the 23-line empty-shape paragraph above
