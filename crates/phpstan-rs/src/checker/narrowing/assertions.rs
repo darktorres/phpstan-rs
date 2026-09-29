@@ -1,5 +1,7 @@
 use crate::checker::Discriminant;
-use crate::checker::narrowing::predicates::{narrowing_infer_target, narrowing_key};
+use crate::checker::narrowing::predicates::{
+    narrowing_infer_target, narrowing_key, narrowing_type_for_predicate,
+};
 use crate::checker::{Checker, Locals};
 use syntax::ast::*;
 use types::Type;
@@ -293,13 +295,8 @@ impl<'a> Checker<'a> {
     /// receiver is really a `PHPUnit\Framework\TestCase` - these names are
     /// specific enough that a false match isn't a realistic concern,
     /// matching this project's existing "trust the name" precedent for
-    /// `is_string`/`empty`/`isset` and friends.
-    ///
-    /// Deliberately excludes `assertIsNumeric` - real PHPStan narrows it to
-    /// `int|float|numeric-string`, a type this project has no
-    /// representation for; narrowing to a plain `int|float` would be
-    /// actively wrong (and a new false negative) for the equally-common
-    /// numeric-*string* case.
+    /// `is_string`/`empty`/`isset` and friends. `assertIsX`/`assertIsNotX`
+    /// narrow as `is_x()` does.
     pub(crate) fn apply_phpunit_assertion_narrowing(
         &self,
         method: &str,
@@ -322,19 +319,31 @@ impl<'a> Checker<'a> {
                 locals.insert(key, self.exclude(&current, excluded));
             }
         };
-        match method {
-            "assertIsString" => narrow_to(locals, 0, &Type::string()),
-            "assertIsArray" => narrow_to(
-                locals,
-                0,
-                &Type::array(Type::unknown_array_key(), Type::mixed()),
-            ),
-            "assertIsInt" | "assertIsInteger" => narrow_to(locals, 0, &Type::int()),
-            "assertIsFloat" => narrow_to(locals, 0, &Type::float()),
-            "assertIsBool" | "assertIsBoolean" => narrow_to(locals, 0, &Type::bool()),
-            "assertIsResource" => {
-                narrow_to(locals, 0, &Type::resource(false));
+        let kind_check = |kind: &str| -> Option<Type> {
+            match kind {
+                "Numeric" => Some(types::parse_type_string("int|float|numeric-string")),
+                "List" => Some(types::parse_type_string("list<mixed>")),
+                "ClosedResource" => Some(Type::resource(true)),
+                "Integer" => narrowing_type_for_predicate("is_int"),
+                "Boolean" => narrowing_type_for_predicate("is_bool"),
+                other => {
+                    narrowing_type_for_predicate(&format!("is_{}", other.to_ascii_lowercase()))
+                }
             }
+        };
+        if let Some(kind) = method.strip_prefix("assertIsNot")
+            && let Some(target) = kind_check(kind)
+        {
+            narrow_excluding(locals, 0, &target);
+            return;
+        }
+        if let Some(kind) = method.strip_prefix("assertIs")
+            && let Some(target) = kind_check(kind)
+        {
+            narrow_to(locals, 0, &target);
+            return;
+        }
+        match method {
             "assertNull" => narrow_to(locals, 0, &Type::null()),
             "assertTrue" => narrow_to(locals, 0, &Type::bool_literal(true)),
             "assertFalse" => narrow_to(locals, 0, &Type::bool_literal(false)),
@@ -353,7 +362,9 @@ impl<'a> Checker<'a> {
                     && let Some(actual_arg) = args.get(1)
                     && let Some(key) = narrowing_key(&actual_arg.value)
                 {
-                    locals.insert(key, self.resolve_name_expr(class_name));
+                    let class = self.resolve_name_expr(class_name);
+                    let current = self.current_narrowed_type(&actual_arg.value, &key, locals);
+                    locals.insert(key, self.relation().narrow_to_instance(&current, &class));
                 }
             }
             _ => {}
