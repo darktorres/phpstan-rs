@@ -17,7 +17,7 @@
 use crate::checker::Checker;
 use syntax::ast::*;
 use syntax::token::Span;
-use syntax::visit::{any_child_expr, any_child_stmt};
+use syntax::visit::{Visitor, walk_expr, walk_stmts};
 
 impl<'a> Checker<'a> {
     /// `fqn`'s own test methods, each checked independently - only fires
@@ -89,8 +89,9 @@ fn is_assertion_method_name(name: &str) -> bool {
         || name == "addToAssertionCount"
 }
 
-fn expr_has_assertion(e: &Expr) -> bool {
-    let own = match &e.kind {
+/// Whether `e` is itself an assertion call.
+fn is_assertion(e: &Expr) -> bool {
+    match &e.kind {
         ExprKind::MethodCall(_, method, _, _) => is_assertion_method_name(method),
         ExprKind::StaticCall(_, method, _) => is_assertion_method_name(method),
         // Pest's own `expect($x)->toBe($y)` - the mere presence of a
@@ -98,62 +99,45 @@ fn expr_has_assertion(e: &Expr) -> bool {
         // enough signal on its own (real Pest usage never calls it
         // without immediately chaining an expectation off the result),
         // without needing to also verify the chained `->to*()` call.
-        ExprKind::Call(callee, _) => {
-            matches!(&callee.kind, ExprKind::Name(n) if n.trim_start_matches('\\') == "expect")
-        }
+        ExprKind::Call(callee, _) => matches!(&callee.kind, ExprKind::Name(n) if {
+            let (primary, fallback) = n.candidates();
+            fallback.unwrap_or(primary) == "expect"
+        }),
         _ => false,
-    };
-    own || any_child_expr(e, &mut expr_has_assertion)
+    }
 }
 
-/// Mirrors `control_flow::generators::stmt_contains_yield`'s own
-/// exhaustive per-`StmtKind`-variant shape (that function's own doc
-/// comment has the full reasoning) - each variant's own `Expr`-bearing
-/// field(s), checked via `expr_has_assertion`, plus `any_child_stmt` for
-/// nested statements. Both `any_child_stmt`/`any_child_expr` stop at a
-/// nested `Closure`/`ArrowFn` boundary by design - correct here too: an
-/// assertion inside a nested callback (`array_map(fn ($x) => $this->
-/// assertTrue($x), $items)` is a real, if unusual, exception) still
-/// needs to count for *this* test, so nested-closure bodies are walked
-/// by `any_child_expr` exactly like any other child expression - the
-/// boundary only matters for `body_contains_yield`'s different question
-/// ("is the *enclosing* function itself a generator"), not this one.
-fn stmt_has_assertion(stmt: &Stmt) -> bool {
-    let own = match &stmt.kind {
-        StmtKind::Expression(e) | StmtKind::Throw(e) => expr_has_assertion(e),
-        StmtKind::Return(Some(e)) => expr_has_assertion(e),
-        StmtKind::Return(None) => false,
-        StmtKind::Echo(exprs) => exprs.iter().any(expr_has_assertion),
-        StmtKind::If(if_stmt) => if_stmt.conditions().any(expr_has_assertion),
-        StmtKind::While { cond, .. } | StmtKind::DoWhile { cond, .. } => expr_has_assertion(cond),
-        StmtKind::For {
-            init, cond, step, ..
-        } => init.iter().chain(cond).chain(step).any(expr_has_assertion),
-        StmtKind::Foreach {
-            subject,
-            key,
-            value,
-            ..
-        } => {
-            expr_has_assertion(subject)
-                || key.as_ref().is_some_and(expr_has_assertion)
-                || expr_has_assertion(value)
+/// Finds an assertion anywhere in a test body, a nested callback included
+/// (`array_map(fn ($x) => $this->assertTrue($x), $items)`): it runs as
+/// part of the test. A nested named function or class declaration is not
+/// the test's own code.
+#[derive(Default)]
+struct Assertions {
+    found: bool,
+}
+
+impl<'ast> Visitor<'ast> for Assertions {
+    fn visit_function_decl(&mut self, _: &'ast FunctionDecl) {}
+
+    fn visit_class_decl(&mut self, _: &'ast ClassDecl) {}
+
+    fn visit_expr(&mut self, e: &'ast Expr) {
+        if self.found || is_assertion(e) {
+            self.found = true;
+            return;
         }
-        StmtKind::GlobalConst(consts) => consts.iter().any(|c| expr_has_assertion(&c.value)),
-        StmtKind::StaticVar(vars) => vars
-            .iter()
-            .any(|(_, d)| d.as_ref().is_some_and(expr_has_assertion)),
-        StmtKind::Switch { subject, cases } => {
-            expr_has_assertion(subject)
-                || cases
-                    .iter()
-                    .any(|c| c.test.as_ref().is_some_and(expr_has_assertion))
-        }
-        _ => false,
-    };
-    own || any_child_stmt(stmt, &mut stmt_has_assertion)
+        walk_expr(self, e);
+    }
+}
+
+fn expr_has_assertion(e: &Expr) -> bool {
+    let mut search = Assertions::default();
+    search.visit_expr(e);
+    search.found
 }
 
 fn body_has_assertion(stmts: &[Stmt]) -> bool {
-    stmts.iter().any(stmt_has_assertion)
+    let mut search = Assertions::default();
+    walk_stmts(&mut search, stmts);
+    search.found
 }

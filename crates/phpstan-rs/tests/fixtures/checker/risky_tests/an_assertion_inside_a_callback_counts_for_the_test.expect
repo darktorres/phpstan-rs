@@ -1,0 +1,1 @@
+13:25-13:36 test.risky L4 | Test MyTest::testNothing() has no assertions and no expectException/markTestSkipped/markTestIncomplete/addToAssertionCount call - it will be reported risky by PHPUnit at runtime.

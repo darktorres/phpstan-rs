@@ -726,6 +726,24 @@ pub fn any_child_stmt<'ast>(stmt: &'ast Stmt, f: impl FnMut(&'ast Stmt) -> bool)
     children.found
 }
 
+/// Calls `f` on each expression directly inside `expr` in its scope (its
+/// children, not their descendants; see `walk_expr_in_scope`), in order.
+pub fn for_each_child_expr<'ast>(expr: &'ast Expr, mut f: impl FnMut(&'ast Expr)) {
+    any_child_expr(expr, |child| {
+        f(child);
+        false
+    });
+}
+
+/// Calls `f` on each statement directly inside `stmt` in the same function
+/// body, in order; see `any_child_stmt`.
+pub fn for_each_child_stmt<'ast>(stmt: &'ast Stmt, mut f: impl FnMut(&'ast Stmt)) {
+    any_child_stmt(stmt, |child| {
+        f(child);
+        false
+    });
+}
+
 /// Whether a function, method or closure body contains a `yield` or
 /// `yield from`, making it a generator. A `yield` inside a nested
 /// closure, arrow function, class or function belongs to that scope.

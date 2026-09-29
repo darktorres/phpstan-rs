@@ -61,7 +61,7 @@ use crate::checker::uninitialized::property_assigned_anywhere_in_hierarchy;
 use crate::registry::FunctionReflection;
 use syntax::ast::*;
 use syntax::token::Span;
-use syntax::visit::{Visitor, any_child_expr};
+use syntax::visit::{Visitor, for_each_child_expr};
 
 /// Bare property names known-initialized on every path reaching a given
 /// point. Mirrors `checker.rs`'s `ProvenanceSet` type alias (same
@@ -667,9 +667,8 @@ fn walk_expr(
                 absorb_resolved(target, name, state, ctx)
             }
             _ => {
-                any_child_expr(e, |child| {
+                for_each_child_expr(e, |child| {
                     state = walk_expr(child, std::mem::take(&mut state), ctx, declaring_class);
-                    false
                 });
                 state
             }

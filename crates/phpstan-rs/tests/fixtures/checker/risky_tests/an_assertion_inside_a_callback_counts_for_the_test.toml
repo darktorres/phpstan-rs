@@ -1,0 +1,2 @@
+[ext.phpunit]
+check_risky_tests = true
