@@ -745,7 +745,7 @@ through `check-project`.
 
 ### Structure
 
-- [ ] **F12. Two name-resolution paths.** The resolve pass fills
+- [x] **F12. Two name-resolution paths.** The resolve pass fills
   `QualifiedName::resolved`, yet about 59 sites re-resolve written names
   through a `NameContext`: the checker's `name_ctx.resolve`,
   `resolve_function_candidates` and `resolve_constant_candidates`, and the
@@ -764,6 +764,10 @@ through `check-project`.
   `Unresolved`. The checker gets them right today through its own
   `NameContext` (`class.notFound P22\integer`); switching to `resolved`
   would regress it. One native-keyword list (`NATIVE_TYPE_KEYWORDS`).
+  Done in `a70a5b42`: `NameContext` remains for PHPDoc text, a name
+  parsed apart from its file (completion) and building new code.
+  Native hints become types straight from the `TypeHint`, and
+  `type_declarations.rs` reads the hint's nodes.
 
 - [ ] **F13. Declarations' namespaced names are computed and ignored.**
   `namespaced_name` is read only by xtask's stub index. The registry
