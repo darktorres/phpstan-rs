@@ -104,7 +104,6 @@ impl Parser {
                 None
             };
             params.push(Param {
-                id: self.node_id(),
                 name,
                 name_span,
                 type_hint,

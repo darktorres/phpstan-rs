@@ -22,7 +22,6 @@ impl Parser {
         };
         self.expect_semicolon()?;
         Ok(EnumCase {
-            id: self.node_id(),
             name: self.interner.name(&name),
             name_span,
             value,
@@ -187,7 +186,6 @@ impl Parser {
                     self.expect(&Token::Equals)?;
                     let value = self.parse_expression()?;
                     consts.push(ClassConst {
-                        id: self.node_id(),
                         namespaced_name: None,
                         removal_span: None,
                         name: self.interner.name(&cname),
@@ -216,7 +214,6 @@ impl Parser {
                 function.doc_comment = doc;
                 function.attrs = attrs;
                 methods.push(MethodDecl {
-                    id: self.node_id(),
                     removal_span: None,
                     visibility,
                     is_static,
@@ -242,7 +239,6 @@ impl Parser {
         self.expect(&Token::RBrace)?;
 
         Ok(ClassDecl {
-            id: self.node_id(),
             namespaced_name: None,
             name: Some(self.interner.name(&name)),
             name_span,

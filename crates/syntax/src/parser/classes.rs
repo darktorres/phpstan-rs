@@ -126,7 +126,6 @@ impl Parser {
             end: self.previous_end(),
         };
         let decl = ClassDecl {
-            id: self.node_id(),
             namespaced_name: None,
             name: None,
             // No name token to point at - see `ClassDecl::name_span`'s own
@@ -329,7 +328,6 @@ impl Parser {
                     self.expect(&Token::Equals)?;
                     let value = self.parse_expression()?;
                     consts.push(ClassConst {
-                        id: self.node_id(),
                         namespaced_name: None,
                         removal_span: None,
                         name: self.interner.name(&cname),
@@ -371,7 +369,6 @@ impl Parser {
                     }
                 }
                 methods.push(MethodDecl {
-                    id: self.node_id(),
                     removal_span: None,
                     visibility,
                     is_static,
@@ -409,7 +406,6 @@ impl Parser {
                 if self.check(&Token::LBrace) {
                     let hooks = self.parse_property_hooks()?;
                     properties.push(PropertyDecl {
-                        id: self.node_id(),
                         removal_span: None,
                         name: self.interner.name(&name),
                         name_span,
@@ -432,7 +428,6 @@ impl Parser {
                     break;
                 }
                 properties.push(PropertyDecl {
-                    id: self.node_id(),
                     removal_span: None,
                     name: self.interner.name(&name),
                     name_span,
@@ -640,7 +635,6 @@ impl Parser {
         } = self.parse_class_body(class_is_readonly)?;
 
         Ok(ClassDecl {
-            id: self.node_id(),
             namespaced_name: None,
             name: Some(self.interner.name(&name)),
             name_span,

@@ -68,7 +68,6 @@ impl Parser {
                 };
                 self.expect(&Token::RParen)?;
                 Some(Param {
-                    id: self.node_id(),
                     name,
                     name_span,
                     type_hint,

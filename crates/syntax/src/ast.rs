@@ -185,7 +185,6 @@ pub struct SwitchCase {
 
 #[derive(Debug, Clone)]
 pub struct CatchClause {
-    pub id: NodeId,
     pub types: Vec<QualifiedName>,
     // Each `types` entry's span (same index).
     pub types_spans: Vec<Span>,
@@ -202,7 +201,6 @@ pub struct CatchClause {
 
 #[derive(Debug, Clone)]
 pub struct Param {
-    pub id: NodeId,
     // Moved out of the lexer's interned `Token::Variable`, without its `$`.
     pub name: Arc<str>,
     // This parameter's own `$name` token's span - populated by
@@ -309,7 +307,6 @@ pub enum Visibility {
 
 #[derive(Debug, Clone)]
 pub struct PropertyDecl {
-    pub id: NodeId,
     // Without its `$`.
     pub name: Name,
     // See `FunctionDecl::name_span`'s own doc comment.
@@ -392,7 +389,6 @@ pub struct PropertyHooks {
 
 #[derive(Debug, Clone)]
 pub struct MethodDecl {
-    pub id: NodeId,
     pub visibility: Visibility,
     pub is_static: bool,
     pub is_abstract: bool,
@@ -434,7 +430,6 @@ pub enum UseKind {
 
 #[derive(Debug, Clone)]
 pub struct ClassConst {
-    pub id: NodeId,
     pub name: Name,
     // The name with the file's namespace, for a global `const`; `None` in
     // a class. Filled in by name resolution.
@@ -494,7 +489,6 @@ pub enum ClassKind {
 
 #[derive(Debug, Clone)]
 pub struct ClassDecl {
-    pub id: NodeId,
     // `None` for an anonymous class.
     pub name: Option<Name>,
     // The name with the file's namespace; `None` for an anonymous class.
@@ -563,7 +557,6 @@ impl ClassDecl {
 
 #[derive(Debug, Clone)]
 pub struct EnumCase {
-    pub id: NodeId,
     pub name: Name,
     // See `FunctionDecl::name_span`'s own doc comment.
     pub name_span: Span,
@@ -609,7 +602,6 @@ pub struct TraitAdaptations {
 /// parameter (the unpacked array's contents aren't known statically).
 #[derive(Debug, Clone)]
 pub struct Arg {
-    pub id: NodeId,
     // `name:` for a named argument.
     pub name: Option<Ident>,
     pub spread: bool,
@@ -714,7 +706,6 @@ pub enum UnaryOp {
 
 #[derive(Debug, Clone)]
 pub struct ClosureUse {
-    pub id: NodeId,
     // Moved out of the lexer's interned `Token::Variable`, without its `$`.
     pub name: Arc<str>,
     pub by_ref: bool,
@@ -1343,7 +1334,6 @@ pub enum ExprKind {
 /// One arm of a `match`: `conditions => body`, or `default => body`.
 #[derive(Debug, Clone)]
 pub struct MatchArm {
-    pub id: NodeId,
     // `None` for the `default` arm.
     pub conditions: Option<Vec<Expr>>,
     pub body: Expr,
