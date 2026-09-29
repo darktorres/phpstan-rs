@@ -1,4 +1,4 @@
-//! The cross-referencing half of Phase 82's named-argument-rename
+//! The cross-referencing half of the named-argument-rename
 //! feature (`checker::named_argument_renames`'s own module doc comment
 //! covers the call-site recording half) - mirrors real PHPStan's
 //! `MethodCallWithPossiblyRenamedNamedArgumentRule::processNode` exactly:

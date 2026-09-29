@@ -66,8 +66,8 @@ impl<'a> Checker<'a> {
                 }
                 ExprKind::PropertyAccess(base, prop, _) => {
                     self.check_expr_quiet_root(base, locals, label);
-                    // Opt-in `checkDynamicProperties` strict mode
-                    // (ROADMAP Phase 102's W1) - real PHPStan's
+                    // Opt-in `checkDynamicProperties` strict mode - real
+                    // PHPStan's
                     // lenient default silently allows `isset($x->undefined)`
                     // (the whole point of `isset`/`??` is to probe for
                     // exactly that), but the stricter mode still flags it as

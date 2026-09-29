@@ -1159,7 +1159,7 @@ impl Server {
         }
     }
 
-    /// `textDocument/typeDefinition` (Phase 108's AM2) - jumps from an
+    /// `textDocument/typeDefinition` - jumps from an
     /// inferred `Type` to that type's own class declaration(s), reusing
     /// the identical throwaway-`Checker` probe/`type_to_classes` pair
     /// `format_hover`'s `Instance`/`VariableSelf`/`VariableRead` arms

@@ -1,26 +1,21 @@
-//! ROADMAP Phase 93: flag an `abstract class` with zero concrete
-//! descendants anywhere in the closed universe - a permanent structural
-//! fact, not "currently unused" the way Phase 86's B2 (`class.unused`)
-//! is. Real PHPStan has no such rule at all: its `Reflection/` layer has
-//! no descendant-enumeration API (an open-world consumer could always
-//! add one), the same architectural reason Phase 85's A5 (closed
-//! sealed-hierarchy inference) doesn't apply there either.
+//! Flags an `abstract class` with zero concrete descendants anywhere in
+//! the closed universe - a permanent structural fact, not "currently
+//! unused" the way `class.unused` is. Real PHPStan has no such rule at
+//! all: its `Reflection/` layer has no descendant-enumeration API (an
+//! open-world consumer could always add one).
 //!
 //! Distinct from `class.unused`: a polymorphic-dispatch-only abstract
 //! class (referenced only through a type hint on its own name, never
 //! `new`'d directly - which real PHP forbids for an abstract class
 //! anyway) has non-zero Tier-1 references there even with zero real
-//! subclasses, so B2 would never catch this; this check would, since it
+//! subclasses, so `class.unused` would never catch this; this check would, since it
 //! asks a structurally different question (does a *descendant* exist,
 //! not does a *reference* exist).
 //!
-//! Deliberately narrower than Phase 85's A5 (this check's own original
-//! backlog citation) - A5's own full scope is auto-inferring a *sealed*
-//! hierarchy for `ObjectType::isInstanceOf` to return certain `false`
-//! instead of PHPStan's permanent `Maybe`, a pervasive change to
-//! type-narrowing semantics throughout the checker. This only needs A5's
-//! own narrow "does *any* concrete descendant exist" existence query, not
-//! that broader (and riskier) semantic change - answered directly here
+//! Narrower than inferring a *sealed* hierarchy for
+//! `ObjectType::isInstanceOf` to answer a certain `false` instead of
+//! PHPStan's permanent `Maybe`: this only asks whether *any* concrete
+//! descendant exists - answered directly here
 //! via `Registry::all_ancestor_names`, inverted (a witness class's own
 //! ancestors include every abstract superclass it has a concrete
 //! descendant for), rather than building a persistent reverse index on

@@ -1,10 +1,9 @@
 //! A purely declarative, config-driven list of a project's own custom
-//! DQL function registrations (ROADMAP Phase 168 168h) - a
+//! DQL function registrations - a
 //! `Doctrine\ORM\Query\AST\Functions\FunctionNode` subclass registered
 //! via `Configuration::addCustomStringFunction()`/
 //! `addCustomNumericFunction()`/`addCustomDatetimeFunction()` (e.g.
-//! `DATE_FORMAT_YEAR_MONTH`, confirmed real and project-registered in
-//! the corpus this phase targets) has no return type this project can
+//! `DATE_FORMAT_YEAR_MONTH`) has no return type this project can
 //! derive from the DQL parser alone - **this is true of real PHPStan's
 //! own `phpstan-doctrine` too**: it requires the identical shape of
 //! manually-declared config (`customNumericFunctions`/

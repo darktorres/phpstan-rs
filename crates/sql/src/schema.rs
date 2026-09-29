@@ -1,7 +1,7 @@
-//! Sub-phase A2: a static schema catalog parsed from a per-engine DDL
+//! A static schema catalog parsed from a per-engine DDL
 //! dump (`install/piwigo_structure-{mysql,mariadb,pgsql,sqlite}.sql`-
 //! shaped), the same per-column type-translation table the live
-//! reflector (sub-phase C) will use - just fed from a parsed `sqlparser`
+//! reflector uses - just fed from a parsed `sqlparser`
 //! AST `ColumnDef` instead of a live prepared-statement response. Not
 //! merely a fallback for when a live DB is unavailable - versioned in
 //! the repo, no live infrastructure needed, and immune to a locally-

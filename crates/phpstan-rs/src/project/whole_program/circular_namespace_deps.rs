@@ -1,18 +1,17 @@
-//! ROADMAP Phase 86's B3: flag a *namespace-level* structural
+//! Flags a *namespace-level* structural
 //! dependency cycle - namespace `A` has a class that `extends`/
 //! `implements`/`use`s a class in namespace `B`, and namespace `B` (via
 //! some other, possibly unrelated, class pair) has an edge back into
 //! `A`. Real PHPStan has no such rule; this project's own closed-world
 //! `Registry` makes the graph available almost for free, since every
 //! `ClassReflection.extends`/`.implements`/`.uses` entry is already resolved
-//! to its target's real canonical FQN (by name resolution) - no new indexing pass needed at all, unlike Phase 86's B2
-//! (`dead_code`), which needed a real (if cheap) reference index.
+//! to its target's real canonical FQN (by name resolution) - no new indexing pass needed at all, unlike
+//! `dead_code`, which needed a real (if cheap) reference index.
 //!
-//! Deliberately narrower than the backlog's own original sketch (Tarjan's
-//! SCC over `Project.dependents`, "the already-live reverse-reference
-//! graph"): that graph is *any* reference (a type hint, a static call, an
-//! `instanceof`, ...), not just structural composition, and - as found
-//! implementing B2 - its own raw, unresolved keys aren't precise enough
+//! Deliberately narrower than Tarjan's SCC over `Project.dependents`
+//! (the reverse-reference graph): that graph is *any* reference (a type
+//! hint, a static call, an `instanceof`, ...), not just structural
+//! composition, and its raw, unresolved keys aren't precise enough
 //! for a specific, attributable finding like this one either. Restricting
 //! to `extends`/`implements`/`uses` trades completeness (a cycle formed
 //! purely through method-body calls or type hints is invisible here) for

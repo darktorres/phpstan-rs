@@ -1,4 +1,4 @@
-//! Doctrine ORM entity metadata (ROADMAP Phase 168 168a) - extracted
+//! Doctrine ORM entity metadata - extracted
 //! once, here, from a class's own `#[ORM\...]` attributes, reusing the
 //! native property types `ClassReflection::from_decl` has already resolved
 //! (this project's own already-indexed property types answer "what type
@@ -9,7 +9,7 @@
 //! (confirmed directly - zero `@ORM\...` legacy docblock annotations
 //! anywhere in the corpus), so only the attribute style is supported.
 //!
-//! Entity inheritance (ROADMAP Phase 168 168j) - `#[ORM\
+//! Entity inheritance - `#[ORM\
 //! DiscriminatorMap]`'s own value -> concrete-subclass map is parsed on
 //! the root entity; a `FROM BaseEntity alias` with a non-empty map
 //! produces a union across every mapped subclass (`checker::doctrine::
@@ -67,7 +67,7 @@ pub struct DoctrineEntity {
     /// doesn't attempt to replicate - every real corpus entity checked
     /// declares this explicitly). Raw SQL query reflection's own table-
     /// name cross-reference (`checker::sql_reflection::resolve`) is the
-    /// only consumer - Phase 168's own DQL-side machinery never needed
+    /// only consumer - the DQL-side machinery never needed
     /// a real DB table/column name at all, since DQL resolves through
     /// property names.
     pub table_name: Option<Name>,

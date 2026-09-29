@@ -2,9 +2,9 @@
 //! free-standing helpers - the SQL-text-generation logic itself, which
 //! needs no `Checker`/`Locals` at all. The chain-*walking* half
 //! (`resolve_dbal_query_builder_sql`, an AST backward-walk needing a
-//! real `Checker`) mirrors Phase 168's own already-proven
+//! real `Checker`) mirrors the DQL side's
 //! `resolve_query_builder_chain` mechanism closely enough that it's left
-//! to sub-phase D's own end-to-end `#[PHPStan\Testing\assertType]` tests
+//! to the call sites' end-to-end `#[PHPStan\Testing\assertType]` tests
 //! once a real call site actually surfaces its result - this project's
 //! own established convention for checker-level logic (see
 //! `checker/tests/doctrine_query_result.rs`), not a standalone Rust

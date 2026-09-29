@@ -186,7 +186,7 @@ fn disjunctive_syllogism_atom_key(e: &Expr) -> Option<String> {
 
 /// A condition recognized well enough to canonicalize as a bare-
 /// truthiness discriminant, for `record_branch_implied_facts`'s own
-/// same-condition-recurrence case (Phase 170) - a bare variable (the
+/// same-condition-recurrence case - a bare variable (the
 /// ternary/flag-reuse shape, `$nbmSendDetailedContent ? $news : null`
 /// reusing the identical `$nbmSendDetailedContent`'s own earlier `if`)
 /// or a single-argument `isset(...)` call (`UploadService::

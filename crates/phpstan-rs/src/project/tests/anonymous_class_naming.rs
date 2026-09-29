@@ -78,8 +78,7 @@ fn anonymous_class_not_implementing_the_required_interface_still_flags_return_ty
 
 #[test]
 fn an_anonymous_class_instances_own_extra_method_is_resolved_alongside_its_interface() {
-    // The exact shape the already-reverted "ancestor-aliasing shortcut"
-    // (see ROADMAP.md's own Reverted section) got wrong: a "spy" that
+    // The shape an "ancestor-aliasing shortcut" would get wrong: a "spy" that
     // implements a real interface but also declares its own extra member
     // a caller reads directly. Registering the anonymous class's own full
     // declaration (not just aliasing to the interface it implements) means

@@ -1,4 +1,4 @@
-//! A small DQL SELECT-item parser (ROADMAP Phase 168 168c) -
+//! A small DQL SELECT-item parser -
 //! scoped to exactly what a query's own result-row *shape* depends on:
 //! `alias`/`alias.field`/`IDENTITY(alias.assoc)`, an aggregate function
 //! call, `CASE ... END`, `NEW Some\Dto(...)`, each optionally `AS`-
@@ -13,7 +13,7 @@
 //! is Doctrine's own, unrelated grammar.
 //!
 //! A scalar subquery nested inside a select item (`SELECT (SELECT
-//! COUNT(...) FROM ...) AS cnt`, ROADMAP Phase 168 168k) recurses
+//! COUNT(...) FROM ...) AS cnt`) recurses
 //! into this exact same grammar via `parse_select_statement_tokens` -
 //! not a second, parallel one - only an uncorrelated inner query (a
 //! complete, self-contained `FROM` of its own) is modeled; a subquery
@@ -74,11 +74,10 @@ pub(crate) enum SelectItemKind {
     },
     New(String),
     /// A function-call-shaped item whose name isn't one of the five
-    /// built-in aggregates - a custom, project-registered DQL function
-    /// (ROADMAP Phase 168 168h).
+    /// built-in aggregates - a custom, project-registered DQL function.
     Custom(String),
     /// A scalar subquery nested inside a select item (`SELECT (SELECT
-    /// COUNT(...) FROM ...) AS cnt`, ROADMAP Phase 168 168k) - the
+    /// COUNT(...) FROM ...) AS cnt`) - the
     /// inner query's own resolved chain/items, exactly the same shape
     /// `parse_select_statement` itself returns. Only valid DQL when the
     /// inner query resolves to exactly one scalar column -
@@ -566,9 +565,9 @@ fn at_join_boundary(tokens: &[Token], pos: usize) -> bool {
 }
 
 /// A full `SELECT ... FROM Entity alias [JOIN ...]*` DQL statement -
-/// ROADMAP Phase 168 168g's own literal-`createQuery($dql)` entry
-/// point, feeding a real DQL string directly into the same select-item
-/// grammar 168b's own `QueryBuilder`-chain-derived arguments use, rather
+/// the literal-`createQuery($dql)` entry point, feeding a real DQL
+/// string directly into the same select-item grammar a `QueryBuilder`
+/// chain's arguments use, rather
 /// than needing a second, parallel grammar. No WHERE/GROUP BY/HAVING/
 /// ORDER BY parsing - stops at the first one, matching 168b/168c's own
 /// identical exclusion (none of those clauses can ever add or remove a
@@ -586,8 +585,7 @@ pub(crate) fn parse_select_statement(
 
 /// `parse_select_statement`'s own real implementation, operating
 /// directly on an already-tokenized buffer starting at `start` - shared
-/// with a select item's own nested-subquery production (ROADMAP
-/// Phase 168 168k, `SelectItemKind::Subquery`) so the two never risk
+/// with a select item's own nested-subquery production (`SelectItemKind::Subquery`) so the two never risk
 /// drifting into two subtly different grammars. Returns the position
 /// just past the parsed statement (its caller decides what, if
 /// anything, legally follows - the top-level `dql: &str` entry point

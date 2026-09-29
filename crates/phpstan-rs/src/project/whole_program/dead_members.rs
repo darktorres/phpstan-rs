@@ -1,11 +1,11 @@
-//! ROADMAP Phase 86's B1: flag a protected/public method/
+//! Flags a protected/public method/
 //! property/const never referenced anywhere in the project. Real
 //! PHPStan's own dead-member rule gates on `isPrivate()` specifically,
 //! since verifying no *other file* reaches a broader-visibility member
 //! needs its cross-process collector machinery - this project's own
 //! closed-world `Registry`/Tier-2 `use_sites` index already has that
 //! fact for free, the same infrastructure `project::whole_program::
-//! dead_code` (Phase 86's B2) already reads.
+//! dead_code` already reads.
 //!
 //! `record_member_ref` already fires from every ordinary access arm
 //! (instance/static property, instance/static method call, class

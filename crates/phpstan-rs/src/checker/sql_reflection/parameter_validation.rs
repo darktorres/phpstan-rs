@@ -1,5 +1,5 @@
-//! Sub-phase E: placeholder/bound-parameter validation. Once a SQL
-//! string is resolved (sub-phase B's own chain-fold, or a literal/
+//! Placeholder/bound-parameter validation. Once a SQL
+//! string is resolved (the `QueryBuilder` chain fold, or a literal/
 //! foldable argument), every real placeholder it references (`?`
 //! positional, `:name` named) is cross-referenced against the actual
 //! bound values a real call site provides - `Doctrine\DBAL\Query\
@@ -174,7 +174,7 @@ impl<'a> Checker<'a> {
     /// bound value is a real array where the placeholder isn't declared
     /// `ArrayParameterType::*`. Silently does nothing whenever any part
     /// of the resolution is undecidable (unfoldable SQL, no chain/array
-    /// found) - the same "don't guess" leniency every other sub-phase
+    /// found) - the same "don't guess" leniency every other step
     /// of this feature already has.
     // Every argument here is already its own independently-meaningful
     // piece of the one real call site (`checker/expr.rs`'s own

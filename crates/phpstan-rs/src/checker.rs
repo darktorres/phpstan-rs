@@ -1113,7 +1113,7 @@ pub struct Checker<'a> {
     pub(crate) collect_member_refs: bool,
     #[allow(clippy::type_complexity)]
     member_ref_sites: RefCell<FxHashSet<(Span, String, String)>>,
-    // Phase 92's own escape hatch: every real `Enum` class this file's
+    // Dead-enum-case detection's escape hatch: every real `Enum` class this file's
     // check pass saw a `::cases()` call or a dynamic (`{dynamic}`)
     // member access against - either one means "some case of this enum
     // is used in a way this project can't attribute to a specific case
@@ -1125,7 +1125,7 @@ pub struct Checker<'a> {
     // `record_member_ref`'s own pattern, so every plain call site below
     // stays unconditional.
     escaped_enums: RefCell<FxHashSet<String>>,
-    // Phase 86's B1 own escape hatch: every class (and each of its own
+    // Dead-member detection's escape hatch: every class (and each of its own
     // ancestors/real subclasses - see `Checker::escape_targets_for_
     // receiver_type`) this file's check pass saw reached through a
     // *genuinely* dynamic member access (`$obj->{$expr}`/`$obj->$name`,

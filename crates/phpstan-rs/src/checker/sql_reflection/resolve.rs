@@ -1,5 +1,5 @@
-//! Sub-phase C's own resolution orchestration - the single entry point
-//! sub-phase D's real call sites consult. Implements all 4 steps of the
+//! SQL result-type resolution - the single entry point the call sites
+//! consult. Implements all 4 steps of the
 //! plan's own resolution order: 1 (`resolve_pure_ast` - a select list of
 //! only literals/a bare `COUNT`, needing no schema/connection at all),
 //! 2 (`Registry::sql_reflection_cache` - a resolved-or-undecidable
@@ -25,7 +25,7 @@
 //! (`resolve_ctes_from_static_schema`/`TableFactor::Derived`) through
 //! the same column-list primitive a real table's own schema entry
 //! already uses - but deliberately not `UNION`'s own per-engine
-//! numeric/string coercion rules, `CREATE VIEW` parsing (A2's DDL
+//! numeric/string coercion rules, `CREATE VIEW` parsing (the static catalog's DDL
 //! parser only extracts `CREATE TABLE`), or `WITH RECURSIVE` (which
 //! compounds both): each needs real per-engine behavior this project
 //! only ever trusts once verified live, which a schema-file-only

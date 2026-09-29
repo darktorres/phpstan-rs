@@ -1,4 +1,4 @@
-//! Result-shape builder (ROADMAP Phase 168 168d) - given a parsed
+//! Result-shape builder - given a parsed
 //! SELECT clause (168c) plus the `FROM`/`JOIN` alias map (168b) and
 //! 168a's entity metadata, computes one query row's own `Type`, mirroring
 //! real Doctrine's default `HYDRATE_OBJECT` hydration rules exactly.
@@ -119,8 +119,7 @@ fn entity_info<'a>(checker: &'a Checker, class: &str) -> Option<&'a ClassReflect
     info.doctrine_entity().as_ref().map(|_| info)
 }
 
-/// A whole-entity select item's own row type (ROADMAP Phase 168
-/// 168j) - a plain `Object(entity, [])` for the overwhelming majority
+/// A whole-entity select item's own row type - a plain `Object(entity, [])` for the overwhelming majority
 /// (an ordinary, non-hierarchical entity), or, when `entity` is the
 /// *root* of a single-table/joined-table inheritance hierarchy (a real,
 /// non-empty `#[ORM\DiscriminatorMap]`), a union across every one of its
@@ -230,8 +229,7 @@ fn select_item_type(checker: &Checker, aliases: &AliasMap, item: &SelectItem) ->
         // (the same leniency an ordinary `new UnknownClass()` expression
         // already gets elsewhere in this project's own type system).
         SelectItemKind::New(class) => checker.class_type_named(class),
-        // A custom, project-registered DQL function (ROADMAP
-        // Phase 168 168h) - `Mixed` when this project's own
+        // A custom, project-registered DQL function - `Mixed` when this project's own
         // `[[doctrine_custom_functions]]` config doesn't declare it,
         // exactly like real `phpstan-doctrine`'s identical config
         // dependency for the same reason (see `doctrine_functions`'s own
@@ -242,7 +240,7 @@ fn select_item_type(checker: &Checker, aliases: &AliasMap, item: &SelectItem) ->
             .get(&name.to_ascii_lowercase())
             .map(|kind| doctrine_custom_function_type(*kind))
             .unwrap_or(Type::mixed()),
-        // A scalar subquery (ROADMAP Phase 168 168k) - its own
+        // A scalar subquery - its own
         // `FROM`/`JOIN` scope is entirely independent of the outer
         // query's own `aliases` map (only an uncorrelated subquery is
         // recognized at all - see `dql`'s own module doc comment), so
@@ -546,7 +544,7 @@ fn to_array_mode(checker: &Checker, ty: Type) -> Type {
     })
 }
 
-/// `getArrayResult()` (ROADMAP Phase 168 168f) - the identical row
+/// `getArrayResult()` - the identical row
 /// shape `build_result_row_type` computes, except every entity member
 /// converts to its own `entity_array_shape` instead of a real object
 /// (real Doctrine's `HYDRATE_ARRAY` mode). Beyond real PHPStan (168e's
@@ -568,7 +566,7 @@ pub(crate) fn build_array_result_row_type(
     })
 }
 
-/// `getScalarResult()` (ROADMAP Phase 168 168f) - flattens every
+/// `getScalarResult()` - flattens every
 /// selected entity's own scalar fields directly into one flat row
 /// (`{alias}_{field}`-keyed) alongside every plain scalar/aggregate item
 /// under `unaliased_scalar_key`'s own rule when unaliased, exactly like

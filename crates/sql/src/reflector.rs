@@ -1,4 +1,4 @@
-//! Sub-phase C (MySQL, Postgres, and SQLite): live SQL query reflection.
+//! Live SQL query reflection (MySQL, Postgres, and SQLite).
 //! `PREPARE`s (never executes) a resolved SQL string against a live
 //! connection and reads
 //! the prepared statement's own real result-set column metadata,
@@ -39,7 +39,7 @@ pub trait QueryReflector: Send + Sync {
     fn reflect(&self, sql: &str) -> Option<Vec<Column>>;
 }
 
-/// Sub-phase B's own `DbalQueryBuilderChain::render()` (and a direct
+/// The checker's `DbalQueryBuilderChain::render()` (and a direct
 /// literal-string argument to `Connection::fetchAssociative()` etc.)
 /// both fold DBAL's own placeholder syntax through unchanged - `?`
 /// (positional) or `:name` (named, real corpus's own dominant form:
@@ -205,7 +205,7 @@ impl QueryReflector for MysqlReflector {
 }
 
 impl MysqlReflector {
-    /// Same as `reflect`, but consults `schema` (A2's static catalog,
+    /// Same as `reflect`, but consults `schema` (the static catalog,
     /// when configured) for an `ENUM` column's own real literal-value
     /// union - kept as a separate entry point from the trait method so
     /// unit tests can exercise the enum cross-reference directly
@@ -291,7 +291,7 @@ fn mysql_column_type(col: &mysql::Column, schema: Option<&SchemaCatalog>) -> Col
     }
 }
 
-/// Cross-references `schema` (A2's own static catalog) for this `ENUM`
+/// Cross-references `schema` (the static catalog) for this `ENUM`
 /// column's real declared literal values, via the column's own
 /// `org_table`/`org_name` (the *original* table/column, which survives
 /// an alias - unlike `table`/`name`, which reflect the aliased query

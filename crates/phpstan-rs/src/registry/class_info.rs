@@ -545,7 +545,7 @@ pub struct ClassReflection {
     // `Registry::resolve_method_tags`, a later pass. Empty again after
     // that pass runs; never read afterward.
     pub(in crate::registry) method_tags: Vec<(Name, FunctionReflection, bool)>,
-    // `#[ORM\Entity]` metadata (ROADMAP Phase 168 168a) - `None`
+    // `#[ORM\Entity]` metadata - `None`
     // for the overwhelming majority of classes, which aren't Doctrine
     // entities at all.
     pub(in crate::registry) doctrine_entity: Option<DoctrineEntity>,

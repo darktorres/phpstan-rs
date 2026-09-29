@@ -2,11 +2,10 @@
 //! types - result-set type inference for `fetch*`/`executeQuery`/
 //! `executeStatement`, the same real-world shape `staabm/phpstan-dba`
 //! uses (prepare, don't execute, and read the prepared statement's own
-//! result-set column metadata). See
-//! `delegated-tumbling-dongarra.md`'s sub-phases B/C/D/E for the full
-//! design. Only per-call-site, `Checker`/AST-consulting logic lives
-//! under this module (this file's own `query_builder`) - both A2's
-//! static schema catalog and C's live reflector are compiled/lazily-
+//! result-set column metadata). Only per-call-site, `Checker`/AST-
+//! consulting logic lives under this module (this file's own
+//! `query_builder`) - both the static schema catalog and the live
+//! reflector are compiled/lazily-
 //! built state stored directly on `Registry`, so they live top-level
 //! instead, in `sql::schema`/`crate::
 //! sql_reflection_reflector` (see either module's own doc comment for

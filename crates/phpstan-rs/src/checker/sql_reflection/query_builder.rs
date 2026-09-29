@@ -1,7 +1,7 @@
-//! Sub-phase B: folds a `Doctrine\DBAL\Query\QueryBuilder` fluent chain
+//! Folds a `Doctrine\DBAL\Query\QueryBuilder` fluent chain
 //! (root: `$connection->createQueryBuilder()`) into one literal SQL
-//! string sub-phase C's reflector can `PREPARE` against. Same backward-
-//! walk architecture as Phase 168's `checker::doctrine::query_builder`
+//! string the live reflector can `PREPARE` against. Same backward-
+//! walk architecture as `checker::doctrine::query_builder`
 //! (`resolve_query_builder_chain`), reusing its own `Locals::
 //! query_builder_aliases` map (`looks_like_query_builder_chain`'s own
 //! check is purely syntactic - "ends in a call named
@@ -16,7 +16,7 @@
 //! truth, not guessed.
 //!
 //! `where`/`andWhere`/`orWhere`/`having`/`andHaving`/`orHaving` genuinely
-//! need folding here, unlike Phase 168's own DQL chain-folder (which
+//! need folding here, unlike the DQL chain-folder (which
 //! drops them entirely - they never change a DQL query's own result
 //! *shape*): this class's SQL text needs every clause to be a real,
 //! syntactically valid `PREPARE` target, and dropping a `WHERE`/`HAVING`
@@ -109,7 +109,7 @@ pub(crate) struct DbalQueryBuilderChain {
     /// Every `setParameter`/`setParameters` binding collected along the
     /// chain, in call order - `setParameters` replaces the whole list
     /// (matching real DBAL: `$this->params = $params;`, not a merge),
-    /// `setParameter` appends/overwrites one key. Sub-phase E's own
+    /// `setParameter` appends/overwrites one key. Parameter validation's own
     /// concern (`checker::sql_reflection::parameter_validation`), not
     /// consulted by `render()` at all - a placeholder's own bound value
     /// never changes the SQL *text*.
@@ -313,7 +313,7 @@ impl<'a> Checker<'a> {
     /// Same backward-walk as `resolve_dbal_query_builder_sql`, but
     /// returns the whole resolved chain (including every collected
     /// `setParameter`/`setParameters` binding) instead of just its own
-    /// rendered SQL text - sub-phase E's own entry point
+    /// rendered SQL text - parameter validation's own entry point
     /// (`checker::sql_reflection::parameter_validation`), which needs
     /// both the text (to find real placeholders) and the bindings (to
     /// cross-reference against them).
@@ -354,7 +354,7 @@ impl<'a> Checker<'a> {
     }
 
     /// A directly-passed SQL argument (`fetchAssociative($sql, ...)`) -
-    /// the "already a plain string" shortcut, matching Phase 168's own
+    /// the "already a plain string" shortcut, matching the DQL side's own
     /// 168g precedent for `createQuery($dql)`: a literal or constant-
     /// foldable string needs no chain-walking at all.
     pub(crate) fn foldable_sql_string(&self, expr: &Expr, locals: &Locals) -> Option<String> {
@@ -519,7 +519,7 @@ impl<'a> Checker<'a> {
             }
             // Never change the SQL text itself (they bind a value to an
             // already-written `?`/`:name` placeholder) - collected for
-            // sub-phase E's own cross-reference against the resolved
+            // parameter validation's own cross-reference against the resolved
             // SQL's real placeholders, not consulted by `render()`.
             "setParameter" => {
                 let key = args
@@ -594,7 +594,7 @@ impl<'a> Checker<'a> {
                 chain.params = params;
             }
             // Any other unrecognized method is simply ignored, matching
-            // Phase 168's own `apply_chain_call` precedent.
+            // the DQL side's `apply_chain_call` precedent.
             _ => {}
         }
         Some(())

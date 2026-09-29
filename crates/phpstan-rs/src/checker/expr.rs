@@ -1218,15 +1218,12 @@ impl<'a> Checker<'a> {
                         // validation - independent of the internal/
                         // deprecated checks above.
                         self.check_dom_create_element(class, method, args, e.span);
-                        // Sub-phase E of the live SQL query reflection
-                        // phase (see delegated-tumbling-dongarra.md) -
-                        // independent of the internal/deprecated checks
-                        // above too.
+                        // SQL parameter binding validation - independent of
+                        // the internal/deprecated checks above too.
                         self.check_dbal_parameter_binding(
                             class, method, recv, args, locals, e.span,
                         );
-                        // Phase 82's named-argument-rename feature -
-                        // see `checker::named_argument_renames`'s own
+                        // Renamed named arguments - see `checker::named_argument_renames`'s own
                         // module doc comment. Always on (not gated on
                         // `facts_only`) - this arm's whole body already
                         // runs unconditionally.
@@ -2407,7 +2404,7 @@ impl<'a> Checker<'a> {
                     .as_ref()
                     .and_then(|class| self.static_call_method(target, class, method));
                 let sig = sig_with_owner.as_ref().map(|(_, s)| s.as_ref());
-                // Phase 92's own `::cases()` escape hatch - see
+                // The `::cases()` escape hatch - see
                 // `Checker::escaped_enums`'s own doc comment. `owner`
                 // (not `resolved_class`) is the registry's own
                 // canonically-declared name, which matters here: a
@@ -2647,8 +2644,8 @@ impl<'a> Checker<'a> {
                         let resolved_ty = self.infer_call_return_type(s, &resolved, locals);
                         let resolved_ty =
                             self.narrow_enum_from_call(class, method, args, resolved_ty, locals);
-                        // Phase 92's own `::from()`/`::tryFrom()` literal-
-                        // argument signal - see `project::whole_program::
+                        // The `::from()`/`::tryFrom()` literal-argument
+                        // signal - see `project::whole_program::
                         // dead_enum_cases`'s own doc comment. Reads the
                         // type `narrow_enum_from_call` just computed
                         // rather than threading a new span parameter
@@ -4458,7 +4455,7 @@ impl<'a> Checker<'a> {
                     && let Some((owner, _)) = self.registry.lookup_method_with_owner(&class, method)
                 {
                     self.record_member_ref(e.span, &owner, method);
-                    // Phase 92's own `::cases()` escape hatch - see
+                    // The `::cases()` escape hatch - see
                     // `Checker::escaped_enums`'s own doc comment. `owner`
                     // is already the registry's own canonically-declared
                     // name (same reasoning as `check_expr`'s identical
@@ -4483,8 +4480,8 @@ impl<'a> Checker<'a> {
                                     self.infer_call_return_type(sig, &resolved_args, locals);
                                 let resolved = self
                                     .narrow_enum_from_call(&class, method, args, resolved, locals);
-                                // Phase 92's own `::from()`/`::tryFrom()`
-                                // literal-argument signal - see `check_expr`'s
+                                // The `::from()`/`::tryFrom()` literal-argument
+                                // signal - see `check_expr`'s
                                 // identical fix just above `ExprKind::
                                 // ClassConstFetch` for why this reads the
                                 // already-computed type rather than
@@ -5729,12 +5726,9 @@ fn cast_result_type(kind: CastKind) -> Type {
 /// Doctrine's `AbstractQuery::getResult()` (and every real terminal
 /// method sharing its own `HYDRATE_OBJECT` shape - `execute()`/
 /// `toIterable()` when their own hydration-mode argument is omitted or
-/// explicit) always produces a real, sequentially-keyed list - true
-/// regardless of whether ROADMAP Phase 168's own DQL-aware row-
-/// type inference (168b-168d) managed to resolve a real element type;
-/// this is the list of `mixed` used when it didn't (matches this
-/// project's pre-Phase-168 fallback exactly, so an undecidable chain
-/// regresses nothing).
+/// explicit) always produces a real, sequentially-keyed list, whether or
+/// not the DQL row type resolved; this is the list of `mixed` used when
+/// it didn't.
 pub(crate) fn doctrine_query_result_list_type() -> Type {
     Type::list_of(Type::mixed())
 }

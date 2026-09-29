@@ -560,7 +560,7 @@ fn a_real_live_named_placeholder_query_prepares_successfully_against_mysql() {
     };
     let reflector = MysqlReflector::connect(&config).expect("connect to live MySQL");
     // The exact real shape 542 real Piwigo `setParameter()` call sites
-    // produce once sub-phase B folds the chain - confirmed real MySQL
+    // produce once the `QueryBuilder` chain is folded - confirmed real MySQL
     // PREPARE rejects `:id` outright before this fix.
     let row_type = reflector.reflect("SELECT id, name FROM categories WHERE id = :id");
     assert!(row_type.is_some(), "expected a resolved row type");

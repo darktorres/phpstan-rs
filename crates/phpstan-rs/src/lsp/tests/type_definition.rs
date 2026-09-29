@@ -1,4 +1,4 @@
-//! `textDocument/typeDefinition` (Phase 108's AM2) - jumps from an
+//! `textDocument/typeDefinition` - jumps from an
 //! inferred `Type` to that type's own class declaration, not to
 //! wherever a clicked member/name itself is declared (that's ordinary
 //! `textDocument/definition`, covered by `navigation.rs`'s own tests).

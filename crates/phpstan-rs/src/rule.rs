@@ -1,6 +1,6 @@
-//! A real, flow-sensitive, per-node-kind extension surface - Axis 3 of
-//! Phase 18's own 3-axis extension/plugin API (Axis 1: declarative
-//! `restricted_symbols`; Axis 2: `reflection_rule::ReflectionRule`, a
+//! A real, flow-sensitive, per-node-kind extension surface - the third
+//! of the extension API's three axes (the first: declarative
+//! `restricted_symbols`; the second: `reflection_rule::ReflectionRule`, a
 //! reflection-only tier with no live `Scope` - see that module's own
 //! doc comment contrasting the two). Mirrors real PHPStan's own
 //! `Rule<TNodeType>`/`Scope`: an implementor declares which `ExprKind`/
@@ -40,10 +40,7 @@
 //!   facts, exposed as boolean queries (not the raw `GuardedFunctionSet`/
 //!   `GuardedMemberSet` types) so this facade's own shape stays stable
 //!   even if their internal representation changes.
-//! - **Omitted, disclosed**: `provenance` (blocked on Phase 84's own
-//!   not-yet-built explicit/implicit-`Mixed` provenance semantics,
-//!   which would likely reshape this field before it's worth a public
-//!   contract), `condition_aliases`/`branch_implied_facts`/
+//! - **Omitted, disclosed**: `provenance`, `condition_aliases`/`branch_implied_facts`/
 //!   `query_builder_aliases`/`container_field_facts`/
 //!   `discriminant_array_facts` (internal narrowing-mechanism
 //!   bookkeeping specific to how *this* checker's own narrowing engine

@@ -201,8 +201,8 @@ pub struct Project {
     escaped_enum_cases: FxHashSet<String>,
     // `Checker::escaped_member_classes`'s own project-wide merge -
     // exactly the same shape/population paths as `escaped_enum_cases`
-    // above, just for Phase 86's B1 (`whole_program::
-    // dead_members::find_dead_members`) instead of Phase 92.
+    // above, for `whole_program::dead_members::find_dead_members`
+    // instead of dead enum cases.
     escaped_member_classes: FxHashSet<String>,
 }
 

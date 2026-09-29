@@ -708,8 +708,7 @@ impl<'a> Checker<'a> {
             .registry
             .is_subclass_of(class, "Doctrine\\DBAL\\Result")
         {
-            // Sub-phase D of the live SQL query reflection phase (see
-            // delegated-tumbling-dongarra.md): `Doctrine\DBAL\Result`'s
+            // Live SQL query reflection: `Doctrine\DBAL\Result`'s
             // own no-argument terminal methods - the second hop of the
             // `executeQuery()` -> `Result` propagation just below reads
             // the row type back from `type_args[0]`, the same
@@ -862,7 +861,7 @@ impl<'a> Checker<'a> {
 
     /// The SQL text a DBAL fetch*/`executeQuery` call actually runs -
     /// `QueryBuilder`'s own no-argument convenience methods get their
-    /// SQL from the fluent chain itself (sub-phase B); `Connection`'s
+    /// SQL from the fluent chain itself (`checker::sql_reflection::query_builder`); `Connection`'s
     /// own methods take it as a literal/constant-foldable first
     /// argument instead. `None` for anything undecidable either way -
     /// callers fall back to `generic_object_method_return_type`, never

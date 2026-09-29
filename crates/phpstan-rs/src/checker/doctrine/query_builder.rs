@@ -1,5 +1,4 @@
-//! Symbolic Doctrine `QueryBuilder` fluent-chain resolution (ROADMAP
-//! Phase 168 168b) - given the receiver expression of a `->getQuery()`
+//! Symbolic Doctrine `QueryBuilder` fluent-chain resolution - given the receiver expression of a `->getQuery()`
 //! call, walks the fluent `MethodCall` chain backward collecting every
 //! call that can affect the query's own result-row *shape*
 //! (`select`/`addSelect`/`from`/`join`/`innerJoin`/`leftJoin`), purely
