@@ -76,17 +76,20 @@ impl<'a> Checker<'a> {
             .is_some_and(|c| !c.templates().is_empty())
         {
             let mut bindings = self.class_template_bindings(class, type_args, owner);
-            // An erased receiver's templates with a declared default take
-            // it (`@template T = 'array'`), so a conditional on `T`
-            // resolves; one without a default stays the `Mixed` wildcard.
+            // An erased receiver's template is its declared default
+            // (`@template T = 'array'`, so a conditional on `T` resolves),
+            // or else its bound: what a value of it is surely known to be.
             if let Some(info) = self.registry.classes.get(owner) {
                 for name in info.templates() {
                     if !bindings.contains_key(name.as_ref())
-                        && let Some(default) = info.template_defaults().get(name)
+                        && let Some(erased) = info
+                            .template_defaults()
+                            .get(name)
+                            .or_else(|| info.template_bounds().get(name))
                     {
-                        let default =
-                            default.substitute_templates_of(&bindings, owner, &self.relation());
-                        bindings.insert(name.to_string(), default);
+                        let erased =
+                            erased.substitute_templates_of(&bindings, owner, &self.relation());
+                        bindings.insert(name.to_string(), erased);
                     }
                 }
             }
