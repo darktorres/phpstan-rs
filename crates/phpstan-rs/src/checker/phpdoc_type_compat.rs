@@ -300,7 +300,7 @@ impl<'a> Checker<'a> {
                     },
                 };
                 let void = TypeHint {
-                    kind: TypeHintKind::Name(QualifiedName::new("void")),
+                    kind: TypeHintKind::Keyword(NativeType::Void, "void".into()),
                     span,
                 };
                 ("set", vec![value], Some(void))

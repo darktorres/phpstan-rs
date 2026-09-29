@@ -892,8 +892,11 @@ pub struct TypeHint {
 
 #[derive(Debug, Clone)]
 pub enum TypeHintKind {
-    /// A keyword type or a class name, as written (`int`, `static`,
-    /// `\App\Foo`).
+    /// A native type keyword (`int`, `static`, `null`), with its spelling
+    /// as written (`INT`).
+    Keyword(NativeType, Arc<str>),
+    /// A class name, as written (`\App\Foo`, `Foo`) - including a word
+    /// PHP reads as a class in a native hint (`integer`, `resource`).
     Name(QualifiedName),
     /// `?T`.
     Nullable(Box<TypeHint>),
@@ -901,6 +904,77 @@ pub enum TypeHintKind {
     Union(Vec<TypeHint>),
     /// `A&B`, or a parenthesized `(A&B)` term of a union.
     Intersection(Vec<TypeHint>),
+}
+
+/// A type keyword PHP recognizes in a native declaration, whatever its
+/// case. Any other name in a type hint is a class.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum NativeType {
+    Int,
+    Float,
+    String,
+    Bool,
+    Array,
+    Object,
+    Mixed,
+    Void,
+    Never,
+    Null,
+    True,
+    False,
+    Iterable,
+    Callable,
+    SelfType,
+    Static,
+    Parent,
+}
+
+impl NativeType {
+    /// The keyword `name` spells, compared case-insensitively.
+    pub fn from_name(name: &str) -> Option<NativeType> {
+        Some(match name.to_ascii_lowercase().as_str() {
+            "int" => NativeType::Int,
+            "float" => NativeType::Float,
+            "string" => NativeType::String,
+            "bool" => NativeType::Bool,
+            "array" => NativeType::Array,
+            "object" => NativeType::Object,
+            "mixed" => NativeType::Mixed,
+            "void" => NativeType::Void,
+            "never" => NativeType::Never,
+            "null" => NativeType::Null,
+            "true" => NativeType::True,
+            "false" => NativeType::False,
+            "iterable" => NativeType::Iterable,
+            "callable" => NativeType::Callable,
+            "self" => NativeType::SelfType,
+            "static" => NativeType::Static,
+            "parent" => NativeType::Parent,
+            _ => return None,
+        })
+    }
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            NativeType::Int => "int",
+            NativeType::Float => "float",
+            NativeType::String => "string",
+            NativeType::Bool => "bool",
+            NativeType::Array => "array",
+            NativeType::Object => "object",
+            NativeType::Mixed => "mixed",
+            NativeType::Void => "void",
+            NativeType::Never => "never",
+            NativeType::Null => "null",
+            NativeType::True => "true",
+            NativeType::False => "false",
+            NativeType::Iterable => "iterable",
+            NativeType::Callable => "callable",
+            NativeType::SelfType => "self",
+            NativeType::Static => "static",
+            NativeType::Parent => "parent",
+        }
+    }
 }
 
 impl TypeHint {
@@ -920,11 +994,8 @@ impl TypeHint {
 
     fn collect_class_names<'a>(&'a self, out: &mut Vec<(&'a str, Span)>) {
         match &self.kind {
-            TypeHintKind::Name(name) => {
-                if !is_primitive_type_name(name.trim_start_matches('\\')) {
-                    out.push((name, self.span));
-                }
-            }
+            TypeHintKind::Keyword(..) => {}
+            TypeHintKind::Name(name) => out.push((name, self.span)),
             TypeHintKind::Nullable(inner) => inner.collect_class_names(out),
             TypeHintKind::Union(members) | TypeHintKind::Intersection(members) => {
                 for member in members {
@@ -940,6 +1011,7 @@ impl std::fmt::Display for TypeHint {
     /// intersection terms parenthesized.
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match &self.kind {
+            TypeHintKind::Keyword(_, written) => f.write_str(written),
             TypeHintKind::Name(name) => f.write_str(name),
             TypeHintKind::Nullable(inner) => write!(f, "?{inner}"),
             TypeHintKind::Union(members) => {

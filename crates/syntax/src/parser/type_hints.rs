@@ -1,4 +1,4 @@
-use crate::ast::{TypeHint, TypeHintKind};
+use crate::ast::{NativeType, TypeHint, TypeHintKind};
 use crate::parser::{ParseError, Parser};
 use crate::token::{Keyword, Position, Span, Token};
 
@@ -77,7 +77,13 @@ impl Parser {
                 // identifiers glued together with no backslash between them.
                 None => self.parse_qualified_name(),
             };
-            Ok(self.type_hint(TypeHintKind::Name(self.qualified_name(&name)), start))
+            // A bare keyword is the native type; anything else, `integer`
+            // and `\int` included, names a class.
+            let kind = match NativeType::from_name(&name) {
+                Some(keyword) => TypeHintKind::Keyword(keyword, name.as_str().into()),
+                None => TypeHintKind::Name(self.qualified_name(&name)),
+            };
+            Ok(self.type_hint(kind, start))
         })
     }
 

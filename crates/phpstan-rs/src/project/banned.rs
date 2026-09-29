@@ -316,6 +316,7 @@ impl<'a> Walker<'a> {
 /// without a leading backslash).
 fn hint_mentions(hint: &TypeHint, name: &str) -> bool {
     match &hint.kind {
+        TypeHintKind::Keyword(keyword, _) => keyword.as_str() == name,
         TypeHintKind::Name(written) => written.trim_start_matches('\\').eq_ignore_ascii_case(name),
         TypeHintKind::Nullable(inner) => hint_mentions(inner, name),
         TypeHintKind::Union(members) | TypeHintKind::Intersection(members) => {

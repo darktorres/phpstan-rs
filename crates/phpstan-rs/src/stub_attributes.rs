@@ -174,7 +174,7 @@ fn set_spans(hint: &mut TypeHint, at: Span) {
     syntax::stack::guard(|| {
         hint.span = at;
         match &mut hint.kind {
-            TypeHintKind::Name(_) => {}
+            TypeHintKind::Keyword(..) | TypeHintKind::Name(_) => {}
             TypeHintKind::Nullable(inner) => set_spans(inner, at),
             TypeHintKind::Union(members) | TypeHintKind::Intersection(members) => {
                 for m in members {

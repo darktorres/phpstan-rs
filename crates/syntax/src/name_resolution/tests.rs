@@ -79,7 +79,7 @@ fn names_resolve_through_the_namespace_and_imports() {
         use const Lib\LIMIT;
         #[Attr]
         class C extends Thing implements Alias {
-            public function m(\Absolute $a, Local $b, int $c, self $d): void {
+            public function m(\Absolute $a, Local $b, int $c, self $d, integer $e): void {
                 new Thing();
                 helper();
                 strlen('x');
@@ -99,8 +99,9 @@ fn names_resolve_through_the_namespace_and_imports() {
     assert_eq!(find(&all, "Alias"), &exact("Lib\\Other"));
     assert_eq!(find(&all, "\\Absolute"), &exact("Absolute"));
     assert_eq!(find(&all, "Local"), &exact("App\\Local"));
-    assert_eq!(find(&all, "int"), &ResolvedName::Unresolved);
-    assert_eq!(find(&all, "self"), &ResolvedName::Unresolved);
+    // A native keyword type isn't a name; `integer` is a class to PHP.
+    assert!(all.iter().all(|(w, _)| w != "int" && w != "self"));
+    assert_eq!(find(&all, "integer"), &exact("App\\integer"));
     assert_eq!(find(&all, "parent"), &ResolvedName::Unresolved);
     assert_eq!(find(&all, "helper"), &exact("Lib\\helper"));
     assert_eq!(

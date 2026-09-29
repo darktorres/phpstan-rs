@@ -475,11 +475,8 @@ impl VisitorMut for Resolver {
 
     fn visit_type_hint(&mut self, hint: &mut TypeHint) {
         crate::stack::guard(|| match &mut hint.kind {
-            TypeHintKind::Name(name) => {
-                if !is_primitive_type_name(name.trim_start_matches('\\')) {
-                    self.class(name);
-                }
-            }
+            TypeHintKind::Keyword(..) => {}
+            TypeHintKind::Name(name) => self.class(name),
             TypeHintKind::Nullable(inner) => self.visit_type_hint(inner),
             TypeHintKind::Union(members) | TypeHintKind::Intersection(members) => {
                 for member in members {

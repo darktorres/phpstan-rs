@@ -32,7 +32,10 @@ fn a_dnf_type_is_a_union_of_an_intersection() {
         panic!("expected a union, got {hint:?}");
     };
     assert!(matches!(&members[0].kind, TypeHintKind::Intersection(parts) if parts.len() == 2));
-    assert!(matches!(&members[1].kind, TypeHintKind::Name(n) if n == "null"));
+    assert!(matches!(
+        &members[1].kind,
+        TypeHintKind::Keyword(NativeType::Null, _)
+    ));
 }
 
 #[test]

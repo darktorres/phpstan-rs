@@ -68,7 +68,9 @@ pub trait Visitor<'ast> {
         walk_arg(self, arg);
     }
 
-    fn visit_type_hint(&mut self, _hint: &'ast TypeHint) {}
+    fn visit_type_hint(&mut self, hint: &'ast TypeHint) {
+        walk_type_hint(self, hint);
+    }
 
     /// A class, function or constant name as written, with its
     /// resolution.
@@ -483,6 +485,20 @@ pub fn walk_enum_case<'ast, V: Visitor<'ast> + ?Sized>(v: &mut V, c: &'ast EnumC
     if let Some(value) = &c.value {
         v.visit_expr(value);
     }
+}
+
+/// A type hint's class names, each through `visit_name`.
+pub fn walk_type_hint<'ast, V: Visitor<'ast> + ?Sized>(v: &mut V, hint: &'ast TypeHint) {
+    crate::stack::guard(|| match &hint.kind {
+        TypeHintKind::Keyword(..) => {}
+        TypeHintKind::Name(name) => v.visit_name(name),
+        TypeHintKind::Nullable(inner) => v.visit_type_hint(inner),
+        TypeHintKind::Union(members) | TypeHintKind::Intersection(members) => {
+            for member in members {
+                v.visit_type_hint(member);
+            }
+        }
+    })
 }
 
 pub fn walk_param<'ast, V: Visitor<'ast> + ?Sized>(v: &mut V, p: &'ast Param) {
