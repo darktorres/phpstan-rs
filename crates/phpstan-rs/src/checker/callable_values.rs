@@ -22,6 +22,13 @@ struct NamedCallable<'r> {
 }
 
 impl<'a> Checker<'a> {
+    /// The signature of the function or method a value of type `ty`
+    /// names: a function name, `'Class::method'`, an array callable, or
+    /// an object's `__invoke()`.
+    pub(crate) fn named_callable_signature(&self, ty: &Type) -> Option<&'a FunctionReflection> {
+        self.resolve_named_callable(ty).map(|named| named.sig)
+    }
+
     fn resolve_named_callable(&self, ty: &Type) -> Option<NamedCallable<'a>> {
         if let Some(s) = ty.string_literal_value() {
             let s = s.as_str()?;

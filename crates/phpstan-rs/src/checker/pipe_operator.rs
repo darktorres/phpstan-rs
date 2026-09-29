@@ -5,27 +5,11 @@
 //! pipe - a real, if narrow, correctness signal (not just style),
 //! independent of the piped value's own type.
 //!
-//! Real PHPStan resolves this against the right-hand side's own
-//! *type* (`Type::getCallableParametersAcceptors`), which only ever
-//! answers something concrete for a PHPDoc-shaped `callable(...)`/
-//! `Closure(...)` type. This project doesn't synthesize that shape for
-//! an ordinary closure/arrow-fn *literal* expression's own inferred type
-//! (a bare literal infers as the coarse `Closure`| -
-//! see `ExprKind::Closure`'s own `check_expr` arm) - resolving through
-//! the type system here would need building that machinery first, a
-//! large, disproportionate undertaking for this one narrow check.
-//! Instead, this resolves directly against the right-hand side's own
-//! *literal syntax* - the same "handle the shape that actually comes
-//! up" precedent `check_closure_literal_with_param_overrides` and
-//! `FirstClassCallable`'s own resolution already established - covering
-//! every real pipe-target idiom: a closure/arrow-fn literal, a
-//! first-class callable (`foo(...)`/`$obj->method(...)`/
-//! `Foo::method(...)`), a bare string function name, and a two-element
-//! `[$obj, 'method']`/`['Class', 'method']` array callable. Anything
-//! else (a plain variable holding an already-built `Closure`, for
-//! instance) can't be resolved this way and is silently skipped -
-//! matching real PHPStan's own silent skip whenever its type-level
-//! resolution can't produce a confident `isCallable()` type either.
+//! The right-hand side is resolved through its type: a closure's or a
+//! callable shape's signature, or the function or method a string, an
+//! array callable or an invokable object names. A first-class callable
+//! (`foo(...)`) is resolved from its syntax, its type not carrying the
+//! signature.
 
 use crate::checker::{Checker, Locals};
 use diagnostics::DiagnosticBuilder;
@@ -54,44 +38,15 @@ impl<'a> Checker<'a> {
     /// PHPStan's own `foreach` over zero parameters never entering its
     /// loop body at all.
     fn pipe_target_first_param_is_by_ref(&self, expr: &Expr, locals: &Locals) -> Option<bool> {
-        match &expr.peeled().kind {
-            ExprKind::Closure { params, .. } | ExprKind::ArrowFn { params, .. } => {
-                Some(params.first().is_some_and(|p| p.by_ref))
-            }
-            ExprKind::FirstClassCallable(inner) => {
-                self.first_class_callable_first_param_by_ref(&inner.peeled().kind, locals)
-            }
-            ExprKind::Literal(Literal::String(name)) => self
-                .registry
-                .lookup_function(&name.to_str_lossy())
-                .map(|sig| sig.params().first().is_some_and(|p| p.by_ref())),
-            // `[$obj, 'method']` / `['Class', 'method']` array callable -
-            // a plain two-element list, no string key on either item.
-            ExprKind::ArrayLiteral(items) => match items.as_slice() {
-                [recv_item, method_item]
-                    if recv_item.key.is_none() && method_item.key.is_none() =>
-                {
-                    let ExprKind::Literal(Literal::String(method)) =
-                        &method_item.value.peeled().kind
-                    else {
-                        return None;
-                    };
-                    let class = match &recv_item.value.peeled().kind {
-                        ExprKind::Literal(Literal::String(name)) => name.to_string(),
-                        _ => self
-                            .infer_expr(&recv_item.value, locals)
-                            .as_object()?
-                            .0
-                            .to_string(),
-                    };
-                    self.registry
-                        .lookup_method(&class, &method.to_str_lossy())
-                        .map(|sig| sig.params().first().is_some_and(|p| p.by_ref()))
-                }
-                _ => None,
-            },
-            _ => None,
+        if let ExprKind::FirstClassCallable(inner) = &expr.peeled().kind {
+            return self.first_class_callable_first_param_by_ref(&inner.peeled().kind, locals);
         }
+        let ty = self.infer_expr(expr, locals);
+        if let Some(sig) = ty.callable_sig() {
+            return Some(sig.params.first().is_some_and(|p| p.by_ref));
+        }
+        let sig = self.named_callable_signature(&ty)?;
+        Some(sig.params().first().is_some_and(|p| p.by_ref()))
     }
 
     /// The referenced function/method's own first-parameter-by-ref
