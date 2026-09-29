@@ -70,6 +70,7 @@ impl Registry {
     pub(crate) fn resolve_transitive_purity(&mut self, bodies: &dyn BodySource) {
         self.classify_purity(bodies);
         self.run_purity_fixed_point();
+        self.resolve_property_writes(bodies);
     }
 
     /// Populates `purity_dependencies` on every function/method this

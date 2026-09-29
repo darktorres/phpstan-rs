@@ -181,70 +181,114 @@ impl<'a> Checker<'a> {
         }
     }
 
-    /// After a call that may change an object's properties - one not
-    /// proven pure, wherever it can be overridden - what is known about the
-    /// properties of each object the call is given is stale: the receiver
-    /// of a method call, `$this` forwarded to a non-static method through
-    /// `self::`, `static::` or `parent::`, and every object argument. What
-    /// is known about each object itself stays. A builtin function
-    /// changes no argument's properties but through a by-ref parameter,
-    /// which its call handles.
+    /// After a call that may write an object's properties, what is known
+    /// about them is stale (`registry::property_writes`): the receiver's,
+    /// or `$this`'s when a `self::`, `static::` or `parent::` call forwards
+    /// it to a non-static method, unless the call writes no object's
+    /// properties; an object argument's, unless it writes at most its own
+    /// object's. What is known about each object itself stays.
     fn forget_members_a_call_may_change(&self, e: &Expr, locals: &mut Locals) {
-        let (receiver, args, pure) = match &e.kind {
+        use crate::registry::PropertyWrites;
+        let (receiver, args, writes) = match &e.kind {
             ExprKind::MethodCall(recv, method, args, _) => {
                 let recv_ty = self.infer_expr(recv, locals);
-                let pure = recv_ty
+                let writes = recv_ty
                     .as_object()
-                    .is_some_and(|(class, _)| self.method_is_surely_pure(class, method));
-                (narrowing_key(recv), args, pure)
+                    .and_then(|(class, _)| {
+                        let (owner, sig) = self.registry.lookup_method_with_owner(class, method)?;
+                        crate::registry::is_non_overridable(
+                            self.registry,
+                            class,
+                            &owner,
+                            method,
+                            sig,
+                        )
+                        .then(|| self.registry.method_property_writes(&owner, method))
+                    })
+                    .unwrap_or(PropertyWrites::Anything);
+                (narrowing_key(recv), args, writes)
             }
             ExprKind::StaticCall(target, method, args) => {
                 let class = self.infer_static_target_class(target, locals);
-                let forwards_this = matches!(target, StaticTarget::Name(name)
-                    if ["self", "static", "parent"]
-                        .iter()
-                        .any(|word| name.written.eq_ignore_ascii_case(word)))
-                    && !class.as_deref().is_some_and(|class| self.method_is_static(class, method));
-                let pure = class
-                    .as_deref()
-                    .is_some_and(|class| self.method_is_surely_pure(class, method));
-                (forwards_this.then(|| "this".to_string()), args, pure)
+                let keyword = |word: &str| matches!(target, StaticTarget::Name(name) if name.is_keyword(word));
+                let resolved = class.as_deref().and_then(|class| {
+                    let (owner, sig) = if keyword("parent") {
+                        self.registry
+                            .lookup_ancestor_method_with_owner(class, method)?
+                    } else {
+                        self.registry.lookup_method_with_owner(class, method)?
+                    };
+                    let exact = !keyword("static")
+                        || crate::registry::is_non_overridable(
+                            self.registry,
+                            class,
+                            &owner,
+                            method,
+                            sig,
+                        );
+                    Some((owner, exact))
+                });
+                let forwards_this = (keyword("self") || keyword("static") || keyword("parent"))
+                    && !resolved
+                        .as_ref()
+                        .is_some_and(|(owner, _)| self.method_is_static(owner, method));
+                let writes = match resolved {
+                    Some((owner, true)) => self.registry.method_property_writes(&owner, method),
+                    _ => PropertyWrites::Anything,
+                };
+                (forwards_this.then(|| "this".to_string()), args, writes)
             }
             ExprKind::Call(callee, args) => {
-                let pure = match &callee.kind {
+                let writes = match &callee.kind {
                     ExprKind::Name(name) => self
                         .registry
                         .resolve_function(name)
-                        .is_some_and(|(_, sig)| sig.is_stub() || sig.is_transitively_pure()),
-                    _ => false,
+                        .map_or(PropertyWrites::Anything, |(resolved, _)| {
+                            self.registry.function_property_writes(resolved)
+                        }),
+                    _ => PropertyWrites::Anything,
                 };
-                (None, args, pure)
+                (None, args, writes)
             }
             ExprKind::New(class, args) => {
-                let pure = match &class.kind {
-                    ExprKind::Name(name) => self
-                        .registry
-                        .lookup_method(name.resolved_class().unwrap_or(&name.written), "__construct")
-                        .is_none_or(|sig| sig.is_stub() || sig.is_transitively_pure()),
-                    _ => false,
+                let writes = match &class.kind {
+                    ExprKind::Name(name) => {
+                        let target = if name.is_keyword("self") || name.is_keyword("static") {
+                            self.current_class.clone()
+                        } else {
+                            name.resolved_class().map(str::to_string)
+                        };
+                        match target
+                            .as_deref()
+                            .and_then(|t| self.registry.lookup_method_with_owner(t, "__construct"))
+                        {
+                            Some((owner, _)) => {
+                                self.registry.method_property_writes(&owner, "__construct")
+                            }
+                            None => PropertyWrites::Nothing,
+                        }
+                    }
+                    _ => PropertyWrites::Anything,
                 };
-                (None, args, pure)
+                (None, args, writes)
             }
             _ => return,
         };
-        if pure {
-            return;
+        let mut stale: Vec<String> = Vec::new();
+        if writes > PropertyWrites::Nothing {
+            stale.extend(receiver);
         }
-        let objects = receiver.into_iter().chain(args.iter().filter_map(|arg| {
-            let key = narrowing_key(&arg.value)?;
-            self.infer_expr(&arg.value, locals)
-                .union_members()
-                .iter()
-                .any(|member| member.as_object().is_some())
-                .then_some(key)
-        }));
-        let objects: Vec<String> = objects.collect();
-        for key in objects {
+        if writes == PropertyWrites::Anything {
+            stale.extend(args.iter().filter_map(|arg| {
+                let key = narrowing_key(&arg.value)?;
+                self.infer_expr(&arg.value, locals)
+                    .union_members()
+                    .iter()
+                    .any(|member| !member.is_object().no())
+                    .then_some(key)
+            }));
+        }
+        for key in stale {
             if locals
                 .iter()
                 .any(|(k, _)| crate::checker::narrowing::key_depends_on(k, &key))
@@ -252,17 +296,6 @@ impl<'a> Checker<'a> {
                 purge_stale_narrowing_for(locals, &key);
             }
         }
-    }
-
-    /// Whether every implementation a call to `class`'s `method` can reach
-    /// is proven pure.
-    fn method_is_surely_pure(&self, class: &str, method: &str) -> bool {
-        self.registry
-            .lookup_method_with_owner(class, method)
-            .is_some_and(|(owner, sig)| {
-                sig.is_transitively_pure()
-                    && crate::registry::is_non_overridable(self.registry, class, &owner, method, sig)
-            })
     }
 
     /// Whether `class`'s `method` is declared static.

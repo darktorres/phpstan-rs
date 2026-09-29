@@ -1,1 +1,3 @@
 41:9-41:22 method.resultUnused L4 | Call to method Anomalies::name() on a separate line has no effect.
+67:33-67:51 property.onlyWritten L4 | private property Envelope::$mail is never read, only written
+97:5-97:24 new.resultUnused L4 | Call to new Envelope() on a separate line has no effect.

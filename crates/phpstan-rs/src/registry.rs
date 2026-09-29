@@ -16,6 +16,7 @@ mod hierarchy;
 mod index;
 mod name_context;
 mod name_table;
+mod property_writes;
 pub mod provenance;
 mod purity;
 pub mod reflection_attribute;
@@ -46,6 +47,7 @@ pub type FunctionTable = NameTable<FunctionReflection>;
 pub(crate) use index::{BuiltDecl, build_declarations, register_global_constant};
 pub(crate) use name_context::{collect_class_name_case_refs, resolve_names_in_type};
 pub(crate) use name_table::{folded_key, function_key};
+pub(crate) use property_writes::PropertyWrites;
 pub use provenance::{Origin, Provenance};
 pub use purity::PurityDependency;
 pub(crate) use purity::{collect_impure_points, is_non_overridable};
@@ -201,6 +203,9 @@ pub struct Registry {
     pub(crate) property_owner_by_class: NameTable<FxHashMap<Name, Name>>,
     pub(crate) ancestor_property_owner_by_class: NameTable<FxHashMap<Name, Name>>,
     pub(crate) const_owner_by_class: NameTable<FxHashMap<Name, Name>>,
+    // Whose properties each function and method with a body may write
+    // (`registry::property_writes`), keyed by lowercased (class, name).
+    pub(crate) property_writes: FxHashMap<(Option<String>, String), PropertyWrites>,
 }
 
 impl Registry {
