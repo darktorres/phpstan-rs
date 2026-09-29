@@ -915,8 +915,9 @@ through `check-project`.
     - The printer writes floats past 1e15 in Rust's form and control bytes
       other than `\n\t\r` raw.
 
-- [ ] **F36. Structural leftovers from the "Type behaviour lives on the
-  type" series.**
+- [x] **F36. Structural leftovers from the "Type behaviour lives on the
+  type" series.** Done in `f50e2bd0`, `9b331b26`, `321d388c`, `f81c5e70`,
+  `bc7bd7c1` and `4499b58d`.
   - `Type::is_within` is public and general but uses
     `Relation::structural()` (blind to the class hierarchy), and answers
     `never ⊆ X` as No where the relation says Yes. Every caller passes a
