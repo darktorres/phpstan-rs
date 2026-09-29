@@ -558,15 +558,6 @@ impl<'a> Lexer<'a> {
         }
     }
 
-    /// A numeric literal's own digit-run, with PHP's `_` digit separator
-    /// (`1_000_000`) stripped - `raw` is always plain ASCII (digits/hex-
-    /// digits/`e`/`E`/`+`/`-`/`.`, the only bytes `lex_number`'s own scan
-    /// loops ever advance `self.pos` over), so a direct `str::from_utf8`
-    /// borrow (no allocation at all) is sound whenever there's nothing to
-    /// strip - the overwhelmingly common case, real digit separators being
-    /// rare in most real-world source. Only allocates (via `.replace`) for
-    /// the literals that actually use one. Found and fixed via a perf-
-    /// optimization investigation workflow.
     /// Reports the number just lexed from `start` when PHP wouldn't read
     /// all of it as one (`1e`, `0x`, `1__0`, `1_`): the rest is an
     /// unexpected identifier to PHP.
@@ -585,6 +576,9 @@ impl<'a> Lexer<'a> {
         });
     }
 
+    /// A numeric literal's digit run with PHP's `_` digit separators
+    /// (`1_000_000`) stripped, borrowed when it has none. `raw` is ASCII,
+    /// the only bytes `lex_number`'s scan advances over.
     fn strip_digit_separators(raw: &[u8]) -> Cow<'_, str> {
         let s = std::str::from_utf8(raw).unwrap_or_default();
         if raw.contains(&b'_') {

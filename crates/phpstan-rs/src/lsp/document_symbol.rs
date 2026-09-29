@@ -1,8 +1,7 @@
 //! `textDocument/documentSymbol` - a per-file hierarchical outline, built
 //! straight from `Project::ast`'s own top-level declarations (their
 //! `name_span`/whole-declaration `span` fields already carry everything
-//! needed) rather than `DeclLocations`, which is flattened project-wide
-//! by FQN and would lose the per-file nesting a document outline needs.
+//! needed), keeping the per-file nesting a document outline needs.
 
 use crate::registry::class_decl_name;
 use lsp_types::{DocumentSymbol, SymbolKind};

@@ -101,27 +101,18 @@ impl Parser {
         matches!(self.peek(), Token::Eof)
     }
 
-    /// Advances past the current token without materializing it - the
-    /// large majority (126 of 128) of real call sites across the parser
-    /// discard `advance()`'s own return value entirely, paying a wasted
-    /// `Token::clone()` (a real heap allocation for 7 of `Token`'s
-    /// variants: `Identifier`/`Variable`/`StringLit`/`InterpString`/
-    /// `ShellExec`/`DocComment`/`InlineHtml`) for nothing. Found and
-    /// fixed via a perf-optimization investigation workflow; the 2 real
-    /// consumers (`expect_variable` just below, `classes.rs`'s own
-    /// `parse_class_like_decl`) use `take_token()` instead.
+    /// Advances past the current token without materializing it; a
+    /// caller that needs the token moves it out with `take_token()`.
     pub(crate) fn skip(&mut self) {
         if self.pos < self.tokens.len() {
             self.pos += 1;
         }
     }
 
-    /// `advance()`'s own real-consumer counterpart - moves the current
-    /// token out via `mem::replace` (leaving an inert `Token::Eof`
-    /// placeholder behind) instead of cloning it. Bounds-guarded the same
-    /// way `advance()`/`skip()` always were, to preserve the identical
-    /// graceful-EOF fallback rather than panicking on an out-of-range
-    /// index. Sound to leave a placeholder behind: the only place
+    /// Moves the current token out via `mem::replace` (leaving an inert
+    /// `Token::Eof` placeholder behind) instead of cloning it.
+    /// Bounds-guarded like `skip()`, falling back to EOF rather than
+    /// panicking on an out-of-range index. Sound to leave a placeholder behind: the only place
     /// `self.tokens` is ever indexed by something other than `self.pos`
     /// (`control_flow.rs`'s `elseif`-rewrite backtrack) unconditionally
     /// overwrites that slot before it's ever read again.

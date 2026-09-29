@@ -1429,8 +1429,7 @@ pub enum ExprKind {
     // methods are still type-checked (see checker::check_expr).
     NewAnonymousClass(Box<ClassDecl>, Vec<Arg>),
     // `yield;` / `yield $v;` / `yield $k => $v;` - (key, value). Makes the
-    // enclosing function a generator; that broader semantic isn't modeled,
-    // only enough structure to parse and check the yielded expression(s).
+    // enclosing function a generator.
     Yield(Option<Box<Expr>>, Option<Box<Expr>>),
     // `yield from $generator;`
     YieldFrom(Box<Expr>),

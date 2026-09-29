@@ -8,7 +8,7 @@
 //! proven traversal shape, reused for "record every match", never "find
 //! the one match at a cursor". Real caret-precision spans need the
 //! file's retained source text (`index_class_fn_refs`, LSP-only, gated
-//! behind `retain_source` exactly like `DeclLocations` used to be); a
+//! behind `retain_source`); a
 //! batch `check-project` run has no retained source but, when `project::
 //! whole_program::dead_code` is enabled, still needs to know *whether* a
 //! class/function is referenced at all -
@@ -16,8 +16,8 @@
 //! precise sub-spans (needs real source text to carve out of a combined
 //! multi-identifier span) for real, already-on-hand AST-node spans that
 //! are merely less narrowly scoped - see that function's own doc
-//! comment. NOT run unconditionally the way `DeclLocations` now is,
-//! though: measured on a real corpus, this walk is too expensive to pay
+//! comment. Not run unconditionally, though: this walk is too
+//! expensive to pay
 //! for every loaded file (including every vendor/context one) when
 //! nothing consumes it - `Project::insert_parsed_file` gates it on
 //! `check_dead_code` specifically, its only batch-mode consumer.
@@ -53,8 +53,7 @@ pub(crate) enum RefTarget {
 /// Every reference site this project has ever indexed, in both
 /// directions: `by_target` answers "where is X used" (`references`'s own
 /// query shape); `by_file` answers "what did this file contribute"
-/// (`remove_file`'s own undo shape, mirroring `DeclLocations`'s identical
-/// two-directions-for-two-operations split).
+/// (`remove_file`'s own undo shape).
 #[derive(Default)]
 pub(crate) struct UseSiteIndex {
     by_target: FxHashMap<RefTarget, Vec<(PathBuf, Span)>>,

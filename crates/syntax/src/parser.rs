@@ -144,12 +144,6 @@ impl Parser {
         }
     }
 
-    /// The position a `Stmt`/`Expr` about to be parsed starts at - call
-    /// before consuming its first token. Falls back to the last known
-    /// span rather than indexing directly: `self.pos` can run one past
-    /// the last real token (e.g. `__halt_compiler()`'s handling
-    /// deliberately jumps there), the same real edge case `peek()`/
-    /// `advance()` already guard against.
     /// The span of the token about to be read.
     pub(crate) fn current_span(&self) -> Span {
         self.spans
@@ -159,6 +153,11 @@ impl Parser {
             .unwrap_or_default()
     }
 
+    /// The position a `Stmt`/`Expr` about to be parsed starts at - call
+    /// before consuming its first token. Falls back to the last known
+    /// span: `self.pos` can run one past the last real token
+    /// (`__halt_compiler()` jumps there), as `peek()` and `skip()` also
+    /// allow.
     pub(crate) fn current_pos(&self) -> Position {
         self.spans
             .get(self.pos)
@@ -313,10 +312,9 @@ impl Parser {
     /// generically in parse_statement). Only legal at the top level of a
     /// file, so this is special-cased in parse_program rather than making
     /// every parse_statement caller handle getting more than one Stmt
-    /// back. Namespaces aren't modeled beyond the Stmt::Namespace marker,
-    /// so the block's body is spliced into the surrounding statement list
-    /// instead of nested - that's also what keeps its declarations visible
-    /// to Registry::index, which only scans the top-level Vec<Stmt>.
+    /// back. The block's body is spliced into the surrounding statement
+    /// list after a `Stmt::Namespace` marker, the same shape the statement
+    /// form gives.
     pub(crate) fn parse_namespace_stmt(&mut self) -> Result<Vec<Stmt>, ParseError> {
         let start = self.current_pos();
         self.skip(); // `namespace`

@@ -750,8 +750,6 @@ impl<'a> Lexer<'a> {
             // source can contain non-UTF-8 bytes, matching every other
             // byte-range conversion already in this function (`inner`/
             // `name`/`prop`/`key` above, `label` in `lex_heredoc`).
-            // Found and fixed via a perf-optimization investigation
-            // workflow.
             let run_start = i;
             while i < bytes.len()
                 && !(bytes[i] == b'\\' && i + 1 < bytes.len())

@@ -325,14 +325,9 @@ fn split_top_level(s: &str, sep: char) -> Vec<&str> {
     parts
 }
 
-/// PHPStan's own conditional return type syntax: `($param is SomeType ?
-/// TrueType : FalseType)` - real PHPStan evaluates this per call site,
-/// binding `$param`'s actual argument; this project has no per-call-site
-/// type-expression evaluation, so it must not let the DNF-group unwrap
-/// above this function's caller mis-parse the whole expression as an
-/// ordinary intersection group (mangling `$param`/`is`/etc. into
-/// namespace-qualified garbage). Takes the safe answer instead: the
-/// union of both branches. Requires the literal `is`/`?`/`:` tokens at
+/// PHPStan's conditional return type syntax, `($param is SomeType ?
+/// TrueType : FalseType)` or `(T is ...)`, as a `Repr::Conditional`
+/// resolved per call site. Requires the literal `is`/`?`/`:` tokens at
 /// the top level (`split_top_level`'s bracket-depth tracking) so this
 /// never misfires on an ordinary DNF group, which has no ternary syntax.
 fn try_parse_conditional_type(s: &str) -> Option<Type> {
@@ -1225,7 +1220,7 @@ fn parse_type_keyword_or_class(bare: &str, original: &str, generic_args: &[&str]
 /// Foo>`, or `Collection<*>` ("don't check this argument at all"),
 /// parsed on every generic type position (`@param`/`@return`/`@var`/
 /// `@extends`/`@implements` alike). Consulted by
-/// `Registry::effective_slot_variance`, which lets a marker here
+/// `effective_slot_variance` (`hierarchy.rs`), which lets a marker here
 /// override a class's declared slot variance for one comparison,
 /// matching `GenericObjectType::isSuperTypeOf`'s "call-site variance
 /// wins when present" rule.

@@ -181,8 +181,7 @@ impl Parser {
         // or just checking which variant), and the few that do
         // (`StringLit`/`Variable`/`InterpString`/`ShellExec`, all
         // heap-owning) use `take_token()` (a move) inside their own arm
-        // instead of a whole-`Token` clone up front. Found and fixed via
-        // a perf-optimization investigation workflow.
+        // instead of a whole-`Token` clone up front.
         Ok(match self.peek() {
             Token::Integer(n) => {
                 let n = *n;
@@ -373,8 +372,7 @@ impl Parser {
                 self.expr(ExprKind::Throw(Box::new(inner)), start)
             }
             // `yield`/`yield from` - makes the enclosing function a
-            // generator, which isn't modeled, but the yielded key/value
-            // expression(s) are still worth parsing and checking.
+            // generator.
             Token::Keyword(Keyword::Yield) => {
                 self.skip();
                 if matches!(self.peek(), Token::Identifier(name) if name.eq_ignore_ascii_case("from"))

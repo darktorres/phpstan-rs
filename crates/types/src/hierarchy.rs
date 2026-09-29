@@ -1,5 +1,5 @@
-//! What a type relation needs to know about classes. Reflection
-//! implements it (C8); until then `Registry` does.
+//! What a type relation needs to know about classes; `Registry`
+//! implements it.
 
 use rustc_hash::FxHashMap;
 use syntax::ast::ClassKind;

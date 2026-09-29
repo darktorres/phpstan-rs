@@ -101,9 +101,8 @@ impl Keyword {
     /// identifier longer than this bound can never match, so `try_from_
     /// bytes` bails out before ever touching it, and every identifier
     /// short enough to possibly match gets lowercased into a stack
-    /// buffer instead of a heap allocation - found and fixed via a
-    /// perf-optimization investigation workflow, since this runs on
-    /// every identifier-shaped token the lexer produces, keyword or not.
+    /// buffer instead of a heap allocation, since this runs on every
+    /// identifier-shaped token the lexer produces, keyword or not.
     /// Operates on raw bytes (not `&str`) specifically so `Lexer::
     /// next_token`'s identifier branch can check "is this a keyword"
     /// *before* ever allocating the owned `String` an ordinary
