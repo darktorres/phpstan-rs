@@ -178,7 +178,10 @@ fn signature_help_for_an_anonymous_class_resolves_its_own_constructor() {
     let labels = labels(&result);
     assert_eq!(labels.len(), 1, "{labels:?}");
     assert!(labels[0].starts_with("class@anonymous/"), "{labels:?}");
-    assert!(labels[0].ends_with(":2::__construct(int $id): mixed"), "{labels:?}");
+    assert!(
+        labels[0].ends_with(":2::__construct(int $id): mixed"),
+        "{labels:?}"
+    );
 }
 
 #[test]

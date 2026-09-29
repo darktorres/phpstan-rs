@@ -38,7 +38,8 @@ use crate::registry::Registry;
 use syntax::ast::{Arg, ClassDecl, Expr, ExprKind, FunctionDecl, MethodDecl, Stmt};
 use syntax::token::{Position, Span};
 use syntax::visit::{
-    Visitor, walk_args, walk_class_decl, walk_expr, walk_function_decl, walk_method_decl, walk_stmts,
+    Visitor, walk_args, walk_class_decl, walk_expr, walk_function_decl, walk_method_decl,
+    walk_stmts,
 };
 
 use super::navigation::{ProbeScope, contains, resolve_class_ref};
