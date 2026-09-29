@@ -309,6 +309,91 @@ through `check-project`.
   the conditional's branches are split past the callable return and `::`
   (and a nullable branch); fixtures for each.
 
+- [ ] **F44. `rand()` with its bounds reversed is `never`** (`dedc1ad8`).
+  `Type::int_range` now gives `never` when the bounds cross, and the
+  `rand`/`mt_rand`/`random_int` arm (`builtin_calls.rs`) builds its range
+  from the first argument's minimum and the second's maximum. PHP's
+  `rand()` accepts `rand(10, 1)` and returns a value in `[1, 10]`, so
+  `$r = rand(10, 1);` is `never` and the next statement reports
+  `deadCode.unreachable`; the pre-window binary gave `int<10, 1>` and no
+  report. `rand($a, $b)` with `$a` in `int<5, 10>` and `$b` in
+  `int<0, 3>` is `never` the same way. (`mt_rand` and `random_int` throw
+  on crossed bounds, so `never` is right for them.) Done: `rand`'s range
+  spans both arguments' bounds in either order, with a fixture.
+- [ ] **F45. A write through a reference doesn't reach the variable it
+  aliases** (also before the window). After `$t = &$s; $t = null;`, `$s`
+  keeps its old type (`'x'`), so `$s === null` reports
+  `identical.alwaysFalse`; after `$r = &$x; $r++;`, `$x === 1` reports
+  `identical.alwaysTrue`. A fact the branch-implied-facts mechanism
+  recorded for `$s` is replayed across such a write too. Done: an
+  assignment by reference records the alias, and a write to either name
+  updates (or at least forgets the narrowing of) the other, with
+  fixtures for both shapes.
+- [ ] **F46. A flag set to `false` in an `if` replays the condition as
+  true** (`record_if_body_flag_alias`, `checker/narrowing.rs`; also before
+  the window). The alias is recorded whatever literal the body assigns,
+  and testing the flag replays the condition at the flag's own polarity.
+  `$ok = true; if ($x === null) { $ok = false; } if ($ok) { strlen($x);
+  }` narrows `$x` to `null` inside `if ($ok)` and reports "Parameter #1
+  $string of function strlen expects string, null given" - `$x` is a
+  `string` there. Done: the alias is recorded only when the assigned
+  literal is truthy and the prior value falsy (or the replay is negated
+  to match), with a fixture for the `true`-then-`false` shape.
+- [ ] **F47. A loop that can't exit on its own isn't seen as
+  terminating** (`always_terminates`, `checker/control_flow.rs`; also
+  before the window). Both report `return.missing` at level 0:
+  - `do { if (...) { return 1; } } while (true);` - there is no
+    `DoWhile` arm.
+  - `while (true) { foreach (...) { break; } if (...) { return 1; } }` -
+    `stmt_contains_break` counts a `break` that only leaves the nested
+    loop. Its doc says the over-count "only ever causes a missed
+    simplification, never a wrong termination conclusion", which is not
+    so for `return.missing`.
+
+  Done: a `do`-`while` with a truthy literal condition is handled like
+  `while`, and only a `break` that targets the loop itself counts, with
+  fixtures.
+- [ ] **F48. A write through a key that is one of several literals
+  overwrites every one of them** (`bind_assignment_target`,
+  `checker/assignment.rs`; also before the window).
+  `purge_aliased_index_entries` drops the container's per-key entries
+  first, then each literal the key may be gets the written type outright;
+  the union with the prior value the code intends never happens. With
+  `$key` `'id'|'name'`, `$row[$key] = null;` makes `$row['id']` and
+  `$row['name']` both `null`, so `$row['id'] === null` reports
+  `identical.alwaysTrue`. Done: when the key may be more than one
+  literal, each entry becomes the union of its prior value and the
+  written one, with a fixture.
+- [ ] **F49. Builtin return types that claim more than the function
+  gives** (`checker/expr/builtin_calls.rs`, read whole; all but the
+  report noted were already there before the window):
+  - `array_combine` returns the values array's type without its
+    accessories, keeping the values' keys:
+    `array_combine(['a', 'b'], [1, 2])` is `array{0: 1, 1: 2}`, and
+    `$c['a']` reports `offsetAccess.notFound`.
+  - `array_change_key_case` returns its input unchanged, though the keys
+    are re-cased: `array_change_key_case(['Content-Type' => 'x'])['content-type']`
+    reports `offsetAccess.notFound`.
+  - `array_fill_keys` keys the result by the keys array's value type
+    without converting it to an array key: `array_fill_keys(['1', '2'],
+    0)` is `array<'1'|'2', 0>`, and `$k[1]` reports
+    `offsetAccess.notFound`.
+  - `get_parent_class($o)` answers from `$o`'s declared class, so for a
+    non-final `Foo` with no parent it is `false` and `=== false` reports
+    `identical.alwaysTrue`; a `Bar extends Foo` instance gives `'Foo'`.
+  - `array_slice` keeps the input's non-emptiness, and `explode` is
+    `non-empty-list<string>` even with a negative limit
+    (`explode(',', 'a', -1)` is `[]`). Since the window, comparing either
+    with `[]` reports `identical.alwaysFalse`.
+  - `parse_sscanf_format` doesn't count `%X` or `%n`, so
+    `sscanf($s, "%d %X", $a, $b)` reports `argument.sscanf` ("contains 1
+    placeholder(s), 2 value(s) given") at level 0.
+
+  Done: each gives what PHP returns (keys from the keys array, re-cased
+  shape keys, array-key conversion, the declared parent only for a final
+  class, non-emptiness only when it survives, every scanf conversion
+  counted), with a fixture for each.
+
 ### Wrong types and missed reports (probed)
 
 - [ ] **F13. An array literal's positional key after an unknown key**
@@ -466,6 +551,20 @@ through `check-project`.
 
   Done: each gives the type or message it names, with a fixture.
 
+- [ ] **F50. Calls that narrow are matched by the name's case** (also
+  before the window). PHP function and method names ignore case, but:
+  - `names_with_assert_tags` (`apply_bare_statement_assert_narrowing`)
+    holds names as declared, so `A::ISSTR($a)`, `$o->ISINT($b)` and
+    `ISFL($c)` narrow nothing where the declared spelling does.
+  - `bare_assert_condition` compares with `"assert"`, and the narrowing
+    arms for `count`, `in_array`, `array_key_exists`, `str_contains`,
+    `str_starts_with`, `str_ends_with` and `is_a` compare the name as
+    written, where the single-argument predicates go through
+    `called_function_name`.
+
+  Done: the tagged-name set and every name comparison fold case (and
+  resolve the function the way `called_function_name` does).
+
 ### Design
 
 - [ ] **F20. Nothing enforces the stack guard** (`041fcc46`). It is a
@@ -616,6 +715,37 @@ through `check-project`.
     the `Array` path does (F42).
 
   Done: each says what the code does.
+
+- [ ] **F51. Comments in the checker modules read whole:**
+  - `control_flow.rs`: `merge_scopes`'s doc ("Joins two branch-local
+    scopes...") and its `#[hotpath::measure]` sit above
+    `add_implied_fact`, which was inserted between them, so the profile
+    measures `add_implied_fact` under that doc and `merge_scopes` has
+    neither.
+  - `stmt.rs`: `statement_defined_variable_names`'s doc ("Every
+    bare-variable name ... Deliberately doesn't cover `foreach`") is
+    fused above `bare_assert_condition`'s. That paragraph and the
+    post-dispatch comment in `check_stmt_impl` ("Deliberately does NOT
+    extend this to a tag sitting directly on a `foreach` header") are
+    stale: `check_foreach` takes the statement's inline `@var`s, and
+    `statement_defined_variable_names` has a `Foreach` arm.
+  - `member_resolution.rs`: `method_call_return_type`'s doc
+    ("`infer_expr`'s own `ExprKind::MethodCall` return-type
+    resolution...") is fused above `class_argument_return`'s;
+    `object_method_call_return_type` cites "the same
+    synthesized-generic-slot convention 168e already established", a
+    task reference.
+  - `builtin_calls.rs`: the comment above the `range` arm says
+    `array_pop`/`array_shift` are "deliberately NOT special-cased", and
+    an `array_pop | array_shift` arm follows; `get_defined_vars`'s
+    comment sits above the `mysqli_query` arm; `array_merge`'s comments
+    name `checker::assignment::write_literal_key_aware` (now in
+    `types::offsets`) and narrate ("closing the gap this arm used to
+    leave", "Loosened from an exact `string` match");
+    `sscanf_result_fields` says its fields are keyed by strings
+    (`"0"`, `"1"`), and it builds `ShapeKey::Int`.
+
+  Done: each doc sits on its item and says what the code does.
 
 ## The Stage B review's done items
 
@@ -936,8 +1066,9 @@ all of its diffs above, but not again whole.
   coercion, display, intersection}`, read at `3cea2a20`: F39, F40, F41,
   F42, F43. `subtype`, `queries`, `coercion` and `intersection` only
   carry what is listed elsewhere.
-- [ ] Not re-read whole: the checker's
-  `expr`, `function_decl`, `assignment`, `stmt`, `control_flow`,
-  `narrowing`, `member_resolution` and `builtin_calls`, the registry's
+- [x] The checker's `function_decl`, `assignment`, `stmt`,
+  `control_flow`, `narrowing`, `member_resolution` and `builtin_calls`,
+  read at `3cea2a20`: F44 to F51. `function_decl` carries none.
+- [ ] Not re-read whole: the checker's `expr`, the registry's
   `class_info` and `purity`, `project`, `lsp::navigation`, and
   `syntax::{ast, visit, parser}`.
