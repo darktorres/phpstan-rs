@@ -47,13 +47,13 @@ impl<'a> Checker<'a> {
                 }
             }
             // `static` names the current class or any subclass of it.
-            InstanceofTarget::Name(name, _) if name.eq_ignore_ascii_case("static") => {
+            InstanceofTarget::Name(name) if name.eq_ignore_ascii_case("static") => {
                 let Some(class) = self.current_class.clone() else {
                     return;
                 };
                 (class, true)
             }
-            InstanceofTarget::Name(name, _) => {
+            InstanceofTarget::Name(name) => {
                 let resolved = self.resolve_name_expr(name);
                 let Some((class, _)) = resolved.as_object() else {
                     return;

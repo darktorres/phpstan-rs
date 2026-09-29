@@ -217,7 +217,7 @@ impl<'a> Checker<'a> {
                 }
                 ExprKind::StaticCall(target, method, _) => {
                     let class = match target {
-                        StaticTarget::Name(name, _) => self.resolve_static_class_name(name),
+                        StaticTarget::Name(name) => self.resolve_static_class_name(name),
                         StaticTarget::Expr(receiver) => self
                             .native_expr_type(receiver, locals)
                             .as_object()

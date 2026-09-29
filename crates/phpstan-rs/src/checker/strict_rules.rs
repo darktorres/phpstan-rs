@@ -737,7 +737,7 @@ impl<'a> Checker<'a> {
         let Some(method) = self.current_method.as_deref() else {
             return false;
         };
-        let StaticTarget::Name(name, _) = target else {
+        let StaticTarget::Name(name) = target else {
             return false;
         };
         if let Some(trait_name) = self.current_trait.as_deref() {

@@ -441,7 +441,7 @@ fn infer_const_type_with(
             // widen every array literal/argument this const then feeds
             // into.
             ExprKind::Binary(syntax::ast::BinOp::Concat, ..) => Type::string(),
-            ExprKind::ClassConstFetch(StaticTarget::Name(class, _), name) => {
+            ExprKind::ClassConstFetch(StaticTarget::Name(class), name) => {
                 class_const_ref(class, name).unwrap_or(Type::mixed())
             }
             // A constant array literal is a real, exact array shape in

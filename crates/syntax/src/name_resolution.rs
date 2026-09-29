@@ -366,7 +366,7 @@ impl Resolver {
             ExprKind::Instanceof(inner, target) => {
                 self.visit_expr(inner);
                 match target {
-                    InstanceofTarget::Name(name, _) => self.class(name),
+                    InstanceofTarget::Name(name) => self.class(name),
                     InstanceofTarget::Expr(e) => self.visit_expr(e),
                 }
             }
@@ -376,7 +376,7 @@ impl Resolver {
 
     fn static_target(&mut self, target: &mut StaticTarget) {
         match target {
-            StaticTarget::Name(name, _) => self.class(name),
+            StaticTarget::Name(name) => self.class(name),
             StaticTarget::Expr(e) => self.visit_expr(e),
         }
     }

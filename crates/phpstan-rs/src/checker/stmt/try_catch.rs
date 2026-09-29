@@ -152,7 +152,7 @@ impl<'a> Checker<'a> {
             // below does with them - a real, unconditional PHP fatal
             // error at declaration time otherwise ("Cannot catch X
             // because it does not implement Throwable").
-            for (i, t) in c.types.iter().enumerate() {
+            for t in &c.types {
                 let resolved = self.resolve_name_expr(t);
                 if let Some((class, _)) = resolved.as_object() {
                     // `CaughtExceptionExistenceRule`'s own existence
@@ -168,7 +168,7 @@ impl<'a> Checker<'a> {
                     if !self.class_name_exists(class) {
                         self.report(
                             format!("caught class {class} not found"),
-                            c.span,
+                            t.span,
                             0,
                             // Real PHPStan's own
                             // `CaughtExceptionExistenceRule` reuses
@@ -182,22 +182,17 @@ impl<'a> Checker<'a> {
                         if !self.registry.is_subclass_of(class, "Throwable") {
                             self.report(
                                 format!("cannot catch {class}: it does not implement Throwable"),
-                                c.span,
+                                t.span,
                                 0,
                                 "catch.notThrowable",
                             );
                         }
-                        // `class.nameCase` - `t` is the raw, as-written
-                        // text; `types_spans` carries one span per
-                        // `types` entry, same index (`FunctionDecl::
-                        // return_type_span`'s own precedent).
-                        let span = c.types_spans.get(i).copied().unwrap_or(c.span);
-                        self.check_class_name_case(t, span);
-                        self.check_internal_catch(class, c.span);
+                        self.check_class_name_case(t);
+                        self.check_internal_catch(class, t.span);
                         self.check_restricted_class_name_usage(
                             class,
                             "Catching",
-                            c.span,
+                            t.span,
                             crate::checker::restricted_symbol_usage::ClassUsageLocation::Other,
                         );
                     }

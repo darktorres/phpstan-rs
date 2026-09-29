@@ -1,1 +1,1 @@
-5:42-5:82 catch.notThrowable L0 | cannot catch NotAnException1: it does not implement Throwable
+5:44-5:59 catch.notThrowable L0 | cannot catch NotAnException1: it does not implement Throwable

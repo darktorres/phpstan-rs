@@ -3,7 +3,7 @@
 5:20-5:24 interface.nameCase L0 | Interface referenced with incorrect case: runs.
     fix: Use Runs => "Runs"
 6:1-6:42 class.nameCase L0 | Class referenced with incorrect case: foo.
-6:28-6:39 class.nameCase L0 | Class referenced with incorrect case: FOO.
+6:28-6:31 class.nameCase L0 | Class referenced with incorrect case: FOO.
 7:12-7:18 class.nameCase L0 | Class referenced with incorrect case: foo.
 9:52-9:55 class.nameCase L0 | Class referenced with incorrect case: foo.
     fix: Use Foo => "Foo"

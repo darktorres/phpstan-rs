@@ -639,7 +639,7 @@ fn resolve_static_expr_type(expr: &Expr, registry: &Registry) -> Type {
                 .and_then(|class| registry.lookup_method(class, method))
                 .map(|sig| sig.return_type.clone())
                 .unwrap_or(Type::mixed()),
-            ExprKind::ClassConstFetch(StaticTarget::Name(class, _), name) => class
+            ExprKind::ClassConstFetch(StaticTarget::Name(class), name) => class
                 .resolved_class()
                 .and_then(|class| registry.lookup_const(class, name))
                 .map(|c| c.ty.clone())

@@ -1,4 +1,4 @@
 2:13-7:14 missingType.return L6 | Function f() has no return type specified.
 4:21-4:34 function.resultUnused L4 | Call to function doSomething() on a separate line has no effect.
-5:24-6:18 class.notFound L0 | caught class TotallyMadeUpException not found
+5:26-5:48 class.notFound L0 | caught class TotallyMadeUpException not found
 8:13-8:38 missingType.return L6 | Function doSomething() has no return type specified.

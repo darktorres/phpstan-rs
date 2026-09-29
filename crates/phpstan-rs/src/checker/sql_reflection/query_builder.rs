@@ -731,7 +731,7 @@ fn fold_sprintf_int_arg(checker: &Checker, arg: &Arg, locals: &Locals) -> Option
 /// list").
 pub(crate) fn is_array_parameter_type(checker: &Checker, expr: &Expr) -> bool {
     match &expr.kind {
-        ExprKind::ClassConstFetch(StaticTarget::Name(class_name, _), _member) => checker
+        ExprKind::ClassConstFetch(StaticTarget::Name(class_name), _member) => checker
             .resolve_class_name(class_name)
             .ends_with("ArrayParameterType"),
         _ => false,
@@ -751,7 +751,7 @@ pub(crate) fn is_array_parameter_type(checker: &Checker, expr: &Expr) -> bool {
 /// doesn't treat as integer.
 pub(crate) fn is_integer_parameter_type(checker: &Checker, expr: &Expr) -> bool {
     match &expr.kind {
-        ExprKind::ClassConstFetch(StaticTarget::Name(class_name, _), member) => {
+        ExprKind::ClassConstFetch(StaticTarget::Name(class_name), member) => {
             let resolved = checker.resolve_class_name(class_name);
             let short_name = resolved.rsplit('\\').next().unwrap_or(&resolved);
             match short_name {

@@ -241,8 +241,16 @@ impl Parser {
     }
 
     /// A reference by name, not yet resolved.
-    pub(crate) fn qualified_name(&self, written: Name) -> QualifiedName {
-        QualifiedName::new(written)
+    pub(crate) fn qualified_name(&self, written: Name, span: Span) -> QualifiedName {
+        QualifiedName::new(written, span)
+    }
+
+    /// From `start` to the end of the last consumed token.
+    pub(crate) fn span_from(&self, start: Position) -> Span {
+        Span {
+            start,
+            end: self.previous_end(),
+        }
     }
 
     /// A fresh id for the node being built.

@@ -343,12 +343,12 @@ impl<'a> Walker<'a> {
         resolve_class_ref(name, self.current_class.as_deref(), self.registry)
     }
 
-    /// Records `name`, a class name, at `span`.
-    fn record_class(&mut self, name: &QualifiedName, span: Span) {
-        if self.anchor.matches(span)
+    /// Records `name`, a class name, at its span.
+    fn record_class(&mut self, name: &QualifiedName) {
+        if self.anchor.matches(name.span)
             && let Some(fqn) = self.class_ref(name)
         {
-            self.out.push((span, Resolved::Class(fqn)));
+            self.out.push((name.span, Resolved::Class(fqn)));
         }
     }
 
@@ -366,17 +366,11 @@ impl<'a> Walker<'a> {
 
     /// Records `class::member` for a literal class name, each name at its
     /// own span; under `Anchor::All` both get an entry.
-    fn record_static_member(
-        &mut self,
-        whole: Span,
-        class: &QualifiedName,
-        class_span: Span,
-        member: &Ident,
-    ) {
+    fn record_static_member(&mut self, whole: Span, class: &QualifiedName, member: &Ident) {
         if self.anchor.matches(whole)
             && let Some(fqn) = self.class_ref(class)
         {
-            self.record(class_span, Resolved::Class(fqn.clone()));
+            self.record(class.span, Resolved::Class(fqn.clone()));
             self.record(member.span, Resolved::Member(fqn, member.to_string()));
         }
     }
@@ -476,8 +470,8 @@ impl<'ast> Visitor<'ast> for Walker<'_> {
     }
 
     fn visit_catch_clause(&mut self, clause: &'ast CatchClause) {
-        for (name, span) in clause.types.iter().zip(&clause.types_spans) {
-            self.record_class(name, *span);
+        for name in &clause.types {
+            self.record_class(name);
         }
         if let Some(var) = &clause.var {
             self.record_var_self(var.span, &var.name);
@@ -492,8 +486,8 @@ impl<'ast> Visitor<'ast> for Walker<'_> {
         if !self.anchor.matches(hint.span) {
             return;
         }
-        for (name, name_span) in hint.class_names() {
-            self.record_class(name, name_span);
+        for name in hint.class_names() {
+            self.record_class(name);
         }
     }
 
@@ -537,15 +531,13 @@ impl<'ast> Visitor<'ast> for Walker<'_> {
         let fqn = class_decl_fqn(class).to_string();
         let previous = self.current_class.replace(fqn.clone());
         self.record(class.name_span, Resolved::Class(fqn));
-        let named = [
-            (&class.extends, &class.extends_spans),
-            (&class.implements, &class.implements_spans),
-            (&class.uses, &class.uses_spans),
-        ];
-        for (names, spans) in named {
-            for (name, span) in names.iter().zip(spans) {
-                self.record_class(name, *span);
-            }
+        for name in class
+            .extends
+            .iter()
+            .chain(&class.implements)
+            .chain(&class.uses)
+        {
+            self.record_class(name);
         }
         walk_class_decl(self, class);
         self.current_class = previous;
@@ -594,7 +586,7 @@ impl<'ast> Visitor<'ast> for Walker<'_> {
                     let ExprKind::Name(n) = &callee.kind else {
                         unreachable!()
                     };
-                    self.record_class(n, callee.span);
+                    self.record_class(n);
                     walk_args(self, args);
                     return;
                 }
@@ -612,11 +604,11 @@ impl<'ast> Visitor<'ast> for Walker<'_> {
                         self.record(expr.span, resolved);
                     }
                 }
-                ExprKind::ClassConstFetch(StaticTarget::Name(class, class_span), member) => {
-                    self.record_static_member(expr.span, class, *class_span, member);
+                ExprKind::ClassConstFetch(StaticTarget::Name(class), member) => {
+                    self.record_static_member(expr.span, class, member);
                 }
-                ExprKind::ClassNameFetch(StaticTarget::Name(class, class_span)) => {
-                    self.record_class(class, *class_span);
+                ExprKind::ClassNameFetch(StaticTarget::Name(class)) => {
+                    self.record_class(class);
                 }
                 // `Foo::method()` mirrors `ClassConstFetch` above (a literal
                 // class name, resolved by plain name lookup). A dynamic
@@ -625,8 +617,8 @@ impl<'ast> Visitor<'ast> for Walker<'_> {
                 // probe `MethodCall`'s own "any other receiver" branch
                 // below uses, `Resolved::Instance` being agnostic to `->`
                 // vs `::` call syntax.
-                ExprKind::StaticCall(StaticTarget::Name(class, class_span), member, _) => {
-                    self.record_static_member(expr.span, class, *class_span, member);
+                ExprKind::StaticCall(StaticTarget::Name(class), member, _) => {
+                    self.record_static_member(expr.span, class, member);
                 }
                 ExprKind::StaticCall(StaticTarget::Expr(receiver), member, args) => {
                     self.visit_expr(receiver);
@@ -635,8 +627,8 @@ impl<'ast> Visitor<'ast> for Walker<'_> {
                     walk_args(self, args);
                     return;
                 }
-                ExprKind::Instanceof(_, InstanceofTarget::Name(name, span)) => {
-                    self.record_class(name, *span);
+                ExprKind::Instanceof(_, InstanceofTarget::Name(name)) => {
+                    self.record_class(name);
                 }
                 // A plain variable read (`$this` excluded - it's never a
                 // locally-declared variable, and is resolved separately via

@@ -173,7 +173,7 @@ impl<'a> Checker<'a> {
                     );
                 }
             }
-            ExprKind::StaticCall(StaticTarget::Name(class, _), method, args)
+            ExprKind::StaticCall(StaticTarget::Name(class), method, args)
                 if method.eq_ignore_ascii_case("createFromFormat") =>
             {
                 let Some(class) = self.resolve_static_class_name(class) else {

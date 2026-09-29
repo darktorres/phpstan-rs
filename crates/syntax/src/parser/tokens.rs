@@ -1,4 +1,4 @@
-use crate::ast::{Attribute, Ident};
+use crate::ast::{Attribute, Ident, QualifiedName};
 use crate::name::Name;
 use crate::parser::{ParseError, Parser};
 use crate::token::{Keyword, Position, Span, Token};
@@ -297,12 +297,15 @@ impl Parser {
         self.interner.name(&s)
     }
 
-    /// `parse_qualified_name`, plus the span it occupied - kept
-    /// as a thin wrapper rather than changing `parse_qualified_name`'s own
-    /// signature, which has ~30 existing call sites that have no use for
-    /// the span. Used only at the smaller set of call sites (`extends`/
-    /// `implements`/`uses`/`instanceof`/`catch`) that feed the LSP's own
-    /// declaration-location index or position-walker.
+    /// A class, function or constant reference: the name and its span.
+    pub(crate) fn parse_name_reference(&mut self) -> QualifiedName {
+        let start = self.current_pos();
+        let name = self.parse_qualified_name();
+        self.qualified_name(name, self.span_from(start))
+    }
+
+    /// `parse_qualified_name`, plus the span it occupied, for a name that
+    /// isn't a reference (a `use` import's path).
     pub(crate) fn parse_qualified_name_spanned(&mut self) -> (Name, Span) {
         let start = self.current_pos();
         let name = self.parse_qualified_name();
@@ -329,7 +332,7 @@ impl Parser {
             let first_in_group = attrs.len();
             loop {
                 let attr_start = self.current_pos();
-                let name = self.parse_qualified_name();
+                let name = self.parse_name_reference();
                 let args = if self.check(&Token::LParen) {
                     self.parse_args()?.0
                 } else {
@@ -340,7 +343,7 @@ impl Parser {
                     end: self.previous_end(),
                 };
                 attrs.push(Attribute {
-                    name: self.qualified_name(name),
+                    name,
                     args,
                     span,
                     removal_span: span,

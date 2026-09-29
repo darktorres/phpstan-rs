@@ -1252,7 +1252,7 @@ impl<'a> Checker<'a> {
                 // A dynamic target (`$x instanceof $className`) still
                 // doesn't name a concrete class to narrow to either way.
                 if let Some(key) = narrowing_key(inner)
-                    && let InstanceofTarget::Name(class_name, _) = target
+                    && let InstanceofTarget::Name(class_name) = target
                 {
                     let resolved = self.resolve_name_expr(class_name);
                     if branch_true {

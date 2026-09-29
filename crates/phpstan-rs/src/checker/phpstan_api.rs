@@ -921,11 +921,11 @@ impl<'ast> Visitor<'ast> for Walker<'_> {
                 // class-constant check - see this module's own doc comment
                 // for why - but is still a real bare name reference, so
                 // `OldPhpParser4ClassRule` still applies to it.
-                ExprKind::ClassNameFetch(StaticTarget::Name(class_name, _)) => {
+                ExprKind::ClassNameFetch(StaticTarget::Name(class_name)) => {
                     self.check_old_php_parser4_class(class_name, e.span);
                 }
-                ExprKind::ClassConstFetch(StaticTarget::Name(class_name, _), member)
-                | ExprKind::StaticPropertyFetch(StaticTarget::Name(class_name, _), member) => {
+                ExprKind::ClassConstFetch(StaticTarget::Name(class_name), member)
+                | ExprKind::StaticPropertyFetch(StaticTarget::Name(class_name), member) => {
                     let sigil = if matches!(e.kind, ExprKind::StaticPropertyFetch(..)) {
                         "$"
                     } else {
@@ -936,7 +936,7 @@ impl<'ast> Visitor<'ast> for Walker<'_> {
                         self.report_not_covered(&fqn, &action, e.span, "phpstanApi.classConstant");
                     }
                 }
-                ExprKind::Instanceof(_, InstanceofTarget::Name(n, _)) => {
+                ExprKind::Instanceof(_, InstanceofTarget::Name(n)) => {
                     self.check_instanceof(n, e.span);
                 }
                 _ => {}

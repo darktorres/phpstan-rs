@@ -83,7 +83,7 @@ pub(crate) fn narrowing_key(e: &Expr) -> Option<String> {
             // `bind_assignment_target` key off `narrowing_key` uniformly,
             // so a later `self::$prop = ...` correctly invalidates/replaces
             // this same entry with no additional wiring needed.
-            ExprKind::StaticPropertyFetch(StaticTarget::Name(class_name, _), name) => {
+            ExprKind::StaticPropertyFetch(StaticTarget::Name(class_name), name) => {
                 Some(format!("{class_name}::${name}"))
             }
             ExprKind::Index(base, Some(idx)) => {
@@ -425,7 +425,7 @@ impl<'a> Checker<'a> {
                 // $className`) still doesn't name a concrete class to narrow
                 // to, same as the single-condition `ExprKind::Instanceof` arm
                 // above already requires.
-                ExprKind::Instanceof(inner, InstanceofTarget::Name(class_name, _)) => {
+                ExprKind::Instanceof(inner, InstanceofTarget::Name(class_name)) => {
                     let key = narrowing_key(inner)?;
                     let target_ty = self.resolve_name_expr(class_name);
                     Some((key, target_ty, &**inner))

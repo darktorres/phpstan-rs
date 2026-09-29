@@ -71,7 +71,7 @@ impl<'a> Checker<'a> {
             // real PHPStan's `AttributesCheck`, which runs its identical
             // `ClassNameCheck::checkClassNames` call right here too,
             // immediately after confirming the name resolves.
-            self.check_class_name_case(&attr.name, attr.span);
+            self.check_class_name_case(&attr.name);
             if info.is_abstract() {
                 self.report(
                     format!("Attribute class {canonical} is abstract."),

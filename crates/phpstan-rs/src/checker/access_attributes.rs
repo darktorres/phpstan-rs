@@ -175,12 +175,11 @@ impl<'a> Checker<'a> {
                 let span = c
                     .uses
                     .iter()
-                    .position(|u| {
+                    .find(|u| {
                         u.resolved_class()
                             .is_some_and(|resolved| resolved.eq_ignore_ascii_case(&trait_name))
                     })
-                    .and_then(|i| c.uses_spans.get(i).copied())
-                    .unwrap_or(c.name_span);
+                    .map_or(c.name_span, |u| u.span);
                 self.report(format!(
                         "Trait {trait_name} can only be used by {} and their subclasses, not {fqn}.",
                         allowed.iter().map(|a| a.as_ref()).collect::<Vec<_>>().join(", ")

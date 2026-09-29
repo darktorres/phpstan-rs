@@ -515,7 +515,7 @@ fn instanceof_with_dynamic_class_name_parses() {
     let ExprKind::Instanceof(_, target) = &rhs.kind else {
         panic!("expected Instanceof");
     };
-    assert!(matches!(target, InstanceofTarget::Name(n, _) if n == "Foo"));
+    assert!(matches!(target, InstanceofTarget::Name(n) if n == "Foo"));
 }
 
 #[test]
@@ -730,7 +730,7 @@ fn dollar_brace_variable_variable_forms_parse() {
     ));
     assert!(matches!(
         &program[2].kind,
-        StmtKind::Expression(Expr { kind: ExprKind::Assign(lhs, _), .. }) if matches!(&lhs.kind, ExprKind::DynamicStaticPropertyFetch(StaticTarget::Name(c, _), _) if c == "C")
+        StmtKind::Expression(Expr { kind: ExprKind::Assign(lhs, _), .. }) if matches!(&lhs.kind, ExprKind::DynamicStaticPropertyFetch(StaticTarget::Name(c), _) if c == "C")
     ));
 }
 
@@ -1063,7 +1063,7 @@ fn double_dollar_variable_variable_in_member_position_parses() {
     ));
     assert!(matches!(
         &program[1].kind,
-        StmtKind::Expression(Expr { kind: ExprKind::DynamicStaticPropertyFetch(StaticTarget::Name(c, _), _), .. }) if c == "Foo"
+        StmtKind::Expression(Expr { kind: ExprKind::DynamicStaticPropertyFetch(StaticTarget::Name(c), _), .. }) if c == "Foo"
     ));
     assert!(matches!(
         &program[2].kind,

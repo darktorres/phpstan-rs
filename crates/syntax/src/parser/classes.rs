@@ -11,7 +11,6 @@ pub(crate) struct ClassBody {
     pub methods: Vec<MethodDecl>,
     pub consts: Vec<ClassConst>,
     pub uses: Vec<QualifiedName>,
-    pub uses_spans: Vec<Span>,
     pub uses_doc_comments: Vec<Option<Arc<str>>>,
     pub trait_aliases: Vec<TraitAlias>,
     pub trait_precedences: Vec<TraitPrecedence>,
@@ -88,23 +87,15 @@ impl Parser {
         };
 
         let mut extends = Vec::new();
-        let mut extends_spans = Vec::new();
         // A class extends one class.
         if self.eat(&Token::Keyword(Keyword::Extends)) {
-            let (name, span) = self.parse_qualified_name_spanned();
-            extends.push(self.qualified_name(name));
-            extends_spans.push(span);
+            extends.push(self.parse_name_reference());
         }
         let mut implements = Vec::new();
-        let mut implements_spans = Vec::new();
         if self.eat(&Token::Keyword(Keyword::Implements)) {
-            let (name, span) = self.parse_qualified_name_spanned();
-            implements.push(self.qualified_name(name));
-            implements_spans.push(span);
+            implements.push(self.parse_name_reference());
             while self.eat(&Token::Comma) {
-                let (name, span) = self.parse_qualified_name_spanned();
-                implements.push(self.qualified_name(name));
-                implements_spans.push(span);
+                implements.push(self.parse_name_reference());
             }
         }
 
@@ -113,7 +104,6 @@ impl Parser {
             methods,
             consts,
             uses,
-            uses_spans,
             uses_doc_comments,
             trait_aliases,
             trait_precedences,
@@ -134,9 +124,7 @@ impl Parser {
             kind: ClassKind::Class,
             backing_type: None,
             extends,
-            extends_spans,
             implements,
-            implements_spans,
             is_abstract: false,
             is_final: false,
             is_readonly: class_is_readonly,
@@ -144,7 +132,6 @@ impl Parser {
             methods,
             consts,
             uses,
-            uses_spans,
             uses_doc_comments,
             trait_aliases,
             trait_precedences,
@@ -170,7 +157,6 @@ impl Parser {
         let mut methods = Vec::new();
         let mut consts = Vec::new();
         let mut uses = Vec::new();
-        let mut uses_spans = Vec::new();
         let mut uses_doc_comments = Vec::new();
         let mut trait_aliases = Vec::new();
         let mut trait_precedences = Vec::new();
@@ -205,14 +191,10 @@ impl Parser {
             }
 
             if self.eat(&Token::Keyword(Keyword::Use)) {
-                let (name, span) = self.parse_qualified_name_spanned();
-                uses.push(self.qualified_name(name));
-                uses_spans.push(span);
+                uses.push(self.parse_name_reference());
                 uses_doc_comments.push(doc.clone());
                 while self.eat(&Token::Comma) {
-                    let (name, span) = self.parse_qualified_name_spanned();
-                    uses.push(self.qualified_name(name));
-                    uses_spans.push(span);
+                    uses.push(self.parse_name_reference());
                     uses_doc_comments.push(doc.clone());
                 }
                 if self.check(&Token::LBrace) {
@@ -469,7 +451,6 @@ impl Parser {
             methods,
             consts,
             uses,
-            uses_spans,
             uses_doc_comments,
             trait_aliases,
             trait_precedences,
@@ -485,20 +466,18 @@ impl Parser {
         let mut out = TraitAdaptations::default();
         self.expect(&Token::LBrace)?;
         while !self.check(&Token::RBrace) && !self.at_eof() {
-            let first = self.parse_qualified_name();
+            let first = self.parse_name_reference();
             let (trait_name, method): (Option<QualifiedName>, Name) =
                 if self.eat(&Token::DoubleColon) {
-                    (Some(self.qualified_name(first)), self.expect_ident()?)
+                    (Some(first), self.expect_ident()?)
                 } else {
-                    (None, first)
+                    (None, first.written)
                 };
             if matches!(self.peek(), Token::Identifier(s) if s.eq_ignore_ascii_case("insteadof")) {
                 self.skip();
-                let first_other = self.parse_qualified_name();
-                let mut instead_of = vec![self.qualified_name(first_other)];
+                let mut instead_of = vec![self.parse_name_reference()];
                 while self.eat(&Token::Comma) {
-                    let other = self.parse_qualified_name();
-                    instead_of.push(self.qualified_name(other));
+                    instead_of.push(self.parse_name_reference());
                 }
                 if let Some(trait_name) = trait_name {
                     out.precedences.push(TraitPrecedence {
@@ -601,28 +580,18 @@ impl Parser {
         // are accepted here since the parser doesn't distinguish the two
         // declaration kinds structurally.
         let mut extends = Vec::new();
-        let mut extends_spans = Vec::new();
         if self.eat(&Token::Keyword(Keyword::Extends)) {
-            let (name, span) = self.parse_qualified_name_spanned();
-            extends.push(self.qualified_name(name));
-            extends_spans.push(span);
+            extends.push(self.parse_name_reference());
             while self.eat(&Token::Comma) {
-                let (name, span) = self.parse_qualified_name_spanned();
-                extends.push(self.qualified_name(name));
-                extends_spans.push(span);
+                extends.push(self.parse_name_reference());
             }
         }
 
         let mut implements = Vec::new();
-        let mut implements_spans = Vec::new();
         if self.eat(&Token::Keyword(Keyword::Implements)) {
-            let (name, span) = self.parse_qualified_name_spanned();
-            implements.push(self.qualified_name(name));
-            implements_spans.push(span);
+            implements.push(self.parse_name_reference());
             while self.eat(&Token::Comma) {
-                let (name, span) = self.parse_qualified_name_spanned();
-                implements.push(self.qualified_name(name));
-                implements_spans.push(span);
+                implements.push(self.parse_name_reference());
             }
         }
 
@@ -631,7 +600,6 @@ impl Parser {
             methods,
             consts,
             uses,
-            uses_spans,
             uses_doc_comments,
             trait_aliases,
             trait_precedences,
@@ -646,9 +614,7 @@ impl Parser {
             kind,
             backing_type: None,
             extends,
-            extends_spans,
             implements,
-            implements_spans,
             is_abstract,
             is_final,
             is_readonly: class_is_readonly,
@@ -656,7 +622,6 @@ impl Parser {
             methods,
             consts,
             uses,
-            uses_spans,
             uses_doc_comments,
             trait_aliases,
             trait_precedences,

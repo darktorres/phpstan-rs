@@ -174,7 +174,7 @@ impl<'ast> Visitor<'ast> for Members<'_> {
                 // `usage.writes` are plain, unconditional sets too) - the
                 // safe direction here, matching this project's "favor false
                 // negatives [on `unused`] over false positives" default.
-                ExprKind::Instanceof(inner, InstanceofTarget::Name(class_ref, _)) => {
+                ExprKind::Instanceof(inner, InstanceofTarget::Name(class_ref)) => {
                     if let ExprKind::Variable(name) = &inner.kind
                         && class_ref_is_self(class_ref, fqn)
                     {

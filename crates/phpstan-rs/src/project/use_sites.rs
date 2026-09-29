@@ -160,11 +160,15 @@ struct ClassFnRefWalker<'a> {
 }
 
 impl ClassFnRefWalker<'_> {
-    /// Records `name`, a class name, at `span`, or at `whole` without the
-    /// source: then a site is the span its node already has.
-    fn class_at(&mut self, name: &QualifiedName, span: Span, whole: Span) {
+    /// Records `name`, a class name, at its span, or at `whole` without
+    /// the source: then a site is the span its node already has.
+    fn class_at(&mut self, name: &QualifiedName, whole: Span) {
         if let Some(fqn) = resolve_class_ref(name) {
-            let span = if self.source.is_some() { span } else { whole };
+            let span = if self.source.is_some() {
+                name.span
+            } else {
+                whole
+            };
             self.out.push((span, RefTarget::Class(fqn)));
         }
     }
@@ -178,28 +182,26 @@ impl ClassFnRefWalker<'_> {
 
 impl<'ast> Visitor<'ast> for ClassFnRefWalker<'_> {
     fn visit_type_hint(&mut self, hint: &'ast TypeHint) {
-        for (name, name_span) in hint.class_names() {
-            self.class_at(name, name_span, hint.span);
+        for name in hint.class_names() {
+            self.class_at(name, hint.span);
         }
     }
 
     fn visit_class_decl(&mut self, class: &'ast ClassDecl) {
-        let named = [
-            (&class.extends, &class.extends_spans),
-            (&class.implements, &class.implements_spans),
-            (&class.uses, &class.uses_spans),
-        ];
-        for (names, spans) in named {
-            for (name, span) in names.iter().zip(spans) {
-                self.class_at(name, *span, *span);
-            }
+        for name in class
+            .extends
+            .iter()
+            .chain(&class.implements)
+            .chain(&class.uses)
+        {
+            self.class_at(name, name.span);
         }
         walk_class_decl(self, class);
     }
 
     fn visit_catch_clause(&mut self, clause: &'ast CatchClause) {
-        for (name, span) in clause.types.iter().zip(&clause.types_spans) {
-            self.class_at(name, *span, *span);
+        for name in &clause.types {
+            self.class_at(name, name.span);
         }
         walk_catch_clause(self, clause);
     }
@@ -218,7 +220,7 @@ impl<'ast> Visitor<'ast> for ClassFnRefWalker<'_> {
                     if matches!(expr.kind, ExprKind::Call(..)) {
                         self.function_at(n, callee.span);
                     } else {
-                        self.class_at(n, callee.span, callee.span);
+                        self.class_at(n, callee.span);
                     }
                     for arg in args {
                         self.visit_arg(arg);
@@ -229,15 +231,15 @@ impl<'ast> Visitor<'ast> for ClassFnRefWalker<'_> {
                 // first-class-callable target `foo(...)`) is taken as a
                 // function.
                 ExprKind::Name(n) => self.function_at(n, expr.span),
-                ExprKind::ClassConstFetch(StaticTarget::Name(class, class_span), _)
-                | ExprKind::ClassNameFetch(StaticTarget::Name(class, class_span))
-                | ExprKind::StaticPropertyFetch(StaticTarget::Name(class, class_span), _)
-                | ExprKind::DynamicStaticPropertyFetch(StaticTarget::Name(class, class_span), _)
-                | ExprKind::StaticCall(StaticTarget::Name(class, class_span), _, _) => {
-                    self.class_at(class, *class_span, expr.span);
+                ExprKind::ClassConstFetch(StaticTarget::Name(class), _)
+                | ExprKind::ClassNameFetch(StaticTarget::Name(class))
+                | ExprKind::StaticPropertyFetch(StaticTarget::Name(class), _)
+                | ExprKind::DynamicStaticPropertyFetch(StaticTarget::Name(class), _)
+                | ExprKind::StaticCall(StaticTarget::Name(class), _, _) => {
+                    self.class_at(class, expr.span);
                 }
-                ExprKind::Instanceof(_, InstanceofTarget::Name(name, span)) => {
-                    self.class_at(name, *span, *span);
+                ExprKind::Instanceof(_, InstanceofTarget::Name(name)) => {
+                    self.class_at(name, name.span);
                 }
                 _ => {}
             }

@@ -81,7 +81,7 @@ impl Parser {
             // and `\int` included, names a class.
             let kind = match NativeType::from_name(&name) {
                 Some(keyword) => TypeHintKind::Keyword(keyword, name.as_str().into()),
-                None => TypeHintKind::Name(self.qualified_name(name)),
+                None => TypeHintKind::Name(self.qualified_name(name, self.span_from(start))),
             };
             Ok(self.type_hint(kind, start))
         })

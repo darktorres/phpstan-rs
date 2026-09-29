@@ -1,4 +1,4 @@
 3:13-8:14 missingType.return L6 | Function f() has no return type specified.
 5:21-5:34 function.resultUnused L4 | Call to function doSomething() on a separate line has no effect.
-6:24-7:18 catch.notThrowable L0 | cannot catch NotAnException: it does not implement Throwable
+6:26-6:40 catch.notThrowable L0 | cannot catch NotAnException: it does not implement Throwable
 9:13-9:38 missingType.return L6 | Function doSomething() has no return type specified.

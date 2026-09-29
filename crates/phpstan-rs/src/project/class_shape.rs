@@ -52,7 +52,7 @@ fn is_doctrine_mapped(c: &ClassDecl, ctx_names: &[String]) -> bool {
 fn is_parent_call(e: &Expr, method: &str) -> bool {
     matches!(
         &e.kind,
-        ExprKind::StaticCall(StaticTarget::Name(target, _), called, _)
+        ExprKind::StaticCall(StaticTarget::Name(target), called, _)
             if target.eq_ignore_ascii_case("parent") && called.eq_ignore_ascii_case(method)
     )
 }

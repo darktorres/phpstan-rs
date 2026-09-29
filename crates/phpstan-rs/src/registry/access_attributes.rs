@@ -53,7 +53,7 @@ fn class_names(args: &[Expr], out: &mut Vec<Name>) {
     syntax::stack::guard(|| {
         for arg in args {
             match &arg.kind {
-                ExprKind::ClassNameFetch(StaticTarget::Name(class, _)) => {
+                ExprKind::ClassNameFetch(StaticTarget::Name(class)) => {
                     out.push(crate::registry::name_context::class_ref(class));
                 }
                 ExprKind::Literal(Literal::String(s)) => {

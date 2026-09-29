@@ -270,13 +270,9 @@ impl Parser {
         while self.eat(&Token::Keyword(Keyword::Catch)) {
             let catch_start = self.previous_end();
             self.expect(&Token::LParen)?;
-            let (first_type, first_span) = self.parse_qualified_name_spanned();
-            let mut types = vec![self.qualified_name(first_type)];
-            let mut types_spans = vec![first_span];
+            let mut types = vec![self.parse_name_reference()];
             while self.eat(&Token::Pipe) {
-                let (name, span) = self.parse_qualified_name_spanned();
-                types.push(self.qualified_name(name));
-                types_spans.push(span);
+                types.push(self.parse_name_reference());
             }
             let var = if matches!(self.peek(), Token::Variable(_)) {
                 let var_start = self.current_pos();
@@ -295,7 +291,6 @@ impl Parser {
             let body = self.parse_stmt_list_block()?;
             catches.push(CatchClause {
                 types,
-                types_spans,
                 var,
                 body,
                 span: Span {

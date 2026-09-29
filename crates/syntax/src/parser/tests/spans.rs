@@ -66,11 +66,11 @@ fn class_decl_name_extends_and_implements_spans_are_each_precise() {
         panic!("expected ClassDecl");
     };
     assert_eq!(text_at(src, c.name_span), "Widget");
-    assert_eq!(c.extends_spans.len(), 1);
-    assert_eq!(text_at(src, c.extends_spans[0]), "Base");
-    assert_eq!(c.implements_spans.len(), 2);
-    assert_eq!(text_at(src, c.implements_spans[0]), "Iface1");
-    assert_eq!(text_at(src, c.implements_spans[1]), "Iface2");
+    assert_eq!(c.extends.len(), 1);
+    assert_eq!(text_at(src, c.extends[0].span), "Base");
+    assert_eq!(c.implements.len(), 2);
+    assert_eq!(text_at(src, c.implements[0].span), "Iface1");
+    assert_eq!(text_at(src, c.implements[1].span), "Iface2");
 }
 
 #[test]
@@ -80,9 +80,9 @@ fn class_decl_uses_spans_point_at_each_trait_name() {
     let StmtKind::ClassDecl(c) = &program[0].kind else {
         panic!("expected ClassDecl");
     };
-    assert_eq!(c.uses_spans.len(), 2);
-    assert_eq!(text_at(src, c.uses_spans[0]), "TraitA");
-    assert_eq!(text_at(src, c.uses_spans[1]), "TraitB");
+    assert_eq!(c.uses.len(), 2);
+    assert_eq!(text_at(src, c.uses[0].span), "TraitA");
+    assert_eq!(text_at(src, c.uses[1].span), "TraitB");
 }
 
 #[test]
@@ -127,8 +127,8 @@ fn enum_decl_name_implements_and_case_name_spans_are_precise() {
     };
     assert_eq!(e.kind, ClassKind::Enum);
     assert_eq!(text_at(src, e.name_span), "Suit");
-    assert_eq!(e.implements_spans.len(), 1);
-    assert_eq!(text_at(src, e.implements_spans[0]), "HasColor");
+    assert_eq!(e.implements.len(), 1);
+    assert_eq!(text_at(src, e.implements[0].span), "HasColor");
     assert_eq!(text_at(src, e.enum_cases[0].name.span), "Hearts");
 }
 
@@ -139,9 +139,9 @@ fn catch_clause_types_spans_point_at_each_exception_type() {
     let StmtKind::Try { catches, .. } = &program[0].kind else {
         panic!("expected Try");
     };
-    assert_eq!(catches[0].types_spans.len(), 2);
-    assert_eq!(text_at(src, catches[0].types_spans[0]), "TypeErrorA");
-    assert_eq!(text_at(src, catches[0].types_spans[1]), "TypeErrorB");
+    assert_eq!(catches[0].types.len(), 2);
+    assert_eq!(text_at(src, catches[0].types[0].span), "TypeErrorA");
+    assert_eq!(text_at(src, catches[0].types[1].span), "TypeErrorB");
 }
 
 #[test]
@@ -151,11 +151,11 @@ fn instanceof_target_name_span_points_at_the_class_name() {
     let StmtKind::Expression(e) = &program[0].kind else {
         panic!("expected Expression");
     };
-    let ExprKind::Instanceof(_, InstanceofTarget::Name(name, span)) = &e.kind else {
+    let ExprKind::Instanceof(_, InstanceofTarget::Name(name)) = &e.kind else {
         panic!("expected Instanceof with a Name target");
     };
     assert_eq!(name, "Foo");
-    assert_eq!(text_at(src, *span), "Foo");
+    assert_eq!(text_at(src, name.span), "Foo");
 }
 
 #[test]
@@ -169,15 +169,15 @@ fn member_names_and_static_targets_have_their_own_spans() {
             other => panic!("expected an expression statement, got {other:?}"),
         })
         .collect();
-    let ExprKind::ClassConstFetch(StaticTarget::Name(_, class_span), name) = &exprs[0].kind else {
+    let ExprKind::ClassConstFetch(StaticTarget::Name(class), name) = &exprs[0].kind else {
         panic!("expected a class constant fetch");
     };
-    assert_eq!(text_at(src, *class_span), "self");
+    assert_eq!(text_at(src, class.span), "self");
     assert_eq!(text_at(src, name.span), "LIMIT");
-    let ExprKind::StaticCall(StaticTarget::Name(_, class_span), name, _) = &exprs[1].kind else {
+    let ExprKind::StaticCall(StaticTarget::Name(class), name, _) = &exprs[1].kind else {
         panic!("expected a static call");
     };
-    assert_eq!(text_at(src, *class_span), "Foo");
+    assert_eq!(text_at(src, class.span), "Foo");
     assert_eq!(text_at(src, name.span), "bar");
     let ExprKind::StaticPropertyFetch(_, name) = &exprs[2].kind else {
         panic!("expected a static property fetch");

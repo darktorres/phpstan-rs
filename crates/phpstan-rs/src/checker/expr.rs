@@ -1812,7 +1812,7 @@ impl<'a> Checker<'a> {
                     // `static` (never flagged - see its doc comment), so
                     // anything that comes back as an `Object` here is a
                     // genuine bare class-name reference.
-                    InstanceofTarget::Name(name, name_span) => {
+                    InstanceofTarget::Name(name) => {
                         let resolved = self.resolve_name_expr(name);
                         if let [class] = resolved.object_class_names()[..]
                             && !resolved.is_enum_case()
@@ -1829,7 +1829,7 @@ impl<'a> Checker<'a> {
                                 // `class.nameCase` - `name` is the raw,
                                 // as-written text, still a bare string
                                 // right here in the AST.
-                                self.check_class_name_case(name, *name_span);
+                                self.check_class_name_case(name);
                                 self.check_internal_instanceof(class, e.span);
                                 self.check_restricted_class_name_usage(
                                     class,
@@ -2268,7 +2268,7 @@ impl<'a> Checker<'a> {
                     // source string right here in the AST, exactly like
                     // `instanceof`/`catch` below.
                     if let ExprKind::Name(raw) = &class_expr.kind {
-                        self.check_class_name_case(raw, class_expr.span);
+                        self.check_class_name_case(raw);
                     }
                     // Called before the borrow just below (this check
                     // does its own, separate registry lookup) since it
@@ -2588,7 +2588,7 @@ impl<'a> Checker<'a> {
                     // registry lookup harmlessly no-ops for a pseudo-
                     // keyword like `self` or a genuinely undefined class).
                     if let Some(raw) = target.as_name() {
-                        self.check_class_name_case(raw, e.span);
+                        self.check_class_name_case(raw);
                     }
                     if let Some(sig) = sig {
                         if let Some((owner, _)) = &sig_with_owner {
@@ -5786,7 +5786,7 @@ fn unhandled_match_error() -> Type {
 fn forwards_static_binding(target: &StaticTarget) -> bool {
     matches!(
         target,
-        StaticTarget::Name(n, _)
+        StaticTarget::Name(n)
             if matches!(n.to_ascii_lowercase().as_str(), "parent" | "self" | "static")
     )
 }
@@ -5880,7 +5880,7 @@ impl<'a> Checker<'a> {
         label: &str,
     ) -> Type {
         let class_name = match target {
-            StaticTarget::Name(name, _) => name,
+            StaticTarget::Name(name) => name,
             // `$obj::X` / `$obj::$x`: the class of the receiver's value.
             StaticTarget::Expr(receiver) => {
                 let Some(class) = receiver_class(self.check_expr(receiver, locals, label)) else {
@@ -5951,7 +5951,7 @@ impl<'a> Checker<'a> {
         }
         // `class.nameCase`, against the class name as written.
         if let Some(written) = written {
-            self.check_class_name_case(written, e.span);
+            self.check_class_name_case(written);
         }
         if is_property {
             let prop_name = member;
@@ -6377,7 +6377,7 @@ fn closure_inferred_return_type(
 /// `$obj::bar()`) ends.
 fn static_target_end(target: &StaticTarget) -> syntax::token::Position {
     match target {
-        StaticTarget::Name(_, span) => span.end,
+        StaticTarget::Name(name) => name.span.end,
         StaticTarget::Expr(expr) => expr.span.end,
     }
 }

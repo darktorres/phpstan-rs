@@ -61,7 +61,7 @@ pub(crate) fn declared_type(
     let mut case_refs: Vec<(Name, Name)> = native
         .into_iter()
         .flat_map(TypeHint::class_names)
-        .filter_map(|(name, _)| {
+        .filter_map(|name| {
             Some((
                 Name::from(&name.written),
                 Name::from(name.resolved_class()?),

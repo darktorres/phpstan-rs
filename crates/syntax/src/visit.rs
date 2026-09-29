@@ -221,7 +221,7 @@ pub fn walk_stmt<'ast, V: Visitor<'ast> + ?Sized>(v: &mut V, stmt: &'ast Stmt) {
 
 fn walk_static_target<'ast, V: Visitor<'ast> + ?Sized>(v: &mut V, target: &'ast StaticTarget) {
     match target {
-        StaticTarget::Name(name, _) => v.visit_name(name),
+        StaticTarget::Name(name) => v.visit_name(name),
         StaticTarget::Expr(e) => v.visit_expr(e),
     }
 }
@@ -333,7 +333,7 @@ pub fn walk_expr<'ast, V: Visitor<'ast> + ?Sized>(v: &mut V, expr: &'ast Expr) {
         ExprKind::Instanceof(inner, target) => {
             v.visit_expr(inner);
             match target {
-                InstanceofTarget::Name(name, _) => v.visit_name(name),
+                InstanceofTarget::Name(name) => v.visit_name(name),
                 InstanceofTarget::Expr(target) => v.visit_expr(target),
             }
         }

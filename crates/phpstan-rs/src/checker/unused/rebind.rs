@@ -64,7 +64,7 @@ impl<'ast> Visitor<'ast> for Rebinds {
     fn visit_expr(&mut self, expr: &'ast Expr) {
         match &expr.kind {
             // `Closure::bind($closure, $newThis, $scope)`.
-            ExprKind::StaticCall(StaticTarget::Name(class, _), method, args)
+            ExprKind::StaticCall(StaticTarget::Name(class), method, args)
                 if class
                     .resolved_class()
                     .is_some_and(|c| c.eq_ignore_ascii_case("Closure"))
@@ -106,7 +106,7 @@ fn record_rebind_scope(
     escape_all: &mut bool,
 ) {
     match scope_arg.map(|a| &a.value.kind) {
-        Some(ExprKind::ClassNameFetch(StaticTarget::Name(class_name, _)))
+        Some(ExprKind::ClassNameFetch(StaticTarget::Name(class_name)))
             if let Some(class) = class_name.resolved_class() =>
         {
             targets.insert(Name::from(class));

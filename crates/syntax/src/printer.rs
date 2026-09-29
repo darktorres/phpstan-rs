@@ -199,7 +199,7 @@ fn write_interpolated_parts(out: &mut String, parts: &[Expr], delimiter: u8) {
 
 fn write_static_target(out: &mut String, target: &StaticTarget) {
     match target {
-        StaticTarget::Name(n, _) => out.push_str(n),
+        StaticTarget::Name(n) => out.push_str(n),
         StaticTarget::Expr(inner) => write_expr(out, inner),
     }
 }
@@ -434,7 +434,7 @@ fn write_expr_unguarded(out: &mut String, e: &Expr) {
             write_expr(out, value);
             out.push_str(" instanceof ");
             match target {
-                InstanceofTarget::Name(n, _) => out.push_str(n),
+                InstanceofTarget::Name(n) => out.push_str(n),
                 InstanceofTarget::Expr(inner) => write_expr(out, inner),
             }
         }

@@ -23,9 +23,9 @@ fn resolutions(src: &str) -> Vec<(String, ResolvedName)> {
         fn visit_expr(&mut self, e: &'ast Expr) {
             match &e.kind {
                 ExprKind::Name(n) => self.push(n),
-                ExprKind::ClassConstFetch(StaticTarget::Name(n, _), _)
-                | ExprKind::StaticCall(StaticTarget::Name(n, _), _, _)
-                | ExprKind::Instanceof(_, InstanceofTarget::Name(n, _)) => self.push(n),
+                ExprKind::ClassConstFetch(StaticTarget::Name(n), _)
+                | ExprKind::StaticCall(StaticTarget::Name(n), _, _)
+                | ExprKind::Instanceof(_, InstanceofTarget::Name(n)) => self.push(n),
                 _ => {}
             }
             walk_expr(self, e);

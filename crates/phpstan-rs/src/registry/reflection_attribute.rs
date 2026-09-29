@@ -128,10 +128,10 @@ fn value(expr: &Expr) -> AttributeValue {
             "null" => AttributeValue::Null,
             _ => AttributeValue::Constant(name.written.clone()),
         },
-        ExprKind::ClassNameFetch(StaticTarget::Name(class, _)) => {
+        ExprKind::ClassNameFetch(StaticTarget::Name(class)) => {
             AttributeValue::ClassName(class_ref(class))
         }
-        ExprKind::ClassConstFetch(StaticTarget::Name(class, _), name) => {
+        ExprKind::ClassConstFetch(StaticTarget::Name(class), name) => {
             AttributeValue::ClassConstant {
                 class: class_ref(class),
                 name: name.name.clone(),

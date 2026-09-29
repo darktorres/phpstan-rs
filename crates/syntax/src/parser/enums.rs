@@ -60,15 +60,10 @@ impl Parser {
         };
 
         let mut implements = Vec::new();
-        let mut implements_spans = Vec::new();
         if self.eat(&Token::Keyword(Keyword::Implements)) {
-            let (name, span) = self.parse_qualified_name_spanned();
-            implements.push(self.qualified_name(name));
-            implements_spans.push(span);
+            implements.push(self.parse_name_reference());
             while self.eat(&Token::Comma) {
-                let (name, span) = self.parse_qualified_name_spanned();
-                implements.push(self.qualified_name(name));
-                implements_spans.push(span);
+                implements.push(self.parse_name_reference());
             }
         }
 
@@ -77,7 +72,6 @@ impl Parser {
             methods,
             consts,
             uses,
-            uses_spans,
             uses_doc_comments,
             trait_aliases,
             trait_precedences,
@@ -92,9 +86,7 @@ impl Parser {
             kind: ClassKind::Enum,
             backing_type,
             extends: Vec::new(),
-            extends_spans: Vec::new(),
             implements,
-            implements_spans,
             is_abstract: false,
             // An enum is implicitly final.
             is_final: true,
@@ -104,7 +96,6 @@ impl Parser {
             methods,
             consts,
             uses,
-            uses_spans,
             uses_doc_comments,
             trait_aliases,
             trait_precedences,

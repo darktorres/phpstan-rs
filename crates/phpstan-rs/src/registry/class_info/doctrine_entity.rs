@@ -139,7 +139,7 @@ fn string_arg<'a>(attr: &'a Attribute, name: &str) -> Option<&'a str> {
 
 fn class_name_of_class_const(e: &Expr) -> Option<&QualifiedName> {
     match &e.kind {
-        ExprKind::ClassNameFetch(StaticTarget::Name(class_name, _)) => Some(class_name),
+        ExprKind::ClassNameFetch(StaticTarget::Name(class_name)) => Some(class_name),
         _ => None,
     }
 }

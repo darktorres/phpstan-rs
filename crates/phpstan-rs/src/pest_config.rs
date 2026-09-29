@@ -55,7 +55,7 @@ pub(crate) fn is_this_binding_call(name: &str) -> bool {
 pub(crate) fn class_names_from_uses_call(args: &[Arg]) -> Vec<String> {
     args.iter()
         .filter_map(|a| match &a.value.kind {
-            ExprKind::ClassNameFetch(StaticTarget::Name(class_name, _)) => {
+            ExprKind::ClassNameFetch(StaticTarget::Name(class_name)) => {
                 class_name.resolved_class().map(str::to_string)
             }
             _ => literal_string_value(&a.value).map(|s| s.trim_start_matches('\\').to_string()),

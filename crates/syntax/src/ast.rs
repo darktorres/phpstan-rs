@@ -186,8 +186,6 @@ pub struct SwitchCase {
 #[derive(Debug, Clone)]
 pub struct CatchClause {
     pub types: Vec<QualifiedName>,
-    // Each `types` entry's span (same index).
-    pub types_spans: Vec<Span>,
     // The bound variable without its `$`; `None` for `catch (Foo) {}`.
     pub var: Option<Ident>,
     pub body: Vec<Stmt>,
@@ -519,10 +517,7 @@ pub struct ClassDecl {
     // and every other class-like.
     pub backing_type: Option<TypeHint>,
     pub extends: Vec<QualifiedName>,
-    // Each `extends` entry's span (same index).
-    pub extends_spans: Vec<Span>,
     pub implements: Vec<QualifiedName>,
-    pub implements_spans: Vec<Span>,
     pub is_abstract: bool,
     pub is_final: bool,
     // `readonly class` (PHP 8.2), surfaced at the class level (in
@@ -536,10 +531,9 @@ pub struct ClassDecl {
     pub consts: Vec<ClassConst>,
     // `use TraitA, TraitB;` inside the class body.
     pub uses: Vec<QualifiedName>,
-    pub uses_spans: Vec<Span>,
     // The doc comment of the `use` *statement* each `uses` entry came
     // from (not the class's own, separate `doc_comment` below) - same
-    // index/shape as `uses_spans`. Needed for `@use Trait<Args>`: real
+    // index/shape as `uses`. Needed for `@use Trait<Args>`: real
     // PHPStan resolves that tag from the `TraitUse` statement's own doc
     // comment, not the class's top-of-class docblock.
     pub uses_doc_comments: Vec<Option<Arc<str>>>,
@@ -749,9 +743,7 @@ pub struct ClosureUse {
 // $className`, `$x instanceof $obj`) for a runtime-determined class.
 #[derive(Debug, Clone)]
 pub enum InstanceofTarget {
-    // The `Span` is the class-name token's own span, not the whole
-    // `instanceof` expression's.
-    Name(QualifiedName, Span),
+    Name(QualifiedName),
     Expr(Box<Expr>),
 }
 
@@ -764,7 +756,7 @@ pub enum InstanceofTarget {
 /// name - only the *receiver* side is ever `Expr` here).
 #[derive(Debug, Clone)]
 pub enum StaticTarget {
-    Name(QualifiedName, Span),
+    Name(QualifiedName),
     Expr(Box<Expr>),
 }
 
@@ -772,7 +764,7 @@ impl StaticTarget {
     /// The literal class name, or `None` for a dynamic receiver.
     pub fn as_name(&self) -> Option<&QualifiedName> {
         match self {
-            StaticTarget::Name(n, _) => Some(n),
+            StaticTarget::Name(n) => Some(n),
             StaticTarget::Expr(_) => None,
         }
     }
@@ -789,7 +781,7 @@ impl StaticTarget {
     /// in `parent::$property::get()`.
     pub fn parent_hook_property(&self) -> Option<&str> {
         match &self.expr()?.kind {
-            ExprKind::StaticPropertyFetch(StaticTarget::Name(class, _), property)
+            ExprKind::StaticPropertyFetch(StaticTarget::Name(class), property)
                 if class.eq_ignore_ascii_case("parent") =>
             {
                 Some(property.as_ref())
@@ -807,6 +799,7 @@ impl StaticTarget {
 pub struct QualifiedName {
     pub written: Name,
     pub resolved: ResolvedName,
+    pub span: Span,
 }
 
 /// What a [`QualifiedName`] refers to.
@@ -824,10 +817,11 @@ pub enum ResolvedName {
 }
 
 impl QualifiedName {
-    pub fn new(written: impl Into<Name>) -> QualifiedName {
+    pub fn new(written: impl Into<Name>, span: Span) -> QualifiedName {
         QualifiedName {
             written: written.into(),
             resolved: ResolvedName::Unresolved,
+            span,
         }
     }
 
@@ -1062,17 +1056,17 @@ impl TypeHint {
     }
 
     /// Every class the declaration names (keyword types like `int` or
-    /// `static` left out), as written, with its span, in source order.
-    pub fn class_names(&self) -> Vec<(&QualifiedName, Span)> {
+    /// `static` left out), as written, in source order.
+    pub fn class_names(&self) -> Vec<&QualifiedName> {
         let mut out = Vec::new();
         self.collect_class_names(&mut out);
         out
     }
 
-    fn collect_class_names<'a>(&'a self, out: &mut Vec<(&'a QualifiedName, Span)>) {
+    fn collect_class_names<'a>(&'a self, out: &mut Vec<&'a QualifiedName>) {
         match &self.kind {
             TypeHintKind::Keyword(..) => {}
-            TypeHintKind::Name(name) => out.push((name, self.span)),
+            TypeHintKind::Name(name) => out.push(name),
             TypeHintKind::Nullable(inner) => inner.collect_class_names(out),
             TypeHintKind::Union(members) | TypeHintKind::Intersection(members) => {
                 for member in members {

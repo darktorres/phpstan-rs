@@ -43,15 +43,15 @@ struct Collector {
 impl<'ast> Visitor<'ast> for Collector {
     fn visit_expr(&mut self, expr: &'ast Expr) {
         match &expr.kind {
-            ExprKind::ClassConstFetch(StaticTarget::Name(class, _), _)
-            | ExprKind::ClassNameFetch(StaticTarget::Name(class, _))
-            | ExprKind::StaticPropertyFetch(StaticTarget::Name(class, _), _)
-            | ExprKind::DynamicStaticPropertyFetch(StaticTarget::Name(class, _), _)
-            | ExprKind::DynamicClassConstFetch(StaticTarget::Name(class, _), _)
-            | ExprKind::StaticCall(StaticTarget::Name(class, _), _, _)
-            | ExprKind::DynamicStaticCall(StaticTarget::Name(class, _), _, _)
+            ExprKind::ClassConstFetch(StaticTarget::Name(class), _)
+            | ExprKind::ClassNameFetch(StaticTarget::Name(class))
+            | ExprKind::StaticPropertyFetch(StaticTarget::Name(class), _)
+            | ExprKind::DynamicStaticPropertyFetch(StaticTarget::Name(class), _)
+            | ExprKind::DynamicClassConstFetch(StaticTarget::Name(class), _)
+            | ExprKind::StaticCall(StaticTarget::Name(class), _, _)
+            | ExprKind::DynamicStaticCall(StaticTarget::Name(class), _, _)
             | ExprKind::Name(class)
-            | ExprKind::Instanceof(_, InstanceofTarget::Name(class, _)) => {
+            | ExprKind::Instanceof(_, InstanceofTarget::Name(class)) => {
                 self.names.insert(class.written.to_string());
             }
             _ => {}
@@ -86,7 +86,7 @@ impl<'ast> Visitor<'ast> for Collector {
     /// Type declarations name classes without the leading `\`, the way
     /// type resolution spells them.
     fn visit_type_hint(&mut self, hint: &'ast TypeHint) {
-        for (name, _) in hint.class_names() {
+        for name in hint.class_names() {
             self.names.insert(name.trim_start_matches('\\').to_string());
         }
     }

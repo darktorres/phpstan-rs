@@ -22,7 +22,7 @@ impl<'a> Checker<'a> {
         span: Span,
     ) {
         match target {
-            StaticTarget::Name(name, _) => {
+            StaticTarget::Name(name) => {
                 let keyword = name.to_ascii_lowercase();
                 if !matches!(keyword.as_str(), "self" | "static" | "parent") {
                     return;

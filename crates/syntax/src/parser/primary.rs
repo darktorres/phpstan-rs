@@ -92,8 +92,8 @@ impl Parser {
                 return Ok(self.expr(ExprKind::Grouping(Box::new(e)), start));
             }
             _ => {
-                let name = self.parse_qualified_name();
-                self.expr(ExprKind::Name(self.qualified_name(name)), start)
+                let name = self.parse_name_reference();
+                self.expr(ExprKind::Name(name), start)
             }
         };
         loop {
@@ -157,7 +157,7 @@ impl Parser {
                 {
                     self.skip();
                     let target = match &expr.kind {
-                        ExprKind::Name(n) => StaticTarget::Name(n.clone(), expr.span),
+                        ExprKind::Name(n) => StaticTarget::Name(n.clone()),
                         _ => StaticTarget::Expr(Box::new(expr)),
                     };
                     expr = if matches!(self.peek(), Token::Variable(_)) {
@@ -325,11 +325,14 @@ impl Parser {
                     && matches!(self.peek_at(1), Token::Ellipsis)
                     && matches!(self.peek_at(2), Token::RParen)
                 {
+                    let clone_span = self.span_from(start);
                     self.skip();
                     self.skip();
                     self.skip();
                     let name = self.expr(
-                        ExprKind::Name(self.qualified_name(self.interner.name("clone"))),
+                        ExprKind::Name(
+                            self.qualified_name(self.interner.name("clone"), clone_span),
+                        ),
                         start,
                     );
                     return Ok(self.expr(ExprKind::FirstClassCallable(Box::new(name)), start));
@@ -503,7 +506,9 @@ impl Parser {
             Token::Keyword(Keyword::Static) => {
                 self.skip();
                 self.expr(
-                    ExprKind::Name(self.qualified_name(self.interner.name("static"))),
+                    ExprKind::Name(
+                        self.qualified_name(self.interner.name("static"), self.span_from(start)),
+                    ),
                     start,
                 )
             }
@@ -522,8 +527,8 @@ impl Parser {
                 self.parse_closure_like(false)?
             }
             Token::Keyword(Keyword::Fn) => {
-                let name = self.parse_qualified_name();
-                self.expr(ExprKind::Name(self.qualified_name(name)), start)
+                let name = self.parse_name_reference();
+                self.expr(ExprKind::Name(name), start)
             }
             Token::Keyword(Keyword::Match) => self.parse_match_expr()?,
             Token::InterpString(_) => {
@@ -562,6 +567,7 @@ impl Parser {
                 | Keyword::Enum,
             ) => {
                 let name = self.parse_qualified_name();
+                let name_span = self.span_from(start);
                 let exit_kind = if name.eq_ignore_ascii_case("exit") {
                     Some(ExitKind::Exit)
                 } else if name.eq_ignore_ascii_case("die") {
@@ -576,8 +582,8 @@ impl Parser {
                     if self.check(&Token::LParen) {
                         let (args, is_first_class_callable) = self.parse_args()?;
                         if is_first_class_callable {
-                            let callee =
-                                self.expr(ExprKind::Name(self.qualified_name(name)), start);
+                            let callee = self
+                                .expr(ExprKind::Name(self.qualified_name(name, name_span)), start);
                             let call = self.expr(ExprKind::Call(Box::new(callee), args), start);
                             self.expr(ExprKind::FirstClassCallable(Box::new(call)), start)
                         } else {
@@ -622,7 +628,7 @@ impl Parser {
                     };
                     self.expr(ExprKind::Eval(Box::new(code.value)), start)
                 } else {
-                    self.expr(ExprKind::Name(self.qualified_name(name)), start)
+                    self.expr(ExprKind::Name(self.qualified_name(name, name_span)), start)
                 }
             }
             other => {

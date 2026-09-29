@@ -70,7 +70,7 @@ impl<'a> Checker<'a> {
         let case_refs = hint
             .class_names()
             .into_iter()
-            .filter_map(|(name, _)| {
+            .filter_map(|name| {
                 let resolved = name.resolved_class()?;
                 Some((Name::from(&name.written), Name::from(resolved)))
             })
@@ -289,7 +289,7 @@ impl<'a> Checker<'a> {
         label: &str,
     ) -> Option<String> {
         match target {
-            StaticTarget::Name(name, _) => self.resolve_static_class_name(name),
+            StaticTarget::Name(name) => self.resolve_static_class_name(name),
             StaticTarget::Expr(receiver) => {
                 receiver_class(self.check_expr(receiver, locals, label))
             }
@@ -306,7 +306,7 @@ impl<'a> Checker<'a> {
         locals: &Locals,
     ) -> Option<String> {
         match target {
-            StaticTarget::Name(name, _) => self.resolve_static_class_name(name),
+            StaticTarget::Name(name) => self.resolve_static_class_name(name),
             StaticTarget::Expr(receiver) => receiver_class(self.infer_expr(receiver, locals)),
         }
     }
@@ -425,9 +425,9 @@ impl<'a> Checker<'a> {
     }
 
     /// `class.nameCase` for a class name written in code.
-    pub(crate) fn check_class_name_case(&mut self, name: &QualifiedName, span: Span) {
+    pub(crate) fn check_class_name_case(&mut self, name: &QualifiedName) {
         if let Some(resolved) = name.resolved_class() {
-            self.check_resolved_class_name_case(&name.written, resolved, span);
+            self.check_resolved_class_name_case(&name.written, resolved, name.span);
         }
     }
 

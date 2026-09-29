@@ -1521,17 +1521,8 @@ impl<'a> Checker<'a> {
                         self.check_class_references_exist(&fqn, c.span);
                         self.check_internal_inheritance(&fqn, c.kind, c.span);
                         self.check_restricted_class_inheritance(&fqn, c.span);
-                        for (i, parent) in c.extends.iter().enumerate() {
-                            let span = c.extends_spans.get(i).copied().unwrap_or(c.span);
-                            self.check_class_name_case(parent, span);
-                        }
-                        for (i, iface) in c.implements.iter().enumerate() {
-                            let span = c.implements_spans.get(i).copied().unwrap_or(c.span);
-                            self.check_class_name_case(iface, span);
-                        }
-                        for (i, used) in c.uses.iter().enumerate() {
-                            let span = c.uses_spans.get(i).copied().unwrap_or(c.span);
-                            self.check_class_name_case(used, span);
+                        for name in c.extends.iter().chain(&c.implements).chain(&c.uses) {
+                            self.check_class_name_case(name);
                         }
                         self.check_method_tag_types(&fqn, c.span);
                         self.check_method_tag_templates(&fqn, c.doc_comment.as_deref(), c.span);

@@ -113,7 +113,7 @@ impl<'a> Checker<'a> {
                 }
                 (method.to_ascii_lowercase(), args)
             }
-            ExprKind::StaticCall(StaticTarget::Name(class, _), method, args)
+            ExprKind::StaticCall(StaticTarget::Name(class), method, args)
                 if self.resolve_static_class_name(class).is_some_and(|c| {
                     c.eq_ignore_ascii_case("Illuminate\\Support\\Facades\\Log")
                 }) =>

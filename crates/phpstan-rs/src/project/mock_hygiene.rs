@@ -54,7 +54,7 @@ fn is_test_helper_call<'e>(e: &'e Expr, name: &str) -> Option<&'e [Arg]> {
         {
             Some(args)
         }
-        ExprKind::StaticCall(StaticTarget::Name(target, _), method, args)
+        ExprKind::StaticCall(StaticTarget::Name(target), method, args)
             if method.eq_ignore_ascii_case(name)
                 && ["self", "static", "parent"]
                     .iter()
@@ -332,7 +332,7 @@ impl<'ast> Visitor<'ast> for Walker<'_> {
         if !self.banned.is_empty() {
             for factory in MOCK_FACTORIES {
                 if let Some(args) = is_test_helper_call(e, factory)
-                    && let Some(ExprKind::ClassNameFetch(StaticTarget::Name(class, _))) =
+                    && let Some(ExprKind::ClassNameFetch(StaticTarget::Name(class))) =
                         args.first().map(|a| &a.value.kind)
                 {
                     let Some(resolved) = class.resolved_class() else {

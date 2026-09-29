@@ -1,1 +1,2 @@
-6:17-6:29 class.nameCase L0 | Class referenced with incorrect case: base.
+6:17-6:21 class.nameCase L0 | Class referenced with incorrect case: base.
+    fix: Use Base => "Base"
