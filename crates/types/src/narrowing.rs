@@ -116,21 +116,11 @@ impl Relation<'_> {
         // `instanceof` check against the same variable still combines
         // correctly once the first check's own merge has already turned
         // `current` into a real union of object-like branches.
-        if is_object_like(&non_null) {
+        if non_null.is_object().yes() {
             self.intersect(vec![non_null, target.clone()])
         } else {
             target.clone()
         }
-    }
-}
-
-fn is_object_like(ty: &Type) -> bool {
-    match ty {
-        Type(Repr::Object(..)) | Type(Repr::ObjectWithoutClass) => true,
-        Type(Repr::Union(members)) | Type(Repr::Intersection(members)) => {
-            members.iter().all(is_object_like)
-        }
-        _ => false,
     }
 }
 
@@ -236,11 +226,7 @@ impl Type {
                         })
                         .map(|m| m.without(excluded))
                         .collect();
-                    match kept.len() {
-                        0 => Type::never(),
-                        1 => kept.into_iter().next().unwrap(),
-                        _ => self.with_members(kept),
-                    }
+                    self.with_members(kept)
                 }
                 // `$x !== ''` on a plain `string`. Deliberately not extended to an
                 // already-Intersection-refined value (e.g. upgrading an existing
@@ -360,11 +346,7 @@ impl Type {
                     .map(Type::to_non_empty_array)
                     .filter(|m| *m != Type::never())
                     .collect();
-                match kept.len() {
-                    0 => Type::never(),
-                    1 => kept.into_iter().next().unwrap(),
-                    _ => Type(Repr::Union(kept)),
-                }
+                Type::union_of(kept)
             }
             _ => self.clone(),
         }
@@ -462,11 +444,7 @@ impl Type {
                     .map(Type::to_non_list)
                     .filter(|m| *m != Type::never())
                     .collect();
-                match kept.len() {
-                    0 => Type::never(),
-                    1 => kept.into_iter().next().unwrap(),
-                    _ => Type(Repr::Union(kept)),
-                }
+                Type::union_of(kept)
             }
             _ => self.to_non_empty_array(),
         }
@@ -535,11 +513,7 @@ impl Type {
                         .map(|m| m.with_key_presence(key, present))
                         .filter(|m| *m != Type::never())
                         .collect();
-                    match kept.len() {
-                        0 => Type::never(),
-                        1 => kept.into_iter().next().unwrap(),
-                        _ => Type(Repr::Union(kept)),
-                    }
+                    Type::union_of(kept)
                 }
                 _ => self.clone(),
             }
@@ -622,11 +596,7 @@ impl Type {
                         .map(|m| m.to_isset_container(key))
                         .filter(|m| *m != Type::never())
                         .collect();
-                    match kept.len() {
-                        0 => Type::never(),
-                        1 => kept.into_iter().next().unwrap(),
-                        _ => Type(Repr::Union(kept)),
-                    }
+                    Type::union_of(kept)
                 }
                 _ => self.clone(),
             }
@@ -702,11 +672,7 @@ impl Type {
                     .map(Type::without_falsy)
                     .filter(|t| *t != Type::never())
                     .collect();
-                match kept.len() {
-                    0 => Type::never(),
-                    1 => kept.into_iter().next().unwrap(),
-                    _ => self.with_members(kept),
-                }
+                self.with_members(kept)
             }
             Type(Repr::Null) | Type(Repr::False) | Type(Repr::IntLiteral(0)) => Type::never(),
             Type(Repr::FloatLiteral(f)) if *f == 0.0 => Type::never(),

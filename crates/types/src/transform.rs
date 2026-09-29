@@ -100,9 +100,9 @@ impl Type {
             Type(Repr::ArrayShape(shape)) if shape.is_sealed() => {
                 Type::array_shape(Shape::unsealed(shape.fields.clone()))
             }
-            Type(Repr::Union(members)) => Type(Repr::Union(
-                members.iter().map(Type::unsealed_shapes).collect(),
-            )),
+            Type(Repr::Union(members)) => {
+                Type::union_of(members.iter().map(Type::unsealed_shapes).collect())
+            }
             other => other.clone(),
         }
     }
@@ -211,7 +211,9 @@ impl Type {
 
     /// This array with each value passed through `keep`: a shape field
     /// `keep` turns into `never` is dropped, and one it changes may be
-    /// dropped (becomes optional). Other types are left as they are.
+    /// dropped (becomes optional); a list or non-empty array whose values
+    /// change may have lost elements, so is neither. Other types are left
+    /// as they are.
     pub fn filter_array_values(&self, keep: &dyn Fn(&Type) -> Type) -> Type {
         syntax::stack::guard(|| match self {
             Type(Repr::Array(key, value)) => Type(Repr::Array(key.clone(), Arc::new(keep(value)))),
@@ -235,12 +237,29 @@ impl Type {
                 unsealed: shape.unsealed.clone(),
                 next_index: shape.next_index,
             }),
-            Type(Repr::Union(members)) => Type(Repr::Union(
+            Type(Repr::Union(members)) => Type::union_of(
                 members
                     .iter()
                     .map(|m| m.filter_array_values(keep))
                     .collect(),
-            )),
+            ),
+            // A refined array (`list<T>`, `non-empty-array<T>`): filtered as
+            // its array is, no longer a list or non-empty once an element
+            // may have been dropped.
+            Type(Repr::Intersection(members)) => {
+                let Some((key, value)) = members.iter().find_map(|m| match m {
+                    Type(Repr::Array(key, value)) => Some((key, value)),
+                    _ => None,
+                }) else {
+                    return self.clone();
+                };
+                let kept = keep(value);
+                if kept == **value {
+                    self.clone()
+                } else {
+                    Type::array(Type::clone(key), kept)
+                }
+            }
             other => other.clone(),
         })
     }
