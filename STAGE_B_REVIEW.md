@@ -188,7 +188,7 @@ Each fix needs a fixture.
   unset($b[2]);` it is 3, not 2, so the shape has to carry its next
   index (PHPStan's `nextAutoIndexes`) for the append to be exact.
 
-- [ ] **P4. Removing an enum case doesn't enumerate the rest.** After
+- [x] **P4. Removing an enum case doesn't enumerate the rest.** Done in `2f1e256a`. After
   `if ($x === Suit::Hearts) { return; }`, `$x: Suit` stays `Suit` where it
   is `Suit::Clubs|Suit::Spades`. Removing a case (and `!==`, `match` arms,
   `instanceof`) from an enum's object type expands the enum to its cases
