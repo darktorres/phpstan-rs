@@ -280,7 +280,7 @@ Each fix needs a fixture.
 
 ## Review 2: structure, syntax (B3)
 
-- [ ] **S1. Spanned names are half done.** `Ident` (a name and its span)
+- [x] **S1. Spanned names are half done.** Done in `3a5b36ca`. `Ident` (a name and its span)
   exists, yet these keep them apart:
   - `FunctionDecl`, `PropertyDecl`, `ClassConst` and `EnumCase` have
     `name` plus `name_span`;
