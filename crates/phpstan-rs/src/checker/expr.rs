@@ -1409,7 +1409,7 @@ impl<'a> Checker<'a> {
                 let invalid = self.check_binary_operand_validity(op, &l_ty, &r_ty, false, l.span);
                 self.check_comparison_validity(op, &l_ty, &r_ty, l.span);
                 self.check_duplicate_operands(op, l, r);
-                self.check_division_by_literal_zero(op, r, &r_ty, r.span);
+                self.check_division_by_zero(op, &r_ty, r.span);
                 self.check_constant_loose_comparison(op, l, r, &l_ty, &r_ty, e.span);
                 self.check_constant_numeric_comparison(op, l, r, &l_ty, &r_ty, e.span);
                 self.check_strict_comparison_of_different_types(
@@ -1934,7 +1934,7 @@ impl<'a> Checker<'a> {
                 if *op != BinOp::Coalesce {
                     let _ =
                         self.check_binary_operand_validity(op, &lhs_ty, &rhs_ty, true, lhs.span);
-                    self.check_division_by_literal_zero(op, rhs, &rhs_ty, rhs.span);
+                    self.check_division_by_zero(op, &rhs_ty, rhs.span);
                 }
                 // `$x += 1`/`$x ??= ...` is a real rebind of `$x` -
                 // routes through the same `bind_assignment_target` every
@@ -5189,6 +5189,10 @@ impl<'a> Checker<'a> {
             | BinOp::Div => {
                 let lt = self.infer_expr(l, locals);
                 let rt = self.infer_expr(r, locals);
+                // An operand that never has a value leaves none for the result.
+                if lt.is_never() || rt.is_never() {
+                    return Type::never();
+                }
                 if let Some(ty) = self.binary_operator_overload_result(op, &lt, &rt) {
                     return ty;
                 }

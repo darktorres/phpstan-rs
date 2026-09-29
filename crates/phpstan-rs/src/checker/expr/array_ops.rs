@@ -567,7 +567,7 @@ impl<'a> Checker<'a> {
             );
         }
         if self.settings.extras.check_array_key_cast
-            && let Some((from, to)) = array_key_cast_description(key_expr, &key_ty)
+            && let Some((from, to)) = array_key_cast_description(&key_ty)
         {
             self.report(
                 format!("Key {from} will be cast to {to} in the array."),
@@ -642,7 +642,7 @@ impl<'a> Checker<'a> {
             );
         }
         if self.settings.extras.check_array_key_cast
-            && let Some((from, to)) = array_key_cast_description(idx, &idx_ty)
+            && let Some((from, to)) = array_key_cast_description(&idx_ty)
         {
             self.report(
                 format!("Key {from} will be cast to {to} in the array access."),
@@ -673,15 +673,7 @@ impl<'a> Checker<'a> {
 /// happens; `None` for a non-constant-scalar type (`Mixed`, a bare
 /// `Int`/`String`, ...) too, matching `check_array_item_key_type`'s own
 /// "don't guess" leniency.
-///
-/// A bare float literal expression infers to `float`, not a
-/// `FloatLiteral`, everywhere else in this checker (nothing else needs
-/// the literal value kept around) - checked directly off the AST here
-/// instead, the one shape this function needs it for.
-fn array_key_cast_description(expr: &Expr, ty: &Type) -> Option<(String, String)> {
-    if let ExprKind::Literal(Literal::Float(f)) = &expr.peeled().kind {
-        return Some((f.to_string(), (*f as i64).to_string()));
-    }
+fn array_key_cast_description(ty: &Type) -> Option<(String, String)> {
     if ty.finite_types().len() != 1 {
         return None;
     }

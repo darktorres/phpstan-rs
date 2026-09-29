@@ -33,7 +33,7 @@
 //! not a good trade for a rule whose whole point is confidence.
 
 use crate::checker::Checker;
-use syntax::ast::{BinOp, Expr, ExprKind, Literal, UnaryOp};
+use syntax::ast::{BinOp, Expr, ExprKind, UnaryOp};
 use syntax::token::Span;
 use types::{ArithmeticOp, OrderingOp, Type};
 
@@ -216,8 +216,12 @@ impl<'a> Checker<'a> {
         // leniency doesn't help here, since
         // `Mixed | non-numeric-literal` fails *both* of `BitAnd`'s own
         // legal combinations even though either one might hold at
-        // runtime.
-        if l_ty.is_mixed() || r_ty.is_mixed() || l_ty.is_error() || r_ty.is_error() {
+        // runtime. An error or `never` operand (a division by zero) is
+        // already reported or never evaluated.
+        if [l_ty, r_ty]
+            .iter()
+            .any(|t| t.is_mixed() || t.is_error() || t.is_never())
+        {
             return false;
         }
         let Some(valid) = self.binary_operand_validity(op, l_ty, r_ty) else {
@@ -355,34 +359,19 @@ impl<'a> Checker<'a> {
     /// own identifiers (`division.byZero`/`modulo.byZero`, not real
     /// PHPStan's own naming, since this isn't really the same mechanism)
     /// rather than force-fitting it into the unrelated throw-tracking
-    /// machinery. Scoped to a literal `0`/`0.0` divisor only - a
-    /// provably-zero *range* (`int<0, 0>`) is a real, if much rarer,
-    /// residual not attempted, and a computed (non-literal) divisor is
-    /// never guessed at either way. Takes the divisor's own raw
-    /// expression, not just its inferred type - a plain float literal
-    /// (`0.0`) infers to bare `float` everywhere else in this
-    /// checker (float literal is only ever produced by parsing a
-    /// docblock type *string*, never an ordinary literal float
-    /// *expression*), so the type alone would silently miss the single
-    /// most common real spelling of a literal-zero float divisor -
-    /// checked directly against the AST node itself instead, the same
-    /// "peek at the literal syntax directly" precedent `is_false_literal`/
-    /// `is_true_literal` already establish elsewhere in this codebase.
-    pub(crate) fn check_division_by_literal_zero(
-        &mut self,
-        op: &BinOp,
-        divisor: &Expr,
-        divisor_ty: &Type,
-        span: Span,
-    ) {
+    /// machinery. Reported when every value the divisor can have is zero
+    /// (`0`, `0.0`, `int<0, 0>`).
+    pub(crate) fn check_division_by_zero(&mut self, op: &BinOp, divisor_ty: &Type, span: Span) {
         let (op_word, identifier) = match op {
             BinOp::Div => ("Division", "division.byZero"),
             BinOp::Mod => ("Modulo", "modulo.byZero"),
             _ => return,
         };
-        let is_zero = *divisor_ty == Type::int_literal(0)
-            || *divisor_ty == Type::float_literal(0.0)
-            || matches!(&divisor.kind, ExprKind::Literal(Literal::Float(f)) if *f == 0.0);
+        let values = divisor_ty.finite_types();
+        let is_zero = !values.is_empty()
+            && values
+                .iter()
+                .all(|v| *v == Type::int_literal(0) || *v == Type::float_literal(0.0));
         if !is_zero {
             return;
         }
