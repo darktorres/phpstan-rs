@@ -209,6 +209,17 @@ impl Relation<'_> {
                         _ => TrinaryLogic::Maybe,
                     }
                 }
+                // A field the shape requires that the array's keys or values
+                // can't hold keeps any value from being both.
+                (Type(Repr::ArrayShape(shape)), Type(Repr::Array(k, v)))
+                | (Type(Repr::Array(k, v)), Type(Repr::ArrayShape(shape)))
+                    if shape.fields.iter().any(|f| {
+                        !f.optional
+                            && (self.disjoint(k, &f.key.to_type()) || self.disjoint(v, &f.ty))
+                    }) =>
+                {
+                    TrinaryLogic::No
+                }
                 // A general array may or may not carry a shape's keys.
                 (Type(Repr::ArrayShape(_)), Type(Repr::Array(..))) => TrinaryLogic::Maybe,
                 _ if self.proves_super_type(sup, sub) => TrinaryLogic::Yes,
@@ -370,9 +381,42 @@ impl Relation<'_> {
     }
 }
 
-/// An accessory refinement no value of `sub`'s scalar family can carry
-/// (`non-empty-string` over an `int`, `list` over a `string`).
+/// An accessory refinement no value of `sub` can carry: one of another
+/// scalar family (`non-empty-string` over an `int`, `list` over a
+/// `string`), or a literal or shape the refinement rules out
+/// (`non-empty-string` over `''`, `numeric-string` over `'abc'`,
+/// `non-empty-array` over `array{}`, `list` over `array{a: int}`).
 fn accessory_refuses(kind: &AccessoryKind, sub: &Type) -> bool {
+    if let Type(Repr::StringLiteral(value)) = sub {
+        let bytes = value.as_bytes();
+        let has = match kind {
+            AccessoryKind::NonEmptyString => !bytes.is_empty(),
+            AccessoryKind::NonFalsyString => !bytes.is_empty() && bytes != b"0",
+            AccessoryKind::NumericString => crate::numeric_value(bytes).is_some(),
+            AccessoryKind::LiteralString => true,
+            AccessoryKind::LowercaseString => !bytes.iter().any(u8::is_ascii_uppercase),
+            AccessoryKind::UppercaseString => !bytes.iter().any(u8::is_ascii_lowercase),
+            AccessoryKind::DecimalIntegerString => value
+                .as_str()
+                .is_some_and(crate::subtype::is_decimal_integer_string_literal),
+            AccessoryKind::NonEmptyArray | AccessoryKind::ArrayList => false,
+        };
+        return !has;
+    }
+    if let Type(Repr::ArrayShape(shape)) = sub {
+        match kind {
+            AccessoryKind::NonEmptyArray if shape.is_empty_array() => return true,
+            AccessoryKind::ArrayList
+                if shape
+                    .fields
+                    .iter()
+                    .any(|f| !f.optional && matches!(f.key, crate::ShapeKey::Str(_))) =>
+            {
+                return true;
+            }
+            _ => {}
+        }
+    }
     let is_string = matches!(
         sub,
         Type(Repr::String)
@@ -428,6 +472,14 @@ fn scalars_disjoint(a: &Type, b: &Type) -> bool {
             (Type(Repr::IntLiteral(n)), Type(Repr::IntRange(min, max)))
             | (Type(Repr::IntRange(min, max)), Type(Repr::IntLiteral(n))) => {
                 min.is_some_and(|m| *n < m) || max.is_some_and(|m| *n > m)
+            }
+            (Type(Repr::IntRange(a_min, a_max)), Type(Repr::IntRange(b_min, b_max))) => {
+                a_max.zip(*b_min).is_some_and(|(a, b)| a < b)
+                    || b_max.zip(*a_min).is_some_and(|(b, a)| b < a)
+            }
+            // `NAN` is itself (see `is_super_type_of`).
+            (Type(Repr::FloatLiteral(x)), Type(Repr::FloatLiteral(y))) => {
+                x != y && !(x.is_nan() && y.is_nan())
             }
             _ => match (scalar_family(a), scalar_family(b)) {
                 (Some(fa), Some(fb)) => fa != fb,

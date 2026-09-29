@@ -1,0 +1,6 @@
+13:9-13:18 identical.alwaysFalse L4 | Strict comparison using === between int<0, 5> and int<10, 20> will always evaluate to false.
+14:9-14:19 identical.alwaysFalse L4 | Strict comparison using === between non-empty-string and '' will always evaluate to false.
+15:9-15:23 identical.alwaysFalse L4 | Strict comparison using === between numeric-string and 'abc' will always evaluate to false.
+16:9-16:20 identical.alwaysFalse L4 | Strict comparison using === between non-empty-array<int> and array{} will always evaluate to false.
+17:9-17:20 identical.alwaysFalse L4 | Strict comparison using === between array<(int|string), int> and array{x: string} will always evaluate to false.
+18:9-18:20 identical.alwaysFalse L4 | Strict comparison using === between 1.5 and 2.5 will always evaluate to false.
