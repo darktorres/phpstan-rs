@@ -822,7 +822,26 @@ pub struct Checker<'a> {
     infer_cache: RefCell<Option<InferCache>>,
 }
 
-type InferCache = FxHashMap<(usize, NodeId, u64), Type>;
+type InferCache = FxHashMap<InferKey, Type>;
+
+/// What `infer_cache` holds an answer to: one question about one
+/// expression (its address and id) in one scope version.
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+pub(crate) struct InferKey {
+    expr: usize,
+    id: NodeId,
+    version: u64,
+    question: InferQuestion,
+}
+
+/// A question `infer_cache` answers.
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+pub(crate) enum InferQuestion {
+    // `Checker::infer_expr`.
+    Type,
+    // `Checker::chain_link_type`.
+    ChainLink,
+}
 
 mod access_attributes;
 mod locals;

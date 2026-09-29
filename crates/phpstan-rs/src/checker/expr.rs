@@ -9,6 +9,7 @@ use crate::checker::{
     propagate_container_field_facts, purge_stale_narrowing_for, resolve_call_args,
     unassigned_variable_type,
 };
+use crate::checker::{InferKey, InferQuestion};
 use crate::pest_config;
 use crate::regex_groups;
 use crate::registry::FunctionReflection;
@@ -4248,6 +4249,21 @@ impl<'a> Checker<'a> {
     /// `null` skipped the rest of it, so that `null` isn't this link's.
     /// Anything else's type is its inferred one.
     pub(crate) fn chain_link_type(&self, e: &Expr, locals: &Locals) -> Type {
+        if !matches!(
+            e.kind,
+            ExprKind::MethodCall(..)
+                | ExprKind::PropertyAccess(..)
+                | ExprKind::Index(_, Some(_))
+                | ExprKind::Grouping(_)
+        ) {
+            return self.infer_expr(e, locals);
+        }
+        self.cached(e, locals, InferQuestion::ChainLink, || {
+            self.chain_link_type_uncached(e, locals)
+        })
+    }
+
+    fn chain_link_type_uncached(&self, e: &Expr, locals: &Locals) -> Type {
         match &e.kind {
             ExprKind::MethodCall(recv, method, args, _) => {
                 // What the method is looked up on is the receiver's object
@@ -4292,14 +4308,33 @@ impl<'a> Checker<'a> {
     }
 
     pub(crate) fn infer_expr(&self, e: &Expr, locals: &Locals) -> Type {
+        self.cached(e, locals, InferQuestion::Type, || {
+            self.infer_expr_unguarded(e, locals)
+        })
+    }
+
+    /// `answer`'s answer to `question` about `e`, from `infer_cache` while
+    /// an expression check runs.
+    fn cached(
+        &self,
+        e: &Expr,
+        locals: &Locals,
+        question: InferQuestion,
+        answer: impl FnOnce() -> Type,
+    ) -> Type {
         if e.id == NodeId::SYNTHETIC || self.infer_cache.borrow().is_none() {
-            return syntax::stack::guard(|| self.infer_expr_unguarded(e, locals));
+            return syntax::stack::guard(answer);
         }
-        let key = (std::ptr::from_ref(e) as usize, e.id, locals.version());
+        let key = InferKey {
+            expr: std::ptr::from_ref(e) as usize,
+            id: e.id,
+            version: locals.version(),
+            question,
+        };
         if let Some(ty) = self.infer_cache.borrow().as_ref().and_then(|c| c.get(&key)) {
             return ty.clone();
         }
-        let ty = syntax::stack::guard(|| self.infer_expr_unguarded(e, locals));
+        let ty = syntax::stack::guard(answer);
         if let Some(cache) = self.infer_cache.borrow_mut().as_mut() {
             cache.insert(key, ty.clone());
         }
