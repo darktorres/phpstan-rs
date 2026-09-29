@@ -50,7 +50,7 @@ impl<'a> Checker<'a> {
                 let Some(i) = f.params.iter().position(|p| *p.name == **name) else {
                     self.report(
                         format!("PHPDoc tag {tag} references unknown parameter: ${name}"),
-                        f.name_span,
+                        f.name.span,
                         2,
                         "parameter.notFound",
                     );
@@ -69,7 +69,7 @@ impl<'a> Checker<'a> {
                         format!(
                             "PHPDoc tag {tag} for parameter ${name} contains unresolvable type."
                         ),
-                        f.name_span,
+                        f.name.span,
                         2,
                         "parameter.unresolvableType",
                     );
@@ -81,7 +81,7 @@ impl<'a> Checker<'a> {
                             format!(
                                 "Parameter ${name} for PHPDoc tag {tag} is not passed by reference."
                             ),
-                            f.name_span,
+                            f.name.span,
                             2,
                             "parameter.notByRef",
                         );
@@ -112,7 +112,7 @@ impl<'a> Checker<'a> {
                         &format!("PHPDoc tag {tag} for parameter ${name}"),
                         &doc_ty,
                         &native,
-                        f.name_span,
+                        f.name.span,
                         "parameter.phpDocType",
                     );
                 }
@@ -121,7 +121,7 @@ impl<'a> Checker<'a> {
                     &format!("{tag} for parameter ${name}"),
                     Some((f.name.as_ref(), block.templates.as_slice())),
                     class_name,
-                    f.name_span,
+                    f.name.span,
                 );
             }
         }
@@ -132,7 +132,7 @@ impl<'a> Checker<'a> {
         {
             self.report(
                 "PHPDoc tag @return contains unresolvable type.".to_string(),
-                f.name_span,
+                f.name.span,
                 2,
                 "return.unresolvableType",
             );
@@ -143,7 +143,7 @@ impl<'a> Checker<'a> {
                 "PHPDoc tag @return",
                 &doc_ty,
                 &native,
-                f.name_span,
+                f.name.span,
                 "return.phpDocType",
             );
             self.check_generic_callables(
@@ -151,7 +151,7 @@ impl<'a> Checker<'a> {
                 "@return",
                 Some((f.name.as_ref(), block.templates.as_slice())),
                 class_name,
-                f.name_span,
+                f.name.span,
             );
         }
     }
@@ -283,8 +283,10 @@ impl<'a> Checker<'a> {
                 let value = match param {
                     Some(p) => p.clone(),
                     None => Param {
-                        name: "value".into(),
-                        name_span: span,
+                        name: Ident {
+                            name: "value".into(),
+                            span,
+                        },
                         type_hint: property_type_hint.cloned(),
                         default: None,
                         by_ref: false,
@@ -306,8 +308,10 @@ impl<'a> Checker<'a> {
         };
         let decl = FunctionDecl {
             namespaced_name: None,
-            name: name.into(),
-            name_span: span,
+            name: Ident {
+                name: name.into(),
+                span,
+            },
             params,
             return_type,
             body: None,
@@ -462,7 +466,7 @@ impl<'a> Checker<'a> {
                         self.report(format!(
                             "Conditional return type uses subject type {shown} which is not part of PHPDoc @template tags."
                         ),
-                        f.name_span,
+                        f.name.span,
                         2,
                         "conditionalType.subjectNotFound",
                     );
@@ -481,7 +485,7 @@ impl<'a> Checker<'a> {
                             format!(
                                 "Conditional return type references unknown parameter ${subject}."
                             ),
-                            f.name_span,
+                            f.name.span,
                             2,
                             "parameter.notFound",
                         );
@@ -504,7 +508,7 @@ impl<'a> Checker<'a> {
             self.report(format!(
                     "Condition \"{subject_ty} {word} {target}\" in conditional return type is always {always}."
                 ),
-                f.name_span,
+                f.name.span,
                 2,
                 if always {
                     "conditionalType.alwaysTrue"
@@ -546,7 +550,7 @@ impl<'a> Checker<'a> {
                     "Self-out type {resolved} of method {class}::{} is not subtype of {class}.",
                     f.name
                 ),
-                f.name_span,
+                f.name.span,
                 2,
                 "selfOut.type",
             );
@@ -556,7 +560,7 @@ impl<'a> Checker<'a> {
                     "PHPDoc tag @phpstan-self-out is not supported above static method {class}::{}().",
                     f.name
                 ),
-                f.name_span,
+                f.name.span,
                 2,
                 "selfOut.static",
             );
@@ -566,7 +570,7 @@ impl<'a> Checker<'a> {
                     "PHPDoc tag @phpstan-self-out for method {class}::{}() contains unresolvable type.",
                     f.name
                 ),
-                f.name_span,
+                f.name.span,
                 2,
                 "selfOut.unresolvableType",
             );
@@ -575,7 +579,7 @@ impl<'a> Checker<'a> {
             &resolved,
             "PHPDoc tag @phpstan-self-out",
             label,
-            f.name_span,
+            f.name.span,
         );
     }
 

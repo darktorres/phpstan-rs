@@ -484,7 +484,7 @@ impl<'a> Checker<'a> {
                 &format!(
                     "Set hook for property {fqn}::${name} uses native union types but they're supported only on PHP 8.0 and later."
                 ),
-                p.name_span,
+                p.name.span,
             );
             // `ExistingClassesInPropertyHookTypehintsRule`'s
             // `parameter.unresolvableNativeType` half - real PHP hooks
@@ -497,7 +497,7 @@ impl<'a> Checker<'a> {
                     p.name,
                 ),
                 "parameter.unresolvableNativeType",
-                p.name_span,
+                p.name.span,
             );
         }
 
@@ -506,9 +506,9 @@ impl<'a> Checker<'a> {
         let mut locals = Locals::default();
         locals.insert("this".to_string(), Type::object(fqn.into(), Vec::new()));
         let param_name = param
-            .map(|p| p.name.clone())
-            .unwrap_or_else(|| "value".to_string().into());
-        let param_span = param.map(|p| p.name_span).unwrap_or(span);
+            .map(|p| p.name.name.clone())
+            .unwrap_or_else(|| "value".into());
+        let param_span = param.map(|p| p.name.span).unwrap_or(span);
         let value_ty = prop_sig
             .set_ty()
             .clone()

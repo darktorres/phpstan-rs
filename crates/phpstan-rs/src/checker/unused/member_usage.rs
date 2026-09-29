@@ -291,7 +291,7 @@ pub(crate) fn seed_self_typed_param_aliases(params: &[Param], fqn: &str, usage: 
             _ => false,
         });
         if is_self {
-            usage.aliases.insert(p.name.clone());
+            usage.aliases.insert(p.name.name.clone());
         }
     }
 }

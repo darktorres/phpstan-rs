@@ -262,12 +262,8 @@ impl<'a> Checker<'a> {
                     }
                 };
                 purge_stale_narrowing_for(&mut catch_locals, var);
-                // Real declaration - `var_span` is always `Some`
-                // exactly when `var` is (the parser sets both
-                // together), `c.span` is a defensive fallback only.
-                let var_span = c.var_span.unwrap_or(c.span);
-                self.probe_hit_at(var_span, &ty);
-                catch_locals.declare(var.to_string(), ty, var_span);
+                self.probe_hit_at(var.span, &ty);
+                catch_locals.declare(var.to_string(), ty, var.span);
             }
             self.check_block(&c.body, &mut catch_locals, declared_return, label);
             if self.settings.extras.check_exception_hygiene {

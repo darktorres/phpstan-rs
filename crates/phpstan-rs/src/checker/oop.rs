@@ -709,14 +709,14 @@ impl<'a> Checker<'a> {
         for m in &c.methods {
             self.check_unknown_phpstan_tags_on(
                 m.function.doc_comment.as_deref(),
-                m.function.name_span,
+                m.function.name.span,
             );
         }
         for p in &c.properties {
             self.check_unknown_phpstan_tags_on(p.doc_comment.as_deref(), p.span);
         }
         for cc in &c.consts {
-            self.check_unknown_phpstan_tags_on(cc.doc_comment.as_deref(), cc.name_span);
+            self.check_unknown_phpstan_tags_on(cc.doc_comment.as_deref(), cc.name.span);
         }
     }
 
@@ -1053,7 +1053,7 @@ impl<'a> Checker<'a> {
             };
             let own = own.clone();
             let proto = proto.clone();
-            let span = cc.name_span;
+            let span = cc.name.span;
             if proto.is_final() {
                 self.report_builder(
                     DiagnosticBuilder::new(
@@ -1189,7 +1189,7 @@ impl<'a> Checker<'a> {
                                     "Constant {fqn}::{name} with value {own_value} overriding constant {trait_fqn}::{name} with different value {} should have the same value.",
                                     trait_const.value_ty()
                                 ),
-                                cc.name_span,
+                                cc.name.span,
                                 0,
                                 "classConstant.value",
                             )
@@ -1267,7 +1267,7 @@ impl<'a> Checker<'a> {
         }
         for (message, identifier) in errors {
             self.report_builder(
-                DiagnosticBuilder::new(message, cc.name_span, 0, identifier).non_ignorable(),
+                DiagnosticBuilder::new(message, cc.name.span, 0, identifier).non_ignorable(),
             );
         }
     }

@@ -112,7 +112,7 @@ impl<'ast> Visitor<'ast> for Vars {
                 // it references by value, so its body is walked.
                 ExprKind::Closure { uses, .. } => {
                     for u in uses {
-                        self.names.insert(u.name.clone());
+                        self.names.insert(u.name.name.clone());
                     }
                     return;
                 }

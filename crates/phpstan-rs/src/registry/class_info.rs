@@ -855,7 +855,7 @@ fn collect_merged_methods(
 }
 
 fn name_site(f: &syntax::ast::FunctionDecl) -> (u32, u32) {
-    (f.name_span.start.line, f.name_span.start.col)
+    (f.name.span.start.line, f.name.span.start.col)
 }
 
 /// Each declared member's name span, by kind: what `ClassReflection::
@@ -871,12 +871,12 @@ pub(crate) struct MemberSpans<'a> {
 impl<'a> MemberSpans<'a> {
     fn add_methods(&mut self, methods: &'a [syntax::ast::MethodDecl]) {
         for m in methods {
-            self.methods.insert(&m.function.name, m.function.name_span);
+            self.methods.insert(&m.function.name, m.function.name.span);
             self.method_sites
-                .insert(name_site(&m.function), m.function.name_span);
+                .insert(name_site(&m.function), m.function.name.span);
             for p in &m.function.params {
                 if p.promotion.is_some() {
-                    self.properties.insert(&p.name, p.name_span);
+                    self.properties.insert(&p.name, p.name.span);
                 }
             }
         }
@@ -884,7 +884,7 @@ impl<'a> MemberSpans<'a> {
 
     fn add_consts(&mut self, consts: &'a [syntax::ast::ClassConst]) {
         for c in consts {
-            self.consts.insert(&c.name, c.name_span);
+            self.consts.insert(&c.name, c.name.span);
         }
     }
 
@@ -893,10 +893,10 @@ impl<'a> MemberSpans<'a> {
         spans.add_methods(&c.methods);
         spans.add_consts(&c.consts);
         for p in &c.properties {
-            spans.properties.insert(&p.name, p.name_span);
+            spans.properties.insert(&p.name, p.name.span);
         }
         for case in &c.enum_cases {
-            spans.consts.insert(&case.name, case.name_span);
+            spans.consts.insert(&case.name, case.name.span);
         }
         spans
     }
@@ -1836,12 +1836,12 @@ impl ClassReflection {
             e.enum_cases
                 .iter()
                 .find(|c| c.name == **name)
-                .map(|c| c.name_span)
+                .map(|c| c.name.span)
                 .or_else(|| {
                     e.consts
                         .iter()
                         .find(|k| k.name == **name)
-                        .map(|k| k.name_span)
+                        .map(|k| k.name.span)
                 })
                 .map(|span| (span.start.line, span.start.col))
         };

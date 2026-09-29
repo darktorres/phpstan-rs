@@ -452,7 +452,7 @@ impl<'ast> Visitor<'ast> for Walker<'_> {
                 self.visit_stmt(body);
             }
             StmtKind::FunctionDecl(f) => {
-                self.record(f.name_span, Resolved::Function(f.fq_name().to_string()));
+                self.record(f.name.span, Resolved::Function(f.fq_name().to_string()));
                 walk_stmt(self, stmt);
             }
             StmtKind::Global(vars) => {
@@ -479,8 +479,8 @@ impl<'ast> Visitor<'ast> for Walker<'_> {
         for (name, span) in clause.types.iter().zip(&clause.types_spans) {
             self.record_class(name, *span);
         }
-        if let (Some(name), Some(span)) = (&clause.var, clause.var_span) {
-            self.record_var_self(span, name);
+        if let Some(var) = &clause.var {
+            self.record_var_self(var.span, &var.name);
         }
         walk_catch_clause(self, clause);
     }
@@ -504,7 +504,7 @@ impl<'ast> Visitor<'ast> for Walker<'_> {
         if let Some(hint) = &param.type_hint {
             self.visit_type_hint(hint);
         }
-        self.record_var_self(param.name_span, &param.name);
+        self.record_var_self(param.name.span, &param.name.name);
         if let Some(default) = &param.default {
             self.visit_expr(default);
         }
@@ -552,24 +552,24 @@ impl<'ast> Visitor<'ast> for Walker<'_> {
     }
 
     fn visit_method_decl(&mut self, method: &'ast MethodDecl) {
-        self.record_member(method.function.name_span, &method.function.name);
+        self.record_member(method.function.name.span, &method.function.name);
         let previous = std::mem::replace(&mut self.current_is_static, method.is_static);
         walk_method_decl(self, method);
         self.current_is_static = previous;
     }
 
     fn visit_property_decl(&mut self, property: &'ast PropertyDecl) {
-        self.record_member(property.name_span, &property.name);
+        self.record_member(property.name.span, &property.name);
         walk_property_decl(self, property);
     }
 
     fn visit_class_const(&mut self, constant: &'ast ClassConst) {
-        self.record_member(constant.name_span, &constant.name);
+        self.record_member(constant.name.span, &constant.name);
         walk_class_const(self, constant);
     }
 
     fn visit_enum_case(&mut self, case: &'ast EnumCase) {
-        self.record_member(case.name_span, &case.name);
+        self.record_member(case.name.span, &case.name);
         walk_enum_case(self, case);
     }
 
@@ -685,12 +685,12 @@ impl<'ast> Visitor<'ast> for Walker<'_> {
                     // below, since a `use` clause names an outer variable,
                     // not one of the closure's own locals.
                     for u in uses {
-                        self.record_var_read(u.span, &u.name);
+                        self.record_var_read(u.name.span, &u.name.name);
                     }
                     let id = self.next_id();
                     self.scope_frames.push(ScopeFrame::Closure {
                         id,
-                        transparent: uses.iter().map(|u| u.name.clone()).collect(),
+                        transparent: uses.iter().map(|u| u.name.name.clone()).collect(),
                     });
                     walk_stmts(self, body);
                     self.scope_frames.pop();
@@ -703,7 +703,7 @@ impl<'ast> Visitor<'ast> for Walker<'_> {
                     let id = self.next_id();
                     self.scope_frames.push(ScopeFrame::ArrowFn {
                         id,
-                        owns: params.iter().map(|p| p.name.clone()).collect(),
+                        owns: params.iter().map(|p| p.name.name.clone()).collect(),
                     });
                     self.visit_expr(body);
                     self.scope_frames.pop();

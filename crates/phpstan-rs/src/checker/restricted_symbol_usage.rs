@@ -945,7 +945,7 @@ impl<'a> Checker<'a> {
                 self.check_restricted_class_name_usage(
                     &class,
                     &format!("Parameter ${} references", p.name),
-                    p.type_hint.as_ref().map(|h| h.span).unwrap_or(p.name_span),
+                    p.type_hint.as_ref().map(|h| h.span).unwrap_or(p.name.span),
                     ClassUsageLocation::ParamType,
                 );
             }

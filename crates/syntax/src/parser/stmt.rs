@@ -297,8 +297,10 @@ impl Parser {
                     consts.push(ClassConst {
                         namespaced_name: None,
                         removal_span: None,
-                        name,
-                        name_span,
+                        name: Ident {
+                            name,
+                            span: name_span,
+                        },
                         value,
                         doc_comment: None,
                         // A top-level `const` has no `public`/`private`

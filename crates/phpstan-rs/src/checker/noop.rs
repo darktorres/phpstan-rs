@@ -400,7 +400,7 @@ impl<'a> Checker<'a> {
             format!(
                 "{description} {label}() is marked as impure but does not have any side effects."
             ),
-            f.name_span,
+            f.name.span,
             0,
             identifier,
         );
@@ -476,7 +476,7 @@ impl<'a> Checker<'a> {
                         param.name,
                         kind_word.to_lowercase()
                     ),
-                    param.name_span,
+                    param.name.span,
                     0,
                     format!("{identifier_prefix}.parameterByRef"),
                 );
@@ -491,7 +491,7 @@ impl<'a> Checker<'a> {
         {
             self.report(
                 format!("{kind_word} {label}() is pure but has no return value."),
-                f.name_span,
+                f.name.span,
                 0,
                 format!("{identifier_prefix}.void"),
             );
@@ -553,7 +553,7 @@ impl<'a> Checker<'a> {
                 self.report(format!(
                         "PHPDoc tag @param-{tag}-invoked-callable references unknown parameter: ${name}"
                     ),
-                    f.name_span,
+                    f.name.span,
                     2,
                     "parameter.notFound",
                 );
@@ -569,7 +569,7 @@ impl<'a> Checker<'a> {
                 self.report(format!(
                         "PHPDoc tag @param-{tag}-invoked-callable is for parameter ${name} with non-callable type {native_ty}."
                     ),
-                    f.name_span,
+                    f.name.span,
                     2,
                     identifier,
                 );
@@ -579,7 +579,7 @@ impl<'a> Checker<'a> {
             let Some(param) = f.params.iter().find(|p| *p.name == **name) else {
                 self.report(
                     format!("PHPDoc tag @param-closure-this references unknown parameter: ${name}"),
-                    f.name_span,
+                    f.name.span,
                     2,
                     "parameter.notFound",
                 );
@@ -591,7 +591,7 @@ impl<'a> Checker<'a> {
                 self.report(format!(
                         "PHPDoc tag @param-closure-this is for parameter ${name} with non-Closure type {native_ty}."
                     ),
-                    f.name_span,
+                    f.name.span,
                     2,
                     "paramClosureThis.nonClosure",
                 );

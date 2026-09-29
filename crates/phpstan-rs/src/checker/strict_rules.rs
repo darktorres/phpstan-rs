@@ -898,10 +898,10 @@ impl<'ast> syntax::visit::Visitor<'ast> for Assigned {
             }
             StmtKind::Try { catches, .. } => {
                 for catch in catches {
-                    if let (Some(var), Some(span)) = (&catch.var, catch.var_span) {
+                    if let Some(var) = &catch.var {
                         out.push(AssignedVariable {
-                            name: var.clone(),
-                            span,
+                            name: var.name.clone(),
+                            span: var.span,
                             loops: loops.clone(),
                         });
                     }

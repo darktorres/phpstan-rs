@@ -95,7 +95,7 @@ impl<'a> Walker<'a> {
             decl.return_type
                 .as_ref()
                 .map(|h| h.span)
-                .unwrap_or(decl.name_span),
+                .unwrap_or(decl.name.span),
             format!("The return type of {what}"),
             sig.return_type(),
         );
@@ -353,7 +353,7 @@ impl<'ast> Visitor<'ast> for Walker<'_> {
                 let fqn = f.fq_name().to_string();
                 let what = format!("{fqn}()");
                 if f.by_ref {
-                    self.by_ref_return(f.name_span, &what);
+                    self.by_ref_return(f.name.span, &what);
                 }
                 if let Some(sig) = self.registry.lookup_function(&fqn) {
                     self.signature_types(sig, f, &what);
@@ -387,7 +387,7 @@ impl<'ast> Visitor<'ast> for Walker<'_> {
             let f = &m.function;
             let what = format!("{fqn}::{}()", f.name);
             if f.by_ref {
-                self.by_ref_return(f.name_span, &what);
+                self.by_ref_return(f.name.span, &what);
             }
             if let Some(sig) = self.registry.lookup_method(&fqn, &f.name) {
                 self.signature_types(sig, f, &what);

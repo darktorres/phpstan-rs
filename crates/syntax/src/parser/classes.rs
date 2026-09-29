@@ -330,8 +330,10 @@ impl Parser {
                     consts.push(ClassConst {
                         namespaced_name: None,
                         removal_span: None,
-                        name: cname,
-                        name_span: cname_span,
+                        name: Ident {
+                            name: cname,
+                            span: cname_span,
+                        },
                         value,
                         doc_comment: doc.clone(),
                         visibility,
@@ -407,8 +409,10 @@ impl Parser {
                     let hooks = self.parse_property_hooks()?;
                     properties.push(PropertyDecl {
                         removal_span: None,
-                        name: self.interner.name(&name),
-                        name_span,
+                        name: Ident {
+                            name: self.interner.name(&name),
+                            span: name_span,
+                        },
                         visibility,
                         write_visibility,
                         is_static,
@@ -429,8 +433,10 @@ impl Parser {
                 }
                 properties.push(PropertyDecl {
                     removal_span: None,
-                    name: self.interner.name(&name),
-                    name_span,
+                    name: Ident {
+                        name: self.interner.name(&name),
+                        span: name_span,
+                    },
                     visibility,
                     write_visibility,
                     is_static,

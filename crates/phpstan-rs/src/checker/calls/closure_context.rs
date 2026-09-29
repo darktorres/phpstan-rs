@@ -60,7 +60,7 @@ impl<'a> Checker<'a> {
                 locals.insert(u.name.to_string(), ty);
                 locals.clear_native(&u.name);
             } else {
-                locals.declare(u.name.to_string(), ty, u.span);
+                locals.declare(u.name.to_string(), ty, u.name.span);
             }
         }
     }
@@ -125,7 +125,7 @@ impl<'a> Checker<'a> {
                         "parameter.trait",
                     );
                     self.check_type_class_name_case(&case_refs, p.span);
-                    arrow_locals.declare(p.name.to_string(), ty, p.name_span);
+                    arrow_locals.declare(p.name.to_string(), ty, p.name.span);
                     arrow_locals.set_native(&p.name, self.closure_param_native(p));
                 }
                 let body_ty = self.check_expr(body, &mut arrow_locals, label);
@@ -188,7 +188,7 @@ impl<'a> Checker<'a> {
                         self.report_builder(
                             DiagnosticBuilder::new(
                                 "Cannot use $this as lexical variable.".to_string(),
-                                u.span,
+                                u.name.span,
                                 0,
                                 "closure.useThis",
                             )
@@ -201,19 +201,19 @@ impl<'a> Checker<'a> {
                                     "Cannot use superglobal variable ${} as lexical variable.",
                                     u.name
                                 ),
-                                u.span,
+                                u.name.span,
                                 0,
                                 "closure.useSuperGlobal",
                             )
                             .non_ignorable(),
                         );
-                    } else if params.iter().any(|p| p.name == u.name) {
+                    } else if params.iter().any(|p| p.name.name == u.name.name) {
                         self.report_builder(
                             DiagnosticBuilder::new(format!(
                                     "Cannot use lexical variable ${} since a parameter with the same name already exists.",
                                     u.name
                                 ),
-                                u.span,
+                                u.name.span,
                                 0,
                                 "closure.useDuplicate",
                             )
@@ -222,14 +222,14 @@ impl<'a> Checker<'a> {
                     } else if !u.by_ref && !locals.contains_key(&u.name) {
                         self.report(
                             format!("undefined variable ${}", u.name),
-                            u.span,
+                            u.name.span,
                             0,
                             "variable.undefined",
                         );
                     }
                     let ty = locals.get(&u.name).cloned().unwrap_or(Type::mixed());
                     let provenance = locals.get_provenance(&u.name).cloned().unwrap_or_default();
-                    if self.probe_span.get() == Some(u.span) {
+                    if self.probe_span.get() == Some(u.name.span) {
                         *self.probe_var_provenance.borrow_mut() =
                             Some(provenance.iter().copied().collect());
                     }
@@ -258,7 +258,7 @@ impl<'a> Checker<'a> {
                         "parameter.trait",
                     );
                     self.check_type_class_name_case(&case_refs, p.span);
-                    closure_locals.declare(p.name.to_string(), ty, p.name_span);
+                    closure_locals.declare(p.name.to_string(), ty, p.name.span);
                     closure_locals.set_native(&p.name, self.closure_param_native(p));
                 }
                 let (declared_return_ty, declared_return_case_refs) =
@@ -352,10 +352,10 @@ impl<'a> Checker<'a> {
                     if !locals.contains_key(&u.name) {
                         // See the identical fix's own comment at
                         // `checker::expr`'s `ExprKind::Closure` arm.
-                        locals.declare(u.name.to_string(), mutated, u.span);
-                        if self.probe_span.get() == Some(u.span) {
+                        locals.declare(u.name.to_string(), mutated, u.name.span);
+                        if self.probe_span.get() == Some(u.name.span) {
                             *self.probe_var_provenance.borrow_mut() =
-                                Some([u.span].into_iter().collect());
+                                Some([u.name.span].into_iter().collect());
                         }
                     } else {
                         locals.insert(u.name.to_string(), mutated);

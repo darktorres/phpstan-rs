@@ -1,6 +1,6 @@
 //! `textDocument/documentSymbol` - a per-file hierarchical outline, built
 //! straight from `Project::ast`'s own top-level declarations (their
-//! `name_span`/whole-declaration `span` fields already carry everything
+//! name spans and whole-declaration `span` fields already carry everything
 //! needed), keeping the per-file nesting a document outline needs.
 
 use crate::registry::class_decl_name;
@@ -62,7 +62,7 @@ fn symbol(
 }
 
 fn function_symbol(f: &FunctionDecl, kind: SymbolKind) -> DocumentSymbol {
-    symbol(f.name.to_string(), kind, f.span, f.name_span, Vec::new())
+    symbol(f.name.to_string(), kind, f.span, f.name.span, Vec::new())
 }
 
 fn method_symbol(m: &MethodDecl) -> DocumentSymbol {
@@ -70,7 +70,7 @@ fn method_symbol(m: &MethodDecl) -> DocumentSymbol {
         m.function.name.to_string(),
         SymbolKind::METHOD,
         m.span,
-        m.function.name_span,
+        m.function.name.span,
         Vec::new(),
     )
 }
@@ -96,7 +96,7 @@ fn class_symbol(c: &ClassDecl) -> DocumentSymbol {
             case.name.to_string(),
             SymbolKind::ENUM_MEMBER,
             case.span,
-            case.name_span,
+            case.name.span,
             Vec::new(),
         )
     }));
@@ -105,7 +105,7 @@ fn class_symbol(c: &ClassDecl) -> DocumentSymbol {
             p.name.to_string(),
             SymbolKind::PROPERTY,
             p.span,
-            p.name_span,
+            p.name.span,
             Vec::new(),
         )
     }));
@@ -123,8 +123,8 @@ fn const_symbol(cst: &syntax::ast::ClassConst) -> DocumentSymbol {
     symbol(
         cst.name.to_string(),
         SymbolKind::CONSTANT,
-        cst.name_span,
-        cst.name_span,
+        cst.name.span,
+        cst.name.span,
         Vec::new(),
     )
 }

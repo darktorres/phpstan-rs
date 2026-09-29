@@ -109,8 +109,10 @@ impl Parser {
                 None
             };
             params.push(Param {
-                name,
-                name_span,
+                name: Ident {
+                    name,
+                    span: name_span,
+                },
                 type_hint,
                 default,
                 by_ref,
@@ -159,8 +161,10 @@ impl Parser {
         };
         Ok(FunctionDecl {
             namespaced_name: None,
-            name,
-            name_span,
+            name: Ident {
+                name,
+                span: name_span,
+            },
             params,
             return_type,
             body,

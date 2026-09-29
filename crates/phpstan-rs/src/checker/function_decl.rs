@@ -61,8 +61,8 @@ impl<'a> Checker<'a> {
             let host_start = self.diagnostics.len();
             for m in &c.methods {
                 let site = (
-                    m.function.name_span.start.line,
-                    m.function.name_span.start.col,
+                    m.function.name.span.start.line,
+                    m.function.name.span.start.col,
                 );
                 let own_sig = own_info
                     .redeclared_methods()
@@ -234,7 +234,7 @@ impl<'a> Checker<'a> {
             .registry
             .function_decl_sites
             .get(crate::registry::function_key(f.fq_name()).as_ref())?;
-        if site == Some((f.name_span.start.line, f.name_span.start.col)) {
+        if site == Some((f.name.span.start.line, f.name.span.start.col)) {
             return None;
         }
         let fresh = FunctionReflection::from_decl(
@@ -253,7 +253,7 @@ impl<'a> Checker<'a> {
         f: &FunctionDecl,
         class: &str,
     ) -> Option<FunctionReflection> {
-        let site = (f.name_span.start.line, f.name_span.start.col);
+        let site = (f.name.span.start.line, f.name.span.start.col);
         let sig = self
             .registry
             .classes
@@ -342,7 +342,7 @@ impl<'a> Checker<'a> {
         // needs it here, or every method would get double-checked.
         if !self.facts_only {
             if class_name.is_none() {
-                self.check_unknown_phpstan_tags_on(f.doc_comment.as_deref(), f.name_span);
+                self.check_unknown_phpstan_tags_on(f.doc_comment.as_deref(), f.name.span);
             }
             if self.settings.sidz.check_magic_numbers {
                 self.check_magic_numbers_in_params(&f.params);
@@ -382,7 +382,7 @@ impl<'a> Checker<'a> {
                 } else {
                     "a function"
                 };
-                self.check_misplaced_var_tag(f.doc_comment.as_deref(), description, f.name_span);
+                self.check_misplaced_var_tag(f.doc_comment.as_deref(), description, f.name.span);
                 if let Some(class) = class_name {
                     self.check_self_out(f, sig, class, is_static, &label);
                 }
@@ -588,8 +588,8 @@ impl<'a> Checker<'a> {
                     } else {
                         ty
                     };
-                    self.probe_hit_at(ast_param.name_span, &ty);
-                    locals.declare(param.name().to_string(), ty, ast_param.name_span);
+                    self.probe_hit_at(ast_param.name.span, &ty);
+                    locals.declare(param.name().to_string(), ty, ast_param.name.span);
                     let native = match class_name {
                         Some(c) => self.resolve_pseudo(param.ty_native(), c),
                         None => param.ty_native().clone(),
@@ -702,8 +702,8 @@ impl<'a> Checker<'a> {
                     } else {
                         ty
                     };
-                    self.probe_hit_at(p.name_span, &ty);
-                    locals.declare(p.name.to_string(), ty, p.name_span);
+                    self.probe_hit_at(p.name.span, &ty);
+                    locals.declare(p.name.to_string(), ty, p.name.span);
                 }
             }
         }
@@ -1089,7 +1089,7 @@ impl<'a> Checker<'a> {
                     if p.by_ref {
                         let ty = self.resolve_type_hint(p.type_hint.as_ref());
                         self.current_function_by_ref_params
-                            .insert(p.name.clone(), ty);
+                            .insert(p.name.name.clone(), ty);
                     }
                 }
             }
@@ -1431,7 +1431,7 @@ impl<'a> Checker<'a> {
                     p.name
                 ),
                 "parameter.unresolvableNativeType",
-                p.name_span,
+                p.name.span,
             );
         }
         self.check_unresolvable_native_type(
@@ -1543,7 +1543,7 @@ impl<'a> Checker<'a> {
                     i + 1,
                     p.name,
                 ),
-                p.name_span,
+                p.name.span,
                 0,
                 "parameter.implicitlyNullable",
             );
@@ -1577,7 +1577,7 @@ impl<'a> Checker<'a> {
                         "Deprecated in PHP 8.0: Required parameter ${} follows optional parameter ${optional}.",
                         p.name,
                     ),
-                    p.name_span,
+                    p.name.span,
                     0,
                     "parameter.requiredAfterOptional",
                 );

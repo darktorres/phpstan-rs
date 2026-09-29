@@ -577,12 +577,12 @@ pub(crate) fn build_declarations(stmts: &[Stmt], origin: &Origin) -> Vec<BuiltDe
                     &FxHashMap::default(),
                     Visibility::Public,
                 );
-                sig.provenance = Provenance::new(origin.clone(), f.name_span);
+                sig.provenance = Provenance::new(origin.clone(), f.name.span);
                 out.push(BuiltDecl::Function {
                     name: Name::from(&declaration.name()),
                     conditional,
                     sig: Box::new(sig),
-                    site: (f.name_span.start.line, f.name_span.start.col),
+                    site: (f.name.span.start.line, f.name.span.start.col),
                 });
             }
             Declared::Constant(c) => out.push(BuiltDecl::GlobalConst {

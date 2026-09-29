@@ -185,7 +185,7 @@ impl Project {
                                 "Method {fqn}::{}() is protected, but since the containing class is final, it can be private.",
                                 m.function.name
                             ),
-                            m.function.name_span,
+                            m.function.name.span,
                             0,
                             "method.protectedInFinalClass",
                         )
@@ -201,7 +201,7 @@ impl Project {
                                 "Property {fqn}::${} is protected, but since the containing class is final, it can be private.",
                                 p.name
                             ),
-                            p.name_span,
+                            p.name.span,
                             0,
                             "property.protectedInFinalClass",
                         )
@@ -221,7 +221,7 @@ impl Project {
                                 "Constant {fqn}::{} is protected, but since the containing class is final, it can be private.",
                                 k.name
                             ),
-                            k.name_span,
+                            k.name.span,
                             0,
                             "classConstant.protectedInFinalClass",
                         )
@@ -246,7 +246,7 @@ impl Project {
                         format!(
                             "Method {fqn}::{name}() is not final, but since the containing class is abstract, it should be."
                         ),
-                        m.function.name_span,
+                        m.function.name.span,
                         0,
                         "method.notFinalInAbstractClass",
                     )
@@ -295,7 +295,7 @@ impl Project {
                 let label = format!("{fqn}::{}", f.name);
                 let mut report =
                     |message: String, id: &'static str, fix: Option<(Span, String)>| {
-                        let mut builder = diagnostic(message, f.name_span, 2, id);
+                        let mut builder = diagnostic(message, f.name.span, 2, id);
                         if let Some((span, text)) = fix {
                             builder = builder.fix(span, text, format!("Call {call}"));
                         }

@@ -3419,7 +3419,7 @@ impl<'a> Checker<'a> {
                         self.report_builder(
                             DiagnosticBuilder::new(
                                 "Cannot use $this as lexical variable.".to_string(),
-                                u.span,
+                                u.name.span,
                                 0,
                                 "closure.useThis",
                             )
@@ -3432,19 +3432,19 @@ impl<'a> Checker<'a> {
                                     "Cannot use superglobal variable ${} as lexical variable.",
                                     u.name
                                 ),
-                                u.span,
+                                u.name.span,
                                 0,
                                 "closure.useSuperGlobal",
                             )
                             .non_ignorable(),
                         );
-                    } else if params.iter().any(|p| p.name == u.name) {
+                    } else if params.iter().any(|p| p.name.name == u.name.name) {
                         self.report_builder(
                             DiagnosticBuilder::new(format!(
                                     "Cannot use lexical variable ${} since a parameter with the same name already exists.",
                                     u.name
                                 ),
-                                u.span,
+                                u.name.span,
                                 0,
                                 "closure.useDuplicate",
                             )
@@ -3453,7 +3453,7 @@ impl<'a> Checker<'a> {
                     } else if !u.by_ref && !locals.contains_key(&u.name) {
                         self.report(
                             format!("undefined variable ${}", u.name),
-                            u.span,
+                            u.name.span,
                             0,
                             "variable.undefined",
                         );
@@ -3466,7 +3466,7 @@ impl<'a> Checker<'a> {
                     // The `use (...)` clause's capture token is itself a
                     // real reference to the outer `$x` - same probe hook
                     // `ExprKind::Variable` has.
-                    if self.probe_span.get() == Some(u.span) {
+                    if self.probe_span.get() == Some(u.name.span) {
                         *self.probe_var_provenance.borrow_mut() =
                             Some(provenance.iter().copied().collect());
                     }
@@ -3474,7 +3474,7 @@ impl<'a> Checker<'a> {
                     // type too, not just resolve go-to-definition - the
                     // two probes (`probe_hit`/`probe_var_provenance`) are
                     // independent.
-                    self.probe_hit_at(u.span, &ty);
+                    self.probe_hit_at(u.name.span, &ty);
                     // A by-reference capture can still gain keys from
                     // anything else holding the reference before the
                     // closure runs.
@@ -3543,7 +3543,7 @@ impl<'a> Checker<'a> {
                     } else {
                         ty
                     };
-                    closure_locals.declare(p.name.to_string(), ty, p.name_span);
+                    closure_locals.declare(p.name.to_string(), ty, p.name.span);
                     closure_locals.set_native(&p.name, self.closure_param_native(p));
                 }
                 let (declared_return_ty, declared_return_case_refs) =
@@ -3652,7 +3652,7 @@ impl<'a> Checker<'a> {
                 self.current_function_byref_snapshot_names = uses
                     .iter()
                     .filter(|u| u.by_ref)
-                    .map(|u| u.name.clone())
+                    .map(|u| u.name.name.clone())
                     .collect();
                 // A closure's own throw points never belong to the
                 // enclosing function's count (calling the closure, not
@@ -3786,7 +3786,7 @@ impl<'a> Checker<'a> {
                         continue;
                     }
                     let mutated = closure_byref_exit_snapshots
-                        .get(&u.name)
+                        .get(&u.name.name)
                         .and_then(|snapshots| snapshots.iter().cloned().reduce(Type::union))
                         .unwrap_or_else(|| {
                             closure_locals
@@ -3801,7 +3801,7 @@ impl<'a> Checker<'a> {
                         // argument auto-vivification this project models
                         // in `predefine_byref_or_unknown_args`, now given
                         // a real, navigable declaration site.
-                        locals.declare(u.name.to_string(), mutated, u.span);
+                        locals.declare(u.name.to_string(), mutated, u.name.span);
                         // `locals.declare` above is this variable's only
                         // provenance site in this case (it didn't exist
                         // in the outer scope before), so the probe hook
@@ -3809,9 +3809,9 @@ impl<'a> Checker<'a> {
                         // `locals` at all) would have stashed an empty
                         // set - correct it now that the real site is
                         // known.
-                        if self.probe_span.get() == Some(u.span) {
+                        if self.probe_span.get() == Some(u.name.span) {
                             *self.probe_var_provenance.borrow_mut() =
-                                Some([u.span].into_iter().collect());
+                                Some([u.name.span].into_iter().collect());
                         }
                     } else {
                         locals.insert(u.name.to_string(), mutated);
@@ -3867,7 +3867,7 @@ impl<'a> Checker<'a> {
                     } else {
                         ty
                     };
-                    arrow_locals.declare(p.name.to_string(), ty, p.name_span);
+                    arrow_locals.declare(p.name.to_string(), ty, p.name.span);
                     arrow_locals.set_native(&p.name, self.closure_param_native(p));
                 }
                 // An arrow function's body is a single expression, not

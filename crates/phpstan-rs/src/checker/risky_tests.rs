@@ -43,7 +43,7 @@ impl<'a> Checker<'a> {
                     "Test {fqn}::{}() has no assertions and no expectException/markTestSkipped/markTestIncomplete/addToAssertionCount call - it will be reported risky by PHPUnit at runtime.",
                     f.name
                 ),
-                f.name_span,
+                f.name.span,
                 4,
                 "test.risky",
             );

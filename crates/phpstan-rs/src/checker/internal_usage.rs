@@ -548,7 +548,7 @@ impl<'a> Checker<'a> {
                     &format!("Parameter ${}", p.name),
                     &context,
                     "parameter",
-                    p.type_hint.as_ref().map(|h| h.span).unwrap_or(p.name_span),
+                    p.type_hint.as_ref().map(|h| h.span).unwrap_or(p.name.span),
                 );
             }
         }

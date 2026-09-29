@@ -37,7 +37,7 @@ impl FileBodies {
         impl<'ast> Visitor<'ast> for Collect {
             fn visit_function_decl(&mut self, function: &'ast FunctionDecl) {
                 if let Some(body) = &function.body {
-                    self.0.insert(function.name_span, body.stmts.clone());
+                    self.0.insert(function.name.span, body.stmts.clone());
                 }
                 visit::walk_function_decl(self, function);
             }

@@ -214,7 +214,7 @@ impl Pass {
 
     /// Applies the parameter rules to one parameter list.
     fn params(&mut self, params: &mut Vec<Param>, function_doc: &mut Option<Arc<str>>) {
-        let names: Vec<Name> = params.iter().map(|p| p.name.clone()).collect();
+        let names: Vec<Name> = params.iter().map(|p| p.name.name.clone()).collect();
         let mut keep = vec![true; params.len()];
         for i in 0..params.len() {
             let superseded_here = params[i]
@@ -238,8 +238,8 @@ impl Pass {
                 && !ty.contains(['[', ']'])
             {
                 let at = Span {
-                    start: params[i].name_span.start,
-                    end: params[i].name_span.start,
+                    start: params[i].name.span.start,
+                    end: params[i].name.span.start,
                 };
                 if let Some(hint) = parse_native_type(&ty, at) {
                     params[i].type_hint = Some(hint);

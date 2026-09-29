@@ -24,14 +24,15 @@ impl Parser {
                 let use_by_ref = self.eat(&Token::Amp);
                 let name_start = self.current_pos();
                 let name = self.expect_variable()?;
-                let span = Span {
-                    start: name_start,
-                    end: self.previous_end(),
-                };
                 uses.push(ClosureUse {
-                    name,
+                    name: Ident {
+                        name,
+                        span: Span {
+                            start: name_start,
+                            end: self.previous_end(),
+                        },
+                    },
                     by_ref: use_by_ref,
-                    span,
                 });
                 if !self.eat(&Token::Comma) {
                     break;

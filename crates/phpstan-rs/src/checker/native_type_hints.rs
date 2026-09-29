@@ -82,7 +82,7 @@ impl<'a> Checker<'a> {
                     "{kind_word} {label}() parameter ${} can be declared natively as {suggested}.",
                     param.name
                 ),
-                param.name_span,
+                param.name.span,
                 0,
                 "missingNativeType.parameter",
             );
@@ -110,7 +110,7 @@ impl<'a> Checker<'a> {
         }
         self.report(
             format!("{kind_word} {label}() return type can be declared natively as {suggested}."),
-            f.name_span,
+            f.name.span,
             0,
             "missingNativeType.return",
         );
@@ -130,7 +130,7 @@ impl<'a> Checker<'a> {
                     "Parameter ${} of the closure can be declared natively as {suggested}.",
                     param.name
                 ),
-                param.name_span,
+                param.name.span,
                 0,
                 "missingNativeType.parameter",
             );
@@ -188,7 +188,7 @@ impl<'a> Checker<'a> {
                     "Constant {fqn}::{} can be declared natively as {suggested}.",
                     constant.name
                 ),
-                constant.name_span,
+                constant.name.span,
                 0,
                 "missingNativeType.classConstant",
             );

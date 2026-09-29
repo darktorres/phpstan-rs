@@ -1,4 +1,4 @@
-//! Span fields like `name_span`/`TypeHint::span`/`extends_spans`/etc. -
+//! Span fields like `Ident::span`/`TypeHint::span`/`extends_spans`/etc. -
 //! each must point at exactly the identifier text it claims to, not just
 //! exist. `helpers::text_at` slices the original source by a span to
 //! check that directly, rather than trusting the span's own byte-range
@@ -14,7 +14,7 @@ fn function_decl_name_span_points_at_the_name_only() {
         panic!("expected FunctionDecl");
     };
     assert_eq!(
-        text_at("<?php function greet(): void {}", f.name_span),
+        text_at("<?php function greet(): void {}", f.name.span),
         "greet"
     );
 }
@@ -93,7 +93,7 @@ fn property_and_class_const_name_and_type_hint_spans_are_precise() {
         panic!("expected ClassDecl");
     };
     let prop = &c.properties[0];
-    assert_eq!(text_at(src, prop.name_span), "$count");
+    assert_eq!(text_at(src, prop.name.span), "$count");
     assert_eq!(
         text_at(
             src,
@@ -105,7 +105,7 @@ fn property_and_class_const_name_and_type_hint_spans_are_precise() {
         "?int"
     );
     let cst = &c.consts[0];
-    assert_eq!(text_at(src, cst.name_span), "LIMIT");
+    assert_eq!(text_at(src, cst.name.span), "LIMIT");
     assert_eq!(
         text_at(
             src,
@@ -129,7 +129,7 @@ fn enum_decl_name_implements_and_case_name_spans_are_precise() {
     assert_eq!(text_at(src, e.name_span), "Suit");
     assert_eq!(e.implements_spans.len(), 1);
     assert_eq!(text_at(src, e.implements_spans[0]), "HasColor");
-    assert_eq!(text_at(src, e.enum_cases[0].name_span), "Hearts");
+    assert_eq!(text_at(src, e.enum_cases[0].name.span), "Hearts");
 }
 
 #[test]

@@ -188,13 +188,8 @@ pub struct CatchClause {
     pub types: Vec<QualifiedName>,
     // Each `types` entry's span (same index).
     pub types_spans: Vec<Span>,
-    // Taken via `Parser::expect_variable` - see `FunctionDecl::name`'s
-    // own doc comment.
-    pub var: Option<Name>,
-    // `var`'s own `$name` token span, populated at the same
-    // parse point `var` itself is consumed - `None` exactly when `var` is
-    // (a catch clause with no bound variable, `catch (Foo) {}`).
-    pub var_span: Option<Span>,
+    // The bound variable without its `$`; `None` for `catch (Foo) {}`.
+    pub var: Option<Ident>,
     pub body: Vec<Stmt>,
     pub span: Span,
 }
@@ -215,12 +210,7 @@ pub struct Promotion {
 #[derive(Debug, Clone)]
 pub struct Param {
     // Moved out of the lexer's interned `Token::Variable`, without its `$`.
-    pub name: Name,
-    // This parameter's own `$name` token's span - populated by
-    // the parser at the exact point it consumes it (`expect_variable`),
-    // needed for local-variable-declaration navigation (a read inside the
-    // function body jumping back to its own parameter).
-    pub name_span: Span,
+    pub name: Ident,
     pub type_hint: Option<TypeHint>,
     pub default: Option<Expr>,
     pub by_ref: bool,
@@ -256,16 +246,10 @@ pub struct FunctionBody {
 
 #[derive(Debug, Clone)]
 pub struct FunctionDecl {
-    pub name: Name,
+    pub name: Ident,
     // The name with the file's namespace, for a function declared as a
     // statement; `None` for a method. Filled in by name resolution.
     pub namespaced_name: Option<Arc<str>>,
-    // This function/method's own name token's span - `span`
-    // below covers the *whole* declaration (from `function`/its
-    // modifiers through the closing brace), which is where the LSP's own
-    // go-to-definition would otherwise have to land instead of on the
-    // identifier itself.
-    pub name_span: Span,
     pub params: Vec<Param>,
     pub return_type: Option<TypeHint>,
     // `Arc`, not a plain `Vec` - `registry::FunctionReflection::from_decl` shares
@@ -326,9 +310,7 @@ pub enum Visibility {
 #[derive(Debug, Clone)]
 pub struct PropertyDecl {
     // Without its `$`.
-    pub name: Name,
-    // See `FunctionDecl::name_span`'s own doc comment.
-    pub name_span: Span,
+    pub name: Ident,
     pub visibility: Visibility,
     // PHP 8.4 asymmetric visibility (`public private(set) string $x;`) -
     // the narrower write-side visibility, when one was declared
@@ -459,12 +441,10 @@ pub enum UseKind {
 
 #[derive(Debug, Clone)]
 pub struct ClassConst {
-    pub name: Name,
+    pub name: Ident,
     // The name with the file's namespace, for a global `const`; `None` in
     // a class. Filled in by name resolution.
     pub namespaced_name: Option<Arc<str>>,
-    // See `FunctionDecl::name_span`'s own doc comment.
-    pub name_span: Span,
     pub value: Expr,
     // The `public`/`private`/`protected` modifier a real class's own
     // `const` declaration can carry (PHP 7.1+), needed by
@@ -531,8 +511,8 @@ pub struct ClassDecl {
     // The name with the file's namespace; `None` for an anonymous class.
     // Filled in by name resolution.
     pub namespaced_name: Option<Arc<str>>,
-    // See `FunctionDecl::name_span`'s own doc comment. For an anonymous
-    // class, which has no name, it is `span` again.
+    // The name token's span. For an anonymous class, which has no name,
+    // it is `span` again.
     pub name_span: Span,
     pub kind: ClassKind,
     // An enum's backing type (`int` or `string`); `None` for a pure enum
@@ -598,9 +578,7 @@ impl ClassDecl {
 
 #[derive(Debug, Clone)]
 pub struct EnumCase {
-    pub name: Name,
-    // See `FunctionDecl::name_span`'s own doc comment.
-    pub name_span: Span,
+    pub name: Ident,
     // Some(...) for a backed enum (`case Hearts = 'H';`), None for a pure
     // one (`case Hearts;`).
     pub value: Option<Expr>,
@@ -760,15 +738,10 @@ pub enum UnaryOp {
 
 #[derive(Debug, Clone)]
 pub struct ClosureUse {
-    // Moved out of the lexer's interned `Token::Variable`, without its `$`.
-    pub name: Name,
+    // The captured variable without its `$`, and its span: a `use (&$x)`
+    // that auto-vivifies `$x` in the outer scope declares it there.
+    pub name: Ident,
     pub by_ref: bool,
-    // The captured variable's own name span - lets a `use (&$x)`
-    // capture that auto-vivifies `$x` in the outer scope (see
-    // `checker::calls::check_closure_literal_with_this_and_scope`'s sibling
-    // write-back logic) declare a real, navigable definition site for it,
-    // the same way `Param::name_span` already does for a parameter.
-    pub span: Span,
 }
 
 // The right-hand side of `instanceof`: almost always a static class name,
@@ -776,9 +749,8 @@ pub struct ClosureUse {
 // $className`, `$x instanceof $obj`) for a runtime-determined class.
 #[derive(Debug, Clone)]
 pub enum InstanceofTarget {
-    // The `Span` is the class-name token's own span - see
-    // `FunctionDecl::name_span`'s own doc comment for why this differs
-    // from `Instanceof`'s own (whole-expression) span.
+    // The `Span` is the class-name token's own span, not the whole
+    // `instanceof` expression's.
     Name(QualifiedName, Span),
     Expr(Box<Expr>),
 }
@@ -937,6 +909,36 @@ impl PartialEq<str> for Ident {
 impl PartialEq<&str> for Ident {
     fn eq(&self, other: &&str) -> bool {
         self.name == **other
+    }
+}
+
+impl AsRef<str> for Ident {
+    fn as_ref(&self) -> &str {
+        &self.name
+    }
+}
+
+impl PartialEq<Name> for Ident {
+    fn eq(&self, other: &Name) -> bool {
+        self.name == *other
+    }
+}
+
+impl PartialEq<Ident> for Name {
+    fn eq(&self, other: &Ident) -> bool {
+        *self == other.name
+    }
+}
+
+impl From<&Ident> for Name {
+    fn from(ident: &Ident) -> Name {
+        ident.name.clone()
+    }
+}
+
+impl From<Ident> for Name {
+    fn from(ident: Ident) -> Name {
+        ident.name
     }
 }
 

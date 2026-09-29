@@ -18,7 +18,7 @@ impl<'a> Checker<'a> {
             .filter(|m| !super::enums::is_native_enum_method(c, &m.function.name))
         {
             let decl = DeclSpans {
-                name: m.function.name_span,
+                name: m.function.name.span,
                 override_removal: m
                     .function
                     .attrs
