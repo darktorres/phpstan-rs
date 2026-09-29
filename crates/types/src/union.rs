@@ -204,6 +204,7 @@ fn union_types_impl(a: Type, b: Type) -> Type {
         // is correctly still kept apart.
         merge_int_ranges(&mut members);
         reduce_array_members(&mut members);
+        absorb_contained_members(&mut members);
         if members.len() > MAX_UNION_MEMBERS {
             members = generalize_by_key_set(members);
         }
@@ -292,6 +293,47 @@ pub(crate) fn merge_int_ranges(members: &mut Vec<Type>) {
         let keep = !removed.contains(&index);
         index += 1;
         keep
+    });
+}
+
+/// PHPStan's `TypeCombinator::union` absorption: a member another member
+/// contains adds nothing (`Suit::Hearts|Suit` is `Suit`, `object|Foo` is
+/// `object`); of two that contain each other the first stays. Judged
+/// without the class hierarchy, so `Base|Child` stays; a member naming a
+/// template or not yet resolved (`value-of<T>`, an offset access, a class
+/// constant, a conditional) isn't compared, what it contains being open.
+fn absorb_contained_members(members: &mut Vec<Type>) {
+    if members.len() < 2 {
+        return;
+    }
+    let relation = crate::Relation::structural();
+    let settled = |m: &Type| {
+        !m.references_template()
+            && !m.contains_late()
+            && !matches!(
+                m,
+                Type(Repr::ValueOf(_))
+                    | Type(Repr::ClassConstant { .. })
+                    | Type(Repr::Conditional { .. })
+                    | Type(Repr::Extension(_))
+            )
+    };
+    let dropped: Vec<bool> = (0..members.len())
+        .map(|i| {
+            let m = &members[i];
+            settled(m)
+                && members.iter().enumerate().any(|(j, n)| {
+                    j != i
+                        && settled(n)
+                        && relation.is_super_type_of(n, m).yes()
+                        && (j < i || !relation.is_super_type_of(m, n).yes())
+                })
+        })
+        .collect();
+    let mut index = 0;
+    members.retain(|_| {
+        index += 1;
+        !dropped[index - 1]
     });
 }
 
