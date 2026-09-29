@@ -30,6 +30,11 @@ impl<'a> Checker<'a> {
         args: &[Arg],
         locals: &Locals,
     ) -> Type {
+        // Every special case below is a builtin's, declared in a stub.
+        if !sig.is_stub() {
+            let resolved = resolve_call_args(args, sig.params());
+            return self.infer_call_return_type(sig, &resolved, locals);
+        }
         if let Some(outcome) = self.type_check_call_outcome(name, args, locals) {
             return Type::bool_literal(outcome);
         }
