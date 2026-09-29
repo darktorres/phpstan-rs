@@ -168,7 +168,8 @@ pub(crate) fn build_template_params(
         let ty = mark_template_params(ty, &shallow);
         resolve_names_in_type(ty, ctx)
     };
-    doc.templates
+    let built: FxHashMap<String, TemplateParam> = doc
+        .templates
         .iter()
         .map(|name| {
             // No `of`/`as` clause at all - explicit mixed, matching
@@ -196,6 +197,24 @@ pub(crate) fn build_template_params(
                     default: default.map(Box::new),
                 },
             )
+        })
+        .collect();
+    // A sibling named in a bound or default carries its own metadata, so
+    // `R of Repo<E>` reads `E`'s bound, not the placeholder's `mixed`.
+    let with_siblings = |ty: &Type| {
+        ty.replace_templates(&mut |tp| {
+            (tp.scope.is_none())
+                .then(|| built.get(&tp.name).cloned().map(Type::template_param))
+                .flatten()
+        })
+    };
+    built
+        .iter()
+        .map(|(name, tp)| {
+            let mut tp = tp.clone();
+            tp.bound = Box::new(with_siblings(&tp.bound));
+            tp.default = tp.default.as_deref().map(|d| Box::new(with_siblings(d)));
+            (name.clone(), tp)
         })
         .collect()
 }
