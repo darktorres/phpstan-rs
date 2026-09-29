@@ -386,8 +386,10 @@ impl<'a> Checker<'a> {
         // flag `Generator<int, string, bool>` - three args isn't one of
         // its padded shapes).
         let is_pre_padded_short_form = (args.len() == 1
-            && ITERABLE_GENERIC_CLASS_NAMES.contains(&class.as_str()))
-            || (args.len() == 2 && class == "Generator");
+            && ITERABLE_GENERIC_CLASS_NAMES
+                .iter()
+                .any(|name| class.eq_ignore_ascii_case(name)))
+            || (args.len() == 2 && class.eq_ignore_ascii_case("Generator"));
         if is_pre_padded_short_form {
             return;
         }
