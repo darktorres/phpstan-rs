@@ -11,7 +11,9 @@ use crate::registry::{
 use syntax::ast::{Expr, ExprKind, Literal, Stmt, StmtKind, Visibility};
 use syntax::intern::intern;
 use syntax::name_resolution::NameContext;
-use syntax::visit::{Visitor, walk_expr_in_scope, walk_stmt, walk_stmts};
+use syntax::visit::{
+    Visitor, walk_class_decl, walk_expr, walk_function_decl, walk_stmt, walk_stmts,
+};
 use types::Type;
 
 /// One declaration's already-built, registry-independent info/sig, plus
@@ -582,148 +584,113 @@ impl Registry {
 /// blocks, silently mis-qualifying the first one's classes.
 #[hotpath::measure]
 pub(crate) fn build_declarations(stmts: &[Stmt], origin: &Origin) -> Vec<BuiltDecl> {
-    let mut ctx = NameContext::default();
-    let mut out = Vec::new();
-    build_declarations_with_context(stmts, origin, &mut ctx, false, &mut out);
-    out
+    let mut declarations = Declarations {
+        origin,
+        ctx: NameContext::default(),
+        conditional: false,
+        out: Vec::new(),
+    };
+    walk_stmts(&mut declarations, stmts);
+    declarations.out
 }
 
-/// `conditional` is `true` once inside any `if`/`else` branch - see
-/// `Registry::insert_built_decl`'s own doc comment for what that flag
-/// means to the insertion side; this function only ever threads it
-/// through to each `BuiltDecl` it produces, never acts on it itself.
-fn build_declarations_with_context(
-    stmts: &[Stmt],
-    origin: &Origin,
-    ctx: &mut NameContext,
+/// Every declaration in a file, wherever it sits: PHP declares a class,
+/// function or constant when execution reaches it, so one inside a
+/// function body, a method, a loop, a `try` or a closure exists once that
+/// runs. A declaration reached only that way, or in an `if` branch (the
+/// `if (!function_exists('foo')) { function foo() {} }` polyfill idiom),
+/// is `conditional`; nothing downstream knows which conditions are
+/// guards. The name context is the file's, as the walk reaches each
+/// point: namespaces and imports aren't scoped to blocks or functions.
+struct Declarations<'a> {
+    origin: &'a Origin,
+    ctx: NameContext,
     conditional: bool,
-    out: &mut Vec<BuiltDecl>,
-) {
-    syntax::stack::guard(|| {
-        for stmt in stmts {
-            match &stmt.kind {
-                StmtKind::Namespace(name) => ctx.set_namespace(name),
-                StmtKind::Use(imports) => ctx.add_uses(imports),
-                StmtKind::ClassDecl(e) if e.kind == syntax::ast::ClassKind::Enum => {
-                    for m in &e.methods {
-                        collect_nested_defines(&m.function.body, out);
-                    }
-                    let name = intern(&ctx.declared_name(class_decl_name(e)));
-                    let mut info = ClassReflection::from_enum_decl(e, ctx);
-                    info.record_provenance(origin, &name, e.name_span, &MemberSpans::of_enum(e));
-                    out.push(BuiltDecl::Enum {
-                        name,
-                        conditional,
-                        info,
-                    });
-                }
-                StmtKind::ClassDecl(c) => {
-                    for m in &c.methods {
-                        collect_nested_defines(&m.function.body, out);
-                    }
-                    let name = intern(&ctx.declared_name(class_decl_name(c)));
-                    let mut info = ClassReflection::from_decl(c, ctx);
-                    info.record_provenance(origin, &name, c.name_span, &MemberSpans::of_class(c));
-                    out.push(BuiltDecl::Class {
-                        name,
-                        conditional,
-                        info,
-                    });
-                }
-                StmtKind::FunctionDecl(f) => {
-                    collect_nested_defines(&f.body, out);
-                    let name = intern(&ctx.declared_name(&f.name));
-                    let mut sig = FunctionReflection::from_decl(
-                        f,
-                        ctx,
-                        &rustc_hash::FxHashMap::default(),
-                        &rustc_hash::FxHashMap::default(),
-                        Visibility::Public,
-                    );
-                    sig.provenance = Provenance::new(origin.clone(), f.name_span);
-                    out.push(BuiltDecl::Function {
-                        name,
-                        conditional,
-                        sig,
-                        site: (f.name_span.start.line, f.name_span.start.col),
-                    });
-                }
-                // The common `if (!function_exists('foo')) { function
-                // foo() {} }` polyfill idiom declares a genuinely global
-                // function/class from inside a conditional - recursing here
-                // is what makes those visible at all. A branch can't hold a
-                // `namespace` or `use` statement, so both share `ctx`. Both branches are
-                // marked `conditional = true` regardless of the `if`'s own
-                // condition text - nothing downstream has a notion of which
-                // conditions are actually guards, only "was this declaration
-                // reached unconditionally or not."
-                StmtKind::If(if_stmt) => {
-                    for body in if_stmt.bodies() {
-                        build_declarations_with_context(
-                            std::slice::from_ref(body),
-                            origin,
-                            ctx,
-                            true,
-                            out,
-                        );
-                    }
-                }
-                // A braced namespace body: its `use` statements apply to the
-                // declarations after them in the block, and the next
-                // `namespace` statement clears them (see `set_namespace`).
-                // Inherits whatever `conditional` its enclosing context
-                // already has.
-                StmtKind::Block(inner)
-                | StmtKind::Declare {
-                    body: Some(inner), ..
-                } => build_declarations_with_context(inner, origin, ctx, conditional, out),
-                StmtKind::GlobalConst(consts) => {
-                    for c in consts {
-                        let name = intern(&ctx.declared_name(&c.name));
-                        let ty = infer_const_type(&c.value);
-                        out.push(BuiltDecl::GlobalConst { name, ty });
-                    }
-                }
-                StmtKind::Expression(e) => collect_defines_in_expr(e, out),
-                _ => collect_nested_defines(std::slice::from_ref(stmt), out),
-            }
-        }
-    })
+    out: Vec<BuiltDecl>,
 }
 
-/// A `define()` statement anywhere in `stmts` - inside a function or
-/// method body, a loop, a `try`, a `switch` - still creates a global
-/// constant at runtime, so it's registered like a top-level one.
-fn collect_nested_defines(stmts: &[Stmt], out: &mut Vec<BuiltDecl>) {
-    walk_stmts(&mut Defines(out), stmts);
+impl Declarations<'_> {
+    /// Walks with every declaration found conditional.
+    fn conditionally(&mut self, walk: impl FnOnce(&mut Self)) {
+        let was = std::mem::replace(&mut self.conditional, true);
+        walk(self);
+        self.conditional = was;
+    }
 }
 
-fn collect_defines_in_expr(e: &Expr, out: &mut Vec<BuiltDecl>) {
-    Defines(out).visit_expr(e);
-}
-
-/// Every `define()` call, in function and method bodies too; a closure's
-/// is not entered.
-struct Defines<'o>(&'o mut Vec<BuiltDecl>);
-
-impl<'ast> Visitor<'ast> for Defines<'_> {
+impl<'ast> Visitor<'ast> for Declarations<'_> {
     fn visit_stmt(&mut self, stmt: &'ast Stmt) {
-        match &stmt.kind {
-            StmtKind::FunctionDecl(f) => walk_stmts(self, &f.body),
+        syntax::stack::guard(|| match &stmt.kind {
+            StmtKind::Namespace(name) => self.ctx.set_namespace(name),
+            StmtKind::Use(imports) => self.ctx.add_uses(imports),
             StmtKind::ClassDecl(c) => {
-                for m in &c.methods {
-                    walk_stmts(self, &m.function.body);
+                let name = intern(&self.ctx.declared_name(class_decl_name(c)));
+                let conditional = self.conditional;
+                if c.kind == syntax::ast::ClassKind::Enum {
+                    let mut info = ClassReflection::from_enum_decl(c, &self.ctx);
+                    info.record_provenance(
+                        self.origin,
+                        &name,
+                        c.name_span,
+                        &MemberSpans::of_enum(c),
+                    );
+                    self.out.push(BuiltDecl::Enum {
+                        name,
+                        conditional,
+                        info,
+                    });
+                } else {
+                    let mut info = ClassReflection::from_decl(c, &self.ctx);
+                    info.record_provenance(
+                        self.origin,
+                        &name,
+                        c.name_span,
+                        &MemberSpans::of_class(c),
+                    );
+                    self.out.push(BuiltDecl::Class {
+                        name,
+                        conditional,
+                        info,
+                    });
+                }
+                self.conditionally(|v| walk_class_decl(v, c));
+            }
+            StmtKind::FunctionDecl(f) => {
+                let name = intern(&self.ctx.declared_name(&f.name));
+                let mut sig = FunctionReflection::from_decl(
+                    f,
+                    &self.ctx,
+                    &rustc_hash::FxHashMap::default(),
+                    &rustc_hash::FxHashMap::default(),
+                    Visibility::Public,
+                );
+                sig.provenance = Provenance::new(self.origin.clone(), f.name_span);
+                self.out.push(BuiltDecl::Function {
+                    name,
+                    conditional: self.conditional,
+                    sig,
+                    site: (f.name_span.start.line, f.name_span.start.col),
+                });
+                self.conditionally(|v| walk_function_decl(v, f));
+            }
+            StmtKind::GlobalConst(consts) => {
+                for c in consts {
+                    let name = intern(&self.ctx.declared_name(&c.name));
+                    let ty = infer_const_type(&c.value);
+                    self.out.push(BuiltDecl::GlobalConst { name, ty });
                 }
             }
-            _ => walk_stmt(self, stmt),
-        }
+            // A braced namespace body runs as the file does.
+            StmtKind::Block(_) | StmtKind::Declare { .. } => walk_stmt(self, stmt),
+            _ => self.conditionally(|v| walk_stmt(v, stmt)),
+        })
     }
 
     fn visit_expr(&mut self, e: &'ast Expr) {
         if let Some((name, ty)) = define_call_constant(e) {
-            self.0.push(BuiltDecl::GlobalConst { name, ty });
+            self.out.push(BuiltDecl::GlobalConst { name, ty });
         }
-        walk_expr_in_scope(self, e);
+        self.conditionally(|v| walk_expr(v, e));
     }
 }
 
