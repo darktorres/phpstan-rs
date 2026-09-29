@@ -354,6 +354,28 @@ impl Type {
         }
     }
 
+    /// PHPStan's `generalize(templateArgument)`: `generalize`, a
+    /// non-empty array no longer known non-empty - an inferred type
+    /// argument (`new Box([1, 2])` is `Box<list<int>>`) must still accept
+    /// an empty one.
+    pub fn generalize_template_argument(&self) -> Type {
+        match self.generalize().into_repr() {
+            Repr::Intersection(members) => crate::intersect_types(
+                members
+                    .into_iter()
+                    .filter(|m| !matches!(m, Type(Repr::Accessory(AccessoryKind::NonEmptyArray))))
+                    .collect(),
+            ),
+            Repr::Union(members) => Type::union_of(
+                members
+                    .iter()
+                    .map(Type::generalize_template_argument)
+                    .collect(),
+            ),
+            other => Type(other),
+        }
+    }
+
     /// PHPStan's `generalize(lessSpecific)`: literals and ranges widen to
     /// their base type, an enum case to its class, a shape to the array
     /// of its generalized keys and values (still a list, still non-empty,

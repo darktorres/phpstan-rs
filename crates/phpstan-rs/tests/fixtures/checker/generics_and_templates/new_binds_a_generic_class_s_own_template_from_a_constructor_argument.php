@@ -5,5 +5,5 @@
                 /** @param T $value */
                 public function __construct(public $value) {}
             }
-            assertType('Box<5>', new Box(5));
+            assertType('Box<int>', new Box(5));
         

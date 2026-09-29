@@ -70,6 +70,38 @@ pub(crate) fn type_definitely_excludes_null(ty: &Type) -> bool {
     !ty.is_never() && ty.is_null().no()
 }
 
+/// PHPStan's `TemplateTypeHelper::generalizeInferredTemplateType`: a
+/// value inferred for a class template that isn't covariant widens past
+/// its literal - `new Box(5)` is `Box<int>`, so it can later hold a `6` -
+/// unless the template's bound is itself scalar (`T of int` keeps `5`),
+/// an `array-key` bound widening any scalar.
+fn generalize_inferred_class_template(
+    info: &crate::registry::ClassReflection,
+    template: &Name,
+    ty: &Type,
+) -> Type {
+    if info.covariant_templates().contains(template) {
+        return ty.clone();
+    }
+    let bound = info
+        .template_bounds()
+        .get(template)
+        .cloned()
+        .unwrap_or_else(Type::mixed);
+    let array_key_bound =
+        bound == Type::unknown_array_key() || bound == Type::benevolent_array_key();
+    let widens = if ty.is_scalar().yes() && array_key_bound {
+        true
+    } else {
+        ty.is_constant_value().yes() && (!bound.is_scalar().yes() || array_key_bound)
+    };
+    if widens {
+        ty.generalize_template_argument()
+    } else {
+        ty.clone()
+    }
+}
+
 /// The function or method a first-class callable names.
 pub(crate) struct FirstClassTarget<'a> {
     pub(crate) sig: &'a FunctionReflection,
@@ -4417,9 +4449,18 @@ impl<'a> Checker<'a> {
                                 .rposition(|t| bindings.contains_key(t.as_ref()))
                                 .map(|i| i + 1)
                                 .unwrap_or(0);
+                            let info = self.registry.classes.get(canonical.as_str());
                             let bound_args = templates[..last_bound]
                                 .iter()
-                                .map(|t| bindings.get(t.as_ref()).cloned().unwrap_or(Type::mixed()))
+                                .map(|t| match bindings.get(t.as_ref()) {
+                                    Some(ty) => match info {
+                                        Some(info) => {
+                                            generalize_inferred_class_template(info, t, ty)
+                                        }
+                                        None => ty.clone(),
+                                    },
+                                    None => Type::mixed(),
+                                })
                                 .collect();
                             Type::object(canonical.into(), bound_args)
                         }
