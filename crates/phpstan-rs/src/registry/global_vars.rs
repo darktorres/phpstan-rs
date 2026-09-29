@@ -216,7 +216,14 @@ fn resolve_global_scope_files<'a>(
     files: &[(&'a Path, &[Stmt])],
     include_sites: &[IncludeSite<'a>],
 ) -> FxHashSet<PathBuf> {
-    let all_paths: Vec<&Path> = files.iter().map(|(p, _)| *p).collect();
+    // Each file's path with `/` separators, grouped by file name: an
+    // include's target can only be a file of its last segment's name.
+    let mut by_file_name: FxHashMap<String, Vec<(&'a Path, String)>> = FxHashMap::default();
+    for (path, _) in files {
+        let text = path.to_string_lossy().replace('\\', "/");
+        let name = text.rsplit('/').next().unwrap_or_default().to_string();
+        by_file_name.entry(name).or_default().push((*path, text));
+    }
 
     let mut top_level_edges: FxHashMap<PathBuf, Vec<PathBuf>> = FxHashMap::default();
     // Every resolved incoming edge, top-level or not - a file targeted
@@ -235,10 +242,14 @@ fn resolve_global_scope_files<'a>(
         if suffix.is_empty() {
             continue;
         }
-        let matches: Vec<&Path> = all_paths
-            .iter()
-            .copied()
-            .filter(|p| path_ends_with_suffix(p, &suffix))
+        let suffix = suffix.trim_start_matches('/');
+        let name = suffix.rsplit('/').next().unwrap_or_default();
+        let matches: Vec<&Path> = by_file_name
+            .get(name)
+            .into_iter()
+            .flatten()
+            .filter(|(_, text)| text_ends_with_suffix(text, suffix))
+            .map(|(path, _)| *path)
             .collect();
         let [target] = matches[..] else {
             continue;
@@ -277,10 +288,11 @@ fn resolve_global_scope_files<'a>(
     result
 }
 
-fn path_ends_with_suffix(path: &Path, suffix: &str) -> bool {
-    let path_str = path.to_string_lossy().replace('\\', "/");
-    let suffix = suffix.trim_start_matches('/');
-    path_str == suffix || path_str.ends_with(&format!("/{suffix}"))
+fn text_ends_with_suffix(path: &str, suffix: &str) -> bool {
+    path == suffix
+        || path
+            .strip_suffix(suffix)
+            .is_some_and(|rest| rest.ends_with('/'))
 }
 
 /// Resolves an `include`/`require`-style target expression to the literal
