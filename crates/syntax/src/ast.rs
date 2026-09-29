@@ -531,10 +531,8 @@ pub struct ClassDecl {
     // The name with the file's namespace; `None` for an anonymous class.
     // Filled in by name resolution.
     pub namespaced_name: Option<Arc<str>>,
-    // See `FunctionDecl::name_span`'s own doc comment. For an
-    // anonymous class (which has no real name to navigate to at all -
-    // `name` is the synthetic placeholder `"class@anonymous"`) this is
-    // just `span` again, never actually looked up by name.
+    // See `FunctionDecl::name_span`'s own doc comment. For an anonymous
+    // class, which has no name, it is `span` again.
     pub name_span: Span,
     pub kind: ClassKind,
     // An enum's backing type (`int` or `string`); `None` for a pure enum
@@ -693,16 +691,7 @@ pub struct DestructureItem {
 pub enum Literal {
     Int(i64),
     Float(f64),
-    // `Arc<str>`, not `String`: fed both by an ordinary `Token::StringLit`
-    // (plain `String`, converted at that one construction site - a string
-    // literal's own contents have low interning payoff, same reasoning as
-    // `Token::StringLit` itself staying `String`) and by
-    // `StringPart::Literal`/`SimpleIndexKey::Str` (already interned
-    // `Arc<str>` - an interpolated string's own literal chunks, moved
-    // straight through with no extra allocation). Keeping this `String`
-    // would make the latter, explicitly-interned path a wash (the
-    // interned value immediately re-copied into a fresh `String` at its
-    // very next - and only - consumer).
+    // The string's bytes: PHP strings aren't necessarily UTF-8.
     String(PhpString),
     Bool(bool),
     Null,
