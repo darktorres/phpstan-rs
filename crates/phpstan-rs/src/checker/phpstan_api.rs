@@ -751,7 +751,7 @@ impl<'a> Walker<'a> {
                 self.report_inheritance(&ifqn, &action, c.span, "phpstanApi.interface", true);
             }
         }
-        for used in &c.uses {
+        for used in c.used_traits() {
             if let Some(ufqn) = self.resolve_if_phpstan(used)
                 && self.registry.classes.contains_key(ufqn.as_str())
             {
@@ -759,7 +759,7 @@ impl<'a> Walker<'a> {
                 // unconditionally - no `@api`/`@api-do-not-implement`
                 // exemption of any kind, unlike extends/implements.
                 let action = format!("using trait {ufqn}");
-                self.report_always(&ufqn, &action, c.span, "phpstanApi.trait");
+                self.report_always(&ufqn, &action, used.span, "phpstanApi.trait");
             }
         }
     }

@@ -446,8 +446,7 @@ pub struct ClassReflection {
     // the `use` statement's own doc comment (`/** @use
     // TemplateTypeTrait<ObjectType> */` sits right above `use
     // TemplateTypeTrait;`, not the class's separate `/** @api */`
-    // docblock above it) - see `ClassDecl::uses_doc_comments`'s doc
-    // comment for where this project captures that.
+    // docblock above it) - see `TraitUse::doc_comment`.
     pub(in crate::registry) uses_args: FxHashMap<Name, Vec<Type>>,
     // `@template T of Bound` - the resolved bound for whichever of
     // `templates` above declared one. Checked by
@@ -1451,16 +1450,10 @@ impl ClassReflection {
         // `@use Trait<Arg, ...>` - unlike `extends`/`implements`, lives
         // on the `use` statement's own doc comment, not `c.doc_comment`
         // (`class_doc` above) - see `ClassReflection::uses_args`'s doc comment.
-        // `uses_doc_comments` repeats the identical string once per trait
-        // name in a multi-name `use A, B;` statement, so dedup (collect
-        // into a `HashSet` first) before re-parsing each distinct doc
-        // comment only once.
         let uses_args: FxHashMap<Name, Vec<Type>> = c
-            .uses_doc_comments
+            .trait_uses
             .iter()
-            .filter_map(|d| d.as_deref())
-            .collect::<FxHashSet<_>>()
-            .into_iter()
+            .filter_map(|u| u.doc_comment.as_deref())
             .map(docblock::parse)
             .flat_map(|d| d.uses)
             .filter_map(|raw| class_and_args(&resolve_generic_tag(&raw)))
@@ -1505,8 +1498,7 @@ impl ClassReflection {
             implements.push(Name::from("Stringable"));
         }
         let trait_aliases: Vec<TraitAlias> = c
-            .trait_aliases
-            .iter()
+            .trait_aliases()
             .filter_map(|a| {
                 Some(TraitAlias {
                     trait_name: a.trait_name.as_ref().map(class_ref),
@@ -1614,7 +1606,7 @@ impl ClassReflection {
             redeclared_methods,
             properties,
             consts,
-            uses: c.uses.iter().map(class_ref).collect(),
+            uses: c.used_traits().map(class_ref).collect(),
             abstract_methods,
             static_methods,
             final_methods,
@@ -1622,7 +1614,7 @@ impl ClassReflection {
             final_methods_by_phpdoc,
             final_properties_by_phpdoc,
             trait_aliases,
-            resolved_trait_conflicts: c.resolved_trait_conflicts.iter().map(Name::from).collect(),
+            resolved_trait_conflicts: c.resolved_trait_conflicts().map(Name::from).collect(),
             templates,
             extends_args,
             implements_args,

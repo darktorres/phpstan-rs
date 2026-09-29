@@ -429,18 +429,23 @@ pub fn walk_class_decl<'ast, V: Visitor<'ast> + ?Sized>(v: &mut V, c: &'ast Clas
     for attr in &c.attrs {
         v.visit_attribute(attr);
     }
-    for name in c.extends.iter().chain(&c.implements).chain(&c.uses) {
+    for name in c.extends.iter().chain(&c.implements) {
         v.visit_name(name);
     }
-    for alias in &c.trait_aliases {
-        if let Some(name) = &alias.trait_name {
+    for trait_use in &c.trait_uses {
+        for name in &trait_use.traits {
             v.visit_name(name);
         }
-    }
-    for precedence in &c.trait_precedences {
-        v.visit_name(&precedence.trait_name);
-        for name in &precedence.instead_of {
-            v.visit_name(name);
+        for alias in &trait_use.adaptations.aliases {
+            if let Some(name) = &alias.trait_name {
+                v.visit_name(name);
+            }
+        }
+        for precedence in &trait_use.adaptations.precedences {
+            v.visit_name(&precedence.trait_name);
+            for name in &precedence.instead_of {
+                v.visit_name(name);
+            }
         }
     }
     if let Some(hint) = &c.backing_type {

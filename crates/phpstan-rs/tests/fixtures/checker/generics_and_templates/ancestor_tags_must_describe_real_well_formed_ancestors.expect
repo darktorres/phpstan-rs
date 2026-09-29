@@ -8,4 +8,4 @@
 25:13-25:40 missingType.generics L6 | Interface F extends generic interface Coll but does not specify its types: T
 27:13-27:47 generics.noParent L2 | Enum G has @extends tag, but cannot extend anything.
 27:13-27:47 missingType.generics L6 | Enum G implements generic interface Coll but does not specify its types: T
-32:13-32:32 missingType.generics L6 | Class I uses generic trait Tr but does not specify its types: T
+32:23-32:30 missingType.generics L6 | Class I uses generic trait Tr but does not specify its types: T

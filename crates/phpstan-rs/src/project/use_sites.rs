@@ -192,7 +192,7 @@ impl<'ast> Visitor<'ast> for ClassFnRefWalker<'_> {
             .extends
             .iter()
             .chain(&class.implements)
-            .chain(&class.uses)
+            .chain(class.used_traits())
         {
             self.class_at(name, name.span);
         }

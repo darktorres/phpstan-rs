@@ -86,7 +86,7 @@ fn class_overrides(
     for m in &c.methods {
         method_overrides(registry, fqn, &m.function.name, out);
     }
-    if c.uses.is_empty() {
+    if c.trait_uses.is_empty() {
         return;
     }
     let Some(info) = registry.classes.get(fqn) else {

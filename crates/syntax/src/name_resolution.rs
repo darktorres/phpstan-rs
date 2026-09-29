@@ -295,11 +295,15 @@ struct Resolver {
 
 impl Resolver {
     /// The trait names a trait-use block's clauses name.
-    fn trait_adaptations(&self, aliases: &mut [TraitAlias], precedences: &mut [TraitPrecedence]) {
-        for name in aliases.iter_mut().filter_map(|a| a.trait_name.as_mut()) {
+    fn trait_adaptations(&self, adaptations: &mut TraitAdaptations) {
+        for name in adaptations
+            .aliases
+            .iter_mut()
+            .filter_map(|a| a.trait_name.as_mut())
+        {
             self.class(name);
         }
-        for precedence in precedences {
+        for precedence in &mut adaptations.precedences {
             self.class(&mut precedence.trait_name);
             for name in &mut precedence.instead_of {
                 self.class(name);
@@ -460,15 +464,15 @@ impl VisitorMut for Resolver {
     }
 
     fn visit_class_decl(&mut self, class: &mut ClassDecl) {
-        for name in class
-            .extends
-            .iter_mut()
-            .chain(class.implements.iter_mut())
-            .chain(class.uses.iter_mut())
-        {
+        for name in class.extends.iter_mut().chain(class.implements.iter_mut()) {
             self.class(name);
         }
-        self.trait_adaptations(&mut class.trait_aliases, &mut class.trait_precedences);
+        for trait_use in &mut class.trait_uses {
+            for name in &mut trait_use.traits {
+                self.class(name);
+            }
+            self.trait_adaptations(&mut trait_use.adaptations);
+        }
         walk_class_decl_mut(self, class);
     }
 

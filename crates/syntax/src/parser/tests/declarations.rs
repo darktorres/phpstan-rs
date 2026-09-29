@@ -202,6 +202,37 @@ fn a_promoted_constructor_parameter_captures_its_own_readonly_modifier() {
 }
 
 #[test]
+fn each_trait_use_statement_keeps_its_own_traits_doc_comment_and_adaptations() {
+    let program = parse(
+        r#"<?php
+            class C {
+                /** @use A<int> */
+                use A, B {
+                    A::hello insteadof B;
+                }
+                use D;
+            }
+            "#,
+    );
+    let StmtKind::ClassDecl(c) = &program[0].kind else {
+        panic!("expected ClassDecl");
+    };
+    assert_eq!(c.trait_uses.len(), 2);
+    fn names(u: &TraitUse) -> Vec<&str> {
+        u.traits.iter().map(|t| &*t.written).collect()
+    }
+    assert_eq!(names(&c.trait_uses[0]), ["A", "B"]);
+    assert_eq!(
+        c.trait_uses[0].doc_comment.as_deref(),
+        Some("/** @use A<int> */")
+    );
+    assert_eq!(c.trait_uses[0].adaptations.precedences.len(), 1);
+    assert_eq!(names(&c.trait_uses[1]), ["D"]);
+    assert!(c.trait_uses[1].doc_comment.is_none());
+    assert!(c.trait_uses[1].adaptations.precedences.is_empty());
+}
+
+#[test]
 fn a_trait_as_alias_clause_is_captured_in_the_ast() {
     let program = parse(
         r#"<?php
@@ -216,11 +247,17 @@ fn a_trait_as_alias_clause_is_captured_in_the_ast() {
     let StmtKind::ClassDecl(c) = &program[0].kind else {
         panic!("expected ClassDecl");
     };
-    assert_eq!(c.trait_aliases.len(), 1);
-    let trait_name = c.trait_aliases[0].trait_name.as_ref().unwrap();
+    assert_eq!(c.trait_uses[0].adaptations.aliases.len(), 1);
+    let trait_name = c.trait_uses[0].adaptations.aliases[0]
+        .trait_name
+        .as_ref()
+        .unwrap();
     assert_eq!(&*trait_name.written, "B");
-    assert_eq!(c.trait_aliases[0].method, "hello");
-    assert_eq!(c.trait_aliases[0].alias, Some("helloB".into()));
+    assert_eq!(c.trait_uses[0].adaptations.aliases[0].method, "hello");
+    assert_eq!(
+        c.trait_uses[0].adaptations.aliases[0].alias,
+        Some("helloB".into())
+    );
 }
 
 #[test]
@@ -237,10 +274,13 @@ fn a_bare_as_alias_clause_with_no_trait_qualifier_is_captured() {
     let StmtKind::ClassDecl(c) = &program[0].kind else {
         panic!("expected ClassDecl");
     };
-    assert_eq!(c.trait_aliases.len(), 1);
-    assert!(c.trait_aliases[0].trait_name.is_none());
-    assert_eq!(c.trait_aliases[0].method, "greet");
-    assert_eq!(c.trait_aliases[0].alias, Some("greetAlias".into()));
+    assert_eq!(c.trait_uses[0].adaptations.aliases.len(), 1);
+    assert!(c.trait_uses[0].adaptations.aliases[0].trait_name.is_none());
+    assert_eq!(c.trait_uses[0].adaptations.aliases[0].method, "greet");
+    assert_eq!(
+        c.trait_uses[0].adaptations.aliases[0].alias,
+        Some("greetAlias".into())
+    );
 }
 
 #[test]
@@ -257,13 +297,18 @@ fn an_as_clause_that_only_changes_visibility_captures_no_alias() {
     let StmtKind::ClassDecl(c) = &program[0].kind else {
         panic!("expected ClassDecl");
     };
-    assert_eq!(c.trait_aliases.len(), 1);
+    assert_eq!(c.trait_uses[0].adaptations.aliases.len(), 1);
     assert!(matches!(
-        c.trait_aliases[0].visibility,
+        c.trait_uses[0].adaptations.aliases[0].visibility,
         Some(Visibility::Protected)
     ));
-    assert!(c.trait_aliases[0].alias.is_none());
-    assert_eq!(c.resolved_trait_conflicts, ["greet"]);
+    assert!(c.trait_uses[0].adaptations.aliases[0].alias.is_none());
+    assert_eq!(
+        c.resolved_trait_conflicts()
+            .map(|n| n.as_str())
+            .collect::<Vec<_>>(),
+        ["greet"]
+    );
 }
 
 #[test]
@@ -280,16 +325,26 @@ fn an_insteadof_clause_records_its_method_as_a_resolved_conflict() {
     let StmtKind::ClassDecl(c) = &program[0].kind else {
         panic!("expected ClassDecl");
     };
-    assert_eq!(c.trait_precedences.len(), 1);
-    assert_eq!(&*c.trait_precedences[0].trait_name.written, "A");
-    assert_eq!(c.trait_precedences[0].method, "hello");
-    let instead_of: Vec<&str> = c.trait_precedences[0]
+    assert_eq!(c.trait_uses[0].adaptations.precedences.len(), 1);
+    assert_eq!(
+        &*c.trait_uses[0].adaptations.precedences[0]
+            .trait_name
+            .written,
+        "A"
+    );
+    assert_eq!(c.trait_uses[0].adaptations.precedences[0].method, "hello");
+    let instead_of: Vec<&str> = c.trait_uses[0].adaptations.precedences[0]
         .instead_of
         .iter()
         .map(|q| &*q.written)
         .collect();
     assert_eq!(instead_of, ["B"]);
-    assert_eq!(c.resolved_trait_conflicts, ["hello"]);
+    assert_eq!(
+        c.resolved_trait_conflicts()
+            .map(|n| n.as_str())
+            .collect::<Vec<_>>(),
+        ["hello"]
+    );
 }
 
 #[test]
@@ -309,7 +364,12 @@ fn an_insteadof_clause_with_a_fully_qualified_trait_name_is_still_parsed() {
     let StmtKind::ClassDecl(c) = &program[0].kind else {
         panic!("expected ClassDecl");
     };
-    assert_eq!(c.resolved_trait_conflicts, ["hello"]);
+    assert_eq!(
+        c.resolved_trait_conflicts()
+            .map(|n| n.as_str())
+            .collect::<Vec<_>>(),
+        ["hello"]
+    );
 }
 
 #[test]

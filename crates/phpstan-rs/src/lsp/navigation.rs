@@ -535,7 +535,7 @@ impl<'ast> Visitor<'ast> for Walker<'_> {
             .extends
             .iter()
             .chain(&class.implements)
-            .chain(&class.uses)
+            .chain(class.used_traits())
         {
             self.record_class(name);
         }

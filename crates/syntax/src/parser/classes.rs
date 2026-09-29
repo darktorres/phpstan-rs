@@ -1,5 +1,3 @@
-use std::sync::Arc;
-
 use crate::ast::*;
 use crate::name::Name;
 use crate::parser::{ParseError, Parser};
@@ -10,11 +8,7 @@ pub(crate) struct ClassBody {
     pub properties: Vec<PropertyDecl>,
     pub methods: Vec<MethodDecl>,
     pub consts: Vec<ClassConst>,
-    pub uses: Vec<QualifiedName>,
-    pub uses_doc_comments: Vec<Option<Arc<str>>>,
-    pub trait_aliases: Vec<TraitAlias>,
-    pub trait_precedences: Vec<TraitPrecedence>,
-    pub resolved_trait_conflicts: Vec<Name>,
+    pub trait_uses: Vec<TraitUse>,
     pub enum_cases: Vec<EnumCase>,
 }
 
@@ -103,11 +97,7 @@ impl Parser {
             properties,
             methods,
             consts,
-            uses,
-            uses_doc_comments,
-            trait_aliases,
-            trait_precedences,
-            resolved_trait_conflicts,
+            trait_uses,
             enum_cases,
         } = self.parse_class_body(class_is_readonly)?;
 
@@ -131,11 +121,7 @@ impl Parser {
             properties,
             methods,
             consts,
-            uses,
-            uses_doc_comments,
-            trait_aliases,
-            trait_precedences,
-            resolved_trait_conflicts,
+            trait_uses,
             enum_cases,
             doc_comment: None,
             attrs,
@@ -156,11 +142,7 @@ impl Parser {
         let mut properties = Vec::new();
         let mut methods = Vec::new();
         let mut consts = Vec::new();
-        let mut uses = Vec::new();
-        let mut uses_doc_comments = Vec::new();
-        let mut trait_aliases = Vec::new();
-        let mut trait_precedences = Vec::new();
-        let mut resolved_trait_conflicts = Vec::new();
+        let mut trait_uses = Vec::new();
         let mut enum_cases = Vec::new();
 
         let mut pending_member: Option<crate::parser::MemberStart> = None;
@@ -191,20 +173,22 @@ impl Parser {
             }
 
             if self.eat(&Token::Keyword(Keyword::Use)) {
-                uses.push(self.parse_name_reference());
-                uses_doc_comments.push(doc.clone());
+                let mut traits = vec![self.parse_name_reference()];
                 while self.eat(&Token::Comma) {
-                    uses.push(self.parse_name_reference());
-                    uses_doc_comments.push(doc.clone());
+                    traits.push(self.parse_name_reference());
                 }
-                if self.check(&Token::LBrace) {
-                    let adaptations = self.parse_trait_adaptations()?;
-                    trait_aliases.extend(adaptations.aliases);
-                    trait_precedences.extend(adaptations.precedences);
-                    resolved_trait_conflicts.extend(adaptations.mentioned);
+                let adaptations = if self.check(&Token::LBrace) {
+                    self.parse_trait_adaptations()?
                 } else {
                     self.expect_semicolon()?;
-                }
+                    TraitAdaptations::default()
+                };
+                trait_uses.push(TraitUse {
+                    traits,
+                    doc_comment: doc,
+                    adaptations,
+                    span: self.span_from(member_start),
+                });
                 continue;
             }
 
@@ -450,11 +434,7 @@ impl Parser {
             properties,
             methods,
             consts,
-            uses,
-            uses_doc_comments,
-            trait_aliases,
-            trait_precedences,
-            resolved_trait_conflicts,
+            trait_uses,
             enum_cases,
         })
     }
@@ -482,11 +462,10 @@ impl Parser {
                 if let Some(trait_name) = trait_name {
                     out.precedences.push(TraitPrecedence {
                         trait_name,
-                        method: method.clone(),
+                        method,
                         instead_of,
                     });
                 }
-                out.mentioned.push(method);
             } else if self.eat(&Token::Keyword(Keyword::As)) {
                 let visibility = match self.peek() {
                     Token::Keyword(Keyword::Public) => Some(Visibility::Public),
@@ -504,11 +483,10 @@ impl Parser {
                 };
                 out.aliases.push(TraitAlias {
                     trait_name,
-                    method: method.clone(),
+                    method,
                     visibility,
                     alias,
                 });
-                out.mentioned.push(method);
             }
             self.expect_semicolon()?;
         }
@@ -599,11 +577,7 @@ impl Parser {
             properties,
             methods,
             consts,
-            uses,
-            uses_doc_comments,
-            trait_aliases,
-            trait_precedences,
-            resolved_trait_conflicts,
+            trait_uses,
             enum_cases,
         } = self.parse_class_body(class_is_readonly)?;
 
@@ -621,11 +595,7 @@ impl Parser {
             properties,
             methods,
             consts,
-            uses,
-            uses_doc_comments,
-            trait_aliases,
-            trait_precedences,
-            resolved_trait_conflicts,
+            trait_uses,
             enum_cases,
             doc_comment,
             // Overwritten by `parse_statement`, the only caller that

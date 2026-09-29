@@ -1521,7 +1521,7 @@ impl<'a> Checker<'a> {
                         self.check_class_references_exist(&fqn, c.span);
                         self.check_internal_inheritance(&fqn, c.kind, c.span);
                         self.check_restricted_class_inheritance(&fqn, c.span);
-                        for name in c.extends.iter().chain(&c.implements).chain(&c.uses) {
+                        for name in c.extends.iter().chain(&c.implements).chain(c.used_traits()) {
                             self.check_class_name_case(name);
                         }
                         self.check_method_tag_types(&fqn, c.span);

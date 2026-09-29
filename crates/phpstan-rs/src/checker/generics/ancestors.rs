@@ -4,12 +4,10 @@
 //! declaration must name one of its real ancestors with a well-formed
 //! generic type, and an ancestor that is generic needs its tag.
 
-use std::sync::Arc;
-
 use crate::checker::{Checker, class_kind_identifier};
 use crate::registry;
 use phpdoc::grammar::{self, PhpDocTagValue};
-use syntax::ast::{ClassDecl, ClassKind, QualifiedName};
+use syntax::ast::{ClassDecl, ClassKind, QualifiedName, TraitUse};
 use syntax::token::Span;
 use types::{self, PositionVariance, Type};
 
@@ -164,14 +162,7 @@ impl<'a> Checker<'a> {
             }
             ClassKind::Trait => {}
         }
-        self.check_used_traits(
-            fqn,
-            &templates,
-            c.kind,
-            &c.uses,
-            &c.uses_doc_comments,
-            c.span,
-        );
+        self.check_used_traits(fqn, &templates, c.kind, &c.trait_uses);
     }
 
     /// This declaration's own `@template`s, from its own doc comment (not
@@ -197,9 +188,7 @@ impl<'a> Checker<'a> {
         fqn: &str,
         templates: &Templates,
         kind: ClassKind,
-        uses: &[QualifiedName],
-        docs: &[Option<Arc<str>>],
-        span: Span,
+        trait_uses: &[TraitUse],
     ) {
         let (type_description, description) = match kind {
             ClassKind::Trait => ("trait", format!("trait {fqn}")),
@@ -221,32 +210,21 @@ impl<'a> Checker<'a> {
             missing_generics: Some(format!("{upper} uses generic trait")),
             variance_context: Some(format!("of {description}")),
         };
-        // Consecutive entries of one `use A, B;` statement share one doc
-        // comment (the same `Arc`).
-        let mut i = 0;
-        while i < uses.len() {
-            let doc = docs.get(i).cloned().flatten();
-            let mut j = i + 1;
-            while j < uses.len()
-                && let (Some(a), Some(Some(b))) = (&doc, docs.get(j))
-                && Arc::ptr_eq(a, b)
-            {
-                j += 1;
-            }
-            let names: Vec<String> = uses[i..j]
+        for trait_use in trait_uses {
+            let names: Vec<String> = trait_use
+                .traits
                 .iter()
                 .map(|n| self.resolve_class_ref(n))
                 .collect();
             self.check_ancestor_tags(
                 fqn,
                 templates,
-                doc.as_deref(),
+                trait_use.doc_comment.as_deref(),
                 AncestorTag::Use,
                 &names,
                 &messages,
-                span,
+                trait_use.span,
             );
-            i = j;
         }
     }
 

@@ -71,11 +71,7 @@ impl Parser {
             properties,
             methods,
             consts,
-            uses,
-            uses_doc_comments,
-            trait_aliases,
-            trait_precedences,
-            resolved_trait_conflicts,
+            trait_uses,
             enum_cases,
         } = self.parse_class_body(false)?;
 
@@ -95,11 +91,7 @@ impl Parser {
             enum_cases,
             methods,
             consts,
-            uses,
-            uses_doc_comments,
-            trait_aliases,
-            trait_precedences,
-            resolved_trait_conflicts,
+            trait_uses,
             doc_comment,
             // Overwritten by `parse_statement`, the only caller that saw
             // any leading `#[Attr]` groups - see `ClassDecl.attrs`'s

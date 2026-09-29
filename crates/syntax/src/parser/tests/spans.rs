@@ -80,9 +80,9 @@ fn class_decl_uses_spans_point_at_each_trait_name() {
     let StmtKind::ClassDecl(c) = &program[0].kind else {
         panic!("expected ClassDecl");
     };
-    assert_eq!(c.uses.len(), 2);
-    assert_eq!(text_at(src, c.uses[0].span), "TraitA");
-    assert_eq!(text_at(src, c.uses[1].span), "TraitB");
+    assert_eq!(c.trait_uses[0].traits.len(), 2);
+    assert_eq!(text_at(src, c.trait_uses[0].traits[0].span), "TraitA");
+    assert_eq!(text_at(src, c.trait_uses[0].traits[1].span), "TraitB");
 }
 
 #[test]

@@ -173,8 +173,7 @@ impl<'a> Checker<'a> {
                 .any(|a| self.registry.is_subclass_of(fqn, a) || fqn.eq_ignore_ascii_case(a))
             {
                 let span = c
-                    .uses
-                    .iter()
+                    .used_traits()
                     .find(|u| {
                         u.resolved_class()
                             .is_some_and(|resolved| resolved.eq_ignore_ascii_case(&trait_name))

@@ -529,21 +529,8 @@ pub struct ClassDecl {
     pub properties: Vec<PropertyDecl>,
     pub methods: Vec<MethodDecl>,
     pub consts: Vec<ClassConst>,
-    // `use TraitA, TraitB;` inside the class body.
-    pub uses: Vec<QualifiedName>,
-    // The doc comment of the `use` *statement* each `uses` entry came
-    // from (not the class's own, separate `doc_comment` below) - same
-    // index/shape as `uses`. Needed for `@use Trait<Args>`: real
-    // PHPStan resolves that tag from the `TraitUse` statement's own doc
-    // comment, not the class's top-of-class docblock.
-    pub uses_doc_comments: Vec<Option<Arc<str>>>,
-    // `use A, B { B::hello as protected helloB; A::hi as private; }`: each
-    // `as` clause, with its visibility and new name.
-    pub trait_aliases: Vec<TraitAlias>,
-    // `use A, B { B::hello insteadof A; }`: each `insteadof` clause.
-    pub trait_precedences: Vec<TraitPrecedence>,
-    // Every method name an adaptation clause mentions.
-    pub resolved_trait_conflicts: Vec<Name>,
+    // Each `use TraitA, TraitB { ... }` statement in the body.
+    pub trait_uses: Vec<TraitUse>,
     // `case` members, which PHP parses in any class-like body but only
     // allows in an enum (`enum.caseOutsideOfEnum`).
     pub enum_cases: Vec<EnumCase>,
@@ -568,6 +555,42 @@ impl ClassDecl {
     pub fn constructor(&self) -> Option<&MethodDecl> {
         self.methods.iter().find(|m| m.function.is_constructor())
     }
+
+    /// Every trait its `use` statements name, in source order.
+    pub fn used_traits(&self) -> impl Iterator<Item = &QualifiedName> {
+        self.trait_uses.iter().flat_map(|u| &u.traits)
+    }
+
+    /// Every `as` clause of its `use` statements.
+    pub fn trait_aliases(&self) -> impl Iterator<Item = &TraitAlias> {
+        self.trait_uses.iter().flat_map(|u| &u.adaptations.aliases)
+    }
+
+    /// Every `insteadof` clause of its `use` statements.
+    pub fn trait_precedences(&self) -> impl Iterator<Item = &TraitPrecedence> {
+        self.trait_uses
+            .iter()
+            .flat_map(|u| &u.adaptations.precedences)
+    }
+
+    /// Every method name an adaptation clause of its `use` statements
+    /// mentions.
+    pub fn resolved_trait_conflicts(&self) -> impl Iterator<Item = &Name> {
+        self.trait_uses
+            .iter()
+            .flat_map(|u| u.adaptations.mentioned_methods())
+    }
+}
+
+/// `use A, B;` or `use A, B { ... }` inside a class-like body.
+#[derive(Debug, Clone)]
+pub struct TraitUse {
+    pub traits: Vec<QualifiedName>,
+    // The statement's own doc comment, which carries `@use Trait<Args>`
+    // (not the class's).
+    pub doc_comment: Option<Arc<str>>,
+    pub adaptations: TraitAdaptations,
+    pub span: Span,
 }
 
 #[derive(Debug, Clone)]
@@ -599,13 +622,22 @@ pub struct TraitPrecedence {
     pub instead_of: Vec<QualifiedName>,
 }
 
-/// A trait-use block's adaptations.
+/// A trait-use block's adaptations: `B::hello as protected helloB;` and
+/// `B::hello insteadof A;` clauses.
 #[derive(Debug, Clone, Default)]
 pub struct TraitAdaptations {
     pub aliases: Vec<TraitAlias>,
     pub precedences: Vec<TraitPrecedence>,
+}
+
+impl TraitAdaptations {
     /// Every method name a clause mentions.
-    pub mentioned: Vec<Name>,
+    pub fn mentioned_methods(&self) -> impl Iterator<Item = &Name> {
+        self.aliases
+            .iter()
+            .map(|a| &a.method)
+            .chain(self.precedences.iter().map(|p| &p.method))
+    }
 }
 
 /// One argument in a call's own argument list - `name` is

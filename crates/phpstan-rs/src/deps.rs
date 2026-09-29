@@ -65,7 +65,7 @@ impl<'ast> Visitor<'ast> for Collector {
         self.names
             .extend(class.implements.iter().map(|n| n.written.to_string()));
         self.names
-            .extend(class.uses.iter().map(|n| n.written.to_string()));
+            .extend(class.used_traits().map(|n| n.written.to_string()));
         walk_class_decl(self, class);
     }
 

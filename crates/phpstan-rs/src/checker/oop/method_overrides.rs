@@ -48,7 +48,7 @@ impl<'a> Checker<'a> {
         // for class-level diagnostics with no more specific member
         // location (`check_class_completeness`, `check_trait_conflicts`,
         // ...).
-        if !c.uses.is_empty() {
+        if !c.trait_uses.is_empty() {
             let own_method_names: rustc_hash::FxHashSet<&str> =
                 c.methods.iter().map(|m| m.function.name.as_ref()).collect();
             let mut trait_method_names: Vec<Name> = info
