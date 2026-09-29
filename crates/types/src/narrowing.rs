@@ -2,7 +2,7 @@
 //! from an excluded one, by key presence, by truthiness, and the array
 //! and integer refinements comparisons and counts prove.
 
-use crate::{AccessoryKind, PhpString, Relation, Repr, ShapeField, ShapeKey, Type};
+use crate::{AccessoryKind, PhpString, Relation, Repr, Shape, ShapeField, ShapeKey, Type};
 use syntax::ast::BinOp;
 
 /// A comparison's own truth value, canonicalized to "the narrowed side
@@ -611,6 +611,39 @@ impl Type {
                 _ => self.clone(),
             }
         })
+    }
+}
+
+impl Type {
+    /// The values of this type PHP treats as false (`empty()` true, `!$x`):
+    /// each of `null`, `false`, `0`, `0.0`, `''`, `'0'` and `[]` the type
+    /// may hold, and a `SimpleXMLElement` (one with no children is
+    /// false). A type over a template is left as it is.
+    pub fn only_falsy(&self, relation: &Relation) -> Type {
+        if self.references_template() {
+            return self.clone();
+        }
+        let candidates = [
+            Type::null(),
+            Type::bool_literal(false),
+            Type::int_literal(0),
+            Type::float_literal(0.0),
+            Type::string_literal(PhpString::default()),
+            Type::string_literal(PhpString::from("0")),
+            Type::array_shape(Shape::sealed(Vec::new())),
+        ];
+        let simple_xml = Type::object("SimpleXMLElement".into(), Vec::new());
+        let mut falsy: Vec<Type> = candidates
+            .into_iter()
+            .filter(|c| relation.is_super_type_of(self, c).yes())
+            .collect();
+        if !relation.is_super_type_of(self, &simple_xml).no() {
+            falsy.push(simple_xml);
+        }
+        falsy
+            .into_iter()
+            .reduce(Type::union)
+            .unwrap_or_else(Type::never)
     }
 }
 

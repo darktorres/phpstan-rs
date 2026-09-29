@@ -905,19 +905,24 @@ impl<'a> Checker<'a> {
             ExprKind::Cast(cast, inner) if cast.kind() == CastKind::Bool => {
                 self.apply_narrowing(inner, locals, branch_true);
             }
-            // `empty($x)` is PHP's own falsy check - only the branch where
-            // it evaluated `false` (`$x` proven truthy) is safely
-            // narrowable, the same asymmetry as a bare truthiness check.
+            // `empty($x)` is PHP's falsy check: false leaves the truthy
+            // values, true the falsy ones - for a defined variable, which
+            // `empty()` of an undefined one can't be told apart from.
             ExprKind::Empty(operand) => {
-                if !branch_true && let Some(key) = narrowing_key(operand) {
+                if let Some(key) = narrowing_key(operand) {
                     let current = self.current_narrowed_type(operand, &key, locals);
-                    locals.insert(key, current.without_falsy());
+                    if !branch_true {
+                        locals.insert(key, current.without_falsy());
+                    } else if is_defined_variable(operand, locals) {
+                        locals.insert(key, current.only_falsy(&self.relation()));
+                    }
                 }
             }
             // `isset($x)`'s truthy branch means specifically "not null" -
             // it's true for `0`, `''`, `false`, an empty array - so this
-            // narrows only `Null` away. The false branch isn't narrowable:
-            // it doesn't say which operand was unset.
+            // narrows only `Null` away. The false branch says one operand
+            // is null or unset: with a single operand that's a defined
+            // variable, it's null.
             ExprKind::Isset(operands) => {
                 if let [operand] = operands.as_slice()
                     && let Some(key) = narrowing_key(operand)
@@ -939,6 +944,21 @@ impl<'a> Checker<'a> {
                         }
                         self.narrow_isset_containers(operand, locals);
                     }
+                } else if let [operand] = operands.as_slice()
+                    && is_defined_variable(operand, locals)
+                    && let Some(key) = narrowing_key(operand)
+                {
+                    let current = self.current_narrowed_type(operand, &key, locals);
+                    let null = if self
+                        .relation()
+                        .is_super_type_of(&current, &Type::null())
+                        .no()
+                    {
+                        Type::never()
+                    } else {
+                        Type::null()
+                    };
+                    locals.insert(key, null);
                 }
             }
             ExprKind::Call(callee, args) => {
@@ -1606,4 +1626,9 @@ impl<'a> Checker<'a> {
             );
         }
     }
+}
+
+/// Whether `e` is a plain variable this scope has defined.
+fn is_defined_variable(e: &Expr, locals: &Locals) -> bool {
+    matches!(&e.kind, ExprKind::Variable(name) if locals.contains_key(name))
 }
