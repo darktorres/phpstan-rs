@@ -15,7 +15,7 @@
 use super::*;
 use crate::registry::FunctionReflection;
 use phpdoc::docblock;
-use types::TrinaryLogic;
+use types::{ConditionalSubject, TrinaryLogic};
 
 impl<'a> Checker<'a> {
     pub(crate) fn check_phpdoc_types_against_native(
@@ -452,34 +452,37 @@ impl<'a> Checker<'a> {
         }
         let templates = self.declared_template_names(f, class_name);
         for c in conditionals {
-            let Some((subject, target, negated, template_subject)) = c.as_conditional() else {
+            let Some((subject, target, negated)) = c.as_conditional() else {
                 continue;
             };
-            let subject_ty = if template_subject {
-                // Its own `@template`s, its class's, or one it inherited
-                // along with the tag (`{@inheritDoc}`).
-                let inherited = find_template_param(sig, subject);
-                if !templates.iter().any(|t| t == subject) && inherited.is_none() {
-                    let shown = self
-                        .resolve_type_node(&phpdoc::grammar::TypeNode::Identifier(subject.into()));
-                    self.report(format!(
+            let subject_ty = match subject {
+                ConditionalSubject::Template(subject) => {
+                    // Its own `@template`s, its class's, or one it inherited
+                    // along with the tag (`{@inheritDoc}`).
+                    let inherited = find_template_param(sig, subject);
+                    if !templates.iter().any(|t| t == subject) && inherited.is_none() {
+                        let shown = self.resolve_type_node(&phpdoc::grammar::TypeNode::Identifier(
+                            subject.to_string(),
+                        ));
+                        self.report(format!(
                             "Conditional return type uses subject type {shown} which is not part of PHPDoc @template tags."
                         ),
                         f.name_span,
                         2,
                         "conditionalType.subjectNotFound",
                     );
-                    continue;
+                        continue;
+                    }
+                    match inherited {
+                        Some(tp) => tp,
+                        None => continue,
+                    }
                 }
-                match inherited {
-                    Some(tp) => tp,
-                    None => continue,
-                }
-            } else {
-                match sig.params().iter().find(|p| **p.name() == *subject) {
-                    Some(p) => p.ty().clone(),
-                    None => {
-                        self.report(
+                ConditionalSubject::Parameter(subject) => {
+                    match sig.params().iter().find(|p| p.name() == subject) {
+                        Some(p) => p.ty().clone(),
+                        None => {
+                            self.report(
                             format!(
                                 "Conditional return type references unknown parameter ${subject}."
                             ),
@@ -487,7 +490,8 @@ impl<'a> Checker<'a> {
                             2,
                             "parameter.notFound",
                         );
-                        continue;
+                            continue;
+                        }
                     }
                 }
             };

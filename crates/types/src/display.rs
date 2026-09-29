@@ -3,7 +3,9 @@ use std::fmt;
 use syntax::ast::ClassKind;
 
 use crate::parse::display_shape_key;
-use crate::{AccessoryKind, CallSiteVariance, CallableSig, PhpString, Repr, Shape, Type};
+use crate::{
+    AccessoryKind, CallSiteVariance, CallableSig, ConditionalSubject, PhpString, Repr, Shape, Type,
+};
 
 /// `keyword(params): return` - shared by a shaped `callable(...)`/
 /// `Closure(...)` PHPDoc type and a closure literal's own
@@ -169,11 +171,14 @@ impl fmt::Display for Type {
                     if_true,
                     if_false,
                     negated,
-                    template_subject,
                 }) => write!(
                     f,
-                    "({}{subject} is {}{target} ? {if_true} : {if_false})",
-                    if *template_subject { "" } else { "$" },
+                    "({}{} is {}{target} ? {if_true} : {if_false})",
+                    match subject {
+                        ConditionalSubject::Parameter(_) => "$",
+                        ConditionalSubject::Template(_) => "",
+                    },
+                    subject.name(),
                     if *negated { "not " } else { "" },
                 ),
             }

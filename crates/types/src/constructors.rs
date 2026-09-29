@@ -3,8 +3,8 @@
 use std::sync::Arc;
 
 use crate::{
-    AccessoryKind, CallSiteVariance, CallableSig, ClassKind, ExtensionTypeData, Name, PhpString,
-    Repr, Shape, ShapeKey, TemplateParam, Type,
+    AccessoryKind, CallSiteVariance, CallableSig, ClassKind, ConditionalSubject, ExtensionTypeData,
+    Name, PhpString, Repr, Shape, ShapeKey, TemplateParam, Type,
 };
 
 impl Type {
@@ -209,7 +209,7 @@ impl Type {
     }
 
     /// The member `member` of `owner`'s reflected class.
-    pub fn reflected_member(owner: Type, member: String) -> Type {
+    pub fn reflected_member(owner: Type, member: Name) -> Type {
         Type(Repr::ReflectedMember(Box::new(owner), member))
     }
 
@@ -229,7 +229,7 @@ impl Type {
     }
 
     /// The constants of `class` matching `pattern` (`Foo::BAR_*`).
-    pub fn class_constant(class: Type, pattern: String) -> Type {
+    pub fn class_constant(class: Type, pattern: Name) -> Type {
         Type(Repr::ClassConstant {
             class: Box::new(class),
             pattern,
@@ -241,15 +241,13 @@ impl Type {
     }
 
     /// `(subject is target ? if_true : if_false)`, `is not` when
-    /// `negated`; `subject` names a template when `template_subject`,
-    /// a parameter otherwise.
+    /// `negated`.
     pub fn conditional(
-        subject: String,
+        subject: ConditionalSubject,
         target: Type,
         if_true: Type,
         if_false: Type,
         negated: bool,
-        template_subject: bool,
     ) -> Type {
         Type(Repr::Conditional {
             subject,
@@ -257,7 +255,6 @@ impl Type {
             if_true: Box::new(if_true),
             if_false: Box::new(if_false),
             negated,
-            template_subject,
         })
     }
 }

@@ -57,8 +57,8 @@ fn substitute_template_recurses_into_a_generic_class_reference() {
 
 // A template param used inside one of a conditional return type's own
 // branches (`@return ($x is T ? T : null)`) needs the same substitution
-// as anywhere else - `subject` (a raw parameter name, not a `Type`) is
-// left untouched.
+// as anywhere else - `subject` (a parameter name, not a `Type`) is left
+// untouched.
 #[test]
 fn substitute_template_recurses_into_a_conditional_types_branches() {
     let mut bindings = FxHashMap::default();
@@ -66,22 +66,20 @@ fn substitute_template_recurses_into_a_conditional_types_branches() {
 
     let t = || Type::template_param(TemplateParam::unbounded("T".to_string()));
     let conditional = Type(Repr::Conditional {
-        subject: "x".to_string(),
+        subject: ConditionalSubject::Parameter("x".into()),
         target: Box::new(t()),
         if_true: Box::new(t()),
         if_false: Box::new(Type::null()),
         negated: false,
-        template_subject: false,
     });
     assert_eq!(
         conditional.substitute_templates(&bindings, &crate::Relation::structural()),
         Type(Repr::Conditional {
-            subject: "x".to_string(),
+            subject: ConditionalSubject::Parameter("x".into()),
             target: Box::new(Type::int()),
             if_true: Box::new(Type::int()),
             if_false: Box::new(Type::null()),
             negated: false,
-            template_subject: false,
         })
     );
 }

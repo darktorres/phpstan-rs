@@ -1,6 +1,6 @@
 use rustc_hash::FxHashMap;
 
-use crate::{CallableParam, CallableSig, Relation, Repr, TemplateParam, Type};
+use crate::{CallableParam, CallableSig, ConditionalSubject, Relation, Repr, TemplateParam, Type};
 
 impl Relation<'_> {
     /// PHPStan's `inferTemplateTypes`: the bindings a parameter of type
@@ -444,20 +444,19 @@ fn substitute(
             // once `T` is bound, the way real PHPStan's `ConditionalType`
             // does; otherwise both branches stay.
             Type(Repr::Conditional {
-                subject,
+                subject: ConditionalSubject::Template(subject),
                 target,
                 if_true,
                 if_false,
                 negated,
-                template_subject: true,
             }) if bindings
-                .get(subject)
+                .get(subject.as_str())
                 .is_some_and(|b| !matches!(b, Type(Repr::Mixed(_)))) =>
             {
                 let target = substitute(target, bindings, substituted, to_bound, relation);
                 match super::conditional::conditional_branch(
                     relation,
-                    &bindings[subject],
+                    &bindings[subject.as_str()],
                     &target,
                     *negated,
                 ) {

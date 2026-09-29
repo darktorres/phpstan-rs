@@ -397,7 +397,7 @@ pub(crate) fn infer_class_const_type(value: &syntax::ast::Expr) -> Type {
     infer_const_type_with(value, &|class, name| {
         Some(Type::class_constant(
             types::parse_type_string(class),
-            name.to_string(),
+            name.into(),
         ))
     })
 }

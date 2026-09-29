@@ -3,7 +3,8 @@
 use std::sync::Arc;
 
 use crate::{
-    AccessoryKind, CallSiteVariance, CallableSig, Relation, Repr, Shape, TrinaryLogic, Type,
+    AccessoryKind, CallSiteVariance, CallableSig, ConditionalSubject, Relation, Repr, Shape,
+    TrinaryLogic, Type,
 };
 
 impl Type {
@@ -258,18 +259,16 @@ impl Type {
         })
     }
 
-    /// A conditional type's condition: its subject (a parameter or
-    /// template name), its target, whether it's negated (`is not`), and
-    /// whether the subject names a template. `None` for any other type.
-    pub fn as_conditional(&self) -> Option<(&str, &Type, bool, bool)> {
+    /// A conditional type's condition: its subject, its target, and whether
+    /// it's negated (`is not`). `None` for any other type.
+    pub fn as_conditional(&self) -> Option<(&ConditionalSubject, &Type, bool)> {
         match self {
             Type(Repr::Conditional {
                 subject,
                 target,
                 negated,
-                template_subject,
                 ..
-            }) => Some((subject, target, *negated, *template_subject)),
+            }) => Some((subject, target, *negated)),
             _ => None,
         }
     }

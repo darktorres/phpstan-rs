@@ -247,7 +247,7 @@ pub(crate) enum Repr {
     // whose own inferred type isn't a string literal either, never
     // produces this - matching this project's own "don't guess" leniency
     // for every other literal-key-aware construction site.
-    ReflectedMember(Box<Type>, String),
+    ReflectedMember(Box<Type>, Name),
     // `value-of<T>` whose `T` a parse alone can't see through - an enum,
     // a class-constant reference or a template - resolved once the
     // registry exists (`Registry::resolve_deferred_value_of`).
@@ -263,27 +263,40 @@ pub(crate) enum Repr {
     // constants, resolved once the registry exists.
     ClassConstant {
         class: Box<Type>,
-        pattern: String,
+        pattern: Name,
     },
     // `($subject is $target ? $if_true : $if_false)` - PHPDoc's
-    // conditional-return-type syntax, lazily resolved once the real
-    // call-site argument type for `subject` is known
-    // (`crate::conditional::resolve_conditional`). `subject` is the raw
-    // parameter name with no leading `$`; only a bare `$param` subject is
-    // modeled. A consumer that can't resolve this variant falls back to
-    // the eager `Union([if_true, if_false])`.
+    // conditional-return-type syntax, lazily resolved once the real type
+    // of `subject` is known. A consumer that can't resolve this variant
+    // falls back to the eager `Union([if_true, if_false])`.
     // An extension's own payload (`crate::ExtensionTypeData`).
     Extension(Arc<dyn ExtensionTypeData>),
     Conditional {
-        subject: String,
+        subject: ConditionalSubject,
         target: Box<Type>,
         if_true: Box<Type>,
         if_false: Box<Type>,
         negated: bool,
-        // `subject` names a `@template` (`(T is int ? A : B)`), resolved
-        // once the template is bound, rather than a parameter.
-        template_subject: bool,
     },
+}
+
+/// What a conditional type (`(subject is target ? A : B)`) tests.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub enum ConditionalSubject {
+    /// A parameter (`$param is ...`), named without its `$`: resolved per
+    /// call from the argument passed for it.
+    Parameter(Name),
+    /// A `@template` (`T is ...`): resolved once the template is bound.
+    Template(Name),
+}
+
+impl ConditionalSubject {
+    /// The parameter's or template's name.
+    pub fn name(&self) -> &Name {
+        match self {
+            ConditionalSubject::Parameter(name) | ConditionalSubject::Template(name) => name,
+        }
+    }
 }
 
 /// Deliberately not derived: `Mixed`'s own `bool` is ignored entirely
@@ -369,7 +382,6 @@ impl PartialEq for Type {
                     if_true: a_if_true,
                     if_false: a_if_false,
                     negated: a_negated,
-                    template_subject: a_template,
                 }),
                 Type(Repr::Conditional {
                     subject: b_subject,
@@ -377,11 +389,9 @@ impl PartialEq for Type {
                     if_true: b_if_true,
                     if_false: b_if_false,
                     negated: b_negated,
-                    template_subject: b_template,
                 }),
             ) => {
-                a_template == b_template
-                    && a_subject == b_subject
+                a_subject == b_subject
                     && a_target == b_target
                     && a_if_true == b_if_true
                     && a_if_false == b_if_false
@@ -533,14 +543,12 @@ impl Hash for Type {
                     if_true,
                     if_false,
                     negated,
-                    template_subject,
                 }) => {
                     subject.hash(state);
                     target.hash(state);
                     if_true.hash(state);
                     if_false.hash(state);
                     negated.hash(state);
-                    template_subject.hash(state);
                 }
             }
         })

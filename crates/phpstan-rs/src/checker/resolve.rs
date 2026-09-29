@@ -232,7 +232,9 @@ impl<'a> Checker<'a> {
         // A non-negated conditional return type on a parameter
         // (`($params is array{wrapperClass: class-string<T>} ? T : X)`)
         // references its templates through that parameter.
-        if let Some((_, _, false, false)) = sig.return_type().as_conditional() {
+        if let Some((types::ConditionalSubject::Parameter(_), _, false)) =
+            sig.return_type().as_conditional()
+        {
             collect_scoped_template_params(sig.return_type(), bare_name, &mut in_params);
         }
         let mut in_signature = in_params.clone();

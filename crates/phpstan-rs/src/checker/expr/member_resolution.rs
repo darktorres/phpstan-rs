@@ -693,11 +693,11 @@ impl<'a> Checker<'a> {
             let name = args
                 .first()
                 .and_then(|a| match literal_string_value(&a.value) {
-                    Some(s) => Some(s.into_owned()),
+                    Some(s) => Some(Name::from(s)),
                     None => self
                         .infer_expr(&a.value, locals)
                         .string_literal_value()
-                        .map(|s| s.to_string()),
+                        .map(|s| Name::from(s.to_string())),
                 });
             match (owner_ty, name) {
                 (Some(owner_ty), Some(name)) => {

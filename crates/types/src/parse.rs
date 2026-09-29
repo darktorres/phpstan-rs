@@ -1,8 +1,8 @@
 use std::sync::Arc;
 
 use crate::{
-    AccessoryKind, CallSiteVariance, CallableParam, CallableSig, ClassKind, Repr, Shape,
-    ShapeField, ShapeKey, Type, late,
+    AccessoryKind, CallSiteVariance, CallableParam, CallableSig, ClassKind, ConditionalSubject,
+    Repr, Shape, ShapeField, ShapeKey, Type, late,
 };
 
 /// Parses one of our parser's raw type-hint strings (`"?string"`,
@@ -345,17 +345,16 @@ fn try_parse_conditional_type(s: &str) -> Option<Type> {
     // `$param is ...` resolves per call from the argument; any other
     // subject (`T is ...`) names a template, resolved when it's bound.
     let subject_raw = subject_raw.trim();
-    let (subject, template_subject) = match subject_raw.strip_prefix('$') {
-        Some(param) => (param, false),
-        None => (subject_raw, true),
+    let subject = match subject_raw.strip_prefix('$') {
+        Some(param) => ConditionalSubject::Parameter(param.into()),
+        None => ConditionalSubject::Template(subject_raw.into()),
     };
     Some(Type(Repr::Conditional {
-        subject: subject.to_string(),
+        subject,
         target: Box::new(parse_type_string(target_raw)),
         if_true: Box::new(if_true),
         if_false: Box::new(if_false),
         negated,
-        template_subject,
     }))
 }
 
@@ -795,7 +794,7 @@ fn parse_type_atom(s: &str) -> Type {
         } else {
             Type(Repr::ClassConstant {
                 class: Box::new(class_ty),
-                pattern: const_part.to_string(),
+                pattern: const_part.into(),
             })
         }
     } else {

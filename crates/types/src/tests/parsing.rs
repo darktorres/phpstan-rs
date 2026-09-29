@@ -406,7 +406,7 @@ fn class_constant_reference_types_parse_to_a_class_constant() {
     let sentinel = |class: Type, pattern: &str| {
         Type(Repr::ClassConstant {
             class: Box::new(class),
-            pattern: pattern.to_string(),
+            pattern: pattern.into(),
         })
     };
     assert_eq!(
@@ -588,13 +588,11 @@ fn conditional_return_type_syntax_parses_into_a_real_conditional_type() {
         if_true,
         if_false,
         negated,
-        template_subject,
     }) = &ty
     else {
         panic!("expected a real Conditional type, got {ty:?}");
     };
-    assert!(!template_subject);
-    assert_eq!(subject, "action");
+    assert_eq!(*subject, ConditionalSubject::Parameter("action".into()));
     assert_eq!(**target, Type::string_literal("send".into()));
     assert_eq!(**if_true, parse_type_string("list<string>"));
     assert_eq!(**if_false, parse_type_string("list<int>"));
@@ -610,27 +608,18 @@ fn conditional_return_type_syntax_with_is_not_sets_negated() {
     else {
         panic!("expected a real Conditional type, got {ty:?}");
     };
-    assert_eq!(subject, "action");
+    assert_eq!(*subject, ConditionalSubject::Parameter("action".into()));
     assert!(*negated);
 }
 
-// PHPStan also allows a non-parameter type-expression subject (e.g. a
-// template name) - not modeled here, so this falls back to the eager
-// "union both branches" leniency rather than guessing at a shape it
-// can't represent.
+// A subject with no `$` names a template.
 #[test]
 fn conditional_return_type_syntax_with_a_template_subject_keeps_its_condition() {
     let ty = parse_type_string("(T is 'send' ? list<string> : list<int>)");
-    let Type(Repr::Conditional {
-        subject,
-        template_subject,
-        ..
-    }) = &ty
-    else {
+    let Type(Repr::Conditional { subject, .. }) = &ty else {
         panic!("expected a template-subject conditional, got {ty:?}");
     };
-    assert_eq!(subject, "T");
-    assert!(*template_subject);
+    assert_eq!(*subject, ConditionalSubject::Template("T".into()));
 }
 
 // A docblock-parsed `list<int>` and one built at runtime are the same

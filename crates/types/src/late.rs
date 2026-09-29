@@ -2,7 +2,7 @@
 //! answer depends on a `T` that may be a template until a call binds it
 //! (PHPStan's `LateResolvableType`).
 
-use crate::{Repr, ShapeKey, Type};
+use crate::{ConditionalSubject, Repr, ShapeKey, Type};
 
 /// What resolving a class reference inside a type needs to know.
 pub trait ClassConstants {
@@ -136,7 +136,7 @@ impl Type {
         match self {
             Type(Repr::TemplateParam(_)) => true,
             Type(Repr::Conditional {
-                template_subject: true,
+                subject: ConditionalSubject::Template(_),
                 ..
             }) => true,
             _ => self.any_child(Type::references_template),

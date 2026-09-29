@@ -58,14 +58,12 @@ impl Type {
                 if_true,
                 if_false,
                 negated,
-                template_subject,
             }) => Type(Repr::Conditional {
                 subject: subject.clone(),
                 target: Box::new(f(target)),
                 if_true: Box::new(f(if_true)),
                 if_false: Box::new(f(if_false)),
                 negated: *negated,
-                template_subject: *template_subject,
             }),
             leaf => leaf.clone(),
         })

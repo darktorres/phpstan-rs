@@ -1,6 +1,6 @@
 use rustc_hash::FxHashMap;
 
-use crate::{Relation, Repr, Type};
+use crate::{ConditionalSubject, Relation, Repr, Type};
 
 /// Which branch a conditional takes for a subject of type `bound`:
 /// `Some(true)` the `if_true` one, `Some(false)` the other, `None` both.
@@ -58,8 +58,10 @@ impl Type {
                 if_true,
                 if_false,
                 negated,
-                template_subject,
-            }) => match param_bindings.get(subject).filter(|_| !*template_subject) {
+            }) => match match subject {
+                ConditionalSubject::Parameter(param) => param_bindings.get(param.as_str()),
+                ConditionalSubject::Template(_) => None,
+            } {
                 Some(bound) if *bound != Type::mixed() => {
                     match conditional_branch(relation, bound, target, *negated) {
                         Some(true) => if_true.resolve_conditional(param_bindings, relation),
