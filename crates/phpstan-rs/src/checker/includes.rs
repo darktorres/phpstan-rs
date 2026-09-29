@@ -16,7 +16,7 @@ use crate::checker::{Checker, Locals};
 use crate::registry::class_decl_name;
 use syntax::ast::*;
 use syntax::token::Span;
-use syntax::visit::{Visitor, any_child_expr, walk_stmt, walk_stmts};
+use syntax::visit::{Visitor, walk_expr, walk_stmt, walk_stmts};
 
 const GUARD_FUNCTIONS: [&str; 6] = [
     "file_exists",
@@ -108,9 +108,14 @@ pub(crate) fn include_construct(kind: IncludeKind) -> (&'static str, &'static st
     (kind.as_str(), prefix)
 }
 
+/// The function a call's callee names, as an unqualified name in a
+/// namespace falls back to the global one.
 fn callee_name(e: &Expr) -> Option<&str> {
     match &e.kind {
-        ExprKind::Name(n) => Some(n.trim_start_matches('\\')),
+        ExprKind::Name(n) => {
+            let (primary, fallback) = n.candidates();
+            Some(fallback.unwrap_or(primary))
+        }
         _ => None,
     }
 }
@@ -349,9 +354,7 @@ impl<'a> Checker<'a> {
                 }
             }
         };
-        for stmt in program {
-            visit_guard_args_in_stmt(stmt, &mut on_call);
-        }
+        walk_stmts(&mut GuardArgs(&mut on_call), program);
         (guarded, include_dirs)
     }
 }
@@ -361,55 +364,32 @@ enum IncludeCall<'e> {
     SetIncludePath(&'e Expr),
 }
 
-fn visit_guard_args_in_stmt(stmt: &Stmt, out: &mut dyn FnMut(IncludeCall)) {
-    GuardArgs(out).visit_stmt(stmt);
-}
-
-/// Hands every statement expression, in function and method bodies too,
-/// to `visit_guard_args_in_expr`.
+/// Hands every `GUARD_FUNCTIONS`, `set_include_path()` and
+/// `ini_set('include_path', ...)` argument anywhere in the program to its
+/// callback.
 struct GuardArgs<'o>(&'o mut dyn FnMut(IncludeCall));
 
 impl<'ast> Visitor<'ast> for GuardArgs<'_> {
-    fn visit_stmt(&mut self, stmt: &'ast Stmt) {
-        match &stmt.kind {
-            StmtKind::FunctionDecl(f) => walk_stmts(self, &f.body),
-            StmtKind::ClassDecl(c) => {
-                for m in &c.methods {
-                    walk_stmts(self, &m.function.body);
-                }
-            }
-            _ => walk_stmt(self, stmt),
-        }
-    }
-
     fn visit_expr(&mut self, e: &'ast Expr) {
-        visit_guard_args_in_expr(e, self.0);
-    }
-}
-
-fn visit_guard_args_in_expr(e: &Expr, out: &mut dyn FnMut(IncludeCall)) {
-    syntax::stack::guard(|| {
-        if let ExprKind::Call(callee, args) = &e.kind
-            && let Some(name) = callee_name(callee)
-        {
-            let name = name.to_ascii_lowercase();
-            match (name.as_str(), args.as_slice()) {
-                (n, [arg, ..]) if GUARD_FUNCTIONS.contains(&n) => {
-                    out(IncludeCall::Guard(&arg.value))
+        syntax::stack::guard(|| {
+            if let ExprKind::Call(callee, args) = &e.kind
+                && let Some(name) = callee_name(callee)
+            {
+                let name = name.to_ascii_lowercase();
+                match (name.as_str(), args.as_slice()) {
+                    (n, [arg, ..]) if GUARD_FUNCTIONS.contains(&n) => {
+                        (self.0)(IncludeCall::Guard(&arg.value))
+                    }
+                    ("set_include_path", [arg]) => {
+                        (self.0)(IncludeCall::SetIncludePath(&arg.value))
+                    }
+                    ("ini_set", [key, value]) if matches!(&key.value.kind, ExprKind::Literal(Literal::String(k)) if *k == "include_path") => {
+                        (self.0)(IncludeCall::SetIncludePath(&value.value))
+                    }
+                    _ => {}
                 }
-                ("set_include_path", [arg]) => out(IncludeCall::SetIncludePath(&arg.value)),
-                ("ini_set", [key, value]) if matches!(&key.value.kind, ExprKind::Literal(Literal::String(k)) if *k == "include_path") => {
-                    out(IncludeCall::SetIncludePath(&value.value))
-                }
-                _ => {}
             }
-        }
-        if let ExprKind::Closure { body, .. } = &e.kind {
-            body.iter().for_each(|s| visit_guard_args_in_stmt(s, out));
-        }
-        any_child_expr(e, &mut |child| {
-            visit_guard_args_in_expr(child, out);
-            false
-        });
-    })
+            walk_expr(self, e);
+        })
+    }
 }
