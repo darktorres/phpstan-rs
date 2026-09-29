@@ -91,7 +91,7 @@ impl Type {
 
     /// `class-string<inner>`.
     pub fn class_string(inner: Type) -> Type {
-        Type(Repr::ClassString(Box::new(inner)))
+        Type(Repr::ClassString(Arc::new(inner)))
     }
 
     /// `interface-string`, `trait-string` or `enum-string`.
@@ -101,15 +101,15 @@ impl Type {
 
     /// `array<key, value>`.
     pub fn array(key: Type, value: Type) -> Type {
-        Type(Repr::Array(Box::new(key), Box::new(value)))
+        Type(Repr::Array(Arc::new(key), Arc::new(value)))
     }
 
     pub fn array_shape(shape: Shape) -> Type {
-        Type(Repr::ArrayShape(shape))
+        Type(Repr::ArrayShape(Arc::new(shape)))
     }
 
     pub fn object_shape(shape: Shape) -> Type {
-        Type(Repr::ObjectShape(shape))
+        Type(Repr::ObjectShape(Arc::new(shape)))
     }
 
     /// An instance of `class`, with its generic arguments.
@@ -159,7 +159,7 @@ impl Type {
 
     /// A generic argument written with a call-site variance.
     pub fn variance_arg(variance: CallSiteVariance, arg: Type) -> Type {
-        Type(Repr::VarianceArg(variance, Box::new(arg)))
+        Type(Repr::VarianceArg(variance, Arc::new(arg)))
     }
 
     /// The union of `members`: nested unions flattened, members another
@@ -192,7 +192,7 @@ impl Type {
 
     /// `hasOffsetValue(key, value)`.
     pub fn has_offset_value(key: ShapeKey, value: Type) -> Type {
-        Type(Repr::HasOffsetValue(key, Box::new(value)))
+        Type(Repr::HasOffsetValue(key, Arc::new(value)))
     }
 
     /// `hasOffset(key)`.
@@ -210,28 +210,28 @@ impl Type {
 
     /// The member `member` of `owner`'s reflected class.
     pub fn reflected_member(owner: Type, member: Name) -> Type {
-        Type(Repr::ReflectedMember(Box::new(owner), member))
+        Type(Repr::ReflectedMember(Arc::new(owner), member))
     }
 
     /// `value-of<of>`.
     pub fn value_of(of: Type) -> Type {
-        Type(Repr::ValueOf(Box::new(of)))
+        Type(Repr::ValueOf(Arc::new(of)))
     }
 
     /// `key-of<of>`.
     pub fn key_of(of: Type) -> Type {
-        Type(Repr::KeyOf(Box::new(of)))
+        Type(Repr::KeyOf(Arc::new(of)))
     }
 
     /// `container[offset]`.
     pub fn offset_access(container: Type, offset: Type) -> Type {
-        Type(Repr::OffsetAccess(Box::new(container), Box::new(offset)))
+        Type(Repr::OffsetAccess(Arc::new(container), Arc::new(offset)))
     }
 
     /// The constants of `class` matching `pattern` (`Foo::BAR_*`).
     pub fn class_constant(class: Type, pattern: Name) -> Type {
         Type(Repr::ClassConstant {
-            class: Box::new(class),
+            class: Arc::new(class),
             pattern,
         })
     }
@@ -251,9 +251,9 @@ impl Type {
     ) -> Type {
         Type(Repr::Conditional {
             subject,
-            target: Box::new(target),
-            if_true: Box::new(if_true),
-            if_false: Box::new(if_false),
+            target: Arc::new(target),
+            if_true: Arc::new(if_true),
+            if_false: Arc::new(if_false),
             negated,
         })
     }
@@ -299,8 +299,8 @@ impl Type {
     /// with no more precise key type available.
     pub fn array_of(value: Type) -> Type {
         Type(Repr::Array(
-            Box::new(Type::unknown_array_key()),
-            Box::new(value),
+            Arc::new(Type::unknown_array_key()),
+            Arc::new(value),
         ))
     }
 

@@ -130,8 +130,8 @@ fn phpdoc_array_shorthand_parses() {
         Type::array(
             Type::benevolent_array_key(),
             Type(Repr::Array(
-                Box::new(Type::benevolent_array_key()),
-                Box::new(Type(Repr::String))
+                std::sync::Arc::new(Type::benevolent_array_key()),
+                std::sync::Arc::new(Type(Repr::String))
             ))
         )
     );
@@ -178,11 +178,11 @@ fn a_positional_array_shape_wrapped_in_array_shorthand_parses() {
         parse_type_string("array{int, string, string}[]"),
         Type::array(
             Type::benevolent_array_key(),
-            Type(Repr::ArrayShape(Shape::from_named(vec![
+            Type::array_shape(Shape::from_named(vec![
                 ("0".to_string(), Type(Repr::Int), false),
                 ("1".to_string(), Type(Repr::String), false),
                 ("2".to_string(), Type(Repr::String), false),
-            ])))
+            ]))
         )
     );
 }
@@ -329,11 +329,11 @@ fn a_keyed_array_shape_wrapped_in_array_shorthand_parses() {
         parse_type_string("array{a: int}[]"),
         Type::array(
             Type::benevolent_array_key(),
-            Type(Repr::ArrayShape(Shape::from_named(vec![(
+            Type::array_shape(Shape::from_named(vec![(
                 "a".to_string(),
                 Type(Repr::Int),
                 false
-            )])))
+            )]))
         )
     );
 }
@@ -344,11 +344,11 @@ fn an_object_shape_wrapped_in_array_shorthand_parses() {
         parse_type_string("object{a: int}[]"),
         Type::array(
             Type::benevolent_array_key(),
-            Type(Repr::ObjectShape(Shape::from_named(vec![(
+            Type::object_shape(Shape::from_named(vec![(
                 "a".to_string(),
                 Type(Repr::Int),
                 false
-            )])))
+            )]))
         )
     );
 }
@@ -429,7 +429,7 @@ fn class_constant_reference_types_parse_to_a_class_constant() {
     // literal class named "self::RFC_*".
     let sentinel = |class: Type, pattern: &str| {
         Type(Repr::ClassConstant {
-            class: Box::new(class),
+            class: std::sync::Arc::new(class),
             pattern: pattern.into(),
         })
     };
@@ -509,7 +509,7 @@ fn generic_arg_with_covariant_marker_parses_to_a_variance_arg() {
             "Collection".into(),
             vec![Type(Repr::VarianceArg(
                 CallSiteVariance::Covariant,
-                Box::new(Type(Repr::Object("Foo".into(), Vec::new())))
+                std::sync::Arc::new(Type(Repr::Object("Foo".into(), Vec::new())))
             ))]
         )
     );
@@ -523,7 +523,7 @@ fn generic_arg_with_contravariant_marker_parses_to_a_variance_arg() {
             "Collection".into(),
             vec![Type(Repr::VarianceArg(
                 CallSiteVariance::Contravariant,
-                Box::new(Type(Repr::Object("Foo".into(), Vec::new())))
+                std::sync::Arc::new(Type(Repr::Object("Foo".into(), Vec::new())))
             ))]
         )
     );
@@ -537,7 +537,7 @@ fn generic_arg_with_bivariant_marker_parses_to_a_variance_arg() {
             "Collection".into(),
             vec![Type(Repr::VarianceArg(
                 CallSiteVariance::Bivariant,
-                Box::new(Type(Repr::Mixed(false, None)))
+                std::sync::Arc::new(Type(Repr::Mixed(false, None)))
             ))]
         )
     );
@@ -554,7 +554,7 @@ fn a_call_site_variance_marker_survives_nested_inside_the_wrapped_type() {
             "Collection".into(),
             vec![Type(Repr::VarianceArg(
                 CallSiteVariance::Covariant,
-                Box::new(Type(Repr::Object("Box".into(), vec![Type(Repr::Int)])))
+                std::sync::Arc::new(Type(Repr::Object("Box".into(), vec![Type(Repr::Int)])))
             ))]
         )
     );

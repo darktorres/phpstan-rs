@@ -49,7 +49,7 @@ impl Type {
             Type(Repr::KeyOf(inner)) => Type::key_of(f(inner)),
             Type(Repr::OffsetAccess(base, key)) => Type::offset_access(f(base), f(key)),
             Type(Repr::ClassConstant { class, pattern }) => Type(Repr::ClassConstant {
-                class: Box::new(f(class)),
+                class: Arc::new(f(class)),
                 pattern: pattern.clone(),
             }),
             Type(Repr::Conditional {
@@ -60,9 +60,9 @@ impl Type {
                 negated,
             }) => Type(Repr::Conditional {
                 subject: subject.clone(),
-                target: Box::new(f(target)),
-                if_true: Box::new(f(if_true)),
-                if_false: Box::new(f(if_false)),
+                target: Arc::new(f(target)),
+                if_true: Arc::new(f(if_true)),
+                if_false: Arc::new(f(if_false)),
                 negated: *negated,
             }),
             leaf => leaf.clone(),

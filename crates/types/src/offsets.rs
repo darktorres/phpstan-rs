@@ -127,14 +127,14 @@ impl Type {
                         && let Some(mut next) = shape.next_append_index()
                         && let AppendKey::Key(key) = next.take() =>
                 {
-                    let mut shape = shape.clone();
+                    let mut shape = Shape::clone(shape);
                     shape.set(ShapeField::new(ShapeKey::Int(key), value, false));
                     shape.next_index = Some(next);
                     Some(Type::array_shape(shape))
                 }
                 Type(Repr::ArrayShape(shape)) => match offset.and_then(literal_key) {
                     Some(key) => {
-                        let mut shape = shape.clone();
+                        let mut shape = Shape::clone(shape);
                         // A written key is present afterwards, even one the
                         // shape only had as optional.
                         shape.set(ShapeField::new(key, value, false));
@@ -280,7 +280,7 @@ impl Type {
             };
             match self {
                 Type(Repr::ArrayShape(shape)) => {
-                    let mut shape = shape.clone();
+                    let mut shape = Shape::clone(shape);
                     // Removing the highest int key doesn't move the next
                     // index back.
                     shape.next_index = shape.next_append_index();

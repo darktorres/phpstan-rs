@@ -741,7 +741,7 @@ impl Type {
         self.union_members()
             .iter()
             .map(|m| match m {
-                Type(Repr::ArrayShape(shape)) if shape.is_sealed() => Some(shape),
+                Type(Repr::ArrayShape(shape)) if shape.is_sealed() => Some(shape.as_ref()),
                 _ => None,
             })
             .collect::<Option<Vec<_>>>()

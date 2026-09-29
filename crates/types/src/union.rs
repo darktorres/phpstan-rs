@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use crate::{AccessoryKind, Repr, Shape, ShapeField, ShapeKey, Type};
 
 /// A defensive cap on how many distinct members `Type::union` will ever
@@ -347,6 +349,7 @@ pub fn generalize_by_key_set(members: Vec<Type>) -> Vec<Type> {
     for m in members {
         match m.into_repr() {
             Repr::ArrayShape(shape) => {
+                let shape = std::sync::Arc::unwrap_or_clone(shape);
                 let mut keys: Vec<ShapeKey> = shape.fields.iter().map(|f| f.key.clone()).collect();
                 keys.sort();
                 let key_set = (keys, shape.is_sealed());
@@ -496,9 +499,10 @@ fn merge_has_offset_value_pair(a: &Type, b: &Type) -> Option<Type> {
         return None;
     }
     let merged_base = match (base_a.into_repr(), base_b.into_repr()) {
-        (Repr::Array(ka, va), Repr::Array(kb, vb)) => {
-            Type::array(Type::union(*ka, *kb), Type::union(*va, *vb))
-        }
+        (Repr::Array(ka, va), Repr::Array(kb, vb)) => Type::array(
+            Type::union(Type::clone(&ka), Type::clone(&kb)),
+            Type::union(Type::clone(&va), Type::clone(&vb)),
+        ),
         // `has_offset_value_parts`' base is always an array.
         (base_a, _) => Type(base_a),
     };
@@ -546,7 +550,7 @@ fn reduce_array_members(members: &mut Vec<Type>) {
     let mut shapes: Vec<Option<Shape>> = Vec::new();
     members.retain(|m| match m {
         Type(Repr::ArrayShape(shape)) => {
-            shapes.push(Some(shape.clone()));
+            shapes.push(Some(Shape::clone(shape)));
             false
         }
         _ => true,
@@ -879,5 +883,5 @@ fn union_with_mixed(types: &[&Type]) -> Option<Type> {
             subtracted = subtracted.map(|s| s.without(ty)).filter(|s| !s.is_never());
         }
     }
-    Some(Type(Repr::Mixed(explicit, subtracted.map(Box::new))))
+    Some(Type(Repr::Mixed(explicit, subtracted.map(Arc::new))))
 }

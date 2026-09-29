@@ -4,6 +4,7 @@
 
 use crate::OrderingOp;
 use crate::{AccessoryKind, PhpString, Relation, Repr, Shape, ShapeField, ShapeKey, Type};
+use std::sync::Arc;
 
 /// A comparison's own truth value, canonicalized to "the narrowed side
 /// is smaller/smaller-or-equal/greater/greater-or-equal than the bound" -
@@ -216,7 +217,7 @@ impl Type {
                     Some(lacks) => Type::union((**lacks).clone(), excluded.clone()),
                     None => excluded.clone(),
                 };
-                return Type(Repr::Mixed(*explicit, Some(Box::new(lacks))));
+                return Type(Repr::Mixed(*explicit, Some(Arc::new(lacks))));
             }
             match self {
                 // Recurses into `Type::without` for each kept member,
@@ -493,7 +494,7 @@ impl Type {
                         }
                     }
                     Some(field) => {
-                        let mut shape = shape.clone();
+                        let mut shape = Shape::clone(shape);
                         if present {
                             shape.set(ShapeField::new(field.key.clone(), field.ty.clone(), false));
                         } else {
@@ -570,7 +571,8 @@ impl Type {
                         return self.clone();
                     };
                     match self.with_key_presence(key, true).into_repr() {
-                        Repr::ArrayShape(mut shape) => {
+                        Repr::ArrayShape(shape) => {
+                            let mut shape = std::sync::Arc::unwrap_or_clone(shape);
                             // An unsealed shape's tail held it when it isn't
                             // listed.
                             let held = match shape.field(key) {

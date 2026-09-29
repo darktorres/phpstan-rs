@@ -104,7 +104,7 @@ pub(crate) enum Repr {
     // written (the keyword, or an unbounded `@template T`), `false` when
     // nothing is known (an unresolvable expression, a missing type). Type
     // equality ignores the flag, as `MixedType::equals()` does.
-    Mixed(bool, Option<Box<Type>>),
+    Mixed(bool, Option<Arc<Type>>),
     // PHPStan's `ErrorType`: the value of an expression a rule reports as
     // invalid. A `mixed` that accepts and is accepted by everything, so the
     // reported error doesn't cascade into more.
@@ -123,21 +123,21 @@ pub(crate) enum Repr {
     // Key type alongside value type. Construction sites with no more
     // precise key generally pass `Type::unknown_array_key()`
     // (`int|string`).
-    Array(Box<Type>, Box<Type>),
+    Array(Arc<Type>, Arc<Type>),
     // `class-string<T>` - holds `T`'s (or a subclass's) fully-qualified
     // name, tracked so it can participate in `@template` binding; a bare
     // `class-string` has no `T` to bind and collapses to plain `String`.
-    ClassString(Box<Type>),
+    ClassString(Arc<Type>),
     // `interface-string`/`trait-string`: the name of some interface or
     // trait. PHPStan reads both as a bare `class-string`; the kind is
     // checked here too.
     ClassKindString(ClassKind),
     // `array{name: string, age?: int}` - PHPDoc's structural array type.
-    ArrayShape(Shape),
+    ArrayShape(Arc<Shape>),
     // `object{name: string, age?: int}` - the `object`-flavored sibling
     // of `ArrayShape`. Structural, not a registered class: an instance is
     // accepted when it has every listed property with an accepted type.
-    ObjectShape(Shape),
+    ObjectShape(Arc<Shape>),
     // A class name plus its resolved `@template` type arguments, if any;
     // empty for a non-generic class or a generic one referenced bare
     // (unspecified/erased, as real PHPStan treats it). Arguments compare
@@ -174,7 +174,7 @@ pub(crate) enum Repr {
     // annotation (`Collection<covariant Foo>`, `Collection<*>`); `*` is
     // bivariant over `mixed`. Overrides the class's declared variance
     // for that slot in one comparison.
-    VarianceArg(CallSiteVariance, Box<Type>),
+    VarianceArg(CallSiteVariance, Arc<Type>),
     Union(Vec<Type>),
     // Real PHPStan's `BenevolentUnionType`: a union for subtyping, but
     // one an argument check accepts when *any* member fits (see
@@ -208,7 +208,7 @@ pub(crate) enum Repr {
     // variable narrowed to a literal during one simulated pass still
     // generalizes away before the merge that produces the loop's own
     // exit type.
-    HasOffsetValue(ShapeKey, Box<Type>),
+    HasOffsetValue(ShapeKey, Arc<Type>),
     // PHPStan's `HasOffsetType`/`HasMethodType`/`HasPropertyType`: only
     // ever an `Intersection` member, refining its base with an offset,
     // method or property it's proven to have (`array_key_exists()`,
@@ -223,22 +223,22 @@ pub(crate) enum Repr {
     // `getProperty('name')` and read by `invoke()`/`getValue()` for the
     // member's declared type. The owner is a full type, so a generic
     // reflected class keeps its arguments.
-    ReflectedMember(Box<Type>, Name),
+    ReflectedMember(Arc<Type>, Name),
     // `value-of<T>` whose `T` a parse alone can't see through - an enum,
     // a class-constant reference or a template - resolved once the
     // registry exists (`Registry::resolve_deferred_value_of`).
-    ValueOf(Box<Type>),
+    ValueOf(Arc<Type>),
     // `key-of<T>` over a `T` not known yet (a template): resolved once
     // `T` is bound (`crate::resolve_late`).
-    KeyOf(Box<Type>),
+    KeyOf(Arc<Type>),
     // `T['key']` (PHPStan's `OffsetAccessType`) over a `T` not known yet:
     // the base, and the offset as its literal key type.
-    OffsetAccess(Box<Type>, Box<Type>),
+    OffsetAccess(Arc<Type>, Arc<Type>),
     // `Foo::BAR`/`Foo::BAR_*` (real PHPStan's `ConstTypeNode`, a `*`
     // matching any run of characters): the type of the matching class
     // constants, resolved once the registry exists.
     ClassConstant {
-        class: Box<Type>,
+        class: Arc<Type>,
         pattern: Name,
     },
     // An extension's own payload (`crate::ExtensionTypeData`).
@@ -249,9 +249,9 @@ pub(crate) enum Repr {
     // falls back to the eager `Union([if_true, if_false])`.
     Conditional {
         subject: ConditionalSubject,
-        target: Box<Type>,
-        if_true: Box<Type>,
-        if_false: Box<Type>,
+        target: Arc<Type>,
+        if_true: Arc<Type>,
+        if_false: Arc<Type>,
         negated: bool,
     },
 }

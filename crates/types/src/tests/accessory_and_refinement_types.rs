@@ -321,7 +321,7 @@ fn array_refinement_pseudo_types_are_real_accessory_intersections() {
     assert_eq!(
         parse_type_string("class-string-map<Foo, int>"),
         Type::array(
-            Type(Repr::ClassString(Box::new(Type(Repr::Object(
+            Type(Repr::ClassString(std::sync::Arc::new(Type(Repr::Object(
                 "Foo".into(),
                 Vec::new()
             ))))),

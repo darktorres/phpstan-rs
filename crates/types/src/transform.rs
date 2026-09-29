@@ -187,7 +187,7 @@ impl Type {
     /// intersection members too. Other types are left as they are.
     pub fn map_array_values(&self, f: &mut dyn FnMut(&Type) -> Type) -> Type {
         syntax::stack::guard(|| match self {
-            Type(Repr::Array(key, value)) => Type(Repr::Array(key.clone(), Box::new(f(value)))),
+            Type(Repr::Array(key, value)) => Type(Repr::Array(key.clone(), Arc::new(f(value)))),
             Type(Repr::ArrayShape(shape)) => Type::array_shape(shape.map_types(&mut |t| f(t))),
             Type(Repr::Union(_)) | Type(Repr::BenevolentUnion(_)) | Type(Repr::Intersection(_)) => {
                 self.map_children(&mut |m| m.map_array_values(&mut *f))
@@ -201,7 +201,7 @@ impl Type {
     /// keeps its fields.
     pub fn with_general_array_value(&self, value: &Type) -> Type {
         syntax::stack::guard(|| match self {
-            Type(Repr::Array(key, _)) => Type(Repr::Array(key.clone(), Box::new(value.clone()))),
+            Type(Repr::Array(key, _)) => Type(Repr::Array(key.clone(), Arc::new(value.clone()))),
             Type(Repr::Union(_)) | Type(Repr::BenevolentUnion(_)) | Type(Repr::Intersection(_)) => {
                 self.map_children(&mut |m| m.with_general_array_value(value))
             }
@@ -214,7 +214,7 @@ impl Type {
     /// dropped (becomes optional). Other types are left as they are.
     pub fn filter_array_values(&self, keep: &dyn Fn(&Type) -> Type) -> Type {
         syntax::stack::guard(|| match self {
-            Type(Repr::Array(key, value)) => Type(Repr::Array(key.clone(), Box::new(keep(value)))),
+            Type(Repr::Array(key, value)) => Type(Repr::Array(key.clone(), Arc::new(keep(value)))),
             Type(Repr::ArrayShape(shape)) => Type::array_shape(Shape {
                 fields: shape
                     .fields

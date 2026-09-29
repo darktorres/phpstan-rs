@@ -56,11 +56,15 @@ impl Relation<'_> {
                 match member.into_repr() {
                     Repr::Array(key, value) => {
                         array = Some(match array {
-                            None => (*key, *value),
-                            Some((k, v)) => (self.narrower(k, *key), self.narrower(v, *value)),
+                            None => (Type::clone(&key), Type::clone(&value)),
+                            Some((k, v)) => (
+                                self.narrower(k, Type::clone(&key)),
+                                self.narrower(v, Type::clone(&value)),
+                            ),
                         });
                     }
                     Repr::ArrayShape(s) => {
+                        let s = std::sync::Arc::unwrap_or_clone(s);
                         shape = match shape {
                             None => Some(s),
                             Some(acc) => match self.intersect_shapes(&acc, &s) {
