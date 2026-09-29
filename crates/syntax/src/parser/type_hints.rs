@@ -70,7 +70,7 @@ impl Parser {
             let name = match keyword {
                 Some(keyword) => {
                     self.skip();
-                    keyword.to_string()
+                    self.interner.name(keyword)
                 }
                 // Otherwise it's a (possibly namespaced) identifier: `int`,
                 // `Foo`, `\App\Foo`, `App\Foo\Bar` - never two unrelated
@@ -81,7 +81,7 @@ impl Parser {
             // and `\int` included, names a class.
             let kind = match NativeType::from_name(&name) {
                 Some(keyword) => TypeHintKind::Keyword(keyword, name.as_str().into()),
-                None => TypeHintKind::Name(self.qualified_name(&name)),
+                None => TypeHintKind::Name(self.qualified_name(name)),
             };
             Ok(self.type_hint(kind, start))
         })

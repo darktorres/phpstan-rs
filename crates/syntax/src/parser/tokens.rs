@@ -1,6 +1,7 @@
 use std::sync::Arc;
 
 use crate::ast::{Attribute, Ident};
+use crate::name::Name;
 use crate::parser::{ParseError, Parser};
 use crate::token::{Keyword, Position, Span, Token};
 
@@ -178,7 +179,7 @@ impl Parser {
     /// take_name_segment is: PHP reserves most keywords only in specific
     /// declaration positions, not universally - `const DEFAULT = 1;` is
     /// valid PHP even though `default` is a keyword.
-    pub(crate) fn expect_ident(&mut self) -> Result<Arc<str>, ParseError> {
+    pub(crate) fn expect_ident(&mut self) -> Result<Name, ParseError> {
         match self.peek() {
             Token::Identifier(_) | Token::Keyword(_) => Ok(self.take_name_segment().unwrap()),
             other => {
@@ -231,7 +232,7 @@ impl Parser {
         let start = self.current_pos();
         let name = self.take_name_segment()?;
         Some(Ident {
-            name: self.interner.name(&name),
+            name,
             span: Span {
                 start,
                 end: self.previous_end(),
@@ -251,7 +252,7 @@ impl Parser {
     /// namespace segments (`Piwigo\Common\Enum\Foo`).
     /// An `Identifier` token's text is moved out already interned; a
     /// keyword's source spelling is interned here.
-    pub(crate) fn take_name_segment(&mut self) -> Option<Arc<str>> {
+    pub(crate) fn take_name_segment(&mut self) -> Option<Name> {
         match self.peek() {
             Token::Identifier(_) => {
                 let Token::Identifier(part) = self.take_token() else {
@@ -276,32 +277,22 @@ impl Parser {
                     .cloned()
                     .flatten()
                     .unwrap_or_else(|| kw.as_str().to_string());
-                Some(self.interner.str(&raw))
+                Some(self.interner.name(&raw))
             }
             _ => None,
         }
     }
 
-    pub(crate) fn parse_qualified_name(&mut self) -> String {
+    pub(crate) fn parse_qualified_name(&mut self) -> Name {
         let leading_backslash = self.eat(&Token::Backslash);
         let Some(first) = self.take_name_segment() else {
-            return if leading_backslash {
-                "\\".to_string()
-            } else {
-                String::new()
-            };
+            return self
+                .interner
+                .name(if leading_backslash { "\\" } else { "" });
         };
-        // Fast path: the overwhelmingly common single-segment,
-        // non-namespaced name - unlike `expect_ident`/`take_name_segment`
-        // itself, this function's own return type is a plain, general
-        // `String` (many call sites build a genuinely multi-segment,
-        // backslash-joined name here, which has no single token to move
-        // out of and thus no interning to preserve either way), so
-        // `first`'s own interned `Arc<str>` is copied into one here -
-        // still just the one allocation this fast path always needed,
-        // not an extra one.
+        // A single-segment name is its token's own name.
         if !leading_backslash && !matches!(self.peek(), Token::Backslash) {
-            return first.to_string();
+            return first;
         }
         let mut s = String::new();
         if leading_backslash {
@@ -316,7 +307,7 @@ impl Parser {
                 None => break,
             }
         }
-        s
+        self.interner.name(&s)
     }
 
     /// `parse_qualified_name`, plus the span it occupied - kept
@@ -325,7 +316,7 @@ impl Parser {
     /// the span. Used only at the smaller set of call sites (`extends`/
     /// `implements`/`uses`/`instanceof`/`catch`) that feed the LSP's own
     /// declaration-location index or position-walker.
-    pub(crate) fn parse_qualified_name_spanned(&mut self) -> (String, Span) {
+    pub(crate) fn parse_qualified_name_spanned(&mut self) -> (Name, Span) {
         let start = self.current_pos();
         let name = self.parse_qualified_name();
         let span = Span {
@@ -362,7 +353,7 @@ impl Parser {
                     end: self.previous_end(),
                 };
                 attrs.push(Attribute {
-                    name: self.qualified_name(&name),
+                    name: self.qualified_name(name),
                     args,
                     span,
                     removal_span: span,

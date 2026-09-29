@@ -93,7 +93,7 @@ impl Parser {
             }
             _ => {
                 let name = self.parse_qualified_name();
-                self.expr(ExprKind::Name(self.qualified_name(&name)), start)
+                self.expr(ExprKind::Name(self.qualified_name(name)), start)
             }
         };
         loop {
@@ -317,7 +317,10 @@ impl Parser {
                     self.skip();
                     self.skip();
                     self.skip();
-                    let name = self.expr(ExprKind::Name(self.qualified_name("clone")), start);
+                    let name = self.expr(
+                        ExprKind::Name(self.qualified_name(self.interner.name("clone"))),
+                        start,
+                    );
                     return Ok(self.expr(ExprKind::FirstClassCallable(Box::new(name)), start));
                 }
                 // PHP 8.5's `clone($obj, $overrides)` - a distinct grammar
@@ -489,7 +492,10 @@ impl Parser {
             }
             Token::Keyword(Keyword::Static) => {
                 self.skip();
-                self.expr(ExprKind::Name(self.qualified_name("static")), start)
+                self.expr(
+                    ExprKind::Name(self.qualified_name(self.interner.name("static"))),
+                    start,
+                )
             }
             Token::Keyword(Keyword::Function) => self.parse_closure_like(false)?,
             // `fn` is only reserved as the arrow-function keyword when
@@ -507,7 +513,7 @@ impl Parser {
             }
             Token::Keyword(Keyword::Fn) => {
                 let name = self.parse_qualified_name();
-                self.expr(ExprKind::Name(self.qualified_name(&name)), start)
+                self.expr(ExprKind::Name(self.qualified_name(name)), start)
             }
             Token::Keyword(Keyword::Match) => self.parse_match_expr()?,
             Token::InterpString(_) => {
@@ -561,7 +567,7 @@ impl Parser {
                         let (args, is_first_class_callable) = self.parse_args()?;
                         if is_first_class_callable {
                             let callee =
-                                self.expr(ExprKind::Name(self.qualified_name(&name)), start);
+                                self.expr(ExprKind::Name(self.qualified_name(name)), start);
                             let call = self.expr(ExprKind::Call(Box::new(callee), args), start);
                             self.expr(ExprKind::FirstClassCallable(Box::new(call)), start)
                         } else {
@@ -606,7 +612,7 @@ impl Parser {
                     };
                     self.expr(ExprKind::Eval(Box::new(code.value)), start)
                 } else {
-                    self.expr(ExprKind::Name(self.qualified_name(&name)), start)
+                    self.expr(ExprKind::Name(self.qualified_name(name)), start)
                 }
             }
             other => {

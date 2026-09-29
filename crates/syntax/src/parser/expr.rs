@@ -511,7 +511,7 @@ impl Parser {
                 InstanceofTarget::Expr(Box::new(self.parse_unary()?))
             } else {
                 let (name, span) = self.parse_qualified_name_spanned();
-                InstanceofTarget::Name(self.qualified_name(&name), span)
+                InstanceofTarget::Name(self.qualified_name(name), span)
             };
             return Ok(self.expr(ExprKind::Instanceof(Box::new(lhs), target), start));
         }

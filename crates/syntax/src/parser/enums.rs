@@ -22,7 +22,7 @@ impl Parser {
         };
         self.expect_semicolon()?;
         Ok(EnumCase {
-            name: self.interner.name(&name),
+            name,
             name_span,
             value,
             attrs,
@@ -63,11 +63,11 @@ impl Parser {
         let mut implements_spans = Vec::new();
         if self.eat(&Token::Keyword(Keyword::Implements)) {
             let (name, span) = self.parse_qualified_name_spanned();
-            implements.push(self.qualified_name(&name));
+            implements.push(self.qualified_name(name));
             implements_spans.push(span);
             while self.eat(&Token::Comma) {
                 let (name, span) = self.parse_qualified_name_spanned();
-                implements.push(self.qualified_name(&name));
+                implements.push(self.qualified_name(name));
                 implements_spans.push(span);
             }
         }
@@ -106,12 +106,12 @@ impl Parser {
 
             if self.eat(&Token::Keyword(Keyword::Use)) {
                 let (name, span) = self.parse_qualified_name_spanned();
-                uses.push(self.qualified_name(&name));
+                uses.push(self.qualified_name(name));
                 uses_spans.push(span);
                 uses_doc_comments.push(doc.clone());
                 while self.eat(&Token::Comma) {
                     let (name, span) = self.parse_qualified_name_spanned();
-                    uses.push(self.qualified_name(&name));
+                    uses.push(self.qualified_name(name));
                     uses_spans.push(span);
                     uses_doc_comments.push(doc.clone());
                 }
@@ -188,7 +188,7 @@ impl Parser {
                     consts.push(ClassConst {
                         namespaced_name: None,
                         removal_span: None,
-                        name: self.interner.name(&cname),
+                        name: cname,
                         name_span: cname_span,
                         value,
                         doc_comment: doc.clone(),
@@ -240,7 +240,7 @@ impl Parser {
 
         Ok(ClassDecl {
             namespaced_name: None,
-            name: Some(self.interner.name(&name)),
+            name: Some(name),
             name_span,
             kind: ClassKind::Enum,
             backing_type,

@@ -92,18 +92,18 @@ impl Parser {
         // A class extends one class.
         if self.eat(&Token::Keyword(Keyword::Extends)) {
             let (name, span) = self.parse_qualified_name_spanned();
-            extends.push(self.qualified_name(&name));
+            extends.push(self.qualified_name(name));
             extends_spans.push(span);
         }
         let mut implements = Vec::new();
         let mut implements_spans = Vec::new();
         if self.eat(&Token::Keyword(Keyword::Implements)) {
             let (name, span) = self.parse_qualified_name_spanned();
-            implements.push(self.qualified_name(&name));
+            implements.push(self.qualified_name(name));
             implements_spans.push(span);
             while self.eat(&Token::Comma) {
                 let (name, span) = self.parse_qualified_name_spanned();
-                implements.push(self.qualified_name(&name));
+                implements.push(self.qualified_name(name));
                 implements_spans.push(span);
             }
         }
@@ -206,12 +206,12 @@ impl Parser {
 
             if self.eat(&Token::Keyword(Keyword::Use)) {
                 let (name, span) = self.parse_qualified_name_spanned();
-                uses.push(self.qualified_name(&name));
+                uses.push(self.qualified_name(name));
                 uses_spans.push(span);
                 uses_doc_comments.push(doc.clone());
                 while self.eat(&Token::Comma) {
                     let (name, span) = self.parse_qualified_name_spanned();
-                    uses.push(self.qualified_name(&name));
+                    uses.push(self.qualified_name(name));
                     uses_spans.push(span);
                     uses_doc_comments.push(doc.clone());
                 }
@@ -330,7 +330,7 @@ impl Parser {
                     consts.push(ClassConst {
                         namespaced_name: None,
                         removal_span: None,
-                        name: self.interner.name(&cname),
+                        name: cname,
                         name_span: cname_span,
                         value,
                         doc_comment: doc.clone(),
@@ -480,20 +480,19 @@ impl Parser {
         self.expect(&Token::LBrace)?;
         while !self.check(&Token::RBrace) && !self.at_eof() {
             let first = self.parse_qualified_name();
-            let (trait_name, method): (Option<QualifiedName>, Arc<str>) =
+            let (trait_name, method): (Option<QualifiedName>, Name) =
                 if self.eat(&Token::DoubleColon) {
-                    (Some(self.qualified_name(&first)), self.expect_ident()?)
+                    (Some(self.qualified_name(first)), self.expect_ident()?)
                 } else {
-                    (None, self.interner.str(&first))
+                    (None, first)
                 };
-            let method = self.interner.name(&method);
             if matches!(self.peek(), Token::Identifier(s) if s.eq_ignore_ascii_case("insteadof")) {
                 self.skip();
                 let first_other = self.parse_qualified_name();
-                let mut instead_of = vec![self.qualified_name(&first_other)];
+                let mut instead_of = vec![self.qualified_name(first_other)];
                 while self.eat(&Token::Comma) {
                     let other = self.parse_qualified_name();
-                    instead_of.push(self.qualified_name(&other));
+                    instead_of.push(self.qualified_name(other));
                 }
                 if let Some(trait_name) = trait_name {
                     out.precedences.push(TraitPrecedence {
@@ -522,7 +521,7 @@ impl Parser {
                     trait_name,
                     method: method.clone(),
                     visibility,
-                    alias: alias.map(|a| self.interner.name(&a)),
+                    alias,
                 });
                 out.mentioned.push(method);
             }
@@ -599,11 +598,11 @@ impl Parser {
         let mut extends_spans = Vec::new();
         if self.eat(&Token::Keyword(Keyword::Extends)) {
             let (name, span) = self.parse_qualified_name_spanned();
-            extends.push(self.qualified_name(&name));
+            extends.push(self.qualified_name(name));
             extends_spans.push(span);
             while self.eat(&Token::Comma) {
                 let (name, span) = self.parse_qualified_name_spanned();
-                extends.push(self.qualified_name(&name));
+                extends.push(self.qualified_name(name));
                 extends_spans.push(span);
             }
         }
@@ -612,11 +611,11 @@ impl Parser {
         let mut implements_spans = Vec::new();
         if self.eat(&Token::Keyword(Keyword::Implements)) {
             let (name, span) = self.parse_qualified_name_spanned();
-            implements.push(self.qualified_name(&name));
+            implements.push(self.qualified_name(name));
             implements_spans.push(span);
             while self.eat(&Token::Comma) {
                 let (name, span) = self.parse_qualified_name_spanned();
-                implements.push(self.qualified_name(&name));
+                implements.push(self.qualified_name(name));
                 implements_spans.push(span);
             }
         }
@@ -636,7 +635,7 @@ impl Parser {
 
         Ok(ClassDecl {
             namespaced_name: None,
-            name: Some(self.interner.name(&name)),
+            name: Some(name),
             name_span,
             kind,
             backing_type: None,

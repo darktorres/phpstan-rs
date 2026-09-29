@@ -174,7 +174,7 @@ impl Parser {
                 self.skip();
                 let name = self.parse_qualified_name();
                 self.expect_semicolon()?;
-                self.stmt(StmtKind::Namespace(name), start)
+                self.stmt(StmtKind::Namespace(name.to_string()), start)
             }
             Token::Keyword(Keyword::Use) => {
                 self.skip();
@@ -229,7 +229,7 @@ impl Parser {
                         imports.push(UseImport {
                             path: self.use_path(&format!("{group_prefix}\\{member}")),
                             written: Ident {
-                                name: self.interner.name(&member),
+                                name: member,
                                 span: member_span,
                             },
                             alias,
@@ -251,7 +251,7 @@ impl Parser {
                 let mut imports = vec![UseImport {
                     path: self.use_path(&name),
                     written: Ident {
-                        name: self.interner.name(&name),
+                        name,
                         span: name_span,
                     },
                     alias,
@@ -271,7 +271,7 @@ impl Parser {
                     imports.push(UseImport {
                         path: self.use_path(&path),
                         written: Ident {
-                            name: self.interner.name(&path),
+                            name: path,
                             span: path_span,
                         },
                         alias,
@@ -297,7 +297,7 @@ impl Parser {
                     consts.push(ClassConst {
                         namespaced_name: None,
                         removal_span: None,
-                        name: self.interner.name(&name),
+                        name,
                         name_span,
                         value,
                         doc_comment: None,

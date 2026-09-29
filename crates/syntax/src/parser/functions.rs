@@ -157,7 +157,7 @@ impl Parser {
         };
         Ok(FunctionDecl {
             namespaced_name: None,
-            name: self.interner.name(&name),
+            name,
             name_span,
             params,
             return_type,

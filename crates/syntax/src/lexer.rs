@@ -409,7 +409,7 @@ impl<'a> Lexer<'a> {
                 return Token::Keyword(kw);
             }
             let s = String::from_utf8_lossy(&self.src[span]);
-            return Token::Identifier(self.interner.str(&s));
+            return Token::Identifier(self.interner.name(&s));
         }
 
         if c.is_ascii_digit() || (c == b'.' && self.peek_at(1).is_ascii_digit()) {

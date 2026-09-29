@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use crate::ast::*;
-use crate::name::Interner;
+use crate::name::{Interner, Name};
 use crate::token::{Keyword, Position, Span, Token};
 
 /// A parse failure: malformed syntax.
@@ -242,8 +242,8 @@ impl Parser {
     }
 
     /// A reference by name, not yet resolved.
-    pub(crate) fn qualified_name(&self, written: &str) -> QualifiedName {
-        QualifiedName::new(self.interner.name(written))
+    pub(crate) fn qualified_name(&self, written: Name) -> QualifiedName {
+        QualifiedName::new(written)
     }
 
     /// A fresh id for the node being built.
@@ -322,12 +322,14 @@ impl Parser {
         self.skip(); // `namespace`
         let name = self.parse_qualified_name();
         if self.check(&Token::LBrace) {
-            let mut stmts = vec![self.stmt(StmtKind::Namespace(name), start)];
+            let mut stmts = vec![self.stmt(StmtKind::Namespace(name.to_string()), start)];
             stmts.extend(self.parse_stmt_list_block()?);
             Ok(stmts)
         } else {
             self.expect_semicolon()?;
-            Ok(vec![self.stmt(StmtKind::Namespace(name), start)])
+            Ok(vec![
+                self.stmt(StmtKind::Namespace(name.to_string()), start),
+            ])
         }
     }
 }

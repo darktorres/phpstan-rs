@@ -376,7 +376,7 @@ pub enum Token {
     // rules as a double-quoted string, different delimiter and runtime
     // meaning (shell_exec).
     ShellExec(Vec<StringPart>),
-    Identifier(Arc<str>),
+    Identifier(crate::name::Name),
     Keyword(Keyword),
 
     // punctuation / operators

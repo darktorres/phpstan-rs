@@ -7,15 +7,17 @@
 //! `==`. Identical text interned by one [`Interner`] shares one
 //! allocation, and a `Name` is one pointer wide.
 //!
-//! A `Project` owns its interner, so the names of a long-running session
-//! are freed with it; [`Interner::global`] serves everything without one
-//! (the embedded stubs, tests).
+//! An interner holds what it interned weakly: text nothing uses any more
+//! is freed, so a long-running session doesn't accumulate the names of
+//! code it no longer holds. A `Project` owns its interner;
+//! [`Interner::global`] serves everything without one (the embedded
+//! stubs, tests).
 
 use std::fmt;
 use std::hash::{Hash, Hasher};
-use std::sync::{Arc, LazyLock, Mutex};
+use std::sync::{Arc, LazyLock, Mutex, Weak};
 
-use rustc_hash::{FxHashSet, FxHasher};
+use rustc_hash::{FxHashMap, FxHasher};
 
 struct NameData {
     text: Box<str>,
@@ -172,15 +174,69 @@ impl From<Name> for String {
 
 const SHARDS: usize = 16;
 
-#[derive(Default)]
-struct Shard {
-    strs: FxHashSet<Arc<str>>,
-    names: FxHashSet<Name>,
+/// Weak references to interned values, by the hash of their text. A value
+/// every holder dropped stays until the table next sweeps, which it does
+/// once it has grown to twice what the last sweep left.
+struct WeakTable<T: ?Sized> {
+    buckets: FxHashMap<u64, Vec<Weak<T>>>,
+    len: usize,
+    sweep_at: usize,
 }
 
-/// Deduplicates text and names: every call for the same text returns a
-/// clone of one allocation. Sharded by hash so parallel lexing rarely
-/// contends on one lock.
+impl<T: ?Sized> Default for WeakTable<T> {
+    fn default() -> Self {
+        WeakTable {
+            buckets: FxHashMap::default(),
+            len: 0,
+            sweep_at: MIN_SWEEP,
+        }
+    }
+}
+
+const MIN_SWEEP: usize = 1024;
+
+impl<T: ?Sized> WeakTable<T> {
+    /// The live value with text hash `hash` that `is_it` accepts, else
+    /// the one `make` builds, now interned.
+    fn get_or_insert(
+        &mut self,
+        hash: u64,
+        is_it: impl Fn(&T) -> bool,
+        make: impl FnOnce() -> Arc<T>,
+    ) -> Arc<T> {
+        let bucket = self.buckets.entry(hash).or_default();
+        if let Some(found) = bucket.iter().filter_map(Weak::upgrade).find(|v| is_it(v)) {
+            return found;
+        }
+        let value = make();
+        bucket.push(Arc::downgrade(&value));
+        self.len += 1;
+        if self.len >= self.sweep_at {
+            self.sweep();
+        }
+        value
+    }
+
+    /// Drops every entry whose value is gone.
+    fn sweep(&mut self) {
+        self.buckets.retain(|_, bucket| {
+            bucket.retain(|w| w.strong_count() > 0);
+            !bucket.is_empty()
+        });
+        self.len = self.buckets.values().map(Vec::len).sum();
+        self.sweep_at = (self.len * 2).max(MIN_SWEEP);
+    }
+}
+
+#[derive(Default)]
+struct Shard {
+    strs: WeakTable<str>,
+    names: WeakTable<NameData>,
+}
+
+/// Deduplicates text and names: every call for the same text while an
+/// earlier result is alive returns a clone of it. Sharded by hash so
+/// parallel lexing rarely contends on one lock.
 pub struct Interner {
     shards: [Mutex<Shard>; SHARDS],
 }
@@ -191,6 +247,12 @@ impl Default for Interner {
             shards: std::array::from_fn(|_| Mutex::new(Shard::default())),
         }
     }
+}
+
+fn text_hash(text: &str) -> u64 {
+    let mut hasher = FxHasher::default();
+    text.hash(&mut hasher);
+    hasher.finish()
 }
 
 impl Interner {
@@ -204,34 +266,31 @@ impl Interner {
         &GLOBAL
     }
 
-    fn shard(&self, text: &str) -> &Mutex<Shard> {
-        let mut hasher = FxHasher::default();
-        text.hash(&mut hasher);
-        &self.shards[hasher.finish() as usize % SHARDS]
+    /// The shard for text hashing to `hash`. A poisoned shard only means
+    /// another thread panicked while holding it; the table itself is
+    /// still consistent.
+    fn shard(&self, hash: u64) -> std::sync::MutexGuard<'_, Shard> {
+        self.shards[hash as usize % SHARDS]
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
     }
 
     /// The shared copy of `text`.
     pub fn str(&self, text: &str) -> Arc<str> {
-        // A poisoned shard only means another thread panicked while
-        // holding it; the set itself is still consistent.
-        let mut shard = self.shard(text).lock().unwrap_or_else(|e| e.into_inner());
-        if let Some(existing) = shard.strs.get(text) {
-            return Arc::clone(existing);
-        }
-        let arc: Arc<str> = Arc::from(text);
-        shard.strs.insert(Arc::clone(&arc));
-        arc
+        let hash = text_hash(text);
+        self.shard(hash)
+            .strs
+            .get_or_insert(hash, |s| s == text, || Arc::from(text))
     }
 
     /// The shared [`Name`] for `text`.
     pub fn name(&self, text: &str) -> Name {
-        let mut shard = self.shard(text).lock().unwrap_or_else(|e| e.into_inner());
-        if let Some(existing) = shard.names.get(text) {
-            return existing.clone();
-        }
-        let name = Name::new(text);
-        shard.names.insert(name.clone());
-        name
+        let hash = text_hash(text);
+        Name(
+            self.shard(hash)
+                .names
+                .get_or_insert(hash, |n| &*n.text == text, || Name::new(text).0),
+        )
     }
 }
 
@@ -247,6 +306,29 @@ mod tests {
             &interner.name("Foo").0,
             &interner.name("Foo").0
         ));
+    }
+
+    #[test]
+    fn text_nothing_holds_is_freed() {
+        let interner = Interner::new();
+        let weak = Arc::downgrade(&interner.str("gone"));
+        assert!(weak.upgrade().is_none());
+        let name = Arc::downgrade(&interner.name("Gone").0);
+        assert!(name.upgrade().is_none());
+    }
+
+    #[test]
+    fn dropped_entries_are_swept_as_the_table_grows() {
+        let interner = Interner::new();
+        for i in 0..(SHARDS * MIN_SWEEP * 4) {
+            interner.str(&format!("transient-{i}"));
+        }
+        let entries: usize = interner
+            .shards
+            .iter()
+            .map(|s| s.lock().unwrap().strs.len)
+            .sum();
+        assert!(entries < SHARDS * MIN_SWEEP, "{entries} entries kept");
     }
 
     #[test]
