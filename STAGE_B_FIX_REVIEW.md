@@ -279,6 +279,15 @@ through `check-project`.
   - an `||` of 10,000 `instanceof` checks: 705 s;
   - 1,000 nested `match`: 71 s.
 
+  A chain of traits each using the previous one (`trait T1 { use T0; }`
+  … `class A { use Tn; }`) grows about cubically, and the pre-window
+  binary grows the same way (400 traits: 9.4 s before, 9.0 s now):
+  - 100 traits: 1.7 s;
+  - 200: 2.7 s;
+  - 400: 9.0 s;
+  - 800: 27.7 s;
+  - 3,000: 63 minutes.
+
   `check_if`/`walk_if_chain` recompute `rest.iter().all(...)` at each
   `elseif` (`288f4fda`), so an `elseif` chain is O(n²) too. `2750baf2`'s
   "nesting is linear" holds for nested calls. Done: each chain shape is
