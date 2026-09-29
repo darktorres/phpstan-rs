@@ -153,7 +153,7 @@ fn loose_kinds(ty: &Type, out: &mut Vec<LooseKind>) -> bool {
             LooseKind::Int
         } else if member.is_float().yes() {
             LooseKind::Float
-        } else if let [literal] = member.constant_strings()[..] {
+        } else if let [literal] = &member.constant_strings_text()[..] {
             if is_numeric_string_literal(literal) {
                 LooseKind::NumericString
             } else {

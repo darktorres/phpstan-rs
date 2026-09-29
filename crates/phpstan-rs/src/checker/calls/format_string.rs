@@ -376,11 +376,11 @@ impl<'a> Checker<'a> {
         let format_ty = self.infer_expr(&args.get(function.format)?.value, locals);
         let registry = self.registry;
         let mut counts = Vec::new();
-        for format in format_ty.constant_strings() {
+        for format in format_ty.constant_strings_text() {
             let count = if function.kind == FormatKind::Scanf {
-                scanf_placeholder_count(format)
+                scanf_placeholder_count(&format)
             } else {
-                registry.php_version_consensus(|v| printf_placeholder_count(format, v))
+                registry.php_version_consensus(|v| printf_placeholder_count(&format, v))
             };
             let Some(count) = count else {
                 self.report(
@@ -521,7 +521,7 @@ impl<'a> Checker<'a> {
             return;
         }
         let format_ty = self.infer_expr(&args[function.format].value, locals);
-        let [format] = format_ty.constant_strings()[..] else {
+        let [format] = &format_ty.constant_strings_text()[..] else {
             return;
         };
         let Some(by_index) = self
@@ -769,7 +769,7 @@ mod tests {
             ("%10$s %3$d", Some(10)),
         ];
         for (format, expected) in cases {
-            assert_eq!(scanf_placeholder_count(format), *expected, "{format}");
+            assert_eq!(scanf_placeholder_count(&format), *expected, "{format}");
         }
     }
 }

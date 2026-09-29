@@ -35,8 +35,8 @@ impl<'a> Checker<'a> {
         };
         let Some(arg) = args.first() else { return };
         let ty = self.infer_expr(&arg.value, locals);
-        for spec in ty.constant_strings() {
-            if validate_date_time_string(spec) != Some(false) {
+        for spec in ty.constant_strings_text() {
+            if validate_date_time_string(&spec) != Some(false) {
                 continue;
             }
             self.report(format!(

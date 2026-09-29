@@ -164,7 +164,7 @@ impl<'a> Checker<'a> {
         };
         let changes = matches!(function, "ini_set" | "ini_alter");
         let ty = self.infer_expr(&arg.value, locals);
-        for directive in ty.constant_strings() {
+        for directive in ty.constant_strings_text() {
             if let Some((_, removed)) = REMOVED
                 .iter()
                 .find(|(name, removed)| *name == directive && version >= *removed)

@@ -175,7 +175,7 @@ impl Relation<'_> {
                     TrinaryLogic::Maybe
                 }
                 (Type(Repr::Object(a, a_args)), Type(Repr::Object(b, b_args)))
-                    if a == b && a_args.is_empty() && b_args.is_empty() =>
+                    if a.eq_ignore_case(b) && a_args.is_empty() && b_args.is_empty() =>
                 {
                     TrinaryLogic::Yes
                 }

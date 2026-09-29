@@ -838,7 +838,7 @@ fn literal_keys_from_type(ty: &Type) -> Vec<String> {
         .iter()
         .filter_map(|m| match m.int_literal_value() {
             Some(n) => Some(n.to_string()),
-            None => m.constant_strings().first().map(|s| s.to_string()),
+            None => m.constant_strings_text().first().map(|s| s.to_string()),
         })
         .collect()
 }

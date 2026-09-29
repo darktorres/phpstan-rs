@@ -8,10 +8,10 @@ use function PHPStan\Testing\assertType;
  */
 function f(string $n, int $i, int $u, string $sp, string $d): void {
     assertType('non-falsy-string', $n . '5');
-    assertType('non-falsy-lowercase-numeric-string', $i . '5');
-    assertType('non-falsy-lowercase-string', $i . '+5');
-    assertType('non-falsy-lowercase-string', $i . ' 5');
+    assertType('non-falsy-lowercase-uppercase-numeric-string', $i . '5');
+    assertType('non-falsy-lowercase-uppercase-string', $i . '+5');
+    assertType('non-falsy-lowercase-uppercase-string', $i . ' 5');
     assertType('non-falsy-lowercase-numeric-string', $i . 'e5');
-    assertType('non-falsy-lowercase-numeric-string', $d . $u);
-    assertType('non-falsy-lowercase-string', $sp . $u);
+    assertType('non-falsy-lowercase-uppercase-numeric-string', $d . $u);
+    assertType('non-falsy-lowercase-uppercase-string', $sp . $u);
 }

@@ -28,8 +28,8 @@ impl<'a> Checker<'a> {
         }
         let Some(arg) = args.first() else { return };
         let ty = self.infer_expr(&arg.value, locals);
-        for spec in ty.constant_strings() {
-            if is_valid_date_interval_spec(spec) {
+        for spec in ty.constant_strings_text() {
+            if is_valid_date_interval_spec(&spec) {
                 continue;
             }
             self.report(format!(

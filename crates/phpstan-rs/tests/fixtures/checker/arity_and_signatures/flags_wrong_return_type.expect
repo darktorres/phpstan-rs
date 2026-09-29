@@ -1,1 +1,1 @@
-2:51-2:59 return.type L3 | return type mismatch: expected int, got non-falsy-lowercase-numeric-string
+2:51-2:59 return.type L3 | return type mismatch: expected int, got non-falsy-lowercase-uppercase-numeric-string

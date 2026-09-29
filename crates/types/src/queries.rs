@@ -526,28 +526,58 @@ impl Type {
     }
 
     /// This type with its strings refined by `kind`: a `string`, bare or
-    /// already refined, gains it, in a union too; other members are left
-    /// as they are.
+    /// already refined, gains it (replacing a refinement it implies, as
+    /// `non-falsy` does `non-empty`), a string literal it rules out is
+    /// `never`, in a union too; other members are left as they are.
     pub fn with_string_accessory(&self, kind: AccessoryKind) -> Type {
+        // The refinement a stronger one implies, and the one it implies.
+        let implied_by = |k: AccessoryKind| match k {
+            AccessoryKind::NonFalsyString => Some(AccessoryKind::NonEmptyString),
+            AccessoryKind::DecimalIntegerString => Some(AccessoryKind::NumericString),
+            _ => None,
+        };
         syntax::stack::guard(|| match self {
-            Type(Repr::String) => Type(Repr::Intersection(vec![
-                Type::string(),
-                Type::accessory(kind),
-            ])),
-            Type(Repr::Intersection(members))
-                if members.contains(&Type::string())
-                    && !members.contains(&Type::accessory(kind)) =>
-            {
-                let mut members = members.clone();
-                members.push(Type::accessory(kind));
-                Type(Repr::Intersection(members))
+            Type(Repr::String) => {
+                crate::intersect_types(vec![Type::string(), Type::accessory(kind)])
             }
-            Type(Repr::Union(members)) => Type(Repr::Union(
-                members
+            Type(Repr::StringLiteral(_)) => {
+                let refined = Type::string().with_string_accessory(kind);
+                if crate::Relation::structural()
+                    .is_super_type_of(&refined, self)
+                    .no()
+                {
+                    Type::never()
+                } else {
+                    self.clone()
+                }
+            }
+            Type(Repr::Intersection(members)) if members.contains(&Type::string()) => {
+                let already = |k: AccessoryKind| members.contains(&Type::accessory(k));
+                if already(kind)
+                    || [
+                        AccessoryKind::NonFalsyString,
+                        AccessoryKind::DecimalIntegerString,
+                    ]
+                    .into_iter()
+                    .any(|stronger| already(stronger) && implied_by(stronger) == Some(kind))
+                {
+                    return self.clone();
+                }
+                let mut members: Vec<Type> = members
                     .iter()
-                    .map(|m| m.with_string_accessory(kind))
-                    .collect(),
-            )),
+                    .filter(|m| {
+                        implied_by(kind).is_none_or(|weaker| **m != Type::accessory(weaker))
+                    })
+                    .cloned()
+                    .collect();
+                members.push(Type::accessory(kind));
+                crate::intersect_types(members)
+            }
+            Type(Repr::Union(members)) => members
+                .iter()
+                .map(|m| m.with_string_accessory(kind))
+                .reduce(Type::union)
+                .unwrap_or_else(Type::never),
             other => other.clone(),
         })
     }
@@ -737,9 +767,14 @@ impl Type {
                     Type::bool()
                 }
             }
+            // A `SimpleXMLElement` with no children is false.
+            Type(Repr::Object(class, _)) if class.eq_ignore_ascii_case("SimpleXMLElement") => {
+                Type::bool()
+            }
             Type(Repr::Object(..))
             | Type(Repr::ObjectWithoutClass)
             | Type(Repr::ObjectShape(_))
+            | Type(Repr::Callable(_))
             | Type(Repr::Resource { .. })
             | Type(Repr::EnumCase(..))
             | Type(Repr::This)
@@ -780,13 +815,23 @@ impl Type {
 }
 
 impl Type {
+    /// `constant_strings` as text, a non-UTF-8 byte read as U+FFFD - for
+    /// consumers that read a string's characters (a format, a path, a
+    /// name).
+    pub fn constant_strings_text(&self) -> Vec<std::borrow::Cow<'_, str>> {
+        self.constant_strings()
+            .into_iter()
+            .map(crate::PhpString::to_str_lossy)
+            .collect()
+    }
+
     /// Every string value this type can only be: a string literal, each
     /// member's of an intersection, and a union's only when every member
     /// has some (PHPStan's `Type::getConstantStrings()`). Empty for
     /// anything else.
-    pub fn constant_strings(&self) -> Vec<&str> {
+    pub fn constant_strings(&self) -> Vec<&crate::PhpString> {
         match self {
-            Type(Repr::StringLiteral(s)) => s.as_str().into_iter().collect(),
+            Type(Repr::StringLiteral(s)) => vec![s],
             Type(Repr::Intersection(members)) => {
                 members.iter().flat_map(Type::constant_strings).collect()
             }

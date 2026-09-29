@@ -251,9 +251,9 @@ impl<'a> Checker<'a> {
                 _ => {
                     let strings: Vec<String> = self
                         .infer_expr(e, locals)
-                        .constant_strings()
+                        .constant_strings_text()
                         .into_iter()
-                        .map(str::to_string)
+                        .map(|s| s.into_owned())
                         .collect();
                     (!strings.is_empty()).then_some(strings)
                 }

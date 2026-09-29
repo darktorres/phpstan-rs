@@ -414,7 +414,7 @@ impl<'a> Checker<'a> {
             let kind =
                 if one.is_string().yes() && !other.is_mixed() && !is_string_or_nullable_string {
                     if converts_to_string_ok
-                        && !matches!(one.constant_strings().as_slice(), [s] if s.is_empty())
+                        && !matches!(one.constant_strings_text().as_slice(), [s] if s.is_empty())
                         && self.converts_to_string(other)
                     {
                         continue;

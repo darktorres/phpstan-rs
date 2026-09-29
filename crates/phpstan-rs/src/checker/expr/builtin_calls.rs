@@ -1650,7 +1650,9 @@ impl<'a> Checker<'a> {
             // entirely of recognized characters - anything else falls
             // through to plain `string`, unchanged.
             "date" if !args.is_empty() => {
-                if let [format] = self.infer_expr(&args[0].value, locals).constant_strings()[..]
+                if let [format] = &self
+                    .infer_expr(&args[0].value, locals)
+                    .constant_strings_text()[..]
                     && let Some(ty) = date_format_return_type(format)
                 {
                     return ty;
@@ -1662,7 +1664,9 @@ impl<'a> Checker<'a> {
             // format string, `idate()`'s only real accepted shape -
             // anything else falls through to plain `int|false`, unchanged.
             "idate" if !args.is_empty() => {
-                if let [format] = self.infer_expr(&args[0].value, locals).constant_strings()[..]
+                if let [format] = &self
+                    .infer_expr(&args[0].value, locals)
+                    .constant_strings_text()[..]
                     && let Some(c) = single_char(format)
                     && let Some((min, max)) = idate_format_char_range(c)
                 {
@@ -1735,7 +1739,9 @@ impl<'a> Checker<'a> {
             // `int|null` instead, a materially different shape not
             // modeled here.
             "sscanf" if args.len() == 2 => {
-                if let [format] = self.infer_expr(&args[1].value, locals).constant_strings()[..]
+                if let [format] = &self
+                    .infer_expr(&args[1].value, locals)
+                    .constant_strings_text()[..]
                     && let Some(fields) = sscanf_result_fields(format)
                 {
                     return Type::union_of(vec![Type::array_shape(fields), Type::null()]);

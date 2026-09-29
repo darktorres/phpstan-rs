@@ -130,7 +130,7 @@ impl Relation<'_> {
                     // template names via the same ancestor-substitution walk
                     // `extends_args`/`implements_args` already use elsewhere,
                     // unless `a == b` and it's already in the right frame.
-                    let effective_args_a: Vec<Type> = if a == b {
+                    let effective_args_a: Vec<Type> = if a.eq_ignore_case(b) {
                         args_a.clone()
                     } else {
                         let bindings = self.hierarchy.ancestor_template_bindings(a, args_a, b);

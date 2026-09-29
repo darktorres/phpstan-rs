@@ -2687,7 +2687,7 @@ impl<'a> Checker<'a> {
                 let name_ty = self.check_expr(name, locals, label);
                 self.check_dynamic_class_constant_fetch(&name_ty, e.span);
                 let literal_names: Option<Vec<String>> = {
-                    let names = name_ty.constant_strings();
+                    let names = name_ty.constant_strings_text();
                     (!names.is_empty()).then(|| names.iter().map(|n| n.to_string()).collect())
                 };
                 match (literal_names, receiver) {
@@ -2979,7 +2979,7 @@ impl<'a> Checker<'a> {
                 let name_ty = self.check_expr(name, locals, label);
                 // `Foo::{'bar'}()`, or a name variable holding one known
                 // string: a call to that method.
-                if let [method] = name_ty.constant_strings()[..] {
+                if let [method] = &name_ty.constant_strings_text()[..] {
                     let call = static_call(target, method.to_string(), args, e.span);
                     return self.check_expr(&call, locals, label);
                 }
@@ -4568,7 +4568,7 @@ impl<'a> Checker<'a> {
                     .unwrap_or(Type::mixed())
             }
             ExprKind::DynamicStaticCall(target, name, args) => {
-                match self.infer_expr(name, locals).constant_strings()[..] {
+                match &self.infer_expr(name, locals).constant_strings_text()[..] {
                     [method] => self.infer_expr(
                         &static_call(target, method.to_string(), args, e.span),
                         locals,
@@ -4579,7 +4579,7 @@ impl<'a> Checker<'a> {
             ExprKind::DynamicClassConstFetch(target, name) => {
                 let names: Option<Vec<String>> = {
                     let names = self.infer_expr(name, locals);
-                    let names = names.constant_strings();
+                    let names = names.constant_strings_text();
                     (!names.is_empty()).then(|| names.iter().map(|n| n.to_string()).collect())
                 };
                 names
@@ -5783,6 +5783,7 @@ impl Checker<'_> {
             CastKind::Int => inner_ty.to_integer(self.registry),
             CastKind::Float => inner_ty.to_float(self.registry),
             CastKind::String => inner_ty.to_string_type(self.registry),
+            CastKind::Bool => Some(inner_ty.to_boolean()),
             _ => None,
         };
         coerced.unwrap_or_else(|| cast_result_type(kind))

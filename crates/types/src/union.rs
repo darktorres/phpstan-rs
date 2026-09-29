@@ -664,9 +664,6 @@ fn is_keys_superset(relation: &crate::Relation, this: &Shape, other: &Shape) -> 
     if other.fields.is_empty() && other.is_sealed() {
         return this.fields.iter().all(|f| f.optional);
     }
-    if !this.is_sealed() && !other.is_sealed() {
-        return true;
-    }
     let tail_absorbs = |tail_owner: &Shape, fields: &Shape| {
         let Some(tail) = tail_owner.unsealed.as_deref() else {
             return false;
@@ -676,6 +673,11 @@ fn is_keys_superset(relation: &crate::Relation, this: &Shape, other: &Shape) -> 
                 && !relation.is_super_type_of(&tail.1, &f.ty).no()
         })
     };
+    if !this.is_sealed() && !other.is_sealed() {
+        return legacy_is_keys_superset(relation, this, other)
+            || tail_absorbs(this, other)
+            || tail_absorbs(other, this);
+    }
     if !this.is_sealed() {
         return legacy_is_keys_superset(relation, this, other) || tail_absorbs(this, other);
     }

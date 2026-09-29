@@ -1,1 +1,1 @@
-6:23-6:41 identical.alwaysFalse L4 | Strict comparison using === between non-falsy-lowercase-numeric-string and 'x' will always evaluate to false.
+6:23-6:41 identical.alwaysFalse L4 | Strict comparison using === between non-falsy-lowercase-uppercase-numeric-string and 'x' will always evaluate to false.

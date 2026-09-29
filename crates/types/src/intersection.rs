@@ -29,6 +29,26 @@ impl Relation<'_> {
             if flat.contains(&Type::never()) {
                 return Type::never();
             }
+            // `(A|B)&C` is `(A&C)|(B&C)`, for a union small enough to
+            // spell out.
+            const DISTRIBUTE_LIMIT: usize = 16;
+            if let Some(at) = flat
+                .iter()
+                .position(|m| matches!(m, Type(Repr::Union(ms)) if ms.len() <= DISTRIBUTE_LIMIT))
+            {
+                let Repr::Union(alternatives) = flat.remove(at).into_repr() else {
+                    unreachable!("matched a union above")
+                };
+                return alternatives
+                    .into_iter()
+                    .map(|alternative| {
+                        let mut members = flat.clone();
+                        members.push(alternative);
+                        self.intersect(members)
+                    })
+                    .reduce(Type::union)
+                    .unwrap_or_else(Type::never);
+            }
             let mut array: Option<(Type, Type)> = None;
             let mut shape: Option<Shape> = None;
             let mut rest: Vec<Type> = Vec::new();
@@ -115,7 +135,8 @@ impl Relation<'_> {
     /// actually returns. An inferred type the native one can't hold at all
     /// (a fall-off-the-end `void` under `: array`) leaves the native type
     /// as-is, and a nullable native type keeps its `null`. An `int` returned
-    /// under `: float` is coerced at runtime, so it reads as the `float`.
+    /// under a native type with `float` and not `int` (`: float`,
+    /// `: float|string`) is coerced at runtime, so it reads as the `float`.
     pub fn intersect_but_not_never(&self, native: &Type, inferred: Type) -> Type {
         let native_members: Vec<&Type> = match native {
             Type(Repr::Union(ms)) => ms.iter().collect(),
@@ -140,6 +161,19 @@ impl Relation<'_> {
                 });
             if fits {
                 kept.push(m);
+                continue;
+            }
+            // An int where the native type takes a float and not an int is
+            // coerced to that float, as PHP's union coercion prefers it.
+            if int_like
+                && native_members
+                    .iter()
+                    .any(|n| matches!(n, Type(Repr::Float)))
+            {
+                kept.push(match m {
+                    Type(Repr::IntLiteral(n)) => Type::float_literal(n as f64),
+                    _ => Type::float(),
+                });
                 continue;
             }
             kept.extend(

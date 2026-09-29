@@ -134,7 +134,7 @@ impl<'a> Checker<'a> {
                 self.check_psr3_level(&level_ty, args[0].value.span);
             }
             let levels = level_ty
-                .constant_strings()
+                .constant_strings_text()
                 .iter()
                 .map(|l| l.to_ascii_lowercase())
                 .collect();
@@ -187,8 +187,8 @@ impl<'a> Checker<'a> {
         if level.is_mixed() {
             return;
         }
-        let levels = level.constant_strings();
-        let valid = !levels.is_empty() && levels.iter().all(|l| LEVELS.contains(l));
+        let levels = level.constant_strings_text();
+        let valid = !levels.is_empty() && levels.iter().all(|l| LEVELS.contains(&l.as_ref()));
         if !valid {
             self.report(format!("Parameter #1 $level of method Psr\\Log\\LoggerInterface::log() expects a PSR-3 log level, {level} given."),
                 span,
@@ -214,7 +214,7 @@ impl<'a> Checker<'a> {
             );
         }
         let message_ty = self.infer_expr(message, locals);
-        let texts = message_ty.constant_strings();
+        let texts = message_ty.constant_strings_text();
         if texts.is_empty() {
             if may_be_non_literal_string(&message_ty) {
                 self.report_builder(
@@ -231,7 +231,7 @@ impl<'a> Checker<'a> {
             }
             return;
         }
-        let texts: Vec<String> = texts.into_iter().map(str::to_string).collect();
+        let texts: Vec<String> = texts.into_iter().map(|t| t.into_owned()).collect();
         for text in &texts {
             let (double, invalid) = invalid_braces(text);
             if double {
