@@ -593,12 +593,12 @@ through `check-project`.
     never compared.
 
   (`91bc9e49`; accepts.rs and subtype.rs final state, probed) Done in `15b5b494`.
-- [ ] **F44. Conditional return types over classes don't resolve.**
+- [x] **F44. Conditional return types over classes don't resolve.**
   `@return ($x is Foo ? int : string)` gives `int|string` for `new
   Child()` (`Child extends Foo`) and for an unrelated final class; so does
   `(T is Foo ? …)`. `conditional_branch` (`conditional.rs`) uses
   `Relation::structural()`, which knows no classes; it needs the
-  hierarchy. (`0e309c03`)
+  hierarchy. (`0e309c03`) Done in `88effc4f`.
 - [>] **F45. `iterable<K, V>` loses both types.** (C7) It parses as
   `array<int|string, V>|Traversable`, dropping `K` and leaving
   `Traversable` bare, so a `foreach` over `iterable<string, int>` gives
