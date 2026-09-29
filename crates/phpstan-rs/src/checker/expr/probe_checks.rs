@@ -352,10 +352,12 @@ impl<'a> Checker<'a> {
         r_ty: &Type,
         span: Span,
     ) {
-        if self.loop_depth > 0 || expr_reads_a_property(l) || expr_reads_a_property(r) {
-            return;
-        }
-        if !matches!(op, BinOp::Eq | BinOp::NotEq) {
+        // The operator first: the operand walks cost the whole subtree.
+        if !matches!(op, BinOp::Eq | BinOp::NotEq)
+            || self.loop_depth > 0
+            || expr_reads_a_property(l)
+            || expr_reads_a_property(r)
+        {
             return;
         }
         let Some(equal) = self
@@ -427,17 +429,15 @@ impl<'a> Checker<'a> {
         span: Span,
         is_exempt_last_condition: bool,
     ) {
-        if self.loop_depth > 0
-            || expr_reads_a_mutable_property(l)
-            || expr_reads_a_mutable_property(r)
-        {
-            return;
-        }
         // A `never` operand is never evaluated (every case of an enum
-        // already handled).
+        // already handled). The operator first: the operand walks cost the
+        // whole subtree.
         if !matches!(op, BinOp::Identical | BinOp::NotIdentical)
             || l_ty.is_never()
             || r_ty.is_never()
+            || self.loop_depth > 0
+            || expr_reads_a_mutable_property(l)
+            || expr_reads_a_mutable_property(r)
         {
             return;
         }
@@ -507,12 +507,12 @@ impl<'a> Checker<'a> {
         r_ty: &Type,
         span: Span,
     ) {
-        if self.loop_depth > 0 || expr_reads_a_property(l) || expr_reads_a_property(r) {
-            return;
-        }
         let Some(ordering) = ordering_op(op) else {
             return;
         };
+        if self.loop_depth > 0 || expr_reads_a_property(l) || expr_reads_a_property(r) {
+            return;
+        }
         let rule_name = match ordering {
             OrderingOp::Lt => "smaller",
             OrderingOp::Gt => "greater",
