@@ -11,7 +11,7 @@ use syntax::ast::{ExprKind, FunctionDecl, StaticTarget, Visibility};
 use syntax::name_resolution::NameContext;
 use types::has_explicit_mixed_nested_somewhere;
 
-use types::{self, Shape, TemplateParam, Type};
+use types::{self, Shape, ShapeField, ShapeKey, TemplateParam, Type};
 
 mod asserts;
 mod generics;
@@ -417,7 +417,7 @@ fn infer_const_type_with(
         match &value.kind {
             ExprKind::Literal(Literal::Int(n)) => Type::int_literal(*n),
             ExprKind::Literal(Literal::Float(_)) => Type::float(),
-            ExprKind::Literal(Literal::String(s)) => Type::string_literal(s.to_string().into()),
+            ExprKind::Literal(Literal::String(s)) => Type::string_literal(s.clone()),
             ExprKind::Literal(Literal::Bool(true)) => Type::bool_literal(true),
             ExprKind::Literal(Literal::Bool(false)) => Type::bool_literal(false),
             ExprKind::Literal(Literal::Null) => Type::null(),
@@ -456,11 +456,15 @@ fn infer_const_type_with(
             // be laid out as a shape, so the value degrades to a plain
             // `array` of the values' union.
             ExprKind::ArrayLiteral(items) => {
-                let mut fields: Vec<(String, Type, bool)> = Vec::new();
+                let mut shape = Shape::sealed(Vec::new());
+                let mut values: Vec<Type> = Vec::new();
                 let mut next_index = types::NextArrayIndex::default();
                 let mut exact = true;
                 for item in items {
                     let value_ty = infer_const_type_with(&item.value, class_const_ref);
+                    if !values.contains(&value_ty) {
+                        values.push(value_ty.clone());
+                    }
                     let key = if item.spread {
                         None
                     } else {
@@ -468,40 +472,29 @@ fn infer_const_type_with(
                             // Appending past `PHP_INT_MAX` throws: the
                             // constant has no value.
                             None => match next_index.take() {
-                                types::AppendKey::Key(n) => Some(n.to_string()),
+                                types::AppendKey::Key(n) => Some(ShapeKey::Int(n)),
                                 types::AppendKey::Unknown => None,
                                 types::AppendKey::Throws => return Type::never(),
                             },
-                            Some(ExprKind::Literal(Literal::Int(n))) => Some(n.to_string()),
-                            Some(ExprKind::Literal(Literal::String(s))) => Some(
-                                types::canonical_int_key(&s.to_str_lossy())
-                                    .map_or_else(|| s.to_string(), |n| n.to_string()),
-                            ),
+                            Some(ExprKind::Literal(Literal::Int(n))) => Some(ShapeKey::Int(*n)),
+                            Some(ExprKind::Literal(Literal::String(s))) => {
+                                Some(ShapeKey::from_bytes(s.as_bytes()))
+                            }
                             _ => None,
                         }
                     };
                     let Some(key) = key else {
                         exact = false;
-                        fields.push((String::new(), value_ty, false));
                         continue;
                     };
-                    if let Some(n) = types::canonical_int_key(&key) {
+                    if let ShapeKey::Int(n) = key {
                         next_index.observe(n);
                     }
-                    match fields.iter_mut().find(|(k, _, _)| *k == key) {
-                        Some(existing) => existing.1 = value_ty,
-                        None => fields.push((key, value_ty, false)),
-                    }
+                    shape.set(ShapeField::new(key, value_ty, false));
                 }
                 if exact {
-                    Type::array_shape(Shape::from_named(fields))
+                    Type::array_shape(shape)
                 } else {
-                    let mut values: Vec<Type> = Vec::new();
-                    for (_, t, _) in fields {
-                        if !values.contains(&t) {
-                            values.push(t);
-                        }
-                    }
                     let value = match values.len() {
                         0 => Type::mixed(),
                         1 => values.pop().expect("len checked"),

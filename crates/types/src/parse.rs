@@ -512,19 +512,21 @@ fn try_parse_object_shape(s: &str) -> Option<Type> {
 /// this type stays round-trippable back through this same parser rather
 /// than showing a key text that would parse differently (or not at all)
 /// if pasted back into a real `@var`/`@param` tag.
-pub(crate) fn display_shape_key(key: &str) -> String {
-    let is_bare_integer = canonical_int_key(key).is_some();
-    let is_bare_identifier = {
+pub(crate) fn display_shape_key(key: &ShapeKey) -> String {
+    let ShapeKey::Str(text) = key else {
+        return key.to_string();
+    };
+    let is_bare_identifier = text.as_str().is_some_and(|key| {
         let mut chars = key.chars();
         chars
             .next()
             .is_some_and(|c| c.is_ascii_alphabetic() || c == '_')
             && chars.all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
-    };
-    if is_bare_integer || is_bare_identifier {
-        key.to_string()
+    });
+    if is_bare_identifier {
+        text.to_string()
     } else {
-        format!("'{}'", key.replace('\\', "\\\\").replace('\'', "\\'"))
+        crate::display::quote_php_string(text)
     }
 }
 

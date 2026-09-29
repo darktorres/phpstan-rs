@@ -52,13 +52,11 @@ impl<'a> Checker<'a> {
                 Some((_, (first_span, count))) => {
                     *count += 1;
                     if *count == 2 {
-                        // `var_export`-style display: bare for an int key,
-                        // single-quoted otherwise.
+                        // Bare for an int key, quoted as PHP writes it
+                        // otherwise.
                         let display = match &key {
                             ShapeKey::Int(n) => n.to_string(),
-                            ShapeKey::Str(text) => {
-                                format!("'{}'", text.replace('\\', "\\\\").replace('\'', "\\'"))
-                            }
+                            ShapeKey::Str(text) => types::quote_php_string(text),
                         };
                         self.report(
                             format!("Array has duplicate key {display}."),

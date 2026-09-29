@@ -382,7 +382,7 @@ impl<'a> Checker<'a> {
                 };
             }
             let name = match common_key.flatten() {
-                Some(ShapeKey::Str(name)) => Some(name.clone()),
+                Some(ShapeKey::Str(name)) => name.as_str().map(str::to_string),
                 _ => None,
             };
             if name.is_some() {

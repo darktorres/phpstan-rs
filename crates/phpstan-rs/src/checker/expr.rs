@@ -2111,12 +2111,7 @@ impl<'a> Checker<'a> {
                         // convergence must resolve here exactly as
                         // `infer_expr`'s identical read does.
                         base_ty
-                            .offset_value_type(
-                                literal_string_key(i)
-                                    .as_deref()
-                                    .map(types::ShapeKey::from_name)
-                                    .as_ref(),
-                            )
+                            .offset_value_type(crate::checker::literal_shape_key(i).as_ref())
                             .unwrap_or(Type::mixed())
                     }
                     // `OffsetAccessWithoutDimForReadingRule` - every
@@ -4728,9 +4723,8 @@ impl<'a> Checker<'a> {
                 {
                     return narrowed.clone();
                 }
-                let key = literal_string_key(idx);
                 (self.infer_expr(base, locals))
-                    .offset_value_type(key.as_deref().map(types::ShapeKey::from_name).as_ref())
+                    .offset_value_type(crate::checker::literal_shape_key(idx).as_ref())
                     .unwrap_or(Type::mixed())
             }
             ExprKind::Name(name) => self

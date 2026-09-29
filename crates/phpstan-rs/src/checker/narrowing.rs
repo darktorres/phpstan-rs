@@ -214,7 +214,7 @@ impl<'a> Checker<'a> {
         let mut e = unwrap_grouping(arg);
         loop {
             let (base, lit_key) = match &e.kind {
-                ExprKind::Index(base, Some(idx)) => (base, literal_string_key(idx)),
+                ExprKind::Index(base, Some(idx)) => (base, crate::checker::literal_shape_key(idx)),
                 ExprKind::PropertyAccess(base, _, _) | ExprKind::DynamicPropertyAccess(base, _) => {
                     if let Some(base_key) = narrowing_key(base) {
                         let current = self.current_narrowed_type(base, &base_key, locals);
@@ -227,7 +227,7 @@ impl<'a> Checker<'a> {
             };
             if let Some(base_key) = narrowing_key(base) {
                 let current = self.current_narrowed_type(base, &base_key, locals);
-                let narrowed = current.to_isset_container(lit_key.as_deref());
+                let narrowed = current.to_isset_container(lit_key.as_ref());
                 if !narrowed.is_never() {
                     locals.insert(base_key, narrowed);
                 }
@@ -1072,6 +1072,7 @@ impl<'a> Checker<'a> {
                     // this narrowing, silently keeping a `Union` member
                     // that couldn't possibly have offset `0` at all.
                     && let Some(lit_key) = literal_string_key(&key_arg.value)
+                    && let Some(shape_key) = crate::checker::literal_shape_key(&key_arg.value)
                     && let Some(arr_key) = narrowing_key(&arr_arg.value)
                 {
                     // The checked expression here is
@@ -1082,7 +1083,7 @@ impl<'a> Checker<'a> {
                     // based on a provable fact" shape `instanceof`'s own
                     // member resolution already uses.
                     let current = self.current_narrowed_type(&arr_arg.value, &arr_key, locals);
-                    let narrowed = current.with_key_presence(&lit_key, branch_true);
+                    let narrowed = current.with_key_presence(&shape_key, branch_true);
                     // Also narrow the specific element
                     // access itself (`$arr['key']`), not just `$arr`'s
                     // own overall type - see `array_value_type_for_key`'s
@@ -1097,8 +1098,7 @@ impl<'a> Checker<'a> {
                     // "exclude `Null`" half of that for the false
                     // branch, a different, already-covered concern).
                     if branch_true
-                        && let Some(value_ty) =
-                            narrowed.offset_value_type(Some(&types::ShapeKey::from_name(&lit_key)))
+                        && let Some(value_ty) = narrowed.offset_value_type(Some(&shape_key))
                     {
                         locals.insert(format!("{arr_key}[{lit_key}]"), value_ty);
                     }

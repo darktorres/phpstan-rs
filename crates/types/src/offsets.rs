@@ -15,10 +15,10 @@ impl Type {
                 if shape.fields.is_empty() && !(offset.is_mixed() || offset.is_never()) {
                     return TrinaryLogic::No;
                 }
-                let Some((key, _)) = literal_key(offset) else {
+                let Some(key) = literal_key(offset) else {
                     return TrinaryLogic::Maybe;
                 };
-                match shape.field(&ShapeKey::from_name(&key)) {
+                match shape.field(&key) {
                     Some(field) if !field.optional => TrinaryLogic::Yes,
                     Some(_) => TrinaryLogic::Maybe,
                     None => TrinaryLogic::No,
@@ -97,12 +97,12 @@ impl Type {
                 // `null` becomes an array on its first write.
                 Type(Repr::Null) => Type::array_shape(Shape::sealed(Vec::new()))
                     .set_offset_value_type(offset, value, in_range, track_literal_key),
-                Type(Repr::ArrayShape(shape)) => match offset.and_then(literal_key_name) {
+                Type(Repr::ArrayShape(shape)) => match offset.and_then(literal_key) {
                     Some(key) => {
                         let mut shape = shape.clone();
                         // A written key is present afterwards, even one the
                         // shape only had as optional.
-                        shape.set(ShapeField::new(ShapeKey::from_name(&key), value, false));
+                        shape.set(ShapeField::new(key, value, false));
                         Some(Type::array_shape(shape))
                     }
                     None => {
@@ -317,9 +317,8 @@ fn write_literal_key_aware(
         None => key.clone(),
     };
     let base = Type::array(key_ty, Type::union(value.clone(), inner.clone()));
-    match offset.and_then(literal_key_name) {
-        Some(name) if track_literal_key => {
-            let key = ShapeKey::from_name(&name);
+    match offset.and_then(literal_key) {
+        Some(key) if track_literal_key => {
             let mut members: Vec<Type> = existing_has_offset_values
                 .iter()
                 .filter(|m| !matches!(m, Type(Repr::HasOffsetValue(k, _)) if *k == key))
@@ -333,27 +332,18 @@ fn write_literal_key_aware(
     }
 }
 
-/// A literal offset's array key as text (`true` is `1`, `null` is `''`).
-fn literal_key_name(offset: &Type) -> Option<String> {
-    literal_key(offset).map(|(key, _)| key)
-}
-
-/// An offset's array key as text and whether it's an integer key, for a
-/// literal offset (`true`/`false`/`null` included).
-fn literal_key(offset: &Type) -> Option<(String, bool)> {
-    match &offset.to_array_key() {
-        Type(Repr::IntLiteral(n)) => Some((n.to_string(), true)),
-        Type(Repr::StringLiteral(s)) => Some((s.to_string(), false)),
-        _ => None,
-    }
+/// A literal offset's array key (`true` is `1`, `null` is `''`).
+fn literal_key(offset: &Type) -> Option<ShapeKey> {
+    ShapeKey::from_type(&offset.to_array_key())
 }
 
 fn general_array_has_offset(key_ty: &Type, is_list: bool, offset: &Type) -> TrinaryLogic {
-    let Some((key, is_int_key)) = literal_key(offset) else {
+    let Some(key) = literal_key(offset) else {
         return TrinaryLogic::Maybe;
     };
+    let is_int_key = matches!(key, ShapeKey::Int(_));
     if is_list {
-        return if !is_int_key || key.starts_with('-') {
+        return if !matches!(key, ShapeKey::Int(n) if n >= 0) {
             TrinaryLogic::No
         } else {
             TrinaryLogic::Maybe

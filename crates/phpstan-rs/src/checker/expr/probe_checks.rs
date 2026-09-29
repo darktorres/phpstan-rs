@@ -196,6 +196,7 @@ impl<'a> Checker<'a> {
                 }
                 ExprKind::Index(base, Some(idx)) => {
                     let key = literal_string_key(idx)?;
+                    let shape_key = crate::checker::literal_shape_key(idx)?;
                     let base_ty = self.resolve_always_exists(
                         base,
                         locals,
@@ -210,7 +211,7 @@ impl<'a> Checker<'a> {
                     // already answers both questions correctly (including
                     // through a `Union`, recursively), this just asks it
                     // twice rather than duplicating its own logic.
-                    if base_ty.with_key_presence(&key, true).is_never() {
+                    if base_ty.with_key_presence(&shape_key, true).is_never() {
                         self.report(
                             format!(
                                 "Offset '{key}' on {base_ty} {operator_description} does not exist."
@@ -221,8 +222,8 @@ impl<'a> Checker<'a> {
                         );
                         return None;
                     }
-                    if base_ty.with_key_presence(&key, false).is_never() {
-                        return base_ty.offset_value_type(Some(&types::ShapeKey::from_name(&key)));
+                    if base_ty.with_key_presence(&shape_key, false).is_never() {
+                        return base_ty.offset_value_type(Some(&shape_key));
                     }
                     None
                 }

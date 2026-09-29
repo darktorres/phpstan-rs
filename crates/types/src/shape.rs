@@ -3,22 +3,28 @@
 
 use std::fmt;
 
-use crate::{Repr, TrinaryLogic, Type, parse::canonical_int_key};
+use crate::{PhpString, Repr, TrinaryLogic, Type, parse::canonical_int_key};
 
 /// An array shape key, canonicalized the way PHP canonicalizes an array
-/// key: a decimal integer string is an int key.
+/// key: a decimal integer string is an int key. A string key is bytes,
+/// as PHP's are: `"\xff"` and `"\xfe"` are two keys.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum ShapeKey {
     Int(i64),
-    Str(String),
+    Str(PhpString),
 }
 
 impl ShapeKey {
     /// The key `name` is as a PHP array key.
     pub fn from_name(name: &str) -> ShapeKey {
-        match canonical_int_key(name) {
+        ShapeKey::from_bytes(name.as_bytes())
+    }
+
+    /// The key a string of these bytes is as a PHP array key.
+    pub fn from_bytes(bytes: &[u8]) -> ShapeKey {
+        match std::str::from_utf8(bytes).ok().and_then(canonical_int_key) {
             Some(n) => ShapeKey::Int(n),
-            None => ShapeKey::Str(name.to_string()),
+            None => ShapeKey::Str(PhpString::from_bytes(bytes)),
         }
     }
 
@@ -26,7 +32,7 @@ impl ShapeKey {
     pub fn to_type(&self) -> Type {
         match self {
             ShapeKey::Int(n) => Type::int_literal(*n),
-            ShapeKey::Str(s) => Type::string_literal(s.as_str().into()),
+            ShapeKey::Str(s) => Type::string_literal(s.clone()),
         }
     }
 
@@ -34,7 +40,7 @@ impl ShapeKey {
     pub fn from_type(ty: &Type) -> Option<ShapeKey> {
         match ty {
             Type(Repr::IntLiteral(n)) => Some(ShapeKey::Int(*n)),
-            Type(Repr::StringLiteral(s)) => Some(ShapeKey::from_name(&s.to_str_lossy())),
+            Type(Repr::StringLiteral(s)) => Some(ShapeKey::from_bytes(s.as_bytes())),
             _ => None,
         }
     }
@@ -45,7 +51,8 @@ impl ShapeKey {
     }
 }
 
-/// The key's own text: the digits of an int key, a string key verbatim.
+/// The key's own text: the digits of an int key, a string key verbatim
+/// (lossily, for display).
 impl fmt::Display for ShapeKey {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {

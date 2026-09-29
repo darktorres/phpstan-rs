@@ -3,7 +3,7 @@ use std::fmt;
 use syntax::ast::ClassKind;
 
 use crate::parse::display_shape_key;
-use crate::{AccessoryKind, CallSiteVariance, CallableSig, Repr, Shape, Type};
+use crate::{AccessoryKind, CallSiteVariance, CallableSig, PhpString, Repr, Shape, Type};
 
 /// `keyword(params): return` - shared by a shaped `callable(...)`/
 /// `Closure(...)` PHPDoc type and a closure literal's own
@@ -64,7 +64,7 @@ impl fmt::Display for Type {
                 Type(Repr::IntLiteral(n)) => write!(f, "{n}"),
                 Type(Repr::Float) => write!(f, "float"),
                 Type(Repr::String) => write!(f, "string"),
-                Type(Repr::StringLiteral(s)) => write!(f, "'{s}'"),
+                Type(Repr::StringLiteral(s)) => f.write_str(&quote_php_string(s)),
                 Type(Repr::Array(key, value)) => {
                     let known_key = **key != Type::unknown_array_key();
                     match (known_key, value.as_ref()) {
@@ -307,11 +307,7 @@ fn write_shape(f: &mut fmt::Formatter<'_>, keyword: &str, shape: &Shape) -> fmt:
         .iter()
         .map(|field| {
             let q = if field.optional { "?" } else { "" };
-            format!(
-                "{}{q}: {}",
-                display_shape_key(&field.key.to_string()),
-                field.ty
-            )
+            format!("{}{q}: {}", display_shape_key(&field.key), field.ty)
         })
         .collect();
     if let Some(tail) = &shape.unsealed {
@@ -353,4 +349,50 @@ impl Type {
             other => other.to_string(),
         }
     }
+}
+
+/// A string as PHP source would write it, unambiguously: single-quoted
+/// with `\` and `'` escaped when it's printable UTF-8 (`'it\'s'`),
+/// otherwise double-quoted with each control or non-UTF-8 byte as an
+/// escape (`"\xff"`, `"a\n"`).
+pub fn quote_php_string(s: &PhpString) -> String {
+    if let Some(text) = s.as_str()
+        && !text.chars().any(char::is_control)
+    {
+        return format!("'{}'", text.replace('\\', "\\\\").replace('\'', "\\'"));
+    }
+    let mut out = String::from("\"");
+    let bytes = s.as_bytes();
+    let mut i = 0;
+    while i < bytes.len() {
+        // A valid multi-byte UTF-8 character stays as it is.
+        let width = match bytes[i] {
+            0xc2..=0xdf => 2,
+            0xe0..=0xef => 3,
+            0xf0..=0xf4 => 4,
+            _ => 1,
+        };
+        if width > 1
+            && let Some(ch) = bytes
+                .get(i..i + width)
+                .and_then(|b| std::str::from_utf8(b).ok())
+        {
+            out.push_str(ch);
+            i += width;
+            continue;
+        }
+        match bytes[i] {
+            b'\\' => out.push_str("\\\\"),
+            b'"' => out.push_str("\\\""),
+            b'$' => out.push_str("\\$"),
+            b'\n' => out.push_str("\\n"),
+            b'\r' => out.push_str("\\r"),
+            b'\t' => out.push_str("\\t"),
+            b if !(0x20..0x7f).contains(&b) => out.push_str(&format!("\\x{b:02x}")),
+            b => out.push(b as char),
+        }
+        i += 1;
+    }
+    out.push('"');
+    out
 }

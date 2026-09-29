@@ -610,11 +610,8 @@ impl<'a> Checker<'a> {
             }
             let absent = match idx.as_deref() {
                 None => true,
-                Some(i) => match literal_string_key(i) {
-                    Some(key) => {
-                        let key = ShapeKey::from_name(&key);
-                        !shapes.iter().any(|shape| shape.field(&key).is_some())
-                    }
+                Some(i) => match literal_shape_key(i) {
+                    Some(key) => !shapes.iter().any(|shape| shape.field(&key).is_some()),
                     None => shapes.iter().all(|shape| shape.fields.is_empty()),
                 },
             };
@@ -681,16 +678,9 @@ impl<'a> Checker<'a> {
                     continue;
                 }
                 if let ExprKind::ArrayLiteral(inner) | ExprKind::List(inner) = &item.value.kind {
-                    let array_key = dim.to_array_key();
-                    let key = array_key
-                        .int_literal_value()
-                        .map(|n| n.to_string())
-                        .or_else(|| match array_key.constant_strings()[..] {
-                            [s] => Some(s.to_string()),
-                            _ => None,
-                        });
+                    let key = types::ShapeKey::from_type(&dim.to_array_key());
                     let inner_container = container
-                        .offset_value_type(key.as_deref().map(types::ShapeKey::from_name).as_ref())
+                        .offset_value_type(key.as_ref())
                         .unwrap_or(Type::mixed());
                     self.check_destructuring_offsets(inner, &inner_container, locals);
                 }
@@ -820,6 +810,16 @@ fn purge_aliased_index_entries(lhs: &Expr, locals: &mut Locals) {
     })
 }
 
+/// The array key a literal subscript names, by its bytes: `'5'` is the
+/// int key 5, `"\xff"` its own string key.
+pub(crate) fn literal_shape_key(e: &Expr) -> Option<ShapeKey> {
+    match &e.kind {
+        ExprKind::Literal(Literal::String(s)) => Some(ShapeKey::from_bytes(s.as_bytes())),
+        ExprKind::Literal(Literal::Int(n)) => Some(ShapeKey::Int(*n)),
+        _ => None,
+    }
+}
+
 pub(crate) fn literal_string_key(e: &Expr) -> Option<String> {
     match &e.kind {
         ExprKind::Literal(Literal::String(s)) => Some(s.to_string()),
@@ -847,7 +847,7 @@ fn literal_keys_from_type(ty: &Type) -> Vec<String> {
 /// when it has none, `None` for a key only known at runtime.
 fn destructured_key(item: &ArrayItem, position: usize) -> Option<ShapeKey> {
     match item.key.as_ref().map(|k| &k.kind) {
-        Some(ExprKind::Literal(Literal::String(s))) => Some(ShapeKey::from_name(&s.to_str_lossy())),
+        Some(ExprKind::Literal(Literal::String(s))) => Some(ShapeKey::from_bytes(s.as_bytes())),
         Some(ExprKind::Literal(Literal::Int(n))) => Some(ShapeKey::Int(*n)),
         Some(_) => None,
         None => Some(ShapeKey::Int(position as i64)),

@@ -1,5 +1,5 @@
 use crate::checker::{
-    Checker, Locals, is_real_variable_key, literal_string_key, narrowing_type_for_predicate,
+    Checker, Locals, is_real_variable_key, literal_shape_key, narrowing_type_for_predicate,
     resolve_call_args,
 };
 use crate::registry::{FunctionReflection, Registry};
@@ -1256,8 +1256,8 @@ impl<'a> Checker<'a> {
                     // precision to offer, so every column read is simply
                     // the row's own uniform element type.
                     let field_ty = match row_ty.as_array_shape() {
-                        Some(shape) => literal_string_key(&args[1].value)
-                            .and_then(|key| shape.field(&ShapeKey::from_name(&key)))
+                        Some(shape) => literal_shape_key(&args[1].value)
+                            .and_then(|key| shape.field(&key))
                             .map(|f| f.ty.clone()),
                         None if row_ty.is_array().yes() => row_ty.array_value_type(),
                         None => None,

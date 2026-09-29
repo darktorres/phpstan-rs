@@ -15,7 +15,7 @@ fn array_key_exists_makes_an_optional_key_required_or_drops_it() {
         true,
     )]));
     assert_eq!(
-        shape.with_key_presence("a", true),
+        shape.with_key_presence(&types::ShapeKey::from_name("a"), true),
         Type::array_shape(Shape::from_named(vec![(
             "a".to_string(),
             Type::int(),
@@ -23,7 +23,7 @@ fn array_key_exists_makes_an_optional_key_required_or_drops_it() {
         )]))
     );
     assert_eq!(
-        shape.with_key_presence("a", false),
+        shape.with_key_presence(&types::ShapeKey::from_name("a"), false),
         Type::array_shape(Shape::sealed(Vec::new()))
     );
 }

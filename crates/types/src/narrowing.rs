@@ -463,10 +463,10 @@ impl Type {
     /// required when present and is dropped when absent, and a general array
     /// has it when present. Recurses through `Union`; anything else is left
     /// untouched.
-    pub fn with_key_presence(&self, key: &str, present: bool) -> Type {
+    pub fn with_key_presence(&self, key: &ShapeKey, present: bool) -> Type {
         syntax::stack::guard(|| {
             match self {
-                Type(Repr::ArrayShape(shape)) => match shape.field(&ShapeKey::from_name(key)) {
+                Type(Repr::ArrayShape(shape)) => match shape.field(key) {
                     Some(field) if !field.optional => {
                         if present {
                             self.clone()
@@ -502,17 +502,13 @@ impl Type {
                     }
                 },
                 // A general array now has that key.
-                Type(Repr::Array(..)) if present => crate::intersect_types(vec![
-                    self.clone(),
-                    Type::has_offset(ShapeKey::from_name(key)),
-                ]),
+                Type(Repr::Array(..)) if present => {
+                    crate::intersect_types(vec![self.clone(), Type::has_offset(key.clone())])
+                }
                 Type(Repr::Intersection(members))
                     if present && members.iter().any(|m| matches!(m, Type(Repr::Array(..)))) =>
                 {
-                    crate::intersect_types(vec![
-                        self.clone(),
-                        Type::has_offset(ShapeKey::from_name(key)),
-                    ])
+                    crate::intersect_types(vec![self.clone(), Type::has_offset(key.clone())])
                 }
                 Type(Repr::Union(members)) => {
                     let kept: Vec<Type> = members
@@ -538,7 +534,7 @@ impl Type {
     /// offset read always yields `null` for, and a shape with `key` listed
     /// has it present and non-null. `key` is `None` for a non-literal
     /// subscript.
-    pub fn to_isset_container(&self, key: Option<&str>) -> Type {
+    pub fn to_isset_container(&self, key: Option<&ShapeKey>) -> Type {
         syntax::stack::guard(|| {
             match self {
                 Type(Repr::Null)
@@ -557,10 +553,9 @@ impl Type {
                     };
                     match self.with_key_presence(key, true).into_repr() {
                         Repr::ArrayShape(mut shape) => {
-                            let key = ShapeKey::from_name(key);
                             // An unsealed shape's tail held it when it isn't
                             // listed.
-                            let held = match shape.field(&key) {
+                            let held = match shape.field(key) {
                                 Some(field) => field.ty.clone(),
                                 None => shape
                                     .unsealed
@@ -569,7 +564,7 @@ impl Type {
                                     .unwrap_or(Type::mixed()),
                             };
                             let value = held.without(&Type::null());
-                            shape.set(ShapeField::new(key, value, false));
+                            shape.set(ShapeField::new(key.clone(), value, false));
                             Type::array_shape(shape)
                         }
                         other => Type(other),
@@ -579,10 +574,7 @@ impl Type {
                 Type(Repr::Array(_, value)) => match key {
                     Some(key) => Type(Repr::Intersection(vec![
                         self.clone(),
-                        Type::has_offset_value(
-                            ShapeKey::from_name(key),
-                            value.without(&Type::null()),
-                        ),
+                        Type::has_offset_value(key.clone(), value.without(&Type::null())),
                     ])),
                     None => self.clone(),
                 },
@@ -596,7 +588,7 @@ impl Type {
                         (Some(key), Some(value)) => {
                             let mut members = members.clone();
                             members.push(Type::has_offset_value(
-                                ShapeKey::from_name(key),
+                                key.clone(),
                                 value.without(&Type::null()),
                             ));
                             Type(Repr::Intersection(members))
