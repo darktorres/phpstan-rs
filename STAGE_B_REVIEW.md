@@ -820,12 +820,13 @@ through `check-project`.
 - [x] **F20. `exit` records its form by span width.** (`b09b0cea`) `banned.rs` tells a
   bare `exit` from `exit()` by measuring the span; the node doesn't record
   it. (`f9757b0a`)
-- [ ] **F25. The error type is produced by nothing.** `Type::error()`
+- [x] **F25. The error type is produced by nothing.** `Type::error()`
   (`*ERROR*`, "for expressions a rule reports as invalid") has union,
   relation and accepts arms, but no rule or inference returns it. Either
   the checker returns it for an expression it reports invalid (undefined
   variable, method or property; invalid operands), so one error doesn't
-  cascade, or the variant goes. (`6fe620f7`)
+  cascade, or the variant goes. (`6fe620f7`) Done in `11b428f4` (the checker
+  produces it).
 - [ ] **F26. `visit_name` misses type-hint names.** Its doc promises every
   class, function and constant name, but `visit_type_hint` is a leaf with
   no `walk_type_hint`. `TypeHintKind::Name` also holds keywords (`int`,
