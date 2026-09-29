@@ -155,6 +155,43 @@ fn many_tokens_on_one_extremely_long_line_does_not_blow_up_quadratically() {
 }
 
 #[test]
+fn many_double_quoted_strings_on_one_long_line_stay_linear_and_exact() {
+    // A double-quoted string resolves positions inside itself before its
+    // own start is resolved, so its token starts behind the last position
+    // asked for; that must not recount the line from its start (a
+    // generated Huffman table: one 1.2 MB line of `"\x00"=>[93,"0"]`).
+    let mut src = "<?php $a = [".to_string();
+    for i in 0..20_000 {
+        if i > 0 {
+            src.push(',');
+        }
+        src.push_str(&format!("\"\\x{:02X}é\"=>[{i},\"0\"]", i % 256));
+    }
+    src.push_str("];\n");
+
+    let start = std::time::Instant::now();
+    let toks = Lexer::new(&src).tokenize_with_spans();
+    let elapsed = start.elapsed();
+    assert!(
+        elapsed.as_secs() < 2,
+        "tokenizing one long line of strings took {elapsed:?} - looks quadratic again"
+    );
+
+    // The last string starts where counting the line's characters says,
+    // each `é` before it one character.
+    let last_string = toks
+        .iter()
+        .rev()
+        .find(|(t, _, _)| matches!(t, Token::StringLit(_) | Token::InterpString(_)))
+        .expect("a string");
+    let expected_col = src
+        .rfind("\"0\"")
+        .map(|byte| src[..byte].chars().count() + 1)
+        .expect("the last string");
+    assert_eq!(last_string.1.start.col as usize, expected_col);
+}
+
+#[test]
 fn a_short_echo_tag_after_inline_html_still_echoes() {
     let src = "<title><?= $t ?></title><?= $u ?>";
     let toks: Vec<Token> = Lexer::new(src)

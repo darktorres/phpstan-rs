@@ -32,22 +32,14 @@ pub struct Lexer<'a> {
     // know where that token's own span should start, since `next_token`
     // itself skips whitespace *and* lexes in one call.
     last_token_start: usize,
-    // `line_col_at`'s incremental cache: the last byte offset it was
-    // asked to convert, and the `Position` that came out. Needed because
-    // a naive "recount every character from the line's own start"
-    // implementation is O(line length) *per call* - fine for ordinary
-    // code, but a real file (a generated Huffman lookup table) can have a
-    // single line over a million characters long, and thousands of
-    // tokens on that one line turns the naive approach into a real
-    // O(line length x tokens on it) blowup. `tokenize_with_spans` calls
-    // `line_col_at` with strictly increasing byte offsets (its whole
-    // point is a linear scan forward), so caching the last conversion and
-    // only counting the delta since then turns the pathological line back
-    // into O(line length) total, not squared - and it's never wrong, only
-    // sometimes not the fast path: a request for an earlier byte offset,
-    // or one on a different line, still gets a fully correct (just not
-    // delta-accelerated) recomputation.
-    pos_cache: (usize, Position),
+    // `line_col_at`'s positions already resolved on the line it was last
+    // asked about: (line index, (byte offset, position) pairs sorted by
+    // offset, starting with the line's own start). A column counts the
+    // characters from the nearest resolved offset at or before it, so a
+    // generated file's million-character line (a Huffman lookup table) is
+    // counted about once, even as a string's own positions are resolved
+    // before the token starting before them.
+    line_marks: (usize, Vec<(usize, Position)>),
     // Where the source starts in its file: line 1, column 1 for a whole
     // file; a string interpolation fragment's own position when one is
     // lexed on its own, so its tokens get their real positions.
@@ -121,7 +113,7 @@ impl<'a> Lexer<'a> {
             in_php: false,
             line_starts: compute_line_starts(bytes),
             last_token_start: 0,
-            pos_cache: (0, Position { line: 1, col: 1 }),
+            line_marks: (0, vec![(0, Position { line: 1, col: 1 })]),
             base: Position { line: 1, col: 1 },
             pending_keyword_raw: None,
             comments: Vec::new(),
@@ -141,7 +133,7 @@ impl<'a> Lexer<'a> {
             in_php: true,
             line_starts: compute_line_starts(bytes),
             last_token_start: 0,
-            pos_cache: (0, Position { line: 1, col: 1 }),
+            line_marks: (0, vec![(0, Position { line: 1, col: 1 })]),
             base: Position { line: 1, col: 1 },
             pending_keyword_raw: None,
             comments: Vec::new(),
@@ -197,38 +189,26 @@ impl<'a> Lexer<'a> {
 
     fn relative_line_col_at(&mut self, byte_pos: usize) -> Position {
         let byte_pos = byte_pos.min(self.src.len());
-        let (cached_pos, cached) = self.pos_cache;
-        if byte_pos == cached_pos {
-            return cached;
-        }
         let line_idx = self.line_idx_at(byte_pos);
-        // The fast path: still on the same line as the last conversion,
-        // moving forward - only count the *new* characters since then,
-        // not the whole line from its own start again. Falls back to a
-        // full (still correct) recompute for a backward jump or a
-        // different line - both real but comparatively rare (a nested
-        // string interpolation is the only caller that can jump backward
-        // at all).
-        let position = if byte_pos > cached_pos && line_idx == self.line_idx_at(cached_pos) {
-            let delta = String::from_utf8_lossy(&self.src[cached_pos..byte_pos])
-                .chars()
-                .count();
-            Position {
-                line: (line_idx + 1) as u32,
-                col: cached.col + delta as u32,
-            }
-        } else {
+        if self.line_marks.0 != line_idx {
             let line_start = self.line_starts[line_idx];
-            let col = String::from_utf8_lossy(&self.src[line_start..byte_pos])
-                .chars()
-                .count()
-                + 1;
-            Position {
+            let start = Position {
                 line: (line_idx + 1) as u32,
-                col: col as u32,
-            }
+                col: 1,
+            };
+            self.line_marks = (line_idx, vec![(line_start, start)]);
+        }
+        let marks = &mut self.line_marks.1;
+        let at = marks.partition_point(|&(offset, _)| offset <= byte_pos);
+        let (offset, from) = marks[at - 1];
+        if offset == byte_pos {
+            return from;
+        }
+        let position = Position {
+            line: from.line,
+            col: from.col + char_count(&self.src[offset..byte_pos]) as u32,
         };
-        self.pos_cache = (byte_pos, position);
+        marks.insert(at, (byte_pos, position));
         position
     }
 
@@ -983,5 +963,14 @@ fn is_numeric_token(raw: &[u8]) -> bool {
             }
             i == raw.len()
         }
+    }
+}
+
+/// How many characters `bytes` hold: each invalid sequence one, as a
+/// lossy decoding reads it.
+fn char_count(bytes: &[u8]) -> usize {
+    match std::str::from_utf8(bytes) {
+        Ok(text) => text.chars().count(),
+        Err(_) => String::from_utf8_lossy(bytes).chars().count(),
     }
 }
