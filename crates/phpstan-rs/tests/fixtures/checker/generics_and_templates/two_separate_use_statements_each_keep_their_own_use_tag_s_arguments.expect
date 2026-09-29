@@ -1,2 +1,2 @@
-8:13-13:14 generics.lessTypes L6 | Generic type Second<string> in PHPDoc tag @use does not specify all template types of trait Second: K, V
-8:13-13:14 generics.moreTypes L6 | Generic type First<int, string> in PHPDoc tag @use specifies 2 template types, but trait First supports only 1: T
+10:17-10:27 generics.moreTypes L6 | Generic type First<int, string> in PHPDoc tag @use specifies 2 template types, but trait First supports only 1: T
+12:17-12:28 generics.lessTypes L6 | Generic type Second<string> in PHPDoc tag @use does not specify all template types of trait Second: K, V

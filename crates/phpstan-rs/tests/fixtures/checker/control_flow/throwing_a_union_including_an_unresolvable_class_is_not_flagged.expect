@@ -1,1 +1,1 @@
-7:24-9:18 class.notFound L0 | caught class SomeUnresolvableInterface not found
+7:26-7:52 class.notFound L0 | caught class SomeUnresolvableInterface not found

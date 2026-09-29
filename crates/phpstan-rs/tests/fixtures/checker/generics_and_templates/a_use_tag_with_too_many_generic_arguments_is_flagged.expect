@@ -1,1 +1,1 @@
-4:13-7:14 generics.moreTypes L6 | Generic type Repo<int, string> in PHPDoc tag @use specifies 2 template types, but trait Repo supports only 1: T
+6:17-6:26 generics.moreTypes L6 | Generic type Repo<int, string> in PHPDoc tag @use specifies 2 template types, but trait Repo supports only 1: T
