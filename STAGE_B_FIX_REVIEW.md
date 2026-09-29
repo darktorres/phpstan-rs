@@ -26,6 +26,270 @@ introduced it or, for a module read in its final state, the module;
 "probed" means reproduced with an `assertType` or diagnostic probe
 through `check-project`.
 
+### Crashes and false positives (probed)
+
+- [ ] **F1. A template bound in a namespace resolves twice.** Since
+  `ac00409c` a type's traversal reaches a template's bound and default,
+  and `declared_type` (`a70a5b42`), `function_sig.rs:611-613`,
+  `generics.rs:67-73`, `class_info.rs:1126`/`1213` and `asserts.rs:114-118`
+  run `mark_template_params` - whose bounds are already resolved - and then
+  `resolve_names_in_type` over the whole type. In `namespace N;`,
+  `@template T of Foo` becomes `N\N\Foo` and `T of \DateTimeInterface`
+  becomes `N\DateTimeInterface`: every signature using `T` reports
+  `class.notFound` at level 0, and `f($foo)` returns `N\N\Foo`. Method and
+  class templates alike. The pre-window binary reports none of it. The
+  fixture only covers the global namespace, where resolving twice changes
+  nothing. Done: a bound is resolved once - either
+  `mark_template_params` takes unresolved bounds, or
+  `resolve_names_in_type` leaves a template parameter's bound and default
+  alone - with a namespaced fixture.
+- [ ] **F2. A first-class callable on a generic receiver leaks the class's
+  templates** (`b3412c22`). `first_class_callable_type` builds the closure
+  from the method's declared signature and resolves only `self`/`static`,
+  so for `Box<int> $b`, `$b->get(...)` is `Closure(): T` and `$g()` is `T`.
+  `h($g())` with `h(int)` reports "expects int, T given". The pre-window
+  binary gave a plain `Closure`, so there was no report. Done: the
+  receiver's class template bindings are substituted into the signature
+  (as a method call's return is) before `with_own_templates`, for static
+  calls too.
+- [ ] **F3. `foreach` over a generic `IteratorAggregate` yields template
+  names.** `iterable_element_type` (`loops.rs:493-517`) takes
+  `getIterator()`'s declared return without the receiver's bindings.
+  - A value typed `IteratorAggregate<int, string>` iterates as
+    `TKey`/`TValue`. This is a regression from `321d388c`: `Traversable`
+    bindings are now found for the stub's `Traversable<TKey, TValue>`,
+    where before the code fell through to `agg_bindings`.
+  - A class `Coll<K, V>` implementing `IteratorAggregate<K, V>` iterates
+    as `K`/`V`, so `h($k, $v)` reports "expects int, K given". This was
+    already the case before the fix window, but the commit rewrote the
+    function and left it in; its new gate
+    `agg_bindings.is_empty() || !(both mixed)` only catches `mixed`.
+
+  Done: the declared return has the receiver's bindings substituted, or
+  non-empty `agg_bindings` win. Fixtures cover both shapes.
+- [ ] **F4. A type check that can't pass narrows to the checked type.**
+  `Relation::narrow` falls back to `target` when `original` and `target`
+  are disjoint (`narrowing.rs`, the `_ => target.clone()` arm and the
+  union arm's `0 => target.clone()`). The resulting type merges back after
+  the `if`.
+  - Since `f18bc022` (subtyping instead of acceptance), `is_float($int)`
+    is `float` in its true branch, and after `if (!is_float($i)) {...}`
+    `$i` is `int|float`. The pre-window binary kept `int`.
+  - Already the case before the window: `if (is_string($j)) {}` makes
+    `$j` `string|int`, so `h($j)` reports "expects int, string|int
+    given"; `is_int(?string)` gives `strlen()` the same false positive.
+
+  The check itself already reports `function.impossibleType`. Done: the
+  disjoint case is `never` in both arms, with a fixture asserting the type
+  after the `if`.
+- [ ] **F5. The error type silences reads that report nothing**
+  (`11b428f4` with `43349c1a`). `unassigned_variable_type` gives
+  `*ERROR*` for every read of a never-assigned variable. That includes
+  the quiet reads, which report nothing, so the error type follows no
+  report:
+  - `$y = $undef ?? 'a'` is `*ERROR*` (PHP gives `'a'`), and
+    `empty($u) ? 1 : $u` is `*ERROR*`;
+  - inside `if (isset($m))`, or after `if (empty($x)) return;`, `$m`/`$x`
+    are `*ERROR*`, not `mixed~null`, so `$m->foo()` is unchecked at level
+    9.
+
+  The pre-window binary gave `mixed`. Done: only a reported read yields
+  the error type. A quiet read yields `mixed`, or whatever the
+  `??`/`isset` semantics give.
+- [ ] **F6. A rebound closure's `$this` is blessed as undefined**
+  (`fda237d8`). The commit's own fixture expects `variable.undefined
+  $this` (level 0) inside the two closures it rebinds with `->call(new
+  Foo)` and `Closure::bind`. PHP runs both with `$this` bound. The rebind
+  scan feeds only unused-member counting. Done: a closure rebound to an
+  object has `$this` of that object's type (or `object`), and the fixture
+  expects no `variable.undefined`.
+- [ ] **F7. An unqualified call to a global function from a namespace is
+  indexed under the namespaced name.** `use_sites::function_at`
+  (`use_sites.rs:176-179`) records `name.candidates().0`. With dead code
+  on, a global `helper()` called as `helper()` from `namespace App;`
+  reports `Function helper is never referenced`. LSP references and
+  rename (`lsp.rs` 1262/1321/1360) and composer attribution read the same
+  index; `navigation.rs` uses `registry.called_function_name`, which is
+  right. This was already the case before the fix window; `d82888a8`
+  moved the index and kept it. Done: the index records the function the
+  call reaches (`called_function_name`'s fallback rule).
+- [ ] **F8. An attribute class used only as an attribute is `class.unused`**
+  (`addc7c39` kept this). The use-site walker records extends, implements,
+  trait use, catch, type-hint, call, `new` and fetch names, but not
+  attribute names. `#[Marker]` on a class leaves `Marker` unreferenced,
+  and LSP references miss attribute sites. Done: attribute names are
+  indexed as class references.
+- [ ] **F9. A pipe into an impure callable is "does not do anything."**
+  `$x |> 'var_dump';`, `$x |> 'printf';` and `$x |> fn($v) =>
+  print($v);` as statements report `expr.resultUnused`. A pipe calls its
+  right side. This was already the case before the fix window; the
+  window's two pipe commits (`1cb1e25d`, `b3412c22`) didn't touch it.
+  Done: a pipe statement is a no-op only when its callee is known pure.
+- [ ] **F10. A bare `yield` followed by a binary-operator keyword is a
+  parse error** (`ad2a5635` is incomplete). `(yield and $b)`,
+  `or`/`xor`, `(yield & $b)`, `(yield |> $b)` and `(yield instanceof
+  Foo)` all pass `php -l` but skip the file. The tokens that end a bare
+  `yield` are a hand-written list. Done: a bare `yield` ends at any token
+  that can't start an expression.
+- [ ] **F11. `NAN === NAN` is reported always true.** PHP gives `false`
+  (and `NAN == NAN` is false, which is reported right). The NaN literal
+  compares equal to itself, as `scalars_disjoint`'s "NAN is itself" says.
+  This was already the case before the fix window; `89da4c25` and
+  `d89ea9e5` kept it. Done: a NaN literal is never identical to anything.
+- [ ] **F12. An unresolvable property type is reported up to three times**
+  (`22d4ff21`, F63's property half). `/** @var non-empty-foo */` on a
+  property gives `class.notFound`, `property.unresolvableType`, and - new
+  in the window - `assign.propertyType` "expects non-empty-foo, 2 given".
+  `@var parent` gives the unresolvable report plus the assignment one.
+  The Stage B ledger's F63 said the same goes for properties, and its
+  done note omits them. Done: an unresolvable property type is ignored
+  after its one report, as a parameter's is.
+
+### Wrong types and missed reports (probed)
+
+- [ ] **F13. An array literal's positional key after an unknown key**
+  (`8febbd1e`). Once a key's value isn't known, later int keys aren't
+  observed, and a positional item still takes `next_index`:
+  - `[$ab => 1, 5 => 2, 'y']`, with `$ab` of type `'a'|'b'`, gives keys
+    `'a'|'b'|5|0`, where PHP gives 6;
+  - after `[$r => 1, 'y']`, with `$r` an `int<10, 20>`, the positional key
+    is 0, where PHP gives 11..21.
+
+  Done: the next index is tracked as a range; an unknown int key makes it
+  unknown (`int`), not 0.
+- [ ] **F14. `iterable<K, V>`'s array member drops `K`** (`321d388c`).
+  The `"iterable"` arm in `parse.rs` builds
+  `array(unknown_array_key, V)`, though it parsed `K`. For
+  `iterable<string, int>`, the `foreach` key is `int|string` and
+  `is_array($it)` gives `array<string>`. The commit's fixture asserts
+  `int|string`. Done: `array<K, V>`.
+- [ ] **F15. A negated `instanceof` keeps a generic member.**
+  - For `Iterator<int, string>|IteratorAggregate<int, string>`,
+    `!$x instanceof Iterator` keeps the whole union, because
+    `is_super_type_of(Iterator, Iterator<int, string>)` isn't a yes in
+    `without`'s structural relation.
+  - In the positive branch, the aggregate member becomes
+    `IteratorAggregate<int, string>&Iterator`, which PHP forbids.
+  - `Traversable<int, string>` narrowed to `Iterator` is
+    `Traversable<int, string>&Iterator`, not `Iterator<int, string>`.
+
+  Done: exclusion matches a generic member by class through the
+  hierarchy, and the two exclusive interfaces don't intersect.
+- [ ] **F16. Division by zero misses the divisors PHP converts to zero**
+  (`b1dddb6c`). `$i / false`, `/ null`, `/ '0'`, `% 0.5`, `% false` and
+  `% '0'` all throw `DivisionByZeroError` (checked with `php -r`), but
+  `is_zero` compares only with int `0` and float `0.0`. Done: a divisor
+  whose every value converts to zero is reported - to a number for `/`,
+  to an int for `%`.
+- [ ] **F17. `new` with a non-name class expression isn't checked.**
+  `check_expr`'s `New` arm (`expr.rs:2218`) runs `infer_expr` on the whole
+  `new` and handles a `Name` class only. `new $undef()`,
+  `new $undef->cls()` and `new $undef['k']()` report no undefined
+  variable. This was already the case before the fix window; `3f04ac3f`
+  widened the grammar there without checking it. Done: the class
+  expression goes through `check_expr`.
+- [ ] **F18. A flat binary chain is still superlinear.** P2's iterative
+  chain covers `.` and `+` over variables; left-associative chains
+  elsewhere recurse and re-infer. Timings with the release binary, one
+  file, startup about 1.4 s:
+  - `'a' . 'a' . …`: 1,000 terms 1.6 s, 4,000 terms 9.8 s, 8,000 terms
+    51.8 s; 20,000 terms was still running after 192 s;
+  - `$b && $b && …`: 1,000 terms 1.8 s, 2,000 terms 5.1 s, 4,000 terms
+    15.8 s;
+  - an `||` of 10,000 `instanceof` checks: 705 s;
+  - 1,000 nested `match`: 71 s.
+
+  `check_if`/`walk_if_chain` recompute `rest.iter().all(...)` at each
+  `elseif` (`288f4fda`), so an `elseif` chain is O(n²) too. `2750baf2`'s
+  "nesting is linear" holds for nested calls. Done: each chain shape is
+  linear, measured at 20,000 terms.
+- [ ] **F19. Smaller type gaps met while probing:**
+  - `89da4c25`: loop widening generalizes a growing literal to its base
+    type and drops non-empty (`'a'` then `.= 'b'` is `string`, not
+    `non-empty-string`).
+  - `40e086a6`: an unsealed shape with a required string key intersected
+    with `list` isn't `never`.
+  - `bd7d7a89`: a native `\int` hint is read as a class `int` and reports
+    `class.notFound` plus "expects int, 1 given" (PHP refuses to compile
+    it).
+  - `$i / 0` infers `int|float`, not `never`.
+  - Already the case before the fix window: a PHPDoc `1e25` is a parse
+    error, though phpdoc-parser's float lexeme accepts it; `array_pop($b)`
+    leaves `$b` a bare `array`.
+
+  Done: each is fixed or ledgered where it belongs.
+
+### Design
+
+- [ ] **F20. Nothing enforces the stack guard** (`041fcc46`). It is a
+  convention on about 200 hand-picked recursive functions, with no lint or
+  test catching a new recursive walk without one. The types crate depends
+  on `syntax` for `stack::guard` alone. Done: a test drives every
+  `Visitor`/type traversal at depth, or a clippy-style check lists the
+  recursive functions, and the guard lives in a crate both can use without
+  the parser.
+- [ ] **F21. The error type has no central rule** (`7ec336de`). Each
+  "is this unknown" check has to learn `is_error()` by hand;
+  `7ec336de` adds one more. Done: `is_error` folds into the one
+  unknown-type predicate the checks already share, so a new check can't
+  miss it.
+- [ ] **F22. Smaller design points:**
+  - `b895fa8d`: declarations inside a top-level `try` or loop body become
+    conditional, though a top-level `try` runs unconditionally.
+  - `1c301f1b`: `walk_expr_in_scope` skips a closure's `use (...)` list,
+    which PHP reads in the enclosing scope.
+  - `f81c5e70`: equal unions in different orders display differently, so
+    a `Type`-keyed cache can make a message's member order depend on
+    evaluation order.
+  - `b3412c22`: `with_own_templates` matches a template's scope by the
+    bare method name, so a class template scoped to a same-named class is
+    taken as the method's own.
+  - `ab8d480d`: `allow_except_param_flags` (disallow when a flag is set)
+    requires every value to match, so a flag that may be set is let
+    through.
+  - `e3b91513`: `ImpurePoints` looks up `__construct` by exact case, and
+    counts a class without a constructor as an unknown instantiation.
+  - `1cb1e25d`: a union of callable names (`$b ? 'sort' : 'count'`)
+    isn't resolved for the by-reference check.
+  - `daa88e7c`: case folding is certain regardless of the configured PHP
+    version, but final sigma differs before 8.3.
+
+  Done: each is decided and fixed or ledgered.
+- [ ] **F23. Fixtures that lost what they tested.**
+  - `15b5b494`: the arithmetic-operand fixture's string cases now see
+    `int|float|string` (after `$s++`), so it no longer tests a string
+    operand for post-decrement or `**=`. The `**=` report vanished for
+    that reason.
+  - `43758de2`: the default-value message shows the bound-resolved
+    `array<(int|string), int>` rather than the declared `array<T>`.
+
+  Done: the fixtures test what their names say.
+
+### Comments
+
+- [ ] **F24. Comments the fixes left wrong:**
+  - `parser/tokens.rs:114-119`: `take_token`'s soundness note cites
+    "`control_flow.rs`'s `elseif`-rewrite backtrack" as the one index
+    other than `self.pos`. No backtrack exists; the parser reads only at
+    `pos`/`pos + k`.
+  - `parser.rs:26-27`: "every existing `self.tokens[...]` access
+    throughout this file (there are many)" - there is one
+    (`tokens.rs:121`).
+  - `408caaf4` left 29 roadmap sub-phase codes (`168a`-`168k`) as the only
+    name for a component. They are in `doctrine/dql.rs`,
+    `doctrine/query_builder.rs:39-62`, `doctrine/result_shape.rs`,
+    `result_shape/tests.rs:123`, `member_resolution.rs:715`,
+    `sql_reflection/resolve.rs:332`, and
+    `sql_reflection/query_builder.rs:358` - that one in a line the commit
+    itself edited.
+  - `union.rs:663-667` (`637f1b67`): `shape_as_general_array`'s doc is
+    glued above `general_array_parts`', so one function has two docs and
+    the other none.
+  - `15b5b494`: "expects resource, resource given" - a class named
+    `resource` and the resource type print alike.
+
+  Done: each says what the code does.
+
 ## The Stage B review's done items
 
 Each item `STAGE_B_REVIEW.md` marks done, checked against the commits it
@@ -38,105 +302,105 @@ Every commit's full diff (`crates`, `xtask`, `gates`), read in order,
 whitespace changes aside. A commit is ticked once its whole diff has been
 read and its findings added above.
 
-- [ ] `041fcc46` fix: no input's depth can crash the process
-- [ ] `288f4fda` refactor: an if statement holds its elseif chain flat...
-- [ ] `e5db6811` fix: integer overflow no longer crashes checking
-- [ ] `d816c5f7` fix: an object compared with an enum case its enum...
-- [ ] `327da348` fix: a non-final class is no longer treated as final
-- [ ] `0fbd42f2` fix: a shape's key type is its literal keys, not string
-- [ ] `b274f947` fix: template inference reads every position and joins its...
-- [ ] `97472c63` fix: `value-of<T>` over a template is kept until a call binds...
-- [ ] `5c94a727` docs: the crate-split plan's C7 resolver takes the PHPDoc...
-- [ ] `04e500b3` fix: below level 7 a union argument is accepted when some...
-- [ ] `3f04ac3f` fix: new takes a variable with its property, offset and...
-- [ ] `1c301f1b` fix: an anonymous class's constructor arguments belong to...
-- [ ] `a62b2c77` fix: simple string interpolation reads PHP 8's nullsafe...
-- [ ] `516fc901` fix: native-type suggestions are declarations PHP compiles
-- [ ] `b09b0cea` fix: exit and die are the functions PHP 8.4 makes them
-- [ ] `43349c1a` fix: isset($x) and empty($x) no longer declare $x for the...
-- [ ] `6e274bf3` fix: unset($a[k]) removes the offset from the array's type
-- [ ] `8e4ef41e` fix: private methods are used whatever case the call spells...
-- [ ] `8a5ece52` fix: the banned-code and composer-fact walks see all code
-- [ ] `ff36a896` fix: a remainder's range follows PHP's rule
-- [ ] `48b1f80f` fix: &, | and ^ over two strings are byte-wise strings ('a'...
-- [ ] `b5ffd642` fix: ++ and -- follow PHP on strings and null
-- [ ] `f7def3af` style: the numeric-string test writes 2^63 without excess...
-- [ ] `8febbd1e` fix: array keys resolve as PHP stores them
-- [ ] `d41a83bf` fix: an unknown class anywhere in a type is reported
-- [ ] `15b5b494` fix: accepts rejects what PHP would
-- [ ] `88effc4f` fix: a conditional type over a class resolves against the...
-- [ ] `2b1ce22b` fix: the missing-typehint walks reach every nested type
-- [ ] `dedc1ad8` fix: an int range has one constructor, and it normalizes
-- [ ] `05fb20f6` fix: numeric strings are recognized as PHP's is_numeric() does
-- [ ] `16dd8365` fix: an interpolated "$a[01]" reads the string key '01'
-- [ ] `139709f2` fix: the key appended after a negative key follows the PHP...
-- [ ] `b895fa8d` fix: a declaration anywhere in a file is registered
-- [ ] `89da4c25` fix: a float literal is its value
-- [ ] `48f02f39` fix: parent without a parent class is reported once
-- [ ] `22d4ff21` fix: an unresolvable PHPDoc type is ignored
-- [ ] `73c5cd11` docs: the resolver list of C7 takes the caller side of F63...
-- [ ] `e06f470c` fix: a string key is its bytes and a string literal...
-- [ ] `daa88e7c` fix: mb_ case functions fold by Unicode where the answer is...
-- [ ] `1c0a6670` fix: a string's quote escapes follow its delimiter
-- [ ] `f4128dec` fix: a leading-zero literal with an 8 or 9 is a parse error
-- [ ] `b224eb02` fix: isset() and empty() narrow both branches
-- [ ] `d89ea9e5` fix: disjointness proves what the types rule out
-- [ ] `ac00409c` fix: late types and traversal see every part of a type
-- [ ] `30f9652c` fix: an accessory-refined string shows every refinement it has
-- [ ] `aa193395` fix: the type model's small gaps close
-- [ ] `52740c36` style: a format-string test passes its format without a...
-- [ ] `e2c11010` refactor: one test says what a constructor is
-- [ ] `57b7f6e7` refactor: parentheses and @ are peeled in one place
-- [ ] `474920e5` fix: what PHP refuses to parse is a parse error
-- [ ] `ad2a5635` fix: the parser refuses what PHP refuses
-- [ ] `df5e82f3` test: (real) on PHP 8.5 is reported removed, not deprecated
-- [ ] `40e086a6` fix: a list intersected with a shape keeps to list keys
-- [ ] `fda237d8` fix: a closure rebinding reaches private members however...
-- [ ] `680bd8ef` fix: an arrow-form hook body is its own function scope in...
-- [ ] `ab9054f8` refactor: the global-variable walk takes statement slices...
-- [ ] `fcdd7f0a` refactor: only nodes something reads carry a NodeId
-- [ ] `11b428f4` fix: an expression reported invalid is the error type, so...
-- [ ] `bd7d7a89` refactor: a native type keyword is its own type-hint node...
-- [ ] `e5301ef6` refactor: a destructuring target is its own pattern node
-- [ ] `a70a5b42` refactor: names written in code are read from what name...
-- [ ] `d82888a8` refactor: one iterator over a file's declarations
-- [ ] `a0d1db44` perf: an interner holds its entries weakly, so text nothing...
-- [ ] `5f84933b` refactor: class, function, member and variable names are...
-- [ ] `bfde069e` fix: a static variable's assignment site is the variable...
-- [ ] `1cdfe80d` refactor: an enum is a class-like like any other
-- [ ] `f25c642c` refactor: signature help walks with a Visitor, overriding...
-- [ ] `addc7c39` refactor: the class and function use-site index walks with...
-- [ ] `ae18f21d` refactor: navigation for the LSP walks with a Visitor...
-- [ ] `6f08ee63` refactor: the unused-member and unused-variable scans walk...
-- [ ] `31cd6f2f` refactor: include-path guards are found by a Visitor over...
-- [ ] `07675ccc` refactor: function-like declarations are found by one...
-- [ ] `6e52272a` refactor: syntax::visit gains for_each_child_expr and...
-- [ ] `2c5a3b5c` refactor: the PHPStan API rules walk with a Visitor that...
-- [ ] `e3b91513` refactor: purity is classified and its impure points...
-- [ ] `ce055dde` docs: the navigation and signature-help module docs...
-- [ ] `f50e2bd0` refactor: the checker asks kind questions through the...
-- [ ] `9b331b26` refactor: a conditional type's subject is a...
-- [ ] `7ec336de` fix: a dynamic class-constant fetch whose name is already...
-- [ ] `321d388c` refactor: a type string parses with its class names...
-- [ ] `f81c5e70` refactor: a union's or an intersection's members compare...
-- [ ] `bc7bd7c1` refactor: the types crate's operator arithmetic and range...
-- [ ] `4499b58d` fix: a rule's level judges a template bounded by a union by...
-- [ ] `465ad3ec` fix: a {$expr} or ${expr} in a string takes its text from...
-- [ ] `fbf3811f` fix: excluding a type drops a lone value that is a subtype...
-- [ ] `1cb1e25d` fix: the pipe operator's by-reference check resolves its...
-- [ ] `b10c01cc` docs: the comments the type-language rewrite left broken or...
-- [ ] `b1dddb6c` fix: division by zero is judged on the divisor's type, so...
-- [ ] `43758de2` fix: a parameter's default is checked against its type with...
-- [ ] `ab8d480d` fix: a disallowed-call parameter-flags condition reads the...
-- [ ] `d82fe912` docs: the types crate's comments from the type-language...
-- [ ] `3e80be89` fix: the numeric pseudo-type is int|float|numeric-string...
-- [ ] `45ea7652` docs: comments cite functions and types that exist, drop...
-- [ ] `408caaf4` docs: comments name the components they mean instead of...
-- [ ] `7d08a968` fix: a braced {$...} in a string must hold a variable...
-- [ ] `b3412c22` fix: a first-class callable's type is a Closure with the...
-- [ ] `f18bc022` fix: narrowing keeps the members that are subtypes of the...
-- [ ] `637f1b67` fix: a write at a dynamic key keeps the array's existing...
-- [ ] `9a2c53e7` fix: a PHPDoc float literal keeps its float spelling when...
+- [x] `041fcc46` fix: no input's depth can crash the process
+- [x] `288f4fda` refactor: an if statement holds its elseif chain flat...
+- [x] `e5db6811` fix: integer overflow no longer crashes checking
+- [x] `d816c5f7` fix: an object compared with an enum case its enum...
+- [x] `327da348` fix: a non-final class is no longer treated as final
+- [x] `0fbd42f2` fix: a shape's key type is its literal keys, not string
+- [x] `b274f947` fix: template inference reads every position and joins its...
+- [x] `97472c63` fix: `value-of<T>` over a template is kept until a call binds...
+- [x] `5c94a727` docs: the crate-split plan's C7 resolver takes the PHPDoc...
+- [x] `04e500b3` fix: below level 7 a union argument is accepted when some...
+- [x] `3f04ac3f` fix: new takes a variable with its property, offset and...
+- [x] `1c301f1b` fix: an anonymous class's constructor arguments belong to...
+- [x] `a62b2c77` fix: simple string interpolation reads PHP 8's nullsafe...
+- [x] `516fc901` fix: native-type suggestions are declarations PHP compiles
+- [x] `b09b0cea` fix: exit and die are the functions PHP 8.4 makes them
+- [x] `43349c1a` fix: isset($x) and empty($x) no longer declare $x for the...
+- [x] `6e274bf3` fix: unset($a[k]) removes the offset from the array's type
+- [x] `8e4ef41e` fix: private methods are used whatever case the call spells...
+- [x] `8a5ece52` fix: the banned-code and composer-fact walks see all code
+- [x] `ff36a896` fix: a remainder's range follows PHP's rule
+- [x] `48b1f80f` fix: &, | and ^ over two strings are byte-wise strings ('a'...
+- [x] `b5ffd642` fix: ++ and -- follow PHP on strings and null
+- [x] `f7def3af` style: the numeric-string test writes 2^63 without excess...
+- [x] `8febbd1e` fix: array keys resolve as PHP stores them
+- [x] `d41a83bf` fix: an unknown class anywhere in a type is reported
+- [x] `15b5b494` fix: accepts rejects what PHP would
+- [x] `88effc4f` fix: a conditional type over a class resolves against the...
+- [x] `2b1ce22b` fix: the missing-typehint walks reach every nested type
+- [x] `dedc1ad8` fix: an int range has one constructor, and it normalizes
+- [x] `05fb20f6` fix: numeric strings are recognized as PHP's is_numeric() does
+- [x] `16dd8365` fix: an interpolated "$a[01]" reads the string key '01'
+- [x] `139709f2` fix: the key appended after a negative key follows the PHP...
+- [x] `b895fa8d` fix: a declaration anywhere in a file is registered
+- [x] `89da4c25` fix: a float literal is its value
+- [x] `48f02f39` fix: parent without a parent class is reported once
+- [x] `22d4ff21` fix: an unresolvable PHPDoc type is ignored
+- [x] `73c5cd11` docs: the resolver list of C7 takes the caller side of F63...
+- [x] `e06f470c` fix: a string key is its bytes and a string literal...
+- [x] `daa88e7c` fix: mb_ case functions fold by Unicode where the answer is...
+- [x] `1c0a6670` fix: a string's quote escapes follow its delimiter
+- [x] `f4128dec` fix: a leading-zero literal with an 8 or 9 is a parse error
+- [x] `b224eb02` fix: isset() and empty() narrow both branches
+- [x] `d89ea9e5` fix: disjointness proves what the types rule out
+- [x] `ac00409c` fix: late types and traversal see every part of a type
+- [x] `30f9652c` fix: an accessory-refined string shows every refinement it has
+- [x] `aa193395` fix: the type model's small gaps close
+- [x] `52740c36` style: a format-string test passes its format without a...
+- [x] `e2c11010` refactor: one test says what a constructor is
+- [x] `57b7f6e7` refactor: parentheses and @ are peeled in one place
+- [x] `474920e5` fix: what PHP refuses to parse is a parse error
+- [x] `ad2a5635` fix: the parser refuses what PHP refuses
+- [x] `df5e82f3` test: (real) on PHP 8.5 is reported removed, not deprecated
+- [x] `40e086a6` fix: a list intersected with a shape keeps to list keys
+- [x] `fda237d8` fix: a closure rebinding reaches private members however...
+- [x] `680bd8ef` fix: an arrow-form hook body is its own function scope in...
+- [x] `ab9054f8` refactor: the global-variable walk takes statement slices...
+- [x] `fcdd7f0a` refactor: only nodes something reads carry a NodeId
+- [x] `11b428f4` fix: an expression reported invalid is the error type, so...
+- [x] `bd7d7a89` refactor: a native type keyword is its own type-hint node...
+- [x] `e5301ef6` refactor: a destructuring target is its own pattern node
+- [x] `a70a5b42` refactor: names written in code are read from what name...
+- [x] `d82888a8` refactor: one iterator over a file's declarations
+- [x] `a0d1db44` perf: an interner holds its entries weakly, so text nothing...
+- [x] `5f84933b` refactor: class, function, member and variable names are...
+- [x] `bfde069e` fix: a static variable's assignment site is the variable...
+- [x] `1cdfe80d` refactor: an enum is a class-like like any other
+- [x] `f25c642c` refactor: signature help walks with a Visitor, overriding...
+- [x] `addc7c39` refactor: the class and function use-site index walks with...
+- [x] `ae18f21d` refactor: navigation for the LSP walks with a Visitor...
+- [x] `6f08ee63` refactor: the unused-member and unused-variable scans walk...
+- [x] `31cd6f2f` refactor: include-path guards are found by a Visitor over...
+- [x] `07675ccc` refactor: function-like declarations are found by one...
+- [x] `6e52272a` refactor: syntax::visit gains for_each_child_expr and...
+- [x] `2c5a3b5c` refactor: the PHPStan API rules walk with a Visitor that...
+- [x] `e3b91513` refactor: purity is classified and its impure points...
+- [x] `ce055dde` docs: the navigation and signature-help module docs...
+- [x] `f50e2bd0` refactor: the checker asks kind questions through the...
+- [x] `9b331b26` refactor: a conditional type's subject is a...
+- [x] `7ec336de` fix: a dynamic class-constant fetch whose name is already...
+- [x] `321d388c` refactor: a type string parses with its class names...
+- [x] `f81c5e70` refactor: a union's or an intersection's members compare...
+- [x] `bc7bd7c1` refactor: the types crate's operator arithmetic and range...
+- [x] `4499b58d` fix: a rule's level judges a template bounded by a union by...
+- [x] `465ad3ec` fix: a {$expr} or ${expr} in a string takes its text from...
+- [x] `fbf3811f` fix: excluding a type drops a lone value that is a subtype...
+- [x] `1cb1e25d` fix: the pipe operator's by-reference check resolves its...
+- [x] `b10c01cc` docs: the comments the type-language rewrite left broken or...
+- [x] `b1dddb6c` fix: division by zero is judged on the divisor's type, so...
+- [x] `43758de2` fix: a parameter's default is checked against its type with...
+- [x] `ab8d480d` fix: a disallowed-call parameter-flags condition reads the...
+- [x] `d82fe912` docs: the types crate's comments from the type-language...
+- [x] `3e80be89` fix: the numeric pseudo-type is int|float|numeric-string...
+- [x] `45ea7652` docs: comments cite functions and types that exist, drop...
+- [x] `408caaf4` docs: comments name the components they mean instead of...
+- [x] `7d08a968` fix: a braced {$...} in a string must hold a variable...
+- [x] `b3412c22` fix: a first-class callable's type is a Closure with the...
+- [x] `f18bc022` fix: narrowing keeps the members that are subtypes of the...
+- [x] `637f1b67` fix: a write at a dynamic key keeps the array's existing...
+- [x] `9a2c53e7` fix: a PHPDoc float literal keeps its float spelling when...
 - [ ] `a5c24e13` fix: truthiness removes every falsy value of a kind
 - [ ] `32929ce4` fix: an array intersection carrying hasOffset or...
 - [ ] `1f4b45bf` fix: on PHP 8 a non-numeric string isn't castable to a...
