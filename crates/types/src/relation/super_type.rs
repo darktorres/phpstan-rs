@@ -36,6 +36,11 @@ impl Relation<'_> {
     /// unprovable is `Maybe`, including any comparison with a class the
     /// registry doesn't know.
     pub fn is_super_type_of(&self, sup: &Type, sub: &Type) -> TrinaryLogic {
+        // A literal, `true`, `false`, `null` or an enum case is one value:
+        // one holds another only when they are the same.
+        if is_scalar_value(sup) && is_scalar_value(sub) {
+            return TrinaryLogic::from_bool(sup == sub);
+        }
         syntax::stack::guard(|| {
             match (sup.repr(), sub.repr()) {
                 (Repr::Error, _) => TrinaryLogic::Yes,
@@ -108,6 +113,22 @@ impl Relation<'_> {
                         .into_iter()
                         .map(|branch| self.is_super_type_of(sup, branch)),
                 ),
+                // A single value is in a union that lists it; otherwise
+                // only a member holding more than one value can hold it.
+                (Repr::Union(members) | Repr::BenevolentUnion(members), _)
+                    if is_scalar_value(sub) =>
+                {
+                    if members.iter().any(|m| m == sub) {
+                        TrinaryLogic::Yes
+                    } else {
+                        TrinaryLogic::max_min(
+                            members
+                                .iter()
+                                .filter(|m| !is_scalar_value(m))
+                                .map(|m| self.is_super_type_of(m, sub)),
+                        )
+                    }
+                }
                 (Repr::Union(members) | Repr::BenevolentUnion(members), _) => {
                     let by_member = TrinaryLogic::max_min(
                         members.iter().map(|m| self.is_super_type_of(m, sub)),
@@ -512,5 +533,20 @@ fn scalar_family(ty: &Type) -> Option<ScalarFamily> {
         | Repr::ObjectShape(_) => Some(ScalarFamily::Object),
         Repr::Resource { .. } => Some(ScalarFamily::Resource),
         _ => None,
+    }
+}
+
+/// Whether `ty` is one scalar value or enum case: a literal (`NAN`
+/// excepted, being no value it equals), `true`, `false`, `null`, a case.
+fn is_scalar_value(ty: &Type) -> bool {
+    match ty.repr() {
+        Repr::IntLiteral(_)
+        | Repr::StringLiteral(_)
+        | Repr::True
+        | Repr::False
+        | Repr::Null
+        | Repr::EnumCase(..) => true,
+        Repr::FloatLiteral(f) => !f.is_nan(),
+        _ => false,
     }
 }

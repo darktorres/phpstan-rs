@@ -423,10 +423,20 @@ pub(crate) enum Operation {
 // stay the ones its key names.
 type MemoEntry = (Vec<Type>, Type);
 
+/// A memo key: the operation and its arguments' node addresses, the first
+/// two inline (every operation but an intersection has two).
+#[derive(PartialEq, Eq, Hash)]
+struct MemoKey {
+    operation: Operation,
+    first: usize,
+    second: usize,
+    rest: Box<[usize]>,
+}
+
 const MEMO_CAPACITY: usize = 1 << 16;
 
 thread_local! {
-    static MEMO: std::cell::RefCell<FxHashMap<(Operation, Vec<usize>), MemoEntry>> =
+    static MEMO: std::cell::RefCell<FxHashMap<MemoKey, MemoEntry>> =
         std::cell::RefCell::new(FxHashMap::default());
 }
 
@@ -439,11 +449,17 @@ pub(crate) fn memoized(
     arguments: &[&Type],
     compute: impl FnOnce() -> Type,
 ) -> Type {
-    let key: Vec<usize> = arguments
-        .iter()
-        .map(|ty| Arc::as_ptr(&ty.0) as usize)
-        .collect();
-    let key = (operation, key);
+    let address = |i: usize| arguments.get(i).map_or(0, |ty| Arc::as_ptr(&ty.0) as usize);
+    let key = MemoKey {
+        operation,
+        first: address(0),
+        second: address(1),
+        rest: arguments
+            .iter()
+            .skip(2)
+            .map(|ty| Arc::as_ptr(&ty.0) as usize)
+            .collect(),
+    };
     if let Some(result) = MEMO.with(|memo| memo.borrow().get(&key).map(|(_, r)| r.clone())) {
         return result;
     }
