@@ -714,14 +714,15 @@ through `check-project`.
     `references_template` don't see types there.
 
   (`0e309c03`) Done in `ac00409c`.
-- [ ] **F51. Displayed types lose information.**
+- [x] **F51. Displayed types lose information.**
   - [x] A float literal prints with Rust's `{n}`: `1.0|2.5` shows `1|2.5`, the
     same as an int literal. PHPStan prints `1.0`. (Done in `89da4c25`.)
-  - `describe_accessory_intersection`'s else-if chains drop parts:
+  - [x] `describe_accessory_intersection`'s else-if chains drop parts:
     `literal-string&numeric-string` shows `literal-string`, and
     decimal-int hides literal. The `[shape, non-empty]` match is
-    positional, though its doc says presence-based.
-  - PHPDoc `1e20` doesn't parse (the parameter reads as untyped).
+    positional, though its doc says presence-based. (Done in `30f9652c`.)
+  - [>] PHPDoc `1e20` doesn't parse (the parameter reads as untyped). (C7's
+    float grammar.)
 
   (`91bc9e49` area; display.rs final state)
 - [ ] **F52. Minor type-model gaps.**

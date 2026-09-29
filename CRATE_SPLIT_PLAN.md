@@ -2709,7 +2709,8 @@ adapter (`registry::type_node`) and the checker's `resolve_type_node`:
 - the resolver has, each with its `STAGE_B_REVIEW.md` probe as a resolver
   test, what `parse_type_string` gets wrong today:
   - a float literal needs PHPDoc's float grammar, so a class named `Nan`,
-    `Infinity` or `inf` is a class (F40);
+    `Infinity` or `inf` is a class (F40), and `1e20` is a float, where it
+    doesn't parse today and leaves the parameter untyped (F51);
   - `value-of<X>`/`key-of<X>` read any array type (`list<int>`,
     `non-empty-array<string, int>`), a bare name kept late as a possible
     template or enum (F40);
