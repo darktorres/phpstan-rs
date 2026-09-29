@@ -2824,28 +2824,29 @@ impl<'a> Checker<'a> {
                         "property.nonObject",
                     );
                 }
-                if non_object_level == Some(0) {
-                } else if let Some(level) = self.strict_mixed_receiver_level(&nonobject_ty) {
-                    self.report(
-                        format!("Cannot access property ${prop} on mixed."),
-                        e.span,
-                        level,
-                        "property.nonObject",
-                    );
-                } else if !property_exists_guarded
-                    && self.member_confirmed_missing(&base_ty, |c| {
-                        c == "stdClass"
-                            || self.registry.lookup_property(c, prop).is_some()
-                            || self.registry.lookup_method(c, "__get").is_some()
-                            || (is_pest_this && self.pest_hook_properties.contains(&*prop.name))
-                    })
-                {
-                    self.report(
-                        format!("access to undefined property {base_ty}::${prop}"),
-                        e.span,
-                        2,
-                        "property.notFound",
-                    );
+                if non_object_level != Some(0) {
+                    if let Some(level) = self.strict_mixed_receiver_level(&nonobject_ty) {
+                        self.report(
+                            format!("Cannot access property ${prop} on mixed."),
+                            e.span,
+                            level,
+                            "property.nonObject",
+                        );
+                    } else if !property_exists_guarded
+                        && self.member_confirmed_missing(&base_ty, |c| {
+                            c == "stdClass"
+                                || self.registry.lookup_property(c, prop).is_some()
+                                || self.registry.lookup_method(c, "__get").is_some()
+                                || (is_pest_this && self.pest_hook_properties.contains(&*prop.name))
+                        })
+                    {
+                        self.report(
+                            format!("access to undefined property {base_ty}::${prop}"),
+                            e.span,
+                            2,
+                            "property.notFound",
+                        );
+                    }
                 }
                 // Visibility - only meaningful once the property is
                 // confirmed to exist at all. Deliberately not the same

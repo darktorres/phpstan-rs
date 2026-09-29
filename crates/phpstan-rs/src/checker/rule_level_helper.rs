@@ -29,10 +29,13 @@ impl RuleLevelHelper {
     /// holds for every member but `null`, level 7 when only for some of
     /// them (`checkUnionTypes`; a benevolent union's members only with
     /// `checkBenevolentUnionTypes`), level 8 when only for `null`
-    /// (`checkNullables`). `None` when it holds for none.
+    /// (`checkNullables`). `None` when it holds for none. A template
+    /// bounded by a union is judged by its bound's members.
     pub fn failing_level(&self, ty: &Type, base: u8, fails: impl Fn(&Type) -> bool) -> Option<u8> {
+        let mut members = Vec::new();
+        level_members(ty, &mut members);
         let (nulls, others): (Vec<&Type>, Vec<&Type>) =
-            ty.union_members().iter().partition(|m| m.is_null().yes());
+            members.into_iter().partition(|m| m.is_null().yes());
         if others.is_empty() {
             return fails(ty).then_some(base);
         }
@@ -44,6 +47,17 @@ impl RuleLevelHelper {
             return Some(base.max(7));
         }
         nulls.iter().any(|m| fails(m)).then_some(base.max(8))
+    }
+}
+
+/// `ty`'s union members, a template bounded by a union standing for its
+/// bound's members.
+fn level_members<'t>(ty: &'t Type, out: &mut Vec<&'t Type>) {
+    for member in ty.union_members() {
+        match member.template_bound() {
+            Some(bound) if bound.union_members().len() > 1 => level_members(bound, out),
+            _ => out.push(member),
+        }
     }
 }
 

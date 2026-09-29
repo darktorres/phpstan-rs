@@ -1,0 +1,2 @@
+10:10-10:15 property.nonObject L7 | access to property $x on a non-object type T
+11:10-11:17 method.nonObject L7 | call to method m() on a non-object type T
