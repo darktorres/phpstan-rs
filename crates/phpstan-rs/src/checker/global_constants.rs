@@ -251,7 +251,7 @@ impl<'a> Checker<'a> {
             );
             return;
         }
-        let is_unknown = |t: &Type| t.is_mixed() || (t.is_never() || t.is_template());
+        let is_unknown = |t: &Type| t.is_mixed() || t.is_never() || t.is_template() || t.is_error();
         if name_ty.union_members().iter().any(is_unknown) {
             return;
         }
