@@ -22,56 +22,14 @@ Legend: `[x]` done (commit given), `[>]` moved to the crate-split plan
   Run `cargo test -q -p phpstan-rs --test fixtures` (about 3,700 fixtures)
   and judge every failure as a correct change to bless or a regression to
   fix.
-  - Known expected change:
-    `checker/phpdoc_native_compat/a_generic_callables_templates_are_validated`
-    loses its `generics.notSupportedBound` line for a `callable` bound (see
-    R1-6).
-  - Expected shifts: nullable receivers reported at level 8 and partial
-    unions at level 7 (R1-1), list keys shown as `int<0, max>` (R1-L),
-    printf messages naming the whole argument type (R1-1).
-  - Seen while running fixture groups for later fixes, to judge in V1:
-    - `receiver_type_checks/foreach_non_iterable/*`: the message is now
-      "only arrays and objects are supported";
-    - `offset_non_accessible/indexing_a_plain_class_not_implementing_arrayaccess_is_flagged`
-      loses its finding: a non-final class may have an `ArrayAccess`
-      subclass, so it's Maybe (a `final` one still reports);
-    - `key_value_of/value_of_on_an_unresolvable_template_falls_back_to_the_native_return_type`:
-      `value-of<T>` with `T of \UnitEnum` settles to `mixed` and gains
-      `return.phpDocType` since `97472c63`; decide what a non-backed
-      enum bound gives;
-    - `invalid_assignment_targets/a_nullsafe_operator_nested_deeper_in_a_ref_assignments_rhs_is_still_flagged`
-      gains `property.nonObject` on `$f?->bar->baz` (`bar` is `?Foo`, a
-      real finding);
-    - `array_functions/array_key_first_reports_a_real_key_type_for_a_literal_array_shape`
-      and `array_keys_unions_int_and_string_for_a_genuinely_mixed_shape`
-      give a shape's literal keys (`'a'|'b'`, `list<0|'name'>`).
-    - `generics_and_templates/a_template_typed_property_reads_as_its_template_inside_the_class`:
-      a `?T` property reads as `T`, losing `null`;
-    - `class_string_template_binds_through_a_nullable_union_parameter` and
-      `declaration_sanity/nullsafe_returned_by_reference_is_flagged` gain
-      level-8 nullable findings (R1-1's shift).
-    - `closures_and_callables/this_is_available_inside_*` and
-      `callable_non_callable/invoking_a_nullable_closure_is_not_flagged` gain
-      `callable.nonCallable` at level 8 on `Closure|null`;
-      `invoking_a_plain_class_with_no_invoke_method_is_flagged` loses its
-      finding (a non-final class may have an invokable subclass);
-    - `stdclass_*_method_calls_*`: `method.nonObject` became
-      `method.notFound` on `stdClass`;
-    - `method_and_property_non_object/a_union_mixing_a_real_class_with_a_closed_scalar_member_is_flagged`
-      moves from level 0 to level 7, and `a_union_with_a_null_member_*`
-      gains a level-8 finding;
-    - `enums/a_case_singleton_still_supports_its_enum_s_own_methods` gains
-      `method.resultUnused` on a pure method's result.
-    - `control_flow/for_loop_that_can_run_zero_times_does_not_define_a_body_only_variable`
-      gains `postInc.type` "Cannot use ++ on never." on `$i++` of a
-      `for ($i = 0; $i < 0; $i++)` whose body never runs;
-    - `misc_and_regressions/class_names_compare_case_insensitively_in_types_catches_and_static_calls`
-      gains `method.notFound` "undefined method foo::name()" on a
-      lowercase-hinted `foo $x` (class `Foo`) and `missingType.generics`
-      naming "generic interface traversable" for a `\traversable` hint;
-    - `generics_and_templates/template_binds_from_argument_in_a_namespaced_file`
-      gains `function.resultUnused` on a pure namespaced function's
-      discarded call (the namespaced-purity fix in `e3b91513`).
+  - The known expected changes and the shifts seen while running fixture
+    groups (callable bounds, level 7/8 receiver findings, list keys,
+    foreach wording, non-final classes, stdClass calls, pure-call results)
+    are blessed or fixed: `f9be84b3` and the fixes before it (nullsafe
+    chains `a5b545ce`, case-insensitive class maps `707776e2`, `?T`
+    nullability `daecae6a`, `value-of` and erased templates `4c88bf44`,
+    `5e109cbd`, `++` on `never` `9b3b12ff`, `array_key_first`
+    `3b84c78f`). What remains is one full run after all of it.
 - [ ] **V2. Corpus run and delta approval** after V1, saved to
   `.corpus-runs/<scope>/<hash>.txt`.
 
