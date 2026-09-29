@@ -803,7 +803,7 @@ through `check-project`.
   `oop/property_overrides.rs`, `class_info.rs` (3), `doctrine_entity.rs`,
   `noop.rs`, `function_decl.rs`. One `ClassDecl::constructor()`.
   (`481b224b`) Done in `e2c11010`; lookups keyed by the exact name are F14's.
-- [ ] **F16. The enum/class merge is nominal.** 16
+- [x] **F16. The enum/class merge is nominal.** 16
   `ClassDecl(e) if e.kind == ClassKind::Enum` arms sit ahead of the class
   arm and duplicate it: the checker's top-level check list (about 80 lines,
   twice), `stmt.rs`, `phpstan_api.rs` `check_enum`, the LSP and use-site
@@ -813,7 +813,7 @@ through `check-project`.
   parser two body loops (`parse_enum_decl`/`parse_class_body`). Use one
   class-like arm that varies by kind where PHP does. An enum's `ClassDecl`
   also says `is_final: false`, but an enum is implicitly final.
-  (`8e373302`)
+  (`8e373302`) Done in `1cdfe80d`.
 - [x] **F17. Destructuring targets are two node kinds.** `[...]` on the
   left is an `ArrayLiteral` and `list(...)` a `List`, so about 15 sites
   match `ArrayLiteral(items) | List(items)`. Make an assignment or
