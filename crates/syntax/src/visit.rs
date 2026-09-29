@@ -226,7 +226,8 @@ fn walk_static_target<'ast, V: Visitor<'ast> + ?Sized>(v: &mut V, target: &'ast 
     }
 }
 
-fn walk_args<'ast, V: Visitor<'ast> + ?Sized>(v: &mut V, args: &'ast [Arg]) {
+/// Each of a call's arguments, through `visit_arg`.
+pub fn walk_args<'ast, V: Visitor<'ast> + ?Sized>(v: &mut V, args: &'ast [Arg]) {
     for arg in args {
         v.visit_arg(arg);
     }

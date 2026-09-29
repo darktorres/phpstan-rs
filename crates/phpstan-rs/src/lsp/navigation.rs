@@ -49,7 +49,10 @@ use rustc_hash::FxHashSet;
 use std::path::Path;
 use syntax::ast::*;
 use syntax::token::{Position, Span};
-use syntax::visit::{any_child_expr, any_child_stmt};
+use syntax::visit::{
+    Visitor, walk_args, walk_catch_clause, walk_class_const, walk_class_decl, walk_enum_case,
+    walk_expr, walk_function_decl, walk_method_decl, walk_property_decl, walk_stmt, walk_stmts,
+};
 
 #[derive(Debug, Clone)]
 pub(crate) enum Resolved {
@@ -171,19 +174,20 @@ pub(crate) fn collect_all(project: &Project, path: &Path) -> Vec<(Span, Resolved
 fn walk_file(project: &Project, path: &Path, anchor: Anchor) -> Option<Vec<(Span, Resolved)>> {
     let stmts = project.ast(path)?;
     let registry = project.registry();
-    let mut out = Vec::new();
     let mut w = Walker {
         registry,
         anchor,
         top_level_stmts: stmts,
         current_function: None,
         current_is_static: false,
+        current_class: None,
         next_scope_id: 0,
         base_scope_id: 0,
         scope_frames: Vec::new(),
+        out: Vec::new(),
     };
-    w.stmts(stmts, None, &mut out);
-    Some(out)
+    walk_stmts(&mut w, stmts);
+    Some(w.out)
 }
 
 /// 1-indexed, half-open (`span.end` is one past the last real character -
@@ -286,6 +290,11 @@ struct Walker<'a> {
     // Innermost-last stack of currently-open `Closure`/`ArrowFn` scopes -
     // see `resolve_var_scope` for how a name is resolved against it.
     scope_frames: Vec<ScopeFrame>,
+    // The class whose body the walk is in.
+    current_class: Option<String>,
+    // Every match so far, a node before the nodes inside it, so the last
+    // one containing a position is the innermost.
+    out: Vec<(Span, Resolved)>,
 }
 
 impl<'a> Walker<'a> {
@@ -332,9 +341,51 @@ impl<'a> Walker<'a> {
         }
     }
 
-    fn record(&self, out: &mut Vec<(Span, Resolved)>, span: Span, value: Resolved) {
+    fn record(&mut self, span: Span, value: Resolved) {
         if self.anchor.matches(span) {
-            out.push((span, value));
+            self.out.push((span, value));
+        }
+    }
+
+    fn class_ref(&self, name: &QualifiedName) -> Option<String> {
+        resolve_class_ref(name, self.current_class.as_deref(), self.registry)
+    }
+
+    /// Records `name`, a class name, at `span`.
+    fn record_class(&mut self, name: &QualifiedName, span: Span) {
+        if self.anchor.matches(span)
+            && let Some(fqn) = self.class_ref(name)
+        {
+            self.out.push((span, Resolved::Class(fqn)));
+        }
+    }
+
+    /// Records `member`'s receiver probe: the receiver's type decides
+    /// which class's member it is.
+    fn instance(&self, receiver_span: Span, member: &Ident) -> Resolved {
+        Resolved::Instance {
+            receiver_span,
+            member: member.to_string(),
+            scope: self.probe_scope(),
+            is_static: self.current_is_static,
+            class: self.current_class.clone(),
+        }
+    }
+
+    /// Records `class::member` for a literal class name, each name at its
+    /// own span; under `Anchor::All` both get an entry.
+    fn record_static_member(
+        &mut self,
+        whole: Span,
+        class: &QualifiedName,
+        class_span: Span,
+        member: &Ident,
+    ) {
+        if self.anchor.matches(whole)
+            && let Some(fqn) = self.class_ref(class)
+        {
+            self.record(class_span, Resolved::Class(fqn.clone()));
+            self.record(member.span, Resolved::Member(fqn, member.to_string()));
         }
     }
 
@@ -343,25 +394,29 @@ impl<'a> Walker<'a> {
     /// the answer) for go-to-definition when the cursor lands directly on
     /// it - `scope`/`is_static`/`class` are only for hover's own later,
     /// separate probe (see `Resolved::VariableSelf`'s own doc comment).
-    fn record_var_self(
-        &self,
-        out: &mut Vec<(Span, Resolved)>,
-        span: Span,
-        current_class: Option<&str>,
-        name: &Name,
-    ) {
-        self.record(
-            out,
+    fn record_var_self(&mut self, span: Span, name: &Name) {
+        let value = Resolved::VariableSelf {
             span,
-            Resolved::VariableSelf {
-                span,
-                scope: self.probe_scope(),
-                is_static: self.current_is_static,
-                class: current_class.map(str::to_string),
-                name: name.clone(),
-                var_scope: self.resolve_var_scope(name),
-            },
-        );
+            scope: self.probe_scope(),
+            is_static: self.current_is_static,
+            class: self.current_class.clone(),
+            name: name.clone(),
+            var_scope: self.resolve_var_scope(name),
+        };
+        self.record(span, value);
+    }
+
+    /// Records `span` as a read of the variable `name`.
+    fn record_var_read(&mut self, span: Span, name: &Name) {
+        let value = Resolved::VariableRead {
+            span,
+            scope: self.probe_scope(),
+            is_static: self.current_is_static,
+            class: self.current_class.clone(),
+            name: name.clone(),
+            var_scope: self.resolve_var_scope(name),
+        };
+        self.record(span, value);
     }
 
     /// A binding target - a `foreach` key/value - is a declaration site,
@@ -369,194 +424,186 @@ impl<'a> Walker<'a> {
     /// (`foreach ($rows as [$a, $b])`). Anything else (rare: a property/
     /// index write target as a foreach binding isn't valid PHP at all)
     /// falls back to an ordinary read-walk.
-    fn bind_var(&mut self, e: &Expr, current_class: Option<&str>, out: &mut Vec<(Span, Resolved)>) {
+    fn bind_var(&mut self, e: &Expr) {
         syntax::stack::guard(|| match &e.kind {
-            ExprKind::Variable(name) => self.record_var_self(out, e.span, current_class, name),
+            ExprKind::Variable(name) => self.record_var_self(e.span, name),
             ExprKind::Destructure(items, _) => {
                 for item in items {
                     if let Some(k) = &item.key {
-                        self.expr(k, current_class, out);
+                        self.visit_expr(k);
                     }
                     if let Some(target) = &item.target {
-                        self.bind_var(target, current_class, out);
+                        self.bind_var(target);
                     }
                 }
             }
-            _ => self.expr(e, current_class, out),
+            _ => self.visit_expr(e),
         })
+    }
+}
+
+impl<'ast> Visitor<'ast> for Walker<'_> {
+    fn visit_stmt(&mut self, stmt: &'ast Stmt) {
+        syntax::stack::guard(|| match &stmt.kind {
+            StmtKind::Foreach {
+                subject,
+                key,
+                value,
+                body,
+                ..
+            } => {
+                self.visit_expr(subject);
+                if let Some(k) = key {
+                    self.bind_var(k);
+                }
+                self.bind_var(value);
+                self.visit_stmt(body);
+            }
+            StmtKind::FunctionDecl(f) => {
+                self.record(f.name_span, Resolved::Function(f.fq_name().to_string()));
+                walk_stmt(self, stmt);
+            }
+            StmtKind::Global(vars) => {
+                for var in vars {
+                    match var {
+                        GlobalVar::Name(name) => self.record_var_self(name.span, &name.name),
+                        GlobalVar::Dynamic(e) => self.visit_expr(e),
+                    }
+                }
+            }
+            StmtKind::StaticVar(vars) => {
+                for (name, default) in vars {
+                    if let Some(e) = default {
+                        self.visit_expr(e);
+                    }
+                    self.record_var_self(name.span, &name.name);
+                }
+            }
+            _ => walk_stmt(self, stmt),
+        })
+    }
+
+    fn visit_catch_clause(&mut self, clause: &'ast CatchClause) {
+        for (name, span) in clause.types.iter().zip(&clause.types_spans) {
+            self.record_class(name, *span);
+        }
+        if let (Some(name), Some(span)) = (&clause.var, clause.var_span) {
+            self.record_var_self(span, name);
+        }
+        walk_catch_clause(self, clause);
     }
 
     /// Resolves a compound type-hint (`?Foo`, `Foo|Bar`) to whichever
     /// single class name inside it the cursor lands on, if any. Under
     /// `Anchor::All`, every class name in the hint gets its own entry.
-    fn record_type_hint(
-        &self,
-        out: &mut Vec<(Span, Resolved)>,
-        hint: &TypeHint,
-        current_class: Option<&str>,
-    ) {
+    fn visit_type_hint(&mut self, hint: &'ast TypeHint) {
         if !self.anchor.matches(hint.span) {
             return;
         }
         for (name, name_span) in hint.class_names() {
-            if self.anchor.matches(name_span)
-                && let Some(fqn) = resolve_class_ref(name, current_class, self.registry)
-            {
-                out.push((name_span, Resolved::Class(fqn)));
-            }
+            self.record_class(name, name_span);
         }
     }
 
-    fn stmts(
-        &mut self,
-        stmts: &[Stmt],
-        current_class: Option<&str>,
-        out: &mut Vec<(Span, Resolved)>,
-    ) {
-        for stmt in stmts {
-            self.stmt(stmt, current_class, out);
+    fn visit_param(&mut self, param: &'ast Param) {
+        for attr in &param.attrs {
+            self.visit_attribute(attr);
+        }
+        if let Some(hint) = &param.type_hint {
+            self.visit_type_hint(hint);
+        }
+        self.record_var_self(param.name_span, &param.name);
+        if let Some(default) = &param.default {
+            self.visit_expr(default);
+        }
+        if let Some(hooks) = &param.hooks {
+            self.visit_property_hooks(hooks);
         }
     }
 
-    fn stmt(&mut self, stmt: &Stmt, current_class: Option<&str>, out: &mut Vec<(Span, Resolved)>) {
-        syntax::stack::guard(|| {
-            match &stmt.kind {
-                StmtKind::Expression(e) | StmtKind::Throw(e) => self.expr(e, current_class, out),
-                StmtKind::Return(Some(e)) => self.expr(e, current_class, out),
-                StmtKind::Echo(exprs) | StmtKind::Unset(exprs) => {
-                    for e in exprs {
-                        self.expr(e, current_class, out);
-                    }
-                }
-                StmtKind::If(if_stmt) => {
-                    for cond in if_stmt.conditions() {
-                        self.expr(cond, current_class, out);
-                    }
-                }
-                StmtKind::While { cond, .. } | StmtKind::DoWhile { cond, .. } => {
-                    self.expr(cond, current_class, out);
-                }
-                StmtKind::For {
-                    init, cond, step, ..
-                } => {
-                    for e in init.iter().chain(cond).chain(step) {
-                        self.expr(e, current_class, out);
-                    }
-                }
-                StmtKind::Foreach {
-                    subject,
-                    key,
-                    value,
-                    ..
-                } => {
-                    self.expr(subject, current_class, out);
-                    if let Some(k) = key {
-                        self.bind_var(k, current_class, out);
-                    }
-                    self.bind_var(value, current_class, out);
-                }
-                StmtKind::FunctionDecl(f) => {
-                    self.record(
-                        out,
-                        f.name_span,
-                        Resolved::Function(f.fq_name().to_string()),
-                    );
-                    self.function(f, current_class, false, out);
-                }
-                StmtKind::ClassDecl(c) => self.class(c, out),
-                StmtKind::GlobalConst(consts) => {
-                    for c in consts {
-                        self.expr(&c.value, current_class, out);
-                    }
-                }
-                // `global $x;`/`static $x = ...;` have no per-name span of
-                // their own (only the whole statement's) - the same
-                // imprecision `Checker::declare`'s own instrumentation for
-                // these two shapes accepts (`checker/stmt.rs`).
-                StmtKind::Global(vars) => {
-                    for var in vars {
-                        match var {
-                            GlobalVar::Name(name) => {
-                                self.record_var_self(out, name.span, current_class, &name.name);
-                            }
-                            GlobalVar::Dynamic(e) => self.expr(e, current_class, out),
-                        }
-                    }
-                }
-                StmtKind::StaticVar(vars) => {
-                    for (name, d) in vars {
-                        if let Some(e) = d {
-                            self.expr(e, current_class, out);
-                        }
-                        self.record_var_self(out, name.span, current_class, &name.name);
-                    }
-                }
-                StmtKind::Switch { subject, cases } => {
-                    self.expr(subject, current_class, out);
-                    for case in cases {
-                        if let Some(t) = &case.test {
-                            self.expr(t, current_class, out);
-                        }
-                    }
-                }
-                StmtKind::Try { catches, .. } => {
-                    for c in catches {
-                        for (name, span) in c.types.iter().zip(c.types_spans.iter()) {
-                            if self.anchor.matches(*span)
-                                && let Some(fqn) =
-                                    resolve_class_ref(name, current_class, self.registry)
-                            {
-                                out.push((*span, Resolved::Class(fqn)));
-                            }
-                        }
-                        if let (Some(name), Some(span)) = (&c.var, c.var_span) {
-                            self.record_var_self(out, span, current_class, name);
-                        }
-                    }
-                }
-                _ => {}
-            }
-            any_child_stmt(stmt, |child| {
-                self.stmt(child, current_class, out);
-                false
-            });
-        })
+    fn visit_function_decl(&mut self, function: &'ast FunctionDecl) {
+        // A named function/method (including one nested inside another
+        // function's body - real, legal PHP) is its own fresh top-level
+        // variable scope, independent of `current_function`/
+        // `current_is_static`, which track the real `Checker` probe
+        // scope, not this purely syntactic same-variable grouping.
+        // Swapped before the parameters: a parameter's own `var_scope`
+        // must resolve against this function's fresh scope, never
+        // whatever enclosing `Closure`/`ArrowFn` frame happened to be
+        // open at the declaration site.
+        let new_base_scope_id = self.next_id();
+        let previous_base_scope_id = std::mem::replace(&mut self.base_scope_id, new_base_scope_id);
+        let previous_scope_frames = std::mem::take(&mut self.scope_frames);
+        let previous_function = self.current_function.replace(function.clone());
+        walk_function_decl(self, function);
+        self.current_function = previous_function;
+        self.scope_frames = previous_scope_frames;
+        self.base_scope_id = previous_base_scope_id;
     }
 
-    fn expr(&mut self, expr: &Expr, current_class: Option<&str>, out: &mut Vec<(Span, Resolved)>) {
+    fn visit_class_decl(&mut self, class: &'ast ClassDecl) {
+        let fqn = class_decl_fqn(class).to_string();
+        let previous = self.current_class.replace(fqn.clone());
+        self.record(class.name_span, Resolved::Class(fqn));
+        let named = [
+            (&class.extends, &class.extends_spans),
+            (&class.implements, &class.implements_spans),
+            (&class.uses, &class.uses_spans),
+        ];
+        for (names, spans) in named {
+            for (name, span) in names.iter().zip(spans) {
+                self.record_class(name, *span);
+            }
+        }
+        walk_class_decl(self, class);
+        self.current_class = previous;
+    }
+
+    fn visit_method_decl(&mut self, method: &'ast MethodDecl) {
+        self.record_member(method.function.name_span, &method.function.name);
+        let previous = std::mem::replace(&mut self.current_is_static, method.is_static);
+        walk_method_decl(self, method);
+        self.current_is_static = previous;
+    }
+
+    fn visit_property_decl(&mut self, property: &'ast PropertyDecl) {
+        self.record_member(property.name_span, &property.name);
+        walk_property_decl(self, property);
+    }
+
+    fn visit_class_const(&mut self, constant: &'ast ClassConst) {
+        self.record_member(constant.name_span, &constant.name);
+        walk_class_const(self, constant);
+    }
+
+    fn visit_enum_case(&mut self, case: &'ast EnumCase) {
+        self.record_member(case.name_span, &case.name);
+        walk_enum_case(self, case);
+    }
+
+    fn visit_expr(&mut self, expr: &'ast Expr) {
         syntax::stack::guard(|| {
             match &expr.kind {
                 // `foo()`'s callee - a bare `Name` here is always a function
                 // reference (never a class), unlike a bare `Name` reached
                 // some other way (see the plain `ExprKind::Name` arm below).
-                // Handled here, before generic recursion, specifically so
-                // that arm never has to guess which one a given `Name` node
-                // means.
-                ExprKind::Call(callee, args) => {
-                    if let ExprKind::Name(n) = &callee.kind {
-                        let fqn = self.registry.called_function_name(n).to_string();
-                        self.record(out, callee.span, Resolved::Function(fqn));
-                    } else {
-                        self.expr(callee, current_class, out);
-                    }
-                    for a in args {
-                        self.expr(&a.value, current_class, out);
-                    }
+                ExprKind::Call(callee, args) if matches!(callee.kind, ExprKind::Name(_)) => {
+                    let ExprKind::Name(n) = &callee.kind else {
+                        unreachable!()
+                    };
+                    let fqn = self.registry.called_function_name(n).to_string();
+                    self.record(callee.span, Resolved::Function(fqn));
+                    walk_args(self, args);
                     return;
                 }
                 // `new Foo(...)`'s callee - always a class reference, the
                 // mirror image of `Call` just above.
-                ExprKind::New(callee, args) => {
-                    if let ExprKind::Name(n) = &callee.kind
-                        && let Some(fqn) = resolve_class_ref(n, current_class, self.registry)
-                    {
-                        self.record(out, callee.span, Resolved::Class(fqn));
-                    } else {
-                        self.expr(callee, current_class, out);
-                    }
-                    for a in args {
-                        self.expr(&a.value, current_class, out);
-                    }
+                ExprKind::New(callee, args) if matches!(callee.kind, ExprKind::Name(_)) => {
+                    let ExprKind::Name(n) = &callee.kind else {
+                        unreachable!()
+                    };
+                    self.record_class(n, callee.span);
+                    walk_args(self, args);
                     return;
                 }
                 // A bare `Name` reached any *other* way (a first-class
@@ -567,103 +614,37 @@ impl<'a> Walker<'a> {
                 ExprKind::Name(n) => {
                     let resolved = match self.registry.resolve_function(n) {
                         Some((fqn, _)) => Some(Resolved::Function(fqn.to_string())),
-                        None => {
-                            resolve_class_ref(n, current_class, self.registry).map(Resolved::Class)
-                        }
+                        None => self.class_ref(n).map(Resolved::Class),
                     };
                     if let Some(resolved) = resolved {
-                        self.record(out, expr.span, resolved);
+                        self.record(expr.span, resolved);
                     }
                 }
                 ExprKind::ClassConstFetch(StaticTarget::Name(class, class_span), member) => {
-                    if self.anchor.matches(expr.span)
-                        && let Some(fqn) = resolve_class_ref(class, current_class, self.registry)
-                    {
-                        let spans = [*class_span, member.span];
-                        // Two independent `if`s, not `if`/`else if`: under
-                        // `Anchor::All` a single expression can contain both
-                        // a class-name occurrence AND a member-name
-                        // occurrence, and both need their own entry.
-                        // `resolve_at`'s own behavior is unaffected - a
-                        // single `Position` can still only ever match one of
-                        // these two disjoint sub-spans.
-                        if self.anchor.matches(spans[0]) {
-                            out.push((spans[0], Resolved::Class(fqn.clone())));
-                        }
-                        if self.anchor.matches(spans[1]) {
-                            out.push((spans[1], Resolved::Member(fqn, member.to_string())));
-                        }
-                    }
+                    self.record_static_member(expr.span, class, *class_span, member);
                 }
                 ExprKind::ClassNameFetch(StaticTarget::Name(class, class_span)) => {
-                    if self.anchor.matches(*class_span)
-                        && let Some(fqn) = resolve_class_ref(class, current_class, self.registry)
-                    {
-                        out.push((*class_span, Resolved::Class(fqn)));
-                    }
+                    self.record_class(class, *class_span);
                 }
-                // `Foo::method()` mirrors `ClassConstFetch`/`StaticPropertyFetch` above exactly (a
-                // literal class name, resolved by plain name lookup). A
-                // genuinely dynamic receiver (`$obj::method()`) has no
-                // class-name text to resolve here at all - it needs the
-                // exact same Stage B type-inference probe `MethodCall`'s own
-                // "any other receiver" branch below already uses, `Resolved::
-                // Instance` being agnostic to `->` vs `::` call syntax (a
-                // real PHP static method is still just a method looked up
-                // on the receiver's own resolved class either way).
-                ExprKind::StaticCall(target, member, args) => {
-                    match target {
-                        StaticTarget::Name(class, class_span) => {
-                            if self.anchor.matches(expr.span)
-                                && let Some(fqn) =
-                                    resolve_class_ref(class, current_class, self.registry)
-                            {
-                                let spans = [*class_span, member.span];
-                                if self.anchor.matches(spans[0]) {
-                                    out.push((spans[0], Resolved::Class(fqn.clone())));
-                                }
-                                if self.anchor.matches(spans[1]) {
-                                    out.push((spans[1], Resolved::Member(fqn, member.to_string())));
-                                }
-                            }
-                        }
-                        StaticTarget::Expr(receiver) => {
-                            self.expr(receiver, current_class, out);
-                            if self.anchor.matches(member.span) {
-                                out.push((
-                                    member.span,
-                                    Resolved::Instance {
-                                        receiver_span: receiver.span,
-                                        member: member.to_string(),
-                                        scope: self.probe_scope(),
-                                        is_static: self.current_is_static,
-                                        class: current_class.map(str::to_string),
-                                    },
-                                ));
-                            }
-                        }
-                    }
-                    for a in args {
-                        self.expr(&a.value, current_class, out);
-                    }
-                    return;
+                // `Foo::method()` mirrors `ClassConstFetch` above (a literal
+                // class name, resolved by plain name lookup). A dynamic
+                // receiver (`$obj::method()`) has no class-name text to
+                // resolve here at all - it needs the same type-inference
+                // probe `MethodCall`'s own "any other receiver" branch
+                // below uses, `Resolved::Instance` being agnostic to `->`
+                // vs `::` call syntax.
+                ExprKind::StaticCall(StaticTarget::Name(class, class_span), member, _) => {
+                    self.record_static_member(expr.span, class, *class_span, member);
                 }
-                ExprKind::DynamicStaticCall(target, name, args) => {
-                    if let StaticTarget::Expr(receiver) = target {
-                        self.expr(receiver, current_class, out);
-                    }
-                    self.expr(name, current_class, out);
-                    for a in args {
-                        self.expr(&a.value, current_class, out);
-                    }
+                ExprKind::StaticCall(StaticTarget::Expr(receiver), member, args) => {
+                    self.visit_expr(receiver);
+                    let instance = self.instance(receiver.span, member);
+                    self.record(member.span, instance);
+                    walk_args(self, args);
                     return;
                 }
                 ExprKind::Instanceof(_, InstanceofTarget::Name(name, span)) => {
-                    if self.anchor.matches(*span)
-                        && let Some(fqn) = resolve_class_ref(name, current_class, self.registry)
-                    {
-                        out.push((*span, Resolved::Class(fqn)));
-                    }
+                    self.record_class(name, *span);
                 }
                 // A plain variable read (`$this` excluded - it's never a
                 // locally-declared variable, and is resolved separately via
@@ -674,240 +655,92 @@ impl<'a> Walker<'a> {
                 // `probe_scope` covers (a named function/method, or top-level
                 // script scope).
                 ExprKind::Variable(name) if **name != *"this" => {
-                    if self.anchor.matches(expr.span) {
-                        out.push((
-                            expr.span,
-                            Resolved::VariableRead {
-                                span: expr.span,
-                                scope: self.probe_scope(),
-                                is_static: self.current_is_static,
-                                class: current_class.map(str::to_string),
-                                name: name.clone(),
-                                var_scope: self.resolve_var_scope(name),
-                            },
-                        ));
-                    }
+                    self.record_var_read(expr.span, name);
                 }
                 // `$this->method()`/`$this->prop` resolve directly (only
-                // `current_class` is needed, already in hand); any *other*
-                // receiver needs Stage B's own type-inference probe - this
-                // records enough (the receiver's own span, the member name,
-                // and the enclosing scope to re-check) for `lsp.rs`'s own
-                // orchestration to run that probe. The recorded span is the
-                // member NAME's own sub-span (`spans[0]`), not `expr.span` -
-                // the latter covers the whole `$x->method(...)` call
-                // including its arguments, which would make every
-                // `document_highlight` range for this arm too wide.
-                ExprKind::MethodCall(recv, method, _, _)
-                | ExprKind::PropertyAccess(recv, method, _) => {
-                    self.expr(recv, current_class, out);
-                    if self.anchor.matches(method.span) {
-                        let spans = [method.span];
-                        if matches!(&recv.kind, ExprKind::Variable(v) if **v == *"this")
-                            && let Some(owner) = current_class
-                        {
-                            out.push((
-                                spans[0],
-                                Resolved::Member(owner.to_string(), method.to_string()),
-                            ));
-                        } else {
-                            out.push((
-                                spans[0],
-                                Resolved::Instance {
-                                    receiver_span: recv.span,
-                                    member: method.to_string(),
-                                    scope: self.probe_scope(),
-                                    is_static: self.current_is_static,
-                                    class: current_class.map(str::to_string),
-                                },
-                            ));
-                        }
-                    }
-                    any_child_expr(expr, |a| {
-                        if !std::ptr::eq(a, recv.as_ref()) {
-                            self.expr(a, current_class, out);
-                        }
-                        false
-                    });
+                // `current_class` is needed); any *other* receiver needs a
+                // type-inference probe - this records enough (the receiver's
+                // own span, the member name, and the enclosing scope to
+                // re-check) for `lsp.rs`'s own orchestration to run it. The
+                // recorded span is the member NAME's own, not the whole
+                // call's, which would make every `document_highlight` range
+                // for this arm too wide.
+                ExprKind::MethodCall(recv, method, args, _) => {
+                    self.visit_expr(recv);
+                    self.record_receiver_member(recv, method);
+                    walk_args(self, args);
                     return;
                 }
-                ExprKind::NewAnonymousClass(decl, args) => {
-                    self.class(decl, out);
-                    for a in args {
-                        self.expr(&a.value, current_class, out);
-                    }
+                ExprKind::PropertyAccess(recv, property, _) => {
+                    self.visit_expr(recv);
+                    self.record_receiver_member(recv, property);
                     return;
                 }
                 ExprKind::Closure {
                     params, uses, body, ..
                 } => {
                     for p in params {
-                        self.param(p, current_class, out);
+                        self.visit_param(p);
                     }
                     // A `use (&$x)`/`use ($x)` capture is itself a real,
                     // navigable reference to the outer scope's `$x` -
                     // resolved the same way an ordinary variable read is
-                    // (`probe_scope()` called *before* recursing into `body`,
-                    // since `current_function` is deliberately never updated
-                    // for a closure literal - see this file's own module doc -
-                    // so it still correctly points at the enclosing named
-                    // function/top-level scope, not the closure itself).
-                    // Each capture's own `var_scope` is resolved BEFORE this
-                    // closure's own frame is pushed below, since a `use`
-                    // clause names an OUTER variable, not one of the
-                    // closure's own locals.
+                    // (`current_function` is deliberately never updated for
+                    // a closure literal - see this file's own module doc -
+                    // so it still points at the enclosing named function or
+                    // top-level scope). Each capture's own `var_scope` is
+                    // resolved before this closure's own frame is pushed
+                    // below, since a `use` clause names an outer variable,
+                    // not one of the closure's own locals.
                     for u in uses {
-                        let var_scope = self.resolve_var_scope(&u.name);
-                        self.record(
-                            out,
-                            u.span,
-                            Resolved::VariableRead {
-                                span: u.span,
-                                scope: self.probe_scope(),
-                                is_static: self.current_is_static,
-                                class: current_class.map(str::to_string),
-                                name: u.name.clone(),
-                                var_scope,
-                            },
-                        );
+                        self.record_var_read(u.span, &u.name);
                     }
                     let id = self.next_id();
                     self.scope_frames.push(ScopeFrame::Closure {
                         id,
                         transparent: uses.iter().map(|u| u.name.clone()).collect(),
                     });
-                    self.stmts(body, current_class, out);
+                    walk_stmts(self, body);
                     self.scope_frames.pop();
                     return;
                 }
                 ExprKind::ArrowFn { params, body, .. } => {
                     for p in params {
-                        self.param(p, current_class, out);
+                        self.visit_param(p);
                     }
                     let id = self.next_id();
                     self.scope_frames.push(ScopeFrame::ArrowFn {
                         id,
                         owns: params.iter().map(|p| p.name.clone()).collect(),
                     });
-                    self.expr(body, current_class, out);
+                    self.visit_expr(body);
                     self.scope_frames.pop();
                     return;
                 }
                 _ => {}
             }
-            any_child_expr(expr, |child| {
-                self.expr(child, current_class, out);
-                false
-            });
+            walk_expr(self, expr);
         })
     }
+}
 
-    fn param(&mut self, p: &Param, current_class: Option<&str>, out: &mut Vec<(Span, Resolved)>) {
-        if let Some(hint) = &p.type_hint {
-            self.record_type_hint(out, hint, current_class);
+impl Walker<'_> {
+    /// Records a member of the class being walked, at its declaration.
+    fn record_member(&mut self, span: Span, name: &str) {
+        if let Some(class) = self.current_class.clone() {
+            self.record(span, Resolved::Member(class, name.to_string()));
         }
-        self.record_var_self(out, p.name_span, current_class, &p.name);
     }
 
-    fn function(
-        &mut self,
-        f: &FunctionDecl,
-        current_class: Option<&str>,
-        is_static: bool,
-        out: &mut Vec<(Span, Resolved)>,
-    ) {
-        // A named function/method (including one nested inside another
-        // function's body - real, legal PHP) is its own fresh top-level
-        // variable scope, independent of (and swapped separately from)
-        // `current_function`/`current_is_static` below, which track the
-        // real `Checker` probe scope, not this purely syntactic same-
-        // variable grouping. Swapped BEFORE the params loop: a
-        // parameter's own `var_scope` must resolve against THIS
-        // function's fresh scope, never whatever enclosing `Closure`/
-        // `ArrowFn` frame happened to be open at the declaration site.
-        let new_base_scope_id = self.next_id();
-        let previous_base_scope_id = std::mem::replace(&mut self.base_scope_id, new_base_scope_id);
-        let previous_scope_frames = std::mem::take(&mut self.scope_frames);
-        for p in &f.params {
-            self.param(p, current_class, out);
-        }
-        if let Some(rt) = &f.return_type {
-            self.record_type_hint(out, rt, current_class);
-        }
-        let previous_function = self.current_function.replace(f.clone());
-        let previous_is_static = std::mem::replace(&mut self.current_is_static, is_static);
-        self.stmts(&f.body, current_class, out);
-        self.current_function = previous_function;
-        self.current_is_static = previous_is_static;
-        self.scope_frames = previous_scope_frames;
-        self.base_scope_id = previous_base_scope_id;
-    }
-
-    fn class(&mut self, c: &ClassDecl, out: &mut Vec<(Span, Resolved)>) {
-        let fqn = class_decl_fqn(c).to_string();
-        self.record(out, c.name_span, Resolved::Class(fqn.clone()));
-        for (name, span) in c.extends.iter().zip(c.extends_spans.iter()) {
-            if self.anchor.matches(*span)
-                && let Some(target) = resolve_class_ref(name, Some(&fqn), self.registry)
-            {
-                out.push((*span, Resolved::Class(target)));
+    /// Records `member` of `recv`: directly for `$this`, else as a probe
+    /// of the receiver's type.
+    fn record_receiver_member(&mut self, recv: &Expr, member: &Ident) {
+        let value = match &self.current_class {
+            Some(owner) if matches!(&recv.kind, ExprKind::Variable(v) if *v == "this") => {
+                Resolved::Member(owner.clone(), member.to_string())
             }
-        }
-        for (name, span) in c.implements.iter().zip(c.implements_spans.iter()) {
-            if self.anchor.matches(*span)
-                && let Some(target) = resolve_class_ref(name, Some(&fqn), self.registry)
-            {
-                out.push((*span, Resolved::Class(target)));
-            }
-        }
-        for (name, span) in c.uses.iter().zip(c.uses_spans.iter()) {
-            if self.anchor.matches(*span)
-                && let Some(target) = resolve_class_ref(name, Some(&fqn), self.registry)
-            {
-                out.push((*span, Resolved::Class(target)));
-            }
-        }
-        for p in &c.properties {
-            self.record(
-                out,
-                p.name_span,
-                Resolved::Member(fqn.clone(), p.name.to_string()),
-            );
-            if let Some(hint) = &p.type_hint {
-                self.record_type_hint(out, hint, Some(&fqn));
-            }
-            if let Some(d) = &p.default {
-                self.expr(d, Some(&fqn), out);
-            }
-        }
-        for m in &c.methods {
-            self.record(
-                out,
-                m.function.name_span,
-                Resolved::Member(fqn.clone(), m.function.name.to_string()),
-            );
-            self.function(&m.function, Some(&fqn), m.is_static, out);
-        }
-        for cst in &c.consts {
-            self.record(
-                out,
-                cst.name_span,
-                Resolved::Member(fqn.clone(), cst.name.to_string()),
-            );
-            if let Some(hint) = &cst.type_hint {
-                self.record_type_hint(out, hint, Some(&fqn));
-            }
-            self.expr(&cst.value, Some(&fqn), out);
-        }
-        for case in &c.enum_cases {
-            self.record(
-                out,
-                case.name_span,
-                Resolved::Member(fqn.clone(), case.name.to_string()),
-            );
-            if let Some(v) = &case.value {
-                self.expr(v, Some(&fqn), out);
-            }
-        }
+            _ => self.instance(recv.span, member),
+        };
+        self.record(member.span, value);
     }
 }
