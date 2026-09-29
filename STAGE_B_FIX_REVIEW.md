@@ -280,6 +280,13 @@ through `check-project`.
     `is_float("1.5" + 1)`.
   - Unary `-`/`+` (`checker/expr.rs`, both arms) make any string
     operand `int`: `-'1.5'` is `-1.5`.
+  - `**` with an exponent that can be negative stays `int`: `int<1, 3> **
+    int<-1, 1>` is `int<min, 3>`, and `3 ** -1` is a float. A negative
+    base over a range of exponents keeps the negative corner: `int<min,
+    -3> ** int<1, 3>` is `int<min, -27>`, though `(-3) ** 2` is `9`.
+  - An unbounded end never adds `float`: `int<min, -3> + int<min, -3>` is
+    `int<min, -6>`, and `PHP_INT_MIN + -3` is a float. F60's sweep finds
+    this at the ends for `+`, `-`, `*` and `**`.
 
   Done: a base range that spans zero or is negative is split by sign
   (even and odd exponents differ), an overflowing bound adds `float`, and
@@ -332,7 +339,9 @@ through `check-project`.
   keeps its old type (`'x'`), so `$s === null` reports
   `identical.alwaysFalse`; after `$r = &$x; $r++;`, `$x === 1` reports
   `identical.alwaysTrue`. A fact the branch-implied-facts mechanism
-  recorded for `$s` is replayed across such a write too. Done: an
+  recorded for `$s` is replayed across such a write too, and
+  `check_pointless_null_probe` reports `$x ?? 'd'` after `$x = null; $r =
+  &$x; $r = 'a';` as `nullCoalesce.variable` ("always null"). Done: an
   assignment by reference records the alias, and a write to either name
   updates (or at least forgets the narrowing of) the other, with
   fixtures for both shapes.
@@ -458,6 +467,86 @@ through `check-project`.
   parses as a right-nested one and nothing reports it. Done: the arrow
   body is a full expression (`parse_expression`), and a ternary in the
   `else` of another without parentheses is a parse error, with fixtures.
+
+- [ ] **F60. Subtracting a half-unbounded range from a constant, or
+  dividing one by a negative constant, flips the result**
+  (`types::arithmetic`; also before the window). Checked against PHP for
+  `+`, `-`, `*`, `/`, `%` and `**` over every pair of ranges with ends in
+  {`min`, -3, -1, 0, 1, 3, `max`}, and exhaustively over bounded ranges
+  in [-4, 4], where every result was right.
+  - `sub_int_range_full`'s first branch gives `int<min, c>` for a
+    constant `c` minus any range with an unbounded end: `-1 - int<min,
+    -1>` is `int<min, -1>` (PHP gives 0 and up), and `3 - int<-1, max>`
+    is `int<min, 3>`, though `3 - (-1)` is `4`. With `int<0, max> $a`,
+    `-1 - (-$a - 1) < 0` reports `smaller.alwaysTrue`; the value is `$a`.
+  - `div_int_range`'s swap for a negative constant divisor makes
+    `int<0, max> / -1` `int<0, max>|float` and `int<min, -3> / -3`
+    `int<min, 1>|float`; the int results are `int<min, 0>` and
+    `int<1, max>`.
+
+  Done: `c - int<lo, hi>` is `int<c - hi, c - lo>`, an unbounded end
+  staying unbounded; a negative constant divisor mirrors the range; the
+  pair sweep is a unit test.
+- [ ] **F61. `isset()` and `??` on a property of a nullable object are
+  reported pointless** (`resolve_always_exists`,
+  `checker/expr/probe_checks.rs`; also before the window). The
+  `PropertyAccess` arm finds the property on the receiver's type without
+  asking whether the receiver can be null: with `?Foo $x` and `Foo::$p`
+  an `int` with a default, `isset($x->p)` reports `isset.property` ("is
+  not nullable") and `$x->p ?? 2` `nullCoalesce.property`, though a null
+  `$x` makes them `false` and `2`. `unset($x->p); isset($x->p)` reports
+  the same. Done: a receiver that may be null, or a property unset on the
+  path, makes the chain not always present, with fixtures.
+- [ ] **F62. A property keeps its narrowed type across a call that can
+  change it** (also before the window). After `$this->x = null;
+  $this->load();`, where `load()` assigns `$this->x`, `$this->x` is still
+  `null`. `expr_reads_a_property` (`checker/expr/ranges.rs`) documents
+  the gap, and the constant-comparison rules skip an operand that reads a
+  property, but the walk only descends through calls, binary and unary
+  operators and indexes: `(string) $this->x === ''` reports
+  `identical.alwaysTrue`. Done: a call not known to be pure forgets the
+  narrowed properties of `$this` (and of the receiver, for a method call
+  on another object), with fixtures; the syntactic guards can then go.
+- [ ] **F63. Two loop exits misread** (`checker/stmt/loops.rs`; also
+  before the window):
+  - `for (;;) { if ($c) { $y = 1; break; } } return $y;` reports
+    `variable.undefined`: the condition-less arm merges the body's end
+    state, which has no `$y`, with the `break` states. `while (true)`
+    folds only the `break` states and gets it right.
+  - `do { if ($c) { continue; } ... } while (false);` reports
+    `doWhile.alwaysFalse`. A `break` in the body exempts this run-once
+    idiom; a `continue`, which leaves the loop the same way here, doesn't.
+
+  Done: `for (;;)` exits through its `break` states only, and a
+  `continue` exempts `doWhile.alwaysFalse` as a `break` does, with
+  fixtures.
+- [ ] **F64. A `mysqli` query that doesn't start with its verb is typed
+  `true`** (`returns_result_set`, `checker/expr/mysqli.rs`; also before
+  the window). Only the first word after any `(` is read:
+  `$db->query('/* report */ SELECT 1 AS a')`, `"-- c\nSELECT 1 AS a"`,
+  `'CALL list_users()'` and `'CHECK TABLE t'` are `true`, so
+  `$r->fetch_assoc()` reports `method.nonObject`. Done: leading comments
+  are skipped, and `CALL`, `CHECK`, `ANALYZE`, `OPTIMIZE`, `REPAIR`,
+  `HELP` or a verb the list doesn't know give `mysqli_result|true`, with a
+  fixture.
+- [ ] **F65. A spread argument counts as one argument**
+  (`checker/expr/array_ops.rs`; also before the window).
+  `check_useless_return_value_call` reads `args.len()`, so `$x =
+  var_export(...$args)` reports `function.uselessReturnValue` though
+  `$args` may hold `true` for `$return`. `check_array_filter_no_op` and
+  `check_array_values_no_op` do the same and judge `array_filter(...$args)`
+  by the type of `$args` itself (read, not probed). Done: a spread
+  argument makes each check bail, with a fixture.
+- [ ] **F66. Two live shapes the opt-in dead-code rules report**
+  (`project::whole_program`; also before the window):
+  - `class.unused` for a class named only in PHPDoc (`@param DocOnly
+    $d`). `dead_code`'s module doc lists attributes, string callables and
+    framework magic as known gaps, not PHPDoc.
+  - `method.unused` for `A::mixedCase()` called as `$a->MIXEDCASE()`:
+    member references are recorded under the name as written.
+
+  Done: a PHPDoc type counts as a reference and member references fold
+  case, with fixtures.
 
 ### Wrong types and missed reports (probed)
 
@@ -632,6 +721,11 @@ through `check-project`.
     `str_starts_with`, `str_ends_with` and `is_a` compare the name as
     written, where the single-argument predicates go through
     `called_function_name`.
+  - `narrow_enum_from_call` compares `from`/`tryFrom` exactly
+    (`Suit::FROM(1)` is `Suit`), `or_chain_narrowing_target` looks the
+    predicate up unfolded (`IS_INT($x) || is_string($x)` narrows
+    nothing), `preg_match_condition` compares with `"preg_match"`, and the
+    PHPUnit assertion narrowing matches method names exactly.
 
   Done: the tagged-name set and every name comparison fold case (and
   resolve the function the way `called_function_name` does).
@@ -648,6 +742,115 @@ through `check-project`.
   Done: the short ternary is the condition's truthy type unioned with
   the `else` type, and a compound assignment is the value it assigns,
   with fixtures.
+
+- [ ] **F67. A loose `==` narrows as `===`** (also before the window).
+  - `check_switch` (`checker/stmt/switch.rs`) narrows each case through
+    `apply_equality_narrowing`, which is `===`'s narrowing, but `switch`
+    compares with `==`. With `string $x`, `case 0:` types `$x` as the int
+    `0` (`'0'` and `'0.0'` match); with `?string $x`, `case null:` types
+    it `null` (`''` matches too); with `int|string $x`, `case '1':` types
+    it `'1'` (`1`, `'01'` and `'1.0'` match too).
+  - `or_chain_narrowing_target` (`checker/narrowing/predicates.rs`) takes
+    a `BinOp::Eq` leaf as `===`: `$x == null || $x == 'a'` narrows a
+    `?string` to `'a'|null`, and `$x == 1 || $x == 2` an `int|string` to
+    `1|2`.
+
+  Done: a loose comparison narrows to every value of the operand's type
+  that loosely equals the other side, or not at all, and a `switch`
+  narrows its cases that way, with fixtures.
+- [ ] **F68. A `break` inside an `if` in a `switch` case loses its path**
+  (`check_switch`; also before the window). The frame pushed onto
+  `loop_break_states` is popped and discarded, and only a case's last
+  statement is read for a `break`: after `case 1: if ($c) { $a = 'one';
+  break; } $a = 'two'; break; default: $a = 'd';`, `$a` is `'two'|'d'`.
+  Done: the popped `break` states join the switch's exit states, with a
+  fixture.
+- [ ] **F69. A `catch` is judged unreachable when the `try` throws only
+  through magic** (`check_try`, `checker/stmt/try_catch.rs`; also before
+  the window). A clause is entered only from recorded throw points, and
+  reading an `ArrayAccess` offset, converting an object to string,
+  reading a property through `__get` and `include` record none: `$ok =
+  true; try { $r = $bag['x']; } catch (RuntimeException $e) { $ok =
+  false; }` leaves `$ok` `true`, as do `'a' . $s`, `$m->foo` and `include
+  $f`. Done: each records a `Throwable` throw point (the offset read and
+  the conversion only for an object with the method), with fixtures.
+- [ ] **F70. Array literal and spread keys** (`checker/expr/array_ops.rs`):
+  - Since `8febbd1e`, a literal whose key isn't known goes general but
+    keeps taking positional keys from an index that no longer sees int
+    keys: with `'a'|'b' $s`, `[$s => 1, 10 => 2, 'c']` is
+    `non-empty-array<'a'|'b'|10|0, 1|2|'c'>`; PHP puts `'c'` at `11`. The
+    pre-window binary gave `array`.
+  - An optional int field is renumbered as if present: `[...$a, 'c']` and
+    `array_merge($a, ['c'])` with `array{0: 'a', 1?: 'b'} $a` are
+    `array{0: 'a', 1?: 'b', 2: 'c'}`; without `1`, `'c'` lands at `1`
+    (also before the window).
+  - An optional string field replaces a required one: `['x' => 1,
+    ...$a]` and `array_merge(['x' => 1], $a)` with `array{x?: 2} $a` are
+    `array{x?: 2}`; `x` is always there, `1|2` (also before the window).
+  - A string key from an earlier known spread doesn't stop the result
+    being a list: `[...['a' => 1], ...$l]` with `list<int> $l` is
+    `list<int>`, and not non-empty (also before the window).
+
+  Done: general mode observes every int key and makes a later positional
+  key `int` once an unknown key may be an int; an optional int field makes
+  the keys renumbered after it uncertain; an optional field keeps a
+  required one's key required, its type joined; list-ness and
+  non-emptiness count the fields already merged, with fixtures.
+- [ ] **F71. `preg_match_all`'s pattern-order groups never hold `''`**
+  (`preg_match_all_pattern_order_shape`, `checker/expr/preg_shapes.rs`;
+  also before the window). A group that doesn't take part in a match
+  still gets a slot, `''` without `PREG_UNMATCHED_AS_NULL`, but the
+  element type is the group's own: `preg_match_all('/(a)?b/', $s, $m)`
+  types `$m[1]` `list<'a'>` (PHP gives `['', 'a']` for `'b ab'`), and
+  `/(\d+)?b/` `list<numeric-string>`. The `PREG_SET_ORDER` result is
+  `array<...>`, though it is a list. Done: an optional group's element
+  adds `''`, and the set-order result is a list, with fixtures.
+- [ ] **F72. Narrowing that picks the wrong argument or value** (also
+  before the window):
+  - `assert_target_key_and_current` (`checker/narrowing/assertions.rs`)
+    finds an `@phpstan-assert` parameter's argument by position: with
+    `@phpstan-assert int $a` on `checkA(mixed $a, mixed $b)`,
+    `checkA(b: $x, a: $y)` makes `$x` `int` and leaves `$y` `mixed`.
+  - `in_array_narrowing` rules out every field value of a constant
+    haystack in the not-found branch, optional fields included: with
+    `'a'|'b' $x` and `array{0: 'a', 1?: 'b'} $h`, `!in_array($x, $h,
+    true)` makes `$x` `never`.
+
+  Done: a named argument maps by name (a spread bails), and the not-found
+  branch rules out only required fields' values, with fixtures.
+- [ ] **F73. A `for` loop's in-range writes keep a list for a negative
+  index** (`in_range_index_write_loop_vars`, `checker/stmt/loops.rs`;
+  also before the window). `for ($i = -1; $i < count($x); $i++) { $x[$i]
+  = 5; }` keeps `list<int> $x` a list, though key `-1` ends that. Done:
+  the index must also be non-negative at the write, with a fixture.
+- [ ] **F74. A `config.platform.php` given as a full version is ignored**
+  (`declared_php_versions`, `project/session.rs`; also before the
+  window). Composer's `config.platform.php` is an exact version
+  (`"8.1.12"`), and a release is kept only when its `.0` or `.99`
+  satisfies the constraint, so none is: with `"8.1.12"` the run has no
+  PHP version and `PHP_VERSION_ID >= 80200` goes unreported, where `"8.1"`
+  reports it always false. Done: an exact version selects its release,
+  and a release counts when any of its patches satisfies the constraint,
+  with a fixture.
+- [ ] **F75. The duplicate-declaration checks miss case variants and
+  split groups** (`project/duplicate_classes.rs`,
+  `duplicate_functions.rs`; also before the window). Sites are keyed by
+  the name as written, so `class Foo` and `class foo`, or `function
+  helper` and `function HELPER`, in two files aren't reported; PHP
+  refuses the second. Function sites are grouped by comparing each with
+  the previous one in path order, so `twice(int)` in `c.php` and `e.php`
+  with `twice(string)` in `d.php` between them are never compared; with
+  another `twice(int)` in `d0.php`, the list names `d0.php` and `e.php`
+  but not `c.php`. Done: sites are keyed by the lowercased name and
+  grouped by signature, with fixtures.
+- [ ] **F76. A namespace cycle through a context file can go unreported**
+  (`find_namespace_cycles`; also before the window). The cycle is
+  reported at the alphabetically-first class contributing an edge, chosen
+  among every registry class, and dropped when that class's file isn't
+  analysed: `App\Foo extends Acme\Base` with `Acme\Plugin implements
+  App\Contract` in a scan path reports nothing, and the same code with
+  `Zed` for `Acme` reports `App, Zed`. Done: the representative is the
+  first analysed class contributing an edge, with a fixture.
 
 ### Design
 
@@ -726,6 +929,39 @@ through `check-project`.
   a long top-level script. Done: the value is built only when the anchor
   matches (a closure passed to `record`, or the check hoisted), and
   `collect_all` builds the probe scope once per scope.
+
+- [ ] **F77. A file that doesn't parse is skipped without a report**
+  (`Session::load`; also before the window). `read_and_parse_file` gives
+  `None` for a parse error and the file is only counted: `0 file(s)
+  checked, 0 diagnostic(s) (2 file(s) skipped: parse error)`, with no
+  location and exit status 0. Each commit in the window that makes more
+  input a parse error (`474920e5`, `f4128dec`) turns a file that was
+  checked into one skipped silently. Done: a parse error is a
+  non-ignorable diagnostic at its span, and it fails the run.
+- [ ] **F78. The duplicate-declaration checks walk every name for every
+  file** (`finish_diagnostics`, `project.rs`). With either opt-in on,
+  each file's diagnostics loop over every recorded name in the project
+  and keep the sites in that file: files times names. Done: the checks
+  run once over the sites and hand each file its diagnostics.
+- [ ] **F79. Smaller gaps read in the submodules** (read, not probed):
+  - `compute_doctrine_entity` makes every property a mapped field,
+    `#[ORM\Column]` or not, so a DQL path to a transient property isn't
+    reported; a positional `#[ORM\Column('col')]` or `#[ORM\Table('t')]`
+    name is ignored.
+  - `check_composer_hygiene` records `extension_loaded('Zend OPcache')` as
+    `zend opcache`, but the extension is named `zend-opcache`, so the
+    probe doesn't silence `ext.notRequired`.
+  - `check_yield_from_compatibility` compares key and value types with
+    `rule_level_accepts` and the send type with `accepts`.
+  - `check_architecture`'s `should_use_trait` reads the class's own
+    `uses()`, while the `uses_trait` selector reads every ancestor.
+  - `compute_attribute_targets` takes any attribute whose last segment is
+    `Attribute` for the meta-attribute.
+  - `mock.withWithoutExpects` reads one statement's chain, so `$m =
+    $mock->expects($this->once()); $m->method('x')->with(1);` is
+    reported.
+
+  Done: each as stated, with a fixture where the output changes.
 
 ### Comments
 
@@ -887,6 +1123,41 @@ through `check-project`.
     body has used `parse_class_body` since `1cdfe80d`); `parse_enum_decl`
     cites "`ClassDecl.attrs`'s identical note" (the field is
     `ClassDef::attrs`).
+
+  Done: each says what the code does, on the item it documents.
+
+- [ ] **F80. Comments in the submodules read whole:**
+  - `checker/expr/array_ops.rs`: a paragraph on `array_element_type` for
+    literal shapes heads `check_array_item_key_type`'s doc; the spread
+    comment narrates "the original check" and "confirmed via
+    `dumpType()`".
+  - `checker/expr/ranges.rs`: `null_probe_verdict` says it serves a bare
+    variable only; offset and property chains use it too.
+  - `checker/control_flow/generators.rs`: the `generator.void` message
+    says "it's return type".
+  - `registry/class_info/doctrine_entity.rs`: the module doc cites Piwigo
+    and "the real corpus this phase targets"; `DoctrineEntity`'s doc says
+    inheritance isn't modeled, where the module doc says the discriminator
+    map is.
+  - `project/duplicate_fn_sites.rs` says the sites are "always populated,
+    since `check_duplicate_function_declarations` needs to run by default
+    ... always-on"; the check is opt-in. `duplicate_functions.rs` sends the
+    reader there for "the concrete reason (phpstorm-stubs' own real `strtr`
+    ...)", which isn't given. `duplicate_classes.rs` and
+    `duplicate_class_sites.rs` argue from corpus evidence.
+  - `project/whole_program/dead_members.rs`: the module doc narrates a
+    Piwigo measurement and past fixes ("used to have", "used to be a real
+    gap here too", "Fixed at the parser level").
+  - `project/mock_hygiene.rs`: `native_members`' doc starts with
+    `union_members`' first line.
+  - `project/session.rs`: `composer_roots`' doc sits on
+    `declared_php_versions`.
+  - `syntax/parser/tokens.rs`: `take_name_segment` cites
+    `Piwigo\Common\Enum\Foo`; `parse_leading_attributes` says "before
+    this phase".
+  - `syntax/visit.rs`: the module doc says every `visit_*` default walks
+    and the walk reaches type declarations; `VisitorMut::visit_type_hint`
+    is a no-op and the mutating walk visits no names.
 
   Done: each says what the code does, on the item it documents.
 
@@ -1223,21 +1494,36 @@ The items above read each named file, not the submodule files under it;
 those, and two files read only in part, are the items below. Each is read
 whole at `43f54302` (the same code as `2a31cc0c`), tests aside.
 
-- [ ] The checker's `expr` submodules: `array_ops`, `mysqli`,
-  `preg_shapes`, `probe_checks`, `ranges`.
-- [ ] The checker's `stmt` submodules: `loops`, `switch`, `try_catch`,
-  `new_exception_discarded`.
-- [ ] The checker's `control_flow` submodules: `boolean_conditions`,
-  `generators`.
-- [ ] The checker's `narrowing` submodules: `assertions`, `predicates`
-  (only excerpts reached from call sites were read before).
-- [ ] The registry's `class_info` submodules: `attributes`,
-  `doctrine_entity`, `tag_synthesis`, `virtual_property`.
-- [ ] The `project` submodules: `architecture`, `class_shape`,
+- [x] The checker's `expr` submodules: `array_ops`, `mysqli`,
+  `preg_shapes`, `probe_checks`, `ranges`: F39, F45, F50, F61, F62, F64,
+  F65, F70, F71, F80.
+- [x] The checker's `stmt` submodules: `loops`, `switch`, `try_catch`,
+  `new_exception_discarded`: F63, F67, F68, F69, F73.
+  `new_exception_discarded` carries none.
+- [x] The checker's `control_flow` submodules: `boolean_conditions`,
+  `generators`: F79, F80. `boolean_conditions` carries none.
+- [x] The checker's `narrowing` submodules: `assertions`, `predicates`
+  (only excerpts reached from call sites were read before): F50, F67,
+  F72.
+- [x] The registry's `class_info` submodules: `attributes`,
+  `doctrine_entity`, `tag_synthesis`, `virtual_property`: F79, F80.
+  `tag_synthesis` still builds an `@method` tag's templates against
+  unbounded siblings (`2a31cc0c` fixed `build_template_params` only), but
+  no check reads those bounds, so nothing reproduces.
+- [x] The `project` submodules: `architecture`, `class_shape`,
   `composer_hygiene`, `duplicate_class_sites`, `duplicate_classes`,
   `duplicate_fn_sites`, `duplicate_functions`, `mock_hygiene`, `session`,
-  and `whole_program` with its six rules.
-- [ ] `syntax::visit` (its last mutable walkers were cut off) and
-  `syntax::parser::tokens` (its comments were filtered out).
-- [ ] `types::arithmetic`'s `div_int_range` and `sub_int_range_full`,
-  checked exhaustively over small ranges against PHP.
+  and `whole_program` with its six rules: F66, F74, F75, F76, F77, F78,
+  F79, F80. Probed clean: an inherited method's types don't count as the
+  subclass's architecture dependencies; `class.notFinal` and
+  `method.notFinalInAbstractClass` see anonymous subclasses and
+  overrides (and a private implementation of a trait's abstract
+  protected method runs in PHP 8.5); a trait-using class doesn't repeat
+  its parent's renamed parameters.
+- [x] `syntax::visit` (its last mutable walkers were cut off) and
+  `syntax::parser::tokens` (its comments were filtered out): F80. The
+  mutable walk matches the shared one apart from names and type hints;
+  `namespace\foo()` resolves.
+- [x] `types::arithmetic`'s `div_int_range` and `sub_int_range_full`,
+  checked exhaustively over small ranges against PHP: F39, F60 (the sweep
+  covered every integer operator).
