@@ -849,7 +849,7 @@ through `check-project`.
   `static`, `self`) and class names alike; a keyword type should be its own
   variant. (`0b579ab1`) Done in `bd7d7a89`; `NativeType` is also the one
   native-keyword list F12 asks for.
-- [ ] **F27. Hand-rolled traversals remain.** `any_child_expr` and
+- [x] **F27. Hand-rolled traversals remain.** `any_child_expr` and
   `any_child_stmt` serve as a for-each with an always-`false` closure at 21
   sites (a `for_each_child_*` is missing). Twelve files still walk children
   with their own per-node-kind handling:
@@ -862,7 +862,14 @@ through `check-project`.
   F24 is the kind of miss this produces. Each becomes a `Visitor` that
   overrides only what it special-cases. Comments renamed mechanically still
   describe the old API ("`any_child_expr` deliberately returns no
-  children", "the generic `Vec<&Expr>` shape"). (`167ff73d`)
+  children", "the generic `Vec<&Expr>` shape"). (`167ff73d`) Done in
+  `f25c642c`..`ce055dde`: each walker is a `Visitor` (`risky_tests.rs`
+  too, which missed assertions in callbacks); the property-initialization
+  dataflow keeps its flow-sensitive shape and iterates children with the
+  new `for_each_child_expr`. Along the way, dead state went (the
+  phpstan-api parameter and property type tables, the promotion walk's
+  label), and calls and `new` in the purity walks, the pure-call and
+  include-guard checks resolve their names.
 - [x] **F28. Minor syntax and walker gaps.** Done across `474920e5`..`fcdd7f0a`,
   the enum-body member with F16. `NodeId::SYNTHETIC` stays shared: it is
   the sentinel no side table stores, so nothing can conflate it. An
