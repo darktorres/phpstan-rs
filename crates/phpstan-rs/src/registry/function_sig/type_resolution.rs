@@ -111,7 +111,12 @@ fn reconcile_doc_with_native(
     // A conditional return type states its nullability per branch
     // (`($p is non-empty-array ? T : T|null)`), so a native `?` must not
     // be unioned onto every resolution of it.
-    let already_nullable = ty.as_conditional().is_some() || !ty.is_null().no();
+    // A template whose bound admits `null` can still be bound to a type
+    // that doesn't, so only a type that surely accepts `null` counts.
+    let already_nullable = ty.as_conditional().is_some()
+        || types::Relation::structural()
+            .is_super_type_of(&ty, &Type::null())
+            .yes();
     let ty = if native_is_nullable && !already_nullable {
         Type::union_of(vec![ty, Type::null()])
     } else {
