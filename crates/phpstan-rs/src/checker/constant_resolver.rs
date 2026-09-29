@@ -5,11 +5,10 @@
 //! configured type or the value's general type, never the literal.
 
 use rustc_hash::FxHashMap;
-use syntax::name_resolution::NameContext;
 use types::{self, Type};
 
 use crate::checker::predefined_constants::predefined_constant_type;
-use crate::registry::{Registry, resolve_names_in_type};
+use crate::registry::Registry;
 
 fn class_constant_key(class: &str, name: &str) -> String {
     format!(
@@ -30,7 +29,6 @@ impl ConstantResolver {
     /// `dynamicConstantNames` as `(name, type)` pairs, `type` unset for
     /// "the value's general type".
     pub fn new(entries: &[(String, Option<String>)]) -> ConstantResolver {
-        let ctx = NameContext::default();
         let dynamic = entries
             .iter()
             .map(|(name, ty)| {
@@ -39,9 +37,7 @@ impl ConstantResolver {
                     Some((class, constant)) => class_constant_key(class, constant),
                     None => name.to_string(),
                 };
-                let ty = ty
-                    .as_deref()
-                    .map(|t| resolve_names_in_type(types::parse_type_string(t), &ctx));
+                let ty = ty.as_deref().map(types::parse_type_string);
                 (key, ty)
             })
             .collect();

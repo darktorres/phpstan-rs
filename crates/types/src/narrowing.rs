@@ -64,12 +64,31 @@ impl Relation<'_> {
     /// (`Base` narrowed to a known `Child`) and nullable-narrowing
     /// (`?Foo` narrowed to `Foo`) cases both still resolve to a single
     /// class/interface exactly as before.
+    ///
+    /// A union narrows member by member: a member that can't be an object
+    /// fails the check and goes, the rest narrow on their own
+    /// (`array<int>|Traversable<mixed, int>` to `Traversable<mixed, int>`).
+    /// A member already an instance of `target` stays as it is, its
+    /// generic arguments included.
     pub fn narrow_to_instance(&self, current: &Type, target: &Type) -> Type {
-        if self.is_super_type_of(current, target).yes() {
-            return target.clone();
+        if let Type(Repr::Union(members)) | Type(Repr::BenevolentUnion(members)) = current {
+            let narrowed: Vec<Type> = members
+                .iter()
+                .filter(|m| !self.is_super_type_of(&Type::object_without_class(), m).no())
+                .map(|m| self.narrow_to_instance(m, target))
+                .filter(|m| !m.is_never())
+                .collect();
+            return if narrowed.is_empty() {
+                target.clone()
+            } else {
+                Type::union_of(narrowed)
+            };
         }
         if self.is_super_type_of(target, current).yes() {
             return current.clone();
+        }
+        if self.is_super_type_of(current, target).yes() {
+            return target.clone();
         }
         // A nullable `current` (`?Socket`, i.e. `Union([Object("Socket"),
         // Null])`) can never actually be `null` once a true `instanceof`
@@ -263,17 +282,17 @@ impl Type {
                 // `Traversable` (missing `rewind()`/`valid()`/`current()`)
                 // instead of narrowing to the only other structurally possible
                 // answer, `Iterator`.
-                Type(Repr::Object(name, _))
+                Type(Repr::Object(name, args))
                     if name == "Traversable"
                         && matches!(excluded, Type(Repr::Object(excl, _)) if excl == "IteratorAggregate") =>
                 {
-                    Type::object("Iterator".into(), Vec::new())
+                    Type::object("Iterator".into(), args.clone())
                 }
-                Type(Repr::Object(name, _))
+                Type(Repr::Object(name, args))
                     if name == "Traversable"
                         && matches!(excluded, Type(Repr::Object(excl, _)) if excl == "Iterator") =>
                 {
-                    Type::object("IteratorAggregate".into(), Vec::new())
+                    Type::object("IteratorAggregate".into(), args.clone())
                 }
                 // Plain `bool` is exactly the two-element set `{true, false}` -
                 // unlike the general "a type covering multiple distinct values

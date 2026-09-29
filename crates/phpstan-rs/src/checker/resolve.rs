@@ -355,16 +355,6 @@ impl<'a> Checker<'a> {
         }
     }
 
-    /// The "does this name actually resolve" primitive: `name` is a
-    /// real class/interface/trait/enum this checker's `Registry`
-    /// indexed, or `Traversable` (`iterable` desugars to
-    /// `array|Traversable`), so an `iterable` never gets flagged as an
-    /// unresolvable class.
-    /// `"class@anonymous"` is this project's fixed, literal synthetic
-    /// name for every anonymous class, deliberately never indexed into
-    /// the registry - without this exemption, a `self`/`static`-typed
-    /// return inside an anonymous class's own body would always read as
-    /// an unresolvable class.
     /// Whether a `class_exists()`-style guard in `locals` proved `name`
     /// declared.
     pub(crate) fn class_guarded(name: &str, locals: &Locals) -> bool {
@@ -374,9 +364,12 @@ impl<'a> Checker<'a> {
                 .contains(&name.trim_start_matches('\\').to_ascii_lowercase())
     }
 
+    /// Whether `name` is a class/interface/trait/enum the registry
+    /// indexed, or `"class@anonymous"`, the name every anonymous class
+    /// shares and the registry never indexes, so a `self`/`static`-typed
+    /// return inside one isn't read as an unresolvable class.
     pub(crate) fn class_name_exists(&self, name: &str) -> bool {
-        matches!(name, "Traversable" | "class@anonymous")
-            || self.registry.lookup_class(name).is_some()
+        name == "class@anonymous" || self.registry.lookup_class(name).is_some()
     }
 
     /// `ClassCaseSensitivityCheck`'s equivalent, covering every

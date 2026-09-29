@@ -30,12 +30,10 @@ impl Type {
     }
 }
 
-/// A bare `iterable`'s own two-member shape (`types::parse_type_string`
-/// always builds it as exactly `Union([Array(value), Object("Traversable",
-/// [])])` - see that function's own doc comment) - `Some(value)` when
-/// `members` is that exact shape, checked by content rather than
-/// positionally in case something upstream ever reorders a `Union`'s own
-/// members.
+/// The value type of `iterable`'s two-member shape (`Union([Array(value),
+/// Object("Traversable", [] or [key, value])])`, as `types::parse_type_string`
+/// builds it) when `members` is that shape, checked by content rather than
+/// position.
 fn iterable_union_value_type(members: &[Type]) -> Option<&Type> {
     if members.len() != 2 {
         return None;
@@ -44,10 +42,10 @@ fn iterable_union_value_type(members: &[Type]) -> Option<&Type> {
         Type(Repr::Array(_, inner)) => Some(inner.as_ref()),
         _ => None,
     })?;
-    let has_bare_traversable = members.iter().any(
-        |m| matches!(m, Type(Repr::Object(name, args)) if name == "Traversable" && args.is_empty()),
-    );
-    has_bare_traversable.then_some(array_inner)
+    let has_traversable = members.iter().any(|m| {
+        matches!(m, Type(Repr::Object(name, _)) if name.trim_start_matches('\\') == "Traversable")
+    });
+    has_traversable.then_some(array_inner)
 }
 
 /// Walks `ty` for every iterable-shaped member (`array`, the `iterable`

@@ -197,8 +197,7 @@ impl<'a> Checker<'a> {
 
     /// `suggested` as a type, with `self`/`static` bound to `class`.
     fn suggested_type(&self, suggested: &str, class_name: Option<&str>) -> Type {
-        let ty = types::parse_type_string(suggested)
-            .map_class_names(&mut |name| name.trim_start_matches('\\').into());
+        let ty = types::parse_type_string(suggested);
         match class_name {
             Some(class) => self.resolve_pseudo(&ty, class),
             None => ty,

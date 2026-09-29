@@ -17,7 +17,7 @@ fn collects_a_representative_nested_type_s_own_class_name_refs() {
     // A `Union`/`ClassString`/`ArrayShape` combination:
     // `class-string<Foo>|array{owner: Bar}`.
     let ctx = ctx_for("App");
-    let ty = types::parse_type_string("class-string<Foo>|array{owner: Bar}");
+    let ty = types::parse_written_type("class-string<Foo>|array{owner: Bar}");
     let mut out = Vec::new();
     collect_class_name_case_refs(&ty, &ctx, &mut out);
     assert_eq!(
@@ -30,33 +30,47 @@ fn collects_a_representative_nested_type_s_own_class_name_refs() {
 }
 
 #[test]
-fn skips_the_object_traversable_and_resource_sentinels() {
+fn skips_the_object_and_resource_keywords() {
     let ctx = ctx_for("App");
-    for sentinel in ["object", "Traversable", "resource"] {
-        let ty = types::parse_type_string(sentinel);
+    for keyword in ["object", "resource"] {
+        let ty = types::parse_written_type(keyword);
         let mut out = Vec::new();
         collect_class_name_case_refs(&ty, &ctx, &mut out);
         assert!(
             out.is_empty(),
-            "sentinel {sentinel} unexpectedly collected: {out:?}"
+            "keyword {keyword} unexpectedly collected: {out:?}"
         );
     }
 }
 
 #[test]
-fn recurses_into_a_traversables_own_generic_argument_without_collecting_traversable_itself() {
-    // Real shape: `bacon/bacon-qr-code`'s own `@return Traversable<Edge>`
-    // - a real, programmer-written PHPDoc tag, not this project's own
-    // internal `iterable`-desugaring synthetic use of `Traversable` -
-    // `Edge`'s own case/namespace-qualification must still be collected.
+fn iterable_names_the_global_traversable() {
+    let ty = resolve_names_in_type(types::parse_written_type("iterable"), &ctx_for("App"));
+    assert_eq!(ty, types::parse_type_string("array|Traversable"));
+}
+
+#[test]
+fn a_written_traversable_resolves_like_any_class_name() {
     let ctx = ctx_for("App");
-    let ty = Type::object(
-        "Traversable".into(),
-        vec![Type::object("Edge".into(), Vec::new())],
-    );
+    let ty = types::parse_written_type("Traversable<Edge>");
     let mut out = Vec::new();
     collect_class_name_case_refs(&ty, &ctx, &mut out);
-    assert_eq!(out, vec![(Name::from("Edge"), Name::from("App\\Edge"))]);
+    assert_eq!(
+        out,
+        vec![
+            (Name::from("Traversable"), Name::from("App\\Traversable")),
+            (Name::from("Edge"), Name::from("App\\Edge")),
+        ]
+    );
+}
+
+#[test]
+fn a_closure_signature_names_the_global_closure() {
+    let ty = resolve_names_in_type(
+        types::parse_written_type("Closure(Foo): void"),
+        &ctx_for("App"),
+    );
+    assert_eq!(ty, types::parse_type_string("Closure(App\\Foo): void"));
 }
 
 #[test]

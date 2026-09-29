@@ -1372,7 +1372,7 @@ impl ClassReflection {
                         let ty = resolve_names_in_type(ty, ctx);
                         substitute_type_aliases(ty, &type_aliases)
                     }
-                    None => resolve_names_in_type(infer_class_const_type(&cc.value), ctx),
+                    None => infer_class_const_type(&cc.value),
                 };
                 (
                     Name::from(&cc.name),
@@ -1384,7 +1384,7 @@ impl ClassReflection {
                         is_final: cc.is_final,
                         native_ty: native_const_type(cc),
                         has_phpdoc_type,
-                        value_ty: resolve_names_in_type(infer_class_const_type(&cc.value), ctx),
+                        value_ty: infer_class_const_type(&cc.value),
                         // `@internal` on this constant's own doc
                         // comment - see `PropertyReflection::is_internal`'s doc
                         // comment for the convention this mirrors.

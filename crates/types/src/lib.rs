@@ -50,7 +50,7 @@ pub use late::ClassConstants;
 pub use narrowing::comparison_narrowed_bounds;
 pub use numeric::{PhpNumber, numeric_value};
 pub use parse::{canonical_int_key, text_mentions_mixed};
-pub use parse::{native_type, parse_type_string};
+pub use parse::{native_type, parse_type_string, parse_written_type};
 pub(crate) use php_float_format::format_php_float;
 pub use php_version::{
     KNOWN_PHP_VERSIONS, PhpFeature, PhpVersion, PhpVersions, known_php_versions_where,

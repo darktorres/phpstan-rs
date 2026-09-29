@@ -2,7 +2,7 @@ use crate::registry::reflection_attribute::ReflectionAttribute;
 use rustc_hash::FxHashMap;
 use syntax::name::Name;
 
-use crate::registry::name_context::resolve_names_in_type;
+use crate::registry::name_context::{class_ref, resolve_names_in_type};
 use crate::registry::type_node::{mentions_mixed, parse_type_node};
 use phpdoc::docblock::{self, DocBlock};
 use phpdoc::grammar::TypeNode;
@@ -396,7 +396,7 @@ pub(crate) fn infer_const_type(value: &syntax::ast::Expr) -> Type {
 pub(crate) fn infer_class_const_type(value: &syntax::ast::Expr) -> Type {
     infer_const_type_with(value, &|class, name| {
         Some(Type::class_constant(
-            types::parse_type_string(class),
+            types::parse_type_string(&class_ref(class)),
             name.into(),
         ))
     })
@@ -407,7 +407,7 @@ pub(crate) fn infer_class_const_type(value: &syntax::ast::Expr) -> Type {
 /// value becomes (`None` falls back to `Mixed`).
 fn infer_const_type_with(
     value: &syntax::ast::Expr,
-    class_const_ref: &dyn Fn(&str, &str) -> Option<Type>,
+    class_const_ref: &dyn Fn(&syntax::ast::QualifiedName, &str) -> Option<Type>,
 ) -> Type {
     syntax::stack::guard(|| {
         use syntax::ast::Literal;

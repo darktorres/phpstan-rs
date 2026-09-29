@@ -8,20 +8,10 @@ pub(crate) fn class_ref(name: &syntax::ast::QualifiedName) -> Name {
     Name::from(name.resolved_class().unwrap_or(&name.written))
 }
 
-/// `ty` with every class name resolved as `ctx` resolves it.
+/// `ty`, a type as written (`types::parse_written_type`), with every
+/// class name resolved as `ctx` resolves it.
 pub(crate) fn resolve_names_in_type(ty: Type, ctx: &NameContext) -> Type {
-    ty.map_class_names(&mut |name| resolve_class_name(name, ctx))
-}
-
-/// `name` as `ctx` resolves it. `Traversable` stays as it is: it is
-/// also the synthetic `iterable` desugars to, never a name to resolve,
-/// though a written `Traversable<Edge>`'s arguments still are.
-fn resolve_class_name(name: &types::Name, ctx: &NameContext) -> types::Name {
-    if name == "Traversable" {
-        name.clone()
-    } else {
-        ctx.resolve(name).into()
-    }
+    ty.map_class_names(&mut |name| ctx.resolve(name).into())
 }
 
 /// Each class name `resolve_names_in_type` resolves in `ty`, as
@@ -33,10 +23,8 @@ pub(crate) fn collect_class_name_case_refs(
     out: &mut Vec<(Name, Name)>,
 ) {
     ty.map_class_names(&mut |name| {
-        let resolved = resolve_class_name(name, ctx);
-        if name != "Traversable" {
-            out.push((Name::from(name), Name::from(&resolved)));
-        }
+        let resolved = Name::from(ctx.resolve(name));
+        out.push((Name::from(name), resolved.clone()));
         resolved
     });
 }

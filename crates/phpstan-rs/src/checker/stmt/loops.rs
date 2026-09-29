@@ -451,30 +451,10 @@ impl<'a> Checker<'a> {
         }
     }
 
-    #[allow(clippy::too_many_arguments)]
-    /// `array_element_type`/`array_key_type`'s own parallel case for
-    /// an object-shaped `foreach` subject - `Traversable`, `Iterator`,
-    /// `Generator` (a real `Iterator` descendant), or
-    /// `IteratorAggregate`. Returns `(key type, value type)`. Deliberately
-    /// not folded into `array_element_type`/`array_key_type` themselves
-    /// (both plain free functions, no registry access), since every
-    /// other caller of those two never has an object subject.
-    ///
-    /// Targets `Iterator`/`IteratorAggregate` directly rather than their
-    /// common ancestor `Traversable`: `Traversable`'s own phpstorm-stubs
-    /// declaration has no real `@template` tag, only a
-    /// `@template-extends iterable<TKey, TValue>` referencing the
-    /// `iterable` *pseudo*-type (which desugars to `array|Traversable`
-    /// before any template attaches), so
-    /// `Registry::class_template_bindings(_, _, "Traversable")` would
-    /// always return an empty map. `Iterator`/`IteratorAggregate` both
-    /// carry real, functional `@template TKey`/`@template-covariant
-    /// TValue` tags, and every real, concrete `Traversable` implementor
-    /// is required by the PHP engine to implement one of the two
-    /// (`Traversable` can't be implemented directly), so this covers
-    /// every concrete case; a variable statically typed as the bare
-    /// `Traversable` interface itself is the one remaining gap, falling
-    /// back to `None`/`Mixed`.
+    /// The `(key, value)` types iterating `ty` gives: an array's own, a
+    /// `Traversable`'s template arguments (every `Iterator`, `Generator`
+    /// and generic `Traversable` included), each member's joined for a
+    /// union; `None` when some member's aren't known.
     ///
     /// `IteratorAggregate` resolves through its own `getIterator()`'s
     /// declared return type first (real, common shape: `getIterator():
@@ -506,6 +486,9 @@ impl<'a> Checker<'a> {
                         .unwrap_or(Type::mixed()),
                 ));
             }
+            if let Some(value) = ty.array_value_type() {
+                return Some((ty.array_key_type().unwrap_or(Type::mixed()), value));
+            }
             let (name, args) = ty.as_object()?;
             if self.registry.is_subclass_of(name, "IteratorAggregate") {
                 let agg_bindings =
@@ -519,6 +502,8 @@ impl<'a> Checker<'a> {
                         declared.as_object().is_some_and(|(inner, _)| inner == name);
                     if !recurses_into_self
                         && let Some(result) = self.iterable_element_type(&declared)
+                        && (agg_bindings.is_empty()
+                            || !(result.0.is_mixed() && result.1.is_mixed()))
                     {
                         return Some(result);
                     }
@@ -532,7 +517,7 @@ impl<'a> Checker<'a> {
             }
             let bindings = self
                 .registry
-                .class_template_bindings(name, args, "Iterator");
+                .class_template_bindings(name, args, "Traversable");
             if bindings.is_empty() {
                 return None;
             }

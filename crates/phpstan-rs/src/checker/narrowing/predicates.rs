@@ -356,15 +356,7 @@ pub(crate) fn narrowing_type_for_predicate(name: &str) -> Option<Type> {
             Type::array(Type::unknown_array_key(), Type::mixed()),
             Type::object("Countable".into(), Vec::new()),
         ])),
-        // Real PHP's own native `iterable` type hint, defined
-        // as exactly `array|Traversable` - the same target `types::
-        // parse_type_string`'s own dedicated `"iterable"` arm resolves
-        // the native type hint to, kept in sync deliberately (both are
-        // "what does `iterable` actually mean" in one place each).
-        "is_iterable" => Some(Type::union_of(vec![
-            Type::array(Type::unknown_array_key(), Type::mixed()),
-            Type::object("Traversable".into(), Vec::new()),
-        ])),
+        "is_iterable" => Some(types::parse_type_string("iterable")),
         "is_null" => Some(Type::null()),
         "is_object" => Some(Type::object_without_class()),
         "is_callable" => Some(Type::callable(None)),

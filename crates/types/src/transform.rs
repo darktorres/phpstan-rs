@@ -56,26 +56,13 @@ impl Type {
 
     /// This type with each object's class renamed by `rename`, at any
     /// depth: generic arguments, and callable signatures with their
-    /// templates' bounds and defaults. The `Closure` of a `Closure(...)`
-    /// shape is PHP's own and keeps its name.
+    /// templates' bounds and defaults.
     pub fn map_class_names(&self, rename: &mut dyn FnMut(&Name) -> Name) -> Type {
         syntax::stack::guard(|| match self {
             Type(Repr::Object(name, args)) => Type::object(
                 rename(name),
                 args.iter().map(|a| a.map_class_names(rename)).collect(),
             ),
-            Type(Repr::Intersection(members))
-                if matches!(
-                    members.as_slice(),
-                    [Type(Repr::Object(name, args)), Type(Repr::Callable(Some(_)))]
-                        if name == "Closure" && args.is_empty()
-                ) =>
-            {
-                Type(Repr::Intersection(vec![
-                    members[0].clone(),
-                    members[1].map_class_names(rename),
-                ]))
-            }
             Type(Repr::Callable(Some(sig))) => {
                 let mut map = |t: &Type| t.map_class_names(rename);
                 Type::callable(Some(Arc::new(

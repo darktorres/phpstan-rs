@@ -81,17 +81,41 @@ fn intersection_parses_flat() {
 }
 
 #[test]
-fn a_leading_backslash_is_preserved_by_the_bare_parser() {
-    // parse_type_string alone has no namespace context - it's not this
-    // layer's job to decide what an absolute reference resolves to,
-    // only to preserve the fact that it *is* absolute for
-    // registry::resolve_names_in_type to act on later. Stripping the
-    // backslash here would silently mis-qualify every absolute
-    // reference as if it were relative - see registry.rs's
-    // `a_leading_backslash_in_a_native_type_hint_is_not_re_namespaced`.
+fn a_written_type_keeps_a_leading_backslash() {
+    // Its file's namespace resolves a relative name, never an absolute one.
     assert_eq!(
-        parse_type_string("\\App\\Foo"),
-        Type::object(("\\App\\Foo".to_string()).into(), Vec::new())
+        parse_written_type("\\App\\Foo"),
+        Type::object("\\App\\Foo".into(), Vec::new())
+    );
+}
+
+#[test]
+fn a_type_string_resolves_in_the_global_namespace() {
+    assert_eq!(
+        parse_type_string("\\App\\Foo|App\\Bar"),
+        parse_type_string("App\\Foo|App\\Bar")
+    );
+}
+
+#[test]
+fn the_classes_the_syntax_names_itself_are_written_fully_qualified() {
+    assert_eq!(
+        parse_written_type("iterable"),
+        Type(Repr::Union(vec![
+            Type::array(Type::unknown_array_key(), Type::mixed()),
+            Type::object("\\Traversable".into(), Vec::new()),
+        ]))
+    );
+    assert_eq!(
+        parse_written_type("Closure(): void"),
+        Type(Repr::Intersection(vec![
+            Type::object("\\Closure".into(), Vec::new()),
+            Type::callable(Some(Arc::new(CallableSig {
+                params: Vec::new(),
+                return_type: Box::new(Type::void()),
+                templates: Vec::new(),
+            }))),
+        ]))
     );
 }
 

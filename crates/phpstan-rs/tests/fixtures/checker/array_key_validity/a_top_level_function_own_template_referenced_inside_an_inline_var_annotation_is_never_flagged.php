@@ -13,7 +13,7 @@
                 foreach ($values as $value) {
                     $key = $keyFunc($value);
                     /** @var Tk $key */
-                    $result[$key] = $value;
+                    $result[$key][] = $value;
                 }
                 return $result;
             }

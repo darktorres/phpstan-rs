@@ -5,13 +5,25 @@ use crate::{
     Repr, Shape, ShapeField, ShapeKey, Type, late,
 };
 
-/// Parses one of our parser's raw type-hint strings (`"?string"`,
-/// `"int|string"`, `"\App\Foo"`, `"Countable&Iterator"`, or a PHPDoc type
-/// like `"array<int, User>"` / `"array{name: string, age?: int}"`) into a
-/// `Type`. Does not handle mixed union+intersection (DNF types) or
-/// parentheses - PHPStan's own stub/native syntax rarely needs them outside
-/// advanced generic bounds.
+/// The type a type string (`"?string"`, `"int|string"`, `"\App\Foo"`,
+/// `"Countable&Iterator"`, or a PHPDoc type like `"array<int, User>"` /
+/// `"array{name: string, age?: int}"`) denotes, its class names resolved
+/// in the global namespace.
 pub fn parse_type_string(raw: &str) -> Type {
+    parse_written_type(raw).map_class_names(&mut |name| match name.strip_prefix('\\') {
+        Some(absolute) => absolute.into(),
+        None => name.clone(),
+    })
+}
+
+/// The type a type string denotes with its class names as written, a
+/// leading `\` kept: the class names a PHPDoc type names, still to be
+/// resolved in its file's namespace and imports. A class this syntax
+/// names itself (`iterable`'s `Traversable`, `Closure(...)`'s `Closure`)
+/// is written fully qualified. Does not handle mixed union+intersection
+/// (DNF types) or parentheses - PHPStan's own stub/native syntax rarely
+/// needs them outside advanced generic bounds.
+pub fn parse_written_type(raw: &str) -> Type {
     syntax::stack::guard(|| {
         let mut s = raw.trim();
         let nullable = s.starts_with('?');
@@ -131,7 +143,7 @@ fn try_parse_callable_shape(stripped: &str) -> Option<Type> {
             return None;
         }
         params.push(CallableParam {
-            ty: parse_type_string(text),
+            ty: parse_written_type(text),
             variadic,
             optional,
             by_ref,
@@ -139,7 +151,7 @@ fn try_parse_callable_shape(stripped: &str) -> Option<Type> {
     }
     let sig = CallableSig {
         params,
-        return_type: Box::new(parse_type_string(ret_text)),
+        return_type: Box::new(parse_written_type(ret_text)),
         templates,
     };
     let sig = mark_callable_templates(sig);
@@ -147,7 +159,10 @@ fn try_parse_callable_shape(stripped: &str) -> Option<Type> {
     // (PHPStan's `ClosureType`), stricter than `callable(...)`, which a
     // string or invokable object satisfies too.
     if matches!(keyword.as_str(), "closure" | "pure-closure") {
-        Some(Type::closure_literal(sig))
+        Some(Type(Repr::Intersection(vec![
+            Type::object("\\Closure".into(), Vec::new()),
+            Type::callable(Some(Arc::new(sig))),
+        ])))
     } else {
         Some(Type::callable(Some(Arc::new(sig))))
     }
@@ -204,7 +219,7 @@ fn parse_callable_template(raw: &str) -> Option<crate::TemplateParam> {
     let mut rest = raw[name_end..].trim();
     let mut default = None;
     if let Some(eq) = top_level_find(rest, "=") {
-        default = Some(Box::new(parse_type_string(rest[eq + 1..].trim())));
+        default = Some(Box::new(parse_written_type(rest[eq + 1..].trim())));
         rest = rest[..eq].trim();
     }
     if rest.starts_with("super ") {
@@ -216,7 +231,7 @@ fn parse_callable_template(raw: &str) -> Option<crate::TemplateParam> {
         .strip_prefix("of ")
         .or_else(|| rest.strip_prefix("as "))
     {
-        Some(b) => parse_type_string(b.trim()),
+        Some(b) => parse_written_type(b.trim()),
         None if rest.is_empty() => Type::mixed(),
         None => return None,
     };
@@ -340,8 +355,8 @@ fn try_parse_conditional_type(s: &str) -> Option<Type> {
     let [true_branch, false_branch] = c_parts.as_slice() else {
         return None;
     };
-    let if_true = parse_type_string(true_branch);
-    let if_false = parse_type_string(false_branch);
+    let if_true = parse_written_type(true_branch);
+    let if_false = parse_written_type(false_branch);
     // `$param is ...` resolves per call from the argument; any other
     // subject (`T is ...`) names a template, resolved when it's bound.
     let subject_raw = subject_raw.trim();
@@ -351,7 +366,7 @@ fn try_parse_conditional_type(s: &str) -> Option<Type> {
     };
     Some(Type(Repr::Conditional {
         subject,
-        target: Box::new(parse_type_string(target_raw)),
+        target: Box::new(parse_written_type(target_raw)),
         if_true: Box::new(if_true),
         if_false: Box::new(if_false),
         negated,
@@ -401,9 +416,12 @@ fn try_parse_array_shape(s: &str) -> Option<Type> {
             shape.unsealed = match split_generic_args(tail.trim()).1.as_slice() {
                 [value] => Some(Box::new((
                     Type::unknown_array_key(),
-                    parse_type_string(value),
+                    parse_written_type(value),
                 ))),
-                [key, value] => Some(Box::new((parse_type_string(key), parse_type_string(value)))),
+                [key, value] => Some(Box::new((
+                    parse_written_type(key),
+                    parse_written_type(value),
+                ))),
                 _ => default,
             };
             continue;
@@ -442,7 +460,7 @@ fn try_parse_array_shape(s: &str) -> Option<Type> {
                 }
                 shape.set(ShapeField::new(
                     key,
-                    parse_type_string(type_part.trim()),
+                    parse_written_type(type_part.trim()),
                     optional,
                 ));
             }
@@ -453,7 +471,7 @@ fn try_parse_array_shape(s: &str) -> Option<Type> {
                     return Some(Type::never());
                 };
                 let key = ShapeKey::Int(n);
-                shape.set(ShapeField::new(key, parse_type_string(field_str), false));
+                shape.set(ShapeField::new(key, parse_written_type(field_str), false));
             }
         }
     }
@@ -497,7 +515,7 @@ fn try_parse_object_shape(s: &str) -> Option<Type> {
         let key = ShapeKey::from_name(strip_shape_key_quotes(key));
         fields.push(ShapeField::new(
             key,
-            parse_type_string(type_part.trim()),
+            parse_written_type(type_part.trim()),
             optional,
         ));
     }
@@ -638,7 +656,7 @@ fn parse_type_atom(s: &str) -> Type {
         if let Some(conditional) = try_parse_conditional_type(inner) {
             return conditional;
         }
-        return parse_type_string(inner);
+        return parse_written_type(inner);
     }
 
     // PHPStan/Psalm's callable-shape syntax: `Closure(ParamType, ...):
@@ -741,7 +759,7 @@ fn parse_type_atom(s: &str) -> Type {
         if !key_part.is_empty() {
             let base_part = s[..open].trim();
             let key = strip_shape_key_quotes(key_part);
-            let base_ty = parse_type_string(base_part);
+            let base_ty = parse_written_type(base_part);
             let key_ty = ShapeKey::from_name(key).to_type();
             let mut ty = match late::offset_access(&base_ty, &key_ty) {
                 Some(ty) => ty,
@@ -770,7 +788,7 @@ fn parse_type_atom(s: &str) -> Type {
     if array_depth > 0
         && let Some(inner) = s.strip_prefix('(').and_then(|s| s.strip_suffix(')'))
     {
-        let mut ty = parse_type_string(inner);
+        let mut ty = parse_written_type(inner);
         for _ in 0..array_depth {
             ty = Type::array(Type::benevolent_array_key(), ty);
         }
@@ -788,7 +806,7 @@ fn parse_type_atom(s: &str) -> Type {
         // (`Registry::resolve_deferred_value_of`/
         // `resolve_deferred_value_of_now`). `Foo::class` is just a
         // class-string.
-        let class_ty = parse_type_string(class_part);
+        let class_ty = parse_written_type(class_part);
         if const_part.eq_ignore_ascii_case("class") {
             Type::class_string(class_ty)
         } else {
@@ -968,7 +986,7 @@ fn parse_type_keyword_or_class(bare: &str, original: &str, generic_args: &[&str]
             let unit_enum = Type::object("UnitEnum".into(), Vec::new());
             match generic_args {
                 [single] => Type::class_string(Type(Repr::Intersection(vec![
-                    parse_type_string(single),
+                    parse_written_type(single),
                     unit_enum,
                 ]))),
                 _ => Type::class_string(unit_enum),
@@ -991,7 +1009,7 @@ fn parse_type_keyword_or_class(bare: &str, original: &str, generic_args: &[&str]
         // `String`.
         "class-string" => match generic_args {
             [] => Type::string(),
-            [single] => Type::class_string(parse_type_string(single)),
+            [single] => Type::class_string(parse_written_type(single)),
             _ => Type::string(),
         },
         "bool" | "boolean" => Type::bool(),
@@ -1032,7 +1050,7 @@ fn parse_type_keyword_or_class(bare: &str, original: &str, generic_args: &[&str]
         // so it stays a `Repr::ValueOf`, resolved later by
         // `Registry::resolve_deferred_value_of`.
         "value-of" => match generic_args {
-            [single] => match parse_type_string(single) {
+            [single] => match parse_written_type(single) {
                 ty @ (Type(Repr::Array(..)) | Type(Repr::ArrayShape(_))) => {
                     late::value_of(&ty).unwrap_or(Type::mixed())
                 }
@@ -1047,7 +1065,7 @@ fn parse_type_keyword_or_class(bare: &str, original: &str, generic_args: &[&str]
             _ => Type::mixed(),
         },
         "key-of" => match generic_args {
-            [single] => match parse_type_string(single) {
+            [single] => match parse_written_type(single) {
                 ty @ (Type(Repr::Array(..)) | Type(Repr::ArrayShape(_))) => {
                     late::key_of(&ty).unwrap_or(Type::mixed())
                 }
@@ -1089,17 +1107,17 @@ fn parse_type_keyword_or_class(bare: &str, original: &str, generic_args: &[&str]
             0 => Type::array_of(Type::mixed()),
             1 if bare == "array" => Type::array(
                 Type::benevolent_array_key(),
-                parse_type_string(generic_args[0]),
+                parse_written_type(generic_args[0]),
             ),
-            1 => Type::array_of(parse_type_string(generic_args[0])),
+            1 => Type::array_of(parse_written_type(generic_args[0])),
             _ => {
-                let key_ty = parse_type_string(generic_args[0]);
+                let key_ty = parse_written_type(generic_args[0]);
                 let key_ty = if bare == "class-string-map" {
                     Type::class_string(key_ty)
                 } else {
                     key_ty
                 };
-                Type::array(key_ty, parse_type_string(generic_args[1]))
+                Type::array(key_ty, parse_written_type(generic_args[1]))
             }
         },
         // `list`/`non-empty-array`/`non-empty-list` are real
@@ -1109,8 +1127,8 @@ fn parse_type_keyword_or_class(bare: &str, original: &str, generic_args: &[&str]
         "list" | "non-empty-array" | "non-empty-list" => {
             let elem_ty = match generic_args.len() {
                 0 => Type::mixed(),
-                1 => parse_type_string(generic_args[0]),
-                _ => parse_type_string(generic_args[1]),
+                1 => parse_written_type(generic_args[0]),
+                _ => parse_written_type(generic_args[1]),
             };
             // `list`/`non-empty-list` genuinely can only ever have
             // sequential int keys - a real precision win over the
@@ -1121,7 +1139,7 @@ fn parse_type_keyword_or_class(bare: &str, original: &str, generic_args: &[&str]
             // in favor of the unknown default.
             let key_ty = if bare == "non-empty-array" {
                 match generic_args.len() {
-                    2 => parse_type_string(generic_args[0]),
+                    2 => parse_written_type(generic_args[0]),
                     _ => Type::unknown_array_key(),
                 }
             } else {
@@ -1143,14 +1161,19 @@ fn parse_type_keyword_or_class(bare: &str, original: &str, generic_args: &[&str]
         // Generator/Iterator/IteratorAggregate passed to an
         // `iterable`-hinted parameter.
         "iterable" => {
-            let element_ty = match generic_args.len() {
-                0 => Type::mixed(),
-                1 => parse_type_string(generic_args[0]),
-                _ => parse_type_string(generic_args[1]),
+            let (key_ty, element_ty) = match generic_args {
+                [] => (Type::mixed(), Type::mixed()),
+                [value] => (Type::mixed(), parse_written_type(value)),
+                [key, value, ..] => (parse_written_type(key), parse_written_type(value)),
+            };
+            let traversable_args = if generic_args.is_empty() {
+                Vec::new()
+            } else {
+                vec![key_ty, element_ty.clone()]
             };
             Type(Repr::Union(vec![
                 Type::array(Type::unknown_array_key(), element_ty),
-                Type::object("Traversable".into(), Vec::new()),
+                Type::object("\\Traversable".into(), traversable_args),
             ]))
         }
         // `Closure` is a concrete class only a real closure object
@@ -1178,7 +1201,7 @@ fn parse_type_keyword_or_class(bare: &str, original: &str, generic_args: &[&str]
         }
         "callable" => Type::callable(None),
         // `self<T>`/`static<T>`: the current class with those arguments.
-        "self" => Type::self_ref(generic_args.iter().map(|a| parse_type_string(a)).collect()),
+        "self" => Type::self_ref(generic_args.iter().map(|a| parse_written_type(a)).collect()),
         "parent" => Type::parent_ref(),
         // `@return $this` is a real, PHPStan-documented PHPDoc
         // convention - not a variable reference despite the `$` sigil
@@ -1186,7 +1209,7 @@ fn parse_type_keyword_or_class(bare: &str, original: &str, generic_args: &[&str]
         // methods).
         "$this" if generic_args.is_empty() => Type::this(),
         "static" | "$this" => {
-            Type::static_ref(generic_args.iter().map(|a| parse_type_string(a)).collect())
+            Type::static_ref(generic_args.iter().map(|a| parse_written_type(a)).collect())
         }
         "object" => Type::object_without_class(),
         // A user-defined generic class (`Collection<User>`): each type
@@ -1219,12 +1242,12 @@ fn parse_generic_arg(a: &str) -> Type {
         return Type::variance_arg(CallSiteVariance::Bivariant, Type(Repr::Mixed(false)));
     }
     if let Some(rest) = trimmed.strip_prefix("covariant ") {
-        return Type::variance_arg(CallSiteVariance::Covariant, parse_type_string(rest));
+        return Type::variance_arg(CallSiteVariance::Covariant, parse_written_type(rest));
     }
     if let Some(rest) = trimmed.strip_prefix("contravariant ") {
-        return Type::variance_arg(CallSiteVariance::Contravariant, parse_type_string(rest));
+        return Type::variance_arg(CallSiteVariance::Contravariant, parse_written_type(rest));
     }
-    parse_type_string(trimmed)
+    parse_written_type(trimmed)
 }
 
 /// True when `text` mentions the word `mixed` (case-insensitively, as a
