@@ -2,8 +2,9 @@
 
 Findings from reviewing the work done on the Stage B review
 (`STAGE_B_REVIEW.md`): every commit from its F23 fix (`041fcc46`) to
-`31d6c5a7`, and every item it marks done. Judged on runtime correctness
-and design, not parity with PHPStan. Each task names where the problem is,
+`31d6c5a7` and the three after it (`d4ae7678`, `5400b17b`, `96027afd`),
+and every item it marks done. Judged on runtime correctness and design,
+not parity with PHPStan. Each task names where the problem is,
 what is wrong, and what done looks like.
 
 The review reads every commit's diff in order, checks each done item's
@@ -199,6 +200,22 @@ through `check-project`.
   declares it or an `insteadof` picks one; the same rule for properties,
   where identical declarations are allowed.
 
+- [ ] **F35. Abstract-method and final-override checks compare method
+  names by case.** `abstract_methods()` and `final_methods()` are
+  case-sensitive sets.
+  - A false positive at level 0: `abstract function run()` implemented as
+    `RUN()` reports `class.abstractMethodNotImplemented` ("does not
+    implement abstract method(s): run"), though PHP runs it.
+  - A miss: `final function Foo()` overridden as `foo()` reports only
+    `method.nameCase`, not `method.parentMethodFinal`, where PHP fails
+    with "Cannot override final method". A `final __Construct` behaves the
+    same.
+
+  This was already the case before the fix window. The Stage B review's
+  F4 fixed unused private members, and its F14 made class and function
+  tables fold case; member sets were left out. Done: member-name sets and
+  lookups fold case as PHP does.
+
 ### Wrong types and missed reports (probed)
 
 - [ ] **F13. An array literal's positional key after an unknown key**
@@ -305,6 +322,15 @@ through `check-project`.
 
   Done: each is fixed or ledgered.
 
+- [ ] **F36. An argument outside its template's bound isn't reported.**
+  With `@template T of \Countable @param T $c`, `cnt(5)` gives no
+  `argument.type` at level 9, and returns `Countable`, where the
+  pre-window binary returned `5`. `@template T of int` with
+  `onlyInt('s')` isn't reported either. The Stage B review's F38 names
+  this ("an argument outside `T of Foo` binds anyway") and is marked done
+  without it. Done: an argument is checked against the bound of the
+  template its parameter names.
+
 ### Design
 
 - [ ] **F20. Nothing enforces the stack guard** (`041fcc46`). It is a
@@ -406,9 +432,124 @@ through `check-project`.
 
 ## The Stage B review's done items
 
-Each item `STAGE_B_REVIEW.md` marks done, checked against the commits it
-names and the code: `[x]` when the claim holds in full, `[ ]` with the
-finding that says what is missing.
+Checked against the commits each item names, the diffs read above, and
+probes. A `[ ]` marks an item whose claim doesn't hold in full; the
+finding names what is missing. V1 wasn't re-run here, since this review
+builds nothing.
+
+### Validation and Review 1
+
+- [x] **V1** (`a782b0d3`, `96027afd`): taken as recorded, not re-run.
+  The fixtures bless two findings: F6's `$this` expectation and F23's
+  lost operand coverage.
+- [x] **R1-1** to **R1-9** and **R1-L**. These predate the window; the
+  final state agrees:
+  - `failing_level` is the one level rule, with a template's bound split
+    by `4499b58d`;
+  - `equals_for_union` is gone;
+  - lists key on `int<0, max>`, and the fixture changes in `f9be84b3`
+    follow from it.
+
+### Review 2
+
+- [ ] **C1** (`f18bc022`). The union case is right. A lone member
+  outside the checked type now narrows to that type, not `never`: F4.
+- [x] **C2** (`637f1b67`).
+- [x] **C3** (`a5c24e13`).
+- [x] **C4** (`32929ce4`).
+- [x] **C5** (`1f4b45bf`). Only its doc is wrong about `'5 apples'`
+  (F34), and `binaryOp.invalid` ignores the version it adds (F32).
+- [x] **P1** (`b9ca6c05`, then `607a43b3`).
+- [ ] **P2**. The nested-call and nested-array figures hold. "A
+  20,000-term `.`/`+` chain 4 s" holds for variable chains only:
+  literal concatenation and `&&`/`||` chains are superlinear (F18).
+- [ ] **P3** (`25ee9d62`). The append is exact, but a next index that
+  equality ignores merges branches wrongly (F25).
+- [x] **P4** (`2f1e256a`).
+- [ ] **P5** (`b3412c22`). A method on a generic receiver keeps the
+  class's templates (F2).
+- [ ] **P6** (`67ed2a1d`). `mixed~S` survives a join with a member inside
+  `S` (F26).
+- [x] **P7** (`ea4d7175`).
+- [x] **P8** (`c78732bc`). Typing every settled type-check call also
+  turns F27's `is_resource` into a constant.
+- [x] **P9** (`d4ae7678`). The cross-file trait case was probed; the CPU
+  figures were not re-measured.
+- [x] **T1** to **T6** and **T8**.
+- [ ] **T7**. `union.rs` has a new fused doc from `637f1b67` (F24).
+- [x] **S1** to **S11**. No `"?"` sentinel and no `"class@anonymous"`
+  string match remain; `ExprKind::Variable` holds a `Name`.
+
+### Full review
+
+- [x] **F23** (`041fcc46`, `288f4fda`). No deep input crashes (67 deep
+  probes); the costs left are F18 and F20.
+- [x] **F29** (`e5db6811`).
+- [x] **F22** (`d816c5f7`).
+- [x] **F35** (`327da348`, `f9be84b3`).
+- [x] **F37** (`0fbd42f2`).
+- [ ] **F38** (`b274f947`). Every listed position binds, but an argument
+  outside the bound isn't reported (F36).
+- [x] **F39** (`97472c63`).
+- [x] **F41** (`04e500b3`).
+- [x] **F54** (`3f04ac3f`). The parse is right; the class expression goes
+  unchecked (F17).
+- [x] **F55** (`1c301f1b`).
+- [x] **F56** (`a62b2c77`).
+- [x] **F58** (`139709f2`).
+- [x] **F59** (`b895fa8d`). A top-level `try` is conditional (F22).
+- [x] **F60** (`89da4c25`). Loop widening drops non-empty (F19).
+- [x] **F62** (`48f02f39`).
+- [ ] **F63** (`22d4ff21`). A property's unresolvable type is still
+  declared and reported three ways (F12).
+- [x] **F64** (`7d08a968`).
+- [ ] **F65** (`b3412c22`): F2.
+- [x] **F42** (`516fc901`).
+- [x] **F1** (`b09b0cea`).
+- [ ] **F2** (`43349c1a`). The variable is declared in the true branch
+  only, but typed as the error type there (F5).
+- [x] **F3** (`6e274bf3`), **F4** (`8e4ef41e`), **F24** (`8a5ece52`),
+  **F30** (`ff36a896`), **F31** (`48b1f80f`), **F32** (`b5ffd642`).
+- [ ] **F33** (`8febbd1e`). There is one resolver, but a positional key
+  after an unknown one is wrong (F13).
+- [x] **F34** (`d41a83bf`).
+- [x] **F43** (`15b5b494`). Its fixture lost the string-operand cases
+  (F23).
+- [x] **F44** (`88effc4f`), **F46** (`2b1ce22b`), **F47** (`dedc1ad8`),
+  **F48** (`05fb20f6`), **F57** (`16dd8365`).
+- [x] **F5** to **F10** (`e06f470c`, `daa88e7c`, `1c0a6670`,
+  `f4128dec`).
+- [x] **F11** (`b224eb02`).
+- [ ] **F49** (`d89ea9e5`). `NAN === NAN` is reported always true (F11).
+- [ ] **F50** (`ac00409c`). Reaching a template's bound makes the
+  already-resolved bound resolve twice (F1).
+- [x] **F51**, **F52**.
+- [x] **F12** (`a70a5b42`). It is also where F1's second resolution
+  sits.
+- [x] **F13** (`d82888a8`). The use-site index it moved keeps F7.
+- [x] **F14** (`a0d1db44`, `5f84933b`). Member-name sets still compare
+  by case (F35).
+- [x] **F15** to **F20**.
+- [ ] **F25** (`11b428f4`). The error type comes from quiet reads too
+  (F5), and has no central rule (F21).
+- [x] **F26** (`bd7d7a89`). A native `\int` hint is read as a class
+  (F19).
+- [ ] **F27** (`f25c642c`..`ce055dde`). The use-site Visitor skips
+  attribute names (F8).
+- [x] **F28**. The `:` case is fixed; other bare-`yield` endings still
+  fail (F10).
+- [x] **F36** (`f50e2bd0` and the rest). `321d388c`'s iterable and
+  `IteratorAggregate` changes are F3 and F14.
+- [x] **F21**.
+- [ ] **F53** (`408caaf4`). 29 roadmap sub-phase codes remain (F24).
+
+### The Stage C review
+
+Since the Stage C review was written, `e06f470c` fixed its O1 (control
+characters print escaped), and `1cdfe80d` fixed its F5 (an enum's
+`@phpstan-type` and constant `@var` probe clean) and one bullet of its
+F13 (`from_enum_decl`'s doc: the function is gone). That ledger doesn't
+say so yet.
 
 ## Full review: coverage
 
@@ -571,6 +712,12 @@ read and its findings added above.
 - [x] `5547d2ce` perf: package ownership looks a file's ancestors up among...
 - [x] `1b7022ad` perf: a chain link's type is cached with the expression's...
 - [x] `31d6c5a7` style: the composer crate's lookup maps are FxHashMaps, as...
+- [x] `d4ae7678` perf: private property types are judged after the one
+  checking pass...
+- [x] `5400b17b` test: a dynamic member access on a nullable receiver
+  expects the possibly non-object...
+- [x] `96027afd` chore: the stub index regenerated - a float constant's
+  value prints the way PHP shows...
 
 ### Final state, module by module
 
