@@ -783,7 +783,7 @@ through `check-project`.
   control flow, the outline, and a pass editing the tree. The same commit
   fixes F12's function navigation in a namespaced file (a function name's
   resolution isn't a class name's).
-- [ ] **F14. Names leave the project's interner.** AST names are `Name`s
+- [x] **F14. Names leave the project's interner.** AST names are `Name`s
   from the project's `Interner`, but the registry re-interns them as
   `Arc<str>` through `syntax::intern::intern`, the process-global interner
   (93 call sites in `registry/`), as do variable names in the checker and
@@ -791,7 +791,12 @@ through `check-project`.
   language-server session they never are. Registry keys become `Name`
   (keyed by `lower()` where PHP is case-insensitive). The parser also
   interns each name twice (`interner.str`, then `interner.name`).
-  (`481b224b`, `b7c04ec9`)
+  (`481b224b`, `b7c04ec9`) Done in `a0d1db44` and `5f84933b`: interners
+  hold their entries weakly, so names nothing uses are freed whichever
+  interner made them; the parser interns each name once; class and
+  function tables are one case-folding `NameTable` keyed by `Name`; names
+  are `Name` across the registry, checker and types, and the global
+  `Arc<str>` interner is gone.
 - [x] **F15. "Is this the constructor" is written 12 times.**
   `name.eq_ignore_ascii_case("__construct")` in `checker/oop.rs`,
   `unused.rs`, `generics/variance.rs`, `oop/property_hooks.rs`,
@@ -822,11 +827,12 @@ through `check-project`.
   instead of one peel helper. `unwrap_grouping` also peels `@` but keeps
   the grouping-only name. Nothing reads `ErrorSuppress`. (`5d93a01c`)
   Done in `57b7f6e7`; `ErrorSuppress` stays a node, as `banned.rs` reports `@`.
-- [ ] **F19. Variable names have two representations.** `StaticVar` and
+- [x] **F19. Variable names have two representations.** `StaticVar` and
   `GlobalVar::Name` are `Ident`s (a `Name`), while `ExprKind::Variable` is
   `Arc<str>`, so call sites convert through the global interner. Extends
   S4. `strict_rules.rs` still gives a static variable the statement's span.
-  (`b7c04ec9`)
+  (`b7c04ec9`) Done in `5f84933b` (variables are `Name` in tokens and the
+  AST) and the next commit (the static variable's own span).
 - [x] **F20. `exit` records its form by span width.** (`b09b0cea`) `banned.rs` tells a
   bare `exit` from `exit()` by measuring the span; the node doesn't record
   it. (`f9757b0a`)
