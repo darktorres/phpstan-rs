@@ -299,11 +299,20 @@ impl ConditionalSubject {
     }
 }
 
+/// Whether `a` and `b` hold the same members, in any order: a union or
+/// an intersection is a set of types, `int|string` the same as
+/// `string|int`.
+fn same_members(a: &[Type], b: &[Type]) -> bool {
+    let count = |members: &[Type], m: &Type| members.iter().filter(|x| *x == m).count();
+    a.len() == b.len() && a.iter().all(|m| count(a, m) == count(b, m))
+}
+
 /// Deliberately not derived: `Mixed`'s own `bool` is ignored entirely
 /// (matching real PHPStan's own `MixedType::equals()`, see `Repr::Mixed`'s
 /// doc comment), and two NaN float literals are equal (PHPStan's
-/// `ConstantFloatType::equals()`), which makes the relation an `Eq`.
-/// `Hash` below agrees with it.
+/// `ConstantFloatType::equals()`), which makes the relation an `Eq`; a
+/// union's or an intersection's members compare in any order. `Hash`
+/// below agrees with it.
 impl PartialEq for Type {
     fn eq(&self, other: &Self) -> bool {
         syntax::stack::guard(|| match (self, other) {
@@ -340,9 +349,9 @@ impl PartialEq for Type {
             (Type(Repr::This), Type(Repr::This)) => true,
             (Type(Repr::TemplateParam(a)), Type(Repr::TemplateParam(b))) => a == b,
             (Type(Repr::VarianceArg(av, a)), Type(Repr::VarianceArg(bv, b))) => av == bv && a == b,
-            (Type(Repr::Union(a)), Type(Repr::Union(b))) => a == b,
-            (Type(Repr::BenevolentUnion(a)), Type(Repr::BenevolentUnion(b))) => a == b,
-            (Type(Repr::Intersection(a)), Type(Repr::Intersection(b))) => a == b,
+            (Type(Repr::Union(a)), Type(Repr::Union(b)))
+            | (Type(Repr::BenevolentUnion(a)), Type(Repr::BenevolentUnion(b)))
+            | (Type(Repr::Intersection(a)), Type(Repr::Intersection(b))) => same_members(a, b),
             (Type(Repr::IntRange(amin, amax)), Type(Repr::IntRange(bmin, bmax))) => {
                 amin == bmin && amax == bmax
             }
@@ -492,11 +501,21 @@ impl Hash for Type {
                     case.hash(state);
                 }
                 Type(Repr::Callable(sig)) => sig.hash(state),
-                Type(Repr::SelfRef(args))
-                | Type(Repr::StaticRef(args))
-                | Type(Repr::Union(args))
-                | Type(Repr::BenevolentUnion(args))
-                | Type(Repr::Intersection(args)) => args.hash(state),
+                Type(Repr::SelfRef(args)) | Type(Repr::StaticRef(args)) => args.hash(state),
+                Type(Repr::Union(members))
+                | Type(Repr::BenevolentUnion(members))
+                | Type(Repr::Intersection(members)) => {
+                    members.len().hash(state);
+                    members
+                        .iter()
+                        .map(|m| {
+                            let mut hasher = rustc_hash::FxHasher::default();
+                            m.hash(&mut hasher);
+                            hasher.finish()
+                        })
+                        .fold(0u64, u64::wrapping_add)
+                        .hash(state);
+                }
                 Type(Repr::TemplateParam(tp)) => tp.hash(state),
                 Type(Repr::VarianceArg(variance, inner)) => {
                     variance.hash(state);

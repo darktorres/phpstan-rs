@@ -79,10 +79,32 @@ fn equal_types_hash_alike() {
             Type::array(Type(Repr::Int), Type(Repr::Mixed(true))),
             Type::array(Type(Repr::Int), Type(Repr::Mixed(false))),
         ),
+        (
+            Type(Repr::Union(vec![Type::int(), Type::string()])),
+            Type(Repr::Union(vec![Type::string(), Type::int()])),
+        ),
+        (
+            Type(Repr::Intersection(vec![
+                Type::object("A".into(), Vec::new()),
+                Type::object("B".into(), Vec::new()),
+            ])),
+            Type(Repr::Intersection(vec![
+                Type::object("B".into(), Vec::new()),
+                Type::object("A".into(), Vec::new()),
+            ])),
+        ),
     ];
     for (a, b) in pairs {
         assert_eq!(a, b);
         assert_eq!(hash(&a), hash(&b), "{a:?} and {b:?}");
     }
     assert_ne!(Type::int_literal(1), Type::int_literal(2));
+    assert_ne!(
+        Type(Repr::Union(vec![Type::int(), Type::int(), Type::string()])),
+        Type(Repr::Union(vec![
+            Type::int(),
+            Type::string(),
+            Type::string()
+        ])),
+    );
 }
