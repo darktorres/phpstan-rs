@@ -657,21 +657,21 @@ through `check-project`.
 
 ### Wrong types (from reading)
 
-- [ ] **F5. Non-UTF-8 array keys collide.** `ShapeKey::Str` holds a
+- [x] **F5. Non-UTF-8 array keys collide.** `ShapeKey::Str` holds a
   `String`, and keys from string literals go through `to_str_lossy`
   (`shape.rs` `from_type`, `checker/assignment.rs`,
   `checker/expr/array_ops.rs`, `coercion.rs` `to_array_key`), so `"\xff"`
   and `"\xfe"` become one `U+FFFD` key where PHP has two. `ShapeKey::Str`
-  holds a `PhpString`. (`3af64337`)
-- [ ] **F6. A constant's bytes round-trip through lossy text.**
+  holds a `PhpString`. (`3af64337`) Done in `e06f470c`.
+- [x] **F6. A constant's bytes round-trip through lossy text.**
   `registry/function_sig.rs` `infer_const_type_with` builds
   `Type::string_literal(s.to_string().into())`; use `s.clone()`.
-  (`3af64337`)
-- [ ] **F7. A string literal's type text is ambiguous.** `display.rs`
+  (`3af64337`) Done in `e06f470c`.
+- [x] **F7. A string literal's type text is ambiguous.** `display.rs`
   prints `'{s}'` lossily and unescaped: `"\xff"` and `"\xfe"` both print
   `'�'` (the `string_literals_are_bytes` fixture shows it), and `it's`
   prints `'it's'`. Escape `'` and `\`, and show non-UTF-8 bytes as `\xNN`
-  in a double-quoted form. (`3af64337`)
+  in a double-quoted form. (`3af64337`) Done in `e06f470c`.
 - [ ] **F8. `mb_*` case functions fold ASCII only.**
   `infer_case_function_call` (`checker/expr/builtin_calls.rs`) folds a
   literal for `mb_strtolower`/`mb_strtoupper`/`mb_lcfirst`/`mb_ucfirst`/
