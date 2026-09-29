@@ -467,13 +467,13 @@ through `check-project`.
   comment says PHP has no such form; PHP 8 does. (lexer final state,
   probed)
 
-- [ ] **F58. The next array key after a negative key is version-blind.**
+- [x] **F58. The next array key after a negative key is version-blind.**
   Since PHP 8.3 an element appended after a negative key takes the next
   integer (`[-5 => 'a', 'b']` has key `-4`); before 8.3 it took `0`.
   `NextArrayIndex` (`shape.rs`) always clamps to `0`, so on 8.3+ the
   literal's shape has the wrong key. The rule follows the configured PHP
   versions, with the key unknown when the range spans 8.3. (found fixing
-  F29, probed with php 8.5)
+  F29, probed with php 8.5) Done in `139709f2`.
 - [ ] **F59. Declarations inside a function body are never registered.**
   `function outer() { function inner(): int {} }` then `inner()` is
   `function.notFound`, and `class Inner {}` in a function body is
