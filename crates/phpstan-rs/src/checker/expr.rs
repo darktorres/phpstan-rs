@@ -181,6 +181,102 @@ impl<'a> Checker<'a> {
         }
     }
 
+    /// After a call that may change an object's properties - one not
+    /// proven pure, wherever it can be overridden - what is known about the
+    /// properties of each object the call is given is stale: the receiver
+    /// of a method call, `$this` forwarded to a non-static method through
+    /// `self::`, `static::` or `parent::`, and every object argument. What
+    /// is known about each object itself stays. A builtin function
+    /// changes no argument's properties but through a by-ref parameter,
+    /// which its call handles.
+    fn forget_members_a_call_may_change(&self, e: &Expr, locals: &mut Locals) {
+        let (receiver, args, pure) = match &e.kind {
+            ExprKind::MethodCall(recv, method, args, _) => {
+                let recv_ty = self.infer_expr(recv, locals);
+                let pure = recv_ty
+                    .as_object()
+                    .is_some_and(|(class, _)| self.method_is_surely_pure(class, method));
+                (narrowing_key(recv), args, pure)
+            }
+            ExprKind::StaticCall(target, method, args) => {
+                let class = self.infer_static_target_class(target, locals);
+                let forwards_this = matches!(target, StaticTarget::Name(name)
+                    if ["self", "static", "parent"]
+                        .iter()
+                        .any(|word| name.written.eq_ignore_ascii_case(word)))
+                    && !class.as_deref().is_some_and(|class| self.method_is_static(class, method));
+                let pure = class
+                    .as_deref()
+                    .is_some_and(|class| self.method_is_surely_pure(class, method));
+                (forwards_this.then(|| "this".to_string()), args, pure)
+            }
+            ExprKind::Call(callee, args) => {
+                let pure = match &callee.kind {
+                    ExprKind::Name(name) => self
+                        .registry
+                        .resolve_function(name)
+                        .is_some_and(|(_, sig)| sig.is_stub() || sig.is_transitively_pure()),
+                    _ => false,
+                };
+                (None, args, pure)
+            }
+            ExprKind::New(class, args) => {
+                let pure = match &class.kind {
+                    ExprKind::Name(name) => self
+                        .registry
+                        .lookup_method(name.resolved_class().unwrap_or(&name.written), "__construct")
+                        .is_none_or(|sig| sig.is_stub() || sig.is_transitively_pure()),
+                    _ => false,
+                };
+                (None, args, pure)
+            }
+            _ => return,
+        };
+        if pure {
+            return;
+        }
+        let objects = receiver.into_iter().chain(args.iter().filter_map(|arg| {
+            let key = narrowing_key(&arg.value)?;
+            self.infer_expr(&arg.value, locals)
+                .union_members()
+                .iter()
+                .any(|member| member.as_object().is_some())
+                .then_some(key)
+        }));
+        let objects: Vec<String> = objects.collect();
+        for key in objects {
+            if locals
+                .iter()
+                .any(|(k, _)| crate::checker::narrowing::key_depends_on(k, &key))
+            {
+                purge_stale_narrowing_for(locals, &key);
+            }
+        }
+    }
+
+    /// Whether every implementation a call to `class`'s `method` can reach
+    /// is proven pure.
+    fn method_is_surely_pure(&self, class: &str, method: &str) -> bool {
+        self.registry
+            .lookup_method_with_owner(class, method)
+            .is_some_and(|(owner, sig)| {
+                sig.is_transitively_pure()
+                    && crate::registry::is_non_overridable(self.registry, class, &owner, method, sig)
+            })
+    }
+
+    /// Whether `class`'s `method` is declared static.
+    fn method_is_static(&self, class: &str, method: &str) -> bool {
+        self.registry
+            .lookup_method_with_owner(class, method)
+            .and_then(|(owner, _)| self.registry.classes.get(owner.as_ref()))
+            .is_some_and(|info| {
+                info.static_methods()
+                    .iter()
+                    .any(|name| name.eq_ignore_ascii_case(method))
+            })
+    }
+
     /// Thin wrapper over `check_expr_impl` - the real work - so every
     /// external `rule::Rule` registered via `Checker::set_external_rules`
     /// still fires at every recursion depth without each of
@@ -204,6 +300,7 @@ impl<'a> Checker<'a> {
             let ty = crate::checker::profiling::measure_outermost!("checker::check_expr", {
                 self.check_expr_impl(e, locals, label)
             });
+            self.forget_members_a_call_may_change(e, locals);
             if !self.try_throw_states.is_empty()
                 && let Some(thrown) = self.thrown_by(e, locals)
             {
