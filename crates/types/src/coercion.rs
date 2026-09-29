@@ -73,9 +73,15 @@ impl Type {
 
     /// PHPStan's `toNumber()`: what arithmetic reads a value of this type
     /// as - an int or float as it is, a bool or `null` as `0`/`1`,
-    /// anything else that coerces as `int|float`. `None` for an array, or
-    /// an object `to_float` refuses.
-    pub fn to_number(&self, hierarchy: &dyn ClassHierarchy) -> Option<Type> {
+    /// anything else that coerces as `int|float`. `None` for an array, an
+    /// object `to_float` refuses, or - when `non_numeric_throws` (PHP 8's
+    /// `NonNumericStringArithmeticThrows`) - a string literal that isn't
+    /// numeric (`'abc'`, `'5 apples'`).
+    pub fn to_number(
+        &self,
+        hierarchy: &dyn ClassHierarchy,
+        non_numeric_throws: bool,
+    ) -> Option<Type> {
         syntax::stack::guard(|| {
             if self.is_array().yes() {
                 return None;
@@ -89,8 +95,16 @@ impl Type {
                 Type(Repr::True) | Type(Repr::False) | Type(Repr::Null) | Type(Repr::Bool) => {
                     self.to_integer(hierarchy)
                 }
+                Type(Repr::StringLiteral(s))
+                    if non_numeric_throws
+                        && !s
+                            .as_str()
+                            .is_some_and(crate::subtype::is_numeric_string_literal) =>
+                {
+                    None
+                }
                 Type(Repr::Union(members)) | Type(Repr::Intersection(members)) => {
-                    union_coercion(members, |m| m.to_number(hierarchy))
+                    union_coercion(members, |m| m.to_number(hierarchy, non_numeric_throws))
                 }
                 _ => self
                     .to_float(hierarchy)

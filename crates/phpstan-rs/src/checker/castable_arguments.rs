@@ -175,35 +175,38 @@ impl<'a> Checker<'a> {
         let Some(element_ty) = array_ty.array_value_type() else {
             return;
         };
-        let castable = match cast {
-            Cast::String | Cast::ImplodeString => {
-                element_ty.to_string_type(self.registry).is_some()
-            }
-            Cast::Number => self.type_to_number(&element_ty),
-            Cast::Float => self.type_to_float_strict(&element_ty),
+        let castable = |ty: &Type| match cast {
+            Cast::String | Cast::ImplodeString => ty.to_string_type(self.registry).is_some(),
+            Cast::Number => self.type_to_number(ty),
+            Cast::Float => self.type_to_float_strict(ty),
             Cast::StringAndFloat => {
-                self.type_to_float_strict(&element_ty)
-                    && element_ty.to_string_type(self.registry).is_some()
+                self.type_to_float_strict(ty) && ty.to_string_type(self.registry).is_some()
             }
         };
-        if castable {
+        // Every element must cast: one that can't is reported at level 5,
+        // some of a union's at level 7.
+        let Some(level) = self.failing_level(&element_ty, 5, |m| !castable(m)) else {
             return;
-        }
+        };
         self.report(
             format!(
                 "Parameter {param_name} of function {function} expects {}, {array_ty} given.",
                 cast.expectation()
             ),
             value.peeled().span,
-            5,
+            level,
             "argument.type",
         );
     }
 
-    /// `Type::toNumber()`: an array or a non-numeric object can't be
-    /// used as a number.
+    /// `Type::toNumber()`: an array, a non-numeric object, or on PHP 8 a
+    /// non-numeric string can't be used as a number.
     fn type_to_number(&self, ty: &Type) -> bool {
-        ty.to_number(self.registry).is_some()
+        let non_numeric_throws = self
+            .registry
+            .php_supports_somewhere(types::PhpFeature::NonNumericStringArithmeticThrows)
+            != Some(false);
+        ty.to_number(self.registry, non_numeric_throws).is_some()
     }
 
     /// `type_to_float`, with an array also illegal (`ArrayType::

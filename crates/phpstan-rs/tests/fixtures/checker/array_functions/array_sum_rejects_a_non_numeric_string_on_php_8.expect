@@ -1,0 +1,1 @@
+3:20-3:30 argument.type L7 | Parameter #1 $array of function array_sum expects an array of values castable to number, array{0: 'abc', 1: 1} given.

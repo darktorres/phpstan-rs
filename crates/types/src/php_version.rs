@@ -343,6 +343,9 @@ pub enum PhpFeature {
     StandaloneNullFalseTrueTypes,
     /// Disjunctive normal form types (`(A&B)|null`).
     DisjunctiveNormalFormTypes,
+    /// A non-numeric string in arithmetic throws a `TypeError` ("saner
+    /// numeric strings"); before, it is `0` with a warning.
+    NonNumericStringArithmeticThrows,
 }
 
 impl PhpFeature {
@@ -362,7 +365,8 @@ impl PhpFeature {
             | NamedArguments
             | NativeUnionTypes
             | RequiredParameterAfterOptionalDeprecated
-            | AbstractTraitMethods => PhpVersion::new(8, 0),
+            | AbstractTraitMethods
+            | NonNumericStringArithmeticThrows => PhpVersion::new(8, 0),
             FinalClassConstants
             | ArrayUnpackingWithStringKeys
             | DeprecatesFloatArrayKey
