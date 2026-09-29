@@ -110,3 +110,20 @@ fn an_error_drops_out_of_an_intersection() {
         Type::int()
     );
 }
+
+#[test]
+fn a_list_intersected_with_a_shape_keeps_only_list_keys() {
+    let list = Type::accessory(AccessoryKind::ArrayList);
+    let keyed = Type::array_shape(Shape::from_named([("a", Type::int(), false)]));
+    assert_eq!(intersect_types(vec![list.clone(), keyed]), Type::never());
+    let gapped = Type::array_shape(Shape::from_named([
+        ("0", Type::int(), false),
+        ("2", Type::int(), false),
+    ]));
+    assert_eq!(intersect_types(vec![list.clone(), gapped]), Type::never());
+    let tuple = Type::array_shape(Shape::from_named([
+        ("0", Type::int(), false),
+        ("1", Type::int(), false),
+    ]));
+    assert_eq!(intersect_types(vec![list, tuple.clone()]), tuple);
+}

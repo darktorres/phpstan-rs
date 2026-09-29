@@ -308,6 +308,22 @@ impl Relation<'_> {
                 {
                     return None;
                 }
+                // A list has only the keys 0, 1, ...: a shape requiring any
+                // other key can't be one, and a shape that is a list already
+                // says so.
+                Type(Repr::Accessory(AccessoryKind::ArrayList)) => {
+                    let list_keys_only = shape
+                        .fields
+                        .iter()
+                        .enumerate()
+                        .all(|(i, f)| f.optional || f.key == crate::ShapeKey::Int(i as i64));
+                    if shape.is_sealed() && !list_keys_only {
+                        return None;
+                    }
+                    if !shape.is_list() {
+                        unapplied.push(member);
+                    }
+                }
                 other => unapplied.push(other),
             }
         }
