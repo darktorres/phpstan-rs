@@ -685,9 +685,9 @@ through `check-project`.
   `\"`; in a heredoc both stay. Backtick strings decode `\"` and keep
   `` \` `` as two bytes. The printer's `ShellExec` arm escapes with
   double-quote rules. (`3af64337`, `75d3096f`) Done in `1c0a6670`.
-- [ ] **F10. `08` is read as 8.** A leading-zero literal with a non-octal
+- [x] **F10. `08` is read as 8.** A leading-zero literal with a non-octal
   digit is a PHP parse error ("Invalid numeric literal"); the lexer reads
-  it as decimal. (`8f5b2af7`)
+  it as decimal. (`8f5b2af7`) Done in `f4128dec`.
 
 ### Precision (probed)
 
