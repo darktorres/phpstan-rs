@@ -320,7 +320,7 @@ Each fix needs a fixture.
   `checker/phpstan_api.rs` and `checker/calls/misc_rules.rs`, and
   `resolve_static_class_name`'s `class_name == "?"` check. Take the
   `Option`.
-- [ ] **S10. The `class@anonymous` placeholder survives.**
+- [x] **S10. The `class@anonymous` placeholder survives.** Done in `027811e4`.
   `registry/anonymous_class.rs` rebuilds it, and `checker/unused.rs`,
   `checker/resolve.rs` and `checker/expr.rs` string-match it. Key anonymous
   classes by what identifies them instead of a shared name.
