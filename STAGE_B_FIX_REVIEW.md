@@ -295,7 +295,10 @@ through `check-project`.
   - `$i / 0` infers `int|float`, not `never`.
   - Already the case before the fix window: a PHPDoc `1e25` is a parse
     error, though phpdoc-parser's float lexeme accepts it; `array_pop($b)`
-    leaves `$b` a bare `array`.
+    leaves `$b` a bare `array`; `$x['a']` on
+    `array{a: 1}|array{b: 2}` is `mixed`, with no "might not exist" report
+    (`offset_value_type` gives up on the whole union when one member lacks
+    the key).
 
   Done: each is fixed or ledgered where it belongs.
 
@@ -437,12 +440,55 @@ through `check-project`.
 
   Done: the doc says what PHP does.
 
+- [ ] **F37. Comments the final state still gets wrong** (read whole,
+  below).
+  - `union.rs` (lines ~161-184): the 23-line `array{}`-absorption
+    paragraph still sits above `merge_int_ranges`, describes
+    `reduce_array_members`, and cites the deleted `index_result_type`. The
+    Stage B review's F53 lists this exact bullet and is marked done.
+  - `union.rs`: the `mixed` absorption comment narrates history ("before
+    its own analogous fix", a `nullsafe.neverNull` false positive).
+    `merge_has_offset_value_pair`'s doc tells a corpus case
+    (`ActivityService::record()`), claims PHPStan's "observed behavior
+    exactly", and names a "merge multiple Array members" step that is now
+    `merge_general_arrays`.
+  - `narrowing.rs`: `narrow_to_instance`'s doc opens with
+    `Relation::narrow`'s old doc, fused on. It says `narrow`
+    "unconditionally trusts `target`" for a non-union, which is false now:
+    it keeps a subtype `original`.
+  - `narrowing.rs`: `narrow`'s fallback comment tells a Piwigo case
+    (`$image_id === $this->sessionService->getRefererImageId()`);
+    `without`'s arms carry narration ("confirmed via `php -r`", "no case
+    this could ever get wrong", "a real gap ... this project doesn't
+    attempt yet"); and `without_falsy`'s last arm describes "the old
+    hand-rolled arm".
+
+  - `relation/accepts.rs`, the generic-arguments arm:
+    - It says a missing slot can't take a default, because
+      `ClassReflection` "only persists `template_bounds`, never a
+      class-level `@template T = Default` map". `template_defaults` exist,
+      and `4c88bf44`/`5e109cbd` read them.
+    - It says unions have "no canonical member order", which is false
+      since `f81c5e70`.
+    - It says call-argument binding "only ever binds a template used as a
+      bare param type", which is false since `b274f947`.
+  - `accepts.rs`: the `Array(Mixed)` leniency's comment says an array
+    literal's element type "is never inferred precisely by this checker",
+    while the arm two below says a literal now carries its shape. The
+    Intersection-vs-Intersection arm "mirrors" an `is_super_type_of`
+    list arm that `69c76cef` removed.
+  - `accepts.rs`: the object-shape arm compares `class == "stdClass"` by
+    case (code rather than a comment, but the same sweep).
+
+  Done: each says what the code does, on the item it documents.
+
 ## The Stage B review's done items
 
 Checked against the commits each item names, the diffs read above, and
-probes. A `[ ]` marks an item whose claim doesn't hold in full; the
-finding names what is missing. V1 wasn't re-run here, since this review
-builds nothing.
+probes. An item in bold is the Stage B review's (its own numbering); a
+finding in parentheses is this review's. A `[ ]` marks an item whose
+claim doesn't hold in full; the finding names what is missing. V1 wasn't
+re-run here, since this review builds nothing.
 
 ### Validation and Review 1
 
@@ -548,7 +594,8 @@ builds nothing.
 - [x] **F36** (`f50e2bd0` and the rest). `321d388c`'s iterable and
   `IteratorAggregate` changes are F3 and F14.
 - [x] **F21**.
-- [ ] **F53** (`408caaf4`). 29 roadmap sub-phase codes remain (F24).
+- [ ] **F53** (`408caaf4`). 29 roadmap sub-phase codes remain (F24),
+  and its `union.rs` empty-shape paragraph is still there (F37).
 
 ### The Stage C review
 
@@ -729,4 +776,26 @@ read and its findings added above.
 ### Final state, module by module
 
 Each module the fixes created or reshaped, read in its final state after
-the commit pass.
+the commit pass. Every other module the window touched was read through
+all of its diffs above, but not again whole.
+
+- [x] Created: `syntax::stack`, `syntax::declarations`,
+  `syntax::php_float` (checked against `var_export`), `types::numeric`
+  (checked against PHP 8.5's `is_numeric` and `++`), `types::intern`,
+  `registry::name_table`, and `checker::locals` (every writer bumps the
+  version). Only the findings above.
+- [x] `types::union`: F25 (a merged shape drops its index), F26, F37.
+- [x] `types::narrowing`: F4 (the disjoint fallback), F37. Its
+  `Traversable` arms compare the class name by case.
+- [x] `types::offsets`: F25 (the stale index after a literal write, found
+  here), F19 (a union of shapes).
+- [x] `types::shape`: `NextArrayIndex::observe` exists for F25's write
+  path.
+- [x] `types::relation::super_type`: F11 (the NaN arms).
+- [x] `types::relation::accepts`: F37.
+- [ ] Not re-read whole: `types::{lib, subtype, templates, parse,
+  queries, arithmetic, coercion, display, intersection}`, the checker's
+  `expr`, `function_decl`, `assignment`, `stmt`, `control_flow`,
+  `narrowing`, `member_resolution` and `builtin_calls`, the registry's
+  `class_info` and `purity`, `project`, `lsp::navigation`, and
+  `syntax::{ast, visit, parser}`.
