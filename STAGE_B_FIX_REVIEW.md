@@ -255,6 +255,60 @@ through `check-project`.
   declaration-side check compares against the bound; fixtures for
   `class-string<T>` and `T $expected` assertions.
 
+- [ ] **F39. Integer arithmetic over a union or a signed range gives the
+  wrong type** (`types::arithmetic`, read whole; the pre-window binary
+  gives the same types).
+  - `pow_int_range` pairs `min ** min` with `max ** max`, which only holds
+    for a base that can't be negative. `int<-3, 2> ** 2` is `never`, so
+    the statement after `$sq = $a ** 2;` reports `deadCode.unreachable`;
+    `int<-2, -1> ** int<1, 2>` is `int<-2, 1>` (PHP gives `4` for
+    `(-2) ** 2`); `int<-5, max> ** 2` is `int<25, max>`, though `0 ** 2` is
+    `0`. A bound that overflows is dropped as unbounded instead of adding
+    `float`.
+  - `binary_operation`'s `+`, `-`, `*` and `**` fall back to plain `int`
+    whenever an operand isn't one integer type: `either_float` only
+    catches an operand that is surely a float. `int|float + 1` is `int`,
+    and so are `$numericString + 1` and `'1.5' + $i` (`to_number` makes
+    them `int|float` first). `is_int($if + 1)` reports
+    `function.alreadyNarrowedType` and `is_float($s + 1)`
+    `function.impossibleType`; PHP gives `true` for
+    `is_float("1.5" + 1)`.
+
+  Done: a base range that spans zero or is negative is split by sign
+  (even and odd exponents differ), an overflowing bound adds `float`, and
+  an operand that may be a float makes the result `int|float` (or `float`
+  when every member is one), with fixtures for each.
+- [ ] **F40. `null == '0'` is taken as always true** (`loosely_equals`,
+  read whole; also before the window). `null` against anything is
+  compared as two booleans, but PHP compares `null` with a string as
+  `''` with that string: `null == '0'` is `false`, and the check reports
+  `equal.alwaysTrue` and treats the `else` branch as dead. Done: `null`
+  against a string literal compares `''` with it; the other `null` and
+  `bool` pairs stay as they are.
+- [ ] **F41. A PHPDoc type that names a class or a literal the parser
+  mistakes** (`types::parse`, read whole; also before the window).
+  - `parse_type_atom` tries `s.parse::<f64>()` before class names, and
+    Rust reads `NaN`, `inf` and `infinity` in any case. `@param Infinity
+    $i` for a class `Infinity` is the float `INF`, so a native
+    `Infinity $i` reports `parameter.phpDocType` ("type INF is
+    incompatible with native type N\Infinity"); `Nan` becomes `NAN` and
+    `$n->v` reports `property.nonObject`. Real PHPStan reads all three as
+    classes.
+  - `@param 1_000 $u` and `@param 0x1F $h` report `phpDoc.parseError`
+    ("Unexpected token \"_000\", expected variable"); PHPDoc's grammar
+    takes both (real PHPStan reads `1_000` as `1000`).
+  - A conditional return type splits its branches on the first top-level
+    `:`, so `($flag is true ? \Closure(): int : string)` falls through to
+    a class name: `class.notFound` for `N\$flag is true ? \Closure(): int :
+    string`, `return.phpDocType`, and since the window
+    `return.unusedType`. A branch with `self::A` falls back to the union
+    of both branches. A `?T` branch splits on its `?` the same way.
+
+  Done: a float literal is read only when the text starts with a digit,
+  a sign or a dot; integer literals take PHP's separators and prefixes;
+  the conditional's branches are split past the callable return and `::`
+  (and a nullable branch); fixtures for each.
+
 ### Wrong types and missed reports (probed)
 
 - [ ] **F13. An array literal's positional key after an unknown key**
@@ -394,6 +448,24 @@ through `check-project`.
   `stdClass|DateTime` and the call return `Repo<stdClass|DateTime>`,
   with no report.
 
+- [ ] **F42. Smaller gaps from the final-state pass:**
+  - `promote_class_string_literals` (`types::templates`) walks an `Array`
+    argument but not a shape, so with `@param array<class-string<T>> $cs
+    @return T`, `first([Foo::class])` is `Foo` and `first(['Foo'])` is
+    `object`.
+  - `describe_accessory_intersection` (`types::display`) renders any
+    intersection with an `Array` member from that member and the list or
+    non-empty accessory alone: after `$a['x'] = 1` on a
+    `non-empty-array<string, mixed>`, `$a` shows as
+    `non-empty-array<string, mixed>`, its `hasOffsetValue('x', 1)`
+    dropped from messages and `assertType`.
+  - Since `2b1ce22b` a native `?iterable` parameter's
+    `missingType.iterableValue` reads "in iterable type array" (the walk
+    reaches `iterable`'s `array` member first); the pre-window binary said
+    "iterable type iterable".
+
+  Done: each gives the type or message it names, with a fixture.
+
 ### Design
 
 - [ ] **F20. Nothing enforces the stack guard** (`041fcc46`). It is a
@@ -532,6 +604,18 @@ through `check-project`.
     case (code rather than a comment, but the same sweep).
 
   Done: each says what the code does, on the item it documents.
+
+- [ ] **F43. Comments in the types modules read whole in the second
+  final-state pass:**
+  - `lib.rs`: `Repr::HasOffsetValue` names its construction site
+    `checker::assignment::write_literal_key_aware`, which is now in
+    `types::offsets`; `Repr::IntRange` opens "A `T` range" for an int
+    range.
+  - `display.rs`: the `HasOffsetValue` arm says no fast path of
+    `describe_accessory_intersection` matches an intersection holding one;
+    the `Array` path does (F42).
+
+  Done: each says what the code does.
 
 ## The Stage B review's done items
 
@@ -848,8 +932,11 @@ all of its diffs above, but not again whole.
   path.
 - [x] `types::relation::super_type`: F11 (the NaN arms).
 - [x] `types::relation::accepts`: F37.
-- [ ] Not re-read whole: `types::{lib, subtype, templates, parse,
-  queries, arithmetic, coercion, display, intersection}`, the checker's
+- [x] `types::{lib, subtype, templates, parse, queries, arithmetic,
+  coercion, display, intersection}`, read at `3cea2a20`: F39, F40, F41,
+  F42, F43. `subtype`, `queries`, `coercion` and `intersection` only
+  carry what is listed elsewhere.
+- [ ] Not re-read whole: the checker's
   `expr`, `function_decl`, `assignment`, `stmt`, `control_flow`,
   `narrowing`, `member_resolution` and `builtin_calls`, the registry's
   `class_info` and `purity`, `project`, `lsp::navigation`, and
