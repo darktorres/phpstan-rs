@@ -133,7 +133,8 @@ fn union_types_does_not_collapse_a_real_class_intersection() {
 // member count combinatorially. Simulates that shape directly: 20
 // pairwise-distinct one-field `ArrayShape`s folded through
 // `Type::union` one at a time, exactly the access pattern `merge_scopes`
-// uses across many sequential branches.
+// uses across many sequential branches. Past the cap the shapes
+// generalize into one array rather than giving up to `mixed`.
 #[test]
 fn union_types_caps_runaway_member_growth_instead_of_hanging() {
     let result = (0..20)
@@ -141,10 +142,11 @@ fn union_types_caps_runaway_member_growth_instead_of_hanging() {
         .reduce(Type::union)
         .unwrap();
     assert_eq!(
-        result,
-        Type::mixed(),
-        "expected the cap to collapse a >12-member union to Mixed, got {result:?}"
+        result.array_value_type(),
+        Some(Type::int()),
+        "got {result:?}"
     );
+    assert!(result.union_members().len() == 1, "got {result:?}");
 }
 
 // The cap must not misfire on the common, small case real code
