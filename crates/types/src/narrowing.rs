@@ -307,49 +307,28 @@ impl Type {
 
 impl Type {
     pub fn to_non_empty_array(&self) -> Type {
-        match self {
-            Type(Repr::Array(key, inner)) => Type(Repr::Intersection(vec![
-                Type::array((**key).clone(), (**inner).clone()),
-                Type::accessory(AccessoryKind::NonEmptyArray),
-            ])),
-            Type(Repr::Intersection(members))
-                if members.iter().any(|m| matches!(m, Type(Repr::Array(_, _))))
-                    && !members.contains(&Type::accessory(AccessoryKind::NonEmptyArray)) =>
-            {
-                let mut members = members.clone();
-                members.push(Type::accessory(AccessoryKind::NonEmptyArray));
-                Type(Repr::Intersection(members))
-            }
-            // A genuinely empty `ArrayShape` is a real contradiction once
-            // `count() > 0`/truthy is known - collapses to `Never` (the same
-            // "this branch is impossible" signal `narrow_type_excluding_
-            // falsy`'s own identical arm already uses) rather than staying
-            // unchanged, so a `Union` member that's provably empty gets
-            // dropped below instead of surviving as a spurious alternative.
-            Type(Repr::ArrayShape(shape)) if shape.is_empty_array() => Type::never(),
-            // A shape whose keys are all optional can't be empty any more.
-            Type(Repr::ArrayShape(_)) if !self.is_non_empty_array().yes() => {
-                crate::intersect_types(vec![
-                    self.clone(),
-                    Type::accessory(AccessoryKind::NonEmptyArray),
-                ])
-            }
-            // A loop-built array whose own entry might still be its
-            // pre-loop `[]` is a real `Union` including that empty-shape
-            // alternative, which a `count($x) > 0` guard immediately
-            // afterward should disprove entirely (dropped via the `Never`
-            // arm just above), not merely leave untouched by falling to
-            // `_ => self.clone()`.
-            Type(Repr::Union(members)) => {
-                let kept: Vec<Type> = members
-                    .iter()
-                    .map(Type::to_non_empty_array)
-                    .filter(|m| *m != Type::never())
-                    .collect();
-                Type::union_of(kept)
-            }
-            _ => self.clone(),
-        }
+        self.refine_arrays(&Type::accessory(AccessoryKind::NonEmptyArray))
+    }
+
+    /// Each member that is an array intersected with `refinement`
+    /// (`non-empty-array`, `list`, `hasOffset(k)`), one it rules out
+    /// dropped; the rest kept as they are.
+    fn refine_arrays(&self, refinement: &Type) -> Type {
+        syntax::stack::guard(|| {
+            let kept: Vec<Type> = self
+                .union_members()
+                .iter()
+                .map(|m| {
+                    if m.is_array().yes() {
+                        Relation::structural().intersect(vec![m.clone(), refinement.clone()])
+                    } else {
+                        m.clone()
+                    }
+                })
+                .filter(|m| !m.is_never())
+                .collect();
+            self.with_members(kept)
+        })
     }
 }
 
@@ -407,24 +386,7 @@ pub fn comparison_narrowed_bounds(
 impl Type {
     /// This array as a list: `array_is_list($x)`'s true branch.
     pub fn to_list(&self) -> Type {
-        match self {
-            Type(Repr::Array(key, inner)) => crate::intersect_types(vec![
-                Type::array((**key).clone(), (**inner).clone()),
-                Type::accessory(AccessoryKind::ArrayList),
-            ]),
-            Type(Repr::Intersection(members))
-                if members.iter().any(|m| matches!(m, Type(Repr::Array(_, _))))
-                    && !members.contains(&Type::accessory(AccessoryKind::ArrayList)) =>
-            {
-                let mut members = members.clone();
-                members.push(Type::accessory(AccessoryKind::ArrayList));
-                crate::intersect_types(members)
-            }
-            Type(Repr::Union(members)) => {
-                Type(Repr::Union(members.iter().map(Type::to_list).collect()))
-            }
-            _ => self.clone(),
-        }
+        self.refine_arrays(&Type::accessory(AccessoryKind::ArrayList))
     }
 }
 
@@ -499,13 +461,8 @@ impl Type {
                     }
                 },
                 // A general array now has that key.
-                Type(Repr::Array(..)) if present => {
-                    crate::intersect_types(vec![self.clone(), Type::has_offset(key.clone())])
-                }
-                Type(Repr::Intersection(members))
-                    if present && members.iter().any(|m| matches!(m, Type(Repr::Array(..)))) =>
-                {
-                    crate::intersect_types(vec![self.clone(), Type::has_offset(key.clone())])
+                Type(Repr::Array(..)) | Type(Repr::Intersection(_)) if present => {
+                    self.refine_arrays(&Type::has_offset(key.clone()))
                 }
                 Type(Repr::Union(members)) => {
                     let kept: Vec<Type> = members
