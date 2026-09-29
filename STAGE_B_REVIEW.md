@@ -178,7 +178,8 @@ Each fix needs a fixture.
     from a table rather than a string match run for every call, user
     functions included; long `.`/`+` chains are walked iteratively.
 
-- [ ] **P3. An append onto a shape widens it to a general array.**
+- [x] **P3. An append onto a shape widens it to a general array.** Done in
+  `25ee9d62`.
   `$a = ['x' => 1]; $a[] = 2;` gives `array<int|string, 1|2>`, though the
   appended key is known: the next index (`NextArrayIndex`), so the result
   is `array{x: 1, 0: 2}`. `set_offset_value_type`'s shape branch
