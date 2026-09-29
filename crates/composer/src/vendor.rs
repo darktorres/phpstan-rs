@@ -22,7 +22,7 @@
 //! for context, never reported" and its bugs would stop being reported
 //! with no warning.
 
-use std::collections::HashMap;
+use rustc_hash::FxHashMap;
 use std::path::{Path, PathBuf};
 
 use syntax::ast::{BinOp, ClassDecl, Expr, ExprKind, Literal, Stmt, StmtKind};
@@ -170,7 +170,7 @@ struct Resolver<'p> {
     generated_dir: &'p Path,
     // Each directory's canonical form, found once: autoload entries share
     // a few thousand directories among tens of thousands of files.
-    canonical_dirs: HashMap<PathBuf, Option<PathBuf>>,
+    canonical_dirs: FxHashMap<PathBuf, Option<PathBuf>>,
 }
 
 impl<'p> Resolver<'p> {
@@ -179,7 +179,7 @@ impl<'p> Resolver<'p> {
             vendor_dir,
             base_dir,
             generated_dir,
-            canonical_dirs: HashMap::new(),
+            canonical_dirs: FxHashMap::default(),
         }
     }
 

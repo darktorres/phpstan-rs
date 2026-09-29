@@ -9,7 +9,7 @@ pub mod constraint;
 pub mod manifest;
 pub mod vendor;
 
-use std::collections::HashMap;
+use rustc_hash::FxHashMap;
 use std::path::{Path, PathBuf};
 
 use manifest::{ComposerManifest, lexically_normalized};
@@ -77,8 +77,8 @@ pub struct PackageIndex {
     dirs: Vec<OwnedDir>,
     // Indices into `dirs` by directory as written, and by its normalized
     // form: a file's owners are among its ancestors.
-    by_dir: HashMap<PathBuf, Vec<usize>>,
-    by_normalized: HashMap<PathBuf, Vec<usize>>,
+    by_dir: FxHashMap<PathBuf, Vec<usize>>,
+    by_normalized: FxHashMap<PathBuf, Vec<usize>>,
 }
 
 /// A directory some package owns, with what `PackageIndex::owner`
@@ -118,8 +118,8 @@ impl PackageIndex {
                 dirs.push(OwnedDir::new(package.install_dir.clone(), owner));
             }
         }
-        let mut by_dir: HashMap<PathBuf, Vec<usize>> = HashMap::new();
-        let mut by_normalized: HashMap<PathBuf, Vec<usize>> = HashMap::new();
+        let mut by_dir: FxHashMap<PathBuf, Vec<usize>> = FxHashMap::default();
+        let mut by_normalized: FxHashMap<PathBuf, Vec<usize>> = FxHashMap::default();
         for (index, dir) in dirs.iter().enumerate() {
             by_dir.entry(dir.dir.clone()).or_default().push(index);
             by_normalized

@@ -9,6 +9,7 @@ license.workspace = true
 name = "composer"
 
 [dependencies]
+rustc-hash.workspace = true
 serde_json.workspace = true
 syntax.workspace = true
 
