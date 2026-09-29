@@ -679,12 +679,12 @@ through `check-project`.
   `'École'`, PHP gives `'école'`; `MB_CASE_TITLE` isn't folded. Use Unicode
   case mapping for the `mb_` family, or don't fold non-ASCII input.
   (`3af64337`) Done in `daa88e7c`; `MB_CASE_FOLD` lowercased only the first byte.
-- [ ] **F9. Escapes are decided per heredoc flag, not per delimiter.**
+- [x] **F9. Escapes are decided per heredoc flag, not per delimiter.**
   `scan_interpolated` takes `heredoc: bool`, but PHP decodes by delimiter:
   in `"…"` `\"` is `"`; in `` `…` `` `` \` `` is `` ` `` and `\"` stays
   `\"`; in a heredoc both stay. Backtick strings decode `\"` and keep
   `` \` `` as two bytes. The printer's `ShellExec` arm escapes with
-  double-quote rules. (`3af64337`, `75d3096f`)
+  double-quote rules. (`3af64337`, `75d3096f`) Done in `1c0a6670`.
 - [ ] **F10. `08` is read as 8.** A leading-zero literal with a non-octal
   digit is a PHP parse error ("Invalid numeric literal"); the lexer reads
   it as decimal. (`8f5b2af7`)
