@@ -36,7 +36,9 @@ impl FileBodies {
         struct Collect(FxHashMap<Span, Arc<Vec<Stmt>>>);
         impl<'ast> Visitor<'ast> for Collect {
             fn visit_function_decl(&mut self, function: &'ast FunctionDecl) {
-                self.0.insert(function.name_span, function.body.clone());
+                if let Some(body) = &function.body {
+                    self.0.insert(function.name_span, body.stmts.clone());
+                }
                 visit::walk_function_decl(self, function);
             }
         }

@@ -185,7 +185,7 @@ impl<'a> Checker<'a> {
             walk(
                 &*self,
                 "__construct",
-                &constructor.function.body,
+                constructor.function.body_stmts(),
                 initialized_up_front.iter().cloned().collect(),
             );
         }
@@ -193,14 +193,14 @@ impl<'a> Checker<'a> {
             if method.is_static
                 || method.is_abstract
                 || method.function.is_constructor()
-                || !unsets_this_property(&method.function.body)
+                || !unsets_this_property(method.function.body_stmts())
             {
                 continue;
             }
             walk(
                 &*self,
                 &method.function.name,
-                &method.function.body,
+                method.function.body_stmts(),
                 candidates.iter().cloned().collect(),
             );
         }

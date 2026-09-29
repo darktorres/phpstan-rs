@@ -221,14 +221,14 @@ impl<'a> Walker<'a> {
         }
         let mut class_origins = FxHashMap::default();
         for m in &c.methods {
-            collect_origins(&m.function.body, &mut class_origins);
+            collect_origins(m.function.body_stmts(), &mut class_origins);
         }
         class_origins.retain(|k, _| k.starts_with("this->"));
         for m in &c.methods {
             let mut origins = class_origins.clone();
-            collect_origins(&m.function.body, &mut origins);
+            collect_origins(m.function.body_stmts(), &mut origins);
             let previous = std::mem::replace(&mut self.origins, origins);
-            walk_stmts(self, &m.function.body);
+            walk_stmts(self, m.function.body_stmts());
             self.origins = previous;
         }
     }
@@ -291,13 +291,13 @@ impl<'ast> Visitor<'ast> for Walker<'_> {
     }
 
     fn visit_function_decl(&mut self, f: &'ast FunctionDecl) {
-        walk_stmts(self, &f.body);
+        walk_stmts(self, f.body_stmts());
     }
 
     fn visit_class_decl(&mut self, c: &'ast ClassDecl) {
         if c.kind == ClassKind::Enum {
             for m in &c.methods {
-                walk_stmts(self, &m.function.body);
+                walk_stmts(self, m.function.body_stmts());
             }
         } else {
             self.class(c);

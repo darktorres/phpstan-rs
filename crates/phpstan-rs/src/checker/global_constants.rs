@@ -63,10 +63,10 @@ impl Collector {
 impl<'ast> Visitor<'ast> for Collector {
     fn visit_stmt(&mut self, stmt: &'ast Stmt) {
         match &stmt.kind {
-            StmtKind::FunctionDecl(f) => self.body(&f.body, false),
+            StmtKind::FunctionDecl(f) => self.body(f.body_stmts(), false),
             StmtKind::ClassDecl(c) => {
                 for m in &c.methods {
-                    self.body(&m.function.body, false);
+                    self.body(m.function.body_stmts(), false);
                 }
             }
             _ => walk_stmt(self, stmt),
@@ -94,7 +94,7 @@ impl<'ast> Visitor<'ast> for Collector {
                     self.visit_expr(&a.value);
                 }
                 for m in &decl.methods {
-                    self.body(&m.function.body, false);
+                    self.body(m.function.body_stmts(), false);
                 }
             }
             _ => walk_expr(self, e),

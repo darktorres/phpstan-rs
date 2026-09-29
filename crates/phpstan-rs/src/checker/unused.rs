@@ -44,7 +44,7 @@ impl<'a> Checker<'a> {
         let Some(fqn) = class_name else {
             return;
         };
-        if !f.is_constructor() || !f.has_body {
+        if !f.is_constructor() || f.body.is_none() {
             return;
         }
         let candidates: Vec<&Param> = f
@@ -64,7 +64,7 @@ impl<'a> Checker<'a> {
         if registry_name.is_some_and(|name| self.constructor_signature_is_dictated(name)) {
             return;
         }
-        let usage = collect_var_usage(&f.body);
+        let usage = collect_var_usage(f.body_stmts());
         for p in candidates {
             if usage.contains(&p.name) {
                 continue;
@@ -175,8 +175,8 @@ impl<'a> Checker<'a> {
             // it textually precedes the statement that established the
             // alias. HashSet inserts are idempotent, so the redundant work
             // in pass 1's own read/write/method accounting is harmless.
-            walk_stmt_body_for_members(&m.function.body, fqn, &mut usage);
-            walk_stmt_body_for_members(&m.function.body, fqn, &mut usage);
+            walk_stmt_body_for_members(m.function.body_stmts(), fqn, &mut usage);
+            walk_stmt_body_for_members(m.function.body_stmts(), fqn, &mut usage);
         }
         if let Some(ctor) = ctor {
             for p in &ctor.function.params {

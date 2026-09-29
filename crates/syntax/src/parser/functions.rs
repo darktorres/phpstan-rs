@@ -146,14 +146,14 @@ impl Parser {
         } else {
             None
         };
-        let has_body = !self.eat(&Token::Semicolon);
-        let body_open = has_body
-            .then(|| self.spans.get(self.pos).copied())
-            .flatten();
-        let body = if has_body {
-            self.parse_stmt_list_block()?
+        let body = if self.eat(&Token::Semicolon) {
+            None
         } else {
-            Vec::new()
+            let open = self.current_span();
+            Some(FunctionBody {
+                open,
+                stmts: std::sync::Arc::new(self.parse_stmt_list_block()?),
+            })
         };
         Ok(FunctionDecl {
             namespaced_name: None,
@@ -161,9 +161,7 @@ impl Parser {
             name_span,
             params,
             return_type,
-            body: std::sync::Arc::new(body),
-            has_body,
-            body_open,
+            body,
             by_ref,
             // Callers that saw a preceding doc comment overwrite this -
             // parse_function_decl itself is entered after any modifiers

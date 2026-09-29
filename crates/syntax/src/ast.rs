@@ -244,6 +244,14 @@ pub struct Param {
     pub span: Span,
 }
 
+/// A function's `{ ... }` body.
+#[derive(Debug, Clone)]
+pub struct FunctionBody {
+    // The opening `{`.
+    pub open: Span,
+    pub stmts: Arc<Vec<Stmt>>,
+}
+
 #[derive(Debug, Clone)]
 pub struct FunctionDecl {
     pub name: Name,
@@ -267,12 +275,9 @@ pub struct FunctionDecl {
     // sharing it needs no `Arc::make_mut` anywhere. `Arc`, not `Rc`: like
     // `src/intern.rs`'s own table, parsing/registry-building runs in
     // parallel across files via a real `rayon` thread pool.
-    pub body: Arc<Vec<Stmt>>,
-    // `false` for a bodiless `function f();` declaration (abstract and
+    // `None` for a bodiless `function f();` declaration (abstract and
     // interface methods), distinct from an empty `{}` body.
-    pub has_body: bool,
-    // The body's opening `{`, when it has one.
-    pub body_open: Option<Span>,
+    pub body: Option<FunctionBody>,
     // `function &f()` - returns by reference.
     pub by_ref: bool,
     // Raw `/** ... */` text immediately preceding this declaration, if any.
@@ -286,6 +291,11 @@ pub struct FunctionDecl {
 }
 
 impl FunctionDecl {
+    /// The body's statements; none for a bodiless declaration.
+    pub fn body_stmts(&self) -> &[Stmt] {
+        self.body.as_ref().map_or(&[], |body| body.stmts.as_slice())
+    }
+
     /// The fully-qualified name a function statement declares; a method's
     /// name.
     pub fn fq_name(&self) -> &str {

@@ -30,8 +30,11 @@ fn complex_interpolation_expression_spans_are_biased_to_real_file_positions() {
     let StmtKind::FunctionDecl(f) = &program[0].kind else {
         panic!("expected a function declaration, got {:?}", program[0].kind);
     };
-    let StmtKind::Return(Some(ret_expr)) = &f.body[0].kind else {
-        panic!("expected a return statement, got {:?}", f.body[0].kind);
+    let StmtKind::Return(Some(ret_expr)) = &f.body_stmts()[0].kind else {
+        panic!(
+            "expected a return statement, got {:?}",
+            f.body_stmts()[0].kind
+        );
     };
     let ExprKind::Interpolated(parts) = &ret_expr.kind else {
         panic!("expected an interpolated string, got {:?}", ret_expr.kind);
@@ -161,8 +164,11 @@ fn multiple_bare_braced_vars_in_one_string_each_keep_their_own_real_position() {
     let StmtKind::FunctionDecl(f) = &program[0].kind else {
         panic!("expected a function declaration, got {:?}", program[0].kind);
     };
-    let StmtKind::Return(Some(ret_expr)) = &f.body[0].kind else {
-        panic!("expected a return statement, got {:?}", f.body[0].kind);
+    let StmtKind::Return(Some(ret_expr)) = &f.body_stmts()[0].kind else {
+        panic!(
+            "expected a return statement, got {:?}",
+            f.body_stmts()[0].kind
+        );
     };
     let ExprKind::Interpolated(parts) = &ret_expr.kind else {
         panic!("expected an interpolated string, got {:?}", ret_expr.kind);

@@ -47,7 +47,9 @@ use lsp_types::{CompletionItem, CompletionItemKind, TextEdit};
 
 use crate::project::{self, Project};
 use crate::registry::Registry;
-use syntax::ast::{ClassKind, Expr, ExprKind, FunctionDecl, NodeId, Stmt, StmtKind, Visibility};
+use syntax::ast::{
+    ClassKind, Expr, ExprKind, FunctionBody, FunctionDecl, NodeId, Stmt, StmtKind, Visibility,
+};
 use syntax::token::{Keyword, Position, Span, Token};
 use types::Type;
 
@@ -355,7 +357,11 @@ fn build_probe_scope(
     match found {
         Some((f, is_static)) => {
             let mut cloned = f.clone();
-            let body = std::sync::Arc::make_mut(&mut cloned.body);
+            let body = cloned.body.get_or_insert_with(|| FunctionBody {
+                open: f.span,
+                stmts: std::sync::Arc::new(Vec::new()),
+            });
+            let body = std::sync::Arc::make_mut(&mut body.stmts);
             body.retain(|s| s.span.end.line < cut_line);
             body.push(assign_stmt);
             body.push(read_stmt);

@@ -36,7 +36,7 @@ impl<'a> Checker<'a> {
             if m.is_abstract || !f.name.starts_with("test") {
                 continue;
             }
-            if body_has_assertion(&f.body) {
+            if body_has_assertion(f.body_stmts()) {
                 continue;
             }
             self.report(format!(

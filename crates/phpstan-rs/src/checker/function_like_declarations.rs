@@ -70,9 +70,9 @@ impl<'ast> Visitor<'ast> for Promotions<'_, '_> {
                     ),
                     PromotionSite::NotConstructor,
                     f.by_ref,
-                    Some(ReturnSource::Body(&f.body)),
+                    Some(ReturnSource::Body(f.body_stmts())),
                 );
-                self.checker.walk_promoted_in_body(&f.body);
+                self.checker.walk_promoted_in_body(f.body_stmts());
             }
             StmtKind::ClassDecl(c) => {
                 let fqn = class_decl_fqn(c).to_string();
@@ -176,8 +176,9 @@ impl<'a> Checker<'a> {
             };
             let returns = m
                 .function
-                .has_body
-                .then_some(ReturnSource::Body(&m.function.body));
+                .body
+                .is_some()
+                .then_some(ReturnSource::Body(m.function.body_stmts()));
             self.check_function_like_declaration(
                 &m.function.params,
                 (
@@ -192,7 +193,7 @@ impl<'a> Checker<'a> {
                 m.function.by_ref,
                 returns,
             );
-            self.walk_promoted_in_body(&m.function.body);
+            self.walk_promoted_in_body(m.function.body_stmts());
         }
     }
 

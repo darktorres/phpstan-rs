@@ -265,7 +265,7 @@ impl Project {
     ) {
         for m in &c.methods {
             let f = &m.function;
-            if !f.has_body {
+            if f.body.is_none() {
                 continue;
             }
             for rule in rules
@@ -290,7 +290,7 @@ impl Project {
                     .body(parent_sig.provenance())
                     .is_some_and(|b| !b.is_empty());
                 let call = format!("parent::{}()", f.name);
-                let body = &f.body;
+                let body = f.body_stmts();
                 let found = contains_parent_call(body, &f.name);
                 let label = format!("{fqn}::{}", f.name);
                 let mut report =
@@ -390,7 +390,7 @@ impl Project {
 /// last call after a trailing `return`, which nothing can follow.
 fn insertion(f: &FunctionDecl, member_col: u32, call: &str, last: bool) -> Option<(Span, String)> {
     if last {
-        let tail = f.body.last()?;
+        let tail = f.body_stmts().last()?;
         if matches!(tail.kind, StmtKind::Return(_)) {
             return None;
         }
@@ -398,12 +398,12 @@ fn insertion(f: &FunctionDecl, member_col: u32, call: &str, last: bool) -> Optio
         let indent = " ".repeat(tail.span.start.col.saturating_sub(1) as usize);
         return Some((Span { start: at, end: at }, format!("\n{indent}{call}")));
     }
-    if let Some(first) = f.body.first() {
+    if let Some(first) = f.body_stmts().first() {
         let at = first.span.start;
         let indent = " ".repeat(at.col.saturating_sub(1) as usize);
         return Some((Span { start: at, end: at }, format!("{call}\n{indent}")));
     }
-    let open = f.body_open?;
+    let open = f.body.as_ref()?.open;
     let close = f.span.end;
     let indent = member_col.saturating_sub(1) as usize;
     Some((

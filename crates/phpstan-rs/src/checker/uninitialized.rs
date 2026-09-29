@@ -82,8 +82,8 @@ pub(super) fn class_ever_assigns_property(c: &ClassDecl, prop: &str) -> bool {
         // fresh instance, not `$this`. Collected once per method (not
         // globally) since the same variable name in a different method
         // could hold anything.
-        let self_vars = collect_self_instance_vars(&m.function.body, class_decl_name(c));
-        body_ever_assigns_property(&m.function.body, prop, &self_vars)
+        let self_vars = collect_self_instance_vars(m.function.body_stmts(), class_decl_name(c));
+        body_ever_assigns_property(m.function.body_stmts(), prop, &self_vars)
     })
 }
 

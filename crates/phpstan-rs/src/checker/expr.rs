@@ -4986,7 +4986,7 @@ impl<'a> Checker<'a> {
 
     fn collect_member_ref_defaults_function(&mut self, f: &FunctionDecl) {
         self.collect_member_ref_defaults_params(&f.params);
-        for s in f.body.iter() {
+        for s in f.body_stmts() {
             self.collect_member_ref_defaults_stmt(s);
         }
     }

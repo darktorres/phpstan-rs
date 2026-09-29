@@ -373,12 +373,12 @@ impl<'a> Visitor<'a> for Scope<'_, 'a> {
     fn visit_stmt(&mut self, stmt: &'a Stmt) {
         match &stmt.kind {
             StmtKind::FunctionDecl(f) => {
-                walk_function_body(&f.body, self.file_ctx, self.out);
+                walk_function_body(f.body_stmts(), self.file_ctx, self.out);
                 return;
             }
             StmtKind::ClassDecl(c) => {
                 for method in &c.methods {
-                    walk_function_body(&method.function.body, self.file_ctx, self.out);
+                    walk_function_body(method.function.body_stmts(), self.file_ctx, self.out);
                 }
                 return;
             }
@@ -404,7 +404,7 @@ impl<'a> Visitor<'a> for Scope<'_, 'a> {
             }
             ExprKind::NewAnonymousClass(decl, _) => {
                 for method in &decl.methods {
-                    walk_function_body(&method.function.body, self.file_ctx, self.out);
+                    walk_function_body(method.function.body_stmts(), self.file_ctx, self.out);
                 }
                 return;
             }

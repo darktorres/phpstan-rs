@@ -422,7 +422,7 @@ pub fn walk_function_decl<'ast, V: Visitor<'ast> + ?Sized>(v: &mut V, f: &'ast F
     if let Some(hint) = &f.return_type {
         v.visit_type_hint(hint);
     }
-    walk_stmts(v, &f.body);
+    walk_stmts(v, f.body_stmts());
 }
 
 pub fn walk_class_decl<'ast, V: Visitor<'ast> + ?Sized>(v: &mut V, c: &'ast ClassDecl) {
@@ -1155,7 +1155,9 @@ pub fn walk_function_decl_mut<V: VisitorMut + ?Sized>(v: &mut V, f: &mut Functio
     if let Some(hint) = &mut f.return_type {
         v.visit_type_hint(hint);
     }
-    walk_stmts_mut(v, std::sync::Arc::make_mut(&mut f.body).as_mut_slice());
+    if let Some(body) = &mut f.body {
+        walk_stmts_mut(v, std::sync::Arc::make_mut(&mut body.stmts).as_mut_slice());
+    }
 }
 
 pub fn walk_class_decl_mut<V: VisitorMut + ?Sized>(v: &mut V, c: &mut ClassDecl) {

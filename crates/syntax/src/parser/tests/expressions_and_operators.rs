@@ -391,8 +391,8 @@ fn bitwise_compound_assignment_operators_parse() {
     let StmtKind::FunctionDecl(f) = &program[0].kind else {
         panic!("expected FunctionDecl");
     };
-    assert_eq!(f.body.len(), 5);
-    for stmt in f.body.iter() {
+    assert_eq!(f.body_stmts().len(), 5);
+    for stmt in f.body_stmts().iter() {
         assert!(matches!(
             &stmt.kind,
             StmtKind::Expression(Expr {
@@ -418,31 +418,31 @@ fn yield_forms_all_parse() {
     let StmtKind::FunctionDecl(f) = &program[0].kind else {
         panic!("expected FunctionDecl");
     };
-    assert_eq!(f.body.len(), 4);
+    assert_eq!(f.body_stmts().len(), 4);
 
     let StmtKind::Expression(Expr {
         kind: ExprKind::Yield(None, Some(_)),
         ..
-    }) = &f.body[0].kind
+    }) = &f.body_stmts()[0].kind
     else {
         panic!("expected bare-value yield");
     };
     let StmtKind::Expression(Expr {
         kind: ExprKind::Yield(Some(_), Some(_)),
         ..
-    }) = &f.body[1].kind
+    }) = f.body_stmts()[1].kind
     else {
         panic!("expected key => value yield");
     };
     assert!(matches!(
-        &f.body[2].kind,
+        f.body_stmts()[2].kind,
         StmtKind::Expression(Expr {
             kind: ExprKind::YieldFrom(_),
             ..
         })
     ));
     assert!(matches!(
-        &f.body[3].kind,
+        f.body_stmts()[3].kind,
         StmtKind::Expression(Expr {
             kind: ExprKind::Yield(None, None),
             ..
@@ -875,7 +875,7 @@ fn yield_followed_by_pure_binary_operator_is_bare() {
     let StmtKind::Expression(Expr {
         kind: ExprKind::Call(_, args),
         ..
-    }) = &f.body[0].kind
+    }) = &f.body_stmts()[0].kind
     else {
         panic!("expected var_dump() call");
     };

@@ -864,7 +864,7 @@ impl<'a> Checker<'a> {
             // explicitly claims "never throws," directly contradicted by
             // a real `throw` sitting right there in the body.
             if throws.is_void()
-                && let Some(throw_span) = body_contains_explicit_throw(&f.body)
+                && let Some(throw_span) = body_contains_explicit_throw(f.body_stmts())
             {
                 let kind_word = if class_name.is_some() {
                     "Method"
@@ -1031,7 +1031,7 @@ impl<'a> Checker<'a> {
         let previous_dynamic_flag = self.saw_dynamic_var_construct;
         self.saw_dynamic_var_construct = false;
         let previous_generator_flag = self.current_function_is_generator;
-        self.current_function_is_generator = body_contains_yield(&f.body);
+        self.current_function_is_generator = body_contains_yield(f.body_stmts());
         let previous_declared_return_type = self.current_declared_return_type.take();
         self.current_declared_return_type =
             declared_return.as_ref().map(|t| match &self.current_class {
@@ -1042,9 +1042,9 @@ impl<'a> Checker<'a> {
         self.current_declared_throws_type = sig.and_then(|s| s.throws().clone());
         let previous_goto_targets = std::mem::replace(
             &mut self.current_function_goto_targets,
-            collect_goto_targets(&f.body),
+            collect_goto_targets(f.body_stmts()),
         );
-        let previous_assigned_variables = self.enter_assigned_variables(&f.body);
+        let previous_assigned_variables = self.enter_assigned_variables(f.body_stmts());
         // See `Checker::current_function_throw_points`'s doc comment.
         let previous_throw_points = std::mem::take(&mut self.current_function_throw_points);
         let previous_try_throw_states = std::mem::take(&mut self.try_throw_states);
@@ -1100,7 +1100,12 @@ impl<'a> Checker<'a> {
         // top-level body is exactly as eligible for `deadCode.unreachable`
         // as any nested `{ ... }` block is - it just needs to be routed
         // through the one place that check lives.
-        self.check_block(&f.body, &mut locals, declared_return.as_ref(), &label);
+        self.check_block(
+            f.body_stmts(),
+            &mut locals,
+            declared_return.as_ref(),
+            &label,
+        );
 
         // A function that falls off the end of its body with no `return`
         // at all implicitly returns `null` too - equally a real mismatch
@@ -1144,7 +1149,10 @@ impl<'a> Checker<'a> {
             // the only shape where PHP's implicit-`null`-return is the real,
             // uncommitted fact). Never for a generator, same reasoning as
             // both `Return` arms in `stmt.rs`.
-            let body_falls_off_end = !f.body.iter().any(|s| self.always_terminates(s, &locals));
+            let body_falls_off_end = !f
+                .body_stmts()
+                .iter()
+                .any(|s| self.always_terminates(s, &locals));
             if body_falls_off_end {
                 self.record_by_ref_exit_snapshot(&locals);
             }
@@ -1155,7 +1163,7 @@ impl<'a> Checker<'a> {
                 }
             }
             if let Some(expected) = &declared_return
-                && (!f.body.is_empty()
+                && (!f.body_stmts().is_empty()
                     || (self.settings.extras.check_empty_method_bodies && is_concrete))
                 && body_falls_off_end
                 && (!self.current_function_is_generator || generator_treturn.is_some())
@@ -1204,7 +1212,7 @@ impl<'a> Checker<'a> {
             // normally". Scoped to an undeclared (reads as `Mixed`) or
             // `void`-declared return type only.
             if self.settings.extras.check_never_return_suggestions
-                && !f.body.is_empty()
+                && !f.body_stmts().is_empty()
                 && !self.current_function_is_generator
                 && !body_falls_off_end
                 && !self.current_function_saw_explicit_return
@@ -1241,7 +1249,8 @@ impl<'a> Checker<'a> {
             // "nothing was thrown at all, flag every declared member"
             // fallback would otherwise unconditionally fire on every
             // `@throws` tag any interface/abstract method ever carries.
-            if !f.body.is_empty() || (self.settings.extras.check_empty_method_bodies && is_concrete)
+            if !f.body_stmts().is_empty()
+                || (self.settings.extras.check_empty_method_bodies && is_concrete)
             {
                 let subject = match class_name {
                     Some(c) => format!("Method {c}::{}()", f.name),

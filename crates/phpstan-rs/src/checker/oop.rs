@@ -1503,7 +1503,7 @@ impl<'a> Checker<'a> {
             // `method.nonAbstract`: a bodiless method that isn't abstract,
             // outside an interface - real PHP: "Non-abstract method
             // Foo::bar() must contain body."
-            if !m.is_abstract && kind != ClassKind::Interface && !m.function.has_body {
+            if !m.is_abstract && kind != ClassKind::Interface && m.function.body.is_none() {
                 self.report_builder(
                     DiagnosticBuilder::new(
                         format!(
@@ -1683,7 +1683,7 @@ impl<'a> Checker<'a> {
         {
             return;
         }
-        if body_calls_parent_construct(&ctor.function.body) {
+        if body_calls_parent_construct(ctor.function.body_stmts()) {
             return;
         }
         let mut builder = DiagnosticBuilder::new(
@@ -1731,7 +1731,7 @@ impl<'a> Checker<'a> {
         {
             return;
         }
-        let body = &ctor.function.body;
+        let body = ctor.function.body_stmts();
         if body.len() != params.len() {
             return;
         }
@@ -1962,12 +1962,12 @@ pub(crate) fn signatures_compatible(a: &FunctionReflection, b: &FunctionReflecti
 /// onto its own lines.
 fn parent_call_insertion(ctor: &MethodDecl) -> Option<(Span, String)> {
     const CALL: &str = "parent::__construct();";
-    if let Some(first) = ctor.function.body.first() {
+    if let Some(first) = ctor.function.body_stmts().first() {
         let at = first.span.start;
         let indent = " ".repeat(at.col.saturating_sub(1) as usize);
         return Some((Span { start: at, end: at }, format!("{CALL}\n{indent}")));
     }
-    let open = ctor.function.body_open?;
+    let open = ctor.function.body.as_ref()?.open;
     let close = ctor.function.span.end;
     let member_indent = ctor.span.start.col.saturating_sub(1) as usize;
     let outer = " ".repeat(member_indent);

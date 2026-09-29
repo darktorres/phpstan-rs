@@ -339,7 +339,7 @@ impl<'ast> Visitor<'ast> for Builder {
         for param in &f.params {
             self.visit_param(param);
         }
-        self.body(&f.body);
+        self.body(f.body_stmts());
     }
 
     fn visit_property_hooks(&mut self, hooks: &'ast PropertyHooks) {

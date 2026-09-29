@@ -501,7 +501,7 @@ impl<'a> Checker<'a> {
         } else {
             None
         };
-        for occ in collect_impure_points(&f.body, class_name, self.registry) {
+        for occ in collect_impure_points(f.body_stmts(), class_name, self.registry) {
             let (verb, identifier) = if occ.certain {
                 ("Impure", format!("impure.{}", occ.identifier))
             } else {

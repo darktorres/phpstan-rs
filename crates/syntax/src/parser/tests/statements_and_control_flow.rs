@@ -9,7 +9,7 @@ fn static_local_variable_declaration_parses() {
     let StmtKind::FunctionDecl(f) = &program[0].kind else {
         panic!("expected FunctionDecl");
     };
-    assert!(matches!(&f.body[0].kind, StmtKind::StaticVar(_)));
+    assert!(matches!(f.body_stmts()[0].kind, StmtKind::StaticVar(_)));
 }
 
 #[test]

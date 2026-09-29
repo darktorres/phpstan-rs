@@ -316,10 +316,10 @@ fn collect_declares(program: &[Stmt]) -> Vec<(&Stmt, bool)> {
                     self.next_is_first = is_first;
                     walk_stmts(self, body);
                 }
-                StmtKind::FunctionDecl(f) => walk_stmts(self, &f.body),
+                StmtKind::FunctionDecl(f) => walk_stmts(self, f.body_stmts()),
                 StmtKind::ClassDecl(c) => {
                     for m in &c.methods {
-                        walk_stmts(self, &m.function.body);
+                        walk_stmts(self, m.function.body_stmts());
                     }
                 }
                 _ => walk_stmt(self, stmt),
