@@ -7,7 +7,7 @@ use function PHPStan\Testing\assertType;
  */
 function f(?int $i, int|string|null $j, string $ne, int $pos, array $l, mixed $m, bool $b, \stdClass $o): void {
     if (!isset($i)) { assertType('null', $i); } else { assertType('int', $i); }
-    if (empty($j)) { assertType("null|0|''|'0'", $j); } else { assertType('int|non-falsy-string', $j); }
+    if (empty($j)) { assertType("null|0|''|'0'", $j); } else { assertType('int<min, -1>|int<1, max>|non-falsy-string', $j); }
     if (empty($ne)) { assertType("'0'", $ne); }
     if (empty($l)) { assertType('array{}', $l); }
     if (empty($b)) { assertType('false', $b); }

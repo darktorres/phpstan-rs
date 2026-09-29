@@ -650,20 +650,36 @@ impl Type {
     }
 }
 
+/// The integers of `int<min, max>` except `0`.
+fn without_zero(min: Option<i64>, max: Option<i64>) -> Type {
+    let below = min.is_none_or(|m| m < 0);
+    let above = max.is_none_or(|m| m > 0);
+    let within = below && above;
+    if !(within || min == Some(0) || max == Some(0)) {
+        return Type::int_range(min, max);
+    }
+    let mut parts = Vec::new();
+    if below {
+        parts.push(Type::int_range(min, Some(-1)));
+    }
+    if above {
+        parts.push(Type::int_range(Some(1), max));
+    }
+    parts
+        .into_iter()
+        .reduce(Type::union)
+        .unwrap_or_else(Type::never)
+}
+
 impl Type {
-    /// This type without every falsy member this project can
-    /// represent - used for a bare truthiness check (`if ($x)`) and
-    /// `empty($x)`'s own truthy branch. The falsy set covers `Null`/`False`,
-    /// `IntLiteral(0)`, `StringLiteral("")`/`StringLiteral("0")`, and an
-    /// empty `ArrayShape`, and upgrades a kept bare `String`/`Array` to its
-    /// own accessory-refined form (`non-falsy-string`/`non-empty-array` -
-    /// `empty()` is false for `'0'` too, not merely non-empty). Recurses
-    /// through `Union` members and drops any that
-    /// resolve to `Never`, rather than pre-filtering and cloning separately -
-    /// simpler than maintaining two parallel "is this falsy" checks.
+    /// This type without its falsy values, where a truthiness check
+    /// (`if ($x)`, `empty($x)`'s false branch) passed: `null`, `false`,
+    /// `0`, `0.0`, `''`, `'0'` and `[]` go, `bool` is `true`, an `int` or a
+    /// range around `0` loses it (`int<min, -1>|int<1, max>`), a string is
+    /// `non-falsy-string` and an array non-empty.
     pub fn without_falsy(&self) -> Type {
         match self {
-            Type(Repr::Union(members)) => {
+            Type(Repr::Union(members)) | Type(Repr::BenevolentUnion(members)) => {
                 let kept: Vec<Type> = members
                     .iter()
                     .map(Type::without_falsy)
@@ -672,13 +688,17 @@ impl Type {
                 match kept.len() {
                     0 => Type::never(),
                     1 => kept.into_iter().next().unwrap(),
-                    _ => Type(Repr::Union(kept)),
+                    _ => self.with_members(kept),
                 }
             }
             Type(Repr::Null) | Type(Repr::False) | Type(Repr::IntLiteral(0)) => Type::never(),
+            Type(Repr::FloatLiteral(f)) if *f == 0.0 => Type::never(),
+            Type(Repr::Bool) => Type::bool_literal(true),
+            Type(Repr::Int) => without_zero(None, None),
+            Type(Repr::IntRange(min, max)) => without_zero(*min, *max),
             Type(Repr::StringLiteral(s)) if s.is_empty() || s == "0" => Type::never(),
             Type(Repr::ArrayShape(shape)) if shape.is_empty_array() => Type::never(),
-            Type(Repr::Array(_, _)) => self.to_non_empty_array(),
+            array if array.is_array().yes() => array.to_non_empty_array(),
             // Delegates to the same general-purpose "add one more accessory
             // fact onto a string, bare or already-refined" helper the
             // `is_numeric()` upgrade already uses - a bare `String` gets the

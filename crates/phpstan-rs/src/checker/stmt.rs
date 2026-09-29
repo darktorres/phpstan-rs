@@ -12,17 +12,18 @@ use types::Type;
 /// must be exactly a bare `Variable` (the same narrow shape the write side
 /// currently triggers on) for this to find anything at all. `None` when
 /// there's nothing recorded for it, the common case for every function
-/// this mechanism doesn't apply to.
-fn reconstructed_discriminant_return_type(e: &Expr, locals: &Locals) -> Option<Type> {
+/// this mechanism doesn't apply to. Each branch's type stays its own:
+/// a union would merge `list<A>|list<B>` into `list<A|B>`.
+fn reconstructed_discriminant_return_types(e: &Expr, locals: &Locals) -> Vec<Type> {
     let ExprKind::Variable(name) = &e.kind else {
-        return None;
+        return Vec::new();
     };
     locals
         .discriminant_array_facts
         .iter()
         .filter(|((container, _, _), _)| container.as_str() == name.as_ref())
         .map(|(_, ty)| ty.clone())
-        .reduce(Type::union)
+        .collect()
 }
 
 mod loops;
@@ -602,9 +603,11 @@ impl<'a> Checker<'a> {
                         // anything else, so a function this mechanism
                         // doesn't apply to (the overwhelming majority)
                         // sees no change in behavior at all.
-                        let reconstructed = reconstructed_discriminant_return_type(e, locals);
-                        let passes_via_reconstruction = reconstructed
-                            .is_some_and(|r| self.rule_level_accepts(&expected, &r).yes());
+                        let reconstructed = reconstructed_discriminant_return_types(e, locals);
+                        let passes_via_reconstruction = !reconstructed.is_empty()
+                            && reconstructed
+                                .iter()
+                                .all(|r| self.rule_level_accepts(&expected, r).yes());
                         if !passes_via_reconstruction {
                             self.report(
                                 format!("return type mismatch: expected {expected}, got {actual}"),
