@@ -207,10 +207,12 @@ fn accessory_kind_name(kind: AccessoryKind) -> &'static str {
 /// in place.
 fn describe_accessory_intersection(members: &[Type]) -> Option<String> {
     let has = |k: AccessoryKind| members.contains(&Type::accessory(k));
-    if let [
-        shape @ Type(Repr::ArrayShape(_)),
-        Type(Repr::Accessory(AccessoryKind::NonEmptyArray)),
-    ] = members
+    // A shape that is only also non-empty.
+    if members.len() == 2
+        && has(AccessoryKind::NonEmptyArray)
+        && let Some(shape) = members
+            .iter()
+            .find(|m| matches!(m, Type(Repr::ArrayShape(_))))
     {
         let shape = shape.to_string();
         return Some(match shape.strip_prefix("array") {
@@ -267,15 +269,19 @@ fn describe_accessory_intersection(members: &[Type]) -> Option<String> {
         } else if has(AccessoryKind::NonEmptyString) {
             parts.push("non-empty");
         }
+        // Each refinement shows; one another implies stands in for both
+        // (`non-falsy` for `non-empty`, `decimal-int` for `numeric`).
         if has(AccessoryKind::LowercaseString) {
             parts.push("lowercase");
-        } else if has(AccessoryKind::UppercaseString) {
+        }
+        if has(AccessoryKind::UppercaseString) {
             parts.push("uppercase");
+        }
+        if has(AccessoryKind::LiteralString) {
+            parts.push("literal");
         }
         if has(AccessoryKind::DecimalIntegerString) {
             parts.push("decimal-int");
-        } else if has(AccessoryKind::LiteralString) {
-            parts.push("literal");
         } else if has(AccessoryKind::NumericString) {
             parts.push("numeric");
         }
