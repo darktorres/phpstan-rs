@@ -111,10 +111,39 @@ fn classify_index_key(key: &str, interner: &Interner) -> Option<SimpleIndexKey> 
     if let Some(var_name) = key.strip_prefix('$') {
         return is_full_identifier(var_name).then(|| SimpleIndexKey::Var(interner.str(var_name)));
     }
-    if let Ok(n) = key.parse::<i64>() {
-        return Some(SimpleIndexKey::Int(n));
+    // A number is an int key only when written canonically and within
+    // range (`0|[1-9][0-9]*`, optionally negative, not `-0`); `01`, `-0`
+    // and `9223372036854775808` are string keys, as PHP reads them.
+    let digits = key.strip_prefix('-').unwrap_or(key);
+    if digits.starts_with(|c: char| c.is_ascii_digit()) {
+        if !is_number_token(digits) {
+            return None;
+        }
+        let canonical = (digits == "0" && key == "0")
+            || (!digits.starts_with('0') && digits.bytes().all(|b| b.is_ascii_digit()));
+        return Some(match key.parse::<i64>() {
+            Ok(n) if canonical => SimpleIndexKey::Int(n),
+            _ => SimpleIndexKey::Str(interner.str(key)),
+        });
     }
     is_full_identifier(key).then(|| SimpleIndexKey::Str(interner.str(key)))
+}
+
+/// Whether `text` is an integer as PHP's lexer reads one in a simple
+/// interpolation's index: decimal, `0x` hex, `0b` binary or `0o` octal,
+/// digits optionally separated by single `_`.
+fn is_number_token(text: &str) -> bool {
+    let (body, is_digit): (&str, fn(&u8) -> bool) =
+        match text.get(..2).map(str::to_ascii_lowercase).as_deref() {
+            Some("0x") => (&text[2..], u8::is_ascii_hexdigit),
+            Some("0b") => (&text[2..], |b| matches!(b, b'0' | b'1')),
+            Some("0o") => (&text[2..], |b| matches!(b, b'0'..=b'7')),
+            _ => (text, u8::is_ascii_digit),
+        };
+    !body.is_empty()
+        && body
+            .split('_')
+            .all(|run| !run.is_empty() && run.as_bytes().iter().all(is_digit))
 }
 
 impl<'a> Lexer<'a> {

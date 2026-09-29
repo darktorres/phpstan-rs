@@ -125,6 +125,34 @@ fn int_index_interpolation_including_negative_parses_as_an_index_with_an_int_lit
     }
 }
 
+/// A number that isn't a canonical, in-range int (`01`, `-0`, a hex form,
+/// `1_000`, past `PHP_INT_MAX`) is the string key PHP reads it as.
+#[test]
+fn a_non_canonical_number_index_in_interpolation_is_a_string_key() {
+    for key in ["01", "-0", "0x1A", "1_000", "9223372036854775808"] {
+        let src = format!(r#"<?php $x = "$arr[{key}]";"#);
+        let program = parse(&src);
+        let StmtKind::Expression(Expr {
+            kind: ExprKind::Assign(_, rhs),
+            ..
+        }) = &program[0].kind
+        else {
+            panic!("expected assignment, got {:?}", program[0].kind);
+        };
+        let ExprKind::Interpolated(parts) = &rhs.kind else {
+            panic!("expected an interpolated string, got {:?}", rhs.kind);
+        };
+        let ExprKind::Index(_, Some(index)) = &parts[0].kind else {
+            panic!("expected an Index part for {key}, got {:?}", parts[0].kind);
+        };
+        assert!(
+            matches!(&index.kind, ExprKind::Literal(Literal::String(s)) if *s == key),
+            "{key}: got {:?}",
+            index.kind
+        );
+    }
+}
+
 /// Each `{$var}` in a string keeps its own position, so diagnostics on
 /// several of them in one string land on distinct columns.
 #[test]
