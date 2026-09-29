@@ -213,7 +213,7 @@ Each fix needs a fixture.
   `Box<6>`. A function's own template keeps the literal (`identity(5)` is
   `5`). (found fixing F38, probed)
 
-- [ ] **P8. `is_numeric()` of a literal isn't folded.** `is_numeric("\u{a0}1")`
+- [x] **P8. `is_numeric()` of a literal isn't folded.** Done in `c78732bc`. `is_numeric("\u{a0}1")`
   is `bool`, not `false`, and `is_numeric(" 1\n")` `bool`, not `true`;
   a string literal's answer is known (`numeric_value`), as is an int's
   or a float's (`true`) and an array's (`false`). (found fixing F48)
