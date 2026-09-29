@@ -498,12 +498,19 @@ through `check-project`.
   form. The name isn't known non-empty, and `[$c => 1]` gets the key
   `int|string` where a class name is never an int key. Moved to C7's
   resolver list. (found fixing F33)
-- [ ] **F62. `parent` without a parent class is reported twice.** In a
+- [x] **F62. `parent` without a parent class is reported twice.** In a
   class with no parent, `@param parent $p` gives both
   `parameter.unresolvableType` and `parameter.noParent` at the same
   parameter (`checker/resolve.rs`'s `check_no_parent_ref` runs on a type
   the PHPDoc check already found unresolvable). One finding, `noParent`,
-  says what's wrong. (found fixing F34)
+  says what's wrong. (found fixing F34) Done in `48f02f39`.
+- [ ] **F63. An unresolvable PHPDoc type still declares the type.**
+  `/** @return parent */` in a class without a parent is
+  `return.unresolvableType`, and then `return 1;` is also `return.type`
+  "expected parent, got 1": the unresolvable type stays the declared
+  one. PHPStan ignores a PHPDoc type it can't resolve and checks against
+  the native type (here none). The same goes for parameters and
+  properties. (found fixing F62)
 
 ### False positives (from reading)
 
