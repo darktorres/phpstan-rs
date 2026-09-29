@@ -182,8 +182,7 @@ impl Registry {
         for (path, stmts) in files {
             let mut ctx = NameContext::default();
             let file_ctx = FileCtx { registry, path };
-            let stmt_refs: Vec<&Stmt> = stmts.iter().collect();
-            walk_top_level(&stmt_refs, &mut ctx, &file_ctx, &mut out);
+            walk_top_level(stmts, &mut ctx, &file_ctx, &mut out);
         }
 
         let global_scope_files = resolve_global_scope_files(files, &out.include_sites);
@@ -310,7 +309,7 @@ fn resolve_include_target_suffix(expr: &Expr) -> Option<String> {
 /// applied later), regardless of any `global $x;` (file top level is
 /// already, potentially, the real global scope).
 fn walk_top_level<'a>(
-    stmts: &[&'a Stmt],
+    stmts: &'a [Stmt],
     ctx: &mut NameContext,
     file_ctx: &FileCtx<'a>,
     out: &mut WalkOutput<'a>,
@@ -328,7 +327,7 @@ fn walk_top_level<'a>(
 /// unconditional (`gate: None`) - a function body's own scope isn't
 /// subject to the include-graph check the way file top level is.
 fn walk_function_body<'a>(
-    stmts: &[&'a Stmt],
+    stmts: &'a [Stmt],
     ctx: &NameContext,
     file_ctx: &FileCtx<'a>,
     out: &mut WalkOutput<'a>,
@@ -340,7 +339,7 @@ fn walk_function_body<'a>(
 
 /// Every name a `global` statement in this body imports. A nested
 /// function, class or closure needs its own `global`, so none is entered.
-fn collect_global_names(stmts: &[&Stmt]) -> FxHashSet<Arc<str>> {
+fn collect_global_names(stmts: &[Stmt]) -> FxHashSet<Arc<str>> {
     let mut out = FxHashSet::default();
     for stmt in stmts {
         any_stmt_in_body(stmt, |s| {
@@ -356,7 +355,7 @@ fn collect_global_names(stmts: &[&Stmt]) -> FxHashSet<Arc<str>> {
 }
 
 fn walk_scope<'a>(
-    stmts: &[&'a Stmt],
+    stmts: &'a [Stmt],
     ctx: &mut NameContext,
     file_ctx: &FileCtx<'a>,
     top_level: bool,
@@ -391,14 +390,12 @@ impl<'a> Visitor<'a> for Scope<'_, 'a> {
             StmtKind::Namespace(name) => self.ctx.set_namespace(name),
             StmtKind::Use(imports) => self.ctx.add_uses(imports),
             StmtKind::FunctionDecl(f) => {
-                let body: Vec<&Stmt> = f.body.iter().collect();
-                walk_function_body(&body, self.ctx, self.file_ctx, self.out);
+                walk_function_body(&f.body, self.ctx, self.file_ctx, self.out);
                 return;
             }
             StmtKind::ClassDecl(c) => {
                 for method in &c.methods {
-                    let body: Vec<&Stmt> = method.function.body.iter().collect();
-                    walk_function_body(&body, self.ctx, self.file_ctx, self.out);
+                    walk_function_body(&method.function.body, self.ctx, self.file_ctx, self.out);
                 }
                 return;
             }
@@ -420,14 +417,12 @@ impl<'a> Visitor<'a> for Scope<'_, 'a> {
     fn visit_expr(&mut self, expr: &'a Expr) {
         match &expr.kind {
             ExprKind::Closure { body, .. } => {
-                let body: Vec<&Stmt> = body.iter().collect();
-                walk_function_body(&body, self.ctx, self.file_ctx, self.out);
+                walk_function_body(body, self.ctx, self.file_ctx, self.out);
                 return;
             }
             ExprKind::NewAnonymousClass(decl, _) => {
                 for method in &decl.methods {
-                    let body: Vec<&Stmt> = method.function.body.iter().collect();
-                    walk_function_body(&body, self.ctx, self.file_ctx, self.out);
+                    walk_function_body(&method.function.body, self.ctx, self.file_ctx, self.out);
                 }
                 return;
             }
@@ -444,6 +439,10 @@ impl<'a> Visitor<'a> for Scope<'_, 'a> {
     }
 }
 
+/// An expression statement's assignment to a variable that is a global
+/// here (at file top level, or imported with `global`): records it as a
+/// site of that global, gated on the file being included when at top
+/// level. A compound assignment only widens the variable.
 fn handle_top_expr_statement<'a>(
     e: &'a Expr,
     ctx: &NameContext,
