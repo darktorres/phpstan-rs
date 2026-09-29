@@ -111,6 +111,12 @@ mod tests {
             b"<?php $x = \"\\u{110000}\";",
             b"<?php $x = \"\\u{zz}\";",
             b"<?php $x = match (1) { default => 1, default => 2 };",
+            b"<?php $x = new final class {};",
+            b"<?php $x = new class extends A, B {};",
+            b"<?php $x = [...$a => 1];",
+            b"<?php $x = ['k' => ...$a];",
+            b"<?php $x = isset();",
+            b"<?php $x = \"{$a b}\";",
         ] {
             assert!(
                 parse(bad, &interner).is_err(),
@@ -123,6 +129,8 @@ mod tests {
             b"<?php $x = 0x1_F;",
             b"<?php $x = .5; $y = 1.; $z = 1E-3;",
             b"<?php $x = \"\\u{D800}\\u{10FFFF}\";",
+            b"<?php function f() { $x = $b ? yield : 2; $y = yield ?? 1; }",
+            b"<?php $x = [&$a, 'k' => &$b];",
         ] {
             assert!(
                 parse(good, &interner).is_ok(),

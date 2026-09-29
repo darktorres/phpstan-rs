@@ -87,6 +87,10 @@ fn write_double_quoted_bytes(out: &mut String, bytes: &[u8], delimiter: u8) {
                 '\n' => out.push_str("\\n"),
                 '\t' => out.push_str("\\t"),
                 '\r' => out.push_str("\\r"),
+                '\u{0B}' => out.push_str("\\v"),
+                '\u{1B}' => out.push_str("\\e"),
+                '\u{0C}' => out.push_str("\\f"),
+                c if c.is_ascii_control() => out.push_str(&format!("\\x{:02x}", c as u8)),
                 c => out.push(c),
             }
         }
@@ -108,15 +112,7 @@ fn write_single_quoted(out: &mut String, s: &str) {
 }
 
 fn write_float(out: &mut String, f: f64) {
-    if f.is_infinite() {
-        out.push_str(if f > 0.0 { "INF" } else { "-INF" });
-    } else if f.is_nan() {
-        out.push_str("NAN");
-    } else if f.fract() == 0.0 && f.abs() < 1e15 {
-        out.push_str(&format!("{f:.1}"));
-    } else {
-        out.push_str(&f.to_string());
-    }
+    out.push_str(&crate::php_float::var_export_float(f));
 }
 
 fn write_list<T>(out: &mut String, items: &[T], mut write: impl FnMut(&mut String, &T)) {

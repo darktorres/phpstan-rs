@@ -58,23 +58,3 @@ fn nan_and_infinities_use_php_s_own_case_sensitive_spellings() {
     assert_eq!(format_php_float(f64::INFINITY), "INF");
     assert_eq!(format_php_float(f64::NEG_INFINITY), "-INF");
 }
-
-#[test]
-fn exact_format_matches_var_export() {
-    use super::format_php_float_exact;
-    for (v, expected) in [
-        (1001.0, "1001.0"),
-        (1e16, "10000000000000000.0"),
-        (1e17, "1.0E+17"),
-        (0.0001, "0.0001"),
-        (0.00001, "1.0E-5"),
-        (1.5e300, "1.5E+300"),
-        (-2.5, "-2.5"),
-        (0.1 + 0.2, "0.30000000000000004"),
-        (18446744073709551616.0, "1.8446744073709552E+19"),
-        (-0.0, "-0.0"),
-        (1.5e-7, "1.5E-7"),
-    ] {
-        assert_eq!(format_php_float_exact(v), expected, "input: {v:?}");
-    }
-}

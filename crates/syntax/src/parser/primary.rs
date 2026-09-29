@@ -21,26 +21,44 @@ impl Parser {
                     key: None,
                     value: self.expr(ExprKind::Literal(Literal::Null), pos),
                     spread: false,
+                    by_ref: false,
                 });
                 self.skip();
                 continue;
             }
             let spread = self.eat(&Token::Ellipsis);
-            self.eat(&Token::Amp); // by-ref element, not modeled
+            let amp_span = self.current_span();
+            let by_ref = self.eat(&Token::Amp);
+            if spread && by_ref {
+                return Err(ParseError {
+                    message: "syntax error, unexpected token \"&\"".to_string(),
+                    span: amp_span,
+                });
+            }
             let first = self.parse_expression()?;
+            let arrow_span = self.current_span();
             if self.eat(&Token::FatArrow) {
-                self.eat(&Token::Amp);
+                // `...$a` has no key.
+                if spread || by_ref {
+                    return Err(ParseError {
+                        message: "syntax error, unexpected token \"=>\"".to_string(),
+                        span: arrow_span,
+                    });
+                }
+                let by_ref = self.eat(&Token::Amp);
                 let value = self.parse_expression()?;
                 items.push(ArrayItem {
                     key: Some(first),
                     value,
                     spread,
+                    by_ref,
                 });
             } else {
                 items.push(ArrayItem {
                     key: None,
                     value: first,
                     spread,
+                    by_ref,
                 });
             }
             if !self.eat(&Token::Comma) {
@@ -337,7 +355,8 @@ impl Parser {
                     return Ok(self.expr(ExprKind::YieldFrom(Box::new(inner)), start));
                 }
                 // A bare `yield` (no value) - whatever follows can't start
-                // an expression, so don't try to parse one; the caller
+                // an expression (a closer, `:`, `?`, a binary operator), so
+                // don't try to parse one; the caller
                 // (already unwinding back up the precedence chain from
                 // this primary position) picks up a token like `*` as an
                 // ordinary binary operator applied to the bare yield, e.g.
@@ -353,7 +372,31 @@ impl Parser {
                         | Token::RBracket
                         | Token::RBrace
                         | Token::Comma
+                        | Token::Colon
+                        | Token::Question
+                        | Token::QuestionQuestion
+                        | Token::FatArrow
                         | Token::Star
+                        | Token::StarStar
+                        | Token::Slash
+                        | Token::Percent
+                        | Token::Dot
+                        | Token::EqualsEquals
+                        | Token::EqualsEqualsEquals
+                        | Token::BangEquals
+                        | Token::BangEqualsEquals
+                        | Token::Lt
+                        | Token::Gt
+                        | Token::LtEquals
+                        | Token::GtEquals
+                        | Token::Spaceship
+                        | Token::AmpAmp
+                        | Token::PipePipe
+                        | Token::Pipe
+                        | Token::Caret
+                        | Token::LtLt
+                        | Token::GtGt
+                        | Token::Eof
                 ) {
                     return Ok(self.expr(ExprKind::Yield(None, None), start));
                 }
@@ -502,7 +545,18 @@ impl Parser {
                         self.expr(ExprKind::Exit(kind, None), start)
                     }
                 } else if name.eq_ignore_ascii_case("isset") && self.check(&Token::LParen) {
-                    let (args, _) = self.parse_args()?;
+                    let paren = self.current_span();
+                    let (args, is_first_class_callable) = self.parse_args()?;
+                    // `isset` takes one or more variables, spelled out.
+                    if args.is_empty() || is_first_class_callable {
+                        return Err(ParseError {
+                            message: "syntax error, unexpected token \")\"".to_string(),
+                            span: Span {
+                                start: paren.start,
+                                end: self.previous_end(),
+                            },
+                        });
+                    }
                     let operands = args.into_iter().map(|a| a.value).collect();
                     self.expr(ExprKind::Isset(operands), start)
                 } else if name.eq_ignore_ascii_case("empty") && self.check(&Token::LParen) {

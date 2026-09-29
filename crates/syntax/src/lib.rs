@@ -11,6 +11,7 @@ pub mod name;
 pub mod name_resolution;
 mod parse;
 pub mod parser;
+pub mod php_float;
 pub mod php_string;
 pub mod printer;
 pub mod stack;

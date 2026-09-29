@@ -36,6 +36,16 @@ impl Parser {
                     let mut sub = Parser::new(tokens).with_interner(&self.interner);
                     sub.next_node_id.set(self.next_node_id.get());
                     let parsed = sub.parse_expression()?;
+                    // `{$a b}`: the braces hold one expression.
+                    if !sub.at_eof() {
+                        return Err(ParseError {
+                            message: format!(
+                                "syntax error, unexpected {:?} in string interpolation",
+                                sub.peek()
+                            ),
+                            span: sub.current_span(),
+                        });
+                    }
                     self.next_node_id.set(sub.next_node_id.get());
                     exprs.push(parsed);
                 }

@@ -65,8 +65,16 @@ impl Parser {
                     class_is_readonly = true;
                     self.skip();
                 }
-                Token::Keyword(Keyword::Final) | Token::Keyword(Keyword::Abstract) => {
-                    self.skip();
+                Token::Keyword(modifier @ (Keyword::Final | Keyword::Abstract)) => {
+                    let word = if *modifier == Keyword::Final {
+                        "final"
+                    } else {
+                        "abstract"
+                    };
+                    return Err(ParseError {
+                        message: format!("Cannot use the {word} modifier on an anonymous class"),
+                        span: self.current_span(),
+                    });
                 }
                 _ => break,
             }
@@ -81,15 +89,11 @@ impl Parser {
 
         let mut extends = Vec::new();
         let mut extends_spans = Vec::new();
+        // A class extends one class.
         if self.eat(&Token::Keyword(Keyword::Extends)) {
             let (name, span) = self.parse_qualified_name_spanned();
             extends.push(self.qualified_name(&name));
             extends_spans.push(span);
-            while self.eat(&Token::Comma) {
-                let (name, span) = self.parse_qualified_name_spanned();
-                extends.push(self.qualified_name(&name));
-                extends_spans.push(span);
-            }
         }
         let mut implements = Vec::new();
         let mut implements_spans = Vec::new();

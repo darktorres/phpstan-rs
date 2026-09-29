@@ -627,6 +627,9 @@ pub struct ArrayItem {
     pub key: Option<Expr>,
     pub value: Expr,
     pub spread: bool,
+    /// `&$x`: the element is a reference to the variable (created as
+    /// `null` if it doesn't exist).
+    pub by_ref: bool,
 }
 
 #[derive(Debug, Clone)]

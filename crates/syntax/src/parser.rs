@@ -141,6 +141,15 @@ impl Parser {
     /// the last real token (e.g. `__halt_compiler()`'s handling
     /// deliberately jumps there), the same real edge case `peek()`/
     /// `advance()` already guard against.
+    /// The span of the token about to be read.
+    pub(crate) fn current_span(&self) -> Span {
+        self.spans
+            .get(self.pos)
+            .or_else(|| self.spans.last())
+            .copied()
+            .unwrap_or_default()
+    }
+
     pub(crate) fn current_pos(&self) -> Position {
         self.spans
             .get(self.pos)

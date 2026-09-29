@@ -1588,6 +1588,9 @@ impl<'a> Checker<'a> {
                 if cast.kind() == CastKind::Unset {
                     self.check_unset_cast_supported(e.span);
                 }
+                if *cast == CastSpelling::Real {
+                    self.check_real_cast_supported(e.span);
+                }
                 if cast.kind() == CastKind::Void {
                     self.check_void_cast(e.span, is_bare_statement);
                 }
@@ -2056,6 +2059,14 @@ impl<'a> Checker<'a> {
                     if let Some(k) = &item.key {
                         self.check_expr(k, locals, label);
                         self.check_array_item_key_type(k, locals);
+                    }
+                    // `[&$x]` makes `$x` a reference, creating it as `null`
+                    // when it doesn't exist.
+                    if item.by_ref
+                        && let ExprKind::Variable(name) = &item.value.kind
+                        && !locals.contains_key(name)
+                    {
+                        locals.declare(name.to_string(), Type::null(), item.value.span);
                     }
                     let value_ty = self.check_expr(&item.value, locals, label);
                     // `arrayUnpacking.nonIterable` - `[...$x]` where

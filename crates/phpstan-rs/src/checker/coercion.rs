@@ -55,6 +55,26 @@ impl<'a> Checker<'a> {
         );
     }
 
+    /// The `(real)` cast, removed in PHP 8.0 alongside `(unset)`.
+    pub(crate) fn check_real_cast_supported(&mut self, span: Span) {
+        if self
+            .registry
+            .php_supports_everywhere(types::php_version::PhpFeature::UnsetCastRemoved)
+            != Some(false)
+        {
+            return;
+        }
+        self.report_builder(
+            DiagnosticBuilder::new(
+                "The (real) cast has been removed, use (float) instead.".to_string(),
+                span,
+                0,
+                "cast.real",
+            )
+            .non_ignorable(),
+        );
+    }
+
     /// Real PHPStan's `VoidCastRule` (`cast.voidNotSupported`/
     /// `cast.void`) - the `(void)` cast needs PHP 8.5+, and
     /// (independently of version) is only ever legal as an entire,
