@@ -725,7 +725,10 @@ through `check-project`.
     float grammar.)
 
   (`91bc9e49` area; display.rs final state)
-- [ ] **F52. Minor type-model gaps.**
+- [x] **F52. Minor type-model gaps.** Done in `aa193395`. The nested
+  benevolent union stays: in `(int|string)|null` only `int|string` is
+  lenient, and `null` must stay strict for the level-8 nullability check
+  (PHPStan prints `array_key_first()`'s result the same way).
   - `constant_strings` (`queries.rs`) returns `Vec<&str>` and drops a
     non-UTF-8 literal; `to_boolean` leaves `callable` at `bool`, though
     every callable is truthy; `with_string_accessory` pushes an accessory
