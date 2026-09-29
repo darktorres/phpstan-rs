@@ -827,11 +827,12 @@ through `check-project`.
   variable, method or property; invalid operands), so one error doesn't
   cascade, or the variant goes. (`6fe620f7`) Done in `11b428f4` (the checker
   produces it).
-- [ ] **F26. `visit_name` misses type-hint names.** Its doc promises every
+- [x] **F26. `visit_name` misses type-hint names.** Its doc promises every
   class, function and constant name, but `visit_type_hint` is a leaf with
   no `walk_type_hint`. `TypeHintKind::Name` also holds keywords (`int`,
   `static`, `self`) and class names alike; a keyword type should be its own
-  variant. (`0b579ab1`)
+  variant. (`0b579ab1`) Done in `bd7d7a89`; `NativeType` is also the one
+  native-keyword list F12 asks for.
 - [ ] **F27. Hand-rolled traversals remain.** `any_child_expr` and
   `any_child_stmt` serve as a for-each with an always-`false` closure at 21
   sites (a `for_each_child_*` is missing). Twelve files still walk children
