@@ -220,6 +220,21 @@ impl Registry {
         self.php_versions.map(|v| !v.supports(feature).no())
     }
 
+    /// Whether `feature` is available on every PHP version the project runs
+    /// on, on none, or on some; `Maybe` when none is known.
+    pub(crate) fn php_supports(&self, feature: types::PhpFeature) -> types::TrinaryLogic {
+        self.php_versions
+            .map_or(types::TrinaryLogic::Maybe, |v| v.supports(feature))
+    }
+
+    /// The next index of an array being built, as the PHP versions the
+    /// project runs on number it.
+    pub(crate) fn next_array_index(&self) -> types::NextArrayIndex {
+        types::NextArrayIndex::new(
+            self.php_supports(types::PhpFeature::NegativeArrayKeysAdvanceTheNextIndex),
+        )
+    }
+
     /// The lowest PHP version the project runs on.
     pub(crate) fn php_version_min(&self) -> Option<types::PhpVersion> {
         self.php_versions.map(|v| v.min)

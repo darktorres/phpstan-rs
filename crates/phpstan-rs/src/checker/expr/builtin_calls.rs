@@ -951,18 +951,22 @@ impl<'a> Checker<'a> {
                     });
                 if all_string_keyed_or_shape {
                     let mut merged = Shape::sealed(Vec::new());
-                    let mut next_index = types::NextArrayIndex::default();
+                    // `array_merge` renumbers from 0 and never reads a negative key,
+                    // so the PHP versions agree on every index.
+                    let mut next_index = types::NextArrayIndex::new(types::TrinaryLogic::Yes);
                     for arg_ty in &arg_types {
                         match arg_ty.as_array_shape() {
                             Some(inner) => {
                                 for f in &inner.fields {
-                                    if !Self::merge_shape_field(
+                                    if Self::merge_shape_field(
                                         &mut merged,
                                         &mut next_index,
                                         &f.key,
                                         f.ty.clone(),
                                         f.optional,
-                                    ) {
+                                    )
+                                    .is_err()
+                                    {
                                         return Type::never();
                                     }
                                 }
@@ -1005,13 +1009,15 @@ impl<'a> Checker<'a> {
                                 // case.
                                 if let Some((_, pairs)) = arg_ty.has_offset_value_parts() {
                                     for (k, v) in pairs {
-                                        if !Self::merge_shape_field(
+                                        if Self::merge_shape_field(
                                             &mut merged,
                                             &mut next_index,
                                             &k,
                                             v,
                                             false,
-                                        ) {
+                                        )
+                                        .is_err()
+                                        {
                                             return Type::never();
                                         }
                                     }
@@ -1023,17 +1029,21 @@ impl<'a> Checker<'a> {
                 }
                 if !has_spread && arg_types.iter().all(|t| t.as_array_shape().is_some()) {
                     let mut merged = Shape::sealed(Vec::new());
-                    let mut next_index = types::NextArrayIndex::default();
+                    // `array_merge` renumbers from 0 and never reads a negative key,
+                    // so the PHP versions agree on every index.
+                    let mut next_index = types::NextArrayIndex::new(types::TrinaryLogic::Yes);
                     for arg_ty in &arg_types {
                         if let Some(inner) = arg_ty.as_array_shape() {
                             for f in &inner.fields {
-                                if !Self::merge_shape_field(
+                                if Self::merge_shape_field(
                                     &mut merged,
                                     &mut next_index,
                                     &f.key,
                                     f.ty.clone(),
                                     f.optional,
-                                ) {
+                                )
+                                .is_err()
+                                {
                                     return Type::never();
                                 }
                             }

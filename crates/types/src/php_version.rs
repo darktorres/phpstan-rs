@@ -232,6 +232,9 @@ pub enum PhpFeature {
     /// "deep clone" idiom, not a bug) - `PhpVersion::
     /// supportsReadonlyPropertyReinitializationOnClone`
     /// (`ReadOnlyPropertyAssignRule`'s own `$inClone` gate).
+    /// An element appended after a negative integer key takes the next
+    /// integer (`[-5 => 'a', 'b']` puts `'b'` at -4), not 0.
+    NegativeArrayKeysAdvanceTheNextIndex,
     ReadonlyPropertyReinitializationOnClone,
     /// The `FILTER_THROW_ON_FAILURE` constant/flag for `filter_var()`/
     /// `filter_input()`. `PhpVersion::hasFilterThrowOnFailureConstant`
@@ -376,7 +379,8 @@ impl PhpFeature {
             NativeTypedClassConstants
             | DynamicClassConstantFetch
             | ReadOnlyAnonymousClasses
-            | ReadonlyPropertyReinitializationOnClone => PhpVersion::new(8, 3),
+            | ReadonlyPropertyReinitializationOnClone
+            | NegativeArrayKeysAdvanceTheNextIndex => PhpVersion::new(8, 3),
             ImplicitlyNullableParameterDeprecated
             | PropertyHooks
             | FinalProperties

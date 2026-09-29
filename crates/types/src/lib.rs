@@ -56,7 +56,7 @@ pub use php_version::{
     parse_php_version,
 };
 pub use relation::{AcceptsResult, Relation};
-pub use shape::{NextArrayIndex, Shape, ShapeField, ShapeKey};
+pub use shape::{AppendKey, NextArrayIndex, Shape, ShapeField, ShapeKey};
 pub use subtype::is_numeric_string_literal;
 pub use template_references::PositionVariance;
 pub use trinary::TrinaryLogic;

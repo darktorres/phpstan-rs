@@ -4,7 +4,9 @@ use crate::registry::FunctionReflection;
 use syntax::ast::*;
 use syntax::token::Span;
 
-use types::{self, AccessoryKind, NextArrayIndex, Shape, ShapeField, ShapeKey, TrinaryLogic, Type};
+use types::{
+    self, AccessoryKind, AppendKey, NextArrayIndex, Shape, ShapeField, ShapeKey, TrinaryLogic, Type,
+};
 
 impl<'a> Checker<'a> {
     /// `DuplicateKeysInLiteralArraysRule`: a later key in an array literal
@@ -23,15 +25,16 @@ impl<'a> Checker<'a> {
         // Key -> (first occurrence's span, how many times it's been seen
         // so far).
         let mut seen: Vec<(ShapeKey, (Span, u32))> = Vec::new();
-        let mut next_index = NextArrayIndex::default();
+        let mut next_index = self.registry.next_array_index();
         for item in items {
             let item_span = item.key.as_ref().map_or(item.value.span, |k| k.span);
             let key = match &item.key {
-                // Appending past `PHP_INT_MAX` throws; nothing after it is
-                // an element.
+                // Appending past `PHP_INT_MAX` throws, so nothing after it
+                // is an element; a key the PHP versions disagree on may
+                // coincide with a later one or not.
                 None => match next_index.take() {
-                    Some(n) => ShapeKey::Int(n),
-                    None => return,
+                    AppendKey::Key(n) => ShapeKey::Int(n),
+                    AppendKey::Unknown | AppendKey::Throws => return,
                 },
                 // A key that could be any of several coincides with a
                 // later one or not; nothing past it can be checked.
@@ -80,7 +83,7 @@ impl<'a> Checker<'a> {
             return self.infer_spread_array_literal_type(items, locals);
         }
         let mut shape = Shape::sealed(Vec::new());
-        let mut next_index = NextArrayIndex::default();
+        let mut next_index = self.registry.next_array_index();
         // Once a key isn't known, every key and value so far and after.
         let mut general: Option<(Vec<Type>, Vec<Type>)> = None;
         for item in items {
@@ -88,8 +91,10 @@ impl<'a> Checker<'a> {
                 // Appending past `PHP_INT_MAX` throws: the literal has no
                 // value.
                 None => match next_index.take() {
-                    Some(n) => Ok(ShapeKey::Int(n)),
-                    None => return Type::never(),
+                    AppendKey::Key(n) => Ok(ShapeKey::Int(n)),
+                    AppendKey::Unknown => Err(Type::int()),
+                    AppendKey::Throws if general.is_some() => Err(Type::int()),
+                    AppendKey::Throws => return Type::never(),
                 },
                 Some(k) => self.array_literal_key(k, locals),
             };
@@ -138,7 +143,7 @@ impl<'a> Checker<'a> {
     /// once a plain item or a non-empty source appears.
     fn infer_spread_array_literal_type(&self, items: &[ArrayItem], locals: &Locals) -> Type {
         let mut shape = Shape::sealed(Vec::new());
-        let mut next_index = NextArrayIndex::default();
+        let mut next_index = self.registry.next_array_index();
         let mut degraded = false;
         let mut key_types: Vec<Type> = Vec::new();
         let mut elem_types: Vec<Type> = Vec::new();
@@ -151,14 +156,16 @@ impl<'a> Checker<'a> {
                 if !degraded {
                     if let [inner] = value_ty.constant_arrays()[..] {
                         for f in &inner.fields {
-                            if !Self::merge_shape_field(
+                            match Self::merge_shape_field(
                                 &mut shape,
                                 &mut next_index,
                                 &f.key,
                                 f.ty.clone(),
                                 f.optional,
                             ) {
-                                return Type::never();
+                                Ok(()) => {}
+                                Err(AppendKey::Throws) => return Type::never(),
+                                Err(_) => degraded = true,
                             }
                         }
                     } else {
@@ -205,9 +212,9 @@ impl<'a> Checker<'a> {
             } else {
                 let key = match &item.key {
                     None => match next_index.take() {
-                        Some(n) => Ok(ShapeKey::Int(n)),
-                        None if degraded => Err(Type::int()),
-                        None => return Type::never(),
+                        AppendKey::Key(n) => Ok(ShapeKey::Int(n)),
+                        AppendKey::Throws if !degraded => return Type::never(),
+                        AppendKey::Unknown | AppendKey::Throws => Err(Type::int()),
                     },
                     Some(k) => self.array_literal_key(k, locals),
                 };
@@ -268,31 +275,27 @@ impl<'a> Checker<'a> {
         }
     }
 
-    /// Shared by a spread array literal and `array_merge()`'s own bespoke
-    /// special case - both apply the identical real-PHP merge rule
-    /// verified via dumpType(): a source field's canonical int key gets
-    /// renumbered sequentially into the target (`next_index`); any other
-    /// key is kept and fully overwrites a same-named target field
-    /// verbatim, its own optional flag included.
     /// Merges one field into `shape` as spreading or `array_merge` does:
-    /// an integer key is renumbered to the next index, a string key kept.
-    /// `false` when renumbering runs past `PHP_INT_MAX`, which throws.
+    /// an integer key is renumbered to the next index, a string key kept
+    /// and overwriting, its optional flag included. `Err` with the next
+    /// index when renumbering has no key: it throws, or the PHP versions
+    /// disagree on it.
     pub(crate) fn merge_shape_field(
         shape: &mut Shape,
         next_index: &mut NextArrayIndex,
         key: &ShapeKey,
         ty: Type,
         optional: bool,
-    ) -> bool {
+    ) -> Result<(), AppendKey> {
         let resolved_key = match key {
             ShapeKey::Int(_) => match next_index.take() {
-                Some(n) => ShapeKey::Int(n),
-                None => return false,
+                AppendKey::Key(n) => ShapeKey::Int(n),
+                other => return Err(other),
             },
             ShapeKey::Str(_) => key.clone(),
         };
         shape.set(ShapeField::new(resolved_key, ty, optional));
-        true
+        Ok(())
     }
 
     /// `UselessFunctionReturnValueRule` -

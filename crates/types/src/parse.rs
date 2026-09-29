@@ -387,7 +387,8 @@ fn try_parse_array_shape(s: &str) -> Option<Type> {
     let inner = &rest[1..rest.len() - 1];
 
     let mut shape = Shape::sealed(Vec::new());
-    let mut next_index = crate::NextArrayIndex::default();
+    // A shape is notation, numbered by the current PHP rule.
+    let mut next_index = crate::NextArrayIndex::new(crate::TrinaryLogic::Yes);
     for field_str in split_top_level(inner, ',') {
         let field_str = field_str.trim();
         if field_str.is_empty() {
@@ -449,7 +450,7 @@ fn try_parse_array_shape(s: &str) -> Option<Type> {
             None => {
                 // No key is left after `PHP_INT_MAX`: no array has this
                 // shape.
-                let Some(n) = next_index.take() else {
+                let crate::AppendKey::Key(n) = next_index.take() else {
                     return Some(Type::never());
                 };
                 let key = ShapeKey::Int(n);

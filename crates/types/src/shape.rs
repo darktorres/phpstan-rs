@@ -3,7 +3,7 @@
 
 use std::fmt;
 
-use crate::{Repr, Type, parse::canonical_int_key};
+use crate::{Repr, TrinaryLogic, Type, parse::canonical_int_key};
 
 /// An array shape key, canonicalized the way PHP canonicalizes an array
 /// key: a decimal integer string is an int key.
@@ -56,34 +56,98 @@ impl fmt::Display for ShapeKey {
 }
 
 /// The key PHP gives the next element appended to an array being built:
-/// one past the highest integer key so far, never below 0. Once
-/// `PHP_INT_MAX` is a key there is none, and appending throws ("Cannot add
-/// element to the array as the next element is already occupied").
+/// one past the highest integer key so far, from 0. Before PHP 8.3 a
+/// negative key doesn't count (`[-5 => 'a', 'b']` puts `'b'` at 0); from
+/// 8.3 it does (at -4). Once `PHP_INT_MAX` is a key there is none, and
+/// appending throws ("Cannot add element to the array as the next
+/// element is already occupied").
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct NextArrayIndex(Option<i64>);
+pub struct NextArrayIndex {
+    /// Whether the PHP 8.3 rule applies: `Maybe` when the versions the
+    /// code runs on straddle it, and both rules are followed.
+    negative_keys_count: TrinaryLogic,
+    before_8_3: NextKey,
+    since_8_3: NextKey,
+}
+
+/// One rule's next key: `None` once appending throws.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct NextKey {
+    next: Option<i64>,
+    has_int_key: bool,
+}
+
+/// The key an appended element gets.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AppendKey {
+    Key(i64),
+    /// The PHP versions the code runs on disagree on it.
+    Unknown,
+    /// Appending throws.
+    Throws,
+}
 
 impl Default for NextArrayIndex {
+    /// Both rules, for code whose PHP versions aren't known.
     fn default() -> Self {
-        NextArrayIndex(Some(0))
+        NextArrayIndex::new(TrinaryLogic::Maybe)
     }
 }
 
 impl NextArrayIndex {
-    /// The key an appended element gets, moving past it; `None` when
-    /// appending throws.
-    pub fn take(&mut self) -> Option<i64> {
-        let key = self.0?;
-        self.0 = key.checked_add(1);
-        Some(key)
+    /// An empty array's, under the PHP 8.3 rule for negative keys when
+    /// `negative_keys_count` says it applies.
+    pub fn new(negative_keys_count: TrinaryLogic) -> NextArrayIndex {
+        let empty = NextKey {
+            next: Some(0),
+            has_int_key: false,
+        };
+        NextArrayIndex {
+            negative_keys_count,
+            before_8_3: empty,
+            since_8_3: empty,
+        }
+    }
+
+    /// The key an appended element gets, moving past it.
+    pub fn take(&mut self) -> AppendKey {
+        let key = match self.negative_keys_count {
+            TrinaryLogic::Yes => self
+                .since_8_3
+                .next
+                .map_or(AppendKey::Throws, AppendKey::Key),
+            TrinaryLogic::No => self
+                .before_8_3
+                .next
+                .map_or(AppendKey::Throws, AppendKey::Key),
+            TrinaryLogic::Maybe => match (self.before_8_3.next, self.since_8_3.next) {
+                (None, None) => AppendKey::Throws,
+                (Some(a), Some(b)) if a == b => AppendKey::Key(a),
+                _ => AppendKey::Unknown,
+            },
+        };
+        for rule in [&mut self.before_8_3, &mut self.since_8_3] {
+            if let Some(n) = rule.next {
+                rule.next = n.checked_add(1);
+                rule.has_int_key = true;
+            }
+        }
+        key
     }
 
     /// Records an element written at the explicit integer key `key`.
     pub fn observe(&mut self, key: i64) {
-        if let Some(next) = self.0
+        if let Some(next) = self.before_8_3.next
             && key >= next
         {
-            self.0 = key.checked_add(1);
+            self.before_8_3.next = key.checked_add(1);
         }
+        if let Some(next) = self.since_8_3.next
+            && (key >= next || !self.since_8_3.has_int_key)
+        {
+            self.since_8_3.next = key.checked_add(1);
+        }
+        self.since_8_3.has_int_key = true;
     }
 }
 

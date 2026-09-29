@@ -468,8 +468,9 @@ fn infer_const_type_with(
                             // Appending past `PHP_INT_MAX` throws: the
                             // constant has no value.
                             None => match next_index.take() {
-                                Some(n) => Some(n.to_string()),
-                                None => return Type::never(),
+                                types::AppendKey::Key(n) => Some(n.to_string()),
+                                types::AppendKey::Unknown => None,
+                                types::AppendKey::Throws => return Type::never(),
                             },
                             Some(ExprKind::Literal(Literal::Int(n))) => Some(n.to_string()),
                             Some(ExprKind::Literal(Literal::String(s))) => Some(
