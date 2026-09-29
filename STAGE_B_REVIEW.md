@@ -784,12 +784,12 @@ through `check-project`.
   (keyed by `lower()` where PHP is case-insensitive). The parser also
   interns each name twice (`interner.str`, then `interner.name`).
   (`481b224b`, `b7c04ec9`)
-- [ ] **F15. "Is this the constructor" is written 12 times.**
+- [x] **F15. "Is this the constructor" is written 12 times.**
   `name.eq_ignore_ascii_case("__construct")` in `checker/oop.rs`,
   `unused.rs`, `generics/variance.rs`, `oop/property_hooks.rs`,
   `oop/property_overrides.rs`, `class_info.rs` (3), `doctrine_entity.rs`,
   `noop.rs`, `function_decl.rs`. One `ClassDecl::constructor()`.
-  (`481b224b`)
+  (`481b224b`) Done in `e2c11010`; lookups keyed by the exact name are F14's.
 - [ ] **F16. The enum/class merge is nominal.** 16
   `ClassDecl(e) if e.kind == ClassKind::Enum` arms sit ahead of the class
   arm and duplicate it: the checker's top-level check list (about 80 lines,
