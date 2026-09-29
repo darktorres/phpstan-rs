@@ -672,13 +672,13 @@ through `check-project`.
   `'�'` (the `string_literals_are_bytes` fixture shows it), and `it's`
   prints `'it's'`. Escape `'` and `\`, and show non-UTF-8 bytes as `\xNN`
   in a double-quoted form. (`3af64337`) Done in `e06f470c`.
-- [ ] **F8. `mb_*` case functions fold ASCII only.**
+- [x] **F8. `mb_*` case functions fold ASCII only.**
   `infer_case_function_call` (`checker/expr/builtin_calls.rs`) folds a
   literal for `mb_strtolower`/`mb_strtoupper`/`mb_lcfirst`/`mb_ucfirst`/
   `mb_convert_case` with ASCII rules: `mb_strtolower('ÉCOLE')` gives
   `'École'`, PHP gives `'école'`; `MB_CASE_TITLE` isn't folded. Use Unicode
   case mapping for the `mb_` family, or don't fold non-ASCII input.
-  (`3af64337`)
+  (`3af64337`) Done in `daa88e7c`; `MB_CASE_FOLD` lowercased only the first byte.
 - [ ] **F9. Escapes are decided per heredoc flag, not per delimiter.**
   `scan_interpolated` takes `heredoc: bool`, but PHP decodes by delimiter:
   in `"…"` `\"` is `"`; in `` `…` `` `` \` `` is `` ` `` and `\"` stays
