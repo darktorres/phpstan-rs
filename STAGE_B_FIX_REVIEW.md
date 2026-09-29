@@ -146,18 +146,27 @@ through `check-project`.
   done note omits them. Done: an unresolvable property type is ignored
   after its one report, as a parameter's is.
 
-- [ ] **F25. Shapes that differ only in their next index merge as one**
-  (`25ee9d62`). `Shape::next_index` is left out of equality and
-  hashing, so two branches' shapes that differ only in it are one union
-  member, and it keeps either branch's index.
-  `$b = [1, 2, 3]; if ($c) { unset($b[2]); } else { $b = [1, 2]; }
-  $b[] = 9;` gives `array{0: 1, 1: 2, 3: 9}` alone, while PHP gives
-  `[1, 2, 9]` or `{0: 1, 1: 2, 3: 9}`. `echo $b[2]` then reports
-  `offsetAccess.notFound`; the pre-window binary gave
-  `non-empty-list<…>` and no report. The interner (`a25d77c6`) keeps the
-  index apart, but equality doesn't. Done: two shapes that differ in
-  their next index are distinct types, or a merge of them gives each
-  appended shape (or an unknown next index), with this fixture.
+- [ ] **F25. A shape's carried next index goes wrong** (`25ee9d62`).
+  - A literal-key write leaves `next_index` where it was.
+    `$c = [1]; $c[] = 2; $c[7] = 3; $c[] = 4;` gives
+    `array{0: 1, 1: 2, 7: 3, 2: 4}` (PHP gives key 8 for the `4`), so
+    `return $c[8];` reports `offsetAccess.notFound`. The same happens
+    after an `unset`: `$b[10] = 'x'; $b[] = 'y';` lands `'y'` at 3, not
+    11. The pre-window binary gave a general array and no report.
+  - `Shape::next_index` is left out of equality and hashing, so two
+    branches' shapes that differ only in it merge as one union member,
+    keeping either branch's index.
+    `$b = [1, 2, 3]; if ($c) { unset($b[2]); } else { $b = [1, 2]; }
+    $b[] = 9;` gives `array{0: 1, 1: 2, 3: 9}` alone, where PHP gives
+    `[1, 2, 9]` or `{0: 1, 1: 2, 3: 9}`, and `echo $b[2]` reports
+    `offsetAccess.notFound`. The interner (`a25d77c6`) keeps the index
+    apart, but equality doesn't.
+  - `generalize_by_key_set` drops the index of the shapes it merges.
+
+  Done: a write past the carried index moves it (PHP's `nextAutoIndexes`
+  after an explicit key). Two shapes with different next indexes are
+  distinct types, or their merge gives each appended shape (or an
+  unknown index). Fixtures cover both reports.
 - [ ] **F26. `mixed~S` joined with a value inside `S` stays `mixed~S`**
   (`67ed2a1d`). `union_with_mixed` takes each joined member out of the
   subtracted type with `without`, which can't take a literal or a subtype
@@ -346,8 +355,6 @@ through `check-project`.
   unknown-type predicate the checks already share, so a new check can't
   miss it.
 - [ ] **F22. Smaller design points:**
-  - `b895fa8d`: declarations inside a top-level `try` or loop body become
-    conditional, though a top-level `try` runs unconditionally.
   - `1c301f1b`: `walk_expr_in_scope` skips a closure's `use (...)` list,
     which PHP reads in the enclosing scope.
   - `f81c5e70`: equal unions in different orders display differently, so
@@ -497,7 +504,7 @@ builds nothing.
 - [x] **F55** (`1c301f1b`).
 - [x] **F56** (`a62b2c77`).
 - [x] **F58** (`139709f2`).
-- [x] **F59** (`b895fa8d`). A top-level `try` is conditional (F22).
+- [x] **F59** (`b895fa8d`).
 - [x] **F60** (`89da4c25`). Loop widening drops non-empty (F19).
 - [x] **F62** (`48f02f39`).
 - [ ] **F63** (`22d4ff21`). A property's unresolvable type is still
