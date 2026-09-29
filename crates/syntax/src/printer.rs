@@ -227,9 +227,8 @@ fn write_expr_unguarded(out: &mut String, e: &Expr) {
             write_expr(out, inner);
             out.push('}');
         }
-        ExprKind::ArrayLiteral(items) | ExprKind::List(items) => {
-            let is_list = matches!(e.kind, ExprKind::List(_));
-            out.push_str(if is_list { "list(" } else { "[" });
+        ExprKind::ArrayLiteral(items) => {
+            out.push('[');
             write_list(out, items, |out, item| {
                 if item.spread {
                     out.push_str("...");
@@ -238,8 +237,33 @@ fn write_expr_unguarded(out: &mut String, e: &Expr) {
                     write_expr(out, key);
                     out.push_str(" => ");
                 }
+                if item.by_ref {
+                    out.push('&');
+                }
                 write_expr(out, &item.value);
             });
+            out.push(']');
+        }
+        ExprKind::Destructure(items, syntax) => {
+            let is_list = *syntax == DestructureSyntax::List;
+            out.push_str(if is_list { "list(" } else { "[" });
+            write_list(out, items, |out, item| {
+                if let Some(key) = &item.key {
+                    write_expr(out, key);
+                    out.push_str(" => ");
+                }
+                if item.by_ref {
+                    out.push('&');
+                }
+                if let Some(target) = &item.target {
+                    write_expr(out, target);
+                }
+            });
+            // `[$a, ]` has one item, so a skipped last slot needs the
+            // comma that marks it.
+            if items.last().is_some_and(|item| item.target.is_none()) {
+                out.push(',');
+            }
             out.push(if is_list { ')' } else { ']' });
         }
         ExprKind::Unary(op, operand) => {

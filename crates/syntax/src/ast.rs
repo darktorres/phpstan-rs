@@ -608,7 +608,7 @@ pub struct Arg {
     pub value: Expr,
 }
 
-/// One element of an `ExprKind::ArrayLiteral` (`[...]`) or `ExprKind::List` - `key` is
+/// One element of an `ExprKind::ArrayLiteral` (`[...]`) - `key` is
 /// `Some(...)` for a `key => value` pair, `None` for a plain positional
 /// element. `spread` is `true` for `...$other` (PHP's own array-unpacking
 /// syntax) - a spread inserts an unknown number of elements, shifting
@@ -621,6 +621,28 @@ pub struct ArrayItem {
     pub spread: bool,
     /// `&$x`: the element is a reference to the variable (created as
     /// `null` if it doesn't exist).
+    pub by_ref: bool,
+}
+
+/// How a destructuring pattern is spelled. PHP doesn't allow the two
+/// spellings to nest in each other.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DestructureSyntax {
+    /// `[$a, $b]`
+    Short,
+    /// `list($a, $b)`
+    List,
+}
+
+/// One element of an `ExprKind::Destructure`: where the value at `key`
+/// (or at the element's position, when there is no key) goes.
+#[derive(Debug, Clone)]
+pub struct DestructureItem {
+    pub key: Option<Expr>,
+    /// Where the value is written: a variable, property, element, or a
+    /// nested pattern. `None` for a skipped slot (`[, $b]`).
+    pub target: Option<Expr>,
+    /// `&$x`: the target becomes a reference to the element.
     pub by_ref: bool,
 }
 
@@ -1258,9 +1280,11 @@ pub enum ExprKind {
     // `@expr`: the error-control operator, which silences the warnings
     // evaluating `expr` raises. Its value is `expr`'s.
     ErrorSuppress(Box<Expr>),
-    // `list(...)`: a destructuring target, as `[...]` on the left of an
-    // assignment is.
-    List(Vec<ArrayItem>),
+    // `[...]` or `list(...)` as the target of an assignment or a
+    // `foreach`: takes the array apart into the item targets. Only ever
+    // the left of an `Assign`, a `foreach` value, or an item target of
+    // another pattern.
+    Destructure(Vec<DestructureItem>, DestructureSyntax),
     Unary(UnaryOp, Box<Expr>),
     Binary(BinOp, Box<Expr>, Box<Expr>),
     Assign(Box<Expr>, Box<Expr>),

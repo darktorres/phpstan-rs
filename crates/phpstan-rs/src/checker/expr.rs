@@ -1833,13 +1833,13 @@ impl<'a> Checker<'a> {
                 // `offsetAccess.nonArray` - `[$a, $b] = $x;`/
                 // `list($a, $b) = $x;` destructuring a value confirmed to
                 // never be array-like at all.
-                if let ExprKind::ArrayLiteral(items) | ExprKind::List(items) = &lhs.kind
+                if let ExprKind::Destructure(items, _) = &lhs.kind
                     && !self.relation().is_destructurable(&rhs_ty).no()
                 {
                     self.check_destructuring_offsets(items, &rhs_ty, locals);
                 }
                 self.check_offset_assignment(lhs, &rhs_ty, false, locals);
-                if matches!(&lhs.kind, ExprKind::ArrayLiteral(_) | ExprKind::List(_))
+                if matches!(&lhs.kind, ExprKind::Destructure(..))
                     && let Some(level) = self
                         .failing_level(&rhs_ty, 3, |m| self.relation().is_destructurable(m).no())
                 {
@@ -2050,16 +2050,8 @@ impl<'a> Checker<'a> {
                     None => Type::mixed(),
                 }
             }
-            // Only a destructuring target; as a value it's a parse error in
-            // PHP.
-            ExprKind::List(items) => {
-                for item in items {
-                    if let Some(k) = &item.key {
-                        self.check_expr(k, locals, label);
-                    }
-                }
-                Type::mixed()
-            }
+            // Only ever a target, checked as one where it's assigned to.
+            ExprKind::Destructure(..) => Type::mixed(),
             ExprKind::ArrayLiteral(items) => {
                 for item in items {
                     if let Some(k) = &item.key {
@@ -2768,7 +2760,7 @@ impl<'a> Checker<'a> {
             }
             ExprKind::PropertyAccess(base, prop, nullsafe) => {
                 // Unlike a write (check_property_assignment, and the
-                // Assign/ArrayLiteral-destructuring arms below that
+                // Assign/destructuring arms below that
                 // deliberately route a PropertyAccess target through only
                 // its base, not here) - a genuinely undeclared property
                 // creates nothing on read, it just returns null with a

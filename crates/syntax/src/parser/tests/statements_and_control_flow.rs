@@ -250,10 +250,13 @@ fn list_is_apart_from_an_array_literal() {
     else {
         panic!("expected an assignment, got {:?}", program[0].kind);
     };
-    let ExprKind::List(items) = &lhs.kind else {
+    let ExprKind::Destructure(items, DestructureSyntax::List) = &lhs.kind else {
         panic!("expected a list, got {:?}", lhs.kind);
     };
-    assert!(matches!(&items[1].value.kind, ExprKind::List(_)));
+    assert!(matches!(
+        &items[1].target.as_ref().unwrap().kind,
+        ExprKind::Destructure(_, DestructureSyntax::List)
+    ));
     assert!(matches!(&rhs.kind, ExprKind::ArrayLiteral(_)));
 }
 

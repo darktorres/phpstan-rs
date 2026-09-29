@@ -207,16 +207,45 @@ impl Parser {
         self.expect(&Token::LParen)?;
         let subject = self.parse_expression()?;
         self.expect(&Token::Keyword(Keyword::As))?;
+        let first_amp = self.current_span();
         let by_ref_first = self.eat(&Token::Amp);
         let first = self.parse_expression()?;
 
-        let (key, by_ref, value) = if self.eat(&Token::FatArrow) {
+        let (key, by_ref, amp_span, value) = if self.check(&Token::FatArrow) {
+            if by_ref_first {
+                return Err(ParseError {
+                    message: "Key element cannot be a reference".to_string(),
+                    span: first_amp,
+                });
+            }
+            if matches!(
+                first.kind,
+                ExprKind::ArrayLiteral(_) | ExprKind::Destructure(..)
+            ) {
+                return Err(ParseError {
+                    message: "Cannot use list as key element".to_string(),
+                    span: first.span,
+                });
+            }
+            self.skip();
+            let amp_span = self.current_span();
             let by_ref_val = self.eat(&Token::Amp);
             let value = self.parse_expression()?;
-            (Some(first), by_ref_val, value)
+            (Some(first), by_ref_val, amp_span, value)
         } else {
-            (None, by_ref_first, first)
+            (None, by_ref_first, first_amp, first)
         };
+        let is_pattern = matches!(
+            value.kind,
+            ExprKind::ArrayLiteral(_) | ExprKind::Destructure(..)
+        );
+        if by_ref && is_pattern {
+            return Err(ParseError {
+                message: "syntax error, unexpected token \"&\"".to_string(),
+                span: amp_span,
+            });
+        }
+        let value = self.as_pattern(value, true)?;
 
         self.expect(&Token::RParen)?;
         let body = self.parse_body(Keyword::EndForeach)?;

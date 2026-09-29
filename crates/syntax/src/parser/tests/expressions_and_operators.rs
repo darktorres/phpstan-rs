@@ -589,15 +589,15 @@ fn destructuring_with_skipped_slot_parses() {
     else {
         panic!("expected assignment");
     };
-    let ExprKind::ArrayLiteral(items) = &lhs.kind else {
-        panic!("expected ArrayLiteral target");
+    let ExprKind::Destructure(items, DestructureSyntax::Short) = &lhs.kind else {
+        panic!("expected a destructuring target");
     };
     assert_eq!(items.len(), 2);
+    assert!(items[0].target.is_none());
     assert!(matches!(
-        &items[0].value.kind,
-        ExprKind::Literal(Literal::Null)
+        &items[1].target.as_ref().unwrap().kind,
+        ExprKind::Variable(_)
     ));
-    assert!(matches!(&items[1].value.kind, ExprKind::Variable(_)));
 
     let StmtKind::Expression(Expr {
         kind: ExprKind::Assign(lhs, _),
@@ -606,14 +606,46 @@ fn destructuring_with_skipped_slot_parses() {
     else {
         panic!("expected assignment");
     };
-    let ExprKind::ArrayLiteral(items) = &lhs.kind else {
-        panic!("expected ArrayLiteral target");
+    let ExprKind::Destructure(items, _) = &lhs.kind else {
+        panic!("expected a destructuring target");
     };
     assert_eq!(items.len(), 3);
+    assert!(items[1].target.is_none());
+}
+
+#[test]
+fn a_foreach_value_array_is_a_destructuring_target() {
+    let program = parse("<?php foreach ($rows as $k => [$a, [$b]]) {}");
+    let StmtKind::Foreach { value, key, .. } = &program[0].kind else {
+        panic!("expected foreach");
+    };
+    assert!(matches!(key.as_ref().unwrap().kind, ExprKind::Variable(_)));
+    let ExprKind::Destructure(items, DestructureSyntax::Short) = &value.kind else {
+        panic!("expected a destructuring target, got {:?}", value.kind);
+    };
     assert!(matches!(
-        &items[1].value.kind,
-        ExprKind::Literal(Literal::Null)
+        &items[1].target.as_ref().unwrap().kind,
+        ExprKind::Destructure(_, DestructureSyntax::Short)
     ));
+}
+
+#[test]
+fn an_array_that_is_not_assigned_to_stays_a_value() {
+    let program = parse("<?php $x = [$a, [$b]][0] = 1;");
+    let StmtKind::Expression(Expr {
+        kind: ExprKind::Assign(_, rhs),
+        ..
+    }) = &program[0].kind
+    else {
+        panic!("expected assignment");
+    };
+    let ExprKind::Assign(inner, _) = &rhs.kind else {
+        panic!("expected an assignment, got {:?}", rhs.kind);
+    };
+    let ExprKind::Index(base, _) = &inner.kind else {
+        panic!("expected an element write, got {:?}", inner.kind);
+    };
+    assert!(matches!(base.kind, ExprKind::ArrayLiteral(_)));
 }
 
 #[test]

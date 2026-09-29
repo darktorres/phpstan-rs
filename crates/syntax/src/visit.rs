@@ -260,12 +260,22 @@ pub fn walk_expr<'ast, V: Visitor<'ast> + ?Sized>(v: &mut V, expr: &'ast Expr) {
         | ExprKind::Throw(inner)
         | ExprKind::YieldFrom(inner)
         | ExprKind::PropertyAccess(inner, _, _) => v.visit_expr(inner),
-        ExprKind::ArrayLiteral(items) | ExprKind::List(items) => {
+        ExprKind::ArrayLiteral(items) => {
             for item in items {
                 if let Some(key) = &item.key {
                     v.visit_expr(key);
                 }
                 v.visit_expr(&item.value);
+            }
+        }
+        ExprKind::Destructure(items, _) => {
+            for item in items {
+                if let Some(key) = &item.key {
+                    v.visit_expr(key);
+                }
+                if let Some(target) = &item.target {
+                    v.visit_expr(target);
+                }
             }
         }
         ExprKind::Binary(_, l, r)
@@ -970,12 +980,22 @@ pub fn walk_expr_mut<V: VisitorMut + ?Sized>(v: &mut V, expr: &mut Expr) {
         | ExprKind::Throw(inner)
         | ExprKind::YieldFrom(inner)
         | ExprKind::PropertyAccess(inner, _, _) => v.visit_expr(inner),
-        ExprKind::ArrayLiteral(items) | ExprKind::List(items) => {
+        ExprKind::ArrayLiteral(items) => {
             for item in items {
                 if let Some(key) = &mut item.key {
                     v.visit_expr(key);
                 }
                 v.visit_expr(&mut item.value);
+            }
+        }
+        ExprKind::Destructure(items, _) => {
+            for item in items {
+                if let Some(key) = &mut item.key {
+                    v.visit_expr(key);
+                }
+                if let Some(target) = &mut item.target {
+                    v.visit_expr(target);
+                }
             }
         }
         ExprKind::Binary(_, l, r)

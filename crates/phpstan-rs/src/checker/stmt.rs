@@ -1380,9 +1380,9 @@ fn statement_assigned_variable_names(kind: &StmtKind) -> Vec<String> {
     fn collect(target: &Expr, out: &mut Vec<String>) {
         match &target.kind {
             ExprKind::Variable(name) => out.push(name.to_string()),
-            ExprKind::ArrayLiteral(items) | ExprKind::List(items) => {
-                for item in items {
-                    collect(&item.value, out);
+            ExprKind::Destructure(items, _) => {
+                for target in items.iter().filter_map(|item| item.target.as_ref()) {
+                    collect(target, out);
                 }
             }
             _ => {}
@@ -1414,9 +1414,10 @@ fn static_variable_type(initializer: &Type) -> Type {
 pub(super) fn assigned_variable_names(target: &Expr) -> Vec<String> {
     syntax::stack::guard(|| match &target.kind {
         ExprKind::Variable(v) => vec![v.to_string()],
-        ExprKind::ArrayLiteral(items) | ExprKind::List(items) => items
+        ExprKind::Destructure(items, _) => items
             .iter()
-            .flat_map(|item| assigned_variable_names(&item.value))
+            .filter_map(|item| item.target.as_ref())
+            .flat_map(assigned_variable_names)
             .collect(),
         _ => Vec::new(),
     })

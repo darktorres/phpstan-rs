@@ -9,17 +9,22 @@ impl Parser {
     ) -> Result<Vec<ArrayItem>, ParseError> {
         let mut items = Vec::new();
         while !self.check(close) {
-            // A skipped destructuring slot (`[, $b] = $arr;`, `[$a, , $c] =
-            // ...`) - only legal on a list-assignment target, but this
-            // parser doesn't distinguish that context from a real array
-            // literal here, so it's accepted generically. Null stands in
-            // as "nothing to bind"; the checker's destructuring/element
-            // walks below already skip anything that isn't a Variable.
+            // A skipped slot (`[, $b] = $arr;`), legal only in a
+            // destructuring target. A placeholder stands in for it until
+            // the array becomes one.
             if self.check(&Token::Comma) {
-                let pos = self.current_pos();
+                let span = self.current_span();
+                let placeholder = self.expr(ExprKind::Literal(Literal::Null), span.start);
+                self.pattern_only.push((
+                    placeholder.id,
+                    ParseError {
+                        message: "Cannot use empty array elements in arrays".to_string(),
+                        span,
+                    },
+                ));
                 items.push(ArrayItem {
                     key: None,
-                    value: self.expr(ExprKind::Literal(Literal::Null), pos),
+                    value: placeholder,
                     spread: false,
                     by_ref: false,
                 });
@@ -242,13 +247,34 @@ impl Parser {
                 self.skip();
                 self.expect(&Token::LParen)?;
                 let items = self.parse_array_items(&Token::RParen)?;
-                self.expr(ExprKind::ArrayLiteral(items), start)
+                let array = self.expr(ExprKind::ArrayLiteral(items), start);
+                self.long_arrays.insert(array.id);
+                array
             }
+            // Only ever a destructuring target, so its items are taken as
+            // pattern items straight away. Whether it stands where a
+            // target can is known once what follows is.
             Token::Keyword(Keyword::List) => {
                 self.skip();
                 self.expect(&Token::LParen)?;
                 let items = self.parse_array_items(&Token::RParen)?;
-                self.expr(ExprKind::List(items), start)
+                let span = Span {
+                    start,
+                    end: self.previous_end(),
+                };
+                let items = self.destructure_items(items, DestructureSyntax::List, span)?;
+                let list = self.expr(ExprKind::Destructure(items, DestructureSyntax::List), start);
+                self.pattern_only.push((
+                    list.id,
+                    ParseError {
+                        message: format!(
+                            "syntax error, unexpected {:?}, expecting \"=\"",
+                            self.peek()
+                        ),
+                        span: self.current_span(),
+                    },
+                ));
+                list
             }
             Token::Keyword(Keyword::New) => {
                 self.skip();

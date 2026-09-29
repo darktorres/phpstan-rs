@@ -36,6 +36,7 @@ impl Parser {
                     let mut sub = Parser::new(tokens).with_interner(&self.interner);
                     sub.next_node_id.set(self.next_node_id.get());
                     let parsed = sub.parse_expression()?;
+                    sub.check_pattern_only()?;
                     // `{$a b}`: the braces hold one expression.
                     if !sub.at_eof() {
                         return Err(ParseError {

@@ -36,11 +36,11 @@ enum Effects {
 fn is_local_assign_target(target: &Expr) -> bool {
     syntax::stack::guard(|| match &target.kind {
         ExprKind::Variable(name) => name.as_ref() != "this",
-        ExprKind::ArrayLiteral(items) | ExprKind::List(items) => items.iter().all(|item| {
+        ExprKind::Destructure(items, _) => items.iter().all(|item| {
             item.key
                 .as_ref()
                 .is_none_or(|k| expr_side_effects(k) == Effects::None)
-                && is_local_assign_target(&item.value)
+                && item.target.as_ref().is_none_or(is_local_assign_target)
         }),
         _ => false,
     })

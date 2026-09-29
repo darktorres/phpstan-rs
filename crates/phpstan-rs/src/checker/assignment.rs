@@ -21,8 +21,9 @@ pub(crate) fn contains_nullsafe(expr: &Expr) -> bool {
         | ExprKind::DynamicStaticPropertyFetch(StaticTarget::Expr(base), _) => {
             contains_nullsafe(base)
         }
-        ExprKind::ArrayLiteral(items) | ExprKind::List(items) => items.iter().any(|item| {
-            item.key.as_ref().is_some_and(contains_nullsafe) || contains_nullsafe(&item.value)
+        ExprKind::Destructure(items, _) => items.iter().any(|item| {
+            item.key.as_ref().is_some_and(contains_nullsafe)
+                || item.target.as_ref().is_some_and(contains_nullsafe)
         }),
         _ => false,
     })
@@ -38,32 +39,19 @@ pub(crate) fn contains_nullsafe(expr: &Expr) -> bool {
 /// while `DynamicMethodCall`/`MethodCall` deliberately don't get one,
 /// since neither is ever a valid assignment target in real PHP either.
 pub(crate) fn is_non_assignable_target(expr: &Expr) -> bool {
-    syntax::stack::guard(|| {
-        match &expr.peeled().kind {
-            ExprKind::Variable(_)
-            | ExprKind::PropertyAccess(..)
-            | ExprKind::DynamicPropertyAccess(..)
-            | ExprKind::Index(..)
-            | ExprKind::ClassConstFetch(..)
-            | ExprKind::ClassNameFetch(_)
-            | ExprKind::StaticPropertyFetch(..)
-            | ExprKind::DynamicStaticPropertyFetch(..) => false,
-            // A skipped destructuring slot (`[, $x]`/`[$a, , $c]`) has no
-            // item of its own in real PHPStan's AST at all (`$item ===
-            // null`, skipped outright) - this project's own parser instead
-            // represents that same empty slot as a real item whose `value`
-            // is a bare `Literal::Null` (confirmed via `destructuring_with_
-            // skipped_slot_parses`), which must get the identical "skip,
-            // never non-assignable" treatment or every real, common skipped-
-            // slot destructuring in a real corpus false-positives here
-            // (caught via a live Piwigo corpus measurement: `[, $extension]
-            // = explode(...)`).
-            ExprKind::ArrayLiteral(items) | ExprKind::List(items) => items.iter().any(|item| {
-                !matches!(&item.value.kind, ExprKind::Literal(Literal::Null))
-                    && is_non_assignable_target(&item.value)
-            }),
-            _ => true,
-        }
+    syntax::stack::guard(|| match &expr.peeled().kind {
+        ExprKind::Variable(_)
+        | ExprKind::PropertyAccess(..)
+        | ExprKind::DynamicPropertyAccess(..)
+        | ExprKind::Index(..)
+        | ExprKind::ClassConstFetch(..)
+        | ExprKind::ClassNameFetch(_)
+        | ExprKind::StaticPropertyFetch(..)
+        | ExprKind::DynamicStaticPropertyFetch(..) => false,
+        ExprKind::Destructure(items, _) => items
+            .iter()
+            .any(|item| item.target.as_ref().is_some_and(is_non_assignable_target)),
+        _ => true,
     })
 }
 
@@ -159,9 +147,14 @@ impl<'a> Checker<'a> {
         syntax::stack::guard(|| {
             match &target.kind {
                 ExprKind::Variable(_) => {}
-                ExprKind::ArrayLiteral(items) | ExprKind::List(items) => {
+                ExprKind::Destructure(items, _) => {
                     for item in items {
-                        self.check_assignment_target(&item.value, locals, label);
+                        if let Some(key) = &item.key {
+                            self.check_expr(key, locals, label);
+                        }
+                        if let Some(target) = &item.target {
+                            self.check_assignment_target(target, locals, label);
+                        }
                     }
                 }
                 // A property being *assigned* isn't a read of that property -
@@ -229,7 +222,7 @@ impl<'a> Checker<'a> {
         })
     }
 
-    /// Sibling recursion to `bind_assignment_target`'s own `ArrayLiteral`
+    /// Sibling recursion to `bind_assignment_target`'s own `Destructure`
     /// arm below - a by-ref parameter destructured out of an array
     /// (`[$byRef, $b] = $arr;`/`list($byRef) = $arr;`, any nesting depth)
     /// needs the same `parameterByRef.type` check a bare `$byRef = ...`
@@ -243,27 +236,22 @@ impl<'a> Checker<'a> {
     /// against its own real per-slot type, not a blanket `Mixed`.
     pub(crate) fn check_by_ref_destructuring(&mut self, lhs: &Expr, ty: &Type) {
         syntax::stack::guard(|| {
-            let (ExprKind::ArrayLiteral(items) | ExprKind::List(items)) = &lhs.kind else {
+            let ExprKind::Destructure(items, _) = &lhs.kind else {
                 return;
             };
             for (position, item) in items.iter().enumerate() {
+                let Some(target) = &item.target else {
+                    continue;
+                };
                 let element_ty = ty
                     .offset_value_type(destructured_key(item, position).as_ref())
                     .unwrap_or(Type::mixed());
-                self.check_param_out_assignment(&item.value, &element_ty);
-                self.check_by_ref_destructuring(&item.value, &element_ty);
+                self.check_param_out_assignment(target, &element_ty);
+                self.check_by_ref_destructuring(target, &element_ty);
             }
         })
     }
 
-    /// Binds an assignment's (or a `foreach` value's) left-hand side to
-    /// `ty`, the type of whatever was just assigned/iterated - recursing
-    /// into a nested `ArrayLiteral` target (`[$a, $b] = $arr;` and
-    /// `list($a, $b) = $arr;` both parse this way, including a nested
-    /// `[[$a, $b], $c] = $nested;`) rather than only handling one level
-    /// deep. Per-key precision (`['name' => $n] = $shapedArray`) isn't
-    /// resolved for a plain array source - every target gets the
-    /// source's homogeneous element type, or Mixed for anything else.
     /// What a property reads as after `lhs = value`. A hooked property
     /// reads as its declared type, as its hooks decide what is stored and
     /// read. Otherwise `value` when it fits the property's native type, or
@@ -293,6 +281,11 @@ impl<'a> Checker<'a> {
         sig.ty().clone()
     }
 
+    /// Binds an assignment's (or a `foreach` value's) left-hand side to
+    /// `ty`, the type of whatever was just assigned/iterated, recursing
+    /// into a destructuring target (`[$a, $b] = $arr;`, `list($a, $b) =
+    /// $arr;`, nested `[[$a, $b], $c] = $nested;`): each element target
+    /// gets the value at its key.
     pub(crate) fn bind_assignment_target(&self, lhs: &Expr, ty: Type, locals: &mut Locals) {
         syntax::stack::guard(|| {
             // Keep any existing `narrowing_key` entry for this exact
@@ -336,12 +329,15 @@ impl<'a> Checker<'a> {
                 }
                 // Each element takes the value at its key: a keyed element's
                 // literal key, a positional one's index.
-                ExprKind::ArrayLiteral(items) | ExprKind::List(items) => {
+                ExprKind::Destructure(items, _) => {
                     for (position, item) in items.iter().enumerate() {
+                        let Some(target) = &item.target else {
+                            continue;
+                        };
                         let element_ty = ty
                             .offset_value_type(destructured_key(item, position).as_ref())
                             .unwrap_or(Type::mixed());
-                        self.bind_assignment_target(&item.value, element_ty, locals);
+                        self.bind_assignment_target(target, element_ty, locals);
                     }
                 }
                 // `$x['newKey'] = $value;` adds a real key to `$x`'s
@@ -652,32 +648,23 @@ impl<'a> Checker<'a> {
     /// value, recursing into a nested destructuring target.
     pub(crate) fn check_destructuring_offsets(
         &mut self,
-        items: &[ArrayItem],
+        items: &[DestructureItem],
         container: &Type,
         locals: &Locals,
     ) {
         syntax::stack::guard(|| {
-            let mut position: i64 = 0;
-            for item in items {
-                if item.spread {
+            for (position, item) in items.iter().enumerate() {
+                let Some(target) = &item.target else {
                     continue;
-                }
-                if item.key.is_none() && matches!(item.value.kind, ExprKind::Literal(Literal::Null))
-                {
-                    position += 1;
-                    continue;
-                }
+                };
                 let (dim, span) = match &item.key {
                     Some(k) => (self.infer_expr(k, locals), k.span),
-                    None => {
-                        position += 1;
-                        (Type::int_literal(position - 1), item.value.span)
-                    }
+                    None => (Type::int_literal(position as i64), target.span),
                 };
                 if self.report_missing_offset(container, &dim, span) {
                     continue;
                 }
-                if let ExprKind::ArrayLiteral(inner) | ExprKind::List(inner) = &item.value.kind {
+                if let ExprKind::Destructure(inner, _) = &target.kind {
                     let key = types::ShapeKey::from_type(&dim.to_array_key());
                     let inner_container = container
                         .offset_value_type(key.as_ref())
@@ -827,7 +814,7 @@ fn literal_keys_from_type(ty: &Type) -> Vec<String> {
 
 /// The key a destructuring element reads: its literal key, its position
 /// when it has none, `None` for a key only known at runtime.
-fn destructured_key(item: &ArrayItem, position: usize) -> Option<ShapeKey> {
+pub(crate) fn destructured_key(item: &DestructureItem, position: usize) -> Option<ShapeKey> {
     match item.key.as_ref().map(|k| &k.kind) {
         Some(ExprKind::Literal(Literal::String(s))) => Some(ShapeKey::from_bytes(s.as_bytes())),
         Some(ExprKind::Literal(Literal::Int(n))) => Some(ShapeKey::Int(*n)),

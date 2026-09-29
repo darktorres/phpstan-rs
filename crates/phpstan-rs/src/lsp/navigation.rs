@@ -381,12 +381,14 @@ impl<'a> Walker<'a> {
     ) {
         syntax::stack::guard(|| match &e.kind {
             ExprKind::Variable(name) => self.record_var_self(out, e.span, current_class, name),
-            ExprKind::ArrayLiteral(items) | ExprKind::List(items) => {
+            ExprKind::Destructure(items, _) => {
                 for item in items {
                     if let Some(k) = &item.key {
                         self.expr(k, ctx, current_class, out);
                     }
-                    self.bind_var(&item.value, ctx, current_class, out);
+                    if let Some(target) = &item.target {
+                        self.bind_var(target, ctx, current_class, out);
+                    }
                 }
             }
             _ => self.expr(e, ctx, current_class, out),

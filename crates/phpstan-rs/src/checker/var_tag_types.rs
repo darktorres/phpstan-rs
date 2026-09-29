@@ -3,6 +3,7 @@
 //! `VarTagTypeRuleHelper`/`VarTagChangedExpressionTypeRule`'s checks of a
 //! tag's type against the value it describes.
 
+use super::assignment::destructured_key;
 use super::*;
 use crate::registry;
 use syntax::ast::literal_string_value;
@@ -547,31 +548,25 @@ impl<'a> Checker<'a> {
                     out.push((tag.clone(), described));
                 }
             }
-            ExprKind::ArrayLiteral(items) | ExprKind::List(items) => {
+            ExprKind::Destructure(items, _) => {
                 for (i, item) in items.iter().enumerate() {
-                    let key = match &item.key {
-                        Some(k) => match &k.kind {
-                            ExprKind::Literal(Literal::Int(n)) => Type::int_literal(*n),
-                            ExprKind::Literal(Literal::String(s)) => {
-                                Type::string_literal(s.clone())
-                            }
-                            _ => Type::mixed(),
-                        },
-                        None => Type::int_literal(i as i64),
+                    let Some(item_target) = &item.target else {
+                        continue;
                     };
+                    let key = destructured_key(item, i);
                     let item_described = Described {
                         native: described
                             .native
-                            .offset_value_type(types::ShapeKey::from_type(&key).as_ref())
+                            .offset_value_type(key.as_ref())
                             .unwrap_or(Type::mixed()),
                         doc: described
                             .doc
-                            .offset_value_type(types::ShapeKey::from_type(&key).as_ref())
+                            .offset_value_type(key.as_ref())
                             .unwrap_or(Type::mixed()),
                         shape: ValueShape::Other,
                     };
                     self.collect_target_checks(
-                        &item.value,
+                        item_target,
                         item_described,
                         tag_for,
                         candidates,

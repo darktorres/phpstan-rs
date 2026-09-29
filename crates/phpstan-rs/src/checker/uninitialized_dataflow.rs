@@ -679,13 +679,13 @@ fn walk_expr(
 /// A `$this->prop = ...`-shaped assignment target marks `prop` as
 /// known-initialized from here on and is never itself a "read" (mirrors
 /// `checker/assignment.rs`'s `check_assignment_target`). Also mirrors
-/// that function's `ArrayLiteral` handling: a list-destructure like
+/// that function's `Destructure` handling: a destructuring like
 /// `[$this->name, $this->callableRef] = ...` assigns two properties at
 /// once; treating the whole left side as an ordinary expression would
 /// wrongly read both as still-uninitialized at the very point they were
 /// being assigned. Recurses through any nesting depth; an item's `key`
 /// expression (`['k' => $x] = ...`) is a real read, not a target, and is
-/// left to fall through to the ordinary expression walk. Any other shape
+/// walked as one. Any other shape
 /// (`$x = ...`, `$this->arr[$k] = ...`, ...) isn't a tracked property
 /// write, but its base/index subexpressions may still contain reads/
 /// calls worth walking.
@@ -702,9 +702,14 @@ fn assign_target(
             state.insert(name.to_string());
             return state;
         }
-        if let ExprKind::ArrayLiteral(items) | ExprKind::List(items) = &lhs.kind {
+        if let ExprKind::Destructure(items, _) = &lhs.kind {
             for item in items {
-                state = assign_target(&item.value, state, ctx, declaring_class);
+                if let Some(key) = &item.key {
+                    state = walk_expr(key, state, ctx, declaring_class);
+                }
+                if let Some(target) = &item.target {
+                    state = assign_target(target, state, ctx, declaring_class);
+                }
             }
             return state;
         }

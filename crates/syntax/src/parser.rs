@@ -58,6 +58,13 @@ pub struct Parser {
     pub(crate) next_node_id: std::cell::Cell<u32>,
     // What names in the tree are interned into.
     pub(crate) interner: Arc<Interner>,
+    // Errors that stand unless the node they're keyed by turns out to be
+    // part of a destructuring target: a skipped array slot (`[, $b]`) and
+    // a `list(...)`. Which it is is only known once the outermost `[...]`
+    // is followed by `=`, so they wait until then.
+    pub(crate) pattern_only: Vec<(NodeId, ParseError)>,
+    // The `array(...)` literals, which can't be destructuring targets.
+    pub(crate) long_arrays: rustc_hash::FxHashSet<NodeId>,
 }
 
 mod classes;
@@ -132,6 +139,8 @@ impl Parser {
             doc_comment_starts,
             next_node_id: std::cell::Cell::new(0),
             interner: Arc::clone(Interner::global()),
+            pattern_only: Vec::new(),
+            long_arrays: rustc_hash::FxHashSet::default(),
         }
     }
 
@@ -293,6 +302,7 @@ impl Parser {
                 stmts.push(self.parse_statement()?);
             }
         }
+        self.check_pattern_only()?;
         crate::name_resolution::resolve_names(&mut stmts);
         Ok(stmts)
     }

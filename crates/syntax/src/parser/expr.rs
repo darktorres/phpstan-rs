@@ -1,6 +1,6 @@
 use crate::ast::*;
 use crate::parser::{ParseError, Parser};
-use crate::token::{Keyword, Position, Token};
+use crate::token::{Keyword, Position, Span, Token};
 
 impl Parser {
     // ---- expressions (precedence climbing) ----
@@ -86,12 +86,41 @@ impl Parser {
             Token::GtGtEquals => Some(BinOp::Shr),
             _ => return Ok(lhs),
         };
+        let op_span = self.current_span();
+        let unexpected = |token: &str| ParseError {
+            message: format!("syntax error, unexpected token \"{token}\""),
+            span: op_span,
+        };
+        let is_pattern = matches!(
+            lhs.kind,
+            ExprKind::ArrayLiteral(_) | ExprKind::Destructure(..)
+        );
+        // `($a) = 1`: a parenthesized expression isn't a variable, nor is
+        // `array(...)`.
+        if matches!(lhs.kind, ExprKind::Grouping(_))
+            || self.long_arrays.contains(&lhs.id)
+            || (is_pattern && op.is_some())
+        {
+            return Err(unexpected(&format!("{:?}", self.peek())));
+        }
         self.skip();
         // Reference assignment (`$a = &$b;`) - only valid on a plain `=`,
         // never a compound one. See `ExprKind::AssignRef`'s own doc
         // comment for why this gets its own variant rather than just
         // being consumed and discarded.
+        let amp_span = self.current_span();
         let is_ref = op.is_none() && self.eat(&Token::Amp);
+        if is_ref && is_pattern {
+            return Err(ParseError {
+                message: "syntax error, unexpected token \"&\"".to_string(),
+                span: amp_span,
+            });
+        }
+        let lhs = if is_pattern {
+            self.as_pattern(lhs, true)?
+        } else {
+            lhs
+        };
         let rhs = self.parse_assignment()?;
         Ok(match op {
             None if is_ref => self.expr(ExprKind::AssignRef(Box::new(lhs), Box::new(rhs)), start),
@@ -101,6 +130,130 @@ impl Parser {
                 start,
             ),
         })
+    }
+
+    /// `target`, an assignment's or a `foreach`'s, with an array in it
+    /// taken as the destructuring pattern it is there. `top` is whether
+    /// `target` is the whole target rather than an item of an enclosing
+    /// pattern.
+    pub(crate) fn as_pattern(&mut self, mut target: Expr, top: bool) -> Result<Expr, ParseError> {
+        match &mut target.kind {
+            ExprKind::ArrayLiteral(items) => {
+                let items = std::mem::take(items);
+                if self.long_arrays.contains(&target.id) {
+                    return Err(ParseError {
+                        message: if top {
+                            format!("syntax error, unexpected {:?}", self.peek())
+                        } else {
+                            "Cannot assign to array(), use [] instead".to_string()
+                        },
+                        span: if top {
+                            self.current_span()
+                        } else {
+                            target.span
+                        },
+                    });
+                }
+                let items = self.destructure_items(items, DestructureSyntax::Short, target.span)?;
+                Ok(Expr {
+                    id: target.id,
+                    kind: ExprKind::Destructure(items, DestructureSyntax::Short),
+                    span: target.span,
+                })
+            }
+            ExprKind::Destructure(..) => {
+                self.take_pattern_only(target.id);
+                Ok(target)
+            }
+            _ => Ok(target),
+        }
+    }
+
+    /// The items of a `[...]` or `list(...)` spelled `syntax`, as the
+    /// items of the pattern it is, with PHP's compile-time checks on them.
+    pub(crate) fn destructure_items(
+        &mut self,
+        items: Vec<ArrayItem>,
+        syntax: DestructureSyntax,
+        span: Span,
+    ) -> Result<Vec<DestructureItem>, ParseError> {
+        let error = |message: &str, span: Span| ParseError {
+            message: message.to_string(),
+            span,
+        };
+        let keyed = items.iter().any(|item| item.key.is_some());
+        let mut pattern = Vec::with_capacity(items.len());
+        for item in items {
+            let skipped = matches!(item.value.kind, ExprKind::Literal(Literal::Null))
+                && self.take_pattern_only(item.value.id);
+            if skipped {
+                if keyed {
+                    return Err(error(
+                        "Cannot use empty array entries in keyed array assignment",
+                        item.value.span,
+                    ));
+                }
+                pattern.push(DestructureItem {
+                    key: None,
+                    target: None,
+                    by_ref: false,
+                });
+                continue;
+            }
+            if item.spread {
+                return Err(error(
+                    "Spread operator is not supported in assignments",
+                    item.value.span,
+                ));
+            }
+            if item.key.is_some() != keyed {
+                return Err(error(
+                    "Cannot mix keyed and unkeyed array entries in assignments",
+                    item.value.span,
+                ));
+            }
+            let mixed = match (&item.value.kind, syntax) {
+                (ExprKind::ArrayLiteral(_), DestructureSyntax::List) => {
+                    !self.long_arrays.contains(&item.value.id)
+                }
+                (ExprKind::Destructure(_, inner), _) => *inner != syntax,
+                _ => false,
+            };
+            if mixed {
+                return Err(error("Cannot mix [] and list()", item.value.span));
+            }
+            pattern.push(DestructureItem {
+                key: item.key,
+                target: Some(self.as_pattern(item.value, false)?),
+                by_ref: item.by_ref,
+            });
+        }
+        if pattern.iter().all(|item| item.target.is_none()) {
+            return Err(error("Cannot use empty list", span));
+        }
+        Ok(pattern)
+    }
+
+    /// Drops the error waiting on `id` being part of a destructuring
+    /// target; whether there was one.
+    fn take_pattern_only(&mut self, id: NodeId) -> bool {
+        let before = self.pattern_only.len();
+        self.pattern_only.retain(|(pending, _)| *pending != id);
+        self.pattern_only.len() != before
+    }
+
+    /// The first error still waiting on its node being part of a
+    /// destructuring target, now that none can become one.
+    pub(crate) fn check_pattern_only(&mut self) -> Result<(), ParseError> {
+        match self
+            .pattern_only
+            .drain(..)
+            .map(|(_, error)| error)
+            .min_by_key(|error| (error.span.start.line, error.span.start.col))
+        {
+            Some(error) => Err(error),
+            None => Ok(()),
+        }
     }
 
     pub(crate) fn parse_ternary(&mut self) -> Result<Expr, ParseError> {
