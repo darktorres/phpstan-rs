@@ -64,26 +64,14 @@
 //! `#[RegisteredRule]`-style attribute, not actually "using" its API
 //! surface - without that nuance would be pure noise.
 
-use rustc_hash::FxHashMap;
-
 use crate::checker::Checker;
 use crate::registry::class_decl_name;
 use crate::registry::{FunctionReflection, Registry, is_phpstan_namespace};
 use diagnostics::{Diagnostic, DiagnosticBuilder};
 use syntax::ast::*;
-use syntax::name_resolution::{NameContext, for_each_in_context};
+use syntax::name_resolution::for_each_in_context;
 use syntax::token::Span;
-use syntax::visit::{any_child_expr, any_child_stmt};
-
-/// `$variable-name -> resolved fully-qualified class name` for whichever
-/// of the enclosing function/method/closure/arrow-fn's own parameters (or
-/// closure `use`-captures) carry a single, unambiguous native class type
-/// hint - see `param_types_with`'s own doc comment for exactly what
-/// counts. Not filtered to `PHPStan\*` at collection time (unlike every
-/// other reference kind's own `resolve_if_phpstan` check) - collection
-/// stays reusable/simple, and every lookup site re-checks the namespace
-/// itself.
-type ParamTypes = FxHashMap<String, String>;
+use syntax::visit::{Visitor, walk_class_decl, walk_expr, walk_stmt};
 
 /// `file_package` is the checked file's composer package name: `None`
 /// when there's no file (`Walker::tests`' own `diagnostics_for`), and
@@ -100,14 +88,14 @@ pub(crate) fn check_phpstan_api_usage(
     let mut walker = Walker {
         registry,
         diagnostics: Vec::new(),
-        current_prop_types: ParamTypes::default(),
+        namespace: String::new(),
         current_class_implements_phpstan_interface: false,
         current_class_fqn: None,
         file_package,
     };
-    let empty = ParamTypes::default();
     for_each_in_context(program, |stmt, ctx| {
-        walker.check_stmt(stmt, ctx, &empty, "<main>");
+        walker.namespace = ctx.namespace().to_string();
+        walker.visit_stmt(stmt);
     });
     walker.diagnostics
 }
@@ -375,84 +363,11 @@ const RUNTIME_REFLECTION_CLASSES: &[&str] = &[
     "ReflectionFiber",
 ];
 
-/// A single class-shaped native type hint (`Param::type_hint`) resolved to
-/// a fully-qualified name, or `None` for anything not simple/unambiguous
-/// enough to trust: no hint at all, a keyword type, or a union or
-/// intersection (`Foo|Bar`, `A&B`). `?Scope $scope` still names `Scope`
-/// unambiguously.
-fn resolved_param_class(p: &Param) -> Option<String> {
-    resolved_class_from_hint(p.type_hint.as_ref()?)
-}
-
-/// The shared native-hint-resolution core `resolved_param_class` (above)
-/// and `class_prop_types` (below) both need.
-fn resolved_class_from_hint(hint: &TypeHint) -> Option<String> {
-    match &hint.kind {
-        TypeHintKind::Nullable(inner) => resolved_class_from_hint(inner),
-        TypeHintKind::Name(name) => name.resolved_class().map(str::to_string),
-        _ => None,
-    }
-}
-
 /// The fully-qualified name a class-like declaration declares.
 fn declared_class_name(c: &ClassDecl) -> String {
     c.namespaced_name
         .as_deref()
         .map_or_else(|| class_decl_name(c).to_string(), str::to_string)
-}
-
-/// A minimal, class-scoped sibling to `ParamTypes` - every
-/// property (ordinary, or constructor-promoted) whose own native type
-/// hint names a single, unambiguous class, keyed by bare property name
-/// (no leading `$`). Lets `check_expr`'s `MethodCall` arm recognize one
-/// additional common receiver shape real `ApiMethodCallRule`'s own full
-/// receiver-type inference would otherwise catch, that a bare
-/// `$variable` lookup against `ParamTypes` alone can't:
-/// `$this->prop->method()` through an injected/promoted dependency -
-/// still not general receiver-type inference (this walker has none, and
-/// still doesn't after this), just one more syntactically-typed shape,
-/// matching the module's own documented "known, disclosed gap" note on
-/// this exact case.
-fn class_prop_types(c: &ClassDecl) -> ParamTypes {
-    let mut out = ParamTypes::default();
-    for p in &c.properties {
-        if let Some(fqn) = p.type_hint.as_ref().and_then(resolved_class_from_hint) {
-            out.insert(p.name.to_string(), fqn);
-        }
-    }
-    if let Some(ctor) = c.constructor() {
-        for p in &ctor.function.params {
-            if p.promoted_visibility.is_some()
-                && let Some(fqn) = resolved_param_class(p)
-            {
-                out.insert(p.name.to_string(), fqn);
-            }
-        }
-    }
-    out
-}
-
-/// Builds a fresh `ParamTypes` map for one function-like body: every entry
-/// from `base` not shadowed by one of `params`' own names, plus a fresh
-/// entry (or an explicit removal, if the param's own hint isn't a simple
-/// class reference) for each of `params` themselves. Shared by
-/// `check_function` (called with an empty `base` - an ordinary function/
-/// method has no enclosing lexical scope to inherit from) and the
-/// `Closure`/`ArrowFn` arms of `check_expr` (called with whatever the
-/// enclosing scope already resolved, filtered down first for `Closure`'s
-/// own explicit `use (...)` capture list - PHP's real capture rule for a
-/// full closure, unlike an arrow function's own implicit
-/// capture-everything-referenced rule, which is why `ArrowFn` passes its
-/// *entire* enclosing map through unfiltered instead).
-fn param_types_with(base: &ParamTypes, params: &[Param]) -> ParamTypes {
-    let mut out = base.clone();
-    for p in params {
-        out.remove(p.name.as_ref());
-        if let Some(fqn) = resolved_param_class(p) {
-            out.insert(p.name.to_string(), fqn);
-        }
-    }
-    out
 }
 
 impl<'a> Checker<'a> {
@@ -552,26 +467,15 @@ impl<'a> Checker<'a> {
 struct Walker<'a> {
     registry: &'a Registry,
     diagnostics: Vec<Diagnostic>,
-    // Set once per `check_class`, from that class's own
-    // properties/promoted constructor params (`class_prop_types`) - PHP
-    // classes never nest, so there's no enclosing class's own map to
-    // save/restore the way `current_function_is_generator` and friends
-    // need to in the main `Checker`. Empty outside any class (top-level
-    // functions have no `$this` to look anything up through anyway).
-    current_prop_types: ParamTypes,
-    // Set once per `check_class`, alongside `current_prop_
-    // types` above, for the same reason (no nesting, no save/restore
-    // needed) - `RuntimeReflectionFunctionRule`/`RuntimeReflection
-    // InstantiationRule`/`OldPhpParser4ClassRule` all gate on this exact
-    // condition (real PHPStan's own `$scope->isInClass()` plus "does the
-    // enclosing class implement a `PHPStan\*` interface").
+    // The namespace the walk is in.
+    namespace: String,
+    // Whether the class whose body the walk is in implements a
+    // `PHPStan\*` interface: `RuntimeReflectionFunctionRule`/
+    // `RuntimeReflectionInstantiationRule`/`OldPhpParser4ClassRule` all
+    // gate on it (real PHPStan's own `$scope->isInClass()` plus that).
     current_class_implements_phpstan_interface: bool,
-    // Set once per `check_class`, alongside the two fields
-    // above (no nesting, no save/restore needed - PHP classes never
-    // nest) - `resolve_if_phpstan`'s own `self`/`static`/`parent`
-    // pseudo-class resolution needs this, as this standalone `Walker`
-    // has no other "current class" state of its own the way the main
-    // `Checker` does.
+    // The class whose body the walk is in, for `resolve_if_phpstan`'s
+    // `self`/`static`/`parent`.
     current_class_fqn: Option<String>,
     // The checked file's composer package name, for
     // `PhpStanNamespaceIn3rdPartyPackageRule` - see
@@ -696,9 +600,8 @@ impl<'a> Walker<'a> {
         action: &str,
         span: Span,
         identifier: &'static str,
-        ctx: &NameContext,
     ) {
-        if !self.is_phpstan_code(ctx.namespace(), fqn) {
+        if !self.is_phpstan_code(&self.namespace, fqn) {
             return;
         }
         let Some(info) = self.registry.classes.get(fqn) else {
@@ -733,20 +636,14 @@ impl<'a> Walker<'a> {
     /// method the registry has no record of at all (a dynamic/unresolved
     /// call) is silently skipped, matching real PHPStan's own
     /// `!hasNativeMethod` bail.
-    fn report_static_method_not_covered(
-        &mut self,
-        class: &str,
-        method: &str,
-        span: Span,
-        ctx: &NameContext,
-    ) {
+    fn report_static_method_not_covered(&mut self, class: &str, method: &str, span: Span) {
         let Some((owner, sig)) = self.registry.lookup_method_with_owner(class, method) else {
             return;
         };
         if sig.is_api() {
             return;
         }
-        if !self.is_phpstan_code(ctx.namespace(), &owner) {
+        if !self.is_phpstan_code(&self.namespace, &owner) {
             return;
         }
         let Some(owner_info) = self.registry.classes.get(&owner) else {
@@ -767,15 +664,8 @@ impl<'a> Walker<'a> {
     /// the caller) and `ApiTraitUseRule` (no exemption of any kind) both
     /// need this shape, unlike `report_not_covered`'s own class-level-
     /// `@api`-checks-out early return.
-    fn report_always(
-        &mut self,
-        fqn: &str,
-        action: &str,
-        span: Span,
-        identifier: &'static str,
-        ctx: &NameContext,
-    ) {
-        if !self.is_phpstan_code(ctx.namespace(), fqn) {
+    fn report_always(&mut self, fqn: &str, action: &str, span: Span, identifier: &'static str) {
+        if !self.is_phpstan_code(&self.namespace, fqn) {
             return;
         }
         self.diagnostics.push(DiagnosticBuilder::new(format!(
@@ -791,13 +681,6 @@ impl<'a> Walker<'a> {
     /// `isApiDoNotImplement()`). `false` for a class's own `extends`
     /// call site; `true` everywhere else (interface
     /// `extends`, `implements`, and this function's own general shape).
-    /// `ctx` (needed for the vendor-directory `is_phpstan_code` check)
-    /// pushed this past clippy's default 7-argument threshold - every
-    /// argument here is already its own independently-meaningful piece
-    /// of this one report site's own shape, not a bag of fields crying
-    /// out for a struct (mirrors this project's own existing precedent
-    /// for the identical situation, `main/check_project.rs::run_check_project`).
-    #[allow(clippy::too_many_arguments)]
     fn report_inheritance(
         &mut self,
         fqn: &str,
@@ -805,9 +688,8 @@ impl<'a> Walker<'a> {
         span: Span,
         identifier: &'static str,
         check_do_not_implement: bool,
-        ctx: &NameContext,
     ) {
-        if !self.is_phpstan_code(ctx.namespace(), fqn) {
+        if !self.is_phpstan_code(&self.namespace, fqn) {
             return;
         }
         let Some(info) = self.registry.classes.get(fqn) else {
@@ -826,20 +708,8 @@ impl<'a> Walker<'a> {
         }
     }
 
-    fn check_function(&mut self, f: &FunctionDecl, ctx: &NameContext, label: &str) {
-        let param_types = param_types_with(&ParamTypes::default(), &f.params);
-        for s in f.body.iter() {
-            self.check_stmt(s, ctx, &param_types, label);
-        }
-        for p in &f.params {
-            if let Some(d) = &p.default {
-                self.check_expr(d, ctx, &param_types, label);
-            }
-        }
-    }
-
-    fn check_class(&mut self, c: &ClassDecl, ctx: &NameContext) {
-        let fqn = declared_class_name(c);
+    /// `c`'s own `extends`, `implements` and `use` of PHPStan's classes.
+    fn check_class_inheritance(&mut self, c: &ClassDecl) {
         for parent in &c.extends {
             if let Some(pfqn) = self.resolve_if_phpstan(parent) {
                 // Real `ApiClassExtendsRule`'s own narrow
@@ -872,14 +742,13 @@ impl<'a> Walker<'a> {
                     c.span,
                     identifier,
                     c.kind != ClassKind::Class,
-                    ctx,
                 );
             }
         }
         for iface in &c.implements {
             if let Some(ifqn) = self.resolve_if_phpstan(iface) {
                 let action = format!("implementing {ifqn}");
-                self.report_inheritance(&ifqn, &action, c.span, "phpstanApi.interface", true, ctx);
+                self.report_inheritance(&ifqn, &action, c.span, "phpstanApi.interface", true);
             }
         }
         for used in &c.uses {
@@ -890,32 +759,9 @@ impl<'a> Walker<'a> {
                 // unconditionally - no `@api`/`@api-do-not-implement`
                 // exemption of any kind, unlike extends/implements.
                 let action = format!("using trait {ufqn}");
-                self.report_always(&ufqn, &action, c.span, "phpstanApi.trait", ctx);
+                self.report_always(&ufqn, &action, c.span, "phpstanApi.trait");
             }
         }
-        let empty = ParamTypes::default();
-        for p in &c.properties {
-            if let Some(d) = &p.default {
-                self.check_expr(d, ctx, &empty, &fqn);
-            }
-        }
-        for cst in &c.consts {
-            self.check_expr(&cst.value, ctx, &empty, &fqn);
-        }
-        for value in c.enum_cases.iter().filter_map(|case| case.value.as_ref()) {
-            self.check_expr(value, ctx, &empty, &fqn);
-        }
-        self.current_prop_types = class_prop_types(c);
-        self.current_class_implements_phpstan_interface =
-            class_implements_phpstan_interface(&fqn, self.registry);
-        self.current_class_fqn = Some(fqn.clone());
-        for m in &c.methods {
-            let method_label = format!("{fqn}::{}", m.function.name);
-            self.check_function(&m.function, ctx, &method_label);
-        }
-        self.current_prop_types = ParamTypes::default();
-        self.current_class_implements_phpstan_interface = false;
-        self.current_class_fqn = None;
     }
 
     /// `PhpStanNamespaceIn3rdPartyPackageRule`, direct port
@@ -1015,310 +861,154 @@ impl<'a> Walker<'a> {
                 "Creating new {matched} is a runtime reflection concept that might not work in PHPStan because it uses fully static reflection engine. Use objects retrieved from ReflectionProvider instead."
             ), span, 0, "phpstanApi.runtimeReflection").build());
     }
+}
 
-    /// Mirrors `deps::collect_stmt`'s exact shape - see that function's
-    /// own doc comment for why the recursion is split this way
-    /// (`any_child_stmt` for nested *statements*, this match for a
-    /// variant's own non-statement fields, with `FunctionDecl`/
-    /// `ClassDecl`/`ClassDecl` needing both since they have their own
-    /// dedicated declaration-walker instead of being flattened into an
-    /// ordinary statement list).
-    fn check_stmt(
-        &mut self,
-        stmt: &Stmt,
-        ctx: &NameContext,
-        param_types: &ParamTypes,
-        label: &str,
-    ) {
-        syntax::stack::guard(|| self.check_stmt_unguarded(stmt, ctx, param_types, label));
+impl<'ast> Visitor<'ast> for Walker<'_> {
+    fn visit_stmt(&mut self, stmt: &'ast Stmt) {
+        syntax::stack::guard(|| {
+            if let StmtKind::Namespace(ns) = &stmt.kind {
+                self.check_namespace_declaration(ns, stmt.span);
+            }
+            walk_stmt(self, stmt);
+        })
     }
 
-    fn check_stmt_unguarded(
-        &mut self,
-        stmt: &Stmt,
-        ctx: &NameContext,
-        param_types: &ParamTypes,
-        label: &str,
-    ) {
-        match &stmt.kind {
-            StmtKind::Block(_)
-            | StmtKind::InlineHtml(_)
-            | StmtKind::Break(_)
-            | StmtKind::Continue(_)
-            | StmtKind::Use(_)
-            | StmtKind::Global(_)
-            | StmtKind::Goto(_)
-            | StmtKind::Label(_)
-            | StmtKind::Declare { .. } => {}
-            StmtKind::Namespace(ns) => self.check_namespace_declaration(ns, stmt.span),
-            StmtKind::Expression(e) | StmtKind::Throw(e) => {
-                self.check_expr(e, ctx, param_types, label)
-            }
-            StmtKind::Unset(targets) => {
-                for target in targets {
-                    self.check_expr(target, ctx, param_types, label);
-                }
-            }
-            StmtKind::Return(e) => {
-                if let Some(e) = e {
-                    self.check_expr(e, ctx, param_types, label);
-                }
-            }
-            StmtKind::Echo(exprs) => {
-                for e in exprs {
-                    self.check_expr(e, ctx, param_types, label);
-                }
-            }
-            StmtKind::If(if_stmt) => {
-                for cond in if_stmt.conditions() {
-                    self.check_expr(cond, ctx, param_types, label);
-                }
-            }
-            StmtKind::While { cond, .. } | StmtKind::DoWhile { cond, .. } => {
-                self.check_expr(cond, ctx, param_types, label);
-            }
-            StmtKind::For {
-                init, cond, step, ..
-            } => {
-                for e in init.iter().chain(cond).chain(step) {
-                    self.check_expr(e, ctx, param_types, label);
-                }
-            }
-            StmtKind::Foreach {
-                subject,
-                key,
-                value,
-                ..
-            } => {
-                self.check_expr(subject, ctx, param_types, label);
-                if let Some(k) = key {
-                    self.check_expr(k, ctx, param_types, label);
-                }
-                self.check_expr(value, ctx, param_types, label);
-            }
-            StmtKind::FunctionDecl(f) => self.check_function(f, ctx, &f.name),
-            StmtKind::ClassDecl(c) => self.check_class(c, ctx),
-            StmtKind::GlobalConst(consts) => {
-                for c in consts {
-                    self.check_expr(&c.value, ctx, param_types, label);
-                }
-            }
-            StmtKind::StaticVar(vars) => {
-                for (_, d) in vars {
-                    if let Some(e) = d {
-                        self.check_expr(e, ctx, param_types, label);
+    fn visit_class_decl(&mut self, class: &'ast ClassDecl) {
+        self.check_class_inheritance(class);
+        let fqn = declared_class_name(class);
+        let implements_phpstan = class_implements_phpstan_interface(&fqn, self.registry);
+        let previous_implements = std::mem::replace(
+            &mut self.current_class_implements_phpstan_interface,
+            implements_phpstan,
+        );
+        let previous_class = self.current_class_fqn.replace(fqn);
+        walk_class_decl(self, class);
+        self.current_class_implements_phpstan_interface = previous_implements;
+        self.current_class_fqn = previous_class;
+    }
+
+    /// Each name-bearing reference kind is checked directly against
+    /// `self.registry`'s `@api`/`@api-do-not-implement` state.
+    fn visit_expr(&mut self, e: &'ast Expr) {
+        syntax::stack::guard(|| {
+            match &e.kind {
+                ExprKind::Call(callee, _) => {
+                    if let ExprKind::Name(n) = &callee.kind {
+                        self.check_runtime_reflection_function(n, e.span);
                     }
                 }
-            }
-            StmtKind::Switch { subject, cases } => {
-                self.check_expr(subject, ctx, param_types, label);
-                for case in cases {
-                    if let Some(t) = &case.test {
-                        self.check_expr(t, ctx, param_types, label);
+                ExprKind::New(callee, _) => {
+                    if let ExprKind::Name(n) = &callee.kind {
+                        self.check_new(n, e.span);
                     }
                 }
-            }
-            StmtKind::Try { .. } => {}
-        }
-        any_child_stmt(stmt, |child| {
-            self.check_stmt(child, ctx, param_types, label);
-            false
-        });
-    }
-
-    /// Mirrors `deps::collect_expr`'s exact shape - see that function's
-    /// own doc comment. Each name-bearing reference kind is checked
-    /// directly against `self.registry`'s `@api`/`@api-do-not-implement`
-    /// state (never generically recursed into via `any_child_expr` a
-    /// second time for the same span - every arm below either fully
-    /// covers its own children by hand, matching what `any_child_expr`
-    /// would otherwise return, or falls through to the catch-all).
-    fn check_expr(&mut self, e: &Expr, ctx: &NameContext, param_types: &ParamTypes, label: &str) {
-        syntax::stack::guard(|| self.check_expr_unguarded(e, ctx, param_types, label));
-    }
-
-    fn check_expr_unguarded(
-        &mut self,
-        e: &Expr,
-        ctx: &NameContext,
-        param_types: &ParamTypes,
-        label: &str,
-    ) {
-        match &e.kind {
-            ExprKind::Call(callee, args) => {
-                if let ExprKind::Name(n) = &callee.kind {
-                    self.check_runtime_reflection_function(n, e.span);
-                }
-                self.check_expr(callee, ctx, param_types, label);
-                for a in args {
-                    self.check_expr(&a.value, ctx, param_types, label);
-                }
-            }
-            ExprKind::New(callee, args) => {
-                if let ExprKind::Name(n) = &callee.kind {
-                    self.check_old_php_parser4_class(n, e.span);
-                    self.check_runtime_reflection_instantiation(n, e.span);
-                    if let Some(fqn) = self.resolve_if_phpstan(n)
-                        && let Some(info) = self.registry.classes.get(fqn.as_str())
+                ExprKind::StaticCall(target, method, _) => {
+                    // Resolved unconditionally, NOT pre-filtered through
+                    // `resolve_if_phpstan` - see `resolve_class_name`'s own
+                    // doc comment for why. `report_static_method_not_covered`
+                    // does its own `is_phpstan_code` gating against the
+                    // method's real *declaring* class once it looks it up.
+                    // A dynamic receiver has no name to resolve here (this
+                    // pass has no type inference of its own).
+                    if let Some(fqn) = target
+                        .as_name()
+                        .and_then(|name| self.resolve_class_name(name))
                     {
-                        // Real PHPStan's own `ApiInstantiationRule`
-                        // flags instantiation unconditionally by default - a
-                        // class-level `@api` does NOT exempt it at all. The
-                        // only exemption: the class's own, non-inherited
-                        // constructor (a direct `info.methods.get` lookup,
-                        // not `lookup_method`, since an inherited
-                        // constructor doesn't count) itself carries `@api`.
-                        let has_own_api_constructor = info
-                            .methods()
-                            .get("__construct")
-                            .is_some_and(|ctor| ctor.is_api());
-                        if !has_own_api_constructor {
-                            let action = format!("instantiating {fqn}");
-                            self.report_always(
-                                &fqn,
-                                &action,
-                                e.span,
-                                "phpstanApi.constructor",
-                                ctx,
-                            );
-                        }
-                    }
-                } else {
-                    self.check_expr(callee, ctx, param_types, label);
-                }
-                for a in args {
-                    self.check_expr(&a.value, ctx, param_types, label);
-                }
-            }
-            ExprKind::StaticCall(target, method, args) => {
-                // Resolved unconditionally, NOT
-                // pre-filtered through `resolve_if_phpstan` - see
-                // `resolve_class_name`'s own doc comment for why.
-                // `report_static_method_not_covered` does its own
-                // `is_phpstan_code` gating against the method's real
-                // *declaring* class once it looks it up. A genuinely
-                // dynamic receiver has no name to resolve here (this
-                // pass has no type-inference machinery of its own to
-                // fall back on, unlike `check_static_call`'s own real
-                // resolution).
-                if let Some(fqn) = target
-                    .as_name()
-                    .and_then(|name| self.resolve_class_name(name))
-                {
-                    self.report_static_method_not_covered(&fqn, method, e.span, ctx);
-                }
-                for a in args {
-                    self.check_expr(&a.value, ctx, param_types, label);
-                }
-            }
-            // `X::class` is deliberately exempt from the ordinary `@api`
-            // class-constant check - see this module's own doc comment
-            // for why - but is still a real bare name reference, so
-            // `OldPhpParser4ClassRule` still applies to it.
-            ExprKind::ClassNameFetch(StaticTarget::Name(class_name, _)) => {
-                self.check_old_php_parser4_class(class_name, e.span);
-            }
-            ExprKind::ClassConstFetch(StaticTarget::Name(class_name, _), member)
-            | ExprKind::StaticPropertyFetch(StaticTarget::Name(class_name, _), member) => {
-                let sigil = if matches!(e.kind, ExprKind::StaticPropertyFetch(..)) {
-                    "$"
-                } else {
-                    ""
-                };
-                if let Some(fqn) = self.resolve_if_phpstan(class_name) {
-                    let action = format!("accessing {fqn}::{sigil}{member}");
-                    self.report_not_covered(&fqn, &action, e.span, "phpstanApi.classConstant", ctx);
-                }
-            }
-            // `phpstanApi.method`/`phpParser.
-            // nodeConnectingAttribute` reporting for a method call is
-            // handled by the main `Checker` pass (`checker/expr.rs`'s own
-            // `MethodCall` arm, via `Checker::check_phpstan_api_method_
-            // call`/`check_node_connecting_attribute`) - general receiver-
-            // type inference there now fully subsumes this walker's own
-            // previous syntactically-typed-only recognition (a directly-
-            // typed parameter, or `$this->prop`). Still recurses into the
-            // receiver/args, since other reference kinds this walker
-            // covers (`new X()`, `X::staticMethod()`, ...) can appear
-            // nested inside either.
-            ExprKind::MethodCall(recv, _method, args, _) => {
-                self.check_expr(recv, ctx, param_types, label);
-                for a in args {
-                    self.check_expr(&a.value, ctx, param_types, label);
-                }
-            }
-            ExprKind::Instanceof(inner, InstanceofTarget::Name(n, _)) => {
-                self.check_old_php_parser4_class(n, e.span);
-                // Real PHPStan's own `ApiInstanceofRule` - two
-                // genuinely different diagnostics depending on whether the
-                // class is `@api` at all, not one identifier reused for
-                // both. A non-`@api` class is flagged with a kind-specific
-                // identifier and the ordinary "not covered" message; an
-                // `@api` class is still flagged (unless it's `PHPStan\
-                // Type\Type` itself or an interface) with a different
-                // identifier/message warning that the instanceof
-                // assumption itself might break in a minor version. This
-                // project has no live type-narrowing pass available to
-                // this separate walker, so the "already provably true/
-                // false"/"static type already narrows" suppressions real
-                // PHPStan also applies aren't replicated here.
-                if let Some(fqn) = self.resolve_if_phpstan(n) {
-                    // Independent of `@api` status entirely -
-                    // see `check_instanceof_deprecated`'s own doc comment.
-                    self.check_instanceof_deprecated(&fqn, e.span);
-                }
-                if let Some(fqn) = self.resolve_if_phpstan(n)
-                    && let Some(info) = self.registry.classes.get(fqn.as_str())
-                {
-                    if !info.is_api() {
-                        let action = format!("instanceof {fqn}");
-                        let identifier = match info.kind() {
-                            ClassKind::Class => "phpstanApi.class",
-                            ClassKind::Interface => "phpstanApi.interface",
-                            ClassKind::Trait => "phpstanApi.trait",
-                            ClassKind::Enum => "phpstanApi.enum",
-                        };
-                        self.report_always(&fqn, &action, e.span, identifier, ctx);
-                    } else if fqn != "PHPStan\\Type\\Type" && info.kind() != ClassKind::Interface {
-                        self.diagnostics.push(DiagnosticBuilder::new(format!(
-                                "Although {fqn} is covered by backward compatibility promise, this instanceof assumption might break in a minor PHPStan version."
-                            ), e.span, 0, "phpstanApi.instanceofAssumption").build());
+                        self.report_static_method_not_covered(&fqn, method, e.span);
                     }
                 }
-                self.check_expr(inner, ctx, param_types, label);
-            }
-            ExprKind::NewAnonymousClass(decl, args) => {
-                self.check_class(decl, ctx);
-                for a in args {
-                    self.check_expr(&a.value, ctx, param_types, label);
+                // `X::class` is deliberately exempt from the ordinary `@api`
+                // class-constant check - see this module's own doc comment
+                // for why - but is still a real bare name reference, so
+                // `OldPhpParser4ClassRule` still applies to it.
+                ExprKind::ClassNameFetch(StaticTarget::Name(class_name, _)) => {
+                    self.check_old_php_parser4_class(class_name, e.span);
                 }
-            }
-            ExprKind::Closure {
-                params, uses, body, ..
-            } => {
-                let captured: ParamTypes = uses
-                    .iter()
-                    .filter_map(|u| {
-                        param_types
-                            .get(u.name.as_ref())
-                            .map(|ty| (u.name.to_string(), ty.clone()))
-                    })
-                    .collect();
-                let nested = param_types_with(&captured, params);
-                for s in body {
-                    self.check_stmt(s, ctx, &nested, label);
+                ExprKind::ClassConstFetch(StaticTarget::Name(class_name, _), member)
+                | ExprKind::StaticPropertyFetch(StaticTarget::Name(class_name, _), member) => {
+                    let sigil = if matches!(e.kind, ExprKind::StaticPropertyFetch(..)) {
+                        "$"
+                    } else {
+                        ""
+                    };
+                    if let Some(fqn) = self.resolve_if_phpstan(class_name) {
+                        let action = format!("accessing {fqn}::{sigil}{member}");
+                        self.report_not_covered(&fqn, &action, e.span, "phpstanApi.classConstant");
+                    }
                 }
+                ExprKind::Instanceof(_, InstanceofTarget::Name(n, _)) => {
+                    self.check_instanceof(n, e.span);
+                }
+                _ => {}
             }
-            ExprKind::ArrowFn { params, body, .. } => {
-                let nested = param_types_with(param_types, params);
-                self.check_expr(body, ctx, &nested, label);
-            }
-            _ => {
-                any_child_expr(e, |child| {
-                    self.check_expr(child, ctx, param_types, label);
-                    false
-                });
-            }
+            walk_expr(self, e);
+        })
+    }
+}
+
+impl Walker<'_> {
+    /// `ApiInstantiationRule` and the runtime-reflection and PHP-Parser 4
+    /// class rules, for `new <name>(...)`.
+    fn check_new(&mut self, n: &QualifiedName, span: Span) {
+        self.check_old_php_parser4_class(n, span);
+        self.check_runtime_reflection_instantiation(n, span);
+        let Some(fqn) = self.resolve_if_phpstan(n) else {
+            return;
+        };
+        let Some(info) = self.registry.classes.get(fqn.as_str()) else {
+            return;
+        };
+        // Real PHPStan's own `ApiInstantiationRule` flags instantiation
+        // unconditionally by default - a class-level `@api` does NOT
+        // exempt it at all. The only exemption: the class's own,
+        // non-inherited constructor (a direct `info.methods.get` lookup,
+        // not `lookup_method`, since an inherited constructor doesn't
+        // count) itself carries `@api`.
+        let has_own_api_constructor = info
+            .methods()
+            .get("__construct")
+            .is_some_and(|ctor| ctor.is_api());
+        if !has_own_api_constructor {
+            let action = format!("instantiating {fqn}");
+            self.report_always(&fqn, &action, span, "phpstanApi.constructor");
+        }
+    }
+
+    /// `ApiInstanceofRule` and the PHP-Parser 4 class rule, for
+    /// `instanceof <name>`.
+    fn check_instanceof(&mut self, n: &QualifiedName, span: Span) {
+        self.check_old_php_parser4_class(n, span);
+        let Some(fqn) = self.resolve_if_phpstan(n) else {
+            return;
+        };
+        // Independent of `@api` status entirely - see
+        // `check_instanceof_deprecated`'s own doc comment.
+        self.check_instanceof_deprecated(&fqn, span);
+        let Some(info) = self.registry.classes.get(fqn.as_str()) else {
+            return;
+        };
+        // Two genuinely different diagnostics depending on whether the
+        // class is `@api` at all. A non-`@api` class is flagged with a
+        // kind-specific identifier and the ordinary "not covered" message;
+        // an `@api` class is still flagged (unless it's `PHPStan\Type\Type`
+        // itself or an interface) with a different identifier warning that
+        // the instanceof assumption itself might break in a minor version.
+        // This walker has no type narrowing of its own, so the "already
+        // provably true/false" suppressions real PHPStan also applies
+        // aren't replicated here.
+        if !info.is_api() {
+            let action = format!("instanceof {fqn}");
+            let identifier = match info.kind() {
+                ClassKind::Class => "phpstanApi.class",
+                ClassKind::Interface => "phpstanApi.interface",
+                ClassKind::Trait => "phpstanApi.trait",
+                ClassKind::Enum => "phpstanApi.enum",
+            };
+            self.report_always(&fqn, &action, span, identifier);
+        } else if fqn != "PHPStan\\Type\\Type" && info.kind() != ClassKind::Interface {
+            self.diagnostics.push(DiagnosticBuilder::new(format!(
+                    "Although {fqn} is covered by backward compatibility promise, this instanceof assumption might break in a minor PHPStan version."
+                ), span, 0, "phpstanApi.instanceofAssumption").build());
         }
     }
 }
