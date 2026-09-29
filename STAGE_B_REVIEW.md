@@ -845,7 +845,10 @@ through `check-project`.
   overrides only what it special-cases. Comments renamed mechanically still
   describe the old API ("`any_child_expr` deliberately returns no
   children", "the generic `Vec<&Expr>` shape"). (`167ff73d`)
-- [ ] **F28. Minor syntax and walker gaps.**
+- [x] **F28. Minor syntax and walker gaps.** Done across `474920e5`..`fcdd7f0a`,
+  the enum-body member with F16. `NodeId::SYNTHETIC` stays shared: it is
+  the sentinel no side table stores, so nothing can conflate it. An
+  anonymous class stays `is_final: false`, as PHP's reflection has it.
   - A second `default` match arm is a PHP compile error; it's accepted,
     and `match_default` takes the first (`bc28373d`).
   - The new `NodeId`s on declarations and clauses are read by nothing, and
