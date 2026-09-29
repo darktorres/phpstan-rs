@@ -65,13 +65,12 @@
 //! surface - without that nuance would be pure noise.
 
 use crate::checker::Checker;
-use crate::registry::class_decl_name;
 use crate::registry::{FunctionReflection, Registry, is_phpstan_namespace};
 use diagnostics::{Diagnostic, DiagnosticBuilder};
 use syntax::ast::*;
 use syntax::name_resolution::for_each_in_context;
 use syntax::token::Span;
-use syntax::visit::{Visitor, walk_class_decl, walk_expr, walk_stmt};
+use syntax::visit::{Visitor, walk_args, walk_class_def, walk_expr, walk_stmt};
 
 /// `file_package` is the checked file's composer package name: `None`
 /// when there's no file (`Walker::tests`' own `diagnostics_for`), and
@@ -362,13 +361,6 @@ const RUNTIME_REFLECTION_CLASSES: &[&str] = &[
     "ReflectionGenerator",
     "ReflectionFiber",
 ];
-
-/// The fully-qualified name a class-like declaration declares.
-fn declared_class_name(c: &ClassDecl) -> String {
-    c.namespaced_name
-        .as_deref()
-        .map_or_else(|| class_decl_name(c).to_string(), str::to_string)
-}
 
 impl<'a> Checker<'a> {
     /// `ApiMethodCallRule`'s general receiver-type-inference
@@ -708,8 +700,25 @@ impl<'a> Walker<'a> {
         }
     }
 
+    /// Checks class `fqn`'s definition `class` and walks its body in its
+    /// context; `fqn` is `None` for an anonymous class not named yet.
+    fn visit_class(&mut self, fqn: Option<String>, class: &ClassDef) {
+        self.check_class_inheritance(class);
+        let implements_phpstan = fqn
+            .as_deref()
+            .is_some_and(|fqn| class_implements_phpstan_interface(fqn, self.registry));
+        let previous_implements = std::mem::replace(
+            &mut self.current_class_implements_phpstan_interface,
+            implements_phpstan,
+        );
+        let previous_class = std::mem::replace(&mut self.current_class_fqn, fqn);
+        walk_class_def(self, class);
+        self.current_class_implements_phpstan_interface = previous_implements;
+        self.current_class_fqn = previous_class;
+    }
+
     /// `c`'s own `extends`, `implements` and `use` of PHPStan's classes.
-    fn check_class_inheritance(&mut self, c: &ClassDecl) {
+    fn check_class_inheritance(&mut self, c: &ClassDef) {
         for parent in &c.extends {
             if let Some(pfqn) = self.resolve_if_phpstan(parent) {
                 // Real `ApiClassExtendsRule`'s own narrow
@@ -874,17 +883,7 @@ impl<'ast> Visitor<'ast> for Walker<'_> {
     }
 
     fn visit_class_decl(&mut self, class: &'ast ClassDecl) {
-        self.check_class_inheritance(class);
-        let fqn = declared_class_name(class);
-        let implements_phpstan = class_implements_phpstan_interface(&fqn, self.registry);
-        let previous_implements = std::mem::replace(
-            &mut self.current_class_implements_phpstan_interface,
-            implements_phpstan,
-        );
-        let previous_class = self.current_class_fqn.replace(fqn);
-        walk_class_decl(self, class);
-        self.current_class_implements_phpstan_interface = previous_implements;
-        self.current_class_fqn = previous_class;
+        self.visit_class(Some(class.fq_name().to_string()), &class.def);
     }
 
     /// Each name-bearing reference kind is checked directly against
@@ -892,6 +891,11 @@ impl<'ast> Visitor<'ast> for Walker<'_> {
     fn visit_expr(&mut self, e: &'ast Expr) {
         syntax::stack::guard(|| {
             match &e.kind {
+                ExprKind::NewAnonymousClass(class) => {
+                    walk_args(self, &class.args);
+                    self.visit_class(class.name.as_ref().map(|name| name.to_string()), &class.def);
+                    return;
+                }
                 ExprKind::Call(callee, _) => {
                     if let ExprKind::Name(n) = &callee.kind {
                         self.check_runtime_reflection_function(n, e.span);

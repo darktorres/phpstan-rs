@@ -18,7 +18,6 @@
 //!   the expected calls;
 //! - `mock.bannedClass`: mocking a class `mock_banned_classes` lists.
 
-use crate::registry::class_decl_name;
 use rustc_hash::FxHashMap;
 use std::path::PathBuf;
 
@@ -136,7 +135,7 @@ fn collect_origins(stmts: &[Stmt], out: &mut FxHashMap<String, bool>) {
             walk_expr_in_scope(self, e);
         }
         fn visit_function_decl(&mut self, _: &'ast FunctionDecl) {}
-        fn visit_class_decl(&mut self, _: &'ast ClassDecl) {}
+        fn visit_class_def(&mut self, _: &'ast ClassDef) {}
     }
     walk_stmts(&mut Origins { out }, stmts);
 }
@@ -159,7 +158,7 @@ impl<'a> Walker<'a> {
 
     fn class(&mut self, c: &ClassDecl) {
         let mut mock_properties = 0;
-        for p in &c.properties {
+        for p in &c.def.properties {
             let (hint, members) = match &p.type_hint {
                 Some(native) => (native.to_string(), native_members(native)),
                 None => {
@@ -204,27 +203,28 @@ impl<'a> Walker<'a> {
             }
         }
         if mock_properties > 0
-            && mock_properties == c.properties.len()
-            && c.extends
+            && mock_properties == c.def.properties.len()
+            && c.def
+                .extends
                 .first()
                 .and_then(QualifiedName::resolved_class)
                 .is_some_and(|e| e.ends_with("TestCase"))
         {
             self.report(
-                c.name_span,
+                c.name.span,
                 format!(
                     "Test class {} has only mock properties; nothing real is under test in its fixtures.",
-                    class_decl_name(c)
+                    c.name
                 ),
                 "mock.onlyMockProperties",
             );
         }
         let mut class_origins = FxHashMap::default();
-        for m in &c.methods {
+        for m in &c.def.methods {
             collect_origins(m.function.body_stmts(), &mut class_origins);
         }
         class_origins.retain(|k, _| k.starts_with("this->"));
-        for m in &c.methods {
+        for m in &c.def.methods {
             let mut origins = class_origins.clone();
             collect_origins(m.function.body_stmts(), &mut origins);
             let previous = std::mem::replace(&mut self.origins, origins);
@@ -295,8 +295,8 @@ impl<'ast> Visitor<'ast> for Walker<'_> {
     }
 
     fn visit_class_decl(&mut self, c: &'ast ClassDecl) {
-        if c.kind == ClassKind::Enum {
-            for m in &c.methods {
+        if c.def.kind == ClassKind::Enum {
+            for m in &c.def.methods {
                 walk_stmts(self, m.function.body_stmts());
             }
         } else {

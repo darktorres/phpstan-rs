@@ -365,11 +365,9 @@ impl<'a> Checker<'a> {
     }
 
     /// Whether `name` is a class/interface/trait/enum the registry
-    /// indexed, or `"class@anonymous"`, the name every anonymous class
-    /// shares and the registry never indexes, so a `self`/`static`-typed
-    /// return inside one isn't read as an unresolvable class.
+    /// indexed.
     pub(crate) fn class_name_exists(&self, name: &str) -> bool {
-        name == "class@anonymous" || self.registry.lookup_class(name).is_some()
+        self.registry.lookup_class(name).is_some()
     }
 
     /// `ClassCaseSensitivityCheck`'s equivalent, covering every

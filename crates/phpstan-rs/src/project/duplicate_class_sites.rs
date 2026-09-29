@@ -46,7 +46,7 @@ impl DuplicateClassSites {
             if let Declared::Class(c) = declaration.declared
                 && !declaration.conditional
             {
-                self.record(declaration.name(), path, c.name_span, c.kind, is_stub);
+                self.record(declaration.name(), path, c.name.span, c.def.kind, is_stub);
             }
         });
     }

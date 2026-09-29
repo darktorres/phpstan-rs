@@ -73,7 +73,7 @@ struct Vars {
 impl<'ast> Visitor<'ast> for Vars {
     fn visit_function_decl(&mut self, _: &'ast FunctionDecl) {}
 
-    fn visit_class_decl(&mut self, _: &'ast ClassDecl) {}
+    fn visit_class_def(&mut self, _: &'ast ClassDef) {}
 
     fn visit_expr(&mut self, expr: &'ast Expr) {
         syntax::stack::guard(|| {

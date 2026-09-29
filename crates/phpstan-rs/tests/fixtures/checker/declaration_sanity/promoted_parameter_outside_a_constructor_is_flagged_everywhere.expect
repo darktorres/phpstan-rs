@@ -9,6 +9,6 @@
     non-ignorable
 7:30-7:45 property.invalidPromoted L0 | Promoted properties can be in constructor only.
     non-ignorable
-9:32-9:65 missingType.return L6 | Method class@anonymous::inner() has no return type specified.
+9:32-9:65 missingType.return L6 | Method class@anonymous/promoted_parameter_outside_a_constructor_is_flagged_everywhere.php:8::inner() has no return type specified.
 9:47-9:61 property.invalidPromoted L0 | Promoted properties can be in constructor only.
     non-ignorable

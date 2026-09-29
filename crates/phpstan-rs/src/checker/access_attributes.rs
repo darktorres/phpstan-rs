@@ -173,12 +173,13 @@ impl<'a> Checker<'a> {
                 .any(|a| self.registry.is_subclass_of(fqn, a) || fqn.eq_ignore_ascii_case(a))
             {
                 let span = c
+                    .def
                     .used_traits()
                     .find(|u| {
                         u.resolved_class()
                             .is_some_and(|resolved| resolved.eq_ignore_ascii_case(&trait_name))
                     })
-                    .map_or(c.name_span, |u| u.span);
+                    .map_or(c.name.span, |u| u.span);
                 self.report(format!(
                         "Trait {trait_name} can only be used by {} and their subclasses, not {fqn}.",
                         allowed.iter().map(|a| a.as_ref()).collect::<Vec<_>>().join(", ")
@@ -189,7 +190,7 @@ impl<'a> Checker<'a> {
                 );
             }
         }
-        for m in &c.methods {
+        for m in &c.def.methods {
             let checked = m.function.is_constructor()
                 || info
                     .method_access()

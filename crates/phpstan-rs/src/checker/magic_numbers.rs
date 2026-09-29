@@ -107,9 +107,9 @@ impl<'a> Checker<'a> {
             | ExprKind::New(_, args) => {
                 self.check_magic_arguments(args);
             }
-            ExprKind::NewAnonymousClass(decl, args) => {
-                self.check_magic_arguments(args);
-                self.check_magic_numbers_in_properties(&decl.properties);
+            ExprKind::NewAnonymousClass(class) => {
+                self.check_magic_arguments(&class.args);
+                self.check_magic_numbers_in_properties(&class.def.properties);
             }
             ExprKind::Closure { params, .. } | ExprKind::ArrowFn { params, .. } => {
                 self.check_magic_numbers_in_params(params);

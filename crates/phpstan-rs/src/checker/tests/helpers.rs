@@ -14,7 +14,8 @@ pub(super) fn all_diagnostics_for_with(
     configure: impl FnOnce(&mut CheckSettings),
 ) -> Vec<Diagnostic> {
     let tokens = Lexer::new(src).tokenize_with_spans();
-    let program = Parser::new(tokens).parse_program().unwrap();
+    let mut program = Parser::new(tokens).parse_program().unwrap();
+    crate::registry::name_anonymous_classes(&mut program, "test.php");
     let mut registry = Registry::build(&program);
     registry.merge_stubs(crate::registry::stubs::generated_stubs());
     registry.merge_stub_classes(crate::registry::stubs::generated_stub_classes());

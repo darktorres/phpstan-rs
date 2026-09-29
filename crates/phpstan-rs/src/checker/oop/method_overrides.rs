@@ -13,9 +13,10 @@ impl<'a> Checker<'a> {
         };
         // Redeclaring a native enum method is itself the error.
         for m in c
+            .def
             .methods
             .iter()
-            .filter(|m| !super::enums::is_native_enum_method(c, &m.function.name))
+            .filter(|m| !super::enums::is_native_enum_method(&c.def, &m.function.name))
         {
             let decl = DeclSpans {
                 name: m.function.name.span,
@@ -48,9 +49,13 @@ impl<'a> Checker<'a> {
         // for class-level diagnostics with no more specific member
         // location (`check_class_completeness`, `check_trait_conflicts`,
         // ...).
-        if !c.trait_uses.is_empty() {
-            let own_method_names: rustc_hash::FxHashSet<&str> =
-                c.methods.iter().map(|m| m.function.name.as_ref()).collect();
+        if !c.def.trait_uses.is_empty() {
+            let own_method_names: rustc_hash::FxHashSet<&str> = c
+                .def
+                .methods
+                .iter()
+                .map(|m| m.function.name.as_ref())
+                .collect();
             let mut trait_method_names: Vec<Name> = info
                 .methods()
                 .keys()
@@ -66,7 +71,7 @@ impl<'a> Checker<'a> {
                 let Some(own_visibility) = info.methods().get(&name).map(|s| s.visibility()) else {
                     continue;
                 };
-                self.check_one_method_override(fqn, &name, &own_visibility, c.span, None);
+                self.check_one_method_override(fqn, &name, &own_visibility, c.def.span, None);
             }
         }
     }

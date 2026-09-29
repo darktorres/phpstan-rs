@@ -766,7 +766,7 @@ fn collect_declared_classes(stmts: &[Stmt], out: &mut Vec<(String, Span)>) {
         if let Declared::Class(c) = declaration.declared
             && !declaration.conditional
         {
-            out.push((declaration.name(), c.name_span));
+            out.push((declaration.name(), c.name.span));
         }
     });
 }

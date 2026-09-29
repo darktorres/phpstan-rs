@@ -4,7 +4,7 @@
 use crate::ast::*;
 use crate::token::Position;
 use crate::visit::{
-    VisitorMut, walk_attribute_mut, walk_catch_clause_mut, walk_class_decl_mut, walk_expr_mut,
+    VisitorMut, walk_attribute_mut, walk_catch_clause_mut, walk_class_def_mut, walk_expr_mut,
     walk_stmt_mut, walk_stmts_mut,
 };
 
@@ -422,10 +422,7 @@ impl VisitorMut for Resolver {
                         f.namespaced_name = Some(self.ctx.declared_name(&f.name).into());
                     }
                     StmtKind::ClassDecl(c) => {
-                        c.namespaced_name = c
-                            .name
-                            .as_ref()
-                            .map(|name| self.ctx.declared_name(name).into());
+                        c.namespaced_name = self.ctx.declared_name(&c.name).into();
                     }
                     StmtKind::GlobalConst(consts) => {
                         for c in consts {
@@ -463,7 +460,7 @@ impl VisitorMut for Resolver {
         }
     }
 
-    fn visit_class_decl(&mut self, class: &mut ClassDecl) {
+    fn visit_class_def(&mut self, class: &mut ClassDef) {
         for name in class.extends.iter_mut().chain(class.implements.iter_mut()) {
             self.class(name);
         }
@@ -473,7 +470,7 @@ impl VisitorMut for Resolver {
             }
             self.trait_adaptations(&mut trait_use.adaptations);
         }
-        walk_class_decl_mut(self, class);
+        walk_class_def_mut(self, class);
     }
 
     fn visit_catch_clause(&mut self, clause: &mut CatchClause) {

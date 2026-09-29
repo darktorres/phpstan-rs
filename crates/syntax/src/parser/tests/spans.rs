@@ -65,12 +65,12 @@ fn class_decl_name_extends_and_implements_spans_are_each_precise() {
     let StmtKind::ClassDecl(c) = &program[0].kind else {
         panic!("expected ClassDecl");
     };
-    assert_eq!(text_at(src, c.name_span), "Widget");
-    assert_eq!(c.extends.len(), 1);
-    assert_eq!(text_at(src, c.extends[0].span), "Base");
-    assert_eq!(c.implements.len(), 2);
-    assert_eq!(text_at(src, c.implements[0].span), "Iface1");
-    assert_eq!(text_at(src, c.implements[1].span), "Iface2");
+    assert_eq!(text_at(src, c.name.span), "Widget");
+    assert_eq!(c.def.extends.len(), 1);
+    assert_eq!(text_at(src, c.def.extends[0].span), "Base");
+    assert_eq!(c.def.implements.len(), 2);
+    assert_eq!(text_at(src, c.def.implements[0].span), "Iface1");
+    assert_eq!(text_at(src, c.def.implements[1].span), "Iface2");
 }
 
 #[test]
@@ -80,9 +80,9 @@ fn class_decl_uses_spans_point_at_each_trait_name() {
     let StmtKind::ClassDecl(c) = &program[0].kind else {
         panic!("expected ClassDecl");
     };
-    assert_eq!(c.trait_uses[0].traits.len(), 2);
-    assert_eq!(text_at(src, c.trait_uses[0].traits[0].span), "TraitA");
-    assert_eq!(text_at(src, c.trait_uses[0].traits[1].span), "TraitB");
+    assert_eq!(c.def.trait_uses[0].traits.len(), 2);
+    assert_eq!(text_at(src, c.def.trait_uses[0].traits[0].span), "TraitA");
+    assert_eq!(text_at(src, c.def.trait_uses[0].traits[1].span), "TraitB");
 }
 
 #[test]
@@ -92,7 +92,7 @@ fn property_and_class_const_name_and_type_hint_spans_are_precise() {
     let StmtKind::ClassDecl(c) = &program[0].kind else {
         panic!("expected ClassDecl");
     };
-    let prop = &c.properties[0];
+    let prop = &c.def.properties[0];
     assert_eq!(text_at(src, prop.name.span), "$count");
     assert_eq!(
         text_at(
@@ -104,7 +104,7 @@ fn property_and_class_const_name_and_type_hint_spans_are_precise() {
         ),
         "?int"
     );
-    let cst = &c.consts[0];
+    let cst = &c.def.consts[0];
     assert_eq!(text_at(src, cst.name.span), "LIMIT");
     assert_eq!(
         text_at(
@@ -125,11 +125,11 @@ fn enum_decl_name_implements_and_case_name_spans_are_precise() {
     let StmtKind::ClassDecl(e) = &program[0].kind else {
         panic!("expected an enum");
     };
-    assert_eq!(e.kind, ClassKind::Enum);
-    assert_eq!(text_at(src, e.name_span), "Suit");
-    assert_eq!(e.implements.len(), 1);
-    assert_eq!(text_at(src, e.implements[0].span), "HasColor");
-    assert_eq!(text_at(src, e.enum_cases[0].name.span), "Hearts");
+    assert_eq!(e.def.kind, ClassKind::Enum);
+    assert_eq!(text_at(src, e.name.span), "Suit");
+    assert_eq!(e.def.implements.len(), 1);
+    assert_eq!(text_at(src, e.def.implements[0].span), "HasColor");
+    assert_eq!(text_at(src, e.def.enum_cases[0].name.span), "Hearts");
 }
 
 #[test]

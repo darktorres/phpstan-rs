@@ -842,45 +842,6 @@ impl Registry {
         resolve_deferred_value_of_with_native_fallback(ty, native, &self.classes)
     }
 
-    /// Whether `ty` mentions a template scoped anywhere
-    /// other than `method_name` - mirrors `function_sig::
-    /// mark_template_params`'s recursive-case list (`Object`'s type
-    /// args, `Array`'s key/value, `ClassString`, `Union`/`Intersection`,
-    /// `ArrayShape`/`ObjectShape` fields). `flatten_phpdoc_inheritance_
-    /// one_pass` uses this to refuse backfilling a foreign-scoped
-    /// template-parameterized ancestor type - genuinely unsafe to
-    /// backfill because it's scoped to the ancestor's own enclosing
-    /// class (meaningful only via unmodeled `@extends Base<Concrete>`
-    /// cross-inheritance binding, which this project doesn't model).
-    ///
-    /// As opposed to a `@template` declared directly on the ancestor
-    /// method itself (`function_sig::from_decl`'s `build_template_params(d,
-    /// &f.name, ctx)` stamps `scope: Some(f.name)` for exactly this case,
-    /// vs. `class_info.rs`'s `class_scope`, the class's own name,
-    /// for a class-level one - an FQN vs. a bare method name,
-    /// structurally distinguishable). A method-scoped template is safe
-    /// to copy through verbatim: `Relation::infer_template_bindings`/
-    /// `Type::substitute_templates`'s call-site binding is purely name-keyed
-    /// and blind to which class's `FunctionReflection` a signature came from.
-    /// Real PHPStan draws the identical line:
-    /// `ResolvedPhpDocBlock::resolveTemplateTypeInTag` substitutes an
-    /// ancestor tag's type through
-    /// `$parentClass->getActiveTemplateTypeMap()`, which only ever holds
-    /// class-level bindings - a method-scoped `@template` is never a
-    /// member of it, so that substitution is a no-op for this shape, and
-    /// real PHPStan's own merge leaves it untouched too.
-    pub(crate) fn type_mentions_foreign_scoped_template_param(
-        ty: &Type,
-        method_name: &str,
-    ) -> bool {
-        ty.nested_templates().iter().any(|tp| {
-            !matches!(
-                tp.scope.as_deref(),
-                Some(s) if s == method_name || s == types::CALLABLE_TEMPLATE_SCOPE
-            )
-        })
-    }
-
     /// `class_name`'s concrete binding for each templated ancestor
     /// (`{ancestor => {template => type}}`). Its own templates stay
     /// templates, scoped to it, through the mapping, so an inherited

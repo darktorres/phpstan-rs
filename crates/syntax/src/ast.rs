@@ -502,16 +502,39 @@ pub enum ClassKind {
     Enum,
 }
 
+/// A class, interface, trait or enum declaration statement: a name bound
+/// to a class definition.
 #[derive(Debug, Clone)]
 pub struct ClassDecl {
-    // `None` for an anonymous class.
+    pub name: Ident,
+    // The name with the file's namespace. The name as written until name
+    // resolution fills it in.
+    pub namespaced_name: Arc<str>,
+    pub def: ClassDef,
+}
+
+impl ClassDecl {
+    /// The fully-qualified name it declares.
+    pub fn fq_name(&self) -> &str {
+        &self.namespaced_name
+    }
+}
+
+/// `new class(...) [extends X] [implements Y] { ... }`: a class
+/// definition with no name in the source, and its constructor arguments.
+#[derive(Debug, Clone)]
+pub struct AnonymousClass {
+    pub def: ClassDef,
+    pub args: Vec<Arg>,
+    // The name the analysis knows it by, derived from where it is; `None`
+    // until the file's anonymous classes are named after parsing.
     pub name: Option<Name>,
-    // The name with the file's namespace; `None` for an anonymous class.
-    // Filled in by name resolution.
-    pub namespaced_name: Option<Arc<str>>,
-    // The name token's span. For an anonymous class, which has no name,
-    // it is `span` again.
-    pub name_span: Span,
+}
+
+/// A class-like's definition: everything but its name, shared by a
+/// declaration statement and an anonymous class (`new class { ... }`).
+#[derive(Debug, Clone)]
+pub struct ClassDef {
     pub kind: ClassKind,
     // An enum's backing type (`int` or `string`); `None` for a pure enum
     // and every other class-like.
@@ -544,13 +567,7 @@ pub struct ClassDecl {
     pub span: Span,
 }
 
-impl ClassDecl {
-    /// The fully-qualified name it declares; `None` for an anonymous
-    /// class.
-    pub fn fq_name(&self) -> Option<&str> {
-        self.namespaced_name.as_deref().or(self.name.as_deref())
-    }
-
+impl ClassDef {
     /// Its `__construct` method, matched case-insensitively.
     pub fn constructor(&self) -> Option<&MethodDecl> {
         self.methods.iter().find(|m| m.function.is_constructor())
@@ -1486,12 +1503,7 @@ pub enum ExprKind {
     // to StmtKind::Throw, a bare `throw expr;` statement, which is still
     // dispatched separately and takes priority at statement position.
     Throw(Box<Expr>),
-    // `new class(...) [extends X] [implements Y] { ... }` - the anonymous
-    // class's own declaration, inline, plus its constructor arguments.
-    // Never given a stable name multiple such expressions could share, so
-    // it isn't indexed into the registry the way a normal class is; its
-    // methods are still type-checked (see checker::check_expr).
-    NewAnonymousClass(Box<ClassDecl>, Vec<Arg>),
+    NewAnonymousClass(Box<AnonymousClass>),
     // `yield;` / `yield $v;` / `yield $k => $v;` - (key, value). Makes the
     // enclosing function a generator.
     Yield(Option<Box<Expr>>, Option<Box<Expr>>),

@@ -134,7 +134,7 @@ impl Parser {
             | Token::Keyword(Keyword::Interface)
             | Token::Keyword(Keyword::Trait) => {
                 let mut c = self.parse_class_decl()?;
-                c.attrs = attrs;
+                c.def.attrs = attrs;
                 self.stmt(StmtKind::ClassDecl(c), start)
             }
             // `abstract`/`final`/`readonly` are only reserved as class
@@ -149,7 +149,7 @@ impl Parser {
                 if self.looks_like_class_decl() =>
             {
                 let mut c = self.parse_class_decl()?;
-                c.attrs = attrs;
+                c.def.attrs = attrs;
                 self.stmt(StmtKind::ClassDecl(c), start)
             }
             // Like abstract/final/readonly above, `enum` is only reserved
@@ -160,7 +160,7 @@ impl Parser {
                 if matches!(self.peek_at(1), Token::Identifier(_) | Token::Keyword(_)) =>
             {
                 let mut e = self.parse_enum_decl()?;
-                e.attrs = attrs;
+                e.def.attrs = attrs;
                 self.stmt(StmtKind::ClassDecl(e), start)
             }
             // `namespace\foo();` - a relative-name expression statement,

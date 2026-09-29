@@ -9,7 +9,6 @@ use std::path::PathBuf;
 
 use crate::banned::BannedConstruct;
 use crate::registry::Registry;
-use crate::registry::{class_decl_fqn, class_decl_name};
 use syntax::ast::*;
 use syntax::token::{Position, Span};
 use syntax::visit::{
@@ -29,8 +28,9 @@ struct Walker<'a> {
     constructs: &'a FxHashSet<BannedConstruct>,
     types: &'a [String],
     registry: &'a Registry,
-    /// The classes whose declarations enclose the walk, innermost last.
-    classes: Vec<String>,
+    /// The classes whose declarations enclose the walk, innermost last;
+    /// `None` for an anonymous class not named yet.
+    classes: Vec<Option<String>>,
     out: Vec<Diagnostic>,
 }
 
@@ -142,7 +142,7 @@ impl<'a> Walker<'a> {
 
     /// The class whose members are being walked.
     fn class(&self) -> Option<&str> {
-        self.classes.last().map(String::as_str)
+        self.classes.last().and_then(Option::as_deref)
     }
 
     /// The constructs `e` itself is; its children are walked after.
@@ -297,7 +297,7 @@ impl<'a> Walker<'a> {
                 }
                 self.hint_types(params, return_type.as_deref(), "an arrow function");
             }
-            ExprKind::NewAnonymousClass(_, args) => self.arguments(args, e.span),
+            ExprKind::NewAnonymousClass(class) => self.arguments(&class.args, e.span),
             _ => {}
         }
         if let ExprKind::DynamicMethodCall(..) | ExprKind::DynamicStaticCall(..) = &e.kind {
@@ -360,8 +360,8 @@ impl<'ast> Visitor<'ast> for Walker<'_> {
                 }
             }
             StmtKind::ClassDecl(c) => {
-                let fqn = class_decl_fqn(c).to_string();
-                self.classes.push(fqn);
+                let fqn = c.fq_name().to_string();
+                self.classes.push(Some(fqn));
                 walk_stmt(self, stmt);
                 self.classes.pop();
                 return;
@@ -373,8 +373,9 @@ impl<'ast> Visitor<'ast> for Walker<'_> {
 
     fn visit_expr(&mut self, e: &'ast Expr) {
         self.expr_itself(e);
-        if let ExprKind::NewAnonymousClass(decl, _) = &e.kind {
-            self.classes.push(class_decl_name(decl).to_string());
+        if let ExprKind::NewAnonymousClass(class) = &e.kind {
+            self.classes
+                .push(class.name.as_ref().map(|name| name.to_string()));
             walk_expr(self, e);
             self.classes.pop();
         } else {

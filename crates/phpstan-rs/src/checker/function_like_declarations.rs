@@ -13,7 +13,6 @@
 use crate::checker::calls::contains_nullsafe_access;
 use crate::checker::type_declarations::TypePosition;
 use crate::checker::{Checker, Locals};
-use crate::registry::{class_decl_fqn, class_decl_name};
 use diagnostics::DiagnosticBuilder;
 use syntax::ast::*;
 use syntax::token::Span;
@@ -75,11 +74,12 @@ impl<'ast> Visitor<'ast> for Promotions<'_, '_> {
                 self.checker.walk_promoted_in_body(f.body_stmts());
             }
             StmtKind::ClassDecl(c) => {
-                let fqn = class_decl_fqn(c).to_string();
+                let fqn = c.fq_name().to_string();
                 let previous_class = self.checker.current_class.replace(fqn.clone());
                 self.checker
-                    .check_promoted_in_methods(&fqn, c.kind, &c.methods);
-                self.checker.walk_promoted_in_property_hooks(&c.properties);
+                    .check_promoted_in_methods(&fqn, c.def.kind, &c.def.methods);
+                self.checker
+                    .walk_promoted_in_property_hooks(&c.def.properties);
                 self.checker.current_class = previous_class;
             }
             _ => walk_stmt(self, stmt),
@@ -124,18 +124,16 @@ impl<'ast> Visitor<'ast> for Promotions<'_, '_> {
                     .check_literal_default_parameter_types(params, "arrow function");
                 self.visit_expr(body);
             }
-            ExprKind::NewAnonymousClass(decl, args) => {
-                walk_args(self, args);
-                let registry_name = self.checker.anonymous_class_names.get(&e.span).cloned();
-                let previous_class =
-                    std::mem::replace(&mut self.checker.current_class, registry_name);
-                self.checker.check_promoted_in_methods(
-                    class_decl_name(decl),
-                    decl.kind,
-                    &decl.methods,
-                );
+            ExprKind::NewAnonymousClass(class) => {
+                walk_args(self, &class.args);
+                let Some(name) = &class.name else {
+                    return;
+                };
+                let previous_class = self.checker.current_class.replace(name.to_string());
                 self.checker
-                    .walk_promoted_in_property_hooks(&decl.properties);
+                    .check_promoted_in_methods(name, class.def.kind, &class.def.methods);
+                self.checker
+                    .walk_promoted_in_property_hooks(&class.def.properties);
                 self.checker.current_class = previous_class;
             }
             _ => walk_expr(self, e),

@@ -3,7 +3,6 @@
 //! name spans and whole-declaration `span` fields already carry everything
 //! needed), keeping the per-file nesting a document outline needs.
 
-use crate::registry::class_decl_name;
 use lsp_types::{DocumentSymbol, SymbolKind};
 
 use syntax::ast::{ClassDecl, ClassKind, FunctionDecl, MethodDecl, Stmt, StmtKind};
@@ -89,9 +88,9 @@ pub(super) fn class_kind_symbol_kind(kind: ClassKind) -> SymbolKind {
 }
 
 fn class_symbol(c: &ClassDecl) -> DocumentSymbol {
-    let kind = class_kind_symbol_kind(c.kind);
-    let mut children: Vec<DocumentSymbol> = c.consts.iter().map(const_symbol).collect();
-    children.extend(c.enum_cases.iter().map(|case| {
+    let kind = class_kind_symbol_kind(c.def.kind);
+    let mut children: Vec<DocumentSymbol> = c.def.consts.iter().map(const_symbol).collect();
+    children.extend(c.def.enum_cases.iter().map(|case| {
         symbol(
             case.name.to_string(),
             SymbolKind::ENUM_MEMBER,
@@ -100,7 +99,7 @@ fn class_symbol(c: &ClassDecl) -> DocumentSymbol {
             Vec::new(),
         )
     }));
-    children.extend(c.properties.iter().map(|p| {
+    children.extend(c.def.properties.iter().map(|p| {
         symbol(
             p.name.to_string(),
             SymbolKind::PROPERTY,
@@ -109,14 +108,8 @@ fn class_symbol(c: &ClassDecl) -> DocumentSymbol {
             Vec::new(),
         )
     }));
-    children.extend(c.methods.iter().map(method_symbol));
-    symbol(
-        class_decl_name(c).to_string(),
-        kind,
-        c.span,
-        c.name_span,
-        children,
-    )
+    children.extend(c.def.methods.iter().map(method_symbol));
+    symbol(c.name.to_string(), kind, c.def.span, c.name.span, children)
 }
 
 fn const_symbol(cst: &syntax::ast::ClassConst) -> DocumentSymbol {

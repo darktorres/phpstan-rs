@@ -173,7 +173,7 @@ impl<'a> Checker<'a> {
         // Each property gets its own real span (declaration order, not a
         // sorted HashMap walk - the AST's `Vec<PropertyDecl>` is already
         // deterministic, unlike the registry's `HashMap`-backed lookup).
-        for p in &c.properties {
+        for p in &c.def.properties {
             if let Some(prop_sig) = info.properties().get(p.name.as_ref()) {
                 self.check_generic_bounds(
                     prop_sig.ty(),
@@ -209,10 +209,10 @@ impl<'a> Checker<'a> {
                 self.check_type_internal_usage(prop_sig.case_refs(), p.span);
             }
         }
-        self.check_property_tag_types(fqn, c);
-        self.check_property_phpdoc_types(fqn, c);
-        self.check_class_ancestors(fqn, c);
-        self.check_ancestor_generic_bounds(fqn, c.span);
+        self.check_property_tag_types(fqn, &c.def);
+        self.check_property_phpdoc_types(fqn, &c.def);
+        self.check_class_ancestors(fqn, &c.def);
+        self.check_ancestor_generic_bounds(fqn, c.def.span);
         // `TemplateTypeCheck`'s own declaration-validity family,
         // class-level (real PHPStan's per-kind rule split -
         // `ClassTemplateTypeRule`/`InterfaceTemplateTypeRule`/
@@ -222,7 +222,7 @@ impl<'a> Checker<'a> {
         // counterpart, since real PHPStan excludes enums from
         // `ClassTemplateTypeRule` entirely.
         if !info.templates().is_empty() {
-            let display_name = format!("{} {fqn}", class_kind_identifier(&c.kind));
+            let display_name = format!("{} {fqn}", class_kind_identifier(&c.def.kind));
             let templates = info.templates().clone();
             let bounds = info.template_bounds().clone();
             let defaults = info.template_defaults().clone();
@@ -235,7 +235,7 @@ impl<'a> Checker<'a> {
                 TemplateSubject::Declared {
                     display_name: &display_name,
                 },
-                c.span,
+                c.def.span,
             );
         }
     }
@@ -260,7 +260,7 @@ impl<'a> Checker<'a> {
     /// scratch, so a `@property` tag shadowed by a real property of the
     /// same name checks the *real* property's type instead of the tag's
     /// own.
-    fn check_property_tag_types(&mut self, fqn: &str, c: &ClassDecl) {
+    fn check_property_tag_types(&mut self, fqn: &str, c: &ClassDef) {
         let Some(raw) = &c.doc_comment else {
             return;
         };

@@ -7,7 +7,7 @@
 use crate::checker::{Checker, class_kind_identifier};
 use crate::registry;
 use phpdoc::grammar::{self, PhpDocTagValue};
-use syntax::ast::{ClassDecl, ClassKind, QualifiedName, TraitUse};
+use syntax::ast::{ClassDef, ClassKind, QualifiedName, TraitUse};
 use syntax::token::Span;
 use types::{self, PositionVariance, Type};
 
@@ -70,7 +70,7 @@ fn call_site_projection(arg: &Type) -> Option<String> {
 
 impl<'a> Checker<'a> {
     /// The ancestor checks of a class, interface or trait declaration.
-    pub(crate) fn check_class_ancestors(&mut self, fqn: &str, c: &ClassDecl) {
+    pub(crate) fn check_class_ancestors(&mut self, fqn: &str, c: &ClassDef) {
         let doc = c.doc_comment.as_deref();
         let templates = self.declared_templates(fqn, doc);
         match c.kind {

@@ -20,7 +20,7 @@ use syntax::ast::*;
 
 impl<'a> Checker<'a> {
     /// `DuplicateDeclarationHelper::checkClassLike`'s equivalent.
-    pub(crate) fn check_duplicate_class_members(&mut self, fqn: &str, c: &ClassDecl) {
+    pub(crate) fn check_duplicate_class_members(&mut self, fqn: &str, c: &ClassDef) {
         let kind = class_kind_identifier(&c.kind);
         self.check_duplicate_consts(fqn, kind, &c.enum_cases, &c.consts);
         self.check_duplicate_properties(fqn, kind, &c.properties, &c.methods);

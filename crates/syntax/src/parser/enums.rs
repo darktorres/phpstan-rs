@@ -46,12 +46,7 @@ impl Parser {
         // generic; PHP has no `enum Foo<T>` syntax at all).
         let doc_comment = self.take_doc_comment();
         self.expect(&Token::Keyword(Keyword::Enum))?;
-        let name_start = self.current_pos();
-        let name = self.expect_ident()?;
-        let name_span = Span {
-            start: name_start,
-            end: self.previous_end(),
-        };
+        let name = self.expect_ident_spanned()?;
 
         let backing_type = if self.eat(&Token::Colon) {
             self.parse_type_hint()?
@@ -76,30 +71,28 @@ impl Parser {
         } = self.parse_class_body(false)?;
 
         Ok(ClassDecl {
-            namespaced_name: None,
-            name: Some(name),
-            name_span,
-            kind: ClassKind::Enum,
-            backing_type,
-            extends: Vec::new(),
-            implements,
-            is_abstract: false,
-            // An enum is implicitly final.
-            is_final: true,
-            is_readonly: false,
-            properties,
-            enum_cases,
-            methods,
-            consts,
-            trait_uses,
-            doc_comment,
-            // Overwritten by `parse_statement`, the only caller that saw
-            // any leading `#[Attr]` groups - see `ClassDecl.attrs`'s
-            // identical note in `parse_class_decl`.
-            attrs: Vec::new(),
-            span: Span {
-                start,
-                end: self.previous_end(),
+            namespaced_name: name.name.as_str().into(),
+            name,
+            def: ClassDef {
+                kind: ClassKind::Enum,
+                backing_type,
+                extends: Vec::new(),
+                implements,
+                is_abstract: false,
+                // An enum is implicitly final.
+                is_final: true,
+                is_readonly: false,
+                properties,
+                enum_cases,
+                methods,
+                consts,
+                trait_uses,
+                doc_comment,
+                // Overwritten by `parse_statement`, the only caller that saw
+                // any leading `#[Attr]` groups - see `ClassDecl.attrs`'s
+                // identical note in `parse_class_decl`.
+                attrs: Vec::new(),
+                span: self.span_from(start),
             },
         })
     }

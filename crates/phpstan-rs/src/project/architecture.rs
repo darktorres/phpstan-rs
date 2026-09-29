@@ -40,9 +40,10 @@ fn collect_declared<'a>(stmts: &'a [Stmt], out: &mut FxHashMap<String, Declared<
         out.insert(
             declaration.name().to_ascii_lowercase(),
             Declared {
-                name_span: c.name_span,
+                name_span: c.name.span,
                 span: declaration.span,
                 attributes: c
+                    .def
                     .attrs
                     .iter()
                     .map(|a| {
@@ -53,6 +54,7 @@ fn collect_declared<'a>(stmts: &'a [Stmt], out: &mut FxHashMap<String, Declared<
                     })
                     .collect(),
                 public_methods: c
+                    .def
                     .methods
                     .iter()
                     .filter(|m| m.visibility == Visibility::Public && !m.function.is_constructor())

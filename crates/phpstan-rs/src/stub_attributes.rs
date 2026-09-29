@@ -23,7 +23,7 @@ use syntax::ast::*;
 use syntax::lexer::Lexer;
 use syntax::parser::Parser;
 use syntax::token::{Span, Token};
-use syntax::visit::{VisitorMut, walk_class_decl_mut, walk_function_decl_mut, walk_stmt_mut};
+use syntax::visit::{VisitorMut, walk_class_def_mut, walk_function_decl_mut, walk_stmt_mut};
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum StubAttribute {
@@ -301,8 +301,8 @@ impl VisitorMut for Pass {
             }
             StmtKind::FunctionDecl(f) => self.function(f, Some(&mut stmt.doc_comment)),
             StmtKind::ClassDecl(c) => {
-                for ty in self.return_overrides(&c.attrs) {
-                    append_to(&mut c.doc_comment, &format!("@return {ty}"));
+                for ty in self.return_overrides(&c.def.attrs) {
+                    append_to(&mut c.def.doc_comment, &format!("@return {ty}"));
                     append_to(&mut stmt.doc_comment, &format!("@return {ty}"));
                 }
                 self.visit_class_decl(c);
@@ -315,7 +315,7 @@ impl VisitorMut for Pass {
         self.function(f, None);
     }
 
-    fn visit_class_decl(&mut self, c: &mut ClassDecl) {
+    fn visit_class_def(&mut self, c: &mut ClassDef) {
         self.strip(&mut c.attrs);
         self.methods(&mut c.methods);
         for p in &mut c.properties {
@@ -333,7 +333,7 @@ impl VisitorMut for Pass {
         for case in &mut c.enum_cases {
             self.strip(&mut case.attrs);
         }
-        walk_class_decl_mut(self, c);
+        walk_class_def_mut(self, c);
     }
 
     fn visit_expr(&mut self, expr: &mut Expr) {

@@ -35,11 +35,10 @@ use std::path::Path;
 
 use crate::project::Project;
 use crate::registry::Registry;
-use crate::registry::class_decl_fqn;
 use syntax::ast::{Arg, ClassDecl, Expr, ExprKind, FunctionDecl, MethodDecl, Stmt};
 use syntax::token::{Position, Span};
 use syntax::visit::{
-    Visitor, walk_class_decl, walk_expr, walk_function_decl, walk_method_decl, walk_stmts,
+    Visitor, walk_args, walk_class_decl, walk_expr, walk_function_decl, walk_method_decl, walk_stmts,
 };
 
 use super::navigation::{ProbeScope, contains, resolve_class_ref};
@@ -152,9 +151,7 @@ impl<'a> Walker<'a> {
 
 impl<'ast> Visitor<'ast> for Walker<'_> {
     fn visit_class_decl(&mut self, class: &'ast ClassDecl) {
-        let previous = self
-            .current_class
-            .replace(class_decl_fqn(class).to_string());
+        let previous = self.current_class.replace(class.fq_name().to_string());
         walk_class_decl(self, class);
         self.current_class = previous;
     }
@@ -214,12 +211,30 @@ impl<'ast> Visitor<'ast> for Walker<'_> {
                     };
                     self.offer(expr.span, method.span.end, args, Some(target));
                 }
-                // A dynamic name or an anonymous class's constructor has no
-                // signature to offer.
+                // A dynamic name has no signature to offer.
                 ExprKind::DynamicStaticCall(_, _, args)
-                | ExprKind::DynamicMethodCall(_, _, args, _)
-                | ExprKind::NewAnonymousClass(_, args) => {
+                | ExprKind::DynamicMethodCall(_, _, args, _) => {
                     self.offer(expr.span, expr.span.start, args, None);
+                }
+                ExprKind::NewAnonymousClass(class) => {
+                    let target = class
+                        .name
+                        .as_ref()
+                        .filter(|name| {
+                            self.registry
+                                .lookup_method_with_owner(name, "__construct")
+                                .is_some()
+                        })
+                        .map(|name| Target::Constructor(name.to_string()));
+                    self.offer(expr.span, expr.span.start, &class.args, target);
+                    walk_args(self, &class.args);
+                    let previous = std::mem::replace(
+                        &mut self.current_class,
+                        class.name.as_ref().map(|name| name.to_string()),
+                    );
+                    self.visit_class_def(&class.def);
+                    self.current_class = previous;
+                    return;
                 }
                 ExprKind::StaticCall(target, member, args) => {
                     // A dynamic receiver has no class-name text to resolve

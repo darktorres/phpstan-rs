@@ -544,7 +544,8 @@ impl Registry {
 /// it's safe to call concurrently for many files at once -
 /// `check_project.rs`'s parallel parse stage does exactly that, once per
 /// file, inside the same rayon pool `project::parse_file` runs in.
-/// Returns every declaration `stmts` contributes, in depth-first order -
+/// Returns every declaration `stmts` contributes, in depth-first order,
+/// then its anonymous classes (`anonymous_class_decls`) -
 /// `Registry::insert_built_decl` must see them fed back in this order
 /// (single-file callers get that for free from `Registry::index`'s own
 /// loop; the parallel batch path must preserve per-file order too,
@@ -562,7 +563,7 @@ pub(crate) fn build_declarations(stmts: &[Stmt], origin: &Origin) -> Vec<BuiltDe
             Declared::Class(c) => {
                 let name = Name::from(&declaration.name());
                 let mut info = ClassReflection::from_decl(c, ctx);
-                info.record_provenance(origin, &name, c.name_span, &MemberSpans::of_class(c));
+                info.record_provenance(origin, &name, c.name.span, &MemberSpans::of_class(&c.def));
                 out.push(BuiltDecl::Class {
                     name,
                     conditional,
@@ -596,6 +597,7 @@ pub(crate) fn build_declarations(stmts: &[Stmt], origin: &Origin) -> Vec<BuiltDe
             }
         }
     });
+    out.extend(crate::registry::anonymous_class_decls(stmts, origin));
     out
 }
 

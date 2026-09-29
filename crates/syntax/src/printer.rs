@@ -486,10 +486,10 @@ fn write_expr_unguarded(out: &mut String, e: &Expr) {
             out.push_str("throw ");
             write_expr(out, inner);
         }
-        ExprKind::NewAnonymousClass(_, args) => {
+        ExprKind::NewAnonymousClass(class) => {
             out.push_str("new class");
-            if !args.is_empty() {
-                write_args(out, args);
+            if !class.args.is_empty() {
+                write_args(out, &class.args);
             }
             out.push_str("\n{\n}");
         }

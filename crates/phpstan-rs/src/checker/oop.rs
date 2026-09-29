@@ -401,7 +401,7 @@ impl<'a> Checker<'a> {
     /// sensitivity re-check is deliberately not built here - that's the
     /// dedicated `class.nameCase` pipeline-wide expansion, not
     /// re-litigated per tag family.
-    pub(crate) fn check_require_tag_types(&mut self, c: &ClassDecl) {
+    pub(crate) fn check_require_tag_types(&mut self, c: &ClassDef) {
         let Some(doc) = c.doc_comment.as_deref().map(docblock::parse) else {
             return;
         };
@@ -539,7 +539,7 @@ impl<'a> Checker<'a> {
     /// RHS is re-parsed directly from the declaration's own doc comment
     /// rather than read back from the already-flattened
     /// `ClassReflection::sealed`.
-    pub(crate) fn check_sealed_tag_types(&mut self, c: &ClassDecl) {
+    pub(crate) fn check_sealed_tag_types(&mut self, c: &ClassDef) {
         let Some(doc) = c.doc_comment.as_deref().map(docblock::parse) else {
             return;
         };
@@ -705,17 +705,17 @@ impl<'a> Checker<'a> {
     /// `@phpstan-*` tags are overwhelmingly declaration-level in
     /// practice.
     pub(crate) fn check_unknown_phpstan_tags_in_class(&mut self, c: &ClassDecl) {
-        self.check_unknown_phpstan_tags_on(c.doc_comment.as_deref(), c.name_span);
-        for m in &c.methods {
+        self.check_unknown_phpstan_tags_on(c.def.doc_comment.as_deref(), c.name.span);
+        for m in &c.def.methods {
             self.check_unknown_phpstan_tags_on(
                 m.function.doc_comment.as_deref(),
                 m.function.name.span,
             );
         }
-        for p in &c.properties {
+        for p in &c.def.properties {
             self.check_unknown_phpstan_tags_on(p.doc_comment.as_deref(), p.span);
         }
-        for cc in &c.consts {
+        for cc in &c.def.consts {
             self.check_unknown_phpstan_tags_on(cc.doc_comment.as_deref(), cc.name.span);
         }
     }
@@ -978,17 +978,17 @@ impl<'a> Checker<'a> {
         if self.facts_only {
             return;
         }
-        self.check_readonly_class_version(c.is_readonly, false, c.name_span);
-        self.check_method_declaration_sanity(fqn, c.kind, c.is_abstract, &c.methods);
+        self.check_readonly_class_version(c.def.is_readonly, false, c.name.span);
+        self.check_method_declaration_sanity(fqn, c.def.kind, c.def.is_abstract, &c.def.methods);
         self.check_property_declarations(
             fqn,
             fqn,
-            c.kind,
-            c.is_abstract,
-            &c.properties,
-            &c.methods,
+            c.def.kind,
+            c.def.is_abstract,
+            &c.def.properties,
+            &c.def.methods,
         );
-        self.check_class_constant_modifiers(fqn, c.kind, &c.consts);
+        self.check_class_constant_modifiers(fqn, c.def.kind, &c.def.consts);
         let own = crate::registry::ClassReflection::from_decl(c, &self.name_ctx);
         let registry_matches = self.registry.classes.get(fqn).is_some_and(|info| {
             *info.extends() == *own.extends()
@@ -996,10 +996,10 @@ impl<'a> Checker<'a> {
                 && *info.uses() == *own.uses()
         });
         if registry_matches {
-            self.check_inheritance_target_kinds(fqn, false, c.span);
-            self.check_magic_serialization_methods(fqn, fqn, c.name_span);
-            self.check_constant_overrides(fqn, &c.consts);
-            self.check_trait_constant_conflicts(fqn, &c.consts);
+            self.check_inheritance_target_kinds(fqn, false, c.def.span);
+            self.check_magic_serialization_methods(fqn, fqn, c.name.span);
+            self.check_constant_overrides(fqn, &c.def.consts);
+            self.check_trait_constant_conflicts(fqn, &c.def.consts);
         }
     }
 
@@ -1653,7 +1653,7 @@ impl<'a> Checker<'a> {
     /// has one that's real, callable, and non-private.
     /// `lookup_ancestor_method_with_owner` already gets that "nearest
     /// real declaration" semantics for free.
-    pub(crate) fn check_parent_constructor_call(&mut self, fqn: &str, c: &ClassDecl) {
+    pub(crate) fn check_parent_constructor_call(&mut self, fqn: &str, c: &ClassDef) {
         if !self.settings.strict_rules.check_parent_constructor_call {
             return;
         }
@@ -1709,7 +1709,7 @@ impl<'a> Checker<'a> {
     /// target property is a plain (non-static, non-hooked) declaration
     /// on this same class with the identical native type. Requires a
     /// configured PHP version >= 8.0.
-    pub(crate) fn check_promoted_property_candidate(&mut self, fqn: &str, c: &ClassDecl) {
+    pub(crate) fn check_promoted_property_candidate(&mut self, fqn: &str, c: &ClassDef) {
         if !self.settings.extras.check_promoted_property_suggestions {
             return;
         }

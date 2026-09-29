@@ -36,14 +36,14 @@ use types::Name;
 
 use crate::project::Project;
 use crate::registry::Registry;
-use crate::registry::class_decl_fqn;
 use rustc_hash::FxHashSet;
 use std::path::Path;
 use syntax::ast::*;
 use syntax::token::{Position, Span};
 use syntax::visit::{
-    Visitor, walk_args, walk_catch_clause, walk_class_const, walk_class_decl, walk_enum_case,
-    walk_expr, walk_function_decl, walk_method_decl, walk_property_decl, walk_stmt, walk_stmts,
+    Visitor, walk_args, walk_catch_clause, walk_class_const, walk_class_decl, walk_class_def,
+    walk_enum_case, walk_expr, walk_function_decl, walk_method_decl, walk_property_decl, walk_stmt,
+    walk_stmts,
 };
 
 #[derive(Debug, Clone)]
@@ -528,9 +528,14 @@ impl<'ast> Visitor<'ast> for Walker<'_> {
     }
 
     fn visit_class_decl(&mut self, class: &'ast ClassDecl) {
-        let fqn = class_decl_fqn(class).to_string();
+        let fqn = class.fq_name().to_string();
         let previous = self.current_class.replace(fqn.clone());
-        self.record(class.name_span, Resolved::Class(fqn));
+        self.record(class.name.span, Resolved::Class(fqn));
+        walk_class_decl(self, class);
+        self.current_class = previous;
+    }
+
+    fn visit_class_def(&mut self, class: &'ast ClassDef) {
         for name in class
             .extends
             .iter()
@@ -539,8 +544,7 @@ impl<'ast> Visitor<'ast> for Walker<'_> {
         {
             self.record_class(name);
         }
-        walk_class_decl(self, class);
-        self.current_class = previous;
+        walk_class_def(self, class);
     }
 
     fn visit_method_decl(&mut self, method: &'ast MethodDecl) {
@@ -568,6 +572,16 @@ impl<'ast> Visitor<'ast> for Walker<'_> {
     fn visit_expr(&mut self, expr: &'ast Expr) {
         syntax::stack::guard(|| {
             match &expr.kind {
+                ExprKind::NewAnonymousClass(class) => {
+                    walk_args(self, &class.args);
+                    let previous = std::mem::replace(
+                        &mut self.current_class,
+                        class.name.as_ref().map(|name| name.to_string()),
+                    );
+                    self.visit_class_def(&class.def);
+                    self.current_class = previous;
+                    return;
+                }
                 // `foo()`'s callee - a bare `Name` here is always a function
                 // reference (never a class), unlike a bare `Name` reached
                 // some other way (see the plain `ExprKind::Name` arm below).

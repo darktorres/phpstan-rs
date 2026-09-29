@@ -23,7 +23,7 @@ use rustc_hash::FxHashMap;
 use syntax::name::Name;
 
 use syntax::ast::{
-    ArrayItem, Attribute, ClassDecl, Expr, ExprKind, Literal, QualifiedName, StaticTarget,
+    ArrayItem, Attribute, ClassDef, Expr, ExprKind, Literal, QualifiedName, StaticTarget,
 };
 use types::Type;
 
@@ -197,7 +197,7 @@ fn association_target_from_native_type(ty: &Type) -> Option<String> {
 /// majority of classes in any real project, including this project's
 /// own.
 pub(crate) fn compute_doctrine_entity(
-    c: &ClassDecl,
+    c: &ClassDef,
     properties: &FxHashMap<Name, PropertyReflection>,
 ) -> Option<DoctrineEntity> {
     let entity_attr = find_orm_attribute(&c.attrs, "Entity")?;

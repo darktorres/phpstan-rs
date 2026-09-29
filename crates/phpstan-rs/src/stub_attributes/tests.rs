@@ -1,7 +1,6 @@
 //! The version attributes, checked against the same declarations
 //! written without them.
 
-use crate::registry::class_decl_name;
 use syntax::ast::*;
 use syntax::lexer::Lexer;
 use syntax::parser::Parser;
@@ -61,8 +60,8 @@ fn shape(src: &str) -> Vec<String> {
             match &s.kind {
                 StmtKind::FunctionDecl(f) => function(f, out),
                 StmtKind::ClassDecl(c) => {
-                    out.push(format!("class {} {{", class_decl_name(c)));
-                    for m in &c.methods {
+                    out.push(format!("class {} {{", c.name));
+                    for m in &c.def.methods {
                         function(&m.function, out);
                     }
                     out.push("}".to_string());

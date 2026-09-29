@@ -33,7 +33,7 @@ use std::path::{Path, PathBuf};
 
 use syntax::ast::*;
 use syntax::token::Span;
-use syntax::visit::{Visitor, walk_catch_clause, walk_class_decl, walk_expr, walk_stmts};
+use syntax::visit::{Visitor, walk_catch_clause, walk_class_def, walk_expr, walk_stmts};
 
 /// What a reference site points at - no local-variable variant (see
 /// this item's own edge-case notes: local-variable rename/references is
@@ -187,7 +187,7 @@ impl<'ast> Visitor<'ast> for ClassFnRefWalker<'_> {
         }
     }
 
-    fn visit_class_decl(&mut self, class: &'ast ClassDecl) {
+    fn visit_class_def(&mut self, class: &'ast ClassDef) {
         for name in class
             .extends
             .iter()
@@ -196,7 +196,7 @@ impl<'ast> Visitor<'ast> for ClassFnRefWalker<'_> {
         {
             self.class_at(name, name.span);
         }
-        walk_class_decl(self, class);
+        walk_class_def(self, class);
     }
 
     fn visit_catch_clause(&mut self, clause: &'ast CatchClause) {

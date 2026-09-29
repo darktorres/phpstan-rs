@@ -27,7 +27,7 @@ impl<'a> Checker<'a> {
     /// Also covers a promoted constructor property's inline hooks
     /// (`Param::hooks`), reusing `check_get_hook`/`check_set_hook` via
     /// scalar `name`/`span`/`type_hint` arguments.
-    pub(crate) fn check_property_hooks(&mut self, fqn: &str, c: &ClassDecl) {
+    pub(crate) fn check_property_hooks(&mut self, fqn: &str, c: &ClassDef) {
         let Some(info) = self.registry.classes.get(fqn) else {
             return;
         };

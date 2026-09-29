@@ -1,7 +1,6 @@
 use indexmap::IndexMap;
 use rustc_hash::{FxHashMap, FxHashSet};
 
-use crate::registry::class_decl_fqn;
 use crate::registry::function_sig::{
     DeclaredType, FunctionReflection, ParameterReflection, apply_implicit_nullable_default,
     build_template_params, build_type_aliases, declared_type, infer_class_const_type,
@@ -15,7 +14,7 @@ use crate::registry::reflection_attribute::ReflectionAttribute;
 use crate::registry::type_node::parse_type_node;
 use phpdoc::docblock::{self, DocBlock};
 use phpdoc::grammar::TypeNode;
-use syntax::ast::{ClassDecl, ClassKind, ExprKind, Literal, Visibility};
+use syntax::ast::{ClassDecl, ClassDef, ClassKind, ExprKind, Literal, Visibility};
 use syntax::name_resolution::NameContext;
 use syntax::token::Span;
 use types::{self, AccessoryKind, Name, TemplateParam, Type};
@@ -887,7 +886,7 @@ impl<'a> MemberSpans<'a> {
         }
     }
 
-    pub(crate) fn of_class(c: &'a ClassDecl) -> MemberSpans<'a> {
+    pub(crate) fn of_class(c: &'a ClassDef) -> MemberSpans<'a> {
         let mut spans = MemberSpans::default();
         spans.add_methods(&c.methods);
         spans.add_consts(&c.consts);
@@ -934,8 +933,14 @@ impl ClassReflection {
         }
     }
 
-    #[hotpath::measure]
     pub(crate) fn from_decl(c: &ClassDecl, ctx: &NameContext) -> ClassReflection {
+        Self::from_def(c.fq_name(), &c.def, ctx)
+    }
+
+    /// The reflection of class definition `c`, which declares class
+    /// `name`.
+    #[hotpath::measure]
+    pub(crate) fn from_def(name: &str, c: &ClassDef, ctx: &NameContext) -> ClassReflection {
         let class_doc: Option<DocBlock> = c.doc_comment.as_deref().map(docblock::parse);
         // An enum can't be generic; its `@template` tags declare nothing.
         let template_doc = class_doc.as_ref().filter(|_| c.kind != ClassKind::Enum);
@@ -950,7 +955,7 @@ impl ClassReflection {
         // (properties, consts, `@extends`/`@implements` args, and every
         // method's params/return type below) carries the real metadata
         // from here instead of a bare name.
-        let class_scope = class_decl_fqn(c).to_string();
+        let class_scope = name.to_string();
         let template_params: FxHashMap<String, TemplateParam> = template_doc
             .map(|d| build_template_params(d, &class_scope, ctx))
             .unwrap_or_default();
@@ -1655,7 +1660,7 @@ impl ClassReflection {
     /// typed as the case; `cases()`, and a backed enum's `from()` and
     /// `tryFrom()`; the `name` property, and a backed enum's `value`; and
     /// `UnitEnum`/`BackedEnum` among its interfaces.
-    fn add_enum_members(&mut self, e: &ClassDecl, fqn: &str) {
+    fn add_enum_members(&mut self, e: &ClassDef, fqn: &str) {
         // `cases(): array` is a real, built-in static method every enum
         // gets from the language itself (`UnitEnum`), and a backed
         // enum's `from(int|string $value): static`/`tryFrom(...): ?static`

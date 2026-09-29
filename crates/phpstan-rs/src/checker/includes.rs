@@ -13,7 +13,6 @@ use rustc_hash::{FxHashMap, FxHashSet};
 use std::path::{Path, PathBuf};
 
 use crate::checker::{Checker, Locals};
-use crate::registry::class_decl_name;
 use syntax::ast::*;
 use syntax::token::Span;
 use syntax::visit::{Visitor, walk_expr, walk_stmt, walk_stmts};
@@ -77,8 +76,8 @@ impl<'ast> Visitor<'ast> for Initializers {
                 }
             }
             StmtKind::ClassDecl(c) => {
-                for k in &c.consts {
-                    self.add(class_constant_key(class_decl_name(c), &k.name), &k.value);
+                for k in &c.def.consts {
+                    self.add(class_constant_key(&c.name, &k.name), &k.value);
                 }
             }
             StmtKind::FunctionDecl(_) => {}

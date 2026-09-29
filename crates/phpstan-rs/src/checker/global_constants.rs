@@ -65,7 +65,7 @@ impl<'ast> Visitor<'ast> for Collector {
         match &stmt.kind {
             StmtKind::FunctionDecl(f) => self.body(f.body_stmts(), false),
             StmtKind::ClassDecl(c) => {
-                for m in &c.methods {
+                for m in &c.def.methods {
                     self.body(m.function.body_stmts(), false);
                 }
             }
@@ -89,11 +89,11 @@ impl<'ast> Visitor<'ast> for Collector {
                 self.visit_expr(body);
                 self.in_closure = outer;
             }
-            ExprKind::NewAnonymousClass(decl, args) => {
-                for a in args {
+            ExprKind::NewAnonymousClass(class) => {
+                for a in &class.args {
                     self.visit_expr(&a.value);
                 }
-                for m in &decl.methods {
+                for m in &class.def.methods {
                     self.body(m.function.body_stmts(), false);
                 }
             }

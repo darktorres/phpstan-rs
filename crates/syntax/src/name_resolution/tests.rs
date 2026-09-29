@@ -31,7 +31,7 @@ fn resolutions(src: &str) -> Vec<(String, ResolvedName)> {
             walk_expr(self, e);
         }
         fn visit_class_decl(&mut self, c: &'ast ClassDecl) {
-            for n in c.extends.iter().chain(&c.implements) {
+            for n in c.def.extends.iter().chain(&c.def.implements) {
                 self.push(n);
             }
             crate::visit::walk_class_decl(self, c);
@@ -146,7 +146,7 @@ fn declarations_carry_the_namespace_they_are_declared_in() {
     );
     let mut names = Vec::new();
     for_each_in_context(&program, |stmt, _| match &stmt.kind {
-        StmtKind::ClassDecl(c) => names.push(c.namespaced_name.clone()),
+        StmtKind::ClassDecl(c) => names.push(Some(c.namespaced_name.clone())),
         StmtKind::GlobalConst(consts) => {
             names.extend(consts.iter().map(|c| c.namespaced_name.clone()))
         }

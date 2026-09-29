@@ -59,7 +59,7 @@ impl Scope {
 impl<'ast> Visitor<'ast> for Scope {
     fn visit_expr(&mut self, _: &'ast Expr) {}
     fn visit_function_decl(&mut self, _: &'ast FunctionDecl) {}
-    fn visit_class_decl(&mut self, _: &'ast ClassDecl) {}
+    fn visit_class_def(&mut self, _: &'ast ClassDef) {}
 
     fn visit_stmt(&mut self, stmt: &'ast Stmt) {
         match &stmt.kind {
@@ -318,7 +318,7 @@ fn collect_declares(program: &[Stmt]) -> Vec<(&Stmt, bool)> {
                 }
                 StmtKind::FunctionDecl(f) => walk_stmts(self, f.body_stmts()),
                 StmtKind::ClassDecl(c) => {
-                    for m in &c.methods {
+                    for m in &c.def.methods {
                         walk_stmts(self, m.function.body_stmts());
                     }
                 }

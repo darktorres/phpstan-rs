@@ -12,7 +12,6 @@ use crate::checker::{
 use crate::pest_config;
 use crate::regex_groups;
 use crate::registry::FunctionReflection;
-use crate::registry::class_decl_name;
 use diagnostics::DiagnosticBuilder;
 use syntax::ast::*;
 use syntax::token::Span;
@@ -149,19 +148,35 @@ impl<'a> Checker<'a> {
             .map_or(Type::mixed(), |f| f.return_type().clone())
     }
 
-    /// A `new class { ... }` expression's own inferred type - looks its
-    /// span up in `anonymous_class_names` (populated once, at parse time,
-    /// by `registry::collect_anonymous_classes` - see that module's own
-    /// doc comment) rather than recomputing its synthetic name here, so
-    /// the checker and the registry entry it resolves against always
-    /// agree by construction. Falls back to `mixed` when the span
-    /// isn't found - every existing test (which never calls
-    /// `set_anonymous_class_names`) keeps today's behavior unchanged.
-    fn anonymous_class_type(&self, span: Span) -> Type {
-        self.anonymous_class_names
-            .get(&span)
-            .map(|name| Type::object(name.clone().into(), Vec::new()))
-            .unwrap_or(Type::mixed())
+    /// Checks anonymous class `name`'s definition `def`, written at
+    /// `span`: its members, under its registry name.
+    fn check_anonymous_class(&mut self, name: &str, def: &ClassDef, span: Span) {
+        self.check_inheritance_target_kinds(name, true, span);
+        self.check_magic_serialization_methods(name, "anonymous class", span);
+        self.check_property_declarations(
+            name,
+            name,
+            ClassKind::Class,
+            false,
+            &def.properties,
+            &def.methods,
+        );
+        self.check_readonly_class_version(def.is_readonly, true, span);
+        for m in &def.methods {
+            self.check_function(&m.function, Some(name), m.is_static, true);
+        }
+        for p in &def.properties {
+            self.check_attributes(&p.attrs, name);
+            self.check_attribute_targets(&p.attrs, ATTRIBUTE_TARGET_PROPERTY, "property");
+        }
+        for cc in &def.consts {
+            self.check_attributes(&cc.attrs, name);
+            self.check_attribute_targets(
+                &cc.attrs,
+                ATTRIBUTE_TARGET_CLASS_CONSTANT,
+                "class constant",
+            );
+        }
     }
 
     /// Thin wrapper over `check_expr_impl` - the real work - so every
@@ -2345,13 +2360,14 @@ impl<'a> Checker<'a> {
                 }
                 new_ty
             }
-            ExprKind::NewAnonymousClass(decl, args) => {
-                self.check_enum_cases_outside_enum(&decl.enum_cases);
-                let ctor_params = decl
+            ExprKind::NewAnonymousClass(class) => {
+                self.check_enum_cases_outside_enum(&class.def.enum_cases);
+                let ctor_params = class
+                    .def
                     .constructor()
                     .map(|m| m.function.params.as_slice())
                     .unwrap_or_default();
-                for (i, a) in args.iter().enumerate() {
+                for (i, a) in class.args.iter().enumerate() {
                     let param = match &a.name {
                         Some(name) => ctor_params.iter().find(|p| *p.name == **name),
                         None => ctor_params
@@ -2365,79 +2381,10 @@ impl<'a> Checker<'a> {
                     }
                     self.check_expr(&a.value, locals, label);
                 }
-                // The anonymous class's own methods are still worth
-                // checking - check_function only needs a FunctionDecl and
-                // a label to check against, independent of whether the
-                // class itself is indexed into the registry under a
-                // stable name.
-                //
-                // `ancestor_sig` looks up the same method name directly
-                // against whichever real, already-registered interface/
-                // parent this anonymous class implements/extends
-                // (`extends` first, matching `Registry::
-                // lookup_ancestor_method_with_owner`'s order), since an
-                // anonymous class's synthetic name is never indexed into
-                // the registry for `check_function`'s own `sig` lookup to
-                // find otherwise. Passed only as `check_missing_function_
-                // typehints`'s fallback (see `check_function_with_
-                // ancestor_hint`'s doc comment) - this project still
-                // doesn't otherwise type-check an anonymous class's body
-                // against its implemented interfaces.
-                let previous_anonymous_class = std::mem::replace(
-                    &mut self.current_anonymous_class,
-                    self.anonymous_class_names.get(&e.span).cloned(),
-                );
-                if let Some(name) = self.current_anonymous_class.clone() {
-                    self.check_inheritance_target_kinds(&name, true, e.span);
-                    self.check_magic_serialization_methods(&name, "anonymous class", e.span);
+                if let Some(name) = &class.name {
+                    self.check_anonymous_class(name, &class.def, e.span);
                 }
-                let registry_name = self
-                    .current_anonymous_class
-                    .clone()
-                    .unwrap_or_else(|| class_decl_name(decl).to_string());
-                self.check_property_declarations(
-                    &registry_name,
-                    "class@anonymous",
-                    ClassKind::Class,
-                    false,
-                    &decl.properties,
-                    &decl.methods,
-                );
-                self.check_readonly_class_version(decl.is_readonly, true, e.span);
-                for m in &decl.methods {
-                    let ancestor_sig =
-                        decl.extends
-                            .iter()
-                            .chain(decl.implements.iter())
-                            .find_map(|name| {
-                                self.registry
-                                    .lookup_method(&self.resolve_class_name(name), &m.function.name)
-                            });
-                    self.check_function_with_ancestor_hint(
-                        &m.function,
-                        Some(class_decl_name(decl)),
-                        m.is_static,
-                        true,
-                        ancestor_sig,
-                    );
-                }
-                self.current_anonymous_class = previous_anonymous_class;
-                // Its own properties'/consts' attributes too -
-                // method/param attributes are already covered inside
-                // `check_function` above.
-                for p in &decl.properties {
-                    self.check_attributes(&p.attrs, class_decl_name(decl));
-                    self.check_attribute_targets(&p.attrs, ATTRIBUTE_TARGET_PROPERTY, "property");
-                }
-                for cc in &decl.consts {
-                    self.check_attributes(&cc.attrs, class_decl_name(decl));
-                    self.check_attribute_targets(
-                        &cc.attrs,
-                        ATTRIBUTE_TARGET_CLASS_CONSTANT,
-                        "class constant",
-                    );
-                }
-                self.anonymous_class_type(e.span)
+                anonymous_class_type(class)
             }
             ExprKind::StaticCall(target, method, args) => {
                 if let Some(property) = target.parent_hook_property() {
@@ -4357,7 +4304,7 @@ impl<'a> Checker<'a> {
             // is exactly the right type for it, the same way it's used for
             // a function that always throws or exits.
             ExprKind::Throw(_) => Type::never(),
-            ExprKind::NewAnonymousClass(..) => self.anonymous_class_type(e.span),
+            ExprKind::NewAnonymousClass(class) => anonymous_class_type(class),
             ExprKind::ShellExec(_) => self.shell_exec_type(),
             ExprKind::Print(_) => Type::int_literal(1),
             ExprKind::Isset(_) | ExprKind::Empty(_) => Type::bool(),
@@ -5003,15 +4950,15 @@ impl<'a> Checker<'a> {
         match &stmt.kind {
             StmtKind::FunctionDecl(f) => self.collect_member_ref_defaults_function(f),
             StmtKind::ClassDecl(c) => {
-                for p in &c.properties {
+                for p in &c.def.properties {
                     if let Some(d) = &p.default {
                         self.infer_expr(d, &Locals::default());
                     }
                 }
-                for cst in &c.consts {
+                for cst in &c.def.consts {
                     self.infer_expr(&cst.value, &Locals::default());
                 }
-                for m in &c.methods {
+                for m in &c.def.methods {
                     self.collect_member_ref_defaults_function(&m.function);
                 }
             }
@@ -5632,7 +5579,7 @@ impl<'a> Checker<'a> {
         impl<'ast> syntax::visit::Visitor<'ast> for Returns<'ast> {
             fn visit_expr(&mut self, _: &'ast Expr) {}
             fn visit_function_decl(&mut self, _: &'ast FunctionDecl) {}
-            fn visit_class_decl(&mut self, _: &'ast ClassDecl) {}
+            fn visit_class_def(&mut self, _: &'ast ClassDef) {}
             fn visit_stmt(&mut self, s: &'ast Stmt) {
                 syntax::visit::walk_stmt(self, s);
                 if matches!(s.kind, StmtKind::Return(_)) {
@@ -6389,4 +6336,14 @@ fn concat_string_parts(parts: Vec<Type>, hierarchy: &dyn types::ClassHierarchy) 
         .into_iter()
         .reduce(|acc, part| acc.concat(&part, hierarchy))
         .unwrap_or(Type::string())
+}
+
+/// A `new class { ... }` expression's type: an instance of the class
+/// under its registry name, or `mixed` before the file's anonymous
+/// classes are named.
+fn anonymous_class_type(class: &AnonymousClass) -> Type {
+    class
+        .name
+        .as_ref()
+        .map_or(Type::mixed(), |name| Type::object(name.clone(), Vec::new()))
 }

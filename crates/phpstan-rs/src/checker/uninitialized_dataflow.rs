@@ -110,17 +110,18 @@ impl<'a> Checker<'a> {
     /// starts with everything initialized, so only its own `unset()`s
     /// can make a read premature.
     pub(crate) fn check_premature_property_access(&mut self, fqn: &str, c: &ClassDecl) {
-        if !self.settings.rules.check_uninitialized_properties || c.kind != ClassKind::Class {
+        if !self.settings.rules.check_uninitialized_properties || c.def.kind != ClassKind::Class {
             return;
         }
-        let constructor = c.constructor();
+        let constructor = c.def.constructor();
         // A property with a default or promoted from the constructor is
         // initialized before any code runs; one without either needs an
         // assignment somewhere for a premature read to mean anything.
         let mut initialized_up_front: Vec<String> = c
+            .def
             .properties
             .iter()
-            .filter(|p| trackable(c, p) && p.default.is_some())
+            .filter(|p| trackable(&c.def, p) && p.default.is_some())
             .map(|p| p.name.to_string())
             .collect();
         initialized_up_front.extend(
@@ -130,16 +131,17 @@ impl<'a> Checker<'a> {
                 .filter(|p| {
                     p.promotion.is_some()
                         && !p.promotion.is_some_and(|promotion| promotion.readonly)
-                        && !c.is_readonly
+                        && !c.def.is_readonly
                         && p.type_hint.is_some()
                 })
                 .map(|p| p.name.to_string()),
         );
         let assigned_later: Vec<String> = c
+            .def
             .properties
             .iter()
             .filter(|p| {
-                trackable(c, p)
+                trackable(&c.def, p)
                     && p.default.is_none()
                     && property_assigned_anywhere_in_hierarchy(self, c, fqn, &p.name)
             })
@@ -180,7 +182,7 @@ impl<'a> Checker<'a> {
         // An abstract class's constructor may rely on a subclass having
         // initialized a property first.
         if let Some(constructor) = constructor
-            && !c.is_abstract
+            && !c.def.is_abstract
         {
             walk(
                 &*self,
@@ -189,7 +191,7 @@ impl<'a> Checker<'a> {
                 initialized_up_front.iter().cloned().collect(),
             );
         }
-        for method in &c.methods {
+        for method in &c.def.methods {
             if method.is_static
                 || method.is_abstract
                 || method.function.is_constructor()
@@ -219,7 +221,7 @@ impl<'a> Checker<'a> {
 /// one is `null` until assigned), per-instance, not readonly (unsetting
 /// an initialized one throws) and without hooks (it has no backing store
 /// to leave uninitialized, or its hooks decide what a read does).
-fn trackable(c: &ClassDecl, p: &PropertyDecl) -> bool {
+fn trackable(c: &ClassDef, p: &PropertyDecl) -> bool {
     !p.is_static && !p.is_readonly && !c.is_readonly && p.hooks.is_none() && p.type_hint.is_some()
 }
 

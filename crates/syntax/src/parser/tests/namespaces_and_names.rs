@@ -77,7 +77,7 @@ fn braced_namespace_declarations_splice_their_body_in() {
     let class_names: Vec<&str> = program
         .iter()
         .filter_map(|s| match &s.kind {
-            StmtKind::ClassDecl(c) => c.name.as_deref(),
+            StmtKind::ClassDecl(c) => Some(&*c.name),
             _ => None,
         })
         .collect();
@@ -192,7 +192,7 @@ fn enum_usable_as_plain_function_and_constant_name() {
     );
     assert!(matches!(&program[0].kind, StmtKind::FunctionDecl(f) if f.name == "enum"));
     assert!(
-        matches!(&program[3].kind, StmtKind::ClassDecl(e) if e.kind == ClassKind::Enum && e.name.as_deref() == Some("Suit"))
+        matches!(&program[3].kind, StmtKind::ClassDecl(e) if e.def.kind == ClassKind::Enum && Some(&*e.name) == Some("Suit"))
     );
 }
 

@@ -377,7 +377,7 @@ impl<'a> Visitor<'a> for Scope<'_, 'a> {
                 return;
             }
             StmtKind::ClassDecl(c) => {
-                for method in &c.methods {
+                for method in &c.def.methods {
                     walk_function_body(method.function.body_stmts(), self.file_ctx, self.out);
                 }
                 return;
@@ -402,8 +402,8 @@ impl<'a> Visitor<'a> for Scope<'_, 'a> {
                 walk_function_body(body, self.file_ctx, self.out);
                 return;
             }
-            ExprKind::NewAnonymousClass(decl, _) => {
-                for method in &decl.methods {
+            ExprKind::NewAnonymousClass(class) => {
+                for method in &class.def.methods {
                     walk_function_body(method.function.body_stmts(), self.file_ctx, self.out);
                 }
                 return;

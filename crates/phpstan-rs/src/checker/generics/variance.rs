@@ -174,7 +174,7 @@ impl<'a> Checker<'a> {
     /// splitting `walk_variance`'s hardcoded strings by call site wasn't
     /// judged worth it for how rarely a property is both generic-
     /// template-typed and hits this specific violation.
-    pub(crate) fn check_property_variances(&mut self, fqn: &str, c: &ClassDecl) {
+    pub(crate) fn check_property_variances(&mut self, fqn: &str, c: &ClassDef) {
         let Some(info) = self.registry.classes.get(fqn) else {
             return;
         };

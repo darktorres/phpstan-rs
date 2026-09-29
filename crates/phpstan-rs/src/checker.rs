@@ -5,7 +5,6 @@ use types::Name;
 
 use crate::pest_config;
 use crate::registry::Registry;
-use crate::registry::class_decl_fqn;
 use diagnostics::{Diagnostic, DiagnosticBuilder};
 use syntax::ast::*;
 use syntax::name_resolution::NameContext;
@@ -548,22 +547,6 @@ pub struct Checker<'a> {
     // wins" precedence) with whatever file-local `beforeEach(...)` calls
     // `check_program` itself finds. Defaults empty.
     pub(crate) pest_hook_properties: FxHashSet<Name>,
-    // `NewAnonymousClass` expression span -> its own stable synthetic
-    // registry name, computed once at parse time
-    // (`registry::collect_anonymous_classes`) and set via
-    // `set_anonymous_class_names` before `check_program` runs - see that
-    // module's own doc comment for why the checker looks this up rather
-    // than recomputing the name itself. Empty (not populated) in every
-    // existing test, the same "no signal, stay quiet" leniency
-    // `pest_this_type`'s own default gets - a lookup miss just falls back
-    // to `mixed`, matching today's unconditional behavior.
-    pub(crate) anonymous_class_names: FxHashMap<syntax::token::Span, String>,
-    // The registry name (`anonymous_class_names`' value) of the anonymous
-    // class whose own methods are currently being checked - its methods
-    // are checked under the placeholder `"class@anonymous"` class name,
-    // which never resolves against the registry. `None` outside an
-    // anonymous class's methods, or when its span has no entry.
-    pub(crate) current_anonymous_class: Option<String>,
     // The file being checked, for resolving `include`/`require` paths.
     pub(crate) current_file: Option<std::path::PathBuf>,
     // `current_file` as an absolute path (`Project::absolute_path`), what
@@ -1044,8 +1027,6 @@ impl<'a> Checker<'a> {
             in_exempt_last_condition: false,
             pest_this_type: Type::mixed(),
             pest_hook_properties: FxHashSet::default(),
-            anonymous_class_names: FxHashMap::default(),
-            current_anonymous_class: None,
             current_file: None,
             current_file_absolute: None,
             include_guarded_paths: FxHashSet::default(),
@@ -1106,9 +1087,6 @@ impl<'a> Checker<'a> {
         self.pest_hook_properties = props.into_iter().map(|p| Name::from(&p)).collect();
     }
 
-    /// Seeds the `NewAnonymousClass`-span -> synthetic-name map - see
-    /// `anonymous_class_names`'s own doc comment. A setter for the same
-    /// reason `set_pest_this_type` is one.
     /// See `current_file`.
     pub fn set_current_file(&mut self, path: &std::path::Path) {
         self.current_file = Some(path.to_path_buf());
@@ -1116,10 +1094,6 @@ impl<'a> Checker<'a> {
 
     pub(crate) fn set_current_file_absolute(&mut self, path: std::path::PathBuf) {
         self.current_file_absolute = Some(path);
-    }
-
-    pub fn set_anonymous_class_names(&mut self, names: FxHashMap<syntax::token::Span, String>) {
-        self.anonymous_class_names = names;
     }
 
     /// Seeds the whole-project merge of every file's own `property_
@@ -1490,18 +1464,18 @@ impl<'a> Checker<'a> {
                     // self/parent/static, and the undefined-class check
                     // for `new self()`/`new static()`), which is now
                     // FQN-keyed.
-                    let fqn = class_decl_fqn(c).to_string();
-                    let is_enum = c.kind == ClassKind::Enum;
+                    let fqn = c.fq_name().to_string();
+                    let is_enum = c.def.kind == ClassKind::Enum;
                     if !self.facts_only {
                         if is_enum {
-                            self.check_enum_template_tag(&fqn, c);
-                            self.check_enum_case_values(&fqn, c);
+                            self.check_enum_template_tag(&fqn, &c.def);
+                            self.check_enum_case_values(&fqn, &c.def);
                             self.check_enum_sanity(&fqn, c);
                         } else {
-                            self.check_enum_cases_outside_enum(&c.enum_cases);
+                            self.check_enum_cases_outside_enum(&c.def.enum_cases);
                         }
                         self.check_class_generic_bounds(&fqn, c);
-                        let description = match c.kind {
+                        let description = match c.def.kind {
                             ClassKind::Interface => Some("an interface"),
                             ClassKind::Trait => None,
                             ClassKind::Enum => Some("an enum"),
@@ -1509,64 +1483,74 @@ impl<'a> Checker<'a> {
                         };
                         if let Some(description) = description {
                             self.check_misplaced_var_tag(
-                                c.doc_comment.as_deref(),
+                                c.def.doc_comment.as_deref(),
                                 description,
-                                c.name_span,
+                                c.name.span,
                             );
                         }
-                        self.check_class_completeness(&fqn, c.span);
-                        self.check_inheritance_target_kinds(&fqn, false, c.span);
-                        self.check_readonly_class_version(c.is_readonly, false, c.name_span);
-                        self.check_magic_serialization_methods(&fqn, &fqn, c.name_span);
-                        self.check_class_references_exist(&fqn, c.span);
-                        self.check_internal_inheritance(&fqn, c.kind, c.span);
-                        self.check_restricted_class_inheritance(&fqn, c.span);
-                        for name in c.extends.iter().chain(&c.implements).chain(c.used_traits()) {
+                        self.check_class_completeness(&fqn, c.def.span);
+                        self.check_inheritance_target_kinds(&fqn, false, c.def.span);
+                        self.check_readonly_class_version(c.def.is_readonly, false, c.name.span);
+                        self.check_magic_serialization_methods(&fqn, &fqn, c.name.span);
+                        self.check_class_references_exist(&fqn, c.def.span);
+                        self.check_internal_inheritance(&fqn, c.def.kind, c.def.span);
+                        self.check_restricted_class_inheritance(&fqn, c.def.span);
+                        for name in c
+                            .def
+                            .extends
+                            .iter()
+                            .chain(&c.def.implements)
+                            .chain(c.def.used_traits())
+                        {
                             self.check_class_name_case(name);
                         }
-                        self.check_method_tag_types(&fqn, c.span);
-                        self.check_method_tag_templates(&fqn, c.doc_comment.as_deref(), c.span);
-                        self.check_mixin_types(&fqn, c.span);
-                        self.check_type_alias_types(&fqn, c.span);
+                        self.check_method_tag_types(&fqn, c.def.span);
+                        self.check_method_tag_templates(
+                            &fqn,
+                            c.def.doc_comment.as_deref(),
+                            c.def.span,
+                        );
+                        self.check_mixin_types(&fqn, c.def.span);
+                        self.check_type_alias_types(&fqn, c.def.span);
                         self.check_method_overrides(&fqn, c);
-                        self.check_property_overrides(&fqn, c);
-                        self.check_require_tags(&fqn, c.span);
-                        self.check_require_tag_types(c);
-                        self.check_sealed_hierarchy(&fqn, c.span);
-                        self.check_sealed_tag_types(c);
+                        self.check_property_overrides(&fqn, &c.def);
+                        self.check_require_tags(&fqn, c.def.span);
+                        self.check_require_tag_types(&c.def);
+                        self.check_sealed_hierarchy(&fqn, c.def.span);
+                        self.check_sealed_tag_types(&c.def);
                         self.check_unknown_phpstan_tags_in_class(c);
                         if self.settings.sidz.check_magic_numbers {
-                            self.check_magic_numbers_in_properties(&c.properties);
+                            self.check_magic_numbers_in_properties(&c.def.properties);
                         }
-                        self.check_property_hooks(&fqn, c);
-                        self.check_property_variances(&fqn, c);
-                        self.check_trait_conflicts(&fqn, c.span);
+                        self.check_property_hooks(&fqn, &c.def);
+                        self.check_property_variances(&fqn, &c.def);
+                        self.check_trait_conflicts(&fqn, c.def.span);
                         self.check_uninitialized_properties(&fqn, c);
-                        self.check_default_property_types(&fqn, c);
+                        self.check_default_property_types(&fqn, &c.def);
                         self.check_premature_property_access(&fqn, c);
-                        self.check_duplicate_class_members(&fqn, c);
+                        self.check_duplicate_class_members(&fqn, &c.def);
                         if self.settings.phpunit.check_risky_tests {
-                            self.check_risky_test_methods(&fqn, c);
+                            self.check_risky_test_methods(&fqn, &c.def);
                         }
                         self.check_method_declaration_sanity(
                             &fqn,
-                            c.kind,
-                            c.is_abstract,
-                            &c.methods,
+                            c.def.kind,
+                            c.def.is_abstract,
+                            &c.def.methods,
                         );
                         self.check_property_declarations(
                             &fqn,
                             &fqn,
-                            c.kind,
-                            c.is_abstract,
-                            &c.properties,
-                            &c.methods,
+                            c.def.kind,
+                            c.def.is_abstract,
+                            &c.def.properties,
+                            &c.def.methods,
                         );
-                        self.check_reserved_class_constant_name(&c.consts);
-                        self.check_typed_class_constant_values(&fqn, &c.consts);
-                        self.check_class_constant_modifiers(&fqn, c.kind, &c.consts);
-                        self.check_constant_overrides(&fqn, &c.consts);
-                        self.check_trait_constant_conflicts(&fqn, &c.consts);
+                        self.check_reserved_class_constant_name(&c.def.consts);
+                        self.check_typed_class_constant_values(&fqn, &c.def.consts);
+                        self.check_class_constant_modifiers(&fqn, c.def.kind, &c.def.consts);
+                        self.check_constant_overrides(&fqn, &c.def.consts);
+                        self.check_trait_constant_conflicts(&fqn, &c.def.consts);
                         // The class's own attributes, plus every property's/
                         // const's - method/param attributes are checked
                         // per-declaration inside `check_function` below
@@ -1574,21 +1558,21 @@ impl<'a> Checker<'a> {
                         // regardless of how it's reached (a direct method
                         // here, or via `check_trait_methods`'s per-host loop
                         // for a trait).
-                        self.check_attributes(&c.attrs, &fqn);
-                        self.check_attribute_targets(&c.attrs, ATTRIBUTE_TARGET_CLASS, "class");
+                        self.check_attributes(&c.def.attrs, &fqn);
+                        self.check_attribute_targets(&c.def.attrs, ATTRIBUTE_TARGET_CLASS, "class");
                         self.check_self_attribute_class_declaration(
-                            &c.attrs,
+                            &c.def.attrs,
                             &fqn,
-                            c.kind,
-                            c.is_abstract,
+                            c.def.kind,
+                            c.def.is_abstract,
                         );
                         self.check_class_like_marker_attributes(
-                            &c.attrs,
-                            c.kind,
-                            c.is_readonly,
+                            &c.def.attrs,
+                            c.def.kind,
+                            c.def.is_readonly,
                             &fqn,
                         );
-                        for p in &c.properties {
+                        for p in &c.def.properties {
                             self.check_attributes(&p.attrs, &fqn);
                             self.check_attribute_targets(
                                 &p.attrs,
@@ -1596,7 +1580,7 @@ impl<'a> Checker<'a> {
                                 "property",
                             );
                         }
-                        for case in &c.enum_cases {
+                        for case in &c.def.enum_cases {
                             self.check_attributes(&case.attrs, &fqn);
                             self.check_attribute_targets(
                                 &case.attrs,
@@ -1604,7 +1588,7 @@ impl<'a> Checker<'a> {
                                 "class constant",
                             );
                         }
-                        for cc in &c.consts {
+                        for cc in &c.def.consts {
                             self.check_attributes(&cc.attrs, &fqn);
                             self.check_attribute_targets(
                                 &cc.attrs,
@@ -1620,21 +1604,21 @@ impl<'a> Checker<'a> {
                         // a trait's methods (a method's `$this`-dependent body
                         // needs a real host; a property/const's declared type
                         // never does).
-                        self.check_missing_property_typehints(&fqn, &c.properties);
-                        self.check_missing_class_constant_typehints(&fqn, &c.consts);
+                        self.check_missing_property_typehints(&fqn, &c.def.properties);
+                        self.check_missing_class_constant_typehints(&fqn, &c.def.consts);
                         if self.settings.extras.check_native_type_hints {
-                            self.check_native_class_constant_types(&fqn, &c.consts);
+                            self.check_native_class_constant_types(&fqn, &c.def.consts);
                         }
                     }
-                    if c.kind == ClassKind::Trait {
+                    if c.def.kind == ClassKind::Trait {
                         self.check_trait_methods(&fqn, c);
                     } else {
-                        for m in &c.methods {
+                        for m in &c.def.methods {
                             self.check_function(
                                 &m.function,
                                 Some(&fqn),
                                 m.is_static,
-                                !m.is_abstract && c.kind != ClassKind::Interface,
+                                !m.is_abstract && c.def.kind != ClassKind::Interface,
                             );
                         }
                         // A class's private consts/methods/properties,
@@ -1645,15 +1629,15 @@ impl<'a> Checker<'a> {
                         if !self.facts_only {
                             self.check_unused_private_members(
                                 &fqn,
-                                c.kind,
-                                &c.methods,
-                                &c.properties,
-                                &c.consts,
+                                c.def.kind,
+                                &c.def.methods,
+                                &c.def.properties,
+                                &c.def.consts,
                             );
-                            self.check_too_wide_property_types(&fqn, c);
-                            self.check_parent_constructor_call(&fqn, c);
+                            self.check_too_wide_property_types(&fqn, &c.def);
+                            self.check_parent_constructor_call(&fqn, &c.def);
                             self.check_class_access_attributes(&fqn, c);
-                            self.check_promoted_property_candidate(&fqn, c);
+                            self.check_promoted_property_candidate(&fqn, &c.def);
                         }
                     }
                 }

@@ -31,9 +31,15 @@ pub trait Visitor<'ast> {
         walk_function_decl(self, function);
     }
 
-    /// A class, interface or trait declaration, or an anonymous class.
+    /// A class, interface, trait or enum declaration statement.
     fn visit_class_decl(&mut self, class: &'ast ClassDecl) {
         walk_class_decl(self, class);
+    }
+
+    /// A class-like's definition: a declaration's or an anonymous
+    /// class's.
+    fn visit_class_def(&mut self, class: &'ast ClassDef) {
+        walk_class_def(self, class);
     }
 
     fn visit_method_decl(&mut self, method: &'ast MethodDecl) {
@@ -343,9 +349,9 @@ pub fn walk_expr<'ast, V: Visitor<'ast> + ?Sized>(v: &mut V, expr: &'ast Expr) {
                 v.visit_expr(overrides);
             }
         }
-        ExprKind::NewAnonymousClass(class, args) => {
-            walk_args(v, args);
-            v.visit_class_decl(class);
+        ExprKind::NewAnonymousClass(class) => {
+            walk_args(v, &class.args);
+            v.visit_class_def(&class.def);
         }
         ExprKind::Yield(key, value) => {
             if let Some(key) = key {
@@ -426,6 +432,10 @@ pub fn walk_function_decl<'ast, V: Visitor<'ast> + ?Sized>(v: &mut V, f: &'ast F
 }
 
 pub fn walk_class_decl<'ast, V: Visitor<'ast> + ?Sized>(v: &mut V, c: &'ast ClassDecl) {
+    v.visit_class_def(&c.def);
+}
+
+pub fn walk_class_def<'ast, V: Visitor<'ast> + ?Sized>(v: &mut V, c: &'ast ClassDef) {
     for attr in &c.attrs {
         v.visit_attribute(attr);
     }
@@ -587,7 +597,7 @@ pub fn walk_switch_case<'ast, V: Visitor<'ast> + ?Sized>(v: &mut V, c: &'ast Swi
 pub fn walk_expr_in_scope<'ast, V: Visitor<'ast> + ?Sized>(v: &mut V, expr: &'ast Expr) {
     match &expr.kind {
         ExprKind::Closure { .. } | ExprKind::ArrowFn { .. } => {}
-        ExprKind::NewAnonymousClass(_, args) => walk_args(v, args),
+        ExprKind::NewAnonymousClass(class) => walk_args(v, &class.args),
         _ => walk_expr(v, expr),
     }
 }
@@ -613,7 +623,7 @@ pub fn any_stmt_in_body<'ast>(stmt: &'ast Stmt, pred: impl FnMut(&'ast Stmt) -> 
         }
         fn visit_expr(&mut self, _: &'ast Expr) {}
         fn visit_function_decl(&mut self, _: &'ast FunctionDecl) {}
-        fn visit_class_decl(&mut self, _: &'ast ClassDecl) {}
+        fn visit_class_def(&mut self, _: &'ast ClassDef) {}
     }
     let mut search = Search { pred, found: false };
     search.visit_stmt(stmt);
@@ -647,7 +657,7 @@ pub fn any_expr_in_body<'ast>(stmts: &'ast [Stmt], pred: impl FnMut(&'ast Expr) 
             walk_expr_in_scope(self, expr);
         }
         fn visit_function_decl(&mut self, _: &'ast FunctionDecl) {}
-        fn visit_class_decl(&mut self, _: &'ast ClassDecl) {}
+        fn visit_class_def(&mut self, _: &'ast ClassDef) {}
     }
     let mut search = Search { pred, found: false };
     walk_stmts(&mut search, stmts);
@@ -717,7 +727,7 @@ pub fn any_child_stmt<'ast>(stmt: &'ast Stmt, f: impl FnMut(&'ast Stmt) -> bool)
         }
         fn visit_expr(&mut self, _: &'ast Expr) {}
         fn visit_function_decl(&mut self, _: &'ast FunctionDecl) {}
-        fn visit_class_decl(&mut self, _: &'ast ClassDecl) {}
+        fn visit_class_def(&mut self, _: &'ast ClassDef) {}
         fn visit_class_const(&mut self, _: &'ast ClassConst) {}
     }
     let mut children = Children { f, found: false };
@@ -777,9 +787,15 @@ pub trait VisitorMut {
         walk_function_decl_mut(self, function);
     }
 
-    /// A class, interface or trait declaration, or an anonymous class.
+    /// A class, interface, trait or enum declaration statement.
     fn visit_class_decl(&mut self, class: &mut ClassDecl) {
         walk_class_decl_mut(self, class);
+    }
+
+    /// A class-like's definition: a declaration's or an anonymous
+    /// class's.
+    fn visit_class_def(&mut self, class: &mut ClassDef) {
+        walk_class_def_mut(self, class);
     }
 
     fn visit_method_decl(&mut self, method: &mut MethodDecl) {
@@ -1079,9 +1095,9 @@ pub fn walk_expr_mut<V: VisitorMut + ?Sized>(v: &mut V, expr: &mut Expr) {
                 v.visit_expr(overrides);
             }
         }
-        ExprKind::NewAnonymousClass(class, args) => {
-            walk_args_mut(v, args);
-            v.visit_class_decl(class);
+        ExprKind::NewAnonymousClass(class) => {
+            walk_args_mut(v, &mut class.args);
+            v.visit_class_def(&mut class.def);
         }
         ExprKind::Yield(key, value) => {
             if let Some(key) = key {
@@ -1160,6 +1176,10 @@ pub fn walk_function_decl_mut<V: VisitorMut + ?Sized>(v: &mut V, f: &mut Functio
 }
 
 pub fn walk_class_decl_mut<V: VisitorMut + ?Sized>(v: &mut V, c: &mut ClassDecl) {
+    v.visit_class_def(&mut c.def);
+}
+
+pub fn walk_class_def_mut<V: VisitorMut + ?Sized>(v: &mut V, c: &mut ClassDef) {
     for attr in c.attrs.iter_mut() {
         v.visit_attribute(attr);
     }

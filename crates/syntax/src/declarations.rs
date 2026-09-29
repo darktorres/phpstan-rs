@@ -44,7 +44,7 @@ impl Declaration<'_> {
     /// The fully-qualified name it declares.
     pub fn name(&self) -> String {
         match self.declared {
-            Declared::Class(c) => c.fq_name().unwrap_or_default().to_string(),
+            Declared::Class(c) => c.fq_name().to_string(),
             Declared::Function(f) => f.fq_name().to_string(),
             Declared::Constant(c) => c.fq_name().to_string(),
             Declared::Define { name, .. } => name.to_str_lossy().into_owned(),

@@ -51,13 +51,11 @@ impl<'a> Checker<'a> {
         if candidates.is_empty() {
             return;
         }
-        let is_anonymous = fqn == "class@anonymous";
-        let registry_name = if is_anonymous {
-            self.current_anonymous_class.as_deref()
-        } else {
-            Some(fqn)
-        };
-        if registry_name.is_some_and(|name| self.constructor_signature_is_dictated(name)) {
+        let is_anonymous = self
+            .registry
+            .lookup_class(fqn)
+            .is_some_and(|(_, class)| class.is_anonymous());
+        if self.constructor_signature_is_dictated(fqn) {
             return;
         }
         let usage = collect_var_usage(f.body_stmts());

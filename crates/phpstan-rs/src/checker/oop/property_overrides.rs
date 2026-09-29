@@ -27,7 +27,7 @@ impl<'a> Checker<'a> {
     /// per plain declaration and once per promoted `__construct`
     /// parameter. A promoted property is never `static` (no such syntax
     /// exists), which `own_sig.is_static: false` encodes directly.
-    pub(crate) fn check_property_overrides(&mut self, fqn: &str, c: &ClassDecl) {
+    pub(crate) fn check_property_overrides(&mut self, fqn: &str, c: &ClassDef) {
         let Some(info) = self.registry.classes.get(fqn) else {
             return;
         };

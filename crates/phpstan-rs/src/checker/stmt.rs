@@ -3,7 +3,6 @@ use crate::checker::{
     Locals, generator_missing_return_type, generator_template_param, merge_scopes,
     purge_stale_narrowing_for,
 };
-use crate::registry::class_decl_fqn;
 use syntax::ast::*;
 use types::Name;
 use types::Type;
@@ -867,19 +866,29 @@ impl<'a> Checker<'a> {
             // included.
             StmtKind::FunctionDecl(f) => self.check_function(f, None, false, true),
             StmtKind::ClassDecl(c) => {
-                let fqn = class_decl_fqn(c).to_string();
+                let fqn = c.fq_name().to_string();
                 self.check_nested_class_declaration(&fqn, c);
                 if self.settings.sidz.check_magic_numbers {
-                    self.check_magic_numbers_in_properties(&c.properties);
+                    self.check_magic_numbers_in_properties(&c.def.properties);
                 }
-                self.check_attributes(&c.attrs, &fqn);
-                self.check_attribute_targets(&c.attrs, ATTRIBUTE_TARGET_CLASS, "class");
-                self.check_self_attribute_class_declaration(&c.attrs, &fqn, c.kind, c.is_abstract);
-                self.check_class_like_marker_attributes(&c.attrs, c.kind, c.is_readonly, &fqn);
-                if c.kind != ClassKind::Enum {
-                    self.check_enum_cases_outside_enum(&c.enum_cases);
+                self.check_attributes(&c.def.attrs, &fqn);
+                self.check_attribute_targets(&c.def.attrs, ATTRIBUTE_TARGET_CLASS, "class");
+                self.check_self_attribute_class_declaration(
+                    &c.def.attrs,
+                    &fqn,
+                    c.def.kind,
+                    c.def.is_abstract,
+                );
+                self.check_class_like_marker_attributes(
+                    &c.def.attrs,
+                    c.def.kind,
+                    c.def.is_readonly,
+                    &fqn,
+                );
+                if c.def.kind != ClassKind::Enum {
+                    self.check_enum_cases_outside_enum(&c.def.enum_cases);
                 }
-                for case in &c.enum_cases {
+                for case in &c.def.enum_cases {
                     self.check_attributes(&case.attrs, &fqn);
                     self.check_attribute_targets(
                         &case.attrs,
@@ -887,11 +896,11 @@ impl<'a> Checker<'a> {
                         "class constant",
                     );
                 }
-                for p in &c.properties {
+                for p in &c.def.properties {
                     self.check_attributes(&p.attrs, &fqn);
                     self.check_attribute_targets(&p.attrs, ATTRIBUTE_TARGET_PROPERTY, "property");
                 }
-                for cc in &c.consts {
+                for cc in &c.def.consts {
                     self.check_attributes(&cc.attrs, &fqn);
                     self.check_attribute_targets(
                         &cc.attrs,
@@ -911,15 +920,15 @@ impl<'a> Checker<'a> {
                 // `current_class` set to the trait's own name, wrongly
                 // flagging a method provided only by a sibling trait on
                 // the real host class.
-                if c.kind == ClassKind::Trait {
+                if c.def.kind == ClassKind::Trait {
                     self.check_trait_methods(&fqn, c);
                 } else {
-                    for m in &c.methods {
+                    for m in &c.def.methods {
                         self.check_function(
                             &m.function,
                             Some(&fqn),
                             m.is_static,
-                            !m.is_abstract && c.kind != ClassKind::Interface,
+                            !m.is_abstract && c.def.kind != ClassKind::Interface,
                         );
                     }
                 }

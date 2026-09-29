@@ -35,7 +35,7 @@ pub(crate) fn is_magic_method_name(lower: &str) -> bool {
 
 /// Whether `name` is a method PHP gives `e` natively when `e` is an enum:
 /// `cases()`, and a backed enum's `from()` and `tryFrom()`.
-pub(crate) fn is_native_enum_method(e: &ClassDecl, name: &str) -> bool {
+pub(crate) fn is_native_enum_method(e: &ClassDef, name: &str) -> bool {
     e.kind == ClassKind::Enum
         && (name.eq_ignore_ascii_case("cases")
             || (e.backing_type.is_some()
@@ -66,7 +66,7 @@ impl<'a> Checker<'a> {
     /// int/string (the overwhelming majority in practice) - a computed or
     /// otherwise non-literal case value isn't evaluated, matching this
     /// project's usual "don't guess" leniency.
-    pub(crate) fn check_enum_case_values(&mut self, fqn: &str, e: &ClassDecl) {
+    pub(crate) fn check_enum_case_values(&mut self, fqn: &str, e: &ClassDef) {
         let mut seen: FxHashMap<(bool, String), &str> = FxHashMap::default();
         for case in &e.enum_cases {
             let Some(value) = &case.value else {
@@ -92,7 +92,7 @@ impl<'a> Checker<'a> {
     /// PHP (there's no `enum Foo<T>` syntax at all), so a stray
     /// `@template` tag on one's own doc comment is always a mistake,
     /// never a real declaration the way it would be on a class.
-    pub(crate) fn check_enum_template_tag(&mut self, fqn: &str, e: &ClassDecl) {
+    pub(crate) fn check_enum_template_tag(&mut self, fqn: &str, e: &ClassDef) {
         let Some(raw) = &e.doc_comment else {
             return;
         };
@@ -124,7 +124,7 @@ impl<'a> Checker<'a> {
     /// flags it as a design-level error (an enum has no identity to
     /// serialize/unserialize into). A property is a compile error too.
     pub(crate) fn check_enum_sanity(&mut self, fqn: &str, e: &ClassDecl) {
-        if let Some(property) = e.properties.first() {
+        if let Some(property) = e.def.properties.first() {
             self.report_builder(
                 DiagnosticBuilder::new(
                     format!("Enum {fqn} cannot include properties."),
@@ -135,7 +135,7 @@ impl<'a> Checker<'a> {
                 .non_ignorable(),
             );
         }
-        for m in &e.methods {
+        for m in &e.def.methods {
             let lower = m.function.name.to_ascii_lowercase();
             if is_magic_method_name(&lower) {
                 if lower == "__construct" {
@@ -170,7 +170,7 @@ impl<'a> Checker<'a> {
                     );
                 }
             }
-            if is_native_enum_method(e, &m.function.name) {
+            if is_native_enum_method(&e.def, &m.function.name) {
                 self.report_builder(
                     DiagnosticBuilder::new(
                         format!(
@@ -186,7 +186,7 @@ impl<'a> Checker<'a> {
             }
         }
 
-        if let Some(backing) = &e.backing_type {
+        if let Some(backing) = &e.def.backing_type {
             let expects_int = matches!(backing.kind, TypeHintKind::Keyword(NativeType::Int, _));
             let expects_string =
                 matches!(backing.kind, TypeHintKind::Keyword(NativeType::String, _));
@@ -194,7 +194,7 @@ impl<'a> Checker<'a> {
                 self.report_builder(
                     DiagnosticBuilder::new(
                         format!("Backed enum {fqn} can have only \"int\" or \"string\" type."),
-                        e.span,
+                        e.def.span,
                         0,
                         "enum.backingType",
                     )
@@ -207,7 +207,7 @@ impl<'a> Checker<'a> {
             self.report_builder(
                 DiagnosticBuilder::new(
                     format!("Enum {fqn} cannot implement the Serializable interface."),
-                    e.span,
+                    e.def.span,
                     0,
                     "enum.serializable",
                 )
@@ -215,15 +215,15 @@ impl<'a> Checker<'a> {
             );
         }
 
-        let backing_type_word = e.backing_type.as_ref().map(|b| {
+        let backing_type_word = e.def.backing_type.as_ref().map(|b| {
             if matches!(b.kind, TypeHintKind::Keyword(NativeType::Int, _)) {
                 "int"
             } else {
                 "string"
             }
         });
-        for case in &e.enum_cases {
-            match (&e.backing_type, &case.value) {
+        for case in &e.def.enum_cases {
+            match (&e.def.backing_type, &case.value) {
                 (None, Some(value)) => {
                     let ty = registry::infer_const_type(value);
                     self.report_builder(

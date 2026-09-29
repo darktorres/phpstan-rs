@@ -35,8 +35,8 @@ fn doc_comment_attaches_to_method_not_the_previous_one() {
     let StmtKind::ClassDecl(c) = &program[0].kind else {
         panic!("expected ClassDecl");
     };
-    assert!(c.methods[0].function.doc_comment.is_some());
-    assert!(c.methods[1].function.doc_comment.is_none());
+    assert!(c.def.methods[0].function.doc_comment.is_some());
+    assert!(c.def.methods[1].function.doc_comment.is_none());
 }
 
 #[test]
@@ -53,7 +53,7 @@ fn doc_comment_attaches_to_property() {
         panic!("expected ClassDecl");
     };
     assert!(
-        c.properties[0]
+        c.def.properties[0]
             .doc_comment
             .as_ref()
             .unwrap()

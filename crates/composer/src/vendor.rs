@@ -97,7 +97,7 @@ fn parse_static_file(path: &Path, vendor_dir: &Path, base_dir: &Path) -> Option<
     let class = find_class_decl(&stmts)?;
 
     let mut ctx = VendorContext::default();
-    for prop in &class.properties {
+    for prop in &class.def.properties {
         if !prop.is_static {
             continue;
         }

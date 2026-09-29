@@ -52,10 +52,8 @@ struct FileState {
     // Inline `@phpstan-ignore*` comments, read while the file was lexed
     // (the AST carries no comment text).
     ignores: ignore_comments::IgnoreComments,
-    // See `ParsedFile::anonymous_class_names`'s own doc comment - carried
-    // here too so `Project::check_file_impl` can hand it to a fresh
-    // `Checker` on every re-check, not just the initial load.
-    anonymous_class_names: FxHashMap<syntax::token::Span, String>,
+    // The registry names of the file's anonymous classes.
+    anonymous_classes: Vec<String>,
     // This file's own raw source text, kept only when
     // `Project::retain_source` is on (see that field's own doc comment) -
     // `None` for every ordinary `check-project` batch run, which never
@@ -636,13 +634,12 @@ impl Project {
             references,
             ignores,
             built_decls,
-            anonymous_class_decls,
-            anonymous_class_names,
+            anonymous_classes,
             duplicate_fn_sites,
             duplicate_class_sites,
             bodies,
         } = parsed;
-        for decl in built_decls.into_iter().chain(anonymous_class_decls) {
+        for decl in built_decls {
             self.registry.insert_built_decl(decl, analyzed);
         }
         // Real source text (`retain_source`) buys narrower per-identifier
@@ -687,7 +684,7 @@ impl Project {
                 classes,
                 references,
                 ignores,
-                anonymous_class_names,
+                anonymous_classes,
                 source: self.retain_source.then_some(source),
                 analyzed,
                 owner,
@@ -757,8 +754,13 @@ impl Project {
         let Some(old) = self.files.remove(path) else {
             return false;
         };
-        self.registry
-            .remove_declarations(&old.functions, &old.classes);
+        let classes: Vec<String> = old
+            .classes
+            .iter()
+            .chain(&old.anonymous_classes)
+            .cloned()
+            .collect();
+        self.registry.remove_declarations(&old.functions, &classes);
         self.use_sites.remove_file(path);
         self.duplicate_fn_sites
             .remove_declarations(path, &old.functions);
@@ -914,7 +916,7 @@ impl Project {
         // *before* the very edit that introduced its own trigger) for as
         // long as the file kept failing to parse, not just for the one
         // request that happened to race a genuinely-invalid save.
-        let (ast, ignores, _) = parse_with_ignores(new_source.as_bytes(), &self.interner)?;
+        let (ast, ignores, _) = parse_with_ignores(path, new_source.as_bytes(), &self.interner)?;
         let mut changed_symbols: FxHashSet<String> = FxHashSet::default();
         self.unindex_file(path, &mut changed_symbols);
         let (functions, classes) = declared_names(&ast);
@@ -952,21 +954,7 @@ impl Project {
         };
         let origin = Origin::File(Arc::from(path));
         self.registry.index(&ast, &origin, analyzed);
-        // Best-effort, not full incremental invalidation: a prior version
-        // of this file's own anonymous-class entries (registered under
-        // synthetic names keyed by `path:line[:index]`) aren't removed
-        // here first - `functions`/`classes` above (what `remove_
-        // declarations` purges) never included them to begin with, since
-        // `declared_names` only sees top-level declarations. A stale
-        // entry from a since-deleted-or-moved anonymous class can
-        // therefore linger in the registry across edits; harmless (an
-        // orphaned class nothing references), just imprecise, the same
-        // tradeoff this path already accepts elsewhere.
-        let (anonymous_class_decls, anonymous_class_names) =
-            crate::registry::collect_anonymous_classes(&ast, &path.display().to_string(), &origin);
-        for decl in anonymous_class_decls {
-            self.registry.insert_built_decl(decl, analyzed);
-        }
+        let anonymous_classes = anonymous_class_names(&ast);
         for name in &classes {
             self.registry.record_phpstan_class_file(name, path);
         }
@@ -1032,7 +1020,7 @@ impl Project {
                 classes,
                 references,
                 ignores,
-                anonymous_class_names,
+                anonymous_classes,
                 source: self.retain_source.then(|| new_source.to_string()),
                 analyzed,
                 owner: self.packages.owner(&self.absolute_path(path)),
@@ -1286,9 +1274,8 @@ impl Project {
     /// feature that needs to drive `check_program` itself with extra
     /// collection flags set first (e.g. `textDocument/inlayHint`'s
     /// `collect_inlay_hints`) rather than through `check_file_impl`'s own
-    /// fixed diagnostic pipeline. Mirrors `check_file_impl`'s Pest/
-    /// anonymous-class setup exactly, minus the cross-file property-
-    /// assign-facts wiring (an LSP one-off request has no batch-wide
+    /// fixed diagnostic pipeline. Mirrors `check_file_impl`'s Pest
+    /// setup exactly, minus the cross-file property-assign-facts wiring (an LSP one-off request has no batch-wide
     /// facts pass to plug in).
     pub(crate) fn checker_for(&self, path: &Path) -> Option<(Checker<'_>, &[Stmt])> {
         let file = self.files.get(path)?;
@@ -1298,7 +1285,6 @@ impl Project {
             .with_bodies(&self.files);
         checker.set_pest_this_type(self.pest_config.resolve_this_type(path, &self.registry));
         checker.set_pest_hook_properties(self.pest_config.resolve_hook_properties(path));
-        checker.set_anonymous_class_names(file.anonymous_class_names.clone());
         checker.set_current_file(path);
         checker.set_current_file_absolute(self.absolute_path(path));
         checker.set_working_dir(self.working_dir.clone());
@@ -1343,7 +1329,6 @@ impl Project {
             .with_bodies(&self.files);
         checker.set_pest_this_type(self.pest_config.resolve_this_type(path, &self.registry));
         checker.set_pest_hook_properties(self.pest_config.resolve_hook_properties(path));
-        checker.set_anonymous_class_names(file.anonymous_class_names.clone());
         checker.set_current_file(path);
         checker.set_current_file_absolute(self.absolute_path(path));
         checker.set_working_dir(self.working_dir.clone());
@@ -1481,7 +1466,7 @@ impl Project {
     ///
     /// Two things a naive "does this class declare a private property"
     /// check would miss:
-    /// - Anonymous classes: checked via `file.anonymous_class_names` too,
+    /// - Anonymous classes: checked via `file.anonymous_classes` too,
     ///   not just `file.classes` - an anonymous class's own
     ///   private-property writes are processed the same way during the
     ///   same file's `check_program` walk (via `check_expr`'s
@@ -1519,11 +1504,10 @@ impl Project {
                         .is_some_and(has_private_property)
                 })
         };
-        file.classes.iter().any(|name| class_may_write(name))
-            || file
-                .anonymous_class_names
-                .values()
-                .any(|name| class_may_write(name))
+        file.classes
+            .iter()
+            .chain(&file.anonymous_classes)
+            .any(|name| class_may_write(name))
     }
 
     /// The collect half of the two-pass (collect-then-consume) checking
@@ -1985,7 +1969,7 @@ fn trait_line_ranges(ast: &[Stmt]) -> Vec<(u32, u32)> {
     for stmt in ast {
         syntax::visit::any_stmt_in_body(stmt, |s| {
             if let StmtKind::ClassDecl(c) = &s.kind
-                && c.kind == syntax::ast::ClassKind::Trait
+                && c.def.kind == syntax::ast::ClassKind::Trait
             {
                 ranges.push((s.span.start.line, s.span.end.line));
             }
@@ -1998,11 +1982,16 @@ fn trait_line_ranges(ast: &[Stmt]) -> Vec<(u32, u32)> {
 /// Parses `source`, with its inline ignore comments.
 type Parsed = (Vec<Stmt>, ignore_comments::IgnoreComments, Vec<LexWarning>);
 
-fn parse_with_ignores(source: &[u8], interner: &Arc<Interner>) -> Result<Parsed, ParseError> {
+fn parse_with_ignores(
+    path: &Path,
+    source: &[u8],
+    interner: &Arc<Interner>,
+) -> Result<Parsed, ParseError> {
     let parsed = syntax::parse(source, interner)?;
     let ignores = ignore_comments::scan_parsed(&parsed);
     let mut ast = parsed.stmts;
     crate::stub_attributes::apply_stub_attributes(&mut ast);
+    crate::registry::name_anonymous_classes(&mut ast, &path.display().to_string());
     Ok((ast, ignores, parsed.warnings))
 }
 
@@ -2040,21 +2029,8 @@ pub struct ParsedFile {
     // (baked into every `FnDeclSite`), which is why `parse_file` below
     // takes one now.
     duplicate_fn_sites: DuplicateFunctionSites,
-    // Every `new class { ... }` expression this file contains, already
-    // built into `BuiltDecl::Class`es under their own stable synthetic
-    // names (see `registry::collect_anonymous_classes`'s own doc comment)
-    // - merged into `built_decls` by `insert_parsed_file` the same way an
-    // ordinary class is, just computed as a separate pass since it needs
-    // `path` (to seed the name hash) the same way `duplicate_fn_sites`
-    // does.
-    anonymous_class_decls: Vec<crate::registry::BuiltDecl>,
-    // `NewAnonymousClass` expression span -> that same synthetic name,
-    // so `Checker`'s own inference site can look its type up without
-    // recomputing the name a second time (see the module doc comment on
-    // `registry::anonymous_class` for why that matters). Carried on
-    // `FileState` (below) rather than only used transiently here, since
-    // `check_file_impl` needs it again on every re-check.
-    anonymous_class_names: FxHashMap<syntax::token::Span, String>,
+    // The registry names of the file's anonymous classes.
+    anonymous_classes: Vec<String>,
     // The class-like counterpart to `duplicate_fn_sites` above, built the
     // same way and for the same reason - `parse_file`'s own `is_stub`
     // parameter is baked into every `ClassDeclSite` here (see that
@@ -2077,13 +2053,12 @@ pub fn parse_file(
     is_stub: bool,
     interner: &Arc<Interner>,
 ) -> Result<ParsedFile, ParseError> {
-    let (ast, ignores, lex_warnings) = parse_with_ignores(source, interner)?;
+    let (ast, ignores, lex_warnings) = parse_with_ignores(path, source, interner)?;
     let (functions, classes) = declared_names(&ast);
     let references = deps::referenced_names(&ast);
     let origin = Origin::File(Arc::from(path));
     let built_decls = crate::registry::build_declarations(&ast, &origin);
-    let (anonymous_class_decls, anonymous_class_names) =
-        crate::registry::collect_anonymous_classes(&ast, &path.display().to_string(), &origin);
+    let anonymous_classes = anonymous_class_names(&ast);
     let mut duplicate_fn_sites = DuplicateFunctionSites::default();
     duplicate_fn_sites.index(&ast, path);
     let mut duplicate_class_sites = DuplicateClassSites::default();
@@ -2096,13 +2071,32 @@ pub fn parse_file(
         classes,
         references,
         built_decls,
-        anonymous_class_decls,
-        anonymous_class_names,
+        anonymous_classes,
         duplicate_fn_sites,
         duplicate_class_sites,
         ignores,
         bodies,
     })
+}
+
+/// The registry names of the anonymous classes in `ast`.
+fn anonymous_class_names(ast: &[Stmt]) -> Vec<String> {
+    struct Names(Vec<String>);
+    impl<'a> syntax::visit::Visitor<'a> for Names {
+        fn visit_expr(&mut self, expr: &'a syntax::ast::Expr) {
+            if let syntax::ast::ExprKind::NewAnonymousClass(class) = &expr.kind
+                && let Some(name) = &class.name
+            {
+                self.0.push(name.to_string());
+            }
+            syntax::visit::walk_expr(self, expr);
+        }
+    }
+    let mut names = Names(Vec::new());
+    for stmt in ast {
+        syntax::visit::Visitor::visit_stmt(&mut names, stmt);
+    }
+    names.0
 }
 
 impl ParsedFile {

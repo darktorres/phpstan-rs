@@ -1,7 +1,6 @@
 use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::checker::{Checker, class_kind_identifier};
-use crate::registry::class_decl_name;
 use diagnostics::DiagnosticBuilder;
 use syntax::ast::*;
 
@@ -245,21 +244,21 @@ impl<'a> Checker<'a> {
                     }
                 }
                 StmtKind::ClassDecl(c) => {
-                    let kind = class_kind_identifier(&c.kind);
+                    let kind = class_kind_identifier(&c.def.kind);
                     let scope = used_names
                         .entry(current_namespace_lower.clone())
                         .or_default();
-                    if !scope.insert(class_decl_name(c).to_ascii_lowercase()) {
+                    if !scope.insert(c.name.to_ascii_lowercase()) {
                         let qualified = if current_namespace.is_empty() {
-                            class_decl_name(c).to_string()
+                            c.name.to_string()
                         } else {
-                            format!("{current_namespace}\\{}", class_decl_name(c))
+                            format!("{current_namespace}\\{}", c.name)
                         };
                         self.report_builder(
                             DiagnosticBuilder::new(format!(
                                     "Cannot declare {kind} {qualified} because the name is already in use."
                                 ),
-                                c.span,
+                                c.def.span,
                                 0,
                                 format!("{kind}.nameInUse"),
                             )

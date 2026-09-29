@@ -23,7 +23,6 @@
 use rustc_hash::FxHashSet;
 
 use crate::checker::Checker;
-use crate::registry::class_decl_name;
 use syntax::ast::*;
 use syntax::visit::any_stmt_in_body;
 
@@ -44,10 +43,10 @@ impl<'a> Checker<'a> {
         if !self.settings.rules.check_uninitialized_properties {
             return;
         }
-        if c.kind != ClassKind::Class || c.is_abstract {
+        if c.def.kind != ClassKind::Class || c.def.is_abstract {
             return;
         }
-        for p in &c.properties {
+        for p in &c.def.properties {
             if p.is_static || p.is_readonly || p.default.is_some() || p.hooks.is_some() {
                 continue;
             }
@@ -75,14 +74,14 @@ impl<'a> Checker<'a> {
 }
 
 pub(super) fn class_ever_assigns_property(c: &ClassDecl, prop: &str) -> bool {
-    c.methods.iter().any(|m| {
+    c.def.methods.iter().any(|m| {
         // A static "named constructor" (`public static function
         // create(...): static { $node = new static; ...; $node->prop =
         // ...; return $node; }`) populates a *local* variable holding a
         // fresh instance, not `$this`. Collected once per method (not
         // globally) since the same variable name in a different method
         // could hold anything.
-        let self_vars = collect_self_instance_vars(m.function.body_stmts(), class_decl_name(c));
+        let self_vars = collect_self_instance_vars(m.function.body_stmts(), &c.name);
         body_ever_assigns_property(m.function.body_stmts(), prop, &self_vars)
     })
 }

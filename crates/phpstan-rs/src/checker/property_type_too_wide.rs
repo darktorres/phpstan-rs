@@ -15,7 +15,7 @@
 //! to catch.
 
 use crate::checker::Checker;
-use syntax::ast::{ClassDecl, Expr, ExprKind, Literal, Visibility};
+use syntax::ast::{ClassDef, Expr, ExprKind, Literal, Visibility};
 use types::Type;
 
 /// A property's own `= null` default is a real, reachable value (every
@@ -39,7 +39,7 @@ impl<'a> Checker<'a> {
     /// has been checked - the same choke point `check_unused_private_
     /// members` already uses for its own "needs every body scanned
     /// together" requirement.
-    pub(crate) fn check_too_wide_property_types(&mut self, fqn: &str, c: &ClassDecl) {
+    pub(crate) fn check_too_wide_property_types(&mut self, fqn: &str, c: &ClassDef) {
         let Some(info) = self.registry.classes.get(fqn) else {
             return;
         };

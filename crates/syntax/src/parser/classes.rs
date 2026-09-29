@@ -101,16 +101,7 @@ impl Parser {
             enum_cases,
         } = self.parse_class_body(class_is_readonly)?;
 
-        let decl_span = Span {
-            start: decl_start,
-            end: self.previous_end(),
-        };
-        let decl = ClassDecl {
-            namespaced_name: None,
-            name: None,
-            // No name token to point at - see `ClassDecl::name_span`'s own
-            // doc comment.
-            name_span: decl_span,
+        let def = ClassDef {
             kind: ClassKind::Class,
             backing_type: None,
             extends,
@@ -125,10 +116,17 @@ impl Parser {
             enum_cases,
             doc_comment: None,
             attrs,
-            span: decl_span,
+            span: self.span_from(decl_start),
         };
 
-        Ok(self.expr(ExprKind::NewAnonymousClass(Box::new(decl), args), start))
+        Ok(self.expr(
+            ExprKind::NewAnonymousClass(Box::new(AnonymousClass {
+                def,
+                args,
+                name: None,
+            })),
+            start,
+        ))
     }
 
     /// The `{ ... }` body shared by class/interface/trait declarations and
@@ -546,12 +544,7 @@ impl Parser {
                 });
             }
         };
-        let name_start = self.current_pos();
-        let name = self.expect_ident()?;
-        let name_span = Span {
-            start: name_start,
-            end: self.previous_end(),
-        };
+        let name = self.expect_ident_spanned()?;
 
         // A class extends at most one class, but an interface can extend
         // several other interfaces (`interface C extends A, B {}`) - both
@@ -582,31 +575,29 @@ impl Parser {
         } = self.parse_class_body(class_is_readonly)?;
 
         Ok(ClassDecl {
-            namespaced_name: None,
-            name: Some(name),
-            name_span,
-            kind,
-            backing_type: None,
-            extends,
-            implements,
-            is_abstract,
-            is_final,
-            is_readonly: class_is_readonly,
-            properties,
-            methods,
-            consts,
-            trait_uses,
-            enum_cases,
-            doc_comment,
-            // Overwritten by `parse_statement`, the only caller that
-            // actually saw any leading `#[Attr]` groups (both of this
-            // function's own call sites are reached only after
-            // `parse_statement` already consumed and stashed them) - see
-            // its own `Token::Keyword(Keyword::Class | ...)` handling.
-            attrs: Vec::new(),
-            span: Span {
-                start,
-                end: self.previous_end(),
+            namespaced_name: name.name.as_str().into(),
+            name,
+            def: ClassDef {
+                kind,
+                backing_type: None,
+                extends,
+                implements,
+                is_abstract,
+                is_final,
+                is_readonly: class_is_readonly,
+                properties,
+                methods,
+                consts,
+                trait_uses,
+                enum_cases,
+                doc_comment,
+                // Overwritten by `parse_statement`, the only caller that
+                // actually saw any leading `#[Attr]` groups (both of this
+                // function's own call sites are reached only after
+                // `parse_statement` already consumed and stashed them) - see
+                // its own `Token::Keyword(Keyword::Class | ...)` handling.
+                attrs: Vec::new(),
+                span: self.span_from(start),
             },
         })
     }

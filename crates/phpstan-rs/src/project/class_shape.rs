@@ -27,7 +27,7 @@ const DOCTRINE_MAPPED: [&str; 3] = ["Entity", "Embeddable", "MappedSuperclass"];
 fn collect_classes<'a>(stmts: &'a [Stmt], out: &mut Vec<(String, &'a ClassDecl)>) {
     syntax::declarations::for_each_declaration(stmts, |declaration, _| {
         if let Declared::Class(c) = declaration.declared
-            && c.kind != ClassKind::Enum
+            && c.def.kind != ClassKind::Enum
             && !declaration.conditional
         {
             out.push((declaration.name(), c));
@@ -35,7 +35,7 @@ fn collect_classes<'a>(stmts: &'a [Stmt], out: &mut Vec<(String, &'a ClassDecl)>
     });
 }
 
-fn is_doctrine_mapped(c: &ClassDecl, ctx_names: &[String]) -> bool {
+fn is_doctrine_mapped(c: &ClassDef, ctx_names: &[String]) -> bool {
     let doc = c.doc_comment.as_deref().unwrap_or("");
     DOCTRINE_MAPPED.iter().any(|name| {
         doc.contains(&format!("@ORM\\{name}"))
@@ -121,7 +121,7 @@ impl Project {
                     self.closed_class_shape(&fqn, c, &subclassed, &overridden, &mut found);
                 }
                 if !parent_calls.is_empty() {
-                    self.parent_call_rules(&fqn, c, parent_calls, &mut found);
+                    self.parent_call_rules(&fqn, &c.def, parent_calls, &mut found);
                 }
             }
             if !found.is_empty() {
@@ -140,24 +140,28 @@ impl Project {
         overridden: &FxHashSet<(String, String)>,
         out: &mut Vec<Diagnostic>,
     ) {
-        if c.kind != ClassKind::Class {
+        if c.def.kind != ClassKind::Class {
             return;
         }
         let Some(info) = self.registry.classes.get(fqn) else {
             return;
         };
-        let attribute_names: Vec<String> =
-            c.attrs.iter().map(|a| a.name.written.to_string()).collect();
+        let attribute_names: Vec<String> = c
+            .def
+            .attrs
+            .iter()
+            .map(|a| a.name.written.to_string())
+            .collect();
         let lower = fqn.to_ascii_lowercase();
         if !info.is_abstract()
             && !info.is_final()
             && !subclassed.contains(&lower)
-            && !is_doctrine_mapped(c, &attribute_names)
+            && !is_doctrine_mapped(&c.def, &attribute_names)
         {
             out.push(
                 diagnostic(
                     format!("Class {fqn} is not final."),
-                    c.name_span,
+                    c.name.span,
                     0,
                     "class.notFinal",
                 )
@@ -177,7 +181,7 @@ impl Project {
                     .iter()
                     .any(|i| of_method && self.registry.lookup_method(i, member).is_some())
             };
-            for m in &c.methods {
+            for m in &c.def.methods {
                 if m.visibility == Visibility::Protected && !inherited(&m.function.name, true) {
                     out.push(
                         diagnostic(
@@ -193,7 +197,7 @@ impl Project {
                     );
                 }
             }
-            for p in &c.properties {
+            for p in &c.def.properties {
                 if p.visibility == Visibility::Protected && !inherited(&p.name, false) {
                     out.push(
                         diagnostic(
@@ -209,7 +213,7 @@ impl Project {
                     );
                 }
             }
-            for k in &c.consts {
+            for k in &c.def.consts {
                 let from_parent = info
                     .extends()
                     .first()
@@ -231,7 +235,7 @@ impl Project {
             }
         }
         if info.is_abstract() {
-            for m in &c.methods {
+            for m in &c.def.methods {
                 let name = m.function.name.as_ref();
                 if m.is_abstract
                     || m.is_final
@@ -259,7 +263,7 @@ impl Project {
     fn parent_call_rules(
         &self,
         fqn: &str,
-        c: &ClassDecl,
+        c: &ClassDef,
         rules: &[ParentCallRule],
         out: &mut Vec<Diagnostic>,
     ) {

@@ -6,7 +6,6 @@ use types::Type;
 
 pub mod access_attributes;
 mod anonymous_class;
-pub(crate) use anonymous_class::{class_decl_fqn, class_decl_name};
 mod assertion_table;
 pub mod bodies;
 mod class_info;
@@ -26,7 +25,7 @@ pub mod settings;
 pub mod stubs;
 mod type_node;
 
-pub(crate) use anonymous_class::collect_anonymous_classes;
+pub(crate) use anonymous_class::{anonymous_class_decls, name_anonymous_classes};
 pub use bodies::{BodySource, FileBodies, NoBodies};
 pub use class_info::{ClassReflection, ConstantReflection, PropertyReflection};
 pub(crate) use class_info::{hook_body_calls_parent_hook, hook_body_references_property};

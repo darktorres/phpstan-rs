@@ -99,31 +99,31 @@ impl Walk<'_, '_> {
                         self.stmts(std::slice::from_ref(body));
                     }
                 }
-                StmtKind::ClassDecl(en) if en.kind == ClassKind::Enum => {
-                    let name = declared(&en.namespaced_name);
-                    let interfaces = en.implements.iter().map(resolved).collect();
+                StmtKind::ClassDecl(en) if en.def.kind == ClassKind::Enum => {
+                    let name = en.fq_name().to_string();
+                    let interfaces = en.def.implements.iter().map(resolved).collect();
                     let e = self.entry("enum", name.to_ascii_lowercase(), &name, &[]);
                     if e.declarations.len() == 1 {
                         e.interfaces = interfaces;
                     }
                 }
                 StmtKind::ClassDecl(c) => {
-                    let kind = match c.kind {
+                    let kind = match c.def.kind {
                         ClassKind::Interface => "interface",
                         ClassKind::Trait => "trait",
                         ClassKind::Enum => "enum",
                         ClassKind::Class => "class",
                     };
-                    let name = declared(&c.namespaced_name);
-                    let parent = (c.kind == ClassKind::Class)
-                        .then(|| c.extends.first().map(resolved))
+                    let name = c.fq_name().to_string();
+                    let parent = (c.def.kind == ClassKind::Class)
+                        .then(|| c.def.extends.first().map(resolved))
                         .flatten();
-                    let interfaces = if c.kind == ClassKind::Interface {
-                        c.extends.iter().map(resolved).collect()
+                    let interfaces = if c.def.kind == ClassKind::Interface {
+                        c.def.extends.iter().map(resolved).collect()
                     } else {
-                        c.implements.iter().map(resolved).collect()
+                        c.def.implements.iter().map(resolved).collect()
                     };
-                    let e = self.entry(kind, name.to_ascii_lowercase(), &name, &c.attrs);
+                    let e = self.entry(kind, name.to_ascii_lowercase(), &name, &c.def.attrs);
                     if e.declarations.len() == 1 {
                         e.parent = parent;
                         e.interfaces = interfaces;

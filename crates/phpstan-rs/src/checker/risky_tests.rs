@@ -24,7 +24,7 @@ impl<'a> Checker<'a> {
     /// for a real `PHPUnit\Framework\TestCase` subclass at all (a plain
     /// class with a `test*`-named method that happens not to extend it
     /// is just an ordinary, unrelated method, not a test).
-    pub(crate) fn check_risky_test_methods(&mut self, fqn: &str, c: &ClassDecl) {
+    pub(crate) fn check_risky_test_methods(&mut self, fqn: &str, c: &ClassDef) {
         if !self
             .registry
             .is_subclass_of(fqn, "PHPUnit\\Framework\\TestCase")
@@ -119,7 +119,7 @@ struct Assertions {
 impl<'ast> Visitor<'ast> for Assertions {
     fn visit_function_decl(&mut self, _: &'ast FunctionDecl) {}
 
-    fn visit_class_decl(&mut self, _: &'ast ClassDecl) {}
+    fn visit_class_def(&mut self, _: &'ast ClassDef) {}
 
     fn visit_expr(&mut self, e: &'ast Expr) {
         if self.found || is_assertion(e) {

@@ -5,8 +5,7 @@ use crate::checker::{
     type_allows_generator_return,
 };
 use crate::registry::{
-    self, ClassReflection, FunctionReflection, Registry, mark_template_params,
-    resolve_names_in_type,
+    self, ClassReflection, FunctionReflection, mark_template_params, resolve_names_in_type,
 };
 use diagnostics::DiagnosticBuilder;
 use phpdoc::docblock;
@@ -59,7 +58,7 @@ impl<'a> Checker<'a> {
         > = rustc_hash::FxHashMap::default();
         for (host_index, host) in contexts.into_iter().enumerate() {
             let host_start = self.diagnostics.len();
-            for m in &c.methods {
+            for m in &c.def.methods {
                 let site = (
                     m.function.name.span.start.line,
                     m.function.name.span.start.col,
@@ -99,7 +98,7 @@ impl<'a> Checker<'a> {
         // facts` merge, not this single-pass call, can see both sides
         // reliably).
         if !has_hosts {
-            self.check_too_wide_property_types(fqn, c);
+            self.check_too_wide_property_types(fqn, &c.def);
         }
         // A trait used by 2+ classes gets checked 2+ times - a
         // genuinely host-independent bug in the trait's body (no
@@ -219,11 +218,7 @@ impl<'a> Checker<'a> {
             None => self.own_declaration_sig(f),
             Some(class) => self.own_redeclared_method_sig(f, class),
         };
-        if let Some(own) = own {
-            self.check_function_impl(f, class_name, is_static, is_concrete, None, Some(&own));
-            return;
-        }
-        self.check_function_with_ancestor_hint(f, class_name, is_static, is_concrete, None);
+        self.check_function_impl(f, class_name, is_static, is_concrete, own.as_ref());
     }
 
     /// `f`'s own signature when the registry's slot for its name was built
@@ -263,48 +258,12 @@ impl<'a> Checker<'a> {
         Some(self.registry.finalize_standalone_sig(sig.clone()))
     }
 
-    /// `check_function`'s real body - `ancestor_sig_hint` is `Some` only
-    /// for an anonymous class's own method, where it's the first
-    /// ancestor's signature found by walking `decl.extends`/
-    /// `decl.implements` directly at the call site (`ExprKind::
-    /// NewAnonymousClass`'s handling in `checker/expr.rs`) - an
-    /// anonymous class is never indexed into the registry under any
-    /// stable name (see `lookup_own_signature`'s doc comment), so `sig`
-    /// below is always `None` for one. `ancestor_sig_hint` is
-    /// deliberately used only at `check_missing_function_typehints`'s
-    /// call site below, not substituted in for `sig` throughout this
-    /// whole function - correct there (that check only ever reads a
-    /// signature's own docblock-provenance bits, `has_own_doc`/
-    /// `explicit_mixed_hint`, which an ancestor's genuinely still is),
-    /// but not obviously safe for every other `Some(sig)`-gated check
-    /// here (e.g. variance/bound enforcement checking the anonymous
-    /// class's own body against a signature it never actually
-    /// redeclared).
-    pub(crate) fn check_function_with_ancestor_hint(
-        &mut self,
-        f: &FunctionDecl,
-        class_name: Option<&str>,
-        is_static: bool,
-        is_concrete: bool,
-        ancestor_sig_hint: Option<&FunctionReflection>,
-    ) {
-        self.check_function_impl(
-            f,
-            class_name,
-            is_static,
-            is_concrete,
-            ancestor_sig_hint,
-            None,
-        );
-    }
-
     /// For a trait method body whose own literal declaration (not the
     /// registry's single winning slot for this trait's name - see
     /// `check_trait_methods`'s doc comment) is already known. `own_sig`
     /// is a full substitute for the ordinary registry-derived `sig`, not
     /// a hint - a trait's own literal declaration genuinely is this
-    /// method's real signature, unlike `ancestor_sig_hint`'s narrower,
-    /// single-call-site-only role.
+    /// method's real signature.
     pub(crate) fn check_function_with_own_sig(
         &mut self,
         f: &FunctionDecl,
@@ -313,22 +272,18 @@ impl<'a> Checker<'a> {
         is_concrete: bool,
         own_sig: Option<&FunctionReflection>,
     ) {
-        self.check_function_impl(f, class_name, is_static, is_concrete, None, own_sig);
+        self.check_function_impl(f, class_name, is_static, is_concrete, own_sig);
     }
 
-    /// The real body shared by `check_function`/
-    /// `check_function_with_ancestor_hint`/`check_function_with_own_sig` -
-    /// `ancestor_sig_hint` is `Some` only for an anonymous class's own
-    /// method (see `check_function_with_ancestor_hint`'s doc comment);
-    /// `own_sig_override`, when `Some`, replaces the ordinary registry
-    /// lookup for `sig` entirely (used only by `check_trait_methods`).
+    /// The real body shared by `check_function` and
+    /// `check_function_with_own_sig`; `own_sig_override`, when `Some`,
+    /// replaces the ordinary registry lookup for `sig` entirely.
     fn check_function_impl(
         &mut self,
         f: &FunctionDecl,
         class_name: Option<&str>,
         is_static: bool,
         is_concrete: bool,
-        ancestor_sig_hint: Option<&FunctionReflection>,
         own_sig_override: Option<&FunctionReflection>,
     ) {
         let sig = own_sig_override.or_else(|| self.lookup_own_signature(f, class_name));
@@ -602,27 +557,15 @@ impl<'a> Checker<'a> {
                     locals.set_native(param.name(), native);
                 }
             }
-            // This is exactly what every anonymous class method hits,
-            // unconditionally: `lookup_own_signature` looks up
-            // `self.registry.classes.get(c)` for `class_name =
-            // Some(&decl.name)`, and an anonymous class's synthetic name
-            // is never indexed into the registry - so `sig` is always
-            // `None` there. Unlike the `Some(sig)` branch above, this one
-            // must separately resolve a `use`-imported type-hint name to
-            // its FQN, and resolve a `self`/`static`/`parent` pseudo-type
-            // against the enclosing (possibly anonymous) class. Both are
-            // fixed the same way, using `self.name_ctx` - the exact
-            // per-file context real class declarations get resolved
-            // against - since this branch (unlike the `Some` one) builds
-            // each `Type` fresh from a raw string on every call anyway.
-            //
-            // `doc`/`resolve_type` below mirror `FunctionReflection::from_decl`'s
-            // param-resolution exactly, so an anonymous class's own
-            // `/** @return array<string, object> */` above a fully-typed
-            // method isn't silently discarded.
+            // A declaration the registry has no signature for. Unlike the
+            // `Some(sig)` branch above, this one resolves each declared
+            // type itself, against `self.name_ctx`, the same way
+            // `FunctionReflection::from_decl` does, and resolves a
+            // `self`/`static`/`parent` pseudo-type against the enclosing
+            // class.
             None => {
                 let doc = f.doc_comment.as_deref().map(docblock::parse);
-                for (i, p) in f.params.iter().enumerate() {
+                for p in &f.params {
                     // Same inline-`@var`-on-a-promoted-property fallback
                     // as `FunctionReflection::from_decl`'s param loop.
                     let doc_ty: Option<phpdoc::grammar::TypeNode> = doc
@@ -635,9 +578,8 @@ impl<'a> Checker<'a> {
                                 .map(docblock::parse)
                                 .and_then(|d| d.var_type)
                         });
-                    // This anonymous-class fallback path bypasses
-                    // `FunctionReflection::from_decl`, so it collects the
-                    // param's case refs itself, and resolves a `value-of<T>`
+                    // This path bypasses `FunctionReflection::from_decl`,
+                    // so it collects the param's case refs itself, and resolves a `value-of<T>`
                     // on an enum as the registry's pipeline would.
                     let registry::DeclaredType {
                         ty,
@@ -652,40 +594,6 @@ impl<'a> Checker<'a> {
                     let ty = self
                         .registry
                         .resolve_deferred_value_of_now_with_native_fallback(ty, &native_ty);
-                    // `doc_ty` being `None` means this exact declaration
-                    // has nothing to say about this position - but an
-                    // anonymous class relying on an implemented
-                    // interface's real, non-`mixed` documented type still
-                    // needs it backfilled here. Mirrors `Registry::
-                    // flatten_phpdoc_inheritance_one_pass`'s three safety
-                    // guards: `__construct` matches by name, everything
-                    // else positionally, the same real-PHP-constructor-
-                    // signature-compatibility distinction that pass draws.
-                    let ty = if doc_ty.is_none() {
-                        ancestor_sig_hint
-                            .and_then(|s| {
-                                if f.is_constructor() {
-                                    s.params()
-                                        .iter()
-                                        .find(|ap| ap.name().as_ref() == p.name.as_ref())
-                                } else {
-                                    s.params().get(i)
-                                }
-                            })
-                            .filter(|ap| {
-                                ap.has_own_doc()
-                                    && Registry::safe_to_backfill_mixed(ap.ty(), &ty)
-                                    && !Registry::type_mentions_foreign_scoped_template_param(
-                                        ap.ty(),
-                                        &f.name,
-                                    )
-                                    && Registry::safe_to_backfill_object_type(ap.ty(), &ty)
-                            })
-                            .map(|ap| ap.ty().clone())
-                            .unwrap_or(ty)
-                    } else {
-                        ty
-                    };
                     let ty = match class_name {
                         Some(c) => self.resolve_pseudo(&ty, c),
                         None => ty,
@@ -743,10 +651,7 @@ impl<'a> Checker<'a> {
                 }
             })
             .or_else(|| {
-                // Same "the registry-side merge this branch otherwise skips"
-                // fix as the param loop above, for the return position - an
-                // anonymous class's `@return` docblock tag is only ever
-                // reached here, never via `sig` (always `None` for one).
+                // The return-position sibling of the param loop above.
                 let doc_return = f
                     .doc_comment
                     .as_deref()
@@ -768,24 +673,6 @@ impl<'a> Checker<'a> {
                 let ty = self
                     .registry
                     .resolve_deferred_value_of_now_with_native_fallback(ty, &native_ty);
-                // Same ancestor-backfill as the param loop above, for the
-                // return position.
-                let ty = if doc_return.is_none() {
-                    ancestor_sig_hint
-                        .filter(|s| {
-                            s.return_has_own_doc()
-                                && Registry::safe_to_backfill_mixed(s.return_type(), &ty)
-                                && !Registry::type_mentions_foreign_scoped_template_param(
-                                    s.return_type(),
-                                    &f.name,
-                                )
-                                && Registry::safe_to_backfill_object_type(s.return_type(), &ty)
-                        })
-                        .map(|s| s.return_type().clone())
-                        .unwrap_or(ty)
-                } else {
-                    ty
-                };
                 Some(match class_name {
                     Some(c) => self.resolve_pseudo(&ty, c),
                     None => ty,
@@ -968,7 +855,7 @@ impl<'a> Checker<'a> {
                 &label,
                 &resolved_params,
                 declared_return.as_ref(),
-                sig.or(ancestor_sig_hint),
+                sig,
             );
             if self.settings.extras.check_native_type_hints
                 && let Some(sig) = sig

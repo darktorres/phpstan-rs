@@ -21,7 +21,6 @@ hotpath.workspace = true
 imbl.workspace = true
 indexmap = "=2.14.2"
 lsp-server = "=0.10.0"
-md5 = "=0.8.1"
 lsp-types = "=0.97.0"
 pcre2-sys = { version = "=0.2.10", optional = true }
 rayon = "=1.12.0"

@@ -340,7 +340,7 @@ impl<'a> Checker<'a> {
         self.check_phpdoc_types_against_native(&decl, &sig, Some(fqn));
     }
 
-    pub(crate) fn check_property_phpdoc_types(&mut self, fqn: &str, c: &ClassDecl) {
+    pub(crate) fn check_property_phpdoc_types(&mut self, fqn: &str, c: &ClassDef) {
         if !self.registry.classes.contains_key(fqn) {
             return;
         }

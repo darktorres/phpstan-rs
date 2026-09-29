@@ -323,7 +323,7 @@ struct Disqualifier<'r> {
 impl<'ast> Visitor<'ast> for Disqualifier<'_> {
     fn visit_function_decl(&mut self, _: &'ast FunctionDecl) {}
 
-    fn visit_class_decl(&mut self, _: &'ast ClassDecl) {}
+    fn visit_class_def(&mut self, _: &'ast ClassDef) {}
 
     fn visit_stmt(&mut self, stmt: &'ast Stmt) {
         if self.found {
@@ -710,7 +710,7 @@ impl ImpurePoints<'_> {
 impl<'ast> Visitor<'ast> for ImpurePoints<'_> {
     fn visit_function_decl(&mut self, _: &'ast FunctionDecl) {}
 
-    fn visit_class_decl(&mut self, _: &'ast ClassDecl) {}
+    fn visit_class_def(&mut self, _: &'ast ClassDef) {}
 
     fn visit_stmt(&mut self, stmt: &'ast Stmt) {
         syntax::stack::guard(|| {

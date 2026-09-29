@@ -15,7 +15,7 @@ use crate::checker::NamedArgumentCallFacts;
 use crate::registry::Registry;
 use rustc_hash::{FxHashMap, FxHashSet};
 use std::path::PathBuf;
-use syntax::ast::{ClassDecl, Stmt, Visibility};
+use syntax::ast::{ClassDef, Stmt, Visibility};
 use syntax::declarations::{Declared, for_each_declaration};
 use syntax::token::Span;
 use types::Name;
@@ -70,7 +70,7 @@ pub(crate) fn renamed_parameter_overrides<'p>(
             if let Declared::Class(c) = declaration.declared
                 && !declaration.conditional
             {
-                class_overrides(registry, &declaration.name(), c, &mut overrides);
+                class_overrides(registry, &declaration.name(), &c.def, &mut overrides);
             }
         });
     }
@@ -80,7 +80,7 @@ pub(crate) fn renamed_parameter_overrides<'p>(
 fn class_overrides(
     registry: &Registry,
     fqn: &str,
-    c: &ClassDecl,
+    c: &ClassDef,
     out: &mut RenamedParameterOverrideFacts,
 ) {
     for m in &c.methods {

@@ -166,6 +166,22 @@ fn signature_help_for_new_resolves_the_constructor_not_the_class() {
 }
 
 #[test]
+fn signature_help_for_an_anonymous_class_resolves_its_own_constructor() {
+    let dir = TempDir::new("sh_new_anonymous");
+    let src = "<?php\n$x = new class() {\n    function __construct(int $id) {}\n};\n";
+    let path = dir.write("a.php", src);
+    let uri = path_to_uri(&path).to_string();
+    let pos = pos_after(src, "new class(");
+
+    let messages = run(&dir, &[signature_help_request(2, &uri, pos)]);
+    let result = response_result(&messages, 2);
+    let labels = labels(&result);
+    assert_eq!(labels.len(), 1, "{labels:?}");
+    assert!(labels[0].starts_with("class@anonymous/"), "{labels:?}");
+    assert!(labels[0].ends_with(":2::__construct(int $id): mixed"), "{labels:?}");
+}
+
+#[test]
 fn signature_help_targets_the_innermost_of_two_nested_calls() {
     let dir = TempDir::new("sh_nested");
     let src = "<?php\nfunction outer(int $a): void {}\nfunction inner(int $b): void {}\nouter(inner());\n";
