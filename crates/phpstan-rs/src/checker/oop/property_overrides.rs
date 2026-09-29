@@ -43,7 +43,7 @@ impl<'a> Checker<'a> {
                 continue;
             }
             for param in &m.function.params {
-                if param.promoted_visibility.is_none() {
+                if param.promotion.is_none() {
                     continue;
                 }
                 let Some(own_sig) = info.properties().get(param.name.as_ref()).cloned() else {

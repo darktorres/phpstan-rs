@@ -199,6 +199,19 @@ pub struct CatchClause {
     pub span: Span,
 }
 
+/// A constructor parameter promoted to a property (`private int $id`,
+/// `readonly int $id`): the property's modifiers.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Promotion {
+    // Public when only `readonly`, `final` or a set visibility promotes.
+    pub visibility: Visibility,
+    // `private(set)`: who may write the property.
+    pub set_visibility: Option<Visibility>,
+    pub readonly: bool,
+    // `final` - valid PHP, unlike `abstract`.
+    pub is_final: bool,
+}
+
 #[derive(Debug, Clone)]
 pub struct Param {
     // Moved out of the lexer's interned `Token::Variable`, without its `$`.
@@ -212,20 +225,9 @@ pub struct Param {
     pub default: Option<Expr>,
     pub by_ref: bool,
     pub variadic: bool,
-    // Some(visibility) for constructor property promotion, e.g.
+    // The property a constructor parameter promotes to, e.g.
     // `public function __construct(private int $id) {}`.
-    pub promoted_visibility: Option<Visibility>,
-    // `private(set)` on a promoted constructor parameter: who may write the
-    // property. `None` without one.
-    pub promoted_set_visibility: Option<Visibility>,
-    // `public readonly int $id` in a promoted constructor parameter.
-    // Meaningless when promoted_visibility is None.
-    pub promoted_readonly: bool,
-    // `public final int $id` in a promoted constructor parameter -
-    // real, valid PHP, unlike `abstract` (an abstract constructor can't
-    // declare any promoted property at all - real fatal error).
-    // Meaningless when promoted_visibility is None.
-    pub promoted_final: bool,
+    pub promotion: Option<Promotion>,
     // A promoted property's own hooks, defined inline in the constructor's
     // parameter list rather than on an ordinary property declaration.
     // Boxed because PropertyHooks::set itself embeds a Param - unboxed,

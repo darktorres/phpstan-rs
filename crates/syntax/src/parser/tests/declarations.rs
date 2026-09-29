@@ -194,7 +194,11 @@ fn a_promoted_constructor_parameter_captures_its_own_readonly_modifier() {
         .iter()
         .find(|m| m.function.name == "__construct")
         .unwrap();
-    assert!(ctor.function.params[0].promoted_readonly);
+    assert!(
+        ctor.function.params[0]
+            .promotion
+            .is_some_and(|promotion| promotion.readonly)
+    );
 }
 
 #[test]
@@ -553,7 +557,12 @@ fn public_set_and_final_promoted_params_parse() {
         panic!("expected ClassDecl");
     };
     let ctor = &c.methods[0].function;
-    assert_eq!(ctor.params[0].promoted_visibility, Some(Visibility::Public));
+    assert_eq!(
+        ctor.params[0]
+            .promotion
+            .map(|promotion| promotion.visibility),
+        Some(Visibility::Public)
+    );
     assert_eq!(ctor.params[1].name, "b");
 }
 
@@ -758,19 +767,23 @@ fn a_promoted_parameter_keeps_its_set_visibility() {
     };
     let params = &c.methods[0].function.params;
     assert!(matches!(
-        params[0].promoted_visibility,
+        params[0].promotion.map(|promotion| promotion.visibility),
         Some(Visibility::Public)
     ));
     assert!(matches!(
-        params[0].promoted_set_visibility,
+        params[0]
+            .promotion
+            .and_then(|promotion| promotion.set_visibility),
         Some(Visibility::Private)
     ));
     assert!(matches!(
-        params[1].promoted_visibility,
+        params[1].promotion.map(|promotion| promotion.visibility),
         Some(Visibility::Public)
     ));
     assert!(matches!(
-        params[1].promoted_set_visibility,
+        params[1]
+            .promotion
+            .and_then(|promotion| promotion.set_visibility),
         Some(Visibility::Protected)
     ));
 }

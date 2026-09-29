@@ -96,16 +96,19 @@ impl<'a> Checker<'a> {
                 ctor.function
                     .params
                     .iter()
-                    .filter(|p| p.promoted_visibility.is_some())
+                    .filter(|p| p.promotion.is_some())
                     .map(|p| PropertyView {
                         name: &p.name,
                         span: p.span,
-                        visibility: p.promoted_visibility.unwrap_or(Visibility::Public),
+                        visibility: p
+                            .promotion
+                            .map(|promotion| promotion.visibility)
+                            .unwrap_or(Visibility::Public),
                         write_visibility: None,
                         is_static: false,
-                        is_readonly: p.promoted_readonly,
+                        is_readonly: p.promotion.is_some_and(|promotion| promotion.readonly),
                         is_abstract: false,
-                        is_final: p.promoted_final,
+                        is_final: p.promotion.is_some_and(|promotion| promotion.is_final),
                         type_hint: p.type_hint.as_ref(),
                         has_default: false,
                         hooks: p.hooks.as_deref(),

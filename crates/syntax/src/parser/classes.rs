@@ -363,8 +363,8 @@ impl Parser {
                 // on its own - only this call site does).
                 if class_is_readonly {
                     for param in &mut function.params {
-                        if param.promoted_visibility.is_some() {
-                            param.promoted_readonly = true;
+                        if let Some(promotion) = &mut param.promotion {
+                            promotion.readonly = true;
                         }
                     }
                 }

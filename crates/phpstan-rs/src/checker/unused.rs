@@ -47,11 +47,7 @@ impl<'a> Checker<'a> {
         if !f.is_constructor() || f.body.is_none() {
             return;
         }
-        let candidates: Vec<&Param> = f
-            .params
-            .iter()
-            .filter(|p| p.promoted_visibility.is_none())
-            .collect();
+        let candidates: Vec<&Param> = f.params.iter().filter(|p| p.promotion.is_none()).collect();
         if candidates.is_empty() {
             return;
         }
@@ -316,7 +312,9 @@ impl<'a> Checker<'a> {
         }
         if let Some(ctor) = ctor {
             for param in &ctor.function.params {
-                if param.promoted_visibility != Some(Visibility::Private) {
+                if param.promotion.map(|promotion| promotion.visibility)
+                    != Some(Visibility::Private)
+                {
                     continue;
                 }
                 let (only_readable, only_writable) = hook_read_write_shape(param.hooks.as_deref());

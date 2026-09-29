@@ -144,7 +144,7 @@ impl<'ast> Visitor<'ast> for Promotions<'_, '_> {
 }
 
 fn is_promoted(p: &Param) -> bool {
-    p.promoted_visibility.is_some() || p.hooks.is_some()
+    p.promotion.is_some() || p.hooks.is_some()
 }
 
 impl<'a> Checker<'a> {
@@ -385,8 +385,8 @@ impl<'a> Checker<'a> {
             PromotionSite::Constructor => {}
         }
         let final_unavailable = unavailable(PhpFeature::FinalPromotedProperties);
-        for p in params.iter().filter(|p| p.promoted_visibility.is_some()) {
-            if p.promoted_final && final_unavailable {
+        for p in params.iter().filter(|p| p.promotion.is_some()) {
+            if p.promotion.is_some_and(|promotion| promotion.is_final) && final_unavailable {
                 self.report_declaration(
                     "Final promoted properties are supported only on PHP 8.5 and later.",
                     p.span,

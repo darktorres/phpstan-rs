@@ -97,7 +97,7 @@ impl<'a> Checker<'a> {
                 continue;
             }
             for param in &m.function.params {
-                if param.promoted_visibility.is_none() {
+                if param.promotion.is_none() {
                     continue;
                 }
                 if seen.contains_key(param.name.as_ref()) {

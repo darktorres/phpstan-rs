@@ -875,7 +875,7 @@ impl<'a> MemberSpans<'a> {
             self.method_sites
                 .insert(name_site(&m.function), m.function.name_span);
             for p in &m.function.params {
-                if p.promoted_visibility.is_some() {
+                if p.promotion.is_some() {
                     self.properties.insert(&p.name, p.name_span);
                 }
             }
@@ -1060,8 +1060,9 @@ impl ClassReflection {
                     .params
                     .iter()
                     .filter(|p| {
-                        p.promoted_final
-                            && p.promoted_visibility.as_ref() != Some(&Visibility::Private)
+                        p.promotion.is_some_and(|promotion| promotion.is_final)
+                            && p.promotion.map(|promotion| promotion.visibility).as_ref()
+                                != Some(&Visibility::Private)
                     })
                     .map(|p| Name::from(&p.name)),
             );
@@ -1087,7 +1088,8 @@ impl ClassReflection {
                     .params
                     .iter()
                     .filter(|p| {
-                        p.promoted_visibility.as_ref() != Some(&Visibility::Private)
+                        p.promotion.map(|promotion| promotion.visibility).as_ref()
+                            != Some(&Visibility::Private)
                             && p.doc_comment
                                 .as_deref()
                                 .map(docblock::parse)
@@ -1177,7 +1179,7 @@ impl ClassReflection {
         if let Some(ctor) = c.constructor() {
             let ctor_doc = ctor.function.doc_comment.as_deref().map(docblock::parse);
             for p in &ctor.function.params {
-                if p.promoted_visibility.is_none() {
+                if p.promotion.is_none() {
                     continue;
                 }
                 // Same inline-`@var`-on-a-promoted-property fallback as
@@ -1236,19 +1238,34 @@ impl ClassReflection {
                         doc_ty: own_doc_ty,
                         has_native_type: p.type_hint.is_some(),
                         is_static: false,
-                        is_readonly: p.promoted_readonly || doc_readonly,
-                        allows_private_mutation: !p.promoted_readonly
+                        is_readonly: p.promotion.is_some_and(|promotion| promotion.readonly)
+                            || doc_readonly,
+                        allows_private_mutation: !p
+                            .promotion
+                            .is_some_and(|promotion| promotion.readonly)
                             && doc_readonly
                             && doc_allows_private_mutation,
-                        readonly_by_phpdoc: !p.promoted_readonly && doc_readonly,
+                        readonly_by_phpdoc: !p
+                            .promotion
+                            .is_some_and(|promotion| promotion.readonly)
+                            && doc_readonly,
                         tag_read_only: false,
                         tag_write_only: false,
                         set_ty,
                         is_virtual,
-                        visibility: p.promoted_visibility.unwrap_or(Visibility::Public),
-                        write_visibility: p.promoted_visibility.unwrap_or(Visibility::Public),
-                        implicit_protected_set: p.promoted_readonly
-                            && p.promoted_visibility
+                        visibility: p
+                            .promotion
+                            .map(|promotion| promotion.visibility)
+                            .unwrap_or(Visibility::Public),
+                        write_visibility: p
+                            .promotion
+                            .map(|promotion| promotion.visibility)
+                            .unwrap_or(Visibility::Public),
+                        implicit_protected_set: p
+                            .promotion
+                            .is_some_and(|promotion| promotion.readonly)
+                            && p.promotion
+                                .map(|promotion| promotion.visibility)
                                 .as_ref()
                                 .is_none_or(|v| *v == Visibility::Public),
                         is_internal: false,

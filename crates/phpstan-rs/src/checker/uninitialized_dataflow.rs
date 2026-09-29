@@ -128,8 +128,8 @@ impl<'a> Checker<'a> {
                 .into_iter()
                 .flat_map(|m| m.function.params.iter())
                 .filter(|p| {
-                    p.promoted_visibility.is_some()
-                        && !p.promoted_readonly
+                    p.promotion.is_some()
+                        && !p.promotion.is_some_and(|promotion| promotion.readonly)
                         && !c.is_readonly
                         && p.type_hint.is_some()
                 })

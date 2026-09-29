@@ -74,11 +74,16 @@ impl Parser {
             // `readonly`, `final`, or a set-visibility modifier alone
             // (`private(set) string $a`) still promotes, with implicit
             // `public` visibility.
-            if promoted_visibility.is_none()
-                && (promoted_set_visibility.is_some() || promoted_readonly || promoted_final)
-            {
-                promoted_visibility = Some(Visibility::Public);
-            }
+            let promotes = promoted_visibility.is_some()
+                || promoted_set_visibility.is_some()
+                || promoted_readonly
+                || promoted_final;
+            let promotion = promotes.then(|| Promotion {
+                visibility: promoted_visibility.unwrap_or(Visibility::Public),
+                set_visibility: promoted_set_visibility,
+                readonly: promoted_readonly,
+                is_final: promoted_final,
+            });
 
             let type_hint = self.parse_type_hint()?;
             let by_ref = self.eat(&Token::Amp);
@@ -110,10 +115,7 @@ impl Parser {
                 default,
                 by_ref,
                 variadic,
-                promoted_visibility,
-                promoted_set_visibility,
-                promoted_readonly,
-                promoted_final,
+                promotion,
                 hooks,
                 attrs,
                 doc_comment,

@@ -220,7 +220,7 @@ pub(crate) fn compute_doctrine_entity(
     }
     if let Some(ctor) = c.constructor() {
         for p in &ctor.function.params {
-            if p.promoted_visibility.is_some() {
+            if p.promotion.is_some() {
                 attrs_by_property.insert(&p.name, &p.attrs);
             }
         }

@@ -1727,7 +1727,7 @@ impl<'a> Checker<'a> {
         if params.is_empty()
             || params
                 .iter()
-                .any(|p| p.by_ref || p.variadic || p.promoted_visibility.is_some())
+                .any(|p| p.by_ref || p.variadic || p.promotion.is_some())
         {
             return;
         }

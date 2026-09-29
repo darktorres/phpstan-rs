@@ -74,7 +74,7 @@ impl<'a> Checker<'a> {
         }
         if let Some(ctor) = c.constructor() {
             for param in &ctor.function.params {
-                if param.promoted_visibility.is_none() {
+                if param.promotion.is_none() {
                     continue;
                 }
                 let Some(hooks) = param.hooks.as_deref() else {

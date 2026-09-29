@@ -903,7 +903,7 @@ impl<'a> Checker<'a> {
                 // may target either a parameter or the property it also
                 // declares - real PHP itself doesn't distinguish which one
                 // an attribute "means" here, so either target is accepted.
-                let (target, target_name) = if p.promoted_visibility.is_some() {
+                let (target, target_name) = if p.promotion.is_some() {
                     (
                         ATTRIBUTE_TARGET_PARAMETER | ATTRIBUTE_TARGET_PROPERTY,
                         "parameter or property",

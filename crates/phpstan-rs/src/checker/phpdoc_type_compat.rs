@@ -289,10 +289,7 @@ impl<'a> Checker<'a> {
                         default: None,
                         by_ref: false,
                         variadic: false,
-                        promoted_visibility: None,
-                        promoted_set_visibility: None,
-                        promoted_readonly: false,
-                        promoted_final: false,
+                        promotion: None,
                         hooks: None,
                         attrs: Vec::new(),
                         doc_comment: None,
@@ -353,7 +350,7 @@ impl<'a> Checker<'a> {
         let promoted = ctor
             .into_iter()
             .flat_map(|m| m.function.params.iter())
-            .filter(|p| p.promoted_visibility.is_some())
+            .filter(|p| p.promotion.is_some())
             .map(|p| {
                 let node = ctor_nodes.params.get(p.name.as_ref()).cloned().or_else(|| {
                     p.doc_comment
