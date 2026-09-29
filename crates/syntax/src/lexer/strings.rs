@@ -477,19 +477,40 @@ impl<'a> Lexer<'a> {
                     // invalid codepoint (surrogate half, out of range)
                     // leaves the sequence undecoded rather than
                     // panicking.
+                    // `\u{hex}`: a codepoint up to U+10FFFF, surrogates
+                    // included, as UTF-8; anything else is a compile error.
                     b'u' if bytes.get(i + 2) == Some(&b'{') => {
                         let mut j = i + 3;
                         while j < bytes.len() && bytes[j] != b'}' {
                             j += 1;
                         }
                         let hex = std::str::from_utf8(&bytes[i + 3..j]).unwrap_or("");
-                        let decoded = u32::from_str_radix(hex, 16).ok().and_then(char::from_u32);
-                        match decoded {
-                            Some(c) if j < bytes.len() => {
-                                literal.extend_from_slice(c.encode_utf8(&mut [0; 4]).as_bytes());
+                        let codepoint = (j < bytes.len()
+                            && !hex.is_empty()
+                            && hex.bytes().all(|b| b.is_ascii_hexdigit()))
+                        .then(|| u32::from_str_radix(hex, 16).ok())
+                        .flatten();
+                        match codepoint {
+                            Some(c) if c <= 0x10FFFF => {
+                                literal.extend_from_slice(&encode_codepoint(c));
                                 i = j + 1;
                             }
                             _ => {
+                                let span = Span {
+                                    start: self.line_col_at(off(i)),
+                                    end: self.line_col_at(off((j + 1).min(bytes.len()))),
+                                };
+                                let too_large = codepoint.is_some() || hex.len() > 8;
+                                self.warnings.push(crate::lexer::LexWarning {
+                                    span,
+                                    message: if too_large {
+                                        "Invalid UTF-8 codepoint escape sequence: Codepoint too large"
+                                            .to_string()
+                                    } else {
+                                        "Invalid UTF-8 codepoint escape sequence".to_string()
+                                    },
+                                    is_error: true,
+                                });
                                 literal.extend_from_slice(b"\\u");
                                 i += 2;
                             }
@@ -783,4 +804,24 @@ fn strip_heredoc_indent(text: &[u8], indent: usize) -> (Vec<u8>, Vec<usize>) {
     }
     offsets.push(text.len());
     (content, offsets)
+}
+
+/// A codepoint as PHP's `\u{...}` writes it: UTF-8, a surrogate included
+/// (as its three bytes).
+fn encode_codepoint(c: u32) -> Vec<u8> {
+    match c {
+        0..=0x7F => vec![c as u8],
+        0x80..=0x7FF => vec![0xC0 | (c >> 6) as u8, 0x80 | (c & 0x3F) as u8],
+        0x800..=0xFFFF => vec![
+            0xE0 | (c >> 12) as u8,
+            0x80 | ((c >> 6) & 0x3F) as u8,
+            0x80 | (c & 0x3F) as u8,
+        ],
+        _ => vec![
+            0xF0 | (c >> 18) as u8,
+            0x80 | ((c >> 12) & 0x3F) as u8,
+            0x80 | ((c >> 6) & 0x3F) as u8,
+            0x80 | (c & 0x3F) as u8,
+        ],
+    }
 }

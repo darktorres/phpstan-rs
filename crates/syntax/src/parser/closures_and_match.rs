@@ -106,6 +106,15 @@ impl Parser {
         while !self.check(&Token::RBrace) && !self.at_eof() {
             let arm_start = self.current_pos();
             let conditions = if self.eat(&Token::Keyword(Keyword::Default)) {
+                if arms.iter().any(|arm: &MatchArm| arm.conditions.is_none()) {
+                    return Err(ParseError {
+                        message: "Match expressions may only contain one default arm".to_string(),
+                        span: Span {
+                            start: arm_start,
+                            end: self.previous_end(),
+                        },
+                    });
+                }
                 // `default` also tolerates a trailing comma before `=>`,
                 // same as an ordinary arm's condition list.
                 self.eat(&Token::Comma);

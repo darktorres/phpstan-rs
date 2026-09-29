@@ -96,4 +96,39 @@ mod tests {
         assert_eq!(error.message, "Invalid numeric literal");
         assert!(parse(b"<?php $x = 07; $y = 09.5;", &interner).is_ok());
     }
+
+    #[test]
+    fn a_number_or_escape_php_cant_read_whole_is_a_parse_error() {
+        let interner = Arc::new(Interner::new());
+        for bad in [
+            &b"<?php $x = 1e;"[..],
+            b"<?php $x = 1e+;",
+            b"<?php $x = 0x;",
+            b"<?php $x = 0b;",
+            b"<?php $x = 1__0;",
+            b"<?php $x = 1_;",
+            b"<?php $x = 1_.5;",
+            b"<?php $x = \"\\u{110000}\";",
+            b"<?php $x = \"\\u{zz}\";",
+            b"<?php $x = match (1) { default => 1, default => 2 };",
+        ] {
+            assert!(
+                parse(bad, &interner).is_err(),
+                "{}",
+                String::from_utf8_lossy(bad)
+            );
+        }
+        for good in [
+            &b"<?php $x = 1_000.5_5e1_0;"[..],
+            b"<?php $x = 0x1_F;",
+            b"<?php $x = .5; $y = 1.; $z = 1E-3;",
+            b"<?php $x = \"\\u{D800}\\u{10FFFF}\";",
+        ] {
+            assert!(
+                parse(good, &interner).is_ok(),
+                "{}",
+                String::from_utf8_lossy(good)
+            );
+        }
+    }
 }

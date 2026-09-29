@@ -567,6 +567,24 @@ impl<'a> Lexer<'a> {
     /// rare in most real-world source. Only allocates (via `.replace`) for
     /// the literals that actually use one. Found and fixed via a perf-
     /// optimization investigation workflow.
+    /// Reports the number just lexed from `start` when PHP wouldn't read
+    /// all of it as one (`1e`, `0x`, `1__0`, `1_`): the rest is an
+    /// unexpected identifier to PHP.
+    fn check_numeric_token(&mut self, start: usize) {
+        if is_numeric_token(&self.src[start..self.pos]) {
+            return;
+        }
+        let span = Span {
+            start: self.line_col_at(start),
+            end: self.line_col_at(self.pos),
+        };
+        self.warnings.push(LexWarning {
+            span,
+            message: "syntax error, unexpected identifier".to_string(),
+            is_error: true,
+        });
+    }
+
     fn strip_digit_separators(raw: &[u8]) -> Cow<'_, str> {
         let s = std::str::from_utf8(raw).unwrap_or_default();
         if raw.contains(&b'_') {
@@ -607,6 +625,7 @@ impl<'a> Lexer<'a> {
             while self.peek().is_ascii_hexdigit() || self.peek() == b'_' {
                 self.pos += 1;
             }
+            self.check_numeric_token(start);
             let text = Self::strip_digit_separators(&self.src[start + 2..self.pos]);
             return radix_literal(&text, 16);
         }
@@ -616,6 +635,7 @@ impl<'a> Lexer<'a> {
             while self.peek() == b'0' || self.peek() == b'1' || self.peek() == b'_' {
                 self.pos += 1;
             }
+            self.check_numeric_token(start);
             let text = Self::strip_digit_separators(&self.src[start + 2..self.pos]);
             return radix_literal(&text, 2);
         }
@@ -627,6 +647,7 @@ impl<'a> Lexer<'a> {
             while (b'0'..=b'7').contains(&self.peek()) || self.peek() == b'_' {
                 self.pos += 1;
             }
+            self.check_numeric_token(start);
             let text = Self::strip_digit_separators(&self.src[start + 2..self.pos]);
             return radix_literal(&text, 8);
         }
@@ -652,11 +673,12 @@ impl<'a> Lexer<'a> {
             if self.peek() == b'+' || self.peek() == b'-' {
                 self.pos += 1;
             }
-            while self.peek().is_ascii_digit() {
+            while self.peek().is_ascii_digit() || self.peek() == b'_' {
                 self.pos += 1;
             }
         }
 
+        self.check_numeric_token(start);
         let text = Self::strip_digit_separators(&self.src[start..self.pos]);
         if is_float {
             Token::Float(text.parse().unwrap_or(0.0))
@@ -917,3 +939,55 @@ fn is_ident_continue(c: u8) -> bool {
 
 #[cfg(test)]
 mod tests;
+
+/// Whether `raw` is one whole PHP number: digits joined by single `_`s,
+/// after `0x`/`0b`/`0o` in their base, or decimal with an optional
+/// fraction and an exponent that has digits.
+fn is_numeric_token(raw: &[u8]) -> bool {
+    fn run(bytes: &[u8], digit: fn(&u8) -> bool) -> Option<usize> {
+        let mut i = 0;
+        loop {
+            let start = i;
+            while bytes.get(i).is_some_and(digit) {
+                i += 1;
+            }
+            if i == start {
+                return None;
+            }
+            if bytes.get(i) == Some(&b'_') && bytes.get(i + 1).is_some_and(digit) {
+                i += 1;
+                continue;
+            }
+            return Some(i);
+        }
+    }
+    let prefixed = |digit: fn(&u8) -> bool| run(&raw[2..], digit) == Some(raw.len() - 2);
+    match raw.get(..2) {
+        Some(b"0x" | b"0X") => prefixed(u8::is_ascii_hexdigit),
+        Some(b"0b" | b"0B") => prefixed(|b| matches!(b, b'0' | b'1')),
+        Some(b"0o" | b"0O") => prefixed(|b| matches!(b, b'0'..=b'7')),
+        _ => {
+            let mut i = run(raw, u8::is_ascii_digit).unwrap_or(0);
+            if raw.get(i) == Some(&b'.') {
+                i += 1;
+                if raw.get(i).is_some_and(u8::is_ascii_digit) {
+                    i += run(&raw[i..], u8::is_ascii_digit).unwrap_or(0);
+                }
+            }
+            if i == 0 {
+                return false;
+            }
+            if matches!(raw.get(i), Some(b'e' | b'E')) {
+                i += 1;
+                if matches!(raw.get(i), Some(b'+' | b'-')) {
+                    i += 1;
+                }
+                match run(&raw[i..], u8::is_ascii_digit) {
+                    Some(n) => i += n,
+                    None => return false,
+                }
+            }
+            i == raw.len()
+        }
+    }
+}
