@@ -154,8 +154,8 @@ impl Builder {
         self.function_scope(|this| walk_stmts(this, stmts));
     }
 
-    /// Walks an arrow function's body, which runs later: the enclosing
-    /// `catch` types don't apply to it.
+    /// Walks an arrow function's or an arrow-form hook's body, which runs
+    /// later: the enclosing `catch` types don't apply to it.
     fn arrow_body(&mut self, body: &Expr) {
         self.function_scope(|this| this.visit_expr(body));
     }
@@ -354,7 +354,7 @@ impl<'ast> Visitor<'ast> for Builder {
             .flatten()
         {
             match body {
-                PropertyHookBody::Arrow(e) => self.visit_expr(e),
+                PropertyHookBody::Arrow(e) => self.arrow_body(e),
                 PropertyHookBody::Block(stmts) => self.body(stmts),
                 PropertyHookBody::Abstract => {}
             }
