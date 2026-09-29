@@ -116,7 +116,7 @@ impl<'a> Checker<'a> {
         for p in properties {
             let property = format!("{display}::${}", p.name);
             self.check_type_declaration(
-                p.type_hint.as_ref().map(TypeHint::to_string).as_deref(),
+                p.type_hint.as_ref(),
                 crate::checker::type_declarations::TypePosition::Property(&property),
                 p.type_hint.as_ref().map(|h| h.span).unwrap_or(p.span),
             );
@@ -129,7 +129,7 @@ impl<'a> Checker<'a> {
             }
             self.check_readonly_property_declaration(view);
             self.check_unresolvable_native_type(
-                view.type_hint.map(TypeHint::to_string).as_deref(),
+                view.type_hint,
                 &format!(
                     "Property {display}::${} has unresolvable native type.",
                     view.name

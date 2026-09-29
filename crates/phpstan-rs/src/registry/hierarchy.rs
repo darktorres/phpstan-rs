@@ -983,6 +983,32 @@ impl Registry {
         self.functions.get(name)
     }
 
+    /// The function a call to `name` reaches, with the name it's declared
+    /// under: the namespaced candidate when that's declared, else the
+    /// global one PHP falls back to.
+    pub fn resolve_function<'n>(
+        &self,
+        name: &'n syntax::ast::QualifiedName,
+    ) -> Option<(&'n str, &FunctionReflection)> {
+        let (primary, fallback) = name.candidates();
+        self.lookup_function(primary)
+            .map(|sig| (primary, sig))
+            .or_else(|| fallback.and_then(|g| self.lookup_function(g).map(|sig| (g, sig))))
+    }
+
+    /// The name of the function a call to `name` reaches: the declared
+    /// candidate, else the global name PHP falls back to for an
+    /// unqualified name in a namespace.
+    pub fn called_function_name<'n>(&self, name: &'n syntax::ast::QualifiedName) -> &'n str {
+        match self.resolve_function(name) {
+            Some((resolved, _)) => resolved,
+            None => {
+                let (primary, fallback) = name.candidates();
+                fallback.unwrap_or(primary)
+            }
+        }
+    }
+
     /// `lookup_function`'s canonical-name-returning sibling, mirroring
     /// `lookup_class`'s `(&str, &Info)` shape - `FunctionReflection` carries no
     /// `name` field, so `check_function_name_case`'s

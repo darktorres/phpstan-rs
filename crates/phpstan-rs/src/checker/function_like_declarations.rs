@@ -83,7 +83,7 @@ impl<'a> Checker<'a> {
                 self.check_function_like_declaration(
                     &f.params,
                     (
-                        f.return_type.as_ref().map(TypeHint::to_string).as_deref(),
+                        f.return_type.as_ref(),
                         f.return_type.as_ref().map(|h| h.span).unwrap_or(f.span),
                     ),
                     PromotionSite::NotConstructor,
@@ -132,10 +132,7 @@ impl<'a> Checker<'a> {
             } => {
                 self.check_function_like_declaration(
                     params,
-                    (
-                        return_type.as_deref().map(TypeHint::to_string).as_deref(),
-                        e.span,
-                    ),
+                    (return_type.as_deref(), e.span),
                     PromotionSite::NotConstructor,
                     *by_ref,
                     Some(ReturnSource::Body(body)),
@@ -152,10 +149,7 @@ impl<'a> Checker<'a> {
             } => {
                 self.check_function_like_declaration(
                     params,
-                    (
-                        return_type.as_deref().map(TypeHint::to_string).as_deref(),
-                        e.span,
-                    ),
+                    (return_type.as_deref(), e.span),
                     PromotionSite::NotConstructor,
                     *by_ref,
                     Some(ReturnSource::Arrow(body)),
@@ -203,11 +197,7 @@ impl<'a> Checker<'a> {
             self.check_function_like_declaration(
                 &m.function.params,
                 (
-                    m.function
-                        .return_type
-                        .as_ref()
-                        .map(TypeHint::to_string)
-                        .as_deref(),
+                    m.function.return_type.as_ref(),
                     m.function
                         .return_type
                         .as_ref()
@@ -266,7 +256,7 @@ impl<'a> Checker<'a> {
     fn check_function_like_declaration(
         &mut self,
         params: &[Param],
-        return_type: (Option<&str>, Span),
+        return_type: (Option<&TypeHint>, Span),
         site: PromotionSite,
         by_ref: bool,
         returns: Option<ReturnSource>,
@@ -274,7 +264,7 @@ impl<'a> Checker<'a> {
         self.check_promoted_params(params, site);
         for p in params {
             self.check_type_declaration(
-                p.type_hint.as_ref().map(TypeHint::to_string).as_deref(),
+                p.type_hint.as_ref(),
                 TypePosition::Parameter,
                 p.type_hint.as_ref().map(|h| h.span).unwrap_or(p.span),
             );
@@ -339,8 +329,7 @@ impl<'a> Checker<'a> {
             if matches!(default.kind, ExprKind::Literal(Literal::Null)) {
                 continue;
             }
-            let param_ty =
-                self.resolve_type_hint(p.type_hint.as_ref().map(TypeHint::to_string).as_deref());
+            let param_ty = self.resolve_type_hint(p.type_hint.as_ref());
             let param_ty = param_ty.template_bound().unwrap_or(&param_ty).clone();
             let param_ty = match &self.current_class {
                 Some(class) => self.resolve_pseudo(&param_ty, &class.clone()),

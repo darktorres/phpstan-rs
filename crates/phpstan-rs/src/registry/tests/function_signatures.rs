@@ -66,10 +66,8 @@ fn a_leading_backslash_in_a_native_type_hint_is_not_re_namespaced() {
 
 #[test]
 fn a_root_anchored_native_closure_type_hint_is_not_namespace_qualified() {
-    // A root-anchored `\Closure` must keep its leading `\` through
-    // `types::parse_type_keyword_or_class`'s `"closure"` keyword arm, not
-    // get hardcoded to the bare unqualified name - `NameContext::resolve`
-    // needs to see it to know not to re-qualify it.
+    // A root-anchored native `\Closure` names the global class, not one
+    // in the file's namespace.
     let r = build_registry(
         r#"<?php
             namespace App;

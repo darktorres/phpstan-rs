@@ -765,15 +765,8 @@ pub enum StaticTarget {
 }
 
 impl StaticTarget {
-    /// The literal class name, or `None` for a genuinely dynamic
-    /// receiver - the drop-in replacement for every consumer that only
-    /// ever needs `StaticCall`'s old permanent `"?"` sentinel string:
-    /// `target.as_name().unwrap_or("?")` reproduces that exact prior
-    /// behavior byte-for-byte (a real class registry/pseudo-name lookup
-    /// against the literal `"?"` already always failed/mismatched, the
-    /// same outcome `None` naturally produces here too), for every site
-    /// that isn't `check_static_call`'s own new receiver-type resolution.
-    pub fn as_name(&self) -> Option<&str> {
+    /// The literal class name, or `None` for a dynamic receiver.
+    pub fn as_name(&self) -> Option<&QualifiedName> {
         match self {
             StaticTarget::Name(n, _) => Some(n),
             StaticTarget::Expr(_) => None,
@@ -840,6 +833,23 @@ impl QualifiedName {
         match &self.resolved {
             ResolvedName::Exact(name) => Some(name),
             _ => None,
+        }
+    }
+
+    /// Whether this is `keyword` (`self`, `parent` or `static`), which
+    /// PHP reads in any case.
+    pub fn is_keyword(&self, keyword: &str) -> bool {
+        self.written.eq_ignore_ascii_case(keyword)
+    }
+
+    /// The function or constant this names: the fully-qualified name to
+    /// look up, and the global name PHP falls back to when that one isn't
+    /// declared.
+    pub fn candidates(&self) -> (&str, Option<&str>) {
+        match &self.resolved {
+            ResolvedName::Exact(name) => (name, None),
+            ResolvedName::WithGlobalFallback(name) => (name, Some(&self.written)),
+            ResolvedName::Unresolved => (self.written.trim_start_matches('\\'), None),
         }
     }
 }
@@ -1006,15 +1016,24 @@ impl TypeHint {
         a.map(TypeHint::to_string) == b.map(TypeHint::to_string)
     }
 
+    /// Whether this declares `mixed`.
+    pub fn is_mixed(&self) -> bool {
+        match &self.kind {
+            TypeHintKind::Keyword(NativeType::Mixed, _) => true,
+            TypeHintKind::Nullable(inner) => inner.is_mixed(),
+            _ => false,
+        }
+    }
+
     /// Every class the declaration names (keyword types like `int` or
     /// `static` left out), as written, with its span, in source order.
-    pub fn class_names(&self) -> Vec<(&str, Span)> {
+    pub fn class_names(&self) -> Vec<(&QualifiedName, Span)> {
         let mut out = Vec::new();
         self.collect_class_names(&mut out);
         out
     }
 
-    fn collect_class_names<'a>(&'a self, out: &mut Vec<(&'a str, Span)>) {
+    fn collect_class_names<'a>(&'a self, out: &mut Vec<(&'a QualifiedName, Span)>) {
         match &self.kind {
             TypeHintKind::Keyword(..) => {}
             TypeHintKind::Name(name) => out.push((name, self.span)),

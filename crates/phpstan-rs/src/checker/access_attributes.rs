@@ -175,10 +175,8 @@ impl<'a> Checker<'a> {
                     .uses
                     .iter()
                     .position(|u| {
-                        self.name_ctx
-                            .resolve(u)
-                            .trim_start_matches('\\')
-                            .eq_ignore_ascii_case(&trait_name)
+                        u.resolved_class()
+                            .is_some_and(|resolved| resolved.eq_ignore_ascii_case(&trait_name))
                     })
                     .and_then(|i| c.uses_spans.get(i).copied())
                     .unwrap_or(c.name_span);

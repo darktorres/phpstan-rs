@@ -4,17 +4,18 @@ use std::sync::Arc;
 
 use crate::registry::class_decl_name;
 use crate::registry::function_sig::{
-    FunctionReflection, ParameterReflection, apply_implicit_nullable_default,
-    build_template_params, build_type_aliases, infer_class_const_type, mark_template_params,
-    resolve_type_with_parsed_native, substitute_type_aliases,
+    DeclaredType, FunctionReflection, ParameterReflection, apply_implicit_nullable_default,
+    build_template_params, build_type_aliases, declared_type, infer_class_const_type,
+    mark_template_params, substitute_type_aliases,
 };
-use crate::registry::name_context::{collect_class_name_case_refs, resolve_names_in_type};
+use crate::registry::name_context::{
+    class_ref, collect_class_name_case_refs, resolve_names_in_type,
+};
 use crate::registry::provenance::{Origin, Provenance};
 use crate::registry::reflection_attribute::ReflectionAttribute;
 use crate::registry::type_node::parse_type_node;
 use phpdoc::docblock::{self, DocBlock};
 use phpdoc::grammar::TypeNode;
-use syntax::ast::TypeHint;
 use syntax::ast::{ClassDecl, ClassKind, ExprKind, Literal, Visibility};
 use syntax::intern::intern;
 use syntax::name_resolution::NameContext;
@@ -1110,29 +1111,16 @@ impl ClassReflection {
             .iter()
             .map(|p| {
                 let doc_ty = p.doc_comment.as_deref().map(docblock::parse);
-                let native_hint_text = p.type_hint.as_ref().map(TypeHint::to_string);
-                let native_hint = native_hint_text.as_deref();
-                let native_parsed = native_hint.map(types::parse_native_type_string);
-                let doc_reconciled = resolve_type_with_parsed_native(
+                let DeclaredType {
+                    ty,
+                    native: ty_native,
+                    case_refs,
+                } = declared_type(
                     doc_ty.as_ref().and_then(|d| d.var_type.as_ref()),
-                    native_hint,
-                    native_parsed.as_ref(),
+                    p.type_hint.as_ref(),
                     &template_params,
+                    ctx,
                 );
-                // See `FunctionReflection::from_decl`'s param loop for why this
-                // sharing is exact, not an approximation.
-                let shared = Some(&doc_reconciled) == native_parsed.as_ref();
-                let ty = mark_template_params(doc_reconciled, &template_params);
-                let mut case_refs = Vec::new();
-                collect_class_name_case_refs(&ty, ctx, &mut case_refs);
-                let ty = resolve_names_in_type(ty, ctx);
-                let ty_native = if shared {
-                    ty.clone()
-                } else {
-                    let native_only = native_parsed.unwrap_or(Type::mixed());
-                    let t = mark_template_params(native_only, &template_params);
-                    resolve_names_in_type(t, ctx)
-                };
                 let ty = substitute_type_aliases(ty, &type_aliases);
                 let own_doc_ty = doc_ty
                     .as_ref()
@@ -1150,7 +1138,7 @@ impl ClassReflection {
                 (
                     intern(&p.name),
                     PropertyReflection {
-                        attributes: ReflectionAttribute::all(&p.attrs, ctx),
+                        attributes: ReflectionAttribute::all(&p.attrs),
                         provenance: Provenance::default(),
                         ty,
                         ty_native,
@@ -1218,29 +1206,11 @@ impl ClassReflection {
                             .map(docblock::parse)
                             .and_then(|d| d.var_type)
                     });
-                let native_hint_text = p.type_hint.as_ref().map(TypeHint::to_string);
-                let native_hint = native_hint_text.as_deref();
-                let native_parsed = native_hint.map(types::parse_native_type_string);
-                let doc_reconciled = resolve_type_with_parsed_native(
-                    doc_ty.as_ref(),
-                    native_hint,
-                    native_parsed.as_ref(),
-                    &template_params,
-                );
-                // See `FunctionReflection::from_decl`'s param loop for why this
-                // sharing is exact, not an approximation.
-                let shared = Some(&doc_reconciled) == native_parsed.as_ref();
-                let ty = mark_template_params(doc_reconciled, &template_params);
-                let mut case_refs = Vec::new();
-                collect_class_name_case_refs(&ty, ctx, &mut case_refs);
-                let ty = resolve_names_in_type(ty, ctx);
-                let ty_native = if shared {
-                    ty.clone()
-                } else {
-                    let native_only = native_parsed.unwrap_or(Type::mixed());
-                    let t = mark_template_params(native_only, &template_params);
-                    resolve_names_in_type(t, ctx)
-                };
+                let DeclaredType {
+                    ty,
+                    native: ty_native,
+                    case_refs,
+                } = declared_type(doc_ty.as_ref(), p.type_hint.as_ref(), &template_params, ctx);
                 let ty = substitute_type_aliases(ty, &type_aliases);
                 let own_doc_ty = doc_ty.as_ref().map(|raw| {
                     let t = mark_template_params(parse_type_node(raw), &template_params);
@@ -1268,7 +1238,7 @@ impl ClassReflection {
                 properties.insert(
                     p.name.clone(),
                     PropertyReflection {
-                        attributes: ReflectionAttribute::all(&p.attrs, ctx),
+                        attributes: ReflectionAttribute::all(&p.attrs),
                         provenance: Provenance::default(),
                         ty,
                         ty_native,
@@ -1416,12 +1386,12 @@ impl ClassReflection {
                 (
                     intern(&cc.name),
                     ConstantReflection {
-                        attributes: ReflectionAttribute::all(&cc.attrs, ctx),
+                        attributes: ReflectionAttribute::all(&cc.attrs),
                         provenance: Provenance::default(),
                         ty,
                         visibility: cc.visibility,
                         is_final: cc.is_final,
-                        native_ty: native_const_type(cc, ctx),
+                        native_ty: native_const_type(cc),
                         has_phpdoc_type,
                         value_ty: resolve_names_in_type(infer_class_const_type(&cc.value), ctx),
                         // `@internal` on this constant's own doc
@@ -1527,11 +1497,7 @@ impl ClassReflection {
         // modification. Same shape as the enum UnitEnum/BackedEnum
         // implicit-interface handling below, for a different implicit
         // interface.
-        let mut implements: Vec<Arc<str>> = c
-            .implements
-            .iter()
-            .map(|s| intern(&ctx.resolve(s)))
-            .collect();
+        let mut implements: Vec<Arc<str>> = c.implements.iter().map(class_ref).collect();
         if methods.contains_key("__toString") {
             implements.push(intern("Stringable"));
         }
@@ -1540,10 +1506,7 @@ impl ClassReflection {
             .iter()
             .filter_map(|a| {
                 Some(TraitAlias {
-                    trait_name: a
-                        .trait_name
-                        .as_ref()
-                        .map(|t| intern(&ctx.resolve(&t.written))),
+                    trait_name: a.trait_name.as_ref().map(class_ref),
                     method: intern(&a.method),
                     alias: intern(a.alias.as_deref()?),
                 })
@@ -1593,13 +1556,16 @@ impl ClassReflection {
             .as_ref()
             .map(|d| resolve_tag_types(&d.require_implements))
             .unwrap_or_default();
-        let access = crate::registry::access_attributes::access_attributes(&c.attrs, ctx);
+        let access =
+            crate::registry::access_attributes::access_attributes(&c.attrs, ctx.namespace());
         let method_access = c
             .methods
             .iter()
             .filter_map(|m| {
-                let a =
-                    crate::registry::access_attributes::access_attributes(&m.function.attrs, ctx);
+                let a = crate::registry::access_attributes::access_attributes(
+                    &m.function.attrs,
+                    ctx.namespace(),
+                );
                 (!a.is_empty()).then(|| (intern(&m.function.name.to_ascii_lowercase()), a))
             })
             .collect();
@@ -1629,7 +1595,7 @@ impl ClassReflection {
             .unwrap_or_default();
         let deprecated = class_doc.as_ref().and_then(|d| d.deprecated.clone());
         let attribute_targets = compute_attribute_targets(&c.attrs);
-        let doctrine_entity = compute_doctrine_entity(c, ctx, &properties);
+        let doctrine_entity = compute_doctrine_entity(c, &properties);
 
         ClassReflection {
             is_anonymous: false,
@@ -1639,13 +1605,13 @@ impl ClassReflection {
             is_final: c.is_final,
             is_final_by_phpdoc: !c.is_final && class_doc.as_ref().is_some_and(|d| d.is_final),
             is_readonly: c.is_readonly,
-            extends: c.extends.iter().map(|s| intern(&ctx.resolve(s))).collect(),
+            extends: c.extends.iter().map(class_ref).collect(),
             implements,
             methods,
             redeclared_methods,
             properties,
             consts,
-            uses: c.uses.iter().map(|s| intern(&ctx.resolve(s))).collect(),
+            uses: c.uses.iter().map(class_ref).collect(),
             abstract_methods,
             static_methods,
             final_methods,
@@ -1680,7 +1646,7 @@ impl ClassReflection {
             mixin_case_refs,
             deprecated,
             attribute_targets,
-            attributes: ReflectionAttribute::all(&c.attrs, ctx),
+            attributes: ReflectionAttribute::all(&c.attrs),
             enum_case_values: FxHashMap::default(),
             type_aliases,
             type_alias_case_refs,
@@ -1804,8 +1770,8 @@ impl ClassReflection {
                 is_magic: true,
             },
         );
-        if let Some(backing) = e.backing_type.as_ref().map(TypeHint::to_string) {
-            let backing_ty = types::parse_type_string(&backing);
+        if let Some(backing) = &e.backing_type {
+            let backing_ty = types::native_type(backing);
             let value_param = ParameterReflection {
                 attributes: Vec::new(),
                 name: intern("value"),
@@ -1894,12 +1860,12 @@ impl ClassReflection {
                 (
                     intern(&cc.name),
                     ConstantReflection {
-                        attributes: ReflectionAttribute::all(&cc.attrs, ctx),
+                        attributes: ReflectionAttribute::all(&cc.attrs),
                         provenance: Provenance::default(),
                         ty: resolve_names_in_type(infer_class_const_type(&cc.value), ctx),
                         visibility: cc.visibility,
                         is_final: cc.is_final,
-                        native_ty: native_const_type(cc, ctx),
+                        native_ty: native_const_type(cc),
                         has_phpdoc_type: false,
                         value_ty: resolve_names_in_type(infer_class_const_type(&cc.value), ctx),
                         is_internal: doc.as_ref().is_some_and(|d| d.internal),
@@ -1919,7 +1885,7 @@ impl ClassReflection {
             consts.insert(
                 intern(&case.name),
                 ConstantReflection {
-                    attributes: ReflectionAttribute::all(&case.attrs, ctx),
+                    attributes: ReflectionAttribute::all(&case.attrs),
                     provenance: Provenance::default(),
                     ty: Type::enum_case(Name::from(&*fqn), Name::from(&*case.name)),
                     visibility: Visibility::Public,
@@ -2022,7 +1988,7 @@ impl ClassReflection {
                 set_case_refs: Vec::new(),
             },
         );
-        if let Some(backing) = e.backing_type.as_ref().map(TypeHint::to_string) {
+        if let Some(backing) = &e.backing_type {
             // When every case's value is a bare literal (a case value
             // naming a class constant falls back to the plain backing
             // type below, "don't guess"), `->value` is typed as the
@@ -2042,7 +2008,7 @@ impl ClassReflection {
                     _ => Type::union_of(case_values),
                 }
             } else {
-                types::parse_type_string(&backing)
+                types::native_type(backing)
             };
             properties.insert(
                 intern("value"),
@@ -2058,7 +2024,7 @@ impl ClassReflection {
                     // PHP's native reflection only ever sees the backing
                     // type (`string`/`int`), never a per-case refinement
                     // PHPStan derives from analysis alone.
-                    ty_native: types::parse_type_string(&backing),
+                    ty_native: types::native_type(backing),
                     has_native_type: true,
                     is_static: false,
                     is_readonly: false,
@@ -2093,11 +2059,7 @@ impl ClassReflection {
         // Without this, real code narrowing/typing an enum against
         // `UnitEnum` would be flagged as a bound violation despite being
         // exactly what real PHP guarantees.
-        let mut implements: Vec<Arc<str>> = e
-            .implements
-            .iter()
-            .map(|s| intern(&ctx.resolve(s)))
-            .collect();
+        let mut implements: Vec<Arc<str>> = e.implements.iter().map(class_ref).collect();
         implements.push(intern("UnitEnum"));
         if e.backing_type.is_some() {
             implements.push(intern("BackedEnum"));
@@ -2135,10 +2097,7 @@ impl ClassReflection {
             .iter()
             .filter_map(|a| {
                 Some(TraitAlias {
-                    trait_name: a
-                        .trait_name
-                        .as_ref()
-                        .map(|t| intern(&ctx.resolve(&t.written))),
+                    trait_name: a.trait_name.as_ref().map(class_ref),
                     method: intern(&a.method),
                     alias: intern(a.alias.as_deref()?),
                 })
@@ -2166,7 +2125,7 @@ impl ClassReflection {
             redeclared_methods,
             properties,
             consts,
-            uses: e.uses.iter().map(|s| intern(&ctx.resolve(s))).collect(),
+            uses: e.uses.iter().map(class_ref).collect(),
             abstract_methods,
             final_methods,
             static_methods,
@@ -2207,14 +2166,17 @@ impl ClassReflection {
             require_extends: Vec::new(),
             require_implements: Vec::new(),
             sealed: Vec::new(),
-            access: crate::registry::access_attributes::access_attributes(&e.attrs, ctx),
+            access: crate::registry::access_attributes::access_attributes(
+                &e.attrs,
+                ctx.namespace(),
+            ),
             method_access: e
                 .methods
                 .iter()
                 .filter_map(|m| {
                     let a = crate::registry::access_attributes::access_attributes(
                         &m.function.attrs,
-                        ctx,
+                        ctx.namespace(),
                     );
                     (!a.is_empty()).then(|| (intern(&m.function.name.to_ascii_lowercase()), a))
                 })
@@ -2225,7 +2187,7 @@ impl ClassReflection {
             mixin_case_refs: Vec::new(),
             deprecated: class_doc.as_ref().and_then(|d| d.deprecated.clone()),
             attribute_targets: compute_attribute_targets(&e.attrs),
-            attributes: ReflectionAttribute::all(&e.attrs, ctx),
+            attributes: ReflectionAttribute::all(&e.attrs),
             enum_case_values,
             type_aliases: FxHashMap::default(),
             type_alias_case_refs: FxHashMap::default(),
@@ -2334,14 +2296,9 @@ impl ClassReflection {
     }
 }
 
-/// A class constant's PHP 8.3 native type, name-resolved.
-fn native_const_type(cc: &syntax::ast::ClassConst, ctx: &NameContext) -> Option<Type> {
-    let hint_text = cc.type_hint.as_ref().map(TypeHint::to_string);
-    let hint = hint_text.as_deref()?;
-    Some(resolve_names_in_type(
-        types::parse_native_type_string(hint),
-        ctx,
-    ))
+/// A class constant's PHP 8.3 native type.
+fn native_const_type(cc: &syntax::ast::ClassConst) -> Option<Type> {
+    cc.type_hint.as_ref().map(types::native_type)
 }
 
 /// An ancestor tag's class and generic arguments.

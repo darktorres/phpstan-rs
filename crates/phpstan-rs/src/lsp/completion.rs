@@ -689,9 +689,10 @@ pub(super) fn build_member_probe(
     // assign-then-read splice below (which reads back a *value*'s
     // inferred type) doesn't apply to it in the first place.
     if is_static && let ExprKind::Name(name) = &receiver.kind {
-        let ctx = context_at(stmts, cursor);
+        let mut name = name.clone();
+        syntax::name_resolution::resolve_class_name(&mut name, &context_at(stmts, cursor));
         let resolved =
-            super::navigation::resolve_class_ref(name, class_name.as_deref(), &ctx, registry)?;
+            super::navigation::resolve_class_ref(&name, class_name.as_deref(), registry)?;
         return Some(MemberProbe::Resolved {
             ty: Type::object(resolved.into(), Vec::new()),
             is_static,

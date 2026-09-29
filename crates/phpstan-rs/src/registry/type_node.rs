@@ -11,5 +11,5 @@ pub(crate) fn parse_type_node(node: &TypeNode) -> Type {
 
 /// Whether a PHPDoc type spells out `mixed` anywhere, nested included.
 pub(crate) fn mentions_mixed(node: &TypeNode) -> bool {
-    types::has_explicit_mixed_nested_somewhere(None, Some(&node.to_source_string()))
+    types::text_mentions_mixed(&node.to_source_string())
 }

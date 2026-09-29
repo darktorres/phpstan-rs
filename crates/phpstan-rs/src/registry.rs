@@ -37,8 +37,8 @@ pub(crate) use function_sig::is_deprecated_attribute_name;
 pub(crate) use function_sig::is_no_discard_attribute_name;
 pub(crate) use function_sig::is_override_attribute_name;
 pub(crate) use function_sig::param_label;
-pub(crate) use function_sig::resolve_type;
 pub use function_sig::{AssertInfo, AssertTarget, FunctionReflection, ParameterReflection};
+pub(crate) use function_sig::{DeclaredType, declared_type};
 pub(crate) use function_sig::{
     build_template_params, infer_const_type, mark_template_params, substitute_type_aliases,
 };

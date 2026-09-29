@@ -1103,8 +1103,7 @@ pub struct Checker<'a> {
     // both `check_expr` (`&mut self`) and `infer_expr`/
     // `infer_closure_return_with_param_overrides` (`&self`) without
     // threading a new parameter through either's call graph - the same
-    // interior-mutability reasoning `probe_hit`/`call_candidate_cache`
-    // already use. A `HashSet`, not a `Vec`: the same real site can
+    // interior-mutability reasoning `probe_hit` already uses. A `HashSet`, not a `Vec`: the same real site can
     // legitimately be visited more than once (e.g. a condition
     // re-inferred via `infer_expr` for flow-narrowing after `check_expr`'s
     // own primary arm already recorded the identical span) - every
@@ -1140,20 +1139,6 @@ pub struct Checker<'a> {
     // `record_member_class_escape` self-gates on it internally,
     // mirroring `record_enum_escape`'s own pattern.
     escaped_member_classes: RefCell<FxHashSet<String>>,
-    // A `Call(callee, ...)` node's resolved `(primary, fallback)` name
-    // pair, keyed by `callee`'s span - `check_expr`'s `Call` arm and
-    // `infer_expr`'s separate `Call` arm both independently re-derive this
-    // identical pair for the same callee whenever `infer_expr` is invoked
-    // on a call `check_expr` already resolved (e.g. a call nested as
-    // another call's argument, re-derived via `check_args`'s contextual-
-    // type inference). `RefCell`, not a plain field, for the same reason
-    // `probe_hit`/`probe_var_provenance` are: populated/read through a
-    // shared `&self` from both `check_expr` (`&mut self`) and `infer_expr`
-    // (`&self`) without threading a new parameter through either's call
-    // graph. Scoped to one `Checker` (one file), so it never leaks across
-    // files.
-    #[allow(clippy::type_complexity)]
-    call_candidate_cache: RefCell<FxHashMap<Span, (Arc<str>, Option<Arc<str>>)>>,
     // Disjunctive-syllogism narrowing: a stack, not a `Locals` field,
     // since it's scoped to the *traversal position* (currently inside
     // an outer `if ($a || $b)`'s own true branch, at any nesting depth)
@@ -1411,41 +1396,9 @@ impl<'a> Checker<'a> {
             escaped_enums: RefCell::new(FxHashSet::default()),
             escaped_member_classes: RefCell::new(FxHashSet::default()),
             semantic_tokens: Vec::new(),
-            call_candidate_cache: RefCell::new(FxHashMap::default()),
             pending_or_disjunctions: Vec::new(),
             type_dump: None,
         }
-    }
-
-    /// Memoized `NameContext::resolve_function_candidates` - see `call_
-    /// candidate_cache`'s own doc comment for why this exists and why a
-    /// per-callee-span key is safe (one `Checker` per file, so a `Span`
-    /// never collides across two different call sites' own callees).
-    fn resolve_function_candidates_cached(
-        &self,
-        callee_span: Span,
-        name: &str,
-    ) -> (Arc<str>, Option<Arc<str>>) {
-        if let Some(cached) = self.call_candidate_cache.borrow().get(&callee_span) {
-            return cached.clone();
-        }
-        let (primary, fallback) = self.name_ctx.resolve_function_candidates(name);
-        // Interned, not just cached by span: the same resolved name
-        // (e.g. every call to a common function like `strlen`/a locally-
-        // declared helper) recurs across many distinct call sites in a
-        // real file, each its own cache entry by span - interning shares
-        // one allocation across all of them, on top of what the per-span
-        // cache alone already saves for a single call site re-resolved by
-        // both `check_expr` and `infer_expr` (see this field's own doc
-        // comment).
-        let resolved = (
-            syntax::intern::intern(&primary),
-            fallback.as_deref().map(syntax::intern::intern),
-        );
-        self.call_candidate_cache
-            .borrow_mut()
-            .insert(callee_span, resolved.clone());
-        resolved
     }
 
     /// Sets the `$this` type a Pest `it`/`test`/`describe`/`beforeEach`/

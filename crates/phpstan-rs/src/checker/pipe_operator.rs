@@ -110,12 +110,7 @@ impl<'a> Checker<'a> {
                 let ExprKind::Name(name) = &callee.kind else {
                     return None;
                 };
-                let (primary, fallback) = self.name_ctx.resolve_function_candidates(name);
-                let sig = self.registry.lookup_function(&primary).or_else(|| {
-                    fallback
-                        .as_deref()
-                        .and_then(|g| self.registry.lookup_function(g))
-                })?;
+                let (_, sig) = self.registry.resolve_function(name)?;
                 Some(sig.params().first().is_some_and(|p| p.by_ref()))
             }
             ExprKind::MethodCall(recv, method, _, _) => {

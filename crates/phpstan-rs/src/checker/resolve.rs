@@ -1,119 +1,83 @@
 use crate::checker::{Checker, Locals, class_type_word};
 use crate::registry::{self, FunctionReflection};
 use diagnostics::DiagnosticBuilder;
-use syntax::ast::StaticTarget;
+use syntax::ast::{QualifiedName, StaticTarget, TypeHint};
 use syntax::token::Span;
 use types::{self, Type};
 
 impl<'a> Checker<'a> {
-    /// Resolves a bare name exactly as it appears at an expression site
-    /// (`new Foo()`, `$x instanceof Foo`, ...) to the concrete `Type` it
-    /// refers to - `self`/`parent`/`static` need `resolve_pseudo` against
-    /// the class currently being checked; everything else goes through
-    /// `name_ctx.resolve` (namespace/`use`-import resolution) as an
-    /// ordinary class reference. `apply_narrowing`'s `instanceof` handling
-    /// needs this too, not just `name_ctx.resolve` directly - otherwise
-    /// `self`/`parent`/`static` get treated as literal class names
-    /// (`$future instanceof self` in real code would become a
-    /// nonsensical `Amp\self` "class").
-    pub(crate) fn resolve_name_expr(&self, name: &str) -> Type {
-        match name {
-            "self" | "parent" | "static" => {
-                let raw = match name {
-                    "self" => Type::self_ref(Vec::new()),
-                    "parent" => Type::parent_ref(),
-                    _ => Type::static_ref(Vec::new()),
-                };
-                match &self.current_class {
-                    Some(c) => self.resolve_pseudo(&raw, c),
-                    None => raw,
-                }
-            }
-            _ => Type::object(self.resolve_class_name(name).into(), Vec::new()),
+    /// The class type a class name written in code (`new Foo()`, `$x
+    /// instanceof Foo`, ...) refers to: `self`, `parent` and `static`
+    /// relative to the class being checked, any other name as resolved.
+    pub(crate) fn resolve_name_expr(&self, name: &QualifiedName) -> Type {
+        let keyword = |k: &str| name.written.eq_ignore_ascii_case(k);
+        let raw = if keyword("self") {
+            Type::self_ref(Vec::new())
+        } else if keyword("parent") {
+            Type::parent_ref()
+        } else if keyword("static") {
+            Type::static_ref(Vec::new())
+        } else {
+            return Type::object(self.resolve_class_name(name).into(), Vec::new());
+        };
+        match &self.current_class {
+            Some(c) => self.resolve_pseudo(&raw, c),
+            None => raw,
         }
     }
 
-    /// A class name as written in this file, resolved against its
-    /// namespace and imports, in its declared spelling when the class is
-    /// known - PHP class names are case-insensitive.
-    pub(crate) fn resolve_class_name(&self, name: &str) -> String {
-        let resolved = self.name_ctx.resolve(name);
-        match self.registry.lookup_class(&resolved) {
+    /// The class type a class name held in a string names. PHP reads such
+    /// a name as fully qualified, whatever the file's namespace.
+    pub(crate) fn class_type_named(&self, name: &str) -> Type {
+        Type::object(self.canonical_class_name(name).into(), Vec::new())
+    }
+
+    /// The fully-qualified class a class name written in code names, in
+    /// its declared spelling when the class is known.
+    pub(crate) fn resolve_class_name(&self, name: &QualifiedName) -> String {
+        match name.resolved_class() {
+            Some(resolved) => self.canonical_class_name(resolved),
+            None => name.written.to_string(),
+        }
+    }
+
+    /// `name`, a fully-qualified class name, in its declared spelling
+    /// when the class is known - PHP class names are case-insensitive.
+    pub(crate) fn canonical_class_name(&self, name: &str) -> String {
+        let name = name.trim_start_matches('\\');
+        match self.registry.lookup_class(name) {
             Some((canonical, _)) => canonical.to_string(),
-            None => resolved,
+            None => name.to_string(),
         }
     }
 
-    /// Parses a raw type-hint string (a closure/arrow-fn param/return, or
-    /// An inline `@var` annotation via `inline_var_
-    /// annotation` below - one of a few places in this checker that build
-    /// a `Type` straight from source without going through the registry's
-    /// own `FunctionReflection::from_decl`, which already resolves names as part
-    /// of its pipeline; `checker.rs`'s anonymous-class param/return
-    /// docblock fallback is another, patched the same way at its own two
-    /// call sites) and resolves any class name in it against this file's
-    /// `NameContext`, exactly like a real declaration would - otherwise
-    /// an unresolved bare name here compares as a real mismatch against
-    /// the correctly-resolved FQN the closure body itself infers, on
-    /// real code (a `static fn(array $row): ActionCount =>
-    /// new ActionCount(...)` where `ActionCount` is `use`-imported).
-    ///
-    /// Also resolves `types::parse_type_keyword_or_class`'s
-    /// `value-of<T>`-on-an-enum sentinel (`Registry::resolve_deferred_value_of_now`) -
-    /// unlike `Registry::resolve_deferred_value_of`'s own one-time,
-    /// registry-build-time pass, every class/enum is already fully
-    /// indexed by the time *this* function ever runs, so resolution
-    /// happens immediately, inline, with no separate pass needed. An
-    /// inline `@var` annotation is checked through here, and without
-    /// this, the raw, unresolved sentinel would leak straight into a
-    /// real diagnostic message (real shape:
-    /// `shipmonk/dead-code-detector`'s own `CollectedUsage::deserialize()`,
-    /// `/** @var array{..., t: value-of<MemberType>, ...} $result */`).
-    ///
-    /// Also marks the *current class's own*
-    /// `@template` names as template (`registry::
-    /// mark_template_params`) *before* resolving names - order matters,
-    /// the same as the registry-build pipeline's own `build_template_
-    /// params` always running before `resolve_names_in_type` - since
-    /// resolving names first would already have namespace-mangled the
-    /// template's own short name beyond recognition. Without this, a
-    /// class-level template referenced inside a raw type string parsed
-    /// through here (an inline `@var`, most commonly) would otherwise be
-    /// indistinguishable from a genuine, unqualified class reference and
-    /// get resolved (and then, downstream, flagged) as one (real shape:
-    /// `php-standard-library`'s own `SetType`/`MapType`/`MutableSetType`,
-    /// each with an inline `/** @var Type\Type<T> $type */` referencing
-    /// its own class-level `@template`).
-    ///
-    /// Also merges in the *current function/method's own* `@template`s
-    /// (`current_function_template_params` below) - real corpus evidence
-    /// this is needed too, not just a hypothetical: `php-standard-
-    /// library`'s own top-level `group_by()` function, `@template Tk of
-    /// array-key`, `/** @var Tk $key */` referencing it directly (no
-    /// enclosing class at all). Function-level wins on a name collision
-    /// with a class-level template of the same name, mirroring
-    /// `FunctionReflection::from_decl`'s own identical "this function's own
-    /// same-named template wins over the class's" precedent.
-    pub(crate) fn resolve_type_hint(&self, hint: Option<&str>) -> Type {
-        self.resolve_type_hint_with_case_refs(hint).0
+    /// The type a native type declaration declares.
+    pub(crate) fn resolve_type_hint(&self, hint: Option<&TypeHint>) -> Type {
+        hint.map_or_else(Type::mixed, types::native_type)
     }
 
-    /// `resolve_type_hint`'s own case_refs-
-    /// collecting sibling - a closure/arrow-fn literal has no `FunctionReflection`
-    /// of its own for `case_refs` to live on at registry-build time the
-    /// way an ordinary function/method parameter's does, so this
-    /// registry-independent, checker-side pipeline collects them fresh at
-    /// check time instead, identically to how every other `resolve_type_
-    /// hint` caller already resolves the type itself.
+    /// `resolve_type_hint`, with the `(written, resolved)` pairs of the
+    /// class names in it that `class.nameCase` needs.
     #[allow(clippy::type_complexity)]
     pub(crate) fn resolve_type_hint_with_case_refs(
         &self,
-        hint: Option<&str>,
+        hint: Option<&TypeHint>,
     ) -> (Type, Vec<(std::sync::Arc<str>, std::sync::Arc<str>)>) {
-        match hint {
-            Some(h) => self.resolve_written_type(types::parse_native_type_string(h)),
-            None => (Type::mixed(), Vec::new()),
-        }
+        let Some(hint) = hint else {
+            return (Type::mixed(), Vec::new());
+        };
+        let case_refs = hint
+            .class_names()
+            .into_iter()
+            .filter_map(|(name, _)| {
+                let resolved = name.resolved_class()?;
+                Some((
+                    syntax::intern::intern(&name.written),
+                    syntax::intern::intern(resolved),
+                ))
+            })
+            .collect();
+        (types::native_type(hint), case_refs)
     }
 
     /// `resolve_type_hint` for a parsed PHPDoc type.
@@ -144,7 +108,7 @@ impl<'a> Checker<'a> {
     /// Rebuilds the same `HashMap<String, TemplateParam>` `registry::
     /// build_template_params` would produce for `self.current_class`, by
     /// reading it back from the already-indexed `ClassReflection` instead of
-    /// re-parsing a docblock - `resolve_type_hint` needs this to
+    /// re-parsing a docblock - `resolve_type_node` needs this to
     /// recognize a class-level template by name before ever resolving
     /// names in a type string built independently of the registry's own
     /// pipeline. Empty outside any class, or for a non-generic one.
@@ -300,17 +264,10 @@ impl<'a> Checker<'a> {
         }
     }
 
-    /// Resolves a `ClassConstFetch`/`StaticPropertyFetch`/`StaticCall` target (`self`/`parent`/
-    /// `static`, or a plain/namespaced class name) to a concrete FQN.
-    /// `"?"` is the parser's own placeholder for a genuinely dynamic
-    /// class target (`$obj::method()`, `(new Foo())::CONST`) - there's no
-    /// name to resolve at all there, so it's `None`, same as any other
-    /// case `resolve_name_expr` can't turn into a concrete `Object`
-    /// (`self`/`parent`/`static` used outside any class context).
-    pub(crate) fn resolve_static_class_name(&self, class_name: &str) -> Option<String> {
-        if class_name == "?" {
-            return None;
-        }
+    /// The class a `ClassConstFetch`/`StaticPropertyFetch`/`StaticCall`
+    /// target's name (`self`/`parent`/`static`, or a class name) names;
+    /// `None` for `self`/`parent`/`static` outside any class.
+    pub(crate) fn resolve_static_class_name(&self, class_name: &QualifiedName) -> Option<String> {
         self.resolve_name_expr(class_name)
             .as_object()
             .map(|(class, _)| class.to_string())
@@ -477,14 +434,22 @@ impl<'a> Checker<'a> {
         Some((span, replacement, description))
     }
 
-    pub(crate) fn check_class_name_case(&mut self, raw: &str, span: Span) {
+    /// `class.nameCase` for a class name written in code.
+    pub(crate) fn check_class_name_case(&mut self, name: &QualifiedName, span: Span) {
+        if let Some(resolved) = name.resolved_class() {
+            self.check_resolved_class_name_case(&name.written, resolved, span);
+        }
+    }
+
+    /// `class.nameCase` for a class name written as `raw` that resolves
+    /// to `resolved`.
+    fn check_resolved_class_name_case(&mut self, raw: &str, resolved: &str, span: Span) {
         let mut segments = raw.trim_start_matches('\\').splitn(2, '\\');
         let first_segment = segments.next().unwrap_or(raw);
         if self.name_ctx.is_use_imported(first_segment) {
             return;
         }
-        let resolved = self.name_ctx.resolve(raw);
-        let Some((canonical, info)) = self.registry.lookup_class(&resolved) else {
+        let Some((canonical, info)) = self.registry.lookup_class(resolved) else {
             return;
         };
         if self.registry.built_in_stub_classes.contains(canonical) {
@@ -512,7 +477,7 @@ impl<'a> Checker<'a> {
     /// `@phpstan-type` tag target). Pure fan-out over `case_refs`
     /// (`(raw, resolved)` pairs from `collect_class_name_case_refs`,
     /// populated once at registry-build time) - re-runs the *unchanged*
-    /// `check_class_name_case` per pair rather than duplicating its
+    /// `check_resolved_class_name_case` per pair rather than duplicating its
     /// `is_use_imported`/built-in-stub-skip/`lookup_class` logic. Every
     /// reference nested inside one param/return/property's type (e.g.
     /// both class names in `array<Foo, Bar>`) is reported at the *same*
@@ -524,8 +489,8 @@ impl<'a> Checker<'a> {
         case_refs: &[(std::sync::Arc<str>, std::sync::Arc<str>)],
         span: Span,
     ) {
-        for (raw, _resolved) in case_refs {
-            self.check_class_name_case(raw, span);
+        for (raw, resolved) in case_refs {
+            self.check_resolved_class_name_case(raw, resolved, span);
         }
     }
 

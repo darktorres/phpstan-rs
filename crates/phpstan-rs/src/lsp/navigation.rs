@@ -199,27 +199,26 @@ pub(super) fn contains(span: Span, pos: Position) -> bool {
     after_start && before_end
 }
 
-/// Resolves a bare class-name-shaped reference (`self`/`static`/`parent`,
-/// or an ordinary/namespaced name) to a real FQN - the same combined
-/// logic `Checker::resolve_name_expr`/`resolve_static_class_name`/
-/// `resolve_pseudo` provide together, minus the `Type`-wrapping and
-/// union/template recursion neither of those own extra cases apply to a
-/// bare class-name site.
+/// The class a class name written in code (`self`/`static`/`parent`, or
+/// an ordinary/namespaced name) refers to - the same combined logic
+/// `Checker::resolve_name_expr`/`resolve_static_class_name`/
+/// `resolve_pseudo` provide together, minus the `Type`-wrapping.
 pub(super) fn resolve_class_ref(
-    name: &str,
+    name: &QualifiedName,
     current_class: Option<&str>,
-    ctx: &NameContext,
     registry: &Registry,
 ) -> Option<String> {
-    match name {
-        "self" | "static" => current_class.map(str::to_string),
-        "parent" => registry
+    if name.is_keyword("self") || name.is_keyword("static") {
+        return current_class.map(str::to_string);
+    }
+    if name.is_keyword("parent") {
+        return registry
             .classes
             .get(current_class?)
             .and_then(|info| info.extends().first())
-            .map(|s| s.to_string()),
-        _ => Some(ctx.resolve(name)),
+            .map(|s| s.to_string());
     }
+    name.resolved_class().map(str::to_string)
 }
 
 /// A lexically-nested `Closure`/`ArrowFn` scope, pushed on entry and
@@ -403,14 +402,13 @@ impl<'a> Walker<'a> {
         out: &mut Vec<(Span, Resolved)>,
         hint: &TypeHint,
         current_class: Option<&str>,
-        ctx: &NameContext,
     ) {
         if !self.anchor.matches(hint.span) {
             return;
         }
         for (name, name_span) in hint.class_names() {
             if self.anchor.matches(name_span)
-                && let Some(fqn) = resolve_class_ref(name, current_class, ctx, self.registry)
+                && let Some(fqn) = resolve_class_ref(name, current_class, self.registry)
             {
                 out.push((name_span, Resolved::Class(fqn)));
             }
@@ -536,7 +534,7 @@ impl<'a> Walker<'a> {
                         for (name, span) in c.types.iter().zip(c.types_spans.iter()) {
                             if self.anchor.matches(*span)
                                 && let Some(fqn) =
-                                    resolve_class_ref(name, current_class, ctx, self.registry)
+                                    resolve_class_ref(name, current_class, self.registry)
                             {
                                 out.push((*span, Resolved::Class(fqn)));
                             }
@@ -572,7 +570,7 @@ impl<'a> Walker<'a> {
                 // means.
                 ExprKind::Call(callee, args) => {
                     if let ExprKind::Name(n) = &callee.kind
-                        && let Some(fqn) = resolve_class_ref(n, current_class, ctx, self.registry)
+                        && let Some(fqn) = resolve_class_ref(n, current_class, self.registry)
                     {
                         self.record(out, callee.span, Resolved::Function(fqn));
                     } else {
@@ -587,7 +585,7 @@ impl<'a> Walker<'a> {
                 // mirror image of `Call` just above.
                 ExprKind::New(callee, args) => {
                     if let ExprKind::Name(n) = &callee.kind
-                        && let Some(fqn) = resolve_class_ref(n, current_class, ctx, self.registry)
+                        && let Some(fqn) = resolve_class_ref(n, current_class, self.registry)
                     {
                         self.record(out, callee.span, Resolved::Class(fqn));
                     } else {
@@ -604,7 +602,7 @@ impl<'a> Walker<'a> {
                 // actually exists, preferring a function (the far more
                 // common shape for a standalone name reference).
                 ExprKind::Name(n) => {
-                    if let Some(fqn) = resolve_class_ref(n, current_class, ctx, self.registry) {
+                    if let Some(fqn) = resolve_class_ref(n, current_class, self.registry) {
                         let resolved = if self.registry.lookup_function(&fqn).is_some() {
                             Resolved::Function(fqn)
                         } else {
@@ -615,8 +613,7 @@ impl<'a> Walker<'a> {
                 }
                 ExprKind::ClassConstFetch(StaticTarget::Name(class, class_span), member) => {
                     if self.anchor.matches(expr.span)
-                        && let Some(fqn) =
-                            resolve_class_ref(class, current_class, ctx, self.registry)
+                        && let Some(fqn) = resolve_class_ref(class, current_class, self.registry)
                     {
                         let spans = [*class_span, member.span];
                         // Two independent `if`s, not `if`/`else if`: under
@@ -636,8 +633,7 @@ impl<'a> Walker<'a> {
                 }
                 ExprKind::ClassNameFetch(StaticTarget::Name(class, class_span)) => {
                     if self.anchor.matches(*class_span)
-                        && let Some(fqn) =
-                            resolve_class_ref(class, current_class, ctx, self.registry)
+                        && let Some(fqn) = resolve_class_ref(class, current_class, self.registry)
                     {
                         out.push((*class_span, Resolved::Class(fqn)));
                     }
@@ -656,7 +652,7 @@ impl<'a> Walker<'a> {
                         StaticTarget::Name(class, class_span) => {
                             if self.anchor.matches(expr.span)
                                 && let Some(fqn) =
-                                    resolve_class_ref(class, current_class, ctx, self.registry)
+                                    resolve_class_ref(class, current_class, self.registry)
                             {
                                 let spans = [*class_span, member.span];
                                 if self.anchor.matches(spans[0]) {
@@ -700,8 +696,7 @@ impl<'a> Walker<'a> {
                 }
                 ExprKind::Instanceof(_, InstanceofTarget::Name(name, span)) => {
                     if self.anchor.matches(*span)
-                        && let Some(fqn) =
-                            resolve_class_ref(name, current_class, ctx, self.registry)
+                        && let Some(fqn) = resolve_class_ref(name, current_class, self.registry)
                     {
                         out.push((*span, Resolved::Class(fqn)));
                     }
@@ -783,7 +778,7 @@ impl<'a> Walker<'a> {
                     params, uses, body, ..
                 } => {
                     for p in params {
-                        self.param(p, ctx, current_class, out);
+                        self.param(p, current_class, out);
                     }
                     // A `use (&$x)`/`use ($x)` capture is itself a real,
                     // navigable reference to the outer scope's `$x` -
@@ -823,7 +818,7 @@ impl<'a> Walker<'a> {
                 }
                 ExprKind::ArrowFn { params, body, .. } => {
                     for p in params {
-                        self.param(p, ctx, current_class, out);
+                        self.param(p, current_class, out);
                     }
                     let id = self.next_id();
                     self.scope_frames.push(ScopeFrame::ArrowFn {
@@ -843,15 +838,9 @@ impl<'a> Walker<'a> {
         })
     }
 
-    fn param(
-        &mut self,
-        p: &Param,
-        ctx: &NameContext,
-        current_class: Option<&str>,
-        out: &mut Vec<(Span, Resolved)>,
-    ) {
+    fn param(&mut self, p: &Param, current_class: Option<&str>, out: &mut Vec<(Span, Resolved)>) {
         if let Some(hint) = &p.type_hint {
-            self.record_type_hint(out, hint, current_class, ctx);
+            self.record_type_hint(out, hint, current_class);
         }
         self.record_var_self(out, p.name_span, current_class, &p.name);
     }
@@ -877,10 +866,10 @@ impl<'a> Walker<'a> {
         let previous_base_scope_id = std::mem::replace(&mut self.base_scope_id, new_base_scope_id);
         let previous_scope_frames = std::mem::take(&mut self.scope_frames);
         for p in &f.params {
-            self.param(p, ctx, current_class, out);
+            self.param(p, current_class, out);
         }
         if let Some(rt) = &f.return_type {
-            self.record_type_hint(out, rt, current_class, ctx);
+            self.record_type_hint(out, rt, current_class);
         }
         let previous_function = self.current_function.replace(f.clone());
         let previous_is_static = std::mem::replace(&mut self.current_is_static, is_static);
@@ -896,21 +885,21 @@ impl<'a> Walker<'a> {
         self.record(out, c.name_span, Resolved::Class(fqn.clone()));
         for (name, span) in c.extends.iter().zip(c.extends_spans.iter()) {
             if self.anchor.matches(*span)
-                && let Some(target) = resolve_class_ref(name, Some(&fqn), ctx, self.registry)
+                && let Some(target) = resolve_class_ref(name, Some(&fqn), self.registry)
             {
                 out.push((*span, Resolved::Class(target)));
             }
         }
         for (name, span) in c.implements.iter().zip(c.implements_spans.iter()) {
             if self.anchor.matches(*span)
-                && let Some(target) = resolve_class_ref(name, Some(&fqn), ctx, self.registry)
+                && let Some(target) = resolve_class_ref(name, Some(&fqn), self.registry)
             {
                 out.push((*span, Resolved::Class(target)));
             }
         }
         for (name, span) in c.uses.iter().zip(c.uses_spans.iter()) {
             if self.anchor.matches(*span)
-                && let Some(target) = resolve_class_ref(name, Some(&fqn), ctx, self.registry)
+                && let Some(target) = resolve_class_ref(name, Some(&fqn), self.registry)
             {
                 out.push((*span, Resolved::Class(target)));
             }
@@ -922,7 +911,7 @@ impl<'a> Walker<'a> {
                 Resolved::Member(fqn.clone(), p.name.to_string()),
             );
             if let Some(hint) = &p.type_hint {
-                self.record_type_hint(out, hint, Some(&fqn), ctx);
+                self.record_type_hint(out, hint, Some(&fqn));
             }
             if let Some(d) = &p.default {
                 self.expr(d, &mut ctx.clone(), Some(&fqn), out);
@@ -943,7 +932,7 @@ impl<'a> Walker<'a> {
                 Resolved::Member(fqn.clone(), cst.name.to_string()),
             );
             if let Some(hint) = &cst.type_hint {
-                self.record_type_hint(out, hint, Some(&fqn), ctx);
+                self.record_type_hint(out, hint, Some(&fqn));
             }
             self.expr(&cst.value, &mut ctx.clone(), Some(&fqn), out);
         }
@@ -954,14 +943,14 @@ impl<'a> Walker<'a> {
         self.record(out, e.name_span, Resolved::Class(fqn.clone()));
         for (name, span) in e.implements.iter().zip(e.implements_spans.iter()) {
             if self.anchor.matches(*span)
-                && let Some(target) = resolve_class_ref(name, Some(&fqn), ctx, self.registry)
+                && let Some(target) = resolve_class_ref(name, Some(&fqn), self.registry)
             {
                 out.push((*span, Resolved::Class(target)));
             }
         }
         for (name, span) in e.uses.iter().zip(e.uses_spans.iter()) {
             if self.anchor.matches(*span)
-                && let Some(target) = resolve_class_ref(name, Some(&fqn), ctx, self.registry)
+                && let Some(target) = resolve_class_ref(name, Some(&fqn), self.registry)
             {
                 out.push((*span, Resolved::Class(target)));
             }

@@ -32,17 +32,7 @@ impl<'a> Checker<'a> {
                 let ExprKind::Name(name) = &callee.kind else {
                     return;
                 };
-                let (primary, fallback) = self.name_ctx.resolve_function_candidates(name);
-                let Some((resolved_name, sig)) = self
-                    .registry
-                    .lookup_function(&primary)
-                    .map(|sig| (primary.as_str(), sig))
-                    .or_else(|| {
-                        fallback
-                            .as_deref()
-                            .and_then(|g| self.registry.lookup_function(g).map(|sig| (g, sig)))
-                    })
-                else {
+                let Some((resolved_name, sig)) = self.registry.resolve_function(name) else {
                     return;
                 };
                 (
@@ -63,7 +53,9 @@ impl<'a> Checker<'a> {
                 )
             }
             ExprKind::StaticCall(target, method, _) => {
-                let Some(class) = self.resolve_static_class_name(target.as_name().unwrap_or("?"))
+                let Some(class) = target
+                    .as_name()
+                    .and_then(|name| self.resolve_static_class_name(name))
                 else {
                     return;
                 };

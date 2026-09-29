@@ -29,7 +29,6 @@ use syntax::ast::TypeHint;
 use syntax::ast::{ClassConst, ClassKind, FunctionDecl, PropertyDecl};
 use syntax::token::Span;
 use types::Type;
-use types::has_explicit_mixed_nested_somewhere;
 
 /// Real PHPStan's own tip text (`MissingTypehintCheck::
 /// MISSING_ITERABLE_VALUE_TYPE_TIP`), attached to every
@@ -123,14 +122,8 @@ pub(crate) fn class_kind_word(kind: ClassKind) -> &'static str {
 /// all" - real PHPStan's own `MixedType::isExplicitMixed()` distinguishes
 /// the two at the type level (`types::parse_type_string` doesn't carry
 /// that bit through, see its own doc comments on why), so the distinction
-/// is recovered here instead, straight from the original source text.
-fn is_explicit_mixed_text(native_hint: Option<&str>, doc_type: Option<&TypeNode>) -> bool {
-    let is_word_mixed = |s: &str| {
-        s.trim()
-            .trim_start_matches('?')
-            .trim()
-            .eq_ignore_ascii_case("mixed")
-    };
+/// is recovered here instead, straight from the declaration.
+fn is_explicit_mixed_text(native_hint: Option<&TypeHint>, doc_type: Option<&TypeNode>) -> bool {
     let is_mixed_node = |node: &TypeNode| {
         let node = match node {
             TypeNode::Nullable(inner) => inner.as_ref(),
@@ -138,13 +131,13 @@ fn is_explicit_mixed_text(native_hint: Option<&str>, doc_type: Option<&TypeNode>
         };
         matches!(node, TypeNode::Identifier(name) if name.eq_ignore_ascii_case("mixed"))
     };
-    doc_type.is_some_and(is_mixed_node) || native_hint.is_some_and(is_word_mixed)
+    doc_type.is_some_and(is_mixed_node) || native_hint.is_some_and(TypeHint::is_mixed)
 }
 
 /// Whether the native hint or the PHPDoc type spells out `mixed` anywhere,
-/// nested included.
-fn mentions_mixed(native_hint: Option<&str>, doc_type: Option<&TypeNode>) -> bool {
-    has_explicit_mixed_nested_somewhere(native_hint, None)
+/// nested included. A native type can only be `mixed` as a whole.
+fn mentions_mixed(native_hint: Option<&TypeHint>, doc_type: Option<&TypeNode>) -> bool {
+    native_hint.is_some_and(TypeHint::is_mixed)
         || doc_type.is_some_and(crate::registry::mentions_mixed)
 }
 
@@ -152,7 +145,11 @@ fn mentions_mixed(native_hint: Option<&str>, doc_type: Option<&TypeNode>) -> boo
 /// with - `ty` resolved to plain `Mixed` (this project's stand-in for
 /// both "no hint at all" and "explicit `mixed`" alike) where the source
 /// itself didn't actually spell out `mixed`.
-fn is_implicit_mixed(ty: &Type, native_hint: Option<&str>, doc_type: Option<&TypeNode>) -> bool {
+fn is_implicit_mixed(
+    ty: &Type,
+    native_hint: Option<&TypeHint>,
+    doc_type: Option<&TypeNode>,
+) -> bool {
     ty.is_implicit_mixed() && !is_explicit_mixed_text(native_hint, doc_type)
 }
 
@@ -284,11 +281,7 @@ impl<'a> Checker<'a> {
                 .as_deref()
                 .map(docblock::parse)
                 .and_then(|d| d.var_type);
-            if is_implicit_mixed(
-                &ty,
-                p.type_hint.as_ref().map(TypeHint::to_string).as_deref(),
-                doc_var_type.as_ref(),
-            ) {
+            if is_implicit_mixed(&ty, p.type_hint.as_ref(), doc_var_type.as_ref()) {
                 self.report(
                     format!("Property {fqn}::${} has no type specified.", p.name),
                     p.span,
@@ -308,7 +301,7 @@ impl<'a> Checker<'a> {
                     )
                 },
                 &ty,
-                mentions_mixed(p.type_hint.as_ref().map(TypeHint::to_string).as_deref(), doc_var_type.as_ref()),
+                mentions_mixed(p.type_hint.as_ref(), doc_var_type.as_ref()),
             );
         }
     }
@@ -360,7 +353,7 @@ impl<'a> Checker<'a> {
                     )
                 },
                 &ty,
-                mentions_mixed(c.type_hint.as_ref().map(TypeHint::to_string).as_deref(), doc_var_type.as_ref()),
+                mentions_mixed(c.type_hint.as_ref(), doc_var_type.as_ref()),
             );
         }
     }
@@ -446,13 +439,11 @@ impl<'a> Checker<'a> {
             ) {
                 continue;
             }
-            let native_hint_text = f
+            let native_hint = f
                 .params
                 .iter()
                 .find(|p| *p.name == **name)
-                .and_then(|p| p.type_hint.as_ref())
-                .map(TypeHint::to_string);
-            let native_hint = native_hint_text.as_deref();
+                .and_then(|p| p.type_hint.as_ref());
             let doc_ty = doc.as_ref().and_then(|d| d.params.get(name));
             let explicit_mixed = match sig.and_then(|s| s.params().get(i)) {
                 Some(param_sig) => param_sig.explicit_mixed_hint(),
@@ -485,9 +476,7 @@ impl<'a> Checker<'a> {
             );
         }
 
-        let native_return_text = f.return_type.as_ref().map(TypeHint::to_string);
-
-        let native_return = native_return_text.as_deref();
+        let native_return = f.return_type.as_ref();
         let doc_return = doc.as_ref().and_then(|d| d.return_type.as_ref());
 
         // Real PHPStan's own reflection layer only substitutes a magic

@@ -2,14 +2,13 @@ use crate::registry::reflection_attribute::ReflectionAttribute;
 use rustc_hash::FxHashMap;
 use std::sync::Arc;
 
-use crate::registry::name_context::{collect_class_name_case_refs, resolve_names_in_type};
+use crate::registry::name_context::resolve_names_in_type;
 use crate::registry::type_node::{mentions_mixed, parse_type_node};
 use phpdoc::docblock::{self, DocBlock};
 use phpdoc::grammar::TypeNode;
 use syntax::ast::TypeHint;
 use syntax::ast::{ExprKind, FunctionDecl, StaticTarget, Visibility};
 use syntax::name_resolution::NameContext;
-use types::has_explicit_mixed_nested_somewhere;
 
 use types::{self, Shape, ShapeField, ShapeKey, TemplateParam, Type};
 
@@ -22,9 +21,7 @@ pub use asserts::{AssertInfo, AssertTarget};
 pub(crate) use generics::{
     build_template_params, build_type_aliases, mark_template_params, substitute_type_aliases,
 };
-pub(crate) use type_resolution::{
-    apply_implicit_nullable_default, resolve_type, resolve_type_with_parsed_native,
-};
+pub(crate) use type_resolution::{DeclaredType, apply_implicit_nullable_default, declared_type};
 
 #[derive(Debug, Clone)]
 pub struct ParameterReflection {
@@ -634,39 +631,11 @@ impl FunctionReflection {
                             .map(docblock::parse)
                             .and_then(|d| d.var_type)
                     });
-                // Parsed once, shared by both the doc-reconciled `ty`
-                // pipeline below and the native-only `ty_native` one -
-                // `resolve_type`/`resolve_type(None, ...)` used to each
-                // independently re-parse this same hint string.
-                let native_hint_text = p.type_hint.as_ref().map(TypeHint::to_string);
-                let native_hint = native_hint_text.as_deref();
-                let native_parsed = native_hint.map(types::parse_native_type_string);
-                let doc_reconciled = resolve_type_with_parsed_native(
-                    doc_ty.as_ref(),
-                    native_hint,
-                    native_parsed.as_ref(),
-                    &template_params,
-                );
-                // Whenever the docblock contributed nothing beyond the
-                // native hint (no doc tag at all, or `reconcile_with_
-                // native` collapsed back to exactly the native type), the
-                // `ty` and `ty_native` pipelines are computing the
-                // identical value through `mark_template_params`/
-                // `resolve_names_in_type` - both are pure, deterministic
-                // functions, so reusing `ty`'s own result for `ty_native`
-                // is exact, not an approximation.
-                let shared = Some(&doc_reconciled) == native_parsed.as_ref();
-                let ty = mark_template_params(doc_reconciled, &template_params);
-                let mut case_refs = Vec::new();
-                collect_class_name_case_refs(&ty, ctx, &mut case_refs);
-                let ty = resolve_names_in_type(ty, ctx);
-                let ty_native = if shared {
-                    ty.clone()
-                } else {
-                    let native_only = native_parsed.unwrap_or(Type::mixed());
-                    let t = mark_template_params(native_only, &template_params);
-                    resolve_names_in_type(t, ctx)
-                };
+                let DeclaredType {
+                    ty,
+                    native: ty_native,
+                    case_refs,
+                } = declared_type(doc_ty.as_ref(), p.type_hint.as_ref(), &template_params, ctx);
                 let ty = substitute_type_aliases(ty, class_type_aliases);
                 let ty = apply_implicit_nullable_default(ty, p.default.as_ref());
                 // Mirrors `ty` with `doc_ty` forced to `None` - the
@@ -697,7 +666,7 @@ impl FunctionReflection {
                     .and_then(|d| d.param_out.get(p.name.as_ref()))
                     .map(&resolve_doc_type);
                 ParameterReflection {
-                    attributes: ReflectionAttribute::all(&p.attrs, ctx),
+                    attributes: ReflectionAttribute::all(&p.attrs),
                     name: p.name.clone(),
                     ty,
                     ty_native,
@@ -710,10 +679,8 @@ impl FunctionReflection {
                         .map(&resolve_doc_type),
                     by_ref: p.by_ref,
                     has_own_doc: doc_ty.is_some(),
-                    explicit_mixed_hint: has_explicit_mixed_nested_somewhere(
-                        p.type_hint.as_ref().map(TypeHint::to_string).as_deref(),
-                        None,
-                    ) || doc_ty.as_ref().is_some_and(mentions_mixed),
+                    explicit_mixed_hint: p.type_hint.as_ref().is_some_and(TypeHint::is_mixed)
+                        || doc_ty.as_ref().is_some_and(mentions_mixed),
                     case_refs,
                     closure_this_type,
                     out_ty,
@@ -723,37 +690,20 @@ impl FunctionReflection {
         let params = dedup_versioned_params(params);
 
         let doc_return = doc.as_ref().and_then(|d| d.return_type.as_ref());
-        let native_return_hint_text = f.return_type.as_ref().map(TypeHint::to_string);
-        let native_return_hint = native_return_hint_text.as_deref();
-        let native_return_parsed = native_return_hint.map(types::parse_native_type_string);
-        let doc_reconciled_return = resolve_type_with_parsed_native(
-            doc_return,
-            native_return_hint,
-            native_return_parsed.as_ref(),
-            &template_params,
-        );
-        let return_shared = Some(&doc_reconciled_return) == native_return_parsed.as_ref();
-        let return_type = mark_template_params(doc_reconciled_return, &template_params);
-        let mut return_case_refs = Vec::new();
-        collect_class_name_case_refs(&return_type, ctx, &mut return_case_refs);
-        let return_type = resolve_names_in_type(return_type, ctx);
-        let return_type_native = if return_shared {
-            return_type.clone()
-        } else {
-            let native_only = native_return_parsed.unwrap_or(Type::mixed());
-            let t = mark_template_params(native_only, &template_params);
-            resolve_names_in_type(t, ctx)
-        };
+        let DeclaredType {
+            ty: return_type,
+            native: return_type_native,
+            case_refs: return_case_refs,
+        } = declared_type(doc_return, f.return_type.as_ref(), &template_params, ctx);
         let return_type = substitute_type_aliases(return_type, class_type_aliases);
 
         let no_discard = f
             .attrs
             .iter()
             .any(|a| is_no_discard_attribute_name(&a.name));
-        let must_use_result =
-            crate::registry::access_attributes::has_must_use_result(&f.attrs, ctx);
+        let must_use_result = crate::registry::access_attributes::has_must_use_result(&f.attrs);
         let has_override_attr = f.attrs.iter().any(|a| is_override_attribute_name(&a.name));
-        let attributes = ReflectionAttribute::all(&f.attrs, ctx);
+        let attributes = ReflectionAttribute::all(&f.attrs);
 
         let is_internal = doc.as_ref().is_some_and(|d| d.internal);
         let is_api = doc.as_ref().is_some_and(|d| d.api);
@@ -800,10 +750,8 @@ impl FunctionReflection {
                 .and_then(|d| d.self_out.as_ref())
                 .map(resolve_doc_type),
             return_case_refs,
-            return_explicit_mixed_hint: has_explicit_mixed_nested_somewhere(
-                f.return_type.as_ref().map(TypeHint::to_string).as_deref(),
-                None,
-            ) || doc_return.is_some_and(mentions_mixed),
+            return_explicit_mixed_hint: f.return_type.as_ref().is_some_and(TypeHint::is_mixed)
+                || doc_return.is_some_and(mentions_mixed),
             no_discard,
             must_use_result,
             visibility,

@@ -113,15 +113,8 @@ impl UseSiteIndex {
 /// `Foo`'s own body into `Bar::`, since `self` already means "whatever
 /// this class is called," automatically, forever. Recording it as a real
 /// `Foo` reference site would corrupt exactly that rename.
-fn resolve_class_ref(
-    name: &str,
-    _current_class: Option<&str>,
-    ctx: &NameContext,
-) -> Option<String> {
-    match name {
-        "self" | "static" | "parent" => None,
-        _ => Some(ctx.resolve(name)),
-    }
+fn resolve_class_ref(name: &QualifiedName) -> Option<String> {
+    name.resolved_class().map(str::to_string)
 }
 
 /// Every `(Span, RefTarget::Class|Function)` pair in `stmts` - Tier 1's
@@ -169,15 +162,9 @@ struct ClassFnRefWalker<'a> {
 }
 
 impl<'a> ClassFnRefWalker<'a> {
-    fn record_type_hint(
-        &self,
-        out: &mut Vec<(Span, RefTarget)>,
-        hint: &TypeHint,
-        current_class: Option<&str>,
-        ctx: &NameContext,
-    ) {
+    fn record_type_hint(&self, out: &mut Vec<(Span, RefTarget)>, hint: &TypeHint) {
         for (name, name_span) in hint.class_names() {
-            if let Some(fqn) = resolve_class_ref(name, current_class, ctx) {
+            if let Some(fqn) = resolve_class_ref(name) {
                 // Without the source, a site is the whole declaration.
                 let span = if self.source.is_some() {
                     name_span
@@ -204,7 +191,7 @@ impl<'a> ClassFnRefWalker<'a> {
         out: &mut Vec<(Span, RefTarget)>,
     ) {
         if let Some(hint) = &p.type_hint {
-            self.record_type_hint(out, hint, current_class, ctx);
+            self.record_type_hint(out, hint);
         }
         if let Some(d) = &p.default {
             self.expr(d, &mut ctx.clone(), current_class, out);
@@ -289,7 +276,7 @@ impl<'a> ClassFnRefWalker<'a> {
                 StmtKind::Try { catches, .. } => {
                     for c in catches {
                         for (name, span) in c.types.iter().zip(c.types_spans.iter()) {
-                            if let Some(fqn) = resolve_class_ref(name, current_class, ctx) {
+                            if let Some(fqn) = resolve_class_ref(name) {
                                 out.push((*span, RefTarget::Class(fqn)));
                             }
                         }
@@ -315,7 +302,7 @@ impl<'a> ClassFnRefWalker<'a> {
             match &expr.kind {
                 ExprKind::Call(callee, args) => {
                     if let ExprKind::Name(n) = &callee.kind {
-                        if let Some(fqn) = resolve_class_ref(n, current_class, ctx) {
+                        if let Some(fqn) = resolve_class_ref(n) {
                             out.push((callee.span, RefTarget::Function(fqn)));
                         }
                     } else {
@@ -328,7 +315,7 @@ impl<'a> ClassFnRefWalker<'a> {
                 }
                 ExprKind::New(callee, args) => {
                     if let ExprKind::Name(n) = &callee.kind {
-                        if let Some(fqn) = resolve_class_ref(n, current_class, ctx) {
+                        if let Some(fqn) = resolve_class_ref(n) {
                             out.push((callee.span, RefTarget::Class(fqn)));
                         }
                     } else {
@@ -340,7 +327,7 @@ impl<'a> ClassFnRefWalker<'a> {
                     return;
                 }
                 ExprKind::Name(n) => {
-                    if let Some(fqn) = resolve_class_ref(n, current_class, ctx) {
+                    if let Some(fqn) = resolve_class_ref(n) {
                         // Same function-preferred disambiguation as
                         // `navigation.rs`'s identical arm - a bare `Name` node
                         // reached any other way than a `Call`/`New` callee
@@ -352,7 +339,7 @@ impl<'a> ClassFnRefWalker<'a> {
                 | ExprKind::ClassNameFetch(StaticTarget::Name(class, class_span))
                 | ExprKind::StaticPropertyFetch(StaticTarget::Name(class, class_span), _)
                 | ExprKind::DynamicStaticPropertyFetch(StaticTarget::Name(class, class_span), _) => {
-                    if let Some(fqn) = resolve_class_ref(class, current_class, ctx) {
+                    if let Some(fqn) = resolve_class_ref(class) {
                         let span = if self.source.is_some() {
                             *class_span
                         } else {
@@ -367,7 +354,7 @@ impl<'a> ClassFnRefWalker<'a> {
                 // `any_child_expr` walk below (it's a real child of this
                 // node now, not a discarded `"?"` sentinel).
                 ExprKind::StaticCall(StaticTarget::Name(class, class_span), _, _) => {
-                    if let Some(fqn) = resolve_class_ref(class, current_class, ctx) {
+                    if let Some(fqn) = resolve_class_ref(class) {
                         let span = if self.source.is_some() {
                             *class_span
                         } else {
@@ -377,7 +364,7 @@ impl<'a> ClassFnRefWalker<'a> {
                     }
                 }
                 ExprKind::Instanceof(_, InstanceofTarget::Name(name, span)) => {
-                    if let Some(fqn) = resolve_class_ref(name, current_class, ctx) {
+                    if let Some(fqn) = resolve_class_ref(name) {
                         out.push((*span, RefTarget::Class(fqn)));
                     }
                 }
@@ -422,7 +409,7 @@ impl<'a> ClassFnRefWalker<'a> {
             self.param(p, ctx, current_class, out);
         }
         if let Some(rt) = &f.return_type {
-            self.record_type_hint(out, rt, current_class, ctx);
+            self.record_type_hint(out, rt);
         }
         self.stmts(&f.body, ctx, current_class, out);
     }
@@ -430,23 +417,23 @@ impl<'a> ClassFnRefWalker<'a> {
     fn class(&self, c: &ClassDecl, ctx: &mut NameContext, out: &mut Vec<(Span, RefTarget)>) {
         let fqn = ctx.declared_name(class_decl_name(c));
         for (name, span) in c.extends.iter().zip(c.extends_spans.iter()) {
-            if let Some(target) = resolve_class_ref(name, Some(&fqn), ctx) {
+            if let Some(target) = resolve_class_ref(name) {
                 out.push((*span, RefTarget::Class(target)));
             }
         }
         for (name, span) in c.implements.iter().zip(c.implements_spans.iter()) {
-            if let Some(target) = resolve_class_ref(name, Some(&fqn), ctx) {
+            if let Some(target) = resolve_class_ref(name) {
                 out.push((*span, RefTarget::Class(target)));
             }
         }
         for (name, span) in c.uses.iter().zip(c.uses_spans.iter()) {
-            if let Some(target) = resolve_class_ref(name, Some(&fqn), ctx) {
+            if let Some(target) = resolve_class_ref(name) {
                 out.push((*span, RefTarget::Class(target)));
             }
         }
         for p in &c.properties {
             if let Some(hint) = &p.type_hint {
-                self.record_type_hint(out, hint, Some(&fqn), ctx);
+                self.record_type_hint(out, hint);
             }
             if let Some(d) = &p.default {
                 self.expr(d, &mut ctx.clone(), Some(&fqn), out);
@@ -457,7 +444,7 @@ impl<'a> ClassFnRefWalker<'a> {
         }
         for cst in &c.consts {
             if let Some(hint) = &cst.type_hint {
-                self.record_type_hint(out, hint, Some(&fqn), ctx);
+                self.record_type_hint(out, hint);
             }
             self.expr(&cst.value, &mut ctx.clone(), Some(&fqn), out);
         }
@@ -466,12 +453,12 @@ impl<'a> ClassFnRefWalker<'a> {
     fn enum_decl(&self, e: &ClassDecl, ctx: &mut NameContext, out: &mut Vec<(Span, RefTarget)>) {
         let fqn = ctx.declared_name(class_decl_name(e));
         for (name, span) in e.implements.iter().zip(e.implements_spans.iter()) {
-            if let Some(target) = resolve_class_ref(name, Some(&fqn), ctx) {
+            if let Some(target) = resolve_class_ref(name) {
                 out.push((*span, RefTarget::Class(target)));
             }
         }
         for (name, span) in e.uses.iter().zip(e.uses_spans.iter()) {
-            if let Some(target) = resolve_class_ref(name, Some(&fqn), ctx) {
+            if let Some(target) = resolve_class_ref(name) {
                 out.push((*span, RefTarget::Class(target)));
             }
         }

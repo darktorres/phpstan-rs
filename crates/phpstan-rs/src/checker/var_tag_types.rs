@@ -77,7 +77,7 @@ impl<'a> Checker<'a> {
         if p.type_hint.is_none() {
             return Type::mixed();
         }
-        let ty = self.resolve_type_hint(p.type_hint.as_ref().map(TypeHint::to_string).as_deref());
+        let ty = self.resolve_type_hint(p.type_hint.as_ref());
         let ty = match &self.current_class {
             Some(c) => self.resolve_pseudo(&ty, c),
             None => ty,
@@ -198,14 +198,8 @@ impl<'a> Checker<'a> {
                     let ExprKind::Name(name) = &callee.kind else {
                         return Type::mixed();
                     };
-                    let (primary, fallback) = self.name_ctx.resolve_function_candidates(name);
-                    let sig = self.registry.lookup_function(&primary).or_else(|| {
-                        fallback
-                            .as_deref()
-                            .and_then(|f| self.registry.lookup_function(f))
-                    });
-                    match sig {
-                        Some(sig) if !sig.is_magic() => sig.return_type_native().clone(),
+                    match self.registry.resolve_function(name) {
+                        Some((_, sig)) if !sig.is_magic() => sig.return_type_native().clone(),
                         _ => Type::mixed(),
                     }
                 }

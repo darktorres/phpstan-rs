@@ -228,9 +228,7 @@ fn select_item_type(checker: &Checker, aliases: &AliasMap, item: &SelectItem) ->
         // regardless of whether this project can otherwise resolve it
         // (the same leniency an ordinary `new UnknownClass()` expression
         // already gets elsewhere in this project's own type system).
-        SelectItemKind::New(class) => {
-            Type::object(checker.resolve_class_name(class).into(), Vec::new())
-        }
+        SelectItemKind::New(class) => checker.class_type_named(class),
         // A custom, project-registered DQL function (ROADMAP
         // Phase 168 168h) - `Mixed` when this project's own
         // `[[doctrine_custom_functions]]` config doesn't declare it,

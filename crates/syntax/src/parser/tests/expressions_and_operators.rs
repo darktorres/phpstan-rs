@@ -704,7 +704,7 @@ fn dynamic_property_and_method_access_parse() {
     else {
         panic!("expected DynamicStaticCall");
     };
-    assert_eq!(class.as_name(), Some("Foo"));
+    assert_eq!(class.as_name().map(|n| &*n.written), Some("Foo"));
     assert!(matches!(&name.kind, ExprKind::Variable(v) if &**v == "name"));
 }
 

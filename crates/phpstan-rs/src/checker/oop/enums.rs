@@ -168,9 +168,10 @@ impl<'a> Checker<'a> {
             }
         }
 
-        if let Some(backing) = e.backing_type.as_ref().map(TypeHint::to_string) {
-            let expects_int = backing.eq_ignore_ascii_case("int");
-            let expects_string = backing.eq_ignore_ascii_case("string");
+        if let Some(backing) = &e.backing_type {
+            let expects_int = matches!(backing.kind, TypeHintKind::Keyword(NativeType::Int, _));
+            let expects_string =
+                matches!(backing.kind, TypeHintKind::Keyword(NativeType::String, _));
             if !expects_int && !expects_string {
                 self.report_builder(
                     DiagnosticBuilder::new(
@@ -196,18 +197,13 @@ impl<'a> Checker<'a> {
             );
         }
 
-        let backing_type_word = e
-            .backing_type
-            .as_ref()
-            .map(TypeHint::to_string)
-            .as_deref()
-            .map(|b| {
-                if b.eq_ignore_ascii_case("int") {
-                    "int"
-                } else {
-                    "string"
-                }
-            });
+        let backing_type_word = e.backing_type.as_ref().map(|b| {
+            if matches!(b.kind, TypeHintKind::Keyword(NativeType::Int, _)) {
+                "int"
+            } else {
+                "string"
+            }
+        });
         for case in &e.enum_cases {
             match (&e.backing_type, &case.value) {
                 (None, Some(value)) => {

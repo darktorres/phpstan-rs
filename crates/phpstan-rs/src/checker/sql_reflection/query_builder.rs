@@ -732,8 +732,7 @@ fn fold_sprintf_int_arg(checker: &Checker, arg: &Arg, locals: &Locals) -> Option
 pub(crate) fn is_array_parameter_type(checker: &Checker, expr: &Expr) -> bool {
     match &expr.kind {
         ExprKind::ClassConstFetch(StaticTarget::Name(class_name, _), _member) => checker
-            .name_ctx
-            .resolve(class_name)
+            .resolve_class_name(class_name)
             .ends_with("ArrayParameterType"),
         _ => false,
     }

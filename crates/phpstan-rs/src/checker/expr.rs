@@ -283,33 +283,21 @@ impl<'a> Checker<'a> {
                 // arg-checking path and the undefined-call diagnostic
                 // below see the same name(s) a real call would actually
                 // resolve to.
-                let resolved_name = match &callee.kind {
-                    ExprKind::Name(name) => {
-                        let (primary, fallback) =
-                            self.resolve_function_candidates_cached(callee.span, name);
-                        if self.registry.lookup_function(&primary).is_some() {
-                            Some(primary)
-                        } else if let Some(global) = &fallback
-                            && self.registry.lookup_function(global).is_some()
-                        {
-                            Some(global.clone())
-                        } else {
-                            Some(primary)
-                        }
-                    }
-                    _ => None,
+                let (resolved_name, sig) = match &callee.kind {
+                    ExprKind::Name(name) => match self.registry.resolve_function(name) {
+                        Some((resolved, sig)) => (Some(resolved), Some(sig)),
+                        None => (Some(name.candidates().0), None),
+                    },
+                    _ => (None, None),
                 };
-                let sig = resolved_name
-                    .as_deref()
-                    .and_then(|name| self.registry.lookup_function(name));
                 // `resolved_name` is already namespace-qualified the
                 // same way `check_class_name_case`'s own `resolved`
                 // variable is, so the identical canonical-vs-written
                 // comparison applies unchanged.
                 if self.settings.rules.check_function_name_case
-                    && let Some(resolved) = &resolved_name
+                    && let Some(resolved) = resolved_name
                     && let Some((canonical, _)) = self.registry.lookup_function_with_name(resolved)
-                    && canonical != resolved.as_ref()
+                    && canonical != resolved
                 {
                     let mut builder = DiagnosticBuilder::new(
                         format!("Function {canonical} used with incorrect case: {resolved}."),
@@ -355,20 +343,12 @@ impl<'a> Checker<'a> {
                 // checking independently re-derives each argument's type
                 // via `infer_expr` from whatever `locals` holds then,
                 // rather than reusing this already-corrected value.
-                let array_shift_pop_pre_widen_ty: Option<Type> = matches!(
-                    resolved_name.as_deref(),
-                    Some("array_shift") | Some("array_pop")
-                )
-                .then(|| args.first())
-                .flatten()
-                .map(|a| self.infer_expr(&a.value, locals));
-                self.predefine_byref_or_unknown_args(
-                    resolved_name.as_deref(),
-                    sig,
-                    args,
-                    &resolved,
-                    locals,
-                );
+                let array_shift_pop_pre_widen_ty: Option<Type> =
+                    matches!(resolved_name, Some("array_shift") | Some("array_pop"))
+                        .then(|| args.first())
+                        .flatten()
+                        .map(|a| self.infer_expr(&a.value, locals));
+                self.predefine_byref_or_unknown_args(resolved_name, sig, args, &resolved, locals);
                 // `it`/`test`/`describe`/`beforeEach`/`afterEach`/
                 // `beforeAll`/`afterAll` rebind `$this` inside their
                 // closure/arrow-fn argument at runtime (Pest's own
@@ -393,7 +373,7 @@ impl<'a> Checker<'a> {
                 // needs). Scoped to the common 2-arg single-array form,
                 // matching `infer_builtin_call_return_type`'s identical
                 // restriction for the same function.
-                let array_map_elem_override = (resolved_name.as_deref() == Some("array_map")
+                let array_map_elem_override = (resolved_name == Some("array_map")
                     && args.len() == 2)
                     .then(|| self.infer_expr(&args[1].value, locals))
                     .and_then(|ty| ty.array_value_type());
@@ -412,8 +392,8 @@ impl<'a> Checker<'a> {
                 // modes, `array_walk`'s optional third `$arg` callback
                 // parameter) by simply falling back to a plain check,
                 // with no separate gate needed here.
-                let contextual_callback_override: Option<(usize, Vec<Type>)> =
-                    resolved_name.as_deref().and_then(|name| match name {
+                let contextual_callback_override: Option<(usize, Vec<Type>)> = resolved_name
+                    .and_then(|name| match name {
                         "array_filter" if args.len() == 2 => {
                             let arr_ty = self.infer_expr(&args[0].value, locals);
                             arr_ty.array_value_type().map(|t| (1, vec![t]))
@@ -610,7 +590,7 @@ impl<'a> Checker<'a> {
                             );
                         }
                         self.record_function_usage_token(name, sig, callee.span);
-                        match name.as_ref() {
+                        match *name {
                             "array_filter" => {
                                 self.check_array_filter_no_op(args, locals, e.span);
                                 if self.settings.strict_rules.check_strict_array_filter {
@@ -732,8 +712,8 @@ impl<'a> Checker<'a> {
                                 .to_ascii_lowercase(),
                         )
                     {
-                        // Since resolve_function_candidates always
-                        // produces a definite name (unlike `ExprKind::New`'s
+                        // Since a function name always resolves to a
+                        // definite name (unlike `ExprKind::New`'s
                         // class resolution, which still has a "can't
                         // resolve" case for a multi-segment name with no
                         // matching import), every miss here is a real
@@ -805,7 +785,7 @@ impl<'a> Checker<'a> {
                 // before `check_args` would make every `$matches` shape
                 // whose leaf type isn't plain `string` (a `[string, int]`
                 // tuple, or `string|null`) spuriously fail that check.
-                if resolved_name.as_deref() == Some("preg_match")
+                if resolved_name == Some("preg_match")
                     && resolved.get(1).copied().flatten().is_some()
                     && let Some(pattern_arg) = resolved.first().copied().flatten()
                     && let Some(matches_arg) = resolved.get(2).copied().flatten()
@@ -856,7 +836,7 @@ impl<'a> Checker<'a> {
                 // by capture group across every match; `PREG_SET_ORDER`
                 // groups them by match, reusing `preg_match_matches_shape`
                 // unchanged for each entry).
-                if resolved_name.as_deref() == Some("preg_match_all")
+                if resolved_name == Some("preg_match_all")
                     && resolved.get(1).copied().flatten().is_some()
                     && let Some(pattern_arg) = resolved.first().copied().flatten()
                     && let Some(matches_arg) = resolved.get(2).copied().flatten()
@@ -906,7 +886,7 @@ impl<'a> Checker<'a> {
                 // mechanism to key off a different parameter's literal
                 // keys, but a plain `array<int, resource>` is still
                 // enough to be useful.
-                if resolved_name.as_deref() == Some("proc_open")
+                if resolved_name == Some("proc_open")
                     && let Some(pipes_arg) = resolved.get(2).copied().flatten()
                     && let ExprKind::Variable(pipes_name) = &pipes_arg.kind
                 {
@@ -924,7 +904,7 @@ impl<'a> Checker<'a> {
                 let call_ty = sig
                     .map(|s| {
                         self.infer_builtin_call_return_type(
-                            resolved_name.as_deref().unwrap_or_default(),
+                            resolved_name.unwrap_or_default(),
                             s,
                             args,
                             locals,
@@ -2584,7 +2564,7 @@ impl<'a> Checker<'a> {
                             // late-static-binding unsafety as the
                             // identical class-constant/static-property
                             // rules.
-                            if target.as_name() == Some("static")
+                            if target.as_name().is_some_and(|n| n.is_keyword("static"))
                                 && sig.visibility() == Visibility::Private
                             {
                                 self.check_static_private_method_access(owner, method, e.span);
@@ -3475,9 +3455,8 @@ impl<'a> Checker<'a> {
                 }
                 let closure_label = format!("{label} (closure)");
                 for p in params {
-                    let (ty, case_refs) = self.resolve_type_hint_with_case_refs(
-                        p.type_hint.as_ref().map(TypeHint::to_string).as_deref(),
-                    );
+                    let (ty, case_refs) =
+                        self.resolve_type_hint_with_case_refs(p.type_hint.as_ref());
                     // Mirrors real PHPStan's
                     // `ExistingClassesInClosureTypehintsRule` - checked on
                     // the un-array-wrapped element type below (a variadic
@@ -3505,10 +3484,8 @@ impl<'a> Checker<'a> {
                     closure_locals.declare(p.name.to_string(), ty, p.name_span);
                     closure_locals.set_native(&p.name, self.closure_param_native(p));
                 }
-                let (declared_return_ty, declared_return_case_refs) = self
-                    .resolve_type_hint_with_case_refs(
-                        return_type.as_deref().map(TypeHint::to_string).as_deref(),
-                    );
+                let (declared_return_ty, declared_return_case_refs) =
+                    self.resolve_type_hint_with_case_refs(return_type.as_deref());
                 let declared_return = Some(declared_return_ty);
                 self.check_type_class_names_exist(
                     declared_return.as_ref().unwrap_or(&Type::mixed()),
@@ -3544,7 +3521,7 @@ impl<'a> Checker<'a> {
                 let current_class_for_internal_check = self.current_class.clone();
                 self.check_internal_param_and_return_types_raw(
                     params,
-                    return_type.as_deref().map(TypeHint::to_string).as_deref(),
+                    return_type.as_deref(),
                     e.span,
                     false,
                     current_class_for_internal_check.as_deref(),
@@ -3552,7 +3529,7 @@ impl<'a> Checker<'a> {
                 );
                 self.check_restricted_param_and_return_types_raw(
                     params,
-                    return_type.as_deref().map(TypeHint::to_string).as_deref(),
+                    return_type.as_deref(),
                     e.span,
                     current_class_for_internal_check.as_deref(),
                 );
@@ -3787,12 +3764,7 @@ impl<'a> Checker<'a> {
                         closure_falls_off_end,
                     )
                 });
-                self.closure_literal_type(
-                    params,
-                    return_type.as_deref().map(TypeHint::to_string).as_deref(),
-                    inferred_return,
-                    None,
-                )
+                self.closure_literal_type(params, return_type.as_deref(), inferred_return, None)
             }
             ExprKind::ArrowFn {
                 params,
@@ -3810,9 +3782,8 @@ impl<'a> Checker<'a> {
                 // needed) - a plain clone of `locals` is exactly that.
                 let mut arrow_locals = locals.clone();
                 for p in params {
-                    let (ty, case_refs) = self.resolve_type_hint_with_case_refs(
-                        p.type_hint.as_ref().map(TypeHint::to_string).as_deref(),
-                    );
+                    let (ty, case_refs) =
+                        self.resolve_type_hint_with_case_refs(p.type_hint.as_ref());
                     // Mirrors real PHPStan's
                     // `ExistingClassesInArrowFunctionTypehintsRule` - same
                     // "check the element type, not the variadic-collected
@@ -3849,13 +3820,7 @@ impl<'a> Checker<'a> {
                 self.current_function_is_generator = expr_contains_yield(body);
                 let declared_return = return_type
                     .as_deref()
-                    .map(TypeHint::to_string)
-                    .as_deref()
-                    .map(|_| {
-                        self.resolve_type_hint(
-                            return_type.as_deref().map(TypeHint::to_string).as_deref(),
-                        )
-                    });
+                    .map(|_| self.resolve_type_hint(return_type.as_deref()));
                 let previous_declared_return_type = self.current_declared_return_type.take();
                 self.current_declared_return_type =
                     declared_return.as_ref().map(|t| match &self.current_class {
@@ -3900,9 +3865,8 @@ impl<'a> Checker<'a> {
                 // Return-vs-declared_return check, kept here since
                 // there's no StmtKind::Return for it to share.
                 if return_type.is_some() {
-                    let (expected, expected_case_refs) = self.resolve_type_hint_with_case_refs(
-                        return_type.as_deref().map(TypeHint::to_string).as_deref(),
-                    );
+                    let (expected, expected_case_refs) =
+                        self.resolve_type_hint_with_case_refs(return_type.as_deref());
                     self.check_type_class_names_exist(
                         &expected,
                         "return type of arrow function",
@@ -3941,7 +3905,7 @@ impl<'a> Checker<'a> {
                 let current_class_for_internal_check = self.current_class.clone();
                 self.check_internal_param_and_return_types_raw(
                     params,
-                    return_type.as_deref().map(TypeHint::to_string).as_deref(),
+                    return_type.as_deref(),
                     e.span,
                     false,
                     current_class_for_internal_check.as_deref(),
@@ -3949,13 +3913,13 @@ impl<'a> Checker<'a> {
                 );
                 self.check_restricted_param_and_return_types_raw(
                     params,
-                    return_type.as_deref().map(TypeHint::to_string).as_deref(),
+                    return_type.as_deref(),
                     e.span,
                     current_class_for_internal_check.as_deref(),
                 );
                 self.closure_literal_type(
                     params,
-                    return_type.as_deref().map(TypeHint::to_string).as_deref(),
+                    return_type.as_deref(),
                     (!expr_contains_yield(body)).then(|| body_ty.clone()),
                     None,
                 )
@@ -3999,20 +3963,9 @@ impl<'a> Checker<'a> {
                 match &inner.kind {
                     ExprKind::Call(callee, _) => {
                         if let ExprKind::Name(name) = &callee.kind {
-                            let (primary, fallback) =
-                                self.name_ctx.resolve_function_candidates(name);
-                            let resolved_sig = self
-                                .registry
-                                .lookup_function(&primary)
-                                .map(|s| (primary.clone(), s))
-                                .or_else(|| {
-                                    fallback.as_deref().and_then(|g| {
-                                        self.registry.lookup_function(g).map(|s| (g.to_string(), s))
-                                    })
-                                });
-                            match resolved_sig {
+                            match self.registry.resolve_function(name) {
                                 Some((resolved_name, sig)) => {
-                                    self.check_internal_function_call(&resolved_name, sig, e.span);
+                                    self.check_internal_function_call(resolved_name, sig, e.span);
                                     // Closes a real, live bypass: a
                                     // banned function's own
                                     // first-class-callable syntax
@@ -4021,18 +3974,14 @@ impl<'a> Checker<'a> {
                                     // ordinary call site
                                     // (`banned_func()`) already was.
                                     self.check_restricted_function_call(
-                                        &resolved_name,
+                                        resolved_name,
                                         &[],
                                         locals,
                                         e.span,
                                     );
-                                    self.check_deprecated_function_call(
-                                        &resolved_name,
-                                        sig,
-                                        e.span,
-                                    );
+                                    self.check_deprecated_function_call(resolved_name, sig, e.span);
                                     self.record_function_usage_token(
-                                        &resolved_name,
+                                        resolved_name,
                                         sig,
                                         callee.span,
                                     );
@@ -4041,12 +3990,13 @@ impl<'a> Checker<'a> {
                                     // Same `function_exists()`-guard
                                     // suppression as the ordinary-call
                                     // site above.
+                                    let primary = name.candidates().0;
                                     let guarded = !locals.guarded_functions.is_empty()
                                         && locals.guarded_functions.contains(
                                             primary
                                                 .rsplit('\\')
                                                 .next()
-                                                .unwrap_or(&primary)
+                                                .unwrap_or(primary)
                                                 .to_ascii_lowercase()
                                                 .as_str(),
                                         );
@@ -4184,7 +4134,7 @@ impl<'a> Checker<'a> {
                                     sig.is_internal(),
                                     e.span,
                                 );
-                                if target.as_name() == Some("static")
+                                if target.as_name().is_some_and(|n| n.is_keyword("static"))
                                     && sig.visibility() == Visibility::Private
                                 {
                                     self.check_static_private_method_access(&owner, method, e.span);
@@ -4279,12 +4229,7 @@ impl<'a> Checker<'a> {
             } => {
                 let inferred = self
                     .closure_syntactic_return_type(params, uses, body, *is_static, locals, None);
-                self.closure_literal_type(
-                    params,
-                    return_type.as_deref().map(TypeHint::to_string).as_deref(),
-                    inferred,
-                    None,
-                )
+                self.closure_literal_type(params, return_type.as_deref(), inferred, None)
             }
             ExprKind::ArrowFn {
                 params,
@@ -4293,12 +4238,7 @@ impl<'a> Checker<'a> {
                 ..
             } => {
                 let inferred = self.arrow_fn_inferred_return(params, body, locals, None);
-                self.closure_literal_type(
-                    params,
-                    return_type.as_deref().map(TypeHint::to_string).as_deref(),
-                    inferred,
-                    None,
-                )
+                self.closure_literal_type(params, return_type.as_deref(), inferred, None)
             }
             ExprKind::Match { subject, arms } => {
                 let default = match_default(arms);
@@ -4410,12 +4350,7 @@ impl<'a> Checker<'a> {
                     // since `lookup_method`'s ancestor walk needs exact
                     // case.
                     _ => {
-                        let resolved_name = self.name_ctx.resolve(name);
-                        let canonical = self
-                            .registry
-                            .lookup_class(&resolved_name)
-                            .map(|(canonical, _)| canonical.to_string())
-                            .unwrap_or(resolved_name);
+                        let canonical = self.resolve_class_name(name);
                         let templates = self
                             .registry
                             .classes
@@ -4483,22 +4418,13 @@ impl<'a> Checker<'a> {
                 _ => Type::mixed(),
             },
             ExprKind::Call(callee, args) => match &callee.kind {
-                ExprKind::Name(name) => {
-                    let (primary, fallback) =
-                        self.resolve_function_candidates_cached(callee.span, name);
-                    self.registry
-                        .lookup_function(&primary)
-                        .map(|sig| (primary.as_ref(), sig))
-                        .or_else(|| {
-                            fallback
-                                .as_deref()
-                                .and_then(|g| self.registry.lookup_function(g).map(|sig| (g, sig)))
-                        })
-                        .map(|(resolved_name, sig)| {
-                            self.infer_builtin_call_return_type(resolved_name, sig, args, locals)
-                        })
-                        .unwrap_or_else(|| self.call_fallback_return_type(callee, args, locals))
-                }
+                ExprKind::Name(name) => self
+                    .registry
+                    .resolve_function(name)
+                    .map(|(resolved_name, sig)| {
+                        self.infer_builtin_call_return_type(resolved_name, sig, args, locals)
+                    })
+                    .unwrap_or_else(|| self.call_fallback_return_type(callee, args, locals)),
                 _ => self.call_fallback_return_type(callee, args, locals),
             },
             ExprKind::MethodCall(recv, method, args, nullsafe) => {
@@ -4771,7 +4697,11 @@ impl<'a> Checker<'a> {
     /// that doesn't type-check against its own declared hint at all, or
     /// simply couldn't be inferred) falls back to the hint unchanged,
     /// exactly today's prior behavior.
-    fn prefer_inferred_over_declared_return(&self, hint: Option<&str>, inferred: Type) -> Type {
+    fn prefer_inferred_over_declared_return(
+        &self,
+        hint: Option<&TypeHint>,
+        inferred: Type,
+    ) -> Type {
         let Some(hint) = hint else {
             return inferred;
         };
@@ -4821,10 +4751,7 @@ impl<'a> Checker<'a> {
                     arrow_locals.insert(p.name.to_string(), ty.clone());
                 }
                 let inferred = self.infer_expr(body, &arrow_locals);
-                Some(self.prefer_inferred_over_declared_return(
-                    return_type.as_deref().map(TypeHint::to_string).as_deref(),
-                    inferred,
-                ))
+                Some(self.prefer_inferred_over_declared_return(return_type.as_deref(), inferred))
             }
             ExprKind::Closure {
                 params,
@@ -4870,14 +4797,14 @@ impl<'a> Checker<'a> {
                         },
                     ] => {
                         let inferred = self.infer_expr(e, &closure_locals);
-                        Some(self.prefer_inferred_over_declared_return(
-                            return_type.as_deref().map(TypeHint::to_string).as_deref(),
-                            inferred,
-                        ))
+                        Some(
+                            self.prefer_inferred_over_declared_return(
+                                return_type.as_deref(),
+                                inferred,
+                            ),
+                        )
                     }
                     _ => return_type
-                        .as_deref()
-                        .map(TypeHint::to_string)
                         .as_deref()
                         .map(|hint| self.resolve_type_hint(Some(hint))),
                 }
@@ -4897,16 +4824,10 @@ impl<'a> Checker<'a> {
                 // absent for a plain function, which can't return either.
                 let (sig, class) = match &inner.kind {
                     ExprKind::Call(callee, _) => match &callee.kind {
-                        ExprKind::Name(name) => {
-                            let (primary, fallback) =
-                                self.name_ctx.resolve_function_candidates(name);
-                            let sig = self.registry.lookup_function(&primary).or_else(|| {
-                                fallback
-                                    .as_deref()
-                                    .and_then(|g| self.registry.lookup_function(g))
-                            });
-                            (sig, None)
-                        }
+                        ExprKind::Name(name) => (
+                            self.registry.resolve_function(name).map(|(_, sig)| sig),
+                            None,
+                        ),
                         _ => (None, None),
                     },
                     ExprKind::StaticCall(target, method, _) => {
@@ -5503,11 +5424,11 @@ impl<'a> Checker<'a> {
     pub(crate) fn closure_literal_type(
         &self,
         params: &[Param],
-        return_type: Option<&str>,
+        return_type: Option<&TypeHint>,
         inferred_return: Option<Type>,
         overrides: Option<&[Type]>,
     ) -> Type {
-        let resolve = |hint: Option<&str>| {
+        let resolve = |hint: Option<&TypeHint>| {
             let ty = self.resolve_type_hint(hint);
             match &self.current_class {
                 Some(c) => self.resolve_pseudo(&ty, c),
@@ -5520,9 +5441,7 @@ impl<'a> Checker<'a> {
                 .enumerate()
                 .map(|(i, p)| types::CallableParam {
                     ty: match p.type_hint {
-                        Some(_) => {
-                            resolve(p.type_hint.as_ref().map(TypeHint::to_string).as_deref())
-                        }
+                        Some(_) => resolve(p.type_hint.as_ref()),
                         None => self.closure_param_type(p, i, overrides),
                     },
                     variadic: p.variadic,
@@ -5648,9 +5567,7 @@ impl<'a> Checker<'a> {
     /// `mixed`.
     fn closure_param_type(&self, p: &Param, i: usize, overrides: Option<&[Type]>) -> Type {
         match (&p.type_hint, overrides.and_then(|o| o.get(i))) {
-            (Some(_), _) => {
-                self.resolve_type_hint(p.type_hint.as_ref().map(TypeHint::to_string).as_deref())
-            }
+            (Some(_), _) => self.resolve_type_hint(p.type_hint.as_ref()),
             (None, Some(expected)) => expected.clone(),
             (None, None) => Type::mixed(),
         }
@@ -5683,7 +5600,7 @@ impl<'a> Checker<'a> {
                     self.arrow_fn_inferred_return(params, body, locals, Some(&overrides));
                 Some(self.closure_literal_type(
                     params,
-                    return_type.as_deref().map(TypeHint::to_string).as_deref(),
+                    return_type.as_deref(),
                     inferred,
                     Some(&overrides),
                 ))
@@ -5706,7 +5623,7 @@ impl<'a> Checker<'a> {
                 );
                 Some(self.closure_literal_type(
                     params,
-                    return_type.as_deref().map(TypeHint::to_string).as_deref(),
+                    return_type.as_deref(),
                     inferred,
                     Some(&overrides),
                 ))
@@ -5838,7 +5755,7 @@ impl<'a> Checker<'a> {
         label: &str,
     ) -> Type {
         let class_name = match target {
-            StaticTarget::Name(name, _) => name.written.as_ref(),
+            StaticTarget::Name(name, _) => name,
             // `$obj::X` / `$obj::$x`: the class of the receiver's value.
             StaticTarget::Expr(receiver) => {
                 let Some(class) = receiver_class(self.check_expr(receiver, locals, label)) else {
@@ -5872,7 +5789,7 @@ impl<'a> Checker<'a> {
         &mut self,
         e: &Expr,
         class: &str,
-        written: Option<&str>,
+        written: Option<&QualifiedName>,
         member: &str,
         is_property: bool,
     ) -> Type {
@@ -5961,7 +5878,9 @@ impl<'a> Checker<'a> {
                 // `AccessPrivatePropertyThroughStaticRule` - same
                 // late-static-binding unsafety as the identical
                 // class-constant rule above.
-                if written == Some("static") && sig.visibility() == Visibility::Private {
+                if written.is_some_and(|n| n.is_keyword("static"))
+                    && sig.visibility() == Visibility::Private
+                {
                     self.check_static_private_property_access(owner, prop_name, e.span);
                 }
             }
@@ -6004,7 +5923,9 @@ impl<'a> Checker<'a> {
                 });
                 // Mirrors real PHPStan's
                 // `AccessPrivateConstantThroughStaticRule`.
-                if written == Some("static") && cs.visibility() == Visibility::Private {
+                if written.is_some_and(|n| n.is_keyword("static"))
+                    && cs.visibility() == Visibility::Private
+                {
                     self.check_static_private_constant_access(owner, member, e.span);
                 }
             }

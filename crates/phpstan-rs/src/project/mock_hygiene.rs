@@ -142,6 +142,16 @@ fn collect_origins(stmts: &[Stmt], out: &mut FxHashMap<String, bool>) {
 }
 
 impl<'a> Walker<'a> {
+    /// A class or keyword type named in PHPDoc text, as the class it
+    /// resolves to here, or the keyword in lowercase.
+    fn resolve_doc_type_name(&self, name: &str) -> String {
+        let name = name.trim().trim_matches(|c| c == '(' || c == ')');
+        if NativeType::from_name(name).is_some() {
+            return name.to_ascii_lowercase();
+        }
+        self.ctx.resolve(name).trim_start_matches('\\').to_string()
+    }
+
     fn report(&mut self, span: Span, message: String, id: &'static str) {
         self.out
             .push(DiagnosticBuilder::new(message, span, 2, id).build());
@@ -150,16 +160,8 @@ impl<'a> Walker<'a> {
     fn class(&mut self, c: &ClassDecl) {
         let mut mock_properties = 0;
         for p in &c.properties {
-            let (hint, written_members) = match &p.type_hint {
-                Some(native) => {
-                    let text = native.to_string();
-                    let members = text
-                        .trim_start_matches('?')
-                        .split('|')
-                        .map(|m| m.trim().to_string())
-                        .collect();
-                    (text, members)
-                }
+            let (hint, members) = match &p.type_hint {
+                Some(native) => (native.to_string(), native_members(native)),
                 None => {
                     let Some(node) = p
                         .doc_comment
@@ -168,24 +170,26 @@ impl<'a> Walker<'a> {
                     else {
                         continue;
                     };
-                    let mut members = Vec::new();
-                    union_members(&node, &mut members);
+                    let mut written = Vec::new();
+                    union_members(&node, &mut written);
+                    let members = written
+                        .iter()
+                        .map(|member| {
+                            member
+                                .split('&')
+                                .map(|part| self.resolve_doc_type_name(part))
+                                .collect()
+                        })
+                        .collect();
                     (node.to_source_string(), members)
                 }
             };
-            let hint = &hint;
-            let members: Vec<String> = written_members
-                .iter()
-                .map(|m| self.ctx.resolve(m).trim_start_matches('\\').to_string())
-                .collect();
             let is_mock = |m: &String| MOCK_TYPES.iter().any(|t| t.eq_ignore_ascii_case(m));
-            if members.iter().any(is_mock) {
+            let is_plain_mock = |m: &Vec<String>| matches!(m.as_slice(), [only] if is_mock(only));
+            if members.iter().any(is_plain_mock) {
                 mock_properties += 1;
-                if members.len() > 1
-                    && members
-                        .iter()
-                        .any(|m| !is_mock(m) && !m.eq_ignore_ascii_case("null"))
-                {
+                let is_null = |m: &Vec<String>| matches!(m.as_slice(), [only] if only == "null");
+                if members.len() > 1 && members.iter().any(|m| !is_plain_mock(m) && !is_null(m)) {
                     self.report(
                         p.span,
                         format!(
@@ -195,14 +199,7 @@ impl<'a> Walker<'a> {
                         "mock.unionPropertyType",
                     );
                 }
-            } else if hint.contains('&')
-                && hint.split('&').any(|m| {
-                    let resolved = self.ctx.resolve(m.trim());
-                    MOCK_TYPES
-                        .iter()
-                        .any(|t| t.eq_ignore_ascii_case(resolved.trim_start_matches('\\')))
-                })
-            {
+            } else if members.iter().any(|m| m.len() > 1 && m.iter().any(is_mock)) {
                 mock_properties += 1;
             }
         }
@@ -210,7 +207,8 @@ impl<'a> Walker<'a> {
             && mock_properties == c.properties.len()
             && c.extends
                 .first()
-                .is_some_and(|e| e.trim_start_matches('\\').ends_with("TestCase"))
+                .and_then(QualifiedName::resolved_class)
+                .is_some_and(|e| e.ends_with("TestCase"))
         {
             self.report(
                 c.name_span,
@@ -337,8 +335,9 @@ impl<'ast> Visitor<'ast> for Walker<'_> {
                     && let Some(ExprKind::ClassNameFetch(StaticTarget::Name(class, _))) =
                         args.first().map(|a| &a.value.kind)
                 {
-                    let resolved = self.ctx.resolve(class);
-                    let resolved = resolved.trim_start_matches('\\');
+                    let Some(resolved) = class.resolved_class() else {
+                        continue;
+                    };
                     if self
                         .banned
                         .iter()
@@ -384,6 +383,28 @@ impl Project {
 }
 
 /// The members of a PHPDoc union as written, `?T` as `T` and `null`.
+/// A native type's union members, each as its intersected parts: a class
+/// by its resolved name, a keyword type in lowercase.
+fn native_members(hint: &TypeHint) -> Vec<Vec<String>> {
+    fn part(hint: &TypeHint) -> String {
+        match &hint.kind {
+            TypeHintKind::Name(name) => name.resolved_class().unwrap_or(&name.written).to_string(),
+            TypeHintKind::Keyword(_, written) => written.to_ascii_lowercase(),
+            _ => hint.to_string(),
+        }
+    }
+    match &hint.kind {
+        TypeHintKind::Union(members) => members.iter().flat_map(native_members).collect(),
+        TypeHintKind::Nullable(inner) => {
+            let mut out = native_members(inner);
+            out.push(vec!["null".to_string()]);
+            out
+        }
+        TypeHintKind::Intersection(parts) => vec![parts.iter().map(part).collect()],
+        _ => vec![vec![part(hint)]],
+    }
+}
+
 fn union_members(node: &phpdoc::grammar::TypeNode, out: &mut Vec<String>) {
     use phpdoc::grammar::TypeNode;
     match node.unwrap_paren() {

@@ -47,7 +47,7 @@ impl<'a> Checker<'a> {
     /// checked too - see `check_attribute_targets` below.
     pub(crate) fn check_attributes(&mut self, attrs: &[Attribute], label: &str) {
         for attr in attrs {
-            let fqn = self.name_ctx.resolve(&attr.name);
+            let fqn = self.resolve_class_name(&attr.name);
             // `lookup_class` (case-insensitive fallback), not a bare
             // `self.registry.classes.get(&fqn)` - without it, a
             // case-mismatched attribute reference always reports "does

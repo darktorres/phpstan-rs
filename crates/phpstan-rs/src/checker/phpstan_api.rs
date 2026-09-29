@@ -377,29 +377,28 @@ const RUNTIME_REFLECTION_CLASSES: &[&str] = &[
 
 /// A single class-shaped native type hint (`Param::type_hint`) resolved to
 /// a fully-qualified name, or `None` for anything not simple/unambiguous
-/// enough to trust: no hint at all, a union/intersection (`Foo|Bar`,
-/// `A&B`), or an empty string. A leading `?` (nullable) is stripped first -
-/// `?Scope $scope` still names `Scope` unambiguously. No primitive/pseudo-
-/// type keyword filter is needed here: `is_phpstan_namespace` already
-/// rejects anything a keyword like `self`/`static`/`array`/`int` could
-/// ever resolve to, so a keyword slipping through this function costs
-/// nothing.
-fn resolved_param_class(p: &Param, ctx: &NameContext) -> Option<String> {
-    resolved_class_from_hint(
-        p.type_hint.as_ref().map(TypeHint::to_string).as_deref(),
-        ctx,
-    )
+/// enough to trust: no hint at all, a keyword type, or a union or
+/// intersection (`Foo|Bar`, `A&B`). `?Scope $scope` still names `Scope`
+/// unambiguously.
+fn resolved_param_class(p: &Param) -> Option<String> {
+    resolved_class_from_hint(p.type_hint.as_ref()?)
 }
 
 /// The shared native-hint-resolution core `resolved_param_class` (above)
 /// and `class_prop_types` (below) both need.
-fn resolved_class_from_hint(hint: Option<&str>, ctx: &NameContext) -> Option<String> {
-    let hint = hint?;
-    let bare = hint.strip_prefix('?').unwrap_or(hint);
-    if bare.is_empty() || bare.contains('|') || bare.contains('&') {
-        return None;
+fn resolved_class_from_hint(hint: &TypeHint) -> Option<String> {
+    match &hint.kind {
+        TypeHintKind::Nullable(inner) => resolved_class_from_hint(inner),
+        TypeHintKind::Name(name) => name.resolved_class().map(str::to_string),
+        _ => None,
     }
-    Some(ctx.resolve(bare))
+}
+
+/// The fully-qualified name a class-like declaration declares.
+fn declared_class_name(c: &ClassDecl) -> String {
+    c.namespaced_name
+        .as_deref()
+        .map_or_else(|| class_decl_name(c).to_string(), str::to_string)
 }
 
 /// A minimal, class-scoped sibling to `ParamTypes` - every
@@ -414,20 +413,17 @@ fn resolved_class_from_hint(hint: Option<&str>, ctx: &NameContext) -> Option<Str
 /// still doesn't after this), just one more syntactically-typed shape,
 /// matching the module's own documented "known, disclosed gap" note on
 /// this exact case.
-fn class_prop_types(c: &ClassDecl, ctx: &NameContext) -> ParamTypes {
+fn class_prop_types(c: &ClassDecl) -> ParamTypes {
     let mut out = ParamTypes::default();
     for p in &c.properties {
-        if let Some(fqn) = resolved_class_from_hint(
-            p.type_hint.as_ref().map(TypeHint::to_string).as_deref(),
-            ctx,
-        ) {
+        if let Some(fqn) = p.type_hint.as_ref().and_then(resolved_class_from_hint) {
             out.insert(p.name.to_string(), fqn);
         }
     }
     if let Some(ctor) = c.constructor() {
         for p in &ctor.function.params {
             if p.promoted_visibility.is_some()
-                && let Some(fqn) = resolved_param_class(p, ctx)
+                && let Some(fqn) = resolved_param_class(p)
             {
                 out.insert(p.name.to_string(), fqn);
             }
@@ -448,11 +444,11 @@ fn class_prop_types(c: &ClassDecl, ctx: &NameContext) -> ParamTypes {
 /// full closure, unlike an arrow function's own implicit
 /// capture-everything-referenced rule, which is why `ArrowFn` passes its
 /// *entire* enclosing map through unfiltered instead).
-fn param_types_with(base: &ParamTypes, params: &[Param], ctx: &NameContext) -> ParamTypes {
+fn param_types_with(base: &ParamTypes, params: &[Param]) -> ParamTypes {
     let mut out = base.clone();
     for p in params {
         out.remove(p.name.as_ref());
-        if let Some(fqn) = resolved_param_class(p, ctx) {
+        if let Some(fqn) = resolved_param_class(p) {
             out.insert(p.name.to_string(), fqn);
         }
     }
@@ -573,10 +569,9 @@ struct Walker<'a> {
     // Set once per `check_class`, alongside the two fields
     // above (no nesting, no save/restore needed - PHP classes never
     // nest) - `resolve_if_phpstan`'s own `self`/`static`/`parent`
-    // pseudo-class resolution needs this; `NameContext::resolve` has no
-    // special-casing for any of the three at all (confirmed by its own
-    // doc comment), and this standalone `Walker` has no other "current
-    // class" state of its own the way the main `Checker` does.
+    // pseudo-class resolution needs this, as this standalone `Walker`
+    // has no other "current class" state of its own the way the main
+    // `Checker` does.
     current_class_fqn: Option<String>,
     // The checked file's composer package name, for
     // `PhpStanNamespaceIn3rdPartyPackageRule` - see
@@ -585,17 +580,9 @@ struct Walker<'a> {
 }
 
 impl<'a> Walker<'a> {
-    /// `self`/`static`/`parent` need resolving against
-    /// `current_class_fqn` before ever reaching `ctx.resolve` - that
-    /// function has no special-casing for any of the three (confirmed by
-    /// its own doc comment: "`self`/`parent`/`static`... never reach
-    /// here" is a promise the *main* `Checker`'s own callers uphold, not
-    /// something `NameContext` itself enforces), so without this,
-    /// `parent::someMethod()` inside a class extending a `PHPStan\*` base
-    /// silently resolved `"parent"` as a literal, always-unqualified bare
-    /// name and never matched `is_phpstan_namespace` at all.
-    fn resolve_if_phpstan(&self, name: &str, ctx: &NameContext) -> Option<String> {
-        self.resolve_class_name(name, ctx)
+    /// The class `name` names, when it's in a PHPStan namespace.
+    fn resolve_if_phpstan(&self, name: &QualifiedName) -> Option<String> {
+        self.resolve_class_name(name)
             .filter(|fqn| is_phpstan_namespace(fqn))
     }
 
@@ -607,20 +594,21 @@ impl<'a> Walker<'a> {
     /// name's own namespace, so `MyNonPhpStanSubclass::
     /// inheritedPhpStanMethod()` (where `MyNonPhpStanSubclass extends
     /// PHPStan\Foo`) must still reach `report_static_method_not_covered`.
-    fn resolve_class_name(&self, name: &str, ctx: &NameContext) -> Option<String> {
-        match name {
-            "self" | "static" => self.current_class_fqn.clone(),
-            "parent" => {
-                let current = self.current_class_fqn.as_deref()?;
-                self.registry
-                    .classes
-                    .get(current)?
-                    .extends()
-                    .first()
-                    .map(|s| s.to_string())
-            }
-            _ => Some(ctx.resolve(name)),
+    fn resolve_class_name(&self, name: &QualifiedName) -> Option<String> {
+        if name.is_keyword("self") || name.is_keyword("static") {
+            return self.current_class_fqn.clone();
         }
+        if name.is_keyword("parent") {
+            let current = self.current_class_fqn.as_deref()?;
+            return self
+                .registry
+                .classes
+                .get(current)?
+                .extends()
+                .first()
+                .map(|s| s.to_string());
+        }
+        name.resolved_class().map(str::to_string)
     }
 
     /// Direct port of `ApiRuleHelper::isPhpStanCode`
@@ -839,7 +827,7 @@ impl<'a> Walker<'a> {
     }
 
     fn check_function(&mut self, f: &FunctionDecl, ctx: &NameContext, label: &str) {
-        let param_types = param_types_with(&ParamTypes::default(), &f.params, ctx);
+        let param_types = param_types_with(&ParamTypes::default(), &f.params);
         for s in f.body.iter() {
             self.check_stmt(s, ctx, &param_types, label);
         }
@@ -851,9 +839,9 @@ impl<'a> Walker<'a> {
     }
 
     fn check_class(&mut self, c: &ClassDecl, ctx: &NameContext) {
-        let fqn = ctx.declared_name(class_decl_name(c));
+        let fqn = declared_class_name(c);
         for parent in &c.extends {
-            if let Some(pfqn) = self.resolve_if_phpstan(parent, ctx) {
+            if let Some(pfqn) = self.resolve_if_phpstan(parent) {
                 // Real `ApiClassExtendsRule`'s own narrow
                 // carve-out - extending `PHPStan\Analyser\MutatingScope`
                 // itself is exempt, a `Class_`-only concept (an interface's
@@ -889,13 +877,13 @@ impl<'a> Walker<'a> {
             }
         }
         for iface in &c.implements {
-            if let Some(ifqn) = self.resolve_if_phpstan(iface, ctx) {
+            if let Some(ifqn) = self.resolve_if_phpstan(iface) {
                 let action = format!("implementing {ifqn}");
                 self.report_inheritance(&ifqn, &action, c.span, "phpstanApi.interface", true, ctx);
             }
         }
         for used in &c.uses {
-            if let Some(ufqn) = self.resolve_if_phpstan(used, ctx)
+            if let Some(ufqn) = self.resolve_if_phpstan(used)
                 && self.registry.classes.contains_key(ufqn.as_str())
             {
                 // Real `ApiTraitUseRule` flags trait use
@@ -914,7 +902,7 @@ impl<'a> Walker<'a> {
         for cst in &c.consts {
             self.check_expr(&cst.value, ctx, &empty, &fqn);
         }
-        self.current_prop_types = class_prop_types(c, ctx);
+        self.current_prop_types = class_prop_types(c);
         self.current_class_implements_phpstan_interface =
             class_implements_phpstan_interface(&fqn, self.registry);
         self.current_class_fqn = Some(fqn.clone());
@@ -928,15 +916,15 @@ impl<'a> Walker<'a> {
     }
 
     fn check_enum(&mut self, e: &ClassDecl, ctx: &NameContext) {
-        let fqn = ctx.declared_name(class_decl_name(e));
+        let fqn = declared_class_name(e);
         for iface in &e.implements {
-            if let Some(ifqn) = self.resolve_if_phpstan(iface, ctx) {
+            if let Some(ifqn) = self.resolve_if_phpstan(iface) {
                 let action = format!("implementing {ifqn}");
                 self.report_inheritance(&ifqn, &action, e.span, "phpstanApi.interface", true, ctx);
             }
         }
         for used in &e.uses {
-            if let Some(ufqn) = self.resolve_if_phpstan(used, ctx)
+            if let Some(ufqn) = self.resolve_if_phpstan(used)
                 && self.registry.classes.contains_key(ufqn.as_str())
             {
                 let action = format!("using trait {ufqn}");
@@ -996,13 +984,16 @@ impl<'a> Walker<'a> {
 
     /// `OldPhpParser4ClassRule`'s own reporting half - the
     /// name-mapping lookup itself lives in `OLD_PHP_PARSER_4_CLASS_NAMES`.
-    /// `name` is the as-written reference text (matches real PHPStan's
-    /// own `$node->toString()` in the reported message).
-    fn check_old_php_parser4_class(&mut self, name: &str, span: Span) {
+    /// The message names the resolved class, as real PHPStan's
+    /// `$node->toString()` of a resolved name does.
+    fn check_old_php_parser4_class(&mut self, name: &QualifiedName, span: Span) {
         if !self.current_class_implements_phpstan_interface {
             return;
         }
-        let lower = name.trim_start_matches('\\').to_ascii_lowercase();
+        let Some(name) = name.resolved_class() else {
+            return;
+        };
+        let lower = name.to_ascii_lowercase();
         let Some((_, new_name)) = OLD_PHP_PARSER_4_CLASS_NAMES
             .iter()
             .find(|(old, _)| *old == lower)
@@ -1023,14 +1014,14 @@ impl<'a> Walker<'a> {
     }
 
     /// `RuntimeReflectionFunctionRule`'s own reporting half.
-    fn check_runtime_reflection_function(&mut self, name: &str, span: Span) {
+    fn check_runtime_reflection_function(&mut self, name: &QualifiedName, span: Span) {
         if !self.current_class_implements_phpstan_interface {
             return;
         }
-        let bare = name.rsplit('\\').next().unwrap_or(name);
+        let resolved = self.registry.called_function_name(name);
         let Some(matched) = RUNTIME_REFLECTION_FUNCTIONS
             .iter()
-            .find(|f| bare.eq_ignore_ascii_case(f))
+            .find(|f| resolved.eq_ignore_ascii_case(f))
         else {
             return;
         };
@@ -1040,16 +1031,13 @@ impl<'a> Walker<'a> {
     }
 
     /// `RuntimeReflectionInstantiationRule`'s own reporting half.
-    fn check_runtime_reflection_instantiation(
-        &mut self,
-        name: &str,
-        ctx: &NameContext,
-        span: Span,
-    ) {
+    fn check_runtime_reflection_instantiation(&mut self, name: &QualifiedName, span: Span) {
         if !self.current_class_implements_phpstan_interface {
             return;
         }
-        let resolved = ctx.resolve(name);
+        let Some(resolved) = name.resolved_class() else {
+            return;
+        };
         let Some(matched) = RUNTIME_REFLECTION_CLASSES
             .iter()
             .find(|c| resolved.eq_ignore_ascii_case(c))
@@ -1203,8 +1191,8 @@ impl<'a> Walker<'a> {
             ExprKind::New(callee, args) => {
                 if let ExprKind::Name(n) = &callee.kind {
                     self.check_old_php_parser4_class(n, e.span);
-                    self.check_runtime_reflection_instantiation(n, ctx, e.span);
-                    if let Some(fqn) = self.resolve_if_phpstan(n, ctx)
+                    self.check_runtime_reflection_instantiation(n, e.span);
+                    if let Some(fqn) = self.resolve_if_phpstan(n)
                         && let Some(info) = self.registry.classes.get(fqn.as_str())
                     {
                         // Real PHPStan's own `ApiInstantiationRule`
@@ -1246,10 +1234,11 @@ impl<'a> Walker<'a> {
                 // dynamic receiver has no name to resolve here (this
                 // pass has no type-inference machinery of its own to
                 // fall back on, unlike `check_static_call`'s own real
-                // resolution) - `unwrap_or("?")` matches the identical
-                // "unresolvable" outcome the parser's old permanent `"?"`
-                // sentinel already produced for this exact case.
-                if let Some(fqn) = self.resolve_class_name(target.as_name().unwrap_or("?"), ctx) {
+                // resolution).
+                if let Some(fqn) = target
+                    .as_name()
+                    .and_then(|name| self.resolve_class_name(name))
+                {
                     self.report_static_method_not_covered(&fqn, method, e.span, ctx);
                 }
                 for a in args {
@@ -1270,7 +1259,7 @@ impl<'a> Walker<'a> {
                 } else {
                     ""
                 };
-                if let Some(fqn) = self.resolve_if_phpstan(class_name, ctx) {
+                if let Some(fqn) = self.resolve_if_phpstan(class_name) {
                     let action = format!("accessing {fqn}::{sigil}{member}");
                     self.report_not_covered(&fqn, &action, e.span, "phpstanApi.classConstant", ctx);
                 }
@@ -1307,12 +1296,12 @@ impl<'a> Walker<'a> {
                 // this separate walker, so the "already provably true/
                 // false"/"static type already narrows" suppressions real
                 // PHPStan also applies aren't replicated here.
-                if let Some(fqn) = self.resolve_if_phpstan(n, ctx) {
+                if let Some(fqn) = self.resolve_if_phpstan(n) {
                     // Independent of `@api` status entirely -
                     // see `check_instanceof_deprecated`'s own doc comment.
                     self.check_instanceof_deprecated(&fqn, e.span);
                 }
-                if let Some(fqn) = self.resolve_if_phpstan(n, ctx)
+                if let Some(fqn) = self.resolve_if_phpstan(n)
                     && let Some(info) = self.registry.classes.get(fqn.as_str())
                 {
                     if !info.is_api() {
@@ -1349,13 +1338,13 @@ impl<'a> Walker<'a> {
                             .map(|ty| (u.name.to_string(), ty.clone()))
                     })
                     .collect();
-                let nested = param_types_with(&captured, params, ctx);
+                let nested = param_types_with(&captured, params);
                 for s in body {
                     self.check_stmt(s, ctx, &nested, label);
                 }
             }
             ExprKind::ArrowFn { params, body, .. } => {
-                let nested = param_types_with(param_types, params, ctx);
+                let nested = param_types_with(param_types, params);
                 self.check_expr(body, ctx, &nested, label);
             }
             _ => {

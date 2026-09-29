@@ -241,7 +241,7 @@ impl NameContext {
     /// Returns the primary candidate to look up first, plus a
     /// global-namespace fallback candidate when that rule could apply
     /// (namespaced file, unqualified name, no matching import).
-    pub fn resolve_function_candidates(&self, name: &str) -> (String, Option<String>) {
+    fn resolve_function_candidates(&self, name: &str) -> (String, Option<String>) {
         self.resolve_with_global_fallback(name, UseKind::Function)
     }
 
@@ -249,7 +249,7 @@ impl NameContext {
     /// PHP applies the identical current-namespace-then-global fallback
     /// to an unqualified constant, but matches it against `use const`
     /// imports, never `use function` ones.
-    pub fn resolve_constant_candidates(&self, name: &str) -> (String, Option<String>) {
+    fn resolve_constant_candidates(&self, name: &str) -> (String, Option<String>) {
         self.resolve_with_global_fallback(name, UseKind::Const)
     }
 
@@ -303,11 +303,7 @@ impl Resolver {
     }
 
     fn class(&self, name: &mut QualifiedName) {
-        name.resolved = if is_class_keyword(&name.written) {
-            ResolvedName::Unresolved
-        } else {
-            ResolvedName::Exact(self.ctx.resolve(&name.written).into())
-        };
+        resolve_class_name(name, &self.ctx);
     }
 
     fn function(&self, name: &mut QualifiedName) {
@@ -379,6 +375,16 @@ impl Resolver {
             StaticTarget::Expr(e) => self.visit_expr(e),
         }
     }
+}
+
+/// Fills in `name`'s resolution as a class name in `ctx`, for a name
+/// parsed apart from the file it belongs to.
+pub fn resolve_class_name(name: &mut QualifiedName, ctx: &NameContext) {
+    name.resolved = if is_class_keyword(&name.written) {
+        ResolvedName::Unresolved
+    } else {
+        ResolvedName::Exact(ctx.resolve(&name.written).into())
+    };
 }
 
 /// `self`, `parent` and `static` name a class relative to where they

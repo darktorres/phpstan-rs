@@ -45,7 +45,16 @@ fn collect_declared<'a>(
                         Declared {
                             name_span: c.name_span,
                             span: stmt.span,
-                            attributes: c.attrs.iter().map(|a| ctx.resolve(&a.name)).collect(),
+                            attributes: c
+                                .attrs
+                                .iter()
+                                .map(|a| {
+                                    a.name
+                                        .resolved_class()
+                                        .unwrap_or(&a.name.written)
+                                        .to_string()
+                                })
+                                .collect(),
                             public_methods: c
                                 .methods
                                 .iter()

@@ -107,7 +107,7 @@ impl<'a> Checker<'a> {
     /// constant.
     pub(crate) fn check_unknown_global_constant(
         &mut self,
-        name: &str,
+        name: &QualifiedName,
         locals: &crate::checker::Locals,
         span: Span,
     ) {
@@ -122,12 +122,9 @@ impl<'a> Checker<'a> {
         {
             return;
         }
-        let (primary, fallback) = self.name_ctx.resolve_constant_candidates(name);
+        let (primary, fallback) = name.candidates();
         let guarded = |n: &str| locals.guarded_constants.contains(n);
-        if guarded(bare)
-            || guarded(primary.trim_start_matches('\\'))
-            || fallback.as_deref().is_some_and(guarded)
-        {
+        if guarded(bare) || guarded(primary) || fallback.is_some_and(guarded) {
             return;
         }
         self.report(

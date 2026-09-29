@@ -4,6 +4,12 @@ use syntax::intern::intern;
 use syntax::name_resolution::NameContext;
 use types::Type;
 
+/// The class a class name written in code names; a name resolution
+/// leaves unresolved (`self`, `parent`, `static`) as written.
+pub(crate) fn class_ref(name: &syntax::ast::QualifiedName) -> Arc<str> {
+    intern(name.resolved_class().unwrap_or(&name.written))
+}
+
 /// `ty` with every class name resolved as `ctx` resolves it.
 pub(crate) fn resolve_names_in_type(ty: Type, ctx: &NameContext) -> Type {
     ty.map_class_names(&mut |name| resolve_class_name(name, ctx))

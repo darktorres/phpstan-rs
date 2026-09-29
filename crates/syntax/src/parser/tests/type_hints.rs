@@ -45,7 +45,7 @@ fn class_names_skip_keyword_types_and_carry_their_own_spans() {
     let names: Vec<(&str, String)> = hint
         .class_names()
         .into_iter()
-        .map(|(name, span)| (name, text_at(src, span)))
+        .map(|(name, span)| (&*name.written, text_at(src, span)))
         .collect();
     assert_eq!(
         names,

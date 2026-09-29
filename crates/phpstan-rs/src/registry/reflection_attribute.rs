@@ -4,9 +4,9 @@
 
 use std::sync::Arc;
 
+use crate::registry::name_context::class_ref;
 use syntax::ast::{Arg, Attribute, BinOp, Expr, ExprKind, Literal, StaticTarget, UnaryOp};
 use syntax::intern::intern;
-use syntax::name_resolution::NameContext;
 
 /// One attribute on a declaration.
 #[derive(Debug, Clone, PartialEq)]
@@ -48,23 +48,19 @@ pub enum AttributeValue {
 }
 
 impl ReflectionAttribute {
-    /// `attribute` as written in the scope `ctx` resolves names in.
-    pub(crate) fn from_ast(attribute: &Attribute, ctx: &NameContext) -> ReflectionAttribute {
+    /// `attribute` as written, its names resolved.
+    pub(crate) fn from_ast(attribute: &Attribute) -> ReflectionAttribute {
         ReflectionAttribute {
-            name: intern(&ctx.resolve(&attribute.name)),
-            arguments: attribute
-                .args
-                .iter()
-                .map(|arg| argument(arg, ctx))
-                .collect(),
+            name: class_ref(&attribute.name),
+            arguments: attribute.args.iter().map(argument).collect(),
         }
     }
 
-    /// Every attribute in `attributes`, resolved in `ctx`.
-    pub(crate) fn all(attributes: &[Attribute], ctx: &NameContext) -> Vec<ReflectionAttribute> {
+    /// Every attribute in `attributes`.
+    pub(crate) fn all(attributes: &[Attribute]) -> Vec<ReflectionAttribute> {
         attributes
             .iter()
-            .map(|a| ReflectionAttribute::from_ast(a, ctx))
+            .map(ReflectionAttribute::from_ast)
             .collect()
     }
 
@@ -101,18 +97,18 @@ impl ReflectionAttribute {
     }
 }
 
-fn argument(arg: &Arg, ctx: &NameContext) -> AttributeArgument {
+fn argument(arg: &Arg) -> AttributeArgument {
     AttributeArgument {
         name: arg.name.as_deref().map(intern),
         value: if arg.spread {
             AttributeValue::Unsupported
         } else {
-            value(&arg.value, ctx)
+            value(&arg.value)
         },
     }
 }
 
-fn value(expr: &Expr, ctx: &NameContext) -> AttributeValue {
+fn value(expr: &Expr) -> AttributeValue {
     let expr = expr.peeled();
     syntax::stack::guard(|| match &expr.kind {
         ExprKind::Literal(Literal::Null) => AttributeValue::Null,
@@ -122,7 +118,7 @@ fn value(expr: &Expr, ctx: &NameContext) -> AttributeValue {
         ExprKind::Literal(Literal::String(s)) => {
             AttributeValue::String(Arc::from(&*s.to_str_lossy()))
         }
-        ExprKind::Unary(UnaryOp::Neg, inner) => match value(inner, ctx) {
+        ExprKind::Unary(UnaryOp::Neg, inner) => match value(inner) {
             AttributeValue::Int(i) => AttributeValue::Int(i.wrapping_neg()),
             AttributeValue::Float(f) => AttributeValue::Float(-f),
             _ => AttributeValue::Unsupported,
@@ -134,11 +130,11 @@ fn value(expr: &Expr, ctx: &NameContext) -> AttributeValue {
             _ => AttributeValue::Constant(intern(name)),
         },
         ExprKind::ClassNameFetch(StaticTarget::Name(class, _)) => {
-            AttributeValue::ClassName(intern(&ctx.resolve(class)))
+            AttributeValue::ClassName(class_ref(class))
         }
         ExprKind::ClassConstFetch(StaticTarget::Name(class, _), name) => {
             AttributeValue::ClassConstant {
-                class: intern(&ctx.resolve(class)),
+                class: class_ref(class),
                 name: intern(name),
             }
         }
@@ -149,14 +145,14 @@ fn value(expr: &Expr, ctx: &NameContext) -> AttributeValue {
             AttributeValue::Array(
                 items
                     .iter()
-                    .map(|i| (i.key.as_ref().map(|k| value(k, ctx)), value(&i.value, ctx)))
+                    .map(|i| (i.key.as_ref().map(value), value(&i.value)))
                     .collect(),
             )
         }
         ExprKind::Binary(BinOp::BitOr, left, right) => {
             let mut operands = Vec::new();
             for side in [left, right] {
-                match value(side, ctx) {
+                match value(side) {
                     AttributeValue::BitOr(inner) => operands.extend(inner),
                     other => operands.push(other),
                 }

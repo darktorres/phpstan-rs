@@ -3,7 +3,6 @@ use std::sync::Arc;
 
 use syntax::ast::*;
 use syntax::intern::intern;
-use syntax::name_resolution::NameContext;
 use syntax::visit::{any_child_expr, any_child_stmt};
 
 // ---------------------------------------------------------------------
@@ -43,23 +42,24 @@ pub(crate) struct MemberUsage {
 }
 
 /// Whether `class_ref` (the class name half of a `Foo::bar`/`self::bar`/
-/// `static::bar` expression, exactly as written in source) refers to the
-/// class currently being scanned - `self`/`static` always do (a private
-/// member is only ever reachable from inside its own declaring class to
-/// begin with, so late static binding through `static::` can't actually
-/// reach a *different* class's private member); anything else is resolved
-/// through the same file-local `use`-import table every other class/
-/// function reference in this checker goes through, so an explicit
-/// same-class self-reference (`Foo::BAR` written inside `Foo` itself,
-/// unusual but legal) is still recognized.
-fn class_ref_is_self(class_ref: &str, fqn: &str, ctx: &NameContext) -> bool {
-    class_ref == "self" || class_ref == "static" || ctx.resolve(class_ref) == fqn
+/// `static::bar` expression) refers to the class currently being
+/// scanned - `self`/`static` always do (a private member is only ever
+/// reachable from inside its own declaring class to begin with, so late
+/// static binding through `static::` can't actually reach a *different*
+/// class's private member); an explicit same-class reference (`Foo::BAR`
+/// written inside `Foo` itself, unusual but legal) does too.
+fn class_ref_is_self(class_ref: &QualifiedName, fqn: &str) -> bool {
+    class_ref.is_keyword("self")
+        || class_ref.is_keyword("static")
+        || class_ref
+            .resolved_class()
+            .is_some_and(|resolved| resolved.eq_ignore_ascii_case(fqn))
 }
 
-fn target_is_self(target: &StaticTarget, fqn: &str, ctx: &NameContext) -> bool {
+fn target_is_self(target: &StaticTarget, fqn: &str) -> bool {
     target
         .as_name()
-        .is_some_and(|class_ref| class_ref_is_self(class_ref, fqn, ctx))
+        .is_some_and(|class_ref| class_ref_is_self(class_ref, fqn))
 }
 
 /// A method name as `MemberUsage::methods` holds it: PHP method names are
@@ -85,9 +85,9 @@ fn is_this_or_aliased(e: &Expr, usage: &MemberUsage) -> bool {
 /// `new self(...)`/`new static(...)`/`new <SameClass>(...)` - the
 /// declaration-based half of `MemberUsage::aliases`'s detection, paired
 /// with the `Assign` arm below.
-fn is_new_self_instance(e: &Expr, fqn: &str, ctx: &NameContext) -> bool {
+fn is_new_self_instance(e: &Expr, fqn: &str) -> bool {
     matches!(&e.kind, ExprKind::New(callee, _)
-        if matches!(&callee.kind, ExprKind::Name(class_ref) if class_ref_is_self(class_ref, fqn, ctx)))
+        if matches!(&callee.kind, ExprKind::Name(class_ref) if class_ref_is_self(class_ref, fqn)))
 }
 
 /// Marks `l` - the left-hand side of an `Assign`/`CompoundAssign` - as a
@@ -99,13 +99,7 @@ fn is_new_self_instance(e: &Expr, fqn: &str, ctx: &NameContext) -> bool {
 /// only ever mutated in place might go unreported as "never written", but
 /// this can never *cause* a false "unused"/"only written" report, since
 /// falling back to a plain read only ever adds usage, never removes it.
-fn mark_write_target(
-    l: &Expr,
-    fqn: &str,
-    ctx: &NameContext,
-    usage: &mut MemberUsage,
-    also_read: bool,
-) -> bool {
+fn mark_write_target(l: &Expr, fqn: &str, usage: &mut MemberUsage, also_read: bool) -> bool {
     match &l.kind {
         ExprKind::PropertyAccess(base, name, _) if is_this_or_aliased(base, usage) => {
             usage.writes.insert(intern(&name.name));
@@ -114,7 +108,7 @@ fn mark_write_target(
             }
             true
         }
-        ExprKind::StaticPropertyFetch(target, prop) if target_is_self(target, fqn, ctx) => {
+        ExprKind::StaticPropertyFetch(target, prop) if target_is_self(target, fqn) => {
             usage.writes.insert(intern(&prop.name));
             if also_read {
                 usage.reads.insert(intern(&prop.name));
@@ -125,31 +119,29 @@ fn mark_write_target(
     }
 }
 
-fn walk_stmt_for_members(stmt: &Stmt, fqn: &str, ctx: &NameContext, usage: &mut MemberUsage) {
+fn walk_stmt_for_members(stmt: &Stmt, fqn: &str, usage: &mut MemberUsage) {
     syntax::stack::guard(|| {
         match &stmt.kind {
-            StmtKind::Expression(e) | StmtKind::Throw(e) => {
-                walk_expr_for_members(e, fqn, ctx, usage)
-            }
-            StmtKind::Return(Some(e)) => walk_expr_for_members(e, fqn, ctx, usage),
+            StmtKind::Expression(e) | StmtKind::Throw(e) => walk_expr_for_members(e, fqn, usage),
+            StmtKind::Return(Some(e)) => walk_expr_for_members(e, fqn, usage),
             StmtKind::Echo(exprs) | StmtKind::Unset(exprs) => {
                 for e in exprs {
-                    walk_expr_for_members(e, fqn, ctx, usage);
+                    walk_expr_for_members(e, fqn, usage);
                 }
             }
             StmtKind::If(if_stmt) => {
                 for cond in if_stmt.conditions() {
-                    walk_expr_for_members(cond, fqn, ctx, usage);
+                    walk_expr_for_members(cond, fqn, usage);
                 }
             }
             StmtKind::While { cond, .. } | StmtKind::DoWhile { cond, .. } => {
-                walk_expr_for_members(cond, fqn, ctx, usage)
+                walk_expr_for_members(cond, fqn, usage)
             }
             StmtKind::For {
                 init, cond, step, ..
             } => {
                 for e in init.iter().chain(cond).chain(step) {
-                    walk_expr_for_members(e, fqn, ctx, usage);
+                    walk_expr_for_members(e, fqn, usage);
                 }
             }
             StmtKind::Foreach {
@@ -158,47 +150,42 @@ fn walk_stmt_for_members(stmt: &Stmt, fqn: &str, ctx: &NameContext, usage: &mut 
                 value,
                 ..
             } => {
-                walk_expr_for_members(subject, fqn, ctx, usage);
+                walk_expr_for_members(subject, fqn, usage);
                 if let Some(k) = key {
-                    walk_expr_for_members(k, fqn, ctx, usage);
+                    walk_expr_for_members(k, fqn, usage);
                 }
-                walk_expr_for_members(value, fqn, ctx, usage);
+                walk_expr_for_members(value, fqn, usage);
             }
             StmtKind::GlobalConst(consts) => {
                 for c in consts {
-                    walk_expr_for_members(&c.value, fqn, ctx, usage);
+                    walk_expr_for_members(&c.value, fqn, usage);
                 }
             }
             StmtKind::StaticVar(vars) => {
                 for (_, d) in vars {
                     if let Some(e) = d {
-                        walk_expr_for_members(e, fqn, ctx, usage);
+                        walk_expr_for_members(e, fqn, usage);
                     }
                 }
             }
             StmtKind::Switch { subject, cases } => {
-                walk_expr_for_members(subject, fqn, ctx, usage);
+                walk_expr_for_members(subject, fqn, usage);
                 for case in cases {
                     if let Some(t) = &case.test {
-                        walk_expr_for_members(t, fqn, ctx, usage);
+                        walk_expr_for_members(t, fqn, usage);
                     }
                 }
             }
             _ => {}
         }
         any_child_stmt(stmt, |child| {
-            walk_stmt_for_members(child, fqn, ctx, usage);
+            walk_stmt_for_members(child, fqn, usage);
             false
         });
     })
 }
 
-pub(crate) fn walk_expr_for_members(
-    expr: &Expr,
-    fqn: &str,
-    ctx: &NameContext,
-    usage: &mut MemberUsage,
-) {
+pub(crate) fn walk_expr_for_members(expr: &Expr, fqn: &str, usage: &mut MemberUsage) {
     syntax::stack::guard(|| {
         match &expr.kind {
             // Handled explicitly (and `return`s below, skipping the generic
@@ -208,25 +195,25 @@ pub(crate) fn walk_expr_for_members(
             // through to the generic `PropertyAccess`/`ClassConstFetch`/`StaticPropertyFetch` arms
             // further down would.
             ExprKind::Assign(l, r) | ExprKind::AssignRef(l, r) => {
-                walk_expr_for_members(r, fqn, ctx, usage);
+                walk_expr_for_members(r, fqn, usage);
                 // `$var = new self()`/`new static()`/`new <SameClass>()` -
                 // see `MemberUsage::aliases`'s own doc comment. Moot for
                 // `AssignRef` in practice (real PHP rejects `=& new ...`),
                 // but harmless to still check.
                 if let ExprKind::Variable(name) = &l.kind
-                    && is_new_self_instance(r, fqn, ctx)
+                    && is_new_self_instance(r, fqn)
                 {
                     usage.aliases.insert(name.clone());
                 }
-                if !mark_write_target(l, fqn, ctx, usage, false) {
-                    walk_expr_for_members(l, fqn, ctx, usage);
+                if !mark_write_target(l, fqn, usage, false) {
+                    walk_expr_for_members(l, fqn, usage);
                 }
                 return;
             }
             ExprKind::CompoundAssign(_, l, r) => {
-                walk_expr_for_members(r, fqn, ctx, usage);
-                if !mark_write_target(l, fqn, ctx, usage, true) {
-                    walk_expr_for_members(l, fqn, ctx, usage);
+                walk_expr_for_members(r, fqn, usage);
+                if !mark_write_target(l, fqn, usage, true) {
+                    walk_expr_for_members(l, fqn, usage);
                 }
                 return;
             }
@@ -243,7 +230,7 @@ pub(crate) fn walk_expr_for_members(
             // positives" default.
             ExprKind::Instanceof(inner, InstanceofTarget::Name(class_ref, _)) => {
                 if let ExprKind::Variable(name) = &inner.kind
-                    && class_ref_is_self(class_ref, fqn, ctx)
+                    && class_ref_is_self(class_ref, fqn)
                 {
                     usage.aliases.insert(name.clone());
                 }
@@ -253,18 +240,18 @@ pub(crate) fn walk_expr_for_members(
             // skipped (see `MemberUsage`'s own doc comment).
             ExprKind::DynamicStaticPropertyFetch(..) => usage.escaped = true,
             ExprKind::StaticPropertyFetch(target, prop) => {
-                if target_is_self(target, fqn, ctx) {
+                if target_is_self(target, fqn) {
                     usage.reads.insert(intern(&prop.name));
                 }
             }
             ExprKind::ClassConstFetch(target, member) => {
-                if target_is_self(target, fqn, ctx) {
+                if target_is_self(target, fqn) {
                     usage.consts.insert(intern(&member.name));
                 }
             }
             ExprKind::DynamicClassConstFetch(target, name) => match &name.kind {
                 ExprKind::Literal(Literal::String(member)) => {
-                    if target_is_self(target, fqn, ctx) {
+                    if target_is_self(target, fqn) {
                         usage.consts.insert(Arc::from(&*member.to_str_lossy()));
                     }
                 }
@@ -273,7 +260,7 @@ pub(crate) fn walk_expr_for_members(
             ExprKind::MethodCall(recv, name, ..) if is_this_or_aliased(recv, usage) => {
                 usage.methods.insert(method_key(&name.name));
             }
-            ExprKind::StaticCall(target, name, _) if target_is_self(target, fqn, ctx) => {
+            ExprKind::StaticCall(target, name, _) if target_is_self(target, fqn) => {
                 usage.methods.insert(method_key(&name.name));
             }
             // `$obj->{$expr}` / `$obj->$name(...)` - a fully dynamic member
@@ -296,7 +283,7 @@ pub(crate) fn walk_expr_for_members(
                     && !b.spread
                     && (is_this_or_aliased(&a.value, usage)
                         || matches!(&a.value.kind, ExprKind::ClassNameFetch(target)
-                            if target_is_self(target, fqn, ctx)))
+                            if target_is_self(target, fqn)))
                     && let ExprKind::Literal(Literal::String(name)) = &b.value.kind
                 {
                     usage.methods.insert(method_key(&name.to_str_lossy()));
@@ -314,19 +301,19 @@ pub(crate) fn walk_expr_for_members(
             ExprKind::Closure { params, body, .. } => {
                 for p in params {
                     if let Some(d) = &p.default {
-                        walk_expr_for_members(d, fqn, ctx, usage);
+                        walk_expr_for_members(d, fqn, usage);
                     }
                 }
-                walk_stmt_body_for_members(body, fqn, ctx, usage);
+                walk_stmt_body_for_members(body, fqn, usage);
                 return;
             }
             ExprKind::ArrowFn { params, body, .. } => {
                 for p in params {
                     if let Some(d) = &p.default {
-                        walk_expr_for_members(d, fqn, ctx, usage);
+                        walk_expr_for_members(d, fqn, usage);
                     }
                 }
-                walk_expr_for_members(body, fqn, ctx, usage);
+                walk_expr_for_members(body, fqn, usage);
                 return;
             }
             // The anonymous class's own constructor `args` genuinely run in
@@ -340,14 +327,14 @@ pub(crate) fn walk_expr_for_members(
             // the anonymous class).
             ExprKind::NewAnonymousClass(_, args) => {
                 for a in args {
-                    walk_expr_for_members(&a.value, fqn, ctx, usage);
+                    walk_expr_for_members(&a.value, fqn, usage);
                 }
                 return;
             }
             _ => {}
         }
         any_child_expr(expr, |child| {
-            walk_expr_for_members(child, fqn, ctx, usage);
+            walk_expr_for_members(child, fqn, usage);
             false
         });
     })
@@ -356,28 +343,22 @@ pub(crate) fn walk_expr_for_members(
 pub(crate) fn walk_property_hooks_for_members(
     hooks: &PropertyHooks,
     fqn: &str,
-    ctx: &NameContext,
     usage: &mut MemberUsage,
 ) {
     if let Some(body) = &hooks.get {
-        walk_hook_body_for_members(body, fqn, ctx, usage);
+        walk_hook_body_for_members(body, fqn, usage);
     }
     if let Some((_, body)) = &hooks.set {
-        walk_hook_body_for_members(body, fqn, ctx, usage);
+        walk_hook_body_for_members(body, fqn, usage);
     }
 }
 
-fn walk_hook_body_for_members(
-    body: &PropertyHookBody,
-    fqn: &str,
-    ctx: &NameContext,
-    usage: &mut MemberUsage,
-) {
+fn walk_hook_body_for_members(body: &PropertyHookBody, fqn: &str, usage: &mut MemberUsage) {
     match body {
-        PropertyHookBody::Arrow(e) => walk_expr_for_members(e, fqn, ctx, usage),
+        PropertyHookBody::Arrow(e) => walk_expr_for_members(e, fqn, usage),
         PropertyHookBody::Block(stmts) => {
             for s in stmts {
-                walk_stmt_for_members(s, fqn, ctx, usage);
+                walk_stmt_for_members(s, fqn, usage);
             }
         }
         PropertyHookBody::Abstract => {}
@@ -400,14 +381,9 @@ pub(crate) fn hook_read_write_shape(hooks: Option<&PropertyHooks>) -> (bool, boo
     }
 }
 
-pub(crate) fn walk_stmt_body_for_members(
-    body: &[Stmt],
-    fqn: &str,
-    ctx: &NameContext,
-    usage: &mut MemberUsage,
-) {
+pub(crate) fn walk_stmt_body_for_members(body: &[Stmt], fqn: &str, usage: &mut MemberUsage) {
     for stmt in body {
-        walk_stmt_for_members(stmt, fqn, ctx, usage);
+        walk_stmt_for_members(stmt, fqn, usage);
     }
 }
 
@@ -419,19 +395,14 @@ pub(crate) fn walk_stmt_body_for_members(
 /// (`?self`) or union (`self|null`) type hint is skipped, matching this
 /// project's existing "conservative when the shape gets more complex"
 /// direction elsewhere in this same file.
-pub(crate) fn seed_self_typed_param_aliases(
-    params: &[Param],
-    fqn: &str,
-    ctx: &NameContext,
-    usage: &mut MemberUsage,
-) {
+pub(crate) fn seed_self_typed_param_aliases(params: &[Param], fqn: &str, usage: &mut MemberUsage) {
     for p in params {
-        if p.type_hint
-            .as_ref()
-            .map(TypeHint::to_string)
-            .as_deref()
-            .is_some_and(|t| class_ref_is_self(t, fqn, ctx))
-        {
+        let is_self = p.type_hint.as_ref().is_some_and(|hint| match &hint.kind {
+            TypeHintKind::Keyword(NativeType::SelfType | NativeType::Static, _) => true,
+            TypeHintKind::Name(name) => class_ref_is_self(name, fqn),
+            _ => false,
+        });
+        if is_self {
             usage.aliases.insert(p.name.clone());
         }
     }

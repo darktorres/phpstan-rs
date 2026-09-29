@@ -460,7 +460,8 @@ impl<'a> Checker<'a> {
                 // along with the tag (`{@inheritDoc}`).
                 let inherited = find_template_param(sig, subject);
                 if !templates.iter().any(|t| t == subject) && inherited.is_none() {
-                    let shown = self.resolve_type_hint(Some(subject));
+                    let shown = self
+                        .resolve_type_node(&phpdoc::grammar::TypeNode::Identifier(subject.into()));
                     self.report(format!(
                             "Conditional return type uses subject type {shown} which is not part of PHPDoc @template tags."
                         ),

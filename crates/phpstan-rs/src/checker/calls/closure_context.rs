@@ -109,9 +109,7 @@ impl<'a> Checker<'a> {
                 let mut arrow_locals = locals.clone();
                 for (p, override_ty) in params.iter().zip(param_overrides) {
                     let (ty, case_refs) = if p.type_hint.is_some() {
-                        self.resolve_type_hint_with_case_refs(
-                            p.type_hint.as_ref().map(TypeHint::to_string).as_deref(),
-                        )
+                        self.resolve_type_hint_with_case_refs(p.type_hint.as_ref())
                     } else {
                         (override_ty.clone(), Vec::new())
                     };
@@ -132,9 +130,8 @@ impl<'a> Checker<'a> {
                 }
                 let body_ty = self.check_expr(body, &mut arrow_locals, label);
                 if return_type.is_some() {
-                    let (expected, expected_case_refs) = self.resolve_type_hint_with_case_refs(
-                        return_type.as_deref().map(TypeHint::to_string).as_deref(),
-                    );
+                    let (expected, expected_case_refs) =
+                        self.resolve_type_hint_with_case_refs(return_type.as_deref());
                     self.check_type_class_names_exist(
                         &expected,
                         "return type of arrow function",
@@ -245,9 +242,7 @@ impl<'a> Checker<'a> {
                 let closure_label = format!("{label} (closure)");
                 for (p, override_ty) in params.iter().zip(param_overrides) {
                     let (ty, case_refs) = if p.type_hint.is_some() {
-                        self.resolve_type_hint_with_case_refs(
-                            p.type_hint.as_ref().map(TypeHint::to_string).as_deref(),
-                        )
+                        self.resolve_type_hint_with_case_refs(p.type_hint.as_ref())
                     } else {
                         (override_ty.clone(), Vec::new())
                     };
@@ -266,10 +261,8 @@ impl<'a> Checker<'a> {
                     closure_locals.declare(p.name.to_string(), ty, p.name_span);
                     closure_locals.set_native(&p.name, self.closure_param_native(p));
                 }
-                let (declared_return_ty, declared_return_case_refs) = self
-                    .resolve_type_hint_with_case_refs(
-                        return_type.as_deref().map(TypeHint::to_string).as_deref(),
-                    );
+                let (declared_return_ty, declared_return_case_refs) =
+                    self.resolve_type_hint_with_case_refs(return_type.as_deref());
                 let declared_return = Some(declared_return_ty);
                 self.check_type_class_names_exist(
                     declared_return.as_ref().unwrap_or(&Type::mixed()),

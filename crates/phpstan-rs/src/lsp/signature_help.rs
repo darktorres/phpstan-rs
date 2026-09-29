@@ -304,8 +304,7 @@ impl<'a> Walker<'a> {
                         *best = None;
                         if self.pos_past(callee.span.end)
                             && let ExprKind::Name(n) = &callee.kind
-                            && let Some(fqn) =
-                                resolve_class_ref(n, current_class, ctx, self.registry)
+                            && let Some(fqn) = resolve_class_ref(n, current_class, self.registry)
                             && self.registry.lookup_function(&fqn).is_some()
                         {
                             *best = Some(SigHelp {
@@ -325,8 +324,7 @@ impl<'a> Walker<'a> {
                         *best = None;
                         if self.pos_past(callee.span.end)
                             && let ExprKind::Name(n) = &callee.kind
-                            && let Some(fqn) =
-                                resolve_class_ref(n, current_class, ctx, self.registry)
+                            && let Some(fqn) = resolve_class_ref(n, current_class, self.registry)
                             && self
                                 .registry
                                 .lookup_method_with_owner(&fqn, "__construct")
@@ -411,7 +409,7 @@ impl<'a> Walker<'a> {
                         // `navigation.rs`'s own equivalent does).
                         if let Some(class) = target.as_name()
                             && let Some(fqn) =
-                                resolve_class_ref(class, current_class, ctx, self.registry)
+                                resolve_class_ref(class, current_class, self.registry)
                             && self.pos_past(member.span.end)
                         {
                             *best = Some(SigHelp {

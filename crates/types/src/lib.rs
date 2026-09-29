@@ -49,8 +49,8 @@ pub(crate) use intersection::intersect_types;
 pub use late::ClassConstants;
 pub use narrowing::comparison_narrowed_bounds;
 pub use numeric::{PhpNumber, numeric_value};
-pub use parse::{canonical_int_key, has_explicit_mixed_nested_somewhere};
-pub use parse::{parse_native_type_string, parse_type_string};
+pub use parse::{canonical_int_key, text_mentions_mixed};
+pub use parse::{native_type, parse_type_string};
 pub(crate) use php_float_format::format_php_float;
 pub use php_version::{
     KNOWN_PHP_VERSIONS, PhpFeature, PhpVersion, PhpVersions, known_php_versions_where,

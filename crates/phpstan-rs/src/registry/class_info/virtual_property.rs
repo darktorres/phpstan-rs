@@ -1,9 +1,7 @@
 use rustc_hash::FxHashMap;
 use std::sync::Arc;
 
-use crate::registry::function_sig::{mark_template_params, resolve_type};
-use crate::registry::name_context::{collect_class_name_case_refs, resolve_names_in_type};
-use syntax::ast::TypeHint;
+use crate::registry::function_sig::declared_type;
 use syntax::ast::{Expr, ExprKind, PropertyHookBody, PropertyHooks};
 use syntax::name_resolution::NameContext;
 use syntax::visit::{any_expr_in_body, any_expr_in_scope};
@@ -27,14 +25,8 @@ pub(crate) fn property_hook_set_type(
     let Some((Some(param), _)) = hooks.and_then(|h| h.set.as_ref()) else {
         return (None, Vec::new());
     };
-    let ty = resolve_type(
-        None,
-        param.type_hint.as_ref().map(TypeHint::to_string).as_deref(),
-    );
-    let ty = mark_template_params(ty, template_params);
-    let mut case_refs = Vec::new();
-    collect_class_name_case_refs(&ty, ctx, &mut case_refs);
-    (Some(resolve_names_in_type(ty, ctx)), case_refs)
+    let declared = declared_type(None, param.type_hint.as_ref(), template_params, ctx);
+    (Some(declared.ty), declared.case_refs)
 }
 
 /// Whether either hook of `hooks` references `$this->prop_name` anywhere

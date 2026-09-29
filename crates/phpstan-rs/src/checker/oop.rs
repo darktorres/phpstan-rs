@@ -911,7 +911,7 @@ impl<'a> Checker<'a> {
             let Some(raw_hint) = &c.type_hint else {
                 continue;
             };
-            let declared_ty = self.resolve_type_hint(Some(&raw_hint.to_string()));
+            let declared_ty = self.resolve_type_hint(Some(raw_hint));
             let value_ty = self.infer_expr(&c.value, &Locals::default());
             // `mixed` here almost always means "this checker
             // couldn't resolve it" (an unrecognized global constant,
@@ -1189,8 +1189,6 @@ impl<'a> Checker<'a> {
             let own_native = cc
                 .type_hint
                 .as_ref()
-                .map(TypeHint::to_string)
-                .as_deref()
                 .map(|h| self.resolve_type_hint(Some(h)));
             for trait_fqn in &all_traits {
                 let Some(trait_const) = self
@@ -1405,7 +1403,7 @@ impl<'a> Checker<'a> {
         for c in consts {
             let constant = format!("{fqn}::{}", c.name);
             self.check_type_declaration(
-                c.type_hint.as_ref().map(TypeHint::to_string).as_deref(),
+                c.type_hint.as_ref(),
                 crate::checker::type_declarations::TypePosition::ClassConstant(&constant),
                 c.type_hint.as_ref().map(|h| h.span).unwrap_or(c.span),
             );

@@ -197,11 +197,9 @@ impl<'a> Checker<'a> {
         }
     }
 
-    fn resolve_class_ref(&self, name: &str) -> String {
-        self.name_ctx
-            .resolve(name)
-            .trim_start_matches('\\')
-            .to_string()
+    fn resolve_class_ref(&self, name: &QualifiedName) -> String {
+        name.resolved_class()
+            .map_or_else(|| name.written.to_string(), str::to_string)
     }
 
     /// `UsedTraitsRule`, once per `use` statement: its traits, and the

@@ -1027,8 +1027,8 @@ impl<'a> Checker<'a> {
     /// `@phpstan-assert` is vanishingly rare in real code, so the
     /// `infer_expr` receiver-type recompute and `find_method_owner`'s
     /// hierarchy walk for `MethodCall`, `StaticCall`'s own
-    /// `lookup_method` walk, and `Call`'s `resolve_function_candidates` +
-    /// `lookup_function` would be wasted work on nearly every call site.
+    /// `lookup_method` walk, and `Call`'s `Registry::resolve_function`
+    /// would be wasted work on nearly every call site.
     /// `registry.names_with_assert_tags` (populated once, see its own
     /// doc comment) turns that into a single cheap set-membership check
     /// by the call's bare name before paying for any receiver-type
@@ -1065,12 +1065,8 @@ impl<'a> Checker<'a> {
                     if !self.registry.names_with_assert_tags.contains(bare) {
                         return;
                     }
-                    let (primary, fallback) = self.name_ctx.resolve_function_candidates(name);
-                    if let Some(sig) = self.registry.lookup_function(&primary).or_else(|| {
-                        fallback
-                            .as_deref()
-                            .and_then(|g| self.registry.lookup_function(g))
-                    }) && !sig.assert().is_empty()
+                    if let Some((_, sig)) = self.registry.resolve_function(name)
+                        && !sig.assert().is_empty()
                     {
                         self.apply_assert_infos(sig.assert(), sig, None, args, locals);
                     }

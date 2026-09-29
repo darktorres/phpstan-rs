@@ -9,7 +9,6 @@ use std::sync::Arc;
 
 use syntax::ast::{Attribute, Expr, ExprKind, Literal, StaticTarget};
 use syntax::intern::intern;
-use syntax::name_resolution::NameContext;
 
 /// `NamespaceVisibility`: callers must be in `namespace` (or, unless
 /// `exclude_sub_namespaces`, below it).
@@ -51,19 +50,19 @@ fn library_attribute(resolved: &str) -> Option<&str> {
         .then(|| resolved.rsplit('\\').next().unwrap_or(resolved))
 }
 
-fn class_names(args: &[Expr], ctx: &NameContext, out: &mut Vec<Arc<str>>) {
+fn class_names(args: &[Expr], out: &mut Vec<Arc<str>>) {
     syntax::stack::guard(|| {
         for arg in args {
             match &arg.kind {
                 ExprKind::ClassNameFetch(StaticTarget::Name(class, _)) => {
-                    out.push(intern(ctx.resolve(class).trim_start_matches('\\')));
+                    out.push(crate::registry::name_context::class_ref(class));
                 }
                 ExprKind::Literal(Literal::String(s)) => {
                     out.push(intern(s.to_str_lossy().trim_start_matches('\\')));
                 }
                 ExprKind::ArrayLiteral(items) => {
                     let values: Vec<Expr> = items.iter().map(|i| i.value.clone()).collect();
-                    class_names(&values, ctx, out);
+                    class_names(&values, out);
                 }
                 _ => {}
             }
@@ -71,30 +70,30 @@ fn class_names(args: &[Expr], ctx: &NameContext, out: &mut Vec<Arc<str>>) {
     })
 }
 
-pub(crate) fn access_attributes(attrs: &[Attribute], ctx: &NameContext) -> AccessAttributes {
+/// The access attributes among `attrs`, on a declaration in `namespace`.
+pub(crate) fn access_attributes(attrs: &[Attribute], namespace: &str) -> AccessAttributes {
     let mut out = AccessAttributes::default();
     for attribute in attrs {
-        let resolved = ctx.resolve(&attribute.name);
-        let Some(short) = library_attribute(&resolved) else {
+        let Some(short) = attribute.name.resolved_class().and_then(library_attribute) else {
             continue;
         };
         let values: Vec<Expr> = attribute.args.iter().map(|a| a.value.clone()).collect();
         match short {
-            "Friend" => class_names(&values, ctx, &mut out.friends),
-            "RestrictTraitTo" => class_names(&values, ctx, &mut out.restrict_trait_to),
-            "Sealed" => class_names(&values, ctx, &mut out.sealed),
+            "Friend" => class_names(&values, &mut out.friends),
+            "RestrictTraitTo" => class_names(&values, &mut out.restrict_trait_to),
+            "Sealed" => class_names(&values, &mut out.sealed),
             "TestTag" => out.test_only = true,
             "InjectableVersion" => out.injectable_version = true,
             "CheckInjectableVersion" => out.check_injectable_version = true,
             "Package" => {
                 out.namespace_visibility = Some(NamespaceVisibility {
-                    namespace: ctx.namespace().to_string(),
+                    namespace: namespace.to_string(),
                     exclude_sub_namespaces: true,
                 })
             }
             "NamespaceVisibility" => {
                 let mut visibility = NamespaceVisibility {
-                    namespace: ctx.namespace().to_string(),
+                    namespace: namespace.to_string(),
                     exclude_sub_namespaces: false,
                 };
                 for arg in &attribute.args {
@@ -127,9 +126,8 @@ pub(crate) fn access_attributes(attrs: &[Attribute], ctx: &NameContext) -> Acces
 }
 
 /// Whether `attrs` includes the library's `MustUseResult`.
-pub(crate) fn has_must_use_result(attrs: &[Attribute], ctx: &NameContext) -> bool {
-    attrs.iter().any(|a| {
-        let resolved = ctx.resolve(&a.name);
-        library_attribute(&resolved) == Some("MustUseResult")
-    })
+pub(crate) fn has_must_use_result(attrs: &[Attribute]) -> bool {
+    attrs
+        .iter()
+        .any(|a| a.name.resolved_class().and_then(library_attribute) == Some("MustUseResult"))
 }

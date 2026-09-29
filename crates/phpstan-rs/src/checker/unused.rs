@@ -164,7 +164,7 @@ impl<'a> Checker<'a> {
         let ctor = methods.iter().find(|m| m.function.is_constructor());
         for m in methods {
             usage.aliases.clear();
-            seed_self_typed_param_aliases(&m.function.params, fqn, &self.name_ctx, &mut usage);
+            seed_self_typed_param_aliases(&m.function.params, fqn, &mut usage);
             // Two passes over the same body, same accumulator: pass 1
             // fully populates `usage.aliases` (detecting a same-class
             // `new self()` assignment or `instanceof self` check doesn't
@@ -175,8 +175,8 @@ impl<'a> Checker<'a> {
             // it textually precedes the statement that established the
             // alias. HashSet inserts are idempotent, so the redundant work
             // in pass 1's own read/write/method accounting is harmless.
-            walk_stmt_body_for_members(&m.function.body, fqn, &self.name_ctx, &mut usage);
-            walk_stmt_body_for_members(&m.function.body, fqn, &self.name_ctx, &mut usage);
+            walk_stmt_body_for_members(&m.function.body, fqn, &mut usage);
+            walk_stmt_body_for_members(&m.function.body, fqn, &mut usage);
         }
         if let Some(ctor) = ctor {
             for p in &ctor.function.params {
@@ -186,29 +186,29 @@ impl<'a> Checker<'a> {
                     // can appear in one, so `usage.aliases` can never be
                     // populated here; cleared anyway.
                     usage.aliases.clear();
-                    walk_expr_for_members(d, fqn, &self.name_ctx, &mut usage);
+                    walk_expr_for_members(d, fqn, &mut usage);
                 }
                 if let Some(hooks) = &p.hooks {
                     usage.aliases.clear();
-                    walk_property_hooks_for_members(hooks, fqn, &self.name_ctx, &mut usage);
-                    walk_property_hooks_for_members(hooks, fqn, &self.name_ctx, &mut usage);
+                    walk_property_hooks_for_members(hooks, fqn, &mut usage);
+                    walk_property_hooks_for_members(hooks, fqn, &mut usage);
                 }
             }
         }
         for p in properties {
             if let Some(d) = &p.default {
                 usage.aliases.clear();
-                walk_expr_for_members(d, fqn, &self.name_ctx, &mut usage);
+                walk_expr_for_members(d, fqn, &mut usage);
             }
             if let Some(hooks) = &p.hooks {
                 usage.aliases.clear();
-                walk_property_hooks_for_members(hooks, fqn, &self.name_ctx, &mut usage);
-                walk_property_hooks_for_members(hooks, fqn, &self.name_ctx, &mut usage);
+                walk_property_hooks_for_members(hooks, fqn, &mut usage);
+                walk_property_hooks_for_members(hooks, fqn, &mut usage);
             }
         }
         for c in consts {
             usage.aliases.clear();
-            walk_expr_for_members(&c.value, fqn, &self.name_ctx, &mut usage);
+            walk_expr_for_members(&c.value, fqn, &mut usage);
         }
 
         // See `MemberUsage::escaped`'s own doc comment - a fully dynamic

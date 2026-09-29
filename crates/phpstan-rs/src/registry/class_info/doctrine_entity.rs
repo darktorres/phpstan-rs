@@ -22,12 +22,14 @@
 use rustc_hash::FxHashMap;
 use std::sync::Arc;
 
-use syntax::ast::{ArrayItem, Attribute, ClassDecl, Expr, ExprKind, Literal, StaticTarget};
+use syntax::ast::{
+    ArrayItem, Attribute, ClassDecl, Expr, ExprKind, Literal, QualifiedName, StaticTarget,
+};
 use syntax::intern::intern;
 use types::Type;
 
 use super::PropertyReflection;
-use syntax::name_resolution::NameContext;
+use crate::registry::name_context::class_ref;
 
 /// One Doctrine association property (`#[ORM\ManyToOne]`/`OneToOne`/
 /// `OneToMany`/`ManyToMany`).
@@ -93,20 +95,15 @@ pub struct DoctrineEntity {
     pub discriminator_map: FxHashMap<String, Arc<str>>,
 }
 
-fn resolved_attr_name(ctx: &NameContext, attr: &Attribute) -> String {
-    ctx.resolve(&attr.name)
+fn is_orm_attribute(attr: &Attribute, short_name: &str) -> bool {
+    attr.name
+        .resolved_class()
+        .and_then(|resolved| resolved.strip_prefix("Doctrine\\ORM\\Mapping\\"))
+        == Some(short_name)
 }
 
-fn is_orm_attribute(ctx: &NameContext, attr: &Attribute, short_name: &str) -> bool {
-    resolved_attr_name(ctx, attr) == format!("Doctrine\\ORM\\Mapping\\{short_name}")
-}
-
-fn find_orm_attribute<'a>(
-    ctx: &NameContext,
-    attrs: &'a [Attribute],
-    short_name: &str,
-) -> Option<&'a Attribute> {
-    attrs.iter().find(|a| is_orm_attribute(ctx, a, short_name))
+fn find_orm_attribute<'a>(attrs: &'a [Attribute], short_name: &str) -> Option<&'a Attribute> {
+    attrs.iter().find(|a| is_orm_attribute(a, short_name))
 }
 
 /// A named argument's own value, when it's a class-constant-fetch
@@ -116,7 +113,7 @@ fn find_orm_attribute<'a>(
 /// guess - the same "don't guess" leniency this project applies
 /// everywhere else a statically-unresolvable value could otherwise be
 /// wrongly trusted.
-fn class_const_arg<'a>(attr: &'a Attribute, name: &str) -> Option<&'a str> {
+fn class_const_arg<'a>(attr: &'a Attribute, name: &str) -> Option<&'a QualifiedName> {
     attr.args.iter().find_map(|arg| {
         if arg.name.as_deref() != Some(name) {
             return None;
@@ -141,11 +138,9 @@ fn string_arg<'a>(attr: &'a Attribute, name: &str) -> Option<&'a str> {
     })
 }
 
-fn class_name_of_class_const(e: &Expr) -> Option<&str> {
+fn class_name_of_class_const(e: &Expr) -> Option<&QualifiedName> {
     match &e.kind {
-        ExprKind::ClassNameFetch(StaticTarget::Name(class_name, _)) => {
-            Some(class_name.written.as_ref())
-        }
+        ExprKind::ClassNameFetch(StaticTarget::Name(class_name, _)) => Some(class_name),
         _ => None,
     }
 }
@@ -158,7 +153,7 @@ fn class_name_of_class_const(e: &Expr) -> Option<&str> {
 /// literal string, or a value that isn't a `SomeClass::class` reference,
 /// is simply skipped rather than guessed - the same "don't guess"
 /// leniency this module applies everywhere else.
-fn discriminator_map_arg(ctx: &NameContext, attr: &Attribute) -> FxHashMap<String, Arc<str>> {
+fn discriminator_map_arg(attr: &Attribute) -> FxHashMap<String, Arc<str>> {
     let array = attr
         .args
         .iter()
@@ -178,7 +173,7 @@ fn discriminator_map_arg(ctx: &NameContext, attr: &Attribute) -> FxHashMap<Strin
                 return None;
             };
             let class = class_name_of_class_const(&item.value)?;
-            Some((value.to_string(), intern(&ctx.resolve(class))))
+            Some((value.to_string(), class_ref(class)))
         })
         .collect()
 }
@@ -204,17 +199,15 @@ fn association_target_from_native_type(ty: &Type) -> Option<String> {
 /// own.
 pub(crate) fn compute_doctrine_entity(
     c: &ClassDecl,
-    ctx: &NameContext,
     properties: &FxHashMap<Arc<str>, PropertyReflection>,
 ) -> Option<DoctrineEntity> {
-    let entity_attr = find_orm_attribute(ctx, &c.attrs, "Entity")?;
-    let repository_class =
-        class_const_arg(entity_attr, "repositoryClass").map(|name| intern(&ctx.resolve(name)));
-    let table_name = find_orm_attribute(ctx, &c.attrs, "Table")
+    let entity_attr = find_orm_attribute(&c.attrs, "Entity")?;
+    let repository_class = class_const_arg(entity_attr, "repositoryClass").map(class_ref);
+    let table_name = find_orm_attribute(&c.attrs, "Table")
         .and_then(|attr| string_arg(attr, "name"))
         .map(intern);
-    let discriminator_map = find_orm_attribute(ctx, &c.attrs, "DiscriminatorMap")
-        .map(|attr| discriminator_map_arg(ctx, attr))
+    let discriminator_map = find_orm_attribute(&c.attrs, "DiscriminatorMap")
+        .map(discriminator_map_arg)
         .unwrap_or_default();
 
     // Every property's own raw attrs, from both a plain body declaration
@@ -243,17 +236,17 @@ pub(crate) fn compute_doctrine_entity(
             continue;
         };
         fields.insert(intern(name), sig.ty_native.clone());
-        if let Some(column_attr) = find_orm_attribute(ctx, attrs, "Column") {
+        if let Some(column_attr) = find_orm_attribute(attrs, "Column") {
             let column_name = string_arg(column_attr, "name").unwrap_or(name);
             column_names.insert(intern(name), intern(column_name));
         }
-        if find_orm_attribute(ctx, attrs, "Id").is_some() {
+        if find_orm_attribute(attrs, "Id").is_some() {
             id_fields.push(intern(name));
         }
-        let to_one = find_orm_attribute(ctx, attrs, "ManyToOne")
-            .or_else(|| find_orm_attribute(ctx, attrs, "OneToOne"));
-        let to_many = find_orm_attribute(ctx, attrs, "OneToMany")
-            .or_else(|| find_orm_attribute(ctx, attrs, "ManyToMany"));
+        let to_one = find_orm_attribute(attrs, "ManyToOne")
+            .or_else(|| find_orm_attribute(attrs, "OneToOne"));
+        let to_many = find_orm_attribute(attrs, "OneToMany")
+            .or_else(|| find_orm_attribute(attrs, "ManyToMany"));
         if let Some(assoc_attr) = to_one {
             if let Some(target) = association_target_from_native_type(&sig.ty_native) {
                 associations.insert(
@@ -267,7 +260,7 @@ pub(crate) fn compute_doctrine_entity(
                 associations.insert(
                     intern(name),
                     DoctrineAssociation {
-                        target: intern(&ctx.resolve(target)),
+                        target: class_ref(target),
                         is_collection: false,
                     },
                 );
@@ -282,7 +275,7 @@ pub(crate) fn compute_doctrine_entity(
                 associations.insert(
                     intern(name),
                     DoctrineAssociation {
-                        target: intern(&ctx.resolve(target)),
+                        target: class_ref(target),
                         is_collection: true,
                     },
                 );

@@ -9,15 +9,9 @@
 
 use crate::checker::Checker;
 use diagnostics::DiagnosticBuilder;
+use syntax::ast::{NativeType, QualifiedName, TypeHint, TypeHintKind};
 use syntax::token::Span;
 use types::php_version::PhpFeature;
-
-const ONLY_STANDALONE: [&str; 3] = ["mixed", "never", "void"];
-
-const BUILTIN: [&str; 17] = [
-    "int", "float", "string", "bool", "false", "true", "null", "void", "never", "mixed", "array",
-    "iterable", "object", "callable", "static", "self", "parent",
-];
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(crate) enum TypePosition<'s> {
@@ -27,90 +21,120 @@ pub(crate) enum TypePosition<'s> {
     ClassConstant(&'s str),
 }
 
-enum Shape<'h> {
-    Single(&'h str),
-    Nullable(&'h str),
-    Union(Vec<Member<'h>>),
-    Intersection(Vec<&'h str>),
+/// One named type in a declaration: a keyword, or a class.
+#[derive(Clone, Copy)]
+enum Atom<'h> {
+    Keyword(NativeType, &'h str),
+    Class(&'h QualifiedName),
 }
 
+impl<'h> Atom<'h> {
+    fn of(hint: &'h TypeHint) -> Option<Atom<'h>> {
+        match &hint.kind {
+            TypeHintKind::Keyword(keyword, written) => Some(Atom::Keyword(*keyword, written)),
+            TypeHintKind::Name(name) => Some(Atom::Class(name)),
+            _ => None,
+        }
+    }
+
+    /// The name as written.
+    fn written(self) -> &'h str {
+        match self {
+            Atom::Keyword(_, written) => written,
+            Atom::Class(name) => &name.written,
+        }
+    }
+
+    fn is(self, keyword: NativeType) -> bool {
+        matches!(self, Atom::Keyword(k, _) if k == keyword)
+    }
+
+    /// What two members must share to be the same type: a keyword in
+    /// lowercase, a class by its resolved name, lowercased.
+    fn canonical(self) -> String {
+        match self {
+            Atom::Keyword(_, written) => written.to_ascii_lowercase(),
+            Atom::Class(name) => name
+                .resolved_class()
+                .unwrap_or(name.written.trim_start_matches('\\'))
+                .to_ascii_lowercase(),
+        }
+    }
+}
+
+/// A union member: a named type, or a parenthesized intersection.
 enum Member<'h> {
-    Name(&'h str),
-    Group(Vec<&'h str>),
+    Name(Atom<'h>),
+    Group(Vec<Atom<'h>>),
 }
 
-fn parse_shape(hint: &str) -> Shape<'_> {
-    let hint = hint.trim();
-    if let Some(inner) = hint.strip_prefix('?') {
-        return Shape::Nullable(inner.trim());
-    }
-    if hint.contains('|') {
-        return Shape::Union(
-            hint.split('|')
-                .map(str::trim)
-                .map(
-                    |m| match m.strip_prefix('(').and_then(|m| m.strip_suffix(')')) {
-                        Some(group) => Member::Group(group.split('&').map(str::trim).collect()),
-                        None => Member::Name(m),
-                    },
-                )
-                .collect(),
-        );
-    }
-    if hint.contains('&') {
-        return Shape::Intersection(hint.split('&').map(str::trim).collect());
-    }
-    Shape::Single(hint)
+enum Shape<'h> {
+    Single(Atom<'h>),
+    Nullable(Atom<'h>),
+    Union(Vec<Member<'h>>),
+    Intersection(Vec<Atom<'h>>),
 }
 
-fn lower(name: &str) -> String {
-    name.to_ascii_lowercase()
+fn atoms(members: &[TypeHint]) -> Vec<Atom<'_>> {
+    members.iter().filter_map(Atom::of).collect()
 }
 
-fn is_builtin(name: &str) -> bool {
-    BUILTIN.contains(&lower(name).as_str())
+/// `hint`'s shape; `None` for a nesting PHP's grammar doesn't produce.
+fn shape(hint: &TypeHint) -> Option<Shape<'_>> {
+    Some(match &hint.kind {
+        TypeHintKind::Keyword(..) | TypeHintKind::Name(_) => Shape::Single(Atom::of(hint)?),
+        TypeHintKind::Nullable(inner) => Shape::Nullable(Atom::of(inner)?),
+        TypeHintKind::Union(members) => Shape::Union(
+            members
+                .iter()
+                .map(|m| match &m.kind {
+                    TypeHintKind::Intersection(group) => Some(Member::Group(atoms(group))),
+                    _ => Atom::of(m).map(Member::Name),
+                })
+                .collect::<Option<_>>()?,
+        ),
+        TypeHintKind::Intersection(members) => Shape::Intersection(atoms(members)),
+    })
+}
+
+const ONLY_STANDALONE: [NativeType; 3] = [NativeType::Mixed, NativeType::Never, NativeType::Void];
+
+fn is_only_standalone(atom: Atom) -> bool {
+    ONLY_STANDALONE.iter().any(|k| atom.is(*k))
 }
 
 impl<'a> Checker<'a> {
-    fn canonical_type_name(&self, name: &str) -> String {
-        if is_builtin(name) {
-            return lower(name);
-        }
-        lower(&self.resolve_class_name_for_hint(name))
-    }
-
-    fn resolve_class_name_for_hint(&self, name: &str) -> String {
-        match self.resolve_type_hint(Some(name)).as_object() {
-            Some((resolved, _)) => resolved.to_string(),
-            None => name.trim_start_matches('\\').to_string(),
-        }
-    }
-
     fn report_type_declaration(&mut self, message: String, span: Span, id: String) {
         self.report_builder(DiagnosticBuilder::new(message, span, 0, id).non_ignorable());
     }
 
     pub(crate) fn check_type_declaration(
         &mut self,
-        hint: Option<&str>,
+        hint: Option<&TypeHint>,
         position: TypePosition,
         span: Span,
     ) {
         let Some(hint) = hint else {
             return;
         };
-        self.check_type_version_support(hint, span);
-        match parse_shape(hint) {
-            Shape::Single(name) => self.check_type_position(name, position, span),
+        let Some(shape) = shape(hint) else {
+            return;
+        };
+        self.check_type_version_support(hint, &shape, span);
+        match shape {
+            Shape::Single(atom) => self.check_type_position(atom, position, span),
             Shape::Nullable(inner) => {
-                let inner_lower = lower(inner);
-                if ONLY_STANDALONE.contains(&inner_lower.as_str()) {
+                let inner_lower = inner.written().to_ascii_lowercase();
+                if is_only_standalone(inner) {
                     self.report_type_declaration(
-                        format!("Type {inner} cannot be part of a nullable type declaration."),
+                        format!(
+                            "Type {} cannot be part of a nullable type declaration.",
+                            inner.written()
+                        ),
                         span,
                         format!("nullableType.{inner_lower}"),
                     );
-                } else if inner_lower == "null" {
+                } else if inner.is(NativeType::Null) {
                     self.report_type_declaration(
                         "Type null cannot be marked as nullable.".to_string(),
                         span,
@@ -122,49 +146,51 @@ impl<'a> Checker<'a> {
             }
             Shape::Union(members) => {
                 let standalone = members.iter().find_map(|m| match m {
-                    Member::Name(n) if ONLY_STANDALONE.contains(&lower(n).as_str()) => Some(*n),
+                    Member::Name(atom) if is_only_standalone(*atom) => Some(*atom),
                     _ => None,
                 });
-                if let Some(name) = standalone {
+                if let Some(atom) = standalone {
                     self.report_type_declaration(
-                        format!("Type {name} cannot be part of a union type declaration."),
+                        format!(
+                            "Type {} cannot be part of a union type declaration.",
+                            atom.written()
+                        ),
                         span,
-                        format!("unionType.{}", lower(name)),
+                        format!("unionType.{}", atom.written().to_ascii_lowercase()),
                     );
                     return;
                 }
                 self.check_union_redundancy(hint, &members, span);
                 for member in &members {
                     match member {
-                        Member::Name(n) => self.check_type_position(n, position, span),
-                        Member::Group(names) => self.check_intersection(names, span),
+                        Member::Name(atom) => self.check_type_position(*atom, position, span),
+                        Member::Group(atoms) => self.check_intersection(atoms, span),
                     }
                 }
             }
-            Shape::Intersection(names) => self.check_intersection(&names, span),
+            Shape::Intersection(atoms) => self.check_intersection(&atoms, span),
         }
     }
 
-    fn check_type_version_support(&mut self, hint: &str, span: Span) {
+    fn check_type_version_support(&mut self, hint: &TypeHint, shape: &Shape, span: Span) {
         if self.registry.php_versions.is_none() {
             return;
         }
         let unavailable =
             |feature: PhpFeature| self.registry.php_supports_everywhere(feature) == Some(false);
-        let shape = parse_shape(hint);
-        let names: Vec<&str> = match &shape {
-            Shape::Single(n) | Shape::Nullable(n) => vec![*n],
-            Shape::Intersection(ns) => ns.clone(),
+        let atoms: Vec<Atom> = match shape {
+            Shape::Single(a) | Shape::Nullable(a) => vec![*a],
+            Shape::Intersection(atoms) => atoms.clone(),
             Shape::Union(members) => members
                 .iter()
                 .flat_map(|m| match m {
-                    Member::Name(n) => vec![*n],
-                    Member::Group(ns) => ns.clone(),
+                    Member::Name(a) => vec![*a],
+                    Member::Group(atoms) => atoms.clone(),
                 })
                 .collect(),
         };
         if unavailable(PhpFeature::DisjunctiveNormalFormTypes)
-            && let Shape::Union(members) = &shape
+            && let Shape::Union(members) = shape
             && members.iter().any(|m| matches!(m, Member::Group(_)))
         {
             self.report_type_declaration(
@@ -177,22 +203,22 @@ impl<'a> Checker<'a> {
         if !unavailable(PhpFeature::StandaloneNullFalseTrueTypes) {
             return;
         }
-        if names.iter().any(|n| n.eq_ignore_ascii_case("true")) {
+        if atoms.iter().any(|a| a.is(NativeType::True)) {
             self.report_type_declaration(
                 "Type true is supported only on PHP 8.2 and later.".to_string(),
                 span,
                 "trueType.notSupported".to_string(),
             );
         }
-        let only_null_or_false = match &shape {
+        let only_null_or_false = match shape {
             Shape::Single(_) | Shape::Nullable(_) => true,
             Shape::Union(members) => members.iter().all(|m| matches!(m, Member::Name(_))),
             Shape::Intersection(_) => false,
-        } && names
+        } && atoms
             .iter()
-            .all(|n| n.eq_ignore_ascii_case("null") || n.eq_ignore_ascii_case("false"));
+            .all(|a| a.is(NativeType::Null) || a.is(NativeType::False));
         if only_null_or_false {
-            let which = if names.iter().any(|n| n.eq_ignore_ascii_case("false")) {
+            let which = if atoms.iter().any(|a| a.is(NativeType::False)) {
                 "false"
             } else {
                 "null"
@@ -205,24 +231,30 @@ impl<'a> Checker<'a> {
         }
     }
 
-    fn check_union_redundancy(&mut self, hint: &str, members: &[Member], span: Span) {
+    fn check_union_redundancy(&mut self, hint: &TypeHint, members: &[Member], span: Span) {
         let mut seen: Vec<String> = Vec::new();
         let mut has_class = false;
         for member in members {
-            let Member::Name(name) = member else {
+            let Member::Name(atom) = member else {
                 continue;
             };
-            let canonical = self.canonical_type_name(name);
+            let canonical = atom.canonical();
             if seen.contains(&canonical) {
                 self.report_type_declaration(
-                    format!("Duplicate type {name} is redundant."),
+                    format!("Duplicate type {} is redundant.", atom.written()),
                     span,
                     "unionType.duplicate".to_string(),
                 );
                 return;
             }
-            has_class |=
-                !is_builtin(name) || ["self", "parent", "static"].contains(&canonical.as_str());
+            has_class |= matches!(
+                atom,
+                Atom::Class(_)
+                    | Atom::Keyword(
+                        NativeType::SelfType | NativeType::Parent | NativeType::Static,
+                        _
+                    )
+            );
             seen.push(canonical);
         }
         let has = |t: &str| seen.iter().any(|s| s == t);
@@ -260,22 +292,23 @@ impl<'a> Checker<'a> {
         }
     }
 
-    fn check_intersection(&mut self, names: &[&str], span: Span) {
+    fn check_intersection(&mut self, atoms: &[Atom], span: Span) {
         let mut seen: Vec<String> = Vec::new();
-        for name in names {
-            let name_lower = lower(name);
-            if is_builtin(name) && !["self", "parent"].contains(&name_lower.as_str()) {
+        for atom in atoms {
+            if let Atom::Keyword(keyword, written) = atom
+                && !matches!(keyword, NativeType::SelfType | NativeType::Parent)
+            {
                 self.report_type_declaration(
-                    format!("Type {name} cannot be part of an intersection type."),
+                    format!("Type {written} cannot be part of an intersection type."),
                     span,
-                    format!("intersectionType.{name_lower}"),
+                    format!("intersectionType.{}", written.to_ascii_lowercase()),
                 );
                 return;
             }
-            let canonical = self.canonical_type_name(name);
+            let canonical = atom.canonical();
             if seen.contains(&canonical) {
                 self.report_type_declaration(
-                    format!("Duplicate type {name} is redundant."),
+                    format!("Duplicate type {} is redundant.", atom.written()),
                     span,
                     "intersectionType.duplicate".to_string(),
                 );
@@ -286,21 +319,27 @@ impl<'a> Checker<'a> {
     }
 
     /// `void`/`never`/`static` outside the positions that allow them.
-    fn check_type_position(&mut self, name: &str, position: TypePosition, span: Span) {
-        let name_lower = lower(name);
-        let (message, id) = match (position, name_lower.as_str()) {
-            (TypePosition::Parameter, t @ ("void" | "never" | "static")) => (
+    fn check_type_position(&mut self, atom: Atom, position: TypePosition, span: Span) {
+        let Atom::Keyword(keyword, _) = atom else {
+            return;
+        };
+        let t = match keyword {
+            NativeType::Void => "void",
+            NativeType::Never => "never",
+            NativeType::Static => "static",
+            NativeType::Callable => "callable",
+            _ => return,
+        };
+        let (message, id) = match position {
+            TypePosition::Parameter if keyword != NativeType::Callable => (
                 format!("{t} cannot be used as a parameter type."),
                 format!("parameter.{t}"),
             ),
-            (TypePosition::Property(prop), t @ ("void" | "never" | "static")) => (
+            TypePosition::Property(prop) if keyword != NativeType::Callable => (
                 format!("Property {prop} cannot have type {t}."),
                 format!("property.{t}Type"),
             ),
-            (
-                TypePosition::ClassConstant(constant),
-                t @ ("void" | "never" | "callable" | "static"),
-            ) => (
+            TypePosition::ClassConstant(constant) => (
                 format!("Class constant {constant} cannot have type {t}."),
                 format!("classConstant.{t}Type"),
             ),

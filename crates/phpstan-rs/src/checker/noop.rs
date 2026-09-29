@@ -18,7 +18,6 @@ use crate::checker::{Checker, Locals};
 use crate::registry::{FunctionReflection, collect_impure_points};
 use diagnostics::DiagnosticBuilder;
 use phpdoc::docblock;
-use syntax::ast::TypeHint;
 use syntax::ast::{BinOp, CastKind, Expr, ExprKind, FunctionDecl, UnaryOp};
 use syntax::visit::{Visitor, any_expr_in_scope, walk_expr_in_scope};
 use types::Type;
@@ -556,8 +555,7 @@ impl<'a> Checker<'a> {
                 );
                 continue;
             };
-            let native_ty = self
-                .resolve_type_hint(param.type_hint.as_ref().map(TypeHint::to_string).as_deref());
+            let native_ty = self.resolve_type_hint(param.type_hint.as_ref());
             if !self.param_type_could_satisfy(&native_ty, &Type::callable(None)) {
                 let identifier = if *immediately {
                     "paramImmediatelyInvokedCallable.nonCallable"
@@ -583,8 +581,7 @@ impl<'a> Checker<'a> {
                 );
                 continue;
             };
-            let native_ty = self
-                .resolve_type_hint(param.type_hint.as_ref().map(TypeHint::to_string).as_deref());
+            let native_ty = self.resolve_type_hint(param.type_hint.as_ref());
             let closure_ty = Type::object("Closure".into(), Vec::new());
             if !self.param_type_could_satisfy(&native_ty, &closure_ty) {
                 self.report(format!(

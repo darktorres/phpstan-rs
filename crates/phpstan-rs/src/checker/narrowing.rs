@@ -243,17 +243,12 @@ impl<'a> Checker<'a> {
     /// silently skips the rest).
     fn apply_function_conditional_asserts(
         &self,
-        name: &str,
+        name: &QualifiedName,
         args: &[Arg],
         locals: &mut Locals,
         branch_true: bool,
     ) {
-        let (primary, fallback) = self.name_ctx.resolve_function_candidates(name);
-        if let Some(sig) = self.registry.lookup_function(&primary).or_else(|| {
-            fallback
-                .as_deref()
-                .and_then(|g| self.registry.lookup_function(g))
-        }) {
+        if let Some((_, sig)) = self.registry.resolve_function(name) {
             let infos = if branch_true {
                 sig.assert_if_true()
             } else {
@@ -971,18 +966,10 @@ impl<'a> Checker<'a> {
                 if let (ExprKind::Name(name), [single_arg]) = (&callee.kind, args.as_slice())
                     && let Some(key) = narrowing_key(&single_arg.value)
                 {
-                    // A fully-qualified call (`\is_array($x)`,
-                    // `\count($x)`, ...) keeps its leading backslash in
-                    // `ExprKind::Name` - unlike ordinary call resolution
-                    // (`name_ctx::resolve_function_candidates`, used for
-                    // every real argument/arity check), every name
-                    // comparison in this whole match arm is a bare
-                    // string equality with no normalization, so a
-                    // common defensive-global-namespace style (e.g.
-                    // `\is_array($value)` nested inside an
-                    // `is_iterable($value)` guard) needs stripping the
-                    // backslash first.
-                    let name = name.trim_start_matches('\\');
+                    // The function the call reaches: `\is_array($x)` and
+                    // `is_array($x)` in a namespace alike, but not a
+                    // namespaced function of the same name.
+                    let name = self.registry.called_function_name(name);
                     if name == "count" && branch_true {
                         // A bare `if (count($x))`/`while
                         // (count($x))` truthiness check, not the `> 0`/
@@ -1183,12 +1170,14 @@ impl<'a> Checker<'a> {
                     // `None` the same way a dynamic `instanceof` target
                     // does. `Foo::class` is a `ClassNameFetch`, not a
                     // string `literal_string_value` handles.
-                    let class_name = match &class_arg.value.kind {
-                        ExprKind::ClassNameFetch(target) => target.as_name().map(str::to_string),
-                        _ => literal_string_value(&class_arg.value).map(|s| s.into_owned()),
+                    let class = match &class_arg.value.kind {
+                        ExprKind::ClassNameFetch(target) => {
+                            target.as_name().map(|name| self.resolve_name_expr(name))
+                        }
+                        _ => literal_string_value(&class_arg.value)
+                            .map(|name| self.class_type_named(&name)),
                     };
-                    if let Some(class_name) = class_name {
-                        let resolved = self.resolve_name_expr(&class_name);
+                    if let Some(resolved) = class {
                         let current = self.current_narrowed_type(&obj_arg.value, &key, locals);
                         if branch_true {
                             locals.insert(

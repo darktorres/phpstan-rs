@@ -14,16 +14,16 @@ impl<'a> Checker<'a> {
     /// fall back to the global namespace for an unqualified reference"
     /// resolution rule real PHP functions do (unlike class names, which
     /// never fall back), matched against `use const` imports -
-    /// `resolve_constant_candidates`. `None` for anything not in the table (an engine-
+    /// `QualifiedName::candidates`. `None` for anything not in the table (an engine-
     /// provided constant like `PHP_EOL`, or a `const`/`define()` whose
     /// own value wasn't a plain literal - see `Registry::global_
     /// constants`'s own doc comment for the exact scope), leaving
     /// `bare_name_literal_type`'s existing `Mixed` fallback in place.
-    pub(crate) fn global_constant_type(&self, name: &str) -> Option<Type> {
-        let (primary, fallback) = self.name_ctx.resolve_constant_candidates(name);
+    pub(crate) fn global_constant_type(&self, name: &QualifiedName) -> Option<Type> {
+        let (primary, fallback) = name.candidates();
         self.settings
             .constants
-            .global_constant_type(self.registry, &primary, fallback.as_deref())
+            .global_constant_type(self.registry, primary, fallback)
     }
 
     /// Checks an `isset()`/`??`-style "quiet" left-hand-side chain: walks

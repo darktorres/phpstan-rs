@@ -2235,13 +2235,13 @@ fn strip_null_from_array_element(ty: Type) -> Type {
 /// `fn ($v): bool => $v instanceof Target` (or the equivalent
 /// single-statement closure) - returns `Target`'s raw name string, for
 /// the caller to resolve.
-fn is_instanceof_filter_callback(e: &Expr) -> Option<&str> {
-    fn as_instanceof_class<'a>(body: &'a Expr, param: &str) -> Option<&'a str> {
+fn is_instanceof_filter_callback(e: &Expr) -> Option<&QualifiedName> {
+    fn as_instanceof_class<'a>(body: &'a Expr, param: &str) -> Option<&'a QualifiedName> {
         match &body.kind {
             ExprKind::Instanceof(inner, InstanceofTarget::Name(class_name, _))
                 if is_var_named(inner, param) =>
             {
-                Some(class_name.written.as_ref())
+                Some(class_name)
             }
             _ => None,
         }

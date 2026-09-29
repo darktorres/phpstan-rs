@@ -5,8 +5,8 @@ use crate::checker::{
     type_allows_generator_return,
 };
 use crate::registry::{
-    ClassReflection, FunctionReflection, Registry, collect_class_name_case_refs,
-    mark_template_params, resolve_names_in_type, resolve_type,
+    self, ClassReflection, FunctionReflection, Registry, mark_template_params,
+    resolve_names_in_type,
 };
 use diagnostics::DiagnosticBuilder;
 use phpdoc::docblock;
@@ -642,27 +642,19 @@ impl<'a> Checker<'a> {
                                 .map(docblock::parse)
                                 .and_then(|d| d.var_type)
                         });
-                    let ty = resolve_type(
+                    // This anonymous-class fallback path bypasses
+                    // `FunctionReflection::from_decl`, so it collects the
+                    // param's case refs itself, and resolves a `value-of<T>`
+                    // on an enum as the registry's pipeline would.
+                    let registry::DeclaredType {
+                        ty,
+                        native: native_ty,
+                        case_refs,
+                    } = registry::declared_type(
                         doc_ty.as_ref(),
-                        p.type_hint.as_ref().map(TypeHint::to_string).as_deref(),
-                    );
-                    // This anonymous-class fallback path builds `ty`
-                    // straight from raw text, bypassing `FunctionReflection::
-                    // from_decl`'s own `ParameterReflection::case_refs` population,
-                    // so this needs the collection call done inline,
-                    // right before `resolve_names_in_type` destroys the
-                    // pre-resolution spelling.
-                    let mut case_refs = Vec::new();
-                    collect_class_name_case_refs(&ty, &self.name_ctx, &mut case_refs);
-                    let ty = resolve_names_in_type(ty, &self.name_ctx);
-                    // This anonymous-class param docblock fallback parses
-                    // raw text independently of the registry's own
-                    // pipeline, so it needs the identical `value-of<T>`-
-                    // on-an-enum resolution `resolve_type` above already
-                    // went through, so an unresolvable `value-of<T>`
-                    // needs the same native-type fallback here too.
-                    let native_ty = self.resolve_type_hint(
-                        p.type_hint.as_ref().map(TypeHint::to_string).as_deref(),
+                        p.type_hint.as_ref(),
+                        &Default::default(),
+                        &self.name_ctx,
                     );
                     let ty = self
                         .registry
@@ -770,23 +762,19 @@ impl<'a> Checker<'a> {
                     .as_deref()
                     .map(docblock::parse)
                     .and_then(|d| d.return_type);
-                let ty = resolve_type(
-                    doc_return.as_ref(),
-                    f.return_type.as_ref().map(TypeHint::to_string).as_deref(),
-                );
-                // Same "checker builds a Type straight from raw text,
-                // bypassing FunctionReflection::from_decl" pattern as the param
-                // loop's identical fix above.
-                collect_class_name_case_refs(
-                    &ty,
-                    &self.name_ctx,
-                    &mut declared_return_case_refs_none_path,
-                );
-                let ty = resolve_names_in_type(ty, &self.name_ctx);
                 // The return-position sibling of the param loop's identical
-                // fix above, including the same native-fallback need.
-                let native_ty = self
-                    .resolve_type_hint(f.return_type.as_ref().map(TypeHint::to_string).as_deref());
+                // fix above.
+                let registry::DeclaredType {
+                    ty,
+                    native: native_ty,
+                    case_refs,
+                } = registry::declared_type(
+                    doc_return.as_ref(),
+                    f.return_type.as_ref(),
+                    &Default::default(),
+                    &self.name_ctx,
+                );
+                declared_return_case_refs_none_path = case_refs;
                 let ty = self
                     .registry
                     .resolve_deferred_value_of_now_with_native_fallback(ty, &native_ty);
@@ -825,13 +813,7 @@ impl<'a> Checker<'a> {
         // would produce false positives on every docblock-typed-as-array
         // generator.
         let native_return = sig.map(|s| s.return_type_native().clone()).or_else(|| {
-            let ty = f
-                .return_type
-                .as_ref()
-                .map(TypeHint::to_string)
-                .as_deref()
-                .map(types::parse_native_type_string)
-                .map(|ty| resolve_names_in_type(ty, &self.name_ctx))?;
+            let ty = f.return_type.as_ref().map(types::native_type)?;
             Some(match class_name {
                 Some(c) => self.resolve_pseudo(&ty, c),
                 None => ty,
@@ -1035,7 +1017,7 @@ impl<'a> Checker<'a> {
         self.current_method_attrs = f
             .attrs
             .iter()
-            .map(|a| syntax::intern::intern(&self.name_ctx.resolve(&a.name)))
+            .map(|a| syntax::intern::intern(&self.resolve_class_name(&a.name)))
             .collect();
         // Mirrors real PHPStan's `DeprecatedScopeHelper` - suppresses
         // every deprecated-usage diagnostic from within a deprecated
@@ -1115,9 +1097,7 @@ impl<'a> Checker<'a> {
             None => {
                 for p in &f.params {
                     if p.by_ref {
-                        let ty = self.resolve_type_hint(
-                            p.type_hint.as_ref().map(TypeHint::to_string).as_deref(),
-                        );
+                        let ty = self.resolve_type_hint(p.type_hint.as_ref());
                         self.current_function_by_ref_params
                             .insert(p.name.clone(), ty);
                     }
@@ -1446,7 +1426,7 @@ impl<'a> Checker<'a> {
     fn check_unresolvable_native_types(&mut self, f: &FunctionDecl, label: &str) {
         for p in &f.params {
             self.check_unresolvable_native_type(
-                p.type_hint.as_ref().map(TypeHint::to_string).as_deref(),
+                p.type_hint.as_ref(),
                 &format!(
                     "Parameter ${} of {label}() has unresolvable native type.",
                     p.name
@@ -1456,7 +1436,7 @@ impl<'a> Checker<'a> {
             );
         }
         self.check_unresolvable_native_type(
-            f.return_type.as_ref().map(TypeHint::to_string).as_deref(),
+            f.return_type.as_ref(),
             &format!("{label}() has unresolvable native return type."),
             "return.unresolvableNativeType",
             f.span,
@@ -1477,7 +1457,7 @@ impl<'a> Checker<'a> {
     /// risk a false positive on a shape nothing has verified yet.
     pub(crate) fn check_unresolvable_native_type(
         &mut self,
-        hint: Option<&str>,
+        hint: Option<&TypeHint>,
         message: &str,
         identifier: &'static str,
         span: Span,
@@ -1492,7 +1472,7 @@ impl<'a> Checker<'a> {
         let Some(hint) = hint else {
             return;
         };
-        if !hint.contains('&') {
+        if !matches!(hint.kind, TypeHintKind::Intersection(_)) {
             return;
         }
         let resolved = self.resolve_type_hint(Some(hint));
@@ -1531,20 +1511,22 @@ impl<'a> Checker<'a> {
             return;
         }
         for (i, p) in f.params.iter().enumerate() {
-            let Some(hint) = p.type_hint.as_ref().map(TypeHint::to_string) else {
+            let Some(hint) = &p.type_hint else {
                 continue;
             };
-            let hint = hint.as_str();
-            if hint.starts_with('?') || hint.contains('&') {
-                continue;
-            }
-            if hint.eq_ignore_ascii_case("mixed") || hint.eq_ignore_ascii_case("null") {
-                continue;
-            }
-            if hint
-                .split('|')
-                .any(|member| member.eq_ignore_ascii_case("null"))
-            {
+            let admits_null_or_is_intersection = match &hint.kind {
+                TypeHintKind::Nullable(_)
+                | TypeHintKind::Intersection(_)
+                | TypeHintKind::Keyword(NativeType::Mixed | NativeType::Null, _) => true,
+                TypeHintKind::Union(members) => members.iter().any(|m| {
+                    matches!(
+                        m.kind,
+                        TypeHintKind::Intersection(_) | TypeHintKind::Keyword(NativeType::Null, _)
+                    )
+                }),
+                _ => false,
+            };
+            if admits_null_or_is_intersection {
                 continue;
             }
             let is_default_null = matches!(

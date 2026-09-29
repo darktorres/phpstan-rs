@@ -807,55 +807,23 @@ fn parse_type_atom(s: &str) -> Type {
     ty
 }
 
-/// PHP's reserved type names: the only keywords a native type
-/// declaration has.
-const NATIVE_TYPE_KEYWORDS: &[&str] = &[
-    "int", "float", "string", "bool", "false", "true", "null", "void", "never", "mixed", "array",
-    "iterable", "object", "callable", "static", "self", "parent",
-];
-
-/// The type a native type declaration (`?T`, `A|B`, `A&B`, `(A&B)|C`)
-/// denotes. Only PHP's reserved type names are keywords; any other name,
-/// a PHPDoc keyword such as `resource` or `integer` included, is a class,
-/// as PHP itself reads it.
-pub fn parse_native_type_string(s: &str) -> Type {
-    syntax::stack::guard(|| {
-        let s = s.trim();
-        if let Some(inner) = s.strip_prefix('?') {
-            return Type(Repr::Union(vec![
-                parse_native_type_string(inner),
-                Type::null(),
-            ]));
+/// The type a native type declaration denotes, its class names as name
+/// resolution resolved them.
+pub fn native_type(hint: &syntax::ast::TypeHint) -> Type {
+    use syntax::ast::TypeHintKind;
+    syntax::stack::guard(|| match &hint.kind {
+        TypeHintKind::Keyword(_, written) => parse_type_string(written),
+        TypeHintKind::Name(name) => Type::object(
+            name.resolved_class().unwrap_or(&name.written).into(),
+            Vec::new(),
+        ),
+        TypeHintKind::Nullable(inner) => Type(Repr::Union(vec![native_type(inner), Type::null()])),
+        TypeHintKind::Union(members) => {
+            Type(Repr::Union(members.iter().map(native_type).collect()))
         }
-        let alternatives = split_top_level(s, '|');
-        if alternatives.len() > 1 {
-            return Type(Repr::Union(
-                alternatives
-                    .iter()
-                    .map(|a| parse_native_type_string(a))
-                    .collect(),
-            ));
-        }
-        let unwrapped = s
-            .strip_prefix('(')
-            .and_then(|inner| inner.strip_suffix(')'))
-            .unwrap_or(s);
-        let members = split_top_level(unwrapped, '&');
-        if members.len() > 1 {
-            return Type(Repr::Intersection(
-                members
-                    .iter()
-                    .map(|m| parse_native_type_string(m))
-                    .collect(),
-            ));
-        }
-        let name = unwrapped.trim();
-        let bare = name.trim_start_matches('\\');
-        if NATIVE_TYPE_KEYWORDS.contains(&bare.to_ascii_lowercase().as_str()) {
-            parse_type_string(bare)
-        } else {
-            Type::object(name.into(), Vec::new())
-        }
+        TypeHintKind::Intersection(members) => Type(Repr::Intersection(
+            members.iter().map(native_type).collect(),
+        )),
     })
 }
 
@@ -1272,7 +1240,7 @@ fn parse_generic_arg(a: &str) -> Type {
 /// somewhere in that same type - worst case a rare false *negative*
 /// (silently accepting a still-implicit `mixed` elsewhere in the same
 /// union/intersection), never a new false positive.
-fn text_mentions_mixed(text: &str) -> bool {
+pub fn text_mentions_mixed(text: &str) -> bool {
     let lower = text.to_ascii_lowercase();
     let is_ident_byte = |b: u8| b.is_ascii_alphanumeric() || b == b'_';
     let mut search_from = 0;
@@ -1287,15 +1255,4 @@ fn text_mentions_mixed(text: &str) -> bool {
         search_from = end;
     }
     false
-}
-
-/// Whether a declaration's native hint or its PHPDoc type spells out
-/// `mixed` anywhere (see `text_mentions_mixed` for the precision), so a
-/// `mixed` value type nested in an `array`/`iterable`/`list` generic
-/// counts as explicit.
-pub fn has_explicit_mixed_nested_somewhere(
-    native_hint: Option<&str>,
-    doc_type: Option<&str>,
-) -> bool {
-    native_hint.is_some_and(text_mentions_mixed) || doc_type.is_some_and(text_mentions_mixed)
 }

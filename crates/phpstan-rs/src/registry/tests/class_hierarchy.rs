@@ -256,8 +256,8 @@ fn trait_constants_are_flattened_in() {
 #[test]
 fn trait_flattening_works_across_namespaced_classes() {
     // `flatten_traits` iterates `self.classes` (FQN-keyed) and resolves
-    // each class's own `uses` list (also FQN, via `ClassReflection::from_decl`'s
-    // `ctx.resolve`) to look trait method/property tables up by - both
+    // each class's own `uses` list (also FQN, as name resolution resolved
+    // it) to look trait method/property tables up by - both
     // sides need to actually agree for this to find anything at all, so
     // this must be tested with namespaced (not bare) PHP.
     let r = build_registry(

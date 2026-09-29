@@ -1,9 +1,14 @@
+use std::sync::Arc;
+
 use rustc_hash::FxHashMap;
 
 use super::generics::mark_template_params;
+use crate::registry::name_context::{collect_class_name_case_refs, resolve_names_in_type};
 use crate::registry::type_node::parse_type_node;
 use phpdoc::grammar::TypeNode;
-use syntax::ast::{Expr, ExprKind, Literal};
+use syntax::ast::{Expr, ExprKind, Literal, NativeType, TypeHint, TypeHintKind};
+use syntax::intern::intern;
+use syntax::name_resolution::NameContext;
 use types::{self, TemplateParam, Type};
 
 /// Resolves a param's/property's type: a PHPDoc type (when present) wins
@@ -34,37 +39,61 @@ pub(crate) fn apply_implicit_nullable_default(ty: Type, default: Option<&Expr>) 
     }
 }
 
-pub(crate) fn resolve_type(doc_type: Option<&TypeNode>, native_hint: Option<&str>) -> Type {
-    let native_ty = native_hint.map(types::parse_native_type_string);
-    resolve_type_with_parsed_native(
-        doc_type,
-        native_hint,
-        native_ty.as_ref(),
-        &FxHashMap::default(),
-    )
+/// A declaration's types, from its PHPDoc type and native type hint.
+pub(crate) struct DeclaredType {
+    /// The PHPDoc type reconciled with the native one.
+    pub(crate) ty: Type,
+    /// The native type alone; `mixed` without a hint.
+    pub(crate) native: Type,
+    /// `(written, resolved)` for each class name either names, for
+    /// `class.nameCase`.
+    pub(crate) case_refs: Vec<(Arc<str>, Arc<str>)>,
 }
 
-/// `resolve_type`'s own real body, taking the native hint's already-parsed
-/// `Type` instead of re-deriving it from `native_hint` via a second
-/// `types::parse_type_string` call - a caller that also needs the
-/// native-only type on its own (`FunctionReflection::from_decl`'s `ty`/`ty_native`
-/// split) parses `native_hint` once and passes the same `Type` to both,
-/// instead of each independently re-parsing the identical string.
-/// `native_hint`'s own raw text is still needed alongside `native_ty` for
-/// the two checks below that read it as text (nullability prefix, the
-/// `object` exclusion) rather than as a parsed `Type`. `template_params`
-/// are the templates in scope, marked in the doc type before it is
-/// reconciled with the native one.
-pub(crate) fn resolve_type_with_parsed_native(
-    doc_type: Option<&TypeNode>,
-    native_hint: Option<&str>,
-    native_ty: Option<&Type>,
+/// The types of a declaration with PHPDoc type `doc` and native type
+/// `native`: the PHPDoc type with `template_params` marked and its names
+/// resolved in `ctx`, reconciled with the native type.
+pub(crate) fn declared_type(
+    doc: Option<&TypeNode>,
+    native: Option<&TypeHint>,
     template_params: &FxHashMap<String, TemplateParam>,
+    ctx: &NameContext,
+) -> DeclaredType {
+    let native_ty = native.map(types::native_type);
+    let mut case_refs: Vec<(Arc<str>, Arc<str>)> = native
+        .into_iter()
+        .flat_map(TypeHint::class_names)
+        .filter_map(|(name, _)| Some((intern(&name.written), intern(name.resolved_class()?))))
+        .collect();
+    let doc_ty = doc.map(|node| {
+        let ty = mark_template_params(parse_type_node(node), template_params);
+        let mut doc_refs = Vec::new();
+        collect_class_name_case_refs(&ty, ctx, &mut doc_refs);
+        for doc_ref in doc_refs {
+            if !case_refs.contains(&doc_ref) {
+                case_refs.push(doc_ref);
+            }
+        }
+        resolve_names_in_type(ty, ctx)
+    });
+    DeclaredType {
+        ty: reconcile_doc_with_native(doc_ty, native, native_ty.as_ref()),
+        native: native_ty.unwrap_or(Type::mixed()),
+        case_refs,
+    }
+}
+
+/// The PHPDoc type `doc` (resolved) reconciled with the native type
+/// `native_ty` declared by `native_hint`; the native type alone without
+/// a PHPDoc type, `mixed` without either.
+fn reconcile_doc_with_native(
+    doc: Option<Type>,
+    native_hint: Option<&TypeHint>,
+    native_ty: Option<&Type>,
 ) -> Type {
-    let Some(doc) = doc_type else {
+    let Some(ty) = doc else {
         return native_ty.cloned().unwrap_or(Type::mixed());
     };
-    let ty = mark_template_params(parse_type_node(doc), template_params);
     // A docblock type is trusted as the complete picture and otherwise
     // fully replaces the native hint (deliberate - it's usually more
     // precise) - but real docblocks very commonly aren't fully redundant
@@ -74,7 +103,8 @@ pub(crate) fn resolve_type_with_parsed_native(
     // the nullability). Silently losing that would make an entirely
     // legitimate `null` argument a false positive - union `Null` in
     // unless the docblock type already says so itself.
-    let native_is_nullable = native_hint.is_some_and(|h| h.trim_start().starts_with('?'));
+    let native_is_nullable =
+        native_hint.is_some_and(|h| matches!(h.kind, TypeHintKind::Nullable(_)));
     // A conditional return type states its nullability per branch
     // (`($p is non-empty-array ? T : T|null)`), so a native `?` must not
     // be unioned onto every resolution of it.
@@ -111,7 +141,9 @@ pub(crate) fn resolve_type_with_parsed_native(
     // it doesn't get the same automatic fallout and still needs the
     // explicit guard.
     match (native_hint, native_ty) {
-        (Some(native), Some(native_ty)) if native.trim() != "object" => {
+        (Some(native), Some(native_ty))
+            if !matches!(native.kind, TypeHintKind::Keyword(NativeType::Object, _)) =>
+        {
             ty.reconcile_with_native(native_ty.clone())
         }
         _ => ty,

@@ -131,7 +131,7 @@ impl<'a> Checker<'a> {
             .iter()
             .find(|a| registry::is_no_discard_attribute_name(&a.name))
         {
-            let fqn = self.name_ctx.resolve(&nodiscard.name);
+            let fqn = self.resolve_class_name(&nodiscard.name);
             self.report_builder(
                 DiagnosticBuilder::new(
                     format!("Attribute class {fqn} cannot be used on property hooks."),
@@ -456,14 +456,8 @@ impl<'a> Checker<'a> {
                 );
             }
             (true, true) => {
-                let param_ty = self.resolve_type_hint(
-                    param
-                        .and_then(|p| p.type_hint.as_ref())
-                        .map(TypeHint::to_string)
-                        .as_deref(),
-                );
-                let prop_native_ty =
-                    self.resolve_type_hint(type_hint.map(TypeHint::to_string).as_deref());
+                let param_ty = self.resolve_type_hint(param.and_then(|p| p.type_hint.as_ref()));
+                let prop_native_ty = self.resolve_type_hint(type_hint);
                 if !self.accepts(&param_ty, &prop_native_ty).yes() {
                     self.report_builder(
                         DiagnosticBuilder::new(format!(
@@ -530,7 +524,7 @@ impl<'a> Checker<'a> {
             // have no return-type position (see above), so only the
             // parameter half is reachable here.
             self.check_unresolvable_native_type(
-                p.type_hint.as_ref().map(TypeHint::to_string).as_deref(),
+                p.type_hint.as_ref(),
                 &format!(
                     "Parameter ${} of set hook for property {fqn}::${name} has unresolvable native type.",
                     p.name,
