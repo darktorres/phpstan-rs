@@ -252,11 +252,11 @@ Each fix needs a fixture.
   with one refinement". Express them through `Relation::intersect`,
   distributed over union members and dropping `never`; the plan's "A
   template narrows by intersection" item is the same operation.
-- [ ] **T3. Union rebuilding.** Six copies of `match kept.len() { 0 =>
+- [x] **T3. Union rebuilding.** Done in `65a73cd1`. Six copies of `match kept.len() { 0 =>
   never, 1 => the one, _ => raw union }` in `narrowing.rs`, plus raw unions
   in `transform.rs` (`unsealed_shapes`, `filter_array_values`). Use
   `Type::union_of`.
-- [ ] **T4. `is_object_like`** in `narrowing.rs` duplicates `Type::is_object`.
+- [x] **T4. `is_object_like`** (done in `65a73cd1`) in `narrowing.rs` duplicates `Type::is_object`.
 - [ ] **T5. Two literal-key helpers disagree.** In `offsets.rs`,
   `literal_key_name` and `literal_key`: only the second sees through
   `to_array_key` (`true`, a float, `"1"`). Keep one, built on
@@ -269,7 +269,7 @@ Each fix needs a fixture.
   onto `absorb_union_subtypes`, as `resolve_conditional`'s was onto
   `conditional_branch`. Check the crate for other doc blocks sitting on the
   wrong item.
-- [ ] **T8. `filter_array_values` skips intersections** (`transform.rs`). A
+- [x] **T8. `filter_array_values` skips intersections** (done in `65a73cd1`) (`transform.rs`). A
   `list<T>` passes through unfiltered. Harmless today, since `array_filter`
   strips refinements first, but the method's contract doesn't say so.
 
