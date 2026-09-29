@@ -878,6 +878,11 @@ impl<'a> Checker<'a> {
             // identical `int|string|null` signature.
             "key" | "array_key_first" | "array_key_last" if args.len() == 1 => {
                 let arr_ty = self.infer_expr(&args[0].value, locals);
+                if name != "key"
+                    && let Some(key) = shape_end_key(&arr_ty, name == "array_key_first")
+                {
+                    return key;
+                }
                 if arr_ty.is_array().yes() {
                     let key_ty = arr_ty
                         .array_key_type()
@@ -3202,4 +3207,34 @@ fn list_of_non_empty_strings() -> Type {
         Type::accessory(AccessoryKind::ArrayList),
         Type::accessory(AccessoryKind::NonEmptyArray),
     ])
+}
+
+/// The first (`from_start`) or last key of a sealed array shape, or of
+/// each member of a union of them: the keys up to and including the first
+/// one that is surely there, `null` too when none is.
+fn shape_end_key(arr_ty: &Type, from_start: bool) -> Option<Type> {
+    let mut keys = Vec::new();
+    for member in arr_ty.union_members() {
+        let shape = member.as_array_shape()?;
+        if shape.unsealed.is_some() {
+            return None;
+        }
+        let mut fields: Box<dyn Iterator<Item = &types::ShapeField>> = if from_start {
+            Box::new(shape.fields.iter())
+        } else {
+            Box::new(shape.fields.iter().rev())
+        };
+        let mut surely_non_empty = false;
+        for field in &mut fields {
+            keys.push(field.key.to_type());
+            if !field.optional {
+                surely_non_empty = true;
+                break;
+            }
+        }
+        if !surely_non_empty {
+            keys.push(Type::null());
+        }
+    }
+    Some(Type::union_of(keys))
 }
