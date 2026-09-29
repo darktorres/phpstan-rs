@@ -246,7 +246,10 @@ Each fix needs a fixture.
   Make it the union's rule, keeping merges that absorption can't express
   (ranges that touch, arrays by key set), and measure the cost: an O(n²)
   relation pass per union on a hot path.
-- [ ] **T2. Refinements as intersection.** `to_non_empty_array`, `to_list`,
+- [x] **T2. Refinements as intersection.** Done in `c6c59353` for
+  `to_non_empty_array`, `to_list` and a present key; `to_isset_container`
+  and `without_falsy` also remove values (null, scalars, falsy literals),
+  which an intersection doesn't express, and stay per kind. `to_non_empty_array`, `to_list`,
   `with_key_presence`, `to_isset_container` and `without_falsy` in
   `crates/types/src/narrowing.rs` each hand-write "intersect every member
   with one refinement". Express them through `Relation::intersect`,
