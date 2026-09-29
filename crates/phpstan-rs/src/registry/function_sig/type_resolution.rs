@@ -1,13 +1,11 @@
-use std::sync::Arc;
-
 use rustc_hash::FxHashMap;
+use syntax::name::Name;
 
 use super::generics::mark_template_params;
 use crate::registry::name_context::{collect_class_name_case_refs, resolve_names_in_type};
 use crate::registry::type_node::parse_type_node;
 use phpdoc::grammar::TypeNode;
 use syntax::ast::{Expr, ExprKind, Literal, NativeType, TypeHint, TypeHintKind};
-use syntax::intern::intern;
 use syntax::name_resolution::NameContext;
 use types::{self, TemplateParam, Type};
 
@@ -47,7 +45,7 @@ pub(crate) struct DeclaredType {
     pub(crate) native: Type,
     /// `(written, resolved)` for each class name either names, for
     /// `class.nameCase`.
-    pub(crate) case_refs: Vec<(Arc<str>, Arc<str>)>,
+    pub(crate) case_refs: Vec<(Name, Name)>,
 }
 
 /// The types of a declaration with PHPDoc type `doc` and native type
@@ -60,10 +58,15 @@ pub(crate) fn declared_type(
     ctx: &NameContext,
 ) -> DeclaredType {
     let native_ty = native.map(types::native_type);
-    let mut case_refs: Vec<(Arc<str>, Arc<str>)> = native
+    let mut case_refs: Vec<(Name, Name)> = native
         .into_iter()
         .flat_map(TypeHint::class_names)
-        .filter_map(|(name, _)| Some((intern(&name.written), intern(name.resolved_class()?))))
+        .filter_map(|(name, _)| {
+            Some((
+                Name::from(&name.written),
+                Name::from(name.resolved_class()?),
+            ))
+        })
         .collect();
     let doc_ty = doc.map(|node| {
         let ty = mark_template_params(parse_type_node(node), template_params);

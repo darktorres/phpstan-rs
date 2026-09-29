@@ -15,15 +15,15 @@ use crate::checker::NamedArgumentCallFacts;
 use crate::registry::Registry;
 use rustc_hash::{FxHashMap, FxHashSet};
 use std::path::PathBuf;
-use std::sync::Arc;
 use syntax::ast::{ClassDecl, Stmt, Visibility};
 use syntax::declarations::{Declared, for_each_declaration};
 use syntax::token::Span;
+use types::Name;
 
 /// Project-wide merge of every analysed file's `NamedArgumentCallFacts`,
 /// each call site tagged with the file it came from.
 pub(crate) type NamedArgumentCallFactsWithPath =
-    FxHashMap<(Arc<str>, Arc<str>, Arc<str>), Vec<(PathBuf, Span)>>;
+    FxHashMap<(Name, Name, Name), Vec<(PathBuf, Span)>>;
 
 /// Merges each analysed file's call sites in the order given, which the
 /// caller makes path order.
@@ -47,11 +47,11 @@ pub(crate) fn merge_named_argument_calls(
 /// positional slot.
 #[derive(Debug, Clone)]
 pub(crate) struct RenamedParameterOverride {
-    pub(crate) prototype_class: Arc<str>,
-    pub(crate) method: Arc<str>,
-    pub(crate) prototype_param: Arc<str>,
-    pub(crate) overriding_class: Arc<str>,
-    pub(crate) overriding_param: Arc<str>,
+    pub(crate) prototype_class: Name,
+    pub(crate) method: Name,
+    pub(crate) prototype_param: Name,
+    pub(crate) overriding_class: Name,
+    pub(crate) overriding_param: Name,
 }
 
 pub(crate) type RenamedParameterOverrideFacts = Vec<RenamedParameterOverride>;
@@ -94,7 +94,7 @@ fn class_overrides(
     };
     let own_method_names: FxHashSet<&str> =
         c.methods.iter().map(|m| m.function.name.as_ref()).collect();
-    let mut trait_method_names: Vec<Arc<str>> = info
+    let mut trait_method_names: Vec<Name> = info
         .methods()
         .keys()
         .filter(|name| {
@@ -137,9 +137,9 @@ fn method_overrides(
         if ancestor_param.name() != own_param.name() {
             out.push(RenamedParameterOverride {
                 prototype_class: ancestor_owner.clone(),
-                method: syntax::intern::intern(method_name),
+                method: Name::from(method_name),
                 prototype_param: ancestor_param.name().clone(),
-                overriding_class: syntax::intern::intern(fqn),
+                overriding_class: Name::from(fqn),
                 overriding_param: own_param.name().clone(),
             });
         }

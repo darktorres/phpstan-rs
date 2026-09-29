@@ -357,7 +357,7 @@ impl<'a> Lexer<'a> {
         if c == b'$' && (is_ident_start(self.peek_at(1))) {
             self.pos += 1;
             let s = self.lex_ident_raw();
-            return Token::Variable(self.interner.str(&s));
+            return Token::Variable(self.interner.name(&s));
         }
 
         // `${expr}` - the older "variable variable" syntax, where the

@@ -13,6 +13,7 @@ use phpdoc::docblock;
 use syntax::ast::*;
 use syntax::token::Span;
 use syntax::visit::body_contains_yield;
+use types::Name;
 use types::php_version::PhpFeature;
 use types::{self, Type};
 
@@ -31,10 +32,10 @@ impl<'a> Checker<'a> {
     pub(crate) fn check_trait_methods(&mut self, fqn: &str, c: &ClassDecl) {
         let hosts = self.registry.classes_using_trait(fqn);
         let has_hosts = !hosts.is_empty();
-        let contexts: Vec<std::sync::Arc<str>> = if has_hosts {
+        let contexts: Vec<Name> = if has_hosts {
             hosts
         } else {
-            vec![std::sync::Arc::from(fqn)]
+            vec![Name::from(fqn)]
         };
         let previous_trait = self.current_trait.take();
         self.current_trait = Some(fqn.to_string());
@@ -423,20 +424,16 @@ impl<'a> Checker<'a> {
                     let ty = mark_template_params(ty, &shallow);
                     resolve_names_in_type(ty, &self.name_ctx)
                 };
-                let templates: Vec<std::sync::Arc<str>> = doc
-                    .templates
-                    .iter()
-                    .map(|s| syntax::intern::intern(s))
-                    .collect();
-                let bounds: rustc_hash::FxHashMap<std::sync::Arc<str>, Type> = doc
+                let templates: Vec<Name> = doc.templates.iter().map(Name::from).collect();
+                let bounds: rustc_hash::FxHashMap<Name, Type> = doc
                     .template_bounds
                     .iter()
-                    .map(|(k, v)| (syntax::intern::intern(k), resolve(v)))
+                    .map(|(k, v)| (Name::from(k), resolve(v)))
                     .collect();
-                let defaults: rustc_hash::FxHashMap<std::sync::Arc<str>, Type> = doc
+                let defaults: rustc_hash::FxHashMap<Name, Type> = doc
                     .template_defaults
                     .iter()
-                    .map(|(k, v)| (syntax::intern::intern(k), resolve(v)))
+                    .map(|(k, v)| (Name::from(k), resolve(v)))
                     .collect();
                 let type_aliases = class_name
                     .and_then(|c| self.registry.classes.get(c))
@@ -736,10 +733,7 @@ impl<'a> Checker<'a> {
         // Captured (moved into) by the `.or_else` closure below when
         // `sig` is `None`. Stays empty (and unused) when `sig` is
         // `Some`, since the closure never runs in that case.
-        let mut declared_return_case_refs_none_path: Vec<(
-            std::sync::Arc<str>,
-            std::sync::Arc<str>,
-        )> = Vec::new();
+        let mut declared_return_case_refs_none_path: Vec<(Name, Name)> = Vec::new();
         let declared_return = sig
             .map(|s| {
                 if return_doc_unresolvable {
@@ -1013,7 +1007,7 @@ impl<'a> Checker<'a> {
         self.current_method_attrs = f
             .attrs
             .iter()
-            .map(|a| syntax::intern::intern(&self.resolve_class_name(&a.name)))
+            .map(|a| Name::from(&self.resolve_class_name(&a.name)))
             .collect();
         // Mirrors real PHPStan's `DeprecatedScopeHelper` - suppresses
         // every deprecated-usage diagnostic from within a deprecated
@@ -1080,7 +1074,7 @@ impl<'a> Checker<'a> {
             Some(sig) => {
                 for param in sig.params() {
                     if param.by_ref() {
-                        let name: std::sync::Arc<str> = std::sync::Arc::from(param.name().as_ref());
+                        let name: Name = param.name().clone();
                         if let Some(out_ty) = &param.out_ty() {
                             self.current_function_by_ref_params_with_tag
                                 .insert(name.clone(), out_ty.clone());

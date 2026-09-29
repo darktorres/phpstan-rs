@@ -1,8 +1,7 @@
 use rustc_hash::FxHashSet;
-use std::sync::Arc;
+use types::Name;
 
 use syntax::ast::*;
-use syntax::intern::intern;
 use syntax::visit::{any_child_expr, any_child_stmt};
 
 // ---------------------------------------------------------------------
@@ -21,11 +20,11 @@ use syntax::visit::{any_child_expr, any_child_stmt};
 /// a member that dynamic code actually does reach.
 #[derive(Default)]
 pub(crate) struct MemberUsage {
-    pub(crate) consts: FxHashSet<Arc<str>>,
+    pub(crate) consts: FxHashSet<Name>,
     /// Lowercased (`method_key`).
-    pub(crate) methods: FxHashSet<Arc<str>>,
-    pub(crate) reads: FxHashSet<Arc<str>>,
-    pub(crate) writes: FxHashSet<Arc<str>>,
+    pub(crate) methods: FxHashSet<Name>,
+    pub(crate) reads: FxHashSet<Name>,
+    pub(crate) writes: FxHashSet<Name>,
     pub(crate) escaped: bool,
     /// Local variable names, scoped to the one function/hook body
     /// currently being scanned, syntactically proven (never via real type
@@ -38,7 +37,7 @@ pub(crate) struct MemberUsage {
     /// class-wide, so the caller (`check_unused_private_members`) clears
     /// this before each function/hook body's own scan rather than letting
     /// it accumulate across bodies.
-    pub(crate) aliases: FxHashSet<Arc<str>>,
+    pub(crate) aliases: FxHashSet<Name>,
 }
 
 /// Whether `class_ref` (the class name half of a `Foo::bar`/`self::bar`/
@@ -64,8 +63,8 @@ fn target_is_self(target: &StaticTarget, fqn: &str) -> bool {
 
 /// A method name as `MemberUsage::methods` holds it: PHP method names are
 /// case-insensitive.
-pub(crate) fn method_key(name: &str) -> Arc<str> {
-    Arc::from(name.to_ascii_lowercase())
+pub(crate) fn method_key(name: &str) -> Name {
+    Name::from(name.to_ascii_lowercase())
 }
 
 fn is_this(e: &Expr) -> bool {
@@ -102,16 +101,16 @@ fn is_new_self_instance(e: &Expr, fqn: &str) -> bool {
 fn mark_write_target(l: &Expr, fqn: &str, usage: &mut MemberUsage, also_read: bool) -> bool {
     match &l.kind {
         ExprKind::PropertyAccess(base, name, _) if is_this_or_aliased(base, usage) => {
-            usage.writes.insert(intern(&name.name));
+            usage.writes.insert(Name::from(&name.name));
             if also_read {
-                usage.reads.insert(intern(&name.name));
+                usage.reads.insert(Name::from(&name.name));
             }
             true
         }
         ExprKind::StaticPropertyFetch(target, prop) if target_is_self(target, fqn) => {
-            usage.writes.insert(intern(&prop.name));
+            usage.writes.insert(Name::from(&prop.name));
             if also_read {
-                usage.reads.insert(intern(&prop.name));
+                usage.reads.insert(Name::from(&prop.name));
             }
             true
         }
@@ -218,7 +217,7 @@ pub(crate) fn walk_expr_for_members(expr: &Expr, fqn: &str, usage: &mut MemberUs
                 return;
             }
             ExprKind::PropertyAccess(base, name, _) if is_this_or_aliased(base, usage) => {
-                usage.reads.insert(intern(&name.name));
+                usage.reads.insert(Name::from(&name.name));
             }
             // `$var instanceof self`/`static`/`<SameClass>`, either polarity,
             // anywhere in the body - see `MemberUsage::aliases`'s own doc
@@ -241,18 +240,18 @@ pub(crate) fn walk_expr_for_members(expr: &Expr, fqn: &str, usage: &mut MemberUs
             ExprKind::DynamicStaticPropertyFetch(..) => usage.escaped = true,
             ExprKind::StaticPropertyFetch(target, prop) => {
                 if target_is_self(target, fqn) {
-                    usage.reads.insert(intern(&prop.name));
+                    usage.reads.insert(Name::from(&prop.name));
                 }
             }
             ExprKind::ClassConstFetch(target, member) => {
                 if target_is_self(target, fqn) {
-                    usage.consts.insert(intern(&member.name));
+                    usage.consts.insert(Name::from(&member.name));
                 }
             }
             ExprKind::DynamicClassConstFetch(target, name) => match &name.kind {
                 ExprKind::Literal(Literal::String(member)) => {
                     if target_is_self(target, fqn) {
-                        usage.consts.insert(Arc::from(&*member.to_str_lossy()));
+                        usage.consts.insert(Name::from(&*member.to_str_lossy()));
                     }
                 }
                 _ => usage.escaped = true,

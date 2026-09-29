@@ -15,6 +15,7 @@ use diagnostics::DiagnosticBuilder;
 use syntax::ast::TypeHint;
 use syntax::ast::{Arg, ClassKind, Expr, ExprKind, FunctionDecl, Literal, Param, UnaryOp};
 use syntax::token::Span;
+use types::Name;
 use types::Type;
 
 /// Where a `Class`-kind ban's own referenced-class check fires -
@@ -456,7 +457,7 @@ impl<'a> Checker<'a> {
     /// case-insensitivity - an attribute name is, after all, a class
     /// name.
     fn is_allowed_by_attribute_context(&self, entry: &RestrictedSymbolEntry) -> bool {
-        let matches_any = |patterns: &[String], attrs: &[std::sync::Arc<str>]| {
+        let matches_any = |patterns: &[String], attrs: &[Name]| {
             patterns.iter().any(|p| {
                 let p = p.to_lowercase();
                 attrs.iter().any(|a| glob_matches(&p, &a.to_lowercase()))
@@ -526,7 +527,7 @@ impl<'a> Checker<'a> {
     /// this one specific allow mechanism (the `is_empty()` guard just
     /// above), unlike `current_class_attrs`/`current_method_attrs`,
     /// which every restricted-symbol report reads.
-    fn current_class_any_method_attrs(&self) -> Vec<std::sync::Arc<str>> {
+    fn current_class_any_method_attrs(&self) -> Vec<Name> {
         let Some(class) = &self.current_class else {
             return Vec::new();
         };

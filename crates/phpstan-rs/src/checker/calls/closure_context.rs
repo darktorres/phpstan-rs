@@ -184,7 +184,7 @@ impl<'a> Checker<'a> {
                 for u in uses {
                     // See the identical fix's own comment at
                     // `checker::expr`'s `ExprKind::Closure` arm.
-                    if u.name == "this".into() {
+                    if u.name == "this" {
                         self.report_builder(
                             DiagnosticBuilder::new(
                                 "Cannot use $this as lexical variable.".to_string(),

@@ -477,7 +477,7 @@ impl<'a> Checker<'a> {
             StmtKind::Global(vars) => {
                 own = vars
                     .iter()
-                    .filter_map(|v| v.name().map(str::to_string))
+                    .filter_map(|v| v.name().map(Name::to_string))
                     .collect();
             }
             StmtKind::Return(Some(e)) | StmtKind::Throw(e) => {

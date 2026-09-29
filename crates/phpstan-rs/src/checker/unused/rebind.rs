@@ -1,5 +1,5 @@
 use rustc_hash::FxHashSet;
-use std::sync::Arc;
+use types::Name;
 
 use syntax::ast::*;
 use syntax::visit::{Visitor, walk_expr, walk_stmts};
@@ -18,7 +18,7 @@ use syntax::visit::{Visitor, walk_expr, walk_stmts};
 /// resolve without real type inference. A rebind is `Closure::bind()`,
 /// `->bindTo()`, or `->call()` on a closure (a literal, or a variable
 /// assigned one), whose scope is its object's class.
-pub(crate) fn scan_program_for_rebind_targets(program: &[Stmt]) -> (FxHashSet<Arc<str>>, bool) {
+pub(crate) fn scan_program_for_rebind_targets(program: &[Stmt]) -> (FxHashSet<Name>, bool) {
     let mut closures = ClosureVariables::default();
     walk_stmts(&mut closures, program);
     let mut rebinds = Rebinds {
@@ -32,7 +32,7 @@ pub(crate) fn scan_program_for_rebind_targets(program: &[Stmt]) -> (FxHashSet<Ar
 
 /// Every variable name some assignment gives a closure.
 #[derive(Default)]
-struct ClosureVariables(FxHashSet<Arc<str>>);
+struct ClosureVariables(FxHashSet<Name>);
 
 impl<'ast> Visitor<'ast> for ClosureVariables {
     fn visit_expr(&mut self, expr: &'ast Expr) {
@@ -55,9 +55,9 @@ fn is_closure_expr(e: &Expr) -> bool {
 }
 
 struct Rebinds {
-    targets: FxHashSet<Arc<str>>,
+    targets: FxHashSet<Name>,
     escape_all: bool,
-    closure_variables: FxHashSet<Arc<str>>,
+    closure_variables: FxHashSet<Name>,
 }
 
 impl<'ast> Visitor<'ast> for Rebinds {
@@ -90,7 +90,7 @@ impl<'ast> Visitor<'ast> for Rebinds {
                         if let ExprKind::Name(name) = &class.kind
                             && let Some(class) = name.resolved_class() =>
                     {
-                        self.targets.insert(Arc::from(class));
+                        self.targets.insert(Name::from(class));
                     }
                     _ => self.escape_all = true,
                 }
@@ -102,14 +102,14 @@ impl<'ast> Visitor<'ast> for Rebinds {
 }
 fn record_rebind_scope(
     scope_arg: Option<&Arg>,
-    targets: &mut FxHashSet<Arc<str>>,
+    targets: &mut FxHashSet<Name>,
     escape_all: &mut bool,
 ) {
     match scope_arg.map(|a| &a.value.kind) {
         Some(ExprKind::ClassNameFetch(StaticTarget::Name(class_name, _)))
             if let Some(class) = class_name.resolved_class() =>
         {
-            targets.insert(Arc::from(class));
+            targets.insert(Name::from(class));
         }
         // An omitted scope argument, or one that isn't a literal
         // `Foo::class` naming a class (a variable, `get_class($x)`,

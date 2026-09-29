@@ -40,7 +40,7 @@
 //! classes from its own dependency, `nikic/php-doc-parser`
 //! (`PHPStan\PhpDocParser\Ast\Type\*`), not vendored here.
 
-use std::sync::Arc;
+use syntax::name::Name;
 
 use rayon::prelude::*;
 
@@ -76,7 +76,7 @@ use stub_sources::{
 /// mechanism - a single, narrow, explicitly justified post-generation
 /// patch for this one function is more honest than reintroducing a
 /// whole overlay system for it.
-fn patch_array_multisort_by_ref(stubs: &mut [(Arc<str>, FunctionReflection)]) {
+fn patch_array_multisort_by_ref(stubs: &mut [(Name, FunctionReflection)]) {
     for (name, sig) in stubs.iter_mut() {
         if name.as_ref() != "array_multisort" {
             continue;
@@ -92,7 +92,7 @@ fn patch_array_multisort_by_ref(stubs: &mut [(Arc<str>, FunctionReflection)]) {
 /// `list<array{function: string, ...}>` shape `Exception::getTrace()`
 /// shares (`backtrace_frame_list_type`, `patch_reflection_and_exception_
 /// list_types`'s own doc comment).
-fn patch_debug_backtrace(stubs: &mut [(Arc<str>, FunctionReflection)]) {
+fn patch_debug_backtrace(stubs: &mut [(Name, FunctionReflection)]) {
     for (name, sig) in stubs.iter_mut() {
         if name.as_ref() == "debug_backtrace" {
             sig.return_type = backtrace_frame_list_type();
@@ -124,7 +124,7 @@ fn patch_debug_backtrace(stubs: &mut [(Arc<str>, FunctionReflection)]) {
 /// one-function-at-a-time discipline `patch_array_multisort_by_ref`
 /// above already established rather than reintroducing a whole
 /// stub-overlay system for a still-hypothetical wider gap.
-fn patch_usleep(stubs: &mut [(Arc<str>, FunctionReflection)]) {
+fn patch_usleep(stubs: &mut [(Name, FunctionReflection)]) {
     for (name, sig) in stubs.iter_mut() {
         if name.as_ref() == "usleep" {
             for param in &mut sig.params {
@@ -138,7 +138,7 @@ fn patch_usleep(stubs: &mut [(Arc<str>, FunctionReflection)]) {
 /// `string|int|float`; `functionMap.php` covers `printf`, so PHPStan never
 /// reads that tag. The values take `functionMap.php`'s type, which the
 /// printf rule checks, as for `sprintf` and `fprintf`.
-fn patch_printf_values(stubs: &mut [(Arc<str>, FunctionReflection)]) {
+fn patch_printf_values(stubs: &mut [(Name, FunctionReflection)]) {
     for (name, sig) in stubs.iter_mut() {
         if name.as_ref() != "printf" {
             continue;
@@ -154,7 +154,7 @@ fn patch_printf_values(stubs: &mut [(Arc<str>, FunctionReflection)]) {
 /// comparison callback(s) as the last argument(s) of the variadic
 /// `...$rest`, which phpstorm-stubs types `array` only; `$rest` holds
 /// either. (`functionMap.php` spells out each arity as its own variant.)
-fn patch_array_callback_family(stubs: &mut [(Arc<str>, FunctionReflection)]) {
+fn patch_array_callback_family(stubs: &mut [(Name, FunctionReflection)]) {
     const FAMILY: &[&str] = &[
         "array_udiff",
         "array_udiff_assoc",
@@ -251,7 +251,7 @@ fn patch_array_callback_family(stubs: &mut [(Arc<str>, FunctionReflection)]) {
 /// own `LanguageLevelTypeAware` attributes get (`proc_get_status` lost
 /// its `|false` in 8.0, `session_get_cookie_params` gained `partitioned`
 /// in 8.5).
-fn patch_functionmap_array_shapes(stubs: &mut [(Arc<str>, FunctionReflection)]) {
+fn patch_functionmap_array_shapes(stubs: &mut [(Name, FunctionReflection)]) {
     let date_parse_shape = types::parse_type_string(
         "array{year: int|false, month: int|false, day: int|false, hour: int|false, \
          minute: int|false, second: int|false, fraction: float|false, warning_count: int, \
@@ -377,7 +377,7 @@ fn patch_functionmap_array_shapes(stubs: &mut [(Arc<str>, FunctionReflection)]) 
 /// once across the corpus (e.g. a version-conditional pair of signatures
 /// for the same function in different files); taking the first is a
 /// simplification, not a precision-critical choice.
-pub fn generated_stubs() -> Vec<(Arc<str>, FunctionReflection)> {
+pub fn generated_stubs() -> Vec<(Name, FunctionReflection)> {
     generated_stub_data().functions.clone()
 }
 
@@ -404,7 +404,7 @@ pub fn generated_stubs() -> Vec<(Arc<str>, FunctionReflection)> {
 /// member binds from a class string (a literal naming a class included),
 /// and the bare `T` member only from an object, `T` being bound by
 /// `object`.
-fn patch_reflection_class_constructor_template(classes: &mut [(Arc<str>, ClassReflection)]) {
+fn patch_reflection_class_constructor_template(classes: &mut [(Name, ClassReflection)]) {
     let Some((_, info)) = classes
         .iter_mut()
         .find(|(name, _)| name.as_ref() == "ReflectionClass")
@@ -492,7 +492,7 @@ fn patch_reflection_class_constructor_template(classes: &mut [(Arc<str>, ClassRe
 /// attribute reader) would start getting flagged at level 6+ for a
 /// template this project invented, not one a user ever wrote or could
 /// satisfy.
-fn patch_reflection_method_and_property_templates(classes: &mut [(Arc<str>, ClassReflection)]) {
+fn patch_reflection_method_and_property_templates(classes: &mut [(Name, ClassReflection)]) {
     for class_name in ["ReflectionMethod", "ReflectionProperty"] {
         let Some((_, info)) = classes
             .iter_mut()
@@ -503,10 +503,10 @@ fn patch_reflection_method_and_property_templates(classes: &mut [(Arc<str>, Clas
         if info.templates.iter().any(|t| t.as_ref() == "TClass") {
             continue;
         }
-        info.templates.push(Arc::from("TClass"));
-        info.covariant_templates.insert(Arc::from("TClass"));
+        info.templates.push(Name::from("TClass"));
+        info.covariant_templates.insert(Name::from("TClass"));
         info.template_bounds
-            .insert(Arc::from("TClass"), Type::object_without_class());
+            .insert(Name::from("TClass"), Type::object_without_class());
         let tp = TemplateParam {
             name: "TClass".to_string(),
             bound: Box::new(Type::object_without_class()),
@@ -629,7 +629,7 @@ fn backtrace_frame_list_type() -> Type {
 ///   ReflectionParameter>`.
 /// - `Exception`/`Error::getTrace()` -> the shared `backtrace_frame_
 ///   list_type()` shape above.
-fn patch_reflection_and_exception_list_types(classes: &mut [(Arc<str>, ClassReflection)]) {
+fn patch_reflection_and_exception_list_types(classes: &mut [(Name, ClassReflection)]) {
     if let Some((_, info)) = classes
         .iter_mut()
         .find(|(name, _)| name.as_ref() == "ReflectionFunctionAbstract")
@@ -688,7 +688,7 @@ fn patch_reflection_and_exception_list_types(classes: &mut [(Arc<str>, ClassRefl
 /// package's own incomplete declaration of these): every one of the
 /// `generics.notGeneric` false positives these six classes caused is
 /// gone.
-fn patch_spl_iterator_templates(classes: &mut [(Arc<str>, ClassReflection)]) {
+fn patch_spl_iterator_templates(classes: &mut [(Name, ClassReflection)]) {
     let shapes: &[(&str, &[&str])] = &[
         ("FilterIterator", &["TKey", "TValue", "TIterator"]),
         ("RecursiveIterator", &["TKey", "TValue"]),
@@ -707,10 +707,7 @@ fn patch_spl_iterator_templates(classes: &mut [(Arc<str>, ClassReflection)]) {
         if !info.templates.is_empty() {
             continue;
         }
-        info.templates = template_names
-            .iter()
-            .map(|t| Arc::<str>::from(*t))
-            .collect();
+        info.templates = template_names.iter().map(|t| Name::from(*t)).collect();
     }
 }
 
@@ -727,7 +724,7 @@ fn patch_spl_iterator_templates(classes: &mut [(Arc<str>, ClassReflection)]) {
 /// where phpstorm-stubs' own `@var` claims a bare `DOMElement`) takes
 /// that type, as long as the class ends up with the stub's own template
 /// names, since the type may refer to them.
-fn patch_phpstan_stub_classes(classes: &mut [(Arc<str>, ClassReflection)]) {
+fn patch_phpstan_stub_classes(classes: &mut [(Name, ClassReflection)]) {
     for source in PHPSTAN_STUB_SOURCES {
         let Ok(parsed) = syntax::parse(source.as_bytes(), Interner::global()) else {
             continue;
@@ -789,7 +786,7 @@ fn patch_phpstan_stub_classes(classes: &mut [(Arc<str>, ClassReflection)]) {
 
 /// All classes generated from the vendored phpstorm-stubs sources, merged
 /// (first occurrence wins - see `generated_stubs`' equivalent note).
-pub fn generated_stub_classes() -> Vec<(Arc<str>, ClassReflection)> {
+pub fn generated_stub_classes() -> Vec<(Name, ClassReflection)> {
     generated_stub_data().classes.clone()
 }
 
@@ -811,7 +808,7 @@ pub fn generated_stub_classes() -> Vec<(Arc<str>, ClassReflection)> {
 /// instead), a bare global constant has no such tiebreaking mechanism, so
 /// this reuses the exact same conflict policy already used *within* one
 /// file's own `global_constants` map, across the whole corpus at once.
-pub fn generated_stub_constants() -> Vec<(Arc<str>, Type)> {
+pub fn generated_stub_constants() -> Vec<(Name, Type)> {
     generated_stub_data().constants.clone()
 }
 
@@ -825,9 +822,9 @@ pub fn generated_stub_constants() -> Vec<(Arc<str>, Type)> {
 /// field off what is otherwise the identical deterministic per-file
 /// result was pure waste.
 struct GeneratedStubData {
-    functions: Vec<(Arc<str>, FunctionReflection)>,
-    classes: Vec<(Arc<str>, ClassReflection)>,
-    constants: Vec<(Arc<str>, Type)>,
+    functions: Vec<(Name, FunctionReflection)>,
+    classes: Vec<(Name, ClassReflection)>,
+    constants: Vec<(Name, Type)>,
     // Lowercased name -> the phpstorm-stubs directory (extension) that
     // declares it; PHPStan's own classes aren't built-ins and aren't here.
     function_extensions: rustc_hash::FxHashMap<String, &'static str>,
@@ -868,7 +865,7 @@ pub fn builtin_class_extension(name: &str) -> Option<&'static str> {
 /// types some of these by the base class name instead (the PHP 8.4
 /// tentative hint); the class member becomes `static`, keeping any
 /// `false` failure alternative.
-fn patch_datetime_fluent_returns(classes: &mut [(Arc<str>, ClassReflection)]) {
+fn patch_datetime_fluent_returns(classes: &mut [(Name, ClassReflection)]) {
     const FLUENT: [&str; 9] = [
         "modify",
         "add",
@@ -912,9 +909,9 @@ fn patch_datetime_fluent_returns(classes: &mut [(Arc<str>, ClassReflection)]) {
 
 /// One stub file's declarations, in the order its registry yields them.
 struct StubFileDeclarations {
-    functions: Vec<(Arc<str>, FunctionReflection)>,
-    classes: Vec<(Arc<str>, ClassReflection)>,
-    constants: Vec<(Arc<str>, Type)>,
+    functions: Vec<(Name, FunctionReflection)>,
+    classes: Vec<(Name, ClassReflection)>,
+    constants: Vec<(Name, Type)>,
 }
 
 /// Parses and indexes one embedded stub file, from `origin`.
@@ -959,7 +956,7 @@ fn generated_stub_data() -> &'static GeneratedStubData {
         let mut functions = Vec::new();
         let mut seen_classes = rustc_hash::FxHashSet::default();
         let mut classes = Vec::new();
-        let mut merged_constants: rustc_hash::FxHashMap<Arc<str>, Type> =
+        let mut merged_constants: rustc_hash::FxHashMap<Name, Type> =
             rustc_hash::FxHashMap::default();
         let mut function_extensions = rustc_hash::FxHashMap::default();
         let mut class_extensions = rustc_hash::FxHashMap::default();

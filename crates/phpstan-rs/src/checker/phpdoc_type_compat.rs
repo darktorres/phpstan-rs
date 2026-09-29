@@ -202,7 +202,7 @@ impl<'a> Checker<'a> {
                 continue;
             };
             let description = callable.to_string();
-            let names: Vec<std::sync::Arc<str>> = sig
+            let names: Vec<Name> = sig
                 .templates
                 .iter()
                 .map(|t| t.name.as_str().into())

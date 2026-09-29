@@ -2,8 +2,8 @@
 //! sibling of `resolve_names_in_type`.
 
 use super::super::*;
-use syntax::intern::intern;
 use syntax::name_resolution::NameContext;
+use types::Name;
 use types::{self, CallSiteVariance, Type};
 
 fn ctx_for(namespace: &str) -> NameContext {
@@ -23,8 +23,8 @@ fn collects_a_representative_nested_type_s_own_class_name_refs() {
     assert_eq!(
         out,
         vec![
-            (intern("Foo"), intern("App\\Foo")),
-            (intern("Bar"), intern("App\\Bar")),
+            (Name::from("Foo"), Name::from("App\\Foo")),
+            (Name::from("Bar"), Name::from("App\\Bar")),
         ]
     );
 }
@@ -56,7 +56,7 @@ fn recurses_into_a_traversables_own_generic_argument_without_collecting_traversa
     );
     let mut out = Vec::new();
     collect_class_name_case_refs(&ty, &ctx, &mut out);
-    assert_eq!(out, vec![(intern("Edge"), intern("App\\Edge"))]);
+    assert_eq!(out, vec![(Name::from("Edge"), Name::from("App\\Edge"))]);
 }
 
 #[test]
@@ -68,5 +68,5 @@ fn recurses_through_a_variance_annotation() {
     );
     let mut out = Vec::new();
     collect_class_name_case_refs(&ty, &ctx, &mut out);
-    assert_eq!(out, vec![(intern("Foo"), intern("App\\Foo"))]);
+    assert_eq!(out, vec![(Name::from("Foo"), Name::from("App\\Foo"))]);
 }

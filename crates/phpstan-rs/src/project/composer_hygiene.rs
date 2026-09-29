@@ -614,7 +614,7 @@ impl Project {
             .filter(|name| {
                 self.registry
                     .classes
-                    .get(*name)
+                    .get(name)
                     .is_some_and(|info| info.kind() == ClassKind::Class && !info.is_abstract())
             })
             .collect();

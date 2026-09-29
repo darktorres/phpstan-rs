@@ -17,6 +17,7 @@ use diagnostics::DiagnosticBuilder;
 use syntax::ast::*;
 use syntax::token::Span;
 use syntax::visit::{body_contains_yield, expr_contains_yield};
+use types::Name;
 use types::{self, Shape, Type};
 
 mod array_ops;
@@ -3353,7 +3354,7 @@ impl<'a> Checker<'a> {
                     // all (a real PHP compile error), distinct from - and
                     // checked before - the plain "undefined variable"
                     // case below.
-                    if u.name == "this".into() {
+                    if u.name == "this" {
                         self.report_builder(
                             DiagnosticBuilder::new(
                                 "Cannot use $this as lexical variable.".to_string(),
@@ -5373,10 +5374,7 @@ impl<'a> Checker<'a> {
         target: &StaticTarget,
         class: &str,
         method: &str,
-    ) -> Option<(
-        std::sync::Arc<str>,
-        std::borrow::Cow<'a, FunctionReflection>,
-    )> {
+    ) -> Option<(Name, std::borrow::Cow<'a, FunctionReflection>)> {
         let (owner, sig) = self.registry.lookup_method_with_owner(class, method)?;
         let sig = match &self.current_class {
             // Inside the calling class, its own templates stay templates:

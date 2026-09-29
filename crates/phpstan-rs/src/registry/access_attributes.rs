@@ -5,10 +5,9 @@
 //! `Sealed` (checked alongside `ClassReflection::sealed`). `MustUseResult` feeds
 //! `FunctionReflection::must_use_result`.
 
-use std::sync::Arc;
+use syntax::name::Name;
 
 use syntax::ast::{Attribute, Expr, ExprKind, Literal, StaticTarget};
-use syntax::intern::intern;
 
 /// `NamespaceVisibility`: callers must be in `namespace` (or, unless
 /// `exclude_sub_namespaces`, below it).
@@ -21,7 +20,7 @@ pub struct NamespaceVisibility {
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct AccessAttributes {
     /// `Friend`: the only other classes that may call it.
-    pub friends: Vec<Arc<str>>,
+    pub friends: Vec<Name>,
     pub namespace_visibility: Option<NamespaceVisibility>,
     /// `TestTag`: only test code may use it.
     pub test_only: bool,
@@ -31,9 +30,9 @@ pub struct AccessAttributes {
     pub check_injectable_version: bool,
     /// `RestrictTraitTo`: only these classes (and subclasses) may use
     /// the trait.
-    pub restrict_trait_to: Vec<Arc<str>>,
+    pub restrict_trait_to: Vec<Name>,
     /// `Sealed`: the only classes that may extend/implement it.
-    pub sealed: Vec<Arc<str>>,
+    pub sealed: Vec<Name>,
 }
 
 impl AccessAttributes {
@@ -50,7 +49,7 @@ fn library_attribute(resolved: &str) -> Option<&str> {
         .then(|| resolved.rsplit('\\').next().unwrap_or(resolved))
 }
 
-fn class_names(args: &[Expr], out: &mut Vec<Arc<str>>) {
+fn class_names(args: &[Expr], out: &mut Vec<Name>) {
     syntax::stack::guard(|| {
         for arg in args {
             match &arg.kind {
@@ -58,7 +57,7 @@ fn class_names(args: &[Expr], out: &mut Vec<Arc<str>>) {
                     out.push(crate::registry::name_context::class_ref(class));
                 }
                 ExprKind::Literal(Literal::String(s)) => {
-                    out.push(intern(s.to_str_lossy().trim_start_matches('\\')));
+                    out.push(Name::from(s.to_str_lossy().trim_start_matches('\\')));
                 }
                 ExprKind::ArrayLiteral(items) => {
                     let values: Vec<Expr> = items.iter().map(|i| i.value.clone()).collect();

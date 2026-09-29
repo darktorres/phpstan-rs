@@ -4,6 +4,7 @@
 
 use std::path::Path;
 use std::sync::Arc;
+use syntax::name::Name;
 
 use syntax::token::Span;
 
@@ -33,7 +34,7 @@ pub enum Origin {
 pub struct Provenance {
     origin: Origin,
     span: Span,
-    declaring_class: Option<Arc<str>>,
+    declaring_class: Option<Name>,
 }
 
 impl Provenance {
@@ -46,7 +47,7 @@ impl Provenance {
     }
 
     /// A member's, declared by `class`.
-    pub fn member(origin: Origin, span: Span, class: Arc<str>) -> Provenance {
+    pub fn member(origin: Origin, span: Span, class: Name) -> Provenance {
         Provenance {
             origin,
             span,

@@ -21,7 +21,6 @@
 //! graph is resolved.
 
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
 
 use rustc_hash::{FxHashMap, FxHashSet};
 
@@ -31,7 +30,7 @@ use syntax::ast::{
 };
 use syntax::visit::{Visitor, any_stmt_in_body, walk_expr_in_scope, walk_stmt};
 
-use types::{Shape, Type};
+use types::{Name, Shape, Type};
 
 use super::Registry;
 
@@ -137,7 +136,7 @@ impl SiteContribution {
 /// enclosing `global $x;` at collection time (always applied).
 struct StagedSite {
     gate: Option<PathBuf>,
-    name: Arc<str>,
+    name: Name,
     contribution: SiteContribution,
 }
 
@@ -187,7 +186,7 @@ impl Registry {
 
         let global_scope_files = resolve_global_scope_files(files, &out.include_sites);
 
-        let mut accumulators: FxHashMap<Arc<str>, GlobalAccumulator> = FxHashMap::default();
+        let mut accumulators: FxHashMap<Name, GlobalAccumulator> = FxHashMap::default();
         for site in out.sites {
             if let Some(path) = &site.gate
                 && !global_scope_files.contains(path)
@@ -328,13 +327,13 @@ fn walk_function_body<'a>(stmts: &'a [Stmt], file_ctx: &FileCtx<'a>, out: &mut W
 
 /// Every name a `global` statement in this body imports. A nested
 /// function, class or closure needs its own `global`, so none is entered.
-fn collect_global_names(stmts: &[Stmt]) -> FxHashSet<Arc<str>> {
+fn collect_global_names(stmts: &[Stmt]) -> FxHashSet<Name> {
     let mut out = FxHashSet::default();
     for stmt in stmts {
         any_stmt_in_body(stmt, |s| {
             if let StmtKind::Global(names) = &s.kind {
                 for name in names.iter().filter_map(GlobalVar::name) {
-                    out.insert(Arc::from(name));
+                    out.insert(name.clone());
                 }
             }
             false
@@ -347,7 +346,7 @@ fn walk_scope<'a>(
     stmts: &'a [Stmt],
     file_ctx: &FileCtx<'a>,
     top_level: bool,
-    global_names: &FxHashSet<Arc<str>>,
+    global_names: &FxHashSet<Name>,
     out: &mut WalkOutput<'a>,
 ) {
     let mut scope = Scope {
@@ -366,7 +365,7 @@ fn walk_scope<'a>(
 struct Scope<'r, 'a> {
     file_ctx: &'r FileCtx<'a>,
     top_level: bool,
-    global_names: &'r FxHashSet<Arc<str>>,
+    global_names: &'r FxHashSet<Name>,
     out: &'r mut WalkOutput<'a>,
 }
 
@@ -430,7 +429,7 @@ fn handle_top_expr_statement<'a>(
     e: &'a Expr,
     file_ctx: &FileCtx<'a>,
     top_level: bool,
-    global_names: &FxHashSet<Arc<str>>,
+    global_names: &FxHashSet<Name>,
     out: &mut WalkOutput<'a>,
 ) {
     let is_site = |name: &str| top_level || global_names.contains(name);
@@ -471,7 +470,7 @@ fn handle_assignment_target<'a>(
             };
             out.sites.push(StagedSite {
                 gate: gate(),
-                name: Arc::from(name.as_ref()),
+                name: name.clone(),
                 contribution,
             });
         }
@@ -490,7 +489,7 @@ fn handle_assignment_target<'a>(
                 };
                 out.sites.push(StagedSite {
                     gate: gate(),
-                    name: Arc::from(name.as_ref()),
+                    name: name.clone(),
                     contribution: SiteContribution::ShapeField(key_str, ty),
                 });
             } else if let Some((name, key_str)) = root_variable_and_first_key(lhs)
@@ -508,7 +507,7 @@ fn handle_assignment_target<'a>(
                 // piwigo16 corpus diff, not hypothesized).
                 out.sites.push(StagedSite {
                     gate: gate(),
-                    name: Arc::from(name.as_ref()),
+                    name: name.clone(),
                     contribution: SiteContribution::ShapeField(key_str, Type::mixed()),
                 });
             }
@@ -530,7 +529,7 @@ fn handle_assignment_target<'a>(
 /// isn't a literal (including a bare append directly on the variable
 /// itself, `$name[] = ...` - nothing to report there, not a special
 /// case, `key.as_ref()` on `None` already falls through to `None`).
-fn root_variable_and_first_key(expr: &Expr) -> Option<(&Arc<str>, String)> {
+fn root_variable_and_first_key(expr: &Expr) -> Option<(&Name, String)> {
     syntax::stack::guard(|| {
         let ExprKind::Index(base, key) = &expr.peeled().kind else {
             return None;
@@ -553,7 +552,7 @@ fn root_variable_and_first_key(expr: &Expr) -> Option<(&Arc<str>, String)> {
 /// to anything array-shaped) - the caller falls back to its own ordinary
 /// whole-value handling in that case.
 fn array_merge_self_fields(
-    name: &Arc<str>,
+    name: &Name,
     rhs: &Expr,
     registry: &Registry,
 ) -> Option<Vec<FieldContribution>> {

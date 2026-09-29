@@ -1,7 +1,7 @@
 //! The registry as the class hierarchy the type relations read, and its
 //! shorthands for them.
 
-use std::sync::Arc;
+use syntax::name::Name;
 
 use rustc_hash::FxHashMap;
 
@@ -26,7 +26,7 @@ impl ClassHierarchy for Registry {
         })
     }
 
-    fn ancestor_names(&self, class: &str) -> Vec<Arc<str>> {
+    fn ancestor_names(&self, class: &str) -> Vec<Name> {
         self.all_ancestor_names(self.canonical_class_name(class))
             .into_iter()
             .collect()
@@ -40,7 +40,7 @@ impl ClassHierarchy for Registry {
     fn is_static_method(&self, class: &str, method: &str) -> bool {
         let class = self.canonical_class_name(class);
         self.lookup_method_with_owner(class, method)
-            .and_then(|(owner, _)| self.classes.get(&*owner))
+            .and_then(|(owner, _)| self.classes.get(&owner))
             .is_some_and(|info| {
                 info.static_methods()
                     .iter()

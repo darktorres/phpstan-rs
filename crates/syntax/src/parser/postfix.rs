@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use crate::name::Name;
 
 use crate::ast::*;
 use crate::parser::{ParseError, Parser};
@@ -187,7 +187,6 @@ impl Parser {
                             }
                             StaticMember::Name(n) => ExprKind::ClassConstFetch(target, n),
                             StaticMember::Variable(name, span) => {
-                                let name = self.interner.name(&name);
                                 ExprKind::StaticPropertyFetch(target, Ident { name, span })
                             }
                             StaticMember::Dynamic(name) => {
@@ -281,6 +280,6 @@ impl Parser {
 enum StaticMember {
     Name(Ident),
     /// `$name`, and where it is.
-    Variable(Arc<str>, Span),
+    Variable(Name, Span),
     Dynamic(Expr),
 }

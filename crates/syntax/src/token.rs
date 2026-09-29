@@ -22,6 +22,7 @@ pub struct Position {
 /// as a `HashSet` element, one entry per candidate declaration site for
 /// a variable.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+#[cfg_attr(feature = "fuzzing", derive(arbitrary::Arbitrary))]
 pub struct Span {
     pub start: Position,
     pub end: Position,
@@ -298,7 +299,7 @@ pub enum StringPart {
     // A literal chunk and the span of its source text.
     Literal(PhpString, Span),
     // `$var`, spanning the `$` and the name.
-    SimpleVar(Arc<str>, Span),
+    SimpleVar(crate::name::Name, Span),
     // The fragment's own source text, plus the real file position it
     // starts at - `parser::build_interpolated` re-lexes the fragment on
     // its own, starting at this position, so an error inside
@@ -314,10 +315,10 @@ pub enum StringPart {
     // `$`'s own position, `var_end` the position right after the variable
     // name (where the arrow starts), `end` the position right after `prop`.
     PropertyAccess {
-        var: Arc<str>,
+        var: crate::name::Name,
         var_start: Position,
         var_end: Position,
-        prop: Arc<str>,
+        prop: crate::name::Name,
         nullsafe: bool,
         end: Position,
     },
@@ -327,7 +328,7 @@ pub enum StringPart {
     // `PropertyAccess`'s own: `var_start`/`var_end` bracket the variable
     // name, `end` is the position right after the closing `]`.
     Index {
-        var: Arc<str>,
+        var: crate::name::Name,
         var_start: Position,
         var_end: Position,
         key: SimpleIndexKey,
@@ -347,7 +348,7 @@ pub enum StringPart {
 #[derive(Debug, Clone, PartialEq)]
 #[cfg_attr(feature = "fuzzing", derive(arbitrary::Arbitrary))]
 pub enum SimpleIndexKey {
-    Var(Arc<str>),
+    Var(crate::name::Name),
     Int(i64),
     Str(Arc<str>),
 }
@@ -362,7 +363,7 @@ pub enum Token {
     // declaration it precedes.
     DocComment(Arc<str>),
 
-    Variable(Arc<str>),
+    Variable(crate::name::Name),
     Integer(i64),
     Float(f64),
     // Deliberately plain `String`, not interned - unlike an identifier or

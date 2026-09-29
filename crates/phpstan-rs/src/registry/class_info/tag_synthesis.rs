@@ -1,5 +1,5 @@
 use rustc_hash::FxHashMap;
-use std::sync::Arc;
+use syntax::name::Name;
 
 use crate::registry::function_sig::{
     FunctionReflection, ParameterReflection, mark_template_params,
@@ -9,7 +9,6 @@ use crate::registry::type_node::parse_type_node;
 use phpdoc::docblock;
 use phpdoc::grammar::TypeNode;
 use syntax::ast::Visibility;
-use syntax::intern::intern;
 use syntax::name_resolution::NameContext;
 use types::{self, TemplateParam, Type};
 
@@ -60,7 +59,7 @@ pub(crate) fn method_tag_sig(
     }
     let template_params = &template_params;
     #[allow(clippy::type_complexity)]
-    let resolve = |node: &TypeNode| -> (Type, Vec<(Arc<str>, Arc<str>)>) {
+    let resolve = |node: &TypeNode| -> (Type, Vec<(Name, Name)>) {
         let ty = parse_type_node(node);
         let ty = mark_template_params(ty, template_params);
         let mut case_refs = Vec::new();
@@ -82,7 +81,7 @@ pub(crate) fn method_tag_sig(
                     .unwrap_or((Type::mixed(), Vec::new()));
             ParameterReflection {
                 attributes: Vec::new(),
-                name: intern(&p.name),
+                name: Name::from(&p.name),
                 ty: ty.clone(),
                 ty_native: ty,
                 variadic: p.variadic,

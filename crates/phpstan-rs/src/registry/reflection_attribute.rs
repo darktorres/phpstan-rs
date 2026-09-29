@@ -2,23 +2,22 @@
 //! resolved to its class, each argument evaluated where it's a constant
 //! expression.
 
-use std::sync::Arc;
+use syntax::name::Name;
 
 use crate::registry::name_context::class_ref;
 use syntax::ast::{Arg, Attribute, BinOp, Expr, ExprKind, Literal, StaticTarget, UnaryOp};
-use syntax::intern::intern;
 
 /// One attribute on a declaration.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ReflectionAttribute {
-    name: Arc<str>,
+    name: Name,
     arguments: Vec<AttributeArgument>,
 }
 
 /// One argument an attribute is given: positional, or named.
 #[derive(Debug, Clone, PartialEq)]
 pub struct AttributeArgument {
-    pub name: Option<Arc<str>>,
+    pub name: Option<Name>,
     pub value: AttributeValue,
 }
 
@@ -29,16 +28,16 @@ pub enum AttributeValue {
     Bool(bool),
     Int(i64),
     Float(f64),
-    String(Arc<str>),
+    String(Name),
     /// `Foo::class`, the class resolved.
-    ClassName(Arc<str>),
+    ClassName(Name),
     /// `Foo::BAR`, the class resolved.
     ClassConstant {
-        class: Arc<str>,
-        name: Arc<str>,
+        class: Name,
+        name: Name,
     },
     /// A global constant, as written.
-    Constant(Arc<str>),
+    Constant(Name),
     /// `[k => v, ...]`, each key `None` when positional.
     Array(Vec<(Option<AttributeValue>, AttributeValue)>),
     /// `A | B | ...`, flattened.
@@ -69,7 +68,7 @@ impl ReflectionAttribute {
         &self.name
     }
 
-    pub(crate) fn name_arc(&self) -> &Arc<str> {
+    pub(crate) fn name_arc(&self) -> &Name {
         &self.name
     }
 
@@ -99,7 +98,7 @@ impl ReflectionAttribute {
 
 fn argument(arg: &Arg) -> AttributeArgument {
     AttributeArgument {
-        name: arg.name.as_deref().map(intern),
+        name: arg.name.as_deref().map(Name::from),
         value: if arg.spread {
             AttributeValue::Unsupported
         } else {
@@ -116,7 +115,7 @@ fn value(expr: &Expr) -> AttributeValue {
         ExprKind::Literal(Literal::Int(i)) => AttributeValue::Int(*i),
         ExprKind::Literal(Literal::Float(f)) => AttributeValue::Float(*f),
         ExprKind::Literal(Literal::String(s)) => {
-            AttributeValue::String(Arc::from(&*s.to_str_lossy()))
+            AttributeValue::String(Name::from(&*s.to_str_lossy()))
         }
         ExprKind::Unary(UnaryOp::Neg, inner) => match value(inner) {
             AttributeValue::Int(i) => AttributeValue::Int(i.wrapping_neg()),
@@ -127,7 +126,7 @@ fn value(expr: &Expr) -> AttributeValue {
             "true" => AttributeValue::Bool(true),
             "false" => AttributeValue::Bool(false),
             "null" => AttributeValue::Null,
-            _ => AttributeValue::Constant(intern(name)),
+            _ => AttributeValue::Constant(name.written.clone()),
         },
         ExprKind::ClassNameFetch(StaticTarget::Name(class, _)) => {
             AttributeValue::ClassName(class_ref(class))
@@ -135,7 +134,7 @@ fn value(expr: &Expr) -> AttributeValue {
         ExprKind::ClassConstFetch(StaticTarget::Name(class, _), name) => {
             AttributeValue::ClassConstant {
                 class: class_ref(class),
-                name: intern(name),
+                name: name.name.clone(),
             }
         }
         ExprKind::ArrayLiteral(items) => {

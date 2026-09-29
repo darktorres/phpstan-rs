@@ -40,7 +40,7 @@
 //! approximation of it - see `Checker::probe_var_provenance`'s own doc
 //! comment in `checker.rs` for the full design.
 
-use std::sync::Arc;
+use types::Name;
 
 use crate::project::Project;
 use crate::registry::Registry;
@@ -94,7 +94,7 @@ pub(crate) enum Resolved {
         scope: ProbeScope,
         is_static: bool,
         class: Option<String>,
-        name: Arc<str>,
+        name: Name,
         var_scope: u32,
     },
     /// A local variable *read* - resolved via a real, checker-driven
@@ -110,7 +110,7 @@ pub(crate) enum Resolved {
         scope: ProbeScope,
         is_static: bool,
         class: Option<String>,
-        name: Arc<str>,
+        name: Name,
         var_scope: u32,
     },
 }
@@ -229,7 +229,7 @@ enum ScopeFrame {
     /// variable, so resolution keeps walking outward past this frame.
     Closure {
         id: u32,
-        transparent: FxHashSet<Arc<str>>,
+        transparent: FxHashSet<Name>,
     },
     /// An arrow function's implicit-capture-by-value boundary: PHP's
     /// `fn() => ...` auto-captures every outer variable it reads BY
@@ -237,7 +237,7 @@ enum ScopeFrame {
     /// consult - only its own declared parameters (`owns`) belong to a
     /// genuinely new scope; every other name resolves as the SAME
     /// variable as whatever it refers to outside the arrow function.
-    ArrowFn { id: u32, owns: FxHashSet<Arc<str>> },
+    ArrowFn { id: u32, owns: FxHashSet<Name> },
 }
 
 struct Walker<'a> {
@@ -302,7 +302,7 @@ impl<'a> Walker<'a> {
     /// arrow function's own parameters (everything else is an implicit
     /// by-value capture of whatever the name already means outside it).
     /// Falling off the end of the stack resolves to `base_scope_id`.
-    fn resolve_var_scope(&self, name: &Arc<str>) -> u32 {
+    fn resolve_var_scope(&self, name: &Name) -> u32 {
         for frame in self.scope_frames.iter().rev() {
             match frame {
                 ScopeFrame::Closure { id, transparent } => {
@@ -348,7 +348,7 @@ impl<'a> Walker<'a> {
         out: &mut Vec<(Span, Resolved)>,
         span: Span,
         current_class: Option<&str>,
-        name: &Arc<str>,
+        name: &Name,
     ) {
         self.record(
             out,
@@ -478,12 +478,7 @@ impl<'a> Walker<'a> {
                     for var in vars {
                         match var {
                             GlobalVar::Name(name) => {
-                                self.record_var_self(
-                                    out,
-                                    name.span,
-                                    current_class,
-                                    &syntax::intern::intern(name),
-                                );
+                                self.record_var_self(out, name.span, current_class, &name.name);
                             }
                             GlobalVar::Dynamic(e) => self.expr(e, current_class, out),
                         }
@@ -494,12 +489,7 @@ impl<'a> Walker<'a> {
                         if let Some(e) = d {
                             self.expr(e, current_class, out);
                         }
-                        self.record_var_self(
-                            out,
-                            name.span,
-                            current_class,
-                            &syntax::intern::intern(name),
-                        );
+                        self.record_var_self(out, name.span, current_class, &name.name);
                     }
                 }
                 StmtKind::Switch { subject, cases } => {

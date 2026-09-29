@@ -51,6 +51,7 @@ use crate::checker::{Checker, Locals};
 use crate::registry::FunctionReflection;
 use diagnostics::DiagnosticBuilder;
 use syntax::ast::*;
+use types::Name;
 use types::TrinaryLogic;
 use types::{AccessoryKind, Type};
 
@@ -853,7 +854,7 @@ fn is_tuple(shape: &types::Shape) -> bool {
 /// One variable assignment site, with the spans of the loops around it.
 #[derive(Clone)]
 pub(crate) struct AssignedVariable {
-    name: std::sync::Arc<str>,
+    name: Name,
     span: syntax::token::Span,
     loops: Vec<syntax::token::Span>,
 }
@@ -903,7 +904,7 @@ impl<'ast> syntax::visit::Visitor<'ast> for Assigned {
             StmtKind::StaticVar(vars) => {
                 for (name, _) in vars {
                     out.push(AssignedVariable {
-                        name: syntax::intern::intern(name),
+                        name: name.name.clone(),
                         span: stmt.span,
                         loops: loops.clone(),
                     });

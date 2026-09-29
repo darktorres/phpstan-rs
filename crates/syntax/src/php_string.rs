@@ -8,6 +8,13 @@ use std::sync::Arc;
 #[derive(Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Default)]
 pub struct PhpString(Arc<[u8]>);
 
+#[cfg(feature = "fuzzing")]
+impl<'a> arbitrary::Arbitrary<'a> for PhpString {
+    fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<PhpString> {
+        Ok(PhpString(Arc::from(<&[u8]>::arbitrary(u)?)))
+    }
+}
+
 impl PhpString {
     pub fn from_bytes(bytes: impl Into<Arc<[u8]>>) -> PhpString {
         PhpString(bytes.into())

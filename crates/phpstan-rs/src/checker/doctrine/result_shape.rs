@@ -4,6 +4,7 @@
 //! real Doctrine's default `HYDRATE_OBJECT` hydration rules exactly.
 
 use rustc_hash::{FxHashMap, FxHashSet};
+use types::Name;
 
 use crate::checker::Checker;
 use crate::doctrine_functions::DoctrineFunctionKind;
@@ -136,7 +137,7 @@ fn entity_row_type(checker: &Checker, entity: &str) -> Type {
         .map(|e| &e.discriminator_map);
     match discriminator_map {
         Some(map) if !map.is_empty() => {
-            let mut subclasses: Vec<&std::sync::Arc<str>> = map.values().collect();
+            let mut subclasses: Vec<&Name> = map.values().collect();
             // Deterministic order - a `HashMap`'s own iteration order is
             // unspecified, and this union must render identically
             // across runs.
@@ -600,7 +601,7 @@ pub(crate) fn build_scalar_result_row_type(
                     fields.push((i.to_string(), Type::mixed(), false));
                     continue;
                 };
-                let mut scalar_fields: Vec<(&std::sync::Arc<str>, &Type)> = de
+                let mut scalar_fields: Vec<(&Name, &Type)> = de
                     .fields
                     .iter()
                     .filter(|(name, _)| !de.associations.contains_key(*name))

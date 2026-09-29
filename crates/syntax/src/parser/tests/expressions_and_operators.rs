@@ -1036,7 +1036,7 @@ fn brace_less_double_dollar_variable_variable_parses() {
     let StmtKind::Global(vars) = &program[0].kind else {
         panic!("expected a global statement");
     };
-    assert_eq!(vars[0].name(), Some("a"));
+    assert_eq!(vars[0].name().map(|n| n.as_str()), Some("a"));
     assert!(
         matches!(&vars[1], GlobalVar::Dynamic(Expr { kind: ExprKind::Variable(b), .. }) if &**b == "b")
     );

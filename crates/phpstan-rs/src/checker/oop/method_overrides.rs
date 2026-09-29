@@ -3,6 +3,7 @@ use crate::checker::oop::visibility_word;
 use diagnostics::DiagnosticBuilder;
 use syntax::ast::*;
 use syntax::token::Span;
+use types::Name;
 use types::Type;
 
 impl<'a> Checker<'a> {
@@ -45,7 +46,7 @@ impl<'a> Checker<'a> {
         if !c.uses.is_empty() {
             let own_method_names: rustc_hash::FxHashSet<&str> =
                 c.methods.iter().map(|m| m.function.name.as_ref()).collect();
-            let mut trait_method_names: Vec<std::sync::Arc<str>> = info
+            let mut trait_method_names: Vec<Name> = info
                 .methods()
                 .keys()
                 .filter(|name| {

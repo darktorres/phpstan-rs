@@ -54,6 +54,7 @@
 //! false-positive class for another isn't a real fix.
 
 use rustc_hash::FxHashSet;
+use types::Name;
 
 use crate::checker::Checker;
 use crate::checker::uninitialized::property_assigned_anywhere_in_hierarchy;
@@ -737,7 +738,7 @@ fn absorb(
 /// method, or simply unresolvable) contributes nothing: the caller's
 /// state passes through unchanged.
 fn absorb_resolved(
-    resolved: Option<(std::sync::Arc<str>, &FunctionReflection)>,
+    resolved: Option<(Name, &FunctionReflection)>,
     method_name: &str,
     state: PropertyInitState,
     ctx: &mut PropertyInitCtx,

@@ -1,5 +1,5 @@
 use rustc_hash::FxHashMap;
-use std::sync::Arc;
+use types::Name;
 
 use crate::checker::{Checker, Locals, purge_stale_narrowing_for};
 use crate::registry::{FunctionReflection, ParameterReflection};
@@ -873,7 +873,7 @@ pub(crate) fn resolve_call_args<'a>(
 pub(crate) fn call_arg_param_name_hints(
     args: &[Arg],
     params: &[ParameterReflection],
-) -> Vec<(Span, Arc<str>)> {
+) -> Vec<(Span, Name)> {
     let mut hints = Vec::new();
     let mut positional_index = 0usize;
     let mut spread_seen = false;

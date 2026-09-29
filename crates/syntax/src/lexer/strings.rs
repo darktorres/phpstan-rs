@@ -109,7 +109,7 @@ fn try_parse_simple_interpolation(bytes: &[u8]) -> Option<SimpleInterpolationSha
 /// here.
 fn classify_index_key(key: &str, interner: &Interner) -> Option<SimpleIndexKey> {
     if let Some(var_name) = key.strip_prefix('$') {
-        return is_full_identifier(var_name).then(|| SimpleIndexKey::Var(interner.str(var_name)));
+        return is_full_identifier(var_name).then(|| SimpleIndexKey::Var(interner.name(var_name)));
     }
     // A number is an int key only when written canonically and within
     // range (`0|[1-9][0-9]*`, optionally negative, not `-0`); `01`, `-0`
@@ -561,10 +561,10 @@ impl<'a> Lexer<'a> {
                     }) => {
                         let name = self
                             .interner
-                            .str(&String::from_utf8_lossy(&inner_bytes[1..name_end]));
+                            .name(&String::from_utf8_lossy(&inner_bytes[1..name_end]));
                         let prop = self
                             .interner
-                            .str(&String::from_utf8_lossy(&inner_bytes[prop_start..]));
+                            .name(&String::from_utf8_lossy(&inner_bytes[prop_start..]));
                         let var_end = self.line_col_at(off(start + name_end));
                         let end = self.line_col_at(off(close_brace_pos));
                         parts.push(StringPart::PropertyAccess {
@@ -586,7 +586,7 @@ impl<'a> Lexer<'a> {
                             Some(key) => {
                                 let name = self
                                     .interner
-                                    .str(&String::from_utf8_lossy(&inner_bytes[1..name_end]));
+                                    .name(&String::from_utf8_lossy(&inner_bytes[1..name_end]));
                                 let var_end = self.line_col_at(off(start + name_end));
                                 let end = self.line_col_at(off(close_brace_pos));
                                 parts.push(StringPart::Index {
@@ -642,7 +642,7 @@ impl<'a> Lexer<'a> {
                         start: base,
                         end: self.line_col_at(off(i)),
                     };
-                    parts.push(StringPart::SimpleVar(self.interner.str(&inner), span));
+                    parts.push(StringPart::SimpleVar(self.interner.name(&inner), span));
                 } else if starts_with_name
                     && inner[name_len..].starts_with('[')
                     && inner.ends_with(']')
@@ -663,7 +663,7 @@ impl<'a> Lexer<'a> {
                 }
                 let name = self
                     .interner
-                    .str(&String::from_utf8_lossy(&bytes[name_start..i]));
+                    .name(&String::from_utf8_lossy(&bytes[name_start..i]));
                 // Points at the `$` itself (one byte before `name_start`),
                 // matching where the reconstructed `${name}...` string below
                 // begins - precision within the reconstruction (distinguishing
@@ -689,7 +689,7 @@ impl<'a> Lexer<'a> {
                     }
                     let prop = self
                         .interner
-                        .str(&String::from_utf8_lossy(&bytes[prop_start..i]));
+                        .name(&String::from_utf8_lossy(&bytes[prop_start..i]));
                     let end = self.line_col_at(off(i));
                     parts.push(StringPart::PropertyAccess {
                         var: name,

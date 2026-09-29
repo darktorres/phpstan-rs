@@ -14,7 +14,7 @@
 //! `project::whole_program::renamed_named_arguments`.
 
 use rustc_hash::FxHashMap;
-use std::sync::Arc;
+use types::Name;
 
 use crate::checker::Checker;
 use syntax::ast::{Arg, Visibility};
@@ -28,7 +28,7 @@ use syntax::token::Span;
 /// a private method, or one on/marked `final`, can never actually
 /// dispatch to a different override at runtime, so no rename collision
 /// is possible there at all.
-pub(crate) type NamedArgumentCallFacts = FxHashMap<(Arc<str>, Arc<str>, Arc<str>), Vec<Span>>;
+pub(crate) type NamedArgumentCallFacts = FxHashMap<(Name, Name, Name), Vec<Span>>;
 
 impl<'a> Checker<'a> {
     /// Drains this run's own `named_argument_call_facts`, which
@@ -50,7 +50,7 @@ impl<'a> Checker<'a> {
     /// own static receiver type happens to be.
     pub(crate) fn record_named_argument_call(
         &mut self,
-        owner: &Arc<str>,
+        owner: &Name,
         method: &str,
         visibility: &Visibility,
         span: Span,
@@ -67,10 +67,10 @@ impl<'a> Checker<'a> {
         {
             return;
         }
-        let method: Arc<str> = syntax::intern::intern(method);
+        let method: Name = Name::from(method);
         for arg in args {
             let Some(name) = &arg.name else { continue };
-            let name: Arc<str> = syntax::intern::intern(name);
+            let name: Name = name.name.clone();
             self.named_argument_call_facts
                 .entry((owner.clone(), method.clone(), name))
                 .or_default()

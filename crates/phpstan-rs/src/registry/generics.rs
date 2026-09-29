@@ -1,5 +1,5 @@
 use rustc_hash::{FxHashMap, FxHashSet};
-use std::sync::Arc;
+use syntax::name::Name;
 
 use crate::registry::Registry;
 use types::{self, Type, Variance};
@@ -170,7 +170,7 @@ impl Registry {
     /// the (at least two) paths reads the signature next.
     pub(crate) fn substitute_class_scoped_ancestor_templates(
         ty: &Type,
-        ancestor_bindings: &FxHashMap<Arc<str>, FxHashMap<String, Type>>,
+        ancestor_bindings: &FxHashMap<Name, FxHashMap<String, Type>>,
     ) -> Type {
         ty.replace_templates(&mut |tp| {
             tp.scope

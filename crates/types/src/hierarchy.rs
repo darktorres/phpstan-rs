@@ -1,19 +1,17 @@
 //! What a type relation needs to know about classes. Reflection
 //! implements it (C8); until then `Registry` does.
 
-use std::sync::Arc;
-
 use rustc_hash::FxHashMap;
 use syntax::ast::ClassKind;
 
-use crate::{CallSiteVariance, CallableSig, Repr, TrinaryLogic, Type, Variance};
+use crate::{CallSiteVariance, CallableSig, Name, Repr, TrinaryLogic, Type, Variance};
 
 /// A class as a type relation sees it.
 pub struct ClassFacts<'a> {
     pub kind: ClassKind,
     pub is_final: bool,
     /// Its own `@template` names, in declaration order.
-    pub templates: &'a [Arc<str>],
+    pub templates: &'a [Name],
 }
 
 pub trait ClassHierarchy {
@@ -24,7 +22,7 @@ pub trait ClassHierarchy {
     fn find_class(&self, name: &str) -> Option<ClassFacts<'_>>;
 
     /// Every ancestor's name: parents, interfaces and used traits.
-    fn ancestor_names(&self, class: &str) -> Vec<Arc<str>>;
+    fn ancestor_names(&self, class: &str) -> Vec<Name>;
 
     fn has_method(&self, class: &str, method: &str) -> bool;
 
@@ -92,7 +90,7 @@ impl ClassHierarchy for NoClasses {
         None
     }
 
-    fn ancestor_names(&self, _: &str) -> Vec<Arc<str>> {
+    fn ancestor_names(&self, _: &str) -> Vec<Name> {
         Vec::new()
     }
 

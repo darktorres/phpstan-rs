@@ -17,6 +17,7 @@
 //! each is recognized by the class its name resolves to.
 
 use std::sync::Arc;
+use types::Name;
 
 use syntax::ast::*;
 use syntax::lexer::Lexer;
@@ -213,7 +214,7 @@ impl Pass {
 
     /// Applies the parameter rules to one parameter list.
     fn params(&mut self, params: &mut Vec<Param>, function_doc: &mut Option<Arc<str>>) {
-        let names: Vec<Arc<str>> = params.iter().map(|p| p.name.clone()).collect();
+        let names: Vec<Name> = params.iter().map(|p| p.name.clone()).collect();
         let mut keep = vec![true; params.len()];
         for i in 0..params.len() {
             let superseded_here = params[i]

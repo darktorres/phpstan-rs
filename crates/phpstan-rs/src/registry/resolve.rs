@@ -1,10 +1,12 @@
+use crate::registry::NameTable;
 use indexmap::IndexMap;
 use rayon::prelude::*;
 use rustc_hash::{FxHashMap, FxHashSet};
-use std::sync::{Arc, OnceLock};
+use std::sync::OnceLock;
+use syntax::name::Name;
 
 /// Each templated ancestor's template bindings, as seen from one class.
-type AncestorBindings = FxHashMap<Arc<str>, FxHashMap<String, Type>>;
+type AncestorBindings = FxHashMap<Name, FxHashMap<String, Type>>;
 
 use crate::registry::Registry;
 use crate::registry::{
@@ -45,22 +47,13 @@ impl Registry {
     /// (no remove/reinsert dance) is sound to run concurrently.
     #[hotpath::measure]
     pub(crate) fn canonicalize_class_name_case(&mut self) {
-        let mut canonical_by_lower: FxHashMap<String, Arc<str>> = FxHashMap::default();
+        let mut canonical_by_lower: FxHashMap<String, Name> = FxHashMap::default();
         for key in self.classes.keys() {
             canonical_by_lower
                 .entry(key.to_ascii_lowercase())
                 .or_insert_with(|| key.clone());
         }
-        // Persisted as `self.classes_lowercase` too - `Registry::
-        // lookup_class`'s doc comment explains why its linear-scan
-        // fallback uses this instead of a fresh scan on every call. Built
-        // fresh every time this pass runs, so it can never go stale
-        // independently of this pass's own call sites.
-        self.classes_lowercase = canonical_by_lower
-            .iter()
-            .map(|(k, v)| (k.clone(), v.clone()))
-            .collect();
-        let canonicalize = |name: &mut Arc<str>| {
+        let canonicalize = |name: &mut Name| {
             if let Some(canonical) = canonical_by_lower.get(&name.to_ascii_lowercase())
                 && canonical.as_ref() != name.as_ref()
             {
@@ -135,15 +128,15 @@ impl Registry {
     /// with corpus size, not the cheap, still-sequential apply step.
     fn flatten_traits_one_pass(&mut self) -> bool {
         type TraitAddition = (
-            Arc<str>,
-            Vec<(Arc<str>, FunctionReflection)>,
-            Vec<(Arc<str>, PropertyReflection)>,
-            Vec<(Arc<str>, ConstantReflection)>,
-            FxHashSet<Arc<str>>,
-            FxHashSet<Arc<str>>,
+            Name,
+            Vec<(Name, FunctionReflection)>,
+            Vec<(Name, PropertyReflection)>,
+            Vec<(Name, ConstantReflection)>,
+            FxHashSet<Name>,
+            FxHashSet<Name>,
         );
 
-        let class_names: Vec<Arc<str>> = self.classes.keys().cloned().collect();
+        let class_names: Vec<Name> = self.classes.keys().cloned().collect();
         let registry: &Registry = self;
         let additions: Vec<TraitAddition> = class_names
             .par_iter()
@@ -159,7 +152,7 @@ impl Registry {
                 // before any trait's contribution is applied) always wins,
                 // matching the same `or_insert` "first/own wins" semantics
                 // `methods` itself already uses below.
-                let own_method_names: FxHashSet<Arc<str>> = registry.classes[class_name]
+                let own_method_names: FxHashSet<Name> = registry.classes[class_name]
                     .methods
                     .keys()
                     .cloned()
@@ -167,7 +160,7 @@ impl Registry {
                 let mut methods = Vec::new();
                 let mut properties = Vec::new();
                 let mut consts = Vec::new();
-                let mut abstract_from_traits: FxHashSet<Arc<str>> = FxHashSet::default();
+                let mut abstract_from_traits: FxHashSet<Name> = FxHashSet::default();
                 // `static_methods` needs the identical trait-flattening
                 // treatment `abstract_from_traits` gets below - without
                 // it, a using class's own `static_methods` set would
@@ -175,7 +168,7 @@ impl Registry {
                 // doesn't also redeclare itself, even though that
                 // method's (correctly flattened-in) `FunctionReflection` is
                 // right there in `info.methods`.
-                let mut static_from_traits: FxHashSet<Arc<str>> = FxHashSet::default();
+                let mut static_from_traits: FxHashSet<Name> = FxHashSet::default();
                 for trait_name in &uses {
                     if let Some(trait_info) = registry.classes.get(trait_name) {
                         for (name, sig) in &trait_info.methods {
@@ -359,7 +352,7 @@ impl Registry {
         // Each class's ancestor bindings, computed at most once for the
         // whole fixed point: they're built from its declared hierarchy and
         // template arguments, which the passes never change.
-        let bindings: FxHashMap<Arc<str>, OnceLock<AncestorBindings>> = self
+        let bindings: FxHashMap<Name, OnceLock<AncestorBindings>> = self
             .classes
             .keys()
             .map(|name| (name.clone(), OnceLock::new()))
@@ -386,7 +379,7 @@ impl Registry {
     }
 
     fn inherit_property_hooks_one_pass(&mut self) -> bool {
-        let mut updates: Vec<(Arc<str>, Arc<str>, PropertyReflection)> = Vec::new();
+        let mut updates: Vec<(Name, Name, PropertyReflection)> = Vec::new();
         for (class_name, info) in &self.classes {
             let Some(parent) = info.extends.first() else {
                 continue;
@@ -453,7 +446,7 @@ impl Registry {
     #[hotpath::measure]
     pub(crate) fn resolve_deferred_value_of(&mut self) {
         self.resolve_class_constant_references();
-        let class_names: Vec<Arc<str>> = self.classes.keys().cloned().collect();
+        let class_names: Vec<Name> = self.classes.keys().cloned().collect();
         for class_name in class_names {
             // Only a class with a deferred sentinel somewhere needs its
             // inherited-constant view (the overwhelming majority, stubs
@@ -608,7 +601,7 @@ impl Registry {
     fn resolve_class_constant_references(&mut self) {
         const MAX_ROUNDS: usize = 16;
         for _ in 0..MAX_ROUNDS {
-            let mut updates: Vec<(Arc<str>, Arc<str>, Type)> = Vec::new();
+            let mut updates: Vec<(Name, Name, Type)> = Vec::new();
             for (class_name, info) in &self.classes {
                 if !info.consts.values().any(|sig| sig.ty.contains_deferred()) {
                     continue;
@@ -679,8 +672,8 @@ impl Registry {
     /// referencing each other.
     #[hotpath::measure]
     pub(crate) fn resolve_deferred_type_imports(&mut self) {
-        let mut classes_with_imports: Vec<Arc<str>> = Vec::new();
-        let mut resolved: Vec<(Arc<str>, Arc<str>, Type)> = Vec::new();
+        let mut classes_with_imports: Vec<Name> = Vec::new();
+        let mut resolved: Vec<(Name, Name, Type)> = Vec::new();
         for (class_name, info) in &self.classes {
             if info.type_imports.is_empty() {
                 continue;
@@ -703,7 +696,7 @@ impl Registry {
         if classes_with_imports.is_empty() {
             return;
         }
-        let mut by_class: FxHashMap<Arc<str>, FxHashMap<Arc<str>, Type>> = FxHashMap::default();
+        let mut by_class: FxHashMap<Name, FxHashMap<Name, Type>> = FxHashMap::default();
         for (class_name, local_key, ty) in resolved {
             by_class
                 .entry(class_name)
@@ -779,8 +772,8 @@ impl Registry {
     /// type_aliases`'s alias-of-alias handling accepts.
     #[hotpath::measure]
     pub(crate) fn resolve_deferred_mixins(&mut self) {
-        let mut method_additions: Vec<(Arc<str>, Arc<str>, FunctionReflection)> = Vec::new();
-        let mut property_additions: Vec<(Arc<str>, Arc<str>, PropertyReflection)> = Vec::new();
+        let mut method_additions: Vec<(Name, Name, FunctionReflection)> = Vec::new();
+        let mut property_additions: Vec<(Name, Name, PropertyReflection)> = Vec::new();
         for (class_name, info) in &self.classes {
             for mixin_fqn in &info.mixins {
                 let Some(mixin_info) = self.classes.get(mixin_fqn) else {
@@ -927,7 +920,7 @@ impl Registry {
     pub(crate) fn template_param_scopes_all_safe_to_backfill(
         ty: &Type,
         method_name: &str,
-        ancestor_bindings: &FxHashMap<Arc<str>, FxHashMap<String, Type>>,
+        ancestor_bindings: &FxHashMap<Name, FxHashMap<String, Type>>,
     ) -> bool {
         ty.nested_templates().iter().all(|tp| {
             tp.scope.as_deref() == Some(method_name)
@@ -1009,16 +1002,11 @@ impl Registry {
     /// `flatten_traits_one_pass` parallelizes.
     fn flatten_phpdoc_inheritance_one_pass(
         &mut self,
-        bindings: &FxHashMap<Arc<str>, OnceLock<AncestorBindings>>,
+        bindings: &FxHashMap<Name, OnceLock<AncestorBindings>>,
     ) -> bool {
-        type Backfill = (
-            Arc<str>,
-            Arc<str>,
-            Vec<(usize, Type, bool)>,
-            Option<(Type, bool)>,
-        );
+        type Backfill = (Name, Name, Vec<(usize, Type, bool)>, Option<(Type, bool)>);
 
-        let class_names: Vec<Arc<str>> = self.classes.keys().cloned().collect();
+        let class_names: Vec<Name> = self.classes.keys().cloned().collect();
         let registry: &Registry = self;
         let backfills: Vec<Backfill> = class_names
             .par_iter()
@@ -1246,15 +1234,12 @@ fn class_namespace(fqn: &str) -> &str {
 /// any depth. See `Registry::resolve_deferred_value_of`'s doc comment
 /// for why this exists, and `types::parse_type_keyword_or_class`'s
 /// `"value-of"` arm for where a `ValueOf` is produced.
-fn resolve_deferred_value_of_in_type(
-    ty: Type,
-    classes: &FxHashMap<Arc<str>, ClassReflection>,
-) -> Type {
+fn resolve_deferred_value_of_in_type(ty: Type, classes: &NameTable<ClassReflection>) -> Type {
     ty.resolve_class_references(&DeclaredConstants(classes))
 }
 
 /// The constants and enum cases of the classes indexed so far.
-struct DeclaredConstants<'a>(&'a FxHashMap<Arc<str>, ClassReflection>);
+struct DeclaredConstants<'a>(&'a NameTable<ClassReflection>);
 
 impl types::ClassConstants for DeclaredConstants<'_> {
     fn enum_values(&self, class: &str) -> Type {
@@ -1280,7 +1265,7 @@ impl types::ClassConstants for DeclaredConstants<'_> {
 fn resolve_class_const_type(
     class: &Type,
     pattern: &str,
-    classes: &FxHashMap<Arc<str>, ClassReflection>,
+    classes: &NameTable<ClassReflection>,
 ) -> Type {
     let Some((fqn, _)) = class.as_object() else {
         return Type::mixed();
@@ -1329,12 +1314,12 @@ fn class_has_deferred_type(info: &ClassReflection) -> bool {
 /// of the same name.
 fn visible_class_consts(
     fqn: &str,
-    classes: &FxHashMap<Arc<str>, ClassReflection>,
-) -> IndexMap<Arc<str>, ConstantReflection> {
-    let mut consts: IndexMap<Arc<str>, ConstantReflection> = IndexMap::new();
-    let mut seen: FxHashSet<Arc<str>> = FxHashSet::default();
-    let mut queue: std::collections::VecDeque<Arc<str>> = std::collections::VecDeque::new();
-    queue.push_back(Arc::from(fqn));
+    classes: &NameTable<ClassReflection>,
+) -> IndexMap<Name, ConstantReflection> {
+    let mut consts: IndexMap<Name, ConstantReflection> = IndexMap::new();
+    let mut seen: FxHashSet<Name> = FxHashSet::default();
+    let mut queue: std::collections::VecDeque<Name> = std::collections::VecDeque::new();
+    queue.push_back(Name::from(fqn));
     while let Some(name) = queue.pop_front() {
         if !seen.insert(name.clone()) {
             continue;
@@ -1355,11 +1340,8 @@ fn visible_class_consts(
 
 /// The union of every constant in `consts` whose name matches `pattern` -
 /// see `resolve_class_const_type`.
-fn matching_class_const_type(
-    consts: &IndexMap<Arc<str>, ConstantReflection>,
-    pattern: &str,
-) -> Type {
-    let names: Vec<&Arc<str>> = consts
+fn matching_class_const_type(consts: &IndexMap<Name, ConstantReflection>, pattern: &str) -> Type {
+    let names: Vec<&Name> = consts
         .keys()
         .filter(|name| glob_matches(pattern, name))
         .collect();
@@ -1407,7 +1389,7 @@ fn glob_matches(pattern: &str, name: &str) -> bool {
 fn bind_class_const_self(
     ty: Type,
     class: &str,
-    own_consts: &IndexMap<Arc<str>, ConstantReflection>,
+    own_consts: &IndexMap<Name, ConstantReflection>,
 ) -> Type {
     bind_class_const_self_at(ty, class, own_consts, 0)
 }
@@ -1419,7 +1401,7 @@ fn bind_class_const_self(
 fn bind_class_const_self_at(
     ty: Type,
     class: &str,
-    own_consts: &IndexMap<Arc<str>, ConstantReflection>,
+    own_consts: &IndexMap<Name, ConstantReflection>,
     depth: usize,
 ) -> Type {
     syntax::stack::guard(|| {
@@ -1461,10 +1443,7 @@ fn unresolved_class_const_to_mixed(ty: Type) -> Type {
 /// (`registry/class_info.rs`, built for the enum's real `->value`
 /// property) is already the exact union-of-case-literal-values type real
 /// PHPStan computes independently - reused directly, not recomputed.
-fn resolve_value_of_target(
-    target_fqn: &str,
-    classes: &FxHashMap<Arc<str>, ClassReflection>,
-) -> Type {
+fn resolve_value_of_target(target_fqn: &str, classes: &NameTable<ClassReflection>) -> Type {
     let Some(info) = classes.get(target_fqn) else {
         return Type::mixed();
     };
@@ -1494,7 +1473,7 @@ fn resolve_value_of_target(
 fn resolve_deferred_value_of_with_native_fallback(
     ty: Type,
     native: &Type,
-    classes: &FxHashMap<Arc<str>, ClassReflection>,
+    classes: &NameTable<ClassReflection>,
 ) -> Type {
     let resolved = resolve_deferred_value_of_in_type(ty, classes);
     if resolved.is_mixed() && !native.is_mixed() {
@@ -1545,9 +1524,9 @@ impl Registry {
     pub(crate) fn drop_doc_members_excluded_by_native(&mut self) {
         // (class, method or function, parameter index or `None` for the
         // return, corrected type)
-        type Fix = (Option<Arc<str>>, Arc<str>, Option<usize>, Type);
+        type Fix = (Option<Name>, Name, Option<usize>, Type);
         let mut fixes: Vec<Fix> = Vec::new();
-        let mut visit = |class: Option<&Arc<str>>, name: &Arc<str>, sig: &FunctionReflection| {
+        let mut visit = |class: Option<&Name>, name: &Name, sig: &FunctionReflection| {
             for (i, p) in sig.params.iter().enumerate() {
                 if let Some(ty) = self.excluding_native(&p.ty, &p.ty_native, class) {
                     fixes.push((class.cloned(), name.clone(), Some(i), ty));
@@ -1604,7 +1583,7 @@ impl Registry {
 
     /// `ty` without the members `native` provably excludes, when any are
     /// excluded; `None` when nothing changes.
-    fn excluding_native(&self, ty: &Type, native: &Type, class: Option<&Arc<str>>) -> Option<Type> {
+    fn excluding_native(&self, ty: &Type, native: &Type, class: Option<&Name>) -> Option<Type> {
         if ty == native || native.is_mixed() {
             return None;
         }

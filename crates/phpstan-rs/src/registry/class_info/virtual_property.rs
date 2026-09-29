@@ -1,5 +1,5 @@
 use rustc_hash::FxHashMap;
-use std::sync::Arc;
+use syntax::name::Name;
 
 use crate::registry::function_sig::declared_type;
 use syntax::ast::{Expr, ExprKind, PropertyHookBody, PropertyHooks};
@@ -21,7 +21,7 @@ pub(crate) fn property_hook_set_type(
     hooks: Option<&PropertyHooks>,
     template_params: &FxHashMap<String, TemplateParam>,
     ctx: &NameContext,
-) -> (Option<Type>, Vec<(Arc<str>, Arc<str>)>) {
+) -> (Option<Type>, Vec<(Name, Name)>) {
     let Some((Some(param), _)) = hooks.and_then(|h| h.set.as_ref()) else {
         return (None, Vec::new());
     };

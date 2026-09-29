@@ -8,7 +8,7 @@
 //! repeated request against an unchanged document costs no extra pass.
 
 use std::path::Path;
-use std::sync::Arc;
+use types::Name;
 
 use lsp_types::{InlayHint, InlayHintKind, InlayHintLabel, Range as LspRange};
 
@@ -22,7 +22,7 @@ use super::protocol::to_lsp_position;
 pub(super) fn collect(
     project: &Project,
     path: &Path,
-) -> Option<(Vec<(Span, Arc<str>)>, Vec<(Span, Type)>)> {
+) -> Option<(Vec<(Span, Name)>, Vec<(Span, Type)>)> {
     let (mut checker, ast) = project.checker_for(path)?;
     checker.collect_inlay_hints = true;
     checker.check_program(ast);
@@ -33,7 +33,7 @@ pub(super) fn collect(
 }
 
 pub(super) fn filter_to_range(
-    param_hints: &[(Span, Arc<str>)],
+    param_hints: &[(Span, Name)],
     local_hints: &[(Span, Type)],
     range: LspRange,
 ) -> Vec<InlayHint> {

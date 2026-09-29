@@ -5,6 +5,7 @@ use crate::checker::{
 };
 use crate::registry::class_decl_fqn;
 use syntax::ast::*;
+use types::Name;
 use types::Type;
 
 /// See `DiscriminantArrayFactsMap`'s own doc comment (`checker.rs`) - `e`
@@ -295,7 +296,7 @@ impl<'a> Checker<'a> {
             StmtKind::Global(vars) => {
                 let names: Vec<String> = vars
                     .iter()
-                    .filter_map(|v| v.name().map(str::to_string))
+                    .filter_map(|v| v.name().map(Name::to_string))
                     .collect();
                 for tag in &tags {
                     match tag {
@@ -848,7 +849,7 @@ impl<'a> Checker<'a> {
                     purge_stale_narrowing_for(locals, name);
                     self.probe_hit_at(stmt.span, &ty);
                     locals.declare(name.to_string(), ty, name.span);
-                    self.static_var_names.insert(syntax::intern::intern(name));
+                    self.static_var_names.insert(name.name.clone());
                 }
             }
             // `check_program`'s own top-level loop already handles a

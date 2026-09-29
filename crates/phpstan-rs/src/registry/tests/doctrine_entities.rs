@@ -172,7 +172,7 @@ fn a_many_to_one_association_resolves_its_target_from_the_native_type() {
         .as_ref()
         .unwrap();
     let assoc = entity.associations.get("category").unwrap();
-    assert_eq!(assoc.target, "App\\CategoryEntity".into());
+    assert_eq!(assoc.target, "App\\CategoryEntity");
     assert!(!assoc.is_collection);
 }
 
@@ -205,7 +205,7 @@ fn a_one_to_many_collection_association_resolves_its_target_from_target_entity_a
         .as_ref()
         .unwrap();
     let assoc = entity.associations.get("imageCategories").unwrap();
-    assert_eq!(assoc.target, "App\\ImageCategoryEntity".into());
+    assert_eq!(assoc.target, "App\\ImageCategoryEntity");
     assert!(assoc.is_collection);
 }
 

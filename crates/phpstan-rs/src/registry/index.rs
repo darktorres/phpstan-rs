@@ -1,5 +1,5 @@
 use rustc_hash::FxHashMap;
-use std::sync::Arc;
+use syntax::name::Name;
 
 use crate::registry::Registry;
 use crate::registry::class_info::MemberSpans;
@@ -9,7 +9,6 @@ use crate::registry::{
 };
 use syntax::ast::{Expr, Stmt, Visibility};
 use syntax::declarations::{Declared, for_each_declaration};
-use syntax::intern::intern;
 use syntax::php_string::PhpString;
 use types::Type;
 
@@ -22,24 +21,24 @@ use types::Type;
 /// wholly separate step from the insertion logic below.
 pub(crate) enum BuiltDecl {
     Class {
-        name: Arc<str>,
+        name: Name,
         conditional: bool,
         info: ClassReflection,
     },
     Enum {
-        name: Arc<str>,
+        name: Name,
         conditional: bool,
         info: ClassReflection,
     },
     Function {
-        name: Arc<str>,
+        name: Name,
         conditional: bool,
         sig: FunctionReflection,
         // The declaration's name position, `(line, col)`.
         site: (u32, u32),
     },
     GlobalConst {
-        name: Arc<str>,
+        name: Name,
         ty: Type,
     },
 }
@@ -184,7 +183,7 @@ impl Registry {
                         self.classes.insert(name, new_info);
                     }
                 } else if conditional {
-                    self.classes.entry(name).or_insert_with(|| new_info);
+                    self.classes.get_or_insert_with(name, || new_info);
                 } else if self.unconditionally_declared_classes.contains(&name) {
                     // A second unconditional declaration of the same
                     // name - real, not always a mistake. Mirrors
@@ -287,7 +286,7 @@ impl Registry {
                 info,
             } => {
                 if conditional {
-                    self.classes.entry(name).or_insert_with(|| info);
+                    self.classes.get_or_insert_with(name, || info);
                 } else {
                     self.classes.insert(name, info);
                 }
@@ -408,7 +407,7 @@ impl Registry {
                     // first, the same bare-name shape method names
                     // already are.
                     let bare = name.rsplit('\\').next().unwrap_or(name);
-                    self.names_with_assert_tags.insert(intern(bare));
+                    self.names_with_assert_tags.insert(Name::from(bare));
                 }
             }
             BuiltDecl::Class { info, .. } | BuiltDecl::Enum { info, .. } => {
@@ -490,9 +489,9 @@ impl Registry {
     /// legitimately declaring a function with the same name as a builtin
     /// correctly takes `insert_built_decl`'s merge path (the `strtr`
     /// case) instead of blindly overwriting.
-    pub fn merge_stubs<S: Into<Arc<str>>>(&mut self, stubs: Vec<(S, FunctionReflection)>) {
+    pub fn merge_stubs<S: Into<Name>>(&mut self, stubs: Vec<(S, FunctionReflection)>) {
         for (name, sig) in stubs {
-            let name: Arc<str> = name.into();
+            let name: Name = name.into();
             self.unconditionally_declared_functions
                 .insert(folded_key(&name));
             self.stub_provided_functions.insert(folded_key(&name));
@@ -518,9 +517,9 @@ impl Registry {
     /// even if user code was somehow indexed before this runs - existing
     /// user info is `other` in `ClassReflection::merge`, so it still wins any
     /// member-name conflict.
-    pub fn merge_stub_classes<S: Into<Arc<str>>>(&mut self, stubs: Vec<(S, ClassReflection)>) {
+    pub fn merge_stub_classes<S: Into<Name>>(&mut self, stubs: Vec<(S, ClassReflection)>) {
         for (name, info) in stubs {
-            let name: Arc<str> = name.into();
+            let name: Name = name.into();
             self.unconditionally_declared_classes.insert(name.clone());
             self.built_in_stub_classes.insert(name.clone());
             match self.classes.remove(&name) {
@@ -543,7 +542,7 @@ impl Registry {
     /// disagreement" conflict policy - the same policy already used
     /// within one file's `global_constants` map, applied here across
     /// every vendored stub file at once.
-    pub fn merge_stub_constants(&mut self, stubs: Vec<(Arc<str>, Type)>) {
+    pub fn merge_stub_constants(&mut self, stubs: Vec<(Name, Type)>) {
         for (name, ty) in stubs {
             register_global_constant(&mut self.global_constants, name, ty);
         }
@@ -575,7 +574,7 @@ pub(crate) fn build_declarations(stmts: &[Stmt], origin: &Origin) -> Vec<BuiltDe
         let conditional = declaration.conditional;
         match declaration.declared {
             Declared::Class(c) => {
-                let name = intern(&declaration.name());
+                let name = Name::from(&declaration.name());
                 if c.kind == syntax::ast::ClassKind::Enum {
                     let mut info = ClassReflection::from_enum_decl(c, ctx);
                     info.record_provenance(origin, &name, c.name_span, &MemberSpans::of_enum(c));
@@ -604,14 +603,14 @@ pub(crate) fn build_declarations(stmts: &[Stmt], origin: &Origin) -> Vec<BuiltDe
                 );
                 sig.provenance = Provenance::new(origin.clone(), f.name_span);
                 out.push(BuiltDecl::Function {
-                    name: intern(&declaration.name()),
+                    name: Name::from(&declaration.name()),
                     conditional,
                     sig,
                     site: (f.name_span.start.line, f.name_span.start.col),
                 });
             }
             Declared::Constant(c) => out.push(BuiltDecl::GlobalConst {
-                name: intern(&declaration.name()),
+                name: Name::from(&declaration.name()),
                 ty: infer_const_type(&c.value),
             }),
             Declared::Define { name, value } => {
@@ -639,7 +638,7 @@ pub(crate) fn build_declarations(stmts: &[Stmt], origin: &Origin) -> Vec<BuiltDe
 /// `\null` reference for every file in the corpus - every `!== \false`-
 /// style narrowing idiom would silently stop narrowing away `false` at
 /// all once such a stub was indexed.
-fn define_constant(const_name: &PhpString, value: &Expr) -> Option<(Arc<str>, Type)> {
+fn define_constant(const_name: &PhpString, value: &Expr) -> Option<(Name, Type)> {
     let const_name = const_name.as_str()?;
     if ["true", "false", "null"]
         .iter()
@@ -703,9 +702,9 @@ fn define_constant(const_name: &PhpString, value: &Expr) -> Option<(Arc<str>, Ty
     // not `infer_const_type`'s own float-overflow-affected inference)
     // is the safe, correct level of precision.
     if const_name == "PHP_INT_MIN" {
-        return Some((Arc::from(const_name), Type::int()));
+        return Some((Name::from(const_name), Type::int()));
     }
-    Some((Arc::from(const_name), infer_const_type(value)))
+    Some((Name::from(const_name), infer_const_type(value)))
 }
 
 /// Records one `const`/`define()` declaration site for `name`,
@@ -726,11 +725,7 @@ fn define_constant(const_name: &PhpString, value: &Expr) -> Option<(Arc<str>, Ty
 /// to a specific type, since the true value is still just as
 /// undetermined regardless of which site happens to run at this
 /// constant's real, load-order-dependent definition time.
-pub(crate) fn register_global_constant(
-    map: &mut FxHashMap<Arc<str>, Type>,
-    name: Arc<str>,
-    ty: Type,
-) {
+pub(crate) fn register_global_constant(map: &mut FxHashMap<Name, Type>, name: Name, ty: Type) {
     match map.get(&name) {
         None => {
             map.insert(name, ty);

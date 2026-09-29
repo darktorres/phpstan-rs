@@ -1,5 +1,5 @@
 use rustc_hash::FxHashSet;
-use std::sync::Arc;
+use types::Name;
 
 use syntax::ast::*;
 use syntax::visit::{any_child_expr, any_child_stmt};
@@ -16,7 +16,7 @@ use syntax::visit::{any_child_expr, any_child_stmt};
 /// ever being read again is a subtler bug than an unused-parameter check
 /// is meant to catch.
 pub(crate) enum VarUsage {
-    Names(FxHashSet<Arc<str>>),
+    Names(FxHashSet<Name>),
     /// Something that reads variables by a name this walk can't resolve
     /// statically was seen anywhere in the body - `func_get_args()`,
     /// `compact(...)` with a non-literal argument, `get_defined_vars()`,
@@ -57,7 +57,7 @@ fn is_call_to(callee: &Expr, target: &str) -> bool {
     matches!(&callee.kind, ExprKind::Name(n) if n.trim_start_matches('\\').eq_ignore_ascii_case(target))
 }
 
-fn walk_stmt_for_vars(stmt: &Stmt, names: &mut FxHashSet<Arc<str>>, escaped: &mut bool) {
+fn walk_stmt_for_vars(stmt: &Stmt, names: &mut FxHashSet<Name>, escaped: &mut bool) {
     syntax::stack::guard(|| {
         match &stmt.kind {
             StmtKind::Expression(e) | StmtKind::Throw(e) => walk_expr_for_vars(e, names, escaped),
@@ -123,7 +123,7 @@ fn walk_stmt_for_vars(stmt: &Stmt, names: &mut FxHashSet<Arc<str>>, escaped: &mu
     })
 }
 
-fn walk_expr_for_vars(expr: &Expr, names: &mut FxHashSet<Arc<str>>, escaped: &mut bool) {
+fn walk_expr_for_vars(expr: &Expr, names: &mut FxHashSet<Name>, escaped: &mut bool) {
     syntax::stack::guard(|| {
         match &expr.kind {
             ExprKind::Variable(name) => {
@@ -133,7 +133,7 @@ fn walk_expr_for_vars(expr: &Expr, names: &mut FxHashSet<Arc<str>>, escaped: &mu
             }
             ExprKind::DynamicVariable(inner) => {
                 if let ExprKind::Literal(Literal::String(s)) = &inner.kind {
-                    names.insert(Arc::from(&*s.to_str_lossy()));
+                    names.insert(Name::from(&*s.to_str_lossy()));
                 } else {
                     *escaped = true;
                 }
@@ -204,10 +204,10 @@ fn walk_expr_for_vars(expr: &Expr, names: &mut FxHashSet<Arc<str>>, escaped: &mu
 /// spread, ...) has no static name to resolve here, so it escalates to the
 /// same blanket "everything is used" fallback as `func_get_args()`/
 /// `get_defined_vars()` rather than risk a false "unused" report.
-fn collect_compact_names(e: &Expr, names: &mut FxHashSet<Arc<str>>, escaped: &mut bool) {
+fn collect_compact_names(e: &Expr, names: &mut FxHashSet<Name>, escaped: &mut bool) {
     syntax::stack::guard(|| match &e.kind {
         ExprKind::Literal(Literal::String(s)) => {
-            names.insert(Arc::from(&*s.to_str_lossy()));
+            names.insert(Name::from(&*s.to_str_lossy()));
         }
         ExprKind::ArrayLiteral(items) => {
             for item in items {

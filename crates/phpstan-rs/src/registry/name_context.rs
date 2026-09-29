@@ -1,13 +1,11 @@
-use std::sync::Arc;
-
-use syntax::intern::intern;
+use syntax::name::Name;
 use syntax::name_resolution::NameContext;
 use types::Type;
 
 /// The class a class name written in code names; a name resolution
 /// leaves unresolved (`self`, `parent`, `static`) as written.
-pub(crate) fn class_ref(name: &syntax::ast::QualifiedName) -> Arc<str> {
-    intern(name.resolved_class().unwrap_or(&name.written))
+pub(crate) fn class_ref(name: &syntax::ast::QualifiedName) -> Name {
+    Name::from(name.resolved_class().unwrap_or(&name.written))
 }
 
 /// `ty` with every class name resolved as `ctx` resolves it.
@@ -32,12 +30,12 @@ fn resolve_class_name(name: &types::Name, ctx: &NameContext) -> types::Name {
 pub(crate) fn collect_class_name_case_refs(
     ty: &Type,
     ctx: &NameContext,
-    out: &mut Vec<(Arc<str>, Arc<str>)>,
+    out: &mut Vec<(Name, Name)>,
 ) {
     ty.map_class_names(&mut |name| {
         let resolved = resolve_class_name(name, ctx);
         if name != "Traversable" {
-            out.push((intern(name), intern(&resolved)));
+            out.push((Name::from(name), Name::from(&resolved)));
         }
         resolved
     });

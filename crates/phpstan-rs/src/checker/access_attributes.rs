@@ -11,6 +11,7 @@ use crate::checker::Checker;
 use crate::registry::access_attributes::AccessAttributes;
 use syntax::ast::*;
 use syntax::token::Span;
+use types::Name;
 
 const TEST_BASE_CLASSES: [&str; 2] = ["PHPUnit\\Framework\\TestCase", "Codeception\\Test\\Unit"];
 
@@ -153,7 +154,7 @@ impl<'a> Checker<'a> {
         let Some(info) = self.registry.classes.get(fqn) else {
             return;
         };
-        let uses: Vec<(String, Vec<std::sync::Arc<str>>)> = info
+        let uses: Vec<(String, Vec<Name>)> = info
             .uses()
             .iter()
             .filter_map(|t| {

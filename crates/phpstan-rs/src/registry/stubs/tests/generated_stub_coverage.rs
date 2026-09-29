@@ -3,6 +3,7 @@
 //! actually wired in and produces correct, non-miscounted signatures.
 
 use super::super::*;
+use types::Name;
 
 #[test]
 fn generates_a_real_ctype_signature() {
@@ -38,7 +39,7 @@ fn patch_spl_iterator_templates_gives_real_generic_spl_classes_their_missing_tem
     // project's own vendored phpstorm-stubs, yet real PHPStan resolves
     // every one as generic with exactly this template list.
     let classes = generated_stub_classes();
-    let by_name: rustc_hash::FxHashMap<&str, &Vec<std::sync::Arc<str>>> = classes
+    let by_name: rustc_hash::FxHashMap<&str, &Vec<Name>> = classes
         .iter()
         .map(|(n, info)| (n.as_ref(), &info.templates))
         .collect();

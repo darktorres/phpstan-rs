@@ -1,6 +1,6 @@
 use rustc_hash::{FxHashMap, FxHashSet};
 use std::collections::VecDeque;
-use std::sync::Arc;
+use syntax::name::Name;
 
 use rayon::prelude::*;
 
@@ -9,7 +9,6 @@ use crate::registry::{
     ClassReflection, ConstantReflection, FunctionReflection, PropertyReflection,
 };
 use syntax::ast::ClassKind;
-use syntax::intern::intern;
 use types::Type;
 
 impl Registry {
@@ -37,9 +36,9 @@ impl Registry {
     /// `instanceof`/`is_subclass_of` never recognizes). `class` itself
     /// is never included (matching `is_subclass_of`'s own separate
     /// `class == of` check).
-    fn class_extends_implements_closure(&self, class: &str) -> FxHashSet<Arc<str>> {
+    fn class_extends_implements_closure(&self, class: &str) -> FxHashSet<Name> {
         let mut seen = FxHashSet::default();
-        let mut stack = vec![intern(class)];
+        let mut stack = vec![Name::from(class)];
         let mut result = FxHashSet::default();
         while let Some(current) = stack.pop() {
             if !seen.insert(current.clone()) {
@@ -66,7 +65,7 @@ impl Registry {
     /// class's result can invalidate another's.
     #[hotpath::measure]
     pub fn precompute_ancestor_names(&mut self) {
-        let class_names: Vec<Arc<str>> = self.classes.keys().cloned().collect();
+        let class_names: Vec<Name> = self.classes.keys().cloned().collect();
         let registry: &Registry = self;
         self.ancestor_names = class_names
             .par_iter()
@@ -86,7 +85,7 @@ impl Registry {
     /// `getParentClass()` only, never `implements`/`uses`).
     pub(crate) fn class_is_immutable(&self, class: &str) -> bool {
         let mut seen = FxHashSet::default();
-        let mut stack = vec![intern(class)];
+        let mut stack = vec![Name::from(class)];
         while let Some(current) = stack.pop() {
             if !seen.insert(current.clone()) {
                 continue;
@@ -109,9 +108,9 @@ impl Registry {
     /// Needed by `checker::oop::check_require_tags`: real PHPStan's
     /// `getInterfaces()`/`getTraits(true)` are both transitive the
     /// identical way.
-    pub(crate) fn all_ancestor_names(&self, class: &str) -> FxHashSet<Arc<str>> {
+    pub(crate) fn all_ancestor_names(&self, class: &str) -> FxHashSet<Name> {
         let mut seen = FxHashSet::default();
-        let mut stack = vec![intern(class)];
+        let mut stack = vec![Name::from(class)];
         let mut result = FxHashSet::default();
         while let Some(current) = stack.pop() {
             if !seen.insert(current.clone()) {
@@ -139,9 +138,9 @@ impl Registry {
     /// trait used only by another trait (`trait B { ... } trait A {
     /// use B; } class X { use A; }`) still needs `B` checked against
     /// `X`, the real, final host.
-    pub(crate) fn classes_using_trait(&self, trait_fqn: &str) -> Vec<Arc<str>> {
+    pub(crate) fn classes_using_trait(&self, trait_fqn: &str) -> Vec<Name> {
         let mut result = Vec::new();
-        let mut stack = vec![intern(trait_fqn)];
+        let mut stack = vec![Name::from(trait_fqn)];
         let mut seen = FxHashSet::default();
         while let Some(current) = stack.pop() {
             if !seen.insert(current.clone()) {
@@ -187,16 +186,16 @@ impl Registry {
         &self,
         class: &str,
     ) -> (
-        FxHashMap<Arc<str>, Arc<str>>,
-        FxHashMap<Arc<str>, Arc<str>>,
-        FxHashMap<Arc<str>, Arc<str>>,
+        FxHashMap<Name, Name>,
+        FxHashMap<Name, Name>,
+        FxHashMap<Name, Name>,
     ) {
         let mut method_owner = FxHashMap::default();
         let mut property_owner = FxHashMap::default();
         let mut const_owner = FxHashMap::default();
         let mut seen = FxHashSet::default();
         let mut queue = VecDeque::new();
-        queue.push_back(intern(class));
+        queue.push_back(Name::from(class));
         while let Some(current) = queue.pop_front() {
             if !seen.insert(current.clone()) {
                 continue;
@@ -237,9 +236,9 @@ impl Registry {
     /// exact "try parent 0 fully, then parent 1 fully" priority without
     /// re-walking anything.
     fn merge_ancestor_owner_names(
-        parents: impl Iterator<Item = Arc<str>>,
-        own_owner_by_class: &FxHashMap<Arc<str>, FxHashMap<Arc<str>, Arc<str>>>,
-    ) -> FxHashMap<Arc<str>, Arc<str>> {
+        parents: impl Iterator<Item = Name>,
+        own_owner_by_class: &FxHashMap<Name, FxHashMap<Name, Name>>,
+    ) -> FxHashMap<Name, Name> {
         let mut merged = FxHashMap::default();
         for parent in parents {
             if let Some(parent_map) = own_owner_by_class.get(&parent) {
@@ -273,7 +272,7 @@ impl Registry {
     /// finish before any class's `ancestor` map starts.
     #[hotpath::measure]
     pub fn precompute_member_owners(&mut self) {
-        let class_names: Vec<Arc<str>> = self.classes.keys().cloned().collect();
+        let class_names: Vec<Name> = self.classes.keys().cloned().collect();
         let registry: &Registry = self;
 
         // Every `self.X = ...`-style assignment below is deferred to
@@ -299,53 +298,45 @@ impl Registry {
             const_owner_by_class.insert(name, consts);
         }
 
-        let ancestor_method_owner_by_class: FxHashMap<Arc<str>, FxHashMap<Arc<str>, Arc<str>>> =
-            class_names
-                .par_iter()
-                .map(|name| {
-                    let parents = registry
-                        .classes
-                        .get(name)
-                        .map(|info| {
-                            info.extends
-                                .iter()
-                                .chain(info.implements.iter())
-                                .cloned()
-                                .collect::<Vec<_>>()
-                        })
-                        .unwrap_or_default();
-                    (
-                        name.clone(),
-                        Self::merge_ancestor_owner_names(
-                            parents.into_iter(),
-                            &method_owner_by_class,
-                        ),
-                    )
-                })
-                .collect();
+        let ancestor_method_owner_by_class: FxHashMap<Name, FxHashMap<Name, Name>> = class_names
+            .par_iter()
+            .map(|name| {
+                let parents = registry
+                    .classes
+                    .get(name)
+                    .map(|info| {
+                        info.extends
+                            .iter()
+                            .chain(info.implements.iter())
+                            .cloned()
+                            .collect::<Vec<_>>()
+                    })
+                    .unwrap_or_default();
+                (
+                    name.clone(),
+                    Self::merge_ancestor_owner_names(parents.into_iter(), &method_owner_by_class),
+                )
+            })
+            .collect();
 
         // Real PHP interfaces can't declare properties at all, so
         // `lookup_ancestor_property_with_owner`'s own walk (unlike the
         // method version) only ever considers `extends`, never
         // `implements` - mirrored here.
-        let ancestor_property_owner_by_class: FxHashMap<Arc<str>, FxHashMap<Arc<str>, Arc<str>>> =
-            class_names
-                .par_iter()
-                .map(|name| {
-                    let parents = registry
-                        .classes
-                        .get(name)
-                        .map(|info| info.extends.clone())
-                        .unwrap_or_default();
-                    (
-                        name.clone(),
-                        Self::merge_ancestor_owner_names(
-                            parents.into_iter(),
-                            &property_owner_by_class,
-                        ),
-                    )
-                })
-                .collect();
+        let ancestor_property_owner_by_class: FxHashMap<Name, FxHashMap<Name, Name>> = class_names
+            .par_iter()
+            .map(|name| {
+                let parents = registry
+                    .classes
+                    .get(name)
+                    .map(|info| info.extends.clone())
+                    .unwrap_or_default();
+                (
+                    name.clone(),
+                    Self::merge_ancestor_owner_names(parents.into_iter(), &property_owner_by_class),
+                )
+            })
+            .collect();
 
         self.method_owner_by_class = method_owner_by_class;
         self.property_owner_by_class = property_owner_by_class;
@@ -451,7 +442,7 @@ impl Registry {
         &self,
         class: &str,
         method: &str,
-    ) -> Option<(Arc<str>, Arc<str>)> {
+    ) -> Option<(Name, Name)> {
         let owners = self.method_owner_by_class.get(class)?;
         owners.iter().find_map(|(name, owner)| {
             (name.eq_ignore_ascii_case(method) && name.as_ref() != method)
@@ -470,7 +461,7 @@ impl Registry {
         &self,
         class: &str,
         method: &str,
-    ) -> Option<(Arc<str>, &FunctionReflection)> {
+    ) -> Option<(Name, &FunctionReflection)> {
         let owners = self.method_owner_by_class.get(class)?;
         if let Some(owner) = owners.get(method) {
             let sig = self.classes.get(owner)?.methods.get(method)?;
@@ -493,7 +484,7 @@ impl Registry {
         &self,
         class: &str,
         method: &str,
-    ) -> Option<(Arc<str>, &FunctionReflection)> {
+    ) -> Option<(Name, &FunctionReflection)> {
         let owner = self
             .ancestor_method_owner_by_class
             .get(class)?
@@ -533,7 +524,7 @@ impl Registry {
         &self,
         class: &str,
         method: &str,
-    ) -> Option<(Arc<str>, &FunctionReflection, bool)> {
+    ) -> Option<(Name, &FunctionReflection, bool)> {
         let info = self.classes.get(class)?;
         // 1. Immediately-implemented interfaces - walks each interface's
         //    *own* ancestor chain too (`lookup_method_with_owner`, not a
@@ -596,7 +587,7 @@ impl Registry {
     pub(crate) fn find_consistent_constructor_ancestor(
         &self,
         class: &str,
-    ) -> Option<(Arc<str>, &FunctionReflection)> {
+    ) -> Option<(Name, &FunctionReflection)> {
         let mut current = self.classes.get(class)?.extends.first()?.clone();
         for _ in 0..self.classes.len().max(1) {
             let info = self.classes.get(&current)?;
@@ -664,7 +655,7 @@ impl Registry {
             return false;
         };
         let mut seen = FxHashSet::default();
-        let mut queue: VecDeque<Arc<str>> = info
+        let mut queue: VecDeque<Name> = info
             .extends
             .iter()
             .chain(info.implements.iter())
@@ -695,7 +686,7 @@ impl Registry {
         &self,
         class: &str,
         prop: &str,
-    ) -> Option<(Arc<str>, &PropertyReflection)> {
+    ) -> Option<(Name, &PropertyReflection)> {
         let owner = self
             .ancestor_property_owner_by_class
             .get(class)?
@@ -717,14 +708,10 @@ impl Registry {
     /// has both (mirrors real PHPStan's own `OverridingMethodRule`
     /// if/elseif order: `method.parentMethodFinal` vs.
     /// `method.parentMethodFinalByPhpDoc`).
-    pub fn find_final_ancestor_method(
-        &self,
-        class: &str,
-        method: &str,
-    ) -> Option<(Arc<str>, bool)> {
+    pub fn find_final_ancestor_method(&self, class: &str, method: &str) -> Option<(Name, bool)> {
         let info = self.classes.get(class)?;
         let mut seen = FxHashSet::default();
-        let mut stack: Vec<Arc<str>> = info.extends.clone();
+        let mut stack: Vec<Name> = info.extends.clone();
         while let Some(current) = stack.pop() {
             if !seen.insert(current.clone()) {
                 continue;
@@ -754,10 +741,10 @@ impl Registry {
         &self,
         class: &str,
         property: &str,
-    ) -> Option<(Arc<str>, bool)> {
+    ) -> Option<(Name, bool)> {
         let info = self.classes.get(class)?;
         let mut seen = FxHashSet::default();
-        let mut stack: Vec<Arc<str>> = info.extends.clone();
+        let mut stack: Vec<Name> = info.extends.clone();
         while let Some(current) = stack.pop() {
             if !seen.insert(current.clone()) {
                 continue;
@@ -787,10 +774,10 @@ impl Registry {
         &self,
         class: &str,
         method: &str,
-    ) -> Vec<(Arc<str>, &FunctionReflection)> {
+    ) -> Vec<(Name, &FunctionReflection)> {
         let mut seen_classes = FxHashSet::default();
-        let mut class_queue: VecDeque<Arc<str>> = VecDeque::new();
-        class_queue.push_back(intern(class));
+        let mut class_queue: VecDeque<Name> = VecDeque::new();
+        class_queue.push_back(Name::from(class));
         let mut seen_ifaces = FxHashSet::default();
         let mut result = Vec::new();
         while let Some(c) = class_queue.pop_front() {
@@ -801,7 +788,7 @@ impl Registry {
                 continue;
             };
             class_queue.extend(info.extends.iter().cloned());
-            let mut iface_queue: VecDeque<Arc<str>> = info.implements.iter().cloned().collect();
+            let mut iface_queue: VecDeque<Name> = info.implements.iter().cloned().collect();
             while let Some(iface) = iface_queue.pop_front() {
                 if !seen_ifaces.insert(iface.clone()) {
                     continue;
@@ -830,10 +817,10 @@ impl Registry {
     /// its own concrete override), so a plain walk of `abstract_methods`
     /// here already covers it, with no separate trait-specific case
     /// needed.
-    pub fn required_abstract_methods(&self, class: &str) -> Vec<Arc<str>> {
+    pub fn required_abstract_methods(&self, class: &str) -> Vec<Name> {
         let mut required = FxHashSet::default();
         let mut seen = FxHashSet::default();
-        let mut stack = vec![intern(class)];
+        let mut stack = vec![Name::from(class)];
         while let Some(current) = stack.pop() {
             if !seen.insert(current.clone()) {
                 continue;
@@ -860,7 +847,7 @@ impl Registry {
                 stack.push(parent.clone());
             }
         }
-        let mut required: Vec<Arc<str>> = required.into_iter().collect();
+        let mut required: Vec<Name> = required.into_iter().collect();
         required.sort();
         required
     }
@@ -877,7 +864,7 @@ impl Registry {
     /// implementation is reachable elsewhere.
     pub fn has_concrete_implementation(&self, class: &str, method: &str) -> bool {
         let mut seen = FxHashSet::default();
-        let mut stack = vec![intern(class)];
+        let mut stack = vec![Name::from(class)];
         while let Some(current) = stack.pop() {
             if !seen.insert(current.clone()) {
                 continue;
@@ -915,7 +902,7 @@ impl Registry {
         &self,
         class: &str,
         prop: &str,
-    ) -> Option<(Arc<str>, &PropertyReflection)> {
+    ) -> Option<(Name, &PropertyReflection)> {
         let owner = self.property_owner_by_class.get(class)?.get(prop)?;
         let sig = self.classes.get(owner)?.properties.get(prop)?;
         Some((owner.clone(), sig))
@@ -938,7 +925,7 @@ impl Registry {
         &self,
         class: &str,
         const_name: &str,
-    ) -> Option<(Arc<str>, &ConstantReflection)> {
+    ) -> Option<(Name, &ConstantReflection)> {
         let owner = self.const_owner_by_class.get(class)?.get(const_name)?;
         let sig = self.classes.get(owner)?.consts.get(const_name)?;
         Some((owner.clone(), sig))
@@ -1018,7 +1005,9 @@ impl Registry {
         &self,
         name: &str,
     ) -> Option<(&str, &FunctionReflection)> {
-        self.functions.get_with_name(name)
+        self.functions
+            .get_with_name(name)
+            .map(|(declared, sig)| (declared.as_str(), sig))
     }
 
     /// `lookup_function`'s class-side mirror - real PHP resolves
@@ -1028,22 +1017,10 @@ impl Registry {
     /// lookup, not a structural registry field - see
     /// `canonicalize_class_name_case` for why those two need different
     /// treatment).
-    ///
-    /// The case-mismatch fallback uses `self.classes_lowercase` (built
-    /// once alongside `canonicalize_class_name_case`'s identical map) to
-    /// turn what would otherwise be a full linear scan on every
-    /// case-mismatched or unresolved name into one `HashMap` lookup plus
-    /// one exact `get` - real cost given
-    /// `check_type_class_names_exist` calls this once per parameter and
-    /// once per return type on every function checked.
     pub fn lookup_class(&self, name: &str) -> Option<(&str, &ClassReflection)> {
-        if let Some((k, v)) = self.classes.get_key_value(name) {
-            return Some((k.as_ref(), v));
-        }
-        let canonical = self.classes_lowercase.get(&name.to_ascii_lowercase())?;
         self.classes
-            .get_key_value(canonical)
-            .map(|(k, v)| (k.as_ref(), v))
+            .get_with_name(name)
+            .map(|(declared, info)| (declared.as_str(), info))
     }
 
     /// The entity that names `repository_fqn` as its own

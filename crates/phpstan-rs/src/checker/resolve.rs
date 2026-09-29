@@ -3,6 +3,7 @@ use crate::registry::{self, FunctionReflection};
 use diagnostics::DiagnosticBuilder;
 use syntax::ast::{QualifiedName, StaticTarget, TypeHint};
 use syntax::token::Span;
+use types::Name;
 use types::{self, Type};
 
 impl<'a> Checker<'a> {
@@ -62,7 +63,7 @@ impl<'a> Checker<'a> {
     pub(crate) fn resolve_type_hint_with_case_refs(
         &self,
         hint: Option<&TypeHint>,
-    ) -> (Type, Vec<(std::sync::Arc<str>, std::sync::Arc<str>)>) {
+    ) -> (Type, Vec<(Name, Name)>) {
         let Some(hint) = hint else {
             return (Type::mixed(), Vec::new());
         };
@@ -71,10 +72,7 @@ impl<'a> Checker<'a> {
             .into_iter()
             .filter_map(|(name, _)| {
                 let resolved = name.resolved_class()?;
-                Some((
-                    syntax::intern::intern(&name.written),
-                    syntax::intern::intern(resolved),
-                ))
+                Some((Name::from(&name.written), Name::from(resolved)))
             })
             .collect();
         (types::native_type(hint), case_refs)
@@ -88,10 +86,7 @@ impl<'a> Checker<'a> {
     /// Resolves a type as written in the current scope: its templates
     /// marked, its class names resolved, with the case refs of those names.
     #[allow(clippy::type_complexity)]
-    fn resolve_written_type(
-        &self,
-        ty: Type,
-    ) -> (Type, Vec<(std::sync::Arc<str>, std::sync::Arc<str>)>) {
+    fn resolve_written_type(&self, ty: Type) -> (Type, Vec<(Name, Name)>) {
         let mut params = self.current_class_template_params();
         params.extend(self.current_function_template_params());
         let ty = if params.is_empty() {
@@ -484,11 +479,7 @@ impl<'a> Checker<'a> {
     /// `span`, since this project's PHPDoc parsing keeps no
     /// per-reference span within a docblock's type text, only the
     /// position of the type token as a whole.
-    pub(crate) fn check_type_class_name_case(
-        &mut self,
-        case_refs: &[(std::sync::Arc<str>, std::sync::Arc<str>)],
-        span: Span,
-    ) {
+    pub(crate) fn check_type_class_name_case(&mut self, case_refs: &[(Name, Name)], span: Span) {
         for (raw, resolved) in case_refs {
             self.check_resolved_class_name_case(raw, resolved, span);
         }

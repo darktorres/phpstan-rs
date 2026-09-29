@@ -72,6 +72,19 @@ impl PartialEq for Name {
 
 impl Eq for Name {}
 
+impl PartialOrd for Name {
+    fn partial_cmp(&self, other: &Name) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for Name {
+    /// By text, as the text's `Ord` compares.
+    fn cmp(&self, other: &Name) -> std::cmp::Ordering {
+        self.0.text.cmp(&other.0.text)
+    }
+}
+
 impl PartialEq<str> for Name {
     fn eq(&self, other: &str) -> bool {
         *self.0.text == *other
@@ -159,6 +172,26 @@ impl From<&String> for Name {
     }
 }
 
+impl From<&Name> for Name {
+    fn from(name: &Name) -> Name {
+        name.clone()
+    }
+}
+
+impl From<std::borrow::Cow<'_, str>> for Name {
+    /// Interns into the global interner.
+    fn from(text: std::borrow::Cow<'_, str>) -> Name {
+        Interner::global().name(&text)
+    }
+}
+
+impl From<Arc<str>> for Name {
+    /// Interns into the global interner.
+    fn from(text: Arc<str>) -> Name {
+        Interner::global().name(&text)
+    }
+}
+
 impl From<&Arc<str>> for Name {
     /// Interns into the global interner.
     fn from(text: &Arc<str>) -> Name {
@@ -169,6 +202,14 @@ impl From<&Arc<str>> for Name {
 impl From<Name> for String {
     fn from(name: Name) -> String {
         name.as_str().to_string()
+    }
+}
+
+#[cfg(feature = "fuzzing")]
+impl<'a> arbitrary::Arbitrary<'a> for Name {
+    /// Interns into the global interner.
+    fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Name> {
+        Ok(Interner::global().name(<&str>::arbitrary(u)?))
     }
 }
 

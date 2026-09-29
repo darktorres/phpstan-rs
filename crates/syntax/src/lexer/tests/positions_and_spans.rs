@@ -77,8 +77,8 @@ fn complex_interpolation_gets_a_real_base_position_on_a_later_line() {
         })
         .expect("expected a PropertyAccess part");
     let (var, var_start, var_end, prop, end) = part;
-    assert_eq!(var, "obj".into());
-    assert_eq!(prop, "prop".into());
+    assert_eq!(var, "obj");
+    assert_eq!(prop, "prop");
     // The literal "a\n" inside the string doesn't introduce a real
     // newline in the source - {$obj->prop} is still on line 2.
     // `$s = "a\n{$obj->prop}";` - the `$` of `$obj` is the 11th
@@ -115,8 +115,8 @@ fn shorthand_property_interpolation_base_points_at_the_dollar_sign() {
         })
         .expect("expected a PropertyAccess part");
     let (var, var_start, var_end, prop, end) = part;
-    assert_eq!(var, "obj".into());
-    assert_eq!(prop, "prop".into());
+    assert_eq!(var, "obj");
+    assert_eq!(prop, "prop");
     // `$s = "x $obj->prop y";` - the `$` of `$obj` is the 9th character,
     // `->` starts at the 13th (right after `obj`), and `prop` ends right
     // before the trailing space at the 19th.

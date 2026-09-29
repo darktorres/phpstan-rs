@@ -436,7 +436,7 @@ fn property_hooks_parse() {
     let hooks = c.properties[0].hooks.as_ref().expect("expected hooks");
     assert!(matches!(hooks.get, Some(PropertyHookBody::Arrow(_))));
     let (param, body) = hooks.set.as_ref().expect("expected set hook");
-    assert_eq!(param.as_ref().unwrap().name, "value".into());
+    assert_eq!(param.as_ref().unwrap().name, "value");
     assert!(matches!(body, PropertyHookBody::Block(_)));
 
     // A bodyless hook (`get;`/`set;`) parses to
@@ -554,7 +554,7 @@ fn public_set_and_final_promoted_params_parse() {
     };
     let ctor = &c.methods[0].function;
     assert_eq!(ctor.params[0].promoted_visibility, Some(Visibility::Public));
-    assert_eq!(ctor.params[1].name, "b".into());
+    assert_eq!(ctor.params[1].name, "b");
 }
 
 #[test]

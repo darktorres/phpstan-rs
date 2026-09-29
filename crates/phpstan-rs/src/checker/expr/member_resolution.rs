@@ -5,6 +5,7 @@ use crate::checker::expr::doctrine_query_result_list_type;
 use crate::checker::{Checker, Locals, resolve_call_args};
 use crate::registry::{FunctionReflection, PropertyReflection};
 use syntax::ast::*;
+use types::Name;
 
 use types::{self, Shape, ShapeField, ShapeKey, Type};
 
@@ -22,7 +23,7 @@ impl<'a> Checker<'a> {
         &self,
         base_ty: &Type,
         prop: &str,
-    ) -> Option<(std::sync::Arc<str>, &'a PropertyReflection)> {
+    ) -> Option<(Name, &'a PropertyReflection)> {
         syntax::stack::guard(|| {
             let members = base_ty.union_members();
             if members.len() > 1 {
@@ -56,7 +57,7 @@ impl<'a> Checker<'a> {
         &self,
         base_ty: &Type,
         method: &str,
-    ) -> Option<(std::sync::Arc<str>, &'a FunctionReflection)> {
+    ) -> Option<(Name, &'a FunctionReflection)> {
         syntax::stack::guard(|| {
             let members = base_ty.union_members();
             if members.len() > 1 {
@@ -192,7 +193,7 @@ impl<'a> Checker<'a> {
         &self,
         base_ty: &Type,
         prop: &str,
-    ) -> Option<(String, Vec<Type>, std::sync::Arc<str>, PropertyReflection)> {
+    ) -> Option<(String, Vec<Type>, Name, PropertyReflection)> {
         syntax::stack::guard(|| {
             let members = base_ty.union_members();
             if members.len() > 1 {
@@ -250,7 +251,7 @@ impl<'a> Checker<'a> {
     ) -> Option<(
         String,
         Vec<Type>,
-        std::sync::Arc<str>,
+        Name,
         std::borrow::Cow<'a, FunctionReflection>,
     )> {
         syntax::stack::guard(|| {

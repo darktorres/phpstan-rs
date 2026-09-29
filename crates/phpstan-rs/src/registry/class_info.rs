@@ -1,6 +1,5 @@
 use indexmap::IndexMap;
 use rustc_hash::{FxHashMap, FxHashSet};
-use std::sync::Arc;
 
 use crate::registry::class_decl_fqn;
 use crate::registry::function_sig::{
@@ -17,7 +16,6 @@ use crate::registry::type_node::parse_type_node;
 use phpdoc::docblock::{self, DocBlock};
 use phpdoc::grammar::TypeNode;
 use syntax::ast::{ClassDecl, ClassKind, ExprKind, Literal, Visibility};
-use syntax::intern::intern;
 use syntax::name_resolution::NameContext;
 use syntax::token::Span;
 use types::{self, AccessoryKind, Name, TemplateParam, Type};
@@ -158,10 +156,10 @@ pub struct PropertyReflection {
     // identically at all three real construction sites (plain declared
     // property, promoted constructor property, `@property`/`-read`/
     // `-write` tag).
-    pub(in crate::registry) case_refs: Vec<(Arc<str>, Arc<str>)>,
+    pub(in crate::registry) case_refs: Vec<(Name, Name)>,
     // `set_ty`'s case_refs equivalent - `property_hook_set_type` never
     // collected these, unlike the sibling `ty` field above.
-    pub(in crate::registry) set_case_refs: Vec<(Arc<str>, Arc<str>)>,
+    pub(in crate::registry) set_case_refs: Vec<(Name, Name)>,
     pub(in crate::registry) attributes: Vec<ReflectionAttribute>,
     pub(in crate::registry) provenance: Provenance,
 }
@@ -259,11 +257,11 @@ impl PropertyReflection {
         self.has_native_type
     }
 
-    pub fn case_refs(&self) -> &Vec<(Arc<str>, Arc<str>)> {
+    pub fn case_refs(&self) -> &Vec<(Name, Name)> {
         &self.case_refs
     }
 
-    pub fn set_case_refs(&self) -> &Vec<(Arc<str>, Arc<str>)> {
+    pub fn set_case_refs(&self) -> &Vec<(Name, Name)> {
         &self.set_case_refs
     }
 }
@@ -340,9 +338,9 @@ impl ConstantReflection {
 /// `trait_name` resolved, `None` when the clause names no trait.
 #[derive(Debug, Clone)]
 pub struct TraitAlias {
-    pub trait_name: Option<Arc<str>>,
-    pub method: Arc<str>,
-    pub alias: Arc<str>,
+    pub trait_name: Option<Name>,
+    pub method: Name,
+    pub alias: Name,
 }
 
 #[derive(Debug, Clone)]
@@ -367,38 +365,38 @@ pub struct ClassReflection {
     // declaration carry the tag," not "is this class immutable
     // considering its whole ancestor chain."
     pub(in crate::registry) is_immutable: bool,
-    pub(in crate::registry) extends: Vec<Arc<str>>,
-    pub(in crate::registry) implements: Vec<Arc<str>>,
-    pub(in crate::registry) methods: FxHashMap<Arc<str>, FunctionReflection>,
+    pub(in crate::registry) extends: Vec<Name>,
+    pub(in crate::registry) implements: Vec<Name>,
+    pub(in crate::registry) methods: FxHashMap<Name, FunctionReflection>,
     // The own signature of each method whose name the body declares more
     // than once, keyed by its name's position: `methods` holds their
     // union.
     pub(in crate::registry) redeclared_methods: FxHashMap<(u32, u32), FunctionReflection>,
-    pub(in crate::registry) properties: FxHashMap<Arc<str>, PropertyReflection>,
+    pub(in crate::registry) properties: FxHashMap<Name, PropertyReflection>,
     // Declaration order is kept: a listing of constants (a `match`
     // remainder, a `Foo::X_*` wildcard) follows source order, as in real
     // PHPStan.
-    pub(in crate::registry) consts: IndexMap<Arc<str>, ConstantReflection>,
-    pub(in crate::registry) uses: Vec<Arc<str>>,
+    pub(in crate::registry) consts: IndexMap<Name, ConstantReflection>,
+    pub(in crate::registry) uses: Vec<Name>,
     // Method names declared `abstract` in this class's own body (not
     // walked up the hierarchy - a completeness check needs to walk
     // `extends`/`implements` itself and consult each ancestor's own set).
-    pub(in crate::registry) abstract_methods: FxHashSet<Arc<str>>,
+    pub(in crate::registry) abstract_methods: FxHashSet<Name>,
     // Method names declared `final` in this class's own body.
-    pub(in crate::registry) final_methods: FxHashSet<Arc<str>>,
+    pub(in crate::registry) final_methods: FxHashSet<Name>,
     // Method names declared `static` in this class's own body - same
     // "not walked up the hierarchy" shape as `abstract_methods`/
     // `final_methods` above, used by `check_one_method_override`'s
     // `method.nonStatic`/`method.static` check, mirroring real PHPStan's
     // `OverridingMethodRule`: an override must match its ancestor's
     // static-ness exactly, either direction.
-    pub(in crate::registry) static_methods: FxHashSet<Arc<str>>,
+    pub(in crate::registry) static_methods: FxHashSet<Name>,
     // Property names declared `final` in this class's own body (PHP 8.4) -
     // same "not walked up the hierarchy" shape as `final_methods` above;
     // `Registry::find_final_ancestor_property` does that walk. Real PHP
     // fatals overriding a `final` property in a subclass exactly like a
     // `final` method.
-    pub(in crate::registry) final_properties: FxHashSet<Arc<str>>,
+    pub(in crate::registry) final_properties: FxHashSet<Name>,
     // `@final`'s docblock-only siblings to `final_methods`/
     // `final_properties` above - real PHP never enforces this convention
     // (no engine-level guarantee backs it, unlike the native keyword), so
@@ -406,8 +404,8 @@ pub struct ClassReflection {
     // (`Registry::find_final_ancestor_method`/
     // `find_final_ancestor_property`, real keyword taking priority when
     // both somehow apply on the same ancestor).
-    pub(in crate::registry) final_methods_by_phpdoc: FxHashSet<Arc<str>>,
-    pub(in crate::registry) final_properties_by_phpdoc: FxHashSet<Arc<str>>,
+    pub(in crate::registry) final_methods_by_phpdoc: FxHashSet<Name>,
+    pub(in crate::registry) final_properties_by_phpdoc: FxHashSet<Name>,
     // `use A, B { B::hello as helloB; }` - each entry's `trait_name` (when
     // present) is already resolved to the same fully-qualified name
     // `uses` itself is keyed under, so `flatten_traits` can look it up in
@@ -418,12 +416,12 @@ pub struct ClassReflection {
     // these as already addressed by the class author, even for
     // `insteadof` (whose actual trait-selection this project doesn't
     // otherwise model).
-    pub(in crate::registry) resolved_trait_conflicts: FxHashSet<Arc<str>>,
+    pub(in crate::registry) resolved_trait_conflicts: FxHashSet<Name>,
     // This class's own `@template T` names, in declaration order - order
     // matters, since a generic reference (`Collection<User>`) binds its
     // type arguments to these positionally (`checker::
     // class_template_bindings`). Empty for a non-generic class.
-    pub(in crate::registry) templates: Vec<Arc<str>>,
+    pub(in crate::registry) templates: Vec<Name>,
     // `@extends Parent<Arg, ...>`'s argument list - fixes
     // `extends.first()`'s `@template` names for every instance of this
     // class, independent of whether this class is itself generic (e.g.
@@ -440,7 +438,7 @@ pub struct ClassReflection {
     // `@implements Iface<Arg, ...>` tag applies to (a class can implement
     // more than one at once) - the key is resolved to the same
     // fully-qualified name `implements` itself uses, so the two agree.
-    pub(in crate::registry) implements_args: FxHashMap<Arc<str>, Vec<Type>>,
+    pub(in crate::registry) implements_args: FxHashMap<Name, Vec<Type>>,
     // Same idea again, but for a generic trait named in an `@use
     // Trait<Arg, ...>` tag - keyed the same way as `implements_args`.
     // Unlike `extends`/`implements`, which are both written on the
@@ -450,12 +448,12 @@ pub struct ClassReflection {
     // TemplateTypeTrait;`, not the class's separate `/** @api */`
     // docblock above it) - see `ClassDecl::uses_doc_comments`'s doc
     // comment for where this project captures that.
-    pub(in crate::registry) uses_args: FxHashMap<Arc<str>, Vec<Type>>,
+    pub(in crate::registry) uses_args: FxHashMap<Name, Vec<Type>>,
     // `@template T of Bound` - the resolved bound for whichever of
     // `templates` above declared one. Checked by
     // `checker::check_generic_bounds` wherever this class is referenced
     // with concrete type arguments (`Collection<Foo>`).
-    pub(in crate::registry) template_bounds: FxHashMap<Arc<str>, Type>,
+    pub(in crate::registry) template_bounds: FxHashMap<Name, Type>,
     // `@template T = Default` - the resolved default for whichever of
     // `templates` above declared one, mirroring `template_bounds`'s
     // shape/construction exactly. A generic reference supplying fewer
@@ -463,12 +461,12 @@ pub struct ClassReflection {
     // (`check_generic_reference_arity`, `checker/generics.rs`) for a
     // template name absent from this map - one with a default is
     // legitimately optional to supply.
-    pub(in crate::registry) template_defaults: FxHashMap<Arc<str>, Type>,
+    pub(in crate::registry) template_defaults: FxHashMap<Name, Type>,
     // Names from `templates` above additionally declared
     // `@template-covariant`/`@template-contravariant` - a name absent
     // from both stays invariant.
-    pub(in crate::registry) covariant_templates: FxHashSet<Arc<str>>,
-    pub(in crate::registry) contravariant_templates: FxHashSet<Arc<str>>,
+    pub(in crate::registry) covariant_templates: FxHashSet<Name>,
+    pub(in crate::registry) contravariant_templates: FxHashSet<Name>,
     // This class/interface/trait's own docblock carries `@api` (or,
     // equivalently, `@api-do-not-implement`, which implies it - see
     // `DocBlock::api`'s doc comment). Consulted only by
@@ -514,7 +512,7 @@ pub struct ClassReflection {
     // `->value` union-of-literals property type applies) - empty for a
     // non-enum, an unbacked enum, or a backed enum with any non-literal
     // case value (a case naming a class constant).
-    pub(in crate::registry) enum_case_values: FxHashMap<Arc<str>, Type>,
+    pub(in crate::registry) enum_case_values: FxHashMap<Name, Type>,
     // This class's own `@phpstan-type Name TypeExpr` local alias table
     // (`function_sig::build_type_aliases`), keyed by each alias's own
     // resolved FQN - already spliced into every member's `ty` at
@@ -523,7 +521,7 @@ pub struct ClassReflection {
     // check-time `@var` resolution path, which needs the same table to
     // expand a local variable annotated `/** @var Name $x */` inside one
     // of this class's method bodies. Empty for a class with no such tags.
-    pub(in crate::registry) type_aliases: FxHashMap<Arc<str>, Type>,
+    pub(in crate::registry) type_aliases: FxHashMap<Name, Type>,
     // `ParameterReflection::case_refs`'s `@phpstan-type` equivalent - keyed the
     // same way `type_aliases` itself is (the alias's resolved local
     // name), `(raw, resolved)` pairs for every class-name reference the
@@ -531,7 +529,7 @@ pub struct ClassReflection {
     // elsewhere - that's this same mechanism at whatever
     // `@param`/`@return`/property tag actually uses the alias, via its
     // own `case_refs`).
-    pub(in crate::registry) type_alias_case_refs: FxHashMap<Arc<str>, Vec<(Arc<str>, Arc<str>)>>,
+    pub(in crate::registry) type_alias_case_refs: FxHashMap<Name, Vec<(Name, Name)>>,
     // This class's own `@phpstan-import-type` tags, name-resolved
     // (`from` to the source class's FQN, the imported name to the local
     // key this class's members already reference it by) but not yet
@@ -546,7 +544,7 @@ pub struct ClassReflection {
     // yet inserted into `methods` - insertion has to wait for
     // `Registry::resolve_method_tags`, a later pass. Empty again after
     // that pass runs; never read afterward.
-    pub(in crate::registry) method_tags: Vec<(Arc<str>, FunctionReflection, bool)>,
+    pub(in crate::registry) method_tags: Vec<(Name, FunctionReflection, bool)>,
     // `#[ORM\Entity]` metadata (ROADMAP Phase 168 168a) - `None`
     // for the overwhelming majority of classes, which aren't Doctrine
     // entities at all.
@@ -559,26 +557,26 @@ pub struct ClassReflection {
     // project's "don't guess" precedent elsewhere). See
     // `checker::oop::check_require_tags`/`check_sealed_hierarchy` for
     // the two, differently-shaped consuming checks.
-    pub(in crate::registry) require_extends: Vec<Arc<str>>,
-    pub(in crate::registry) require_implements: Vec<Arc<str>>,
-    pub(in crate::registry) sealed: Vec<Arc<str>>,
+    pub(in crate::registry) require_extends: Vec<Name>,
+    pub(in crate::registry) require_implements: Vec<Name>,
+    pub(in crate::registry) sealed: Vec<Name>,
     /// The class's own `php-language-extensions` access attributes.
     pub(in crate::registry) access: crate::registry::access_attributes::AccessAttributes,
     /// Each method's, keyed by lowercased method name (only methods that
     /// have any).
     pub(in crate::registry) method_access:
-        FxHashMap<Arc<str>, crate::registry::access_attributes::AccessAttributes>,
+        FxHashMap<Name, crate::registry::access_attributes::AccessAttributes>,
     // `@mixin Type` - resolved FQNs, same shape/flattening as the three
     // above. Not yet looked up in the target's own `methods`/`properties`
     // (may not be indexed yet) - `Registry::resolve_deferred_mixins`,
     // mirroring `resolve_deferred_type_imports`'s own two-step shape.
-    pub(in crate::registry) mixins: Vec<Arc<str>>,
+    pub(in crate::registry) mixins: Vec<Name>,
     // `ParameterReflection::case_refs`'s `@mixin`-tag equivalent - `(raw, resolved)`
     // pairs for every `@mixin` target on this class's docblock, in
     // declaration order (not keyed by name - unlike
     // `type_alias_case_refs`, a class can carry several `@mixin` tags
     // with no unique name to key by).
-    pub(in crate::registry) mixin_case_refs: Vec<(Arc<str>, Arc<str>)>,
+    pub(in crate::registry) mixin_case_refs: Vec<(Name, Name)>,
     // A `new class { ... }` expression's class.
     pub(in crate::registry) is_anonymous: bool,
     pub(in crate::registry) provenance: Provenance,
@@ -613,15 +611,15 @@ impl ClassReflection {
         self.is_immutable
     }
 
-    pub fn extends(&self) -> &Vec<Arc<str>> {
+    pub fn extends(&self) -> &Vec<Name> {
         &self.extends
     }
 
-    pub fn implements(&self) -> &Vec<Arc<str>> {
+    pub fn implements(&self) -> &Vec<Name> {
         &self.implements
     }
 
-    pub fn methods(&self) -> &FxHashMap<Arc<str>, FunctionReflection> {
+    pub fn methods(&self) -> &FxHashMap<Name, FunctionReflection> {
         &self.methods
     }
 
@@ -629,39 +627,39 @@ impl ClassReflection {
         &self.redeclared_methods
     }
 
-    pub fn properties(&self) -> &FxHashMap<Arc<str>, PropertyReflection> {
+    pub fn properties(&self) -> &FxHashMap<Name, PropertyReflection> {
         &self.properties
     }
 
-    pub fn consts(&self) -> &IndexMap<Arc<str>, ConstantReflection> {
+    pub fn consts(&self) -> &IndexMap<Name, ConstantReflection> {
         &self.consts
     }
 
-    pub fn uses(&self) -> &Vec<Arc<str>> {
+    pub fn uses(&self) -> &Vec<Name> {
         &self.uses
     }
 
-    pub fn abstract_methods(&self) -> &FxHashSet<Arc<str>> {
+    pub fn abstract_methods(&self) -> &FxHashSet<Name> {
         &self.abstract_methods
     }
 
-    pub fn final_methods(&self) -> &FxHashSet<Arc<str>> {
+    pub fn final_methods(&self) -> &FxHashSet<Name> {
         &self.final_methods
     }
 
-    pub fn static_methods(&self) -> &FxHashSet<Arc<str>> {
+    pub fn static_methods(&self) -> &FxHashSet<Name> {
         &self.static_methods
     }
 
-    pub fn final_properties(&self) -> &FxHashSet<Arc<str>> {
+    pub fn final_properties(&self) -> &FxHashSet<Name> {
         &self.final_properties
     }
 
-    pub fn final_methods_by_phpdoc(&self) -> &FxHashSet<Arc<str>> {
+    pub fn final_methods_by_phpdoc(&self) -> &FxHashSet<Name> {
         &self.final_methods_by_phpdoc
     }
 
-    pub fn final_properties_by_phpdoc(&self) -> &FxHashSet<Arc<str>> {
+    pub fn final_properties_by_phpdoc(&self) -> &FxHashSet<Name> {
         &self.final_properties_by_phpdoc
     }
 
@@ -669,11 +667,11 @@ impl ClassReflection {
         &self.trait_aliases
     }
 
-    pub fn resolved_trait_conflicts(&self) -> &FxHashSet<Arc<str>> {
+    pub fn resolved_trait_conflicts(&self) -> &FxHashSet<Name> {
         &self.resolved_trait_conflicts
     }
 
-    pub fn templates(&self) -> &Vec<Arc<str>> {
+    pub fn templates(&self) -> &Vec<Name> {
         &self.templates
     }
 
@@ -681,27 +679,27 @@ impl ClassReflection {
         &self.extends_args
     }
 
-    pub fn implements_args(&self) -> &FxHashMap<Arc<str>, Vec<Type>> {
+    pub fn implements_args(&self) -> &FxHashMap<Name, Vec<Type>> {
         &self.implements_args
     }
 
-    pub fn uses_args(&self) -> &FxHashMap<Arc<str>, Vec<Type>> {
+    pub fn uses_args(&self) -> &FxHashMap<Name, Vec<Type>> {
         &self.uses_args
     }
 
-    pub fn template_bounds(&self) -> &FxHashMap<Arc<str>, Type> {
+    pub fn template_bounds(&self) -> &FxHashMap<Name, Type> {
         &self.template_bounds
     }
 
-    pub fn template_defaults(&self) -> &FxHashMap<Arc<str>, Type> {
+    pub fn template_defaults(&self) -> &FxHashMap<Name, Type> {
         &self.template_defaults
     }
 
-    pub fn covariant_templates(&self) -> &FxHashSet<Arc<str>> {
+    pub fn covariant_templates(&self) -> &FxHashSet<Name> {
         &self.covariant_templates
     }
 
-    pub fn contravariant_templates(&self) -> &FxHashSet<Arc<str>> {
+    pub fn contravariant_templates(&self) -> &FxHashSet<Name> {
         &self.contravariant_templates
     }
 
@@ -733,16 +731,16 @@ impl ClassReflection {
         &self.attributes
     }
 
-    pub fn enum_case_values(&self) -> &FxHashMap<Arc<str>, Type> {
+    pub fn enum_case_values(&self) -> &FxHashMap<Name, Type> {
         &self.enum_case_values
     }
 
-    pub fn type_aliases(&self) -> &FxHashMap<Arc<str>, Type> {
+    pub fn type_aliases(&self) -> &FxHashMap<Name, Type> {
         &self.type_aliases
     }
 
     #[allow(clippy::type_complexity)]
-    pub fn type_alias_case_refs(&self) -> &FxHashMap<Arc<str>, Vec<(Arc<str>, Arc<str>)>> {
+    pub fn type_alias_case_refs(&self) -> &FxHashMap<Name, Vec<(Name, Name)>> {
         &self.type_alias_case_refs
     }
 
@@ -750,7 +748,7 @@ impl ClassReflection {
         &self.type_imports
     }
 
-    pub fn method_tags(&self) -> &Vec<(Arc<str>, FunctionReflection, bool)> {
+    pub fn method_tags(&self) -> &Vec<(Name, FunctionReflection, bool)> {
         &self.method_tags
     }
 
@@ -758,15 +756,15 @@ impl ClassReflection {
         &self.doctrine_entity
     }
 
-    pub fn require_extends(&self) -> &Vec<Arc<str>> {
+    pub fn require_extends(&self) -> &Vec<Name> {
         &self.require_extends
     }
 
-    pub fn require_implements(&self) -> &Vec<Arc<str>> {
+    pub fn require_implements(&self) -> &Vec<Name> {
         &self.require_implements
     }
 
-    pub fn sealed(&self) -> &Vec<Arc<str>> {
+    pub fn sealed(&self) -> &Vec<Name> {
         &self.sealed
     }
 
@@ -776,15 +774,15 @@ impl ClassReflection {
 
     pub fn method_access(
         &self,
-    ) -> &FxHashMap<Arc<str>, crate::registry::access_attributes::AccessAttributes> {
+    ) -> &FxHashMap<Name, crate::registry::access_attributes::AccessAttributes> {
         &self.method_access
     }
 
-    pub fn mixins(&self) -> &Vec<Arc<str>> {
+    pub fn mixins(&self) -> &Vec<Name> {
         &self.mixins
     }
 
-    pub fn mixin_case_refs(&self) -> &Vec<(Arc<str>, Arc<str>)> {
+    pub fn mixin_case_refs(&self) -> &Vec<(Name, Name)> {
         &self.mixin_case_refs
     }
 
@@ -799,14 +797,14 @@ pub struct ResolvedTypeImport {
     // The key this class's own already-built member types reference the
     // import under (`substitute_type_aliases` matches on this exact key,
     // same as an ordinary local `@phpstan-type` alias would).
-    pub local_key: Arc<str>,
-    pub source_class_fqn: Arc<str>,
+    pub local_key: Name,
+    pub source_class_fqn: Name,
     // The name as declared on the *source* class's own `@phpstan-type` -
     // not yet resolved to that class's own key (needs its own namespace,
     // reconstructed from `source_class_fqn` at resolution time rather
     // than carried here, since a class's own containing namespace is
     // always recoverable from its own FQN).
-    pub source_alias_name: Arc<str>,
+    pub source_alias_name: Name,
 }
 
 /// Same "two full declarations of one name collapse into their positional
@@ -828,9 +826,9 @@ pub struct ResolvedTypeImport {
 /// name's position (`ClassReflection::redeclared_methods`).
 #[allow(clippy::type_complexity)]
 fn collect_merged_methods(
-    methods: Vec<(Arc<str>, (u32, u32), FunctionReflection)>,
+    methods: Vec<(Name, (u32, u32), FunctionReflection)>,
 ) -> (
-    FxHashMap<Arc<str>, FunctionReflection>,
+    FxHashMap<Name, FunctionReflection>,
     FxHashMap<(u32, u32), FunctionReflection>,
 ) {
     let mut counts: FxHashMap<&str, usize> = FxHashMap::default();
@@ -842,7 +840,7 @@ fn collect_merged_methods(
         .filter(|(name, _, _)| counts[name.as_ref()] > 1)
         .map(|(_, site, sig)| (*site, sig.clone()))
         .collect();
-    let mut out: FxHashMap<Arc<str>, FunctionReflection> = FxHashMap::default();
+    let mut out: FxHashMap<Name, FunctionReflection> = FxHashMap::default();
     for (name, _, sig) in methods {
         match out.remove(&name) {
             Some(existing) => {
@@ -919,7 +917,7 @@ impl ClassReflection {
     pub(crate) fn record_provenance(
         &mut self,
         origin: &Origin,
-        class: &Arc<str>,
+        class: &Name,
         name_span: Span,
         spans: &MemberSpans,
     ) {
@@ -947,9 +945,9 @@ impl ClassReflection {
     #[hotpath::measure]
     pub(crate) fn from_decl(c: &ClassDecl, ctx: &NameContext) -> ClassReflection {
         let class_doc: Option<DocBlock> = c.doc_comment.as_deref().map(docblock::parse);
-        let templates: Vec<Arc<str>> = class_doc
+        let templates: Vec<Name> = class_doc
             .as_ref()
-            .map(|d| d.templates.iter().map(|s| intern(s)).collect())
+            .map(|d| d.templates.iter().map(Name::from).collect())
             .unwrap_or_default();
         // This class's `@template` metadata (bound/variance/default),
         // keyed by name - `templates` above stays a plain `Vec<String>`
@@ -984,9 +982,9 @@ impl ClassReflection {
                     .map(|imp| {
                         let local_name = imp.as_name.as_deref().unwrap_or(&imp.alias);
                         ResolvedTypeImport {
-                            local_key: intern(&ctx.resolve(local_name)),
-                            source_class_fqn: intern(&ctx.resolve(&imp.from)),
-                            source_alias_name: intern(&imp.alias),
+                            local_key: Name::from(&ctx.resolve(local_name)),
+                            source_class_fqn: Name::from(&ctx.resolve(&imp.from)),
+                            source_alias_name: Name::from(&imp.alias),
                         }
                     })
                     .collect()
@@ -998,14 +996,14 @@ impl ClassReflection {
         // cloned only for the sets it actually belongs to, instead of
         // every method in the class being filtered/name-cloned once per
         // set across 5 separate iterations.
-        let mut methods_vec: Vec<(Arc<str>, (u32, u32), FunctionReflection)> =
+        let mut methods_vec: Vec<(Name, (u32, u32), FunctionReflection)> =
             Vec::with_capacity(c.methods.len());
-        let mut abstract_methods: FxHashSet<Arc<str>> = FxHashSet::default();
-        let mut final_methods: FxHashSet<Arc<str>> = FxHashSet::default();
-        let mut static_methods: FxHashSet<Arc<str>> = FxHashSet::default();
-        let mut final_methods_by_phpdoc: FxHashSet<Arc<str>> = FxHashSet::default();
+        let mut abstract_methods: FxHashSet<Name> = FxHashSet::default();
+        let mut final_methods: FxHashSet<Name> = FxHashSet::default();
+        let mut static_methods: FxHashSet<Name> = FxHashSet::default();
+        let mut final_methods_by_phpdoc: FxHashSet<Name> = FxHashSet::default();
         for m in &c.methods {
-            let name = intern(&m.function.name);
+            let name = Name::from(&m.function.name);
             if m.is_abstract {
                 abstract_methods.insert(name.clone());
             }
@@ -1052,11 +1050,11 @@ impl ClassReflection {
         // above applies, one member kind over - a private property
         // (final or not) is never part of a subclass's overridable
         // surface either.
-        let mut final_properties: FxHashSet<Arc<str>> = c
+        let mut final_properties: FxHashSet<Name> = c
             .properties
             .iter()
             .filter(|p| p.is_final && p.visibility != Visibility::Private)
-            .map(|p| intern(&p.name))
+            .map(|p| Name::from(&p.name))
             .collect();
         // `public final int $x` is real, valid PHP on a promoted
         // constructor property too, and real PHP does enforce "Cannot
@@ -1072,13 +1070,13 @@ impl ClassReflection {
                         p.promoted_final
                             && p.promoted_visibility.as_ref() != Some(&Visibility::Private)
                     })
-                    .map(|p| p.name.clone()),
+                    .map(|p| Name::from(&p.name)),
             );
         }
 
         // `@final`'s docblock-only sibling to `final_properties` above -
         // same private-is-not-overridable exemption.
-        let mut final_properties_by_phpdoc: FxHashSet<Arc<str>> = c
+        let mut final_properties_by_phpdoc: FxHashSet<Name> = c
             .properties
             .iter()
             .filter(|p| {
@@ -1088,7 +1086,7 @@ impl ClassReflection {
                         .map(docblock::parse)
                         .is_some_and(|d| d.is_final)
             })
-            .map(|p| intern(&p.name))
+            .map(|p| Name::from(&p.name))
             .collect();
         if let Some(ctor) = c.constructor() {
             final_properties_by_phpdoc.extend(
@@ -1102,11 +1100,11 @@ impl ClassReflection {
                                 .map(docblock::parse)
                                 .is_some_and(|d| d.is_final)
                     })
-                    .map(|p| p.name.clone()),
+                    .map(|p| Name::from(&p.name)),
             );
         }
 
-        let mut properties: FxHashMap<Arc<str>, PropertyReflection> = c
+        let mut properties: FxHashMap<Name, PropertyReflection> = c
             .properties
             .iter()
             .map(|p| {
@@ -1136,7 +1134,7 @@ impl ClassReflection {
                     .as_ref()
                     .is_some_and(|h| !hooks_reference_backing_storage(h, &p.name));
                 (
-                    intern(&p.name),
+                    Name::from(&p.name),
                     PropertyReflection {
                         attributes: ReflectionAttribute::all(&p.attrs),
                         provenance: Provenance::default(),
@@ -1236,7 +1234,7 @@ impl ClassReflection {
                     .as_deref()
                     .is_some_and(|h| !hooks_reference_backing_storage(h, &p.name));
                 properties.insert(
-                    p.name.clone(),
+                    Name::from(&p.name),
                     PropertyReflection {
                         attributes: ReflectionAttribute::all(&p.attrs),
                         provenance: Provenance::default(),
@@ -1286,7 +1284,7 @@ impl ClassReflection {
         // `PropertyReflection::is_writable`/`is_readable`'s concern.
         if let Some(doc) = &class_doc {
             for tag in &doc.properties {
-                properties.entry(intern(&tag.name)).or_insert_with(|| {
+                properties.entry(Name::from(&tag.name)).or_insert_with(|| {
                     let ty = parse_type_node(&tag.ty);
                     let ty = mark_template_params(ty, &template_params);
                     let mut case_refs = Vec::new();
@@ -1343,14 +1341,14 @@ impl ClassReflection {
         // is also vacant-only.
         // `Registry::resolve_method_tags` runs this insertion later
         // instead, once `flatten_traits` has had its own say.
-        let method_tags: Vec<(Arc<str>, FunctionReflection, bool)> = class_doc
+        let method_tags: Vec<(Name, FunctionReflection, bool)> = class_doc
             .as_ref()
             .map(|d| {
                 d.method_tags
                     .iter()
                     .map(|tag| {
                         (
-                            intern(&tag.name),
+                            Name::from(&tag.name),
                             method_tag_sig(tag, &template_params, ctx),
                             tag.is_static,
                         )
@@ -1384,7 +1382,7 @@ impl ClassReflection {
                     None => resolve_names_in_type(infer_class_const_type(&cc.value), ctx),
                 };
                 (
-                    intern(&cc.name),
+                    Name::from(&cc.name),
                     ConstantReflection {
                         attributes: ReflectionAttribute::all(&cc.attrs),
                         provenance: Provenance::default(),
@@ -1435,7 +1433,7 @@ impl ClassReflection {
                     .unwrap_or_default()
             })
             .unwrap_or_default();
-        let implements_args: FxHashMap<Arc<str>, Vec<Type>> = class_doc
+        let implements_args: FxHashMap<Name, Vec<Type>> = class_doc
             .iter()
             .flat_map(|d| &d.implements)
             .filter_map(|raw| class_and_args(&resolve_generic_tag(raw)))
@@ -1447,7 +1445,7 @@ impl ClassReflection {
         // name in a multi-name `use A, B;` statement, so dedup (collect
         // into a `HashSet` first) before re-parsing each distinct doc
         // comment only once.
-        let uses_args: FxHashMap<Arc<str>, Vec<Type>> = c
+        let uses_args: FxHashMap<Name, Vec<Type>> = c
             .uses_doc_comments
             .iter()
             .filter_map(|d| d.as_deref())
@@ -1457,34 +1455,39 @@ impl ClassReflection {
             .flat_map(|d| d.uses)
             .filter_map(|raw| class_and_args(&resolve_generic_tag(&raw)))
             .collect();
-        let template_bounds: FxHashMap<Arc<str>, Type> = class_doc
+        let template_bounds: FxHashMap<Name, Type> = class_doc
             .as_ref()
             .map(|d| {
                 d.template_bounds
                     .iter()
-                    .map(|(name, raw)| (intern(name), resolve_generic_tag(raw)))
+                    .map(|(name, raw)| (Name::from(name), resolve_generic_tag(raw)))
                     .collect()
             })
             .unwrap_or_default();
-        let template_defaults: FxHashMap<Arc<str>, Type> = class_doc
+        let template_defaults: FxHashMap<Name, Type> = class_doc
             .as_ref()
             .map(|d| {
                 d.template_defaults
                     .iter()
-                    .map(|(name, raw)| (intern(name), resolve_generic_tag(raw)))
+                    .map(|(name, raw)| (Name::from(name), resolve_generic_tag(raw)))
                     .collect()
             })
             .unwrap_or_default();
-        let covariant_templates: FxHashSet<Arc<str>> = class_doc
+        let covariant_templates: FxHashSet<Name> = class_doc
             .as_ref()
-            .map(|d| d.covariant_templates.iter().map(|s| intern(s)).collect())
+            .map(|d| {
+                d.covariant_templates
+                    .iter()
+                    .map(Name::from)
+                    .collect()
+            })
             .unwrap_or_default();
-        let contravariant_templates: FxHashSet<Arc<str>> = class_doc
+        let contravariant_templates: FxHashSet<Name> = class_doc
             .as_ref()
             .map(|d| {
                 d.contravariant_templates
                     .iter()
-                    .map(|s| intern(s))
+                    .map(Name::from)
                     .collect()
             })
             .unwrap_or_default();
@@ -1497,9 +1500,9 @@ impl ClassReflection {
         // modification. Same shape as the enum UnitEnum/BackedEnum
         // implicit-interface handling below, for a different implicit
         // interface.
-        let mut implements: Vec<Arc<str>> = c.implements.iter().map(class_ref).collect();
+        let mut implements: Vec<Name> = c.implements.iter().map(class_ref).collect();
         if methods.contains_key("__toString") {
-            implements.push(intern("Stringable"));
+            implements.push(Name::from("Stringable"));
         }
         let trait_aliases: Vec<TraitAlias> = c
             .trait_aliases
@@ -1507,8 +1510,8 @@ impl ClassReflection {
             .filter_map(|a| {
                 Some(TraitAlias {
                     trait_name: a.trait_name.as_ref().map(class_ref),
-                    method: intern(&a.method),
-                    alias: intern(a.alias.as_deref()?),
+                    method: Name::from(&a.method),
+                    alias: Name::from(a.alias.as_deref()?),
                 })
             })
             .collect();
@@ -1537,13 +1540,13 @@ impl ClassReflection {
         // flattened to the class names it names (`object_class_names`),
         // mirroring real PHPStan's `getObjectClassNames()` call sites
         // for these same three tags.
-        let resolve_tag_types = |raw: &[TypeNode]| -> Vec<Arc<str>> {
+        let resolve_tag_types = |raw: &[TypeNode]| -> Vec<Name> {
             raw.iter()
                 .flat_map(|text| {
                     let ty = resolve_names_in_type(parse_type_node(text), ctx);
                     ty.object_class_names()
                         .into_iter()
-                        .map(|n| intern(n))
+                        .map(Name::from)
                         .collect::<Vec<_>>()
                 })
                 .collect()
@@ -1566,7 +1569,7 @@ impl ClassReflection {
                     &m.function.attrs,
                     ctx.namespace(),
                 );
-                (!a.is_empty()).then(|| (intern(&m.function.name.to_ascii_lowercase()), a))
+                (!a.is_empty()).then(|| (Name::from(&m.function.name.to_ascii_lowercase()), a))
             })
             .collect();
         let sealed = class_doc
@@ -1579,7 +1582,7 @@ impl ClassReflection {
             .unwrap_or_default();
         // Own small dedicated closure, not `resolve_tag_types` above -
         // see `mixin_case_refs`'s doc comment.
-        let mixin_case_refs: Vec<(Arc<str>, Arc<str>)> = class_doc
+        let mixin_case_refs: Vec<(Name, Name)> = class_doc
             .as_ref()
             .map(|d| {
                 d.mixins
@@ -1622,7 +1625,7 @@ impl ClassReflection {
             resolved_trait_conflicts: c
                 .resolved_trait_conflicts
                 .iter()
-                .map(|n| intern(n))
+                .map(Name::from)
                 .collect(),
             templates,
             extends_args,
@@ -1675,7 +1678,7 @@ impl ClassReflection {
         // level template a tag's argument could reference.
         let fqn = class_decl_fqn(e).to_string();
         let class_doc: Option<DocBlock> = e.doc_comment.as_deref().map(docblock::parse);
-        let implements_args: FxHashMap<Arc<str>, Vec<Type>> = class_doc
+        let implements_args: FxHashMap<Name, Vec<Type>> = class_doc
             .iter()
             .flat_map(|d| &d.implements)
             .filter_map(|raw| class_and_args(&resolve_names_in_type(parse_type_node(raw), ctx)))
@@ -1684,7 +1687,7 @@ impl ClassReflection {
         // construction - the reasoning (`@use` lives on the `use`
         // statement's own doc comment) is unrelated to whether the
         // enclosing declaration is a class or an enum.
-        let uses_args: FxHashMap<Arc<str>, Vec<Type>> = e
+        let uses_args: FxHashMap<Name, Vec<Type>> = e
             .uses_doc_comments
             .iter()
             .filter_map(|d| d.as_deref())
@@ -1699,7 +1702,7 @@ impl ClassReflection {
                 .iter()
                 .map(|m| {
                     (
-                        intern(&m.function.name),
+                        Name::from(&m.function.name),
                         name_site(&m.function),
                         FunctionReflection::from_decl(
                             &m.function,
@@ -1729,7 +1732,7 @@ impl ClassReflection {
             Type::accessory(AccessoryKind::ArrayList),
         ]);
         methods.insert(
-            intern("cases"),
+            Name::from("cases"),
             FunctionReflection {
                 provenance: Provenance::default(),
                 params: Vec::new(),
@@ -1774,7 +1777,7 @@ impl ClassReflection {
             let backing_ty = types::native_type(backing);
             let value_param = ParameterReflection {
                 attributes: Vec::new(),
-                name: intern("value"),
+                name: Name::from("value"),
                 ty: backing_ty.clone(),
                 ty_native: backing_ty,
                 variadic: false,
@@ -1789,7 +1792,7 @@ impl ClassReflection {
                 out_ty: None,
             };
             methods.insert(
-                intern("from"),
+                Name::from("from"),
                 FunctionReflection {
                     provenance: Provenance::default(),
                     params: vec![value_param.clone()],
@@ -1822,7 +1825,7 @@ impl ClassReflection {
                 },
             );
             methods.insert(
-                intern("tryFrom"),
+                Name::from("tryFrom"),
                 FunctionReflection {
                     provenance: Provenance::default(),
                     params: vec![value_param],
@@ -1852,13 +1855,13 @@ impl ClassReflection {
                 },
             );
         }
-        let mut consts: IndexMap<Arc<str>, ConstantReflection> = e
+        let mut consts: IndexMap<Name, ConstantReflection> = e
             .consts
             .iter()
             .map(|cc| {
                 let doc = cc.doc_comment.as_deref().map(docblock::parse);
                 (
-                    intern(&cc.name),
+                    Name::from(&cc.name),
                     ConstantReflection {
                         attributes: ReflectionAttribute::all(&cc.attrs),
                         provenance: Provenance::default(),
@@ -1883,7 +1886,7 @@ impl ClassReflection {
         // syntax in real PHP - always public.
         for case in &e.enum_cases {
             consts.insert(
-                intern(&case.name),
+                Name::from(&case.name),
                 ConstantReflection {
                     attributes: ReflectionAttribute::all(&case.attrs),
                     provenance: Provenance::default(),
@@ -1902,7 +1905,7 @@ impl ClassReflection {
             );
         }
         // Cases and constants interleave in source; keep that order.
-        let position = |name: &Arc<str>| {
+        let position = |name: &Name| {
             e.enum_cases
                 .iter()
                 .find(|c| c.name == **name)
@@ -1923,7 +1926,7 @@ impl ClassReflection {
         // `::from()`/`::tryFrom()` narrowing only needs to know a given
         // literal argument's matching case, if any, and a partial map
         // still answers that for the literal-valued cases it covers.
-        let enum_case_values: FxHashMap<Arc<str>, Type> = e
+        let enum_case_values: FxHashMap<Name, Type> = e
             .enum_cases
             .iter()
             .filter_map(|c| {
@@ -1933,7 +1936,7 @@ impl ClassReflection {
                     ExprKind::Literal(Literal::Int(n)) => Type::int_literal(*n),
                     _ => return None,
                 };
-                Some((intern(&c.name), ty))
+                Some((Name::from(&c.name), ty))
             })
             .collect();
 
@@ -1946,7 +1949,7 @@ impl ClassReflection {
         // every real `$case->value` access.
         let mut properties = FxHashMap::default();
         properties.insert(
-            intern("name"),
+            Name::from("name"),
             PropertyReflection {
                 attributes: Vec::new(),
                 provenance: Provenance::default(),
@@ -2011,7 +2014,7 @@ impl ClassReflection {
                 types::native_type(backing)
             };
             properties.insert(
-                intern("value"),
+                Name::from("value"),
                 PropertyReflection {
                     attributes: Vec::new(),
                     provenance: Provenance::default(),
@@ -2059,27 +2062,27 @@ impl ClassReflection {
         // Without this, real code narrowing/typing an enum against
         // `UnitEnum` would be flagged as a bound violation despite being
         // exactly what real PHP guarantees.
-        let mut implements: Vec<Arc<str>> = e.implements.iter().map(class_ref).collect();
-        implements.push(intern("UnitEnum"));
+        let mut implements: Vec<Name> = e.implements.iter().map(class_ref).collect();
+        implements.push(Name::from("UnitEnum"));
         if e.backing_type.is_some() {
-            implements.push(intern("BackedEnum"));
+            implements.push(Name::from("BackedEnum"));
         }
 
         // One pass over `e.methods` instead of 3 separate filtered ones -
         // see `ClassReflection::from_decl`'s equivalent loop for the same
         // reasoning.
-        let mut abstract_methods: FxHashSet<Arc<str>> = FxHashSet::default();
-        let mut final_methods: FxHashSet<Arc<str>> = FxHashSet::default();
-        let mut static_methods: FxHashSet<Arc<str>> = FxHashSet::default();
+        let mut abstract_methods: FxHashSet<Name> = FxHashSet::default();
+        let mut final_methods: FxHashSet<Name> = FxHashSet::default();
+        let mut static_methods: FxHashSet<Name> = FxHashSet::default();
         for m in &e.methods {
             if m.is_abstract {
-                abstract_methods.insert(intern(&m.function.name));
+                abstract_methods.insert(Name::from(&m.function.name));
             }
             if m.is_final && m.visibility != Visibility::Private {
-                final_methods.insert(intern(&m.function.name));
+                final_methods.insert(Name::from(&m.function.name));
             }
             if m.is_static {
-                static_methods.insert(intern(&m.function.name));
+                static_methods.insert(Name::from(&m.function.name));
             }
         }
         for builtin in ["cases", "from", "tryFrom"] {
@@ -2089,7 +2092,7 @@ impl ClassReflection {
                     .iter()
                     .any(|m| m.function.name.eq_ignore_ascii_case(builtin))
             {
-                static_methods.insert(intern(builtin));
+                static_methods.insert(Name::from(builtin));
             }
         }
         let trait_aliases: Vec<TraitAlias> = e
@@ -2098,8 +2101,8 @@ impl ClassReflection {
             .filter_map(|a| {
                 Some(TraitAlias {
                     trait_name: a.trait_name.as_ref().map(class_ref),
-                    method: intern(&a.method),
-                    alias: intern(a.alias.as_deref()?),
+                    method: Name::from(&a.method),
+                    alias: Name::from(a.alias.as_deref()?),
                 })
             })
             .collect();
@@ -2142,7 +2145,7 @@ impl ClassReflection {
             resolved_trait_conflicts: e
                 .resolved_trait_conflicts
                 .iter()
-                .map(|n| intern(n))
+                .map(Name::from)
                 .collect(),
             templates: Vec::new(),
             extends_args: Vec::new(),
@@ -2178,7 +2181,7 @@ impl ClassReflection {
                         &m.function.attrs,
                         ctx.namespace(),
                     );
-                    (!a.is_empty()).then(|| (intern(&m.function.name.to_ascii_lowercase()), a))
+                    (!a.is_empty()).then(|| (Name::from(&m.function.name.to_ascii_lowercase()), a))
                 })
                 .collect(),
             // An enum can `@mixin` in real PHPStan's grammar, but this is
@@ -2302,7 +2305,7 @@ fn native_const_type(cc: &syntax::ast::ClassConst) -> Option<Type> {
 }
 
 /// An ancestor tag's class and generic arguments.
-fn class_and_args(ty: &Type) -> Option<(Arc<str>, Vec<Type>)> {
+fn class_and_args(ty: &Type) -> Option<(Name, Vec<Type>)> {
     ty.as_object()
-        .map(|(name, args)| (intern(name), args.to_vec()))
+        .map(|(name, args)| (Name::from(name), args.to_vec()))
 }

@@ -26,6 +26,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Condvar, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
+use types::Name;
 
 use crossbeam_channel::{Receiver, RecvTimeoutError};
 use lsp_server::{
@@ -276,7 +277,7 @@ struct Server {
     // changes, so serving a request against an unchanged document from
     // cache is what actually saves a repeated `check_program` pass).
     #[allow(clippy::type_complexity)]
-    inlay_hint_cache: FxHashMap<PathBuf, (u64, Vec<(Span, Arc<str>)>, Vec<(Span, Type)>)>,
+    inlay_hint_cache: FxHashMap<PathBuf, (u64, Vec<(Span, Name)>, Vec<(Span, Type)>)>,
     // The version `initialize` reports, the binary's own.
     version: String,
     // Every section a workspace's `phpstan-rs.toml` may set.

@@ -1,11 +1,10 @@
 use rustc_hash::FxHashMap;
-use std::sync::Arc;
+use syntax::name::Name;
 
 use crate::registry::name_context::{collect_class_name_case_refs, resolve_names_in_type};
 use crate::registry::type_node::parse_type_node;
 use phpdoc::docblock;
 use phpdoc::grammar::TypeNode;
-use syntax::intern::intern;
 use types::{self, TemplateParam, Type};
 
 use super::generics::mark_template_params;
@@ -24,12 +23,12 @@ use syntax::name_resolution::NameContext;
 #[derive(Debug, Clone, PartialEq)]
 pub enum AssertTarget {
     /// `$name` matching one of this declaration's own parameters.
-    Param(Arc<str>),
+    Param(Name),
     /// Bare `$this` - the assertion narrows the call's own receiver.
     ThisSelf,
     /// `$this->propName` - a single-level property access on the
     /// receiver.
-    ThisProp(Arc<str>),
+    ThisProp(Name),
     /// `$name` shaped exactly like a bare parameter
     /// reference, but `name` doesn't match any of this declaration's own
     /// parameters - real PHPStan's own `parameter.notFound` ("Assert
@@ -38,14 +37,14 @@ pub enum AssertTarget {
     /// silent-drop behavior - is still surfaced to the checker so it can
     /// report the real authoring mistake this almost always is (a typo,
     /// or a stale tag left behind after a parameter rename).
-    NotFound(Arc<str>),
+    NotFound(Name),
     /// Any other target shape this project doesn't model at
     /// all (a method-call target, an array-index/nested-chain target,
     /// ...) - real PHPStan's own `assert.unknownExpr` ("Assert
     /// references unknown %s."). Carries the original raw target text
     /// verbatim, for that message. Same "no narrowing effect" note as
     /// `NotFound` above.
-    Unknown(Arc<str>),
+    Unknown(Name),
 }
 
 #[derive(Debug, Clone)]
@@ -56,7 +55,7 @@ pub struct AssertInfo {
     // Shares the exact same type-resolution pipeline as every other
     // declared type on this same declaration, which already collects
     // `case_refs`.
-    pub case_refs: Vec<(Arc<str>, Arc<str>)>,
+    pub case_refs: Vec<(Name, Name)>,
     // The tag's type as written, for checks that need its parsed form
     // rather than the resolved `ty`.
     pub written_ty: TypeNode,
@@ -80,19 +79,19 @@ fn classify_assert_target(target: &str, param_names: &[&str]) -> AssertTarget {
         && !prop.is_empty()
         && prop.chars().all(|c| c.is_alphanumeric() || c == '_')
     {
-        return AssertTarget::ThisProp(intern(prop));
+        return AssertTarget::ThisProp(Name::from(prop));
     }
     if let Some(name) = target.strip_prefix('$')
         && !name.is_empty()
         && name.chars().all(|c| c.is_alphanumeric() || c == '_')
     {
         return if param_names.contains(&name) {
-            AssertTarget::Param(intern(name))
+            AssertTarget::Param(Name::from(name))
         } else {
-            AssertTarget::NotFound(intern(name))
+            AssertTarget::NotFound(Name::from(name))
         };
     }
-    AssertTarget::Unknown(intern(target))
+    AssertTarget::Unknown(Name::from(target))
 }
 
 /// Resolves every `@phpstan-assert`-family tag on `doc` into a real

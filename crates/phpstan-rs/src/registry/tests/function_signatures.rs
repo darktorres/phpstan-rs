@@ -139,13 +139,13 @@ fn a_duplicate_named_parameter_collapses_to_its_last_occurrence_s_type() {
     );
     let sig = &r.functions["pg_query"];
     assert_eq!(sig.params.len(), 2, "the legacy duplicate must be dropped");
-    assert_eq!(sig.params[0].name, "connection".into());
+    assert_eq!(sig.params[0].name, "connection");
     assert_eq!(
         sig.params[0].ty,
         Type::object(("PgSql\\Connection".to_string()).into(), Vec::new()),
         "the surviving type must be the modern (second) occurrence's, not the legacy (first, untyped) one"
     );
-    assert_eq!(sig.params[1].name, "query".into());
+    assert_eq!(sig.params[1].name, "query");
     assert_eq!(sig.params[1].ty, Type::string());
 }
 
@@ -166,9 +166,9 @@ fn two_separate_duplicated_parameter_pairs_both_collapse() {
     );
     let sig = &r.functions["sqlite3_open"];
     assert_eq!(sig.params.len(), 3);
-    assert_eq!(sig.params[1].name, "flags".into());
+    assert_eq!(sig.params[1].name, "flags");
     assert_eq!(sig.params[1].ty, Type::int());
-    assert_eq!(sig.params[2].name, "encryptionKey".into());
+    assert_eq!(sig.params[2].name, "encryptionKey");
     assert_eq!(sig.params[2].ty, Type::string());
 }
 
@@ -204,8 +204,8 @@ fn a_function_with_no_duplicate_parameters_is_unaffected() {
     let r = build_registry(r#"<?php function f(int $a, string $b) {}"#);
     let sig = &r.functions["f"];
     assert_eq!(sig.params.len(), 2);
-    assert_eq!(sig.params[0].name, "a".into());
-    assert_eq!(sig.params[1].name, "b".into());
+    assert_eq!(sig.params[0].name, "a");
+    assert_eq!(sig.params[1].name, "b");
 }
 
 // A `LanguageLevelTypeAware` parameter override must win over a

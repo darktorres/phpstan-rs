@@ -1,5 +1,6 @@
 use crate::checker::{Checker, Locals, MemberVisibilityCheck, UsageTokenKind};
 use syntax::ast::*;
+use types::Name;
 use types::php_version::PhpFeature;
 
 impl<'a> Checker<'a> {
@@ -116,9 +117,9 @@ impl<'a> Checker<'a> {
         // wider than private).
         if prop_sig.write_visibility() == Visibility::Private {
             self.property_assign_facts
-                .entry(syntax::intern::intern(&owner))
+                .entry(Name::from(&owner))
                 .or_default()
-                .entry(syntax::intern::intern(&prop.name))
+                .entry(Name::from(&prop.name))
                 .or_default()
                 .push(actual.clone());
         }

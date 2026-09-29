@@ -1,5 +1,3 @@
-use std::sync::Arc;
-
 use crate::ast::{Attribute, Ident};
 use crate::name::Name;
 use crate::parser::{ParseError, Parser};
@@ -216,7 +214,7 @@ impl Parser {
         }
     }
 
-    pub(crate) fn expect_variable(&mut self) -> Result<Arc<str>, ParseError> {
+    pub(crate) fn expect_variable(&mut self) -> Result<Name, ParseError> {
         let span = self.spans.get(self.pos).copied().unwrap_or_default();
         match self.take_token() {
             Token::Variable(s) => Ok(s),

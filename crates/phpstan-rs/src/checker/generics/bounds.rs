@@ -1,4 +1,5 @@
 use rustc_hash::FxHashMap;
+use types::Name;
 
 use crate::checker::{
     Checker, ITERABLE_GENERIC_CLASS_NAMES, TemplateBindings, class_kind_identifier,
@@ -528,14 +529,14 @@ impl<'a> Checker<'a> {
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn check_template_declaration_validity(
         &mut self,
-        templates: &[std::sync::Arc<str>],
-        bounds: &FxHashMap<std::sync::Arc<str>, Type>,
-        defaults: &FxHashMap<std::sync::Arc<str>, Type>,
-        type_aliases: &FxHashMap<std::sync::Arc<str>, Type>,
+        templates: &[Name],
+        bounds: &FxHashMap<Name, Type>,
+        defaults: &FxHashMap<Name, Type>,
+        type_aliases: &FxHashMap<Name, Type>,
         subject: TemplateSubject<'_>,
         span: Span,
     ) {
-        let mut template_with_default: Option<&std::sync::Arc<str>> = None;
+        let mut template_with_default: Option<&Name> = None;
         for name in templates {
             if self.class_name_exists(name) {
                 self.report(

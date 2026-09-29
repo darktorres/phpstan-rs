@@ -190,7 +190,7 @@ pub struct CatchClause {
     pub types_spans: Vec<Span>,
     // Taken via `Parser::expect_variable` - see `FunctionDecl::name`'s
     // own doc comment.
-    pub var: Option<Arc<str>>,
+    pub var: Option<Name>,
     // `var`'s own `$name` token span, populated at the same
     // parse point `var` itself is consumed - `None` exactly when `var` is
     // (a catch clause with no bound variable, `catch (Foo) {}`).
@@ -202,7 +202,7 @@ pub struct CatchClause {
 #[derive(Debug, Clone)]
 pub struct Param {
     // Moved out of the lexer's interned `Token::Variable`, without its `$`.
-    pub name: Arc<str>,
+    pub name: Name,
     // This parameter's own `$name` token's span - populated by
     // the parser at the exact point it consumes it (`expect_variable`),
     // needed for local-variable-declaration navigation (a read inside the
@@ -749,7 +749,7 @@ pub enum UnaryOp {
 #[derive(Debug, Clone)]
 pub struct ClosureUse {
     // Moved out of the lexer's interned `Token::Variable`, without its `$`.
-    pub name: Arc<str>,
+    pub name: Name,
     pub by_ref: bool,
     // The captured variable's own name span - lets a `use (&$x)`
     // capture that auto-vivifies `$x` in the outer scope (see
@@ -1111,9 +1111,9 @@ pub enum GlobalVar {
 
 impl GlobalVar {
     /// The variable's name, when it is written out.
-    pub fn name(&self) -> Option<&str> {
+    pub fn name(&self) -> Option<&Name> {
         match self {
-            GlobalVar::Name(name) => Some(name),
+            GlobalVar::Name(ident) => Some(&ident.name),
             GlobalVar::Dynamic(_) => None,
         }
     }
@@ -1310,7 +1310,7 @@ pub enum ExprKind {
     Literal(Literal),
     // Moved out of the lexer's interned `Token::Variable` or a string
     // interpolation's variable, without its `$`.
-    Variable(Arc<str>),
+    Variable(Name),
     // `${expr}` - the older "variable variable" syntax: the variable's own
     // name is computed at runtime by evaluating expr, so unlike Variable
     // there's no fixed name here to look up or bind in `locals`.
@@ -1347,11 +1347,10 @@ pub enum ExprKind {
     // syntactically, but real PHP's `?->` implicitly makes the whole
     // access `null` when its base is `null`, which `infer_expr` needs to
     // know to union `Null` into the result.
-    // The property/method name: `Arc<str>`, moved straight out of an
-    // interned `Token::Identifier`/`Token::Keyword` (via `Parser::
+    // The property/method name: a `Name`, moved straight out of a
+    // `Token::Identifier`/`Token::Keyword` (via `Parser::
     // take_name_segment`) - or, for a string-interpolation `$obj->prop`
-    // occurrence, the identically-interned `StringPart::
-    // PropertyAccess::prop`. A `$obj->$prop` dynamic-by-variable-name
+    // occurrence, `StringPart::PropertyAccess::prop`. A `$obj->$prop` dynamic-by-variable-name
     // access is a `DynamicPropertyAccess`/`DynamicMethodCall` below, not
     // this variant - `$prop`'s own runtime value, not its declared name,
     // is the real member name.

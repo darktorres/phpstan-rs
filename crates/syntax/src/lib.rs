@@ -6,7 +6,6 @@
 pub mod annotations;
 pub mod ast;
 pub mod declarations;
-pub mod intern;
 pub mod lexer;
 pub mod name;
 pub mod name_resolution;

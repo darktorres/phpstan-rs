@@ -13,7 +13,7 @@
 
 use crate::checker::Checker;
 use syntax::ast::{Expr, ExprKind, Visibility};
-use types::Type;
+use types::{Name, Type};
 
 /// Same shape as the identically-named private helper in
 /// `return_type_too_wide.rs`/`property_type_too_wide.rs`/`throws/
@@ -114,7 +114,7 @@ impl<'a> Checker<'a> {
         {
             return;
         }
-        let names: Vec<std::sync::Arc<str>> = self
+        let names: Vec<Name> = self
             .current_function_by_ref_params
             .keys()
             .cloned()
@@ -141,7 +141,7 @@ impl<'a> Checker<'a> {
     /// unacceptable exit state should ever be reported, not "some path
     /// disagreed with another."
     pub(crate) fn check_by_ref_execution_end(&mut self, span: syntax::token::Span) {
-        let out_types: Vec<(std::sync::Arc<str>, Type)> = self
+        let out_types: Vec<(Name, Type)> = self
             .current_function_by_ref_params_with_tag
             .iter()
             .map(|(name, ty)| (name.clone(), ty.clone()))
@@ -175,7 +175,7 @@ impl<'a> Checker<'a> {
     /// return_type`'s own visibility/finality gate) - callers must check
     /// that before calling this.
     pub(crate) fn check_too_wide_by_ref_type(&mut self, span: syntax::token::Span) {
-        let params: Vec<(std::sync::Arc<str>, Type)> = self
+        let params: Vec<(Name, Type)> = self
             .current_function_by_ref_params
             .iter()
             .map(|(name, ty)| (name.clone(), ty.clone()))

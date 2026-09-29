@@ -1,11 +1,10 @@
 use rustc_hash::FxHashMap;
-use std::sync::Arc;
+use syntax::name::Name;
 
 use crate::registry::name_context::{collect_class_name_case_refs, resolve_names_in_type};
 use crate::registry::type_node::parse_type_node;
 use phpdoc::docblock::DocBlock;
 use phpdoc::grammar::TypeNode;
-use syntax::intern::intern;
 use syntax::name_resolution::NameContext;
 use types::{self, TemplateParam, Type};
 
@@ -23,7 +22,7 @@ use types::{self, TemplateParam, Type};
 /// re-resolving *its own* values further - each entry is inserted once,
 /// already fully resolved, and never touched by `resolve_names_in_type`
 /// again after that.
-pub(crate) fn substitute_type_aliases(ty: Type, aliases: &FxHashMap<Arc<str>, Type>) -> Type {
+pub(crate) fn substitute_type_aliases(ty: Type, aliases: &FxHashMap<Name, Type>) -> Type {
     ty.replace_objects(&mut |name| aliases.get(name.as_str()).cloned())
 }
 
@@ -50,18 +49,18 @@ pub(crate) fn substitute_type_aliases(ty: Type, aliases: &FxHashMap<Arc<str>, Ty
 /// aliases' own values - a sibling alias reference inside this one's RHS
 /// isn't itself a class-name reference to case-check (it's resolved
 /// separately, when *that* alias's own entry is built).
-pub(crate) type TypeAliasCaseRefs = FxHashMap<Arc<str>, Vec<(Arc<str>, Arc<str>)>>;
+pub(crate) type TypeAliasCaseRefs = FxHashMap<Name, Vec<(Name, Name)>>;
 
 pub(crate) fn build_type_aliases(
     class_doc: Option<&DocBlock>,
     template_params: &FxHashMap<String, TemplateParam>,
     ctx: &NameContext,
-) -> (FxHashMap<Arc<str>, Type>, TypeAliasCaseRefs) {
+) -> (FxHashMap<Name, Type>, TypeAliasCaseRefs) {
     let Some(class_doc) = class_doc else {
         return (FxHashMap::default(), FxHashMap::default());
     };
     let mut case_refs: TypeAliasCaseRefs = FxHashMap::default();
-    let raw: FxHashMap<Arc<str>, Type> = class_doc
+    let raw: FxHashMap<Name, Type> = class_doc
         .type_aliases
         .iter()
         .map(|(name, node)| {
@@ -69,7 +68,7 @@ pub(crate) fn build_type_aliases(
             let ty = mark_template_params(ty, template_params);
             let mut refs = Vec::new();
             collect_class_name_case_refs(&ty, ctx, &mut refs);
-            let resolved_name = intern(&ctx.resolve(name));
+            let resolved_name = Name::from(&ctx.resolve(name));
             case_refs.insert(resolved_name.clone(), refs);
             let ty = resolve_names_in_type(ty, ctx);
             (resolved_name, ty)
@@ -87,10 +86,10 @@ pub(crate) fn build_type_aliases(
 /// reached again while it is being expanded is a cycle and reads as
 /// `mixed` there.
 fn expand_type_alias(
-    name: &Arc<str>,
-    raw: &FxHashMap<Arc<str>, Type>,
-    done: &mut FxHashMap<Arc<str>, Type>,
-    visiting: &mut Vec<Arc<str>>,
+    name: &Name,
+    raw: &FxHashMap<Name, Type>,
+    done: &mut FxHashMap<Name, Type>,
+    visiting: &mut Vec<Name>,
 ) -> Type {
     if let Some(ty) = done.get(name) {
         return ty.clone();
@@ -107,9 +106,9 @@ fn expand_type_alias(
 
 fn expand_alias_uses(
     ty: Type,
-    raw: &FxHashMap<Arc<str>, Type>,
-    done: &mut FxHashMap<Arc<str>, Type>,
-    visiting: &mut Vec<Arc<str>>,
+    raw: &FxHashMap<Name, Type>,
+    done: &mut FxHashMap<Name, Type>,
+    visiting: &mut Vec<Name>,
 ) -> Type {
     ty.replace_objects(&mut |name| {
         let (key, _) = raw.get_key_value(name.as_str())?;

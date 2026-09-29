@@ -1,6 +1,6 @@
 use crate::registry::reflection_attribute::ReflectionAttribute;
 use rustc_hash::FxHashMap;
-use std::sync::Arc;
+use syntax::name::Name;
 
 use crate::registry::name_context::resolve_names_in_type;
 use crate::registry::type_node::{mentions_mixed, parse_type_node};
@@ -25,7 +25,7 @@ pub(crate) use type_resolution::{DeclaredType, apply_implicit_nullable_default, 
 
 #[derive(Debug, Clone)]
 pub struct ParameterReflection {
-    pub(in crate::registry) name: Arc<str>,
+    pub(in crate::registry) name: Name,
     pub(in crate::registry) ty: Type,
     // The native, no-docblock-merge type (see `return_type_native`'s
     // doc comment for the same split on the return side).
@@ -67,7 +67,7 @@ pub struct ParameterReflection {
     // original spelling. Empty for a backfilled position - the raw text
     // belongs to an ancestor file's own `use` imports, not this one's
     // `name_ctx`.
-    pub(in crate::registry) case_refs: Vec<(Arc<str>, Arc<str>)>,
+    pub(in crate::registry) case_refs: Vec<(Name, Name)>,
     // `@param-closure-this Type $name`'s resolved `Type` - what `$this`
     // becomes inside a `Closure`/`ArrowFn` argument at this position.
     // `None` when untagged.
@@ -92,7 +92,7 @@ impl ParameterReflection {
         }
     }
 
-    pub fn name(&self) -> &Arc<str> {
+    pub fn name(&self) -> &Name {
         &self.name
     }
 
@@ -132,7 +132,7 @@ impl ParameterReflection {
         self.explicit_mixed_hint
     }
 
-    pub fn case_refs(&self) -> &Vec<(Arc<str>, Arc<str>)> {
+    pub fn case_refs(&self) -> &Vec<(Name, Name)> {
         &self.case_refs
     }
 
@@ -165,7 +165,7 @@ pub struct FunctionReflection {
     // method. `None` without the tag.
     pub(in crate::registry) self_out: Option<Type>,
     // `ParameterReflection::case_refs`'s return-position equivalent.
-    pub(in crate::registry) return_case_refs: Vec<(Arc<str>, Arc<str>)>,
+    pub(in crate::registry) return_case_refs: Vec<(Name, Name)>,
     // `ParameterReflection::explicit_mixed_hint`'s return-position equivalent.
     pub(in crate::registry) return_explicit_mixed_hint: bool,
     // PHP 8.5's `#[\NoDiscard]` marker - `true` when a bare, unused
@@ -297,7 +297,7 @@ impl FunctionReflection {
         &self.self_out
     }
 
-    pub fn return_case_refs(&self) -> &Vec<(Arc<str>, Arc<str>)> {
+    pub fn return_case_refs(&self) -> &Vec<(Name, Name)> {
         &self.return_case_refs
     }
 
@@ -593,7 +593,7 @@ impl FunctionReflection {
         f: &FunctionDecl,
         ctx: &NameContext,
         class_templates: &FxHashMap<String, TemplateParam>,
-        class_type_aliases: &FxHashMap<Arc<str>, Type>,
+        class_type_aliases: &FxHashMap<Name, Type>,
         visibility: Visibility,
     ) -> FunctionReflection {
         let doc: Option<DocBlock> = f.doc_comment.as_deref().map(docblock::parse);
@@ -667,7 +667,7 @@ impl FunctionReflection {
                     .map(&resolve_doc_type);
                 ParameterReflection {
                     attributes: ReflectionAttribute::all(&p.attrs),
-                    name: p.name.clone(),
+                    name: Name::from(&p.name),
                     ty,
                     ty_native,
                     variadic: p.variadic,
@@ -957,8 +957,8 @@ impl FunctionReflection {
 /// *position* of its *first*, so later uniquely-named parameters aren't
 /// shifted.
 fn dedup_versioned_params(params: Vec<ParameterReflection>) -> Vec<ParameterReflection> {
-    let mut order: Vec<Arc<str>> = Vec::new();
-    let mut by_name: FxHashMap<Arc<str>, ParameterReflection> = FxHashMap::default();
+    let mut order: Vec<Name> = Vec::new();
+    let mut by_name: FxHashMap<Name, ParameterReflection> = FxHashMap::default();
     for p in params {
         if !by_name.contains_key(&p.name) {
             order.push(p.name.clone());

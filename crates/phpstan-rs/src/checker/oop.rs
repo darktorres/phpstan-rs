@@ -1,4 +1,5 @@
 use rustc_hash::FxHashMap;
+use types::Name;
 
 use crate::checker::{Checker, Locals, class_kind_identifier};
 use crate::registry::{
@@ -315,7 +316,7 @@ impl<'a> Checker<'a> {
                 );
                 crate::registry::resolve_names_in_type(ty, &self.name_ctx)
             };
-            let names: Vec<std::sync::Arc<str>> = tag
+            let names: Vec<Name> = tag
                 .templates
                 .iter()
                 .map(|t| t.name.as_str().into())
@@ -1168,11 +1169,11 @@ impl<'a> Checker<'a> {
         let Some(info) = self.registry.classes.get(fqn) else {
             return;
         };
-        let immediate: Vec<std::sync::Arc<str>> = info.uses().clone();
+        let immediate: Vec<Name> = info.uses().clone();
         if immediate.is_empty() {
             return;
         }
-        let mut all_traits: Vec<std::sync::Arc<str>> = Vec::new();
+        let mut all_traits: Vec<Name> = Vec::new();
         let mut stack = immediate.clone();
         while let Some(t) = stack.pop() {
             if all_traits.contains(&t) {
@@ -1648,7 +1649,7 @@ impl<'a> Checker<'a> {
             return;
         }
         let required = self.registry.required_abstract_methods(fqn);
-        let missing: Vec<&std::sync::Arc<str>> = required
+        let missing: Vec<&Name> = required
             .iter()
             .filter(|m| !self.registry.has_concrete_implementation(fqn, m))
             .collect();
@@ -1904,7 +1905,7 @@ impl<'a> Checker<'a> {
             let Some(parent_info) = self.registry.classes.get(parent_fqn) else {
                 continue;
             };
-            let attribute_sealed: &[std::sync::Arc<str>] = if self.settings.language_extensions {
+            let attribute_sealed: &[Name] = if self.settings.language_extensions {
                 &parent_info.access().sealed
             } else {
                 &[]

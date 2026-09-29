@@ -37,11 +37,10 @@
 
 use crate::registry::bodies::BodySource;
 use rayon::prelude::*;
-use std::sync::Arc;
+use syntax::name::Name;
 
 use crate::registry::{FunctionReflection, Registry};
 use syntax::ast::*;
-use syntax::intern::intern;
 use syntax::token::Span;
 use syntax::visit::{any_child_expr, any_child_stmt};
 
@@ -55,8 +54,8 @@ use syntax::visit::{any_child_expr, any_child_stmt};
 /// different call-site casing always resolves to the same graph node.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum PurityDependency {
-    Function(Arc<str>),
-    Method(Arc<str>, Arc<str>),
+    Function(Name),
+    Method(Name, Name),
 }
 
 impl Registry {
@@ -99,9 +98,9 @@ impl Registry {
     /// needs `&mut self` again.
     #[allow(clippy::type_complexity)]
     fn classify_purity(&mut self, bodies: &dyn BodySource) {
-        let function_names: Vec<Arc<str>> = self.functions.keys().cloned().collect();
+        let function_names: Vec<Name> = self.functions.keys().cloned().collect();
         let registry: &Registry = self;
-        let function_deps: Vec<(Arc<str>, Option<Vec<PurityDependency>>)> = function_names
+        let function_deps: Vec<(Name, Option<Vec<PurityDependency>>)> = function_names
             .par_iter()
             .filter_map(|name| {
                 let sig = &registry.functions[name];
@@ -117,12 +116,12 @@ impl Registry {
             self.functions.get_mut(&name).unwrap().purity_dependencies = deps;
         }
 
-        let class_names: Vec<Arc<str>> = self.classes.keys().cloned().collect();
+        let class_names: Vec<Name> = self.classes.keys().cloned().collect();
         let registry: &Registry = self;
-        let method_deps: Vec<(Arc<str>, Arc<str>, Option<Vec<PurityDependency>>)> = class_names
+        let method_deps: Vec<(Name, Name, Option<Vec<PurityDependency>>)> = class_names
             .par_iter()
             .flat_map(|class_name| {
-                let method_names: Vec<Arc<str>> = registry.classes[class_name]
+                let method_names: Vec<Name> = registry.classes[class_name]
                     .methods
                     .keys()
                     .cloned()
@@ -164,7 +163,7 @@ impl Registry {
     fn run_purity_fixed_point(&mut self) {
         loop {
             let mut changed = false;
-            let function_names: Vec<Arc<str>> = self.functions.keys().cloned().collect();
+            let function_names: Vec<Name> = self.functions.keys().cloned().collect();
             for name in function_names {
                 let sig = &self.functions[&name];
                 if sig.is_transitively_pure {
@@ -178,9 +177,9 @@ impl Registry {
                     changed = true;
                 }
             }
-            let class_names: Vec<Arc<str>> = self.classes.keys().cloned().collect();
+            let class_names: Vec<Name> = self.classes.keys().cloned().collect();
             for class_name in class_names {
-                let method_names: Vec<Arc<str>> =
+                let method_names: Vec<Name> =
                     self.classes[&class_name].methods.keys().cloned().collect();
                 for method_name in method_names {
                     let sig = &self.classes[&class_name].methods[&method_name];
@@ -422,7 +421,7 @@ fn expr_disqualifies(
                     let Some((canonical_name, _)) = registry.lookup_function_with_name(name) else {
                         return true;
                     };
-                    deps.push(PurityDependency::Function(intern(canonical_name)));
+                    deps.push(PurityDependency::Function(Name::from(canonical_name)));
                     return false;
                 }
                 true
@@ -533,7 +532,7 @@ fn resolve_this_method_call(
     if !is_non_overridable(registry, class, &owner, method, sig) {
         return true;
     }
-    deps.push(PurityDependency::Method(owner.clone(), intern(method)));
+    deps.push(PurityDependency::Method(owner.clone(), Name::from(method)));
     false
 }
 
@@ -599,7 +598,7 @@ fn resolve_static_call(
     let Some((owner, _)) = resolved else {
         return true;
     };
-    deps.push(PurityDependency::Method(owner, intern(method)));
+    deps.push(PurityDependency::Method(owner, Name::from(method)));
     false
 }
 
@@ -624,8 +623,8 @@ fn resolve_new(target_class: &str, registry: &Registry, deps: &mut Vec<PurityDep
         return true;
     }
     deps.push(PurityDependency::Method(
-        intern(owner),
-        intern("__construct"),
+        Name::from(owner),
+        Name::from("__construct"),
     ));
     false
 }

@@ -1,5 +1,6 @@
 use std::fs;
 use std::path::Path;
+use types::Name;
 
 use checker::Checker;
 use phpstan_rs::registry::stubs;
@@ -82,17 +83,17 @@ pub(crate) fn run_demo(file: Option<&Path>) {
     registry.precompute_member_owners();
 
     println!("\n-- resolved signatures (from source) --");
-    let mut fn_names: Vec<&std::sync::Arc<str>> = registry.functions.keys().collect();
+    let mut fn_names: Vec<&Name> = registry.functions.keys().collect();
     fn_names.sort();
     for name in &fn_names {
         println!("{}", format_signature(name, &registry.functions[*name]));
     }
 
-    let mut class_names: Vec<&std::sync::Arc<str>> = registry.classes.keys().collect();
+    let mut class_names: Vec<&Name> = registry.classes.keys().collect();
     class_names.sort();
     for class_name in &class_names {
         let info = &registry.classes[*class_name];
-        let mut method_names: Vec<&std::sync::Arc<str>> = info.methods().keys().collect();
+        let mut method_names: Vec<&Name> = info.methods().keys().collect();
         method_names.sort();
         for method_name in method_names {
             let qualified = format!("{class_name}::{method_name}");
@@ -105,7 +106,7 @@ pub(crate) fn run_demo(file: Option<&Path>) {
 
     println!("\n-- class hierarchy --");
     for class_name in &class_names {
-        let ancestors: Vec<&std::sync::Arc<str>> = class_names
+        let ancestors: Vec<&Name> = class_names
             .iter()
             .filter(|other| *other != class_name && registry.is_subclass_of(class_name, other))
             .copied()

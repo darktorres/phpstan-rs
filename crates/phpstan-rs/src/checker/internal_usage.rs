@@ -31,6 +31,7 @@ use crate::registry::{ConstantReflection, FunctionReflection, PropertyReflection
 use syntax::ast::TypeHint;
 use syntax::ast::{ClassKind, FunctionDecl, Param};
 use syntax::token::Span;
+use types::Name;
 use types::Type;
 
 /// `Class`/`Interface`/`Trait`/`Enum` - matches real PHPStan's own
@@ -333,11 +334,7 @@ impl<'a> Checker<'a> {
     /// `class.nameCase`) instead of building new call-site plumbing -
     /// each `(raw, resolved)` pair's `resolved` half is already the
     /// fully-qualified name this check needs.
-    pub(crate) fn check_type_internal_usage(
-        &mut self,
-        case_refs: &[(std::sync::Arc<str>, std::sync::Arc<str>)],
-        span: Span,
-    ) {
+    pub(crate) fn check_type_internal_usage(&mut self, case_refs: &[(Name, Name)], span: Span) {
         if !self.settings.rules.check_internal_usage {
             return;
         }

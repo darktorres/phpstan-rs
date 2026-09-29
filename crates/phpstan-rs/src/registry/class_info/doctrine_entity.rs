@@ -20,12 +20,11 @@
 //! real, well-defined Doctrine feature gets built at all.
 
 use rustc_hash::FxHashMap;
-use std::sync::Arc;
+use syntax::name::Name;
 
 use syntax::ast::{
     ArrayItem, Attribute, ClassDecl, Expr, ExprKind, Literal, QualifiedName, StaticTarget,
 };
-use syntax::intern::intern;
 use types::Type;
 
 use super::PropertyReflection;
@@ -36,7 +35,7 @@ use crate::registry::name_context::class_ref;
 #[derive(Debug, Clone)]
 pub struct DoctrineAssociation {
     /// The target entity's fully-qualified class name.
-    pub target: Arc<str>,
+    pub target: Name,
     /// `OneToMany`/`ManyToMany` - the property holds a collection of
     /// `target`, not a single instance.
     pub is_collection: bool,
@@ -54,14 +53,14 @@ pub struct DoctrineEntity {
     /// `IDENTITY()` on a composite-key association is already a DQL
     /// error in real Doctrine, so this project has nothing incorrect to
     /// produce either way).
-    pub id_field: Option<Arc<str>>,
+    pub id_field: Option<Name>,
     /// Every mapped scalar field's own already-resolved native type
     /// (reused from `ClassReflection::properties`, not re-resolved here) -
     /// keyed by property name, association properties included too
     /// (their "field type" is the association's own declared type,
     /// consulted only via `associations` below in practice).
-    pub fields: FxHashMap<Arc<str>, Type>,
-    pub associations: FxHashMap<Arc<str>, DoctrineAssociation>,
+    pub fields: FxHashMap<Name, Type>,
+    pub associations: FxHashMap<Name, DoctrineAssociation>,
     /// `#[ORM\Table(name: '...')]`'s own argument - `None` when absent
     /// (real Doctrine would then fall back to its own default naming
     /// strategy, generally the bare class name, which this project
@@ -71,7 +70,7 @@ pub struct DoctrineEntity {
     /// only consumer - Phase 168's own DQL-side machinery never needed
     /// a real DB table/column name at all, since DQL resolves through
     /// property names.
-    pub table_name: Option<Arc<str>>,
+    pub table_name: Option<Name>,
     /// Property name -> its own real DB column name
     /// (`#[ORM\Column(name: '...')]`'s argument, or the property's own
     /// name unchanged when absent - real Doctrine's own default naming
@@ -81,10 +80,10 @@ pub struct DoctrineEntity {
     /// `associations` - a raw SQL column is never itself another
     /// entity's own object identity, so there's nothing this cross-
     /// reference would need an association's own column name for.
-    pub column_names: FxHashMap<Arc<str>, Arc<str>>,
+    pub column_names: FxHashMap<Name, Name>,
     /// `#[ORM\Entity(repositoryClass: ...)]`'s own argument, if present -
     /// resolved to a fully-qualified class name.
-    pub repository_class: Option<Arc<str>>,
+    pub repository_class: Option<Name>,
     /// `#[ORM\DiscriminatorMap([...])]`'s own value -> concrete-subclass
     /// map, non-empty only on the root entity of a single-table/joined-
     /// table inheritance hierarchy. Empty for every ordinary, non-
@@ -92,7 +91,7 @@ pub struct DoctrineEntity {
     /// arbitrary literal discriminator tag (developer-chosen, not a
     /// source identifier), so it stays `String`; the value is a real
     /// class FQN.
-    pub discriminator_map: FxHashMap<String, Arc<str>>,
+    pub discriminator_map: FxHashMap<String, Name>,
 }
 
 fn is_orm_attribute(attr: &Attribute, short_name: &str) -> bool {
@@ -153,7 +152,7 @@ fn class_name_of_class_const(e: &Expr) -> Option<&QualifiedName> {
 /// literal string, or a value that isn't a `SomeClass::class` reference,
 /// is simply skipped rather than guessed - the same "don't guess"
 /// leniency this module applies everywhere else.
-fn discriminator_map_arg(attr: &Attribute) -> FxHashMap<String, Arc<str>> {
+fn discriminator_map_arg(attr: &Attribute) -> FxHashMap<String, Name> {
     let array = attr
         .args
         .iter()
@@ -199,13 +198,13 @@ fn association_target_from_native_type(ty: &Type) -> Option<String> {
 /// own.
 pub(crate) fn compute_doctrine_entity(
     c: &ClassDecl,
-    properties: &FxHashMap<Arc<str>, PropertyReflection>,
+    properties: &FxHashMap<Name, PropertyReflection>,
 ) -> Option<DoctrineEntity> {
     let entity_attr = find_orm_attribute(&c.attrs, "Entity")?;
     let repository_class = class_const_arg(entity_attr, "repositoryClass").map(class_ref);
     let table_name = find_orm_attribute(&c.attrs, "Table")
         .and_then(|attr| string_arg(attr, "name"))
-        .map(intern);
+        .map(Name::from);
     let discriminator_map = find_orm_attribute(&c.attrs, "DiscriminatorMap")
         .map(discriminator_map_arg)
         .unwrap_or_default();
@@ -227,21 +226,21 @@ pub(crate) fn compute_doctrine_entity(
         }
     }
 
-    let mut id_fields: Vec<Arc<str>> = Vec::new();
-    let mut fields: FxHashMap<Arc<str>, Type> = FxHashMap::default();
-    let mut column_names: FxHashMap<Arc<str>, Arc<str>> = FxHashMap::default();
-    let mut associations: FxHashMap<Arc<str>, DoctrineAssociation> = FxHashMap::default();
+    let mut id_fields: Vec<Name> = Vec::new();
+    let mut fields: FxHashMap<Name, Type> = FxHashMap::default();
+    let mut column_names: FxHashMap<Name, Name> = FxHashMap::default();
+    let mut associations: FxHashMap<Name, DoctrineAssociation> = FxHashMap::default();
     for (name, attrs) in &attrs_by_property {
         let Some(sig) = properties.get(*name) else {
             continue;
         };
-        fields.insert(intern(name), sig.ty_native.clone());
+        fields.insert(Name::from(*name), sig.ty_native.clone());
         if let Some(column_attr) = find_orm_attribute(attrs, "Column") {
             let column_name = string_arg(column_attr, "name").unwrap_or(name);
-            column_names.insert(intern(name), intern(column_name));
+            column_names.insert(Name::from(*name), Name::from(column_name));
         }
         if find_orm_attribute(attrs, "Id").is_some() {
-            id_fields.push(intern(name));
+            id_fields.push(Name::from(*name));
         }
         let to_one = find_orm_attribute(attrs, "ManyToOne")
             .or_else(|| find_orm_attribute(attrs, "OneToOne"));
@@ -250,15 +249,15 @@ pub(crate) fn compute_doctrine_entity(
         if let Some(assoc_attr) = to_one {
             if let Some(target) = association_target_from_native_type(&sig.ty_native) {
                 associations.insert(
-                    intern(name),
+                    Name::from(*name),
                     DoctrineAssociation {
-                        target: intern(&target),
+                        target: Name::from(&target),
                         is_collection: false,
                     },
                 );
             } else if let Some(target) = class_const_arg(assoc_attr, "targetEntity") {
                 associations.insert(
-                    intern(name),
+                    Name::from(*name),
                     DoctrineAssociation {
                         target: class_ref(target),
                         is_collection: false,
@@ -273,7 +272,7 @@ pub(crate) fn compute_doctrine_entity(
             // source here.
             if let Some(target) = class_const_arg(assoc_attr, "targetEntity") {
                 associations.insert(
-                    intern(name),
+                    Name::from(*name),
                     DoctrineAssociation {
                         target: class_ref(target),
                         is_collection: true,

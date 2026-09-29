@@ -1,6 +1,7 @@
 use rustc_hash::{FxHashMap, FxHashSet};
 use std::cell::{Cell, RefCell};
 use std::sync::Arc;
+use types::Name;
 
 use crate::pest_config;
 use crate::registry::Registry;
@@ -560,10 +561,9 @@ pub(crate) type TemplateBindings = rustc_hash::FxHashMap<String, Type>;
 /// A private property's every discovered assigned type, keyed by
 /// (declaring class fqn, property name) - see `Checker::
 /// property_assign_facts`/`cross_file_property_assign_facts`'s own doc
-/// comments. Both keys are identity-like text (interned `Arc<str>`, not
-/// `String`); `Arc<str>: Borrow<str>` keeps every `&str` lookup/`.get()`
-/// call site unchanged.
-pub(crate) type PropertyAssignFacts = FxHashMap<Arc<str>, FxHashMap<Arc<str>, Vec<Type>>>;
+/// comments. Both keys are `Name`s; `Name: Borrow<str>` keeps every
+/// `&str` lookup/`.get()` call site unchanged.
+pub(crate) type PropertyAssignFacts = FxHashMap<Name, FxHashMap<Name, Vec<Type>>>;
 
 /// Walks function/method bodies, inferring a best-effort type for each
 /// expression and flagging argument/return type mismatches against the
@@ -636,7 +636,7 @@ pub struct Checker<'a> {
     // attributes`, looked up by `current_class` at the same choke point
     // that field is set). Empty for a top-level function/no enclosing
     // class.
-    pub(crate) current_class_attrs: Vec<Arc<str>>,
+    pub(crate) current_class_attrs: Vec<Name>,
     // Same as `current_class_attrs`, for `allow_in_methods_with_
     // attributes`/`allow_except_in_methods_with_attributes` - the
     // function/method declaration's own attribute names, resolved,
@@ -645,7 +645,7 @@ pub struct Checker<'a> {
     // syntax for either) - a restricted call textually inside a closure
     // literal defined inside an attributed method still counts as "in
     // that method" for this check, a disclosed simplification.
-    pub(crate) current_method_attrs: Vec<Arc<str>>,
+    pub(crate) current_method_attrs: Vec<Name>,
     // The trait whose method bodies are currently being checked, if any -
     // `check_trait_methods` re-checks a trait's methods once per using
     // host, with `current_class` set to the *host*, so a trait's own
@@ -768,7 +768,7 @@ pub struct Checker<'a> {
     // function/method/closure (native type, or `@param-out` when the tag
     // supplies one - see `ParameterReflection::out_ty`'s doc comment), set/restored
     // at the same choke point as `current_declared_return_type`.
-    pub(crate) current_function_by_ref_params: rustc_hash::FxHashMap<Arc<str>, Type>,
+    pub(crate) current_function_by_ref_params: rustc_hash::FxHashMap<Name, Type>,
     // Every by-ref parameter's own `locals`-tracked type, snapshotted at
     // each real execution-end point of the enclosing body (an explicit
     // `return`, with or without a value, and the implicit falls-off-the-
@@ -786,7 +786,7 @@ pub struct Checker<'a> {
     // ever actually observe by the time the function returns. Consumed
     // by `check_by_ref_execution_end`/`check_by_ref_too_wide`
     // (`checker/by_ref_params.rs`).
-    pub(crate) current_function_by_ref_exit_snapshots: rustc_hash::FxHashMap<Arc<str>, Vec<Type>>,
+    pub(crate) current_function_by_ref_exit_snapshots: rustc_hash::FxHashMap<Name, Vec<Type>>,
     // The subset of `current_function_by_ref_params` that actually
     // declares a real `@param-out` tag (its own resolved out-type, not
     // just a native-type fallback) - real `ParameterOutExecutionEndTypeRule`
@@ -794,7 +794,7 @@ pub struct Checker<'a> {
     // with no `@param-out` tag, unlike the tag-independent direct-
     // assignment rule (`check_by_ref_value`) which happily falls back to
     // the native type. Consulted by `check_by_ref_execution_end` only.
-    pub(crate) current_function_by_ref_params_with_tag: rustc_hash::FxHashMap<Arc<str>, Type>,
+    pub(crate) current_function_by_ref_params_with_tag: rustc_hash::FxHashMap<Name, Type>,
     // Every name `record_by_ref_exit_snapshot` should snapshot at each
     // real execution-end point - a superset of `current_function_by_ref_
     // params`'s own keys (kept as a separate set, not folded into that
@@ -812,7 +812,7 @@ pub struct Checker<'a> {
     // body happened to fall off the end at - which, for the common
     // `if (cond) { $x[] = ...; return ...; } return ...;` guard-clause
     // shape, is never the branch that actually mutated `$x` at all.
-    pub(crate) current_function_byref_snapshot_names: rustc_hash::FxHashSet<Arc<str>>,
+    pub(crate) current_function_byref_snapshot_names: rustc_hash::FxHashSet<Name>,
     // Set for the duration of one function/method/closure body to every
     // label name `goto`-targeted anywhere in it (see
     // `collect_goto_targets`'s doc comment for the real corpus false
@@ -875,7 +875,7 @@ pub struct Checker<'a> {
     // unioned (not overridden - a property-name set has no "most specific
     // wins" precedence) with whatever file-local `beforeEach(...)` calls
     // `check_program` itself finds. Defaults empty.
-    pub(crate) pest_hook_properties: FxHashSet<Arc<str>>,
+    pub(crate) pest_hook_properties: FxHashSet<Name>,
     // `NewAnonymousClass` expression span -> its own stable synthetic
     // registry name, computed once at parse time
     // (`registry::collect_anonymous_classes`) and set via
@@ -1040,7 +1040,7 @@ pub struct Checker<'a> {
     // this shape too). Accumulated across the whole file rather than
     // reset per function/closure - a stale entry only costs a missed
     // diagnostic on an unrelated later local sharing the same name.
-    pub(crate) static_var_names: FxHashSet<Arc<str>>,
+    pub(crate) static_var_names: FxHashSet<Name>,
     // Every class named as the resolved `$scope` of a `Closure::
     // bind(...)`/`->bindTo(...)` call anywhere in the file being checked
     // (`unused::scan_program_for_rebind_targets`, built once per
@@ -1053,7 +1053,7 @@ pub struct Checker<'a> {
     // every class's private-member check for the whole file than risk a
     // false "unused" report on a member a rebound closure actually
     // reaches.
-    pub(crate) rebind_target_classes: FxHashSet<Arc<str>>,
+    pub(crate) rebind_target_classes: FxHashSet<Name>,
     pub(crate) rebind_escape_all: bool,
     // The LSP's one-off "what type is this instance receiver" probe.
     // `probe_span` is the exact `Span` of the receiver `Expr` the caller
@@ -1093,7 +1093,7 @@ pub struct Checker<'a> {
     // (call-argument parameter names) and `check_stmt`'s Expression arm
     // (inferred local-variable types), then drained by `lsp::inlay_hints`.
     pub(crate) collect_inlay_hints: bool,
-    pub(crate) inlay_param_name_hints: Vec<(Span, Arc<str>)>,
+    pub(crate) inlay_param_name_hints: Vec<(Span, Name)>,
     pub(crate) inlay_local_type_hints: Vec<(Span, Type)>,
     // `textDocument/references`/`textDocument/rename`'s Tier-2 (member
     // reference) collection mode - see `project::use_sites`'s own module
@@ -1415,14 +1415,11 @@ impl<'a> Checker<'a> {
     /// unions this with whatever file-local `beforeEach(...)` calls it
     /// finds itself, rather than one overriding the other. Takes owned
     /// `String`s (`PestConfig::resolve_hook_properties`'s own return
-    /// type is unchanged) and interns each one into the shared `Arc<str>`
+    /// type is unchanged) and interns each one into the shared `Name`
     /// table on the way in, matching the field's own interned
     /// representation.
     pub fn set_pest_hook_properties(&mut self, props: FxHashSet<String>) {
-        self.pest_hook_properties = props
-            .into_iter()
-            .map(|p| syntax::intern::intern(&p))
-            .collect();
+        self.pest_hook_properties = props.into_iter().map(|p| Name::from(&p)).collect();
     }
 
     /// Seeds the `NewAnonymousClass`-span -> synthetic-name map - see
@@ -1778,7 +1775,7 @@ impl<'a> Checker<'a> {
         self.pest_hook_properties.extend(
             pest_config::file_local_hook_properties(program)
                 .into_iter()
-                .map(|p| syntax::intern::intern(&p)),
+                .map(|p| Name::from(&p)),
         );
 
         let mut top_locals: Locals = Locals::default();

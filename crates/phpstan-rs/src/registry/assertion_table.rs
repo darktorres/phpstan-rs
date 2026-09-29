@@ -2,7 +2,8 @@
 //! configured ones) to the matching declarations as if they carried the
 //! `@phpstan-assert` tags, and serves `[[class_argument_returns]]`.
 
-use std::sync::{Arc, LazyLock};
+use std::sync::LazyLock;
+use syntax::name::Name;
 
 use crate::assertion_tables::{
     AssertWhen, AssertionEntry, ClassArgumentReturn, default_assertions,
@@ -43,7 +44,7 @@ impl Registry {
             .chain(self.configured_assertions.iter())
             .cloned()
             .collect();
-        let mut tagged: Vec<Arc<str>> = Vec::new();
+        let mut tagged: Vec<Name> = Vec::new();
         for entry in entries {
             let sig = match (&entry.function, &entry.class, &entry.method) {
                 (Some(function), _, _) => self
@@ -52,13 +53,13 @@ impl Registry {
                     .find(|(name, _)| name.eq_ignore_ascii_case(function.trim_start_matches('\\')))
                     .map(|(name, sig)| {
                         let bare = name.rsplit('\\').next().unwrap_or(name);
-                        tagged.push(Arc::from(bare));
+                        tagged.push(Name::from(bare));
                         sig
                     }),
                 (None, Some(class), Some(method)) => {
                     let Some(canonical) = self
                         .lookup_class(class.trim_start_matches('\\'))
-                        .map(|(c, _)| Arc::<str>::from(c))
+                        .map(|(c, _)| Name::from(c))
                     else {
                         continue;
                     };
@@ -91,7 +92,7 @@ impl Registry {
                     types::parse_type_string(written),
                     &NameContext::default(),
                 ),
-                target: AssertTarget::Param(Arc::from(parameter)),
+                target: AssertTarget::Param(Name::from(parameter)),
                 case_refs: Vec::new(),
                 written_ty: grammar::parse_type_prefix(written)
                     .0
