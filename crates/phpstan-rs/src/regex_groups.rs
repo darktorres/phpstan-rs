@@ -101,7 +101,7 @@ const MAX_GROUP_DEPTH: usize = 250;
 /// Caps every literal-value cross-product step (concatenation, bounded-
 /// quantifier repetition, alternation union) - smaller than real
 /// PHPStan's own `LITERALS_LIMIT` (100), consistent with this project's
-/// own tighter caps elsewhere (`checker::expr::MAX_UNION_MEMBERS` is 12).
+/// own tighter caps elsewhere.
 /// Exceeding it degrades *that one span* to `None`, never the whole
 /// parse.
 const LITERAL_ENUM_LIMIT: usize = 32;

@@ -62,7 +62,7 @@ pub use shape::{AppendKey, NextArrayIndex, Shape, ShapeField, ShapeKey};
 pub use subtype::is_numeric_string_literal;
 pub use template_references::PositionVariance;
 pub use trinary::TrinaryLogic;
-pub use union::generalize_by_key_set;
+pub use union::{MAX_UNION_MEMBERS, generalize_by_key_set};
 
 /// A PHP type. What it is, what its values can be used as and how it
 /// relates to other types are asked through its methods; how it is

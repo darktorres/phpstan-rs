@@ -1,17 +1,13 @@
 use crate::{AccessoryKind, Repr, Shape, ShapeField, ShapeKey, Type};
 
-/// A defensive cap on how many distinct members `Type::union` will ever
-/// materialize into a real `Repr::Union`. Collapsing to `Mixed` past this
-/// point is a stable fixed point (a union with `mixed` is `mixed`), so a
-/// variable that blows
-/// past the cap once stays collapsed rather than being recomputed on
-/// every subsequent merge. Needed because `Repr::Union` sticks across
-/// reads/writes instead of immediately collapsing to `Mixed`: a function
-/// with many sequential and nested branches assigning distinct array
-/// shapes to the same variable can grow that variable's union member
-/// count combinatorially, and each subsequent dedup scan below (plus
-/// each member's own recursive `PartialEq`) grows right along with it.
-const MAX_UNION_MEMBERS: usize = 12;
+/// How many members a union keeps: past it, its members are generalized
+/// (shapes by key set, extension payloads widened, literals to their base
+/// types), and only a union still too wide is `mixed`, a fixed point, so a
+/// variable past it stays settled across merges. Branches assigning
+/// distinct shapes can grow a union combinatorially; 64 members cost next
+/// to nothing over 12 on a large project, where 256 cost half again the
+/// whole run.
+pub const MAX_UNION_MEMBERS: usize = 64;
 
 impl Type {
     /// The union of this type and `other`, normalized: nested unions
@@ -346,7 +342,7 @@ fn absorb_contained_members(members: &mut Vec<Type>) {
 
 /// The union cap's third fallback: each member generalized (a literal to
 /// its base type, a range to `int`, a shape to a general array), then
-/// merged again - thirteen string literals are `string`, not `mixed`.
+/// merged again - too many string literals are `string`, not `mixed`.
 fn generalize_members(members: Vec<Type>) -> Vec<Type> {
     let mut generalized: Vec<Type> = Vec::new();
     for m in members {

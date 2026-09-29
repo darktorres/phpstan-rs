@@ -445,6 +445,9 @@ fn an_extension_payload_relates_through_its_hooks_and_its_base() {
     // Distinct payloads stay distinct until the union cap, then widen.
     let two = Type::union(joins(1), joins(2));
     assert_eq!(two.union_members().len(), 2, "got {two:?}");
-    let many = (0..20).map(joins).reduce(Type::union).unwrap();
+    let many = (0..types::MAX_UNION_MEMBERS as u32 + 8)
+        .map(joins)
+        .reduce(Type::union)
+        .unwrap();
     assert_eq!(many, builder);
 }

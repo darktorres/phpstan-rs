@@ -130,14 +130,14 @@ fn union_types_does_not_collapse_a_real_class_intersection() {
 // which must cap how many distinct members it accumulates - a function
 // with many sequential branches assigning genuinely distinct array
 // shapes to the same variable can otherwise grow that variable's union
-// member count combinatorially. Simulates that shape directly: 20
-// pairwise-distinct one-field `ArrayShape`s folded through
+// member count combinatorially. Simulates that shape directly: more
+// pairwise-distinct one-field `ArrayShape`s than the cap, folded through
 // `Type::union` one at a time, exactly the access pattern `merge_scopes`
 // uses across many sequential branches. Past the cap the shapes
 // generalize into one array rather than giving up to `mixed`.
 #[test]
 fn union_types_caps_runaway_member_growth_instead_of_hanging() {
-    let result = (0..20)
+    let result = (0..types::MAX_UNION_MEMBERS + 8)
         .map(|i| Type::array_shape(Shape::from_named(vec![(i.to_string(), Type::int(), false)])))
         .reduce(Type::union)
         .unwrap();
@@ -171,14 +171,15 @@ fn union_types_below_the_cap_still_builds_a_precise_union() {
 
 // The two tests above exercise `generalize_by_key_set` directly;
 // this one confirms `Type::union` itself actually calls it - built as
-// a single `Type::union(pre_built_union_of_12, one_more_shape)` call
+// a single `Type::union(pre_built_full_union, one_more_shape)` call
 // (not a `.reduce()` chain) specifically so only *one* generalization
 // pass happens, matching what `generalize_by_key_set`'s own
 // standalone tests already prove that pass does.
 #[test]
 fn union_types_itself_generalizes_before_collapsing_to_mixed() {
-    let first_twelve = Type::union_of(
-        (0..12)
+    let cap = types::MAX_UNION_MEMBERS as i64;
+    let full = Type::union_of(
+        (0..cap)
             .map(|i| {
                 Type::array_shape(Shape::from_named(vec![(
                     "x".to_string(),
@@ -188,14 +189,14 @@ fn union_types_itself_generalizes_before_collapsing_to_mixed() {
             })
             .collect(),
     );
-    // Thirteen distinct tags: no two merge without loss, so only the
-    // member cap's generalization makes them one shape.
-    let thirteenth = Type::array_shape(Shape::from_named(vec![(
+    // One more distinct tag than the cap: no two merge without loss, so
+    // only the member cap's generalization makes them one shape.
+    let one_more = Type::array_shape(Shape::from_named(vec![(
         "x".to_string(),
-        Type::int_literal(12),
+        Type::int_literal(cap),
         false,
     )]));
-    let result = Type::union(first_twelve, thirteenth);
+    let result = Type::union(full, one_more);
     match result.as_array_shape() {
         Some(fields) => {
             let fields = fields.named_fields();

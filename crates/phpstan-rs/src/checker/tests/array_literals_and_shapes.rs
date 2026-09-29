@@ -4,7 +4,7 @@ use super::super::*;
 use types::Shape;
 
 // Array-shape generalization, tried before the hard
-// MAX_UNION_MEMBERS collapse - 13 shapes that all share the *same*
+// MAX_UNION_MEMBERS collapse - more shapes than it that all share the *same*
 // key set merge into one shape with unioned field types instead of
 // collapsing to `Mixed`. Tested directly against `generalize_by_key_
 // set` itself, not via sequential `Type::union` calls: `.reduce()`
@@ -21,7 +21,7 @@ fn generalize_by_key_set_merges_same_key_set_shapes_instead_of_collapsing() {
     // union stays well under its own cap and the result is `bool`, not
     // `Mixed` - proving the merge actually folds
     // real field types together, not just picks one arbitrarily.
-    let members: Vec<Type> = (0..13)
+    let members: Vec<Type> = (0..=types::MAX_UNION_MEMBERS)
         .map(|i| {
             let value = if i % 2 == 0 {
                 Type::bool_literal(true)
