@@ -152,7 +152,7 @@ pub struct Registry {
     // class (`PHPUnit\Framework\TestCase`-vs-`class_exists`-guarded-
     // fallback) would wrongly leak a defensive fallback's members onto
     // the real class everything else sees.
-    pub(crate) built_in_stub_classes: FxHashSet<Name>,
+    pub(crate) built_in_stub_classes: NameTable<()>,
     // The function-side sibling of the tracking set above -
     // phpstorm-stubs represents a real PHP internal function overload
     // (different signatures by argument shape, not version) as two
@@ -192,15 +192,15 @@ pub struct Registry {
     // closure - see `is_subclass_of`/`precompute_ancestor_names`
     // (`registry/hierarchy.rs`). Rebuilt whenever the class graph could
     // have changed.
-    pub(crate) ancestor_names: FxHashMap<Name, FxHashSet<Name>>,
+    pub(crate) ancestor_names: NameTable<FxHashSet<Name>>,
     // Every registered class's precomputed member-name ->
     // owning-ancestor-name map, one per member kind - see
     // `lookup_method`/`precompute_member_owners` (`registry/hierarchy.rs`).
-    pub(crate) method_owner_by_class: FxHashMap<Name, FxHashMap<Name, Name>>,
-    pub(crate) ancestor_method_owner_by_class: FxHashMap<Name, FxHashMap<Name, Name>>,
-    pub(crate) property_owner_by_class: FxHashMap<Name, FxHashMap<Name, Name>>,
-    pub(crate) ancestor_property_owner_by_class: FxHashMap<Name, FxHashMap<Name, Name>>,
-    pub(crate) const_owner_by_class: FxHashMap<Name, FxHashMap<Name, Name>>,
+    pub(crate) method_owner_by_class: NameTable<FxHashMap<Name, Name>>,
+    pub(crate) ancestor_method_owner_by_class: NameTable<FxHashMap<Name, Name>>,
+    pub(crate) property_owner_by_class: NameTable<FxHashMap<Name, Name>>,
+    pub(crate) ancestor_property_owner_by_class: NameTable<FxHashMap<Name, Name>>,
+    pub(crate) const_owner_by_class: NameTable<FxHashMap<Name, Name>>,
 }
 
 impl Registry {

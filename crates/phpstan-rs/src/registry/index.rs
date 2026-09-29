@@ -109,7 +109,7 @@ impl Registry {
                 info: new_info,
             } => {
                 let new_info = *new_info;
-                if conditional && self.built_in_stub_classes.contains(&name) {
+                if conditional && self.built_in_stub_classes.contains_key(&name) {
                     // A plain `or_insert_with` no-op (the shape every
                     // other conditional case below uses) fully discards
                     // a conditional declaration's own members the moment
@@ -192,7 +192,7 @@ impl Registry {
                     // vendored class - every other method/constant - the
                     // moment a targeted override's own bare `class Foo
                     // { public function bar() {} }` is indexed.
-                    if analyzed && !self.built_in_stub_classes.contains(&name) {
+                    if analyzed && !self.built_in_stub_classes.contains_key(&name) {
                         // An analyzed (first-party) file's class
                         // declaration is ground truth for whatever is
                         // actually being checked - it must always
@@ -201,7 +201,7 @@ impl Registry {
                         // with it the way two context-only declarations
                         // legitimately do above.
                         self.classes.insert(name, new_info);
-                    } else if self.built_in_stub_classes.contains(&name) {
+                    } else if self.built_in_stub_classes.contains_key(&name) {
                         // The one exception to the rule just above: a
                         // *built-in* stub name (`ArrayIterator`, ...)
                         // this project already ships its own vendored,
@@ -507,7 +507,7 @@ impl Registry {
         for (name, info) in stubs {
             let name: Name = name.into();
             self.unconditionally_declared_classes.insert(name.clone());
-            self.built_in_stub_classes.insert(name.clone());
+            self.built_in_stub_classes.insert(name.clone(), ());
             match self.classes.remove(&name) {
                 Some(existing) => {
                     self.classes.insert(name, info.merge(existing));

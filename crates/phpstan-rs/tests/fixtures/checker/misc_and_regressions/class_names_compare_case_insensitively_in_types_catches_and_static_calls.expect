@@ -4,6 +4,7 @@
     fix: Use Runs => "Runs"
 6:1-6:42 class.nameCase L0 | Class referenced with incorrect case: foo.
 6:28-6:31 class.nameCase L0 | Class referenced with incorrect case: FOO.
+    fix: Use Foo => "Foo"
 7:12-7:18 class.nameCase L0 | Class referenced with incorrect case: foo.
 9:52-9:55 class.nameCase L0 | Class referenced with incorrect case: foo.
     fix: Use Foo => "Foo"

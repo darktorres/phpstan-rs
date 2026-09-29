@@ -1024,7 +1024,7 @@ impl Registry {
                     // `Command`, Doctrine's console commands, ...), which
                     // must still participate in this pass normally.
                     if syntax::ast::is_constructor_name(method_name)
-                        && registry.built_in_stub_classes.contains(&owner)
+                        && registry.built_in_stub_classes.contains_key(&owner)
                     {
                         continue;
                     }
@@ -1114,9 +1114,10 @@ impl Registry {
                     // A builtin method's native return type is tentative
                     // (PHP 8.1): an override may omit it, and then has it
                     // still.
-                    let inherits_tentative_type = registry.built_in_stub_classes.contains(&owner)
-                        && sig.return_type_native.is_mixed()
-                        && !ancestor_sig.return_type_native.is_mixed();
+                    let inherits_tentative_type =
+                        registry.built_in_stub_classes.contains_key(&owner)
+                            && sig.return_type_native.is_mixed()
+                            && !ancestor_sig.return_type_native.is_mixed();
                     let return_fill = (needs_return
                         && (ancestor_sig.return_has_own_doc || inherits_tentative_type)
                         && Registry::safe_to_backfill_mixed(

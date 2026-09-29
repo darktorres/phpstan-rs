@@ -171,15 +171,21 @@ impl<'a> Checker<'a> {
         ty: &Type,
         out: &mut Vec<(String, String)>,
     ) {
-        for name in ty.bare_object_class_names() {
-            if ITERABLE_GENERIC_CLASS_NAMES.contains(&name.as_str())
-                || SYNTHETIC_GENERIC_CLASS_NAMES.contains(&name.as_str())
-                || MISSING_TYPEHINT_LENIENT_GENERIC_CLASS_NAMES.contains(&name.as_str())
+        for written in ty.bare_object_class_names() {
+            // Compared and shown as declared: class names are
+            // case-insensitive.
+            let (name, info) = match self.registry.classes.get_with_name(written.as_str()) {
+                Some((declared, info)) => (declared.as_str(), Some(info)),
+                None => (written.as_str(), None),
+            };
+            if ITERABLE_GENERIC_CLASS_NAMES.contains(&name)
+                || SYNTHETIC_GENERIC_CLASS_NAMES.contains(&name)
+                || MISSING_TYPEHINT_LENIENT_GENERIC_CLASS_NAMES.contains(&name)
             {
                 continue;
             }
             // Only templates without a default must be given.
-            if let Some(info) = self.registry.classes.get(name.as_str())
+            if let Some(info) = info
                 && info.kind() != ClassKind::Trait
             {
                 let total = info.templates().len();

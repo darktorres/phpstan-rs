@@ -440,7 +440,7 @@ impl<'a> Checker<'a> {
         let Some((canonical, info)) = self.registry.lookup_class(resolved) else {
             return;
         };
-        if self.registry.built_in_stub_classes.contains(canonical) {
+        if self.registry.built_in_stub_classes.contains_key(canonical) {
             return;
         }
         if canonical != resolved {

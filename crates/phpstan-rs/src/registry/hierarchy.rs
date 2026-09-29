@@ -4,10 +4,10 @@ use syntax::name::Name;
 
 use rayon::prelude::*;
 
-use crate::registry::Registry;
 use crate::registry::{
     ClassReflection, ConstantReflection, FunctionReflection, PropertyReflection,
 };
+use crate::registry::{NameTable, Registry};
 use syntax::ast::ClassKind;
 use types::Type;
 
@@ -67,7 +67,7 @@ impl Registry {
     pub fn precompute_ancestor_names(&mut self) {
         let class_names: Vec<Name> = self.classes.keys().cloned().collect();
         let registry: &Registry = self;
-        self.ancestor_names = class_names
+        let ancestor_names: Vec<_> = class_names
             .par_iter()
             .map(|name| {
                 (
@@ -76,6 +76,7 @@ impl Registry {
                 )
             })
             .collect();
+        self.ancestor_names = ancestor_names.into_iter().collect();
     }
 
     /// Is `class` (or any ancestor it `extends`) tagged
@@ -237,7 +238,7 @@ impl Registry {
     /// re-walking anything.
     fn merge_ancestor_owner_names(
         parents: impl Iterator<Item = Name>,
-        own_owner_by_class: &FxHashMap<Name, FxHashMap<Name, Name>>,
+        own_owner_by_class: &NameTable<FxHashMap<Name, Name>>,
     ) -> FxHashMap<Name, Name> {
         let mut merged = FxHashMap::default();
         for parent in parents {
@@ -289,16 +290,16 @@ impl Registry {
                 (name.clone(), methods, properties, consts)
             })
             .collect();
-        let mut method_owner_by_class = FxHashMap::default();
-        let mut property_owner_by_class = FxHashMap::default();
-        let mut const_owner_by_class = FxHashMap::default();
+        let mut method_owner_by_class = NameTable::default();
+        let mut property_owner_by_class = NameTable::default();
+        let mut const_owner_by_class = NameTable::default();
         for (name, methods, properties, consts) in own_by_class {
             method_owner_by_class.insert(name.clone(), methods);
             property_owner_by_class.insert(name.clone(), properties);
             const_owner_by_class.insert(name, consts);
         }
 
-        let ancestor_method_owner_by_class: FxHashMap<Name, FxHashMap<Name, Name>> = class_names
+        let ancestor_method_owner_by_class: Vec<(Name, FxHashMap<Name, Name>)> = class_names
             .par_iter()
             .map(|name| {
                 let parents = registry
@@ -323,7 +324,7 @@ impl Registry {
         // `lookup_ancestor_property_with_owner`'s own walk (unlike the
         // method version) only ever considers `extends`, never
         // `implements` - mirrored here.
-        let ancestor_property_owner_by_class: FxHashMap<Name, FxHashMap<Name, Name>> = class_names
+        let ancestor_property_owner_by_class: Vec<(Name, FxHashMap<Name, Name>)> = class_names
             .par_iter()
             .map(|name| {
                 let parents = registry
@@ -341,8 +342,9 @@ impl Registry {
         self.method_owner_by_class = method_owner_by_class;
         self.property_owner_by_class = property_owner_by_class;
         self.const_owner_by_class = const_owner_by_class;
-        self.ancestor_method_owner_by_class = ancestor_method_owner_by_class;
-        self.ancestor_property_owner_by_class = ancestor_property_owner_by_class;
+        self.ancestor_method_owner_by_class = ancestor_method_owner_by_class.into_iter().collect();
+        self.ancestor_property_owner_by_class =
+            ancestor_property_owner_by_class.into_iter().collect();
     }
 
     /// Looks up a method, walking the extends/implements ancestor graph
@@ -962,7 +964,7 @@ impl Registry {
     /// Whether `class` is a class a stub declares (a PHP builtin or
     /// extension class).
     pub(crate) fn is_builtin_class(&self, class: &str) -> bool {
-        self.built_in_stub_classes.contains(class)
+        self.built_in_stub_classes.contains_key(class)
     }
 
     /// The function `name` names, compared case-insensitively as PHP does.
