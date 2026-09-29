@@ -1,9 +1,10 @@
 use crate::checker::expr::ranges::{NullProbeVerdictFn, expr_reads_a_property};
+use crate::checker::operators::ordering_op;
 use crate::checker::{Checker, Locals, literal_string_key, narrowing_type_for_predicate};
 use syntax::ast::*;
 use syntax::token::Span;
 use types::Type;
-use types::compare_range_outcome;
+use types::{OrderingOp, compare_range_outcome};
 
 impl<'a> Checker<'a> {
     /// Looks up a bare global-constant reference (`ExprKind::Name`,
@@ -504,12 +505,14 @@ impl<'a> Checker<'a> {
         if self.loop_depth > 0 || expr_reads_a_property(l) || expr_reads_a_property(r) {
             return;
         }
-        let rule_name = match op {
-            BinOp::Lt => "smaller",
-            BinOp::Gt => "greater",
-            BinOp::LtEq => "smallerOrEqual",
-            BinOp::GtEq => "greaterOrEqual",
-            _ => return,
+        let Some(ordering) = ordering_op(op) else {
+            return;
+        };
+        let rule_name = match ordering {
+            OrderingOp::Lt => "smaller",
+            OrderingOp::Gt => "greater",
+            OrderingOp::LtEq => "smallerOrEqual",
+            OrderingOp::GtEq => "greaterOrEqual",
         };
         let Some(l_bounds) = l_ty.int_bounds() else {
             return;
@@ -517,15 +520,14 @@ impl<'a> Checker<'a> {
         let Some(r_bounds) = r_ty.int_bounds() else {
             return;
         };
-        let Some(outcome) = compare_range_outcome(op, l_bounds, r_bounds) else {
+        let Some(outcome) = compare_range_outcome(ordering, l_bounds, r_bounds) else {
             return;
         };
-        let sigil = match op {
-            BinOp::Lt => "<",
-            BinOp::Gt => ">",
-            BinOp::LtEq => "<=",
-            BinOp::GtEq => ">=",
-            _ => unreachable!(),
+        let sigil = match ordering {
+            OrderingOp::Lt => "<",
+            OrderingOp::Gt => ">",
+            OrderingOp::LtEq => "<=",
+            OrderingOp::GtEq => ">=",
         };
         self.report(
             format!(

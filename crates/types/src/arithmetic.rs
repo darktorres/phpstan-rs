@@ -3,7 +3,6 @@
 //! arithmetic, and the outcome of comparing ranges and literals.
 
 use crate::{AccessoryKind, PhpString, Repr, TrinaryLogic, Type};
-use syntax::ast::BinOp;
 
 /// Applies `op` to two bounds, distinguishing a genuine `i64` overflow
 /// (both operands were real values, but the exact result doesn't fit)
@@ -252,7 +251,7 @@ pub(crate) fn shift_int_range(
     }
 }
 
-/// Whether `l OP r` (`op` one of `Lt`/`Gt`/`LtEq`/`GtEq`) is provably
+/// Whether `l op r` is provably
 /// always true or always false, given each side's own `(min, max)`
 /// bounds (`None` for an unbounded end) - `Some(true)`/`Some(false)`
 /// only when every possible value pair agrees, `None` for "depends on
@@ -266,14 +265,14 @@ pub(crate) fn shift_int_range(
 /// identical scope decision for the narrowing direction of this same
 /// comparison family).
 pub fn compare_range_outcome(
-    op: &BinOp,
+    op: OrderingOp,
     l: (Option<i64>, Option<i64>),
     r: (Option<i64>, Option<i64>),
 ) -> Option<bool> {
     let (l_min, l_max) = l;
     let (r_min, r_max) = r;
     match op {
-        BinOp::Lt => {
+        OrderingOp::Lt => {
             if let (Some(lmax), Some(rmin)) = (l_max, r_min)
                 && lmax < rmin
             {
@@ -286,7 +285,7 @@ pub fn compare_range_outcome(
             }
             None
         }
-        BinOp::LtEq => {
+        OrderingOp::LtEq => {
             if let (Some(lmax), Some(rmin)) = (l_max, r_min)
                 && lmax <= rmin
             {
@@ -299,7 +298,7 @@ pub fn compare_range_outcome(
             }
             None
         }
-        BinOp::Gt => {
+        OrderingOp::Gt => {
             if let (Some(lmin), Some(rmax)) = (l_min, r_max)
                 && lmin > rmax
             {
@@ -312,7 +311,7 @@ pub fn compare_range_outcome(
             }
             None
         }
-        BinOp::GtEq => {
+        OrderingOp::GtEq => {
             if let (Some(lmin), Some(rmax)) = (l_min, r_max)
                 && lmin >= rmax
             {
@@ -325,7 +324,6 @@ pub fn compare_range_outcome(
             }
             None
         }
-        _ => None,
     }
 }
 
@@ -609,18 +607,45 @@ impl Type {
     }
 }
 
+/// An operator `Type::binary_operation` computes: an arithmetic, bitwise
+/// or shift operator, or `<=>`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ArithmeticOp {
+    Add,
+    Sub,
+    Mul,
+    Div,
+    Mod,
+    Pow,
+    BitAnd,
+    BitOr,
+    BitXor,
+    Shl,
+    Shr,
+    Spaceship,
+}
+
+/// An ordering comparison: `<`, `<=`, `>` or `>=`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum OrderingOp {
+    Lt,
+    LtEq,
+    Gt,
+    GtEq,
+}
+
 impl Type {
     /// The result of `l op r` for an arithmetic, bitwise or shift operator
     /// or `<=>` over operands of these types, operator overloading aside
     /// (PHPStan's `InitializerExprTypeResolver`).
-    pub fn binary_operation(op: &BinOp, lt: &Type, rt: &Type) -> Type {
+    pub fn binary_operation(op: ArithmeticOp, lt: &Type, rt: &Type) -> Type {
         if let Some(folded) = fold_float_constants(op, lt, rt) {
             return folded;
         }
         let either_float = lt.is_float().yes() || rt.is_float().yes();
         match op {
-            BinOp::Spaceship => Type::int_range(Some(-1), Some(1)),
-            BinOp::Add => {
+            ArithmeticOp::Spaceship => Type::int_range(Some(-1), Some(1)),
+            ArithmeticOp::Add => {
                 if lt.is_array().yes() || rt.is_array().yes() {
                     return array_union_type(lt, rt);
                 }
@@ -641,7 +666,7 @@ impl Type {
                 }
                 Type::int()
             }
-            BinOp::Sub => {
+            ArithmeticOp::Sub => {
                 if either_float {
                     return Type::float();
                 }
@@ -665,7 +690,7 @@ impl Type {
                     _ => Type::int(),
                 }
             }
-            BinOp::Mul => {
+            ArithmeticOp::Mul => {
                 if either_float {
                     return Type::float();
                 }
@@ -676,7 +701,7 @@ impl Type {
                     _ => Type::int(),
                 }
             }
-            BinOp::Pow => {
+            ArithmeticOp::Pow => {
                 if either_float {
                     return Type::float();
                 }
@@ -687,7 +712,7 @@ impl Type {
                     _ => Type::int(),
                 }
             }
-            BinOp::BitAnd | BinOp::BitOr | BinOp::BitXor => {
+            ArithmeticOp::BitAnd | ArithmeticOp::BitOr | ArithmeticOp::BitXor => {
                 let as_ints = || fold_bitwise_int_literals(op, lt, rt).unwrap_or(Type::int());
                 match lt.is_string().and(rt.is_string()) {
                     TrinaryLogic::Yes => string_bitwise(op, lt, rt),
@@ -695,19 +720,19 @@ impl Type {
                     TrinaryLogic::Maybe => Type::union(Type::int(), string_bitwise(op, lt, rt)),
                 }
             }
-            BinOp::Shl | BinOp::Shr => match (lt.int_bounds(), rt.int_bounds()) {
+            ArithmeticOp::Shl | ArithmeticOp::Shr => match (lt.int_bounds(), rt.int_bounds()) {
                 (Some((l_min, l_max)), Some((Some(amount), Some(r_max)))) if amount == r_max => {
-                    shift_int_range(l_min, l_max, amount, matches!(op, BinOp::Shl))
+                    shift_int_range(l_min, l_max, amount, matches!(op, ArithmeticOp::Shl))
                 }
                 _ => Type::int(),
             },
-            BinOp::Mod => match (lt.int_bounds(), rt.int_bounds()) {
+            ArithmeticOp::Mod => match (lt.int_bounds(), rt.int_bounds()) {
                 (Some((l_min, l_max)), Some((r_min, r_max))) => {
                     mod_int_range(l_min, l_max, r_min, r_max)
                 }
                 _ => Type::int(),
             },
-            BinOp::Div => {
+            ArithmeticOp::Div => {
                 if either_float {
                     return Type::float();
                 }
@@ -718,7 +743,6 @@ impl Type {
                     _ => Type(Repr::Union(vec![Type::int(), Type::float()])),
                 }
             }
-            _ => Type::mixed(),
         }
     }
 }
@@ -757,7 +781,7 @@ impl Number {
 /// `l op r` computed value by value when both sides are a few int or
 /// float literals and a float takes part, or the operator is `/`. A pair
 /// that throws (a division or modulo by zero) contributes nothing.
-fn fold_float_constants(op: &BinOp, lt: &Type, rt: &Type) -> Option<Type> {
+fn fold_float_constants(op: ArithmeticOp, lt: &Type, rt: &Type) -> Option<Type> {
     const LIMIT: usize = 64;
     fn numbers(ty: &Type) -> Option<Vec<Number>> {
         ty.union_members()
@@ -771,13 +795,13 @@ fn fold_float_constants(op: &BinOp, lt: &Type, rt: &Type) -> Option<Type> {
     }
     if !matches!(
         op,
-        BinOp::Add
-            | BinOp::Sub
-            | BinOp::Mul
-            | BinOp::Div
-            | BinOp::Mod
-            | BinOp::Pow
-            | BinOp::Spaceship
+        ArithmeticOp::Add
+            | ArithmeticOp::Sub
+            | ArithmeticOp::Mul
+            | ArithmeticOp::Div
+            | ArithmeticOp::Mod
+            | ArithmeticOp::Pow
+            | ArithmeticOp::Spaceship
     ) {
         return None;
     }
@@ -785,7 +809,7 @@ fn fold_float_constants(op: &BinOp, lt: &Type, rt: &Type) -> Option<Type> {
     let has_float = |ns: &[Number]| ns.iter().any(|n| matches!(n, Number::Float(_)));
     // Int-only operands are the range arithmetic's, but a division of
     // literals is exact here where a range can only say `int|float`.
-    let takes_part = has_float(&ls) || has_float(&rs) || matches!(op, BinOp::Div);
+    let takes_part = has_float(&ls) || has_float(&rs) || matches!(op, ArithmeticOp::Div);
     if !takes_part || ls.len() * rs.len() > LIMIT {
         return None;
     }
@@ -796,10 +820,10 @@ fn fold_float_constants(op: &BinOp, lt: &Type, rt: &Type) -> Option<Type> {
             _ => Some(Float(g(a.as_f64(), b.as_f64()))),
         };
         match op {
-            BinOp::Add => checked(i64::checked_add, |x, y| x + y),
-            BinOp::Sub => checked(i64::checked_sub, |x, y| x - y),
-            BinOp::Mul => checked(i64::checked_mul, |x, y| x * y),
-            BinOp::Div => match (a, b) {
+            ArithmeticOp::Add => checked(i64::checked_add, |x, y| x + y),
+            ArithmeticOp::Sub => checked(i64::checked_sub, |x, y| x - y),
+            ArithmeticOp::Mul => checked(i64::checked_mul, |x, y| x * y),
+            ArithmeticOp::Div => match (a, b) {
                 (_, Int(0)) => None,
                 (_, Float(0.0)) => None,
                 (Int(x), Int(y)) if x.checked_rem(y) == Some(0) => {
@@ -807,11 +831,11 @@ fn fold_float_constants(op: &BinOp, lt: &Type, rt: &Type) -> Option<Type> {
                 }
                 _ => Some(Float(a.as_f64() / b.as_f64())),
             },
-            BinOp::Mod => {
+            ArithmeticOp::Mod => {
                 let divisor = b.as_i64();
                 (divisor != 0).then(|| Int(a.as_i64().checked_rem(divisor).unwrap_or(0)))
             }
-            BinOp::Pow => match (a, b) {
+            ArithmeticOp::Pow => match (a, b) {
                 (Int(x), Int(y)) if y >= 0 => Some(
                     u32::try_from(y)
                         .ok()
@@ -865,7 +889,7 @@ fn array_union_type(lt: &Type, rt: &Type) -> Type {
 /// `l & r`, `l | r` or `l ^ r` over two strings: byte by byte, as long as
 /// the shorter operand for `&` and `^`, and as the longer for `|` (whose
 /// extra bytes are copied). Folded over up to 64 pairs of literals.
-fn string_bitwise(op: &BinOp, l: &Type, r: &Type) -> Type {
+fn string_bitwise(op: ArithmeticOp, l: &Type, r: &Type) -> Type {
     fn literals(ty: &Type) -> Option<Vec<PhpString>> {
         let finite = ty.finite_types();
         if finite.is_empty() {
@@ -881,7 +905,7 @@ fn string_bitwise(op: &BinOp, l: &Type, r: &Type) -> Type {
     }
     let apply = |a: &[u8], b: &[u8]| -> Vec<u8> {
         match op {
-            BinOp::BitOr => {
+            ArithmeticOp::BitOr => {
                 let (long, short) = if a.len() >= b.len() { (a, b) } else { (b, a) };
                 let mut out = long.to_vec();
                 for (o, s) in out.iter_mut().zip(short) {
@@ -889,7 +913,7 @@ fn string_bitwise(op: &BinOp, l: &Type, r: &Type) -> Type {
                 }
                 out
             }
-            BinOp::BitAnd => a.iter().zip(b).map(|(x, y)| x & y).collect(),
+            ArithmeticOp::BitAnd => a.iter().zip(b).map(|(x, y)| x & y).collect(),
             _ => a.iter().zip(b).map(|(x, y)| x ^ y).collect(),
         }
     };
@@ -908,7 +932,7 @@ fn string_bitwise(op: &BinOp, l: &Type, r: &Type) -> Type {
     }
     let non_empty = |t: &Type| t.is_refined_string(AccessoryKind::NonEmptyString).yes();
     let result_non_empty = match op {
-        BinOp::BitOr => non_empty(l) || non_empty(r),
+        ArithmeticOp::BitOr => non_empty(l) || non_empty(r),
         _ => non_empty(l) && non_empty(r),
     };
     if result_non_empty {
@@ -922,7 +946,7 @@ fn string_bitwise(op: &BinOp, l: &Type, r: &Type) -> Type {
 /// (`PREG_SPLIT_NO_EMPTY | PREG_SPLIT_DELIM_CAPTURE` is `3`), at most 64
 /// combinations. `$x & k` with a non-negative literal `k` is `int<0, k>`
 /// whatever `$x` is.
-fn fold_bitwise_int_literals(op: &BinOp, l: &Type, r: &Type) -> Option<Type> {
+fn fold_bitwise_int_literals(op: ArithmeticOp, l: &Type, r: &Type) -> Option<Type> {
     fn literals(ty: &Type) -> Option<Vec<i64>> {
         match ty {
             Type(Repr::IntLiteral(n)) => Some(vec![*n]),
@@ -936,8 +960,8 @@ fn fold_bitwise_int_literals(op: &BinOp, l: &Type, r: &Type) -> Option<Type> {
         }
     }
     let apply = |a: i64, b: i64| match op {
-        BinOp::BitAnd => a & b,
-        BinOp::BitOr => a | b,
+        ArithmeticOp::BitAnd => a & b,
+        ArithmeticOp::BitOr => a | b,
         _ => a ^ b,
     };
     match (literals(l), literals(r)) {
@@ -953,7 +977,7 @@ fn fold_bitwise_int_literals(op: &BinOp, l: &Type, r: &Type) -> Option<Type> {
             Some(members.fold(first, Type::union))
         }
         (_, Some(ks)) | (Some(ks), _)
-            if matches!(op, BinOp::BitAnd) && ks.len() == 1 && ks[0] >= 0 =>
+            if matches!(op, ArithmeticOp::BitAnd) && ks.len() == 1 && ks[0] >= 0 =>
         {
             Some(Type::int_range(Some(0), Some(ks[0])))
         }

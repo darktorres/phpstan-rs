@@ -2,8 +2,8 @@
 //! from an excluded one, by key presence, by truthiness, and the array
 //! and integer refinements comparisons and counts prove.
 
+use crate::OrderingOp;
 use crate::{AccessoryKind, PhpString, Relation, Repr, Shape, ShapeField, ShapeKey, Type};
-use syntax::ast::BinOp;
 
 /// A comparison's own truth value, canonicalized to "the narrowed side
 /// is smaller/smaller-or-equal/greater/greater-or-equal than the bound" -
@@ -379,7 +379,7 @@ impl Type {
 /// same "give up gracefully" choice every other range-arithmetic helper
 /// in this project already makes rather than risk a wrong bound.
 pub fn comparison_narrowed_bounds(
-    op: &BinOp,
+    op: OrderingOp,
     keyed_on_left: bool,
     branch_true: bool,
     cur_min: Option<i64>,
@@ -387,11 +387,10 @@ pub fn comparison_narrowed_bounds(
     bound: i64,
 ) -> Option<(Option<i64>, Option<i64>)> {
     let outcome = match (op, keyed_on_left) {
-        (BinOp::Lt, true) | (BinOp::Gt, false) => ComparisonOutcome::Smaller,
-        (BinOp::LtEq, true) | (BinOp::GtEq, false) => ComparisonOutcome::SmallerOrEqual,
-        (BinOp::Gt, true) | (BinOp::Lt, false) => ComparisonOutcome::Greater,
-        (BinOp::GtEq, true) | (BinOp::LtEq, false) => ComparisonOutcome::GreaterOrEqual,
-        _ => return None,
+        (OrderingOp::Lt, true) | (OrderingOp::Gt, false) => ComparisonOutcome::Smaller,
+        (OrderingOp::LtEq, true) | (OrderingOp::GtEq, false) => ComparisonOutcome::SmallerOrEqual,
+        (OrderingOp::Gt, true) | (OrderingOp::Lt, false) => ComparisonOutcome::Greater,
+        (OrderingOp::GtEq, true) | (OrderingOp::LtEq, false) => ComparisonOutcome::GreaterOrEqual,
     };
     let outcome = if branch_true {
         outcome

@@ -28,6 +28,7 @@ mod preg_shapes;
 mod probe_checks;
 pub(crate) mod ranges;
 
+use crate::checker::operators::{arithmetic_op, ordering_op};
 pub(crate) use ranges::{NullProbeVerdictFn, empty_probe_verdict, null_probe_verdict};
 use types::compare_range_outcome;
 
@@ -5151,7 +5152,8 @@ impl<'a> Checker<'a> {
                 let lt = self.infer_expr(l, locals);
                 let rt = self.infer_expr(r, locals);
                 if let (Some(l_bounds), Some(r_bounds)) = (lt.int_bounds(), rt.int_bounds())
-                    && let Some(outcome) = compare_range_outcome(op, l_bounds, r_bounds)
+                    && let Some(ordering) = ordering_op(op)
+                    && let Some(outcome) = compare_range_outcome(ordering, l_bounds, r_bounds)
                 {
                     if outcome {
                         Type::bool_literal(true)
@@ -5189,7 +5191,8 @@ impl<'a> Checker<'a> {
                 if let Some(ty) = self.binary_operator_overload_result(op, &lt, &rt) {
                     return ty;
                 }
-                Type::binary_operation(op, &lt, &rt)
+                arithmetic_op(op)
+                    .map_or_else(Type::mixed, |op| Type::binary_operation(op, &lt, &rt))
             }
             BinOp::Coalesce => {
                 let r_ty = self.infer_expr(r, locals);
@@ -6038,7 +6041,7 @@ impl<'a> Checker<'a> {
         let Some(r_bounds) = r_ty.int_bounds() else {
             return false;
         };
-        compare_range_outcome(op, l_bounds, r_bounds) == Some(true)
+        ordering_op(op).and_then(|op| compare_range_outcome(op, l_bounds, r_bounds)) == Some(true)
     }
 
     /// `match.unhandled`'s own case-expansion step: a plain enum-typed

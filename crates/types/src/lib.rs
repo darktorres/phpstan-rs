@@ -40,7 +40,7 @@ mod traverse;
 mod trinary;
 mod union;
 
-pub use arithmetic::compare_range_outcome;
+pub use arithmetic::{ArithmeticOp, OrderingOp, compare_range_outcome};
 pub use display::quote_php_string;
 pub use extension::ExtensionTypeData;
 pub(crate) use hierarchy::effective_slot_variance;

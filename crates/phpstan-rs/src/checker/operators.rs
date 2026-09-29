@@ -35,7 +35,7 @@
 use crate::checker::Checker;
 use syntax::ast::{BinOp, Expr, ExprKind, Literal, UnaryOp};
 use syntax::token::Span;
-use types::Type;
+use types::{ArithmeticOp, OrderingOp, Type};
 
 impl<'a> Checker<'a> {
     /// Mirrors real PHPStan's own `Type::toNumber()` legality: every
@@ -634,6 +634,36 @@ impl<'a> Checker<'a> {
         );
         self.relation().is_super_type_of(&of, ty).yes()
     }
+}
+
+/// The arithmetic, bitwise or shift operator, or `<=>`, `op` is.
+pub(crate) fn arithmetic_op(op: &BinOp) -> Option<ArithmeticOp> {
+    Some(match op {
+        BinOp::Add => ArithmeticOp::Add,
+        BinOp::Sub => ArithmeticOp::Sub,
+        BinOp::Mul => ArithmeticOp::Mul,
+        BinOp::Div => ArithmeticOp::Div,
+        BinOp::Mod => ArithmeticOp::Mod,
+        BinOp::Pow => ArithmeticOp::Pow,
+        BinOp::BitAnd => ArithmeticOp::BitAnd,
+        BinOp::BitOr => ArithmeticOp::BitOr,
+        BinOp::BitXor => ArithmeticOp::BitXor,
+        BinOp::Shl => ArithmeticOp::Shl,
+        BinOp::Shr => ArithmeticOp::Shr,
+        BinOp::Spaceship => ArithmeticOp::Spaceship,
+        _ => return None,
+    })
+}
+
+/// The ordering comparison `op` is.
+pub(crate) fn ordering_op(op: &BinOp) -> Option<OrderingOp> {
+    Some(match op {
+        BinOp::Lt => OrderingOp::Lt,
+        BinOp::LtEq => OrderingOp::LtEq,
+        BinOp::Gt => OrderingOp::Gt,
+        BinOp::GtEq => OrderingOp::GtEq,
+        _ => return None,
+    })
 }
 
 fn comparison_identifier(op: &BinOp) -> Option<&'static str> {

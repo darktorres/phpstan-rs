@@ -14,6 +14,7 @@ pub(crate) use predicates::{
     propagate_container_field_facts, purge_stale_narrowing_for,
 };
 
+use crate::checker::operators::ordering_op;
 use types::comparison_narrowed_bounds;
 
 /// `count($x)`'s own operand-order detection for the count-comparison
@@ -842,7 +843,7 @@ impl<'a> Checker<'a> {
                     // to the `count(...)`-on-the-left shape below.
                     let current = self.current_narrowed_type(count_arg, &key, locals);
                     locals.insert(key, current.to_non_empty_array());
-                } else if matches!(op, BinOp::Lt | BinOp::Gt | BinOp::LtEq | BinOp::GtEq)
+                } else if let Some(ordering) = ordering_op(op)
                     && let Some((keyed_expr, bound_expr, keyed_on_left)) =
                         int_comparison_operands(l, r)
                     && let Some(key) = narrowing_key(keyed_expr)
@@ -871,7 +872,7 @@ impl<'a> Checker<'a> {
                         if let Some((Some(bound), Some(bound_max))) = bound_ty.int_bounds()
                             && bound == bound_max
                             && let Some((new_min, new_max)) = comparison_narrowed_bounds(
-                                op,
+                                ordering,
                                 keyed_on_left,
                                 branch_true,
                                 cur_min,
