@@ -36,31 +36,9 @@ pub fn parse_written_type(raw: &str) -> Type {
         let pipe_parts = split_top_level(s, '|');
         let amp_parts = split_top_level(s, '&');
         let ty = if pipe_parts.len() > 1 {
-            let mut members: Vec<Type> = pipe_parts.into_iter().map(parse_type_atom).collect();
-            // `Mixed` already includes every other possible value, so a
-            // union with `Mixed` alongside anything else (real shape:
-            // `end()`'s stub `@return mixed|false`) is simply `Mixed` -
-            // `Type::union` special-cases this at construction time, but
-            // this lower-level parser builds a `Repr::Union` directly from
-            // doc text with no such normalization; a stray non-`Mixed`
-            // member would otherwise fail an ordinary compatibility check
-            // even though the whole union is vacuously satisfiable.
-            if let Some(explicit) = members
-                .iter()
-                .filter_map(|m| match m {
-                    Type(Repr::Mixed(explicit, _)) => Some(*explicit),
-                    _ => None,
-                })
-                .reduce(|a, b| a || b)
-            {
-                return Type::mixed_with(explicit);
-            }
-            crate::union::merge_int_ranges(&mut members);
-            if members.len() == 1 {
-                members.pop().expect("one member")
-            } else {
-                Type(Repr::Union(members))
-            }
+            // Normalized as any union is (`mixed|false` is `mixed`,
+            // `Dog|Dog` is `Dog`).
+            Type::union_of(pipe_parts.into_iter().map(parse_type_atom).collect())
         } else if amp_parts.len() > 1 {
             crate::intersect_types(amp_parts.into_iter().map(parse_type_atom).collect())
         } else {

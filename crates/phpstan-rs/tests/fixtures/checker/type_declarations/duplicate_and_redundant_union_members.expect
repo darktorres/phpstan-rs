@@ -11,8 +11,6 @@
     non-ignorable
 6:54-6:64 unionType.objectAndClass L0 | Type object|Foo contains both object and a class type, which is redundant.
     non-ignorable
-6:69-6:86 missingType.iterableValue L6 | Function b() has parameter $w with no value type specified in iterable type array.
-    tip: See: https://phpstan.org/blog/solving-phpstan-no-value-type-specified-in-iterable-type
 6:69-6:86 missingType.iterableValue L6 | Function b() has parameter $w with no value type specified in iterable type iterable.
     tip: See: https://phpstan.org/blog/solving-phpstan-no-value-type-specified-in-iterable-type
 6:69-6:83 unionType.iterableAndArray L0 | Type iterable|array contains both iterable and array, which is redundant.

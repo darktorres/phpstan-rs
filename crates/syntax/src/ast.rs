@@ -1041,6 +1041,8 @@ impl TypeHint {
         match &self.kind {
             TypeHintKind::Keyword(NativeType::Mixed, _) => true,
             TypeHintKind::Nullable(inner) => inner.is_mixed(),
+            // A union holding `mixed` is `mixed`.
+            TypeHintKind::Union(members) => members.iter().any(TypeHint::is_mixed),
             _ => false,
         }
     }

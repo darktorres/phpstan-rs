@@ -34,9 +34,10 @@ impl Type {
                 templates: sig.templates.iter().map(|tp| map_template(tp, f)).collect(),
             }))),
             Type(Repr::VarianceArg(variance, inner)) => Type::variance_arg(*variance, f(inner)),
-            Type(Repr::Union(ms)) => Type(Repr::Union(ms.iter().map(&mut *f).collect())),
+            // Rebuilt as a union, so members a mapping made equal merge.
+            Type(Repr::Union(ms)) => Type::union_of(ms.iter().map(&mut *f).collect()),
             Type(Repr::BenevolentUnion(ms)) => {
-                Type(Repr::BenevolentUnion(ms.iter().map(&mut *f).collect()))
+                Type::benevolent_union_of(ms.iter().map(&mut *f).collect())
             }
             Type(Repr::Intersection(ms)) => {
                 Type(Repr::Intersection(ms.iter().map(&mut *f).collect()))

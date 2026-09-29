@@ -27,12 +27,11 @@ fn union_types_impl(a: Type, b: Type) -> Type {
     syntax::stack::guard(|| {
         // `never` has no values to add.
         if a == Type::never() {
-            return normalize_generic_args(b);
+            return b;
         }
         if b == Type::never() {
-            return normalize_generic_args(a);
+            return a;
         }
-        let (a, b) = (normalize_generic_args(a), normalize_generic_args(b));
         if a == b {
             return a;
         }
@@ -836,27 +835,6 @@ fn merge_shapes(sa: &Shape, sb: &Shape, sb_first: bool) -> Shape {
         (None, None) => None,
     };
     merged
-}
-
-/// `ty` with each generic argument's union members deduplicated
-/// (`Collection<Dog|Dog>` is `Collection<Dog>`).
-fn normalize_generic_args(ty: Type) -> Type {
-    match ty.into_repr() {
-        Repr::Object(name, args) if args.iter().any(|a| matches!(a, Type(Repr::Union(_)))) => {
-            let args = args
-                .into_iter()
-                .map(|arg| match arg.into_repr() {
-                    Repr::Union(members) => members
-                        .into_iter()
-                        .reduce(Type::union)
-                        .unwrap_or(Type::never()),
-                    other => Type(other),
-                })
-                .collect();
-            Type::object(name, args)
-        }
-        other => Type(other),
-    }
 }
 
 /// The union of `types` when one is `mixed`: `mixed`, explicit when one
