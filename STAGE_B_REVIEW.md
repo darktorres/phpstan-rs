@@ -230,7 +230,9 @@ Each fix needs a fixture.
 
 ## Review 2: structure, types crate
 
-- [ ] **T1. One absorption rule for unions.** `union_types_impl` in
+- [x] **T1. One absorption rule for unions.** Done in `a3853ad8`: the
+  general rule runs after the merges; the narrowing fixtures take the same
+  time with and without it. `union_types_impl` in
   `crates/types/src/union.rs` is a set of special cases (so `@param
   Suit::Hearts|Suit` stays `Suit::Hearts|Suit`, the case not absorbed into
   its enum):
