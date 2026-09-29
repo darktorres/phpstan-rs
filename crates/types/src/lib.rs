@@ -636,6 +636,51 @@ pub struct CallableSig {
 pub const CALLABLE_TEMPLATE_SCOPE: &str = "callable";
 
 impl CallableSig {
+    /// `self` with the templates whose scope `is_own` accepts (a
+    /// function's or method's own, in its signature) made the callable's
+    /// own: `f(...)` of a generic `f` is a generic `Closure`.
+    pub fn with_own_templates(mut self, is_own: &dyn Fn(&str) -> bool) -> CallableSig {
+        fn collect(ty: &Type, is_own: &dyn Fn(&str) -> bool, out: &mut Vec<TemplateParam>) {
+            if let Type(Repr::TemplateParam(tp)) = ty
+                && tp.scope.as_deref().is_some_and(is_own)
+            {
+                if !out.iter().any(|t| t.name == tp.name) {
+                    out.push(TemplateParam {
+                        scope: Some(CALLABLE_TEMPLATE_SCOPE.to_string()),
+                        ..tp.clone()
+                    });
+                }
+                return;
+            }
+            ty.for_each_child(&mut |c| collect(c, is_own, out));
+        }
+        fn rescope(ty: &Type, is_own: &dyn Fn(&str) -> bool) -> Type {
+            match ty {
+                Type(Repr::TemplateParam(tp)) if tp.scope.as_deref().is_some_and(is_own) => {
+                    Type::template_param(TemplateParam {
+                        scope: Some(CALLABLE_TEMPLATE_SCOPE.to_string()),
+                        ..tp.clone()
+                    })
+                }
+                other => other.map_children(&mut |c| rescope(c, is_own)),
+            }
+        }
+        let mut own = Vec::new();
+        for p in &self.params {
+            collect(&p.ty, is_own, &mut own);
+        }
+        collect(&self.return_type, is_own, &mut own);
+        if own.is_empty() {
+            return self;
+        }
+        for p in &mut self.params {
+            p.ty = rescope(&p.ty, is_own);
+        }
+        self.return_type = Box::new(rescope(&self.return_type, is_own));
+        self.templates.extend(own);
+        self.rebind_templates()
+    }
+
     /// `self` with every occurrence of its own templates replaced by the
     /// current `templates` entries - after their bounds changed.
     pub fn rebind_templates(mut self) -> CallableSig {

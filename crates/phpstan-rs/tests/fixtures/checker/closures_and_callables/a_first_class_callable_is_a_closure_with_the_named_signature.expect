@@ -1,0 +1,1 @@
+26:11-26:22 argument.type L5 | Parameter #1 $f of function takes expects Closure(int): string, Closure(string): int<0, max> given.

@@ -70,6 +70,16 @@ pub(crate) fn type_definitely_excludes_null(ty: &Type) -> bool {
     !ty.is_never() && ty.is_null().no()
 }
 
+/// The function or method a first-class callable names.
+pub(crate) struct FirstClassTarget<'a> {
+    pub(crate) sig: &'a FunctionReflection,
+    /// The class a method was looked up on; `None` for a function.
+    pub(crate) class: Option<String>,
+    /// The function's (unqualified) or method's name, the scope its own
+    /// templates carry.
+    pub(crate) name: String,
+}
+
 impl<'a> Checker<'a> {
     /// An `isset`/`empty` operand. PHP raises no notice for a missing
     /// variable, offset or property inside one, so the operand's root is
@@ -4165,7 +4175,7 @@ impl<'a> Checker<'a> {
                         self.check_expr(inner, locals, label);
                     }
                 }
-                Type::object("Closure".into(), Vec::new())
+                self.first_class_callable_type(inner, locals)
             }
             ExprKind::Literal(lit) => match lit {
                 Literal::Int(n) => Type::int_literal(*n),
@@ -4218,7 +4228,7 @@ impl<'a> Checker<'a> {
             // `Closure`-typed parameter correctly accepts it. A closure/
             // arrow-fn literal additionally carries its own signature
             // (`closure_literal_type`).
-            ExprKind::FirstClassCallable(_) => Type::object("Closure".into(), Vec::new()),
+            ExprKind::FirstClassCallable(inner) => self.first_class_callable_type(inner, locals),
             ExprKind::Closure {
                 params,
                 uses,
@@ -4819,45 +4829,20 @@ impl<'a> Checker<'a> {
             // `infer_call_return_type` does for an ordinary call, just
             // without real argument expressions to read types from.
             ExprKind::FirstClassCallable(inner) => {
-                // `class` is the owner to resolve a `self`/`static`
-                // pseudo-return through (`TagId::tryFrom(...): ?self`) -
-                // absent for a plain function, which can't return either.
-                let (sig, class) = match &inner.kind {
-                    ExprKind::Call(callee, _) => match &callee.kind {
-                        ExprKind::Name(name) => (
-                            self.registry.resolve_function(name).map(|(_, sig)| sig),
-                            None,
-                        ),
-                        _ => (None, None),
-                    },
-                    ExprKind::StaticCall(target, method, _) => {
-                        match self.infer_static_target_class(target, locals) {
-                            Some(class) => {
-                                if self.collect_member_refs
-                                    && let Some((owner, _)) =
-                                        self.registry.lookup_method_with_owner(&class, method)
-                                {
-                                    self.record_member_ref(callback.span, &owner, method);
-                                }
-                                let sig = self.registry.lookup_method(&class, method);
-                                (sig, Some(class))
-                            }
-                            None => (None, None),
-                        }
-                    }
-                    ExprKind::MethodCall(recv, method, _, _) => {
-                        let recv_ty = self.infer_expr(recv, locals);
-                        let result = self.find_method_receiver_class(&recv_ty, method);
-                        if self.collect_member_refs
-                            && let Some(class) = &result.1
-                            && let Some((owner, _)) =
-                                self.registry.lookup_method_with_owner(class, method)
-                        {
-                            self.record_member_ref(callback.span, &owner, method);
-                        }
-                        result
-                    }
-                    _ => (None, None),
+                let target = self.first_class_callable_target(&inner.kind, locals);
+                if self.collect_member_refs
+                    && let Some(FirstClassTarget {
+                        class: Some(class),
+                        name,
+                        ..
+                    }) = &target
+                    && let Some((owner, _)) = self.registry.lookup_method_with_owner(class, name)
+                {
+                    self.record_member_ref(callback.span, &owner, name);
+                }
+                let (sig, class) = match target {
+                    Some(t) => (Some(t.sig), t.class),
+                    None => (None, None),
                 };
                 sig.map(|s| {
                     let mut bindings: TemplateBindings = TemplateBindings::default();
@@ -5402,6 +5387,78 @@ impl<'a> Checker<'a> {
                 self.resolve_pseudo(&bound, class)
             }
             _ => self.resolve_pseudo(ty, class),
+        }
+    }
+
+    /// The function or method a first-class callable's call (`f(...)`,
+    /// `$obj->m(...)`, `C::m(...)`) names.
+    pub(crate) fn first_class_callable_target(
+        &self,
+        inner: &ExprKind,
+        locals: &Locals,
+    ) -> Option<FirstClassTarget<'a>> {
+        match inner {
+            ExprKind::Call(callee, _) => {
+                let ExprKind::Name(name) = &callee.kind else {
+                    return None;
+                };
+                let (resolved, sig) = self.registry.resolve_function(name)?;
+                let bare = resolved.rsplit('\\').next().unwrap_or(resolved);
+                Some(FirstClassTarget {
+                    sig,
+                    class: None,
+                    name: bare.to_string(),
+                })
+            }
+            ExprKind::StaticCall(target, method, _) => {
+                let class = self.infer_static_target_class(target, locals)?;
+                let sig = self.registry.lookup_method(&class, method)?;
+                Some(FirstClassTarget {
+                    sig,
+                    class: Some(class),
+                    name: method.to_string(),
+                })
+            }
+            ExprKind::MethodCall(recv, method, _, _) => {
+                let recv_ty = self.infer_expr(recv, locals);
+                let (sig, class) = self.find_method_receiver_class(&recv_ty, method);
+                Some(FirstClassTarget {
+                    sig: sig?,
+                    class,
+                    name: method.to_string(),
+                })
+            }
+            _ => None,
+        }
+    }
+
+    /// A first-class callable's `Closure(...)` type: the named function's
+    /// or method's signature, its own templates the closure's; a plain
+    /// `Closure` when what it names isn't known.
+    fn first_class_callable_type(&self, inner: &Expr, locals: &Locals) -> Type {
+        let Some(target) = self.first_class_callable_target(&inner.kind, locals) else {
+            return Type::object("Closure".into(), Vec::new());
+        };
+        let sig = types::CallableSig {
+            params: target
+                .sig
+                .params()
+                .iter()
+                .map(|p| types::CallableParam {
+                    ty: p.ty().clone(),
+                    variadic: p.variadic(),
+                    optional: p.has_default(),
+                    by_ref: p.by_ref(),
+                })
+                .collect(),
+            return_type: Box::new(target.sig.return_type().clone()),
+            templates: Vec::new(),
+        }
+        .with_own_templates(&|scope| scope.eq_ignore_ascii_case(&target.name));
+        let closure = Type::closure_literal(sig);
+        match &target.class {
+            Some(class) => self.resolve_pseudo(&closure, class),
+            None => closure,
         }
     }
 

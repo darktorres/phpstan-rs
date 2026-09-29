@@ -5,11 +5,10 @@
 //! pipe - a real, if narrow, correctness signal (not just style),
 //! independent of the piped value's own type.
 //!
-//! The right-hand side is resolved through its type: a closure's or a
-//! callable shape's signature, or the function or method a string, an
-//! array callable or an invokable object names. A first-class callable
-//! (`foo(...)`) is resolved from its syntax, its type not carrying the
-//! signature.
+//! The right-hand side is resolved through its type: a closure's, a
+//! first-class callable's or a callable shape's signature, or the
+//! function or method a string, an array callable or an invokable object
+//! names.
 
 use crate::checker::{Checker, Locals};
 use diagnostics::DiagnosticBuilder;
@@ -38,48 +37,11 @@ impl<'a> Checker<'a> {
     /// PHPStan's own `foreach` over zero parameters never entering its
     /// loop body at all.
     fn pipe_target_first_param_is_by_ref(&self, expr: &Expr, locals: &Locals) -> Option<bool> {
-        if let ExprKind::FirstClassCallable(inner) = &expr.peeled().kind {
-            return self.first_class_callable_first_param_by_ref(&inner.peeled().kind, locals);
-        }
         let ty = self.infer_expr(expr, locals);
         if let Some(sig) = ty.callable_sig() {
             return Some(sig.params.first().is_some_and(|p| p.by_ref));
         }
         let sig = self.named_callable_signature(&ty)?;
         Some(sig.params().first().is_some_and(|p| p.by_ref()))
-    }
-
-    /// The referenced function/method's own first-parameter-by-ref
-    /// answer for a `FirstClassCallable`'s inner `Call`/`MethodCall`/
-    /// `StaticCall` - a read-only peek at its already-resolved
-    /// signature, not a re-check (the pipe's own `check_expr` pass over
-    /// `rhs` already ran every ordinary diagnostic this same expression
-    /// gets on its own).
-    fn first_class_callable_first_param_by_ref(
-        &self,
-        inner: &ExprKind,
-        locals: &Locals,
-    ) -> Option<bool> {
-        match inner {
-            ExprKind::Call(callee, _) => {
-                let ExprKind::Name(name) = &callee.kind else {
-                    return None;
-                };
-                let (_, sig) = self.registry.resolve_function(name)?;
-                Some(sig.params().first().is_some_and(|p| p.by_ref()))
-            }
-            ExprKind::MethodCall(recv, method, _, _) => {
-                let recv_ty = self.infer_expr(recv, locals);
-                let (class, _) = recv_ty.as_object()?;
-                let sig = self.registry.lookup_method(class, method)?;
-                Some(sig.params().first().is_some_and(|p| p.by_ref()))
-            }
-            ExprKind::StaticCall(target, method, _) => {
-                let class = self.infer_static_target_class(target, locals)?;
-                let sig = self.registry.lookup_method(&class, method)?;
-                Some(sig.params().first().is_some_and(|p| p.by_ref()))
-            }
-            _ => None,
-        }
     }
 }
