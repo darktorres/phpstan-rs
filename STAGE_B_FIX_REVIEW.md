@@ -2,10 +2,10 @@
 
 Findings from reviewing the work done on the Stage B review
 (`STAGE_B_REVIEW.md`): every commit from its F23 fix (`041fcc46`) to
-`31d6c5a7` and the three after it (`d4ae7678`, `5400b17b`, `96027afd`),
-and every item it marks done. Judged on runtime correctness and design,
-not parity with PHPStan. Each task names where the problem is,
-what is wrong, and what done looks like.
+`31d6c5a7` and the five after it (`d4ae7678`, `5400b17b`, `96027afd`,
+`9cef98e6`, `3cea2a20`), and every item it marks done. Judged on
+runtime correctness and design, not parity with PHPStan. Each task names
+where the problem is, what is wrong, and what done looks like.
 
 The review reads every commit's diff in order, checks each done item's
 claim against the code, and reads the modules the fixes reshaped in their
@@ -29,7 +29,8 @@ through `check-project`.
 
 ### Crashes and false positives (probed)
 
-- [ ] **F1. A template bound in a namespace resolves twice.** Since
+- [x] **F1. A template bound in a namespace resolves twice** (`9cef98e6`,
+  with `3cea2a20`'s namespaced fixture). Since
   `ac00409c` a type's traversal reaches a template's bound and default,
   and `declared_type` (`a70a5b42`), `function_sig.rs:611-613`,
   `generics.rs:67-73`, `class_info.rs:1126`/`1213` and `asserts.rs:114-118`
@@ -44,6 +45,12 @@ through `check-project`.
   `mark_template_params` takes unresolved bounds, or
   `resolve_names_in_type` leaves a template parameter's bound and default
   alone - with a namespaced fixture.
+
+  `map_class_names` now leaves a template placeholder as it is, and a
+  callable's own templates are still renamed in its template list and
+  rebound into its parameters. Probed after the fix: function, method,
+  class, defaulted, chained (`V of K`), callable and `@phpstan-assert`
+  templates in a namespace all resolve once.
 - [ ] **F2. A first-class callable on a generic receiver leaks the class's
   templates** (`b3412c22`). `first_class_callable_type` builds the closure
   from the method's declared signature and resolves only `self`/`static`,
@@ -225,6 +232,29 @@ through `check-project`.
   tables fold case; member sets were left out. Done: member-name sets and
   lookups fold case as PHP does.
 
+- [ ] **F38. A template in `@phpstan-assert` narrows to the bare
+  placeholder.** `apply_assert_infos` (`narrowing/assertions.rs`)
+  narrows the target to `info.ty` without substituting the call's
+  template bindings. Since `f18bc022` `narrow(mixed, T)` is no longer
+  kept as `mixed` but becomes `T` (the fallback in F4), so:
+  - `assertInstance(Sub::class, $m)` with
+    `@template T of object @param class-string<T> $c
+    @phpstan-assert T $x` leaves `$m` as `T`, and `?Foo $f` becomes `T`
+    where the pre-window binary kept `Foo|null`.
+  - After `assertSame(5, $n)` (`@template T @param T $expected
+    @phpstan-assert T $actual`), `needsInt($n)` reports "expects int, T
+    given" at level 9; `$m->nope` on the `T of object` value goes
+    unreported.
+  - Before the window the assertion narrowed nothing, and the declaration
+    already reported `assert.alreadyNarrowedType` ("Asserted type T for $x
+    with type mixed does not narrow down the type") for each of these, a
+    false positive at level 0 that is still there.
+
+  Done: the assertion's type has the call's template bindings, or the
+  bounds of the unbound ones, substituted before narrowing, and the
+  declaration-side check compares against the bound; fixtures for
+  `class-string<T>` and `T $expected` assertions.
+
 ### Wrong types and missed reports (probed)
 
 - [ ] **F13. An array literal's positional key after an unknown key**
@@ -355,6 +385,14 @@ through `check-project`.
   this ("an argument outside `T of Foo` binds anyway") and is marked done
   without it. Done: an argument is checked against the bound of the
   template its parameter names.
+
+  `3cea2a20` checks the bound with the bindings found so far substituted
+  in (`R of Repo<E>` holds a `Repo<Entity>` once `E` is `Entity`), in
+  either parameter order. A rejected argument still binds the bound's
+  own templates first: with `E` bound to `stdClass`, passing
+  `Other::class` (a `Repo<DateTime>`) for `class-string<R>` makes `E`
+  `stdClass|DateTime` and the call return `Repo<stdClass|DateTime>`,
+  with no report.
 
 ### Design
 
@@ -785,6 +823,10 @@ read and its findings added above.
   expects the possibly non-object...
 - [x] `96027afd` chore: the stub index regenerated - a float constant's
   value prints the way PHP shows...
+- [x] `9cef98e6` fix: resolving the class names a type is written with
+  leaves a template placeholder alone...
+- [x] `3cea2a20` fix: a template binds an argument its bound holds once
+  the bound's own templates are bound...
 
 ### Final state, module by module
 
