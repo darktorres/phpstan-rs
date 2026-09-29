@@ -1261,7 +1261,7 @@ fn token_text(t: &PhpDocToken) -> String {
         PhpDocToken::Identifier(s) => s.clone(),
         PhpDocToken::Variable(s) => format!("${s}"),
         PhpDocToken::IntLiteral(n) => n.to_string(),
-        PhpDocToken::FloatLiteral(n) => n.to_string(),
+        PhpDocToken::FloatLiteral(n) => format!("{n:?}"),
         PhpDocToken::StringLiteral(s) => s.clone(),
         PhpDocToken::Pipe => "|".to_string(),
         PhpDocToken::Amp => "&".to_string(),

@@ -332,7 +332,7 @@ impl TypeNode {
                 format!("int<{min}, {max}>")
             }
             TypeNode::IntLiteral(n) => n.to_string(),
-            TypeNode::FloatLiteral(n) => n.to_string(),
+            TypeNode::FloatLiteral(n) => format!("{n:?}"),
             TypeNode::StringLiteral(s) => format!("'{s}'"),
             TypeNode::ConstFetch { class, const_name } => format!("{class}::{const_name}"),
             TypeNode::Conditional {

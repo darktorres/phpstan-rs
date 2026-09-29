@@ -345,6 +345,7 @@ fn literal_types_parse() {
     assert_eq!(type_of("/** @return 1 */"), TypeNode::IntLiteral(1));
     assert_eq!(type_of("/** @return -1 */"), TypeNode::IntLiteral(-1));
     assert_eq!(type_of("/** @return 1.5 */"), TypeNode::FloatLiteral(1.5));
+    assert_eq!(type_of("/** @return 0.0 */").to_source_string(), "0.0");
     assert_eq!(
         type_of("/** @return 'foo' */"),
         TypeNode::StringLiteral("foo".into())
