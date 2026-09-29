@@ -1259,6 +1259,28 @@ impl CastSpelling {
     }
 }
 
+/// The operator reaching a member: `->`, or `?->`, which gives `null`
+/// instead when the object is `null`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ObjectOperator {
+    Arrow,
+    NullsafeArrow,
+}
+
+impl ObjectOperator {
+    pub fn from_nullsafe(nullsafe: bool) -> ObjectOperator {
+        if nullsafe {
+            ObjectOperator::NullsafeArrow
+        } else {
+            ObjectOperator::Arrow
+        }
+    }
+
+    pub fn is_nullsafe(self) -> bool {
+        self == ObjectOperator::NullsafeArrow
+    }
+}
+
 /// An expression, plus the real source span it occupies - see `Stmt`'s
 /// equivalent doc comment.
 #[derive(Debug, Clone)]
@@ -1356,8 +1378,8 @@ pub enum ExprKind {
     // access is a `DynamicPropertyAccess`/`DynamicMethodCall` below, not
     // this variant - `$prop`'s own runtime value, not its declared name,
     // is the real member name.
-    PropertyAccess(Box<Expr>, Ident, bool),
-    MethodCall(Box<Expr>, Ident, Vec<Arg>, bool),
+    PropertyAccess(Box<Expr>, Ident, ObjectOperator),
+    MethodCall(Box<Expr>, Ident, Vec<Arg>, ObjectOperator),
     // `$obj->{$name}` / `$obj->{$name}(...)` - the property/method name is
     // itself computed from an expression, not statically known, so it
     // can't share PropertyAccess/MethodCall's plain-String name. Still

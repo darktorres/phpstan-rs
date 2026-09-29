@@ -209,7 +209,7 @@ impl<'a> Checker<'a> {
                         return Type::mixed();
                     };
                     let ty = self.native_method_return(class, method);
-                    if *nullsafe && !ty.is_mixed() {
+                    if nullsafe.is_nullsafe() && !ty.is_mixed() {
                         Type::union(ty, Type::null())
                     } else {
                         ty
@@ -234,7 +234,7 @@ impl<'a> Checker<'a> {
                         return Type::mixed();
                     };
                     let ty = self.native_property_type(class, prop, false);
-                    if *nullsafe && !ty.is_mixed() {
+                    if nullsafe.is_nullsafe() && !ty.is_mixed() {
                         Type::union(ty, Type::null())
                     } else {
                         ty

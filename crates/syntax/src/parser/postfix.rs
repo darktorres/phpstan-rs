@@ -81,7 +81,12 @@ impl Parser {
                     if self.check(&Token::LParen) {
                         let (args, is_fcc) = self.parse_args()?;
                         let call = self.expr(
-                            ExprKind::MethodCall(Box::new(expr), name, args, nullsafe),
+                            ExprKind::MethodCall(
+                                Box::new(expr),
+                                name,
+                                args,
+                                ObjectOperator::from_nullsafe(nullsafe),
+                            ),
                             start,
                         );
                         expr = if is_fcc {
@@ -91,7 +96,11 @@ impl Parser {
                         };
                     } else {
                         expr = self.expr(
-                            ExprKind::PropertyAccess(Box::new(expr), name, nullsafe),
+                            ExprKind::PropertyAccess(
+                                Box::new(expr),
+                                name,
+                                ObjectOperator::from_nullsafe(nullsafe),
+                            ),
                             start,
                         );
                     }

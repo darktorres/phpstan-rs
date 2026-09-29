@@ -131,7 +131,11 @@ impl Parser {
                         _ => {
                             let name = self.expect_ident_spanned()?;
                             self.expr(
-                                ExprKind::PropertyAccess(Box::new(expr), name, nullsafe),
+                                ExprKind::PropertyAccess(
+                                    Box::new(expr),
+                                    name,
+                                    ObjectOperator::from_nullsafe(nullsafe),
+                                ),
                                 start,
                             )
                         }

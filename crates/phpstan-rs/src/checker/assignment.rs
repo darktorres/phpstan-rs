@@ -12,8 +12,12 @@ use types::{Shape, ShapeKey, Type};
 /// real, disclosed gap matching how rare it is in practice.
 pub(crate) fn contains_nullsafe(expr: &Expr) -> bool {
     syntax::stack::guard(|| match &expr.peeled().kind {
-        ExprKind::PropertyAccess(base, _, nullsafe) => *nullsafe || contains_nullsafe(base),
-        ExprKind::MethodCall(base, _, _, nullsafe) => *nullsafe || contains_nullsafe(base),
+        ExprKind::PropertyAccess(base, _, nullsafe) => {
+            nullsafe.is_nullsafe() || contains_nullsafe(base)
+        }
+        ExprKind::MethodCall(base, _, _, nullsafe) => {
+            nullsafe.is_nullsafe() || contains_nullsafe(base)
+        }
         ExprKind::Index(base, _) => contains_nullsafe(base),
         ExprKind::StaticCall(StaticTarget::Expr(base), _, _)
         | ExprKind::DynamicStaticCall(StaticTarget::Expr(base), _, _)

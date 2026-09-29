@@ -1742,7 +1742,9 @@ impl<'a> Checker<'a> {
             let ExprKind::Assign(lhs, rhs) = &e.peeled().kind else {
                 return;
             };
-            let ExprKind::PropertyAccess(recv, prop_name, false) = &lhs.peeled().kind else {
+            let ExprKind::PropertyAccess(recv, prop_name, ObjectOperator::Arrow) =
+                &lhs.peeled().kind
+            else {
                 return;
             };
             if !matches!(&recv.peeled().kind, ExprKind::Variable(v) if **v == *"this") {

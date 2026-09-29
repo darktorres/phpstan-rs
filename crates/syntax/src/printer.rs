@@ -363,12 +363,12 @@ fn write_expr_unguarded(out: &mut String, e: &Expr) {
         }
         ExprKind::PropertyAccess(object, name, nullsafe) => {
             write_expr(out, object);
-            out.push_str(if *nullsafe { "?->" } else { "->" });
+            out.push_str(if nullsafe.is_nullsafe() { "?->" } else { "->" });
             out.push_str(name);
         }
         ExprKind::MethodCall(object, name, args, nullsafe) => {
             write_expr(out, object);
-            out.push_str(if *nullsafe { "?->" } else { "->" });
+            out.push_str(if nullsafe.is_nullsafe() { "?->" } else { "->" });
             out.push_str(name);
             write_args(out, args);
         }

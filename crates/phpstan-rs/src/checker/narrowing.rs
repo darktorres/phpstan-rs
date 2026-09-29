@@ -65,9 +65,8 @@ fn mirror_comparison(op: &BinOp) -> BinOp {
 /// or this expression could never have been reached at all).
 pub(super) fn nullsafe_receiver(e: &Expr) -> Option<&Expr> {
     match &e.kind {
-        ExprKind::PropertyAccess(base, _, true) | ExprKind::MethodCall(base, _, _, true) => {
-            Some(base)
-        }
+        ExprKind::PropertyAccess(base, _, ObjectOperator::NullsafeArrow)
+        | ExprKind::MethodCall(base, _, _, ObjectOperator::NullsafeArrow) => Some(base),
         _ => None,
     }
 }
@@ -602,7 +601,8 @@ fn condition_alias_targets(rhs: &Expr) -> Option<Vec<String>> {
             ExprKind::Unary(UnaryOp::Not, inner) => condition_alias_targets(inner),
             // Targets the *receiver*'s own key, not the chain's - see
             // `nullsafe_receiver`'s own doc comment for why.
-            ExprKind::PropertyAccess(base, _, true) | ExprKind::MethodCall(base, _, _, true) => {
+            ExprKind::PropertyAccess(base, _, ObjectOperator::NullsafeArrow)
+            | ExprKind::MethodCall(base, _, _, ObjectOperator::NullsafeArrow) => {
                 Some(vec![narrowing_key(base)?])
             }
             _ => None,

@@ -212,7 +212,7 @@ fn braced_property_access_interpolation_parses_as_a_property_access() {
     };
     assert!(matches!(&base.kind, ExprKind::Variable(v) if **v == *"obj"));
     assert_eq!(&*prop.name, "prop");
-    assert!(!nullsafe);
+    assert!(!nullsafe.is_nullsafe());
 }
 
 #[test]

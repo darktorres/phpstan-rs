@@ -952,8 +952,12 @@ fn find_preg_quote_calls<'a>(e: &'a Expr, out: &mut Vec<&'a [Arg]>) {
 /// needs.
 pub(crate) fn contains_nullsafe_access(expr: &Expr) -> bool {
     syntax::stack::guard(|| match &expr.peeled().kind {
-        ExprKind::PropertyAccess(base, _, nullsafe) => *nullsafe || contains_nullsafe_access(base),
-        ExprKind::MethodCall(base, _, _, nullsafe) => *nullsafe || contains_nullsafe_access(base),
+        ExprKind::PropertyAccess(base, _, nullsafe) => {
+            nullsafe.is_nullsafe() || contains_nullsafe_access(base)
+        }
+        ExprKind::MethodCall(base, _, _, nullsafe) => {
+            nullsafe.is_nullsafe() || contains_nullsafe_access(base)
+        }
         ExprKind::DynamicPropertyAccess(base, _) => contains_nullsafe_access(base),
         ExprKind::DynamicMethodCall(base, _, _) => contains_nullsafe_access(base),
         ExprKind::StaticPropertyFetch(StaticTarget::Expr(base), _)

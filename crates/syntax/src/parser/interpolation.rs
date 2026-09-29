@@ -96,7 +96,7 @@ impl Parser {
                                     end,
                                 },
                             },
-                            nullsafe,
+                            ObjectOperator::from_nullsafe(nullsafe),
                         ),
                         span: Span {
                             start: var_start,

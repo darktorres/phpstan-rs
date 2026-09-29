@@ -1020,7 +1020,7 @@ impl<'a> Checker<'a> {
                 // widened to nullable on a later loop iteration or an
                 // earlier call still looks non-nullable on this single
                 // pass.
-                if *nullsafe
+                if nullsafe.is_nullsafe()
                     && self.loop_depth == 0
                     && !matches!(&recv.kind, ExprKind::Variable(n) if self.static_var_names.contains(n.as_ref()))
                     && type_definitely_excludes_null(&recv_ty)
@@ -1056,7 +1056,7 @@ impl<'a> Checker<'a> {
                 // is: `$x?->method()` on a `null`-only `$x` short-circuits
                 // to `null` rather than erroring, while plain
                 // `$x->method()` on the same `$x` is a real bug.
-                let nonobject_ty = if *nullsafe {
+                let nonobject_ty = if nullsafe.is_nullsafe() {
                     recv_ty.without(&Type::null())
                 } else {
                     recv_ty.clone()
@@ -1328,7 +1328,9 @@ impl<'a> Checker<'a> {
                 // null, on top of whatever the method's own return type
                 // is - real, implicit nullability a plain `->` doesn't
                 // carry.
-                if (*nullsafe || postfix_chain_has_nullsafe(recv)) && !result.is_mixed() {
+                if (nullsafe.is_nullsafe() || postfix_chain_has_nullsafe(recv))
+                    && !result.is_mixed()
+                {
                     Type::union(result, Type::null())
                 } else {
                     result
@@ -2812,7 +2814,7 @@ impl<'a> Checker<'a> {
                 // `NullsafePropertyFetchRule` exactly. Guarded by
                 // `loop_depth`/`static_var_names` - see the identical
                 // guard on the `MethodCall` arm above for why.
-                if *nullsafe
+                if nullsafe.is_nullsafe()
                     && self.loop_depth == 0
                     && !matches!(&base.kind, ExprKind::Variable(n) if self.static_var_names.contains(n.as_ref()))
                     && type_definitely_excludes_null(&base_ty)
@@ -2859,7 +2861,7 @@ impl<'a> Checker<'a> {
                 // handling as `method.nonObject` above, checked first so
                 // it short-circuits before `property.notFound` ever gets
                 // a chance to also fire on the same access.
-                let nonobject_ty = if *nullsafe {
+                let nonobject_ty = if nullsafe.is_nullsafe() {
                     base_ty.without(&Type::null())
                 } else {
                     base_ty.clone()
@@ -2955,7 +2957,9 @@ impl<'a> Checker<'a> {
                 // shared with `infer_expr`'s identical arm - see its doc
                 // comment.
                 let result = self.property_access_type(&base_ty.without(&Type::null()), prop);
-                if (*nullsafe || postfix_chain_has_nullsafe(base)) && !result.is_mixed() {
+                if (nullsafe.is_nullsafe() || postfix_chain_has_nullsafe(base))
+                    && !result.is_mixed()
+                {
                     Type::union(result, Type::null())
                 } else {
                     result
@@ -4514,7 +4518,9 @@ impl<'a> Checker<'a> {
                 // null, on top of whatever the method's own return type
                 // is - real, implicit nullability a plain `->` doesn't
                 // carry.
-                if (*nullsafe || postfix_chain_has_nullsafe(recv)) && !result.is_mixed() {
+                if (nullsafe.is_nullsafe() || postfix_chain_has_nullsafe(recv))
+                    && !result.is_mixed()
+                {
                     Type::union(result, Type::null())
                 } else {
                     result
@@ -4704,7 +4710,9 @@ impl<'a> Checker<'a> {
                 let result = self.property_access_type(&base_ty, prop);
                 // Same implicit nullability as `?->method()` just above,
                 // for `$x?->prop`.
-                if (*nullsafe || postfix_chain_has_nullsafe(base)) && !result.is_mixed() {
+                if (nullsafe.is_nullsafe() || postfix_chain_has_nullsafe(base))
+                    && !result.is_mixed()
+                {
                     Type::union(result, Type::null())
                 } else {
                     result
@@ -6261,10 +6269,10 @@ pub(crate) fn postfix_chain_has_nullsafe(base: &Expr) -> bool {
     let base = base.peeled();
     syntax::stack::guard(|| match &base.kind {
         ExprKind::PropertyAccess(inner, _, nullsafe) => {
-            *nullsafe || postfix_chain_has_nullsafe(inner)
+            nullsafe.is_nullsafe() || postfix_chain_has_nullsafe(inner)
         }
         ExprKind::MethodCall(inner, _, _, nullsafe) => {
-            *nullsafe || postfix_chain_has_nullsafe(inner)
+            nullsafe.is_nullsafe() || postfix_chain_has_nullsafe(inner)
         }
         _ => false,
     })
