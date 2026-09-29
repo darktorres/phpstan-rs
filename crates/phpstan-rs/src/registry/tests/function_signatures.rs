@@ -507,13 +507,10 @@ fn a_mixed_native_hint_still_trusts_the_doc_type_fully() {
     );
 }
 
-// `is_super_type_of`'s `Object` handling is name-equality only (no class
-// hierarchy), so a doc type naming a real subclass of a more generic
-// native return hint must not be treated as "incompatible" and
-// discarded in favor of the generic native type - any class name doc
-// member must always be kept (the reconciliation above only ever
-// discards the one class-name case it can prove reliably, a literal
-// `resource` doc member).
+// No class hierarchy exists yet when a declaration's types are
+// reconciled, so a doc type naming a subclass of the native hint's class
+// can't be told from a stale one and is kept; only a `resource` doc
+// member is ever discarded.
 #[test]
 fn a_doc_type_naming_a_real_subclass_of_the_native_hint_is_not_discarded() {
     let r = build_registry(

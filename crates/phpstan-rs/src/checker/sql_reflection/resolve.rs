@@ -81,8 +81,8 @@ pub(crate) fn resolve_sql_row_type(
 /// column that's also a mapped scalar field - the entity's own mapped
 /// type can be strictly more precise (a narrower non-null guarantee the
 /// app enforces above the DB's own nullability, a value-object wrapper,
-/// ...). Only ever *narrows*: `subtype(entity_ty, column_ty)` must
-/// hold, so a genuine disagreement (the entity's own type is wider, or
+/// ...). Only ever *narrows*: `column_ty` must be a super type of
+/// `entity_ty`, so a genuine disagreement (the entity's own type is wider, or
 /// simply incompatible) keeps the column-derived answer rather than
 /// silently trusting possibly-stale entity metadata over a live/static
 /// schema fact. Scoped to the same single-table, no-`JOIN` shape every

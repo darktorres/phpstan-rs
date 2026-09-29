@@ -186,7 +186,7 @@ impl<'a> Checker<'a> {
     /// Checks every entry - an interface's `extends A, B;` is real,
     /// valid PHP with more than one target. Operates purely on the
     /// already-indexed, already name-resolved `ClassReflection`, so this needs
-    /// no raw `ClassDecl`/`ClassDecl` at all and covers both uniformly
+    /// no raw `ClassDecl` at all and covers every class-like uniformly
     /// from one call site. Existence-only - kind compatibility (a
     /// class `implements`-ing another class instead of an interface) is
     /// `check_inheritance_target_kinds`'.
@@ -538,24 +538,16 @@ impl<'a> Checker<'a> {
     /// see `check_require_tag_types`'s identical doc comment for why the
     /// RHS is re-parsed directly from the declaration's own doc comment
     /// rather than read back from the already-flattened
-    /// `ClassReflection::sealed`. Takes scalars rather than a whole
-    /// `&ClassDecl` since `@phpstan-sealed`'s `sealed.onEnum` check needs
-    /// a real `StmtKind::ClassDecl` call site too - `ClassDecl` and
-    /// `ClassDecl` are different AST types with no shared struct to
-    /// borrow fields from.
-    pub(crate) fn check_sealed_tag_types(
-        &mut self,
-        doc_comment: Option<&str>,
-        span: Span,
-        is_enum: bool,
-    ) {
-        let Some(doc) = doc_comment.map(docblock::parse) else {
+    /// `ClassReflection::sealed`.
+    pub(crate) fn check_sealed_tag_types(&mut self, c: &ClassDecl) {
+        let Some(doc) = c.doc_comment.as_deref().map(docblock::parse) else {
             return;
         };
         if doc.sealed.is_empty() {
             return;
         }
-        if is_enum {
+        let span = c.span;
+        if c.kind == ClassKind::Enum {
             self.report(
                 "PHPDoc tag @phpstan-sealed is only valid on class or interface.".to_string(),
                 span,

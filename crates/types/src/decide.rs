@@ -96,11 +96,9 @@ impl Type {
 /// `refine_callable_member` above deliberately leaves as a bare
 /// `Repr::Callable` rather than the native `Object("Closure", _)` itself,
 /// all genuinely *did* address that native alternative - but
-/// `Relation::is_super_type_of`'s own Object handling is name-equality only, with
-/// none of those leniencies (this function has no `&Registry` to check
-/// real hierarchy or any of `Registry::accepts`'s own object-
-/// specific rules with - see `member_possible_given_native`'s own
-/// identical "no hierarchy this early" doc comment). Wrongly adding a
+/// this runs with `Relation::structural()`, which knows no class
+/// hierarchy (the registry is still being built - see
+/// `member_possible_given_native`), so it can't tell. Wrongly adding a
 /// covered class-named member back produces a real, new false positive
 /// (confirmed twice over a first pass of this fix: the `object`
 /// pseudo-type case broke `a_call_through_a_method_scoped_backfilled_template_binds_t_from_the_real_argument`/
@@ -173,10 +171,9 @@ fn refine_callable_member(m: Type, native_ty: &Type) -> Type {
 }
 
 /// Whether a docblock-derived member `m` could still be real given
-/// `native_ty`. A bare `subtype(m, native_ty)` call is reliable for
-/// anything except a named class/interface (`Repr::Object`), where
-/// `is_super_type_of`'s own Object handling is name-equality only: this
-/// project has no class hierarchy to consult at the point `resolve_type`
+/// `native_ty`. `Relation::structural()` answers reliably for anything
+/// except a named class/interface (`Repr::Object`), whose subclasses it
+/// can't see: there is no class hierarchy to consult at the point this
 /// runs (`FunctionReflection::from_decl` is still building the very registry a
 /// real lookup would need, long before one exists), so treating a
 /// hierarchy mismatch as "incompatible" would wrongly discard a common
@@ -251,26 +248,16 @@ fn member_possible_given_native(m: &Type, native_ty: &Type) -> bool {
                     | Type(Repr::Array(..))
                     | Type(Repr::Null)
             ),
-            // A PHPStan/Psalm callable-shape doc member (`Closure(int):
-            // string`) degrades to plain `Repr::Callable` at parse time
-            // (`types::parse_type_atom`'s own documented simplification - no
-            // per-parameter/return signature is tracked) - the same
-            // information loss `Object`'s own case just above already has to
-            // work around, just one layer earlier. Without this,
-            // `subtype(Callable, Closure)` (correctly `false` in general -
-            // not every callable is a `Closure` instance) would wrongly read
-            // as "the doc member can't be right," discarding it even when
-            // the native hint is exactly `Closure` (e.g. a `null|Closure
-            // $predicate` parameter documented as `(Closure(Tv): bool)|null`
-            // resolving to bare `null` once the `Closure(...)`-shaped member
-            // is filtered out).
+            // A callable doc member (`callable(int): string`) may be a
+            // `Closure` under a native `Closure` hint, though not every
+            // callable is one.
             Type(Repr::Callable(_)) => true,
             // A conditional return type (`($p is X ? A : B)`) is possible if
             // either branch is - each call site picks (or unions) its own.
             // Checked branch-wise through this same function, so a branch
             // naming a template or a class is trusted the same way a plain
-            // one is, instead of failing `is_super_type_of`'s name-equality object
-            // check against the native class.
+            // one is, instead of failing the structural relation's
+            // hierarchy-blind object check against the native class.
             Type(Repr::Conditional {
                 if_true, if_false, ..
             }) => {

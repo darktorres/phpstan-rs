@@ -403,19 +403,10 @@ pub fn generalize_by_key_set(members: Vec<Type>) -> Vec<Type> {
     passthrough
 }
 
-/// The "lossless absorption" half of `Type::union`' own literal-dedup
-/// fix - an `IntLiteral`/`StringLiteral`/`True`/`False` member is
-/// redundant once its own *exact* base type is already present in the
-/// same union (an `Int` member already includes every possible
-/// `IntLiteral`'s value, etc.), mirroring `is_super_type_of`'s own first four
-/// match arms specifically (`types.rs` lines 498-500) rather than
-/// calling `is_super_type_of` itself - `is_super_type_of`'s int-to-float widening
-/// rule is a real, load-bearing *assignability* fact (an int argument is
-/// accepted wherever a float is declared), not a "this value's
-/// representation is a subset of that value's representation" one, so
-/// reusing it here would also silently drop an `IntLiteral` sitting next
-/// to an unrelated `Float` member, discarding real information for a
-/// relation that only holds for compatibility, not equivalence.
+/// The base type a literal, range or accessory-refined member widens to
+/// (`1` to `int`, `'a'` to `string`, `non-empty-string` to `string`): a
+/// union holding that base type already holds the member, so the member
+/// goes.
 fn literal_base_type(t: &Type) -> Option<Type> {
     match t {
         Type(Repr::IntLiteral(_)) => Some(Type::int()),

@@ -1858,7 +1858,7 @@ impl<'a> Checker<'a> {
                         self.check_require_tags(&fqn, c.span);
                         self.check_require_tag_types(c);
                         self.check_sealed_hierarchy(&fqn, c.span);
-                        self.check_sealed_tag_types(c.doc_comment.as_deref(), c.span, is_enum);
+                        self.check_sealed_tag_types(c);
                         self.check_unknown_phpstan_tags_in_class(c);
                         if self.settings.sidz.check_magic_numbers {
                             self.check_magic_numbers_in_properties(&c.properties);

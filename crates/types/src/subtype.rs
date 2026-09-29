@@ -83,10 +83,6 @@ impl Relation<'_> {
                 (Type(Repr::True), Type(Repr::Bool)) | (Type(Repr::False), Type(Repr::Bool)) => {
                     true
                 }
-                // PHP's one documented exception to its own scalar type
-                // declarations, even under strict_types=1: an int value is
-                // always accepted wherever a float is declared (int-to-float
-                // widening - explicit, load-bearing language behavior).
                 (Type(Repr::FloatLiteral(_)), Type(Repr::Float)) => true,
 
                 // `int<min, max>` ranges. `IntRange` fully replaces

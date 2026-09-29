@@ -853,8 +853,8 @@ impl<'a> Checker<'a> {
                 }
             }
             // `check_program`'s own top-level loop already handles a
-            // top-level FunctionDecl/ClassDecl/ClassDecl by checking its
-            // body - but any of the same three declared nested inside a
+            // top-level FunctionDecl/ClassDecl by checking its
+            // body - but either declared nested inside a
             // block (the common `if (!function_exists('foo')) { function
             // foo() {} }` polyfill idiom, or a class conditionally
             // declared inside an if) also needs its body checked here,
@@ -950,7 +950,7 @@ impl<'a> Checker<'a> {
             // already falls through to this same `check_stmt` catch-all
             // for anything it doesn't special-case) and any nested
             // occurrence - `GlobalConst` needs no class/FQN context the
-            // way `ClassDecl`/`ClassDecl` do, so one arm here is enough.
+            // way `ClassDecl` does, so one arm here is enough.
             StmtKind::GlobalConst(consts) => {
                 self.check_global_const_attributes(consts, stmt.span, label);
                 for c in consts {

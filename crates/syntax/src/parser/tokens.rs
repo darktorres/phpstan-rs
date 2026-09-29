@@ -238,12 +238,6 @@ impl Parser {
         })
     }
 
-    // A qualified name is one identifier, optionally namespaced by
-    // backslash-separated segments (`Foo`, `\App\Foo`, `App\Foo\Bar`).
-    // Consecutive bare identifiers with no backslash between them are two
-    // separate tokens, not one name - `array BASE_SECTIONS` must not
-    // collapse into "arrayBASE_SECTIONS", which silently swallowed a
-    // constant's own name until this was fixed.
     /// Consumes one identifier *or* keyword token as a name segment - most
     /// keywords are only reserved in declaration position in real PHP
     /// ("semi-reserved words"), so `Enum`/`Match`/`New`/... are all valid
@@ -281,6 +275,10 @@ impl Parser {
         }
     }
 
+    /// A qualified name: one identifier, optionally namespaced by
+    /// backslash-separated segments (`Foo`, `\App\Foo`, `App\Foo\Bar`).
+    /// Two bare identifiers with no backslash between them are two names,
+    /// not one: `array BASE_SECTIONS` isn't "arrayBASE_SECTIONS".
     pub(crate) fn parse_qualified_name(&mut self) -> Name {
         let leading_backslash = self.eat(&Token::Backslash);
         let Some(first) = self.take_name_segment() else {

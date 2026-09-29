@@ -224,12 +224,9 @@ impl Relation<'_> {
                     }
                     true
                 }
-                // Hierarchy-aware version of `Relation::is_super_type_of`'s own bare
-                // `EnumCase -> Object` name-equality rule - a case
-                // is assignable not just to its own enum's bare type but to
-                // `UnitEnum`/`BackedEnum` (both synthesized `implements`
-                // entries every enum gets, see `ClassReflection::from_enum_decl`)
-                // and any interface the enum itself declares.
+                // A case is an instance of its enum and of everything the
+                // enum implements: `UnitEnum`, `BackedEnum` and its declared
+                // interfaces.
                 (Type(Repr::EnumCase(fqn, _)), Type(Repr::Object(b, _))) => {
                     fqn == b || self.hierarchy.is_subclass_of(fqn, b)
                 }
@@ -237,13 +234,8 @@ impl Relation<'_> {
                 (Type(Repr::EnumCase(class_a, case_a)), Type(Repr::EnumCase(class_b, case_b))) => {
                     class_a == class_b && case_a == case_b
                 }
-                // Same hierarchy-aware override as the plain Object-vs-Object
-                // arm just above, one level up: `Relation::is_super_type_of`'s own
-                // `ClassString` arm inherits its non-hierarchy-aware Object
-                // comparison (name equality only), so without this a
-                // `class-string<Derived>` value would incorrectly fail to
-                // satisfy a `class-string<Base>`-typed parameter even when
-                // `Derived extends Base`.
+                // `class-string<A>` is accepted where `class-string<B>` is
+                // when an `A` is where a `B` is (`Derived extends Base`).
                 // `interface-string`/`trait-string`: real PHPStan draws no
                 // distinction from bare `class-string` here, but this project
                 // is allowed to check more strictly - `ClassReflection::kind`
@@ -252,21 +244,10 @@ impl Relation<'_> {
                     self.class_string_may_be_kind(a, *kind)
                 }
                 (Type(Repr::ClassString(a)), Type(Repr::ClassString(b))) => self.accepts_type(a, b),
-                // Mirrors `Relation::is_super_type_of`'s own bound-aware `TemplateParam`
-                // arm (see its doc comment for the full reasoning and why
-                // this needs to run *before* the `Union` arms just below),
-                // but recurses through `self.accepts` rather than the
-                // plain, hierarchy-*unaware* `Relation::is_super_type_of`: delegating
-                // straight to `Relation::is_super_type_of(sub, sup)` would silently
-                // drop the class-hierarchy-walking half of this whole method
-                // for any bound check involving a `TemplateParam`, wrongly
-                // flagging code where a template's own bound is a union of
-                // concrete classes needing a real ancestor walk to match a
-                // single-class target (e.g. `@phpstan-template TNodeType of
-                // PreInc|PreDec|PostInc|PostDec` satisfying `Rule<TNodeType>`'s
-                // own `TNodeType of Node` bound - each of those four classes
-                // extends `Node` only via `Expr`, a multi-level ancestor
-                // chain plain name-equality can't see).
+                // A template is accepted as its bound is, before the union
+                // arms below take the bound apart (`TNodeType of
+                // PreInc|PreDec` where a `Node` is expected, each member
+                // extending `Node` through `Expr`).
                 (Type(Repr::TemplateParam(tp)), _) => self.accepts_type(&tp.bound, sup),
                 // Mirrors `Relation::is_super_type_of`'s own identically-placed
                 // `Repr::Conditional` arm exactly (see that arm's own doc

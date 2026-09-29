@@ -134,18 +134,10 @@ fn is_object_like(ty: &Type) -> bool {
 }
 
 impl Relation<'_> {
-    /// `relation` (the checker's, over the registry's classes) is needed for
-    /// the `Union` arm's own member filter below - plain `Relation::is_super_type_of`
-    /// has no class-hierarchy awareness at all, so it only ever matches
-    /// a union member against `target` by exact structural equality. An
-    /// interface a concrete class implements only transitively (through an
-    /// intermediate abstract class) would otherwise narrow the whole union
-    /// down to zero matching members, falling through to the
-    /// `target.clone()` case below and discarding every member's own
-    /// additional properties/methods entirely - `Relation::accepts`
-    /// is the identical hierarchy-aware check `is_super_type_of` is documented as
-    /// a non-hierarchy-aware subset of, so using it here can only keep
-    /// strictly more genuinely-compatible members than before, never fewer.
+    /// `original` where a check that its value is of `target` passed. A
+    /// member `target` accepts, through this relation's class hierarchy,
+    /// stays whole: a class implementing the target interface only through
+    /// an ancestor keeps its own members.
     pub fn narrow(&self, original: &Type, target: &Type) -> Type {
         match original {
             Type(Repr::Union(members)) | Type(Repr::BenevolentUnion(members)) => {
@@ -204,24 +196,9 @@ impl Type {
     /// for it failed - the "not null" half of a `=== null` guard clause, the
     /// most common narrowing pattern in real code.
     ///
-    /// A union member is dropped when it's a subtype of
-    /// `excluded`, not just when it's structurally identical to it - the same
-    /// reasoning as `Relation::narrow` above, mirrored for exclusion (`is_array
-    /// (...)`'s false-branch exclusion of `Array(Mixed)` must also drop a
-    /// specific-element `Array(String)` member, since it's never
-    /// `==` to the generic target it should match as "an array").
-    ///
-    /// Deliberately **not** applied to the non-`Union` fallback below
-    /// (`other if other == excluded => Repr::Never`): `is_super_type_of`'s own
-    /// int-to-float argument-coercion rule (`Repr::Int` is a subtype of
-    /// `Repr::Float`) would make `Type::without(Repr::Int,
-    /// Repr::Float)` wrongly collapse a plain, correctly-known `int` to
-    /// `Repr::Never` - the value genuinely is an int, and its coercibility to
-    /// `float` for parameter-passing purposes has nothing to do with whether
-    /// it should be excluded here. Every existing caller of this branch
-    /// (`isset`'s `Null` exclusion, and similar plain-`Null` exclusions
-    /// elsewhere) is unaffected either way, since no other `Type` variant is
-    /// ever a subtype of `Null`.
+    /// Whatever is a subtype of `excluded` goes, not just what is
+    /// identical to it: `is_array(...)`'s false branch excludes
+    /// `array<mixed>`, which must drop an `array<string>` too.
     pub fn without(&self, excluded: &Type) -> Type {
         syntax::stack::guard(|| {
             match self {
@@ -311,7 +288,13 @@ impl Type {
                 Type(Repr::Bool) if *excluded == Type::bool_literal(false) => {
                     Type::bool_literal(true)
                 }
-                other if other == excluded => Type::never(),
+                other
+                    if crate::Relation::structural()
+                        .is_super_type_of(excluded, other)
+                        .yes() =>
+                {
+                    Type::never()
+                }
                 other => other.clone(),
             }
         })

@@ -139,10 +139,8 @@ fn reconcile_doc_with_native(
     // only real type information. A `mixed` native doesn't need its own
     // exclusion here: `mixed` as a super type is unconditionally
     // `true`, so `reconcile_with_native` already keeps every doc member
-    // when native is `mixed`, for free. `object`'s own subtyping is
-    // name-equality-only (see `Relation::is_super_type_of`'s own doc comment), so
-    // it doesn't get the same automatic fallout and still needs the
-    // explicit guard.
+    // when native is `mixed`, for free. `object` holds no `resource`, so
+    // reconciling would drop the doc's `resource` member.
     match (native_hint, native_ty) {
         (Some(native), Some(native_ty))
             if !matches!(native.kind, TypeHintKind::Keyword(NativeType::Object, _)) =>

@@ -599,19 +599,9 @@ impl<'a> Checker<'a> {
         }
     }
 
-    /// Whether `ty` could ever satisfy `target` - deliberately not a
-    /// direct `self.accepts(target, ty).yes()` call. `mixed`
-    /// (an untyped parameter) must satisfy anything (real PHPStan's own
-    /// `mixed.isCallable()`/`isSuperTypeOf()` is always `maybe`, never
-    /// `no`) - `subtype(Mixed, _)` has no such arm and would wrongly
-    /// flag every untyped parameter. A `Union` (e.g. `callable|null`) must
-    /// satisfy when *any* member does, not when *all* do -
-    /// `subtype(Union, _)` requires all members, the right rule for
-    /// soundly narrowing a type but the wrong one for this "could this
-    /// ever be `target`" query; without this, a real, legal `?callable`
-    /// parameter would be wrongly flagged since `Null` alone isn't a
-    /// callable/Closure. Both guards protect against real false-positive
-    /// classes, not hypothetical ones.
+    /// Whether `ty` could ever satisfy `target`: `mixed` (an untyped
+    /// parameter) could be anything, and a union could when any member
+    /// is accepted, not only when all are (a `?callable` parameter).
     pub(crate) fn param_type_could_satisfy(&self, ty: &Type, target: &Type) -> bool {
         ty.is_mixed()
             || ty
