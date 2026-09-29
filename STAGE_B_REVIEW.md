@@ -300,7 +300,7 @@ Each fix needs a fixture.
   belong to which `use` statement. Replace them with one `trait_uses` list
   of `{ traits, doc_comment, adaptations }`. `resolved_trait_conflicts`
   derives from the adaptations.
-- [ ] **S4. Variables are names.** `ExprKind::Variable`, `Param.name`,
+- [x] **S4. Variables are names.** Done with F14b. `ExprKind::Variable`, `Param.name`,
   `ClosureUse.name` and `CatchClause.var` are `Arc<str>` while every other
   name is an interned `Name`.
 - [ ] **S5. Promotion is one option.** `Param`'s `promoted_visibility`,
@@ -312,7 +312,7 @@ Each fix needs a fixture.
   with the `set` parameter on the hook.
 - [ ] **S7. A body is optional.** `FunctionDecl.has_body` sits beside an
   always-present `body`; make `body` an `Option`.
-- [ ] **S8. Nullsafe is named.** `PropertyAccess` and `MethodCall` carry
+- [x] **S8. Nullsafe is named.** Done in `18708302`; a dynamic access carries it too (`e03f6ac9`). `PropertyAccess` and `MethodCall` carry
   the nullsafe flag as a bare positional `bool`; give it a name (a named
   field or an enum).
 - [ ] **S9. The `"?"` sentinel survives.**
