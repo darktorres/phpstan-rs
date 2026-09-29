@@ -201,7 +201,7 @@ Each fix needs a fixture.
   the function's signature as a closure (`Closure(string): int<0, max>`),
   so a call through the value is checked and typed.
 
-- [ ] **P6. `mixed` can't lose `null`.** Inside `if (isset($x))` (and
+- [x] **P6. `mixed` can't lose `null`.** Done in `67ed2a1d`. Inside `if (isset($x))` (and
   after `$x !== null`) a `mixed` `$x` stays `mixed`, where it is `mixed`
   without `null` (PHPStan's `mixed~null`), so a later `=== null` isn't
   always false and a nullable argument check can't use it. `Mixed` carries
