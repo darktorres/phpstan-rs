@@ -523,11 +523,12 @@ through `check-project`.
   properties. (found fixing F62) Done in `22d4ff21` for a function's own body
   and its missing-type check; a caller still sees the registry's merged
   type, which C7's resolver owns.
-- [ ] **F64. `{$x = ...}` in a string parses.** PHP only allows a
+- [x] **F64. `{$x = ...}` in a string parses.** Done in `7d08a968`. PHP only allows a
   variable expression after `{$` (`"{$x = strlen($s)}"` is a parse error:
   unexpected `=`); the interpolation sub-parser takes any expression.
   (found fixing F21)
-- [ ] **F65. A first-class callable's type has no signature.**
+- [x] **F65. A first-class callable's type has no signature.** Done in
+  `b3412c22`.
   `strlen(...)` and `$obj->m(...)` infer as a bare `Closure`
   (`checker/expr.rs`'s inference arm), though the function or method is
   known; a closure literal carries its `Closure(...)` signature. So a
