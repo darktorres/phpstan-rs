@@ -190,7 +190,9 @@ Each fix needs a fixture.
   a string literal's answer is known (`numeric_value`), as is an int's
   or a float's (`true`) and an array's (`false`). (found fixing F48)
 
-- [ ] **P9. Private-property facts cost a second check of most files.**
+- [x] **P9. Private-property facts cost a second check of most files.**
+  Done in `d4ae7678`: sites are judged after the one pass; user CPU on
+  Piwigo 42 s to 29.5 s, output unchanged.
   Profiled on Piwigo (release, frame pointers, after P2):
   `Project::collect_property_assign_facts` runs `check_program` over every
   file that may write a private property, only to harvest
