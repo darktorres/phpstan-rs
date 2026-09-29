@@ -41,10 +41,15 @@ impl Relation<'_> {
                     if arg.is_mixed() {
                         return;
                     }
-                    // `T of array<K, V>` binds `K` and `V` too.
+                    // `T of array<K, V>` binds `K` and `V` too, and the
+                    // bound holds the argument with what they are bound to
+                    // (`R of Repo<E>` holds a `Repo<Entity>` once `E` is
+                    // `Entity`).
                     self.infer_template_bindings(&tp.bound, arg, bindings);
                     if matches!((*tp.bound).repr(), Repr::Mixed(..))
-                        || self.is_super_type_of(&tp.bound, arg).yes()
+                        || self
+                            .is_super_type_of(&tp.bound.substitute_templates(bindings, self), arg)
+                            .yes()
                     {
                         bind(bindings, &tp.name, arg.clone());
                     }
