@@ -637,11 +637,12 @@ through `check-project`.
   whitespace is `" \t\n\r\v\f"`). `concat` keeps `numeric` for a left
   operand with trailing whitespace: `'1 ' . '5'` is `'1 5'`, not numeric.
   (`56e1f538`) Done in `05fb20f6`; `$int . '+5'` and `$int . ' 5'` were numeric too.
-- [ ] **F57. An interpolated `$a[01]` reads key 1.** `classify_index_key`
+- [x] **F57. An interpolated `$a[01]` reads key 1.** `classify_index_key`
   (`lexer/strings.rs`) reads a simple-interpolation key with
   `parse::<i64>()`, so `"$a[01]"` gives `$a[1]` where PHP reads the string
   key `'01'` (php confirms). Only `0|[1-9][0-9]*`, optionally with a
   leading `-`, is an int there: `canonical_int_key`'s rule. (probed)
+  Done in `16dd8365`.
 
 ### Wrong types (from reading)
 
