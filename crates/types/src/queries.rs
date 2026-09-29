@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use crate::{
     AccessoryKind, CallSiteVariance, CallableSig, ConditionalSubject, Relation, Repr, Shape,
-    ShapeField, TrinaryLogic, Type,
+    ShapeField, ShapeKey, TrinaryLogic, Type,
 };
 
 impl Type {
@@ -318,14 +318,20 @@ impl Type {
 
     /// The loop widening of this type as it grows into `next`: an int
     /// keeps a bound that stayed put and opens the one that moved
-    /// (`0` then `0|1` is `int<0, max>`); an array shape keeping its keys
-    /// widens field by field, so a counter inside it doesn't cost its
-    /// siblings their types; anything else is `next` generalized.
+    /// (`0` then `0|1` is `int<0, max>`); array shapes, a union of them
+    /// read as one shape whose keys some members lack are optional, widen
+    /// field by field as long as they keep their keys or gain string ones
+    /// (a body writes finitely many), so a counter inside one doesn't cost
+    /// its siblings their types; anything else, an array gaining int keys
+    /// by appends among it, is `next` generalized.
     pub fn widen_towards(&self, next: &Type) -> Type {
-        if let (Repr::ArrayShape(before), Repr::ArrayShape(after)) = (self.repr(), next.repr())
-            && before.fields.len() == after.fields.len()
+        if let (Some(before), Some(after)) = (self.combined_shape(), next.combined_shape())
             && before.is_sealed() == after.is_sealed()
-            && after.fields.iter().all(|f| before.field(&f.key).is_some())
+            && before.fields.iter().all(|f| after.field(&f.key).is_some())
+            && after
+                .fields
+                .iter()
+                .all(|f| before.field(&f.key).is_some() || matches!(f.key, ShapeKey::Str(_)))
         {
             let widen = |old: &Type, new: &Type| {
                 if old == new {
@@ -372,6 +378,51 @@ impl Type {
                 (next_max == max).then_some(max).flatten(),
             ),
             _ => next.generalize(),
+        }
+    }
+
+    /// This array shape, or a union of array shapes as one shape: a key
+    /// every member has, and none has optional, is required, any other is
+    /// optional; a key's value joins the members', and other keys any
+    /// unsealed member allows join into the tail.
+    fn combined_shape(&self) -> Option<Shape> {
+        match self.repr() {
+            Repr::ArrayShape(shape) => Some((**shape).clone()),
+            Repr::Union(members) => {
+                let shapes: Vec<&Shape> = members
+                    .iter()
+                    .map(|m| match m.repr() {
+                        Repr::ArrayShape(shape) => Some(&**shape),
+                        _ => None,
+                    })
+                    .collect::<Option<_>>()?;
+                let mut fields: Vec<ShapeField> = Vec::new();
+                for shape in &shapes {
+                    for f in &shape.fields {
+                        match fields.iter_mut().find(|g| g.key == f.key) {
+                            Some(g) => {
+                                g.ty = Type::union(g.ty.clone(), f.ty.clone());
+                                g.optional |= f.optional;
+                            }
+                            None => fields.push(f.clone()),
+                        }
+                    }
+                }
+                for f in &mut fields {
+                    f.optional |= shapes.iter().any(|s| s.field(&f.key).is_none());
+                }
+                let unsealed = shapes
+                    .iter()
+                    .filter_map(|s| s.unsealed.as_deref().cloned())
+                    .reduce(|(k1, v1), (k2, v2)| (Type::union(k1, k2), Type::union(v1, v2)))
+                    .map(Box::new);
+                Some(Shape {
+                    fields,
+                    unsealed,
+                    next_index: None,
+                })
+            }
+            _ => None,
         }
     }
 
