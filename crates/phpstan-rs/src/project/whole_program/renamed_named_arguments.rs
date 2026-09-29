@@ -13,12 +13,11 @@
 
 use crate::checker::NamedArgumentCallFacts;
 use crate::registry::Registry;
-use crate::registry::class_decl_name;
 use rustc_hash::{FxHashMap, FxHashSet};
 use std::path::PathBuf;
 use std::sync::Arc;
-use syntax::ast::{ClassDecl, Stmt, StmtKind, Visibility};
-use syntax::name_resolution::NameContext;
+use syntax::ast::{ClassDecl, Stmt, Visibility};
+use syntax::declarations::{Declared, for_each_declaration};
 use syntax::token::Span;
 
 /// Project-wide merge of every analysed file's `NamedArgumentCallFacts`,
@@ -57,29 +56,23 @@ pub(crate) struct RenamedParameterOverride {
 
 pub(crate) type RenamedParameterOverrideFacts = Vec<RenamedParameterOverride>;
 
-/// Every renamed-parameter override declared by a top-level class in
-/// `programs`: each class's own methods in source order, then the
-/// methods it takes from used traits (sorted, skipping `__construct`,
-/// its own and abstract ones). Names resolve against the `namespace`
-/// and `use` statements seen so far in the file.
+/// Every renamed-parameter override declared by a class `programs`
+/// declare unconditionally: each class's own methods in source order,
+/// then the methods it takes from used traits (sorted, skipping
+/// `__construct`, its own and abstract ones).
 pub(crate) fn renamed_parameter_overrides<'p>(
     registry: &Registry,
     programs: impl IntoIterator<Item = &'p [Stmt]>,
 ) -> RenamedParameterOverrideFacts {
     let mut overrides = Vec::new();
     for program in programs {
-        let mut name_ctx = NameContext::default();
-        for stmt in program {
-            match &stmt.kind {
-                StmtKind::Namespace(name) => name_ctx.set_namespace(name),
-                StmtKind::Use(imports) => name_ctx.add_uses(imports),
-                StmtKind::ClassDecl(c) => {
-                    let fqn = name_ctx.declared_name(class_decl_name(c));
-                    class_overrides(registry, &fqn, c, &mut overrides);
-                }
-                _ => {}
+        for_each_declaration(program, |declaration, _| {
+            if let Declared::Class(c) = declaration.declared
+                && !declaration.conditional
+            {
+                class_overrides(registry, &declaration.name(), c, &mut overrides);
             }
-        }
+        });
     }
     overrides
 }

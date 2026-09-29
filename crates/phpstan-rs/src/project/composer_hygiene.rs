@@ -25,19 +25,18 @@
 use rustc_hash::{FxHashMap, FxHashSet};
 use std::path::{Path, PathBuf};
 
-use crate::registry::class_decl_name;
 use crate::registry::stubs;
 use composer::PackageOwner;
 use composer::constraint;
 use composer::manifest::{ComposerManifest, InstalledPackage, path_starts_with};
 use syntax::ast::*;
+use syntax::declarations::Declared;
 use syntax::token::{Position, Span};
 use syntax::visit::{Visitor, walk_expr, walk_stmts};
 
 use super::use_sites::{RefTarget, index_class_fn_refs_without_source};
 use super::{FileState, Project};
 use diagnostics::{Diagnostic, DiagnosticBuilder};
-use syntax::name_resolution::NameContext;
 
 /// PSR virtual packages and the interfaces a provider must implement.
 const PSR_VIRTUAL_PACKAGES: &[(&str, &[&str])] = &[
@@ -503,7 +502,7 @@ impl Project {
         diagnostics: &mut Vec<Diagnostic>,
     ) {
         let mut declared: Vec<(String, Span)> = Vec::new();
-        collect_declared_classes(&file.ast, &mut NameContext::default(), &mut declared);
+        collect_declared_classes(&file.ast, &mut declared);
         if declared.is_empty() {
             return;
         }
@@ -760,25 +759,14 @@ fn check_platform_php(manifest: &ComposerManifest, diagnostics: &mut Vec<Diagnos
     }
 }
 
-/// Every class-like `stmts` declares, with its name's span.
-fn collect_declared_classes(stmts: &[Stmt], ctx: &mut NameContext, out: &mut Vec<(String, Span)>) {
-    syntax::stack::guard(|| {
-        for stmt in stmts {
-            match &stmt.kind {
-                StmtKind::Namespace(name) => ctx.set_namespace(name),
-                StmtKind::Use(imports) => ctx.add_uses(imports),
-                StmtKind::ClassDecl(e) if e.kind == ClassKind::Enum => {
-                    out.push((ctx.declared_name(class_decl_name(e)), e.name_span))
-                }
-                StmtKind::ClassDecl(c) => {
-                    out.push((ctx.declared_name(class_decl_name(c)), c.name_span))
-                }
-                StmtKind::Block(body)
-                | StmtKind::Declare {
-                    body: Some(body), ..
-                } => collect_declared_classes(body, ctx, out),
-                _ => {}
-            }
+/// Every class-like `stmts` declares unconditionally, with its name's
+/// span.
+fn collect_declared_classes(stmts: &[Stmt], out: &mut Vec<(String, Span)>) {
+    syntax::declarations::for_each_declaration(stmts, |declaration, _| {
+        if let Declared::Class(c) = declaration.declared
+            && !declaration.conditional
+        {
+            out.push((declaration.name(), c.name_span));
         }
-    })
+    });
 }

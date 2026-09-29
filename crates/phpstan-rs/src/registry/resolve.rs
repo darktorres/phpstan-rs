@@ -687,7 +687,7 @@ impl Registry {
             }
             classes_with_imports.push(class_name.clone());
             for imp in &info.type_imports {
-                let source_key = declared_name_in_namespace(
+                let source_key = syntax::name_resolution::qualify(
                     class_namespace(&imp.source_class_fqn),
                     &imp.source_alias_name,
                 );
@@ -863,7 +863,7 @@ impl Registry {
     /// As opposed to a `@template` declared directly on the ancestor
     /// method itself (`function_sig::from_decl`'s `build_template_params(d,
     /// &f.name, ctx)` stamps `scope: Some(f.name)` for exactly this case,
-    /// vs. `class_info.rs`'s `class_scope = ctx.declared_name(&c.name)`
+    /// vs. `class_info.rs`'s `class_scope`, the class's own name,
     /// for a class-level one - an FQN vs. a bare method name,
     /// structurally distinguishable). A method-scoped template is safe
     /// to copy through verbatim: `Relation::infer_template_bindings`/
@@ -1240,20 +1240,6 @@ impl Registry {
 /// same class resolves against.
 fn class_namespace(fqn: &str) -> &str {
     fqn.rsplit_once('\\').map_or("", |(ns, _)| ns)
-}
-
-/// `NameContext::declared_name`'s exact logic, replicated for a namespace
-/// string reconstructed after the fact (`class_namespace`) rather than a
-/// live `NameContext` - no leading `\` for the global namespace, which a
-/// naive `format!("{ns}\\{bare}")` would always insert: an alias declared
-/// with no namespace at all keys its `type_aliases` entry under the bare
-/// name, never `"\\Name"`.
-fn declared_name_in_namespace(namespace: &str, bare: &str) -> String {
-    if namespace.is_empty() {
-        bare.to_string()
-    } else {
-        format!("{namespace}\\{bare}")
-    }
 }
 
 /// The actual substitution: every `ValueOf`/`ClassConstant` in `ty`, at

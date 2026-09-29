@@ -1,15 +1,13 @@
-use crate::registry::class_decl_name;
 use std::path::{Path, PathBuf};
 
 use rustc_hash::FxHashMap;
 
-use syntax::ast::{ClassKind, Stmt, StmtKind};
-use syntax::name_resolution::NameContext;
+use syntax::ast::{ClassKind, Stmt};
+use syntax::declarations::Declared;
 use syntax::token::Span;
 
-/// One top-level class-like (`class`/`interface`/`trait`/`enum`)
-/// declaration's own site, name-keyed the same way `Registry`/
-/// `DeclLocations` are - mirrors `project::duplicate_fn_sites::FnDeclSite`
+/// One class-like (`class`/`interface`/`trait`/`enum`) declaration's own
+/// site, name-keyed the same way `Registry` is - mirrors `project::duplicate_fn_sites::FnDeclSite`
 /// exactly, with one new field this side needs and the function side
 /// doesn't: `is_stub`, whether this site's own file falls under a
 /// configured `stub_paths` entry (see `project::duplicate_classes`'s own
@@ -24,7 +22,7 @@ pub(crate) struct ClassDeclSite {
     pub(crate) is_stub: bool,
 }
 
-/// Every top-level class-like's own unconditional declaration site(s),
+/// Every class-like's own unconditional declaration site(s),
 /// across the whole project - a straight port of `DuplicateFunctionSites`
 /// to class-likes, plus the `is_stub` field above. Gated behind
 /// `RulesSettings::check_duplicate_class_declarations` (opt-in, unlike
@@ -37,73 +35,20 @@ pub(crate) struct DuplicateClassSites {
 }
 
 impl DuplicateClassSites {
-    /// `conditional` mirrors `DuplicateFunctionSites::index`'s own
-    /// identical parameter and `If`/`Block` recursion shape exactly - a
-    /// conditionally-reached class-like declaration is dropped entirely,
-    /// same false-negative-favoring rationale (a real, if rarer, analogue
-    /// of the `function_exists`-guarded polyfill idiom: `if (!class_
-    /// exists(Foo::class)) { class Foo {} }`). `is_stub` is this call's
-    /// own file-level provenance (every recursive call keeps whatever
-    /// its caller passed - a stub file's own conditional class-like
-    /// declarations are still dropped by the `conditional` check above,
-    /// consistent with the unconditional-only semantics this whole
-    /// index shares with the function-side precedent).
-    pub(crate) fn index(
-        &mut self,
-        stmts: &[Stmt],
-        ctx: &mut NameContext,
-        path: &Path,
-        conditional: bool,
-        is_stub: bool,
-    ) {
-        syntax::stack::guard(|| {
-            for stmt in stmts {
-                match &stmt.kind {
-                    StmtKind::Namespace(name) => ctx.set_namespace(name),
-                    StmtKind::Use(imports) => ctx.add_uses(imports),
-                    StmtKind::ClassDecl(e) if e.kind == ClassKind::Enum => {
-                        if conditional {
-                            continue;
-                        }
-                        self.record(
-                            ctx.declared_name(class_decl_name(e)),
-                            path,
-                            e.name_span,
-                            ClassKind::Enum,
-                            is_stub,
-                        );
-                    }
-                    StmtKind::ClassDecl(c) => {
-                        if conditional {
-                            continue;
-                        }
-                        self.record(
-                            ctx.declared_name(class_decl_name(c)),
-                            path,
-                            c.name_span,
-                            c.kind,
-                            is_stub,
-                        );
-                    }
-                    StmtKind::If(if_stmt) => {
-                        for body in if_stmt.bodies() {
-                            self.index(
-                                std::slice::from_ref(body),
-                                &mut ctx.clone(),
-                                path,
-                                true,
-                                is_stub,
-                            );
-                        }
-                    }
-                    StmtKind::Block(inner)
-                    | StmtKind::Declare {
-                        body: Some(inner), ..
-                    } => self.index(inner, ctx, path, conditional, is_stub),
-                    _ => {}
-                }
+    /// Records `stmts`' unconditional class-like declarations, dropping
+    /// a conditional one as `DuplicateFunctionSites::index` does, for the
+    /// same false-negative-favoring reason (a real, if rarer, analogue of
+    /// the `function_exists`-guarded polyfill idiom: `if (!class_exists(
+    /// Foo::class)) { class Foo {} }`). `is_stub` is the file's
+    /// provenance.
+    pub(crate) fn index(&mut self, stmts: &[Stmt], path: &Path, is_stub: bool) {
+        syntax::declarations::for_each_declaration(stmts, |declaration, _| {
+            if let Declared::Class(c) = declaration.declared
+                && !declaration.conditional
+            {
+                self.record(declaration.name(), path, c.name_span, c.kind, is_stub);
             }
-        })
+        });
     }
 
     fn record(&mut self, fqn: String, path: &Path, span: Span, kind: ClassKind, is_stub: bool) {

@@ -9,7 +9,7 @@ use std::path::PathBuf;
 
 use crate::banned::BannedConstruct;
 use crate::registry::Registry;
-use crate::registry::class_decl_name;
+use crate::registry::{class_decl_fqn, class_decl_name};
 use syntax::ast::*;
 use syntax::token::{Position, Span};
 use syntax::visit::{
@@ -20,7 +20,6 @@ use types::Type;
 
 use super::Project;
 use diagnostics::{Diagnostic, DiagnosticBuilder};
-use syntax::name_resolution::NameContext;
 
 const SUPERGLOBALS: [&str; 9] = [
     "GLOBALS", "_SERVER", "_GET", "_POST", "_FILES", "_COOKIE", "_SESSION", "_REQUEST", "_ENV",
@@ -30,7 +29,6 @@ struct Walker<'a> {
     constructs: &'a FxHashSet<BannedConstruct>,
     types: &'a [String],
     registry: &'a Registry,
-    ctx: NameContext,
     /// The classes whose declarations enclose the walk, innermost last.
     classes: Vec<String>,
     out: Vec<Diagnostic>,
@@ -328,8 +326,6 @@ fn hint_mentions(hint: &TypeHint, name: &str) -> bool {
 impl<'ast> Visitor<'ast> for Walker<'_> {
     fn visit_stmt(&mut self, stmt: &'ast Stmt) {
         match &stmt.kind {
-            StmtKind::Namespace(name) => self.ctx.set_namespace(name),
-            StmtKind::Use(imports) => self.ctx.add_uses(imports),
             StmtKind::Switch { .. } => {
                 self.ban(BannedConstruct::Switch, stmt.span, "switch".to_string())
             }
@@ -354,7 +350,7 @@ impl<'ast> Visitor<'ast> for Walker<'_> {
                 ),
             ),
             StmtKind::FunctionDecl(f) => {
-                let fqn = self.ctx.declared_name(&f.name);
+                let fqn = f.fq_name().to_string();
                 let what = format!("{fqn}()");
                 if f.by_ref {
                     self.by_ref_return(f.name_span, &what);
@@ -364,7 +360,7 @@ impl<'ast> Visitor<'ast> for Walker<'_> {
                 }
             }
             StmtKind::ClassDecl(c) => {
-                let fqn = self.ctx.declared_name(class_decl_name(c));
+                let fqn = class_decl_fqn(c).to_string();
                 self.classes.push(fqn);
                 walk_stmt(self, stmt);
                 self.classes.pop();
@@ -468,7 +464,6 @@ impl Project {
                 constructs: &constructs,
                 types: &types,
                 registry: &self.registry,
-                ctx: NameContext::default(),
                 classes: Vec::new(),
                 out: Vec::new(),
             };

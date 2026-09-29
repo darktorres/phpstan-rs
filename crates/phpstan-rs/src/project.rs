@@ -11,14 +11,13 @@ use crate::checker::{self, Checker, PropertyAssignFacts};
 use crate::deps;
 use crate::ignore_comments;
 use crate::pest_config::PestConfig;
-use crate::registry::class_decl_name;
 use crate::registry::stubs;
 use crate::registry::{BodySource, FileBodies, Origin, Provenance, Registry};
 use diagnostics::{self, Diagnostic, DiagnosticBuilder};
 use syntax::ast::{ClassKind, Stmt, StmtKind, Visibility};
+use syntax::declarations::Declared;
 use syntax::lexer::LexWarning;
 use syntax::name::Interner;
-use syntax::name_resolution::NameContext;
 use syntax::parser::ParseError;
 use syntax::token::Span;
 use whole_program::renamed_named_arguments::NamedArgumentCallFactsWithPath;
@@ -971,13 +970,11 @@ impl Project {
         for name in &classes {
             self.registry.record_phpstan_class_file(name, path);
         }
-        self.duplicate_fn_sites
-            .index(&ast, &mut NameContext::default(), path, false);
+        self.duplicate_fn_sites.index(&ast, path);
         // `is_stub: false` - same reasoning as `load_file_impl`'s own
         // identical note: `update_file` is the LSP/incremental-edit path,
         // which has no `stub_paths` concept.
-        self.duplicate_class_sites
-            .index(&ast, &mut NameContext::default(), path, false, false);
+        self.duplicate_class_sites.index(&ast, path, false);
         // A changed class's `use TraitName;` list (added, removed, or a
         // trait's own members changed in this same file) means the whole
         // registry's trait flattening can't be assumed still correct -
@@ -2088,9 +2085,9 @@ pub fn parse_file(
     let (anonymous_class_decls, anonymous_class_names) =
         crate::registry::collect_anonymous_classes(&ast, &path.display().to_string(), &origin);
     let mut duplicate_fn_sites = DuplicateFunctionSites::default();
-    duplicate_fn_sites.index(&ast, &mut NameContext::default(), path, false);
+    duplicate_fn_sites.index(&ast, path);
     let mut duplicate_class_sites = DuplicateClassSites::default();
-    duplicate_class_sites.index(&ast, &mut NameContext::default(), path, false, is_stub);
+    duplicate_class_sites.index(&ast, path, is_stub);
     let bodies = FileBodies::of(&ast);
     Ok(ParsedFile {
         ast,
@@ -2188,67 +2185,24 @@ fn bare_name(fqn: &str) -> &str {
     fqn.rsplit('\\').next().unwrap_or(fqn)
 }
 
-/// The top-level function/class/enum names one file's parse tree declares -
-/// exactly what a registry entry needs to be identified by to be removed
-/// again later. Enums share the registry's `classes` map (see
+/// The function and class names one file's parse tree declares - exactly
+/// what a registry entry needs to be identified by to be removed again
+/// later. Enums share the registry's `classes` map (see
 /// `Registry::index`), so they're collected into the same list here.
-/// Must produce exactly the same names `Registry::index` actually keys
-/// its entries under - otherwise an incremental update's removal step
-/// would look up the wrong key and leave a stale entry behind. Mirrors
-/// `registry::build_declarations`'s structure (including its positional,
-/// mutated-in-place `NameContext` tracking - see that function's own doc
-/// comment on why a namespace can't just be computed once up front for
-/// the whole file) for exactly that reason.
+/// Walks the declarations `registry::build_declarations` builds entries
+/// from, so an incremental update's removal step finds every key the
+/// registry holds.
 pub(crate) fn declared_names(stmts: &[Stmt]) -> (Vec<String>, Vec<String>) {
-    let mut ctx = NameContext::default();
-    declared_names_with_context(stmts, &mut ctx)
-}
-
-fn declared_names_with_context(
-    stmts: &[Stmt],
-    ctx: &mut NameContext,
-) -> (Vec<String>, Vec<String>) {
-    syntax::stack::guard(|| {
-        let mut functions = Vec::new();
-        let mut classes = Vec::new();
-        for stmt in stmts {
-            match &stmt.kind {
-                StmtKind::Namespace(name) => ctx.set_namespace(name),
-                StmtKind::Use(imports) => ctx.add_uses(imports),
-                StmtKind::FunctionDecl(f) => functions.push(ctx.declared_name(&f.name)),
-                StmtKind::ClassDecl(e) if e.kind == ClassKind::Enum => {
-                    classes.push(ctx.declared_name(class_decl_name(e)))
-                }
-                StmtKind::ClassDecl(c) => classes.push(ctx.declared_name(class_decl_name(c))),
-                // Must mirror Registry::index's recursion into `if`/block
-                // bodies (the `if (!function_exists(...)) { function foo()
-                // {} }` polyfill idiom) - otherwise an incremental update
-                // wouldn't know to remove a conditionally-declared symbol
-                // that index() itself did pick up, leaving a stale entry
-                // behind after the declaring file changes or is removed.
-                StmtKind::If(if_stmt) => {
-                    for body in if_stmt.bodies() {
-                        let (f, c) = declared_names_with_context(
-                            std::slice::from_ref(body),
-                            &mut ctx.clone(),
-                        );
-                        functions.extend(f);
-                        classes.extend(c);
-                    }
-                }
-                StmtKind::Block(inner)
-                | StmtKind::Declare {
-                    body: Some(inner), ..
-                } => {
-                    let (f, c) = declared_names_with_context(inner, ctx);
-                    functions.extend(f);
-                    classes.extend(c);
-                }
-                _ => {}
-            }
+    let mut functions = Vec::new();
+    let mut classes = Vec::new();
+    syntax::declarations::for_each_declaration(stmts, |declaration, _| {
+        match declaration.declared {
+            Declared::Function(_) => functions.push(declaration.name()),
+            Declared::Class(_) => classes.push(declaration.name()),
+            Declared::Constant(_) | Declared::Define { .. } => {}
         }
-        (functions, classes)
-    })
+    });
+    (functions, classes)
 }
 
 fn register_references(

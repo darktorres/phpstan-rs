@@ -3,7 +3,7 @@ use crate::checker::{
     Locals, generator_missing_return_type, generator_template_param, merge_scopes,
     purge_stale_narrowing_for,
 };
-use crate::registry::class_decl_name;
+use crate::registry::class_decl_fqn;
 use syntax::ast::*;
 use types::Type;
 
@@ -863,7 +863,7 @@ impl<'a> Checker<'a> {
             // included.
             StmtKind::FunctionDecl(f) => self.check_function(f, None, false, true),
             StmtKind::ClassDecl(e) if e.kind == ClassKind::Enum => {
-                let fqn = self.name_ctx.declared_name(class_decl_name(e));
+                let fqn = class_decl_fqn(e).to_string();
                 self.check_nested_enum_declaration(&fqn, e);
                 self.check_attributes(&e.attrs, &fqn);
                 self.check_attribute_targets(&e.attrs, ATTRIBUTE_TARGET_CLASS, "class");
@@ -890,7 +890,7 @@ impl<'a> Checker<'a> {
                 }
             }
             StmtKind::ClassDecl(c) => {
-                let fqn = self.name_ctx.declared_name(class_decl_name(c));
+                let fqn = class_decl_fqn(c).to_string();
                 self.check_nested_class_declaration(&fqn, c);
                 if self.settings.sidz.check_magic_numbers {
                     self.check_magic_numbers_in_properties(&c.properties);
@@ -971,10 +971,9 @@ impl<'a> Checker<'a> {
                 self.check_global_const_attributes(consts, stmt.span, label);
                 for c in consts {
                     let value = self.infer_expr(&c.value, locals);
-                    let name = self.name_ctx.declared_name(&c.name);
                     self.check_configured_constant_value(
                         None,
-                        &name,
+                        c.fq_name(),
                         &value,
                         "constant.value",
                         c.span,

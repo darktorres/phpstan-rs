@@ -13,7 +13,8 @@
 //!   becomes an `@return` override in the declaration's doc comment.
 //!
 //! A file may import either attribute under an alias
-//! (`use JetBrains\PhpStorm\Internal\LanguageLevelTypeAware as Alias;`).
+//! (`use JetBrains\PhpStorm\Internal\LanguageLevelTypeAware as Alias;`);
+//! each is recognized by the class its name resolves to.
 
 use std::sync::Arc;
 
@@ -23,58 +24,20 @@ use syntax::parser::Parser;
 use syntax::token::{Span, Token};
 use syntax::visit::{VisitorMut, walk_class_decl_mut, walk_function_decl_mut, walk_stmt_mut};
 
-const NAMESPACE: &str = "JetBrains\\PhpStorm\\Internal\\";
-
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum StubAttribute {
     Availability,
     TypeAware,
 }
 
-/// The file's aliases for the two attributes (`use
-/// JetBrains\PhpStorm\Internal\LanguageLevelTypeAware as Alias;`).
-type Aliases = Vec<(syntax::name::Name, StubAttribute)>;
-
-fn aliases(stmts: &[Stmt]) -> Aliases {
-    syntax::stack::guard(|| {
-        let mut out = Vec::new();
-        for stmt in stmts {
-            match &stmt.kind {
-                StmtKind::Use(imports) => {
-                    for import in imports {
-                        let Some(alias) = &import.alias else {
-                            continue;
-                        };
-                        let kind =
-                            match import.path.trim_start_matches('\\').strip_prefix(NAMESPACE) {
-                                Some("PhpStormStubsElementAvailable") => {
-                                    StubAttribute::Availability
-                                }
-                                Some("LanguageLevelTypeAware") => StubAttribute::TypeAware,
-                                _ => continue,
-                            };
-                        out.push((alias.name.clone(), kind));
-                    }
-                }
-                StmtKind::Block(inner)
-                | StmtKind::Declare {
-                    body: Some(inner), ..
-                } => out.extend(aliases(inner)),
-                _ => {}
-            }
-        }
-        out
-    })
-}
-
-fn stub_attribute(attr: &Attribute, aliases: &Aliases) -> Option<StubAttribute> {
-    match &*attr.name.written {
+/// Which of the two attributes `attr` is, by the class it names, however
+/// the file imports it.
+fn stub_attribute(attr: &Attribute) -> Option<StubAttribute> {
+    let name = attr.name.resolved_class().unwrap_or(&attr.name.written);
+    match name.rsplit('\\').next().unwrap_or(name) {
         "PhpStormStubsElementAvailable" => Some(StubAttribute::Availability),
         "LanguageLevelTypeAware" | "PhpVersionAware" => Some(StubAttribute::TypeAware),
-        written => aliases
-            .iter()
-            .find(|(alias, _)| **alias == *written)
-            .map(|(_, kind)| *kind),
+        _ => None,
     }
 }
 
@@ -85,9 +48,9 @@ fn is_closed_range(attr: &Attribute) -> bool {
 
 /// Whether an attribute list ends with a closed-range availability
 /// attribute, so the declaration it gates no longer exists.
-fn ends_superseded(attrs: &[Attribute], aliases: &Aliases) -> bool {
+fn ends_superseded(attrs: &[Attribute]) -> bool {
     attrs.last().is_some_and(|a| {
-        stub_attribute(a, aliases) == Some(StubAttribute::Availability) && is_closed_range(a)
+        stub_attribute(a) == Some(StubAttribute::Availability) && is_closed_range(a)
     })
 }
 
@@ -187,10 +150,10 @@ fn set_spans(hint: &mut TypeHint, at: Span) {
 
 /// The `@return` overrides a declaration's type-aware attributes give, to
 /// append to its doc comment.
-fn return_overrides(attrs: &[Attribute], aliases: &Aliases) -> Vec<String> {
+fn return_overrides(attrs: &[Attribute]) -> Vec<String> {
     attrs
         .iter()
-        .filter(|a| stub_attribute(a, aliases) == Some(StubAttribute::TypeAware))
+        .filter(|a| stub_attribute(a) == Some(StubAttribute::TypeAware))
         .filter_map(newest_type)
         .collect()
 }
@@ -201,9 +164,7 @@ pub(crate) fn apply_stub_attributes(stmts: &mut Vec<Stmt>) {
     if !mentions_stub_attributes(stmts) {
         return;
     }
-    let mut pass = Pass {
-        aliases: aliases(stmts),
-    };
+    let mut pass = Pass;
     pass.retain_stmts(stmts);
     for stmt in stmts.iter_mut() {
         pass.visit_stmt(stmt);
@@ -211,36 +172,29 @@ pub(crate) fn apply_stub_attributes(stmts: &mut Vec<Stmt>) {
     syntax::name_resolution::resolve_names(stmts);
 }
 
-/// Whether any attribute in the file is one of the two (or an alias).
+/// Whether any attribute in the file is one of the two.
 fn mentions_stub_attributes(stmts: &[Stmt]) -> bool {
-    struct Find<'a> {
-        aliases: &'a Aliases,
+    struct Find {
         found: bool,
     }
-    impl<'ast> syntax::visit::Visitor<'ast> for Find<'_> {
+    impl<'ast> syntax::visit::Visitor<'ast> for Find {
         fn visit_attribute(&mut self, attr: &'ast Attribute) {
-            if stub_attribute(attr, self.aliases).is_some() {
+            if stub_attribute(attr).is_some() {
                 self.found = true;
             }
             syntax::visit::walk_attribute(self, attr);
         }
     }
-    let aliases = aliases(stmts);
-    let mut find = Find {
-        aliases: &aliases,
-        found: false,
-    };
+    let mut find = Find { found: false };
     syntax::visit::walk_stmts(&mut find, stmts);
     find.found
 }
 
-struct Pass {
-    aliases: Aliases,
-}
+struct Pass;
 
 impl Pass {
     fn kind(&self, attr: &Attribute) -> Option<StubAttribute> {
-        stub_attribute(attr, &self.aliases)
+        stub_attribute(attr)
     }
 
     fn strip(&self, attrs: &mut Vec<Attribute>) {
@@ -248,14 +202,13 @@ impl Pass {
     }
 
     fn return_overrides(&self, attrs: &[Attribute]) -> Vec<String> {
-        return_overrides(attrs, &self.aliases)
+        return_overrides(attrs)
     }
 
     /// Drops the function declarations a closed range supersedes.
     fn retain_stmts(&self, stmts: &mut Vec<Stmt>) {
-        stmts.retain(|s| {
-            !matches!(&s.kind, StmtKind::FunctionDecl(f) if ends_superseded(&f.attrs, &self.aliases))
-        });
+        stmts
+            .retain(|s| !matches!(&s.kind, StmtKind::FunctionDecl(f) if ends_superseded(&f.attrs)));
     }
 
     /// Applies the parameter rules to one parameter list.
@@ -331,7 +284,7 @@ impl Pass {
     }
 
     fn methods(&mut self, methods: &mut Vec<MethodDecl>) {
-        methods.retain(|m| !ends_superseded(&m.function.attrs, &self.aliases));
+        methods.retain(|m| !ends_superseded(&m.function.attrs));
     }
 }
 

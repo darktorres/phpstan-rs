@@ -2,18 +2,15 @@ use rustc_hash::FxHashMap;
 use std::sync::Arc;
 
 use crate::registry::Registry;
-use crate::registry::class_decl_name;
 use crate::registry::class_info::MemberSpans;
 use crate::registry::provenance::{Origin, Provenance};
 use crate::registry::{
     ClassReflection, FunctionReflection, folded_key, function_key, infer_const_type,
 };
-use syntax::ast::{Expr, ExprKind, Literal, Stmt, StmtKind, Visibility};
+use syntax::ast::{Expr, Stmt, Visibility};
+use syntax::declarations::{Declared, for_each_declaration};
 use syntax::intern::intern;
-use syntax::name_resolution::NameContext;
-use syntax::visit::{
-    Visitor, walk_class_decl, walk_expr, walk_function_decl, walk_stmt, walk_stmts,
-};
+use syntax::php_string::PhpString;
 use types::Type;
 
 /// One declaration's already-built, registry-independent info/sig, plus
@@ -569,139 +566,68 @@ impl Registry {
 /// though it may interleave whole files in any order relative to each
 /// other - see `insert_parsed_file`'s doc comment).
 ///
-/// Tracks the current `NameContext` positionally as it walks - a
-/// `namespace` statement changes it for everything from that point on,
-/// exactly like real PHP, rather than computing one static context up
-/// front for the whole file. This matters concretely: the parser has no
-/// real model of brace-delimited `namespace X { ... }` (see
-/// `StmtKind::Namespace`'s parsing comment), so it falls out as a
-/// `StmtKind::Namespace(name)` immediately followed by a sibling
-/// `StmtKind::Block` holding what was inside the braces - and real
-/// vendored stub files can have two such blocks in one file
-/// (`namespace { ... }` for a global class, then a later
-/// `namespace Pdo { ... }` for a version-gated subclass) - a single
-/// whole-file context would apply whichever one it saw last to both
-/// blocks, silently mis-qualifying the first one's classes.
+/// Each declaration's PHPDoc resolves in the name context in effect where
+/// it sits (`for_each_declaration`).
 #[hotpath::measure]
 pub(crate) fn build_declarations(stmts: &[Stmt], origin: &Origin) -> Vec<BuiltDecl> {
-    let mut declarations = Declarations {
-        origin,
-        ctx: NameContext::default(),
-        conditional: false,
-        out: Vec::new(),
-    };
-    walk_stmts(&mut declarations, stmts);
-    declarations.out
-}
-
-/// Every declaration in a file, wherever it sits: PHP declares a class,
-/// function or constant when execution reaches it, so one inside a
-/// function body, a method, a loop, a `try` or a closure exists once that
-/// runs. A declaration reached only that way, or in an `if` branch (the
-/// `if (!function_exists('foo')) { function foo() {} }` polyfill idiom),
-/// is `conditional`; nothing downstream knows which conditions are
-/// guards. The name context is the file's, as the walk reaches each
-/// point: namespaces and imports aren't scoped to blocks or functions.
-struct Declarations<'a> {
-    origin: &'a Origin,
-    ctx: NameContext,
-    conditional: bool,
-    out: Vec<BuiltDecl>,
-}
-
-impl Declarations<'_> {
-    /// Walks with every declaration found conditional.
-    fn conditionally(&mut self, walk: impl FnOnce(&mut Self)) {
-        let was = std::mem::replace(&mut self.conditional, true);
-        walk(self);
-        self.conditional = was;
-    }
-}
-
-impl<'ast> Visitor<'ast> for Declarations<'_> {
-    fn visit_stmt(&mut self, stmt: &'ast Stmt) {
-        syntax::stack::guard(|| match &stmt.kind {
-            StmtKind::Namespace(name) => self.ctx.set_namespace(name),
-            StmtKind::Use(imports) => self.ctx.add_uses(imports),
-            StmtKind::ClassDecl(c) => {
-                let name = intern(&self.ctx.declared_name(class_decl_name(c)));
-                let conditional = self.conditional;
+    let mut out = Vec::new();
+    for_each_declaration(stmts, |declaration, ctx| {
+        let conditional = declaration.conditional;
+        match declaration.declared {
+            Declared::Class(c) => {
+                let name = intern(&declaration.name());
                 if c.kind == syntax::ast::ClassKind::Enum {
-                    let mut info = ClassReflection::from_enum_decl(c, &self.ctx);
-                    info.record_provenance(
-                        self.origin,
-                        &name,
-                        c.name_span,
-                        &MemberSpans::of_enum(c),
-                    );
-                    self.out.push(BuiltDecl::Enum {
+                    let mut info = ClassReflection::from_enum_decl(c, ctx);
+                    info.record_provenance(origin, &name, c.name_span, &MemberSpans::of_enum(c));
+                    out.push(BuiltDecl::Enum {
                         name,
                         conditional,
                         info,
                     });
                 } else {
-                    let mut info = ClassReflection::from_decl(c, &self.ctx);
-                    info.record_provenance(
-                        self.origin,
-                        &name,
-                        c.name_span,
-                        &MemberSpans::of_class(c),
-                    );
-                    self.out.push(BuiltDecl::Class {
+                    let mut info = ClassReflection::from_decl(c, ctx);
+                    info.record_provenance(origin, &name, c.name_span, &MemberSpans::of_class(c));
+                    out.push(BuiltDecl::Class {
                         name,
                         conditional,
                         info,
                     });
                 }
-                self.conditionally(|v| walk_class_decl(v, c));
             }
-            StmtKind::FunctionDecl(f) => {
-                let name = intern(&self.ctx.declared_name(&f.name));
+            Declared::Function(f) => {
                 let mut sig = FunctionReflection::from_decl(
                     f,
-                    &self.ctx,
-                    &rustc_hash::FxHashMap::default(),
-                    &rustc_hash::FxHashMap::default(),
+                    ctx,
+                    &FxHashMap::default(),
+                    &FxHashMap::default(),
                     Visibility::Public,
                 );
-                sig.provenance = Provenance::new(self.origin.clone(), f.name_span);
-                self.out.push(BuiltDecl::Function {
-                    name,
-                    conditional: self.conditional,
+                sig.provenance = Provenance::new(origin.clone(), f.name_span);
+                out.push(BuiltDecl::Function {
+                    name: intern(&declaration.name()),
+                    conditional,
                     sig,
                     site: (f.name_span.start.line, f.name_span.start.col),
                 });
-                self.conditionally(|v| walk_function_decl(v, f));
             }
-            StmtKind::GlobalConst(consts) => {
-                for c in consts {
-                    let name = intern(&self.ctx.declared_name(&c.name));
-                    let ty = infer_const_type(&c.value);
-                    self.out.push(BuiltDecl::GlobalConst { name, ty });
+            Declared::Constant(c) => out.push(BuiltDecl::GlobalConst {
+                name: intern(&declaration.name()),
+                ty: infer_const_type(&c.value),
+            }),
+            Declared::Define { name, value } => {
+                if let Some((name, ty)) = define_constant(name, value) {
+                    out.push(BuiltDecl::GlobalConst { name, ty });
                 }
             }
-            // A braced namespace body runs as the file does.
-            StmtKind::Block(_) | StmtKind::Declare { .. } => walk_stmt(self, stmt),
-            _ => self.conditionally(|v| walk_stmt(v, stmt)),
-        })
-    }
-
-    fn visit_expr(&mut self, e: &'ast Expr) {
-        if let Some((name, ty)) = define_call_constant(e) {
-            self.out.push(BuiltDecl::GlobalConst { name, ty });
         }
-        self.conditionally(|v| walk_expr(v, e));
-    }
+    });
+    out
 }
 
-/// Recognizes a top-level `define('NAME', value)` (or `\define(...)`)
-/// call statement, returning the constant's literal name plus its
-/// inferred value type (`infer_const_type`, the same literal-only scope
-/// a `const` declaration's value already gets). `None` for anything else
-/// a bare `StmtKind::Expression` could be, a call to some other function,
-/// a spread/named argument (real `define()` never takes either), a
-/// non-literal first argument (a dynamic constant name this project has
-/// no way to know without evaluating it), or a name that's really the
+/// The constant a `define('NAME', value)` declares, with its value's
+/// inferred type (`infer_const_type`, the same literal-only scope a
+/// `const` declaration's value already gets). `None` for a name that
+/// isn't text, or one that's really the
 /// case-insensitive language keyword `true`/`false`/`null` rather than
 /// an ordinary constant. On a real PHP runtime these three names are
 /// parser-level keywords resolved before `define()` could ever apply to
@@ -713,27 +639,7 @@ impl<'ast> Visitor<'ast> for Declarations<'_> {
 /// `\null` reference for every file in the corpus - every `!== \false`-
 /// style narrowing idiom would silently stop narrowing away `false` at
 /// all once such a stub was indexed.
-fn define_call_constant(e: &Expr) -> Option<(Arc<str>, Type)> {
-    let ExprKind::Call(callee, args) = &e.kind else {
-        return None;
-    };
-    let ExprKind::Name(name) = &callee.kind else {
-        return None;
-    };
-    if !name
-        .rsplit('\\')
-        .next()
-        .unwrap_or(name)
-        .eq_ignore_ascii_case("define")
-    {
-        return None;
-    }
-    if args.len() < 2 || args.iter().any(|a| a.spread || a.name.is_some()) {
-        return None;
-    }
-    let ExprKind::Literal(Literal::String(const_name)) = &args[0].value.kind else {
-        return None;
-    };
+fn define_constant(const_name: &PhpString, value: &Expr) -> Option<(Arc<str>, Type)> {
     let const_name = const_name.as_str()?;
     if ["true", "false", "null"]
         .iter()
@@ -799,7 +705,7 @@ fn define_call_constant(e: &Expr) -> Option<(Arc<str>, Type)> {
     if const_name == "PHP_INT_MIN" {
         return Some((Arc::from(const_name), Type::int()));
     }
-    Some((Arc::from(const_name), infer_const_type(&args[1].value)))
+    Some((Arc::from(const_name), infer_const_type(value)))
 }
 
 /// Records one `const`/`define()` declaration site for `name`,

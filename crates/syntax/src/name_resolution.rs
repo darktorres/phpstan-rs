@@ -166,11 +166,7 @@ impl NameContext {
     /// in the current namespace - declarations are never `use`-resolved
     /// (that only applies to *references*), always just namespace-relative.
     pub fn declared_name(&self, bare: &str) -> String {
-        if self.namespace.is_empty() {
-            bare.to_string()
-        } else {
-            format!("{}\\{bare}", self.namespace)
-        }
+        qualify(&self.namespace, bare)
     }
 
     /// Resolves a *reference* to a class/function name as it appears in
@@ -262,6 +258,15 @@ impl NameContext {
         } else {
             (self.declared_name(name), Some(name.to_string()))
         }
+    }
+}
+
+/// `name` in `namespace`; `name` itself in the global namespace.
+pub fn qualify(namespace: &str, name: &str) -> String {
+    if namespace.is_empty() {
+        name.to_string()
+    } else {
+        format!("{namespace}\\{name}")
     }
 }
 

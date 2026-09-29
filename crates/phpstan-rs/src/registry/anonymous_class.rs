@@ -39,6 +39,12 @@ pub(crate) fn class_decl_name(c: &ClassDecl) -> &str {
     c.name.as_deref().unwrap_or("class@anonymous")
 }
 
+/// The fully-qualified name a class declaration declares;
+/// `class@anonymous` for an anonymous class.
+pub(crate) fn class_decl_fqn(c: &ClassDecl) -> &str {
+    c.fq_name().unwrap_or("class@anonymous")
+}
+
 pub(crate) fn synthetic_name(
     relative_file: &str,
     start_line: u32,

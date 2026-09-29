@@ -2,7 +2,7 @@ use indexmap::IndexMap;
 use rustc_hash::{FxHashMap, FxHashSet};
 use std::sync::Arc;
 
-use crate::registry::class_decl_name;
+use crate::registry::class_decl_fqn;
 use crate::registry::function_sig::{
     DeclaredType, FunctionReflection, ParameterReflection, apply_implicit_nullable_default,
     build_template_params, build_type_aliases, declared_type, infer_class_const_type,
@@ -959,7 +959,7 @@ impl ClassReflection {
         // (properties, consts, `@extends`/`@implements` args, and every
         // method's params/return type below) carries the real metadata
         // from here instead of a bare name.
-        let class_scope = ctx.declared_name(class_decl_name(c));
+        let class_scope = class_decl_fqn(c).to_string();
         let template_params: FxHashMap<String, TemplateParam> = class_doc
             .as_ref()
             .map(|d| build_template_params(d, &class_scope, ctx))
@@ -1673,7 +1673,7 @@ impl ClassReflection {
         // real), so `@implements` tags are still worth resolving - just
         // with an empty `template_params` map, since there's no class-
         // level template a tag's argument could reference.
-        let fqn = ctx.declared_name(class_decl_name(e));
+        let fqn = class_decl_fqn(e).to_string();
         let class_doc: Option<DocBlock> = e.doc_comment.as_deref().map(docblock::parse);
         let implements_args: FxHashMap<Arc<str>, Vec<Type>> = class_doc
             .iter()

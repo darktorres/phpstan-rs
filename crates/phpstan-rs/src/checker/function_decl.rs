@@ -163,7 +163,7 @@ impl<'a> Checker<'a> {
             None => self
                 .registry
                 .functions
-                .get(self.name_ctx.declared_name(&f.name).as_str()),
+                .get(f.fq_name()),
         }
     }
 
@@ -232,11 +232,10 @@ impl<'a> Checker<'a> {
     /// from a different declaration (or merged from several); `None` when
     /// the slot is `f`'s.
     fn own_declaration_sig(&self, f: &FunctionDecl) -> Option<FunctionReflection> {
-        let name = self.name_ctx.declared_name(&f.name);
         let site = *self
             .registry
             .function_decl_sites
-            .get(crate::registry::function_key(&name).as_ref())?;
+            .get(crate::registry::function_key(f.fq_name()).as_ref())?;
         if site == Some((f.name_span.start.line, f.name_span.start.col)) {
             return None;
         }
@@ -448,7 +447,7 @@ impl<'a> Checker<'a> {
                     .unwrap_or_default();
                 let display_name = match class_name {
                     Some(c) => format!("method {c}::{}()", f.name),
-                    None => format!("function {}()", self.name_ctx.declared_name(&f.name)),
+                    None => format!("function {}()", f.fq_name()),
                 };
                 self.check_template_declaration_validity(
                     &templates,

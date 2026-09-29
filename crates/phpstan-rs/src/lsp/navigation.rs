@@ -44,11 +44,10 @@ use std::sync::Arc;
 
 use crate::project::Project;
 use crate::registry::Registry;
-use crate::registry::class_decl_name;
+use crate::registry::class_decl_fqn;
 use rustc_hash::FxHashSet;
 use std::path::Path;
 use syntax::ast::*;
-use syntax::name_resolution::NameContext;
 use syntax::token::{Position, Span};
 use syntax::visit::{any_child_expr, any_child_stmt};
 
@@ -172,7 +171,6 @@ pub(crate) fn collect_all(project: &Project, path: &Path) -> Vec<(Span, Resolved
 fn walk_file(project: &Project, path: &Path, anchor: Anchor) -> Option<Vec<(Span, Resolved)>> {
     let stmts = project.ast(path)?;
     let registry = project.registry();
-    let mut ctx = NameContext::default();
     let mut out = Vec::new();
     let mut w = Walker {
         registry,
@@ -184,7 +182,7 @@ fn walk_file(project: &Project, path: &Path, anchor: Anchor) -> Option<Vec<(Span
         base_scope_id: 0,
         scope_frames: Vec::new(),
     };
-    w.stmts(stmts, &mut ctx, None, &mut out);
+    w.stmts(stmts, None, &mut out);
     Some(out)
 }
 
@@ -371,26 +369,20 @@ impl<'a> Walker<'a> {
     /// (`foreach ($rows as [$a, $b])`). Anything else (rare: a property/
     /// index write target as a foreach binding isn't valid PHP at all)
     /// falls back to an ordinary read-walk.
-    fn bind_var(
-        &mut self,
-        e: &Expr,
-        ctx: &mut NameContext,
-        current_class: Option<&str>,
-        out: &mut Vec<(Span, Resolved)>,
-    ) {
+    fn bind_var(&mut self, e: &Expr, current_class: Option<&str>, out: &mut Vec<(Span, Resolved)>) {
         syntax::stack::guard(|| match &e.kind {
             ExprKind::Variable(name) => self.record_var_self(out, e.span, current_class, name),
             ExprKind::Destructure(items, _) => {
                 for item in items {
                     if let Some(k) = &item.key {
-                        self.expr(k, ctx, current_class, out);
+                        self.expr(k, current_class, out);
                     }
                     if let Some(target) = &item.target {
-                        self.bind_var(target, ctx, current_class, out);
+                        self.bind_var(target, current_class, out);
                     }
                 }
             }
-            _ => self.expr(e, ctx, current_class, out),
+            _ => self.expr(e, current_class, out),
         })
     }
 
@@ -418,48 +410,37 @@ impl<'a> Walker<'a> {
     fn stmts(
         &mut self,
         stmts: &[Stmt],
-        ctx: &mut NameContext,
         current_class: Option<&str>,
         out: &mut Vec<(Span, Resolved)>,
     ) {
         for stmt in stmts {
-            self.stmt(stmt, ctx, current_class, out);
+            self.stmt(stmt, current_class, out);
         }
     }
 
-    fn stmt(
-        &mut self,
-        stmt: &Stmt,
-        ctx: &mut NameContext,
-        current_class: Option<&str>,
-        out: &mut Vec<(Span, Resolved)>,
-    ) {
+    fn stmt(&mut self, stmt: &Stmt, current_class: Option<&str>, out: &mut Vec<(Span, Resolved)>) {
         syntax::stack::guard(|| {
             match &stmt.kind {
-                StmtKind::Namespace(name) => ctx.set_namespace(name),
-                StmtKind::Use(imports) => ctx.add_uses(imports),
-                StmtKind::Expression(e) | StmtKind::Throw(e) => {
-                    self.expr(e, ctx, current_class, out)
-                }
-                StmtKind::Return(Some(e)) => self.expr(e, ctx, current_class, out),
+                StmtKind::Expression(e) | StmtKind::Throw(e) => self.expr(e, current_class, out),
+                StmtKind::Return(Some(e)) => self.expr(e, current_class, out),
                 StmtKind::Echo(exprs) | StmtKind::Unset(exprs) => {
                     for e in exprs {
-                        self.expr(e, ctx, current_class, out);
+                        self.expr(e, current_class, out);
                     }
                 }
                 StmtKind::If(if_stmt) => {
                     for cond in if_stmt.conditions() {
-                        self.expr(cond, ctx, current_class, out);
+                        self.expr(cond, current_class, out);
                     }
                 }
                 StmtKind::While { cond, .. } | StmtKind::DoWhile { cond, .. } => {
-                    self.expr(cond, ctx, current_class, out);
+                    self.expr(cond, current_class, out);
                 }
                 StmtKind::For {
                     init, cond, step, ..
                 } => {
                     for e in init.iter().chain(cond).chain(step) {
-                        self.expr(e, ctx, current_class, out);
+                        self.expr(e, current_class, out);
                     }
                 }
                 StmtKind::Foreach {
@@ -468,25 +449,25 @@ impl<'a> Walker<'a> {
                     value,
                     ..
                 } => {
-                    self.expr(subject, ctx, current_class, out);
+                    self.expr(subject, current_class, out);
                     if let Some(k) = key {
-                        self.bind_var(k, ctx, current_class, out);
+                        self.bind_var(k, current_class, out);
                     }
-                    self.bind_var(value, ctx, current_class, out);
+                    self.bind_var(value, current_class, out);
                 }
                 StmtKind::FunctionDecl(f) => {
                     self.record(
                         out,
                         f.name_span,
-                        Resolved::Function(ctx.declared_name(&f.name)),
+                        Resolved::Function(f.fq_name().to_string()),
                     );
-                    self.function(f, &mut ctx.clone(), current_class, false, out);
+                    self.function(f, current_class, false, out);
                 }
-                StmtKind::ClassDecl(e) if e.kind == ClassKind::Enum => self.enum_decl(e, ctx, out),
-                StmtKind::ClassDecl(c) => self.class(c, ctx, out),
+                StmtKind::ClassDecl(e) if e.kind == ClassKind::Enum => self.enum_decl(e, out),
+                StmtKind::ClassDecl(c) => self.class(c, out),
                 StmtKind::GlobalConst(consts) => {
                     for c in consts {
-                        self.expr(&c.value, ctx, current_class, out);
+                        self.expr(&c.value, current_class, out);
                     }
                 }
                 // `global $x;`/`static $x = ...;` have no per-name span of
@@ -504,14 +485,14 @@ impl<'a> Walker<'a> {
                                     &syntax::intern::intern(name),
                                 );
                             }
-                            GlobalVar::Dynamic(e) => self.expr(e, ctx, current_class, out),
+                            GlobalVar::Dynamic(e) => self.expr(e, current_class, out),
                         }
                     }
                 }
                 StmtKind::StaticVar(vars) => {
                     for (name, d) in vars {
                         if let Some(e) = d {
-                            self.expr(e, ctx, current_class, out);
+                            self.expr(e, current_class, out);
                         }
                         self.record_var_self(
                             out,
@@ -522,10 +503,10 @@ impl<'a> Walker<'a> {
                     }
                 }
                 StmtKind::Switch { subject, cases } => {
-                    self.expr(subject, ctx, current_class, out);
+                    self.expr(subject, current_class, out);
                     for case in cases {
                         if let Some(t) = &case.test {
-                            self.expr(t, ctx, current_class, out);
+                            self.expr(t, current_class, out);
                         }
                     }
                 }
@@ -547,19 +528,13 @@ impl<'a> Walker<'a> {
                 _ => {}
             }
             any_child_stmt(stmt, |child| {
-                self.stmt(child, ctx, current_class, out);
+                self.stmt(child, current_class, out);
                 false
             });
         })
     }
 
-    fn expr(
-        &mut self,
-        expr: &Expr,
-        ctx: &mut NameContext,
-        current_class: Option<&str>,
-        out: &mut Vec<(Span, Resolved)>,
-    ) {
+    fn expr(&mut self, expr: &Expr, current_class: Option<&str>, out: &mut Vec<(Span, Resolved)>) {
         syntax::stack::guard(|| {
             match &expr.kind {
                 // `foo()`'s callee - a bare `Name` here is always a function
@@ -569,15 +544,14 @@ impl<'a> Walker<'a> {
                 // that arm never has to guess which one a given `Name` node
                 // means.
                 ExprKind::Call(callee, args) => {
-                    if let ExprKind::Name(n) = &callee.kind
-                        && let Some(fqn) = resolve_class_ref(n, current_class, self.registry)
-                    {
+                    if let ExprKind::Name(n) = &callee.kind {
+                        let fqn = self.registry.called_function_name(n).to_string();
                         self.record(out, callee.span, Resolved::Function(fqn));
                     } else {
-                        self.expr(callee, ctx, current_class, out);
+                        self.expr(callee, current_class, out);
                     }
                     for a in args {
-                        self.expr(&a.value, ctx, current_class, out);
+                        self.expr(&a.value, current_class, out);
                     }
                     return;
                 }
@@ -589,10 +563,10 @@ impl<'a> Walker<'a> {
                     {
                         self.record(out, callee.span, Resolved::Class(fqn));
                     } else {
-                        self.expr(callee, ctx, current_class, out);
+                        self.expr(callee, current_class, out);
                     }
                     for a in args {
-                        self.expr(&a.value, ctx, current_class, out);
+                        self.expr(&a.value, current_class, out);
                     }
                     return;
                 }
@@ -602,12 +576,13 @@ impl<'a> Walker<'a> {
                 // actually exists, preferring a function (the far more
                 // common shape for a standalone name reference).
                 ExprKind::Name(n) => {
-                    if let Some(fqn) = resolve_class_ref(n, current_class, self.registry) {
-                        let resolved = if self.registry.lookup_function(&fqn).is_some() {
-                            Resolved::Function(fqn)
-                        } else {
-                            Resolved::Class(fqn)
-                        };
+                    let resolved = match self.registry.resolve_function(n) {
+                        Some((fqn, _)) => Some(Resolved::Function(fqn.to_string())),
+                        None => {
+                            resolve_class_ref(n, current_class, self.registry).map(Resolved::Class)
+                        }
+                    };
+                    if let Some(resolved) = resolved {
                         self.record(out, expr.span, resolved);
                     }
                 }
@@ -664,7 +639,7 @@ impl<'a> Walker<'a> {
                             }
                         }
                         StaticTarget::Expr(receiver) => {
-                            self.expr(receiver, ctx, current_class, out);
+                            self.expr(receiver, current_class, out);
                             if self.anchor.matches(member.span) {
                                 out.push((
                                     member.span,
@@ -680,17 +655,17 @@ impl<'a> Walker<'a> {
                         }
                     }
                     for a in args {
-                        self.expr(&a.value, ctx, current_class, out);
+                        self.expr(&a.value, current_class, out);
                     }
                     return;
                 }
                 ExprKind::DynamicStaticCall(target, name, args) => {
                     if let StaticTarget::Expr(receiver) = target {
-                        self.expr(receiver, ctx, current_class, out);
+                        self.expr(receiver, current_class, out);
                     }
-                    self.expr(name, ctx, current_class, out);
+                    self.expr(name, current_class, out);
                     for a in args {
-                        self.expr(&a.value, ctx, current_class, out);
+                        self.expr(&a.value, current_class, out);
                     }
                     return;
                 }
@@ -736,7 +711,7 @@ impl<'a> Walker<'a> {
                 // `document_highlight` range for this arm too wide.
                 ExprKind::MethodCall(recv, method, _, _)
                 | ExprKind::PropertyAccess(recv, method, _) => {
-                    self.expr(recv, ctx, current_class, out);
+                    self.expr(recv, current_class, out);
                     if self.anchor.matches(method.span) {
                         let spans = [method.span];
                         if matches!(&recv.kind, ExprKind::Variable(v) if **v == *"this")
@@ -761,16 +736,16 @@ impl<'a> Walker<'a> {
                     }
                     any_child_expr(expr, |a| {
                         if !std::ptr::eq(a, recv.as_ref()) {
-                            self.expr(a, ctx, current_class, out);
+                            self.expr(a, current_class, out);
                         }
                         false
                     });
                     return;
                 }
                 ExprKind::NewAnonymousClass(decl, args) => {
-                    self.class(decl, &mut ctx.clone(), out);
+                    self.class(decl, out);
                     for a in args {
-                        self.expr(&a.value, ctx, current_class, out);
+                        self.expr(&a.value, current_class, out);
                     }
                     return;
                 }
@@ -812,7 +787,7 @@ impl<'a> Walker<'a> {
                         id,
                         transparent: uses.iter().map(|u| u.name.clone()).collect(),
                     });
-                    self.stmts(body, &mut ctx.clone(), current_class, out);
+                    self.stmts(body, current_class, out);
                     self.scope_frames.pop();
                     return;
                 }
@@ -825,14 +800,14 @@ impl<'a> Walker<'a> {
                         id,
                         owns: params.iter().map(|p| p.name.clone()).collect(),
                     });
-                    self.expr(body, &mut ctx.clone(), current_class, out);
+                    self.expr(body, current_class, out);
                     self.scope_frames.pop();
                     return;
                 }
                 _ => {}
             }
             any_child_expr(expr, |child| {
-                self.expr(child, ctx, current_class, out);
+                self.expr(child, current_class, out);
                 false
             });
         })
@@ -848,7 +823,6 @@ impl<'a> Walker<'a> {
     fn function(
         &mut self,
         f: &FunctionDecl,
-        ctx: &mut NameContext,
         current_class: Option<&str>,
         is_static: bool,
         out: &mut Vec<(Span, Resolved)>,
@@ -873,15 +847,15 @@ impl<'a> Walker<'a> {
         }
         let previous_function = self.current_function.replace(f.clone());
         let previous_is_static = std::mem::replace(&mut self.current_is_static, is_static);
-        self.stmts(&f.body, ctx, current_class, out);
+        self.stmts(&f.body, current_class, out);
         self.current_function = previous_function;
         self.current_is_static = previous_is_static;
         self.scope_frames = previous_scope_frames;
         self.base_scope_id = previous_base_scope_id;
     }
 
-    fn class(&mut self, c: &ClassDecl, ctx: &mut NameContext, out: &mut Vec<(Span, Resolved)>) {
-        let fqn = ctx.declared_name(class_decl_name(c));
+    fn class(&mut self, c: &ClassDecl, out: &mut Vec<(Span, Resolved)>) {
+        let fqn = class_decl_fqn(c).to_string();
         self.record(out, c.name_span, Resolved::Class(fqn.clone()));
         for (name, span) in c.extends.iter().zip(c.extends_spans.iter()) {
             if self.anchor.matches(*span)
@@ -914,7 +888,7 @@ impl<'a> Walker<'a> {
                 self.record_type_hint(out, hint, Some(&fqn));
             }
             if let Some(d) = &p.default {
-                self.expr(d, &mut ctx.clone(), Some(&fqn), out);
+                self.expr(d, Some(&fqn), out);
             }
         }
         for m in &c.methods {
@@ -923,7 +897,7 @@ impl<'a> Walker<'a> {
                 m.function.name_span,
                 Resolved::Member(fqn.clone(), m.function.name.to_string()),
             );
-            self.function(&m.function, &mut ctx.clone(), Some(&fqn), m.is_static, out);
+            self.function(&m.function, Some(&fqn), m.is_static, out);
         }
         for cst in &c.consts {
             self.record(
@@ -934,12 +908,12 @@ impl<'a> Walker<'a> {
             if let Some(hint) = &cst.type_hint {
                 self.record_type_hint(out, hint, Some(&fqn));
             }
-            self.expr(&cst.value, &mut ctx.clone(), Some(&fqn), out);
+            self.expr(&cst.value, Some(&fqn), out);
         }
     }
 
-    fn enum_decl(&mut self, e: &ClassDecl, ctx: &mut NameContext, out: &mut Vec<(Span, Resolved)>) {
-        let fqn = ctx.declared_name(class_decl_name(e));
+    fn enum_decl(&mut self, e: &ClassDecl, out: &mut Vec<(Span, Resolved)>) {
+        let fqn = class_decl_fqn(e).to_string();
         self.record(out, e.name_span, Resolved::Class(fqn.clone()));
         for (name, span) in e.implements.iter().zip(e.implements_spans.iter()) {
             if self.anchor.matches(*span)
@@ -961,7 +935,7 @@ impl<'a> Walker<'a> {
                 m.function.name_span,
                 Resolved::Member(fqn.clone(), m.function.name.to_string()),
             );
-            self.function(&m.function, &mut ctx.clone(), Some(&fqn), m.is_static, out);
+            self.function(&m.function, Some(&fqn), m.is_static, out);
         }
         for cst in &e.consts {
             self.record(
@@ -969,7 +943,7 @@ impl<'a> Walker<'a> {
                 cst.name_span,
                 Resolved::Member(fqn.clone(), cst.name.to_string()),
             );
-            self.expr(&cst.value, &mut ctx.clone(), Some(&fqn), out);
+            self.expr(&cst.value, Some(&fqn), out);
         }
         for case in &e.enum_cases {
             self.record(
@@ -978,7 +952,7 @@ impl<'a> Walker<'a> {
                 Resolved::Member(fqn.clone(), case.name.to_string()),
             );
             if let Some(v) = &case.value {
-                self.expr(v, &mut ctx.clone(), Some(&fqn), out);
+                self.expr(v, Some(&fqn), out);
             }
         }
     }

@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use crate::pest_config;
 use crate::registry::Registry;
-use crate::registry::class_decl_name;
+use crate::registry::class_decl_fqn;
 use diagnostics::{Diagnostic, DiagnosticBuilder};
 use syntax::ast::*;
 use syntax::name_resolution::NameContext;
@@ -1803,7 +1803,7 @@ impl<'a> Checker<'a> {
                 StmtKind::Use(imports) => self.name_ctx.add_uses(imports),
                 StmtKind::FunctionDecl(f) => self.check_function(f, None, false, true),
                 StmtKind::ClassDecl(e) if e.kind == ClassKind::Enum => {
-                    let fqn = self.name_ctx.declared_name(class_decl_name(e));
+                    let fqn = class_decl_fqn(e).to_string();
                     if !self.facts_only {
                         self.check_class_completeness(&fqn, e.span);
                         self.check_class_references_exist(&fqn, e.span);
@@ -1905,7 +1905,7 @@ impl<'a> Checker<'a> {
                     // self/parent/static, and the undefined-class check
                     // for `new self()`/`new static()`), which is now
                     // FQN-keyed.
-                    let fqn = self.name_ctx.declared_name(class_decl_name(c));
+                    let fqn = class_decl_fqn(c).to_string();
                     if !self.facts_only {
                         self.check_class_generic_bounds(&fqn, c);
                         let description = match c.kind {

@@ -41,7 +41,7 @@ use std::path::Path;
 
 use crate::project::Project;
 use crate::registry::Registry;
-use crate::registry::class_decl_name;
+use crate::registry::class_decl_fqn;
 use syntax::ast::{
     Arg, ClassDecl, ClassKind, Expr, ExprKind, FunctionDecl, Param, StaticTarget, Stmt, StmtKind,
 };
@@ -49,7 +49,6 @@ use syntax::token::{Position, Span};
 use syntax::visit::{any_child_expr, any_child_stmt};
 
 use super::navigation::{ProbeScope, contains, resolve_class_ref};
-use syntax::name_resolution::NameContext;
 
 /// What a resolved signature-help target needs to look its own
 /// `FunctionReflection` up (or, for `Instance`, to run the same checker probe
@@ -83,7 +82,6 @@ pub(crate) struct SigHelp {
 pub(crate) fn resolve_at(project: &Project, path: &Path, pos: Position) -> Option<SigHelp> {
     let stmts = project.ast(path)?;
     let registry = project.registry();
-    let mut ctx = NameContext::default();
     let mut best = None;
     let mut w = Walker {
         registry,
@@ -92,7 +90,7 @@ pub(crate) fn resolve_at(project: &Project, path: &Path, pos: Position) -> Optio
         current_function: None,
         current_is_static: false,
     };
-    w.stmts(stmts, &mut ctx, None, &mut best);
+    w.stmts(stmts, None, &mut best);
     best
 }
 
@@ -128,51 +126,35 @@ impl<'a> Walker<'a> {
         }
     }
 
-    fn stmts(
-        &mut self,
-        stmts: &[Stmt],
-        ctx: &mut NameContext,
-        current_class: Option<&str>,
-        best: &mut Option<SigHelp>,
-    ) {
+    fn stmts(&mut self, stmts: &[Stmt], current_class: Option<&str>, best: &mut Option<SigHelp>) {
         for stmt in stmts {
-            self.stmt(stmt, ctx, current_class, best);
+            self.stmt(stmt, current_class, best);
         }
     }
 
-    fn stmt(
-        &mut self,
-        stmt: &Stmt,
-        ctx: &mut NameContext,
-        current_class: Option<&str>,
-        best: &mut Option<SigHelp>,
-    ) {
+    fn stmt(&mut self, stmt: &Stmt, current_class: Option<&str>, best: &mut Option<SigHelp>) {
         syntax::stack::guard(|| {
             match &stmt.kind {
-                StmtKind::Namespace(name) => ctx.set_namespace(name),
-                StmtKind::Use(imports) => ctx.add_uses(imports),
-                StmtKind::Expression(e) | StmtKind::Throw(e) => {
-                    self.expr(e, ctx, current_class, best)
-                }
-                StmtKind::Return(Some(e)) => self.expr(e, ctx, current_class, best),
+                StmtKind::Expression(e) | StmtKind::Throw(e) => self.expr(e, current_class, best),
+                StmtKind::Return(Some(e)) => self.expr(e, current_class, best),
                 StmtKind::Echo(exprs) | StmtKind::Unset(exprs) => {
                     for e in exprs {
-                        self.expr(e, ctx, current_class, best);
+                        self.expr(e, current_class, best);
                     }
                 }
                 StmtKind::If(if_stmt) => {
                     for cond in if_stmt.conditions() {
-                        self.expr(cond, ctx, current_class, best);
+                        self.expr(cond, current_class, best);
                     }
                 }
                 StmtKind::While { cond, .. } | StmtKind::DoWhile { cond, .. } => {
-                    self.expr(cond, ctx, current_class, best);
+                    self.expr(cond, current_class, best);
                 }
                 StmtKind::For {
                     init, cond, step, ..
                 } => {
                     for e in init.iter().chain(cond).chain(step) {
-                        self.expr(e, ctx, current_class, best);
+                        self.expr(e, current_class, best);
                     }
                 }
                 StmtKind::Foreach {
@@ -181,74 +163,65 @@ impl<'a> Walker<'a> {
                     value,
                     ..
                 } => {
-                    self.expr(subject, ctx, current_class, best);
+                    self.expr(subject, current_class, best);
                     if let Some(k) = key {
-                        self.expr(k, ctx, current_class, best);
+                        self.expr(k, current_class, best);
                     }
-                    self.expr(value, ctx, current_class, best);
+                    self.expr(value, current_class, best);
                 }
                 StmtKind::FunctionDecl(f) => {
-                    self.function(f, &mut ctx.clone(), current_class, false, best);
+                    self.function(f, current_class, false, best);
                 }
-                StmtKind::ClassDecl(e) if e.kind == ClassKind::Enum => {
-                    self.enum_decl(e, &mut ctx.clone(), best)
-                }
-                StmtKind::ClassDecl(c) => self.class(c, &mut ctx.clone(), best),
+                StmtKind::ClassDecl(e) if e.kind == ClassKind::Enum => self.enum_decl(e, best),
+                StmtKind::ClassDecl(c) => self.class(c, best),
                 StmtKind::GlobalConst(consts) => {
                     for c in consts {
-                        self.expr(&c.value, ctx, current_class, best);
+                        self.expr(&c.value, current_class, best);
                     }
                 }
                 StmtKind::Switch { subject, cases } => {
-                    self.expr(subject, ctx, current_class, best);
+                    self.expr(subject, current_class, best);
                     for case in cases {
                         if let Some(t) = &case.test {
-                            self.expr(t, ctx, current_class, best);
+                            self.expr(t, current_class, best);
                         }
                     }
                 }
                 StmtKind::StaticVar(vars) => {
                     for (_, d) in vars {
                         if let Some(e) = d {
-                            self.expr(e, ctx, current_class, best);
+                            self.expr(e, current_class, best);
                         }
                     }
                 }
                 _ => {}
             }
             any_child_stmt(stmt, |child| {
-                self.stmt(child, ctx, current_class, best);
+                self.stmt(child, current_class, best);
                 false
             });
         })
     }
 
-    fn param(
-        &mut self,
-        p: &Param,
-        ctx: &mut NameContext,
-        current_class: Option<&str>,
-        best: &mut Option<SigHelp>,
-    ) {
+    fn param(&mut self, p: &Param, current_class: Option<&str>, best: &mut Option<SigHelp>) {
         if let Some(d) = &p.default {
-            self.expr(d, ctx, current_class, best);
+            self.expr(d, current_class, best);
         }
     }
 
     fn function(
         &mut self,
         f: &FunctionDecl,
-        ctx: &mut NameContext,
         current_class: Option<&str>,
         is_static: bool,
         best: &mut Option<SigHelp>,
     ) {
         for p in &f.params {
-            self.param(p, ctx, current_class, best);
+            self.param(p, current_class, best);
         }
         let previous_function = self.current_function.replace(f.clone());
         let previous_is_static = std::mem::replace(&mut self.current_is_static, is_static);
-        self.stmts(&f.body, ctx, current_class, best);
+        self.stmts(&f.body, current_class, best);
         self.current_function = previous_function;
         self.current_is_static = previous_is_static;
     }
@@ -260,43 +233,37 @@ impl<'a> Walker<'a> {
     /// `current_class` its *constructor arguments* (as opposed to this
     /// class's own body) see, and it deliberately does NOT pass one in
     /// here.
-    fn class(&mut self, c: &ClassDecl, ctx: &mut NameContext, best: &mut Option<SigHelp>) {
-        let fqn = ctx.declared_name(class_decl_name(c));
+    fn class(&mut self, c: &ClassDecl, best: &mut Option<SigHelp>) {
+        let fqn = class_decl_fqn(c).to_string();
         for p in &c.properties {
             if let Some(d) = &p.default {
-                self.expr(d, &mut ctx.clone(), Some(&fqn), best);
+                self.expr(d, Some(&fqn), best);
             }
         }
         for m in &c.methods {
-            self.function(&m.function, &mut ctx.clone(), Some(&fqn), m.is_static, best);
+            self.function(&m.function, Some(&fqn), m.is_static, best);
         }
         for cst in &c.consts {
-            self.expr(&cst.value, &mut ctx.clone(), Some(&fqn), best);
+            self.expr(&cst.value, Some(&fqn), best);
         }
     }
 
-    fn enum_decl(&mut self, e: &ClassDecl, ctx: &mut NameContext, best: &mut Option<SigHelp>) {
-        let fqn = ctx.declared_name(class_decl_name(e));
+    fn enum_decl(&mut self, e: &ClassDecl, best: &mut Option<SigHelp>) {
+        let fqn = class_decl_fqn(e).to_string();
         for m in &e.methods {
-            self.function(&m.function, &mut ctx.clone(), Some(&fqn), m.is_static, best);
+            self.function(&m.function, Some(&fqn), m.is_static, best);
         }
         for cst in &e.consts {
-            self.expr(&cst.value, &mut ctx.clone(), Some(&fqn), best);
+            self.expr(&cst.value, Some(&fqn), best);
         }
         for case in &e.enum_cases {
             if let Some(v) = &case.value {
-                self.expr(v, &mut ctx.clone(), Some(&fqn), best);
+                self.expr(v, Some(&fqn), best);
             }
         }
     }
 
-    fn expr(
-        &mut self,
-        expr: &Expr,
-        ctx: &mut NameContext,
-        current_class: Option<&str>,
-        best: &mut Option<SigHelp>,
-    ) {
+    fn expr(&mut self, expr: &Expr, current_class: Option<&str>, best: &mut Option<SigHelp>) {
         syntax::stack::guard(|| {
             match &expr.kind {
                 ExprKind::Call(callee, args) => {
@@ -304,18 +271,17 @@ impl<'a> Walker<'a> {
                         *best = None;
                         if self.pos_past(callee.span.end)
                             && let ExprKind::Name(n) = &callee.kind
-                            && let Some(fqn) = resolve_class_ref(n, current_class, self.registry)
-                            && self.registry.lookup_function(&fqn).is_some()
+                            && let Some((fqn, _)) = self.registry.resolve_function(n)
                         {
                             *best = Some(SigHelp {
-                                target: Target::Function(fqn),
+                                target: Target::Function(fqn.to_string()),
                                 active_parameter: active_parameter(args, self.pos),
                             });
                         }
                     }
-                    self.expr(callee, ctx, current_class, best);
+                    self.expr(callee, current_class, best);
                     for a in args {
-                        self.expr(&a.value, ctx, current_class, best);
+                        self.expr(&a.value, current_class, best);
                     }
                     return;
                 }
@@ -336,9 +302,9 @@ impl<'a> Walker<'a> {
                             });
                         }
                     }
-                    self.expr(callee, ctx, current_class, best);
+                    self.expr(callee, current_class, best);
                     for a in args {
-                        self.expr(&a.value, ctx, current_class, best);
+                        self.expr(&a.value, current_class, best);
                     }
                     return;
                 }
@@ -367,9 +333,9 @@ impl<'a> Walker<'a> {
                             }
                         }
                     }
-                    self.expr(recv, ctx, current_class, best);
+                    self.expr(recv, current_class, best);
                     for a in args {
-                        self.expr(&a.value, ctx, current_class, best);
+                        self.expr(&a.value, current_class, best);
                     }
                     return;
                 }
@@ -379,11 +345,11 @@ impl<'a> Walker<'a> {
                         *best = None;
                     }
                     if let StaticTarget::Expr(receiver) = target {
-                        self.expr(receiver, ctx, current_class, best);
+                        self.expr(receiver, current_class, best);
                     }
-                    self.expr(name_expr, ctx, current_class, best);
+                    self.expr(name_expr, current_class, best);
                     for a in args {
-                        self.expr(&a.value, ctx, current_class, best);
+                        self.expr(&a.value, current_class, best);
                     }
                     return;
                 }
@@ -394,10 +360,10 @@ impl<'a> Walker<'a> {
                     if contains(expr.span, self.pos) {
                         *best = None;
                     }
-                    self.expr(recv, ctx, current_class, best);
-                    self.expr(name_expr, ctx, current_class, best);
+                    self.expr(recv, current_class, best);
+                    self.expr(name_expr, current_class, best);
                     for a in args {
-                        self.expr(&a.value, ctx, current_class, best);
+                        self.expr(&a.value, current_class, best);
                     }
                     return;
                 }
@@ -419,7 +385,7 @@ impl<'a> Walker<'a> {
                         }
                     }
                     for a in args {
-                        self.expr(&a.value, ctx, current_class, best);
+                        self.expr(&a.value, current_class, best);
                     }
                     return;
                 }
@@ -436,12 +402,12 @@ impl<'a> Walker<'a> {
                     // synthetic FQN - `class` takes no `current_class` of
                     // its own, matching `navigation::Walker::class`'s
                     // identical precedent.
-                    self.class(decl, &mut ctx.clone(), best);
+                    self.class(decl, best);
                     // The constructor ARGUMENTS execute in the *enclosing*
                     // scope, not the anonymous class's own - passed through
                     // unmodified, the mirror image of the line above.
                     for a in args {
-                        self.expr(&a.value, ctx, current_class, best);
+                        self.expr(&a.value, current_class, best);
                     }
                     return;
                 }
@@ -453,22 +419,22 @@ impl<'a> Walker<'a> {
                     ..
                 } => {
                     for p in params {
-                        self.param(p, ctx, current_class, best);
+                        self.param(p, current_class, best);
                     }
-                    self.stmts(body, &mut ctx.clone(), current_class, best);
+                    self.stmts(body, current_class, best);
                     return;
                 }
                 ExprKind::ArrowFn { params, body, .. } => {
                     for p in params {
-                        self.param(p, ctx, current_class, best);
+                        self.param(p, current_class, best);
                     }
-                    self.expr(body, &mut ctx.clone(), current_class, best);
+                    self.expr(body, current_class, best);
                     return;
                 }
                 _ => {}
             }
             any_child_expr(expr, |child| {
-                self.expr(child, ctx, current_class, best);
+                self.expr(child, current_class, best);
                 false
             });
         })

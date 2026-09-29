@@ -6,7 +6,7 @@ use types::Type;
 
 pub mod access_attributes;
 mod anonymous_class;
-pub(crate) use anonymous_class::class_decl_name;
+pub(crate) use anonymous_class::{class_decl_fqn, class_decl_name};
 mod assertion_table;
 pub mod bodies;
 mod class_info;

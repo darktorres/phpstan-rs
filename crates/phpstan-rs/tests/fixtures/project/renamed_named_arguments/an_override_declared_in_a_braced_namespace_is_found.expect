@@ -1,0 +1,1 @@
+a.php:10:9-10:22 argument.parameterRenamedInSubtype L5 | Call to App\\Base::f() uses named argument for parameter $old, but App\\Sub renames it to $new.

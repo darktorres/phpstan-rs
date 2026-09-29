@@ -11,39 +11,28 @@ use rustc_hash::{FxHashMap, FxHashSet};
 use std::path::PathBuf;
 
 use crate::parent_calls::{HasContent, Invocation, ParentCallRule};
-use crate::registry::class_decl_name;
 use syntax::ast::*;
 use syntax::token::Span;
 use syntax::visit::any_expr_in_body;
 
 use super::Project;
 use diagnostics::{Diagnostic, DiagnosticBuilder};
-use syntax::name_resolution::NameContext;
+use syntax::declarations::Declared;
 
 const DOCTRINE_MAPPED: [&str; 3] = ["Entity", "Embeddable", "MappedSuperclass"];
 
-fn collect_classes<'a>(
-    stmts: &'a [Stmt],
-    ctx: &mut NameContext,
-    out: &mut Vec<(String, &'a ClassDecl)>,
-) {
-    syntax::stack::guard(|| {
-        for stmt in stmts {
-            match &stmt.kind {
-                StmtKind::Namespace(name) => ctx.set_namespace(name),
-                StmtKind::Use(imports) => ctx.add_uses(imports),
-                // An enum is final and has no properties or subclasses.
-                StmtKind::ClassDecl(c) if c.kind != ClassKind::Enum => {
-                    out.push((ctx.declared_name(class_decl_name(c)), c))
-                }
-                StmtKind::Block(body)
-                | StmtKind::Declare {
-                    body: Some(body), ..
-                } => collect_classes(body, ctx, out),
-                _ => {}
-            }
+/// Every class, interface and trait `stmts` declares unconditionally, by
+/// its fully-qualified name. An enum is final and has no properties or
+/// subclasses.
+fn collect_classes<'a>(stmts: &'a [Stmt], out: &mut Vec<(String, &'a ClassDecl)>) {
+    syntax::declarations::for_each_declaration(stmts, |declaration, _| {
+        if let Declared::Class(c) = declaration.declared
+            && c.kind != ClassKind::Enum
+            && !declaration.conditional
+        {
+            out.push((declaration.name(), c));
         }
-    })
+    });
 }
 
 fn is_doctrine_mapped(c: &ClassDecl, ctx_names: &[String]) -> bool {
@@ -125,7 +114,7 @@ impl Project {
         files.sort_by(|a, b| a.0.cmp(b.0));
         for (path, file) in files {
             let mut classes = Vec::new();
-            collect_classes(&file.ast, &mut NameContext::default(), &mut classes);
+            collect_classes(&file.ast, &mut classes);
             let mut found = Vec::new();
             for (fqn, c) in classes {
                 if closed_classes {

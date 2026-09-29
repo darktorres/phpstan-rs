@@ -286,6 +286,12 @@ pub struct FunctionDecl {
 }
 
 impl FunctionDecl {
+    /// The fully-qualified name a function statement declares; a method's
+    /// name.
+    pub fn fq_name(&self) -> &str {
+        self.namespaced_name.as_deref().unwrap_or(&self.name)
+    }
+
     /// Whether this is a `__construct` method (PHP names are
     /// case-insensitive).
     pub fn is_constructor(&self) -> bool {
@@ -479,6 +485,14 @@ pub struct ClassConst {
     pub removal_span: Option<Span>,
 }
 
+impl ClassConst {
+    /// The fully-qualified name a global `const` declares; a class
+    /// constant's name.
+    pub fn fq_name(&self) -> &str {
+        self.namespaced_name.as_deref().unwrap_or(&self.name)
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ClassKind {
     Class,
@@ -549,6 +563,12 @@ pub struct ClassDecl {
 }
 
 impl ClassDecl {
+    /// The fully-qualified name it declares; `None` for an anonymous
+    /// class.
+    pub fn fq_name(&self) -> Option<&str> {
+        self.namespaced_name.as_deref().or(self.name.as_deref())
+    }
+
     /// Its `__construct` method, matched case-insensitively.
     pub fn constructor(&self) -> Option<&MethodDecl> {
         self.methods.iter().find(|m| m.function.is_constructor())

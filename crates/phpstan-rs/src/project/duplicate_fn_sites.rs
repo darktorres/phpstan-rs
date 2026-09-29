@@ -2,12 +2,12 @@ use std::path::{Path, PathBuf};
 
 use rustc_hash::FxHashMap;
 
-use syntax::ast::{FunctionDecl, Stmt, StmtKind, TypeHint};
-use syntax::name_resolution::NameContext;
+use syntax::ast::{FunctionDecl, Stmt, TypeHint};
+use syntax::declarations::Declared;
 use syntax::token::Span;
 
-/// One top-level `function` declaration's own site, name-keyed the same
-/// way `Registry`/`DeclLocations` are - but every unconditional
+/// One `function` declaration's own site, name-keyed the same way
+/// `Registry` is - but every unconditional
 /// declaration of a name is kept (not just the winning one), since
 /// `check_duplicate_function_declarations` needs to see every occurrence
 /// to build its own full location list, exactly mirroring real PHPStan's
@@ -21,67 +21,35 @@ pub(crate) struct FnDeclSite {
     pub(crate) return_hint: Option<String>,
 }
 
-/// Every top-level function's own unconditional declaration site(s),
-/// across the whole project - always populated (unlike `DeclLocations`,
-/// which is LSP-only and opt-in), since `check_duplicate_function_
+/// Every function's own unconditional declaration site(s), across the
+/// whole project - always populated, since `check_duplicate_function_
 /// declarations` needs to run by default for `check-project`, matching
-/// real PHPStan's own always-on `function.duplicate` rule. A new,
-/// purpose-built walker (not a generalization of `DeclLocations::index` or
-/// `registry::build_declarations`) for the same reason `DeclLocations`
-/// itself gives for being its own walker: this one's `conditional`
-/// handling is load-bearing for correctness (an `if (!function_exists(...))
-/// { function foo() {} }` polyfill guard must never be tracked at all -
-/// see `index`'s own doc comment), unlike `DeclLocations`'s deliberately
-/// looser last-wins convenience lookup.
+/// real PHPStan's own always-on `function.duplicate` rule. A conditional
+/// declaration is never tracked (see `index`).
 #[derive(Default)]
 pub(crate) struct DuplicateFunctionSites {
     sites: FxHashMap<String, Vec<FnDeclSite>>,
 }
 
 impl DuplicateFunctionSites {
-    /// `conditional` mirrors `registry::build_declarations`'s own
-    /// identical parameter and `If`/`Block` recursion shape - but where
-    /// that function still *records* a conditional declaration (just with
-    /// weaker "first unconditional wins" semantics), this one drops a
-    /// conditionally-reached `FunctionDecl` entirely: real PHPStan's own
-    /// rule has no such guard and is a known, disclosed false-positive
-    /// source for the common `symfony/polyfill-*`-style `if (!
-    /// function_exists('foo')) { function foo() {} }` idiom (two
-    /// unrelated packages independently guarding the identical polyfill
-    /// name) - a deliberate, stricter departure from literal real-PHPStan
-    /// behavior, matching this project's own "favor false negatives over
-    /// false positives" precedent.
-    pub(crate) fn index(
-        &mut self,
-        stmts: &[Stmt],
-        ctx: &mut NameContext,
-        path: &Path,
-        conditional: bool,
-    ) {
-        syntax::stack::guard(|| {
-            for stmt in stmts {
-                match &stmt.kind {
-                    StmtKind::Namespace(name) => ctx.set_namespace(name),
-                    StmtKind::Use(imports) => ctx.add_uses(imports),
-                    StmtKind::FunctionDecl(f) => {
-                        if conditional {
-                            continue;
-                        }
-                        self.record(ctx.declared_name(&f.name), path, f);
-                    }
-                    StmtKind::If(if_stmt) => {
-                        for body in if_stmt.bodies() {
-                            self.index(std::slice::from_ref(body), &mut ctx.clone(), path, true);
-                        }
-                    }
-                    StmtKind::Block(inner)
-                    | StmtKind::Declare {
-                        body: Some(inner), ..
-                    } => self.index(inner, ctx, path, conditional),
-                    _ => {}
-                }
+    /// Records `stmts`' unconditional function declarations. Where
+    /// `registry::build_declarations` still records a conditional one
+    /// (with weaker "first unconditional wins" semantics), this drops it
+    /// entirely: real PHPStan's own rule has no such guard and is a known,
+    /// disclosed false-positive source for the common
+    /// `symfony/polyfill-*`-style `if (!function_exists('foo')) { function
+    /// foo() {} }` idiom (two unrelated packages independently guarding
+    /// the identical polyfill name) - a deliberate, stricter departure
+    /// from literal real-PHPStan behavior, matching this project's own
+    /// "favor false negatives over false positives" precedent.
+    pub(crate) fn index(&mut self, stmts: &[Stmt], path: &Path) {
+        syntax::declarations::for_each_declaration(stmts, |declaration, _| {
+            if let Declared::Function(f) = declaration.declared
+                && !declaration.conditional
+            {
+                self.record(declaration.name(), path, f);
             }
-        })
+        });
     }
 
     fn record(&mut self, fqn: String, path: &Path, f: &FunctionDecl) {
@@ -97,10 +65,8 @@ impl DuplicateFunctionSites {
         });
     }
 
-    /// Mirrors `DeclLocations::remove_declarations`'s own shape, but
-    /// filters each name's own `Vec` down by `path` rather than a flat
-    /// `.remove()` - unlike `DeclLocations` (one winning site per name),
-    /// one function name here can legitimately have sites in several
+    /// Filters each name's own `Vec` down by `path` rather than a flat
+    /// `.remove()` - one function name here can legitimately have sites in several
     /// different files at once, so removing `path`'s own contribution
     /// must leave every other file's site(s) for that same name intact.
     pub(crate) fn remove_declarations(&mut self, path: &Path, removed_functions: &[String]) {

@@ -9,7 +9,6 @@ use rustc_hash::{FxHashMap, FxHashSet};
 use std::path::PathBuf;
 
 use crate::architecture::{ArchitectureRule, NamePattern, Selector};
-use crate::registry::class_decl_name;
 use crate::registry::stubs;
 use syntax::ast::*;
 use syntax::token::Span;
@@ -19,7 +18,6 @@ use types::Type;
 use super::Project;
 use super::use_sites::{RefTarget, index_class_fn_refs_without_source};
 use diagnostics::{Diagnostic, DiagnosticBuilder};
-use syntax::name_resolution::NameContext;
 
 /// A class-like declaration's own facts the registry doesn't keep.
 struct Declared<'a> {
@@ -29,52 +27,40 @@ struct Declared<'a> {
     public_methods: Vec<&'a str>,
 }
 
-fn collect_declared<'a>(
-    stmts: &'a [Stmt],
-    ctx: &mut NameContext,
-    out: &mut FxHashMap<String, Declared<'a>>,
-) {
-    syntax::stack::guard(|| {
-        for stmt in stmts {
-            match &stmt.kind {
-                StmtKind::Namespace(name) => ctx.set_namespace(name),
-                StmtKind::Use(imports) => ctx.add_uses(imports),
-                StmtKind::ClassDecl(c) => {
-                    out.insert(
-                        ctx.declared_name(class_decl_name(c)).to_ascii_lowercase(),
-                        Declared {
-                            name_span: c.name_span,
-                            span: stmt.span,
-                            attributes: c
-                                .attrs
-                                .iter()
-                                .map(|a| {
-                                    a.name
-                                        .resolved_class()
-                                        .unwrap_or(&a.name.written)
-                                        .to_string()
-                                })
-                                .collect(),
-                            public_methods: c
-                                .methods
-                                .iter()
-                                .filter(|m| {
-                                    m.visibility == Visibility::Public
-                                        && !m.function.is_constructor()
-                                })
-                                .map(|m| m.function.name.as_ref())
-                                .collect(),
-                        },
-                    );
-                }
-                StmtKind::Block(body)
-                | StmtKind::Declare {
-                    body: Some(body), ..
-                } => collect_declared(body, ctx, out),
-                _ => {}
-            }
+/// Every class-like `stmts` declares unconditionally, by its lowercased
+/// fully-qualified name.
+fn collect_declared<'a>(stmts: &'a [Stmt], out: &mut FxHashMap<String, Declared<'a>>) {
+    syntax::declarations::for_each_declaration(stmts, |declaration, _| {
+        let syntax::declarations::Declared::Class(c) = declaration.declared else {
+            return;
+        };
+        if declaration.conditional {
+            return;
         }
-    })
+        out.insert(
+            declaration.name().to_ascii_lowercase(),
+            Declared {
+                name_span: c.name_span,
+                span: declaration.span,
+                attributes: c
+                    .attrs
+                    .iter()
+                    .map(|a| {
+                        a.name
+                            .resolved_class()
+                            .unwrap_or(&a.name.written)
+                            .to_string()
+                    })
+                    .collect(),
+                public_methods: c
+                    .methods
+                    .iter()
+                    .filter(|m| m.visibility == Visibility::Public && !m.function.is_constructor())
+                    .map(|m| m.function.name.as_ref())
+                    .collect(),
+            },
+        );
+    });
 }
 
 fn contains(outer: Span, inner: Span) -> bool {
@@ -276,7 +262,7 @@ impl Project {
         }
         let mut declared = FxHashMap::default();
         for file in self.files.values() {
-            collect_declared(&file.ast, &mut NameContext::default(), &mut declared);
+            collect_declared(&file.ast, &mut declared);
         }
         let mut ctx = Context {
             project: self,
@@ -289,7 +275,7 @@ impl Project {
         analyzed.sort_by(|a, b| a.0.cmp(b.0));
         for (path, file) in analyzed {
             let mut classes = FxHashMap::default();
-            collect_declared(&file.ast, &mut NameContext::default(), &mut classes);
+            collect_declared(&file.ast, &mut classes);
             if classes.is_empty() {
                 continue;
             }
