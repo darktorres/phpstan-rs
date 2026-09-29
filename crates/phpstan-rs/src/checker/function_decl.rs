@@ -500,6 +500,20 @@ impl<'a> Checker<'a> {
         // `Locals::track`'s doc comment. Every clone of `locals` from
         // here on carries this forward automatically.
         locals.set_track(self.probe_span.get().is_some());
+        // A PHPDoc type that can't be resolved is ignored: its position has
+        // the native type (its tag is reported as unresolvable).
+        let doc_nodes = f
+            .doc_comment
+            .as_deref()
+            .filter(|doc| doc.contains('@'))
+            .map(super::phpdoc_unresolvable::tag_type_nodes);
+        let doc_unresolvable = |this: &Self, node: Option<&phpdoc::grammar::TypeNode>| {
+            node.is_some_and(|n| this.type_node_unresolvable(n, class_name))
+        };
+        let return_doc_unresolvable = doc_unresolvable(
+            self,
+            doc_nodes.as_ref().and_then(|n| n.return_type.as_ref()),
+        );
         match sig {
             // The registry's FunctionReflection already has PHPDoc types merged
             // in - using it here, instead of re-deriving from the raw
@@ -519,9 +533,19 @@ impl<'a> Checker<'a> {
                     // fell through to `Mixed` - no undefined-property/
                     // method checking at all, unlike the identical access
                     // through `$this`.
+                    let declared = if doc_unresolvable(
+                        self,
+                        doc_nodes
+                            .as_ref()
+                            .and_then(|n| n.params.get(param.name().as_ref())),
+                    ) {
+                        param.ty_native()
+                    } else {
+                        param.ty()
+                    };
                     let ty = match class_name {
-                        Some(c) => self.resolve_pseudo(param.ty(), c),
-                        None => param.ty().clone(),
+                        Some(c) => self.resolve_pseudo(declared, c),
+                        None => declared.clone(),
                     };
                     // Mirrors real PHPStan's `ExistingClassesInTypehintsRule` -
                     // on the un-array-wrapped element type below (a
@@ -728,59 +752,67 @@ impl<'a> Checker<'a> {
             std::sync::Arc<str>,
             std::sync::Arc<str>,
         )> = Vec::new();
-        let declared_return = sig.map(|s| s.return_type().clone()).or_else(|| {
-            // Same "the registry-side merge this branch otherwise skips"
-            // fix as the param loop above, for the return position - an
-            // anonymous class's `@return` docblock tag is only ever
-            // reached here, never via `sig` (always `None` for one).
-            let doc_return = f
-                .doc_comment
-                .as_deref()
-                .map(docblock::parse)
-                .and_then(|d| d.return_type);
-            let ty = resolve_type(
-                doc_return.as_ref(),
-                f.return_type.as_ref().map(TypeHint::to_string).as_deref(),
-            );
-            // Same "checker builds a Type straight from raw text,
-            // bypassing FunctionReflection::from_decl" pattern as the param
-            // loop's identical fix above.
-            collect_class_name_case_refs(
-                &ty,
-                &self.name_ctx,
-                &mut declared_return_case_refs_none_path,
-            );
-            let ty = resolve_names_in_type(ty, &self.name_ctx);
-            // The return-position sibling of the param loop's identical
-            // fix above, including the same native-fallback need.
-            let native_ty =
-                self.resolve_type_hint(f.return_type.as_ref().map(TypeHint::to_string).as_deref());
-            let ty = self
-                .registry
-                .resolve_deferred_value_of_now_with_native_fallback(ty, &native_ty);
-            // Same ancestor-backfill as the param loop above, for the
-            // return position.
-            let ty = if doc_return.is_none() {
-                ancestor_sig_hint
-                    .filter(|s| {
-                        s.return_has_own_doc()
-                            && Registry::safe_to_backfill_mixed(s.return_type(), &ty)
-                            && !Registry::type_mentions_foreign_scoped_template_param(
-                                s.return_type(),
-                                &f.name,
-                            )
-                            && Registry::safe_to_backfill_object_type(s.return_type(), &ty)
-                    })
-                    .map(|s| s.return_type().clone())
-                    .unwrap_or(ty)
-            } else {
-                ty
-            };
-            Some(match class_name {
-                Some(c) => self.resolve_pseudo(&ty, c),
-                None => ty,
+        let declared_return = sig
+            .map(|s| {
+                if return_doc_unresolvable {
+                    s.return_type_native().clone()
+                } else {
+                    s.return_type().clone()
+                }
             })
-        });
+            .or_else(|| {
+                // Same "the registry-side merge this branch otherwise skips"
+                // fix as the param loop above, for the return position - an
+                // anonymous class's `@return` docblock tag is only ever
+                // reached here, never via `sig` (always `None` for one).
+                let doc_return = f
+                    .doc_comment
+                    .as_deref()
+                    .map(docblock::parse)
+                    .and_then(|d| d.return_type);
+                let ty = resolve_type(
+                    doc_return.as_ref(),
+                    f.return_type.as_ref().map(TypeHint::to_string).as_deref(),
+                );
+                // Same "checker builds a Type straight from raw text,
+                // bypassing FunctionReflection::from_decl" pattern as the param
+                // loop's identical fix above.
+                collect_class_name_case_refs(
+                    &ty,
+                    &self.name_ctx,
+                    &mut declared_return_case_refs_none_path,
+                );
+                let ty = resolve_names_in_type(ty, &self.name_ctx);
+                // The return-position sibling of the param loop's identical
+                // fix above, including the same native-fallback need.
+                let native_ty = self
+                    .resolve_type_hint(f.return_type.as_ref().map(TypeHint::to_string).as_deref());
+                let ty = self
+                    .registry
+                    .resolve_deferred_value_of_now_with_native_fallback(ty, &native_ty);
+                // Same ancestor-backfill as the param loop above, for the
+                // return position.
+                let ty = if doc_return.is_none() {
+                    ancestor_sig_hint
+                        .filter(|s| {
+                            s.return_has_own_doc()
+                                && Registry::safe_to_backfill_mixed(s.return_type(), &ty)
+                                && !Registry::type_mentions_foreign_scoped_template_param(
+                                    s.return_type(),
+                                    &f.name,
+                                )
+                                && Registry::safe_to_backfill_object_type(s.return_type(), &ty)
+                        })
+                        .map(|s| s.return_type().clone())
+                        .unwrap_or(ty)
+                } else {
+                    ty
+                };
+                Some(match class_name {
+                    Some(c) => self.resolve_pseudo(&ty, c),
+                    None => ty,
+                })
+            });
         // The native-only counterpart of `declared_return` above -
         // `check_generator_return_type` needs it specifically, not the
         // PHPDoc-refined type `declared_return` carries everywhere else

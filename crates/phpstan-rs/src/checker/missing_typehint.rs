@@ -428,8 +428,24 @@ impl<'a> Checker<'a> {
         } else {
             "Function"
         };
+        // A position whose PHPDoc type is unresolvable has a type written;
+        // that it can't be resolved is reported instead.
+        let doc_nodes = f
+            .doc_comment
+            .as_deref()
+            .filter(|doc| doc.contains('@'))
+            .map(super::phpdoc_unresolvable::tag_type_nodes);
+        let unresolvable = |this: &Self, node: Option<&phpdoc::grammar::TypeNode>| {
+            node.is_some_and(|n| this.type_node_unresolvable(n, class_name))
+        };
 
         for (i, (name, ty, span)) in resolved_params.iter().enumerate() {
+            if unresolvable(
+                self,
+                doc_nodes.as_ref().and_then(|n| n.params.get(name.as_str())),
+            ) {
+                continue;
+            }
             let native_hint_text = f
                 .params
                 .iter()
@@ -516,6 +532,12 @@ impl<'a> Checker<'a> {
             return;
         }
 
+        if unresolvable(
+            self,
+            doc_nodes.as_ref().and_then(|n| n.return_type.as_ref()),
+        ) {
+            return;
+        }
         let return_explicit_mixed = match sig {
             Some(s) => s.return_explicit_mixed_hint(),
             None => mentions_mixed(native_return, doc_return),

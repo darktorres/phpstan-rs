@@ -2,4 +2,3 @@
 5:12-5:56 return.noParent L0 | return type of K::h() has invalid type parent
 5:23-5:32 parameter.noParent L0 | parameter $p of K::h() has invalid type parent
 7:21-7:22 return.unresolvableType L2 | PHPDoc tag @return contains unresolvable type.
-7:34-7:35 return.type L3 | return type mismatch: expected parent, got 1
