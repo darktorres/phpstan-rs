@@ -121,6 +121,11 @@ through `check-project`.
   right. This was already the case before the fix window; `d82888a8`
   moved the index and kept it. Done: the index records the function the
   call reaches (`called_function_name`'s fallback rule).
+
+  The key is also the name as written, so `Helper()` doesn't count as a
+  reference to `function helper` and `function.unused` fires for it
+  (probed with `check_dead_code` on). Done also needs the key
+  case-folded.
 - [ ] **F8. An attribute class used only as an attribute is `class.unused`**
   (`addc7c39` kept this). The use-site walker records extends, implements,
   trait use, catch, type-hint, call, `new` and fetch names, but not
@@ -421,6 +426,39 @@ through `check-project`.
   `===` recognized (the same narrowing the arm bodies already get), with
   fixtures.
 
+- [ ] **F55. A class declaring `__tostring()` in lower case isn't
+  `Stringable`** (`ClassReflection::from_def`; also before the window).
+  The implicit interface is added on `methods.contains_key("__toString")`,
+  an exact-case lookup, and PHP method names ignore case: for `final class
+  A { public function __tostring(): string {...} }`, passing `new A()` to
+  a `Stringable` parameter reports `argument.type` and
+  `new A() instanceof Stringable` reports `instanceof.alwaysFalse`; PHP
+  says `true`. Done: the lookup folds case, with a fixture.
+- [ ] **F56. A method calling `static::` is proven pure though a subclass
+  can override the callee** (`resolve_static_call`, `registry/purity.rs`;
+  also before the window). `static::m()` is resolved like `self::m()`,
+  with no overridability check, so `final public function run(): int {
+  return static::compute(); }` is pure when `compute()` is, and
+  `$b->run();` reports `method.resultUnused` ("has no effect") even with a
+  `Child` whose `compute()` echoes. The same walk disqualifies every
+  `ClassConstFetch` and `ClassNameFetch` under a comment about static
+  property access, so a getter returning `self::X` is never pure and a
+  bare call to it goes unreported. Done: `static::` needs the same
+  non-overridable target `$this->` does, and a class constant or `::class`
+  read doesn't disqualify, with fixtures.
+- [ ] **F57. An arrow function's body stops before `and`/`or`/`xor`**
+  (`parse_arrow_fn`, `parser/closures_and_match.rs`; also before the
+  window). The body is parsed with `parse_assignment`, but PHP's
+  `fn() => expr` takes a whole `expr`: `$f = fn() => false or $b;` is a
+  closure returning `false or $b` (PHP gives `true` for
+  `(fn() => false or true)()`). prs reads `($f = fn() => false) or $b`,
+  reports `logicalOr.resultUnused`, types `$f` as `Closure(): false`, and
+  reports `if ($f())` as `if.alwaysFalse`. Separately, an unparenthesized
+  nested ternary (`$b ? 1 : 2 ? 3 : 4`), a compile error since PHP 8,
+  parses as a right-nested one and nothing reports it. Done: the arrow
+  body is a full expression (`parse_expression`), and a ternary in the
+  `else` of another without parentheses is a parse error, with fixtures.
+
 ### Wrong types and missed reports (probed)
 
 - [ ] **F13. An array literal's positional key after an unknown key**
@@ -575,6 +613,9 @@ through `check-project`.
     `missingType.iterableValue` reads "in iterable type array" (the walk
     reaches `iterable`'s `array` member first); the pre-window binary said
     "iterable type iterable".
+  - `syntax::ast::is_superglobal` counts `argv` and `argc`, which exist
+    only in the global scope, so `$argv` read inside a function isn't
+    `variable.undefined`.
 
   Done: each gives the type or message it names, with a fixture.
 
@@ -671,6 +712,20 @@ through `check-project`.
     UTF-8 run can differ from counting from the line start.
 
   Done: each is decided and fixed or ledgered.
+
+- [ ] **F58. A hover or definition request clones the enclosing scope
+  once per variable in the file** (`ae18f21d`). `lsp::navigation`'s
+  `record_var_read`, `record_var_self`, `instance` and
+  `record_receiver_member` build their `Resolved` value - including
+  `probe_scope()`, a clone of the enclosing `FunctionDecl`, or of the
+  file's whole top-level statement list in a script - before `record`
+  checks whether the span is at the cursor. The pre-window walker checked
+  the anchor first for variable reads and instance members. So
+  `resolve_at` clones that scope once for every variable read and member
+  access in the file, not once for the one under the cursor: quadratic in
+  a long top-level script. Done: the value is built only when the anchor
+  matches (a closure passed to `record`, or the check hoisted), and
+  `collect_all` builds the probe scope once per scope.
 
 ### Comments
 
@@ -798,6 +853,42 @@ through `check-project`.
     ("Closes a real, live bypass ... previously went unchecked").
 
   Done: each doc sits on its item and says what the code does.
+
+- [ ] **F59. Comments in the registry, project, LSP and syntax modules
+  read whole:**
+  - `project.rs`: `update_file`'s doc ("Re-parses one already-loaded
+    file...") is fused above `unindex_file`'s; plan references ("VSCode
+    plan item 2.2", "(3.2)", "this item's own open-risks note", "1.1's own
+    `phpstan-rs.toml` `paths`"); narration ("`unindex_file` used to run
+    first unconditionally", "a real bug on an earlier pass of this exact
+    method").
+  - `lsp/navigation.rs`: the module doc corrects itself mid-sentence
+    ("`lsp::document_highlight`... no such module - see
+    `Server::document_highlight`").
+  - `project/use_sites.rs`: the `Name` arm says a bare `Name` there is
+    "e.g. a first-class-callable target `foo(...)`"; that is a `Call`
+    (handled above), so a bare `Name` is a constant, recorded as a
+    function.
+  - `registry/purity.rs`: "Any static property access at all" labels the
+    arm that also disqualifies `ClassConstFetch` and `ClassNameFetch`
+    (F56).
+  - `syntax/ast.rs`: `PropertyDecl::hooks` says hook bodies "aren't
+    type-checked" (`checker/oop/property_hooks.rs` checks them);
+    `FunctionDecl::body` says `FunctionReflection::from_decl` shares it
+    into a `body` field (there is none; bodies are found by provenance)
+    and cites `src/intern.rs`; the `PropertyAccess` comment describes a
+    trailing `bool` that is now `ObjectOperator`; `StaticCall` narrates
+    the `"?"` sentinel it replaced; `LogicalAnd` narrates "the way this
+    comment used to argue for"; `UseImport::kind` says there is no
+    global-constant registry; `Stmt::doc_comment` cites
+    `inline_var_annotation` (now `inline_var_annotations`).
+  - `syntax/parser`: `parse_function_decl` says methods come from
+    "`parse_class_body`/`parse_enum_decl`'s own member loops" (an enum
+    body has used `parse_class_body` since `1cdfe80d`); `parse_enum_decl`
+    cites "`ClassDecl.attrs`'s identical note" (the field is
+    `ClassDef::attrs`).
+
+  Done: each says what the code does, on the item it documents.
 
 ## The Stage B review's done items
 
@@ -1123,6 +1214,7 @@ all of its diffs above, but not again whole.
   read at `3cea2a20`: F44 to F51. `function_decl` carries none.
 - [x] The checker's `expr`: F39's unary bullet, F50, F51, F52, F53,
   F54.
-- [ ] Not re-read whole: the registry's
-  `class_info` and `purity`, `project`, `lsp::navigation`, and
-  `syntax::{ast, visit, parser}`.
+- [x] The registry's `class_info` and `purity`, `project` (with
+  `use_sites` and `banned`), `lsp::navigation`, and
+  `syntax::{ast, visit, parser}`, read at `3cea2a20`: F7 (extended), F42,
+  F55, F56, F57, F58, F59. `visit` carries none.
