@@ -1249,7 +1249,7 @@ mod whitespace;
 mod xml_name;
 mod xml_wellformedness;
 
-pub(crate) use assignment::{literal_shape_key, literal_string_key, superglobal_default_type};
+pub(crate) use assignment::{literal_shape_key, literal_string_key, unassigned_variable_type};
 pub(crate) use calls::{CheckArgsCall, resolve_call_args};
 pub(crate) use control_flow::{
     LoopZeroIterations, collect_exit_point_statements, collect_goto_targets,

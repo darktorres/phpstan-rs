@@ -12,6 +12,12 @@ impl Type {
         matches!(self, Type(Repr::Mixed(_)))
     }
 
+    /// Whether this is the error type: an expression already reported
+    /// invalid, which nothing reports on again.
+    pub fn is_error(&self) -> bool {
+        matches!(self, Type(Repr::Error))
+    }
+
     /// Whether this is a `mixed` a written type resolved to.
     pub fn is_explicit_mixed(&self) -> bool {
         matches!(self, Type(Repr::Mixed(true)))

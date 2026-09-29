@@ -205,7 +205,7 @@ impl<'a> Checker<'a> {
         r_ty: &Type,
         is_compound_assign: bool,
         span: Span,
-    ) {
+    ) -> bool {
         // Don't guess: a bare `Mixed` operand might be anything at
         // runtime, on either side, for any operator here - matches real
         // PHPStan's own top-level `$type instanceof MixedType => skip`
@@ -217,14 +217,14 @@ impl<'a> Checker<'a> {
         // `Mixed | non-numeric-literal` fails *both* of `BitAnd`'s own
         // legal combinations even though either one might hold at
         // runtime.
-        if l_ty.is_mixed() || r_ty.is_mixed() {
-            return;
+        if l_ty.is_mixed() || r_ty.is_mixed() || l_ty.is_error() || r_ty.is_error() {
+            return false;
         }
         let Some(valid) = self.binary_operand_validity(op, l_ty, r_ty) else {
-            return;
+            return false;
         };
         if valid {
-            return;
+            return false;
         }
         let sigil = binop_sigil(op);
         let (op_str, identifier) = if is_compound_assign {
@@ -238,6 +238,7 @@ impl<'a> Checker<'a> {
             2,
             identifier,
         );
+        true
     }
 
     /// Flags a condition whose type isn't confidently `bool` at all,

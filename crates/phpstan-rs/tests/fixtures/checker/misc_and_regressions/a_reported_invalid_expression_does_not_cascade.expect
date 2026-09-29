@@ -1,0 +1,8 @@
+5:13-5:19 variable.undefined L0 | undefined variable $undef
+6:5-6:11 variable.undefined L0 | undefined variable $undef
+7:13-7:25 method.notFound L0 | call to undefined method Foo::nope()
+8:5-8:17 method.notFound L0 | call to undefined method Foo::nope()
+9:13-9:26 property.notFound L2 | access to undefined property Foo::$missing
+10:5-10:18 property.notFound L2 | access to undefined property Foo::$missing
+11:10-11:16 variable.undefined L0 | undefined variable $undef
+14:6-14:8 binaryOp.invalid L2 | Binary operation "-" between array{} and 1 results in an error.

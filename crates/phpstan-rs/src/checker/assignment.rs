@@ -395,7 +395,7 @@ impl<'a> Checker<'a> {
                             // runs, so treating this write as if it were the
                             // array's first key would wrongly narrow it down
                             // to only the key(s) a test happens to write
-                            // locally. `superglobal_default_type` already
+                            // locally. `unassigned_variable_type` already
                             // exists for exactly this "read before any real
                             // assignment appears in locals" case - reused
                             // verbatim rather than re-deriving it.
@@ -409,7 +409,7 @@ impl<'a> Checker<'a> {
                             let was_defined = locals.contains_key(name);
                             let current = locals.get(name).cloned().unwrap_or_else(|| {
                                 if is_superglobal(name) {
-                                    superglobal_default_type(name)
+                                    unassigned_variable_type(name)
                                 } else {
                                     Type::array_shape(Shape::sealed(Vec::new()))
                                 }
@@ -736,36 +736,18 @@ impl<'a> Checker<'a> {
     }
 }
 
-/// A superglobal's own type, read *before* any real assignment to it
-/// appears in this function's own `locals` - real phpstorm-stubs' own
-/// `superglobals/_superglobals.php` bootstrap file declares every one of
-/// these (bar `argc`) with a literal `= []` assignment, which is exactly
-/// what real PHPStan's own global-variable seeding generalizes to a bare
-/// `array`, never `null`/`mixed`. Reusing the generic `mixed`
-/// fallback here (as if a superglobal's pre-assignment type were
-/// "unknown/could be anything") broke `$_SESSION ??= [];` specifically:
-/// `widen_coalesce_result`'s own "keep the left side's real array type
-/// instead of collapsing to the empty-shape fallback" rule only fires
-/// for an already-known array. Scoped to exactly the real declared
-/// type: `Array(Mixed)` for the always-array superglobals, `Int` for
-/// `argc` (never `[]` in the stub at all).
-///
-/// The always-array case mirrors real PHPStan's own `MutatingScope::
-/// getVariableType`'s `isGlobalVariable` branch exactly (confirmed
-/// reading `vendor/phpstan-src` directly): `ArrayType(BenevolentUnionType([
-/// Int, String]), MixedType(true))` - a `Benevolent`-marked key (this
-/// project's own `benevolent_array_key()`, the identical marker
-/// `dynamic_write_key_type`'s own fallback already uses for the same
-/// "I don't know the key" case) and an *explicit* Mixed value, not the
-/// generic implicit fallback - a deliberate "this superglobal's value
-/// really is unconstrained" answer, not "we don't know."
-pub(crate) fn superglobal_default_type(name: &str) -> Type {
+/// What reading a variable no assignment has reached gives: a
+/// superglobal's value (an array with a benevolent key and an explicit
+/// `mixed` value, as PHPStan types it), `$argc`'s count, and for any
+/// other name the error type - the read is reported undefined, so what's
+/// built on it doesn't report again.
+pub(crate) fn unassigned_variable_type(name: &str) -> Type {
     match name {
         "argc" => Type::int(),
         _ if is_superglobal(name) => {
             Type::array(Type::benevolent_array_key(), Type::explicit_mixed())
         }
-        _ => Type::mixed(),
+        _ => Type::error(),
     }
 }
 

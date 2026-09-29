@@ -296,6 +296,21 @@ impl<'a> Checker<'a> {
     /// more precision" bias elsewhere). See the `Union`/`Intersection`
     /// arms below for the real distinction between them.
     pub(crate) fn property_access_type(&self, base_ty: &Type, prop: &str) -> Type {
+        // A property the class surely lacks is reported where it's read,
+        // so it's the error type from there on.
+        if self.member_confirmed_missing(base_ty, |c| {
+            c == "stdClass"
+                || self.registry.lookup_property(c, prop).is_some()
+                || self.registry.lookup_method(c, "__get").is_some()
+                || self.pest_hook_properties.contains(prop)
+        }) {
+            return Type::error();
+        }
+        self.declared_property_type(base_ty, prop)
+    }
+
+    /// `property_access_type` once the property may exist.
+    fn declared_property_type(&self, base_ty: &Type, prop: &str) -> Type {
         syntax::stack::guard(|| {
             // An intersection value is every member at once, so the first
             // member whose declaration resolves the property names its type -
@@ -308,7 +323,7 @@ impl<'a> Checker<'a> {
                     .iter()
                     .rev()
                     .find_map(|m| {
-                        let ty = self.property_access_type(m, prop);
+                        let ty = self.declared_property_type(m, prop);
                         (!ty.is_mixed()).then_some(ty)
                     })
                     .unwrap_or(Type::mixed());
@@ -317,7 +332,7 @@ impl<'a> Checker<'a> {
             if members.len() > 1 {
                 return members
                     .iter()
-                    .map(|m| self.property_access_type(m, prop))
+                    .map(|m| self.declared_property_type(m, prop))
                     .filter(|ty| !ty.is_mixed())
                     .reduce(Type::union)
                     .unwrap_or(Type::mixed());
@@ -433,6 +448,30 @@ impl<'a> Checker<'a> {
         args: &[Arg],
         locals: &Locals,
     ) -> Type {
+        // A method a known class surely lacks is reported where it's
+        // called, so the call is the error type from there on.
+        if recv_ty
+            .as_object()
+            .is_some_and(|(class, _)| self.registry.classes.contains_key(class.as_str()))
+            && self.member_confirmed_missing(recv_ty, |c| {
+                self.registry.lookup_method(c, method).is_some()
+                    || self.registry.lookup_method(c, "__call").is_some()
+            })
+        {
+            return Type::error();
+        }
+        self.declared_method_return_type(recv, recv_ty, method, args, locals)
+    }
+
+    /// `method_call_return_type` once the method may exist.
+    fn declared_method_return_type(
+        &self,
+        recv: &Expr,
+        recv_ty: &Type,
+        method: &str,
+        args: &[Arg],
+        locals: &Locals,
+    ) -> Type {
         syntax::stack::guard(|| {
             if let Some((class, type_args)) = recv_ty.as_object() {
                 return match self.class_argument_return(class, method, args, locals) {
@@ -491,7 +530,7 @@ impl<'a> Checker<'a> {
                     .iter()
                     .rev()
                     .find_map(|m| {
-                        let ty = self.method_call_return_type(recv, m, method, args, locals);
+                        let ty = self.declared_method_return_type(recv, m, method, args, locals);
                         (!ty.is_mixed()).then_some(ty)
                     })
                     .unwrap_or(Type::mixed());
@@ -500,7 +539,7 @@ impl<'a> Checker<'a> {
             if members.len() > 1 {
                 return members
                     .iter()
-                    .map(|m| self.method_call_return_type(recv, m, method, args, locals))
+                    .map(|m| self.declared_method_return_type(recv, m, method, args, locals))
                     .filter(|ty| !ty.is_mixed())
                     .reduce(Type::union)
                     .unwrap_or(Type::mixed());

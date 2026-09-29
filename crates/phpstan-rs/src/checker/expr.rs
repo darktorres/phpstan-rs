@@ -7,7 +7,7 @@ use crate::checker::{
     UsageTokenKind, binop_sigil, collect_goto_targets, generator_template_param,
     is_real_variable_key, literal_string_key, merge_scopes, narrowing_key,
     propagate_container_field_facts, purge_stale_narrowing_for, resolve_call_args,
-    superglobal_default_type,
+    unassigned_variable_type,
 };
 use crate::pest_config;
 use crate::regex_groups;
@@ -1424,7 +1424,7 @@ impl<'a> Checker<'a> {
             ExprKind::Binary(op, l, r) => {
                 let l_ty = self.check_expr(l, locals, label);
                 let r_ty = self.check_expr(r, locals, label);
-                self.check_binary_operand_validity(op, &l_ty, &r_ty, false, l.span);
+                let invalid = self.check_binary_operand_validity(op, &l_ty, &r_ty, false, l.span);
                 self.check_comparison_validity(op, &l_ty, &r_ty, l.span);
                 self.check_duplicate_operands(op, l, r);
                 self.check_division_by_literal_zero(op, r, &r_ty, r.span);
@@ -1451,7 +1451,12 @@ impl<'a> Checker<'a> {
                 if *op == BinOp::Pipe {
                     self.check_pipe_byref(r, locals);
                 }
-                self.infer_binary(op, l, r, locals)
+                // A reported invalid operation is the error type from here.
+                if invalid {
+                    Type::error()
+                } else {
+                    self.infer_binary(op, l, r, locals)
+                }
             }
             ExprKind::Variable(name) => {
                 if !locals.contains_key(name) && !is_superglobal(name) {
@@ -1473,7 +1478,7 @@ impl<'a> Checker<'a> {
                 let ty = locals
                     .get(name)
                     .cloned()
-                    .unwrap_or_else(|| superglobal_default_type(name));
+                    .unwrap_or_else(|| unassigned_variable_type(name));
                 // A read's inferred type, for hover - see
                 // `Checker::probe_hit_at`'s doc comment.
                 self.probe_hit_at(e.span, &ty);
@@ -1945,7 +1950,8 @@ impl<'a> Checker<'a> {
                 let rhs_ty = self.check_expr(rhs, locals, label);
                 self.check_offset_assignment(lhs, &rhs_ty, true, locals);
                 if *op != BinOp::Coalesce {
-                    self.check_binary_operand_validity(op, &lhs_ty, &rhs_ty, true, lhs.span);
+                    let _ =
+                        self.check_binary_operand_validity(op, &lhs_ty, &rhs_ty, true, lhs.span);
                     self.check_division_by_literal_zero(op, rhs, &rhs_ty, rhs.span);
                 }
                 // `$x += 1`/`$x ??= ...` is a real rebind of `$x` -
@@ -4257,7 +4263,7 @@ impl<'a> Checker<'a> {
             ExprKind::Variable(name) => locals
                 .get(name)
                 .cloned()
-                .unwrap_or_else(|| superglobal_default_type(name)),
+                .unwrap_or_else(|| unassigned_variable_type(name)),
             ExprKind::Grouping(inner)
             | ExprKind::ErrorSuppress(inner)
             | ExprKind::Clone(inner, _) => self.infer_expr(inner, locals),
