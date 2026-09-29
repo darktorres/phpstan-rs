@@ -119,38 +119,6 @@ impl Relation<'_> {
                         Some(_) => TrinaryLogic::Maybe,
                     }
                 }
-                // Two lists compare by element type and non-emptiness, their
-                // keys being `int<0, max>` alike.
-                (Type(Repr::Intersection(sup_members)), Type(Repr::Intersection(sub_members)))
-                    if sup_members.contains(&Type::accessory(AccessoryKind::ArrayList))
-                        && sub_members.contains(&Type::accessory(AccessoryKind::ArrayList)) =>
-                {
-                    let elem_of = |members: &[Type]| {
-                        members.iter().find_map(|m| match m {
-                            Type(Repr::Array(_, v)) => Some(v.as_ref().clone()),
-                            _ => None,
-                        })
-                    };
-                    let non_empty = |members: &[Type]| {
-                        members.contains(&Type::accessory(AccessoryKind::NonEmptyArray))
-                    };
-                    match (elem_of(sup_members), elem_of(sub_members)) {
-                        (Some(sup_elem), Some(sub_elem)) => {
-                            let elem = self.is_super_type_of(&sup_elem, &sub_elem);
-                            match elem {
-                                TrinaryLogic::Yes
-                                    if non_empty(sup_members) && !non_empty(sub_members) =>
-                                {
-                                    TrinaryLogic::Maybe
-                                }
-                                TrinaryLogic::No => TrinaryLogic::No,
-                                TrinaryLogic::Yes => TrinaryLogic::Yes,
-                                TrinaryLogic::Maybe => TrinaryLogic::Maybe,
-                            }
-                        }
-                        _ => TrinaryLogic::Maybe,
-                    }
-                }
                 (Type(Repr::Intersection(members)), _) => {
                     let results: Vec<TrinaryLogic> = members
                         .iter()
