@@ -199,8 +199,16 @@ impl Locals {
         }
         let depends = |k: &str| narrowing::key_depends_on(k, key);
         let mut changed: Vec<(Discriminant, Option<BranchImpliedFacts>)> = Vec::new();
+        // A truthiness or `isset` subject wraps the key it tests.
+        let tested = |subject: &str| -> String {
+            ["truthy(", "isset("]
+                .iter()
+                .find_map(|prefix| subject.strip_prefix(prefix)?.strip_suffix(')'))
+                .unwrap_or(subject)
+                .to_string()
+        };
         for (fact_key, implied) in self.branch_implied_facts.iter() {
-            if depends(&fact_key.subject) {
+            if depends(&tested(&fact_key.subject)) {
                 changed.push((fact_key.clone(), None));
                 continue;
             }

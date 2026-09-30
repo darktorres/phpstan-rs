@@ -178,6 +178,7 @@ impl<'a> Checker<'a> {
             return;
         }
         let current = self.current_narrowed_type(narrowed_expr, &key, locals);
+        let current_is_bool = current.is_bool().yes();
         // `Type::without` is only sound when `excluded`
         // represents one specific, already-proven value (`Null`,
         // `True`/`False`, a literal, an `is_*()` predicate's own
@@ -206,14 +207,18 @@ impl<'a> Checker<'a> {
         // imply some *other* variable's own non-null type elsewhere in
         // the program - replay those facts too, not just `key`'s own
         // ordinary narrowing above.
-        if matches_when_true
-            && let Some(implied) = locals
-                .branch_implied_facts()
-                .get(&Discriminant::new(&key, &target_ty))
-                .cloned()
-        {
-            for (implied_key, implied_ty) in implied.iter() {
-                locals.insert(implied_key.clone(), implied_ty.clone());
+        if matches_when_true {
+            let mut keys = vec![Discriminant::new(&key, &target_ty)];
+            // A bool `=== true`/`false` is its truthiness.
+            if target_ty.bool_literal_value().is_some() && current_is_bool {
+                keys.push(Discriminant::new(&format!("truthy({key})"), &target_ty));
+            }
+            for discriminant in keys {
+                if let Some(implied) = locals.branch_implied_facts().get(&discriminant).cloned() {
+                    for (implied_key, implied_ty) in implied.iter() {
+                        locals.insert(implied_key.clone(), implied_ty.clone());
+                    }
+                }
             }
         }
         // A nullsafe chain assigned to a variable, then tested later

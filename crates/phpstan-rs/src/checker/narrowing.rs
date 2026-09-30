@@ -201,7 +201,9 @@ fn disjunctive_syllogism_atom_key(e: &Expr) -> Option<String> {
 /// canonicalizer.
 fn truthiness_discriminant_subject(cond: &Expr) -> Option<String> {
     match &cond.kind {
-        ExprKind::Variable(_) => narrowing_key(cond),
+        // Apart from `$x === true`'s key: a truthy `$x` is that only for
+        // a bool.
+        ExprKind::Variable(_) => Some(format!("truthy({})", narrowing_key(cond)?)),
         ExprKind::Isset(operands) => {
             let [operand] = operands.as_slice() else {
                 return None;
@@ -449,9 +451,11 @@ impl<'a> Checker<'a> {
             // generic over the discriminant value's own type and needs no
             // matching change.
             let is_enum_case_proxy = after_ty.is_enum_case();
+            // `cond`'s own truthiness subject is no proxy for itself.
+            let truthy = format!("truthy({name})");
             if (is_flag_proxy || is_object_proxy || is_enum_case_proxy)
                 && before.get(name) != Some(after_ty)
-                && !subjects.iter().any(|(k, _)| k == name)
+                && !subjects.iter().any(|(k, _)| k == name || *k == truthy)
             {
                 subjects.push((name.clone(), after_ty.clone()));
                 if is_flag_proxy {
@@ -1224,7 +1228,16 @@ impl<'a> Checker<'a> {
                 if let Some((_, alias)) = locals.condition_aliases().get(name.as_ref()).cloned() {
                     self.apply_narrowing(&alias, locals, branch_true);
                 }
-                self.replay_truthiness_discriminant_facts(name, locals, branch_true);
+                self.replay_truthiness_discriminant_facts(
+                    &format!("truthy({name})"),
+                    locals,
+                    branch_true,
+                );
+                // A bool is truthy exactly when it's `true`, so what its
+                // equality recorded holds too.
+                if locals.get(name.as_ref()).is_some_and(|t| t.is_bool().yes()) {
+                    self.replay_truthiness_discriminant_facts(name, locals, branch_true);
+                }
                 if branch_true {
                     let current = self.current_narrowed_type(cond, name, locals);
                     locals.insert(name.to_string(), current.without_falsy());
@@ -1483,10 +1496,7 @@ impl<'a> Checker<'a> {
         };
         let negated_prefix = if info.negated { "negated " } else { "" };
         // A template's asserted type is only known per call.
-        let is_super = self
-            .relation()
-            .is_super_type_of(&info.ty, param.ty())
-            .yes();
+        let is_super = self.relation().is_super_type_of(&info.ty, param.ty()).yes();
         let is_disjoint = self.relation().disjoint(&info.ty, param.ty());
         let (impossible, already_narrowed) = if info.negated {
             (is_super, is_disjoint)
