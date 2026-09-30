@@ -1140,8 +1140,13 @@ through `check-project`.
   - `mt_rand` and `random_int` keep `int<a_min, b_max>` when the bounds may
     be in order. When they are always crossed (`a_min > b_max`) the call
     always throws, so it is the explicit `never` of F4's split, since the
-    statement after it really is unreachable. A
-    `function.impossibleCall`-style report is not part of this.
+    statement after it really is unreachable. The call is also reported,
+    since it can only throw: `argument.invalidRange` at level 0 ("Call to
+    random_int() with minimum 10 greater than maximum 1 always throws
+    ValueError."). When the bounds may cross but needn't, the call is
+    reported at level 5 as possibly throwing, the level of the other
+    argument-value reports. A `rand()` with crossed bounds is not reported,
+    since it runs.
 
   The zero-argument forms (`rand()`, `mt_rand()`) are `int` today; they
   return `int<0, getrandmax()>` (`2147483647` on every platform PHP 8
