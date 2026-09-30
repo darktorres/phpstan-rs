@@ -3069,30 +3069,55 @@ through `check-project`.
     signature fields on `FnDeclSite` go.
 
   - Whether two sites are a duplicate. PHP fails only when both
-    declarations run in one process, so that is the test, in place of
-    the opt-in flag that stands in for it today. Two unconditional
-    sites collide when some load set holds both files:
-    - Composer's autoload `files` (and `autoload-dev` `files`), which
-      every request loads; `composer/src/vendor.rs` already reads them;
-    - one PHPUnit test suite: every test file under a `<testsuite>`
-      directory of `phpunit.xml(.dist)` loads into the same process, which
-      is the case the opt-in was guarding against, and in fact a real
-      fatal. A small `phpunit.xml` reader (directories, suffixes,
-      excludes) joins the project's config loading;
-    - the include graph: files reachable from one entry point through
-      `include`/`require` targets that `checker/includes.rs` resolves,
-      the entry points being the Composer `bin` files, the `#!` scripts
-      (F42's rule) and files nothing includes.
+    declarations execute in one process, so that is the test, in place
+    of the opt-in flag that stands in for it today. It has two parts,
+    which files load together and whether each declaration runs when its
+    file loads, and a certainty.
+    - Load sets. A load set is the files one process can load:
+      - every request's set: Composer's autoload `files` (and
+        `autoload-dev` `files` for dev runs), which `composer/src/vendor.rs`
+        already reads, plus the files one entry point reaches;
+      - the entry points: the Composer `bin` files, the `#!` scripts
+        (F42's rule), and the files nothing includes. Each is its own
+        process, so two web entry points declaring `helper()` don't
+        collide unless one includes the other;
+      - the include graph: `include`/`require` targets resolved by
+        `checker/includes.rs`. A target it can't resolve may load any
+        file, so it can't hide a collision;
+      - the test run: plain `phpunit` loads every file of every
+        `<testsuite>` in `phpunit.xml(.dist)` (directories, suffixes,
+        excludes), plus its `bootstrap`, into one process, so all suites
+        are one load set, not one per suite. A test class under
+        `@runInSeparateProcess` or `processIsolation="true"` still has
+        its file loaded in the parent, so isolation doesn't split the
+        set. A small `phpunit.xml` reader joins the config loading.
+    - Guards, not the `conditional` flag. `DuplicateFunctionSites::index`
+      today drops every conditional declaration
+      (`declaration.conditional`). A declaration guarded by
+      `!function_exists('f')`, `!class_exists('C')` or their `\`
+      spellings (directly, or as an early `return` before it) never
+      collides, since it runs only if nothing declared the name. Any other
+      condition (`if (PHP_VERSION_ID < 80000)`, a config flag) may run
+      alongside another declaration, so it counts, as a "may run" site.
+    - Certainty. Two sites that are both unconditional (or guard-free
+      "may run") and both in a load set every process of that kind loads
+      (autoload `files`, the test run) are a certain fatal: reported at
+      level 0, non-ignorable, as today. A pair that meets only through a
+      may-edge (an unresolved include, a "may run" condition, one entry
+      point's reach) is reported at level 7 as "may be declared twice",
+      the maybe level used elsewhere.
+    - Classes. A class is autoloaded by name, and Composer maps a name to
+      one file: PSR-4 by path, a classmap by scanning, where two files
+      declaring one class give Composer's "Ambiguous class resolution"
+      warning and one file is never autoloaded. So a class declared in
+      two autoloadable files is reported as that ambiguity
+      (`class.ambiguousAutoload`, level 0, naming the file Composer picks
+      and the one it drops), and as a fatal duplicate only when a load
+      set reaches both files by other means (`files`, includes, the test
+      run).
 
-    A class declaration is autoloaded by name, and PSR-4 maps a name to
-    one file, so a second declaration of a class is unreachable through
-    autoloading. Its collision needs the same shared load set through
-    `files`, a test suite or includes; otherwise the second declaration
-    is reported as unreachable dead code (`class.unreachableDeclaration`,
-    level 4) rather than a fatal. With that test the checks run by
-    default, and the two `check_duplicate_*` flags go. An include target
-    that can't be resolved counts as possibly loading anything, so it
-    can't hide a collision.
+    With this test the checks run by default, and the two
+    `check_duplicate_*` flags go.
 
   Fixtures: `class Foo` and `class foo` in two files report
   `class.duplicate`, and `function helper`/`function HELPER` report too;
