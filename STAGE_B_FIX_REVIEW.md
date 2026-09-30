@@ -835,6 +835,43 @@ through `check-project`.
   declaration-side check compares against the bound; fixtures for
   `class-string<T>` and `T $expected` assertions.
 
+  Design: two halves.
+
+  At the call, `apply_assert_infos` (`narrowing/assertions.rs:385`)
+  narrows with `info.ty` as declared. The bindings it needs are the ones
+  `bound_call_return_type` (`expr/array_ops.rs:468`) already builds for
+  the return type. That function's first half moves into
+  `call_template_bindings(sig, resolved, locals) -> (TemplateBindings,
+  param_bindings)`, which the return path and the assertion path share.
+  `apply_assert_infos` resolves the arguments with `resolve_call_args`
+  (so named arguments map by name, which is F72's first bullet by the
+  same edit), computes the bindings, and substitutes `info.ty` with
+  `substitute_templates_resolving_to_bounds`, using the same own-scope
+  predicate the return uses, then `resolve_conditional`. Only after that
+  does it `narrow` or `exclude`. For a method call, the six callers
+  (`narrowing.rs:259/1225/1242`, `stmt.rs:1044/1055/1067`) pass the
+  declared `sig`. The ones with a receiver first run
+  `substitute_class_templates` with the receiver's type arguments, as a
+  method call's return does, so `Collection<int>::assertHas(T $x)`
+  narrows to `int`.
+
+  At the declaration, `check_one_assert_tag` (`narrowing.rs:1531`)
+  decides "does not narrow down" with `self.accepts(&info.ty,
+  param.ty())`. Acceptance takes anything into a template
+  (`accepted_though_no_subtype`'s `(_, TemplateParam)` arm), so
+  `@phpstan-assert T $x` over `mixed $x` always looks already narrowed.
+  The check is a subtyping question, so it uses
+  `relation().is_super_type_of`. There a template placeholder as the
+  supertype of anything but itself is `Maybe`, as in PHPStan, and
+  neither verdict fires. The disjointness half compares the
+  placeholder's bound.
+
+  Fixtures: `assertInstance(Sub::class, $m)` makes `$m` `Sub` and `?Foo
+  $f` `Sub`, and `assertSame(5, $n)` makes `$n` `5` so `needsInt($n)` is
+  clean. `$m->nope` on the asserted `Sub` reports. Neither declaration
+  reports `assert.alreadyNarrowedType`. A class-template assertion is
+  narrowed through its receiver.
+
 - [ ] **F39. Integer arithmetic over a union or a signed range gives the
   wrong type** (`types::arithmetic`, read whole; the pre-window binary
   gives the same types).
