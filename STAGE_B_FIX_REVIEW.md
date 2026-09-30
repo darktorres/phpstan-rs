@@ -1377,8 +1377,9 @@ through `check-project`.
     case folding, the fold PHP uses, merging fields that collide in key
     order, last one winning (`['Ab' => 1, 'aB' => 2]` is `['ab' => 2]`). Int
     keys stay. A general array keeps its value type with its string key type
-    folded to `string` (or `lowercase-string`). An unknown mode joins both
-    foldings.
+    folded to `lowercase-string` for `CASE_LOWER` (`uppercase-string` for
+    `CASE_UPPER`, the accessory's mirror, added to `AccessoryKind` if
+    missing). An unknown mode joins both foldings.
   - `array_fill_keys` (line 1207). The key type is the keys array's value
     type through `to_array_key` (`'1'` is `1`, and `'x'` stays). A sealed
     keys shape gives a sealed result shape with one required field per
@@ -1820,9 +1821,15 @@ through `check-project`.
   - `positional_args(args, sig) -> Option<Cow<[Arg]>>` returns the list in
     parameter order. A named argument moves to its parameter's position. A
     gap, an omitted optional parameter before a later named one, gives
-    `None`, since the arms assume a dense prefix. So does a spread, unless
-    the function is in a small `SPREAD_AWARE` set (the arms that already
-    unwrap a spread).
+    `None`, since the arms assume a dense prefix. A spread whose value is
+    a sealed list shape (`...[1, 2]`, or a variable typed
+    `array{int, string}`) is expanded into one argument per element, a
+    string-keyed sealed shape into named arguments, as PHP 8.1 unpacks
+    them, so it resolves like the written-out call. Any other spread gives
+    `None`, unless the function is in the small `SPREAD_AWARE` set (the
+    arms that already unwrap a spread). The same expansion is shared with
+    F72 and with `check_args`, whose argument-count and type checks gain
+    the same precision.
   - `infer_builtin_call_return_type` calls it right after the polyfill
     check, falling back to `infer_call_return_type`'s generic path on
     `None`. `type_check_call_outcome` and every `check_*` taking `args` in
@@ -2798,7 +2805,9 @@ through `check-project`.
     `args.get(idx)`, the positional slot. It resolves the arguments with
     `resolve_call_args(args, sig.params())`, which maps named arguments to
     their parameters, and reads the parameter's slot from that. A spread
-    before or at the parameter's position gives no slot, so no narrowing.
+    is expanded first, as F65's `positional_args` does for a sealed shape,
+    and only a spread it can't expand, before or at the parameter's
+    position, leaves no slot and no narrowing.
     F38's design runs the same resolution for its bindings, so it is
     computed once in `apply_assert_infos` and passed down. The
     `ThisSelf`/`ThisProp` targets are unaffected.
