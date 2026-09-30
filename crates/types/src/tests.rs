@@ -4,6 +4,7 @@ mod constructors;
 mod display_and_misc;
 mod intersections;
 mod kinds;
+mod narrowing;
 mod parsing;
 mod subtyping;
 mod subtyping_properties;

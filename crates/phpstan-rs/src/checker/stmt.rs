@@ -474,6 +474,20 @@ impl<'a> Checker<'a> {
                 // `assert($cond);` alone - `bare_assert_condition`'s own
                 // doc comment has the "which chain position is actually
                 // safe" reasoning.
+                // A variable an assertion narrows to `never` fails it.
+                let inhabited: Vec<String> = if matches!(
+                    e.kind,
+                    ExprKind::Call(..) | ExprKind::MethodCall(..) | ExprKind::StaticCall(..)
+                ) || bare_assert_condition(e).is_some()
+                {
+                    locals
+                        .iter()
+                        .filter(|(_, t)| !t.is_never())
+                        .map(|(k, _)| k.clone())
+                        .collect()
+                } else {
+                    Vec::new()
+                };
                 if let Some(cond) = bare_assert_condition(e) {
                     self.apply_narrowing(cond, locals, true);
                 }
@@ -498,6 +512,12 @@ impl<'a> Checker<'a> {
                 // `FunctionReflection` lookup instead of a hardcoded name table
                 // (see `FunctionReflection::assert_if_true`'s own doc comment).
                 self.apply_bare_statement_assert_narrowing(e, locals);
+                if inhabited
+                    .iter()
+                    .any(|k| locals.get(k).is_some_and(Type::is_never))
+                {
+                    self.terminating_assertions.insert(stmt.span);
+                }
                 // A bare `$cond || neverReturningCall();` statement -
                 // PHP's classic "guard or die" idiom
                 // (`$pos !== false || $this->ierror('Missing .', 400);`).

@@ -191,12 +191,10 @@ impl<'a> Checker<'a> {
         // from an already-`Bool`-typed `$x` (e.g. `function
         // test(?bool $a, bool $b) { if ($a !== null && $a !== $b) { ... }
         // }`) would wrongly collapse it to `never`.
-        // `Relation::narrow` doesn't share this bug: for a non-`Union`
-        // original it always returns `target` outright (matches iff both
-        // sides are already type-compatible, since `===` between
-        // incompatible static types is dead code either way) - safe
-        // regardless of whether `target_ty` is a literal or a general
-        // type, so only the exclusion branch needs gating here.
+        // `Relation::narrow` meets `current` with `target_ty`, sound for
+        // a literal and a general type alike (`===` between incompatible
+        // types leaves `never`: the branch is dead), so only the
+        // exclusion branch needs gating here.
         let narrowed = if matches_when_true {
             self.relation().narrow(&current, &target_ty)
         } else if target_ty.is_single_value() {

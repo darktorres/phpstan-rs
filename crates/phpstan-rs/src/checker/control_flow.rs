@@ -97,7 +97,10 @@ impl<'a> Checker<'a> {
                 | StmtKind::Throw(_)
                 | StmtKind::Break(_)
                 | StmtKind::Continue(_) => true,
-                StmtKind::Expression(e) => self.infer_expr(e, locals).is_never(),
+                StmtKind::Expression(e) => {
+                    self.terminating_assertions.contains(&stmt.span)
+                        || self.infer_expr(e, locals).is_never()
+                }
                 // Any statement in the block unconditionally terminating,
                 // not just the last one, is sound proof the whole block
                 // does - once reached, execution never falls through to
@@ -224,7 +227,10 @@ impl<'a> Checker<'a> {
                 // higher) still counts as exiting.
                 StmtKind::Continue(level) => matches!(level, Some(n) if *n > 1),
                 StmtKind::Break(_) => false,
-                StmtKind::Expression(e) => self.infer_expr(e, locals).is_never(),
+                StmtKind::Expression(e) => {
+                    self.terminating_assertions.contains(&stmt.span)
+                        || self.infer_expr(e, locals).is_never()
+                }
                 StmtKind::Block(stmts)
                 | StmtKind::Declare {
                     body: Some(stmts), ..

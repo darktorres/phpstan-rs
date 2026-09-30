@@ -124,18 +124,18 @@ impl Relation<'_> {
 }
 
 impl Relation<'_> {
-    /// `original` where a check that its value is of `target` passed. A
-    /// member that is a subtype of `target`, through this relation's class
-    /// hierarchy, stays whole: a class implementing the target interface
-    /// only through an ancestor keeps its own members. Subtyping, not
-    /// acceptance: `is_float()` of `int|float` leaves `float`, though a
-    /// `float` parameter accepts an `int`.
+    /// `original` where a check that its value is of `target` passed:
+    /// what was known meets what the check proves. A member that is a
+    /// subtype of `target`, through this relation's class hierarchy, stays
+    /// whole (a class implementing the target interface only through an
+    /// ancestor keeps its own members); any other gives way to its meet
+    /// with each of `target`'s members. Subtyping, not acceptance:
+    /// `is_float()` of `int|float` leaves `float`, though a `float`
+    /// parameter accepts an `int`. A check nothing in `original` can pass
+    /// leaves `never`: the branch doesn't run.
     pub fn narrow(&self, original: &Type, target: &Type) -> Type {
         match original.repr() {
             Repr::Union(members) | Repr::BenevolentUnion(members) => {
-                // A member the target covers stays; one it doesn't gives way
-                // to the target's members inside it (`?string` narrowed to
-                // `'a'|null` is `'a'|null`).
                 let target_members: &[Type] = match target.repr() {
                     Repr::Union(ms) | Repr::BenevolentUnion(ms) => ms,
                     _ => std::slice::from_ref(target),
@@ -149,37 +149,22 @@ impl Relation<'_> {
                         continue;
                     }
                     for t in target_members {
-                        if self.is_super_type_of(m, t).yes() && !kept.contains(t) {
-                            kept.push(t.clone());
+                        let meet = self.intersect(vec![m.clone(), t.clone()]);
+                        if !meet.is_never() && !kept.contains(&meet) {
+                            kept.push(meet);
                         }
                     }
                 }
                 match kept.len() {
-                    0 => target.clone(),
+                    0 => Type::never(),
                     1 => kept.into_iter().next().unwrap(),
                     _ => original.with_members(kept),
                 }
             }
-            // Blindly returning `target` would discard
-            // `original` even when `original` was already narrower, wrongly
-            // widening it: for `$image_id === $this->sessionService->
-            // getRefererImageId()`, where `$image_id` is a definite `int`
-            // and `getRefererImageId()` returns `int|null`, overwriting
-            // `$image_id` with the broader `int|null` inside the `===` true
-            // branch would corrupt every downstream use for the rest of the
-            // method. If `original`
-            // is already at least as narrow as `target`, real equality
-            // proves nothing new about it - keep it unchanged; only fall
-            // back to `target` when it's the narrower side (the literal-
-            // narrowing case this fallback exists for, `$x === 'foo'`).
-            // Same hierarchy-aware upgrade as the `Union` arm above: a single
-            // concrete class that only transitively implements `target` (an
-            // interface inherited from an ancestor, not declared directly)
-            // must still keep its own, more specific type here rather than
-            // needlessly widening to the bare interface.
             _ if self.is_super_type_of(target, original).yes() => original.clone(),
+            Repr::Error => original.clone(),
             Repr::Mixed(_, Some(lacks)) => target.without(lacks),
-            _ => target.clone(),
+            _ => self.intersect(vec![original.clone(), target.clone()]),
         }
     }
 }

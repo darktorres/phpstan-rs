@@ -508,6 +508,10 @@ pub struct Checker<'a> {
     // enclosing function's body to answer "could a `goto` reach this
     // labeled statement" itself.
     pub(crate) current_function_goto_targets: rustc_hash::FxHashSet<syntax::name::Name>,
+    /// Statements in the current function body whose assertion narrowed
+    /// a variable to `never`: the assertion fails there, so they end
+    /// control flow (`always_terminates`).
+    pub(crate) terminating_assertions: rustc_hash::FxHashSet<Span>,
     // Every variable assignment site in the current function body, for
     // `variable.implicitArray`; empty unless that check is enabled.
     pub(crate) current_function_assigned_variables: Vec<strict_rules::AssignedVariable>,
@@ -1042,6 +1046,7 @@ impl<'a> Checker<'a> {
             current_function_by_ref_params_with_tag: rustc_hash::FxHashMap::default(),
             current_function_byref_snapshot_names: rustc_hash::FxHashSet::default(),
             current_function_goto_targets: rustc_hash::FxHashSet::default(),
+            terminating_assertions: rustc_hash::FxHashSet::default(),
             current_function_assigned_variables: Vec::new(),
             in_bare_statement_position: false,
             in_condition_position: false,
