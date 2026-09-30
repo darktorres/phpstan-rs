@@ -643,6 +643,39 @@ through `check-project`.
   `if (is_resource($fp))` has a dead `else`. Done: `resource` answers
   `is_resource` maybe, or `fclose()` and the like leave a closed
   resource.
+
+  Design: the type model already has a closed resource (`Repr::Resource
+  { closed }`, PHPDoc `closed-resource`), but `parse.rs:1012` reads a
+  written `resource` as `open-resource`, so a parameter or stub
+  `resource` claims more than PHP does. PHPStan's `resource` covers both
+  states, and so should this one:
+
+  - `Repr::Resource` takes `state: ResourceState { Open, Closed, Either }`.
+    `resource` parses to `Either`, and `open-resource`/`closed-resource`
+    keep their states. Super-type, disjointness, intern and display
+    (`resource` for `Either`) follow; `Either` is the supertype of the two
+    others.
+  - `is_resource`'s narrowing target (`predicates.rs:371`) is `Open`. On
+    `Either` the call is "maybe", so `while (is_resource($fp))` and the
+    call's type (`bool`) stop being constants. The false branch keeps
+    `Closed`.
+  - A small table of closing functions (`fclose`, `pclose`, `closedir`,
+    `proc_close`, `gzclose`, `bzclose`, `xml_parser_free`,
+    `shmop_delete`'s kin, and those whose argument is still a resource)
+    marks a narrowable argument `Closed` after the call. It sits beside
+    the other by-reference effects of builtins, not in the stubs, which
+    have no `@param-out`.
+  - `gettype`'s return (`builtin_calls.rs:2708`) keeps answering `'resource
+    (closed)'` for `Closed`, and gives both strings for `Either`.
+
+  A fresh resource from `fopen` stays `Either` (its stub says
+  `resource`). That is sound: the loop and the `if` have no constant
+  verdict, and `fclose($fp); is_resource($fp)` is then `false`, reported
+  as `function.impossibleType` only once the closing table has run.
+  Fixtures: `while (is_resource($fp)) { fclose($fp); }` is clean,
+  `fclose($fp); if (is_resource($fp))` reports the impossible check, and
+  the `operators.rs`/`strict_rules.rs` resource lists still build their
+  unions.
 - [ ] **F28. A guarded polyfill's body is checked against the stub's
   signature.** `if (!function_exists('array_key_first')) { function
   array_key_first(array $a) { … $a … } }` reports `undefined variable $a`,
