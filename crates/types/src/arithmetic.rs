@@ -328,64 +328,20 @@ pub fn compare_range_outcome(
 }
 
 impl Type {
-    /// The provable outcome of a loose `==` comparison between two literal
-    /// scalar types (`!=` is just its negation), or `None` when not
-    /// statically decidable - matches real PHPStan's own
-    /// `LooseComparisonHelper::compareConstantScalars`, read directly from
-    /// `vendor/phpstan-src` rather than assumed. Deliberately narrower than
-    /// that helper in one disclosed respect: PHP 8.0 changed exactly one
-    /// corner of the loose-comparison table - a non-numeric string compared
-    /// against a number now casts the *number* to a string instead of the
-    /// string to a number (`PhpVersion::castsNumbersToStringsOnLooseComparison`),
-    /// so that one branch below is only attempted once `php_version` is
-    /// configured at 8.0+, matching this project's existing "a version-gated
-    /// fact stays silent with no configured version" precedent
-    /// (`php_version.rs`) rather than guessing a runtime default. Every
-    /// other branch here is exactly as version-independent in real PHP as it
-    /// is below: same-kind literals, numeric-string-vs-number (always
-    /// numeric, regardless of version), and bool/null-vs-anything (always a
-    /// plain bool-cast-both-sides comparison).
+    /// The provable outcome of a loose `==` comparison (`!=` is its
+    /// negation), or `None` when it isn't decided: the comparison model's
+    /// answer (`Relation::loose_equal`) without class knowledge.
+    /// `php_version` `None` means the answer must hold before and after
+    /// PHP 8.0.
     pub fn loosely_equals(
         &self,
         r: &Type,
         php_version: Option<crate::php_version::PhpVersion>,
     ) -> Option<bool> {
-        // bool/null vs anything: PHP casts *both* sides to bool and compares
-        // - version-independent, and subsumes the same-kind True/False/Null
-        // combinations too (no need to special-case them separately below).
-        if matches!(self.repr(), Repr::True | Repr::False | Repr::Null)
-            || matches!(r.repr(), Repr::True | Repr::False | Repr::Null)
-        {
-            return Some(
-                self.to_boolean().bool_literal_value()? == r.to_boolean().bool_literal_value()?,
-            );
-        }
-        match (self.repr(), r.repr()) {
-            (Repr::IntLiteral(a), Repr::IntLiteral(b)) => Some(a == b),
-            (Repr::FloatLiteral(a), Repr::FloatLiteral(b)) => Some(a == b),
-            (Repr::IntLiteral(a), Repr::FloatLiteral(b))
-            | (Repr::FloatLiteral(b), Repr::IntLiteral(a)) => Some(*a as f64 == *b),
-            (Repr::StringLiteral(a), Repr::StringLiteral(b)) => {
-                match (numeric_string_value(a), numeric_string_value(b)) {
-                    (Some(x), Some(y)) => Some(x == y),
-                    _ => Some(a == b),
-                }
-            }
-            (Repr::IntLiteral(n), Repr::StringLiteral(s))
-            | (Repr::StringLiteral(s), Repr::IntLiteral(n)) => {
-                if let Some(x) = numeric_string_value(s) {
-                    Some(*n as f64 == x)
-                } else if php_version.is_some_and(|v| v >= crate::PhpVersion::new(8, 0)) {
-                    Some(*s == n.to_string())
-                } else {
-                    None
-                }
-            }
-            (Repr::FloatLiteral(n), Repr::StringLiteral(s))
-            | (Repr::StringLiteral(s), Repr::FloatLiteral(n)) => {
-                numeric_string_value(s).map(|x| *n == x)
-            }
-            _ => None,
+        match crate::Relation::structural().loose_equal(self, r, php_version) {
+            crate::TrinaryLogic::Yes => Some(true),
+            crate::TrinaryLogic::No => Some(false),
+            crate::TrinaryLogic::Maybe => None,
         }
     }
 }
@@ -564,14 +520,6 @@ pub(crate) fn div_int_range(
             _ => Type::union(int_half, Type::float()),
         }
     })
-}
-
-/// A numeric string literal's value, `None` for any other string.
-fn numeric_string_value(s: &crate::PhpString) -> Option<f64> {
-    match crate::numeric_value(s.as_bytes())? {
-        crate::PhpNumber::Int(n) => Some(n as f64),
-        crate::PhpNumber::Float(f) => Some(f),
-    }
 }
 
 impl Type {

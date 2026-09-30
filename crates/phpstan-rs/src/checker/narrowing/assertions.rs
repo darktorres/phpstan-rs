@@ -238,6 +238,66 @@ impl<'a> Checker<'a> {
             locals.insert(alias_target.clone(), current.without(&Type::null()));
         }
         locals.insert(key, narrowed);
+        // With keys on both sides, the right one narrows against the left.
+        if narrowing_key(l).is_some()
+            && let Some(r_key) = narrowing_key(r)
+        {
+            let l_ty = self.infer_expr(l, locals);
+            if !l_ty.is_mixed() {
+                let current = self.current_narrowed_type(r, &r_key, locals);
+                let narrowed = if matches_when_true {
+                    self.relation().narrow(&current, &l_ty)
+                } else if l_ty.is_single_value() {
+                    self.exclude(&current, &l_ty)
+                } else {
+                    current.into_owned()
+                };
+                locals.insert(r_key, narrowed);
+            }
+        }
+    }
+
+    /// `l == r` (`equal`) or `l != r` narrows each side with a key
+    /// against the other side's type, as PHP's loose comparison allows.
+    pub(crate) fn apply_loose_equality_narrowing(
+        &self,
+        l: &Expr,
+        r: &Expr,
+        locals: &mut Locals,
+        equal: bool,
+    ) {
+        for (side, other) in [(l, r), (r, l)] {
+            let Some(key) = narrowing_key(side) else {
+                continue;
+            };
+            let other_ty = self.infer_expr(other, locals);
+            if other_ty.is_mixed() {
+                continue;
+            }
+            let current = self.current_narrowed_type(side, &key, locals);
+            let narrowed = self.relation().narrow_loose(
+                &current,
+                &other_ty,
+                equal,
+                self.comparison_php_version(),
+            );
+            locals.insert(key, narrowed);
+        }
+    }
+
+    /// The PHP version comparisons are judged on: the configured range's,
+    /// when it lies on one side of 8.0 (where PHP 7 and 8 compare a number
+    /// and a non-numeric string differently), `None` for both.
+    pub(crate) fn comparison_php_version(&self) -> Option<types::PhpVersion> {
+        let eight = types::PhpVersion::new(8, 0);
+        match (
+            self.registry.php_version_min(),
+            self.registry.php_version_max(),
+        ) {
+            (Some(min), _) if min >= eight => Some(min),
+            (_, Some(max)) if max < eight => Some(max),
+            _ => None,
+        }
     }
 
     /// Whether a method/property is confirmed missing from every value

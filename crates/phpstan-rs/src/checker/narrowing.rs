@@ -798,18 +798,16 @@ impl<'a> Checker<'a> {
                     locals.insert(key, self.relation().narrow(&current, &target_ty));
                 }
             }
-            // Deliberately `===`/`!==` only, not `==`/`!=` - a loose
-            // comparison matches PHP's own type-juggling table (`0 ==
-            // false`, `0 == null`, `"0" == 0`, ...), a much wider set of
-            // values than the literal compared-to one, so narrowing a
-            // variable down to exactly that value on a loose match would
-            // discard every other value `==` could also have matched.
             ExprKind::Binary(op, l, r) => {
                 let is_eq = matches!(op, BinOp::Identical);
                 let is_neq = matches!(op, BinOp::NotIdentical);
                 if is_eq || is_neq {
                     let matches_when_true = if is_eq { branch_true } else { !branch_true };
                     self.apply_equality_narrowing(l, r, locals, matches_when_true);
+                } else if matches!(op, BinOp::Eq | BinOp::NotEq) {
+                    // PHP's loose comparison (`comparison.rs`).
+                    let equal = matches!(op, BinOp::Eq) == branch_true;
+                    self.apply_loose_equality_narrowing(l, r, locals, equal);
                 } else if let Some((count_arg, count_on_left)) = count_call_operand(l, r)
                     && let Some(key) = narrowing_key(count_arg)
                     && let bound_expr = if count_on_left { r } else { l }
@@ -1069,6 +1067,37 @@ impl<'a> Checker<'a> {
                         Some(self.relation().narrow(&current, &target_ty))
                     } else {
                         excluded_ty.map(|excluded| self.exclude(&current, &excluded))
+                    };
+                    if let Some(narrowed) = narrowed {
+                        locals.insert(key, narrowed);
+                    }
+                } else if let ExprKind::Name(name) = &callee.kind
+                    && name.trim_start_matches('\\') == "in_array"
+                    && let [needle, haystack, rest @ ..] = args.as_slice()
+                    && !rest.iter().any(|strict| {
+                        !matches!(&strict.value.kind, ExprKind::Literal(Literal::Bool(false)))
+                    })
+                    && let Some(key) = narrowing_key(&needle.value)
+                    && let Some(values) =
+                        self.infer_expr(&haystack.value, locals).array_value_type()
+                {
+                    // Without `strict`, each value compares loosely: the
+                    // needle may equal any; it surely equals none only
+                    // against a haystack of constants it surely differs from.
+                    let current = self.current_narrowed_type(&needle.value, &key, locals);
+                    let version = self.comparison_php_version();
+                    let narrowed = if branch_true {
+                        Some(
+                            self.relation()
+                                .narrow_loose(&current, &values, true, version),
+                        )
+                    } else {
+                        let constants = values.finite_types();
+                        (!constants.is_empty()).then(|| {
+                            constants.iter().fold(current.into_owned(), |acc, c| {
+                                self.relation().narrow_loose(&acc, c, false, version)
+                            })
+                        })
                     };
                     if let Some(narrowed) = narrowed {
                         locals.insert(key, narrowed);

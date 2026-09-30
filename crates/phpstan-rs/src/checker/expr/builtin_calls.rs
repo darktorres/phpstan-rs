@@ -1312,6 +1312,43 @@ impl<'a> Checker<'a> {
             // `string`.
             "array_search" if args.len() >= 2 => {
                 let haystack_ty = self.infer_expr(&args[1].value, locals);
+                // A shape's keys found by each value's comparison with the
+                // needle: loose without `strict`, identical with it.
+                if let Some(shape) = haystack_ty.as_array_shape()
+                    && shape.is_sealed()
+                {
+                    let needle = self.infer_expr(&args[0].value, locals);
+                    let strict = args.get(2).is_some_and(|a| {
+                        matches!(&a.value.kind, ExprKind::Literal(Literal::Bool(true)))
+                    });
+                    let version = self.comparison_php_version();
+                    let equals = |value: &Type| {
+                        if strict {
+                            if needle.is_single_value() && value.is_single_value() {
+                                types::TrinaryLogic::from_bool(needle == *value)
+                            } else if self.relation().disjoint(&needle, value) {
+                                types::TrinaryLogic::No
+                            } else {
+                                types::TrinaryLogic::Maybe
+                            }
+                        } else {
+                            self.relation().loose_equal(&needle, value, version)
+                        }
+                    };
+                    let mut keys = Vec::new();
+                    let mut surely_found = false;
+                    for field in &shape.fields {
+                        let verdict = equals(&field.ty);
+                        if !verdict.no() {
+                            keys.push(field.key.to_type());
+                        }
+                        surely_found |= verdict.yes() && !field.optional;
+                    }
+                    if !surely_found {
+                        keys.push(Type::bool_literal(false));
+                    }
+                    return Type::union_of(keys);
+                }
                 if haystack_ty.is_list().yes() {
                     return Type::union(Type::int(), Type::bool_literal(false));
                 }

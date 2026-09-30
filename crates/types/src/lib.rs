@@ -12,6 +12,7 @@ pub use syntax::php_string::PhpString;
 
 mod arithmetic;
 mod coercion;
+mod comparison;
 mod concat;
 mod conditional;
 mod constructors;
@@ -43,6 +44,7 @@ mod trinary;
 mod union;
 
 pub use arithmetic::{ArithmeticOp, OrderingOp, compare_range_outcome};
+pub use comparison::Outcomes;
 pub use display::quote_php_string;
 pub use extension::ExtensionTypeData;
 pub(crate) use hierarchy::effective_slot_variance;

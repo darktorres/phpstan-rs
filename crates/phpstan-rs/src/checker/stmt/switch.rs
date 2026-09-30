@@ -89,8 +89,9 @@ impl<'a> Checker<'a> {
                 self.check_expr(t, locals, label);
             }
             let mut direct = narrowed_locals.clone();
+            // A `case` compares loosely (`case 0:` also runs for `'0'`).
             if let Some(t) = &case.test {
-                self.apply_equality_narrowing(subject, t, &mut direct, true);
+                self.apply_loose_equality_narrowing(subject, t, &mut direct, true);
             }
             let mut case_locals = if previous_terminates {
                 direct
@@ -102,7 +103,7 @@ impl<'a> Checker<'a> {
             let case_terminates =
                 last_stmt.is_some_and(|s| self.always_terminates(s, &case_locals));
             if let Some(t) = &case.test {
-                self.apply_equality_narrowing(subject, t, &mut narrowed_locals, false);
+                self.apply_loose_equality_narrowing(subject, t, &mut narrowed_locals, false);
             }
             let is_last = i + 1 == case_count;
             let reaches_after_switch = match last_stmt {

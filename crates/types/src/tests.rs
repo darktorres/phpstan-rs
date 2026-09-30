@@ -1,4 +1,5 @@
 mod accessory_and_refinement_types;
+mod comparison;
 mod concat;
 mod constructors;
 mod display_and_misc;
