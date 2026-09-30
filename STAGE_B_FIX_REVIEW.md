@@ -2765,6 +2765,31 @@ through `check-project`.
   another `twice(int)` in `d0.php`, the list names `d0.php` and `e.php`
   but not `c.php`. Done: sites are keyed by the lowercased name and
   grouped by signature, with fixtures.
+
+  Design:
+
+  - Keys. `DuplicateFunctionSites::record` (`duplicate_fn_sites.rs:55`) and
+    `DuplicateClassSites::record` (`duplicate_class_sites.rs:54`) key their
+    maps by the lowercased FQN (`registry::name_table::Folded`), and each
+    site keeps its declared spelling for the message. `remove_declarations`
+    folds the names it is handed. PHP refuses `class foo` beside
+    `class Foo`, and `function HELPER` beside `function helper`, so both are
+    one name. The message names the first site's spelling.
+  - Grouping. `check_duplicate_function_declarations`
+    (`duplicate_functions.rs:40`) sorts by path and cuts a group at every
+    signature change between neighbours, so equal signatures separated by a
+    different one never meet. It groups by the signature instead, using
+    `(param_hints, return_hint)` as a hash key. Each group with two or more
+    sites is a report listing that group's sites in path order. The
+    "different signatures are the stub version-split idiom" exemption is
+    kept as it is meant: sites of different signatures aren't duplicates of
+    each other.
+
+  Fixtures: `class Foo` and `class foo` in two files report
+  `class.duplicate`, and `function helper`/`function HELPER` report too;
+  `twice(int)` in `c.php` and `e.php` with `twice(string)` in `d.php`
+  reports `c.php` and `e.php`; adding a `twice(int)` in `d0.php` lists
+  all three `int` sites.
 - [ ] **F76. A namespace cycle through a context file can go unreported**
   (`find_namespace_cycles`; also before the window). The cycle is
   reported at the alphabetically-first class contributing an edge, chosen
@@ -2922,6 +2947,22 @@ through `check-project`.
   each file's diagnostics loop over every recorded name in the project
   and keep the sites in that file: files times names. Done: the checks
   run once over the sites and hand each file its diagnostics.
+
+  Design: `finish_diagnostics` (`project.rs:1474`) runs both checks for
+  each file, and each check walks every recorded name to keep the sites
+  in that file. The checks become one pass per run:
+  `duplicate_declaration_diagnostics(&self) -> FxHashMap<PathBuf, Vec<Diagnostic>>`
+  walks the site maps once, groups as F75 describes, and hands each
+  group's diagnostics to the files its sites are in. `Project` caches
+  the map behind a dirty flag that `index`/`remove_declarations`/`merge`
+  on either site map set. `finish_diagnostics` reads its file's entry,
+  recomputing the map first if it is dirty. So a batch run pays once,
+  and an LSP edit pays once per edit rather than once per file per edit.
+  The two opt-in gates stay where they are and decide whether the map is
+  built at all. Fixture: the existing duplicate fixtures, unchanged. The
+  scaling check is a generated project of 2,000 files and 20,000
+  functions timed before and after, recorded with the other scale
+  timings (F18).
 - [ ] **F79. Smaller gaps read in the submodules** (read, not probed):
   - `compute_doctrine_entity` makes every property a mapped field,
     `#[ORM\Column]` or not, so a DQL path to a transient property isn't
