@@ -6,7 +6,7 @@ function filters(): void {
     foreach (['words' => true, 'tags' => false] as $filtName => $filtConf) {
         $displayFilters[$filtName] = $filtConf;
     }
-    assertType('non-empty-array{words?: bool, tags?: bool}', $displayFilters);
+    assertType('array{words: bool, tags: bool}', $displayFilters);
 }
 
 function contents(bool $html): void {

@@ -715,6 +715,12 @@ impl<'a> Checker<'a> {
         // convergence hasn't been reached yet, so this always ends up
         // holding the value from whichever pass was actually accepted.
         let mut last_value_ty: Option<Type> = None;
+        // Whether that pass can `break` out, leaving later elements as
+        // they were.
+        let mut last_pass_breaks = true;
+        // Variables that pass wrote at the loop's own key on every way
+        // through the body (`$acc[$key] = …`).
+        let mut last_written_at_key: Vec<String> = Vec::new();
         // See `ContainerFieldFactsMap`'s own doc comment (`checker.rs`) -
         // harvested from whichever pass is ultimately accepted, the same
         // way `last_value_ty` above is, and for the identical soundness
@@ -778,8 +784,48 @@ impl<'a> Checker<'a> {
                     propagate_container_field_facts(pass_locals, value_name, subject_name);
                 }
                 this.check_stmt(body, pass_locals, declared_return, label);
+                if let Some(Expr {
+                    kind: ExprKind::Variable(key_name),
+                    ..
+                }) = key
+                {
+                    let suffix = format!("[${key_name}]");
+                    let continues = this.loop_continue_states.last();
+                    last_written_at_key = pass_locals
+                        .iter()
+                        .filter_map(|(k, _)| k.strip_suffix(suffix.as_str()))
+                        .filter(|base| base.chars().all(|c| c.is_alphanumeric() || c == '_'))
+                        .filter(|base| {
+                            let marker = format!("{base}{suffix}");
+                            continues
+                                .into_iter()
+                                .flatten()
+                                .all(|state| state.contains_key(&marker))
+                        })
+                        .map(str::to_string)
+                        .collect();
+                    last_pass_breaks = this
+                        .loop_break_states
+                        .last()
+                        .is_none_or(|states| !states.is_empty());
+                }
                 if let ExprKind::Variable(value_name) = &value.kind {
-                    last_value_ty = pass_locals.get(value_name).cloned();
+                    // The value as each way through the body leaves it: its
+                    // end, and every `continue`.
+                    last_value_ty = std::iter::once(pass_locals.get(value_name).cloned())
+                        .chain(
+                            this.loop_continue_states
+                                .last()
+                                .into_iter()
+                                .flatten()
+                                .map(|state| state.get(value_name).cloned()),
+                        )
+                        .collect::<Option<Vec<Type>>>()
+                        .map(Type::union_of);
+                    last_pass_breaks = this
+                        .loop_break_states
+                        .last()
+                        .is_none_or(|states| !states.is_empty());
                     let prefix = format!("{value_name}[");
                     last_field_facts = pass_locals
                         .iter()
@@ -797,22 +843,58 @@ impl<'a> Checker<'a> {
         for state in break_states {
             *locals = merge_scopes(locals, &state);
         }
+        // A loop over a sealed shape that writes a container at its own key
+        // on every way through the body, and can't `break`, has written it
+        // at each key the shape surely has.
+        if !last_pass_breaks
+            && let Some(subject_shape) = subject_ty.as_array_shape()
+            && subject_shape.is_sealed()
+        {
+            let subject_name = match &subject.kind {
+                ExprKind::Variable(name) => Some(name.as_ref()),
+                _ => None,
+            };
+            let keys: Vec<types::ShapeKey> = subject_shape
+                .fields
+                .iter()
+                .filter(|f| !f.optional)
+                .map(|f| f.key.clone())
+                .collect();
+            for name in &last_written_at_key {
+                if Some(name.as_str()) == subject_name {
+                    continue;
+                }
+                let Some(current) = locals.get(name).cloned() else {
+                    continue;
+                };
+                let written = keys
+                    .iter()
+                    .fold(current, |ty, key| ty.with_key_presence(key, true));
+                if !written.is_never() {
+                    locals.insert(name.clone(), written);
+                }
+            }
+        }
         // A by-ref value variable (`foreach ($items as &$item) { $item
         // ['x'] = ...; }`) aliases into `subject`'s own underlying
         // storage - a key/field the body writes into `$item` is really
         // being written into whatever slot of `$subject` that iteration
         // is pointing at, so it belongs in `$subject`'s tracked element
         // type for code reached after the loop, not just `$item`'s own
-        // (otherwise discarded) type. Unioned with the pre-loop element
-        // type rather than replacing it outright, so this can only add
-        // precision, never produce a new false positive.
+        // (otherwise discarded) type. Every element is visited, so each
+        // ends as the body leaves `$item`; a loop that can `break` leaves
+        // the elements after it as they were.
         if by_ref
             && let ExprKind::Variable(subject_name) = &subject.kind
             && let Some(old_element_ty) = subject_ty.array_value_type()
             && let Some(final_value_ty) = last_value_ty
             && let Some(current_subject_ty) = locals.get(subject_name).cloned()
         {
-            let widened_element_ty = Type::union(old_element_ty, final_value_ty);
+            let widened_element_ty = if last_pass_breaks {
+                Type::union(old_element_ty, final_value_ty)
+            } else {
+                final_value_ty
+            };
             // See `ContainerFieldFactsMap`'s own doc comment - records
             // (or, for a second by-ref `foreach` over the same
             // container, overwrites - a disclosed, non-unsound
