@@ -1062,6 +1062,27 @@ through `check-project`.
   `int<0, 3>` is `never` the same way. (`mt_rand` and `random_int` throw
   on crossed bounds, so `never` is right for them.) Done: `rand`'s range
   spans both arguments' bounds in either order, with a fixture.
+
+  Design: split the `random_int | rand | mt_rand` arm
+  (`expr/builtin_calls.rs:132`) by what PHP does with crossed bounds
+  (checked with `php`: `rand(10, 1)` returns a value, and
+  `mt_rand(10, 1)` and `random_int(10, 1)` throw `ValueError`).
+
+  - `rand` returns a value between `min($a, $b)` and `max($a, $b)`, so its
+    range is `int<min(a_min, b_min), max(a_max, b_max)>`, with an unknown
+    bound unbounded. When `$a` is always at most `$b` this is exactly
+    today's `int<a_min, b_max>`, so nothing that works changes.
+  - `mt_rand` and `random_int` keep `int<a_min, b_max>` when the bounds may
+    be in order. When they are always crossed (`a_min > b_max`) the call
+    always throws, so it is the explicit `never` of F4's split, since the
+    statement after it really is unreachable. A
+    `function.impossibleCall`-style report is not part of this.
+
+  The zero-argument forms (`rand()`, `mt_rand()`) keep the stub's
+  `int<0, max>`, not this arm. Fixtures: `$r = rand(10, 1);` is
+  `int<1, 10>` and the next statement is reachable; `rand($a, $b)` with
+  `$a` in `int<5, 10>` and `$b` in `int<0, 3>` is `int<0, 10>`;
+  `random_int(10, 1)` makes what follows unreachable.
 - [ ] **F45. A write through a reference doesn't reach the variable it
   aliases** (also before the window). After `$t = &$s; $t = null;`, `$s`
   keeps its old type (`'x'`), so `$s === null` reports
