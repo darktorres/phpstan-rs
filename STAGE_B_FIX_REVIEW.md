@@ -1335,7 +1335,7 @@ through `check-project`.
   `$ok = true; if (cond) { $ok = false; }` the flag is truthy exactly
   when `cond` failed. So the alias carries a polarity:
 
-  - `ConditionAliasMap`'s entry (`locals.rs`) gains `negated: bool`.
+  - `ConditionAliasMap`'s entry (`checker.rs`) gains `negated: bool`.
   - `record_if_body_flag_alias` (`narrowing.rs:1443`) reads the literal's
     truthiness and the prior type's (`else_locals.get(name)`, through
     `to_boolean`). It records the alias only when both are definite and
@@ -2883,14 +2883,17 @@ through `check-project`.
     (`offsetExists`), `unset($o[k])` (`offsetUnset`), and `foreach` over a
     non-array `Traversable` (the `Iterator` methods).
 
-  The thrown type is the magic method's own `@throws` when the
-  receiver's class resolves one, through `call_throw_types`'s lookup for
-  that method, and `Throwable` otherwise. F82's implicit-call forgetting
-  reads the same shared helpers, so the two can't disagree about what
-  runs code. Fixtures: the four shapes of the finding leave `$ok` `bool`
-  after the `try`; a plain declared property read or array offset read
-  keeps the catch dead; a `__get` with `@throws RuntimeException` makes
-  a `catch (LogicException)` still dead.
+  Each implicit call goes through `record_call_throw_point` (`throws.rs`) with
+  the magic method's signature when the receiver's class resolves one, and with
+  none otherwise, exactly as a written call records itself. So the thrown type
+  follows `call_throw_type`'s rule (its `@throws`, `Throwable` without a
+  resolved signature), and the enclosing function's `@throws` checks
+  (`current_function_throw_points`) see the implicit call too. F82's
+  implicit-call forgetting reads the same shared helpers, so the two can't
+  disagree about what runs code. Fixtures: the four shapes of the finding leave
+  `$ok` `bool` after the `try`; a plain declared property read or array offset
+  read keeps the catch dead; a `__get` with `@throws RuntimeException` makes a
+  `catch (LogicException)` still dead.
 - [ ] **F70. Array literal and spread keys** (`checker/expr/array_ops.rs`):
   - Since `8febbd1e`, a literal whose key isn't known goes general but
     keeps taking positional keys from an index that no longer sees int
@@ -3484,9 +3487,14 @@ through `check-project`.
     canonical key: PHPStan's `UnionTypeHelper::sortTypes` order (null last,
     then by kind, then by description). Messages and `assertType` are
     stable, and the fixtures' expected member orders are regenerated once.
-  - Template scope. `build_template_params` gets a method's scope as
-    `Class::method` (`class_info.rs:960` passes it) instead of the bare
-    method name. `with_own_templates` compares with that, so a class named
+  - Template scope. `FunctionReflection::from_decl`
+    (`function_sig.rs:602`) passes `&f.name`, the bare name, as the scope
+    of a function's or method's own templates, while a class's templates
+    get the class FQN (`class_info.rs:960`). So a method `get` and a class
+    `get` share a scope, and so do two namespaced functions of one bare
+    name. `from_decl` takes the scope from its caller: `Class::method`
+    from the method loop (`class_info.rs:1036`), and the function's FQN
+    for a function. `with_own_templates` compares with that, so a class named
     like the method no longer collides. It is the same edit as F2's.
   - `allowExceptParamFlags`. `param_flags_condition_matches`
     (`restricted_symbol_usage.rs:140`) requires every possible value to
