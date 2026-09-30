@@ -1285,6 +1285,62 @@ through `check-project`.
   class, non-emptiness only when it survives, every scanf conversion
   counted), with a fixture for each.
 
+  Design: one fix per arm in `expr/builtin_calls.rs`, each checked
+  against `php` output.
+
+  - `array_combine` (line 468). The keys come from the keys array's values,
+    converted with `to_array_key`, and the values from the values array.
+    When both are sealed shapes of the same length, the result zips them
+    field by field. A repeated key is last-one-wins
+    (`array_combine(['a', 'a'], [1, 2])` is `['a' => 2]`), which
+    `Shape::set` already does. Shapes of different lengths throw
+    `ValueError`, so the result is the explicit `never`. Otherwise it is
+    `array<keys' value type as array key, values' value type>`, non-empty
+    when the keys array is. List-ness never survives.
+  - `array_change_key_case` (line 818). A literal mode (`CASE_LOWER`, the
+    default, or `CASE_UPPER`) maps each string key of a shape through ASCII
+    case folding, the fold PHP uses, merging fields that collide in key
+    order, last one winning (`['Ab' => 1, 'aB' => 2]` is `['ab' => 2]`). Int
+    keys stay. A general array keeps its value type with its string key type
+    folded to `string` (or `lowercase-string`). An unknown mode joins both
+    foldings.
+  - `array_fill_keys` (line 1207). The key type is the keys array's value
+    type through `to_array_key` (`'1'` is `1`, and `'x'` stays). A sealed
+    keys shape gives a sealed result shape with one required field per
+    distinct key, non-empty when the keys array is.
+  - `get_parent_class` (line 1632). A final class, or an enum, answers its
+    declared parent's name, or `false` without one. A non-final class with a
+    parent answers `class-string`, since a subclass's parent may be any
+    class under it; one without a parent answers `class-string|false`
+    (`false` only when the value is exactly that class). The string-argument
+    form reads the named class the same way.
+  - `array_slice` (line 482). Non-emptiness survives only for a literal
+    offset of `0`, or a negative literal whose magnitude is at most the
+    shape's known minimum size, with no length or a positive literal length
+    (`array_slice([1, 2], 5)` is `[]`). List-ness survives from a list
+    input, since int keys are renumbered.
+  - `explode` (line 1524). The result is `non-empty-list<string>` when there
+    is no limit or a limit that is at least `0` (`0` counts as `1`), and
+    `list<string>` for a negative or unknown limit. An empty literal
+    separator throws `ValueError`, so the result is `never`.
+  - `parse_sscanf_format` (line 3059). Rewritten as one lexer over PHP's
+    format grammar:
+    - an optional XPG `n$` position;
+    - `*`, which suppresses the assignment, so the conversion counts for no
+      slot;
+    - a width, and the size modifiers `h`, `l` and `L`, which PHP ignores;
+    - a conversion from `d i o u x X e E f F g G s c [ n`;
+    - `%%`.
+
+  `%X` is an int like `%x`, `%F`/`%g`/`%G` are floats, and `%n` is an
+  always-set `int`, the characters read so far (`%[a-z]%n` on `"ab"`
+  gives `[ 'ab', 2 ]`). `sscanf_field_type` and
+  `check_scanf_argument_count` both read this lexer, so the count and
+  the shape agree.
+
+  Fixtures: one per arm, taking the finding's reports and the `php`
+  results above as expectations.
+
 - [ ] **F52. A closure argument whose last statement is an `if` with a
   `return` in each branch is typed as possibly returning `null`**
   (`closure_syntactic_return_type`, `checker/expr.rs`; also before the
