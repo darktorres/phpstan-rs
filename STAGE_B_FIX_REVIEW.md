@@ -2721,12 +2721,10 @@ through `check-project`.
   `for ($i = -1; …; $i++)` converges to a range starting at `-1`, so the
   write drops list-ness. `for ($i = 0; …)` keeps it, as does any loop
   narrowed non-negative before the write
-  (`if ($i >= 0) { $x[$i] = 5; }`). A string or float index never
-  qualifies, since `'1'` would still be an int key but `1.5` truncates.
-  The syntactic matcher's doc gains the lower-bound condition. Fixtures:
-  the finding's `-1` loop makes `$x` `array<int, int>`; a `0` loop keeps
-  `list<int>`; a loop over `$i = count($x) - 1` counting down with
-  `$i >= 0` keeps it too.
+  (`if ($i >= 0) { $x[$i] = 5; }`). The index must be an int too, so a
+  float index (truncated to a key) doesn't qualify. The syntactic
+  matcher's doc gains the lower-bound condition. Fixtures: the finding's
+  `-1` loop makes `$x` `array<int, int>`; a `0` loop keeps `list<int>`.
 - [ ] **F74. A `config.platform.php` given as a full version is ignored**
   (`declared_php_versions`, `project/session.rs`; also before the
   window). Composer's `config.platform.php` is an exact version
