@@ -1607,6 +1607,33 @@ through `check-project`.
   `identical.alwaysTrue`. Done: a call not known to be pure forgets the
   narrowed properties of `$this` (and of the receiver, for a method call
   on another object), with fixtures; the syntactic guards can then go.
+
+  Design: `1c33a059` and `310b2205` did the forgetting half. Probed on
+  the 21:15 binary: after `$this->x = null; $this->load();` the property
+  is `string|null`, and the `(string) $this->x === ''` and
+  `$this->x === ''` shapes after a `load()` report nothing. What is left
+  is F82's gaps and then the guards. The guards are two syntactic
+  walkers:
+
+  - `expr_reads_a_property` (`expr/ranges.rs:24`), used by
+    `check_constant_numeric_comparison` and the loose comparison
+    (`probe_checks.rs:358`);
+  - `expr_reads_a_mutable_property` (`probe_checks.rs:675`), used by
+    `check_strict_comparison_of_different_types`.
+
+  Both skip any comparison whose operand reads a property, and
+  `expr_reads_a_property` also skips class constants and `::class`,
+  which can't change. So `self::X === 1` and `count(self::LIST) > 0` are
+  never checked, a missed report the guard causes on its own. Once F82
+  makes every call, alias, static write and implicit call forget what it
+  may change, both walkers and their three call sites go, and the
+  comparisons run on the narrowed types like any other operand. Removing
+  them before F82 would bring back the false positives F82's shapes
+  describe, so the order is F82, then this. Fixtures: the finding's two
+  shapes stay clean after the removal. `self::X === 1` with
+  `const X = 1` reports `identical.alwaysTrue`.
+  `$this->x = null; if ($this->x === null)` with no call between
+  reports.
 - [ ] **F63. Two loop exits misread** (`checker/stmt/loops.rs`; also
   before the window):
   - `for (;;) { if ($c) { $y = 1; break; } } return $y;` reports
