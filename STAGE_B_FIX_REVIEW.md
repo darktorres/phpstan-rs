@@ -3170,14 +3170,23 @@ through `check-project`.
     the element being visited;
   - a nested function or closure capturing the subject by reference.
 
-  On failure the loop falls back to the join the zero-iteration merge
-  already does (`iterated`, with the entry's value type joined), which
-  is the pre-`91666577` behaviour that F83 describes as sound but
-  imprecise. The walk stops at nested function and class bodies, like
-  the other scans. Fixtures: the finding's shape keeps `file?: 'x'|'y'`
-  with `nb` optional; the plain `$items[$day]['file'] = 'y'` loop still
-  types every element with `file`; a body that reassigns `$day` falls
-  back.
+  The writes that fail the test are not a reason to give up the override,
+  because their effect is known too. During the pass, `bind_assignment_target`
+  records, for a write rooted at the subject at a key other than `$key`, the
+  element that key holds after the write (`$items[$day + 1]['file'] = 'x'`
+  records `array{file: 'x'}`, or the existing element with `file` added when the
+  key may already exist). An append records its value, and an `unset` at another
+  key records that the element may be gone. The override then gives every
+  element the union of the at-key element and those recorded ones, and an
+  `unset` elsewhere keeps the array possibly empty. Only an escape the pass
+  can't see (a by-reference pass, a by-reference closure capture, the subject
+  reassigned whole, `$key` reassigned) falls back to the zero-iteration join,
+  the pre-`91666577` behaviour. The walk stops at nested function and class
+  bodies, like the other scans. Fixtures: the finding's shape types each element
+  `array{nb: 1, file: 'y'}|array{file: 'x'}|array{nb: 1, file: 'x'}` (the last
+  two from the write at `$day + 1`, absent or existing), so the new element's
+  missing `nb` shows; the plain `$items[$day]['file'] = 'y'` loop still types
+  every element with `file`; a body that reassigns `$day` falls back.
 - [ ] **F84. A template bound two siblings away still reads as `mixed`**
   (`build_template_params`; `2a31cc0c` substitutes one level). With
   `@template X of int`, `@template E of X`, `@template R of Holder<E>`
@@ -3638,10 +3647,8 @@ through `check-project`.
   fixtures are data files run by one test target (`--test fixtures`,
   which `cargo test --workspace` skips), so "the module's tests" never
   include them. The workflow change: a commit touching `types` or the
-  checker runs `cargo test --test fixtures` filtered by the fixture
-  directories whose names match the changed area (`array_merge`,
-  `shapes`, …), or the whole fixture target when the change is in shared
-  type code. The mapping comes from coverage, not names:
+  checker runs the fixtures that execute the code it changed. The
+  mapping comes from coverage, not names:
   `xtask fixtures-map` runs the fixture target once under
   `cargo llvm-cov` with one profile per fixture, and records which
   source functions each fixture executes into a checked-in map,
