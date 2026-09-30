@@ -974,19 +974,46 @@ through `check-project`.
       right: `int<-3, 2> ** 2` is `int<0, 9>`, `int<-5, max> ** 2` is
       `int<0, max>`, and `int<min, -3> ** int<1, 3>` is `int`: odd exponents
       run to `min` and even ones to `max`.
-  - Overflow at unbounded ends. The one deliberate exception:
-    `int<min, -3> + int<min, -3>` stays `int<min, -6>`, without `float`.
-    Adding `float` wherever an unbounded end could overflow would make every
-    `$i + 1` on an `int` an `int|float`, and every such value passed on to
-    an `int` parameter a level-9 report. That keeps PHPStan's convention,
-    and the finding's last bullet is closed by writing the convention into
-    `checked_bound_op`'s doc rather than changing it. Bounded overflow keeps
-    adding `float`, as `checked_bound_op` already does.
+  - Overflow at unbounded ends. PHP turns an int result past `PHP_INT_MAX`
+    or below `PHP_INT_MIN` into a float, whether or not the operand's range
+    was written down. So the result adds `float` whenever the operands'
+    bounds allow it, an unbounded end counting as able to reach the limit:
+    `int<min, -3> + int<min, -3>` is `int<min, -6>|float`, and `int + 1` is
+    `int|float`. `checked_bound_op` and `mul_int_range` answer "may
+    overflow" from the corners with unbounded ends as infinities, instead of
+    only when every bound is present. `++`/`--` (`increment_type`) follow,
+    since `PHP_INT_MAX + 1` via `++` is a float too. The type is then true,
+    and three changes keep it useful rather than noisy:
+    - The overflow float is marked. `Repr::Float` gains an `overflow_only`
+      flag (a `float` that exists only because an int overflowed), kept
+      through unions and joins, lost as soon as any other float joins it.
+      Display writes the member as `float` with a `(int overflow)` note in
+      messages, and `assertType` prints `int|float`.
+    - Rules tell it apart. When the only member of an argument, return,
+      property or operand type that fails a check is an overflow-only float,
+      the report goes under its own identifier (`argument.intOverflow`,
+      `return.intOverflow`, `assign.intOverflow`, `binaryOp.intOverflow`),
+      at level 9, with the message naming the overflow. A project can ignore
+      that one identifier without losing real float mismatches, and the
+      default reports it, since the value really can be a float.
+    - Real bounds come in where the engine has them. `count()` and the
+      array-size functions return `int<0, HT_MAX_SIZE>` (the hash table's
+      size limit, read from `zend_types.h` when implementing), so
+      `count($a) + 1` never overflows. A loop counter narrowed by its
+      condition (`$i < count($a)`) is bounded the same way. `(int)`,
+      `intdiv`, `is_int` narrowing and a comparison with an int bound all
+      drop the overflow float, as they drop any float.
+
+  The finding's last bullet is then fixed as written, not closed by a
+  convention.
 
   F60's two range bugs are fixed in the same file (see there). Fixtures:
-  each bullet of the finding, plus the three unary probes. A types-crate
-  unit test runs F60's sweep over every operator, now including union
-  and float operands, against a table generated once with `php`.
+  each bullet of the finding, plus the three unary probes, `int + 1`
+  typed `int|float`, `count($a) + 1` typed `int<1, HT_MAX_SIZE + 1>`,
+  and `f($i + 1)` into an `int` parameter reporting
+  `argument.intOverflow` and nothing else. A types-crate unit test runs
+  F60's sweep over every operator, now including union and float
+  operands, against a table generated once with `php`.
 - [ ] **F40. `null == '0'` is taken as always true** (`loosely_equals`,
   read whole; also before the window). `null` against anything is
   compared as two booleans, but PHP compares `null` with a string as
