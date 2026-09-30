@@ -20,6 +20,22 @@ impl Type {
     }
 }
 
+impl crate::Relation<'_> {
+    /// The union of `a` and `b`, as `Type::union` builds it, with the
+    /// class hierarchy at hand for what only it decides.
+    pub fn union(&self, a: Type, b: Type) -> Type {
+        Type::union(a, b)
+    }
+
+    /// The union of `members`, as `union` joins them.
+    pub fn union_of(&self, members: Vec<Type>) -> Type {
+        members
+            .into_iter()
+            .reduce(|a, b| self.union(a, b))
+            .unwrap_or_else(Type::never)
+    }
+}
+
 fn union_types_impl(a: Type, b: Type) -> Type {
     syntax::stack::guard(|| {
         // `never` has no values to add.

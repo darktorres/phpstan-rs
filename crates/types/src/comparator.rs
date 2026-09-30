@@ -74,7 +74,7 @@ impl Relation<'_> {
                 }
             })
             .collect();
-        Type::union_of(kept)
+        self.union_of(kept)
     }
 
     fn comparator_equal_member(&self, e: &Type, a: &Type, exact: bool) -> TrinaryLogic {

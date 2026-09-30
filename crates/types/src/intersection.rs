@@ -49,7 +49,7 @@ impl Relation<'_> {
                         members.push(alternative);
                         self.intersect(members)
                     })
-                    .reduce(Type::union)
+                    .reduce(|a, b| self.union(a, b))
                     .unwrap_or_else(Type::never);
             }
             let mut array: Option<(Type, Type)> = None;
@@ -201,7 +201,7 @@ impl Relation<'_> {
         }
         kept.sort_by_key(|m| *m == Type::null());
         kept.into_iter()
-            .reduce(Type::union)
+            .reduce(|a, b| self.union(a, b))
             .unwrap_or_else(|| native.clone())
     }
 

@@ -1,0 +1,14 @@
+# Randomly seeded hashing makes iteration order - and so emission order and
+# any order-dependent result - differ between runs. Use `FxHashMap`/
+# `FxHashSet` (fixed hashing) or an ordered collection instead.
+disallowed-types = [
+    { path = "std::collections::HashMap", reason = "randomly seeded; use rustc_hash::FxHashMap or an ordered map" },
+    { path = "std::collections::HashSet", reason = "randomly seeded; use rustc_hash::FxHashSet or an ordered set" },
+    { path = "std::hash::RandomState", reason = "randomly seeded; use rustc_hash::FxBuildHasher" },
+]
+# A join without the class hierarchy can't fold objects past the union cap
+# to the classes they share.
+disallowed-methods = [
+    { path = "types::Type::union", reason = "joins without the class hierarchy; use Relation::union" },
+    { path = "types::Type::union_of", reason = "joins without the class hierarchy; use Relation::union_of" },
+]

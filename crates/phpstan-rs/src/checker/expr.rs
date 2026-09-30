@@ -375,7 +375,7 @@ impl<'a> Checker<'a> {
         };
         let own = self.thrown_by_itself(e, locals, anything);
         match (implicit, own) {
-            (Some(a), Some(b)) => Some(Type::union(a, b)),
+            (Some(a), Some(b)) => Some(self.relation().union(a, b)),
             (a, b) => a.or(b),
         }
     }
@@ -1458,7 +1458,7 @@ impl<'a> Checker<'a> {
                 if (nullsafe.is_nullsafe() || postfix_chain_has_nullsafe(recv))
                     && !result.is_mixed()
                 {
-                    Type::union(result, Type::null())
+                    self.relation().union(result, Type::null())
                 } else {
                     result
                 }
@@ -2236,7 +2236,7 @@ impl<'a> Checker<'a> {
                 // union but can't reach inside it to strip its own
                 // `false` member.
                 match then_ty {
-                    Some(then_ty) => Type::union(then_ty, else_ty),
+                    Some(then_ty) => self.relation().union(then_ty, else_ty),
                     None => Type::mixed(),
                 }
             }
@@ -2831,11 +2831,15 @@ impl<'a> Checker<'a> {
                     (!names.is_empty()).then(|| names.iter().map(|n| n.to_string()).collect())
                 };
                 match (literal_names, receiver) {
-                    (Some(names), None) if !names.is_empty() => names
-                        .into_iter()
-                        .map(|n| self.check_expr(&constant_fetch(target, n, e.span), locals, label))
-                        .reduce(Type::union)
-                        .unwrap_or(Type::mixed()),
+                    (Some(names), None) if !names.is_empty() => {
+                        let fetched: Vec<Type> = names
+                            .into_iter()
+                            .map(|n| {
+                                self.check_expr(&constant_fetch(target, n, e.span), locals, label)
+                            })
+                            .collect();
+                        self.relation().union_of(fetched)
+                    }
                     (Some(names), Some(Some(class))) if !names.is_empty() => names
                         .into_iter()
                         .map(|n| {
@@ -2845,7 +2849,9 @@ impl<'a> Checker<'a> {
                                 self.static_member_of_class(e, &class, None, &n, false)
                             }
                         })
-                        .reduce(Type::union)
+                        .collect::<Vec<_>>()
+                        .into_iter()
+                        .reduce(|a, b| self.relation().union(a, b))
                         .unwrap_or(Type::mixed()),
                     (_, Some(Some(class))) => {
                         if self.collect_member_refs {
@@ -3068,7 +3074,7 @@ impl<'a> Checker<'a> {
                 if (nullsafe.is_nullsafe() || postfix_chain_has_nullsafe(base))
                     && !result.is_mixed()
                 {
-                    Type::union(result, Type::null())
+                    self.relation().union(result, Type::null())
                 } else {
                     result
                 }
@@ -3350,7 +3356,7 @@ impl<'a> Checker<'a> {
                         self.narrow_match_arm_conditions(subject, conds, &accumulated, match_true);
                     result_types.push(self.check_expr(result, &mut arm_locals, label));
                     merged = Some(match merged {
-                        Some(m) => merge_scopes(&m, &arm_locals),
+                        Some(m) => merge_scopes(&self.relation(), &m, &arm_locals),
                         None => arm_locals.clone(),
                     });
                     if i == arms_count - 1 {
@@ -3482,7 +3488,7 @@ impl<'a> Checker<'a> {
                     let mut default_locals = accumulated.clone();
                     result_types.push(self.check_expr(d, &mut default_locals, label));
                     merged = Some(match merged {
-                        Some(m) => merge_scopes(&m, &default_locals),
+                        Some(m) => merge_scopes(&self.relation(), &m, &default_locals),
                         None => default_locals,
                     });
                 }
@@ -3503,7 +3509,7 @@ impl<'a> Checker<'a> {
                 // others).
                 result_types
                     .into_iter()
-                    .reduce(Type::union)
+                    .reduce(|a, b| self.relation().union(a, b))
                     .unwrap_or(Type::never())
             }
             ExprKind::Closure {
@@ -3910,7 +3916,12 @@ impl<'a> Checker<'a> {
                     }
                     let mutated = closure_byref_exit_snapshots
                         .get(&u.name.name)
-                        .and_then(|snapshots| snapshots.iter().cloned().reduce(Type::union))
+                        .and_then(|snapshots| {
+                            snapshots
+                                .iter()
+                                .cloned()
+                                .reduce(|a, b| self.relation().union(a, b))
+                        })
                         .unwrap_or_else(|| {
                             closure_locals
                                 .get(&u.name)
@@ -3944,6 +3955,7 @@ impl<'a> Checker<'a> {
                 }
                 let inferred_return = (!closure_is_generator).then(|| {
                     closure_inferred_return_type(
+                        &self.relation(),
                         closure_return_points,
                         closure_saw_explicit_return,
                         closure_falls_off_end,
@@ -4555,7 +4567,7 @@ impl<'a> Checker<'a> {
                 // dedup-then-union construction.
                 result_types
                     .into_iter()
-                    .reduce(Type::union)
+                    .reduce(|a, b| self.relation().union(a, b))
                     .unwrap_or(Type::never())
             }
             // A throw expression never actually produces a value - Never
@@ -4721,7 +4733,7 @@ impl<'a> Checker<'a> {
                 // A nullsafe access in the chain that meets `null` makes the
                 // whole chain `null`.
                 if postfix_chain_has_nullsafe(e) && !link.is_mixed() {
-                    Type::union(link, Type::null())
+                    self.relation().union(link, Type::null())
                 } else {
                     link
                 }
@@ -4799,7 +4811,7 @@ impl<'a> Checker<'a> {
                     .into_iter()
                     .flatten()
                     .map(|member| self.infer_expr(&constant_fetch(target, member, e.span), locals))
-                    .reduce(Type::union)
+                    .reduce(|a, b| self.relation().union(a, b))
                     .unwrap_or(Type::mixed())
             }
             ExprKind::ClassNameFetch(target) => {
@@ -4871,7 +4883,7 @@ impl<'a> Checker<'a> {
                         // See the parallel arm in `check_expr` for why
                         // this must be `Type::union`, not a raw
                         // a raw union.
-                        Type::union(then_ty, else_ty)
+                        self.relation().union(then_ty, else_ty)
                     }
                     None => Type::mixed(),
                 }
@@ -5220,7 +5232,7 @@ impl<'a> Checker<'a> {
             return if matches!(l.kind, ExprKind::Variable(_)) {
                 l_ty
             } else {
-                Type::union(l_ty, Type::null())
+                self.relation().union(l_ty, Type::null())
             };
         }
         let l_ty = self.infer_expr(l, locals).without(&Type::null());
@@ -5254,7 +5266,7 @@ impl<'a> Checker<'a> {
             // null (already computed above, with `Null` excluded) or
             // `$default` when it is - a real union of both outcomes, not
             // "the default's type, unconditionally."
-            _ => Type::union(l_ty, r_ty),
+            _ => self.relation().union(l_ty, r_ty),
         }
     }
 
@@ -5429,7 +5441,7 @@ impl<'a> Checker<'a> {
                         values.push(Type::int_literal(1));
                     }
                     if !values.is_empty() {
-                        return Type::union_of(values);
+                        return self.relation().union_of(values);
                     }
                 }
                 arithmetic_op(op)
@@ -5833,6 +5845,7 @@ impl<'a> Checker<'a> {
             .last()
             .is_some_and(|s| matches!(s.kind, StmtKind::Return(_) | StmtKind::Throw(_)));
         Some(closure_inferred_return_type(
+            &self.relation(),
             points,
             saw_explicit_return,
             falls_off_end,
@@ -6282,7 +6295,7 @@ impl<'a> Checker<'a> {
             multiple => multiple
                 .iter()
                 .map(narrow_one)
-                .reduce(|a, b| merge_scopes(&a, &b))
+                .reduce(|a, b| merge_scopes(&self.relation(), &a, &b))
                 .unwrap_or_else(|| base.clone()),
         }
     }
@@ -6496,7 +6509,7 @@ impl<'a> Checker<'a> {
             match cases.len() {
                 0 => ty.clone(),
                 1 => cases.into_iter().next().unwrap(),
-                _ => Type::union_of(cases),
+                _ => self.relation().union_of(cases),
             }
         })
     }
@@ -6537,6 +6550,7 @@ pub(crate) fn postfix_chain_has_nullsafe(base: &Expr) -> bool {
 /// `null` there, since `void` only means "no value" when it's the whole
 /// story.
 fn closure_inferred_return_type(
+    relation: &types::Relation,
     points: Vec<Type>,
     saw_explicit_return: bool,
     falls_off_end: bool,
@@ -6562,10 +6576,10 @@ fn closure_inferred_return_type(
     // `null` last, the order real PHPStan's own union description uses
     // (`int|null`, not `null|int`).
     members.sort_by_key(|m| m.is_null().yes());
-    members
-        .into_iter()
-        .reduce(Type::union)
-        .unwrap_or(Type::void())
+    if members.is_empty() {
+        return Type::void();
+    }
+    relation.union_of(members)
 }
 
 /// Where a static call's class part (`Foo` in `Foo::bar()`, or `$obj` in

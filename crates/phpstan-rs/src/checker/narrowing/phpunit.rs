@@ -251,7 +251,7 @@ impl<'a> Checker<'a> {
             "assertnan" | "assertinfinite" => (arg(0)?, Check::Type(Type::float()), true),
             "assertfinite" => (
                 arg(0)?,
-                Check::Type(Type::union(Type::int(), Type::float())),
+                Check::Type(self.relation().union(Type::int(), Type::float())),
                 true,
             ),
             "assertthat" => (arg(0)?, self.constraint(arg(1)?, locals)?, true),
@@ -323,7 +323,7 @@ impl<'a> Checker<'a> {
             },
             "islist" => Check::Type(is_kind_type("list")?),
             "isnan" | "isinfinite" => Check::Type(Type::float()),
-            "isfinite" => Check::Type(Type::union(Type::int(), Type::float())),
+            "isfinite" => Check::Type(self.relation().union(Type::int(), Type::float())),
             "logicalnot" => Check::Not(Box::new(self.constraint(arg(0)?, locals)?)),
             "logicaland" => Check::And(parts(locals)?),
             "logicalor" => Check::Or(parts(locals)?),
@@ -360,7 +360,7 @@ impl<'a> Checker<'a> {
             .collect();
         let classes = classes?;
         let exact = exact && classes.len() == 1;
-        Some((Type::union_of(classes), exact))
+        Some((self.relation().union_of(classes), exact))
     }
 
     /// Whether `e` is surely a non-empty string.
@@ -429,7 +429,7 @@ impl<'a> Checker<'a> {
                         }
                     })
                     .collect();
-                Some(Type::union_of(kept))
+                Some(self.relation().union_of(kept))
             }),
             Check::Empty => self.narrow_emptiness(value, false, true, locals),
             Check::Count(count) => {
@@ -503,7 +503,7 @@ impl<'a> Checker<'a> {
                     self.apply_check(value, part, true, &mut branch);
                     joined.push(self.current_narrowed_type(value, key, &branch).into_owned());
                 }
-                locals.insert(key.clone(), Type::union_of(joined));
+                locals.insert(key.clone(), self.relation().union_of(joined));
             }
             // A failed `And`, and the string and property checks failing,
             // say nothing narrowable.
@@ -542,7 +542,7 @@ impl<'a> Checker<'a> {
                 passes.then(|| m.clone())
             })
             .collect();
-        Type::union_of(kept)
+        self.relation().union_of(kept)
     }
 }
 

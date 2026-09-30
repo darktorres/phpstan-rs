@@ -188,7 +188,9 @@ impl<'a> Checker<'a> {
                 // The own PHPDoc type too: a member the native hint
                 // excludes no longer reaches `ty`.
                 let checked = match prop_sig.doc_ty() {
-                    Some(doc) => Type::union_of(vec![prop_sig.ty().clone(), doc.clone()]),
+                    Some(doc) => self
+                        .relation()
+                        .union_of(vec![prop_sig.ty().clone(), doc.clone()]),
                     None => prop_sig.ty().clone(),
                 };
                 self.check_type_class_names_exist(

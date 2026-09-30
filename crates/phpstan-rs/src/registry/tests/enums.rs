@@ -1,5 +1,8 @@
 //! Enum registration: cases, backing types, and implemented interfaces.
 
+// Expected types are built without a class hierarchy.
+#![allow(clippy::disallowed_methods)]
+
 use super::super::*;
 use super::helpers::*;
 

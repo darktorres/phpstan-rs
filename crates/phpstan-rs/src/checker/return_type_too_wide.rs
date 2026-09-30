@@ -78,7 +78,7 @@ impl<'a> Checker<'a> {
             .current_function_return_points
             .iter()
             .cloned()
-            .reduce(Type::union);
+            .reduce(|a, b| self.relation().union(a, b));
         let Some(actual) = actual else {
             return;
         };

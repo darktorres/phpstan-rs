@@ -53,7 +53,7 @@ impl<'a> Checker<'a> {
     /// all," or a PHPDoc type alias combined with a `mixed` parameter
     /// would be wrongly flagged.
     pub(crate) fn is_number_operand(&self, ty: &Type) -> bool {
-        let not_a_number = Type::union_of(vec![
+        let not_a_number = self.relation().union_of(vec![
             Type::array(Type::mixed(), Type::mixed()),
             Type::class_string(Type::mixed()),
             Type::resource(false),
@@ -97,7 +97,7 @@ impl<'a> Checker<'a> {
                     m.to_bitwise_not()
                 }
             })
-            .reduce(Type::union)
+            .reduce(|a, b| self.relation().union(a, b))
             .unwrap_or_else(Type::never)
     }
 
@@ -451,7 +451,7 @@ impl<'a> Checker<'a> {
         }
         // An object or array, perhaps `null`, but not only `null`.
         let nullable_object_or_array = |ty: &Type| {
-            let or_null = |kind: Type| Type::union_of(vec![kind, Type::null()]);
+            let or_null = |kind: Type| self.relation().union_of(vec![kind, Type::null()]);
             !ty.is_null().yes()
                 && (self
                     .relation()
@@ -482,7 +482,9 @@ impl<'a> Checker<'a> {
     /// overloads it (`BcMath\Number` doesn't); a type some value of which
     /// is one of those passes.
     fn bitnot_operand_is_valid(&self, ty: &Type) -> bool {
-        let operand = Type::union_of(vec![Type::int(), Type::float(), Type::string()]);
+        let operand = self
+            .relation()
+            .union_of(vec![Type::int(), Type::float(), Type::string()]);
         !self.relation().is_super_type_of(&operand, ty).no() || self.type_is_instance_of(ty, "GMP")
     }
 
@@ -665,7 +667,10 @@ impl<'a> Checker<'a> {
     /// precedent everywhere else in this file/`coercion.rs`.
     fn is_strictly_number(&self, ty: &Type) -> bool {
         self.relation()
-            .is_super_type_of(&Type::union_of(vec![Type::int(), Type::float()]), ty)
+            .is_super_type_of(
+                &self.relation().union_of(vec![Type::int(), Type::float()]),
+                ty,
+            )
             .yes()
             || self.instance_of_any(ty, &["SimpleXMLElement", "GMP", "BcMath\\Number"])
     }
@@ -676,7 +681,7 @@ impl<'a> Checker<'a> {
     /// numeric-string/non-null/non-bool narrowing - see `check_incdec_
     /// validity`'s own doc comment for why.
     fn is_incdec_operand_valid(&self, ty: &Type) -> bool {
-        let invalid = Type::union_of(vec![
+        let invalid = self.relation().union_of(vec![
             Type::array(Type::mixed(), Type::mixed()),
             Type::class_string(Type::mixed()),
         ]);
@@ -693,7 +698,7 @@ impl<'a> Checker<'a> {
 
     /// Whether every value of `ty` is an instance of one of `classes`.
     fn instance_of_any(&self, ty: &Type, classes: &[&str]) -> bool {
-        let of = Type::union_of(
+        let of = self.relation().union_of(
             classes
                 .iter()
                 .map(|c| Type::object((*c).into(), Vec::new()))

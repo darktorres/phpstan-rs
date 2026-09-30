@@ -21,6 +21,8 @@ use types::{self, TemplateParam, Type};
 /// a large amount of real code (old and new) still uses this style;
 /// later PHP versions only added a deprecation notice for it, the
 /// behavior itself is unchanged.
+// Declared types are joined while the class hierarchy is being built.
+#[allow(clippy::disallowed_methods)]
 pub(crate) fn apply_implicit_nullable_default(ty: Type, default: Option<&Expr>) -> Type {
     let is_bare_null_default = matches!(
         default.map(|e| &e.kind),
@@ -89,6 +91,8 @@ pub(crate) fn declared_type(
 /// The PHPDoc type `doc` (resolved) reconciled with the native type
 /// `native_ty` declared by `native_hint`; the native type alone without
 /// a PHPDoc type, `mixed` without either.
+// Declared types are joined while the class hierarchy is being built.
+#[allow(clippy::disallowed_methods)]
 fn reconcile_doc_with_native(
     doc: Option<Type>,
     native_hint: Option<&TypeHint>,

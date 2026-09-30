@@ -141,7 +141,7 @@ impl<'a> Checker<'a> {
                 let Some(values) = self.infer_expr(&array.value, locals).array_value_type() else {
                     return;
                 };
-                let keyable = Type::union(Type::int(), Type::string());
+                let keyable = self.relation().union(Type::int(), Type::string());
                 if let Some(level) = self.failing_level(&values, 3, |m| {
                     self.relation().is_super_type_of(&keyable, m).no()
                 }) {

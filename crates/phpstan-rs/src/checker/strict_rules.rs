@@ -227,7 +227,7 @@ impl<'a> Checker<'a> {
         if ty.has_unknown_part() {
             return true;
         }
-        let number = Type::union_of(vec![
+        let number = self.relation().union_of(vec![
             Type::int(),
             Type::float(),
             Type::intersection_of(vec![
@@ -243,7 +243,7 @@ impl<'a> Checker<'a> {
             // Arrays, objects, resources and callables already fail PHP's
             // own number conversion.
             Operand::Arithmetic => {
-                let not_a_number = Type::union_of(vec![
+                let not_a_number = self.relation().union_of(vec![
                     Type::array(Type::mixed(), Type::mixed()),
                     Type::object_without_class(),
                     Type::resource(false),
@@ -265,7 +265,7 @@ impl<'a> Checker<'a> {
     }
 
     fn overloads_arithmetic(&self, ty: &Type) -> bool {
-        let overloading = Type::union_of(vec![
+        let overloading = self.relation().union_of(vec![
             Type::object("GMP".into(), Vec::new()),
             Type::object("BcMath\\Number".into(), Vec::new()),
         ]);
@@ -328,7 +328,7 @@ impl<'a> Checker<'a> {
         let allowed = if allowed.len() == 1 {
             allowed[0].clone()
         } else {
-            Type::union_of(allowed.to_vec())
+            self.relation().union_of(allowed.to_vec())
         };
         self.registry.is_super_type_of(&allowed, ty) == TrinaryLogic::Yes
     }
@@ -409,7 +409,7 @@ impl<'a> Checker<'a> {
         };
         let prefix = if compound { "assignOp" } else { "binaryOp" };
         for (one, other) in [(&left, &right), (&right, &left)] {
-            let string_or_null = Type::union_of(vec![Type::string(), Type::null()]);
+            let string_or_null = self.relation().union_of(vec![Type::string(), Type::null()]);
             let is_string_or_nullable_string = self
                 .relation()
                 .is_super_type_of(&string_or_null, other)

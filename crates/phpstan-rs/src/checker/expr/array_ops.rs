@@ -120,7 +120,7 @@ impl<'a> Checker<'a> {
         }
         match general {
             None => Type::array_shape(shape),
-            Some((keys, values)) => general_array_literal_type(keys, values),
+            Some((keys, values)) => general_array_literal_type(&self.relation(), keys, values),
         }
     }
 
@@ -180,7 +180,7 @@ impl<'a> Checker<'a> {
                     key_types.push(match source_key.is_int() {
                         TrinaryLogic::Yes => Type::int(),
                         TrinaryLogic::No => source_key,
-                        TrinaryLogic::Maybe => Type::union(Type::int(), source_key),
+                        TrinaryLogic::Maybe => self.relation().union(Type::int(), source_key),
                     });
                     // `is_list_like` alone (the original check) wrongly
                     // treats an *unmarked* int-keyed source
@@ -252,12 +252,12 @@ impl<'a> Checker<'a> {
         } else {
             key_types
                 .into_iter()
-                .reduce(Type::union)
+                .reduce(|a, b| self.relation().union(a, b))
                 .unwrap_or_else(Type::unknown_array_key)
         };
         let elem_ty = elem_types
             .into_iter()
-            .reduce(Type::union)
+            .reduce(|a, b| self.relation().union(a, b))
             .unwrap_or(Type::mixed());
         let mut members = vec![Type::array(key_ty, elem_ty)];
         if list_safe {
@@ -715,14 +715,18 @@ fn array_key_cast_description(ty: &Type) -> Option<(String, String)> {
 
 /// An array literal with a key that isn't known: every key and value it
 /// has, non-empty.
-fn general_array_literal_type(keys: Vec<Type>, values: Vec<Type>) -> Type {
+fn general_array_literal_type(
+    relation: &types::Relation,
+    keys: Vec<Type>,
+    values: Vec<Type>,
+) -> Type {
     let key = keys
         .into_iter()
-        .reduce(Type::union)
+        .reduce(|a, b| relation.union(a, b))
         .unwrap_or_else(Type::unknown_array_key);
     let value = values
         .into_iter()
-        .reduce(Type::union)
+        .reduce(|a, b| relation.union(a, b))
         .unwrap_or_else(Type::mixed);
     Type::intersection_of(vec![
         Type::array(key, value),

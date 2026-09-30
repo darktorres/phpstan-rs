@@ -372,7 +372,7 @@ impl<'a> Checker<'a> {
                 let field = &shape.fields[j];
                 optional = field.optional;
                 value_ty = Some(match value_ty {
-                    Some(t) => Type::union(t, field.ty.clone()),
+                    Some(t) => self.relation().union(t, field.ty.clone()),
                     None => field.ty.clone(),
                 });
                 common_key = match common_key {

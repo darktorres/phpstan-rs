@@ -412,6 +412,8 @@ pub(crate) fn infer_class_const_type(value: &syntax::ast::Expr) -> Type {
 /// The shared body of `infer_const_type`/`infer_class_const_type`.
 /// `class_const_ref` decides what a `Class::NAME` reference inside the
 /// value becomes (`None` falls back to `Mixed`).
+// Declared types are joined while the class hierarchy is being built.
+#[allow(clippy::disallowed_methods)]
 fn infer_const_type_with(
     value: &syntax::ast::Expr,
     class_const_ref: &dyn Fn(&syntax::ast::QualifiedName, &str) -> Option<Type>,
@@ -596,6 +598,8 @@ impl FunctionReflection {
     // overwhelmingly declares aliases once, on the class, referenced
     // from many members - not attempted here.
     #[hotpath::measure]
+    // Declared types are joined while the class hierarchy is being built.
+    #[allow(clippy::disallowed_methods)]
     pub(crate) fn from_decl(
         f: &FunctionDecl,
         ctx: &NameContext,
@@ -785,6 +789,8 @@ impl FunctionReflection {
     /// $replace_pairs` form, as two separate top-level declarations
     /// sharing one name), mirroring `ClassReflection::merge`'s own "later
     /// declaration wins on conflict" convention.
+    // Declared types are joined while the class hierarchy is being built.
+    #[allow(clippy::disallowed_methods)]
     pub(crate) fn merge(self, other: FunctionReflection) -> FunctionReflection {
         let return_type = Type::union(self.return_type, other.return_type);
         let return_type_native = Type::union(self.return_type_native, other.return_type_native);

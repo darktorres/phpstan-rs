@@ -120,7 +120,7 @@ impl<'a> Checker<'a> {
             let ty = crate::registry::parse_type_node(node);
             let ty = resolve_names_in_type(ty, &self.name_ctx);
             Some(match acc {
-                Some(prev) => Type::union(prev, ty),
+                Some(prev) => self.relation().union(prev, ty),
                 None => ty,
             })
         })

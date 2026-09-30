@@ -1248,7 +1248,7 @@ impl<'a> Checker<'a> {
                 (true, false) => else_locals,
                 (false, true) => then_locals,
                 _ => {
-                    let mut merged = merge_scopes(&then_locals, &else_locals);
+                    let mut merged = merge_scopes(&self.relation(), &then_locals, &else_locals);
                     // `cond`'s own discriminant cannot hold in the other
                     // branch, so its facts stay as that branch recorded them.
                     for (branch, branch_true) in [(&then_locals, true), (&else_locals, false)] {

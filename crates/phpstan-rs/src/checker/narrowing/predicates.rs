@@ -257,6 +257,8 @@ pub(crate) fn propagate_container_field_facts(
     }
 }
 
+// Joins a few known types, far below the union cap.
+#[allow(clippy::disallowed_methods)]
 pub(crate) fn narrowing_type_for_predicate(name: &str) -> Option<Type> {
     match name {
         "is_string" => Some(Type::string()),
@@ -326,7 +328,7 @@ impl<'a> Checker<'a> {
                 ExprKind::Binary(BinOp::Or | BinOp::LogicalOr, l, r) => {
                     let (lk, lt, le) = self.or_chain_narrowing_target(l, locals)?;
                     let (rk, rt, _) = self.or_chain_narrowing_target(r, locals)?;
-                    (lk == rk).then(|| (lk, Type::union(lt, rt), le))
+                    (lk == rk).then(|| (lk, self.relation().union(lt, rt), le))
                 }
                 ExprKind::Call(callee, args) => {
                     let (ExprKind::Name(name), [single_arg]) = (&callee.kind, args.as_slice())
@@ -394,7 +396,7 @@ impl<'a> Checker<'a> {
             ExprKind::Binary(BinOp::And | BinOp::LogicalAnd, l, r) => {
                 let (lk, lt, le) = self.and_chain_narrowing_target(l, locals)?;
                 let (rk, rt, _) = self.and_chain_narrowing_target(r, locals)?;
-                (lk == rk).then(|| (lk, Type::union(lt, rt), le))
+                (lk == rk).then(|| (lk, self.relation().union(lt, rt), le))
             }
             ExprKind::Unary(UnaryOp::Not, inner) => self.or_chain_narrowing_target(inner, locals),
             _ => None,

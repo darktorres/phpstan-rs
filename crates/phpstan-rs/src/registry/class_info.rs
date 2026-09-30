@@ -1660,6 +1660,8 @@ impl ClassReflection {
     /// typed as the case; `cases()`, and a backed enum's `from()` and
     /// `tryFrom()`; the `name` property, and a backed enum's `value`; and
     /// `UnitEnum`/`BackedEnum` among its interfaces.
+    // Declared types are joined while the class hierarchy is being built.
+    #[allow(clippy::disallowed_methods)]
     fn add_enum_members(&mut self, e: &ClassDef, fqn: &str) {
         // `cases(): array` is a real, built-in static method every enum
         // gets from the language itself (`UnitEnum`), and a backed

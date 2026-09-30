@@ -21,6 +21,8 @@ use sql::column::{Column, ColumnType};
 use types::{Shape, Type};
 
 /// The PHP type of the value a raw fetch of a column returns.
+// Joins a few known types, far below the union cap.
+#[allow(clippy::disallowed_methods)]
 pub(crate) fn column_php_type(ty: &ColumnType) -> Type {
     match ty {
         ColumnType::Int => Type::int(),
@@ -41,6 +43,8 @@ pub(crate) fn column_php_type(ty: &ColumnType) -> Type {
 
 /// What fetching `column` returns: its type, or `null` too when the
 /// column is nullable.
+// Joins a few known types, far below the union cap.
+#[allow(clippy::disallowed_methods)]
 pub(crate) fn column_value_type(column: &Column) -> Type {
     let ty = column_php_type(&column.ty);
     if column.nullable {

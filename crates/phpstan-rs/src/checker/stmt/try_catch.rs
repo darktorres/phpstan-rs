@@ -234,7 +234,7 @@ impl<'a> Checker<'a> {
                 .map(|(_, state)| state)
                 .fold(None, |acc: Option<Locals>, state| {
                     Some(match acc {
-                        Some(acc) => merge_scopes(&acc, state),
+                        Some(acc) => merge_scopes(&self.relation(), &acc, state),
                         None => state.clone(),
                     })
                 });
@@ -252,9 +252,9 @@ impl<'a> Checker<'a> {
                 let ty = match c.types.as_slice() {
                     [] => Type::mixed(),
                     [single] => self.resolve_name_expr(single),
-                    multiple => {
-                        Type::union_of(multiple.iter().map(|t| self.resolve_name_expr(t)).collect())
-                    }
+                    multiple => self
+                        .relation()
+                        .union_of(multiple.iter().map(|t| self.resolve_name_expr(t)).collect()),
                 };
                 purge_stale_narrowing_for(&mut catch_locals, var);
                 self.probe_hit_at(var.span, &ty);
@@ -280,7 +280,7 @@ impl<'a> Checker<'a> {
             *locals = end_states
                 .into_iter()
                 .skip(1)
-                .fold(first, |acc, s| merge_scopes(&acc, &s));
+                .fold(first, |acc, s| merge_scopes(&self.relation(), &acc, &s));
         }
         if let Some(f) = finally {
             // `finally`'s own body is checked against the widened
@@ -298,7 +298,7 @@ impl<'a> Checker<'a> {
             // (`unset()`-ing a variable inside `finally` won't remove
             // it from the narrower state afterward - a disclosed edge
             // case of this same materially-cheaper approximation.)
-            let finally_entry = merge_scopes(&pre_try_locals, locals);
+            let finally_entry = merge_scopes(&self.relation(), &pre_try_locals, locals);
             let mut finally_locals = finally_entry.clone();
             self.check_block(f, &mut finally_locals, declared_return, label);
             for (key, ty) in finally_locals.iter() {

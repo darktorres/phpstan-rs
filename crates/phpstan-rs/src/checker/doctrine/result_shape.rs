@@ -18,6 +18,8 @@ use super::query_builder::{JoinClause, QueryBuilderChain};
 /// A declared custom DQL function's own result type - see
 /// `DoctrineFunctionKind`'s own doc comment for why each category maps
 /// to exactly this type, not a narrower one.
+// Joins a few known types, far below the union cap.
+#[allow(clippy::disallowed_methods)]
 fn doctrine_custom_function_type(kind: DoctrineFunctionKind) -> Type {
     match kind {
         DoctrineFunctionKind::Numeric => Type::union_of(vec![Type::int(), Type::float()]),
@@ -144,7 +146,7 @@ fn entity_row_type(checker: &Checker, entity: &str) -> Type {
             subclasses
                 .into_iter()
                 .map(|class| Type::object(class.into(), Vec::new()))
-                .reduce(Type::union)
+                .reduce(|a, b| checker.relation().union(a, b))
                 .unwrap_or_else(|| Type::object(entity.into(), Vec::new()))
         }
         _ => Type::object(entity.into(), Vec::new()),
@@ -221,7 +223,9 @@ fn select_item_type(checker: &Checker, aliases: &AliasMap, item: &SelectItem) ->
             // `parse_case` requires at least one `WHEN ... THEN ...`
             // before accepting `END`), so this always has a first
             // element to reduce from.
-            arm_types.reduce(Type::union).unwrap_or(Type::mixed())
+            arm_types
+                .reduce(|a, b| checker.relation().union(a, b))
+                .unwrap_or(Type::mixed())
         }
         // Real Doctrine constructs the named class from the query's own
         // positional results directly - exact once the class is named,
@@ -267,6 +271,8 @@ fn select_item_type(checker: &Checker, aliases: &AliasMap, item: &SelectItem) ->
 /// `AVG` may come back as a numeric string (MySQL's `DECIMAL`,
 /// PostgreSQL's `numeric`). Any of the four is `null` over zero rows,
 /// which only a `GROUP BY` rules out.
+// Joins a few known types, far below the union cap.
+#[allow(clippy::disallowed_methods)]
 fn aggregate_type(
     checker: &Checker,
     aliases: &AliasMap,
@@ -319,6 +325,8 @@ fn raw_field_type(checker: &Checker, aliases: &AliasMap, r: &FieldRef) -> Option
 }
 
 /// The PHP type of the value a raw fetch of a schema column returns.
+// Joins a few known types, far below the union cap.
+#[allow(clippy::disallowed_methods)]
 fn column_php_type(ty: &sql::column::ColumnType) -> Type {
     use sql::column::ColumnType;
     match ty {
@@ -338,6 +346,8 @@ fn column_php_type(ty: &sql::column::ColumnType) -> Type {
     }
 }
 
+// Joins a few known types, far below the union cap.
+#[allow(clippy::disallowed_methods)]
 fn nullable_if(ty: Type, nullable: bool) -> Type {
     if nullable {
         Type::union(ty, Type::null())

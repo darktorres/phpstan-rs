@@ -26,6 +26,8 @@ fn returns_result_set(sql: &str) -> bool {
 /// `query()` runs over the text protocol, which returns every number as
 /// a string unless `MYSQLI_OPT_INT_AND_FLOAT_NATIVE` is set - either form
 /// is possible without knowing the connection's options.
+// Joins a few known types, far below the union cap.
+#[allow(clippy::disallowed_methods)]
 fn widen_for_text_protocol(ty: &Type) -> Type {
     ty.union_members()
         .iter()
@@ -70,7 +72,7 @@ impl<'a> Checker<'a> {
                     None => Type::object("mysqli_result".into(), Vec::new()),
                 }
             }
-            None => Type::union_of(vec![
+            None => self.relation().union_of(vec![
                 Type::object("mysqli_result".into(), Vec::new()),
                 Type::bool_literal(true),
             ]),
@@ -78,7 +80,7 @@ impl<'a> Checker<'a> {
         if self.mysqli_throws_exceptions() {
             success
         } else {
-            Type::union(success, Type::bool_literal(false))
+            self.relation().union(success, Type::bool_literal(false))
         }
     }
 
@@ -123,7 +125,8 @@ impl<'a> Checker<'a> {
         let end = if self.mysqli_throws_exceptions() {
             Type::null()
         } else {
-            Type::union_of(vec![Type::null(), Type::bool_literal(false)])
+            self.relation()
+                .union_of(vec![Type::null(), Type::bool_literal(false)])
         };
         let mode = |default: &str| -> Option<String> {
             match arg {
@@ -144,9 +147,9 @@ impl<'a> Checker<'a> {
             _ => None,
         };
         Some(match method {
-            "fetch_assoc" => Type::union(assoc(), end),
-            "fetch_row" => Type::union(numeric(), end),
-            "fetch_array" => Type::union(by_mode(&mode("MYSQLI_BOTH")?)?, end),
+            "fetch_assoc" => self.relation().union(assoc(), end),
+            "fetch_row" => self.relation().union(numeric(), end),
+            "fetch_array" => self.relation().union(by_mode(&mode("MYSQLI_BOTH")?)?, end),
             "fetch_all" => Type::list_of(by_mode(&mode("MYSQLI_NUM")?)?),
             "fetch_column" => {
                 let index = match arg.map(|e| &e.kind) {
@@ -156,7 +159,8 @@ impl<'a> Checker<'a> {
                 };
                 let field = fields.get(index)?;
                 // No more rows is `false` here, not `null`.
-                Type::union(field.ty.clone(), Type::bool_literal(false))
+                self.relation()
+                    .union(field.ty.clone(), Type::bool_literal(false))
             }
             _ => return None,
         })

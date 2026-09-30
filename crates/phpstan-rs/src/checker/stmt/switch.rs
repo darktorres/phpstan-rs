@@ -96,7 +96,7 @@ impl<'a> Checker<'a> {
             let mut case_locals = if previous_terminates {
                 direct
             } else {
-                merge_scopes(&running, &direct)
+                merge_scopes(&self.relation(), &running, &direct)
             };
             self.check_block(&case.body, &mut case_locals, declared_return, label);
             let last_stmt = case.body.last();
@@ -130,7 +130,7 @@ impl<'a> Checker<'a> {
             *locals = exit_states
                 .into_iter()
                 .skip(1)
-                .fold(first, |acc, s| merge_scopes(&acc, &s));
+                .fold(first, |acc, s| merge_scopes(&self.relation(), &acc, &s));
         }
     }
 }

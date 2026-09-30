@@ -181,7 +181,7 @@ impl<'a> Checker<'a> {
             if let Some(first) = states.next() {
                 let mut merged = first;
                 for state in states {
-                    merged = merge_scopes(&merged, &state);
+                    merged = merge_scopes(&self.relation(), &merged, &state);
                 }
                 *locals = merged;
             }
@@ -191,7 +191,7 @@ impl<'a> Checker<'a> {
             // narrowed iteration produces" - not a real fixed
             // point, but sound enough to avoid claiming more
             // precision than we have.
-            *locals = merge_scopes(locals, &body_locals);
+            *locals = merge_scopes(&self.relation(), locals, &body_locals);
             // Reaching code after the loop *without having broken
             // out of it* always means `cond` just evaluated
             // false, regardless of how many iterations ran - real,
@@ -206,7 +206,7 @@ impl<'a> Checker<'a> {
             // see `loop_break_states`'s own doc comment on
             // `Checker`.
             for state in break_states {
-                *locals = merge_scopes(locals, &state);
+                *locals = merge_scopes(&self.relation(), locals, &state);
             }
         }
     }
@@ -318,7 +318,7 @@ impl<'a> Checker<'a> {
         // Fold in every `break`-reached state too - see
         // `loop_break_states`'s own doc comment on `Checker`.
         for state in break_states {
-            *locals = merge_scopes(locals, &state);
+            *locals = merge_scopes(&self.relation(), locals, &state);
         }
     }
 
@@ -403,7 +403,7 @@ impl<'a> Checker<'a> {
                 // Same "may run zero times" merge `While` uses, for
                 // the same reason - the body isn't treated as if it
                 // always executes exactly once.
-                *locals = merge_scopes(locals, &body_locals);
+                *locals = merge_scopes(&self.relation(), locals, &body_locals);
                 // Applied *before* folding in break-reached states
                 // below, same reasoning as `While` - a `break`
                 // doesn't mean `cond` went false.
@@ -412,7 +412,7 @@ impl<'a> Checker<'a> {
                 // too - see `loop_break_states`'s own doc comment
                 // on `Checker`.
                 for state in break_states {
-                    *locals = merge_scopes(locals, &state);
+                    *locals = merge_scopes(&self.relation(), locals, &state);
                 }
             }
             None => {
@@ -447,7 +447,7 @@ impl<'a> Checker<'a> {
                 self.loop_depth -= 1;
                 *locals = body_locals;
                 for state in break_states {
-                    *locals = merge_scopes(locals, &state);
+                    *locals = merge_scopes(&self.relation(), locals, &state);
                 }
             }
         }
@@ -480,11 +480,11 @@ impl<'a> Checker<'a> {
                 }
                 return Some((
                     keys.into_iter()
-                        .reduce(Type::union)
+                        .reduce(|a, b| self.relation().union(a, b))
                         .unwrap_or(Type::mixed()),
                     values
                         .into_iter()
-                        .reduce(Type::union)
+                        .reduce(|a, b| self.relation().union(a, b))
                         .unwrap_or(Type::mixed()),
                 ));
             }
@@ -821,7 +821,7 @@ impl<'a> Checker<'a> {
                                 .map(|state| state.get(value_name).cloned()),
                         )
                         .collect::<Option<Vec<Type>>>()
-                        .map(Type::union_of);
+                        .map(|m| this.relation().union_of(m));
                     last_pass_breaks = this
                         .loop_break_states
                         .last()
@@ -841,7 +841,7 @@ impl<'a> Checker<'a> {
         self.loop_depth -= 1;
         *locals = body_locals;
         for state in break_states {
-            *locals = merge_scopes(locals, &state);
+            *locals = merge_scopes(&self.relation(), locals, &state);
         }
         // A loop over a sealed shape that writes a container at its own key
         // on every way through the body, and can't `break`, has written it
@@ -891,7 +891,7 @@ impl<'a> Checker<'a> {
             && let Some(current_subject_ty) = locals.get(subject_name).cloned()
         {
             let widened_element_ty = if last_pass_breaks {
-                Type::union(old_element_ty, final_value_ty)
+                self.relation().union(old_element_ty, final_value_ty)
             } else {
                 final_value_ty
             };

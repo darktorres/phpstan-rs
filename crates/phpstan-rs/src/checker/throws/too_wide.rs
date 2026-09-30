@@ -79,7 +79,7 @@ impl<'a> Checker<'a> {
             .current_function_throw_points
             .iter()
             .cloned()
-            .reduce(Type::union);
+            .reduce(|a, b| self.relation().union(a, b));
         let members: Vec<Type> = throws.union_members().to_vec();
         for declared in members {
             // Calling `accepts(actual, &declared)` directly would be

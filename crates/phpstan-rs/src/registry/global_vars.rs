@@ -52,6 +52,8 @@ struct GlobalAccumulator {
 }
 
 impl GlobalAccumulator {
+    // Declared types are joined while the class hierarchy is being built.
+    #[allow(clippy::disallowed_methods)]
     fn add_shape_field(&mut self, key: String, ty: Type) {
         if let Some((_, existing, _)) = self.shape_fields.iter_mut().find(|(k, _, _)| *k == key) {
             *existing = Type::union(existing.clone(), ty);
@@ -64,6 +66,8 @@ impl GlobalAccumulator {
         self.shape_fields.push((key, ty, true));
     }
 
+    // Declared types are joined while the class hierarchy is being built.
+    #[allow(clippy::disallowed_methods)]
     fn add_other(&mut self, ty: Type) {
         self.other = Some(match self.other.take() {
             Some(existing) => Type::union(existing, ty),
@@ -83,6 +87,8 @@ impl GlobalAccumulator {
         }
     }
 
+    // Declared types are joined while the class hierarchy is being built.
+    #[allow(clippy::disallowed_methods)]
     fn finish(self) -> Type {
         let shape_type = self.has_shape().then(|| self.shape_type());
         match (shape_type, self.other) {

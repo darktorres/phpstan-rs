@@ -16,6 +16,8 @@ const PHP_MIN_ANALYZABLE_VERSION_ID: i64 = 50207;
 /// leading `\`), or `None` when its declared value is authoritative.
 /// `php_version` is the configured target version, narrowing the
 /// version-number constants to it.
+// Joins a few known types, far below the union cap.
+#[allow(clippy::disallowed_methods)]
 pub(crate) fn predefined_constant_type(
     name: &str,
     php_version: Option<PhpVersion>,
@@ -92,6 +94,8 @@ pub(crate) fn predefined_constant_type(
     Some(ty)
 }
 
+// Joins literals and enum cases, which fold without the class hierarchy.
+#[allow(clippy::disallowed_methods)]
 fn string_literals(values: &[&str]) -> Type {
     Type::union_of(
         values

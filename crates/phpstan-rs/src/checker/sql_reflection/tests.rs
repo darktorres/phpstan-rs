@@ -1,3 +1,6 @@
+// Expected types are built without a class hierarchy.
+#![allow(clippy::disallowed_methods)]
+
 use super::*;
 
 fn column(ty: ColumnType, nullable: bool) -> Column {

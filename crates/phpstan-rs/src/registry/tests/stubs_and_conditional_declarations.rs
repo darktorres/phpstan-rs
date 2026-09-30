@@ -1,5 +1,8 @@
 //! Conditional declarations and stub merging for classes and functions.
 
+// Expected types are built without a class hierarchy.
+#![allow(clippy::disallowed_methods)]
+
 use super::super::*;
 use super::helpers::*;
 use syntax::lexer::Lexer;

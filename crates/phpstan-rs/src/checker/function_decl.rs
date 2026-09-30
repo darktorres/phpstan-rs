@@ -491,7 +491,7 @@ impl<'a> Checker<'a> {
                     // excludes no longer reaches `ty`, but naming an
                     // unknown class is still wrong.
                     let checked = match &param.doc_ty() {
-                        Some(doc) => Type::union_of(vec![ty.clone(), doc.clone()]),
+                        Some(doc) => self.relation().union_of(vec![ty.clone(), doc.clone()]),
                         None => ty.clone(),
                     };
                     self.check_type_class_names_exist(&checked, &subject, ast_param.span);
@@ -698,7 +698,7 @@ impl<'a> Checker<'a> {
         let subject = format!("return type of {label}()");
         let declared = declared_return.clone().unwrap_or(Type::mixed());
         let checked = match sig.and_then(|s| s.return_doc_ty().as_ref()) {
-            Some(doc) => Type::union_of(vec![declared, doc.clone()]),
+            Some(doc) => self.relation().union_of(vec![declared, doc.clone()]),
             None => declared,
         };
         self.check_type_class_names_exist(&checked, &subject, f.span);

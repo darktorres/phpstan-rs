@@ -459,6 +459,8 @@ impl TypedColumn {
 
 /// What fetching `col` returns - its type, or `null` too when the column
 /// is nullable.
+// Joins a few known types, far below the union cap.
+#[allow(clippy::disallowed_methods)]
 fn column_value_type(col: &TypedColumn) -> Type {
     if col.nullable {
         Type::union(col.ty.clone(), Type::null())

@@ -295,7 +295,7 @@ impl<'a> Checker<'a> {
             .iter()
             .map(|member| self.member_offset_read_type(member, key, members.len() > 1))
             .collect();
-        Type::union_of(values)
+        self.relation().union_of(values)
     }
 
     /// Whether a negative string offset counts from the end on every PHP
@@ -319,7 +319,7 @@ impl<'a> Checker<'a> {
                     value
                 }
                 Some((value, types::OffsetPresence::MayBeAbsent)) => {
-                    Type::union(value, Type::null())
+                    self.relation().union(value, Type::null())
                 }
                 Some((_, types::OffsetPresence::Absent)) if in_union => Type::null(),
                 _ => Type::error(),
@@ -414,7 +414,7 @@ impl<'a> Checker<'a> {
                     .iter()
                     .map(|m| self.declared_property_type(m, prop))
                     .filter(|ty| !ty.is_mixed())
-                    .reduce(Type::union)
+                    .reduce(|a, b| self.relation().union(a, b))
                     .unwrap_or(Type::mixed());
             }
             if let Some((fqn, case)) = base_ty.as_enum_case() {
@@ -451,7 +451,8 @@ impl<'a> Checker<'a> {
                         // readable through `__get`, as the queried class or
                         // `null`.
                         if self.registry.is_subclass_of(class, "SimpleXMLElement") {
-                            Type::union(Type::object(class.clone(), Vec::new()), Type::null())
+                            self.relation()
+                                .union(Type::object(class.clone(), Vec::new()), Type::null())
                         } else {
                             Type::mixed()
                         }
@@ -621,7 +622,7 @@ impl<'a> Checker<'a> {
                     .iter()
                     .map(|m| self.declared_method_return_type(recv, m, method, args, locals))
                     .filter(|ty| !ty.is_mixed())
-                    .reduce(Type::union)
+                    .reduce(|a, b| self.relation().union(a, b))
                     .unwrap_or(Type::mixed());
             }
             Type::mixed()
@@ -731,7 +732,8 @@ impl<'a> Checker<'a> {
             if args.len() == 1 {
                 Type::bool()
             } else {
-                Type::union_of(vec![Type::string(), Type::bool_literal(false)])
+                self.relation()
+                    .union_of(vec![Type::string(), Type::bool_literal(false)])
             }
         } else if matches!(method, "getMethod" | "getProperty")
             && self.registry.is_subclass_of(class, "ReflectionClass")
@@ -991,6 +993,8 @@ impl<'a> Checker<'a> {
 /// dynamic array-key write already is elsewhere in this project - the
 /// identical "what does this uncertain-typed value become as a real PHP
 /// array key" question.
+// Joins a few known types, far below the union cap.
+#[allow(clippy::disallowed_methods)]
 fn dbal_row_method_return_type(method: &str, row_type: Option<Type>) -> Option<Type> {
     let row_type = row_type?;
     let shape = row_type.as_array_shape()?;
@@ -1271,8 +1275,8 @@ impl<'a> Checker<'a> {
         let single_scalar = mode == HydrationMode::SingleScalar;
         match method {
             "getSingleScalarResult" | "getSingleResult" => element_or_mixed,
-            "getOneOrNullResult" => Type::union(element_or_mixed, Type::null()),
-            "toIterable" => Type::union_of(vec![
+            "getOneOrNullResult" => self.relation().union(element_or_mixed, Type::null()),
+            "toIterable" => self.relation().union_of(vec![
                 Type::array(
                     key.filter(|k| !k.is_null().yes())
                         .unwrap_or_else(Type::unknown_array_key),

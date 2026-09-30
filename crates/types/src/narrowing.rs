@@ -55,7 +55,7 @@ impl Relation<'_> {
             return if narrowed.is_empty() {
                 target.clone()
             } else {
-                Type::union_of(narrowed)
+                self.union_of(narrowed)
             };
         }
         if self.is_super_type_of(target, current).yes() {
@@ -661,6 +661,6 @@ impl Relation<'_> {
                 })
             })
             .collect();
-        Type::union_of(kept)
+        self.union_of(kept)
     }
 }

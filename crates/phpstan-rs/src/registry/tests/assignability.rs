@@ -1,5 +1,8 @@
 //! Type assignability checks driven by the class hierarchy.
 
+// Expected types are built without a class hierarchy.
+#![allow(clippy::disallowed_methods)]
+
 use super::super::*;
 use super::helpers::*;
 use types::Shape;

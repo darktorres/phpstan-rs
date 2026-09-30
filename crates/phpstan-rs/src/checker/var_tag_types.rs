@@ -109,7 +109,7 @@ impl<'a> Checker<'a> {
                     if l.is_mixed() || r.is_mixed() {
                         Type::mixed()
                     } else {
-                        Type::union(l, r)
+                        self.relation().union(l, r)
                     }
                 }
                 ExprKind::ArrayLiteral(items) => {
@@ -125,7 +125,7 @@ impl<'a> Checker<'a> {
                         };
                         value = Some(match value {
                             None => item_ty,
-                            Some(prev) => Type::union(prev, item_ty),
+                            Some(prev) => self.relation().union(prev, item_ty),
                         });
                     }
                     Type::array(Type::unknown_array_key(), value.unwrap_or(Type::mixed()))
@@ -180,7 +180,7 @@ impl<'a> Checker<'a> {
                         if l.is_mixed() || r.is_mixed() {
                             Type::mixed()
                         } else {
-                            Type::union(l, r)
+                            self.relation().union(l, r)
                         }
                     }
                     _ => Type::mixed(),
@@ -191,7 +191,7 @@ impl<'a> Checker<'a> {
                     if t.is_mixed() || o.is_mixed() {
                         Type::mixed()
                     } else {
-                        Type::union(t, o)
+                        self.relation().union(t, o)
                     }
                 }
                 ExprKind::Call(callee, _) => {
@@ -210,7 +210,7 @@ impl<'a> Checker<'a> {
                     };
                     let ty = self.native_method_return(class, method);
                     if nullsafe.is_nullsafe() && !ty.is_mixed() {
-                        Type::union(ty, Type::null())
+                        self.relation().union(ty, Type::null())
                     } else {
                         ty
                     }
@@ -235,7 +235,7 @@ impl<'a> Checker<'a> {
                     };
                     let ty = self.native_property_type(class, prop, false);
                     if nullsafe.is_nullsafe() && !ty.is_mixed() {
-                        Type::union(ty, Type::null())
+                        self.relation().union(ty, Type::null())
                     } else {
                         ty
                     }

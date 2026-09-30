@@ -1,5 +1,8 @@
 //! Union collapsing, readonly/property hooks, literal/accessory refinement types.
 
+// Expected types are built without a class hierarchy.
+#![allow(clippy::disallowed_methods)]
+
 use super::super::*;
 use types::AccessoryKind;
 use types::Shape;

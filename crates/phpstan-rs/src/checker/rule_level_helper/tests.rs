@@ -1,5 +1,8 @@
 //! `RuleLevelHelper`'s level-dependent acceptance.
 
+// Expected types are built without a class hierarchy.
+#![allow(clippy::disallowed_methods)]
+
 use types::{NoClasses, Shape, Type};
 
 use super::RuleLevelHelper;

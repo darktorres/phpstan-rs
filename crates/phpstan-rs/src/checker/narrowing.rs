@@ -486,7 +486,7 @@ impl<'a> Checker<'a> {
                 }
             }
         }
-        record_implied_facts(after, &flag_subjects, &narrowed);
+        record_implied_facts(&self.relation(), after, &flag_subjects, &narrowed);
         let mut implied: Vec<(String, Type)> = Vec::new();
         for (name, after_ty) in after.iter() {
             if subjects.iter().any(|(k, _)| k == name) {
@@ -519,12 +519,13 @@ impl<'a> Checker<'a> {
                 implied.push((name.clone(), after_ty.clone()));
             }
         }
-        record_implied_facts(after, &subjects, &implied);
+        record_implied_facts(&self.relation(), after, &subjects, &implied);
     }
 }
 
 /// Adds `implied` to the facts recorded under each of `subjects`.
 fn record_implied_facts(
+    relation: &types::Relation,
     after: &mut Locals,
     subjects: &[(String, Type)],
     implied: &[(String, Type)],
@@ -540,7 +541,7 @@ fn record_implied_facts(
             .map(|existing| (**existing).clone())
             .unwrap_or_default();
         for (name, ty) in implied {
-            crate::checker::control_flow::add_implied_fact(&mut combined, name, ty);
+            crate::checker::control_flow::add_implied_fact(relation, &mut combined, name, ty);
         }
         after
             .branch_implied_facts_mut()
@@ -1758,7 +1759,7 @@ impl Checker<'_> {
                         .filter(|m| m.count_range() != Some((bl, Some(bl))))
                         .cloned()
                         .collect();
-                    let kept = Type::union_of(kept);
+                    let kept = self.relation().union_of(kept);
                     Some(if bl == 0 {
                         kept.to_non_empty_array()
                     } else {

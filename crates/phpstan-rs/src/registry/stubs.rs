@@ -154,6 +154,8 @@ fn patch_printf_values(stubs: &mut [(Name, FunctionReflection)]) {
 /// comparison callback(s) as the last argument(s) of the variadic
 /// `...$rest`, which phpstorm-stubs types `array` only; `$rest` holds
 /// either. (`functionMap.php` spells out each arity as its own variant.)
+// Declared types are joined while the class hierarchy is being built.
+#[allow(clippy::disallowed_methods)]
 fn patch_array_callback_family(stubs: &mut [(Name, FunctionReflection)]) {
     const FAMILY: &[&str] = &[
         "array_udiff",
@@ -404,6 +406,8 @@ pub fn generated_stubs() -> Vec<(Name, FunctionReflection)> {
 /// member binds from a class string (a literal naming a class included),
 /// and the bare `T` member only from an object, `T` being bound by
 /// `object`.
+// Declared types are joined while the class hierarchy is being built.
+#[allow(clippy::disallowed_methods)]
 fn patch_reflection_class_constructor_template(classes: &mut [(Name, ClassReflection)]) {
     let Some((_, info)) = classes
         .iter_mut()
@@ -586,6 +590,8 @@ fn patch_reflection_method_and_property_templates(classes: &mut [(Name, ClassRef
 /// object}>` (real PHPStan hardcodes this via its own
 /// dynamic-return-type extensions, not from either function's own bare
 /// `array`-returning stub text).
+// Declared types are joined while the class hierarchy is being built.
+#[allow(clippy::disallowed_methods)]
 fn backtrace_frame_list_type() -> Type {
     let frame_shape = Type::array_shape(Shape::from_named(vec![
         ("function".to_string(), Type::string(), false),

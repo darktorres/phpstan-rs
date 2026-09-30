@@ -77,7 +77,7 @@ impl Relation<'_> {
                     if remaining.is_empty() {
                         return;
                     }
-                    let rest = Type::union_of(remaining);
+                    let rest = self.union_of(remaining);
                     for param_member in param_members {
                         self.infer_template_bindings(param_member, &rest, bindings);
                     }

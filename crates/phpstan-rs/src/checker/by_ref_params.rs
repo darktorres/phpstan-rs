@@ -150,7 +150,11 @@ impl<'a> Checker<'a> {
             let Some(snapshots) = self.current_function_by_ref_exit_snapshots.get(&name) else {
                 continue;
             };
-            let Some(actual) = snapshots.iter().cloned().reduce(Type::union) else {
+            let Some(actual) = snapshots
+                .iter()
+                .cloned()
+                .reduce(|a, b| self.relation().union(a, b))
+            else {
                 continue;
             };
             if self.rule_level_accepts(&declared, &actual).yes() {
@@ -188,7 +192,11 @@ impl<'a> Checker<'a> {
             let Some(snapshots) = self.current_function_by_ref_exit_snapshots.get(&name) else {
                 continue;
             };
-            let Some(actual) = snapshots.iter().cloned().reduce(Type::union) else {
+            let Some(actual) = snapshots
+                .iter()
+                .cloned()
+                .reduce(|a, b| self.relation().union(a, b))
+            else {
                 continue;
             };
             if actual.is_mixed() {

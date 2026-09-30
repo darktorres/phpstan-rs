@@ -105,7 +105,7 @@ impl<'a> Checker<'a> {
             // own) throw either's.
             let thrown = call_throw_type(dynamic.as_ref(), sig);
             let joined = match (self.call_throw_types.remove(&span), thrown) {
-                (Some(Some(a)), Some(b)) => Some(Type::union(a, b)),
+                (Some(Some(a)), Some(b)) => Some(self.relation().union(a, b)),
                 (Some(a), b) => a.or(b),
                 (None, b) => b,
             };

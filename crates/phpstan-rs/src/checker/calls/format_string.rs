@@ -488,7 +488,7 @@ impl<'a> Checker<'a> {
         }
         let values_ty = self.infer_expr(&values.value, locals);
         let expected = Type::array(
-            Type::union_of(vec![Type::int(), Type::string()]),
+            self.relation().union_of(vec![Type::int(), Type::string()]),
             format_value_type(),
         );
         if self.rule_level_accepts(&expected, &values_ty).yes() {
@@ -584,7 +584,7 @@ impl<'a> Checker<'a> {
             Accepting::StrictInt => self.accepts(&Type::int(), ty).yes(),
             Accepting::Int if strict => self
                 .accepts(
-                    &Type::union_of(vec![
+                    &self.relation().union_of(vec![
                         Type::int(),
                         Type::intersection_of(vec![
                             Type::string(),
@@ -596,7 +596,7 @@ impl<'a> Checker<'a> {
                 .yes(),
             Accepting::Float if strict => self
                 .accepts(
-                    &Type::union_of(vec![
+                    &self.relation().union_of(vec![
                         Type::float(),
                         Type::int(),
                         Type::intersection_of(vec![
@@ -613,7 +613,7 @@ impl<'a> Checker<'a> {
                 !strict
                     || self
                         .accepts(
-                            &Type::union_of(vec![
+                            &self.relation().union_of(vec![
                                 Type::string(),
                                 Type::object("Stringable".into(), Vec::new()),
                                 Type::float(),
@@ -644,6 +644,8 @@ impl<'a> Checker<'a> {
 
 /// A printf value's `functionMap.php` type, `__stringAndStringable|int|
 /// float|null|bool`.
+// Joins a few known types, far below the union cap.
+#[allow(clippy::disallowed_methods)]
 fn format_value_type() -> Type {
     Type::union_of(vec![
         Type::string(),

@@ -500,7 +500,9 @@ impl<'a> Checker<'a> {
                                 for literal_key in literal_keys_from_type(idx_ty) {
                                     let synthetic_key = format!("{name}[{literal_key}]");
                                     let merged = match locals.get(&synthetic_key) {
-                                        Some(prior) => Type::union(prior.clone(), ty.clone()),
+                                        Some(prior) => {
+                                            self.relation().union(prior.clone(), ty.clone())
+                                        }
                                         None => ty.clone(),
                                     };
                                     locals.insert(synthetic_key, merged);
@@ -760,7 +762,8 @@ impl<'a> Checker<'a> {
             .cloned()
             .collect();
         let string_presence = (!strings.is_empty()).then(|| {
-            Type::union_of(strings)
+            self.relation()
+                .union_of(strings)
                 .string_offset_read(dim, self.negative_string_offsets_count_from_end())
                 .1
         });
@@ -773,7 +776,9 @@ impl<'a> Checker<'a> {
             );
             return true;
         }
-        let array_presence = Type::union_of(arrays)
+        let array_presence = self
+            .relation()
+            .union_of(arrays)
             .array_offset_read(dim)
             .map(|(_, p)| p);
         let presence = match (array_presence, string_presence) {
@@ -913,6 +918,8 @@ pub(crate) fn literal_string_key(e: &Expr) -> Option<String> {
 /// of its offsets: an array is a general array, non-empty after a write;
 /// `null` becomes an array on a write; objects and strings stay what they
 /// are.
+// Joins a few known types, far below the union cap.
+#[allow(clippy::disallowed_methods)]
 fn native_after_offset_change(native: &Type, written: bool) -> Type {
     let general = Type::array(Type::unknown_array_key(), Type::mixed());
     let general = if written {

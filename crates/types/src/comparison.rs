@@ -664,7 +664,7 @@ impl Relation<'_> {
                             .map(|c| self.equal_part(member, c, version))
                             .filter(|t| !t.is_never())
                             .collect();
-                        return (!parts.is_empty()).then(|| Type::union_of(parts));
+                        return (!parts.is_empty()).then(|| self.union_of(parts));
                     }
                     Some(member.clone())
                 } else if verdict.yes() {
@@ -674,7 +674,7 @@ impl Relation<'_> {
                 }
             })
             .collect();
-        Type::union_of(kept)
+        self.union_of(kept)
     }
 
     /// `current` where `current op other` was `holds`: a member for which
@@ -711,7 +711,7 @@ impl Relation<'_> {
                 }
             })
             .collect();
-        Type::union_of(kept)
+        self.union_of(kept)
     }
 
     /// The part of `member` whose values loosely equal the constant `c`.
@@ -729,10 +729,9 @@ impl Relation<'_> {
             Value::Int(Some(n), Some(_)) => self.equal_to_number(member, n as f64, versions),
             Value::Float(Some(f)) => self.equal_to_number(member, f, versions),
             Value::Str(Str::Literal(s)) => match numeric(s, versions.php8) {
-                Some(x) if !versions.php7 || numeric(s, false).is_some() => {
-                    Type::union(self.equal_to_number(member, x, versions), c.clone())
-                        .intersect_with(member, self)
-                }
+                Some(x) if !versions.php7 || numeric(s, false).is_some() => self
+                    .union(self.equal_to_number(member, x, versions), c.clone())
+                    .intersect_with(member, self),
                 _ => {
                     if member.is_string().yes() {
                         c.clone()

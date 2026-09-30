@@ -139,12 +139,12 @@ pub(crate) fn check_too_wide_property_types(
                 .filter_map(|writer| facts.get(writer.as_ref())?.get(p.name.as_ref()))
                 .flatten()
                 .cloned()
-                .reduce(Type::union);
+                .reduce(|a, b| relation.union(a, b));
             let Some(actual) = assigned else {
                 continue;
             };
             let actual = if p.null_default {
-                Type::union(actual, Type::null())
+                relation.union(actual, Type::null())
             } else {
                 actual
             };

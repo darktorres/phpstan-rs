@@ -1,3 +1,6 @@
+// Expected types are built without a class hierarchy.
+#![allow(clippy::disallowed_methods)]
+
 use super::*;
 use crate::checker::doctrine::dql::parse_select_items;
 use crate::checker::doctrine::query_builder::{JoinClause, QueryBuilderChain};

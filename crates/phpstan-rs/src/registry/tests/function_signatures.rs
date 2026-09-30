@@ -1,5 +1,8 @@
 //! Function and method signature resolution, including phpdoc typing and override merging.
 
+// Expected types are built without a class hierarchy.
+#![allow(clippy::disallowed_methods)]
+
 use super::super::*;
 use super::helpers::*;
 

@@ -1302,6 +1302,8 @@ fn visible_class_consts(
 
 /// The union of every constant in `consts` whose name matches `pattern` -
 /// see `resolve_class_const_type`.
+// Declared types are joined while the class hierarchy is being built.
+#[allow(clippy::disallowed_methods)]
 fn matching_class_const_type(consts: &IndexMap<Name, ConstantReflection>, pattern: &str) -> Type {
     let names: Vec<&Name> = consts
         .keys()
@@ -1405,6 +1407,8 @@ fn unresolved_class_const_to_mixed(ty: Type) -> Type {
 /// (`registry/class_info.rs`, built for the enum's real `->value`
 /// property) is already the exact union-of-case-literal-values type real
 /// PHPStan computes independently - reused directly, not recomputed.
+// Declared types are joined while the class hierarchy is being built.
+#[allow(clippy::disallowed_methods)]
 fn resolve_value_of_target(target_fqn: &str, classes: &NameTable<ClassReflection>) -> Type {
     // Any enum's case values, whichever enum it turns out to be.
     if is_enum_interface(target_fqn, classes, 0) {
@@ -1626,7 +1630,7 @@ impl Registry {
         Some(match kept.len() {
             0 => unbound_native.clone(),
             1 => kept.into_iter().next().unwrap(),
-            _ => Type::union_of(kept),
+            _ => self.relation().union_of(kept),
         })
     }
 }

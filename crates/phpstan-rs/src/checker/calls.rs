@@ -211,9 +211,9 @@ impl<'a> Checker<'a> {
                             let pushed_ty = args[1..]
                                 .iter()
                                 .map(|a| self.infer_expr(&a.value, locals))
-                                .reduce(Type::union);
+                                .reduce(|a, b| self.relation().union(a, b));
                             let combined_elem = match pushed_ty {
-                                Some(pushed_ty) => Type::union(elem_ty, pushed_ty),
+                                Some(pushed_ty) => self.relation().union(elem_ty, pushed_ty),
                                 None => elem_ty,
                             };
                             let members = vec![
@@ -263,7 +263,7 @@ impl<'a> Checker<'a> {
                                 args.get(3).map(|a| self.infer_expr(&a.value, locals));
                             let (combined_elem, non_empty) = match &replacement_ty {
                                 Some(r) => (
-                                    Type::union(
+                                    self.relation().union(
                                         elem_ty,
                                         r.array_value_type().unwrap_or(Type::mixed()),
                                     ),

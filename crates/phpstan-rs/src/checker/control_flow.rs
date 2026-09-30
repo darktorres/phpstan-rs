@@ -1,7 +1,7 @@
 use crate::checker::{Checker, Discriminant, Locals};
 use syntax::ast::*;
 use syntax::visit::any_stmt_in_body;
-use types::{self, Type};
+use types::{self, Relation, Type};
 
 mod boolean_conditions;
 mod generators;
@@ -343,9 +343,9 @@ impl<'a> Checker<'a> {
             run_pass(self, &mut body_locals, declared_return, label, pass);
             let break_states = self.loop_break_states.pop().unwrap_or_default();
             let continue_states = self.loop_continue_states.pop().unwrap_or_default();
-            let mut next_entry = merge_scopes(entry, &body_locals);
+            let mut next_entry = merge_scopes(&self.relation(), entry, &body_locals);
             for state in &continue_states {
-                next_entry = merge_scopes(&next_entry, state);
+                next_entry = merge_scopes(&self.relation(), &next_entry, state);
             }
             if pass >= WIDEN_FROM_PASS && next_entry != pass_entry {
                 // Only a growing value widens; one that shrank back inside
@@ -386,7 +386,7 @@ impl<'a> Checker<'a> {
                 // folds `break_states` back in for afterward.
                 let mut exit_locals = body_locals;
                 for state in &continue_states {
-                    exit_locals = merge_scopes(&exit_locals, state);
+                    exit_locals = merge_scopes(&self.relation(), &exit_locals, state);
                 }
                 // A variable only ever assigned inside the loop body but
                 // genuinely tracked before it too (`$x = null; foreach
@@ -437,13 +437,13 @@ impl<'a> Checker<'a> {
                                 if before.is_non_empty_array().yes() {
                                     iterated
                                 } else {
-                                    Type::union(
+                                    self.relation().union(
                                         iterated,
                                         Type::array_shape(types::Shape::sealed(Vec::new())),
                                     )
                                 }
                             }
-                            Some(before) => Type::union(iterated, before.clone()),
+                            Some(before) => self.relation().union(iterated, before.clone()),
                             None => iterated,
                         })
                     });
@@ -479,10 +479,15 @@ impl<'a> Checker<'a> {
 /// Adds the fact that `name` is `ty` to `facts`. Two facts for one
 /// variable under one discriminant come from different paths, so it is
 /// either.
-pub(crate) fn add_implied_fact(facts: &mut Vec<(String, Type)>, name: &str, ty: &Type) {
+pub(crate) fn add_implied_fact(
+    relation: &Relation,
+    facts: &mut Vec<(String, Type)>,
+    name: &str,
+    ty: &Type,
+) {
     match facts.iter_mut().find(|(k, _)| k == name) {
         Some((_, existing)) if existing == ty => {}
-        Some((_, existing)) => *existing = Type::union(existing.clone(), ty.clone()),
+        Some((_, existing)) => *existing = relation.union(existing.clone(), ty.clone()),
         None => facts.push((name.to_string(), ty.clone())),
     }
 }
@@ -491,6 +496,7 @@ pub(crate) fn add_implied_fact(facts: &mut Vec<(String, Type)>, name: &str, ty: 
 /// a fact for is, on the other side, whatever that side holds, since the
 /// discriminant held there too.
 fn merge_implied_facts(
+    relation: &Relation,
     then_facts: &[(String, Type)],
     else_facts: &[(String, Type)],
     then_locals: &Locals,
@@ -500,13 +506,13 @@ fn merge_implied_facts(
     for (name, ty) in then_facts {
         match else_facts.iter().find(|(k, _)| k == name) {
             Some((_, other)) => {
-                add_implied_fact(&mut combined, name, ty);
-                add_implied_fact(&mut combined, name, other);
+                add_implied_fact(relation, &mut combined, name, ty);
+                add_implied_fact(relation, &mut combined, name, other);
             }
             None => {
                 if let Some(other) = else_locals.get(name) {
-                    add_implied_fact(&mut combined, name, ty);
-                    add_implied_fact(&mut combined, name, other);
+                    add_implied_fact(relation, &mut combined, name, ty);
+                    add_implied_fact(relation, &mut combined, name, other);
                 }
             }
         }
@@ -516,8 +522,8 @@ fn merge_implied_facts(
             continue;
         }
         if let Some(other) = then_locals.get(name) {
-            add_implied_fact(&mut combined, name, ty);
-            add_implied_fact(&mut combined, name, other);
+            add_implied_fact(relation, &mut combined, name, ty);
+            add_implied_fact(relation, &mut combined, name, other);
         }
     }
     (!combined.is_empty()).then(|| std::rc::Rc::new(combined))
@@ -527,6 +533,7 @@ fn merge_implied_facts(
 /// kept when the discriminant cannot hold there, and otherwise each widened
 /// by what `other` holds for its variable.
 fn widen_implied_facts(
+    relation: &Relation,
     facts: &std::rc::Rc<Vec<(String, Type)>>,
     key: &Discriminant,
     other: &Locals,
@@ -537,8 +544,8 @@ fn widen_implied_facts(
     let mut widened: Vec<(String, Type)> = Vec::new();
     for (name, ty) in facts.iter() {
         if let Some(other_ty) = other.get(name) {
-            add_implied_fact(&mut widened, name, ty);
-            add_implied_fact(&mut widened, name, other_ty);
+            add_implied_fact(relation, &mut widened, name, ty);
+            add_implied_fact(relation, &mut widened, name, other_ty);
         }
     }
     (!widened.is_empty()).then(|| std::rc::Rc::new(widened))
@@ -566,7 +573,11 @@ fn discriminant_may_hold(locals: &Locals, key: &Discriminant) -> bool {
     }
 }
 
-pub(crate) fn merge_scopes(then_locals: &Locals, else_locals: &Locals) -> Locals {
+pub(crate) fn merge_scopes(
+    relation: &Relation,
+    then_locals: &Locals,
+    else_locals: &Locals,
+) -> Locals {
     let mut merged = then_locals.fresh_scope();
     merged.set_any_variable_may_exist(
         then_locals.any_variable_may_exist() || else_locals.any_variable_may_exist(),
@@ -642,7 +653,10 @@ pub(crate) fn merge_scopes(then_locals: &Locals, else_locals: &Locals) -> Locals
     // A native type survives only when both branches know one.
     for (key, then_native) in then_locals.natives() {
         if let Some(else_native) = else_locals.native(key) {
-            merged.set_native(key, Type::union(then_native.clone(), else_native.clone()));
+            merged.set_native(
+                key,
+                relation.union(then_native.clone(), else_native.clone()),
+            );
         }
     }
     // Same "both branches inherited the identical, unchanged alias"
@@ -697,7 +711,7 @@ pub(crate) fn merge_scopes(then_locals: &Locals, else_locals: &Locals) -> Locals
             Some(then_ty) => {
                 merged
                     .discriminant_array_facts_mut()
-                    .insert(key.clone(), Type::union(then_ty, else_ty.clone()));
+                    .insert(key.clone(), relation.union(then_ty, else_ty.clone()));
             }
             None => {
                 merged
@@ -721,9 +735,9 @@ pub(crate) fn merge_scopes(then_locals: &Locals, else_locals: &Locals) -> Locals
         let combined = match then_locals.branch_implied_facts().get(key) {
             Some(then_facts) if std::rc::Rc::ptr_eq(then_facts, else_facts) => continue,
             Some(then_facts) => {
-                merge_implied_facts(then_facts, else_facts, then_locals, else_locals)
+                merge_implied_facts(relation, then_facts, else_facts, then_locals, else_locals)
             }
-            None => widen_implied_facts(else_facts, key, then_locals),
+            None => widen_implied_facts(relation, else_facts, key, then_locals),
         };
         match combined {
             Some(facts) => merged.branch_implied_facts_mut().insert(key.clone(), facts),
@@ -734,7 +748,7 @@ pub(crate) fn merge_scopes(then_locals: &Locals, else_locals: &Locals) -> Locals
         if else_locals.branch_implied_facts().contains_key(key) {
             continue;
         }
-        match widen_implied_facts(then_facts, key, else_locals) {
+        match widen_implied_facts(relation, then_facts, key, else_locals) {
             Some(facts) => merged.branch_implied_facts_mut().insert(key.clone(), facts),
             None => merged.branch_implied_facts_mut().remove(key),
         };
@@ -754,7 +768,7 @@ pub(crate) fn merge_scopes(then_locals: &Locals, else_locals: &Locals) -> Locals
             let merged_ty = if then_ty == else_ty {
                 then_ty.clone()
             } else {
-                Type::union(then_ty.clone(), else_ty.clone())
+                relation.union(then_ty.clone(), else_ty.clone())
             };
             merged.insert_with_provenance(name.clone(), merged_ty, provenance);
         }

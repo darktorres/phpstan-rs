@@ -97,7 +97,7 @@ impl<'a> Checker<'a> {
             let target = if values.len() == 1 {
                 values.pop().unwrap()
             } else {
-                Type::union_of(values)
+                self.relation().union_of(values)
             };
             return Some((target.clone(), Some(target)));
         }
@@ -132,7 +132,7 @@ impl<'a> Checker<'a> {
         match member_types.len() {
             0 => None,
             1 => member_types.into_iter().next(),
-            _ => Some(Type::union_of(member_types)),
+            _ => Some(self.relation().union_of(member_types)),
         }
     }
 
@@ -478,6 +478,8 @@ impl<'a> Checker<'a> {
 /// only those can be ruled out when the needle is not found, since a
 /// member like `float` (the type of `0.0`) stands for more values than the
 /// one the haystack holds.
+// Joins literals and enum cases, which fold without the class hierarchy.
+#[allow(clippy::disallowed_methods)]
 fn single_values_of(target: &Type) -> Option<Type> {
     let members: Vec<Type> = target
         .union_members()

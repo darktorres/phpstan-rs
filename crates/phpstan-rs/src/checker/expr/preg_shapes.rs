@@ -27,6 +27,8 @@ pub(super) fn preg_leaf_type(offset_capture: bool) -> Type {
 /// refinement (`non-falsy-string`), never a literal union, so this
 /// project's own field-`"0"` handling (plain `leaf.clone()`, unchanged)
 /// already matches that scope without needing this helper at all.
+// Joins a few known types, far below the union cap.
+#[allow(clippy::disallowed_methods)]
 fn group_leaf_type(leaf: &Type, group: &regex_groups::RegexCaptureGroup) -> Type {
     if let Some(values) = &group.literal_values {
         let literal_ty = values
@@ -91,6 +93,8 @@ fn refine_leaf(leaf: &Type, refined: Type) -> Type {
 /// array" to "always present, as `null`". A group that's never optional at all is
 /// unaffected either way, since it can never have a non-participating
 /// slot to turn nullable.
+// Joins a few known types, far below the union cap.
+#[allow(clippy::disallowed_methods)]
 pub(crate) fn preg_match_matches_shape(
     groups: &[regex_groups::RegexCaptureGroup],
     leaf: &Type,
@@ -168,6 +172,8 @@ pub(crate) fn preg_match_matches_shape(
 /// otherwise. `preg_match_all` never calls this - it needs none of this,
 /// since both its own modes already produce a single, unconditional,
 /// always-correct shape for every match count.
+// Joins a few known types, far below the union cap.
+#[allow(clippy::disallowed_methods)]
 pub(super) fn build_matched_shape(
     groups: &[regex_groups::RegexCaptureGroup],
     alternation_branch_counts: &[(u32, usize)],
@@ -338,6 +344,8 @@ pub(super) fn build_matched_shape(
 /// nested inside its array (when combined with `PREG_UNMATCHED_AS_NULL`),
 /// never whether the top-level key itself is present. `sized` is applied
 /// to each group's list, as the match count bounds it.
+// Joins a few known types, far below the union cap.
+#[allow(clippy::disallowed_methods)]
 pub(super) fn preg_match_all_pattern_order_shape(
     groups: &[regex_groups::RegexCaptureGroup],
     leaf: &Type,
@@ -497,6 +505,8 @@ pub(crate) fn preg_call(e: &Expr) -> Option<PregCall<'_>> {
 
 /// The result type of a preg call: `0|1|false` for `preg_match`, the
 /// match count or `false` for `preg_match_all`.
+// Joins a few known types, far below the union cap.
+#[allow(clippy::disallowed_methods)]
 pub(crate) fn preg_result_type(all: bool) -> Type {
     let count = if all {
         Type::int_range(Some(0), None)
@@ -569,7 +579,7 @@ impl crate::checker::Checker<'_> {
             if outcome.may_fail || outcome.count.is_some_and(|(lo, _)| lo <= 0) {
                 parts.push(empty());
             }
-            return Some(Type::union_of(parts));
+            return Some(self.relation().union_of(parts));
         }
         let lists = |count: Option<(i64, Option<i64>)>| {
             let sized = |list: Type| match count {
@@ -600,7 +610,7 @@ impl crate::checker::Checker<'_> {
                 parts.push(empty());
             }
         }
-        Some(Type::union_of(parts))
+        Some(self.relation().union_of(parts))
     }
 }
 

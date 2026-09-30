@@ -200,7 +200,7 @@ impl<'a> Checker<'a> {
                         },
                     })
                     .collect();
-                return Type::union_of(counts);
+                return self.relation().union_of(counts);
             }
             // `random_int`/`rand`/`mt_rand($min, $max)` always produce a
             // value within `[$min, $max]` inclusive; a non-literal,
@@ -233,7 +233,9 @@ impl<'a> Checker<'a> {
                 return match self.infer_expr(&args[0].value, locals).bool_literal_value() {
                     Some(true) => hrtime_number_type(),
                     Some(false) => hrtime_array_shape(),
-                    None => Type::union(hrtime_array_shape(), hrtime_number_type()),
+                    None => self
+                        .relation()
+                        .union(hrtime_array_shape(), hrtime_number_type()),
                 };
             }
             // `array_pop`/`array_shift`'s element-or-null result type is
@@ -307,7 +309,7 @@ impl<'a> Checker<'a> {
                     Type::array(Type::unknown_array_key(), elem),
                     Type::accessory(AccessoryKind::ArrayList),
                 ]);
-                return Type::union(list_ty, Type::bool_literal(false));
+                return self.relation().union(list_ty, Type::bool_literal(false));
             }
             // Mirrors real PHPStan's `FilterFunctionReturnTypeHelper`,
             // scoped to what's statically provable - see
@@ -347,7 +349,7 @@ impl<'a> Checker<'a> {
                     let unioned = if throw_on_failure {
                         element_ty.clone()
                     } else {
-                        Type::union(element_ty.clone(), fallback.clone())
+                        self.relation().union(element_ty.clone(), fallback.clone())
                     };
                     if require_array || force_array {
                         let key_ty = if value_ty.is_array().yes() {
@@ -406,11 +408,11 @@ impl<'a> Checker<'a> {
                     // `False` matches this project's established
                     // convention for this three-way union.
                     let mut result = element_ty;
-                    result = Type::union(result, Type::null());
+                    result = self.relation().union(result, Type::null());
                     if !throw_on_failure {
-                        result = Type::union(result, fallback);
+                        result = self.relation().union(result, fallback);
                     }
-                    return Type::union(result, Type::bool_literal(false));
+                    return self.relation().union(result, Type::bool_literal(false));
                 }
             }
             // Real PHPStan's `MinMaxFunctionReturnTypeExtension`
@@ -429,7 +431,7 @@ impl<'a> Checker<'a> {
                 if !arg_types.iter().any(|t| t.is_array().yes()) {
                     return arg_types
                         .into_iter()
-                        .reduce(Type::union)
+                        .reduce(|a, b| self.relation().union(a, b))
                         .unwrap_or(Type::mixed());
                 }
             }
@@ -440,13 +442,13 @@ impl<'a> Checker<'a> {
             "array_find" if args.len() == 2 => {
                 let input_ty = self.infer_expr(&args[0].value, locals);
                 if let Some(elem_ty) = input_ty.array_value_type() {
-                    return Type::union(elem_ty, Type::null());
+                    return self.relation().union(elem_ty, Type::null());
                 }
             }
             "array_find_key" if args.len() == 2 => {
                 let input_ty = self.infer_expr(&args[0].value, locals);
                 if let Some(key_ty) = input_ty.array_key_type() {
-                    return Type::union(key_ty, Type::null());
+                    return self.relation().union(key_ty, Type::null());
                 }
             }
             // Scoped to the common 2-arg single-array form - the real
@@ -562,7 +564,7 @@ impl<'a> Checker<'a> {
                             .cloned()
                             .collect::<Vec<_>>();
                         let combined = self.combined_arrays(&keys_ty, &values_ty);
-                        return Type::union_of([vec![combined], other].concat());
+                        return self.relation().union_of([vec![combined], other].concat());
                     }
                 }
             }
@@ -682,7 +684,7 @@ impl<'a> Checker<'a> {
             // can't change whether there's at least one element).
             "array_flip" if args.len() == 1 => {
                 let arr_ty = self.infer_expr(&args[0].value, locals);
-                let keyable = Type::union(Type::int(), Type::string());
+                let keyable = self.relation().union(Type::int(), Type::string());
                 // A real array shape gets a precise, field-by-field
                 // flip: a field whose own value is an int/string literal
                 // becomes a real named field in the result (keyed by that
@@ -856,12 +858,14 @@ impl<'a> Checker<'a> {
                 for a in args {
                     let arg_ty = self.infer_expr(&a.value, locals);
                     if let Some(k) = arg_ty.array_key_type() {
-                        key_ty =
-                            Some(key_ty.map_or(k.clone(), |existing| Type::union(existing, k)));
+                        key_ty = Some(
+                            key_ty.map_or(k.clone(), |existing| self.relation().union(existing, k)),
+                        );
                     }
                     if let Some(v) = arg_ty.array_value_type() {
-                        val_ty =
-                            Some(val_ty.map_or(v.clone(), |existing| Type::union(existing, v)));
+                        val_ty = Some(
+                            val_ty.map_or(v.clone(), |existing| self.relation().union(existing, v)),
+                        );
                     }
                 }
                 if let (Some(k), Some(v)) = (key_ty, val_ty) {
@@ -880,7 +884,10 @@ impl<'a> Checker<'a> {
                 let arr_ty = self.infer_expr(&args[0].value, locals);
                 let pad_ty = self.infer_expr(&args[2].value, locals);
                 if let Some(elem_ty) = arr_ty.array_value_type() {
-                    return Type::array(Type::unknown_array_key(), Type::union(elem_ty, pad_ty));
+                    return Type::array(
+                        Type::unknown_array_key(),
+                        self.relation().union(elem_ty, pad_ty),
+                    );
                 }
             }
             // The result's keys are the values of `$array` (only
@@ -893,7 +900,7 @@ impl<'a> Checker<'a> {
                 let arr_ty = self.infer_expr(&args[0].value, locals);
                 if arr_ty.is_array().yes() {
                     // Only int and string values count; others are skipped.
-                    let keyable = Type::union(Type::int(), Type::string());
+                    let keyable = self.relation().union(Type::int(), Type::string());
                     let elem_ty = arr_ty.array_value_type().unwrap_or(Type::mixed());
                     let all_keyable = self.relation().is_super_type_of(&keyable, &elem_ty).yes();
                     let counted = Type::array(
@@ -1103,7 +1110,7 @@ impl<'a> Checker<'a> {
                                 // array_merge never touches).
                                 let elem_ty = arg_ty.array_value_type().unwrap_or(Type::mixed());
                                 for f in merged.fields.iter_mut() {
-                                    f.ty = Type::union(f.ty.clone(), elem_ty.clone());
+                                    f.ty = self.relation().union(f.ty.clone(), elem_ty.clone());
                                 }
                                 // Mark unsealed - the plain array may also
                                 // contribute keys this shape never had, of
@@ -1245,7 +1252,7 @@ impl<'a> Checker<'a> {
                 if all_known_array_like {
                     let elem_ty = elem_types
                         .into_iter()
-                        .reduce(Type::union)
+                        .reduce(|a, b| self.relation().union(a, b))
                         .unwrap_or(Type::mixed());
                     let key_ty = match (key_could_be_int, key_could_be_string) {
                         (true, false) => Type::int(),
@@ -1395,7 +1402,7 @@ impl<'a> Checker<'a> {
                                 match (row_ty.as_array_shape(), literal_shape_key(&index.value)) {
                                     (Some(shape), Some(key)) => match shape.field(&key) {
                                         Some(f) if f.optional => {
-                                            Type::union(f.ty.to_array_key(), Type::int())
+                                            self.relation().union(f.ty.to_array_key(), Type::int())
                                         }
                                         Some(f) => f.ty.to_array_key(),
                                         None if shape.is_sealed() => Type::int(),
@@ -1404,7 +1411,7 @@ impl<'a> Checker<'a> {
                                     (None, _) if row_ty.is_array().yes() => row_ty
                                         .array_value_type()
                                         .map_or_else(Type::unknown_array_key, |v| {
-                                            Type::union(v.to_array_key(), Type::int())
+                                            self.relation().union(v.to_array_key(), Type::int())
                                         }),
                                     _ => Type::unknown_array_key(),
                                 }
@@ -1480,10 +1487,12 @@ impl<'a> Checker<'a> {
                     if !surely_found {
                         keys.push(Type::bool_literal(false));
                     }
-                    return Type::union_of(keys);
+                    return self.relation().union_of(keys);
                 }
                 if haystack_ty.is_list().yes() {
-                    return Type::union(Type::int(), Type::bool_literal(false));
+                    return self
+                        .relation()
+                        .union(Type::int(), Type::bool_literal(false));
                 }
                 // Same idea, one level less precise - a haystack whose
                 // key type is confidently known (not just "definitely a
@@ -1493,7 +1502,7 @@ impl<'a> Checker<'a> {
                 if let Some(key_ty) = haystack_ty.array_key_type()
                     && !key_ty.is_unknown_array_key()
                 {
-                    return Type::union(key_ty, Type::bool_literal(false));
+                    return self.relation().union(key_ty, Type::bool_literal(false));
                 }
             }
             // The real stub declares `version_compare(string, string,
@@ -1597,14 +1606,16 @@ impl<'a> Checker<'a> {
                         .is_super_type_of(&Type::string(), &name_ty)
                         .yes()
                 {
-                    return Type::union_of(vec![Type::string(), Type::bool_literal(false)]);
+                    return self
+                        .relation()
+                        .union_of(vec![Type::string(), Type::bool_literal(false)]);
                 }
             }
             // The native stub declares a plain `string|false`, but a
             // successful call always returns a real non-falsy-string,
             // never `''`/`'0'`.
             "tempnam" if args.len() == 2 => {
-                return Type::union_of(vec![
+                return self.relation().union_of(vec![
                     Type::intersection_of(vec![
                         Type::string(),
                         Type::accessory(AccessoryKind::NonFalsyString),
@@ -1702,7 +1713,7 @@ impl<'a> Checker<'a> {
             // bare `array|false`, but a successful call always returns a
             // real `list<string>`.
             "glob" if matches!(args.len(), 1..=2) => {
-                return Type::union_of(vec![
+                return self.relation().union_of(vec![
                     Type::intersection_of(vec![
                         Type::array(Type::unknown_array_key(), Type::string()),
                         Type::accessory(AccessoryKind::ArrayList),
@@ -1917,7 +1928,9 @@ impl<'a> Checker<'a> {
                         "PATHINFO_DIRNAME" | "PATHINFO_BASENAME" | "PATHINFO_EXTENSION"
                         | "PATHINFO_FILENAME" => Type::string(),
                         "PATHINFO_ALL" => pathinfo_array_shape(&path_ty),
-                        _ => Type::union_of(vec![pathinfo_array_shape(&path_ty), Type::string()]),
+                        _ => self
+                            .relation()
+                            .union_of(vec![pathinfo_array_shape(&path_ty), Type::string()]),
                     };
                 }
             }
@@ -1931,7 +1944,7 @@ impl<'a> Checker<'a> {
             // way PHP's C implementation does isn't worth it for the
             // precision gained here.
             "parse_url" if args.len() == 1 => {
-                return Type::union_of(vec![
+                return self.relation().union_of(vec![
                     parse_url_components_array_shape(),
                     Type::bool_literal(false),
                 ]);
@@ -1961,7 +1974,9 @@ impl<'a> Checker<'a> {
                     .constant_strings_text()[..]
                     && let Some(fields) = sscanf_result_fields(format)
                 {
-                    return Type::union_of(vec![Type::array_shape(fields), Type::null()]);
+                    return self
+                        .relation()
+                        .union_of(vec![Type::array_shape(fields), Type::null()]);
                 }
             }
             // `stat()`/`lstat()`/`fstat()`/`ssh2_sftp_stat()` share one
@@ -1972,10 +1987,14 @@ impl<'a> Checker<'a> {
             // same shape under different key names, nullable rather than
             // `false`-able on failure.
             "stat" | "lstat" | "fstat" | "ssh2_sftp_stat" if args.len() == 1 => {
-                return Type::union_of(vec![stat_array_shape(), Type::bool_literal(false)]);
+                return self
+                    .relation()
+                    .union_of(vec![stat_array_shape(), Type::bool_literal(false)]);
             }
             "dio_stat" if args.len() == 1 => {
-                return Type::union_of(vec![dio_stat_array_shape(), Type::null()]);
+                return self
+                    .relation()
+                    .union_of(vec![dio_stat_array_shape(), Type::null()]);
             }
             // `hash_algos()`/`openssl_get_cipher_methods()`/
             // `mb_list_encodings()`'s stubs are unconditionally a bare
@@ -2030,6 +2049,8 @@ impl<'a> Checker<'a> {
     /// `next`/`prev` alone set it, since moving the pointer can run off
     /// either end regardless of element count; anything else unions the
     /// two.
+    // Joins a few known types, far below the union cap.
+    #[allow(clippy::disallowed_methods)]
     pub(crate) fn array_pointer_result(
         arr_ty: &Type,
         result_ty: Type,
@@ -2129,7 +2150,7 @@ impl<'a> Checker<'a> {
         {
             return folded
                 .into_iter()
-                .reduce(Type::union)
+                .reduce(|a, b| self.relation().union(a, b))
                 .unwrap_or_else(Type::never);
         }
 
@@ -2422,6 +2443,8 @@ fn unseal(shape: &mut Shape) {
 
 /// `shape` unsealed with other entries of `key` and `value` types, joined
 /// with the ones it may already have.
+// Joins a few known types, far below the union cap.
+#[allow(clippy::disallowed_methods)]
 fn unseal_with(shape: &mut Shape, key: &Type, value: &Type) {
     shape.unsealed = Some(Box::new(match shape.unsealed.take() {
         Some(tail) => (
@@ -2751,6 +2774,8 @@ fn contains_json_throw_on_error(e: &Expr) -> bool {
 /// from real PHPStan's `CurlGetinfoFunctionDynamicReturnTypeExtension`
 /// table, including its RTSP/proxy/microsecond/bignum/`_T`-suffixed
 /// variants. `None` falls through to the generic `mixed` behavior.
+// Joins a few known types, far below the union cap.
+#[allow(clippy::disallowed_methods)]
 fn curl_getinfo_component_type(name: &str) -> Option<Type> {
     let string_false = Type::union_of(vec![Type::string(), Type::bool_literal(false)]);
     let int_false = Type::union_of(vec![Type::int(), Type::bool_literal(false)]);
@@ -2848,6 +2873,8 @@ fn curl_getinfo_component_type(name: &str) -> Option<Type> {
 /// `get_debug_type()`'s object case - a free function, not a `Checker`
 /// method, so `Checker::get_debug_type_result`'s union handling can call
 /// it once per member without fighting the borrow checker over `&self`.
+// Joins a few known types, far below the union cap.
+#[allow(clippy::disallowed_methods)]
 fn get_debug_type_for(ty: &Type, registry: &Registry) -> Option<Type> {
     let named = |name: &str| Type::string_literal(name.into());
     let mut result: Option<Type> = None;
@@ -2919,6 +2946,8 @@ fn gettype_string_for(ty: &Type) -> Option<&'static str> {
     }
 }
 
+// Joins a few known types, far below the union cap.
+#[allow(clippy::disallowed_methods)]
 fn gettype_result(ty: &Type) -> Option<Type> {
     ty.union_members()
         .iter()
@@ -3150,6 +3179,8 @@ fn parse_url_components_array_shape() -> Type {
 /// from real PHPStan's `ParseUrlFunctionDynamicReturnTypeExtension`
 /// table, minus its `AccessoryLowercaseStringType` refinement for a
 /// lowercase `$url` (this project has no equivalent accessory kind).
+// Joins a few known types, far below the union cap.
+#[allow(clippy::disallowed_methods)]
 fn parse_url_component_type(name: &str) -> Option<Type> {
     let string_false_null = Type::union_of(vec![
         Type::string(),
@@ -3316,6 +3347,8 @@ fn parse_sscanf_format(format: &str) -> Option<Vec<(Option<u32>, SscanfSpecifier
 /// One `sscanf()` field's type, given its specifier and any explicit
 /// field-width digits - every field is nullable, since a trailing
 /// unmatched specifier leaves that slot `null`.
+// Joins a few known types, far below the union cap.
+#[allow(clippy::disallowed_methods)]
 fn sscanf_field_type(length: Option<u32>, specifier: &SscanfSpecifier) -> Type {
     let base = match specifier {
         SscanfSpecifier::Char('d' | 'o' | 'u' | 'x' | 'i') => Type::int(),
@@ -3373,6 +3406,8 @@ fn hrtime_array_shape() -> Type {
 }
 
 /// `hrtime(true)`'s single-number nanosecond-count form.
+// Joins a few known types, far below the union cap.
+#[allow(clippy::disallowed_methods)]
 fn hrtime_number_type() -> Type {
     Type::union_of(vec![Type::int_range(Some(1), None), Type::float()])
 }
@@ -3437,6 +3472,8 @@ fn list_of_non_empty_strings() -> Type {
 /// The first (`from_start`) or last key of a sealed array shape, or of
 /// each member of a union of them: the keys up to and including the first
 /// one that is surely there, `null` too when none is.
+// Joins a few known types, far below the union cap.
+#[allow(clippy::disallowed_methods)]
 fn shape_end_key(arr_ty: &Type, from_start: bool) -> Option<Type> {
     let mut keys = Vec::new();
     for member in arr_ty.union_members() {
