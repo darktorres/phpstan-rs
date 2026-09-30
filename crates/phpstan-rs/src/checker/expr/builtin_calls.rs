@@ -50,6 +50,57 @@ impl<'a> Checker<'a> {
             // the argument: `strlen()` can never be negative. Real
             // PHPStan additionally refines a literal or known-non-empty-
             // string argument's exact/minimum length; not modeled here.
+            // A hex digest longer than any decimal int: lowercase, never
+            // falsy, a string as an array key. `binary: true` gives raw
+            // bytes instead, which may all be digits.
+            "md5" | "sha1" | "hash" | "hash_hmac" | "spl_object_hash" => {
+                let resolved = resolve_call_args(args, sig.params());
+                let arg = |i: usize| resolved.get(i).copied().flatten();
+                let (algorithm_long, binary) = match name {
+                    "md5" | "sha1" => (true, arg(1)),
+                    "hash" => (arg(0).is_some_and(long_hex_algorithm), arg(2)),
+                    "hash_hmac" => (arg(0).is_some_and(long_hex_algorithm), arg(3)),
+                    _ => (true, None),
+                };
+                let hex = binary.is_none_or(|b| {
+                    matches!(&b.peeled().kind, ExprKind::Literal(Literal::Bool(false)))
+                });
+                if algorithm_long && hex {
+                    return Type::intersection_of(vec![
+                        Type::string(),
+                        Type::accessory(AccessoryKind::NonFalsyString),
+                        Type::accessory(AccessoryKind::LowercaseString),
+                        Type::accessory(AccessoryKind::NonDecimalIntegerString),
+                    ]);
+                }
+            }
+            // Glue with a byte that is neither a digit nor a `-`, joining at
+            // least two pieces, is in the result where no decimal int has it.
+            "implode" | "join" if !args.is_empty() => {
+                let resolved = resolve_call_args(args, sig.params());
+                let (glue, pieces) = match (
+                    resolved.first().copied().flatten(),
+                    resolved.get(1).copied().flatten(),
+                ) {
+                    (Some(pieces), None) => (None, Some(pieces)),
+                    (Some(glue), Some(pieces)) => (Some(glue), Some(pieces)),
+                    _ => (None, None),
+                };
+                if let (Some(glue), Some(pieces)) = (glue, pieces)
+                    && let Some(glue) = literal_string_value(glue)
+                    && glue.bytes().any(|b| !b.is_ascii_digit() && b != b'-')
+                    && self
+                        .infer_expr(pieces, locals)
+                        .count_range()
+                        .is_some_and(|(lo, _)| lo >= 2)
+                {
+                    return Type::intersection_of(vec![
+                        Type::string(),
+                        Type::accessory(AccessoryKind::NonFalsyString),
+                        Type::accessory(AccessoryKind::NonDecimalIntegerString),
+                    ]);
+                }
+            }
             // A match count, or `false` when the call fails.
             "preg_match" | "preg_match_all" => {
                 return crate::checker::preg_result_type(name == "preg_match_all");
@@ -66,17 +117,25 @@ impl<'a> Checker<'a> {
             // regardless of what any specifier expands to.
             // `sprintf_literal_remainder` returns `None` on anything it
             // can't confidently parse, never wrongly claiming non-falsy.
+            // A literal byte that is neither a digit nor a `-` also keeps
+            // the result a string as an array key.
             "sprintf" | "vsprintf" if !args.is_empty() => {
                 if let Some(fmt) = literal_string_value(&args[0].value)
                     && let Some(remainder) = sprintf_literal_remainder(&fmt)
-                    && Type::string_literal(remainder.into())
+                {
+                    let mut members = vec![Type::string()];
+                    if Type::string_literal(remainder.as_str().into())
                         .is_refined_string(AccessoryKind::NonFalsyString)
                         .yes()
-                {
-                    return Type::intersection_of(vec![
-                        Type::string(),
-                        Type::accessory(AccessoryKind::NonFalsyString),
-                    ]);
+                    {
+                        members.push(Type::accessory(AccessoryKind::NonFalsyString));
+                    }
+                    if remainder.bytes().any(|b| !b.is_ascii_digit() && b != b'-') {
+                        members.push(Type::accessory(AccessoryKind::NonDecimalIntegerString));
+                    }
+                    if members.len() > 1 {
+                        return Type::intersection_of(members);
+                    }
                 }
             }
             // Mirrors real PHPStan's own `StrtotimeFunctionReturnTypeExtension`
@@ -1632,10 +1691,39 @@ impl<'a> Checker<'a> {
             // returning false. `contains_json_throw_on_error` walks an
             // arbitrary-depth `|`-chain, not just a bare constant, since
             // the flag is commonly OR'd with others.
-            "json_encode" if args.len() >= 2 && contains_json_throw_on_error(&args[1].value) => {
+            // An array, or an object that can't serialize itself as
+            // something else, encodes to text starting with `[` or `{`.
+            "json_encode" if !args.is_empty() => {
                 let resolved = resolve_call_args(args, sig.params());
-                let generic = self.infer_call_return_type(sig, &resolved, locals);
-                return generic.without(&Type::bool_literal(false));
+                let throws = resolved
+                    .get(1)
+                    .copied()
+                    .flatten()
+                    .is_some_and(contains_json_throw_on_error);
+                let structured = resolved.first().copied().flatten().is_some_and(|value| {
+                    let ty = self.infer_expr(value, locals);
+                    let serializable = Type::object("JsonSerializable".into(), Vec::new());
+                    ty.union_members().iter().all(|m| {
+                        m.is_array().yes()
+                            || (m.is_object().yes()
+                                && self.relation().is_super_type_of(&serializable, m).no())
+                    })
+                });
+                if throws || structured {
+                    let generic = self.infer_call_return_type(sig, &resolved, locals);
+                    let generic = if throws {
+                        generic.without(&Type::bool_literal(false))
+                    } else {
+                        generic
+                    };
+                    return if structured {
+                        generic
+                            .with_string_accessory(AccessoryKind::NonFalsyString)
+                            .with_string_accessory(AccessoryKind::NonDecimalIntegerString)
+                    } else {
+                        generic
+                    };
+                }
             }
             // The real stub declares `curl_getinfo` unconditionally
             // `mixed` - maps a literal `CURLINFO_*` option constant to a
@@ -2028,6 +2116,15 @@ impl<'a> Checker<'a> {
             .yes()
         {
             accessories.push(AccessoryKind::NonEmptyString);
+        }
+        // Digits have no case, so whether the string is a decimal int stays.
+        for kind in [
+            AccessoryKind::DecimalIntegerString,
+            AccessoryKind::NonDecimalIntegerString,
+        ] {
+            if arg_ty.is_refined_string(kind).yes() {
+                accessories.push(kind);
+            }
         }
 
         if accessories.is_empty() {
@@ -3313,4 +3410,59 @@ fn shape_end_key(arr_ty: &Type, from_start: bool) -> Option<Type> {
         }
     }
     Some(Type::union_of(keys))
+}
+
+/// Whether `e` names a hash algorithm whose hex digest is longer than any
+/// decimal int.
+fn long_hex_algorithm(e: &Expr) -> bool {
+    const LONG: [&str; 47] = [
+        "md2",
+        "md4",
+        "md5",
+        "sha1",
+        "sha224",
+        "sha256",
+        "sha384",
+        "sha512/224",
+        "sha512/256",
+        "sha512",
+        "sha3-224",
+        "sha3-256",
+        "sha3-384",
+        "sha3-512",
+        "ripemd128",
+        "ripemd160",
+        "ripemd256",
+        "ripemd320",
+        "whirlpool",
+        "tiger128,3",
+        "tiger160,3",
+        "tiger192,3",
+        "tiger128,4",
+        "tiger160,4",
+        "tiger192,4",
+        "snefru",
+        "snefru256",
+        "gost",
+        "gost-crypto",
+        "murmur3c",
+        "murmur3f",
+        "xxh128",
+        "haval128,3",
+        "haval160,3",
+        "haval192,3",
+        "haval224,3",
+        "haval256,3",
+        "haval128,4",
+        "haval160,4",
+        "haval192,4",
+        "haval224,4",
+        "haval256,4",
+        "haval128,5",
+        "haval160,5",
+        "haval192,5",
+        "haval224,5",
+        "haval256,5",
+    ];
+    literal_string_value(e).is_some_and(|name| LONG.contains(&name.to_ascii_lowercase().as_str()))
 }

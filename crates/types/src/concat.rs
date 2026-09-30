@@ -156,6 +156,32 @@ impl Type {
                 }
             }
 
+            // A byte no decimal-int string has at its position keeps the
+            // result a string when used as an array key.
+            let may_be_empty = |ty: &Type, consts: &[PhpString]| {
+                if consts.is_empty() {
+                    !ty.is_refined_string(AccessoryKind::NonEmptyString).yes()
+                } else {
+                    consts.iter().any(PhpString::is_empty)
+                }
+            };
+            let class_string =
+                |ty: &Type| matches!(ty.repr(), Repr::ClassString(_) | Repr::ClassKindString(_));
+            let (l_consts, r_consts) = (constant_strings(&l_str), constant_strings(&r_str));
+            let (l_empty, r_empty) = (
+                may_be_empty(&l_str, &l_consts),
+                may_be_empty(&r_str, &r_consts),
+            );
+            let l_breaks = class_string(&l_str)
+                || (!l_consts.is_empty()
+                    && l_consts.iter().all(|c| left_breaks(c.as_bytes(), r_empty)));
+            let r_breaks = class_string(&r_str)
+                || (!r_consts.is_empty()
+                    && r_consts.iter().all(|c| right_breaks(c.as_bytes(), l_empty)));
+            if l_breaks || r_breaks {
+                accessories.push(AccessoryKind::NonDecimalIntegerString);
+            }
+
             if accessories.is_empty() {
                 Type::string()
             } else {
@@ -165,6 +191,36 @@ impl Type {
             }
         })
     }
+}
+
+/// The longest decimal-int string, `-9223372036854775808`.
+const MAX_DECIMAL_INT_LEN: usize = 20;
+
+/// Whether `left . r` can't be a decimal-int string for any `r`: `left`
+/// has a non-digit other than a leading `-`, starts with `-0`, or starts
+/// with a `0` something follows (itself, or a right side that can't be
+/// empty), or is too long.
+fn left_breaks(left: &[u8], right_may_be_empty: bool) -> bool {
+    let Some(&first) = left.first() else {
+        return false;
+    };
+    left.len() > MAX_DECIMAL_INT_LEN
+        || left[1..].iter().any(|b| !b.is_ascii_digit())
+        || (!first.is_ascii_digit() && first != b'-')
+        || left.starts_with(b"-0")
+        || (first == b'0' && (left.len() > 1 || !right_may_be_empty))
+}
+
+/// Whether `l . right` can't be a decimal-int string for any `l`: `right`
+/// has a non-digit, other than a `-` that may come first in the result,
+/// or is too long.
+fn right_breaks(right: &[u8], left_may_be_empty: bool) -> bool {
+    let Some(&first) = right.first() else {
+        return false;
+    };
+    right.len() > MAX_DECIMAL_INT_LEN
+        || right[1..].iter().any(|b| !b.is_ascii_digit())
+        || (!first.is_ascii_digit() && (first != b'-' || !left_may_be_empty))
 }
 
 /// Strips a `Repr::StringLiteral("")` member out of a `Union` (a no-op
