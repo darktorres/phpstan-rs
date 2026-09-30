@@ -1240,9 +1240,9 @@ through `check-project`.
     counts too.
 
   The doc's "only ever causes a missed simplification" claim goes.
-  `stmt.rs`'s constant-condition rules, the
-  `while.alwaysTrue`/`do`-`while` exemptions the doc names, call
-  `breaks_out_of` too, so a nested loop's `break` no longer suppresses
+  The constant-condition rules in `stmt/loops.rs` (`while.alwaysTrue`
+  at line 74, and `doWhile.alwaysFalse`/`alwaysTrue` at 293 and 302)
+  call `breaks_out_of` too, so a nested loop's `break` no longer suppresses
   them. Fixtures: both `return.missing` shapes of the finding are clean;
   `while (true) { switch ($x) { case 1: break 2; } }` still falls
   through; a `break` inside a nested `foreach` doesn't suppress
