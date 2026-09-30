@@ -187,3 +187,26 @@ fn a_bool_equals_a_number_by_its_truthiness() {
     assert_eq!(cut(0), Type::bool_literal(false));
     assert_eq!(cut(5), Type::bool_literal(true));
 }
+
+#[test]
+fn excluding_an_int_trims_or_splits_its_range() {
+    assert_eq!(
+        Type::int().without(&Type::int_literal(0)),
+        Type::union(
+            Type::int_range(None, Some(-1)),
+            Type::int_range(Some(1), None)
+        )
+    );
+    assert_eq!(
+        Type::int_range(Some(0), Some(10)).without(&Type::int_literal(0)),
+        Type::int_range(Some(1), Some(10))
+    );
+    assert_eq!(
+        Type::int_range(Some(0), Some(1)).without(&Type::int_literal(1)),
+        Type::int_literal(0)
+    );
+    assert_eq!(
+        Type::int_range(Some(0), Some(10)).without(&Type::int_literal(20)),
+        Type::int_range(Some(0), Some(10))
+    );
+}

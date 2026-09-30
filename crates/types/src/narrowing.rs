@@ -247,6 +247,36 @@ impl Type {
                 // { true => ..., false => ... }` (or a bare `if ($b !== true)`)
                 // never narrows `$b` down to `false` at all, since `Repr::Bool`
                 // isn't itself represented as `Union([True, False])`.
+                // An int literal taken out of a range trims its end or
+                // splits it in two.
+                Repr::Int | Repr::IntRange(..) if let Repr::IntLiteral(n) = excluded.repr() => {
+                    let n = *n;
+                    let (min, max) = self.int_bounds().unwrap_or((None, None));
+                    if min.is_some_and(|m| n < m) || max.is_some_and(|m| n > m) {
+                        return self.clone();
+                    }
+                    let below = n
+                        .checked_sub(1)
+                        .filter(|top| min.is_none_or(|m| m <= *top))
+                        .map(|top| {
+                            if min == Some(top) {
+                                Type::int_literal(top)
+                            } else {
+                                Type::int_range(min, Some(top))
+                            }
+                        });
+                    let above = n
+                        .checked_add(1)
+                        .filter(|bottom| max.is_none_or(|m| m >= *bottom))
+                        .map(|bottom| {
+                            if max == Some(bottom) {
+                                Type::int_literal(bottom)
+                            } else {
+                                Type::int_range(Some(bottom), max)
+                            }
+                        });
+                    Type::union_of(below.into_iter().chain(above).collect())
+                }
                 Repr::Bool if *excluded == Type::bool_literal(true) => Type::bool_literal(false),
                 Repr::Bool if *excluded == Type::bool_literal(false) => Type::bool_literal(true),
                 _ if crate::Relation::structural()
