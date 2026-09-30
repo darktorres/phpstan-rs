@@ -2389,6 +2389,40 @@ through `check-project`.
   Done: the tagged-name set and every name comparison fold case (and
   resolve the function the way `called_function_name` does).
 
+  Design: one name resolver for every narrowing dispatch, and the tagged
+  set folded. PHP resolves an unqualified function call in a namespace
+  to the namespaced function if it exists and to the global one
+  otherwise, and matches both case-insensitively. So `COUNT($x)` in
+  `namespace App;` is the builtin, but not when an `App\count` exists.
+  Today the arms compare the written text:
+  `name.trim_start_matches('\\') == "count"` at `narrowing.rs:30` and
+  `975`, and so on for `in_array` (1057), `array_key_exists` (1077), the
+  `str_*` trio (1122), `is_a` (1160), `preg_match`
+  (`predicates.rs:211`), `assert` (`stmt.rs:1329`) and `extract`
+  (`expr.rs:472`). So a user's `App\count` narrows like the builtin, and
+  `COUNT` narrows nothing.
+
+  - A
+    `Checker::builtin_called(name: &QualifiedName) -> Option<&'static str>`
+    resolves through `registry.called_function_name`. It returns the
+    lowercase builtin name only when the function reached is the stub
+    (`is_stub()`), so a polyfill or namespaced override doesn't narrow as
+    the builtin. Every arm above matches on its result. `extract`'s two
+    branches, `name == "extract"` and the folded one, collapse into it.
+  - `names_with_assert_tags` (built in `registry/index.rs`) stores
+    lowercased resolved names, and `apply_bare_statement_assert_narrowing`
+    looks up the lowercased resolved call, for functions and for
+    `Class::method` keys alike (methods fold, F35).
+  - `narrow_enum_from_call` (`expr/array_ops.rs`) compares `from` and
+    `tryFrom` with `eq_ignore_ascii_case`. `or_chain_narrowing_target` looks
+    predicates up through `builtin_called`. The PHPUnit assertion table
+    (`c58bba2a`'s `assertIsX` family) matches method names folded.
+
+  Fixtures: `COUNT($a) > 0`, `IN_ARRAY($x, ['a'], true)`,
+  `Suit::FROM(1)`, `IS_INT($x) || is_string($x)`, `A::ISSTR($a)` with a
+  tag, and `$this->ASSERTISINT($x)` all narrow; a
+  `namespace App; function count(...)` does not narrow like the builtin.
+
 - [ ] **F54. Two expressions that are always `mixed`** (`checker/expr.rs`;
   also before the window):
   - The short ternary: `$s ?: 'd'` with `?string $s` is `mixed` in both
