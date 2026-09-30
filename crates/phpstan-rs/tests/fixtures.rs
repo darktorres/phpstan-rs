@@ -7,7 +7,9 @@
 //! `phpstan-rs.toml` (paths in it are relative to the subject's
 //! directory). Without `paths`, the subject itself is analysed; without
 //! `no_composer`, composer discovery is off. Its `requires_feature`, a
-//! list of cargo features, skips the fixture in a build without one.
+//! list of cargo features, skips the fixture in a build without one; its
+//! `runtime_warnings` and `runtime_packages` are the runtime oracle's
+//! (`tests/runtime_oracle.rs`).
 //!
 //! An expectation lists one diagnostic per entry, or is the single line
 //! `no diagnostics`; an empty file is not an expectation.
@@ -21,11 +23,9 @@ use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use config::ConfigFile;
 use diagnostics::Diagnostic;
 use libtest_mimic::{Arguments, Failed, Trial};
-use phpstan_rs::app::config_schema;
-use phpstan_rs::project::session::Session;
+use phpstan_rs::gate::{self, FixtureConfig};
 use phpstan_rs::project::worker_pool;
 
 fn main() {
@@ -59,8 +59,11 @@ fn collect(root: &Path, dir: &Path, pool: &Arc<rayon::ThreadPool>, trials: &mut 
                 .display()
                 .to_string();
             let pool = Arc::clone(pool);
-            let missing = match required_features(&path.with_extension("toml")) {
-                Ok(features) => features.iter().any(|f| !enabled(f).unwrap_or(true)),
+            let missing = match gate::fixture_config(&path.with_extension("toml")) {
+                Ok(config) => config
+                    .requires_feature
+                    .iter()
+                    .any(|f| !enabled(f).unwrap_or(true)),
                 Err(_) => false,
             };
             trials.push(
@@ -74,7 +77,7 @@ fn collect(root: &Path, dir: &Path, pool: &Arc<rayon::ThreadPool>, trials: &mut 
 fn run_fixture(name: &str, expect_file: &Path, pool: Arc<rayon::ThreadPool>) -> Result<(), Failed> {
     let stem = expect_file.with_extension("");
     let config = fixture_config(&stem.with_extension("toml"))?;
-    let (session, base) = Session::for_fixture(&stem, &config, pool)?;
+    let (session, base) = gate::load_fixture(&stem, &config, pool)?;
     let single_file = stem.with_extension("php").is_file();
     let dump = std::env::var_os("PHPSTAN_RS_DUMP_TYPES")
         .map(|dir| PathBuf::from(dir).join(name.replace('/', "__")));
@@ -129,46 +132,11 @@ fn enabled(name: &str) -> Result<bool, String> {
         .ok_or_else(|| format!("requires_feature: unknown feature `{name}`"))
 }
 
-/// The config's `requires_feature` list, empty without a config.
-fn required_features(path: &Path) -> Result<Vec<String>, String> {
-    let Ok(text) = std::fs::read_to_string(path) else {
-        return Ok(Vec::new());
-    };
-    let table: toml::Table =
-        toml::from_str(&text).map_err(|e| format!("{}: {e}", path.display()))?;
-    feature_list(table.get("requires_feature"))
-}
-
-fn feature_list(value: Option<&toml::Value>) -> Result<Vec<String>, String> {
-    let Some(value) = value else {
-        return Ok(Vec::new());
-    };
-    value
-        .as_array()
-        .and_then(|list| {
-            list.iter()
-                .map(|f| f.as_str().map(str::to_string))
-                .collect::<Option<Vec<_>>>()
-        })
-        .ok_or_else(|| "requires_feature: expected a list of feature names".to_string())
-}
-
-/// The fixture's config, `path` when it exists, checked against the
-/// application's schema. An old key a schema moves is an error here: a
-/// fixture is written in the current layout. `requires_feature` is the
-/// harness's own key, each feature a known one.
-fn fixture_config(path: &Path) -> Result<ConfigFile, Failed> {
-    if !path.is_file() {
-        return Ok(ConfigFile::empty());
-    }
-    let schema = config_schema();
-    let mut config = ConfigFile::load(path, &schema)?;
-    for feature in feature_list(config.remove("requires_feature").as_ref())? {
-        enabled(&feature)?;
-    }
-    config.validate(&schema)?;
-    if let Some(warning) = config.warnings().first() {
-        return Err(format!("{}: {warning}", path.display()).into());
+/// The fixture's config, each feature it requires a known one.
+fn fixture_config(path: &Path) -> Result<FixtureConfig, Failed> {
+    let config = gate::fixture_config(path)?;
+    for feature in &config.requires_feature {
+        enabled(feature)?;
     }
     Ok(config)
 }

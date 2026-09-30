@@ -12,6 +12,7 @@ use syntax::visit::{self, Visitor};
 use types::Type;
 
 use crate::Registry;
+use crate::project::session::Session;
 
 /// The templates in scope at a point, by name, as the checker binds them:
 /// the enclosing class's, then the enclosing function's or method's own,
@@ -103,6 +104,90 @@ impl<'ast> Visitor<'ast> for Enclosing<'ast> {
             visit::walk_function_decl(self, function);
         }
     }
+}
+
+/// A fixture's `X.toml`: the analysis config, and the harness's own keys,
+/// which are removed before the config is checked against the schema.
+pub struct FixtureConfig {
+    pub config: config::ConfigFile,
+    /// Cargo features the fixture needs (`requires_feature`).
+    pub requires_feature: Vec<String>,
+    /// Whether every runtime warning must line up with an expected
+    /// diagnostic (`runtime_warnings = "exact"`).
+    pub runtime_warnings_exact: bool,
+    /// Libraries the fixture needs at runtime (`runtime_packages`).
+    pub runtime_packages: Vec<String>,
+}
+
+impl FixtureConfig {
+    /// The PHP version the fixture is analysed for, as written
+    /// (`php_version = "8.0"`).
+    pub fn php_version(&self) -> Option<String> {
+        self.config
+            .section::<crate::registry::settings::ReflectionSettings>()
+            .ok()
+            .and_then(|settings| settings.php_version)
+    }
+}
+
+/// The fixture config at `path`, empty when there's none. An old key a
+/// schema moves is an error: a fixture is written in the current layout.
+pub fn fixture_config(path: &Path) -> Result<FixtureConfig, String> {
+    if !path.is_file() {
+        return Ok(FixtureConfig {
+            config: config::ConfigFile::empty(),
+            requires_feature: Vec::new(),
+            runtime_warnings_exact: false,
+            runtime_packages: Vec::new(),
+        });
+    }
+    let schema = crate::app::config_schema();
+    let mut config = config::ConfigFile::load(path, &schema)?;
+    let strings = |value: Option<toml::Value>, key: &str| -> Result<Vec<String>, String> {
+        let Some(value) = value else {
+            return Ok(Vec::new());
+        };
+        value
+            .as_array()
+            .and_then(|list| {
+                list.iter()
+                    .map(|v| v.as_str().map(str::to_string))
+                    .collect::<Option<Vec<_>>>()
+            })
+            .ok_or_else(|| format!("{}: {key}: expected a list of strings", path.display()))
+    };
+    let requires_feature = strings(config.remove("requires_feature"), "requires_feature")?;
+    let runtime_packages = strings(config.remove("runtime_packages"), "runtime_packages")?;
+    let runtime_warnings_exact = match config.remove("runtime_warnings") {
+        None => false,
+        Some(toml::Value::String(mode)) if mode == "exact" => true,
+        Some(other) => {
+            return Err(format!(
+                "{}: runtime_warnings: expected \"exact\", got {other}",
+                path.display()
+            ));
+        }
+    };
+    config.validate(&schema)?;
+    if let Some(warning) = config.warnings().first() {
+        return Err(format!("{}: {warning}", path.display()));
+    }
+    Ok(FixtureConfig {
+        config,
+        requires_feature,
+        runtime_warnings_exact,
+        runtime_packages,
+    })
+}
+
+/// A fixture's session and the directory its paths are relative to:
+/// `stem.php`, or the directory `stem/`, analysed under its config.
+pub fn load_fixture(
+    stem: &Path,
+    config: &FixtureConfig,
+    pool: Arc<rayon::ThreadPool>,
+) -> Result<(Session, PathBuf), String> {
+    Session::for_fixture(stem, &config.config, pool)
 }
 
 /// `template_scope_at` over files read and parsed once each.
