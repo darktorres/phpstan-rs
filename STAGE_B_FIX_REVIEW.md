@@ -1877,10 +1877,16 @@ through `check-project`.
   reach an arm that reads position 1 as the second parameter. The fix is
   one normalization step ahead of all of them:
 
-  - `positional_args(args, sig) -> Option<Cow<[Arg]>>` returns the list in
-    parameter order. A named argument moves to its parameter's position. A
-    gap, an omitted optional parameter before a later named one, gives
-    `None`, since the arms assume a dense prefix. A spread whose value is
+  - `positional_args(args, sig) -> Option<Vec<ArgSlot>>` returns one slot
+    per parameter in parameter order, where `ArgSlot` holds the argument's
+    type and, when there is one, its expression. A named argument moves to
+    its parameter's position. A gap, an omitted optional parameter before a
+    later named one, is filled with the parameter's default: its
+    `default_ty`, with no expression. The arms read types (a literal type
+    carries the value they need) and use an expression only where one is
+    needed, a closure or a format string, which a default slot doesn't
+    need. So a gap resolves instead of bailing, and `None` is left for the
+    spreads below. A spread whose value is
     a sealed list shape (`...[1, 2]`, or a variable typed
     `array{int, string}`) is expanded into one argument per element, a
     string-keyed sealed shape into named arguments, as PHP 8.1 unpacks
