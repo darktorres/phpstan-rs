@@ -2665,8 +2665,8 @@ through `check-project`.
 
   Fixtures: `/(a)?b/` gives `$m[1]` `list<''|'a'>`; `/(\d+)?b/` gives
   `list<''|numeric-string>`; the offset-capture and unmatched-as-null
-  variants; the set-order result is a `list`, and `$m[0][1]` on it is
-  "might not exist", not typed as present.
+  variants; the set-order result is a `list` whose elements have group 1
+  optional.
 - [ ] **F72. Narrowing that picks the wrong argument or value** (also
   before the window):
   - `assert_target_key_and_current` (`checker/narrowing/assertions.rs`)
