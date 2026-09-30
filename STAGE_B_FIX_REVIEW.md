@@ -2001,9 +2001,8 @@ through `check-project`.
   - Reading through it unfolds it: `$a['y']` on `μA. array{x: int, y?: A}`
     is `A` itself, the same recursive type, so `$a['y']['y']['y']['x']` is
     `int` at any depth, and `?? 1` has no constant verdict.
-  - Display prints the binder once, as PHPStan does for its recursive type
-    aliases: `array{x: int, y?: array{x: int, y?: …}}`, one level shown and
-    the recursion as `…`, so a message stays finite.
+  - Display unfolds one level and marks the recursion:
+    `array{x: int, y?: array{x: int, y?: …}}`, so a message stays finite.
   - Every traversal (`for_each_child`, `map_children`, substitution,
     `replace_templates`, interning, hashing) stops at a `RecRef`, which has
     no children, so they terminate. F20's depth test covers a recursive
