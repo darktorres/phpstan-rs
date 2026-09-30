@@ -78,7 +78,7 @@ machinery that its fixes depend on.
   resolve template names; a round-trip test with one string per Display
   arm.
 
-- [ ] **O1. Fixtures aren't checked against PHP.** Every `assertType` is
+- [x] **O1. Fixtures aren't checked against PHP.** (`8044b0cf`, `8c35edb6`) Every `assertType` is
   the analyzer's own claim; nothing runs the fixture. Done: a
   `runtime_oracle` test target runs each fixture under `php` with a shim
   `assertType` that records the value, and fails when the expected type
@@ -87,6 +87,13 @@ machinery that its fixes depend on.
   pinned to another `php_version` run in Docker; one
   `gate::load_fixture` shared by `fixtures.rs`, the oracle and T1. Every
   failure on the existing 3,768 fixtures is fixed or recorded.
+
+  Over the 3,775 fixtures: 31 executed, 3,744 not executed (they declare
+  functions without calling them), none skipped. Its first run found an
+  overflowing binary literal rounded unlike PHP (`214ceffb`), the
+  negative-key append rule keyed to PHP 8.3 instead of 8.0 (`4123ccfc`),
+  and five conditional-return fixtures whose functions didn't return
+  what their PHPDoc said (`7795bd2d`).
 
 - [ ] **FIX-1. Offset reads and writes aren't modeled as PHP performs
   them.**
