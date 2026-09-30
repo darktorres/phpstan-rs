@@ -95,9 +95,9 @@ impl<'a> Checker<'a> {
         // bind any assignment side effect into `locals`) and discarding
         // whatever it reported, since the real diagnostics come from the
         // convergence-aware walk below.
-        let diagnostics_before = self.diagnostics.len();
+        let mark = self.pass_mark();
         self.check_expr(cond, locals, label);
-        self.diagnostics.truncate(diagnostics_before);
+        self.rewind_to(mark);
         let entry = locals.clone();
         self.loop_depth += 1;
         let (body_locals, break_states) = self.converge_loop_body(
@@ -359,11 +359,11 @@ impl<'a> Checker<'a> {
                 // the last one's) before the convergence-aware,
                 // diagnostic-bearing walk runs against per-pass
                 // copies.
-                let diagnostics_before = self.diagnostics.len();
+                let mark = self.pass_mark();
                 for e in cond.iter() {
                     self.check_expr(e, locals, label);
                 }
-                self.diagnostics.truncate(diagnostics_before);
+                self.rewind_to(mark);
                 let entry = locals.clone();
                 self.loop_depth += 1;
                 let in_range_pair = in_range_index_write_loop_vars(c);

@@ -234,6 +234,21 @@ pub(crate) type TemplateBindings = rustc_hash::FxHashMap<String, Type>;
 /// `&str` lookup/`.get()` call site unchanged.
 pub(crate) type PropertyAssignFacts = FxHashMap<Name, FxHashMap<Name, Vec<Type>>>;
 
+/// How long each record a checking pass appends to was when the pass
+/// began (`Checker::pass_mark`), so a pass whose results are discarded -
+/// a loop pass before its fixed point, a condition's quiet evaluation -
+/// leaves none of them behind (`Checker::rewind_to`).
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct PassMark {
+    diagnostics: usize,
+    semantic_tokens: usize,
+    throw_points: usize,
+    explicit_throw_points: usize,
+    return_points: usize,
+    inlay_param_name_hints: usize,
+    inlay_local_type_hints: usize,
+}
+
 /// Walks function/method bodies, inferring a best-effort type for each
 /// expression and flagging argument/return type mismatches against the
 /// registry. Deliberately conservative: `mixed` is overloaded here to
@@ -1120,6 +1135,35 @@ impl<'a> Checker<'a> {
     /// This run's `property_assign_facts`.
     pub fn take_property_assign_facts(&mut self) -> PropertyAssignFacts {
         std::mem::take(&mut self.property_assign_facts)
+    }
+
+    /// Where every record a checking pass appends to stands now.
+    pub(crate) fn pass_mark(&self) -> PassMark {
+        PassMark {
+            diagnostics: self.diagnostics.len(),
+            semantic_tokens: self.semantic_tokens.len(),
+            throw_points: self.current_function_throw_points.len(),
+            explicit_throw_points: self.current_function_explicit_throw_points.len(),
+            return_points: self.current_function_return_points.len(),
+            inlay_param_name_hints: self.inlay_param_name_hints.len(),
+            inlay_local_type_hints: self.inlay_local_type_hints.len(),
+        }
+    }
+
+    /// Drops what every record gained since `mark`.
+    pub(crate) fn rewind_to(&mut self, mark: PassMark) {
+        self.diagnostics.truncate(mark.diagnostics);
+        self.semantic_tokens.truncate(mark.semantic_tokens);
+        self.current_function_throw_points
+            .truncate(mark.throw_points);
+        self.current_function_explicit_throw_points
+            .truncate(mark.explicit_throw_points);
+        self.current_function_return_points
+            .truncate(mark.return_points);
+        self.inlay_param_name_hints
+            .truncate(mark.inlay_param_name_hints);
+        self.inlay_local_type_hints
+            .truncate(mark.inlay_local_type_hints);
     }
 
     /// `textDocument/semanticTokens/full`'s own collection - see

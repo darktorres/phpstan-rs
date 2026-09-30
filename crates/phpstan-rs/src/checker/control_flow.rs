@@ -333,7 +333,7 @@ impl<'a> Checker<'a> {
             let mut body_locals = pass_entry.clone();
             self.loop_break_states.push(Vec::new());
             self.loop_continue_states.push(Vec::new());
-            let diagnostics_before = self.diagnostics.len();
+            let mark = self.pass_mark();
             run_pass(self, &mut body_locals, declared_return, label, pass);
             let break_states = self.loop_break_states.pop().unwrap_or_default();
             let continue_states = self.loop_continue_states.pop().unwrap_or_default();
@@ -448,7 +448,7 @@ impl<'a> Checker<'a> {
                 }
                 return (exit_locals, break_states);
             }
-            self.diagnostics.truncate(diagnostics_before);
+            self.rewind_to(mark);
             pass_entry = next_entry;
         }
         unreachable!("the loop above always returns by its last iteration")

@@ -71,10 +71,14 @@ impl<'a> Checker<'a> {
         for arg in args {
             let Some(name) = &arg.name else { continue };
             let name: Name = name.name.clone();
-            self.named_argument_call_facts
+            // A call a loop's passes check again is still one call.
+            let sites = self
+                .named_argument_call_facts
                 .entry((owner.clone(), method.clone(), name))
-                .or_default()
-                .push(span);
+                .or_default();
+            if !sites.contains(&span) {
+                sites.push(span);
+            }
         }
     }
 }
