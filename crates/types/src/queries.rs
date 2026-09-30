@@ -326,7 +326,8 @@ impl Type {
     /// its siblings their types; anything else, an array gaining int keys
     /// by appends among it, is `next` generalized.
     pub fn widen_towards(&self, next: &Type) -> Type {
-        if let (Some(before), Some(after)) = (self.combined_shape(), next.combined_shape())
+        if let (Some((before, before_non_empty)), Some((after, after_non_empty))) =
+            (self.combined_shape(), next.combined_shape())
             && before.fields.iter().all(|f| after.field(&f.key).is_some())
             && after
                 .fields
@@ -357,11 +358,14 @@ impl Type {
                 (None, Some(tail)) | (Some(tail), None) => Some(tail.clone()),
                 (None, None) => None,
             };
-            return Type::array_shape(Shape {
-                fields,
-                unsealed,
-                next_index: after.next_index,
-            });
+            return crate::union::shape_type(
+                Shape {
+                    fields,
+                    unsealed,
+                    next_index: after.next_index,
+                },
+                before_non_empty && after_non_empty,
+            );
         }
         /// The smallest range holding every member, when all are ints.
         fn hull(ty: &Type) -> Option<(Option<i64>, Option<i64>)> {
@@ -407,18 +411,17 @@ impl Type {
     /// This array shape, or a union of array shapes as one shape: a key
     /// every member has, and none has optional, is required, any other is
     /// optional; a key's value joins the members', and other keys any
-    /// unsealed member allows join into the tail.
-    fn combined_shape(&self) -> Option<Shape> {
+    /// unsealed member allows join into the tail. With whether every
+    /// member is known non-empty.
+    fn combined_shape(&self) -> Option<(Shape, bool)> {
         match self.repr() {
-            Repr::ArrayShape(shape) => Some((**shape).clone()),
             Repr::Union(members) => {
-                let shapes: Vec<&Shape> = members
+                let parts: Vec<(&Shape, bool)> = members
                     .iter()
-                    .map(|m| match m.repr() {
-                        Repr::ArrayShape(shape) => Some(&**shape),
-                        _ => None,
-                    })
+                    .map(crate::union::shape_parts)
                     .collect::<Option<_>>()?;
+                let non_empty = parts.iter().all(|(_, non_empty)| *non_empty);
+                let shapes: Vec<&Shape> = parts.into_iter().map(|(shape, _)| shape).collect();
                 let mut fields: Vec<ShapeField> = Vec::new();
                 for shape in &shapes {
                     for f in &shape.fields {
@@ -439,13 +442,18 @@ impl Type {
                     .filter_map(|s| s.unsealed.as_deref().cloned())
                     .reduce(|(k1, v1), (k2, v2)| (Type::union(k1, k2), Type::union(v1, v2)))
                     .map(Box::new);
-                Some(Shape {
-                    fields,
-                    unsealed,
-                    next_index: None,
-                })
+                Some((
+                    Shape {
+                        fields,
+                        unsealed,
+                        next_index: None,
+                    },
+                    non_empty,
+                ))
             }
-            _ => None,
+            _ => {
+                crate::union::shape_parts(self).map(|(shape, non_empty)| (shape.clone(), non_empty))
+            }
         }
     }
 

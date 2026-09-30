@@ -581,35 +581,28 @@ fn reduce_array_members(members: &mut Vec<Type>) {
         merge_general_arrays(members);
         return;
     }
-    let shape_count = members
-        .iter()
-        .filter(|m| matches!(m.repr(), Repr::ArrayShape(_)))
-        .count();
-    if shape_count == 0 {
+    let shape_count = members.iter().filter(|m| shape_parts(m).is_some()).count();
+    if shape_count <= 1 {
         return;
     }
-    if shape_count == 1 {
-        return;
-    }
-    let mut shapes: Vec<Option<Shape>> = Vec::new();
-    members.retain(|m| match m.repr() {
-        Repr::ArrayShape(shape) => {
-            shapes.push(Some(Shape::clone(shape)));
+    // Each shape with whether it's known non-empty; a merge is non-empty
+    // when both sides are.
+    let mut shapes: Vec<Option<(Shape, bool)>> = Vec::new();
+    members.retain(|m| match shape_parts(m) {
+        Some((shape, non_empty)) => {
+            shapes.push(Some((Shape::clone(shape), non_empty)));
             false
         }
-        _ => true,
+        None => true,
     });
     let relation = crate::Relation::structural();
-    // Merging may not cost the union its non-emptiness, which it has only
-    // while every shape is non-empty.
-    let all_non_empty = shapes.iter().flatten().all(is_non_empty_shape);
-    let keeps_non_empty = |merged: &Shape| !all_non_empty || is_non_empty_shape(merged);
     // Pairs sharing a key, as `reduceArrays`' first pass takes them.
     for i in 0..shapes.len() {
         for j in (i + 1)..shapes.len() {
-            let (Some(a), Some(b)) = (&shapes[i], &shapes[j]) else {
+            let (Some((a, a_non_empty)), Some((b, b_non_empty))) = (&shapes[i], &shapes[j]) else {
                 continue;
             };
+            let non_empty = *a_non_empty && *b_non_empty;
             let overlapping = a
                 .fields
                 .iter()
@@ -628,19 +621,13 @@ fn reduce_array_members(members: &mut Vec<Type>) {
             if single_key_same_type
                 || (overlapping == a.fields.len() && is_keys_superset(&relation, b, a))
             {
-                let merged = merge_shapes(b, a, true);
-                if keeps_non_empty(&merged) {
-                    shapes[j] = Some(merged);
-                    shapes[i] = None;
-                    break;
-                }
+                shapes[j] = Some((merge_shapes(b, a, true), non_empty));
+                shapes[i] = None;
+                break;
             }
             if overlapping == b.fields.len() && is_keys_superset(&relation, a, b) {
-                let merged = merge_shapes(a, b, false);
-                if keeps_non_empty(&merged) {
-                    shapes[i] = Some(merged);
-                    shapes[j] = None;
-                }
+                shapes[i] = Some((merge_shapes(a, b, false), non_empty));
+                shapes[j] = None;
             }
         }
     }
@@ -650,37 +637,61 @@ fn reduce_array_members(members: &mut Vec<Type>) {
         |s: &Shape| !s.is_sealed() || s.fields.is_empty() || s.fields.iter().any(|f| f.optional);
     for i in 0..shapes.len() {
         for j in (i + 1)..shapes.len() {
-            let (Some(a), Some(b)) = (&shapes[i], &shapes[j]) else {
+            let (Some((a, a_non_empty)), Some((b, b_non_empty))) = (&shapes[i], &shapes[j]) else {
                 continue;
             };
             if !candidate(a) && !candidate(b) {
                 continue;
             }
+            let non_empty = *a_non_empty && *b_non_empty;
             if is_keys_superset(&relation, b, a) {
-                let merged = merge_shapes(b, a, true);
-                if keeps_non_empty(&merged) {
-                    shapes[j] = Some(merged);
-                    shapes[i] = None;
-                    break;
-                }
+                shapes[j] = Some((merge_shapes(b, a, true), non_empty));
+                shapes[i] = None;
+                break;
             }
             if is_keys_superset(&relation, a, b) {
-                let merged = merge_shapes(a, b, false);
-                if keeps_non_empty(&merged) {
-                    shapes[i] = Some(merged);
-                    shapes[j] = None;
-                }
+                shapes[i] = Some((merge_shapes(a, b, false), non_empty));
+                shapes[j] = None;
             }
         }
     }
-    members.extend(shapes.into_iter().flatten().map(Type::array_shape));
+    members.extend(
+        shapes
+            .into_iter()
+            .flatten()
+            .map(|(shape, non_empty)| shape_type(shape, non_empty)),
+    );
 }
 
-/// A shape holding a required key. Shapes that each hold one
-/// (`array{a: 1, b?: 1}|array{a?: 1, b: 1}`) stay apart rather than merge
-/// into one that may be empty.
-fn is_non_empty_shape(shape: &Shape) -> bool {
-    shape.fields.iter().any(|f| !f.optional)
+/// An array shape, or one refined non-empty (`non-empty-array{a?: int}`),
+/// with whether it's known non-empty: refined so, or holding a required
+/// key.
+pub(crate) fn shape_parts(ty: &Type) -> Option<(&Shape, bool)> {
+    match ty.repr() {
+        Repr::ArrayShape(shape) => Some((&**shape, shape.fields.iter().any(|f| !f.optional))),
+        Repr::Intersection(members) if members.len() == 2 => {
+            let shape = members.iter().find_map(|m| match m.repr() {
+                Repr::ArrayShape(shape) => Some(&**shape),
+                _ => None,
+            })?;
+            members
+                .contains(&Type::accessory(AccessoryKind::NonEmptyArray))
+                .then_some((shape, true))
+        }
+        _ => None,
+    }
+}
+
+/// `shape` as a type, refined non-empty when it's known to be and no
+/// required key already says so.
+pub(crate) fn shape_type(shape: Shape, non_empty: bool) -> Type {
+    let says_non_empty = shape.fields.iter().any(|f| !f.optional);
+    let ty = Type::array_shape(shape);
+    if non_empty && !says_non_empty {
+        crate::intersect_types(vec![ty, Type::accessory(AccessoryKind::NonEmptyArray)])
+    } else {
+        ty
+    }
 }
 
 /// A shape as the general array it is: its keys' literal types and its
@@ -723,16 +734,15 @@ fn merge_general_arrays(members: &mut Vec<Type>) {
     let mut first = None;
     let mut index = 0;
     members.retain(|m| {
-        let parts = match m.repr() {
-            Repr::ArrayShape(shape) => {
+        let parts = match shape_parts(m) {
+            Some((shape, shape_non_empty)) => {
                 let (key, value) = match shape_as_general_array(shape).repr() {
                     Repr::Array(key, value) => (Some((*key).clone()), Some((*value).clone())),
                     _ => (None, None),
                 };
-                let shape_non_empty = shape.fields.iter().any(|f| !f.optional);
                 Some((key, value, shape.is_list(), shape_non_empty))
             }
-            _ => general_array_parts(m).map(|(key, value, l, n)| (Some(key), Some(value), l, n)),
+            None => general_array_parts(m).map(|(key, value, l, n)| (Some(key), Some(value), l, n)),
         };
         index += 1;
         let Some((key, value, l, n)) = parts else {

@@ -165,8 +165,9 @@ impl Type {
                         Some(Type::array_shape(shape))
                     }
                     // A key that is one of several literal keys writes one
-                    // of them: the array is the shape with that key written,
-                    // for each key it may be.
+                    // of them: each keeps its value or takes the written
+                    // one, one the shape lacks may now exist, and the array
+                    // is non-empty.
                     None if let Some(written) = offset
                         && let Some(keys) = written
                             .union_members()
@@ -174,15 +175,19 @@ impl Type {
                             .map(literal_key)
                             .collect::<Option<Vec<_>>>() =>
                     {
-                        Some(Type::union_of(
-                            keys.into_iter()
-                                .map(|key| {
-                                    let mut shape = Shape::clone(shape);
-                                    shape.set(ShapeField::new(key, value.clone(), false));
-                                    Type::array_shape(shape)
-                                })
-                                .collect(),
-                        ))
+                        let mut shape = Shape::clone(shape);
+                        for key in keys {
+                            let field = match shape.field(&key) {
+                                Some(field) => ShapeField::new(
+                                    key,
+                                    Type::union(field.ty.clone(), value.clone()),
+                                    field.optional,
+                                ),
+                                None => ShapeField::new(key, value.clone(), true),
+                            };
+                            shape.set(field);
+                        }
+                        Some(crate::union::shape_type(shape, true))
                     }
                     // Any other key may write a field it could equal, or
                     // another key: the shape stays, open to that key. Only

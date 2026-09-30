@@ -8,11 +8,11 @@ use function PHPStan\Testing\assertType;
 function f(string $type, array $opt, string $k): void {
     $contents = [];
     $contents[$type] = 'x';
-    assertType("array{'text/html': 'x'}|array{'text/plain': 'x'}", $contents);
+    assertType("non-empty-array{'text/html'?: 'x', 'text/plain'?: 'x'}", $contents);
 
     $withField = ['n' => 1];
     $withField[$type] = 'x';
-    assertType("array{n: 1, 'text/html': 'x'}|array{n: 1, 'text/plain': 'x'}", $withField);
+    assertType("array{n: 1, 'text/html'?: 'x', 'text/plain'?: 'x'}", $withField);
 
     if ($opt !== []) {
         $opt[$k] = 5;
