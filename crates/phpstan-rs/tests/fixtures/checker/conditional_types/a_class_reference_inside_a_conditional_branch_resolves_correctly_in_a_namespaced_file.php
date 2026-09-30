@@ -6,6 +6,6 @@
              * @param mixed $x
              * @return ($x is int ? Connection : string)
              */
-            function f($x) { return $x; }
+            function f($x) { return is_int($x) ? new Connection() : 'a'; }
             assertType('App\Connection', f(5));
         
