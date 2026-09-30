@@ -1977,35 +1977,55 @@ through `check-project`.
   (`types/src/queries.rs:328`) recurses field by field, so a field whose
   new value holds the old shape one level deeper recurses one level
   deeper on every pass. That is the classic unbounded chain, and the
-  passes end before it does. The standard cure is a depth-sensitive
-  step:
+  passes end before it does. The array the loop builds is recursive: a
+  `y` holding a value of the same shape. The exact fixed point is a
+  recursive type, so the type language gains one instead of collapsing
+  the nested levels to `array<string, mixed>`.
 
-  - A helper `array_depth(ty)` gives the nesting depth of array shapes and
-    general arrays in a type (the max over union members, 0 for a
-    non-array).
-  - In the combined-shape branch, a field is widened with `widen` only when
-    `array_depth(new) <= array_depth(old)`. A field that gained a level
-    becomes `new.generalize()` with every array nested inside collapsed to
-    `array<generalized key, mixed>` (a new `Type::collapse_nested_arrays`).
-    The field keeps "is an array" and its key kind, and gives up the values
-    it could not bound. The next pass sees an unchanged depth and settles.
-  - The general-array branch's `before.widen_towards(&after)` on values gets
-    the same test, since a general array whose values nest deeper each pass
-    has the same chain.
+  - `Repr::Recursive(RecId, Type)` binds a name in its body, and
+    `Repr::RecRef(RecId)` refers back to the nearest enclosing binder with
+    that id. `μA. array{x: int, y?: A}` is the finding's `$a`. Ids are
+    allocated by the interner, so two structurally equal recursive types
+    intern to one node.
+  - Widening detects the self-nesting. When a field's new value contains, at
+    any depth, a shape equal to the widened parent (the parent as this pass
+    started, or the same shape one level down), that occurrence is replaced
+    by a `RecRef` to the parent, and the parent is wrapped in `Recursive`.
+    The next pass meets an unchanged type and settles, one pass after the
+    nesting starts.
+  - The relation treats recursive types coinductively. `is_super_type_of`,
+    `accepts` and `disjoint` carry an assumption set of (sup, sub) pairs
+    under comparison. A pair seen again answers `Yes` (or not disjoint). A
+    `Recursive` is unfolded one level (its `RecRef`s substituted by the
+    whole type) when compared with a non-recursive type.
+  - Reading through it unfolds it: `$a['y']` on `μA. array{x: int, y?: A}`
+    is `A` itself, the same recursive type, so `$a['y']['y']['y']['x']` is
+    `int` at any depth, and `?? 1` has no constant verdict.
+  - Display prints the binder once, as PHPStan does for its recursive type
+    aliases: `array{x: int, y?: array{x: int, y?: …}}`, one level shown and
+    the recursion as `…`, so a message stays finite.
+  - Every traversal (`for_each_child`, `map_children`, substitution,
+    `replace_templates`, interning, hashing) stops at a `RecRef`, which has
+    no children, so they terminate. F20's depth test covers a recursive
+    type.
+  - A self-nesting that no shape comparison finds, such as a nested field
+    that changes its keys every pass, still needs a bound. There the depth
+    rule applies: a field that gained a level for the third time widens to
+    `array<generalized key, mixed>`. It is the fallback, not the answer.
 
-  After the finding's loop, `$a` is
-  `array{x: int, y?: array<string, mixed>}`, and
-  `($a['y']…['x'] ?? 1) === 1` has no constant verdict. The `prev`/`i`
-  shape bottoms out the same way, at `prev?: array<string, mixed>`, with
-  no `array{}` claim.
+  After the finding's loop, `$a` is `μA. array{x: int, y?: A}`, and the
+  `prev`/`i` shape is `μP. array{prev?: P, i: int}` (with `prev` absent
+  at the bottom, no `array{}` claim).
 
   `combined_shape`: when a key is missing from some member, the field is
   made optional. If that member is unsealed and its tail key type may be
   the key, the field's type also joins the tail's value type, since the
   key may be there with a tail value. That is the same rule F85 gives
-  writes. Fixtures: both loops of the finding, a types-crate test that
+  writes. Fixtures: both loops of the finding; a types-crate test that
   widening a self-nesting shape reaches the same type on two consecutive
-  passes, and `combined_shape` of
+  passes;
+  `accepts(μA. array{x: int, y?: A}, array{x: 1, y: array{x: 2}})` is
+  `Yes`; and `combined_shape` of
   `array{a: 1}|array{b: 2, ...<string, int>}` giving `a?: 1|int`.
 
 ### Wrong types and missed reports (probed)
