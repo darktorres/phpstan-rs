@@ -8,7 +8,7 @@ function sharpen(float $a): void {
             $matrix[$i][$j] /= 2.0;
         }
     }
-    assertType('array{0: array{0: float, 1: float, 2: float, ...<int, float>}, 1: array{0: float, 1: float, 2: float, ...<int, float>}, 2: array{0: float, 1: float, 2: float, ...<int, float>}, ...<int, array{0: float, 1: float, 2: float, ...<int, float>}>}', $matrix);
+    assertType('array{0: array{0: float, 1: float, 2: float}, 1: array{0: float, 1: float, 2: float}, 2: array{0: float, 1: float, 2: float}}', $matrix);
 }
 
 sharpen(40.0);

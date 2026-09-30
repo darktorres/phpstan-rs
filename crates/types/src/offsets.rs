@@ -227,16 +227,26 @@ impl Type {
                         shape.set(ShapeField::new(key, value, false));
                         Some(Type::array_shape(shape))
                     }
-                    // A key that is one of several literal keys writes one
-                    // of them: each keeps its value or takes the written
-                    // one, one the shape lacks may now exist, and the array
-                    // is non-empty.
+                    // A key that is one of several literal keys, or one of
+                    // few values the shape already has as keys (`int<0, 2>`
+                    // on a three-element list), writes one of them: each
+                    // keeps its value or takes the written one, one the
+                    // shape lacks may now exist, and the array is non-empty.
                     None if let Some(written) = offset
                         && let Some(keys) = written
                             .union_members()
                             .iter()
                             .map(literal_key)
-                            .collect::<Option<Vec<_>>>() =>
+                            .collect::<Option<Vec<_>>>()
+                            .or_else(|| {
+                                let keys = written
+                                    .finite_types()
+                                    .iter()
+                                    .map(literal_key)
+                                    .collect::<Option<Vec<_>>>()?;
+                                (!keys.is_empty() && keys.iter().all(|k| shape.field(k).is_some()))
+                                    .then_some(keys)
+                            }) =>
                     {
                         let mut shape = Shape::clone(shape);
                         for key in keys {
