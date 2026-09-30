@@ -2938,6 +2938,31 @@ through `check-project`.
   `@param` and `@return`: `E`'s substituted bound is `X`'s placeholder,
   whose bound is `mixed`. Done: siblings substitute to a fixed point
   (a cycle stopping at the placeholder), with a fixture.
+
+  Design: `build_template_params` (`registry/function_sig/generics.rs`)
+  substitutes each template's bound and default with the `built` map,
+  whose entries still carry their own unsubstituted bounds. So `E of X`
+  becomes `E of X(bound mixed)`, and `R of Holder<E>` sees an `E` whose
+  bound's `X` is a bare placeholder. The substitution is resolved in
+  dependency order:
+
+  - Build the sibling graph from which templates each bound and default
+    names.
+  - Process the templates in a topological order. Each is substituted with
+    the already-finished entries of the siblings it names, so `X` is
+    finished before `E`, and `E` before `R`.
+  - A template on a cycle (`@template A of B`, `@template B of A`) keeps the
+    plain placeholder for the sibling that closes the cycle, which stops the
+    recursion, as the finding's "a cycle stopping at the placeholder" asks.
+
+  `tag_synthesis.rs`'s `@method` templates build the same way. The
+  review noted they still use unbounded siblings, and nothing reads
+  their bounds yet, so they move onto this function (or a shared helper)
+  in the same change. Fixtures: `X of int`, `E of X`, `R of Holder<E>`
+  with `Holder<T of int>` reports no `generics.notSubtype` on `@param`
+  or `@return`; a two-template cycle parses without a hang or a report;
+  a default naming a sibling (`@template B = A`) resolves through the
+  same order.
 - [ ] **F85. A write through several literal keys fixes the shape but
   not the keys' entries** (`783727da`, with F48). `$row[$key] = null`
   with `'id'|'name' $key` now types `$row` as `array{id: 1|null, name:
