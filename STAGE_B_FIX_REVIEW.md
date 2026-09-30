@@ -2238,7 +2238,16 @@ through `check-project`.
   Probed: still `mixed`. The read is the union of the members' values
   for that key, with `null` for a member that surely lacks it, since PHP
   reads a missing offset as `null` with a warning: `1|null` here.
-  Whether to report the possibly missing offset is a separate rule.
+  The read itself is also reported, since a member that lacks the key
+  makes PHP warn "Undefined array key". `report_missing_offset` answers
+  today only when every member lacks the key (`offsetAccess.notFound`).
+  It gains the "some member" case: `offsetAccess.maybeNotFound` ("Offset
+  'a' might not exist on array{a: 1}|array{b: 2}.") at level 7, the
+  maybe level, for a literal key some constant-array member surely
+  lacks, or has only as optional. The quiet reads (`isset`, `??`,
+  `empty`, `array_key_exists` guards) are exempt, as they are for the
+  definite report, and so is a read the enclosing condition has
+  narrowed (`if (isset($x['a']))`).
 
   Fixtures: one per bullet still open, with the probed types as the
   before state.
