@@ -239,6 +239,22 @@ machinery that its fixes depend on.
   templates are bound per call; `phpstan_rs::gate::template_scope_at`
   then includes them.
 
+- [ ] **M1. A narrowed `mixed` parameter isn't reported.** A child
+  method or interface implementation that narrows an explicitly `mixed`
+  parameter (`ArrayAccess::offsetGet(mixed $offset)` implemented as
+  `offsetGet(string $offset)`) is a fatal error in PHP ("Declaration …
+  must be compatible"), but `method.childParameterType` stays silent;
+  narrowing `int|string` to `string` is reported. Done: an explicit
+  `mixed` parameter is a type like any other in the override check.
+
+- [ ] **T2. `throws.missing` ignores a callee's `@throws`.** The check
+  counts only `throw`s written in the body (documented in
+  `checker/throws/missing.rs`), so calling a method whose `@throws` names
+  a checked exception, directly or through `$o[…]` on an `ArrayAccess`
+  object, isn't reported. For checked exceptions a caller must catch or
+  declare what it calls. Decide whether callee throw points count;
+  if they do, both kinds of call report.
+
 - [ ] **Typed purity.** `is_transitively_pure` is computed in the registry
   before any types exist, so it can't see implicit calls
   (`$o['k']` calling `offsetGet`, `count($o)` calling `count`) nor
