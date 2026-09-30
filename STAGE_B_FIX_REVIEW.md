@@ -1095,6 +1095,47 @@ through `check-project`.
   assignment by reference records the alias, and a write to either name
   updates (or at least forgets the narrowing of) the other, with
   fixtures for both shapes.
+
+  Design: `AssignRef` shares `Assign`'s arm (`expr.rs:2013`) and binds
+  the left side's type, so the checker forgets, after the statement,
+  that the two names are one variable. `Locals` gains reference groups:
+
+  - a map from a narrowing key to a group id, and each group's members,
+    bumped with the version;
+  - `merge_scopes` keeps a pair only if both sides have it, and loop
+    convergence goes through the same rule.
+
+  Groups are formed:
+
+  - `$a = &$b` puts `$a` into `$b`'s group, leaving its old one;
+  - `foreach ($xs as &$v)` groups `$v` with the key `$xs[<current key>]`,
+    dropped at the loop's end;
+  - `global $x` and `static $x` join `$x` to a group of their own that
+    nothing else writes locally;
+  - `$r = &$arr['k']` and `$r = &$o->p` group `$r` with that key.
+
+  A group is used:
+
+  - A write to any member (`declare`/`insert` through
+    `bind_assignment_target`, a compound assignment, `++`/`--`, a
+    by-reference argument) writes the same type to every other member. For
+    an offset or property member it is written as the write at that path, so
+    `$arr`'s shape takes the new `k` value.
+    `purge_branch_implied_facts_depending_on` runs for each member.
+  - A narrowing of one member (`===`, `instanceof`, `is_*`) narrows every
+    member, since they are one value.
+  - `unset($a)` leaves the group. A plain `$a = …` doesn't: PHP writes
+    through the reference.
+
+  A closure's `use (&$x)` makes `$x` escape. Every call after the
+  closure is created, and every call it is passed to, forgets `$x`'s
+  narrowing the way F82's `Anything` verdict forgets properties, because
+  any call may run the closure. The dead-branch fact replay and
+  `check_pointless_null_probe` then read the propagated types and need
+  no change. Fixtures: `$t = &$s; $t = null;` makes `$s` `null`;
+  `$r = &$x; $r++;` gives `$x === 1` no report; the `??` probe after
+  `$r = 'a'` is clean; `$r = &$arr['k']; $r = 5;` types `$arr['k']` `5`;
+  a `foreach (… as &$v)` write shows in the array after the loop.
 - [ ] **F46. A flag set to `false` in an `if` replays the condition as
   true** (`record_if_body_flag_alias`, `checker/narrowing.rs`; also before
   the window). The alias is recorded whatever literal the body assigns,
