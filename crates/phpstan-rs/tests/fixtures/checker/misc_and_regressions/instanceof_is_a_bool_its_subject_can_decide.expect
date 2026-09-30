@@ -1,0 +1,2 @@
+11:24-11:43 instanceof.alwaysTrue L4 | Instanceof between Circle and Shape will always evaluate to true.
+12:14-12:33 instanceof.alwaysTrue L4 | Instanceof between Square and Shape will always evaluate to true.

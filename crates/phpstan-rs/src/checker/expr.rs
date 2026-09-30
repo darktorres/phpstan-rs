@@ -1984,7 +1984,7 @@ impl<'a> Checker<'a> {
                     locals,
                     is_exempt_last_condition,
                 );
-                Type::mixed()
+                self.infer_expr(e, locals)
             }
             ExprKind::Assign(lhs, rhs) | ExprKind::AssignRef(lhs, rhs) => {
                 self.check_nullsafe_assignment_target(lhs);
@@ -4578,6 +4578,14 @@ impl<'a> Checker<'a> {
             ExprKind::ShellExec(_) => self.shell_exec_type(),
             ExprKind::Print(_) => Type::int_literal(1),
             ExprKind::Isset(_) | ExprKind::Empty(_) => Type::bool(),
+            // `true` or `false` when the subject's type decides it.
+            ExprKind::Instanceof(inner, target) => {
+                let subject = self.infer_expr(inner, locals);
+                match self.instanceof_outcome(&subject, target, locals) {
+                    Some((always, _)) => Type::bool_literal(always),
+                    None => Type::bool(),
+                }
+            }
             ExprKind::Exit(..) => Type::never(),
             ExprKind::Eval(_) | ExprKind::Include(..) => Type::mixed(),
             ExprKind::Cast(cast, inner) => {
