@@ -2247,8 +2247,10 @@ through `check-project`.
   Design: each shape gets its cause confirmed with a
   `--features hotpath` build (the crate's `hotpath`/`hotpath-alloc`
   features) on the generator scripts this review timed with, and then
-  its fix. The causes below are read from the code; the profile decides
-  between them.
+  its fix. The causes below are read from the code, and each is fixed
+  whether or not it turns out to be the dominant one, since each is
+  superlinear on its own. The profile's job is to find whatever cost is
+  left after them, not to choose among them.
 
   - `&&`/`||` chains. `check_expr`'s `And`/`Or` arm (`expr.rs:1513`) runs
     `apply_narrowing(l, …)` on the whole left operand to build the right
@@ -2268,15 +2270,18 @@ through `check-project`.
     above, the chain's true branch is built with one `union_of` over the
     leaves' targets, collected when the `||` node is visited, not once per
     level.
-  - `.` chains of literals (51.8 s at 8,000). The candidate is per-level
-    work proportional to the left operand. The profile decides between
-    building the growing literal (`concat` of an ever-longer
-    `StringLiteral`, rehashed at intern time) and a subtree walk in the
-    per-level checks, which is removed as above. The literal is not
-    capped or generalized, since that loses a value the code states. If
-    building it is the cost, the literal's text becomes a shared rope
-    whose hash is combined from its parts', so appending is O(1)
-    amortized and interning never rehashes the prefix.
+  - `.` chains of literals (51.8 s at 8,000). Each level of
+    `Type::concat` (`types/src/concat.rs:20`) copies the whole left literal
+    (`a.concat(b)`), rehashes it when it is interned, and runs
+    `to_string_type` and the accessory checks (numeric, lowercase, …)
+    over its full text. That is O(length) per level, O(n²) overall. The
+    literal is not capped or generalized, since that loses a value the
+    code states. `PhpString` gains a rope form: a concatenation holds its
+    two parts shared (`Arc`), with length, hash and the accessory facts
+    (numeric prefix state, case, emptiness) combined from the parts' when
+    it is built. Appending is then O(1), interning never rehashes the
+    prefix, and the flat bytes are produced only when something reads
+    them (a message, a comparison with another literal).
   - Nested `match` (71 s at 1,000). `narrow_match_arm_conditions` gives each
     arm a scope with a new version, so the infer cache misses when an outer
     arm's `infer_expr` walks the inner match again. The inner match's result
