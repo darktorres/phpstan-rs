@@ -3811,8 +3811,10 @@ through `check-project`.
     references to a function of that name, so LSP references on a function
     list its same-named constants' reads, and dead code counts them. The arm
     records nothing, or a `RefTarget::Constant` if constant references are
-    wanted later, and the comment says a bare name is a constant. A fixture:
-    `function FOO() {}` with only `echo FOO;` is `function.unused`.
+    wanted later, and the comment says a bare name is a constant. Probed: in
+    `namespace App;` with `const FOO`, `function FOO()` and
+    `function bar()`, and only `echo FOO;`, dead code reports `bar` and not
+    `FOO`. That is the fixture, with both reported after the fix.
   - `registry/purity.rs`: F56's rewrite of the "Any static property access
     at all" label.
   - `syntax/ast.rs`:
