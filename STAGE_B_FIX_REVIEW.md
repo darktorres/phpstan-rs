@@ -2056,6 +2056,53 @@ through `check-project`.
   `elseif` (`288f4fda`), so an `elseif` chain is O(n²) too. `2750baf2`'s
   "nesting is linear" holds for nested calls. Done: each chain shape is
   linear, measured at 20,000 terms.
+
+  Design: each shape gets its cause confirmed with a
+  `--features hotpath` build (the crate's `hotpath`/`hotpath-alloc`
+  features) on the generator scripts this review timed with, and then
+  its fix. The causes below are read from the code; the profile decides
+  between them.
+
+  - `&&`/`||` chains. `check_expr`'s `And`/`Or` arm (`expr.rs:1513`) runs
+    `apply_narrowing(l, …)` on the whole left operand to build the right
+    operand's scope. `apply_narrowing` of an `&&` recurses into both of its
+    sides, so every level re-narrows the chain below it, O(n²).
+    `check_boolean_and_or` and `infer_binary`'s `And` arm narrow it once
+    more each. The fix computes a condition's branch scopes once per node.
+    `check_expr` on `&&`/`||` returns (through a side table keyed like the
+    infer cache, by node and scope version) the true and false scopes it
+    already built for its right operand, and `apply_narrowing` of an
+    `&&`/`||` node reuses a cached pair instead of recursing. This is
+    PHPStan's `SpecifiedTypes` computed bottom-up.
+  - An `||` of `instanceof` checks (705 s at 10,000). Each level unions one
+    more class into the narrowed type with `Type::union`, and each union
+    re-runs absorption over all members, O(n²) or worse. The false branch
+    removes one class per level the same way. With the cached branch scopes
+    above, the chain's true branch is built with one `union_of` over the
+    leaves' targets, collected when the `||` node is visited, not once per
+    level.
+  - `.` chains of literals (51.8 s at 8,000). The candidate is per-level
+    work proportional to the left operand. The profile decides between
+    building the growing literal (`concat` of an ever-longer
+    `StringLiteral`, rehashed at intern time), which would be capped by
+    generalizing past a length (PHPStan keeps literals only while short),
+    and a subtree walk in the per-level checks, which is removed as above.
+  - Nested `match` (71 s at 1,000). `narrow_match_arm_conditions` gives each
+    arm a scope with a new version, so the infer cache misses when an outer
+    arm's `infer_expr` walks the inner match again. The inner match's result
+    type is recorded when `check_expr` computes it, keyed by node, so the
+    outer walk reads it back.
+  - The trait chain (cubic, 63 minutes at 3,000). A class's trait members
+    are flattened by walking the used traits recursively, and each lookup
+    through the chain repeats that walk. The registry builds every trait's
+    flattened member table once, in dependency order, each from its used
+    traits' finished tables, and lookups read the tables.
+  - `elseif` chains. `check_if`'s `rest.iter().all(always_terminates)`
+    (`stmt.rs:1233`) and `uninitialized_dataflow.rs:383` recompute a suffix
+    answer at every `elseif`. They precompute it once, back to front, O(n).
+
+  Done is the finding's: each shape measured linear up to 20,000 terms,
+  with the timings recorded beside the scale scripts.
 - [ ] **F19. Smaller type gaps met while probing:**
   - `89da4c25`: loop widening generalizes a growing literal to its base
     type and drops non-empty (`'a'` then `.= 'b'` is `string`, not
