@@ -55,7 +55,26 @@ impl Relation<'_> {
             let mut array: Option<(Type, Type)> = None;
             let mut shape: Option<Shape> = None;
             let mut rest: Vec<Type> = Vec::new();
+            // Ints meet by their bounds.
+            let mut ints: Option<(Option<i64>, Option<i64>)> = None;
             for member in flat {
+                if matches!(
+                    member.repr(),
+                    Repr::Int | Repr::IntLiteral(_) | Repr::IntRange(..)
+                ) && let Some((min, max)) = member.int_bounds()
+                {
+                    ints = Some(match ints {
+                        None => (min, max),
+                        Some((lo, hi)) => (
+                            lo.max(min),
+                            match (hi, max) {
+                                (Some(a), Some(b)) => Some(a.min(b)),
+                                (a, b) => a.or(b),
+                            },
+                        ),
+                    });
+                    continue;
+                }
                 match member.into_repr() {
                     Repr::Array(key, value) => {
                         array = Some(match array {
@@ -83,6 +102,19 @@ impl Relation<'_> {
                         }
                     }
                 }
+            }
+            if let Some((min, max)) = ints {
+                if min.zip(max).is_some_and(|(min, max)| min > max) {
+                    return Type::never();
+                }
+                rest.insert(
+                    0,
+                    match (min, max) {
+                        (Some(min), Some(max)) if min == max => Type::int_literal(min),
+                        (None, None) => Type::int(),
+                        (min, max) => Type::int_range(min, max),
+                    },
+                );
             }
             let mut out: Vec<Type> = Vec::new();
             match (shape, array) {
