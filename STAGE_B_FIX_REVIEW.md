@@ -693,32 +693,36 @@ through `check-project`.
 
   Design: in `union_with_mixed` (`types/src/union.rs:885`), `without` is
   the wrong operation. `s.without(ty)` removes what `ty` wholly covers,
-  while the join needs to remove from the subtracted part every member
-  that `ty` may overlap at all, since a value of `ty` may be one of
-  them. It can't represent "`string` but `'x'`", so the only sound
-  result for an overlapping member is to stop subtracting it.
+  while the join has to account for every member of the subtracted part
+  that `ty` may overlap. Today's answer is also wrong in the other
+  direction: the union absorbs `ty` into the subtracted `mixed`, as if
+  `mixed~S` held everything.
 
-  The loop keeps each member `sm` of `subtracted` (the union's members,
-  or the one type) only when `Relation::structural().disjoint(sm, ty)`
-  holds for every non-mixed member `ty`, and rebuilds the rest with
-  `union_of`. So:
+  The fix is not to absorb what doesn't fit. `mixed~S` holds every value
+  but those of `S`, so a union member `ty` is absorbed only when it is
+  certainly within `mixed~S`, that is, disjoint from `S`. Otherwise the
+  union keeps both members: `mixed~string | 'x'` stays exactly that
+  union. It is precise (the value is a non-string or `'x'`), needs no
+  class hierarchy, since a member of unknown relation is simply kept,
+  and so stays cacheable in the interner's memo:
 
-  - `mixed~string | 'x'` is `mixed`;
-  - `mixed~(string|int) | 'x'` is `mixed~int`;
-  - `mixed~null | 'x'` stays `mixed~null`.
+  - `union_with_mixed` partitions the non-mixed members. Those
+    `Relation::structural().disjoint` from every member of `S` are absorbed.
+    The rest stay as union members beside the `mixed~S`.
+  - Two `mixed` members intersect their subtractions
+    (`mixed~(int|null) | mixed~null` is `mixed~null`), since a value
+    excluded by both is excluded by the join. Kept members are then
+    re-tested against the new subtraction.
+  - `is_super_type_of`, `accepts`, `disjoint`, narrowing and display already
+    handle a union member by member, so `mixed~string|'x'` needs no new
+    arms. `=== 'x'` on it is "maybe", and `is_string` narrows it to `'x'`.
+  - A plain `mixed` (no subtraction) still absorbs everything.
 
-  The first loop's rule for two `mixed` members (keep the subtraction
-  only when both carry the same one) becomes the intersection of their
-  member sets: `mixed~(int|null) | mixed~null` is `mixed~null`, where
-  today it is `mixed`. That is more precise and still sound, since a
-  value excluded by both is excluded by the join. The `disjoint` used
-  must be the structural relation the types crate already has, not one
-  that needs the registry. Two classes' disjointness is then "maybe",
-  which drops the member: sound. Fixtures: the three finding shapes
-  (`'x'` with `mixed~string`, `5` with `mixed~int`, `[1]` with
-  `mixed~array`) no longer report `identical.alwaysFalse`; a types-crate
-  test covers the partial case (`mixed~(string|int)` with `'x'`) and the
-  two-mixed intersection.
+  Fixtures: the three finding shapes (`'x'` with `mixed~string`, `5`
+  with `mixed~int`, `[1]` with `mixed~array`) stay unions and report
+  nothing; `is_string($v)` on the first narrows to `'x'`;
+  `mixed~Foo | Bar` for two classes keeps both without consulting the
+  hierarchy; the two-`mixed` intersection has a types-crate test.
 - [ ] **F27. `is_resource()` of a resource is "always true."**
   `while (is_resource($fp)) { fclose($fp); }` reports
   `function.alreadyNarrowedType`, but a closed resource is not
