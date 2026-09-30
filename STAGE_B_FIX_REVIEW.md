@@ -3123,8 +3123,12 @@ through `check-project`.
   `class.duplicate`, and `function helper`/`function HELPER` report too;
   `twice(int)` in `c.php` and `e.php` with `twice(string)` in `d.php`
   reports all three sites in one list when the files share a load set,
-  and nothing when they don't; two test files in one PHPUnit suite
-  declaring `helper()` report; a stub file's overloads report nothing.
+  and nothing when they don't; two test files in different PHPUnit suites
+  declaring `helper()` report at level 0; two `function_exists`-guarded
+  polyfills report nothing; two `PHP_VERSION_ID`-guarded declarations
+  report at level 7; two web entry points declaring `helper()` report
+  nothing; a class in two classmap paths reports
+  `class.ambiguousAutoload`; a stub file's overloads report nothing.
 - [ ] **F76. A namespace cycle through a context file can go unreported**
   (`find_namespace_cycles`; also before the window). The cycle is
   reported at the alphabetically-first class contributing an edge, chosen
