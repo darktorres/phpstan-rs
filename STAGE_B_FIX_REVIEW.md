@@ -1754,8 +1754,15 @@ through `check-project`.
   - The fold in `check_while`'s `is_truthy_literal(cond)` branch
     (`loops.rs:159`) moves into `endless_loop_exit(break_states, locals)`.
     After the loop comes the merge of the `break` states alone, and with
-    none the code after is unreachable, keeping today's fallback of the
-    pre-loop state.
+    none the code after is unreachable. Today `check_block`
+    (`stmt.rs:57`) reports the first dead statement and then goes on
+    checking every later one with whatever scope is left, here the
+    pre-loop state, so dead code can report again. It stops checking
+    after the report instead: statements after an always-terminating one
+    are not analysed, except a label some `goto` targets, where checking
+    resumes with a scope that no fall-through reaches (the `goto`
+    sites' scopes, or an empty one when those aren't tracked). This
+    holds for every terminating statement, not only endless loops.
   - `check_for` calls it both for the condition-less arm (`None`), which
     today starts from `body_locals` and so carries the body's end state (the
     one without `$y`), and for a condition list whose last expression is a
