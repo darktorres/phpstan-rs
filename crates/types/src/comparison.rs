@@ -677,20 +677,39 @@ impl Relation<'_> {
         Type::union_of(kept)
     }
 
-    /// `current` where `current op other` held: a member for which it
-    /// can't is dropped.
+    /// `current` where `current op other` was `holds`: a member for which
+    /// that can't be is dropped, and an int's range is cut by `other`'s
+    /// numeric bounds (`$i < 2.5` keeps `int<min, 2>`). The false branch
+    /// cuts only against a number that can't be `NAN`, as an uncomparable
+    /// pair fails every ordering.
     pub fn narrow_ordering(
         &self,
         current: &Type,
         op: OrderingOp,
         other: &Type,
+        holds: bool,
         version: Option<PhpVersion>,
     ) -> Type {
+        let bounds = numeric_bounds(other);
         let kept: Vec<Type> = current
             .union_members()
             .iter()
-            .filter(|member| !self.ordering(member, op, other, version).no())
-            .cloned()
+            .filter_map(|member| {
+                let verdict = self.ordering(member, op, other, version);
+                if (holds && verdict.no()) || (!holds && verdict.yes()) {
+                    return None;
+                }
+                let op = if holds { op } else { negated(op) };
+                match (member.int_bounds(), bounds) {
+                    (Some((min, max)), Some((lo, hi)))
+                        if holds || !(lo.is_nan() || hi.is_nan()) =>
+                    {
+                        let (min, max) = cut_int(min, max, op, lo, hi)?;
+                        Some(Type::int_range(min, max))
+                    }
+                    _ => Some(member.clone()),
+                }
+            })
             .collect();
         Type::union_of(kept)
     }
@@ -771,5 +790,94 @@ impl Type {
     /// This type and `other`'s shared values.
     fn intersect_with(&self, other: &Type, relation: &Relation<'_>) -> Type {
         relation.intersect(vec![self.clone(), other.clone()])
+    }
+}
+
+/// The least and greatest number `ty` may be, when every member is an int
+/// or a float literal.
+fn numeric_bounds(ty: &Type) -> Option<(f64, f64)> {
+    let mut lo = f64::INFINITY;
+    let mut hi = f64::NEG_INFINITY;
+    for member in ty.union_members() {
+        let (a, b) = match member.repr() {
+            Repr::FloatLiteral(f) => (*f, *f),
+            _ => {
+                let (min, max) = member.int_bounds()?;
+                (
+                    min.map_or(f64::NEG_INFINITY, |n| n as f64),
+                    max.map_or(f64::INFINITY, |n| n as f64),
+                )
+            }
+        };
+        if a.is_nan() {
+            return Some((f64::NAN, f64::NAN));
+        }
+        lo = lo.min(a);
+        hi = hi.max(b);
+    }
+    (lo <= hi).then_some((lo, hi))
+}
+
+/// `op`'s complement over ordered values.
+fn negated(op: OrderingOp) -> OrderingOp {
+    match op {
+        OrderingOp::Lt => OrderingOp::GtEq,
+        OrderingOp::LtEq => OrderingOp::Gt,
+        OrderingOp::Gt => OrderingOp::LtEq,
+        OrderingOp::GtEq => OrderingOp::Lt,
+    }
+}
+
+/// An int in `[min, max]` where `int op x` holds for some `x` in
+/// `[lo, hi]`; `None` when none does. A float bound rounds inward.
+fn cut_int(
+    min: Option<i64>,
+    max: Option<i64>,
+    op: OrderingOp,
+    lo: f64,
+    hi: f64,
+) -> Option<(Option<i64>, Option<i64>)> {
+    if lo.is_nan() {
+        return None;
+    }
+    let to_int =
+        |x: f64| -> Option<i64> { (x.is_finite() && x.abs() < 9.2e18).then_some(x as i64) };
+    let (mut min, mut max) = (min, max);
+    match op {
+        // Some `x` above the int: the int is below the largest `x`.
+        OrderingOp::Lt => {
+            let bound = if hi.fract() == 0.0 {
+                hi - 1.0
+            } else {
+                hi.floor()
+            };
+            if let Some(b) = to_int(bound) {
+                max = Some(max.map_or(b, |m| m.min(b)));
+            }
+        }
+        OrderingOp::LtEq => {
+            if let Some(b) = to_int(hi.floor()) {
+                max = Some(max.map_or(b, |m| m.min(b)));
+            }
+        }
+        OrderingOp::Gt => {
+            let bound = if lo.fract() == 0.0 {
+                lo + 1.0
+            } else {
+                lo.ceil()
+            };
+            if let Some(b) = to_int(bound) {
+                min = Some(min.map_or(b, |m| m.max(b)));
+            }
+        }
+        OrderingOp::GtEq => {
+            if let Some(b) = to_int(lo.ceil()) {
+                min = Some(min.map_or(b, |m| m.max(b)));
+            }
+        }
+    }
+    match (min, max) {
+        (Some(a), Some(b)) if a > b => None,
+        _ => Some((min, max)),
     }
 }

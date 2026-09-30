@@ -3,8 +3,8 @@ use crate::checker::operators::ordering_op;
 use crate::checker::{Checker, Locals, literal_string_key, narrowing_type_for_predicate};
 use syntax::ast::*;
 use syntax::token::Span;
+use types::OrderingOp;
 use types::Type;
-use types::{OrderingOp, compare_range_outcome};
 
 impl<'a> Checker<'a> {
     /// Looks up a bare global-constant reference (`ExprKind::Name`,
@@ -471,10 +471,9 @@ impl<'a> Checker<'a> {
 
     /// Real PHPStan's own
     /// `NumberComparisonOperatorsConstantConditionRule` (level 4): flags a
-    /// `</>/<=/>=` comparison whose outcome is provably constant from
-    /// both operands' known int ranges - `Type::int_bounds`/
-    /// `compare_range_outcome`'s own doc comments have the range-
-    /// arithmetic reasoning; this is purely the reporting half, mirroring
+    /// `</>/<=/>=` comparison whose outcome is provably constant - the
+    /// comparison model (`ordering_outcome`) decides it; this is purely
+    /// the reporting half, mirroring
     /// `check_constant_loose_comparison` just above's identical shape
     /// (its own standalone rule, fired on every occurrence, not folded
     /// into `if`/`while`'s own generic constant-condition family). Real
@@ -519,13 +518,7 @@ impl<'a> Checker<'a> {
             OrderingOp::LtEq => "smallerOrEqual",
             OrderingOp::GtEq => "greaterOrEqual",
         };
-        let Some(l_bounds) = l_ty.int_bounds() else {
-            return;
-        };
-        let Some(r_bounds) = r_ty.int_bounds() else {
-            return;
-        };
-        let Some(outcome) = compare_range_outcome(ordering, l_bounds, r_bounds) else {
+        let Some(outcome) = self.ordering_outcome(l_ty, ordering, r_ty) else {
             return;
         };
         let sigil = match ordering {

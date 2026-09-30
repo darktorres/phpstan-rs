@@ -34,3 +34,79 @@ fn a_check_nothing_can_pass_leaves_never() {
     assert!(narrow(&Type::int(), &Type::string()).is_never());
     assert!(narrow(&Type::union(Type::int(), Type::float()), &Type::string()).is_never());
 }
+
+fn cut(current: Type, op: crate::OrderingOp, other: Type, holds: bool) -> Type {
+    Relation::structural().narrow_ordering(
+        &current,
+        op,
+        &other,
+        holds,
+        Some(crate::PhpVersion::new(8, 5)),
+    )
+}
+
+#[test]
+fn an_ordering_cuts_an_int_by_the_other_sides_bounds() {
+    use crate::OrderingOp::*;
+    let n = Type::int_range(Some(0), Some(10));
+    assert_eq!(
+        cut(Type::int(), Lt, n.clone(), true),
+        Type::int_range(None, Some(9))
+    );
+    assert_eq!(
+        cut(Type::int(), Lt, n.clone(), false),
+        Type::int_range(Some(0), None)
+    );
+    assert_eq!(
+        cut(Type::int(), LtEq, n.clone(), true),
+        Type::int_range(None, Some(10))
+    );
+    assert_eq!(
+        cut(Type::int(), LtEq, n.clone(), false),
+        Type::int_range(Some(1), None)
+    );
+    assert_eq!(
+        cut(Type::int(), Gt, n.clone(), true),
+        Type::int_range(Some(1), None)
+    );
+    assert_eq!(
+        cut(Type::int(), Gt, n.clone(), false),
+        Type::int_range(None, Some(10))
+    );
+    assert_eq!(
+        cut(Type::int(), GtEq, n.clone(), true),
+        Type::int_range(Some(0), None)
+    );
+    assert_eq!(
+        cut(Type::int(), GtEq, n, false),
+        Type::int_range(None, Some(9))
+    );
+}
+
+#[test]
+fn a_float_bound_rounds_inward_and_nan_fails_every_ordering() {
+    use crate::OrderingOp::*;
+    assert_eq!(
+        cut(Type::int(), Lt, Type::float_literal(2.5), true),
+        Type::int_range(None, Some(2))
+    );
+    assert_eq!(
+        cut(Type::int(), Gt, Type::float_literal(2.5), true),
+        Type::int_range(Some(3), None)
+    );
+    assert!(cut(Type::int(), Lt, Type::float_literal(f64::NAN), true).is_never());
+}
+
+#[test]
+fn an_ordering_keeps_the_members_that_may_satisfy_it() {
+    use crate::OrderingOp::*;
+    let nullable = Type::union(Type::int(), Type::null());
+    assert_eq!(
+        cut(nullable.clone(), Lt, Type::int_literal(5), true),
+        Type::union(Type::int_range(None, Some(4)), Type::null())
+    );
+    assert_eq!(
+        cut(nullable, Lt, Type::int_literal(5), false),
+        Type::int_range(Some(5), None)
+    );
+}

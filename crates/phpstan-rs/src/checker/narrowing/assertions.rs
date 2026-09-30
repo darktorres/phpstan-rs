@@ -285,6 +285,41 @@ impl<'a> Checker<'a> {
         }
     }
 
+    /// `l op r` (`holds`) narrows each side with a key against the other,
+    /// the right side with the operator mirrored, through the comparison
+    /// model.
+    pub(crate) fn apply_ordering_narrowing(
+        &self,
+        l: &Expr,
+        r: &Expr,
+        op: types::OrderingOp,
+        holds: bool,
+        locals: &mut Locals,
+    ) {
+        use types::OrderingOp::*;
+        let mirrored = match op {
+            Lt => Gt,
+            LtEq => GtEq,
+            Gt => Lt,
+            GtEq => LtEq,
+        };
+        let version = self.comparison_php_version();
+        for (side, other, side_op) in [(l, r, op), (r, l, mirrored)] {
+            let Some(key) = narrowing_key(side) else {
+                continue;
+            };
+            let other_ty = self.infer_expr(other, locals);
+            if other_ty.is_mixed() {
+                continue;
+            }
+            let current = self.current_narrowed_type(side, &key, locals);
+            let narrowed = self
+                .relation()
+                .narrow_ordering(&current, side_op, &other_ty, holds, version);
+            locals.insert(key, narrowed);
+        }
+    }
+
     /// The PHP version comparisons are judged on: the configured range's,
     /// when it lies on one side of 8.0 (where PHP 7 and 8 compare a number
     /// and a non-numeric string differently), `None` for both.

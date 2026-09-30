@@ -482,22 +482,3 @@ impl<'a> Checker<'a> {
         })
     }
 }
-
-/// `<`/`>`/`<=`/`>=`'s own two-operand shape: which side is narrowable
-/// (`narrowing_key` succeeds), which side is the comparison bound, and
-/// whether the narrowable side was written on the left (`$x < N`) or the
-/// right (`N < $x`) - `comparison_narrowed_bounds` needs to know the
-/// latter to interpret the operator correctly (`N < $x` means `$x > N`,
-/// not `$x < N`). `None` when neither side has a narrowing key at all.
-pub(crate) fn int_comparison_operands<'e>(
-    l: &'e Expr,
-    r: &'e Expr,
-) -> Option<(&'e Expr, &'e Expr, bool)> {
-    if narrowing_key(l).is_some() {
-        Some((l, r, true))
-    } else if narrowing_key(r).is_some() {
-        Some((r, l, false))
-    } else {
-        None
-    }
-}

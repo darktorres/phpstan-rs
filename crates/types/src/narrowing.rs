@@ -2,33 +2,7 @@
 //! from an excluded one, by key presence, by truthiness, and the array
 //! and integer refinements comparisons and counts prove.
 
-use crate::OrderingOp;
 use crate::{AccessoryKind, PhpString, Relation, Repr, Shape, ShapeField, ShapeKey, Type};
-
-/// A comparison's own truth value, canonicalized to "the narrowed side
-/// is smaller/smaller-or-equal/greater/greater-or-equal than the bound" -
-/// `<`/`<=`/`>`/`>=` all four collapse to Smaller/SmallerOrEqual here (a
-/// negated comparison mirrors real PHPStan's own identical `Greater(l,
-/// r)` -> `Smaller(r, l)` rewrite, `BinaryOpHandler.php`), so
-/// `comparison_narrowed_bounds` only ever has to reason
-/// about two shapes, not four.
-enum ComparisonOutcome {
-    Smaller,
-    SmallerOrEqual,
-    Greater,
-    GreaterOrEqual,
-}
-
-impl ComparisonOutcome {
-    fn negate(self) -> Self {
-        match self {
-            ComparisonOutcome::Smaller => ComparisonOutcome::GreaterOrEqual,
-            ComparisonOutcome::SmallerOrEqual => ComparisonOutcome::Greater,
-            ComparisonOutcome::Greater => ComparisonOutcome::SmallerOrEqual,
-            ComparisonOutcome::GreaterOrEqual => ComparisonOutcome::Smaller,
-        }
-    }
-}
 
 impl Relation<'_> {
     /// Narrows `original` to `target` along the branch where a check for
@@ -311,57 +285,6 @@ impl Type {
                 .collect();
             self.with_members(kept)
         })
-    }
-}
-
-/// The new `(min, max)` bound pair for the narrowed side, once `op`
-/// (written as `l op r`, `keyed_on_left` saying which of `l`/`r` is the
-/// narrowed side) is known true (`branch_true`) or false - `None` only on
-/// `i64` overflow computing an exclusive bound's own off-by-one (`bound -
-/// 1`/`bound + 1`), an edge real code never hits (a literal compared
-/// against `i64::MIN`/`i64::MAX`), where leaving `locals` untouched is the
-/// same "give up gracefully" choice every other range-arithmetic helper
-/// in this project already makes rather than risk a wrong bound.
-pub fn comparison_narrowed_bounds(
-    op: OrderingOp,
-    keyed_on_left: bool,
-    branch_true: bool,
-    cur_min: Option<i64>,
-    cur_max: Option<i64>,
-    bound: i64,
-) -> Option<(Option<i64>, Option<i64>)> {
-    let outcome = match (op, keyed_on_left) {
-        (OrderingOp::Lt, true) | (OrderingOp::Gt, false) => ComparisonOutcome::Smaller,
-        (OrderingOp::LtEq, true) | (OrderingOp::GtEq, false) => ComparisonOutcome::SmallerOrEqual,
-        (OrderingOp::Gt, true) | (OrderingOp::Lt, false) => ComparisonOutcome::Greater,
-        (OrderingOp::GtEq, true) | (OrderingOp::LtEq, false) => ComparisonOutcome::GreaterOrEqual,
-    };
-    let outcome = if branch_true {
-        outcome
-    } else {
-        outcome.negate()
-    };
-    match outcome {
-        ComparisonOutcome::Smaller => {
-            let candidate = bound.checked_sub(1)?;
-            Some((
-                cur_min,
-                Some(cur_max.map_or(candidate, |m| m.min(candidate))),
-            ))
-        }
-        ComparisonOutcome::SmallerOrEqual => {
-            Some((cur_min, Some(cur_max.map_or(bound, |m| m.min(bound)))))
-        }
-        ComparisonOutcome::Greater => {
-            let candidate = bound.checked_add(1)?;
-            Some((
-                Some(cur_min.map_or(candidate, |m| m.max(candidate))),
-                cur_max,
-            ))
-        }
-        ComparisonOutcome::GreaterOrEqual => {
-            Some((Some(cur_min.map_or(bound, |m| m.max(bound))), cur_max))
-        }
     }
 }
 

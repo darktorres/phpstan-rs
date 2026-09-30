@@ -30,7 +30,6 @@ pub(crate) mod ranges;
 
 use crate::checker::operators::{arithmetic_op, ordering_op};
 pub(crate) use ranges::{NullProbeVerdictFn, empty_probe_verdict, null_probe_verdict};
-use types::compare_range_outcome;
 
 // `checker::throws::dynamic` reuses this bitwise-or-flag-chain scan for
 // `JSON_THROW_ON_ERROR`/`FILTER_THROW_ON_FAILURE`, the same helper
@@ -5426,9 +5425,8 @@ impl<'a> Checker<'a> {
             BinOp::Lt | BinOp::Gt | BinOp::LtEq | BinOp::GtEq => {
                 let lt = self.infer_expr(l, locals);
                 let rt = self.infer_expr(r, locals);
-                if let (Some(l_bounds), Some(r_bounds)) = (lt.int_bounds(), rt.int_bounds())
-                    && let Some(ordering) = ordering_op(op)
-                    && let Some(outcome) = compare_range_outcome(ordering, l_bounds, r_bounds)
+                if let Some(ordering) = ordering_op(op)
+                    && let Some(outcome) = self.ordering_outcome(&lt, ordering, &rt)
                 {
                     if outcome {
                         Type::bool_literal(true)
@@ -5469,6 +5467,28 @@ impl<'a> Checker<'a> {
                 }
                 if let Some(ty) = self.binary_operator_overload_result(op, &lt, &rt) {
                     return ty;
+                }
+                // `<=>` gives what the comparison can come to: `-1`, `0`,
+                // and `1` for greater or uncomparable.
+                if *op == BinOp::Spaceship {
+                    let outcomes =
+                        self.relation()
+                            .outcomes(&lt, &rt, self.comparison_php_version());
+                    let mut values = Vec::new();
+                    if outcomes.contains(types::Outcomes::LESS) {
+                        values.push(Type::int_literal(-1));
+                    }
+                    if outcomes.contains(types::Outcomes::EQUAL) {
+                        values.push(Type::int_literal(0));
+                    }
+                    if outcomes.contains(types::Outcomes::GREATER)
+                        || outcomes.contains(types::Outcomes::UNCOMPARABLE)
+                    {
+                        values.push(Type::int_literal(1));
+                    }
+                    if !values.is_empty() {
+                        return Type::union_of(values);
+                    }
                 }
                 arithmetic_op(op)
                     .map_or_else(Type::mixed, |op| Type::binary_operation(op, &lt, &rt))
@@ -6361,11 +6381,9 @@ impl<'a> Checker<'a> {
     /// generically - confirmed via a real `if ($x > 5) {} elseif ($x <=
     /// 5) {}` chain already correctly flagging `smallerOrEqual.alwaysTrue`,
     /// proving the *narrowing* itself was never the gap, only which
-    /// function this check called to read it. Reaches for that same
-    /// dedicated machinery directly (`compare_range_outcome`/
-    /// `Type::int_bounds`, already used by `check_constant_
-    /// numeric_comparison` to report `smaller.alwaysTrue`/`greater.
-    /// alwaysFalse`/etc.) as a plain predicate instead of that
+    /// function this check called to read it. Asks the same question
+    /// `check_constant_numeric_comparison` reports on
+    /// (`ordering_outcome`) as a plain predicate instead of that
     /// function's own side-effecting report. Scoped to the same four
     /// ordering operators that family covers - an `==`/`===`/
     /// `instanceof`/`&&`/`||` condition (all also skipped by
@@ -6383,13 +6401,25 @@ impl<'a> Checker<'a> {
         };
         let l_ty = self.infer_expr(l, locals);
         let r_ty = self.infer_expr(r, locals);
-        let Some(l_bounds) = l_ty.int_bounds() else {
-            return false;
-        };
-        let Some(r_bounds) = r_ty.int_bounds() else {
-            return false;
-        };
-        ordering_op(op).and_then(|op| compare_range_outcome(op, l_bounds, r_bounds)) == Some(true)
+        ordering_op(op).and_then(|op| self.ordering_outcome(&l_ty, op, &r_ty)) == Some(true)
+    }
+
+    /// Whether `l op r` is always true or always false, as the comparison
+    /// model answers it on every configured PHP version.
+    pub(crate) fn ordering_outcome(
+        &self,
+        l: &Type,
+        op: types::OrderingOp,
+        r: &Type,
+    ) -> Option<bool> {
+        match self
+            .relation()
+            .ordering(l, op, r, self.comparison_php_version())
+        {
+            types::TrinaryLogic::Yes => Some(true),
+            types::TrinaryLogic::No => Some(false),
+            types::TrinaryLogic::Maybe => None,
+        }
     }
 
     /// `property.nonObject`/`method.nonObject` for an access whose member

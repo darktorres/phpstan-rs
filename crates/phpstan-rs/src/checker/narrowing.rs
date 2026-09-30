@@ -8,14 +8,11 @@ use types::{AccessoryKind, Type};
 mod assertions;
 mod predicates;
 
-use predicates::{int_comparison_operands, preg_match_condition};
+use predicates::preg_match_condition;
 pub(crate) use predicates::{
     is_real_variable_key, key_depends_on, narrowing_key, narrowing_type_for_predicate,
     propagate_container_field_facts, purge_stale_narrowing_for,
 };
-
-use crate::checker::operators::ordering_op;
-use types::comparison_narrowed_bounds;
 
 /// `count($x)`'s own operand-order detection for the count-comparison
 /// narrowing below - same shape as `int_comparison_operands`, but keyed
@@ -798,6 +795,18 @@ impl<'a> Checker<'a> {
                     locals.insert(key, self.relation().narrow(&current, &target_ty));
                 }
             }
+            ExprKind::Binary(op, l, r)
+                if let Some((spaceship_op, a, b)) = spaceship_comparison(op, l, r) =>
+            {
+                // `($a <=> $b) < 0` is `$a < $b`; `=== 0` or `== 0` is
+                // `$a == $b`.
+                match spaceship_op {
+                    Some(ordering) => {
+                        self.apply_ordering_narrowing(a, b, ordering, branch_true, locals);
+                    }
+                    None => self.apply_loose_equality_narrowing(a, b, locals, branch_true),
+                }
+            }
             ExprKind::Binary(op, l, r) => {
                 let is_eq = matches!(op, BinOp::Identical);
                 let is_neq = matches!(op, BinOp::NotIdentical);
@@ -842,46 +851,8 @@ impl<'a> Checker<'a> {
                     // to the `count(...)`-on-the-left shape below.
                     let current = self.current_narrowed_type(count_arg, &key, locals);
                     locals.insert(key, current.to_non_empty_array());
-                } else if let Some(ordering) = ordering_op(op)
-                    && let Some((keyed_expr, bound_expr, keyed_on_left)) =
-                        int_comparison_operands(l, r)
-                    && let Some(key) = narrowing_key(keyed_expr)
-                {
-                    // `$x < N`/`$x >= N`/... (either
-                    // operand order) narrows `$x`'s own int range - scoped
-                    // directly against real PHPStan's own `IntegerRangeType
-                    // ::getSmallerType`/`getGreaterType` family
-                    // (`vendor/phpstan-src`), deliberately simplified: real
-                    // PHPStan's version also has to subtract `true`/`null`/
-                    // `false` per PHP's own loose-comparison rules for `<`/
-                    // `>`, which this project doesn't model (same "no loose-
-                    // comparison modeling" precedent the `===`/`!==`-only
-                    // equality arm above already holds) - so this only acts
-                    // when both the narrowed side's *current* type and the
-                    // other side's *inferred* type are already unambiguously
-                    // numeric (a bare `int` counts as an unbounded
-                    // range here, unlike `int_bounds` itself), and the
-                    // other side is a single literal value, not a genuine
-                    // range (matching the `count() > 0` arm's own "exactly
-                    // this shape" scoping just above, not general range-vs-
-                    // range subtraction).
-                    let current = self.current_narrowed_type(keyed_expr, &key, locals);
-                    if let Some((cur_min, cur_max)) = current.int_bounds() {
-                        let bound_ty = self.infer_expr(bound_expr, locals);
-                        if let Some((Some(bound), Some(bound_max))) = bound_ty.int_bounds()
-                            && bound == bound_max
-                            && let Some((new_min, new_max)) = comparison_narrowed_bounds(
-                                ordering,
-                                keyed_on_left,
-                                branch_true,
-                                cur_min,
-                                cur_max,
-                                bound,
-                            )
-                        {
-                            locals.insert(key, Type::int_range(new_min, new_max));
-                        }
-                    }
+                } else if let Some(ordering) = crate::checker::operators::ordering_op(op) {
+                    self.apply_ordering_narrowing(l, r, ordering, branch_true, locals);
                 }
             }
             ExprKind::Unary(UnaryOp::Not, inner) => {
@@ -1655,4 +1626,40 @@ impl<'a> Checker<'a> {
 /// Whether `e` is a plain variable this scope has defined.
 fn is_defined_variable(e: &Expr, locals: &Locals) -> bool {
     matches!(&e.kind, ExprKind::Variable(name) if locals.contains_key(name))
+}
+
+/// `($a <=> $b) op c` as the comparison of `$a` and `$b` it encodes, for a
+/// constant `c`: an ordering, or `None` for loose equality. `None` overall
+/// when `cond` isn't one.
+fn spaceship_comparison<'e>(
+    op: &BinOp,
+    l: &'e Expr,
+    r: &'e Expr,
+) -> Option<(Option<types::OrderingOp>, &'e Expr, &'e Expr)> {
+    let (spaceship, constant, op) = match (&l.peeled().kind, &r.peeled().kind) {
+        (ExprKind::Binary(BinOp::Spaceship, ..), _) => (l.peeled(), r, *op),
+        (_, ExprKind::Binary(BinOp::Spaceship, ..)) => (r.peeled(), l, mirror_comparison(op)),
+        _ => return None,
+    };
+    let ExprKind::Binary(BinOp::Spaceship, a, b) = &spaceship.kind else {
+        return None;
+    };
+    let n = match &constant.peeled().kind {
+        ExprKind::Literal(Literal::Int(n)) => *n,
+        ExprKind::Unary(UnaryOp::Neg, inner) => match &inner.kind {
+            ExprKind::Literal(Literal::Int(n)) => -*n,
+            _ => return None,
+        },
+        _ => return None,
+    };
+    use types::OrderingOp::*;
+    let encoded = match (op, n) {
+        (BinOp::Lt, 0) | (BinOp::Identical | BinOp::Eq, -1) | (BinOp::LtEq, -1) => Some(Lt),
+        (BinOp::Gt, 0) | (BinOp::Identical | BinOp::Eq, 1) | (BinOp::GtEq, 1) => Some(Gt),
+        (BinOp::LtEq, 0) => Some(LtEq),
+        (BinOp::GtEq, 0) => Some(GtEq),
+        (BinOp::Identical | BinOp::Eq, 0) => None,
+        _ => return None,
+    };
+    Some((encoded, a, b))
 }
