@@ -267,8 +267,8 @@ through `check-project`.
   Then the reads:
 
   - `check_expr`'s `Variable` arm reports `variable.undefined` when the
-    name is absent or `Maybe` (the message can say "might not be defined"
-    for `Maybe`). It returns `Type::error()` only for an absent name; a
+    name is absent or `Maybe`, with "Variable $v might not be defined."
+    for `Maybe`. It returns `Type::error()` only for an absent name; a
     `Maybe` read returns the known type, since the value is that type
     whenever the read succeeds.
   - `infer_expr`'s `Variable` arm keeps the error type for an absent
@@ -458,11 +458,13 @@ through `check-project`.
   - `Method(receiver, name)` or `Static(class, name)` for a method's
     first-class callable;
   - `Literal(body)` for a closure or arrow function;
-  - `Unknown` otherwise, including a union of names (F32/F22's pipe
-    bullet is the same resolver learning unions: each member is
-    resolved).
+  - `Union(Vec<PipeCallee>)` for a union of callable values (`$b ?
+    'sort' : 'count'`), each member resolved, which is F32's and F22's
+    pipe bullet;
+  - `Unknown` otherwise.
 
-  The walks then use it:
+  The walks then use it, a `Union` counting as resolved when every
+  member is, with the weakest member's verdict:
 
   - `own_side_effects` gives the pipe `Effects::Some`, and
     `check_pure_call_without_effect` gains a pipe arm that reports only
