@@ -1897,8 +1897,13 @@ through `check-project`.
 
   - Whitespace tokens carry `--`, `#` and `/* */` comments, so skipping them
     and any leading `(` reaches the first `Word`.
-  - A MySQL executable comment (`/*! … */`) is text the server runs, so it
-    counts as unknown.
+  - A MySQL executable comment (`/*! … */`) is text the server runs, and
+    `MySqlDialect` already re-tokenizes its content as ordinary tokens
+    (`supports_multiline_comment_hints`, sqlparser 0.63's
+    `tokenizer.rs:978`), so a verb inside it is read like any other. A
+    versioned one (`/*!80000 … */`) runs only on servers at or above that
+    version, which the analysis doesn't know, so a verb found only inside
+    one makes the statement `Either`.
 
   The verbs split three ways:
 
