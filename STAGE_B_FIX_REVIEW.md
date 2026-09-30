@@ -3075,6 +3075,51 @@ through `check-project`.
     version, but final sigma differs before 8.3.
 
   Done: each is decided and fixed or ledgered.
+
+  Design, one decision per bullet:
+
+  - The closure `use` list. `walk_expr_in_scope` (`syntax/src/visit.rs:597`)
+    returns without visiting anything of a closure. The `use (...)` list is
+    read when the closure is created, in the enclosing scope, so the arm
+    visits each `use` entry as a variable read (a new
+    `Visitor::visit_closure_use`, defaulting to nothing, with the in-scope
+    walks overriding it) and keeps skipping the body. By-reference uses
+    count as a write too, since they create the variable. The
+    unused-variable and definedness scans, which use `walk_expr_in_scope`,
+    then see `function () use ($x)` as reading `$x`.
+  - Union display order. Since `f81c5e70` a union compares as a set, but
+    display prints members in construction order, so a message can depend on
+    which evaluation built the type first. Display sorts members by a
+    canonical key: PHPStan's `UnionTypeHelper::sortTypes` order (null last,
+    then by kind, then by description). Messages and `assertType` are
+    stable, and the fixtures' expected member orders are regenerated once.
+  - Template scope. `build_template_params` gets a method's scope as
+    `Class::method` (`class_info.rs:960` passes it) instead of the bare
+    method name. `with_own_templates` compares with that, so a class named
+    like the method no longer collides. It is the same edit as F2's.
+  - `allowExceptParamFlags`. `param_flags_condition_matches`
+    (`restricted_symbol_usage.rs:140`) requires every possible value to
+    carry the flag, right for an allow gate and wrong for a disallow gate.
+    It takes a mode: `Surely` for the allow gates (every value has the
+    flag), and `Possibly` for the disallow gate (some value has it). The
+    `allow_except_param_flags` sites pass `Possibly`. A non-constant
+    argument stays "no match", as the upstream extension treats it, and the
+    doc says so.
+  - `ImpurePoints` and `new`. `resolve_new` (`purity.rs:563`) looks up
+    `__construct` by exact case in the class's own methods and disqualifies
+    a class without one. With F35's folded table the case goes. A class with
+    no constructor anywhere in its ancestry runs no code on `new`, so it is
+    pure. The constructor is looked up through ancestors
+    (`lookup_method_with_owner`), and only an unknown class disqualifies.
+  - The pipe's union of names: F9's `pipe_callee`.
+  - Final sigma. `mb_strtolower`'s handling of a word-final `Σ` changed in
+    PHP 8.3. The folding (`daa88e7c`) answers with the 8.3 result only when
+    the configured minimum is 8.3 or later, and for a string holding `Σ` on
+    a range reaching below 8.3 it answers the union of both results. A
+    string without `Σ` stays certain on any version.
+
+  Fixtures: one per bullet except the display order, which is covered by
+  the regenerated expectations.
 - [ ] **F23. Fixtures that lost what they tested.**
   - `15b5b494`: the arithmetic-operand fixture's string cases now see
     `int|float|string` (after `$s++`), so it no longer tests a string
