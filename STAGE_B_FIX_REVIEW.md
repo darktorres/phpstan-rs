@@ -431,6 +431,38 @@ through `check-project`.
   Foo)` all pass `php -l` but skip the file. The tokens that end a bare
   `yield` are a hand-written list. Done: a bare `yield` ends at any token
   that can't start an expression.
+
+  Design: turn the list in `primary.rs`'s `Keyword::Yield` arm around.
+  PHP's grammar gives a bare `yield` whenever the next token can't begin
+  an expression, so the parser should ask that question rather than
+  enumerate enders. The new predicate `Token::starts_expression(&self)
+  -> bool` (`syntax/src/token.rs`) is true for:
+
+  - `Variable`, `Integer`, `Float`, `StringLit`, `InterpString`,
+    `ShellExec` and `Identifier` (which covers `exit`, `die`, `isset`,
+    `empty`, `eval` and casts' contents);
+  - `Backslash`, `LParen`, `LBracket`, `Bang`, `Tilde`, `Plus`, `Minus`,
+    `Increment`, `Decrement`, `At`, `Dollar`, `DollarBrace` and
+    `AttributeStart` (an attributed closure);
+  - `Keyword(k)` where `k` is one of `Function`, `Fn`, `Static`, `New`,
+    `Clone`, `Print`, `Throw`, `Yield`, `Include`, `IncludeOnce`,
+    `Require`, `RequireOnce`, `Array`, `List`, `Match`, `True`, `False`,
+    `Null` or `Namespace` (a `namespace\f()` name). This is an
+    exhaustive `match` over `Keyword`, so a new keyword has to be
+    classified.
+
+  A `DocComment` token asks the token after it. The arm becomes `if
+  !self.peek().starts_expression() { return Yield(None, None) }`. `Amp`,
+  `Instanceof`, `And`/`Or`/`Xor`, `PipeGt`, `As` and the assignment
+  operators then end a bare `yield` with no edit here, and the operator
+  loop above takes them as for any operand. The comment about `+`/`-`
+  stays true by construction. `yield -1` is still `yield` of `-1`,
+  matching PHP (`php -l` and the 18:15 binary agree). A token-level unit
+  test asserts `starts_expression` against a table, and a parser test
+  parses each of `(yield and $b)`, `or`, `xor`, `(yield & $b)`, `(yield
+  |> $b)`, `(yield instanceof Foo)` and `foreach ((yield) as $v)`. All
+  of these pass `php -l`, as does `yield $k => $v = 3`, which already
+  parses. A fixture checks that such a file is checked, not skipped.
 - [ ] **F11. `NAN === NAN` is reported always true.** PHP gives `false`
   (and `NAN == NAN` is false, which is reported right). The NaN literal
   compares equal to itself, as `scalars_disjoint`'s "NAN is itself" says.
