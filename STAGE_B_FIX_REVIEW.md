@@ -1772,16 +1772,15 @@ through `check-project`.
     tags (`@param`, `@return`, `@var`, `@throws`, `@method`, `@property*`,
     `@mixin`, `@extends`/`@implements`/`@use`, `@template … of`,
     `@phpstan-assert*`, `@phpstan-type`/`-import-type`, `@param-out`,
-    `@param-closure-this`, `@phpstan-self-out`, `@see`/`@uses` excluded).
-    Each `Identifier`, `Generic` head, `ConstFetch` class and callable
-    keyword that isn't a type keyword, a template in scope or a local type
-    alias is resolved against the file's name context, and recorded as
-    `RefTarget::Class`. The walker keeps that context as it walks the file's
-    `namespace` and `use` statements. The site is the name's exact span
-    within the comment when the source is retained, else the comment's span,
-    the fallback `index_class_fn_refs_without_source` already uses. The
-    dead-code module doc's list of gaps loses nothing false: PHPDoc was
-    never listed as a gap.
+    `@param-closure-this` and `@phpstan-self-out`; not `@see` or `@uses`,
+    which name code rather than type it). Each `Identifier`, `Generic` head,
+    `ConstFetch` class and callable keyword that isn't a type keyword, a
+    template in scope or a local type alias is resolved against the file's
+    name context, and recorded as `RefTarget::Class`. The walker keeps that
+    context as it walks the file's `namespace` and `use` statements. The
+    site is the name's exact span within the comment when the source is
+    retained, else the comment's span, the fallback
+    `index_class_fn_refs_without_source` already uses.
   - Member case. `RefTarget::Member(owner, name)` splits by kind into
     `Method(owner, lowercased name)`, `Property(owner, name)`,
     `Constant(owner, name)` and `EnumCase(owner, name)`, since only method
