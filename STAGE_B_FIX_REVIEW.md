@@ -2709,6 +2709,24 @@ through `check-project`.
   also before the window). `for ($i = -1; $i < count($x); $i++) { $x[$i]
   = 5; }` keeps `list<int> $x` a list, though key `-1` ends that. Done:
   the index must also be non-negative at the write, with a fixture.
+
+  Design: `in_range_index_write_loop_vars` (`stmt/loops.rs:22`) matches
+  the condition's shape (`$i < count($x)`), and the write site in
+  `bind_assignment_target` (the `in_range` computation near
+  `assignment.rs:425`) trusts it. The bound it proves is only the upper
+  one. The write site also asks the index's type at the write, which is
+  already narrowed by the condition and converged over the loop's
+  passes: `in_range` holds only when that type is an int whose lower
+  bound is at least 0 (`int_bounds().0 >= Some(0)`).
+  `for ($i = -1; …; $i++)` converges to a range starting at `-1`, so the
+  write drops list-ness. `for ($i = 0; …)` keeps it, as does any loop
+  narrowed non-negative before the write
+  (`if ($i >= 0) { $x[$i] = 5; }`). A string or float index never
+  qualifies, since `'1'` would still be an int key but `1.5` truncates.
+  The syntactic matcher's doc gains the lower-bound condition. Fixtures:
+  the finding's `-1` loop makes `$x` `array<int, int>`; a `0` loop keeps
+  `list<int>`; a loop over `$i = count($x) - 1` counting down with
+  `$i >= 0` keeps it too.
 - [ ] **F74. A `config.platform.php` given as a full version is ignored**
   (`declared_php_versions`, `project/session.rs`; also before the
   window). Composer's `config.platform.php` is an exact version
