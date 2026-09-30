@@ -4,7 +4,8 @@ Findings from reviewing the work done on the Stage B review
 (`STAGE_B_REVIEW.md`): every commit from its F23 fix (`041fcc46`) to
 `31d6c5a7` and the five after it (`d4ae7678`, `5400b17b`, `96027afd`,
 `9cef98e6`, `3cea2a20`), the thirteen code commits made while this
-review ran (`9cfad246` to `783727da`), and every item it marks done.
+review ran (`9cfad246` to `783727da`) and `cc4e6b5e` after them, and
+every item it marks done.
 Judged on
 runtime correctness and design, not parity with PHPStan. Each task names
 where the problem is, what is wrong, and what done looks like.
@@ -1044,6 +1045,20 @@ through `check-project`.
   Done: nothing to change in the code; a fix commit's scoped test run
   includes the fixtures its function reaches.
 
+- [ ] **F87. A discarded pass still leaves some records behind**
+  (`Checker::pass_mark`, `cc4e6b5e`; read, not probed). `rewind_to`
+  covers diagnostics, semantic tokens, throw and return points and inlay
+  hints. What a discarded loop pass adds elsewhere stays:
+  `record_throw_state`'s entries in the enclosing `try`'s frame and
+  `property_assign_facts`. Both only gain the narrower types of earlier
+  passes, so neither changes an outcome today. `named_argument_call_facts`
+  is deduplicated by a linear `contains` per push instead of being
+  rewound. `check_trait_methods` checks a trait's methods once per host
+  and dedups the diagnostics only, so its semantic tokens and inlay hints
+  still repeat per host. Done: every per-pass record is in `PassMark`
+  (or keyed so a repeat can't add), and the trait re-check rewinds the
+  LSP records after its first host.
+
 ### Comments
 
 - [ ] **F24. Comments the fixes left wrong:**
@@ -1241,6 +1256,14 @@ through `check-project`.
     is a no-op and the mutating walk visits no names.
 
   Done: each says what the code does, on the item it documents.
+
+- [ ] **F88. Comments that still describe the truncation `cc4e6b5e`
+  replaced:** `converge_loop_body`'s doc calls discarding a pass "the
+  existing `diagnostics.truncate` pattern", and `check_while`'s comment
+  says every pass but the kept one "has its diagnostics discarded via
+  `converge_loop_body`'s own `diagnostics.truncate`"; both now go
+  through `rewind_to`, which drops more than diagnostics. Done: both
+  name `rewind_to`.
 
 ## The Stage B review's done items
 
@@ -1568,6 +1591,10 @@ read and its findings added above.
   keys as a shape... (F81)
 - [x] `783727da` fix: a write at a non-literal key keeps a shape a
   required field keeps non-empty... (F85)
+
+- [x] `cc4e6b5e` fix: a loop pass that is discarded leaves nothing
+  behind... (F87, F88; a throw inside three nested loops probed: reported
+  once, and a closure's return inside a loop typed right)
 
 ### Final state, module by module
 
