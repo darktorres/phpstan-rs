@@ -660,11 +660,10 @@ through `check-project`.
     call's type (`bool`) stop being constants. The false branch keeps
     `Closed`.
   - A small table of closing functions (`fclose`, `pclose`, `closedir`,
-    `proc_close`, `gzclose`, `bzclose`, `xml_parser_free`,
-    `shmop_delete`'s kin, and those whose argument is still a resource)
-    marks a narrowable argument `Closed` after the call. It sits beside
-    the other by-reference effects of builtins, not in the stubs, which
-    have no `@param-out`.
+    `proc_close`, `gzclose` and `bzclose`, the ones that still take a
+    resource on PHP 8.5) marks a narrowable argument `Closed` after the
+    call. It sits beside the other by-reference effects of builtins, not
+    in the stubs, which have no `@param-out`.
   - `gettype`'s return (`builtin_calls.rs:2708`) keeps answering `'resource
     (closed)'` for `Closed`, and gives both strings for `Either`.
 
