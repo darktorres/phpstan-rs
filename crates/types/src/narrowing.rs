@@ -555,11 +555,25 @@ impl Type {
                     });
                     match (key, element) {
                         (Some(key), Some(value)) => {
-                            let mut members = members.clone();
-                            members.push(Type::has_offset_value(
-                                key.clone(),
-                                value.without(&Type::null()),
-                            ));
+                            // An offset already tracked keeps its value,
+                            // now non-null.
+                            let mut tracked = false;
+                            let mut members: Vec<Type> = members
+                                .iter()
+                                .map(|m| match m.repr() {
+                                    Repr::HasOffsetValue(k, v) if k == key => {
+                                        tracked = true;
+                                        Type::has_offset_value(k.clone(), v.without(&Type::null()))
+                                    }
+                                    _ => m.clone(),
+                                })
+                                .collect();
+                            if !tracked {
+                                members.push(Type::has_offset_value(
+                                    key.clone(),
+                                    value.without(&Type::null()),
+                                ));
+                            }
                             Type::new(Repr::Intersection(members))
                         }
                         _ => self.clone(),

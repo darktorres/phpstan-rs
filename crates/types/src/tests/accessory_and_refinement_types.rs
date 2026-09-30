@@ -603,3 +603,17 @@ fn an_offset_of_several_literal_keys_reads_those_fields_joined() {
         Some(Type::union(Type::string(), Type::null()))
     );
 }
+
+#[test]
+fn isset_on_an_offset_already_tracked_narrows_it_instead_of_repeating_it() {
+    let key = ShapeKey::Str("a".into());
+    let tracked = Type::new(Repr::Intersection(vec![
+        Type::array(Type::unknown_array_key(), Type::mixed()),
+        Type::accessory(AccessoryKind::NonEmptyArray),
+        Type::has_offset_value(key.clone(), Type::union(Type::int(), Type::null())),
+    ]));
+    assert_eq!(
+        tracked.to_isset_container(Some(&key)).to_string(),
+        "non-empty-array&hasOffsetValue('a', int)"
+    );
+}
