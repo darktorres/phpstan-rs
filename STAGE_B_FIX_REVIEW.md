@@ -1906,8 +1906,8 @@ through `check-project`.
   helper. Fixtures: `$x = var_export(...$args)` is clean;
   `array_filter(...$args)` isn't judged by `$args`'s type;
   `explode(limit: -1, separator: ',', string: $s)` is `list<string>`
-  (with F49); `array_slice(array: $a, offset: 5)` keeps the generic
-  return.
+  (with F49); `array_slice(offset: 5, array: $a)` takes the
+  `array_slice` arm as the positional call does.
 - [ ] **F66. Two live shapes the opt-in dead-code rules report**
   (`project::whole_program`; also before the window):
   - `class.unused` for a class named only in PHPDoc (`@param DocOnly
