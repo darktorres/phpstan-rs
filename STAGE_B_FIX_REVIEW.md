@@ -2515,6 +2515,30 @@ through `check-project`.
   break; } $a = 'two'; break; default: $a = 'd';`, `$a` is `'two'|'d'`.
   Done: the popped `break` states join the switch's exit states, with a
   fixture.
+
+  Design: `check_switch` (`stmt/switch.rs`) already pushes a
+  `loop_break_states` frame and a `loop_continue_states` frame, so that
+  a `break` inside the switch is attributed to it. Every such `break`,
+  nested in an `if` or not, records its scope into that frame. Then the
+  frames are popped and dropped (line 121), and only a case's last
+  statement is read for a `break` (`is_switch_break_equivalent`). The
+  fix reads them:
+
+  - The popped break frame's states join `exit_states`.
+  - So does the popped continue frame's: a `continue` or `continue 1` aimed
+    at the switch acts as `break`, which is why the frames stay
+    depth-aligned.
+  - The last-statement test for `break` goes, since a trailing `break;` is
+    recorded in the frame like any other. A case's last statement still
+    decides the fall-off-the-end exit of the last case and whether a case
+    falls through to the next.
+
+  The "no `default`" pre-switch state stays. Merging a state twice, once
+  by fall-off and once by a `break` with the same scope, is idempotent.
+  Fixtures: the finding's shape gives `$a` `'one'|'two'|'d'`; a `break`
+  inside a nested `foreach` in a case doesn't leave the switch (it
+  targets the loop's own frame); a `continue` directly in a case inside
+  a `while` exits the switch with its state.
 - [ ] **F69. A `catch` is judged unreachable when the `try` throws only
   through magic** (`check_try`, `checker/stmt/try_catch.rs`; also before
   the window). A clause is entered only from recorded throw points, and
