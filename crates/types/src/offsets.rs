@@ -84,6 +84,67 @@ impl Type {
         }
     }
 
+    /// What a nested write (`$a[offset][…] = v`) writes into: the value at
+    /// `offset`, and `array{}` where it is `null` or where a shape may lack
+    /// the key, since PHP creates the array there. A general array's key,
+    /// or a shape tail's, is taken as present, as a read of it is.
+    /// `offset` `None` is an append, which always starts from `array{}`.
+    /// `None` when this isn't an array or `null`.
+    pub fn nested_write_container(&self, offset: Option<&Type>) -> Option<Type> {
+        let empty = || Type::array_shape(Shape::sealed(Vec::new()));
+        let Some(offset) = offset else {
+            return Some(empty());
+        };
+        let keys: Option<Vec<ShapeKey>> = offset.union_members().iter().map(literal_key).collect();
+        let mut containers = Vec::new();
+        for member in self.union_members() {
+            if member.is_null().yes() {
+                containers.push(empty());
+                continue;
+            }
+            if !member.is_array().yes() {
+                return None;
+            }
+            let reads: Vec<(Type, Option<Type>)> = match &keys {
+                Some(keys) if !keys.is_empty() => keys
+                    .iter()
+                    .map(|key| (key.to_type(), member.offset_value_type(Some(key))))
+                    .collect(),
+                _ => vec![(offset.clone(), member.offset_value_type(None))],
+            };
+            let shape = crate::union::shape_parts(member).map(|(shape, _)| shape);
+            for (key, value) in reads {
+                let presence = match shape {
+                    Some(shape) => match literal_key(&key) {
+                        Some(k) => match shape.field(&k) {
+                            Some(field) if !field.optional => TrinaryLogic::Yes,
+                            Some(_) => TrinaryLogic::Maybe,
+                            None if shape.is_sealed() => TrinaryLogic::No,
+                            None => TrinaryLogic::Yes,
+                        },
+                        None if shape.is_sealed() => member.has_offset_value_type(&key),
+                        None => TrinaryLogic::Yes,
+                    },
+                    None => TrinaryLogic::Yes,
+                };
+                if !presence.yes() {
+                    containers.push(empty());
+                }
+                if presence.no() {
+                    continue;
+                }
+                for v in value.unwrap_or_else(Type::mixed).union_members() {
+                    containers.push(if v.is_null().yes() {
+                        empty()
+                    } else {
+                        v.clone()
+                    });
+                }
+            }
+        }
+        Some(Type::union_of(containers))
+    }
+
     /// PHPStan's `getOffsetValueType()` for an array: the value at `key`,
     /// `None` for an offset not known literally (every value it could
     /// be; `null` from `array{}`). `None` when this isn't an array, or a

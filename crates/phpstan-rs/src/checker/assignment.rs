@@ -613,10 +613,9 @@ impl<'a> Checker<'a> {
     }
 
     /// The current type of a nested write's intermediate container
-    /// (`$x['a']` in `$x['a']['b'] = 1`). An offset provably absent from
-    /// its own container - an append, a literal key the shape doesn't
-    /// have, or any key on an empty shape - is auto-vivified by PHP into
-    /// a fresh array, at any depth, rather than read back as `mixed`.
+    /// (`$x['a']` in `$x['a']['b'] = 1`), at any depth: where the offset
+    /// may be absent or holds `null`, PHP creates a fresh array, so the
+    /// container includes `array{}` there.
     fn nested_write_container_type(&self, e: &Expr, locals: &Locals) -> Type {
         syntax::stack::guard(|| {
             let ExprKind::Index(inner, idx) = &e.kind else {
@@ -626,22 +625,17 @@ impl<'a> Checker<'a> {
                 ExprKind::Index(..) => self.nested_write_container_type(inner, locals),
                 _ => self.infer_expr(inner, locals),
             };
-            let shapes = inner_ty.constant_arrays();
-            if shapes.is_empty() {
-                return self.infer_expr(e, locals);
+            // An element narrowed by an earlier write or check is present,
+            // with that type.
+            if let Some(key) = narrowing_key(e)
+                && let Some(narrowed) = locals.get(&key)
+            {
+                return narrowed.clone();
             }
-            let absent = match idx.as_deref() {
-                None => true,
-                Some(i) => match literal_shape_key(i) {
-                    Some(key) => !shapes.iter().any(|shape| shape.field(&key).is_some()),
-                    None => shapes.iter().all(|shape| shape.fields.is_empty()),
-                },
-            };
-            if absent {
-                Type::array_shape(Shape::sealed(Vec::new()))
-            } else {
-                self.infer_expr(e, locals)
-            }
+            let idx_ty = idx.as_deref().map(|i| self.infer_expr(i, locals));
+            inner_ty
+                .nested_write_container(idx_ty.as_ref())
+                .unwrap_or_else(|| self.infer_expr(e, locals))
         })
     }
 
