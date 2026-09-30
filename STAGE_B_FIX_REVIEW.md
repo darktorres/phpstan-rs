@@ -3068,11 +3068,38 @@ through `check-project`.
     group listing all of them in path order. `sites_differ` and the
     signature fields on `FnDeclSite` go.
 
+  - Whether two sites are a duplicate. PHP fails only when both
+    declarations run in one process, so that is the test, in place of
+    the opt-in flag that stands in for it today. Two unconditional
+    sites collide when some load set holds both files:
+    - Composer's autoload `files` (and `autoload-dev` `files`), which
+      every request loads; `composer/src/vendor.rs` already reads them;
+    - one PHPUnit test suite: every test file under a `<testsuite>`
+      directory of `phpunit.xml(.dist)` loads into the same process, which
+      is the case the opt-in was guarding against, and in fact a real
+      fatal. A small `phpunit.xml` reader (directories, suffixes,
+      excludes) joins the project's config loading;
+    - the include graph: files reachable from one entry point through
+      `include`/`require` targets that `checker/includes.rs` resolves,
+      the entry points being the Composer `bin` files, the `#!` scripts
+      (F42's rule) and files nothing includes.
+
+    A class declaration is autoloaded by name, and PSR-4 maps a name to
+    one file, so a second declaration of a class is unreachable through
+    autoloading. Its collision needs the same shared load set through
+    `files`, a test suite or includes; otherwise the second declaration
+    is reported as unreachable dead code (`class.unreachableDeclaration`,
+    level 4) rather than a fatal. With that test the checks run by
+    default, and the two `check_duplicate_*` flags go. An include target
+    that can't be resolved counts as possibly loading anything, so it
+    can't hide a collision.
+
   Fixtures: `class Foo` and `class foo` in two files report
   `class.duplicate`, and `function helper`/`function HELPER` report too;
   `twice(int)` in `c.php` and `e.php` with `twice(string)` in `d.php`
-  reports all three sites in one list; a stub file's overloads report
-  nothing.
+  reports all three sites in one list when the files share a load set,
+  and nothing when they don't; two test files in one PHPUnit suite
+  declaring `helper()` report; a stub file's overloads report nothing.
 - [ ] **F76. A namespace cycle through a context file can go unreported**
   (`find_namespace_cycles`; also before the window). The cycle is
   reported at the alphabetically-first class contributing an edge, chosen
