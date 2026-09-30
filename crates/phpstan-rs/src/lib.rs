@@ -14,6 +14,7 @@ pub mod checker;
 pub mod deps;
 pub mod doctrine_functions;
 pub mod ext;
+pub mod gate;
 pub mod ignore_comments;
 pub mod ignore_errors;
 pub mod lsp;

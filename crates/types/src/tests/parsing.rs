@@ -788,3 +788,118 @@ fn a_quoted_literal_containing_a_bracket_shaped_character_inside_an_array_shape(
         )]))
     );
 }
+
+#[test]
+fn a_displayed_type_parses_back_to_the_same_display() {
+    let displays = [
+        "mixed",
+        "mixed~null",
+        "mixed~(false|null)",
+        "(int|string)",
+        "*ERROR*",
+        "never",
+        "void",
+        "array<string, int>&hasOffsetValue('k', 1)",
+        "non-empty-array&hasOffsetValue(0, int)",
+        "array&hasOffset('k')",
+        "Foo&hasMethod(foo)",
+        "Foo&hasProperty(bar)",
+        "reflectedMember(Foo, 'bar')",
+        "list<int>",
+        "non-empty-list<string>",
+        "non-falsy-lowercase-uppercase-string",
+        "non-empty-literal-decimal-int-string",
+        "numeric-string",
+        "non-empty-array{a?: int, b?: string}",
+        "\"a\\nb\\x00\"",
+        "'it\\'s'",
+        "1.0E+25",
+        "1.5",
+        "-0.0",
+        "-INF",
+        "INF",
+        "NAN",
+        "-3",
+        "Foo::BAR*",
+        "Foo::Case",
+        "Foo<covariant Bar, *>",
+        "Foo<contravariant Bar>",
+        "($x is int ? string : null)",
+        "(T is not int ? string : null)",
+        "callable<T of int>(T): T",
+        "callable(int, string=, float..., &bool): void",
+        "Closure(int=): void",
+        "callable",
+        "int<0, max>",
+        "int<min, 5>",
+        "array{a?: int, ...<string, mixed>}",
+        "array{a: int, ...}",
+        "array{'content type': int, 0: string, plural-forms: bool}",
+        "object{a: int}",
+        "class-string<Foo>",
+        "class-string",
+        "interface-string",
+        "key-of<X>",
+        "value-of<X>",
+        "X['k']",
+        "$this",
+        "static<T>",
+        "self",
+        "parent",
+        "object",
+        "resource",
+        "closed-resource",
+        "true",
+        "bool",
+        "float",
+        "class@anonymous/src/a.php:12",
+        "1|2|'a'|null",
+        "Countable&Iterator",
+        "array<array{counter: int, first_encounter?: string|null}>",
+    ];
+    let failures: Vec<String> = displays
+        .iter()
+        .filter_map(|display| match crate::try_parse_displayed(display) {
+            Some(parsed) if parsed.to_string() == *display => None,
+            Some(parsed) => Some(format!("{display} reads back as {parsed}")),
+            None => Some(format!("{display} does not parse")),
+        })
+        .collect();
+    assert!(failures.is_empty(), "{failures:#?}");
+}
+
+#[test]
+fn a_bare_name_the_resolver_knows_is_its_type() {
+    let t = Type::template_param(crate::TemplateParam {
+        name: "T".to_string(),
+        bound: Box::new(Type::int()),
+        variance: crate::Variance::Invariant,
+        scope: Some("f".to_string()),
+        default: None,
+    });
+    let resolve = |name: &str| (name == "T").then(|| t.clone());
+    assert_eq!(
+        crate::try_parse_displayed_with("list<T>", &resolve),
+        Some(Type::list_of(t.clone()))
+    );
+    assert_eq!(
+        crate::try_parse_displayed("T"),
+        Some(Type::object("T".into(), Vec::new()))
+    );
+}
+
+#[test]
+fn a_display_with_an_unreadable_part_does_not_parse() {
+    for display in [
+        "array<",
+        "int<1>",
+        "Foo::",
+        "(int)",
+        "'a",
+        "1.00",
+        "array{a int}",
+        "*",
+    ] {
+        assert_eq!(crate::try_parse_displayed(display), None, "{display}");
+    }
+}
