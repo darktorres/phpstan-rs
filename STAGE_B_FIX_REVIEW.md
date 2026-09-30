@@ -1815,6 +1815,42 @@ through `check-project`.
   fixed point, and `combined_shape` joins an unsealed member's tail into
   the keys it lacks, with fixtures.
 
+  Design: a widening operator has to reach a fixed point in a bounded
+  number of passes whatever the body does. `widen_towards`
+  (`types/src/queries.rs:328`) recurses field by field, so a field whose
+  new value holds the old shape one level deeper recurses one level
+  deeper on every pass. That is the classic unbounded chain, and the
+  passes end before it does. The standard cure is a depth-sensitive
+  step:
+
+  - A helper `array_depth(ty)` gives the nesting depth of array shapes and
+    general arrays in a type (the max over union members, 0 for a
+    non-array).
+  - In the combined-shape branch, a field is widened with `widen` only when
+    `array_depth(new) <= array_depth(old)`. A field that gained a level
+    becomes `new.generalize()` with every array nested inside collapsed to
+    `array<generalized key, mixed>` (a new `Type::collapse_nested_arrays`).
+    The field keeps "is an array" and its key kind, and gives up the values
+    it could not bound. The next pass sees an unchanged depth and settles.
+  - The general-array branch's `before.widen_towards(&after)` on values gets
+    the same test, since a general array whose values nest deeper each pass
+    has the same chain.
+
+  After the finding's loop, `$a` is
+  `array{x: int, y?: array<string, mixed>}`, and
+  `($a['y']…['x'] ?? 1) === 1` has no constant verdict. The `prev`/`i`
+  shape bottoms out the same way, at `prev?: array<string, mixed>`, with
+  no `array{}` claim.
+
+  `combined_shape`: when a key is missing from some member, the field is
+  made optional. If that member is unsealed and its tail key type may be
+  the key, the field's type also joins the tail's value type, since the
+  key may be there with a tail value. That is the same rule F85 gives
+  writes. Fixtures: both loops of the finding, a types-crate test that
+  widening a self-nesting shape reaches the same type on two consecutive
+  passes, and `combined_shape` of
+  `array{a: 1}|array{b: 2, ...<string, int>}` giving `a?: 1|int`.
+
 ### Wrong types and missed reports (probed)
 
 - [ ] **F13. An array literal's positional key after an unknown key**
