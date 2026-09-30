@@ -2799,6 +2799,32 @@ through `check-project`.
   `Zed` for `Acme` reports `App, Zed`. Done: the representative is the
   first analysed class contributing an edge, with a fixture.
 
+  Design: the representative is chosen before anything knows which files
+  are analysed. `find_namespace_cycles`
+  (`whole_program/circular_namespace_deps.rs`) keeps
+  `edge_representative` as the alphabetically first class per
+  namespace-pair edge, over every registry class, and the caller drops
+  the diagnostic when that class's file isn't analysed. So the report
+  depends on the alphabetical accident the finding shows, `Acme` against
+  `Zed`.
+
+  - The function takes `is_analysed: &dyn Fn(&str) -> bool`, from the
+    caller's file set and the registry's class-to-file provenance.
+  - Edges are built from every class, analysed or not, since a context
+    class's `extends` is real structure.
+  - `edge_representative` keeps the first analysed contributor per edge, in
+    FQN order.
+  - A cycle's representative is the minimum over its edges' analysed
+    contributors. A cycle with none (every contributing class is in context
+    files) isn't reported, since no analysed file can carry it, which is the
+    only case where dropping stays right.
+  - The `expect` on the minimum becomes that skip.
+
+  Fixtures: `App\Foo extends Acme\Base` with
+  `Acme\Plugin implements App\Contract` in a scan path reports
+  `App, Acme` at `App\Foo`, the same as with `Zed`; a cycle entirely
+  inside scan paths reports nothing.
+
 - [ ] **F82. Forgetting properties after a call (F62's fix) misses
   whole kinds of writes** (`forget_members_a_call_may_change`,
   `checker/expr.rs`, and `registry/property_writes.rs`; `1c33a059`,
