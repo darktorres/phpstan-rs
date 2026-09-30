@@ -1722,6 +1722,36 @@ through `check-project`.
   `check_array_values_no_op` do the same and judge `array_filter(...$args)`
   by the type of `$args` itself (read, not probed). Done: a spread
   argument makes each check bail, with a fixture.
+
+  Design: the three checks are instances of a wider pattern. The builtin
+  special cases (`infer_builtin_call_return_type`, 140
+  `args.len()`/`args[i]` reads in `builtin_calls.rs`) and the call
+  checks in `array_ops.rs` index the raw argument list. Its doc says
+  named arguments are not worth handling. Only four arms (`min`/`max`,
+  `compact`, and the `array_intersect`/`array_merge` spread unwrapping)
+  look at `a.spread`. So a spread or a reordered named argument can
+  reach an arm that reads position 1 as the second parameter. The fix is
+  one normalization step ahead of all of them:
+
+  - `positional_args(args, sig) -> Option<Cow<[Arg]>>` returns the list in
+    parameter order. A named argument moves to its parameter's position. A
+    gap, an omitted optional parameter before a later named one, gives
+    `None`, since the arms assume a dense prefix. So does a spread, unless
+    the function is in a small `SPREAD_AWARE` set (the arms that already
+    unwrap a spread).
+  - `infer_builtin_call_return_type` calls it right after the polyfill
+    check, falling back to `infer_call_return_type`'s generic path on
+    `None`. `type_check_call_outcome` and every `check_*` taking `args` in
+    `array_ops.rs` (`check_useless_return_value_call`,
+    `check_array_filter_no_op`, `check_array_values_no_op`) and in
+    `castable_arguments.rs` do the same, skipping the check on `None`.
+
+  The doc's named-argument sentence is replaced by a pointer to the
+  helper. Fixtures: `$x = var_export(...$args)` is clean;
+  `array_filter(...$args)` isn't judged by `$args`'s type;
+  `explode(limit: -1, separator: ',', string: $s)` is `list<string>`
+  (with F49); `array_slice(array: $a, offset: 5)` keeps the generic
+  return.
 - [ ] **F66. Two live shapes the opt-in dead-code rules report**
   (`project::whole_program`; also before the window):
   - `class.unused` for a class named only in PHPDoc (`@param DocOnly
