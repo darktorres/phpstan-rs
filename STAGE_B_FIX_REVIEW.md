@@ -280,9 +280,16 @@ through `check-project`.
   So `$undef ?? 'a'` is `'a'`, `$v ?? 2` is `1|2`, `isset($v)` narrows
   `$v` to `1`, and inside `if (isset($m))` on a never-assigned `$m` the
   branch has `$m` as `never`, dead, which F4's implicit `never` keeps
-  silent. A never-assigned name in `isset()` or `??` may get its own
-  report later (PHPStan's "is never defined"); that is not part of this.
-  Fixtures: the five expressions above; `$m->foo()` inside `if
+  silent. The probe of a name that is certainly undefined is itself
+  dead code, so it is reported: `isset.variable`, `empty.variable` and
+  `nullCoalesce.variable` ("Variable $m in isset() is never defined."),
+  at level 1, from `check_pointless_null_probe`, which already owns the
+  "always null" and "never null" verdicts for a bare variable. A `Maybe`
+  name and any name under `any_variable_may_exist` (`extract`, `$$`,
+  `include`, `eval`) are not reported. Fixtures: the five expressions
+  above; `isset($m)` on a never-assigned `$m` reports
+  `isset.variable`, and `isset($v)` after the conditional definition
+  doesn't; `$m->foo()` inside `if
   (isset($m))` after a conditional `$m = new Foo` is checked against
   `Foo`; a plain `echo $v` after the conditional definition still
   reports.
