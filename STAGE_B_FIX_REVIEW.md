@@ -468,6 +468,37 @@ through `check-project`.
   compares equal to itself, as `scalars_disjoint`'s "NAN is itself" says.
   This was already the case before the fix window; `89da4c25` and
   `d89ea9e5` kept it. Done: a NaN literal is never identical to anything.
+
+  Design: the always-true verdict comes from
+  `Relation::identical_result` (`types/src/relation/accepts.rs:810`).
+  For two `is_finite_scalar_type` operands it answers `left == right`,
+  and type equality (`lib.rs:388`) makes two NaN literals equal, as a
+  type's identity must for interning. Value identity is a different
+  question, so `identical_result` answers `Some(false)` first whenever
+  either side is a NaN float literal: no value is identical to NaN, NaN
+  included. The `is_finite_scalar_type` helper then becomes
+  `Type::is_single_value` (`queries.rs:201`), which already excludes
+  NaN, adding the empty-array case it lacks, and the separate helper and
+  its doc go.
+
+  Two more places read `=== NAN` as the value NaN:
+
+  - The `===` true branch narrows `float $x` to `NAN` (probed), where it
+    should be `never`. With F4's implicit `never`, the equality arm in
+    `narrowing.rs` narrows to `never` when the other side is a NaN
+    literal, and leaves the `!==` false branch untouched.
+  - `match ($y) { NAN => 'nan', default => 'other' }` types the result
+    `'nan'|'other'`, though a NaN arm never matches (PHP gives `2` for
+    `match(NAN){NAN=>1, default=>2}`). The match arm-condition check, which
+    goes through `identical_result`, then drops that arm and reports it
+    always false.
+
+  The type-level arms in `super_type.rs` ("NAN is itself") stay: they
+  say the type `NAN` contains its value. Their comments should say that,
+  so they aren't read as value identity. Fixtures: `NAN === NAN` reports
+  `identical.alwaysFalse` and `NAN !== NAN` `notIdentical.alwaysTrue`,
+  `$x === NAN` makes `$x` `*NEVER*`, and the `NAN` match arm is
+  reported.
 - [ ] **F12. An unresolvable property type is reported up to three times**
   (`22d4ff21`, F63's property half). `/** @var non-empty-foo */` on a
   property gives `class.notFound`, `property.unresolvableType`, and - new
