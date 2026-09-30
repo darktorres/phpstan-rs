@@ -913,6 +913,17 @@ impl<'a> Checker<'a> {
                         {
                             self.check_random_int_call(args, locals);
                         }
+                        let bare = name
+                            .rsplit('\\')
+                            .next()
+                            .unwrap_or(name)
+                            .to_ascii_lowercase();
+                        if matches!(
+                            bare.as_str(),
+                            "array_combine" | "array_flip" | "array_count_values"
+                        ) {
+                            self.check_value_to_key_call(&bare, args, locals);
+                        }
                         if name
                             .rsplit('\\')
                             .next()

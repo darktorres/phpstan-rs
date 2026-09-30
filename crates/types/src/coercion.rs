@@ -184,6 +184,15 @@ impl Type {
         })
     }
 
+    /// The key a value becomes where PHP converts it to a string first
+    /// (`array_fill_keys`, `array_combine`): `1.7` gives `'1.7'`, `true`
+    /// gives `1`, `null` gives `''`.
+    pub fn to_string_array_key(&self, hierarchy: &dyn ClassHierarchy) -> Type {
+        self.to_string_type(hierarchy)
+            .unwrap_or_else(Type::string)
+            .to_array_key()
+    }
+
     /// PHPStan's `toArrayKey()`: the key a value of this type becomes in
     /// an array - a float truncated to an int, `true`/`false` as `1`/`0`,
     /// `null` as `''`, a canonical integer string as that int. A string

@@ -110,6 +110,60 @@ impl<'a> Checker<'a> {
         }
     }
 
+    /// Builtins that turn values into keys, called as PHP rejects:
+    /// `array_combine` with arrays whose sizes surely differ (a
+    /// `ValueError` on PHP 8, `false` before), and `array_flip` /
+    /// `array_count_values` over values that aren't ints or strings, each
+    /// skipped with a warning.
+    pub(crate) fn check_value_to_key_call(&mut self, name: &str, args: &[Arg], locals: &Locals) {
+        if args.iter().any(|a| a.spread || a.name.is_some()) {
+            return;
+        }
+        match (name, args) {
+            ("array_combine", [keys, values, ..]) => {
+                let keys_ty = self.infer_expr(&keys.value, locals);
+                let values_ty = self.infer_expr(&values.value, locals);
+                if let (Some((kl, kh)), Some((vl, vh))) =
+                    (keys_ty.count_range(), values_ty.count_range())
+                    && (kh.is_some_and(|h| h < vl) || vh.is_some_and(|h| h < kl))
+                {
+                    self.report(
+                        format!(
+                            "array_combine() expects arrays of the same size, {keys_ty} and {values_ty} given."
+                        ),
+                        values.value.span,
+                        3,
+                        "function.arraySizeMismatch",
+                    );
+                }
+            }
+            ("array_flip" | "array_count_values", [array, ..]) => {
+                let Some(values) = self.infer_expr(&array.value, locals).array_value_type() else {
+                    return;
+                };
+                let keyable = Type::union(Type::int(), Type::string());
+                if let Some(level) = self.failing_level(&values, 3, |m| {
+                    self.relation().is_super_type_of(&keyable, m).no()
+                }) {
+                    let verb = if name == "array_flip" {
+                        "flip"
+                    } else {
+                        "count"
+                    };
+                    self.report(
+                        format!(
+                            "{name}() can only {verb} int and string values, {values} given; others are skipped."
+                        ),
+                        array.value.span,
+                        level,
+                        "function.unkeyableValue",
+                    );
+                }
+            }
+            _ => {}
+        }
+    }
+
     /// `DefineParametersRule` - `define()`'s third `$case_insensitive`
     /// argument stopped doing anything as of PHP 8.0 (case-insensitive
     /// constants were removed entirely); real PHP emits "Argument #3

@@ -541,18 +541,29 @@ impl<'a> Checker<'a> {
                     }
                 }
             }
-            // Combining never changes the values' own type - $keys become
-            // what array can't represent (key types aren't
-            // tracked), so the result is simply $values' own type
-            // verbatim, the same "no transformation" shape as
-            // array_filter above.
-            "array_combine" if args.len() == 2 => {
-                let values_ty = self.infer_expr(&args[1].value, locals);
-                if values_ty.is_array().yes() {
-                    // The result is keyed by $keys, not $values's own
-                    // keys, so any Accessory marker $values carried
-                    // doesn't survive.
-                    return values_ty.without_accessories();
+            // `$keys`' values, converted to strings and cast as keys, key
+            // `$values`' values; two constant lists zip into a shape. What
+            // else the stub returns for the configured versions (`false`
+            // on PHP 7 for different sizes) stays.
+            "array_combine" => {
+                let resolved = resolve_call_args(args, sig.params());
+                if let (Some(keys), Some(values)) = (
+                    resolved.first().copied().flatten(),
+                    resolved.get(1).copied().flatten(),
+                ) {
+                    let keys_ty = self.infer_expr(keys, locals);
+                    let values_ty = self.infer_expr(values, locals);
+                    if keys_ty.is_array().yes() && values_ty.is_array().yes() {
+                        let other = self
+                            .infer_call_return_type(sig, &resolved, locals)
+                            .union_members()
+                            .iter()
+                            .filter(|m| m.is_array().no())
+                            .cloned()
+                            .collect::<Vec<_>>();
+                        let combined = self.combined_arrays(&keys_ty, &values_ty);
+                        return Type::union_of([vec![combined], other].concat());
+                    }
                 }
             }
             // Both preserve list-ness/non-emptiness through to their
@@ -671,6 +682,7 @@ impl<'a> Checker<'a> {
             // can't change whether there's at least one element).
             "array_flip" if args.len() == 1 => {
                 let arr_ty = self.infer_expr(&args[0].value, locals);
+                let keyable = Type::union(Type::int(), Type::string());
                 // A real array shape gets a precise, field-by-field
                 // flip: a field whose own value is an int/string literal
                 // becomes a real named field in the result (keyed by that
@@ -701,9 +713,12 @@ impl<'a> Checker<'a> {
                     let key_ty = arr_ty
                         .array_key_type()
                         .unwrap_or_else(Type::unknown_array_key);
+                    // Only int and string values flip; others are skipped.
                     let elem_ty = arr_ty.array_value_type().unwrap_or(Type::mixed());
+                    let all_keyable = self.relation().is_super_type_of(&keyable, &elem_ty).yes();
+                    let elem_ty = self.relation().narrow(&elem_ty, &keyable).to_array_key();
                     let flipped = Type::array(elem_ty, key_ty);
-                    return if arr_ty.is_non_empty_array().yes() {
+                    return if all_keyable && arr_ty.is_non_empty_array().yes() {
                         Type::intersection_of(vec![
                             flipped,
                             Type::accessory(AccessoryKind::NonEmptyArray),
@@ -877,11 +892,15 @@ impl<'a> Checker<'a> {
             "array_count_values" if args.len() == 1 => {
                 let arr_ty = self.infer_expr(&args[0].value, locals);
                 if arr_ty.is_array().yes() {
+                    // Only int and string values count; others are skipped.
+                    let keyable = Type::union(Type::int(), Type::string());
+                    let elem_ty = arr_ty.array_value_type().unwrap_or(Type::mixed());
+                    let all_keyable = self.relation().is_super_type_of(&keyable, &elem_ty).yes();
                     let counted = Type::array(
-                        Type::union_of(vec![Type::int(), Type::string()]),
-                        Type::int(),
+                        self.relation().narrow(&elem_ty, &keyable).to_array_key(),
+                        Type::int_range(Some(1), None),
                     );
-                    return if arr_ty.is_non_empty_array().yes() {
+                    return if all_keyable && arr_ty.is_non_empty_array().yes() {
                         Type::intersection_of(vec![
                             counted,
                             Type::accessory(AccessoryKind::NonEmptyArray),
@@ -1289,8 +1308,15 @@ impl<'a> Checker<'a> {
                 let keys_ty = self.infer_expr(&args[0].value, locals);
                 let key_ty = keys_ty
                     .array_value_type()
-                    .unwrap_or_else(Type::unknown_array_key);
-                return Type::array(key_ty, self.infer_expr(&args[1].value, locals));
+                    .map_or_else(Type::unknown_array_key, |v| {
+                        v.to_string_array_key(self.registry)
+                    });
+                let filled = Type::array(key_ty, self.infer_expr(&args[1].value, locals));
+                return if keys_ty.is_non_empty_array().yes() {
+                    filled.to_non_empty_array()
+                } else {
+                    filled
+                };
             }
             // Splits one array into several same-shaped ones - the
             // result is an array *of* arrays, each holding the original
@@ -1362,7 +1388,30 @@ impl<'a> Checker<'a> {
                         None => None,
                     };
                     if let Some(field_ty) = field_ty {
-                        let arr_ty = Type::array(Type::unknown_array_key(), field_ty);
+                        // With an index column, its values cast as keys; a
+                        // row without it is appended under the next int.
+                        let index_key = match args.get(2) {
+                            Some(index) if !is_null_literal(&index.value) => {
+                                match (row_ty.as_array_shape(), literal_shape_key(&index.value)) {
+                                    (Some(shape), Some(key)) => match shape.field(&key) {
+                                        Some(f) if f.optional => {
+                                            Type::union(f.ty.to_array_key(), Type::int())
+                                        }
+                                        Some(f) => f.ty.to_array_key(),
+                                        None if shape.is_sealed() => Type::int(),
+                                        None => Type::unknown_array_key(),
+                                    },
+                                    (None, _) if row_ty.is_array().yes() => row_ty
+                                        .array_value_type()
+                                        .map_or_else(Type::unknown_array_key, |v| {
+                                            Type::union(v.to_array_key(), Type::int())
+                                        }),
+                                    _ => Type::unknown_array_key(),
+                                }
+                            }
+                            _ => Type::unknown_array_key(),
+                        };
+                        let arr_ty = Type::array(index_key, field_ty);
                         // The 2-argument form (no `$index_key`) always
                         // builds a brand-new array with fresh sequential
                         // integer keys starting at 0, regardless of the
@@ -1371,7 +1420,10 @@ impl<'a> Checker<'a> {
                         // values as the result's keys instead, which
                         // generally aren't sequential integers, so it
                         // keeps a plain, unmarked `Array`.
-                        return if args.len() == 2 {
+                        return if args
+                            .get(2)
+                            .is_none_or(|index| is_null_literal(&index.value))
+                        {
                             Type::intersection_of(vec![
                                 arr_ty,
                                 Type::accessory(AccessoryKind::ArrayList),
@@ -3465,4 +3517,41 @@ fn long_hex_algorithm(e: &Expr) -> bool {
         "haval256,5",
     ];
     literal_string_value(e).is_some_and(|name| LONG.contains(&name.to_ascii_lowercase().as_str()))
+}
+
+impl Checker<'_> {
+    /// `array_combine(keys, values)` for two arrays: two constant lists of
+    /// one length zip into a shape, otherwise `keys`' values converted to
+    /// strings and cast key `values`' values.
+    fn combined_arrays(&self, keys: &Type, values: &Type) -> Type {
+        let (key_arrays, value_arrays) = (keys.constant_arrays(), values.constant_arrays());
+        if let ([k], [v]) = (key_arrays.as_slice(), value_arrays.as_slice())
+            && k.fields.len() == v.fields.len()
+            && k.fields.iter().chain(&v.fields).all(|f| !f.optional)
+        {
+            let mut shape = Shape::sealed(Vec::new());
+            let zipped = k.fields.iter().zip(&v.fields).map(|(kf, vf)| {
+                ShapeKey::from_type(&kf.ty.to_string_array_key(self.registry))
+                    .map(|key| ShapeField::new(key, vf.ty.clone(), false))
+            });
+            if let Some(fields) = zipped.collect::<Option<Vec<_>>>() {
+                for field in fields {
+                    shape.set(field);
+                }
+                return Type::array_shape(shape);
+            }
+        }
+        let key = keys
+            .array_value_type()
+            .map_or_else(Type::unknown_array_key, |k| {
+                k.to_string_array_key(self.registry)
+            });
+        let value = values.array_value_type().unwrap_or_else(Type::mixed);
+        let combined = Type::array(key, value);
+        if keys.is_non_empty_array().yes() && values.is_non_empty_array().yes() {
+            combined.to_non_empty_array()
+        } else {
+            combined
+        }
+    }
 }

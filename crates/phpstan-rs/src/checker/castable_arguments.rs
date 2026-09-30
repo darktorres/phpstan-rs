@@ -59,8 +59,7 @@ impl<'a> Checker<'a> {
                     self.check_castable_array(&function, &name, &arg.value, Cast::String, locals);
                 }
             }
-            "array_combine" | "natcasesort" | "natsort" | "array_count_values"
-            | "array_fill_keys" => {
+            "array_combine" | "natcasesort" | "natsort" | "array_fill_keys" => {
                 if let Some(value) = resolved.first().copied().flatten() {
                     let name = self.castable_parameter_name(sig, args, 0);
                     self.check_castable_array(&function, &name, value, Cast::String, locals);
