@@ -1359,6 +1359,12 @@ impl<'a> Checker<'a> {
                 if arg_ty.is_array().yes()
                     && let Some(key_ty) = arg_ty.array_key_type()
                 {
+                    // Keys nothing is known of are benevolently int or string.
+                    let key_ty = if key_ty.is_unknown_array_key() {
+                        Type::benevolent_union_of(key_ty.union_members().to_vec())
+                    } else {
+                        key_ty
+                    };
                     return Type::intersection_of(vec![
                         Type::array(Type::unknown_array_key(), key_ty),
                         Type::accessory(AccessoryKind::ArrayList),
