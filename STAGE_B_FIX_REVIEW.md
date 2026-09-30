@@ -3022,6 +3022,39 @@ through `check-project`.
   `7ec336de` adds one more. Done: `is_error` folds into the one
   unknown-type predicate the checks already share, so a new check can't
   miss it.
+
+  Design: make the error type a kind of `mixed`, so every "is this
+  unknown" test sees it without learning it. Today `Repr::Error` is a
+  variant of its own (`queries.rs:18`), and a check must list it by
+  hand: two sites do (`global_constants.rs:254`, `operators.rs:223`) out
+  of about 90 `is_mixed()` guards in the main crate. Those guards are
+  exactly the "unknown, don't report" predicate a check shares, and each
+  that lacks `is_error()` can report on an already-reported expression,
+  the finding's risk.
+
+  - `Repr::Mixed(bool, Option<Type>)` becomes
+    `Repr::Mixed(MixedKind, Option<Type>)`, with `MixedKind` `Implicit`,
+    `Explicit` or `Error`, and `Repr::Error` goes. `Type::error()` builds
+    `Mixed(Error, None)`.
+  - `is_mixed()` is true for all three, so every existing guard covers the
+    error type. `is_error()` and `is_explicit_mixed()` read the kind. The
+    relation code, whose `Mixed` arms accept and are accepted by everything,
+    then gives the error type that behaviour with no arms of its own.
+  - Display keeps `*ERROR*`. A union with an error member is the error type,
+    as `mixed` absorbs: the error wins over the other kinds, since it
+    records that a report was made. Equality, hashing and interning include
+    the kind.
+  - The places that must tell a real `mixed` from an error (the missing-type
+    checks, `mixed`-specific messages, `assertType`) test `is_error()`
+    explicitly. They are found by grepping for `Repr::Mixed(` and
+    `is_explicit_mixed`, a short list, rather than by auditing every
+    `is_mixed()`.
+
+  `7ec336de`'s added `is_error()` becomes redundant and goes, as do the
+  two hand-written ones above. Fixtures: an expression built on an
+  undefined variable (`$undef->foo()->bar + 1`, `strlen($undef)`)
+  reports only `variable.undefined`; `assertType('*ERROR*', …)` still
+  matches.
 - [ ] **F22. Smaller design points:**
   - `1c301f1b`: `walk_expr_in_scope` skips a closure's `use (...)` list,
     which PHP reads in the enclosing scope.
