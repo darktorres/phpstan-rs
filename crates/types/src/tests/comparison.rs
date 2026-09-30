@@ -10,8 +10,9 @@ use crate::{
     Shape, ShapeField, ShapeKey, TrinaryLogic, Type, Variance,
 };
 
-/// The matrix's classes: `P` and `Q` unrelated, `S` with `__toString`.
-struct MatrixClasses;
+/// The matrix's classes: `P` and `Q` unrelated, `S` with `__toString`,
+/// and the enum `E`.
+pub(super) struct MatrixClasses;
 
 impl ClassHierarchy for MatrixClasses {
     fn is_subclass_of(&self, class: &str, of: &str) -> bool {
@@ -19,11 +20,19 @@ impl ClassHierarchy for MatrixClasses {
     }
 
     fn find_class(&self, name: &str) -> Option<ClassFacts<'_>> {
-        matches!(name, "P" | "Q" | "S").then_some(ClassFacts {
-            kind: ClassKind::Class,
-            is_final: false,
-            templates: &[],
-        })
+        match name {
+            "P" | "Q" | "S" => Some(ClassFacts {
+                kind: ClassKind::Class,
+                is_final: false,
+                templates: &[],
+            }),
+            "E" => Some(ClassFacts {
+                kind: ClassKind::Enum,
+                is_final: true,
+                templates: &[],
+            }),
+            _ => None,
+        }
     }
 
     fn ancestor_names(&self, _: &str) -> Vec<Name> {
@@ -78,7 +87,7 @@ fn string(s: &str) -> Type {
 }
 
 /// The type of the value the matrix labels `label`.
-fn value(label: &str) -> Type {
+pub(super) fn value(label: &str) -> Type {
     match label {
         "null" => Type::null(),
         "true" => Type::bool_literal(true),
@@ -96,6 +105,7 @@ fn value(label: &str) -> Type {
         "array{a: 1}" => Type::array_shape(Shape::from_named([("a", Type::int_literal(1), false)])),
         "array{b: 1}" => Type::array_shape(Shape::from_named([("b", Type::int_literal(1), false)])),
         "P" | "Q" | "S" => Type::object(label.into(), Vec::new()),
+        "E::A" | "E::B" => Type::enum_case("E".into(), label[3..].into()),
         _ if label.starts_with('\'') => string(&label[1..label.len() - 1]),
         _ => Type::int_literal(
             label
@@ -105,7 +115,7 @@ fn value(label: &str) -> Type {
     }
 }
 
-fn label(v: &serde_json::Value) -> String {
+pub(super) fn label(v: &serde_json::Value) -> String {
     match v {
         serde_json::Value::String(s) => s.clone(),
         other => other.to_string(),

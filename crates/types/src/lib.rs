@@ -12,6 +12,7 @@ pub use syntax::php_string::PhpString;
 
 mod arithmetic;
 mod coercion;
+mod comparator;
 mod comparison;
 mod concat;
 mod conditional;
