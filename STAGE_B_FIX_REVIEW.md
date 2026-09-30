@@ -722,6 +722,46 @@ through `check-project`.
   declares it or an `insteadof` picks one; the same rule for properties,
   where identical declarations are allowed.
 
+  Design: PHP 8.5's rule, checked with `php` for each shape:
+
+  - Two used traits giving a method of the same name (compared
+    case-insensitively: `Foo` and `foo` collide) is fatal unless the
+    class declares the method or an `insteadof` excludes all but one.
+  - An `as` alias doesn't help.
+  - An abstract trait method never collides.
+  - The same method reached from one trait through two paths (`T1` and
+    `T2` both `use T0`) doesn't collide.
+  - Properties collide between two traits, or between the class and a
+    trait, unless visibility, `static`, `readonly`, type and default all
+    match.
+
+  `check_trait_conflicts` (`oop.rs:626`) is rebuilt on that rule:
+
+  - The registry keeps a class's exclusions in place of
+    `resolved_trait_conflicts` (a set of every mentioned name, which
+    `ClassDef::resolved_trait_conflicts` in `ast.rs:595` builds from
+    aliases and precedences alike). The new set holds `(trait, method)`
+    pairs, lowercased, from each `TraitPrecedence`'s `insteadof` list.
+  - For each lowercased method name, collect the directly used traits'
+    non-abstract methods, dropping the excluded pairs. Deduplicate them by
+    declaring trait, using `lookup_method_with_owner` on the used trait,
+    so a shared `T0` counts once. Skip the name when the class's own
+    `methods` holds it, folded. Two or more left report
+    `trait.methodConflict` with PHP's wording ("Trait method B::foo has
+    not been applied as C::foo, because of collision with A::foo"),
+    whether or not their signatures agree. The old signature comparison
+    then has nothing left to decide.
+  - Properties compare the class's declared ones and each trait's in
+    one map. A pair is compatible when visibility, static-ness,
+    readonly-ness, the native type and the default's constant value are
+    equal. Otherwise `trait.propertyConflict` with PHP's "A and B define
+    the same property ($x) in the composition of C" wording, the class
+    named first when it is one side. The `info.uses().len() < 2` early
+    return goes, since one trait can conflict with the class.
+
+  Fixtures: one per `php` line above (the three fatal method shapes
+  reported, the five legal ones clean, and the three property shapes).
+
 - [ ] **F35. Abstract-method and final-override checks compare method
   names by case.** `abstract_methods()` and `final_methods()` are
   case-sensitive sets.
