@@ -1039,9 +1039,16 @@ through `check-project`.
       that one identifier without losing real float mismatches, and the
       default reports it, since the value really can be a float.
     - Real bounds come in where the engine has them. `count()` and the
-      array-size functions return `int<0, HT_MAX_SIZE>` (the hash table's
-      size limit, read from `zend_types.h` when implementing), so
-      `count($a) + 1` never overflows. A loop counter narrowed by its
+      array-size functions return `int<0, 1073741824>`: `HT_MAX_SIZE`
+      is `0x40000000` on 64-bit builds and `0x02000000` on 32-bit ones
+      (read from PHP 8.5's `Zend/zend_types.h`), and the bound follows the
+      configured `PHP_INT_SIZE`. So `count($a) + 1` never overflows.
+      String lengths and offsets (`strlen`, `mb_strlen`, `strpos`,
+      `substr_count`, …) are bounded the same way. The engine's
+      `ZSTR_MAX_LEN` is `SIZE_MAX` minus a header, beyond any `int`, so
+      the real limit is the address space: `2^52` on the 64-bit
+      platforms PHP supports, `2^31` on 32-bit. `strlen($s) + 1` doesn't
+      overflow either. A loop counter narrowed by its
       condition (`$i < count($a)`) is bounded the same way. `(int)`,
       `intdiv`, `is_int` narrowing and a comparison with an int bound all
       drop the overflow float, as they drop any float.
@@ -1051,7 +1058,7 @@ through `check-project`.
 
   F60's two range bugs are fixed in the same file (see there). Fixtures:
   each bullet of the finding, plus the three unary probes, `int + 1`
-  typed `int|float`, `count($a) + 1` typed `int<1, HT_MAX_SIZE + 1>`,
+  typed `int|float`, `count($a) + 1` typed `int<1, 1073741825>`,
   and `f($i + 1)` into an `int` parameter reporting
   `argument.intOverflow` and nothing else. A types-crate unit test runs
   F60's sweep over every operator, now including union and float
