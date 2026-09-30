@@ -3130,6 +3130,30 @@ through `check-project`.
 
   Done: the fixtures test what their names say.
 
+  Design:
+
+  - `strict_rules/arithmetic_operands__0.php` (and `__1`, its sibling
+    config) run every case on shared parameters, so `$s++` on line 12 turns
+    `$s` into `int|float|string` before `$s--` (line 13) and `$i **= $s`
+    (line 16) read it. Each case gets its own fresh parameter: `string $s1`
+    for `$s1++`, `string $s2` for `$s2--`, `string $s3` for `$i **= $s3`,
+    and `?int $maybe2` for `$maybe2++`, since line 14 has the same coupling
+    through `$maybe * 2` (no write there, but the pattern should not recur).
+    The expectations then read "post-decrement, string given", and the `**=`
+    operand report comes back with `string` on the right side. They are
+    regenerated and compared by hand with the pre-`15b5b494` expectations
+    for those lines.
+  - `43758de2`'s default-value message prints the bound-resolved type
+    (`array<(int|string), int>`), because the check compares against the
+    resolved type and prints what it compared. The comparison stays against
+    the bound-resolved type, which is what makes the nested template
+    checkable. The message prints the parameter's declared type
+    (`param.ty()`, `array<T>`), which is what the reader wrote and what
+    PHPStan prints. The call site in `function_decl.rs` passes both types.
+
+  No code outside the one message changes. Both fixtures' expectations
+  are updated in the same commit as the source they test.
+
 - [ ] **F33. Design points from commits 100 to 155:**
   - `2750baf2`/`1b7022ad`: the infer cache assumes `infer_expr` depends
     only on the node and the scope version. Checker state it also reads
