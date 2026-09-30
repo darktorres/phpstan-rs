@@ -35,6 +35,29 @@ Legend: `[x]` done (commit given), `[>]` moved to the crate-split plan
     `3b84c78f`). What remains is one full run after all of it.
 - [ ] **V2. Corpus run and delta approval** after V1, saved to
   `.corpus-runs/<scope>/<hash>.txt`.
+  - The four fix commits after `91666577` (`69e25540`, `02454672`,
+    `783727da`, `cc4e6b5e`), triaged against it at `c3139de7` (same
+    code):
+    - diagnostics: no row new. 70 `throws.missing` rows went, all
+      duplicates of one throw point recorded once per discarded loop
+      pass; 10 Calendar concatenation rows went because a read at
+      `'dql'|'sql'` gives those fields' `string`; 2 `SearchService`
+      `return.type` rows went because a write at a string key keeps the
+      shape. The baseline artifacts and the `baseline-all-on` `.err`
+      follow those rows.
+    - type dumps: 1,886 changed bindings and 10 added. Nearly all are
+      general arrays kept as shapes by the dynamic-key writes, and
+      literal-union counters widened to sound ranges. Traced and fixed:
+      a write at one of several literal keys lost non-emptiness
+      (`MailService` `$contents`, `8bd314c5`, `1053c403`); a nested write
+      took another key's container where a shape may lack the key
+      (`61f979bb`, `6797151b`, `422f52cf`); an offset write or `unset`
+      left the variable's native type stale (`array{}` after keys were
+      written, `dedccac0`); `isset` at a key that isn't literal didn't
+      prove non-emptiness (`f75c1301`); the display dropped a refined
+      array's tracked offsets and quoted int keys (`9c42baa1`,
+      `117edd4f`). The corpus at `117edd4f` has the same diagnostics as
+      `c3139de7`.
 
 ## V2: corpus findings
 
@@ -183,12 +206,22 @@ machinery that its fixes depend on.
   `wider`, `incomparable`, `unparsed`, `added`, `removed`, `moved`, and
   native-facet changes), per fixture for `types-fixtures`.
 
-- [ ] **CHECK-1. `$count_types_plugins` as a literal counter union.** At
+- [x] **CHECK-1. `$count_types_plugins` as a literal counter union.** (`c3139de7`) At
   `91666577` the dump reads it as
   `non-empty-array<(int|string), 0|1|2|3|4|5>`, a counter whose loop
   hadn't converged. By reading, `783727da` and `02454672` fix it. Done: a
   fixture for a counter at a dynamic key, and the corpus dump at the
-  current HEAD agreeing.
+  current HEAD agreeing. Confirmed: the dump reads
+  `array{active: int<0, max>, inactive: int<0, max>, missing: int<1, max>,
+  merged: int<0, max>, ...<(int|string), int<1, max>>}`.
+
+- [ ] **W1. A nested write at a key union joins every key's container.**
+  `$a[$k]['x'] = v` with `$k: 'a'|'b'` reads the container at both keys
+  and writes their join back at both, so `b` can gain `a`'s fields
+  (`array{a?: array{n: int}}` written at `'a'|'b'` gives
+  `b?: array{n?: int, x: …}`). Sound, but the key a container was read at
+  isn't the key it's written back to. Done: the nested write computed
+  per root member and per key, container and write-back at the same key.
 
 - [ ] **Typed purity.** `is_transitively_pure` is computed in the registry
   before any types exist, so it can't see implicit calls
