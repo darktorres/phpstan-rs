@@ -457,6 +457,17 @@ impl Type {
                         }
                     }
                 },
+                // A shape refined non-empty: the shape's own answer, still
+                // non-empty where the key is absent.
+                Repr::Intersection(_) if let Some((shape, _)) = crate::union::shape_parts(self) => {
+                    let narrowed = Type::array_shape(shape.clone()).with_key_presence(key, present);
+                    match crate::union::shape_parts(&narrowed) {
+                        Some((shape, _)) if !present => {
+                            crate::union::shape_type(shape.clone(), true)
+                        }
+                        _ => narrowed,
+                    }
+                }
                 // A general array now has that key.
                 Repr::Array(..) | Repr::Intersection(_) if present => {
                     self.refine_arrays(&Type::has_offset(key.clone()))
@@ -526,6 +537,11 @@ impl Type {
                     ])),
                     None => self.clone(),
                 },
+                // A shape refined non-empty: the shape's own answer, whose
+                // required key keeps it non-empty.
+                Repr::Intersection(_) if let Some((shape, _)) = crate::union::shape_parts(self) => {
+                    Type::array_shape(shape.clone()).to_isset_container(key)
+                }
                 // `list<T>`/`non-empty-array<T>` - an accessory-marked array.
                 Repr::Intersection(members) => {
                     let element = members.iter().find_map(|m| match m.repr() {

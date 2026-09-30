@@ -683,8 +683,16 @@ pub(crate) fn shape_parts(ty: &Type) -> Option<(&Shape, bool)> {
 }
 
 /// `shape` as a type, refined non-empty when it's known to be and no
-/// required key already says so.
-pub(crate) fn shape_type(shape: Shape, non_empty: bool) -> Type {
+/// required key already says so. A sealed one known non-empty with a
+/// single key has it, and one with none is `never`.
+pub(crate) fn shape_type(mut shape: Shape, non_empty: bool) -> Type {
+    if non_empty && shape.is_sealed() {
+        match shape.fields.as_mut_slice() {
+            [] => return Type::never(),
+            [only] => only.optional = false,
+            _ => {}
+        }
+    }
     let says_non_empty = shape.fields.iter().any(|f| !f.optional);
     let ty = Type::array_shape(shape);
     if non_empty && !says_non_empty {
