@@ -600,6 +600,10 @@ fn reduce_array_members(members: &mut Vec<Type>) {
         _ => true,
     });
     let relation = crate::Relation::structural();
+    // Merging may not cost the union its non-emptiness, which it has only
+    // while every shape is non-empty.
+    let all_non_empty = shapes.iter().flatten().all(is_non_empty_shape);
+    let keeps_non_empty = |merged: &Shape| !all_non_empty || is_non_empty_shape(merged);
     // Pairs sharing a key, as `reduceArrays`' first pass takes them.
     for i in 0..shapes.len() {
         for j in (i + 1)..shapes.len() {
@@ -624,13 +628,19 @@ fn reduce_array_members(members: &mut Vec<Type>) {
             if single_key_same_type
                 || (overlapping == a.fields.len() && is_keys_superset(&relation, b, a))
             {
-                shapes[j] = Some(merge_shapes(b, a, true));
-                shapes[i] = None;
-                break;
+                let merged = merge_shapes(b, a, true);
+                if keeps_non_empty(&merged) {
+                    shapes[j] = Some(merged);
+                    shapes[i] = None;
+                    break;
+                }
             }
             if overlapping == b.fields.len() && is_keys_superset(&relation, a, b) {
-                shapes[i] = Some(merge_shapes(a, b, false));
-                shapes[j] = None;
+                let merged = merge_shapes(a, b, false);
+                if keeps_non_empty(&merged) {
+                    shapes[i] = Some(merged);
+                    shapes[j] = None;
+                }
             }
         }
     }
@@ -647,17 +657,30 @@ fn reduce_array_members(members: &mut Vec<Type>) {
                 continue;
             }
             if is_keys_superset(&relation, b, a) {
-                shapes[j] = Some(merge_shapes(b, a, true));
-                shapes[i] = None;
-                break;
+                let merged = merge_shapes(b, a, true);
+                if keeps_non_empty(&merged) {
+                    shapes[j] = Some(merged);
+                    shapes[i] = None;
+                    break;
+                }
             }
             if is_keys_superset(&relation, a, b) {
-                shapes[i] = Some(merge_shapes(a, b, false));
-                shapes[j] = None;
+                let merged = merge_shapes(a, b, false);
+                if keeps_non_empty(&merged) {
+                    shapes[i] = Some(merged);
+                    shapes[j] = None;
+                }
             }
         }
     }
     members.extend(shapes.into_iter().flatten().map(Type::array_shape));
+}
+
+/// A shape holding a required key. Shapes that each hold one
+/// (`array{a: 1, b?: 1}|array{a?: 1, b: 1}`) stay apart rather than merge
+/// into one that may be empty.
+fn is_non_empty_shape(shape: &Shape) -> bool {
+    shape.fields.iter().any(|f| !f.optional)
 }
 
 /// A shape as the general array it is: its keys' literal types and its
