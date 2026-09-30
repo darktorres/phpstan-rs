@@ -108,6 +108,29 @@ through `check-project`.
 
   Done: the declared return has the receiver's bindings substituted, or
   non-empty `agg_bindings` win. Fixtures cover both shapes.
+
+  Design: in `iterable_element_type`'s `IteratorAggregate` arm, look
+  `getIterator` up with `lookup_method_with_owner(name, "getIterator")`.
+  Run `substitute_class_templates(sig, name, args, &owner)` on it, then
+  `resolve_pseudo_at(return, &owner, name)`. This is the path a
+  `$x->getIterator()` call's return already takes through
+  `generic_object_method_return_type`, so the loop and the call agree.
+  Both bullets then come out right: the stub's `Traversable<TKey,
+  TValue>` becomes `Traversable<int, string>`, and `Coll<K, V>`'s
+  `Iterator<K, V>` becomes its receiver's arguments. When the receiver
+  has no arguments, the erasure gives the default or bound, as for a
+  method call. The gate becomes: the substituted return wins unless it
+  resolves to `mixed` for both key and value while `agg_bindings` (now
+  substituted too) knows better. The self-recursion guard compares only
+  the returned class with `name`. Replace it with a visited set of class
+  names threaded through the recursion (a private
+  `iterable_element_type_in(&self, ty, seen)`), so `A::getIterator(): B`
+  with `B::getIterator(): A` also stops. Fixtures:
+  `IteratorAggregate<int, string>` iterates as `int`/`string`;
+  `Coll<int, string>` implementing `IteratorAggregate<K, V>` with
+  `getIterator(): ArrayIterator<K, V>` passes `h(int $k, string $v)`
+  clean; a bare `Coll` iterates as the bounds; a `getIterator():
+  Generator` that yields keeps the generator's types.
 - [ ] **F4. A type check that can't pass narrows to the checked type.**
   `Relation::narrow` falls back to `target` when `original` and `target`
   are disjoint (`narrowing.rs`, the `_ => target.clone()` arm and the
