@@ -35,6 +35,19 @@ Some designs depend on others, and they land in this order:
 - F7, F8 and F66 change the same use-site index, and land together.
 - F69 before F82's implicit-call bullet (shared helpers).
 
+Four designs add per-variable state to `Locals`: F5 (definedness
+certainty), F6 (a closure-literal alias), F45 (reference groups) and F61
+(unset properties). `Locals` already carries about nine side maps
+(condition aliases, query-builder aliases, branch-implied facts,
+container field facts, discriminant facts, natives, guards), each with
+its own merge rule in `merge_scopes`. So these don't add four more maps:
+the design is one `ExpressionHolder` per narrowing key, as PHPStan's
+scope holds them, carrying the type, the native type, the certainty, the
+reference group, the unset flag and the aliases. `merge_scopes`, loop
+convergence and `PassMark`'s rewind are then each defined once, over
+holders, and the existing side maps move into the holder as they are
+touched. This lands before F5, as the first step of the order above.
+
 Legend: `[x]` done (commit given), `[>]` moved to the crate-split plan
 (where given), `[ ]` open.
 
