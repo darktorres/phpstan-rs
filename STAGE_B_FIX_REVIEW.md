@@ -48,6 +48,22 @@ convergence and `PassMark`'s rewind are then each defined once, over
 holders, and the existing side maps move into the holder as they are
 touched. This lands before F5, as the first step of the order above.
 
+The use-site index gets the same treatment. F7 (fallback sites for an
+unqualified function), F8 (attribute names), F59 (constants and their
+fallbacks) and F66 (PHPDoc names, doc links, member kinds) each extend
+`UseSiteIndex`. Instead of a second map per extension, a site becomes one
+record, `UseSite { target: RefTarget, span, fallback_of:
+Option<RefTarget>, via: Code | PhpDoc | DocLink }`, stored once in
+`by_target` and `by_file`. `references` then takes a filter (resolve the
+fallbacks against the registry, include doc links or not), which is what
+dead code, LSP references, rename and composer attribution each pass.
+F7 lands this record type, and the others add values to it.
+
+Name folding is one type. F7, F35, F50, F66 and F75 each key a table by
+a lowercased name. They all use `registry::name_table::Folded` (and
+`NameTable` where a declared spelling is kept), so no table folds by
+hand with `to_ascii_lowercase()` and none can forget to.
+
 Legend: `[x]` done (commit given), `[>]` moved to the crate-split plan
 (where given), `[ ]` open.
 
