@@ -95,7 +95,9 @@ impl Type {
         let Some(offset) = offset else {
             return Some(empty());
         };
-        let keys: Option<Vec<ShapeKey>> = offset.union_members().iter().map(literal_key).collect();
+        // The keys it may be, when there are few enough to list
+        // (`int<0, 2>` is `0|1|2`).
+        let keys: Option<Vec<ShapeKey>> = offset.finite_types().iter().map(literal_key).collect();
         let mut containers = Vec::new();
         for member in self.union_members() {
             if member.is_null().yes() {
