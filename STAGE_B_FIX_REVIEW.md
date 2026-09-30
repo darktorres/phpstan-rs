@@ -34,6 +34,14 @@ Some designs depend on others, and they land in this order:
   F87 with F88.
 - F7, F8 and F66 change the same use-site index, and land together.
 - F69 before F82's implicit-call bullet (shared helpers).
+- F65 before F72 and F49's named-argument fixtures (the argument
+  slots and sealed-spread expansion).
+- F39's types-crate `to_number` before F16 and F34, which convert
+  through it.
+- F42's CLI-entry rule before F75's entry points.
+- F7's site record before F8, F59 and F66.
+- F81's recursive types with F20's depth test, which must cover them.
+- F13's range index before F25's and F70's range-keyed tails.
 
 Four designs add per-variable state to `Locals`: F5 (definedness
 certainty), F6 (a closure-literal alias), F45 (reference groups) and F61
