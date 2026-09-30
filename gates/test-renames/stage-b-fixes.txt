@@ -1,0 +1,19 @@
+project::tests::property_assign_facts::a_file_whose_facts_panic_costs_only_its_own_facts -> project::tests::property_assign_facts::a_file_whose_check_panics_costs_only_its_own_results
+project::tests::property_assign_facts::facts_only_mode_agrees_with_the_full_pass_on_a_pest_test_closures_property_write -> REMOVED: the facts-only pass is gone; facts come from the one checking pass (d4ae7678)
+project::tests::property_assign_facts::facts_only_mode_agrees_with_the_full_pass_on_a_trait_donated_property_write -> REMOVED: the facts-only pass is gone; facts come from the one checking pass (d4ae7678)
+checker::narrowing::accessory_range::resolve_concat_type_tests::a_float_literal_operand_uses_the_real_php_float_formatter -> tests::concat::a_float_literal_operand_uses_the_php_float_formatter
+checker::narrowing::accessory_range::resolve_concat_type_tests::an_empty_string_operand_is_dropped_via_the_identity_shortcut -> tests::concat::an_empty_string_operand_is_dropped
+checker::narrowing::accessory_range::resolve_concat_type_tests::an_int_typed_left_operand_concatenated_with_a_pure_digit_right_literal_is_numeric -> tests::concat::an_int_left_operand_with_a_digit_literal_right_is_numeric
+checker::narrowing::accessory_range::resolve_concat_type_tests::an_int_typed_left_operand_concatenated_with_a_negative_signed_right_literal_is_not_numeric -> tests::concat::an_int_left_operand_with_a_negative_literal_right_is_not_numeric
+checker::narrowing::accessory_range::resolve_concat_type_tests::two_literal_strings_fully_constant_fold -> tests::concat::two_literal_strings_fully_constant_fold
+checker::tests::narrowing::array_key_exists_on_a_merely_optional_key_narrows_neither_branch -> checker::tests::narrowing::array_key_exists_makes_an_optional_key_required_or_drops_it
+check_does_not_crash_on_realistically_deep_nested_expressions -> check_does_not_crash_on_deep_nesting_or_long_chains
+parser::tests::doc_comments_and_robustness::moderately_nested_unary_still_parses -> parser::tests::doc_comments_and_robustness::deeply_nested_expressions_parse_on_a_default_thread
+parser::tests::doc_comments_and_robustness::pathologically_nested_unary_fails_cleanly_instead_of_overflowing_the_stack -> parser::tests::doc_comments_and_robustness::deeply_nested_expressions_parse_on_a_default_thread
+parser::tests::declarations::declarations_and_clauses_get_their_own_node_ids -> REMOVED: only nodes something reads carry a NodeId (fcdd7f0a); covered by parser::tests::node_ids
+parser::tests::statements_and_control_flow::if_alt_syntax_with_elseif_and_else_folds_into_nested_if -> parser::tests::statements_and_control_flow::if_alt_syntax_with_elseif_and_else_is_one_chain
+registry::tests::name_context::skips_the_object_traversable_and_resource_sentinels -> registry::tests::name_context::skips_the_object_and_resource_keywords
+registry::tests::name_context::recurses_into_a_traversables_own_generic_argument_without_collecting_traversable_itself -> registry::tests::name_context::a_written_traversable_resolves_like_any_class_name
+registry::tests::function_signatures::a_template_equality_form_is_never_resolved -> registry::tests::function_signatures::an_equality_assertion_is_recorded_with_its_form
+docblock::tests::assert_tags::a_template_equality_form_is_never_parsed -> docblock::tests::assert_tags::an_equality_assertion_is_read_with_its_negation
+docblock::tests::assert_tags::a_value_inequality_form_is_never_parsed -> docblock::tests::assert_tags::an_inequality_form_on_a_call_target_is_read
