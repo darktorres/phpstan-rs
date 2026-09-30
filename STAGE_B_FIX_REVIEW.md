@@ -1185,6 +1185,37 @@ through `check-project`.
   Done: a `do`-`while` with a truthy literal condition is handled like
   `while`, and only a `break` that targets the loop itself counts, with
   fixtures.
+
+  Design: replace `stmt_contains_break` (`control_flow.rs:825`) with
+  `breaks_out_of(body)`, which answers whether some `break` leaves this
+  loop, tracking depth as PHP counts it:
+
+  - the walk starts at depth 0 in the loop's body;
+  - a nested `while`, `do`, `for`, `foreach` or `switch` adds one level,
+    since PHP counts a `switch` as a loop for `break`;
+  - a function, closure or class body stops the walk;
+  - a `break n` (default 1) at depth `d` leaves this loop when `n > d`;
+  - a `goto` anywhere counts, since it may jump out.
+
+  A `break 2` in the body leaves this loop and the one around it, so it
+  counts. From the outer loop's walk it is a `break 2` at depth 1, which
+  leaves that loop too, so each loop sees it once. `always_terminates`
+  then:
+
+  - keeps its `While` and `For` arms, using `breaks_out_of`;
+  - gains a `DoWhile` arm. A truthy literal condition terminates when
+    nothing breaks out. Any `do`-`while` terminates when its body does,
+    since the body runs at least once, so `do { return 1; } while ($x)`
+    counts too.
+
+  The doc's "only ever causes a missed simplification" claim goes.
+  `stmt.rs`'s constant-condition rules, the
+  `while.alwaysTrue`/`do`-`while` exemptions the doc names, call
+  `breaks_out_of` too, so a nested loop's `break` no longer suppresses
+  them. Fixtures: both `return.missing` shapes of the finding are clean;
+  `while (true) { switch ($x) { case 1: break 2; } }` still falls
+  through; a `break` inside a nested `foreach` doesn't suppress
+  `while.alwaysTrue`.
 - [ ] **F48. A write through a key that is one of several literals
   overwrites every one of them** (`bind_assignment_target`,
   `checker/assignment.rs`; also before the window).
