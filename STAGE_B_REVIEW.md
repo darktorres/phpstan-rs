@@ -223,6 +223,15 @@ machinery that its fixes depend on.
   isn't the key it's written back to. Done: the nested write computed
   per root member and per key, container and write-back at the same key.
 
+- [ ] **C2. A closure's docblock is ignored.** `/** @template T of int
+  @param T $x @return T */ function ($x) { … }` types `$x` and the call's
+  result as `mixed`: neither the closure's `@param`/`@return` nor its
+  `@template` is read (a closure isn't indexed into the registry, and its
+  doc comment isn't attached to the expression). Done: a closure or arrow
+  function's preceding docblock types its parameters and return, and its
+  templates are bound per call; `phpstan_rs::gate::template_scope_at`
+  then includes them.
+
 - [ ] **Typed purity.** `is_transitively_pure` is computed in the registry
   before any types exist, so it can't see implicit calls
   (`$o['k']` calling `offsetGet`, `count($o)` calling `count`) nor
