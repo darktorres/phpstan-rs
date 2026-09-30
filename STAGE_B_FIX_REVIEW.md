@@ -593,8 +593,8 @@ through `check-project`.
 
   Fixtures: the `$c[8]` read and the `$b[] = 'y'` after `$b[10]` are
   clean; the finding's branch merge gives `array{0: 1, 1: 2, 2:
-  9}|array{0: 1, 1: 2, 3: 9}` and `echo $b[2]` reports "might not exist"
-  rather than `offsetAccess.notFound`; a types-crate test checks that
+  9}|array{0: 1, 1: 2, 3: 9}` and `echo $b[2]` is no longer
+  `offsetAccess.notFound` (one member has key 2); a types-crate test checks that
   two shapes built with and without a redundant carried index are equal.
 - [ ] **F26. `mixed~S` joined with a value inside `S` stays `mixed~S`**
   (`67ed2a1d`). `union_with_mixed` takes each joined member out of the
