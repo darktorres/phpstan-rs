@@ -1647,6 +1647,31 @@ through `check-project`.
   Done: `for (;;)` exits through its `break` states only, and a
   `continue` exempts `doWhile.alwaysFalse` as a `break` does, with
   fixtures.
+
+  Design: share the endless-loop exit.
+
+  - The fold in `check_while`'s `is_truthy_literal(cond)` branch
+    (`loops.rs:159`) moves into `endless_loop_exit(break_states, locals)`.
+    After the loop comes the merge of the `break` states alone, and with
+    none the code after is unreachable, keeping today's fallback of the
+    pre-loop state.
+  - `check_for` calls it both for the condition-less arm (`None`), which
+    today starts from `body_locals` and so carries the body's end state (the
+    one without `$y`), and for a condition list whose last expression is a
+    truthy literal (`for (; true; )`, `for ($i = 0; 1; $i++)`). That case
+    today goes through the `Some(c)` arm's "may run zero times" merge and
+    the false-branch narrowing of `true`.
+  - `check_do_while` does the same when its condition is a truthy literal.
+
+  For `doWhile.alwaysFalse` (`loops.rs:292`), a `continue` that targets
+  the loop leaves a `do { … } while (false)` just as a `break` does,
+  since control goes to the condition, which is false. So the exemption
+  asks F47's depth-aware walk for a `break` or a `continue` whose level
+  targets this loop. A `continue` inside a nested loop doesn't exempt.
+  Fixtures: `for (;;) { if ($c) { $y = 1; break; } } return $y;` is
+  clean; the same with `for (; true; )` is clean;
+  `do { if ($c) { continue; } … } while (false);` is clean; a `continue`
+  inside a `foreach` nested in the `do` still reports.
 - [ ] **F64. A `mysqli` query that doesn't start with its verb is typed
   `true`** (`returns_result_set`, `checker/expr/mysqli.rs`; also before
   the window). Only the first word after any `(` is read:
