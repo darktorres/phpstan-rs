@@ -1867,22 +1867,24 @@ through `check-project`.
 
   Design: two index changes, each at the recording end.
 
-  - PHPDoc class references. `ClassFnRefWalker` (`project/use_sites.rs`)
-    also reads each doc comment the AST carries: a declaration's, a
-    parameter's, a property's, and a statement's inline `@var`. It parses
-    them with `phpdoc::docblock::parse` and walks every `TypeNode` in its
-    tags (`@param`, `@return`, `@var`, `@throws`, `@method`, `@property*`,
-    `@mixin`, `@extends`/`@implements`/`@use`, `@template … of`,
-    `@phpstan-assert*`, `@phpstan-type`/`-import-type`, `@param-out`,
-    `@param-closure-this` and `@phpstan-self-out`; not `@see` or `@uses`,
-    which name code rather than type it). Each `Identifier`, `Generic` head,
-    `ConstFetch` class and callable keyword that isn't a type keyword, a
-    template in scope or a local type alias is resolved against the file's
-    name context, and recorded as `RefTarget::Class`. The walker keeps that
-    context as it walks the file's `namespace` and `use` statements. The
-    site is the name's exact span within the comment when the source is
-    retained, else the comment's span, the fallback
-    `index_class_fn_refs_without_source` already uses.
+  - PHPDoc class references. `ClassFnRefWalker` (`project/use_sites.rs`) also
+    reads each doc comment the AST carries: a declaration's, a parameter's, a
+    property's, and a statement's inline `@var`. It parses them with
+    `phpdoc::docblock::parse` and walks every `TypeNode` in its tags (`@param`,
+    `@return`, `@var`, `@throws`, `@method`, `@property*`, `@mixin`,
+    `@extends`/`@implements`/`@use`, `@template … of`, `@phpstan-assert*`,
+    `@phpstan-type`/`-import-type`, `@param-out`, `@param-closure-this` and
+    `@phpstan-self-out`). `@see`, `@uses` and `@covers` name code rather than
+    type it: they are indexed too, flagged as doc links, so LSP references list
+    them and a rename rewrites them, while dead code ignores the flag, since a
+    class mentioned only in `@see` is still unused. Each `Identifier`, `Generic`
+    head, `ConstFetch` class and callable keyword that isn't a type keyword, a
+    template in scope or a local type alias is resolved against the file's name
+    context, and recorded as `RefTarget::Class`. The walker keeps that context
+    as it walks the file's `namespace` and `use` statements. The site is the
+    name's exact span within the comment when the source is retained, else the
+    comment's span, the fallback `index_class_fn_refs_without_source` already
+    uses.
   - Member case. `RefTarget::Member(owner, name)` splits by kind into
     `Method(owner, lowercased name)`, `Property(owner, name)`,
     `Constant(owner, name)` and `EnumCase(owner, name)`, since only method
