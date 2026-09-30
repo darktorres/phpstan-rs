@@ -321,12 +321,12 @@ impl Type {
     /// (`0` then `0|1` is `int<0, max>`); array shapes, a union of them
     /// read as one shape whose keys some members lack are optional, widen
     /// field by field as long as they keep their keys or gain string ones
-    /// (a body writes finitely many), so a counter inside one doesn't cost
+    /// (a body writes finitely many), other keys either allows staying
+    /// allowed, so a counter inside one doesn't cost
     /// its siblings their types; anything else, an array gaining int keys
     /// by appends among it, is `next` generalized.
     pub fn widen_towards(&self, next: &Type) -> Type {
         if let (Some(before), Some(after)) = (self.combined_shape(), next.combined_shape())
-            && before.is_sealed() == after.is_sealed()
             && before.fields.iter().all(|f| after.field(&f.key).is_some())
             && after
                 .fields
@@ -348,10 +348,15 @@ impl Type {
                     ShapeField::new(f.key.clone(), widen(old, &f.ty), f.optional)
                 })
                 .collect();
-            let unsealed = after.unsealed.as_ref().map(|tail| {
-                let old = before.unsealed.as_ref().map_or(&tail.1, |old| &old.1);
-                Box::new((tail.0.clone(), widen(old, &tail.1)))
-            });
+            // Other keys either side allows stay allowed.
+            let unsealed = match (&before.unsealed, &after.unsealed) {
+                (Some(old), Some(new)) => Some(Box::new((
+                    Type::union(old.0.clone(), new.0.clone()),
+                    widen(&old.1, &new.1),
+                ))),
+                (None, Some(tail)) | (Some(tail), None) => Some(tail.clone()),
+                (None, None) => None,
+            };
             return Type::array_shape(Shape {
                 fields,
                 unsealed,
@@ -377,6 +382,24 @@ impl Type {
                 (next_min == min).then_some(min).flatten(),
                 (next_max == max).then_some(max).flatten(),
             ),
+            // An array growing past what a shape follows turns general,
+            // keeping the values written, which often come from variables
+            // widened alongside it; a general array whose values still
+            // grow widens them as values widen, keeping a bound that
+            // stayed put.
+            _ if self.is_array().yes() && next.is_array().yes() => {
+                let general = next.generalize();
+                let (Some(before), Some(after)) =
+                    (self.array_value_type(), next.array_value_type())
+                else {
+                    return general;
+                };
+                if self.combined_shape().is_some() || before == after {
+                    general.with_general_array_value(&after)
+                } else {
+                    general.with_general_array_value(&before.widen_towards(&after))
+                }
+            }
             _ => next.generalize(),
         }
     }
