@@ -164,9 +164,9 @@ impl Type {
                         shape.set(ShapeField::new(key, value, false));
                         Some(Type::array_shape(shape))
                     }
-                    // A key that is one of several literal keys may write
-                    // each of them: each keeps its value or takes the
-                    // written one, and one the shape lacks may now exist.
+                    // A key that is one of several literal keys writes one
+                    // of them: the array is the shape with that key written,
+                    // for each key it may be.
                     None if let Some(written) = offset
                         && let Some(keys) = written
                             .union_members()
@@ -174,46 +174,24 @@ impl Type {
                             .map(literal_key)
                             .collect::<Option<Vec<_>>>() =>
                     {
-                        let mut shape = Shape::clone(shape);
-                        for key in keys {
-                            let field = match shape.field(&key) {
-                                Some(field) => ShapeField::new(
-                                    key,
-                                    Type::union(field.ty.clone(), value.clone()),
-                                    field.optional,
-                                ),
-                                None => ShapeField::new(key, value.clone(), true),
-                            };
-                            shape.set(field);
-                        }
-                        Some(Type::array_shape(shape))
+                        Some(Type::union_of(
+                            keys.into_iter()
+                                .map(|key| {
+                                    let mut shape = Shape::clone(shape);
+                                    shape.set(ShapeField::new(key, value.clone(), false));
+                                    Type::array_shape(shape)
+                                })
+                                .collect(),
+                        ))
                     }
                     // Any other key may write a field it could equal, or
                     // another key: the shape stays, open to that key. Only
-                    // a shape a required field keeps non-empty stays one,
-                    // as an open part can't say the write made it non-empty.
+                    // a shape a required field keeps non-empty stays one;
+                    // an all-optional one is the general array below.
                     None if let Some(written) = offset
                         && shape.fields.iter().any(|f| !f.optional) =>
                     {
-                        let written = written.write_key_type();
-                        let relation = crate::Relation::structural();
-                        let mut shape = Shape::clone(shape);
-                        for field in &mut shape.fields {
-                            if !relation
-                                .is_super_type_of(&written, &field.key.to_type())
-                                .no()
-                            {
-                                field.ty = Type::union(field.ty.clone(), value.clone());
-                            }
-                        }
-                        shape.unsealed = Some(Box::new(match shape.unsealed.take() {
-                            Some(tail) => {
-                                (Type::union(tail.0, written), Type::union(tail.1, value))
-                            }
-                            None => (written, value),
-                        }));
-                        shape.next_index = None;
-                        Some(Type::array_shape(shape))
+                        Some(Type::array_shape(open_to_key(shape, written, value)))
                     }
                     None => {
                         let widened = shape
@@ -288,6 +266,39 @@ impl Type {
                         track_literal_key,
                         &existing,
                     ))
+                }
+                // A shape with accessories (`non-empty-array{a?: int}`)
+                // takes the write on its shape. A write never empties an
+                // array, so non-emptiness stays; the other accessories may
+                // name the written key and are dropped.
+                Repr::Intersection(members)
+                    if let Some(shape) = members
+                        .iter()
+                        .find(|m| matches!(m.repr(), Repr::ArrayShape(_))) =>
+                {
+                    let non_empty_before =
+                        members.contains(&Type::accessory(AccessoryKind::NonEmptyArray));
+                    // An all-optional shape known non-empty stays a shape,
+                    // open to a key that isn't literal.
+                    if non_empty_before
+                        && let Repr::ArrayShape(inner) = shape.repr()
+                        && let Some(written) = offset
+                        && written
+                            .union_members()
+                            .iter()
+                            .any(|m| literal_key(m).is_none())
+                    {
+                        return Some(non_empty(Type::array_shape(open_to_key(
+                            inner, written, value,
+                        ))));
+                    }
+                    let written =
+                        shape.set_offset_value_type(offset, value, in_range, track_literal_key)?;
+                    if non_empty_before {
+                        Some(non_empty(written))
+                    } else {
+                        Some(written)
+                    }
                 }
                 // A `list<T>`/`non-empty-array<T>`: a dynamic key drops the
                 // markers, an append keeps a list a list (now non-empty), and
@@ -453,6 +464,29 @@ fn write_literal_key_aware(
         }
         _ => non_empty(base),
     }
+}
+
+/// `shape` after a write of `value` at `written`, a key that isn't one
+/// literal: each field the key may name may take the value, and the shape
+/// opens to the key's other values.
+fn open_to_key(shape: &Shape, written: &Type, value: Type) -> Shape {
+    let written = written.write_key_type();
+    let relation = crate::Relation::structural();
+    let mut shape = Shape::clone(shape);
+    for field in &mut shape.fields {
+        if !relation
+            .is_super_type_of(&written, &field.key.to_type())
+            .no()
+        {
+            field.ty = Type::union(field.ty.clone(), value.clone());
+        }
+    }
+    shape.unsealed = Some(Box::new(match shape.unsealed.take() {
+        Some(tail) => (Type::union(tail.0, written), Type::union(tail.1, value)),
+        None => (written, value),
+    }));
+    shape.next_index = None;
+    shape
 }
 
 /// `array` known to hold an element, as it does after a write.
