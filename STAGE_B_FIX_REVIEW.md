@@ -507,9 +507,10 @@ through `check-project`.
   question, so `identical_result` answers `Some(false)` first whenever
   either side is a NaN float literal: no value is identical to NaN, NaN
   included. The `is_finite_scalar_type` helper then becomes
-  `Type::is_single_value` (`queries.rs:201`), which already excludes
-  NaN, adding the empty-array case it lacks, and the separate helper and
-  its doc go.
+  `Type::is_single_value` (`queries.rs:201`). That already excludes NaN
+  and covers the empty array, plus every sealed shape of single values,
+  where `===` is decided the same way (`[1] === [1]` is `true`). The
+  separate helper and its doc go.
 
   Two more places read `=== NAN` as the value NaN:
 
