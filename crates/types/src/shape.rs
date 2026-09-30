@@ -63,18 +63,18 @@ impl fmt::Display for ShapeKey {
 }
 
 /// The key PHP gives the next element appended to an array being built:
-/// one past the highest integer key so far, from 0. Before PHP 8.3 a
+/// one past the highest integer key so far, from 0. Before PHP 8.0 a
 /// negative key doesn't count (`[-5 => 'a', 'b']` puts `'b'` at 0); from
-/// 8.3 it does (at -4). Once `PHP_INT_MAX` is a key there is none, and
+/// 8.0 it does (at -4). Once `PHP_INT_MAX` is a key there is none, and
 /// appending throws ("Cannot add element to the array as the next
 /// element is already occupied").
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct NextArrayIndex {
-    /// Whether the PHP 8.3 rule applies: `Maybe` when the versions the
+    /// Whether the PHP 8.0 rule applies: `Maybe` when the versions the
     /// code runs on straddle it, and both rules are followed.
     negative_keys_count: TrinaryLogic,
-    before_8_3: NextKey,
-    since_8_3: NextKey,
+    before_8_0: NextKey,
+    since_8_0: NextKey,
 }
 
 /// One rule's next key: `None` once appending throws.
@@ -102,7 +102,7 @@ impl Default for NextArrayIndex {
 }
 
 impl NextArrayIndex {
-    /// An empty array's, under the PHP 8.3 rule for negative keys when
+    /// An empty array's, under the PHP 8.0 rule for negative keys when
     /// `negative_keys_count` says it applies.
     pub fn new(negative_keys_count: TrinaryLogic) -> NextArrayIndex {
         let empty = NextKey {
@@ -111,8 +111,8 @@ impl NextArrayIndex {
         };
         NextArrayIndex {
             negative_keys_count,
-            before_8_3: empty,
-            since_8_3: empty,
+            before_8_0: empty,
+            since_8_0: empty,
         }
     }
 
@@ -120,20 +120,20 @@ impl NextArrayIndex {
     pub fn take(&mut self) -> AppendKey {
         let key = match self.negative_keys_count {
             TrinaryLogic::Yes => self
-                .since_8_3
+                .since_8_0
                 .next
                 .map_or(AppendKey::Throws, AppendKey::Key),
             TrinaryLogic::No => self
-                .before_8_3
+                .before_8_0
                 .next
                 .map_or(AppendKey::Throws, AppendKey::Key),
-            TrinaryLogic::Maybe => match (self.before_8_3.next, self.since_8_3.next) {
+            TrinaryLogic::Maybe => match (self.before_8_0.next, self.since_8_0.next) {
                 (None, None) => AppendKey::Throws,
                 (Some(a), Some(b)) if a == b => AppendKey::Key(a),
                 _ => AppendKey::Unknown,
             },
         };
-        for rule in [&mut self.before_8_3, &mut self.since_8_3] {
+        for rule in [&mut self.before_8_0, &mut self.since_8_0] {
             if let Some(n) = rule.next {
                 rule.next = n.checked_add(1);
                 rule.has_int_key = true;
@@ -144,17 +144,17 @@ impl NextArrayIndex {
 
     /// Records an element written at the explicit integer key `key`.
     pub fn observe(&mut self, key: i64) {
-        if let Some(next) = self.before_8_3.next
+        if let Some(next) = self.before_8_0.next
             && key >= next
         {
-            self.before_8_3.next = key.checked_add(1);
+            self.before_8_0.next = key.checked_add(1);
         }
-        if let Some(next) = self.since_8_3.next
-            && (key >= next || !self.since_8_3.has_int_key)
+        if let Some(next) = self.since_8_0.next
+            && (key >= next || !self.since_8_0.has_int_key)
         {
-            self.since_8_3.next = key.checked_add(1);
+            self.since_8_0.next = key.checked_add(1);
         }
-        self.since_8_3.has_int_key = true;
+        self.since_8_0.has_int_key = true;
     }
 }
 

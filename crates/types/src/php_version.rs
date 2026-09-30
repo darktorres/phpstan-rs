@@ -366,7 +366,8 @@ impl PhpFeature {
             | NativeUnionTypes
             | RequiredParameterAfterOptionalDeprecated
             | AbstractTraitMethods
-            | NonNumericStringArithmeticThrows => PhpVersion::new(8, 0),
+            | NonNumericStringArithmeticThrows
+            | NegativeArrayKeysAdvanceTheNextIndex => PhpVersion::new(8, 0),
             FinalClassConstants
             | ArrayUnpackingWithStringKeys
             | DeprecatesFloatArrayKey
@@ -383,8 +384,7 @@ impl PhpFeature {
             NativeTypedClassConstants
             | DynamicClassConstantFetch
             | ReadOnlyAnonymousClasses
-            | ReadonlyPropertyReinitializationOnClone
-            | NegativeArrayKeysAdvanceTheNextIndex => PhpVersion::new(8, 3),
+            | ReadonlyPropertyReinitializationOnClone => PhpVersion::new(8, 3),
             ImplicitlyNullableParameterDeprecated
             | PropertyHooks
             | FinalProperties
