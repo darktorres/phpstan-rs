@@ -1353,6 +1353,23 @@ through `check-project`.
   is `Closure(int): 1|2`. Done: falling off the end is decided with
   `always_terminates` over the body, as `check_expr`'s arm does, with a
   fixture.
+
+  Design: in `closure_syntactic_return_type` (`expr.rs`, near 5820),
+  `falls_off_end` becomes
+  `!body.iter().any(|s| self.always_terminates(s, &scope))`. That is the
+  question `always_terminates`' `Block` arm already answers for a
+  statement list, asked against the scope the function has just built,
+  whose parameters and captures are bound, so a call to a
+  `never`-returning function in the body counts. With F47's `DoWhile`
+  arm and the targeted `break`, the loop shapes come right in the same
+  step. `check_expr`'s arm reads real return points from the converged
+  body and needs no change. The two paths then differ only in precision,
+  as the function's doc says, not in whether `null` joins. Fixtures: the
+  finding's `if`/`else` closure passed to a `Closure(int): int`
+  parameter is clean; a closure ending in a `switch` whose every case
+  returns, one ending in `throw`, and one ending in a call to a `never`
+  function all infer without `null`; a closure whose `if` has no `else`
+  still adds `null`.
 - [ ] **F53. An exhaustive `match (true)` is reported unhandled**
   (`condition_is_provably_true`, `checker/expr.rs`; also before the
   window). The last arm counts as covering the rest only when
