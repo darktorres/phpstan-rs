@@ -794,6 +794,10 @@ impl Relation<'_> {
 
     /// `member`'s values equal to the number `n`.
     fn equal_to_number(&self, member: &Type, n: f64, versions: Versions) -> Type {
+        // A bool compares by the number's truthiness.
+        if member.is_bool().yes() {
+            return self.intersect(vec![member.clone(), Type::bool_literal(n != 0.0)]);
+        }
         if member.is_int().yes() {
             return if n.fract() == 0.0 && n.abs() < 9.2e18 {
                 self.intersect(vec![member.clone(), Type::int_literal(n as i64)])

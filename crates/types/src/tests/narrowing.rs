@@ -178,3 +178,12 @@ mod loose_cut_by_a_non_numeric_string {
         assert_eq!(cut(Type::bool(), "0", None), Type::bool_literal(false));
     }
 }
+
+#[test]
+fn a_bool_equals_a_number_by_its_truthiness() {
+    let cut = |n: i64| {
+        Relation::structural().narrow_loose(&Type::bool(), &Type::int_literal(n), true, None)
+    };
+    assert_eq!(cut(0), Type::bool_literal(false));
+    assert_eq!(cut(5), Type::bool_literal(true));
+}
