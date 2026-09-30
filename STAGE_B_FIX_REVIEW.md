@@ -1415,6 +1415,21 @@ through `check-project`.
   a `Stringable` parameter reports `argument.type` and
   `new A() instanceof Stringable` reports `instanceof.alwaysFalse`; PHP
   says `true`. Done: the lookup folds case, with a fixture.
+
+  Design: the lookup is `methods.contains_key("__toString")` at
+  `class_info.rs:1502`, on the map F35 turns into a folded `NameTable`,
+  so F35's change fixes it with no edit here. Until then, or if F35
+  lands in parts, the one-line fix is
+  `methods.keys().any(|m| m.eq_ignore_ascii_case("__toString"))`. The
+  other `"__toString"` sites go through
+  `lookup_method`/`lookup_method_with_owner` (`checker.rs:1395`,
+  `comparisons.rs:215`), which already fold, or compare with
+  `eq_ignore_ascii_case` (`deprecated_usage.rs:91`). The implicit
+  interface is added only for a class, not an interface, trait or enum,
+  as now. Fixtures:
+  `final class A { public function __tostring(): string {…} }` passed to
+  a `Stringable` parameter is clean, `new A() instanceof Stringable`
+  reports nothing, and `(string) new A()` is accepted.
 - [ ] **F56. A method calling `static::` is proven pure though a subclass
   can override the callee** (`resolve_static_call`, `registry/purity.rs`;
   also before the window). `static::m()` is resolved like `self::m()`,
