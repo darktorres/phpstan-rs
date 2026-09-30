@@ -11,11 +11,18 @@
 //! - `baseline.json`/`baseline.err` with `--baseline`: the same with
 //!   `--baseline <file>`;
 //! - `types.txt` with `--dump-types`: `--dump-types`' file.
+//!
+//! `gate-runner --type-drift <old> <new> [--fixture-root <dir>] [<config
+//! arguments>] --out <dir>` relates two recorded type dumps instead of
+//! analysing, and writes `type-drift.txt`: with configuration arguments
+//! within that project's loaded class hierarchy, with `--fixture-root`
+//! each fixture within its own, and with neither by name only.
 
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 use phpstan_rs::app::check_project::{self, CheckRequest, CheckRun};
+use phpstan_rs::gate;
 use phpstan_rs::output::render_json;
 use phpstan_rs::project::session::{AnalysisResult, DiagnosticOrder};
 
@@ -23,6 +30,8 @@ struct Args {
     request: CheckRequest,
     baseline: Option<PathBuf>,
     dump_types: bool,
+    type_drift: Option<(PathBuf, PathBuf)>,
+    fixture_root: Option<PathBuf>,
     out: PathBuf,
 }
 
@@ -30,6 +39,8 @@ fn parse_args() -> Result<Args, String> {
     let mut request = CheckRequest::default();
     let mut baseline = None;
     let mut dump_types = false;
+    let mut type_drift = None;
+    let mut fixture_root = None;
     let mut out = None;
     let mut args = std::env::args().skip(1);
     while let Some(arg) = args.next() {
@@ -44,6 +55,12 @@ fn parse_args() -> Result<Args, String> {
             }
             "--baseline" => baseline = Some(PathBuf::from(value()?)),
             "--dump-types" => dump_types = true,
+            "--type-drift" => {
+                let old = PathBuf::from(value()?);
+                let new = PathBuf::from(args.next().ok_or("--type-drift needs two dumps")?);
+                type_drift = Some((old, new));
+            }
+            "--fixture-root" => fixture_root = Some(PathBuf::from(value()?)),
             "--out" => out = Some(PathBuf::from(value()?)),
             flag if flag.starts_with("--") => return Err(format!("unknown flag {flag}")),
             path => request.paths.push(PathBuf::from(path)),
@@ -53,6 +70,8 @@ fn parse_args() -> Result<Args, String> {
         request,
         baseline,
         dump_types,
+        type_drift,
+        fixture_root,
         out: out.ok_or("--out is required")?,
     })
 }
@@ -70,6 +89,9 @@ fn main() -> ExitCode {
 fn run() -> Result<(), String> {
     let args = parse_args()?;
     std::fs::create_dir_all(&args.out).map_err(|e| e.to_string())?;
+    if let Some((old, new)) = &args.type_drift {
+        return drift(&args, old, new);
+    }
     let config = check_project::load_config(&args.request)?;
     let run = check_project::prepare(&args.request, &config, phpstan_rs::project::worker_pool())?;
     let default_hook = std::panic::take_hook();
@@ -115,6 +137,26 @@ fn run() -> Result<(), String> {
         )?;
     }
     Ok(())
+}
+
+/// Relates the dumps `old` and `new` and writes `type-drift.txt`.
+fn drift(args: &Args, old: &Path, new: &Path) -> Result<(), String> {
+    let read = |path: &Path| {
+        std::fs::read_to_string(path).map_err(|e| format!("reading {}: {e}", path.display()))
+    };
+    let (old, new) = (read(old)?, read(new)?);
+    let drift = if let Some(root) = &args.fixture_root {
+        gate::type_drift_of_fixtures(root, &old, &new, phpstan_rs::project::worker_pool())?
+    } else if args.request.config_file.is_some() || !args.request.paths.is_empty() {
+        let config = check_project::load_config(&args.request)?;
+        let run =
+            check_project::prepare(&args.request, &config, phpstan_rs::project::worker_pool())?;
+        let loaded = run.session.load()?;
+        gate::type_drift_in_project(&loaded.project, &old, &new)
+    } else {
+        gate::type_drift_structural(&old, &new)
+    };
+    write(&args.out.join("type-drift.txt"), &drift.report())
 }
 
 /// Writes `<name>.json` and `<name>.err`: the report `adjust` makes of the

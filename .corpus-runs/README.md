@@ -16,6 +16,17 @@ a committed tree (`xtask` refuses a dirty tree):
                                  # deny, performance, build time
     cargo xtask corpus [--full]  # record snapshots only
     cargo xtask compare [--full] [--against <hash>]
+    cargo xtask type-drift --against <hash> [--artifact <types-scoped|types-all-on|types-fixtures>]
+
+`type-drift` relates every binding of HEAD's type snapshot to the same one
+in `<hash>`'s, both parsed back from their display text and compared
+within the corpus project's class hierarchy (each fixture's own for
+`types-fixtures`; today's hierarchy for both sides). It writes
+`type-drift-<artifact>/<commit>.txt`: counts of equal, narrower, wider,
+incomparable and unparsed changes for the PHPDoc and the native type, then
+every non-narrowing change, added and removed binding grouped by its
+literal- and class-masked pattern with up to 20 locations each. A binding
+whose line only moved counts as `moved`.
 
 Artifacts:
 

@@ -34,6 +34,7 @@ fn main() -> ExitCode {
         Some("gates") => gates(&args[1..]),
         Some("corpus") => corpus_command(&args[1..]),
         Some("compare") => compare(&args[1..]),
+        Some("type-drift") => type_drift(&args[1..]),
         Some("perf") => perf(),
         Some("buildtime") => buildtime(),
         Some("tests") => test_manifest(),
@@ -60,6 +61,9 @@ const USAGE: &str = "usage: cargo xtask <command>
   compare [--full] [--against <hash>]
                          diff HEAD's snapshots against its parent's (or
                          the nearest ancestor that has them)
+  type-drift --against <hash> [--artifact <types-scoped|types-all-on|types-fixtures>]
+                         relate every binding of HEAD's type snapshot to
+                         <hash>'s and write the drift report
   perf                   record wall time and peak memory of the scoped run
   buildtime              record incremental rebuild times
   tests                  record and check the test-name manifest
@@ -576,6 +580,67 @@ fn corpus(
         record_fixture_types(hash, timings)?;
     }
     determinism_check(full, timings)?;
+    Ok(())
+}
+
+/// `cargo xtask type-drift`: relates HEAD's recorded type snapshot of
+/// `--artifact` (`types-scoped` by default) to `--against`'s through the
+/// runner, within the corpus project's class hierarchy (each fixture's own
+/// for `types-fixtures`), and writes the report as the
+/// `type-drift-<artifact>` snapshot. Both snapshots must be recorded.
+fn type_drift(args: &[String]) -> Result<(), String> {
+    require_clean_tree()?;
+    let hash = head_hash()?;
+    let mut against = None;
+    let mut artifact = "types-scoped".to_string();
+    let mut rest = args.iter();
+    while let Some(arg) = rest.next() {
+        let mut value = || rest.next().cloned().ok_or(format!("{arg} needs a value"));
+        match arg.as_str() {
+            "--against" => against = Some(git(&["rev-parse", &value()?])?),
+            "--artifact" => artifact = value()?,
+            other => return Err(format!("unknown argument {other}")),
+        }
+    }
+    let against = against.ok_or("--against <hash> is required")?;
+    build_gate()?;
+    let out = runner_out(&format!("type-drift-{artifact}"));
+    let _ = std::fs::remove_dir_all(&out);
+    std::fs::create_dir_all(&out).map_err(|e| e.to_string())?;
+    let (old, new) = (out.join("old.txt"), out.join("new.txt"));
+    for (commit, target) in [(&against, &old), (&hash, &new)] {
+        let snapshot = snapshot_path(&artifact, commit, "txt.zst");
+        if !snapshot.is_file() {
+            return Err(format!(
+                "no {artifact} snapshot for {commit}: record it with `cargo xtask corpus` there"
+            ));
+        }
+        run(Command::new("zstd")
+            .args(["-q", "-d", "-f"])
+            .arg(&snapshot)
+            .arg("-o")
+            .arg(target))?;
+    }
+    let mut cmd = Command::new(runner());
+    cmd.arg("--type-drift")
+        .arg(&old)
+        .arg(&new)
+        .arg("--out")
+        .arg(&out);
+    match artifact.as_str() {
+        "types-scoped" => cmd.current_dir(corpus_dir()).args((SCOPED.args)()),
+        "types-all-on" => cmd.current_dir(corpus_dir()).args((ALL_ON.args)()),
+        "types-fixtures" => cmd
+            .current_dir(root())
+            .arg("--fixture-root")
+            .arg(root().join("crates/phpstan-rs/tests/fixtures")),
+        other => return Err(format!("no type snapshot named {other}")),
+    };
+    run(&mut cmd)?;
+    let report = snapshot_path(&format!("type-drift-{artifact}"), &hash, "txt");
+    let text = std::fs::read(out.join("type-drift.txt")).map_err(|e| e.to_string())?;
+    write(&report, &text)?;
+    println!("{}", report.display());
     Ok(())
 }
 

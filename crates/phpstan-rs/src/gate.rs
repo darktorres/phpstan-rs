@@ -14,12 +14,23 @@ use types::Type;
 use crate::Registry;
 use crate::project::session::Session;
 
+mod type_drift;
+pub use type_drift::{Drift, Facet, Verdict, type_drift};
+
 /// The templates in scope at a point, by name, as the checker binds them:
 /// the enclosing class's, then the enclosing function's or method's own,
 /// which shadow a class template of the same name.
 #[derive(Debug, Clone, Default)]
 pub struct TemplateScope {
     templates: FxHashMap<String, Type>,
+}
+
+impl FromIterator<(String, Type)> for TemplateScope {
+    fn from_iter<I: IntoIterator<Item = (String, Type)>>(templates: I) -> TemplateScope {
+        TemplateScope {
+            templates: templates.into_iter().collect(),
+        }
+    }
 }
 
 impl TemplateScope {
@@ -188,6 +199,80 @@ pub fn load_fixture(
     pool: Arc<rayon::ThreadPool>,
 ) -> Result<(Session, PathBuf), String> {
     Session::for_fixture(stem, &config.config, pool)
+}
+
+/// The drift from `old` to `new` with no project: classes are related by
+/// name only and template names read as classes.
+pub fn type_drift_structural(old: &str, new: &str) -> Drift {
+    type_drift(old, new, &types::Relation::structural(), &mut |_, _, _| {
+        TemplateScope::default()
+    })
+}
+
+/// The drift from `old` to `new`, dumped from `project`, related with its
+/// class hierarchy and each dump point's templates.
+pub fn type_drift_in_project(project: &crate::Project, old: &str, new: &str) -> Drift {
+    let registry = project.registry();
+    let mut scopes = TemplateScopes::new(registry);
+    type_drift(old, new, &registry.relation(), &mut |path, line, col| {
+        scopes.at(Path::new(path), line, col)
+    })
+}
+
+/// The drift between two fixture dumps (`types-fixtures`), whose lines
+/// start `<fixture>: `: each fixture's bindings related within that
+/// fixture's own project, loaded from `root` with its `X.toml`. A fixture
+/// in one dump only was renamed or deleted; its bindings are added or
+/// removed, unrelated.
+pub fn type_drift_of_fixtures(
+    root: &Path,
+    old: &str,
+    new: &str,
+    pool: Arc<rayon::ThreadPool>,
+) -> Result<Drift, String> {
+    let by_fixture = |text: &str| {
+        let mut split: std::collections::BTreeMap<String, String> = Default::default();
+        for line in text.lines() {
+            let Some((fixture, rest)) = line.split_once(": ") else {
+                continue;
+            };
+            let part = split.entry(fixture.to_string()).or_default();
+            part.push_str(rest);
+            part.push('\n');
+        }
+        split
+    };
+    let (mut old, new) = (by_fixture(old), by_fixture(new));
+    let mut drift = Drift::default();
+    for (fixture, new_part) in new {
+        let old_part = old.remove(&fixture).unwrap_or_default();
+        let tag = |d: Drift| d.tagged(&fixture);
+        if old_part.is_empty() {
+            drift.merge(tag(type_drift_structural("", &new_part)).in_one_dump());
+            continue;
+        }
+        let stem = root.join(&fixture);
+        let config = fixture_config(&stem.with_extension("toml"))?;
+        let (session, base) = load_fixture(&stem, &config, pool.clone())?;
+        let loaded = session.load()?;
+        let registry = loaded.project.registry();
+        let mut scopes = TemplateScopes::new(registry);
+        let part = type_drift(
+            &old_part,
+            &new_part,
+            &registry.relation(),
+            &mut |path, line, col| scopes.at(&base.join(path), line, col),
+        );
+        drift.merge(tag(part));
+    }
+    for (fixture, old_part) in old {
+        drift.merge(
+            type_drift_structural(&old_part, "")
+                .tagged(&fixture)
+                .in_one_dump(),
+        );
+    }
+    Ok(drift)
 }
 
 /// `template_scope_at` over files read and parsed once each.
