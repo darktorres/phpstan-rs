@@ -2241,6 +2241,30 @@ through `check-project`.
 
   Done: each is fixed or ledgered.
 
+  Design:
+
+  - The version. `binary_operand_validity` (`operators.rs:388`) decides a
+    non-numeric string operand is invalid through the coercion that
+    `1f4b45bf` made version-aware (`to_number` refusing a non-numeric string
+    on PHP 8). The report in `check_binary_operand_validity` (line 201)
+    doesn't consult the range. A non-numeric string is a `TypeError` from
+    PHP 8.0, and a warning with the value `0` before. So the report fires
+    when the failure happens on some version the code runs on: the
+    configured maximum is 8.0 or later, or no version is configured. It is
+    skipped when the maximum is below 8.0, since there the operation runs.
+    The operands that fail on every version (an array with `-`, an object
+    without number casting) are unaffected. The leading-numeric case
+    (`'5 apples' + 1` is `6` with a warning on 8.5, checked with `php`)
+    isn't an error on any version, which F34's doc fix states. Whether it
+    gets a separate warning-level report is not part of this.
+  - The pipe's callable union. The same resolver as F9's `pipe_callee`,
+    which resolves each member of a union of names and requires all of them
+    to agree before the by-reference check reports. It is one change with F9
+    and F22's identical bullet.
+
+  Fixtures: `'abc' + 1` with `--php-version 7.4` is clean, with 8.0
+  reports, and with a 7.4 to 8.3 range reports.
+
 - [ ] **F36. An argument outside its template's bound isn't reported.**
   With `@template T of \Countable @param T $c`, `cnt(5)` gives no
   `argument.type` at level 9, and returns `Countable`, where the
