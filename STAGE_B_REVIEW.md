@@ -67,7 +67,7 @@ bindings, 30,534 narrower, 1,134 equal, 6,925 wider, 39,665 undecided).
 Every loss traced to code is an item here; so are the gaps in the same
 machinery that its fixes depend on.
 
-- [ ] **P1. Displayed types don't parse back.** The type dumps and every
+- [x] **P1. Displayed types don't parse back.** (`96a22f09`) The type dumps and every
   fixture's `assertType` text are in the display grammar, which
   `types/parse.rs` can't read: benevolent unions `(A|B)`, `mixed~X`,
   accessory parts (`hasOffsetValue`, `list`, compound `*-string` names),
