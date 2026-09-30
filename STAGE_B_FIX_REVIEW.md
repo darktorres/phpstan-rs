@@ -3833,9 +3833,12 @@ through `check-project`.
     `PassMark` carries an undo log, filled on a pair's first push after
     the mark with that pair's `Vec` length (or "absent"), and `rewind_to`
     truncates each logged `Vec` and removes the pairs that were absent.
-  - `named_argument_call_facts`. It becomes a length recorded in `PassMark`
-    and truncated like the diagnostics, and the linear `contains` dedup
-    added in `cc4e6b5e` goes.
+  - `named_argument_call_facts`. It is a map from `(class, method,
+    parameter)` to the call sites' spans (`NamedArgumentCallFacts`,
+    `named_argument_renames.rs:31`). A span names one site, so its values
+    become `FxHashSet<Span>`: a repeated pass inserts the same span and adds
+    nothing, which is the "keyed so a repeat can't add" form. The linear
+    `contains` dedup added in `cc4e6b5e` goes.
   - Any other per-pass `Vec` found by listing the `Checker` fields a
     statement check pushes to joins `PassMark` the same way. A unit test
     asserts that checking a loop body twice with a rewind between leaves
