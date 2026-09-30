@@ -5,6 +5,7 @@
   "version": "0.0.1",
   "packageManager": "bun@1.3.14",
   "private": true,
+  "license": "MIT OR Apache-2.0",
   "publisher": "phpstan-rs",
   "engines": {
     "vscode": "^1.117.0"
