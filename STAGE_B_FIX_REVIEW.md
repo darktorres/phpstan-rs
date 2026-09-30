@@ -2282,6 +2282,36 @@ through `check-project`.
   `stdClass|DateTime` and the call return `Repo<stdClass|DateTime>`,
   with no report.
 
+  Design: two parts, binding and checking.
+
+  - Binding (`types/src/templates.rs`, the `TemplateParam` arm near line
+    39). The bound's own templates are bound into `bindings` (line 48)
+    before the bound check decides whether `T` binds at all, so a rejected
+    argument still leaves `E` joined with `DateTime`. The arm binds into a
+    trial copy: clone `bindings`, run the bound's inference into the clone,
+    and test the substituted bound against the argument. Only when it holds
+    are the clone's new bindings kept and `T` bound. On rejection `bindings`
+    is untouched and the template is recorded in a `rejected` set that the
+    call's inference returns beside the bindings.
+  - Checking. The argument loop in `calls/parameters.rs` (near line 290)
+    compares each argument with `param.ty()` as declared, and a template
+    placeholder accepts anything (`accepted_though_no_subtype`'s
+    `(_, TemplateParam)` arm). The loop computes the call's bindings first,
+    through F38's shared `call_template_bindings`, which returns the
+    `rejected` set too. It checks each argument against the parameter type
+    with the call's own templates substituted: a bound template by its
+    binding, and a rejected or unbound one by its bound. Then `cnt(5)` is
+    checked against `Countable` and reports "expects Countable, 5 given", as
+    PHPStan's resolved parameter type does. A bound-respecting argument is
+    checked against its own binding, which holds, so nothing that passes
+    today starts to fail.
+
+  The return type already falls back to the bound for a rejected
+  template, which stays. Fixtures: `cnt(5)` and `onlyInt('s')` report
+  `argument.type`; the `Other::class` call reports and returns
+  `Repo<stdClass>`, not `Repo<stdClass|DateTime>`; `3cea2a20`'s fixture
+  stays clean.
+
 - [ ] **F42. Smaller gaps from the final-state pass:**
   - `promote_class_string_literals` (`types::templates`) walks an `Array`
     argument but not a shape, so with `@param array<class-string<T>> $cs
