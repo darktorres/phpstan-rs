@@ -3583,6 +3583,62 @@ through `check-project`.
 
   Done: each says what the code does, on the item it documents.
 
+  Design, each checked present at `3eaddbd1`. Every replacement states
+  what the code does, in the file's register, without history.
+
+  - `union.rs:174-197`, the empty-shape paragraph above `merge_int_ranges`.
+    It moves onto `reduce_array_members`, which does the absorption, as "An
+    empty `array{}` goes into any general array member: it is a subtype of
+    every array type." The loop example and the `index_result_type` sentence
+    go.
+  - `union.rs:66-80`, the `mixed` absorption. It becomes "A `mixed` member
+    of a flattened operand absorbs the union, as a bare `mixed` operand does
+    above." The history and the `nullsafe.neverNull` story go.
+  - `merge_has_offset_value_pair` (`union.rs:514`). The doc says what the
+    merge keeps: a key tracked on both sides with its values joined, and a
+    key tracked on one side dropped back to the base. It adds that this
+    keeps a variable written in independent branches from growing a union
+    member per branch. The `ActivityService` case, "observed behavior
+    exactly", and the stale step name go. `write_literal_key_aware` becomes
+    `types::offsets`' writer (F43's `lib.rs` bullet is the same rename).
+  - `narrowing.rs`, `narrow_to_instance`. The fused first paragraph is
+    `narrow`'s old doc and goes. `narrow`'s own doc (line 126) already
+    exists. The remaining text loses "unconditionally trusts `target`",
+    since `narrow` keeps a subtype `original`.
+  - `narrowing.rs`, `narrow`'s fallback comment. The Piwigo case becomes one
+    sentence: "An `original` already within `target` stays; `===` against a
+    wider value proves nothing new about it." F4 rewrites this arm anyway,
+    so the comment is written with F4's code.
+  - `narrowing.rs`, `without`'s arms (lines 237, 257, 287). "Confirmed via
+    `php -r`", "no case this could ever get wrong" and "doesn't attempt yet"
+    become plain statements of each arm's rule. The PHP fact stays as a fact
+    ("implementing both is a fatal error"), not as a report of having
+    checked it.
+  - `narrowing.rs`, `without_falsy`'s last arm: "the old hand-rolled arm"
+    goes, and the comment says what the arm removes.
+  - `relation/accepts.rs`, the generic-arguments arm (line 110 on).
+    - The claim that `ClassReflection` keeps no class-level defaults is
+      false, and the code built on it should change with the comment. A
+      missing slot is padded with the class's declared default when it has
+      one (`template_defaults`, the hierarchy trait gaining a
+      `template_default(class, index)` query), and with `mixed` otherwise.
+      The comment then says that.
+    - The "no canonical member order" sentence (line 210) goes, since unions
+      compare as sets since `f81c5e70`.
+    - The "only ever binds a template used as a bare param type" sentence
+      (line 179) goes, since since `b274f947` every position binds.
+  - `accepts.rs:328`, the `Array(Mixed)` leniency. It becomes "An
+    `array<mixed>` value may hold anything, and is accepted where a narrower
+    array is declared unless `strict_mixed_arrays` is set." The claim that
+    literals are never inferred precisely goes.
+  - `accepts.rs`, the `Intersection`/`Intersection` arm. "Mirrors" an arm
+    `69c76cef` removed, so it goes, and the comment states the arm's own
+    rule.
+  - `accepts.rs:447`, `class == "stdClass"`. Class names fold, so it
+    compares with `eq_ignore_ascii_case("stdClass")`. A one-line code fix,
+    with a fixture passing `new STDCLASS()` where `object{a: int}` is
+    expected.
+
 - [ ] **F43. Comments in the types modules read whole in the second
   final-state pass:**
   - `lib.rs`: `Repr::HasOffsetValue` names its construction site
