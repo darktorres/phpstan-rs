@@ -1681,6 +1681,39 @@ through `check-project`.
   are skipped, and `CALL`, `CHECK`, `ANALYZE`, `OPTIMIZE`, `REPAIR`,
   `HELP` or a verb the list doesn't know give `mysqli_result|true`, with a
   fixture.
+
+  Design: `returns_result_set` (`expr/mysqli.rs:13`) becomes a three-way
+  `statement_result(sql) -> ResultKind { ResultSet, NoResultSet, Either }`.
+  It finds the verb with `sqlparser`'s tokenizer under `MySqlDialect`:
+  the dependency is already there, and
+  `sql_reflection/parameter_validation.rs` tokenizes the same way. Two
+  details follow:
+
+  - Whitespace tokens carry `--`, `#` and `/* */` comments, so skipping them
+    and any leading `(` reaches the first `Word`.
+  - A MySQL executable comment (`/*! … */`) is text the server runs, so it
+    counts as unknown.
+
+  The verbs split three ways:
+
+  - a result set: `SELECT`, `WITH`, `TABLE`, `VALUES`, `SHOW`, `DESCRIBE`,
+    `DESC`, `EXPLAIN`, `CHECK`, `CHECKSUM`, `ANALYZE`, `OPTIMIZE`, `REPAIR`,
+    `HELP`, and an `INSERT`, `REPLACE` or `DELETE` with a top-level
+    `RETURNING` (MariaDB);
+  - no result set: `INSERT`, `UPDATE`, `DELETE`, `REPLACE`, `SET`, `CREATE`,
+    `DROP`, `ALTER`, `TRUNCATE`, `RENAME`, `GRANT`, `REVOKE`, `USE`,
+    `BEGIN`, `START`, `COMMIT`, `ROLLBACK`, `SAVEPOINT`, `RELEASE`, `LOCK`,
+    `UNLOCK`, `LOAD`, `DO`, `FLUSH`, `KILL`, `RESET`, `PREPARE`,
+    `DEALLOCATE`;
+  - either: `CALL`, `EXECUTE`, `HANDLER`, and any verb the lists don't know.
+
+  `mysqli_query_type` maps `Either` to `mysqli_result|true`, the same
+  type an unfoldable string gets today. Only `ResultSet` reaches the
+  row-shape resolution. Fixtures: the four queries of the finding
+  (`/* report */ SELECT`, `-- c\nSELECT`, `CALL list_users()`,
+  `CHECK TABLE t`) all allow `->fetch_assoc()` without
+  `method.nonObject`; an `INSERT` is still `true`; an unknown verb is
+  `mysqli_result|true`.
 - [ ] **F65. A spread argument counts as one argument**
   (`checker/expr/array_ops.rs`; also before the window).
   `check_useless_return_value_call` reads `args.len()`, so `$x =
