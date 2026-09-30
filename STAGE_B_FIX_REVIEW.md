@@ -354,6 +354,26 @@ through `check-project`.
   attribute names. `#[Marker]` on a class leaves `Marker` unreferenced,
   and LSP references miss attribute sites. Done: attribute names are
   indexed as class references.
+
+  Design: `syntax::visit::walk_attribute` hands the attribute's name to
+  `visit_name` and walks its arguments. Neither `ClassFnRefWalker`
+  (`project/use_sites.rs`) nor the navigation walker
+  (`lsp/navigation.rs`) overrides `visit_attribute`, so the name reaches
+  no recorder: the `Foo::class` inside `#[Route(Foo::class)]` is
+  indexed, but `Route` is not. `ClassFnRefWalker` gains
+  `visit_attribute`, which calls `self.class_at(&attr.name,
+  attr.name.span)` and then `walk_attribute`, so the attribute is keyed
+  like any class reference (lowercased per F7). The navigation walker
+  gains the same override behind its `anchor.matches(attr.name.span)`
+  check, calling `record_class`, so hover and go-to-definition work on
+  an attribute name too. Attributes on parameters, promoted properties,
+  closures, enum cases, constants and property hooks all reach
+  `visit_attribute` through the shared walk, as the `for attr in …`
+  loops in `visit.rs` show. The dead-code module doc's "attributes" gap
+  then goes. Fixtures: `#[Marker] final class A {}` with
+  `check_dead_code` on keeps `Marker` used, a use-site-index test finds
+  the attribute site at its exact span (and a rename rewrites it), and a
+  hover test resolves `#[Marker]`.
 - [ ] **F9. A pipe into an impure callable is "does not do anything."**
   `$x |> 'var_dump';`, `$x |> 'printf';` and `$x |> fn($v) =>
   print($v);` as statements report `expr.resultUnused`. A pipe calls its
