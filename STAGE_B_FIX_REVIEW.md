@@ -904,6 +904,58 @@ through `check-project`.
   (even and odd exponents differ), an overflowing bound adds `float`, and
   an operand that may be a float makes the result `int|float` (or `float`
   when every member is one), with fixtures for each.
+
+  Design: restructure `Type::binary_operation`
+  (`types/src/arithmetic.rs:640`) around the operands' members rather
+  than patch each arm.
+
+  - Distribution. For `+`, `-`, `*`, `/`, `%` and `**`, the operands are
+    first taken to numbers the way PHP does. That is the checker's
+    `to_number`, moved into the types crate beside `numeric.rs`: a
+    numeric-string literal becomes its value, `numeric-string` becomes
+    `int|float`, `true`/`false`/`null` become `1`/`0`/`0`. Each side is then
+    split into union members, the operation runs per pair, and the results
+    are unioned. Past 16 pairs it falls back to a per-kind summary: `int`,
+    `float`, or `int|float`, by whether each side may be an int or a float.
+    A pair with a float member gives `float` (folded when both are
+    constants), and a pair of ints runs the range math. So `int|float + 1`
+    is `int|float`, `'1.5' + $i` is `float`, `$numericString + 1` is
+    `int|float`, and the `either_float` shortcut and every
+    `_ => Type::int()` fallback go.
+  - Unary operators. `-x` is `x * -1` and `+x` is `x * 1`, which is how PHP
+    compiles them. The two checker arms (`expr.rs:1766`, `4589`) then call
+    `binary_operation(Mul, …)` instead of their string-to-`int` shortcut and
+    `Type::negate`. Probed while designing, besides the finding's `-'1.5'`:
+    `-(1|2)` is `1|2`, `-true` is `true` and `-null` is `null` today, where
+    PHP gives `-1|-2`, `-1` and `0`. `Type::negate` stays only as the range
+    helper `mul` uses.
+  - `**`. `pow_int_range` becomes a candidate evaluation.
+    - The base candidates are its bounds, plus `-1`, `0` and `1` when
+      inside.
+    - The exponent candidates are its bounds and their parity neighbours,
+      both kept inside the exponent range.
+    - The result's ends are the min and max of `checked_i64_pow` over the
+      pairs.
+    - A candidate that overflows adds `float`, as does any negative exponent
+      (`1 ** -1` is `float(1)`, checked with `php`), and an unbounded
+      exponent with `|base| >= 2` adds `float`.
+    - A base range that spans zero gets `0` and the sign of each parity
+      right: `int<-3, 2> ** 2` is `int<0, 9>`, `int<-5, max> ** 2` is
+      `int<0, max>`, and `int<min, -3> ** int<1, 3>` is `int`: odd exponents
+      run to `min` and even ones to `max`.
+  - Overflow at unbounded ends. The one deliberate exception:
+    `int<min, -3> + int<min, -3>` stays `int<min, -6>`, without `float`.
+    Adding `float` wherever an unbounded end could overflow would make every
+    `$i + 1` on an `int` an `int|float`, and every such value passed on to
+    an `int` parameter a level-9 report. That keeps PHPStan's convention,
+    and the finding's last bullet is closed by writing the convention into
+    `checked_bound_op`'s doc rather than changing it. Bounded overflow keeps
+    adding `float`, as `checked_bound_op` already does.
+
+  F60's two range bugs are fixed in the same file (see there). Fixtures:
+  each bullet of the finding, plus the three unary probes. A types-crate
+  unit test runs F60's sweep over every operator, now including union
+  and float operands, against a table generated once with `php`.
 - [ ] **F40. `null == '0'` is taken as always true** (`loosely_equals`,
   read whole; also before the window). `null` against anything is
   compared as two booleans, but PHP compares `null` with a string as
