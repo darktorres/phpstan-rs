@@ -219,6 +219,11 @@ impl Type {
                     .yes()
                 {
                     Type::int()
+                } else if self
+                    .is_refined_string(AccessoryKind::NonDecimalIntegerString)
+                    .yes()
+                {
+                    crate::strip_key_refinement(self)
                 } else {
                     Type::benevolent_union_of(vec![Type::int(), self.clone()])
                 }

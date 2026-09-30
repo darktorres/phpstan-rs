@@ -131,6 +131,10 @@ impl Relation<'_> {
                 (Repr::StringLiteral(s), Repr::Accessory(AccessoryKind::DecimalIntegerString)) => {
                     s.as_str().is_some_and(is_decimal_integer_string_literal)
                 }
+                (
+                    Repr::StringLiteral(s),
+                    Repr::Accessory(AccessoryKind::NonDecimalIntegerString),
+                ) => !s.as_str().is_some_and(is_decimal_integer_string_literal),
                 // Every non-falsy string is non-empty, and so is every numeric
                 // one (`""` isn't numeric).
                 (

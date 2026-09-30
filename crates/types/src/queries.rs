@@ -530,6 +530,7 @@ impl Type {
                                     | AccessoryKind::LowercaseString
                                     | AccessoryKind::UppercaseString
                                     | AccessoryKind::DecimalIntegerString
+                                    | AccessoryKind::NonDecimalIntegerString
                             ) | Repr::HasOffsetValue(..)
                                 | Repr::HasOffset(_)
                         )
@@ -819,8 +820,8 @@ impl Type {
     pub fn array_key_type(&self) -> Option<Type> {
         syntax::stack::guard(|| {
             match self.repr() {
-                Repr::Array(key, _) => Some((*key).clone()),
-                Repr::ArrayShape(shape) => Some(shape.key_type()),
+                Repr::Array(key, _) => Some(read_key((*key).clone())),
+                Repr::ArrayShape(shape) => Some(read_key(shape.key_type())),
                 // A list keys on `int<0, max>` whatever its array member says.
                 Repr::Intersection(members) => {
                     let key = members.iter().find_map(Type::array_key_type)?;
@@ -843,6 +844,12 @@ impl Type {
                 _ => None,
             }
         })
+    }
+
+    /// Whether this is `int|string`, the key type of an array with nothing
+    /// known of its keys, however its strings are refined.
+    pub fn is_unknown_array_key(&self) -> bool {
+        crate::strip_key_refinement(self) == Type::unknown_array_key()
     }
 
     /// PHPStan's `getArrays()`: the members that are arrays.
@@ -1059,5 +1066,25 @@ fn member_count_range(member: &Type) -> Option<(i64, Option<i64>)> {
             Some((least.max(keys.len() as i64), None))
         }
         _ => None,
+    }
+}
+
+/// An array key as read out of the array: a string key is one PHP didn't
+/// cast to an int, so it isn't a decimal-int string.
+fn read_key(key: Type) -> Type {
+    match key.repr() {
+        Repr::Union(members) => Type::union_of(members.iter().cloned().map(read_key).collect()),
+        Repr::BenevolentUnion(members) => {
+            Type::benevolent_union_of(members.iter().cloned().map(read_key).collect())
+        }
+        Repr::StringLiteral(_) | Repr::ClassString(_) | Repr::ClassKindString(_) => key,
+        _ if key.is_string().yes()
+            && !key
+                .is_refined_string(AccessoryKind::DecimalIntegerString)
+                .yes() =>
+        {
+            key.with_string_accessory(AccessoryKind::NonDecimalIntegerString)
+        }
+        _ => key,
     }
 }

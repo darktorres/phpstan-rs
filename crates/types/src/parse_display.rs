@@ -772,6 +772,7 @@ fn refined_string(name: &str) -> Option<Type> {
         ("uppercase", AccessoryKind::UppercaseString),
         ("literal", AccessoryKind::LiteralString),
         ("decimal-int", AccessoryKind::DecimalIntegerString),
+        ("non-decimal-int", AccessoryKind::NonDecimalIntegerString),
         ("numeric", AccessoryKind::NumericString),
     ] {
         if let Some(after) = rest.strip_prefix(part) {

@@ -1380,7 +1380,7 @@ impl<'a> Checker<'a> {
                 // `array<string, V>` haystack can only ever find a
                 // `string` key.
                 if let Some(key_ty) = haystack_ty.array_key_type()
-                    && key_ty != Type::unknown_array_key()
+                    && !key_ty.is_unknown_array_key()
                 {
                     return Type::union(key_ty, Type::bool_literal(false));
                 }

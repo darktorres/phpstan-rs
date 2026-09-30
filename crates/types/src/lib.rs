@@ -88,8 +88,28 @@ pub(crate) struct Node {
 }
 
 impl Type {
-    /// The type `repr` represents.
+    /// The type `repr` represents. An array's key type, a shape's tail
+    /// key included, is stored without the non-decimal-int refinement:
+    /// it tells a string key read out apart, not the array's keys.
     pub(crate) fn new(repr: Repr) -> Type {
+        let repr = match repr {
+            Repr::Array(key, value) if has_key_refinement(&key) => {
+                Repr::Array(strip_key_refinement(&key), value)
+            }
+            Repr::ArrayShape(shape)
+                if shape
+                    .unsealed
+                    .as_ref()
+                    .is_some_and(|tail| has_key_refinement(&tail.0)) =>
+            {
+                let mut shape = Shape::clone(&shape);
+                if let Some(tail) = shape.unsealed.as_mut() {
+                    tail.0 = strip_key_refinement(&tail.0);
+                }
+                Repr::ArrayShape(Arc::new(shape))
+            }
+            repr => repr,
+        };
         Type(intern::intern(repr, semantic_hash))
     }
 
@@ -780,6 +800,49 @@ pub enum AccessoryKind {
     // A string proven to parse as a canonical decimal integer (no
     // leading zero/`+`/whitespace, round-trips through `i64`).
     DecimalIntegerString,
+    // A string that isn't one: as an array key it stays a string.
+    NonDecimalIntegerString,
+}
+
+/// Whether a string member of `key` carries the non-decimal-int
+/// refinement.
+fn has_key_refinement(key: &Type) -> bool {
+    match key.repr() {
+        Repr::Intersection(members) => members.iter().any(|m| {
+            matches!(
+                m.repr(),
+                Repr::Accessory(AccessoryKind::NonDecimalIntegerString)
+            )
+        }),
+        Repr::Union(members) | Repr::BenevolentUnion(members) => {
+            members.iter().any(has_key_refinement)
+        }
+        _ => false,
+    }
+}
+
+/// `key` with the non-decimal-int refinement taken off its strings.
+pub(crate) fn strip_key_refinement(key: &Type) -> Type {
+    match key.repr() {
+        Repr::Intersection(members) => {
+            let kept: Vec<Type> = members
+                .iter()
+                .filter(|m| {
+                    !matches!(
+                        m.repr(),
+                        Repr::Accessory(AccessoryKind::NonDecimalIntegerString)
+                    )
+                })
+                .cloned()
+                .collect();
+            intersect_types(kept)
+        }
+        Repr::Union(members) => Type::union_of(members.iter().map(strip_key_refinement).collect()),
+        Repr::BenevolentUnion(members) => {
+            Type::benevolent_union_of(members.iter().map(strip_key_refinement).collect())
+        }
+        _ => key.clone(),
+    }
 }
 
 #[cfg(test)]

@@ -909,16 +909,15 @@ fn parse_type_keyword_or_class(bare: &str, original: &str, generic_args: &[&str]
             Type::accessory(AccessoryKind::UppercaseString),
         ])),
         // `decimal-int-string` mirrors real PHPStan's own
-        // `IntersectionType([StringType, AccessoryDecimalIntegerStringType])`.
-        // The `inverse` variant (`non-decimal-int-string`) stays
-        // unaliased (falls through to the generic-class-name branch)
-        // since it needs a wholly separate dynamic-array-key-narrowing
-        // consumer this project doesn't build - aliasing it to a kind
-        // with no real consumer would be a silent, false claim of
-        // support.
+        // `IntersectionType([StringType, AccessoryDecimalIntegerStringType])`,
+        // `non-decimal-int-string` its inverse.
         "decimal-int-string" => Type::new(Repr::Intersection(vec![
             Type::string(),
             Type::accessory(AccessoryKind::DecimalIntegerString),
+        ])),
+        "non-decimal-int-string" => Type::new(Repr::Intersection(vec![
+            Type::string(),
+            Type::accessory(AccessoryKind::NonDecimalIntegerString),
         ])),
         "non-empty-string" => Type::new(Repr::Intersection(vec![
             Type::string(),

@@ -938,12 +938,14 @@ impl<'a> Checker<'a> {
                         } else {
                             // Int/Float are unconditionally numeric, so
                             // failing is_numeric proves the value wasn't
-                            // one - nothing else can be dropped this way.
+                            // one; a string that isn't numeric isn't a
+                            // decimal int either.
                             [Type::int(), Type::float()]
                                 .into_iter()
                                 .fold(current.into_owned(), |acc, excluded| {
                                     self.exclude(&acc, &excluded)
                                 })
+                                .with_string_accessory(AccessoryKind::NonDecimalIntegerString)
                         };
                         locals.insert(key, narrowed);
                     } else if let Some(target_ty) = narrowing_type_for_predicate(name) {

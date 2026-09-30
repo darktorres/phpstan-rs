@@ -248,10 +248,10 @@ impl Relation<'_> {
                 (Repr::ArrayShape(_), Repr::Array(..)) => TrinaryLogic::Maybe,
                 _ if self.proves_super_type(sup, sub) => TrinaryLogic::Yes,
                 (_, Repr::Intersection(members)) => {
-                    let refused = members
-                        .iter()
-                        .filter(|m| !m.is_accessory())
-                        .any(|m| self.is_super_type_of(sup, m) == TrinaryLogic::No);
+                    let refused = members.iter().any(|m| match (sup.repr(), m.repr()) {
+                        (Repr::Accessory(a), Repr::Accessory(b)) => accessories_contradict(a, b),
+                        _ => !m.is_accessory() && self.is_super_type_of(sup, m) == TrinaryLogic::No,
+                    });
                     if refused {
                         TrinaryLogic::No
                     } else {
@@ -405,6 +405,11 @@ impl Relation<'_> {
 /// (`non-empty-string` over `''`, `numeric-string` over `'abc'`,
 /// `non-empty-array` over `array{}`, `list` over `array{a: int}`).
 fn accessory_refuses(kind: &AccessoryKind, sub: &Type) -> bool {
+    if let Repr::Accessory(other) = sub.repr()
+        && accessories_contradict(kind, other)
+    {
+        return true;
+    }
     if let Repr::StringLiteral(value) = sub.repr() {
         let bytes = value.as_bytes();
         let has = match kind {
@@ -415,6 +420,9 @@ fn accessory_refuses(kind: &AccessoryKind, sub: &Type) -> bool {
             AccessoryKind::LowercaseString => !bytes.iter().any(u8::is_ascii_uppercase),
             AccessoryKind::UppercaseString => !bytes.iter().any(u8::is_ascii_lowercase),
             AccessoryKind::DecimalIntegerString => value
+                .as_str()
+                .is_some_and(crate::subtype::is_decimal_integer_string_literal),
+            AccessoryKind::NonDecimalIntegerString => !value
                 .as_str()
                 .is_some_and(crate::subtype::is_decimal_integer_string_literal),
             AccessoryKind::NonEmptyArray | AccessoryKind::ArrayList => false,
@@ -457,10 +465,26 @@ fn accessory_refuses(kind: &AccessoryKind, sub: &Type) -> bool {
         | AccessoryKind::LiteralString
         | AccessoryKind::LowercaseString
         | AccessoryKind::UppercaseString
-        | AccessoryKind::DecimalIntegerString => {
+        | AccessoryKind::DecimalIntegerString
+        | AccessoryKind::NonDecimalIntegerString => {
             !is_string && scalars_disjoint(&Type::string(), sub)
         }
     }
+}
+
+/// Two refinements no string has together: a decimal-int string and a
+/// non-decimal-int one.
+fn accessories_contradict(a: &AccessoryKind, b: &AccessoryKind) -> bool {
+    matches!(
+        (a, b),
+        (
+            AccessoryKind::DecimalIntegerString,
+            AccessoryKind::NonDecimalIntegerString
+        ) | (
+            AccessoryKind::NonDecimalIntegerString,
+            AccessoryKind::DecimalIntegerString
+        )
+    )
 }
 
 /// Two different values of one literal kind (`'a'`/`'b'`, `1`/`2`,

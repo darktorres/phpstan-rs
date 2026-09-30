@@ -195,6 +195,7 @@ fn accessory_kind_name(kind: AccessoryKind) -> &'static str {
         AccessoryKind::LowercaseString => "lowercase-string",
         AccessoryKind::UppercaseString => "uppercase-string",
         AccessoryKind::DecimalIntegerString => "decimal-int-string",
+        AccessoryKind::NonDecimalIntegerString => "non-decimal-int-string",
     }
 }
 
@@ -305,8 +306,13 @@ fn describe_accessory_intersection(members: &[Type]) -> Option<String> {
         }
         if has(AccessoryKind::DecimalIntegerString) {
             parts.push("decimal-int");
-        } else if has(AccessoryKind::NumericString) {
-            parts.push("numeric");
+        } else {
+            if has(AccessoryKind::NonDecimalIntegerString) {
+                parts.push("non-decimal-int");
+            }
+            if has(AccessoryKind::NumericString) {
+                parts.push("numeric");
+            }
         }
         return if parts.is_empty() {
             None
