@@ -1096,7 +1096,7 @@ through `check-project`.
   - `lex_number` follows phpdoc-parser's lexemes: decimal, `0x`, `0o` or
     leading-`0` octal, and `0b` integers with `_` separators, and floats
     with a fraction or exponent (`1e25`, `.5`, `1_000.5`). An integer past
-    `i64` becomes a float, as PHPStan's constant-expression reader does.
+    `i64` becomes a float, as PHP reads such a literal in code.
   - A new lowering `TypeNode -> Type` (in `types`, beside `parse.rs`) walks
     the node's variants: identifier, nullable, union, intersection, generic,
     wildcard, variance, `ArrayOf`, offset access, shapes, callables with
@@ -1268,7 +1268,9 @@ through `check-project`.
     since PHP counts a `switch` as a loop for `break`;
   - a function, closure or class body stops the walk;
   - a `break n` (default 1) at depth `d` leaves this loop when `n > d`;
-  - a `goto` anywhere counts, since it may jump out.
+  - a `goto` counts when its label is outside the loop body. Labels are
+    in the AST, so the walk collects the body's own labels first, and a
+    `goto` to one of them stays inside the loop.
 
   A `break 2` in the body leaves this loop and the one around it, so it
   counts. From the outer loop's walk it is a `break 2` at depth 1, which
@@ -2166,9 +2168,12 @@ through `check-project`.
   - `.` chains of literals (51.8 s at 8,000). The candidate is per-level
     work proportional to the left operand. The profile decides between
     building the growing literal (`concat` of an ever-longer
-    `StringLiteral`, rehashed at intern time), which would be capped by
-    generalizing past a length (PHPStan keeps literals only while short),
-    and a subtree walk in the per-level checks, which is removed as above.
+    `StringLiteral`, rehashed at intern time) and a subtree walk in the
+    per-level checks, which is removed as above. The literal is not
+    capped or generalized, since that loses a value the code states. If
+    building it is the cost, the literal's text becomes a shared rope
+    whose hash is combined from its parts', so appending is O(1)
+    amortized and interning never rehashes the prefix.
   - Nested `match` (71 s at 1,000). `narrow_match_arm_conditions` gives each
     arm a scope with a new version, so the infer cache misses when an outer
     arm's `infer_expr` walks the inner match again. The inner match's result
