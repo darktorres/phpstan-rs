@@ -1146,6 +1146,31 @@ through `check-project`.
   `string` there. Done: the alias is recorded only when the assigned
   literal is truthy and the prior value falsy (or the replay is negated
   to match), with a fixture for the `true`-then-`false` shape.
+
+  Design: the alias records "the flag's truthiness is the condition's",
+  which holds only when the body's literal is truthy and the flag's
+  value before the `if` is falsy. After
+  `$ok = true; if (cond) { $ok = false; }` the flag is truthy exactly
+  when `cond` failed. So the alias carries a polarity:
+
+  - `ConditionAliasMap`'s entry (`locals.rs`) gains `negated: bool`.
+  - `record_if_body_flag_alias` (`narrowing.rs:1443`) reads the literal's
+    truthiness and the prior type's (`else_locals.get(name)`, through
+    `to_boolean`). It records the alias only when both are definite and
+    differ, with `negated` set when the literal is the falsy one. A prior
+    `bool` or a same-truthiness pair records nothing.
+  - The plain `$ok = cond;` alias keeps `negated: false`.
+  - The replay at `narrowing.rs:1336` calls
+    `apply_narrowing(&alias, locals, branch_true != negated)`.
+  - The nullsafe replay in `assertions.rs:235` bails on a negated entry,
+    since it is written for the positive shape.
+  - `merge_scopes` compares the flag too when it keeps an entry both sides
+    share.
+
+  Fixtures: the finding's `true`-then-`false` shape keeps `$x` a
+  `string` inside `if ($ok)` and `null` inside `if (!$ok)`. The existing
+  `false`-then-`true` shape is unchanged. A prior `bool $ok` records no
+  alias, so `if ($ok)` narrows nothing.
 - [ ] **F47. A loop that can't exit on its own isn't seen as
   terminating** (`always_terminates`, `checker/control_flow.rs`; also
   before the window). Both report `return.missing` at level 0:
