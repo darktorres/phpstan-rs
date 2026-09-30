@@ -141,3 +141,40 @@ fn narrow_count_keeps_what_the_count_allows() {
         ]))
     );
 }
+
+mod loose_cut_by_a_non_numeric_string {
+    use crate::{PhpVersion, Relation, Type};
+
+    fn cut(member: Type, s: &str, version: Option<PhpVersion>) -> Type {
+        Relation::structural().narrow_loose(&member, &Type::string_literal(s.into()), true, version)
+    }
+
+    const PHP7: Option<PhpVersion> = Some(PhpVersion::new(7, 4));
+    const PHP8: Option<PhpVersion> = Some(PhpVersion::new(8, 0));
+
+    #[test]
+    fn php_7_compares_a_number_with_the_leading_number() {
+        assert_eq!(cut(Type::int(), "abc", PHP7), Type::int_literal(0));
+        assert_eq!(cut(Type::int(), "1abc", PHP7), Type::int_literal(1));
+    }
+
+    #[test]
+    fn php_8_equals_a_number_only_to_its_infinity() {
+        assert_eq!(cut(Type::int(), "abc", PHP8), Type::never());
+        assert_eq!(
+            cut(Type::float(), "INF", PHP8),
+            Type::float_literal(f64::INFINITY)
+        );
+    }
+
+    #[test]
+    fn an_unknown_version_keeps_what_either_allows() {
+        assert_eq!(cut(Type::int(), "abc", None), Type::int_literal(0));
+    }
+
+    #[test]
+    fn a_bool_compares_by_the_string_s_truthiness() {
+        assert_eq!(cut(Type::bool(), "abc", None), Type::bool_literal(true));
+        assert_eq!(cut(Type::bool(), "0", None), Type::bool_literal(false));
+    }
+}

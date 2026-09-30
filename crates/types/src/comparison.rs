@@ -728,20 +728,54 @@ impl Relation<'_> {
             Value::Bool(Some(false)) => member.only_falsy(self),
             Value::Int(Some(n), Some(_)) => self.equal_to_number(member, n as f64, versions),
             Value::Float(Some(f)) => self.equal_to_number(member, f, versions),
-            Value::Str(Str::Literal(s)) => match numeric(s, versions.php8) {
-                Some(x) if !versions.php7 || numeric(s, false).is_some() => self
-                    .union(self.equal_to_number(member, x, versions), c.clone())
-                    .intersect_with(member, self),
-                _ => {
-                    if member.is_string().yes() {
-                        c.clone()
-                    } else {
-                        member.clone()
-                    }
-                }
-            },
+            // Each version's cut, joined when the range spans both.
+            Value::Str(Str::Literal(s)) => {
+                let parts: Vec<Type> = [(versions.php8, true), (versions.php7, false)]
+                    .into_iter()
+                    .filter(|(applies, _)| *applies)
+                    .map(|(_, php8)| self.equal_to_literal_string(member, s, c, php8))
+                    .collect();
+                self.union_of(parts)
+            }
             _ => member.clone(),
         }
+    }
+
+    /// `member`'s values loosely equal to the literal string `c` (bytes
+    /// `s`) on PHP 8 (`php8`) or PHP 7: a bool by the string's truthiness;
+    /// a numeric string as its number and the strings of that value; a
+    /// non-numeric one as itself among strings, and for a number as `INF`
+    /// or `-INF` on PHP 8, or its leading number on PHP 7.
+    fn equal_to_literal_string(&self, member: &Type, s: &[u8], c: &Type, php8: bool) -> Type {
+        let versions = Versions { php7: !php8, php8 };
+        if member.is_bool().yes() {
+            let truthy = !(s.is_empty() || s == b"0");
+            return self.intersect(vec![member.clone(), Type::bool_literal(truthy)]);
+        }
+        if let Some(x) = numeric(s, php8) {
+            return self
+                .union(self.equal_to_number(member, x, versions), c.clone())
+                .intersect_with(member, self);
+        }
+        if member.is_string().yes() {
+            return c.clone();
+        }
+        if member.is_int().yes() || member.is_float().yes() {
+            if !php8 {
+                return self.equal_to_number(member, leading_number(s), versions);
+            }
+            let infinity = match s {
+                b"INF" => f64::INFINITY,
+                b"-INF" => f64::NEG_INFINITY,
+                _ => return Type::never(),
+            };
+            return if member.is_float().yes() {
+                Type::float_literal(infinity)
+            } else {
+                Type::never()
+            };
+        }
+        member.clone()
     }
 
     /// `member`'s values equal to `null`: `null`, `false`, `0`, `0.0`, `''`
