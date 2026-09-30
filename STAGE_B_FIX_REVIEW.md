@@ -2436,6 +2436,30 @@ through `check-project`.
   the `else` type, and a compound assignment is the value it assigns,
   with fixtures.
 
+  Design:
+
+  - The short ternary, in both arms (`check_expr` at `expr.rs:2174`,
+    `infer_expr` at `4871`). `then_` is `None` and the arm returns `mixed`.
+    The value of `$c ?: $e` is `$c` itself when truthy, so the then-type is
+    the condition's type in the truthy scope:
+    `current_narrowed_type(cond, key, &then_locals)` when the condition has
+    a narrowing key, else `cond_ty.without_falsy()`. The result unions it
+    with the else type. `check_expr` already builds `then_locals` and
+    `else_locals` and evaluates the condition once, which stays so.
+  - The compound assignment. `check_expr`'s `CompoundAssign` arm (line 2108)
+    computes the assigned `ty` and then returns `Type::mixed()`. It returns
+    `ty` (cloned before `bind_assignment_target` consumes it), since PHP's
+    value of `$n += 1` is the new `$n`. The `??=` case is `infer_binary`'s
+    `Coalesce`, the same `widen_coalesce_result` rule as `??`. `infer_expr`
+    gets the matching `CompoundAssign` arm, returning
+    `infer_binary(op, lhs, rhs, locals)`, so both paths agree, as the
+    infer-cache assumption (F33) needs.
+
+  Fixtures: `$s ?: 'd'` with `?string $s` is `non-falsy-string|'d'`
+  (`string` minus `''` and `'0'`, plus `'d'`); `$z = ($n += 1)` with
+  `int<0, 5> $n` makes `$z` `int<1, 6>`; `$y = ($a ??= [])` is `$a`'s
+  non-null type or `array{}`.
+
 - [ ] **F67. A loose `==` narrows as `===`** (also before the window).
   - `check_switch` (`checker/stmt/switch.rs`) narrows each case through
     `apply_equality_narrowing`, which is `===`'s narrowing, but `switch`
