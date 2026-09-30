@@ -642,9 +642,7 @@ impl<'a> Checker<'a> {
     }
 
     fn apply_narrowing_unguarded(&self, cond: &Expr, locals: &mut Locals, branch_true: bool) {
-        // A preg call's result, however it's compared, narrows its
-        // `$matches` and subject; the arms below still narrow a variable
-        // the call was stored in.
+        // A preg call's truthiness narrows its `$matches` and subject.
         self.apply_preg_result_narrowing(cond, locals, branch_true);
         // `function_exists('foo')`'s own true branch proves `foo` is
         // callable for the rest of that branch - a project-specific
@@ -795,36 +793,8 @@ impl<'a> Checker<'a> {
                     locals.insert(key, self.relation().narrow(&current, &target_ty));
                 }
             }
-            ExprKind::Binary(op, l, r)
-                if let Some((spaceship_op, a, b)) = spaceship_comparison(op, l, r) =>
-            {
-                // `($a <=> $b) < 0` is `$a < $b`; `=== 0` or `== 0` is
-                // `$a == $b`.
-                match spaceship_op {
-                    Some(ordering) => {
-                        self.apply_ordering_narrowing(a, b, ordering, branch_true, locals);
-                    }
-                    None => self.apply_loose_equality_narrowing(a, b, locals, branch_true),
-                }
-            }
-            // A comparison with `count($x)` narrows `$x` by the count it
-            // proves, then the other side as any comparison does.
-            ExprKind::Binary(op, l, r) if comparison_count_operand(op, l, r).is_some() => {
-                self.apply_count_narrowing(op, l, r, branch_true, locals);
-            }
             ExprKind::Binary(op, l, r) => {
-                let is_eq = matches!(op, BinOp::Identical);
-                let is_neq = matches!(op, BinOp::NotIdentical);
-                if is_eq || is_neq {
-                    let matches_when_true = if is_eq { branch_true } else { !branch_true };
-                    self.apply_equality_narrowing(l, r, locals, matches_when_true);
-                } else if matches!(op, BinOp::Eq | BinOp::NotEq) {
-                    // PHP's loose comparison (`comparison.rs`).
-                    let equal = matches!(op, BinOp::Eq) == branch_true;
-                    self.apply_loose_equality_narrowing(l, r, locals, equal);
-                } else if let Some(ordering) = crate::checker::operators::ordering_op(op) {
-                    self.apply_ordering_narrowing(l, r, ordering, branch_true, locals);
-                }
+                self.apply_comparison_narrowing(op, l, r, locals, branch_true);
             }
             ExprKind::Unary(UnaryOp::Not, inner) => {
                 self.apply_narrowing(inner, locals, !branch_true);
@@ -1202,22 +1172,34 @@ impl<'a> Checker<'a> {
             // branch instead of a real non-zero `int` (`substr()`'s 3rd
             // argument expects `int|null`, not `int<0, max>|false`).
             ExprKind::Assign(lhs, rhs) | ExprKind::AssignRef(lhs, rhs) => {
-                let rhs_ty = self.infer_expr(rhs, locals);
-                let native = match (&cond.kind, &lhs.kind) {
-                    (ExprKind::Assign(..), ExprKind::Variable(name)) => {
-                        Some((name.clone(), self.native_expr_type(rhs, locals)))
-                    }
-                    _ => None,
+                let (rhs_ty, native) = match self.assigned_values.get(&cond.span) {
+                    Some((ty, native)) => (ty.clone(), native.clone()),
+                    None => (
+                        self.infer_expr(rhs, locals),
+                        matches!(cond.kind, ExprKind::Assign(..))
+                            .then(|| self.native_expr_type(rhs, locals)),
+                    ),
                 };
                 self.bind_assignment_target(lhs, rhs_ty, locals);
-                if let Some((name, native)) = native {
-                    locals.set_native(&name, native);
+                if let ExprKind::Variable(name) = &lhs.kind
+                    && let Some(native) = native
+                {
+                    locals.set_native(name, native);
                 }
-                if branch_true
-                    && let Some(key) = narrowing_key(lhs)
+                // The value's own subjects (`$x` in `$o = $x instanceof
+                // Foo`), unless it reads a variable the target replaced.
+                if !reads_assigned_variable(lhs, rhs) {
+                    self.apply_narrowing(rhs, locals, branch_true);
+                }
+                if let Some(key) = narrowing_key(lhs)
                     && let Some(current) = locals.get(&key).cloned()
                 {
-                    locals.insert(key, current.without_falsy());
+                    let narrowed = if branch_true {
+                        current.without_falsy()
+                    } else {
+                        current.only_falsy(&self.relation())
+                    };
+                    locals.insert(key, narrowed);
                 }
             }
             // The narrow slice of real PHPStan's `ConditionalExpressionHolder`
@@ -1824,6 +1806,88 @@ impl Checker<'_> {
         };
         if let Some(narrowed) = narrowed {
             locals.insert(key, narrowed);
+        }
+    }
+}
+
+/// A comparison operand as the value it compares: an assignment's target
+/// and its assigned value, or the operand itself and no value.
+fn condition_operand(e: &Expr) -> (&Expr, Option<&Expr>) {
+    match &e.peeled().kind {
+        ExprKind::Assign(lhs, rhs) | ExprKind::AssignRef(lhs, rhs) => (lhs, Some(rhs)),
+        _ => (e, None),
+    }
+}
+
+/// Whether `value` reads a variable `target` names, whose old value it
+/// meant; after the assignment, the name holds the new one.
+fn reads_assigned_variable(target: &Expr, value: &Expr) -> bool {
+    syntax::visit::any_expr_in_scope(
+        target,
+        |t| matches!(&t.kind, ExprKind::Variable(v) if cond_references_variable(value, v)),
+    )
+}
+
+impl Checker<'_> {
+    /// `l op r` was `holds`. An assignment operand compares as its target
+    /// (`($n = count($x)) > 0` narrows `$n`), and then as its value, whose
+    /// subjects narrow too (`$x`), unless the value reads a variable the
+    /// assignment just replaced.
+    fn apply_comparison_narrowing(
+        &self,
+        op: &BinOp,
+        l: &Expr,
+        r: &Expr,
+        locals: &mut Locals,
+        holds: bool,
+    ) {
+        let ((lt, lv), (rt, rv)) = (condition_operand(l), condition_operand(r));
+        self.compare_operands(op, lt, rt, locals, holds);
+        if lv.is_none() && rv.is_none() {
+            return;
+        }
+        if lv.is_some_and(|v| reads_assigned_variable(lt, v))
+            || rv.is_some_and(|v| reads_assigned_variable(rt, v))
+        {
+            return;
+        }
+        self.compare_operands(op, lv.unwrap_or(lt), rv.unwrap_or(rt), locals, holds);
+    }
+
+    /// `l op r` was `holds`: a preg call's result, a spaceship, a count, or
+    /// the sides themselves, as each narrows.
+    fn compare_operands(&self, op: &BinOp, l: &Expr, r: &Expr, locals: &mut Locals, holds: bool) {
+        self.apply_preg_comparison(op, l, r, locals, holds);
+        if let Some((spaceship_op, a, b)) = spaceship_comparison(op, l, r) {
+            // `($a <=> $b) < 0` is `$a < $b`; `=== 0` or `== 0` is
+            // `$a == $b`.
+            match spaceship_op {
+                Some(ordering) => self.apply_ordering_narrowing(a, b, ordering, holds, locals),
+                None => self.apply_loose_equality_narrowing(a, b, locals, holds),
+            }
+            return;
+        }
+        // A comparison with `count($x)` narrows `$x` by the count it
+        // proves, then the other side as any comparison does.
+        if comparison_count_operand(op, l, r).is_some() {
+            self.apply_count_narrowing(op, l, r, holds, locals);
+            return;
+        }
+        match op {
+            BinOp::Identical | BinOp::NotIdentical => {
+                let equal = matches!(op, BinOp::Identical) == holds;
+                self.apply_equality_narrowing(l, r, locals, equal);
+            }
+            // PHP's loose comparison (`comparison.rs`).
+            BinOp::Eq | BinOp::NotEq => {
+                let equal = matches!(op, BinOp::Eq) == holds;
+                self.apply_loose_equality_narrowing(l, r, locals, equal);
+            }
+            _ => {
+                if let Some(ordering) = crate::checker::operators::ordering_op(op) {
+                    self.apply_ordering_narrowing(l, r, ordering, holds, locals);
+                }
+            }
         }
     }
 }

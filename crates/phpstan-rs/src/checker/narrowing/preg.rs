@@ -6,19 +6,14 @@ use syntax::ast::*;
 use types::{AccessoryKind, PhpVersion, Type};
 
 impl Checker<'_> {
-    /// Narrows a preg call's `$matches` and subject by what `cond` proves
-    /// of its result: `cond` is the call itself (its truthiness), or a
-    /// comparison with a side that is the call or a variable whose
-    /// condition alias is one. The comparison is applied to the result's
-    /// type as any comparison narrows, so every operator and operand
-    /// order works.
+    /// Narrows a preg call's `$matches` and subject when `cond` is the
+    /// call itself, by its truthiness.
     pub(super) fn apply_preg_result_narrowing(
         &self,
         cond: &Expr,
         locals: &mut Locals,
         branch_true: bool,
     ) {
-        let cond = cond.peeled();
         if let Some(call) = preg_call(cond) {
             let result = preg_result_type(call.all);
             let result = if branch_true {
@@ -27,11 +22,21 @@ impl Checker<'_> {
                 result.only_falsy(&self.relation())
             };
             self.narrow_preg_outcome(&call, &result, locals);
-            return;
         }
-        let ExprKind::Binary(op, l, r) = &cond.kind else {
-            return;
-        };
+    }
+
+    /// `l op r` was `holds`, where a side is a preg call or a variable
+    /// whose condition alias is one: the comparison applied to the
+    /// call's result type, as any comparison narrows, so every operator
+    /// and operand order works.
+    pub(super) fn apply_preg_comparison(
+        &self,
+        op: &BinOp,
+        l: &Expr,
+        r: &Expr,
+        locals: &mut Locals,
+        holds: bool,
+    ) {
         for (side, other, on_left) in [(l, r, true), (r, l, false)] {
             let alias;
             let (call, result) = if let Some(call) = preg_call(side) {
@@ -50,7 +55,7 @@ impl Checker<'_> {
             };
             let other = self.infer_expr(other, locals);
             let op = if on_left { *op } else { mirror_comparison(op) };
-            if let Some(result) = self.compared_result(&result, &op, &other, branch_true) {
+            if let Some(result) = self.compared_result(&result, &op, &other, holds) {
                 self.narrow_preg_outcome(&call, &result, locals);
             }
         }

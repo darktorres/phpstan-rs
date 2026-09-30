@@ -508,6 +508,11 @@ pub struct Checker<'a> {
     // enclosing function's body to answer "could a `goto` reach this
     // labeled statement" itself.
     pub(crate) current_function_goto_targets: rustc_hash::FxHashSet<syntax::name::Name>,
+    /// Each assignment's value type (and native type, for a variable
+    /// target) as last checked, by the assignment's span: a condition
+    /// narrowed after the check binds these, not its right side re-read
+    /// once the target already holds the new value.
+    pub(crate) assigned_values: rustc_hash::FxHashMap<Span, (Type, Option<Type>)>,
     /// Statements in the current function body whose assertion narrowed
     /// a variable to `never`: the assertion fails there, so they end
     /// control flow (`always_terminates`).
@@ -1046,6 +1051,7 @@ impl<'a> Checker<'a> {
             current_function_by_ref_params_with_tag: rustc_hash::FxHashMap::default(),
             current_function_byref_snapshot_names: rustc_hash::FxHashSet::default(),
             current_function_goto_targets: rustc_hash::FxHashSet::default(),
+            assigned_values: rustc_hash::FxHashMap::default(),
             terminating_assertions: rustc_hash::FxHashSet::default(),
             current_function_assigned_variables: Vec::new(),
             in_bare_statement_position: false,

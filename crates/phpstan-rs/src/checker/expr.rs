@@ -2051,6 +2051,10 @@ impl<'a> Checker<'a> {
                     }
                     _ => None,
                 };
+                self.assigned_values.insert(
+                    e.span,
+                    (rhs_ty.clone(), native.as_ref().map(|(_, n)| n.clone())),
+                );
                 self.bind_assignment_target(lhs, rhs_ty.clone(), locals);
                 if let Some((name, native)) = native {
                     locals.set_native(&name, native);
