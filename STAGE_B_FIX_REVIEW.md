@@ -1999,6 +1999,35 @@ through `check-project`.
   variable. This was already the case before the fix window; `3f04ac3f`
   widened the grammar there without checking it. Done: the class
   expression goes through `check_expr`.
+
+  Design: both `New` arms treat a non-`Name` class expression as opaque.
+  `check_expr`'s arm (`expr.rs:2352`) starts from `infer_expr(e)`, never
+  checks `class_expr`, and so never reports on it. `infer_expr`'s arm
+  (`expr.rs:4616`) answers `mixed` for it (`_ => Type::mixed()`). So:
+
+  - `check_expr` first runs `self.check_expr(class_expr, locals, label)`
+    when the class expression isn't a `Name`. The variable, property, offset
+    or parenthesized-expression forms `3f04ac3f` added then report what they
+    report elsewhere: undefined variable, undefined property, missing
+    offset. It then checks what came back: a value that can't be a string or
+    an object is PHP's `Error` "Class name must be a valid object or a
+    string" (checked with `php` for an `int`), reported through
+    `failing_level` like the other operand checks. The identifier is a new
+    `new.invalidClass`.
+  - `infer_expr` types the instance from that value:
+    - a `class-string<T>` or a class-string literal gives `T`, with the
+      constructor-argument template binding the `Name` path already does;
+    - an object type gives that same type (`new $o()` makes another instance
+      of `$o`'s runtime class, as `php` confirms for `ArrayObject`);
+    - a plain `string` gives `object`, and anything else `mixed`.
+
+  While there, the `self`/`parent`/`static` match compares `written` by
+  case, though keywords fold (`new SELF()` is valid PHP), so it compares
+  with `eq_ignore_ascii_case`. Fixtures: `new $undef()`,
+  `new $undef->cls()` and `new $undef['k']()` report
+  `variable.undefined`; `new $cls()` with `class-string<Foo> $cls` is
+  `Foo` and checks its constructor's arguments; `new $i()` with `int $i`
+  reports `new.invalidClass`.
 - [ ] **F18. A flat binary chain is still superlinear.** P2's iterative
   chain covers `.` and `+` over variables; left-associative chains
   elsewhere recurse and re-infer. Timings with the release binary, one
