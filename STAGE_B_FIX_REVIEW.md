@@ -323,8 +323,9 @@ through `check-project`.
     under its one candidate. An unqualified name in a namespace is
     recorded under both candidates: the namespaced one as a plain site,
     and the global one as a fallback site tagged with the namespaced name
-    it yields to. The tag is a new `RefTarget::FunctionFallback(global,
-    namespaced)` stored in `by_target` under the global key.
+    it yields to. The index keeps those in a second map,
+    `function_fallbacks: FxHashMap<String, Vec<(PathBuf, Span,
+    String)>>`, undone per file like `by_file`.
   - `references(&RefTarget::Function(f))` gains a sibling
     `function_references(f, is_declared: &dyn Fn(&str) -> bool)`. It
     returns the plain sites for `f` plus the fallback sites whose
