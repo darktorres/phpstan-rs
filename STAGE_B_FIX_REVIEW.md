@@ -190,9 +190,14 @@ through `check-project`.
   The results are unioned, dropping `never`. When every pair is disjoint
   the result is `never`: both the union arm's `0 => target.clone()` and
   the non-union `_ => target.clone()` go. `Mixed(_, Some(lacks))` keeps
-  `target.without(lacks)`. A template placeholder `original` narrows as
-  its bound does, and returns `target` when that is not `never`, so a
-  `T` still narrows to the checked type. This is the same rule
+  `target.without(lacks)`. A template placeholder `original` is checked
+  against its bound: a bound disjoint from `target` gives `never`, and
+  otherwise the result is `T&target`, not `target`. The value is still a
+  `T`, so `function f(T $x): T { if (is_int($x)) { return $x; } … }`
+  must not report returning an `int` where `T` is expected, and a
+  caller's binding of `T` flows through. The intersection with a
+  placeholder already exists (`narrow_to_instance` builds one for
+  objects); scalar targets use the same form. This is the same rule
   `narrow_to_instance` needs in its disjoint fallback, since
   `null&ImageId` is exactly what it avoids, so both share one helper.
   The eight `narrow` callers (the type-check predicates, `===` in
@@ -2122,7 +2127,9 @@ through `check-project`.
       constructor-argument template binding the `Name` path already does;
     - an object type gives that same type (`new $o()` makes another instance
       of `$o`'s runtime class, as `php` confirms for `ArrayObject`);
-    - a plain `string` gives `object`, and anything else `mixed`.
+    - a plain `string` gives `object`, `mixed` stays `mixed`, and a value
+      that can't name a class (reported `new.invalidClass`) gives the
+      error type, so nothing built on it reports again.
 
   While there, the `self`/`parent`/`static` match compares `written` by
   case, though keywords fold (`new SELF()` is valid PHP), so it compares
