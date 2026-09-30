@@ -1199,10 +1199,22 @@ through `check-project`.
   Groups are formed:
 
   - `$a = &$b` puts `$a` into `$b`'s group, leaving its old one;
-  - `foreach ($xs as &$v)` groups `$v` with the key `$xs[<current key>]`,
-    dropped at the loop's end;
-  - `global $x` and `static $x` join `$x` to a group of their own that
-    nothing else writes locally;
+  - `foreach ($xs as &$v)` groups `$v` with the element being visited.
+    The group outlives the loop: PHP leaves `$v` a reference to the last
+    element (`$v = 9` after the loop writes `$a[2]`, checked with `php`).
+    After the loop `$v` is grouped with the last key when the subject is
+    a sealed shape, and otherwise with "some element" (`$xs[*]`), so a
+    write through `$v` joins its type into the array's value type. This
+    is the dangling-reference shape, so a write to `$v` after the loop
+    without an `unset($v)` first is reported at level 4,
+    `foreach.danglingReference`;
+  - `global $x` binds `$x` to the global variable, which any call may
+    write (a function with `global $x`, or `$GLOBALS['x'] = …`, which
+    `php` confirms writes the caller's global). A global-bound variable
+    forgets its narrowing after every call whose purity isn't known to
+    leave globals alone, the rule F82 applies to properties;
+  - `static $x` joins `$x` to a group that only a recursive call of the
+    same function writes, so a call to the function itself forgets it;
   - `$r = &$arr['k']` and `$r = &$o->p` group `$r` with that key.
 
   A group is used:
