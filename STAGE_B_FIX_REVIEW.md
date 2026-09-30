@@ -1147,10 +1147,19 @@ through `check-project`.
     only from a `FloatLiteral` token, so `Infinity`, `NaN` and `inf` are
     class names, and each conditional branch is the node the grammar built,
     including `\Closure(): int`, `self::A` and `?T`.
-  - `parse_written_type` stays for native hints and the few internal strings
-    (`predefined_constants.rs`, stub synthesis). Its float fallback is gated
-    on a first character that is a digit, a sign or a `.`, since native
-    hints never hold a float.
+  - Native hints already lower structurally (`types::native_type` over
+    the `TypeHint` node). What is left of the string parser is its 48
+    internal callers, type strings written in Rust
+    (`predefined_constants.rs`, stub synthesis, builtin return rules).
+    Those go through the same grammar and lowering, via a
+    `types::parse_phpdoc_type(&str)` that lexes and parses the string
+    with `phpdoc::grammar` and lowers the node. The string parser in
+    `types/src/parse.rs` (`parse_type_string`, `parse_written_type`,
+    `split_top_level`, `try_parse_conditional_type`, `parse_type_atom`)
+    is then deleted, so every written type has one grammar. Where the
+    types crate can't depend on `phpdoc`, the grammar's type part (the
+    lexer and `TypeNode` parser) moves into its own crate that both
+    use.
 
   Fixtures: `@param Infinity $i` with a class `Infinity` is clean,
   `$n->v` on `Nan` resolves, `1_000`, `0x1F` and `1e25` read as `1000`,
