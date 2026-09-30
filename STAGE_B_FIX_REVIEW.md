@@ -94,6 +94,18 @@ Legend: `[x]` done (commit given), `[>]` moved to the crate-split plan
   new report that is right. A delta no finding explains is a regression
   of the checkpoint, fixed before the next group.
 
+- [x] **V2. Every probed finding still reproduces** at the last code
+  commit (`cc4e6b5e`, the build from 21:35). The 56 probeable findings
+  were re-run one probe each; all reproduce. The probe of F82 needs
+  `assertType`, since F62's syntactic guard hides the comparison, and it
+  found F89. Three findings changed shape since they were written:
+  - F44: `rand(10, 1)` is still `never`, but the next statement no longer
+    reports `deadCode.unreachable` at the top level;
+  - F38: after `assertSame(5, $n)` the value is `mixed`, not `T`, which is
+    still not narrowed to `5`;
+  - F19's first bullet and most of F62 were already fixed, as their
+    designs say.
+
 ## Full review: findings
 
 Grouped by severity, most severe first. Each names the commit that
@@ -2104,6 +2116,52 @@ through `check-project`.
   `accepts(μA. array{x: int, y?: A}, array{x: 1, y: array{x: 2}})` is
   `Yes`; and `combined_shape` of
   `array{a: 1}|array{b: 2, ...<string, int>}` giving `a?: 1|int`.
+
+- [ ] **F89. A private method called through another value of its own class is
+  reported unused** (`checker/unused/member_usage.rs`; found by the re-probe of
+  F82). The walker counts a private member as used only through `$this`, a
+  variable assigned `new self()`/`new static()`/`new <SameClass>()`, one tested
+  `instanceof self`, or a parameter hinted with the class (`is_this_or_aliased`,
+  `member_usage.rs:288`). `$o = $this; $o->load();` reports
+  `private method A::load() is unused` (`method.unused`), though PHP lets any
+  code in `A` call `load()` on any `A`. Probed further:
+  `$x = clone $this; $x->b();` and an untyped `$m->d()` are reported too, while
+  a parameter typed `self` or `A` is recognized. A property of the class's type
+  and a `static`-returning factory's result go through the same syntactic test
+  (read, not probed). Done: a private member counts as used when any access in
+  the class resolves to it by the receiver's type, with fixtures for each shape.
+
+  Design: the use is a typed question, and the checker already answers
+  it: while it checks the class's bodies it resolves every member
+  access's receiver type and its declaring member (`find_method_owner`,
+  `find_property_owner`, the static and constant lookups).
+  `record_member_ref` (`checker.rs:1226`) records that resolution for dead
+  code, gated on `collect_member_refs`. The private-member check reads the
+  same record instead of its own syntactic walk:
+  - While checking a class-like's bodies (methods, closures inside them,
+    property hooks, constant and property initializers), the checker
+    records each member access whose resolved owner is the class being
+    checked into that class's private-use set, whatever expression the
+    receiver was. This recording is always on, separate from the
+    dead-code gate.
+  - A receiver whose type is unknown there (`mixed`, an untyped
+    parameter) accessing a name that matches a private member counts as a
+    use, since it may be an instance of the class. That is the safe
+    direction for a report that says code is dead.
+  - `check_unused_private_members` (`checker/unused.rs:138`) runs after
+    the class's bodies are checked and reads the set. `MemberUsage`'s
+    syntactic reads, writes and aliases go. Its escape flags stay
+    (`escaped` for a dynamic `static::${...}`, `$this->$name`, and
+    rebinds reaching private members through `unused/rebind.rs`), as do
+    string callables, now F66's typed callable references.
+  - Writes stay distinct from reads (a private property only written is
+    still reported as write-only), recorded from the assignment target's
+    resolution the same way.
+
+  Fixtures: `$o = $this; $o->load();`, `function merge(self $other) {
+  $other->load(); }`, `clone $this` then a private call, a property typed
+  the class, and a `static`-returning factory's result each keep
+  `load()` used; a private method called nowhere is still reported.
 
 ### Wrong types and missed reports (probed)
 
