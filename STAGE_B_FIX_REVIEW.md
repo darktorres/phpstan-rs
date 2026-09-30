@@ -3333,6 +3333,47 @@ through `check-project`.
 
   Done: each as stated, with a fixture where the output changes.
 
+  Design, per bullet:
+
+  - Doctrine fields (`class_info/doctrine_entity.rs:199`).
+    `compute_doctrine_entity` inserts every property into `fields` (line
+    237) and only reads `#[ORM\Column]` for its name. Only a property
+    carrying a mapping attribute (`Column`, `Id`, `ManyToOne`, `OneToOne`,
+    `OneToMany`, `ManyToMany`, `Embedded`, or a `JoinColumn` with one of the
+    association attributes) becomes a field, so a DQL path to a transient
+    property reports as unknown. The name arguments are read positionally
+    too: `string_arg` falls back to the first positional argument for
+    `Column` (its `name` parameter is first) and for `Table`.
+  - The OPcache probe (`composer_hygiene.rs`). The stub directory name goes
+    through `composer_extension_name` (line 103), which maps `zend opcache`
+    to `zend-opcache`. The probed name from `extension_loaded` (line 189) is
+    only lowercased. The probe runs through the same function, so both sides
+    use one normalization. Composer's rule is lowercase with spaces as `-`,
+    so a general `replace(' ', "-")` replaces the one special case.
+  - `yield from` (`control_flow/generators.rs:77`). Key and value use
+    `rule_level_accepts`, and the send type uses `accepts` (line 167),
+    strict at every level. The send check uses `rule_level_accepts` too,
+    keeping its contravariant order (the inner generator's send type accepts
+    the outer's), so all three follow the level's leniency.
+  - `should_use_trait` (`project/architecture.rs:495`) compares against
+    `traits`, the class's own `uses()`. The `uses_trait` selector (line 178)
+    reads `all_ancestor_names`. A trait used by a parent is used by the
+    child in PHP (its methods are there), so the rule reads the same
+    ancestor set, and a class whose parent uses the trait satisfies
+    `should_use_trait`.
+  - The meta-attribute (`class_info/attributes.rs:50`).
+    `compute_attribute_targets` takes any attribute whose last segment is
+    `Attribute`. It compares the resolved name with the global `Attribute`
+    (`resolved_class()`, no leading `\`), so a `#[App\Attribute]` doesn't
+    define targets.
+  - `mock.withWithoutExpects` (`project/mock_hygiene.rs`). The rule reads
+    one statement's chain. The walker remembers, per function body, which
+    variables were assigned a chain containing `->expects(…)`. A chain
+    rooted at such a variable counts as having `expects`, and a reassignment
+    of the variable forgets it.
+
+  Fixtures: one per bullet, each with the finding's shape.
+
 - [ ] **F86. `c0c51bca` landed with two fixtures failing.** Its
   `unseal_with` gives an open shape's tail its types, which changes the
   expected output of `an_open_shape_join_keeps_the_tail_type_for_a_one_sided_key`
