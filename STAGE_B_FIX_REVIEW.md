@@ -3382,6 +3382,20 @@ through `check-project`.
   Done: nothing to change in the code; a fix commit's scoped test run
   includes the fixtures its function reaches.
 
+  Design: nothing in the code. `41e2198d` fixed the two fixtures. The
+  lesson is about scoped verification: a fix commit's scoped test run
+  should include the fixtures that reach the function it changes. The
+  fixtures are data files run by one test target (`--test fixtures`,
+  which `cargo test --workspace` skips), so "the module's tests" never
+  include them. The workflow change: a commit touching `types` or the
+  checker runs `cargo test --test fixtures` filtered by the fixture
+  directories whose names match the changed area (`array_merge`,
+  `shapes`, …), or the whole fixture target when the change is in shared
+  type code. `xtask` can offer that as `xtask fixtures-for <path>`,
+  mapping a source file to the fixture directories that exercise it by
+  the fixture names that mention its functions. Done is the workflow
+  note in the contributor docs and the xtask helper.
+
 - [ ] **F87. A discarded pass still leaves some records behind**
   (`Checker::pass_mark`, `cc4e6b5e`; read, not probed). `rewind_to`
   covers diagnostics, semantic tokens, throw and return points and inlay
@@ -3395,6 +3409,34 @@ through `check-project`.
   still repeat per host. Done: every per-pass record is in `PassMark`
   (or keyed so a repeat can't add), and the trait re-check rewinds the
   LSP records after its first host.
+
+  Design: complete `PassMark` (`checker.rs`) so a discarded pass leaves
+  nothing, rather than reasoning per record about why a leftover is
+  harmless.
+
+  - `try_throw_states`. `record_throw_state` pushes into the innermost `try`
+    frame. `PassMark` records that frame's length (one number per open
+    frame, since a pass only pushes to frames open at the mark), and
+    `rewind_to` truncates each.
+  - `property_assign_facts`. It is a map, so `PassMark` records the keys a
+    pass added or changed (a small undo log: key and prior value), and
+    `rewind_to` restores them.
+  - `named_argument_call_facts`. It becomes a length recorded in `PassMark`
+    and truncated like the diagnostics, and the linear `contains` dedup
+    added in `cc4e6b5e` goes.
+  - Any other per-pass `Vec` found by listing the `Checker` fields a
+    statement check pushes to joins `PassMark` the same way. A unit test
+    asserts that checking a loop body twice with a rewind between leaves
+    every such field as one check leaves it.
+
+  `check_trait_methods` checks a trait's methods once per host. After
+  the first host, it rewinds the LSP records (semantic tokens and inlay
+  hints) the way it already deduplicates diagnostics, by taking a
+  `PassMark` before each later host and rewinding those two fields after
+  it. The trait's hover and highlight data then come from the first host
+  only. Fixtures: an LSP test with a trait used by two classes gets one
+  set of semantic tokens for the trait's methods; a `try` around a loop
+  whose body throws keeps one throw state per distinct scope.
 
 ### Comments
 
