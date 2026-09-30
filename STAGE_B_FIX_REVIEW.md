@@ -3870,6 +3870,54 @@ through `check-project`.
 
   Done: each says what the code does, on the item it documents.
 
+  Design, each checked present at `3eaddbd1`:
+
+  - `checker/expr/array_ops.rs`. The paragraph on `array_element_type` for
+    literal shapes that heads `check_array_item_key_type`'s doc moves to
+    `array_element_type`, or goes if that function's own doc already says
+    it. The spread comment (line 185) loses "the original check" and
+    "confirmed via `dumpType()`", and states the list-safety rule.
+  - `checker/expr/ranges.rs:55`. `null_probe_verdict`'s doc says it serves a
+    bare variable and the offset and property chains of
+    `resolve_always_exists`, which call it through
+    `check_pointless_offset_or_property_probe`. The "deeper chain is out of
+    scope" clause goes.
+  - `checker/control_flow/generators.rs:103`. This is a message, not a
+    comment: `generator.void`'s text "it's return type is void" becomes "its
+    return type is void". The fixtures expecting the old text are updated
+    with it.
+  - `registry/class_info/doctrine_entity.rs`. The module doc's Piwigo and
+    "the real corpus this phase targets" sentences (line 8) go, and it
+    states what is mapped (attributes; see F79 for which properties).
+    `DoctrineEntity`'s doc says the discriminator map is modeled
+    (`discriminator_map`, line 94), matching the module doc.
+  - `project/duplicate_fn_sites.rs:25-27`. The sites are always indexed, and
+    the check that reads them is opt-in
+    (`check_duplicate_function_declarations`). The doc says both, and drops
+    "always-on". `duplicate_functions.rs:22` either gives the `strtr` reason
+    it points at (the stubs declare version-split signatures of one
+    function) or drops the pointer. `duplicate_classes.rs` and
+    `duplicate_class_sites.rs` state their rules without the corpus
+    argument.
+  - `project/whole_program/dead_members.rs`. The module doc's Piwigo
+    measurement and past fixes (lines 17, 46, 59, 75: "used to have", "used
+    to be a real gap here too", "Fixed at the parser level") go. The
+    remaining text lists what counts as a reference and what is a known gap.
+  - `project/mock_hygiene.rs:385`. "The members of a PHPDoc union as
+    written…" moves down to `union_members` (line 408), leaving
+    `native_members` its own doc.
+  - `project/session.rs:219-225`. `composer_roots`' doc ("…per directory,
+    falling back to `root`") moves from above `declared_php_versions` to
+    `composer_roots` (line 236). F74 rewrites `declared_php_versions`' body,
+    and its doc stays.
+  - `syntax/parser/tokens.rs`. `take_name_segment`'s example (line 235) uses
+    a neutral `App\Enum\Foo`. `parse_leading_attributes` (line 392) drops
+    "before this phase" and says what is parsed.
+  - `syntax/visit.rs:10`. The module doc says the shared walk visits type
+    hints and names, and that `VisitorMut`'s defaults don't visit type hints
+    or names (its `visit_type_hint` is a no-op), so a mutating visitor that
+    needs them walks them itself.
+
 - [ ] **F88. Comments that still describe the truncation `cc4e6b5e`
   replaced:** `converge_loop_body`'s doc calls discarding a pass "the
   existing `diagnostics.truncate` pattern", and `check_while`'s comment
@@ -3877,6 +3925,14 @@ through `check-project`.
   `converge_loop_body`'s own `diagnostics.truncate`"; both now go
   through `rewind_to`, which drops more than diagnostics. Done: both
   name `rewind_to`.
+
+  Design: `converge_loop_body`'s doc (`control_flow.rs`, near line 280)
+  says a discarded pass "is rolled back with `rewind_to` to the pass's
+  `PassMark`: its diagnostics, throw and return points, semantic tokens
+  and inlay hints". `check_while`'s comment (`stmt/loops.rs`, near line
+  73) says every pass but the kept one is rolled back the same way. If
+  F87 lands first, both name the records it adds, or say "every per-pass
+  record" and point at `PassMark`'s doc as the one list.
 
 ## The Stage B review's done items
 
