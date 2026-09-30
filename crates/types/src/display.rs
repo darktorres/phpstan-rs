@@ -149,18 +149,12 @@ impl fmt::Display for Type {
                 ),
                 Repr::FloatLiteral(n) => f.write_str(&syntax::php_float::var_export_float(*n)),
                 Repr::Accessory(kind) => write!(f, "{}", accessory_kind_name(*kind)),
-                // Mirrors real PHPStan's own `HasOffsetValueType::describe()`
-                // format exactly (confirmed via `assertType()` against the
-                // vendored phar) - never intercepted by
-                // `describe_accessory_intersection`'s own known-shape fast
-                // paths above (none of them match a `HasOffsetValue` member),
-                // so this always reaches the generic `&`-joined
-                // `Repr::Intersection` fallback alongside its own base
-                // `Repr::Array`.
+                // The offset shows as its key's type (`0`, `'a'`), as
+                // PHPStan's `HasOffsetValueType::describe()` does.
                 Repr::HasOffsetValue(key, value) => {
-                    write!(f, "hasOffsetValue('{key}', {value})")
+                    write!(f, "hasOffsetValue({}, {value})", key.to_type())
                 }
-                Repr::HasOffset(key) => write!(f, "hasOffset('{key}')"),
+                Repr::HasOffset(key) => write!(f, "hasOffset({})", key.to_type()),
                 Repr::HasMethod(name) => write!(f, "hasMethod({name})"),
                 Repr::HasProperty(name) => write!(f, "hasProperty({name})"),
                 // No real PHPStan equivalent to mirror (this variant is a

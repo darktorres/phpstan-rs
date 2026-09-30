@@ -120,3 +120,13 @@ fn a_refined_array_shows_its_tracked_offsets() {
         "non-empty-array&hasOffsetValue('a', 'x')"
     );
 }
+
+#[test]
+fn an_offset_accessory_shows_its_key_as_a_type() {
+    let value = Type::has_offset_value(ShapeKey::Int(0), Type::int());
+    assert_eq!(value.to_string(), "hasOffsetValue(0, int)");
+    assert_eq!(
+        Type::has_offset(ShapeKey::Str("it's".into())).to_string(),
+        "hasOffset('it\\'s')"
+    );
+}
