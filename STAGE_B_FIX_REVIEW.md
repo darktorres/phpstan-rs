@@ -19,6 +19,22 @@ Each open finding carries a "Design" paragraph: the fix worked out
 against the code at `3eaddbd1`, before any of it is built, naming the
 functions it changes, the approach and the fixtures that pin it.
 
+Some designs depend on others, and they land in this order:
+
+- F4 first. F53, F16's `never`, F44 and F39's `pow` rely on its
+  implicit/explicit `never`.
+- F35 before F55, and F22's `ImpurePoints` bullet.
+- F41 before F14 and F19's `1e25`.
+- F21 early. It removes hand-written `is_error()` checks that later
+  fixes would otherwise copy.
+- F82 before F62's guard removal.
+- F9 with F32's and F22's pipe bullets (one resolver).
+- F38 with F72's first bullet (one argument resolution).
+- F13 with F70, F48 with F85, F42 with F43, F47 with F52 and F63, and
+  F87 with F88.
+- F7, F8 and F66 change the same use-site index, and land together.
+- F69 before F82's implicit-call bullet (shared helpers).
+
 Legend: `[x]` done (commit given), `[>]` moved to the crate-split plan
 (where given), `[ ]` open.
 
@@ -26,6 +42,20 @@ Legend: `[x]` done (commit given), `[>]` moved to the crate-split plan
 
 - [ ] **V1. The fixture suite and corpus** are the Stage B review's V1 and
   V2; a failure or delta traced to a commit below is judged here.
+
+  Design: each fix commit runs its scoped checks (clippy, the touched
+  module's unit tests, and the fixtures reaching the changed code, per
+  F86). At the checkpoint after each group of the order below:
+
+  - `cargo test --workspace` and `cargo test --test fixtures` run in full;
+  - the corpus run is saved under `.corpus-runs/<scope>/<hash>.txt`;
+  - it is diffed against the previous checkpoint's run, both sides sorted
+    with `LC_ALL=C sort`.
+
+  Every delta is traced to the finding whose fix caused it, and recorded
+  in that finding's done note: a report gone for the right reason, or a
+  new report that is right. A delta no finding explains is a regression
+  of the checkpoint, fixed before the next group.
 
 ## Full review: findings
 
