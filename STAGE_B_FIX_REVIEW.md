@@ -311,6 +311,42 @@ through `check-project`.
   reference to `function helper` and `function.unused` fires for it
   (probed with `check_dead_code` on). Done also needs the key
   case-folded.
+
+  Design: the index (`UseSiteIndex`) is built per file and without the
+  registry, so that an LSP edit re-indexes one file. The resolution that
+  depends on which functions exist therefore has to happen when the
+  index is queried, not when it is built. This also stays right when a
+  namespaced `App\helper` is added or removed in another file.
+
+  - `RefTarget::Function` holds the name lowercased.
+  - `function_at` records a qualified or `use function`-imported name
+    under its one candidate. An unqualified name in a namespace is
+    recorded under both candidates: the namespaced one as a plain site,
+    and the global one as a fallback site tagged with the namespaced name
+    it yields to. The tag is a new `RefTarget::FunctionFallback(global,
+    namespaced)` stored in `by_target` under the global key.
+  - `references(&RefTarget::Function(f))` gains a sibling
+    `function_references(f, is_declared: &dyn Fn(&str) -> bool)`. It
+    returns the plain sites for `f` plus the fallback sites whose
+    namespaced name is not declared.
+
+  Its three callers already have the registry: `dead_code`, the LSP
+  references and rename (`lsp.rs` 1262/1321/1360), and composer
+  attribution. The last one's own fallback in `composer_hygiene.rs:308`
+  then goes. `registry.function_declaration(fqn)` at `lsp.rs:1321` looks
+  up folded.
+
+  While designing this, a probe showed that classes have the same case
+  gap: `new WIDGET()` for `final class Widget` with `check_dead_code` on
+  reports `class.unused` beside `class.nameCase`. So `RefTarget::Class`
+  is keyed lowercased too (`class_at`), and `RefTarget::Member`'s owner
+  and member folding is F66's. Rename still rewrites each site's own
+  span, so folding the key loses nothing. Fixtures: a global `helper()`
+  called from `namespace App;` isn't `function.unused`, and neither is
+  `Helper()` or `new WIDGET()`. A namespaced `App\helper` declared
+  beside a global `helper` takes the unqualified call, so the global one
+  is unused. LSP references on the global function list the namespaced
+  file's call site.
 - [ ] **F8. An attribute class used only as an attribute is `class.unused`**
   (`addc7c39` kept this). The use-site walker records extends, implements,
   trait use, catch, type-hint, call, `new` and fetch names, but not
