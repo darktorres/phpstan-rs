@@ -2592,18 +2592,23 @@ through `check-project`.
     ranges, turns `string` into `non-empty-string`, and removes `array{}`.
   - `true`/`false` on the other side is truthiness: `without_falsy` or the
     falsy part.
-  - An int literal against an int or float subject is `===` on the number
-    (`int|string`'s int part narrows to `1` for `== 1`). The string part is
-    left unnarrowed, since `'01'`, `'1.0'` and `' 1'` all equal `1` and no
-    type names that set.
+  - A number literal against an int or float subject is `===` on the
+    number (`int|string`'s int part narrows to `1` for `== 1`).
+  - A string subject against a number or a numeric-string literal narrows
+    to `numeric-string` in the true branch: PHP 8 compares a numeric pair
+    as numbers and anything else as strings, so only numeric strings can
+    equal `1` (`'1'`, `' 1'`, `'01'`, `'1.0'`, `'1e0'` do, `'0x1'` and
+    `'1abc'` don't, checked with `php`). Against a non-numeric string
+    literal the comparison is byte equality, so it narrows to that
+    literal, and the false branch removes it.
 
   `switch` cases apply the true branch per `case` and the accumulated
   false branches to later cases and `default`, as they do now, only
-  through this function. Fixtures: with `string $x`, `case 0:` leaves
-  `$x` a `string`; `case null:` on `?string` gives `''|null`;
-  `case '1':` on `int|string` gives `1|string`;
+  through this function. Fixtures: with `string $x`, `case 0:` gives
+  `numeric-string` and `case 'a':` gives `'a'`; `case null:` on `?string`
+  gives `''|null`; `case '1':` on `int|string` gives `1|numeric-string`;
   `$x == null || $x == 'a'` on `?string` narrows to `''|'a'|null`;
-  `$x == 1 || $x == 2` on `int|string` leaves the string part as is.
+  `$x == 1 || $x == 2` on `int|string` gives `1|2|numeric-string`.
 - [ ] **F68. A `break` inside an `if` in a `switch` case loses its path**
   (`check_switch`; also before the window). The frame pushed onto
   `loop_break_states` is popped and discarded, and only a case's last
