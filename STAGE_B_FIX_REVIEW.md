@@ -2680,6 +2680,30 @@ through `check-project`.
 
   Done: a named argument maps by name (a spread bails), and the not-found
   branch rules out only required fields' values, with fixtures.
+
+  Design:
+
+  - The asserted parameter's argument. `assert_target_key_and_current`
+    (`narrowing/assertions.rs:431`) finds the parameter's index and reads
+    `args.get(idx)`, the positional slot. It resolves the arguments with
+    `resolve_call_args(args, sig.params())`, which maps named arguments to
+    their parameters, and reads the parameter's slot from that. A spread
+    before or at the parameter's position gives no slot, so no narrowing.
+    F38's design runs the same resolution for its bindings, so it is
+    computed once in `apply_assert_infos` and passed down. The
+    `ThisSelf`/`ThisProp` targets are unaffected.
+  - The not-found branch. `in_array_narrowing` (`assertions.rs`, near line
+    77) builds the excluded set from every field of a constant haystack
+    shape. An optional field's value may be absent, so it can't be ruled
+    out. The found branch keeps every field's value, required or not. The
+    excluded set is only the required fields' values, and `None` when that
+    is empty. The literal-haystack path (`[...]` with no keys) has no
+    optional fields and is unchanged.
+
+  Fixtures: `checkA(b: $x, a: $y)` makes `$y` `int` and leaves `$x`
+  `mixed`; `checkA(...$args)` narrows nothing; with `'a'|'b' $x` and
+  `array{0: 'a', 1?: 'b'} $h`, `!in_array($x, $h, true)` makes `$x`
+  `'b'`, and the found branch `'a'|'b'`.
 - [ ] **F73. A `for` loop's in-range writes keep a list for a negative
   index** (`in_range_index_write_loop_vars`, `checker/stmt/loops.rs`;
   also before the window). `for ($i = -1; $i < count($x); $i++) { $x[$i]
