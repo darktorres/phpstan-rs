@@ -3514,6 +3514,33 @@ through `check-project`.
 
   Done: the doc says what PHP does.
 
+  Design: the doc and the code share the claim. `to_number`
+  (`types/src/coercion.rs:78`) returns `None` for any string literal
+  that isn't wholly numeric when `non_numeric_throws`, and the doc names
+  `'5 apples'` beside `'abc'`. Checked with `php` 8.5: `'abc' + 1`
+  throws `TypeError` ("Unsupported operand types: string + int"), while
+  `'5 apples' + 1` is `6` and `'1.5x' * 2` is `3.0`, each with the
+  warning "A non-numeric value encountered". So a leading-numeric
+  literal is a number with a warning, not an error. The fix goes beyond
+  the doc, since `None` also makes the operation's type the error type:
+
+  - `to_number` gives a leading-numeric literal its leading value
+    (`'5 apples'` is `5`, `'1.5x'` is `1.5`, through `types::numeric`'s
+    parse of the longest numeric prefix). `None` stays for a string with no
+    numeric prefix at all.
+  - The doc says just that: "`None` for an array, an object `to_float`
+    refuses, or, when `non_numeric_throws` (PHP 8), a string with no leading
+    number (`'abc'`), which throws `TypeError`; a leading-numeric string
+    (`'5 apples'`) is its leading number, with a warning at runtime."
+  - The warning is still worth a report, but not as `binaryOp.invalid`
+    ("results in an error"). `check_binary_operand_validity` adds a separate
+    level-2 report, `binaryOp.nonNumericValue`, with PHP's warning text,
+    when an operand may be a leading-numeric, non-numeric string.
+
+  Fixtures: `'5 apples' + 1` is typed `6`, reports
+  `binaryOp.nonNumericValue` and not `binaryOp.invalid`; `'abc' + 1`
+  still reports `binaryOp.invalid`.
+
 - [ ] **F37. Comments the final state still gets wrong** (read whole,
   below).
   - `union.rs` (lines ~161-184): the 23-line `array{}`-absorption
