@@ -1378,8 +1378,8 @@ through `check-project`.
     order, last one winning (`['Ab' => 1, 'aB' => 2]` is `['ab' => 2]`). Int
     keys stay. A general array keeps its value type with its string key type
     folded to `lowercase-string` for `CASE_LOWER` (`uppercase-string` for
-    `CASE_UPPER`, the accessory's mirror, added to `AccessoryKind` if
-    missing). An unknown mode joins both foldings.
+    `CASE_UPPER`; both are `AccessoryKind`s already). An unknown mode joins
+    both foldings.
   - `array_fill_keys` (line 1207). The key type is the keys array's value
     type through `to_array_key` (`'1'` is `1`, and `'x'` stays). A sealed
     keys shape gives a sealed result shape with one required field per
@@ -3394,30 +3394,30 @@ through `check-project`.
   skipped: parse error".
 
   - The function returns `Result<(String, ParsedFile), LoadFailure>`, where
-    `LoadFailure` is `Unreadable(io::Error)`, `Parse(ParseError)` (which
-    carries a span and a message), or `Panic(String)`.
-  - For an analysed file, `load` records each failure as a diagnostic in the
-    file's result:
-    - a parse error is `phpstanRs.parseError`, level 0, non-ignorable, at
-      the error's span, with the parser's message;
-    - a panic is `phpstanRs.internalError` at the file's first line, naming
-      it an internal error to report;
-    - an unreadable file is `phpstanRs.unreadableFile`.
-
-  The file counts as checked, with those diagnostics, so the run's
-  diagnostic count and exit status (non-zero with diagnostics) follow
-  without new plumbing. The "skipped" summary line goes. - A context
-  (scan-path) file isn't analysed, so it gets no diagnostic. It is
-  listed in a summary line with its path under `-v` and counted
-  otherwise, since its declarations are missing from the registry, which
-  the user should know. - The LSP reparse path publishes the same
-  diagnostic for the open document.
+    `LoadFailure` is `Unreadable(io::Error)`, `Parse(ParseError)` (with its
+    span and message) or `Panic(String)`.
+  - For an analysed file, `load` records each failure as a diagnostic in
+    that file's result: a parse error is `phpstanRs.parseError`, level 0,
+    non-ignorable, at the error's span, with the parser's message; a panic
+    is `phpstanRs.internalError` at the file's first line, naming it an
+    internal error to report; an unreadable file is
+    `phpstanRs.unreadableFile`. The file counts as checked, with those
+    diagnostics, so the run's diagnostic count and exit status follow
+    without new plumbing, and the "skipped" summary line goes.
+  - A context (scan-path) file isn't analysed, but its declarations are
+    missing from the registry, so every analysed file that uses them gets a
+    wrong answer. Its failure is reported too, as a run-level diagnostic
+    (`phpstanRs.contextParseError`, with the path, span and message) that
+    the output formats print beside the file diagnostics and that fails the
+    run, not as a summary line under `-v`.
+  - The LSP reparse path publishes the same diagnostic for the open
+    document, and a context file's failure for the workspace.
 
   Each commit that widens what is a parse error (`474920e5`, `f4128dec`,
   and F10/F57's) then shows up as a reported error. Fixtures: a file
-  with `(yield and $b)` before F10, or any `php -l` failure, reports
-  `phpstanRs.parseError` at the offending token, and the run exits
-  non-zero; the old "skipped" count is gone from the summary.
+  with any `php -l` failure reports `phpstanRs.parseError` at the
+  offending token and the run exits non-zero; a broken scan-path file
+  reports `phpstanRs.contextParseError`.
 - [ ] **F78. The duplicate-declaration checks walk every name for every
   file** (`finish_diagnostics`, `project.rs`). With either opt-in on,
   each file's diagnostics loop over every recorded name in the project
