@@ -892,13 +892,21 @@ impl<'a> Lexer<'a> {
 }
 
 /// A hex, binary or octal integer literal's value: an `int` when it fits,
-/// a `float` past `PHP_INT_MAX`, as PHP reads it.
+/// a `float` past `PHP_INT_MAX`, as PHP reads it. PHP's binary and octal
+/// conversions (`zend_bin_strtod`, `zend_oct_strtod`) compute
+/// `value * radix + c - '0'` in doubles, adding the digit's character
+/// code and then subtracting `'0'`, which rounds twice once the value is
+/// past 2^53 (`0b1` and 63 zeros is 2^63 - 1024); the hex one adds the
+/// digit's value.
 fn radix_literal(digits: &str, radix: u32) -> Token {
     match i64::from_str_radix(digits, radix) {
         Ok(v) => Token::Integer(v),
         Err(_) if digits.is_empty() => Token::Integer(0),
-        Err(_) => Token::Float(digits.chars().fold(0.0, |acc, c| {
-            acc * f64::from(radix) + f64::from(c.to_digit(radix).unwrap_or(0))
+        Err(_) if radix == 16 => Token::Float(digits.chars().fold(0.0, |acc, c| {
+            acc * 16.0 + f64::from(c.to_digit(16).unwrap_or(0))
+        })),
+        Err(_) => Token::Float(digits.bytes().fold(0.0, |acc, c| {
+            (acc * f64::from(radix) + f64::from(c)) - f64::from(b'0')
         })),
     }
 }
