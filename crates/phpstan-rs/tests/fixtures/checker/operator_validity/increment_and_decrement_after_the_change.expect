@@ -1,1 +1,4 @@
-no diagnostics
+6:5-6:9 postInc.deprecated L0 | Increment on non-alphanumeric string is deprecated ('a!' given).
+9:5-9:9 postDec.deprecated L0 | Decrement on empty string is deprecated as non-numeric ('' given).
+12:5-12:9 postInc.noEffect L3 | Increment on type bool has no effect (true given).
+15:5-15:9 postDec.noEffect L3 | Decrement on type null has no effect (null given).

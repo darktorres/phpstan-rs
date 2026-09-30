@@ -17,5 +17,5 @@ function results(array $extra, string $name, int $score): void
             $page[$key] = $value;
         }
     }
-    assertType('array{items: array{}|int, total: int, ...<(int|string), int>}', $page);
+    assertType('array{items: array{}|int, total: int, ...<string, int>}', $page);
 }

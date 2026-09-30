@@ -3,7 +3,7 @@
             /** @param array<string, int> $items */
             function f(array $items): void {
                 foreach ($items as $k => $v) {
-                    assertType('string', $k);
+                    assertType('non-decimal-int-string', $k);
                     assertType('int', $v);
                 }
             }

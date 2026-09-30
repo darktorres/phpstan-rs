@@ -1,3 +1,2 @@
-4:17-7:18 missingType.iterableValue L6 | Method T::f() return type has no value type specified in iterable type array.
+10:9-13:10 missingType.iterableValue L6 | Method T::f() return type has no value type specified in iterable type array.
     tip: See: https://phpstan.org/blog/solving-phpstan-no-value-type-specified-in-iterable-type
-8:47-8:49 missingType.parameter L6 | Method T::assertIsArray() has parameter $x with no type specified.

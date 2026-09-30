@@ -1,1 +1,1 @@
-5:23-5:25 argument.type L5 | Parameter #1 $flag of function g expects bool, bool|int given.
+5:23-5:25 argument.type L5 | Parameter #1 $flag of function g expects bool, false|0 given.

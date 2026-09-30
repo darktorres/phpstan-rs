@@ -1,1 +1,1 @@
-4:28-6:22 match.unhandled L4 | Match expression does not handle remaining value: int
+4:28-6:22 match.unhandled L4 | Match expression does not handle remaining value: int<min, 0>|int<2, max>

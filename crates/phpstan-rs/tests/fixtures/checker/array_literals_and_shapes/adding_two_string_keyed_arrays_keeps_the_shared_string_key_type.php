@@ -7,7 +7,7 @@
                 $merged = $a + $b;
                 assertType('array<string, callable>', $merged);
                 foreach ($merged as $name => $callable) {
-                    assertType('string', $name);
+                    assertType('non-decimal-int-string', $name);
                 }
             }
         

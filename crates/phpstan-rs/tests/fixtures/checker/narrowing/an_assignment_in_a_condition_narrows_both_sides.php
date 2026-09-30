@@ -16,17 +16,17 @@ function counts(array $x): void {
 
 function preg(string $s): void {
     if (($r = preg_match('/(a)/', $s, $m)) === 1) {
-        assertType("array{string, 'a'}", $m);
+        assertType("array{0: string, 1: 'a'}", $m);
     }
     if ($r2 = preg_match('/(b)/', $s, $m2)) {
-        assertType("array{string, 'b'}", $m2);
+        assertType("array{0: string, 1: 'b'}", $m2);
         assertType('1', $r2);
     }
 }
 
 function position(string $s): void {
     if (!$pos = strpos($s, 'x')) {
-        assertType('0|false', $pos);
+        assertType('false|0', $pos);
     }
 }
 
@@ -67,6 +67,9 @@ position('xbc');
 instance(new Foo());
 instance(1);
 $fh = fopen('php://memory', 'r+');
+if ($fh === false) {
+    exit(1);
+}
 fwrite($fh, "a\nb\n");
 rewind($fh);
 lines($fh);

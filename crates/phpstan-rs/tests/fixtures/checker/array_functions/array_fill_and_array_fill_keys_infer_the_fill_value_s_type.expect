@@ -2,4 +2,4 @@
 4:24-4:35 missingType.iterableValue L6 | Function f() has parameter $keys with no value type specified in iterable type array.
     tip: See: https://phpstan.org/blog/solving-phpstan-no-value-type-specified-in-iterable-type
 7:30-7:32 argument.type L5 | Parameter #1 $xs of function needsStrings expects array<(int|string), string>, non-empty-list<42> given.
-8:30-8:32 argument.type L5 | Parameter #1 $xs of function needsStrings expects array<(int|string), string>, array<mixed, 42> given.
+8:30-8:32 argument.type L5 | Parameter #1 $xs of function needsStrings expects array<(int|string), string>, array<(int|string), 42> given.

@@ -3,7 +3,7 @@
             function f(?int $x): void {
                 $flag = $x !== null && $x !== 0;
                 if ($flag) {
-                    assertType('int', $x);
+                    assertType('int<min, -1>|int<1, max>', $x);
                 }
             }
         

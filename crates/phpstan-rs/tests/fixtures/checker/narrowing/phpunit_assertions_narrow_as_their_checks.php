@@ -16,14 +16,17 @@ namespace PHPUnit\Framework {
         abstract class Assert {
             final public static function assertSame(mixed $expected, mixed $actual, string $message = ''): void {}
             final public static function assertNotSame(mixed $expected, mixed $actual, string $message = ''): void {}
+            /** @param array<mixed>|\ArrayAccess<mixed, mixed> $array */
             final public static function assertArrayHasKey(mixed $key, array|\ArrayAccess $array, string $message = ''): void {}
             final public static function assertNotEmpty(mixed $actual, string $message = ''): void {}
             final public static function assertEmpty(mixed $actual, string $message = ''): void {}
+            /** @param \Countable|iterable<mixed> $haystack */
             final public static function assertCount(int $expectedCount, \Countable|iterable $haystack, string $message = ''): void {}
             final public static function assertGreaterThan(mixed $minimum, mixed $actual, string $message = ''): void {}
             final public static function assertGreaterThanOrEqual(mixed $minimum, mixed $actual, string $message = ''): void {}
             final public static function assertStringStartsWith(string $prefix, string $string, string $message = ''): void {}
             final public static function assertJson(string $actual, string $message = ''): void {}
+            /** @param iterable<mixed> $haystack */
             final public static function assertContains(mixed $needle, iterable $haystack, string $message = ''): void {}
             final public static function assertMatchesRegularExpression(string $pattern, string $string, string $message = ''): void {}
             final public static function assertObjectHasProperty(string $propertyName, object $object, string $message = ''): void {}
@@ -63,7 +66,7 @@ namespace {
             self::assertNotEmpty($empty);
             assertType('non-falsy-string', $empty);
             self::assertCount(2, $list);
-            assertType('array{int, int}', $list);
+            assertType('array{0: int, 1: int}', $list);
             self::assertGreaterThan(0, $n);
             assertType('int<1, 5>', $n);
             self::assertStringStartsWith('a', $s);
@@ -73,7 +76,7 @@ namespace {
             assertNotNull($nullable);
             assertType('int', $nullable);
             self::assertThat($x, self::logicalOr(self::isNull(), self::isInt()));
-            assertType('int|null', $x);
+            assertType('null|int', $x);
             self::assertMatchesRegularExpression('/^\d+$/D', $digits);
             assertType('non-empty-numeric-string', $digits);
             self::assertObjectHasProperty('p', $o);

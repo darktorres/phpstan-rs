@@ -1,1 +1,2 @@
-no diagnostics
+6:12-6:29 instanceof.alwaysFalse L4 | Instanceof between Foo and Bar will always evaluate to false.
+7:5-7:24 deadCode.unreachable L4 | Unreachable statement - code above always terminates.

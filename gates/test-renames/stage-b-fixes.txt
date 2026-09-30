@@ -17,3 +17,6 @@ registry::tests::name_context::recurses_into_a_traversables_own_generic_argument
 registry::tests::function_signatures::a_template_equality_form_is_never_resolved -> registry::tests::function_signatures::an_equality_assertion_is_recorded_with_its_form
 docblock::tests::assert_tags::a_template_equality_form_is_never_parsed -> docblock::tests::assert_tags::an_equality_assertion_is_read_with_its_negation
 docblock::tests::assert_tags::a_value_inequality_form_is_never_parsed -> docblock::tests::assert_tags::an_inequality_form_on_a_call_target_is_read
+checker/narrowing/in_array_without_the_strict_flag_narrows_nothing -> checker/narrowing/in_array_without_the_strict_flag_narrows_by_loose_equality
+checker/narrowing/comparison_on_a_non_numeric_current_type_is_never_narrowed -> checker/narrowing/an_ordering_cuts_the_int_part_of_an_int_or_string
+checker/narrowing/is_numeric_false_branch_leaves_a_string_unchanged -> checker/narrowing/a_failed_is_numeric_leaves_a_non_decimal_int_string

@@ -19,7 +19,7 @@ function f(int $i, int $n, ?int $x, $v, int $a, int $b): void {
         assertType('int<5, max>', $x);
     }
     if ($v > 0) {
-        assertType('array<mixed>', $v);
+        assertType('array<(int|string), mixed>', $v);
     }
     if (($a <=> $b) < 0) {
         assertType('int', $a);

@@ -1,2 +1,2 @@
 3:13-3:49 function.resultUnused L4 | Call to function needsString() on a separate line has no effect.
-3:25-3:48 argument.type L5 | Parameter #1 $s of function needsString expects string, string|false given.
+3:25-3:48 argument.type L5 | Parameter #1 $s of function needsString expects string, non-falsy-non-decimal-int-string|false given.

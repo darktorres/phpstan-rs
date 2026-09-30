@@ -1,1 +1,1 @@
-no diagnostics
+5:9-5:20 equal.alwaysFalse L4 | Loose comparison using == between int and 'abc' will always evaluate to false.

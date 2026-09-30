@@ -1,1 +1,5 @@
-no diagnostics
+13:27-13:28 offsetAccess.notFound L3 | Offset 5 does not exist on 'abc'.
+14:39-14:41 offsetAccess.mightNotExist L7 | Offset int<0, 5> might not exist on 'abc'.
+24:9-24:14 offsetAssign.valueType L3 | Cannot assign an empty string to a string offset.
+28:5-28:10 offsetAssign.valueType L3 | Only the first byte will be assigned to the string offset.
+31:5-31:11 offsetAssign.valueType L3 | Illegal string offset -5.
