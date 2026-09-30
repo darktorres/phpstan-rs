@@ -3,7 +3,9 @@
 Findings from reviewing the work done on the Stage B review
 (`STAGE_B_REVIEW.md`): every commit from its F23 fix (`041fcc46`) to
 `31d6c5a7` and the five after it (`d4ae7678`, `5400b17b`, `96027afd`,
-`9cef98e6`, `3cea2a20`), and every item it marks done. Judged on
+`9cef98e6`, `3cea2a20`), the thirteen code commits made while this
+review ran (`9cfad246` to `783727da`), and every item it marks done.
+Judged on
 runtime correctness and design, not parity with PHPStan. Each task names
 where the problem is, what is wrong, and what done looks like.
 
@@ -548,6 +550,24 @@ through `check-project`.
   Done: a PHPDoc type counts as a reference and member references fold
   case, with fixtures.
 
+- [ ] **F81. A loop's shape widening builds a self-nesting array to a
+  fixed depth and types the bottom wrong** (`widen_towards`,
+  `types::queries`; since `f0ad71f8`, which lets a shape gain string keys
+  while widening; the 18:15 binary before it is sound). `$a = ['x' => 1];
+  while ($c) { $a = ['x' => $a['x'] * 2, 'y' => $a]; }` gives `$a` six
+  levels of `y?:`, the innermost `array{x: 1}`, where the binary before
+  gave `non-empty-array<string, ...>` below the first level. Each pass
+  widens the nested field field by field, one level deeper, until the
+  passes run out. After the loop, `($a['y']['y']['y']['y']['y']['y']['x']
+  ?? 1) === 1` reports `identical.alwaysTrue`; PHP gives `4` after eight
+  iterations. `$a = ['prev' => $a, 'i' => $i]` bottoms out the same way,
+  at `prev?: array{}`. Separately (read, not probed), `combined_shape`
+  makes a key some unsealed member lacks optional with the other members'
+  values only, not that member's tail value. Done: a nested field that
+  gains a level widens by generalizing, so that pass sequence reaches a
+  fixed point, and `combined_shape` joins an unsealed member's tail into
+  the keys it lacks, with fixtures.
+
 ### Wrong types and missed reports (probed)
 
 - [ ] **F13. An array literal's positional key after an unknown key**
@@ -852,6 +872,59 @@ through `check-project`.
   `Zed` for `Acme` reports `App, Zed`. Done: the representative is the
   first analysed class contributing an edge, with a fixture.
 
+- [ ] **F82. Forgetting properties after a call (F62's fix) misses
+  whole kinds of writes** (`forget_members_a_call_may_change`,
+  `checker/expr.rs`, and `registry/property_writes.rs`; `1c33a059`,
+  `310b2205`). Each keeps `$this->x` `null` after `$this->x = null;`
+  and a call that sets it:
+  - an alias: `$o = $this; $o->load();` forgets `$o`'s properties only;
+  - a call whose verdict is `Anything` forgets only its receiver's and
+    arguments': `$this->h->run()`, where `Helper::run()` writes
+    `$this->c->x` and `c` is the caller, forgets `$this->h`'s;
+  - static properties: `self::$cache = null; self::warm();` keeps
+    `self::$cache` `null` (a static property write isn't a write in
+    `property_target_owner`, and nothing forgets static keys);
+  - a builtin taking `mixed` is `Nothing` though it runs the object's
+    code: `json_encode($j)` calls `jsonSerialize()` (probed), and
+    `var_dump`, `print_r`, `serialize`, `strval` and `sprintf('%s')` run
+    `__debugInfo`, `__serialize` or `__toString` (by the stub rule);
+  - code run without a call: `echo $s` (`__toString`, probed), an
+    undeclared property read (`__get`), an `ArrayAccess` offset,
+    `foreach` over an `Iterator`.
+
+  Done: an `Anything` call forgets every object's property facts (static
+  ones included), a static property write classifies as a write, a
+  `mixed` parameter counts as code-running, and the implicit calls above
+  forget like a call on that object, with fixtures.
+- [ ] **F83. A `foreach` that rewrites its elements drops a write to
+  another element** (`converge_loop_body`, `checker/control_flow.rs`;
+  `91666577`). The subject becomes the element the body leaves at
+  `$subject[$key]`: with `array<int, array{nb: 1}> $items`,
+  `foreach ($items as $day => $d) { $items[$day + 1]['file'] = 'x';
+  $items[$day]['file'] = 'y'; }` types every element `array{nb: 1,
+  file: 'y'}`, though the last iteration leaves `$items[$last + 1]` as
+  `['file' => 'x']`. The binary before gave `array{nb: 1, file?:
+  'y'|'x'}` (itself missing the element without `nb`). Done: the element
+  override applies only when the body writes the subject at no other key,
+  with a fixture.
+- [ ] **F84. A template bound two siblings away still reads as `mixed`**
+  (`build_template_params`; `2a31cc0c` substitutes one level). With
+  `@template X of int`, `@template E of X`, `@template R of Holder<E>`
+  and `Holder`'s `T of int`, `R` still reports `generics.notSubtype` on
+  `@param` and `@return`: `E`'s substituted bound is `X`'s placeholder,
+  whose bound is `mixed`. Done: siblings substitute to a fixed point
+  (a cycle stopping at the placeholder), with a fixture.
+- [ ] **F85. A write through several literal keys fixes the shape but
+  not the keys' entries** (`783727da`, with F48). `$row[$key] = null`
+  with `'id'|'name' $key` now types `$row` as `array{id: 1|null, name:
+  'n'|null}`, but `$row['id']` still reads its per-key entry, `null`, so
+  `$row['id'] === null` still reports `identical.alwaysTrue`, and the
+  container and its element now disagree. A key the shape lacks becomes
+  optional with the written value only, even when the shape is open:
+  `array{a: 1, ...<string, int>}` written at `'a'|'b'` gains `b?: 'z'`,
+  though `b` may hold an `int` from the tail. Done: F48's entry union,
+  and a missing key taking the tail's value type too, with fixtures.
+
 ### Design
 
 - [ ] **F20. Nothing enforces the stack guard** (`041fcc46`). It is a
@@ -962,6 +1035,14 @@ through `check-project`.
     reported.
 
   Done: each as stated, with a fixture where the output changes.
+
+- [ ] **F86. `c0c51bca` landed with two fixtures failing.** Its
+  `unseal_with` gives an open shape's tail its types, which changes the
+  expected output of `an_open_shape_join_keeps_the_tail_type_for_a_one_sided_key`
+  and `array_shape_writes_across_several_independent_branches_converge_instead_of_blowing_up`
+  (both reach `array_merge`); `41e2198d` updated them two hours later.
+  Done: nothing to change in the code; a fix commit's scoped test run
+  includes the fixtures its function reaches.
 
 ### Comments
 
@@ -1455,6 +1536,38 @@ read and its findings added above.
   leaves a template placeholder alone...
 - [x] `3cea2a20` fix: a template binds an argument its bound holds once
   the bound's own templates are bound...
+
+- [x] `9cfad246` fix: a loop widens an array shape that keeps its keys
+  field by field... (sound on its own; `f0ad71f8` builds on it: F81)
+- [x] `c0c51bca` fix: array_merge's open shape takes the other keys'
+  types... (F86)
+- [x] `2a31cc0c` fix: a template named in a sibling's bound or default
+  carries its own bound... (F84; class-level and `@method` templates
+  probed, no report either way)
+- [x] `9b1c07d5` fix: a builtin's return rules apply to a polyfill of
+  it too... (a namespaced function by a builtin's name probed: keeps
+  its own return type)
+- [x] `f0ad71f8` fix: a loop widens a union of array shapes as one
+  shape... (F81)
+- [x] `1c33a059` fix: what is known about an object's properties is
+  forgotten after a call that may change them... (F82)
+- [x] `310b2205` fix: a call forgets what is known about an object's
+  properties only when it may write them... (F82)
+- [x] `41e2198d` test: two open-shape array_merge fixtures expect the
+  tail's key and value types (F86)
+- [x] `9f3ba74e` fix: an element written at a variable key reads back
+  as written...
+- [x] `91666577` fix: a foreach over a variable leaves every element as
+  the body leaves the element its key names... (F83; `break` and
+  conditional writes probed right, and the subject no longer non-empty
+  after a loop that may not run)
+- [x] `69e25540` fix: an array read at a key whose type is several
+  literal keys joins only those keys' values... (numeric-string keys
+  probed right; a `bool` key still reads every field, which is sound)
+- [x] `02454672` fix: a loop widens an array shape that opens to other
+  keys as a shape... (F81)
+- [x] `783727da` fix: a write at a non-literal key keeps a shape a
+  required field keeps non-empty... (F85)
 
 ### Final state, module by module
 
