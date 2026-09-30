@@ -561,6 +561,41 @@ through `check-project`.
   after an explicit key). Two shapes with different next indexes are
   distinct types, or their merge gives each appended shape (or an
   unknown index). Fixtures cover both reports.
+
+  Design: follow PHPStan's `nextAutoIndexes`, a set of possible next
+  keys, and make it part of the type.
+
+  - `Shape::next_index` becomes a normalized `NextIndex` value: a small
+    sorted set of `NextArrayIndex` (capped at 8, past which it is
+    `Unknown`), where the absent case means "derived from the int keys".
+    A constructor normalizes a carried set equal to what the fields
+    derive back to the derived case, so the same array built two ways is
+    one type.
+  - `PartialEq`/`Hash` for `Shape` compare it. The interner already does
+    (`intern.rs:156`), and today the two disagree. The field doc's "not
+    part of its type" goes.
+  - `set_offset_value_type`'s literal-key arm calls `observe(n)` on every
+    carried index for an int key `n`, which fixes `$c[7] = 3; $c[] = 4`
+    giving 8. The several-literal-keys arm observes each int key into a
+    copy of the set and unions the copies, since each key may be the one
+    written. The open-key arm already clears it.
+  - The append arm takes the set: one candidate appends as today. Several
+    give one shape per candidate key, unioned (PHP puts the element at
+    exactly one of them), and `Unknown` gives no precise append. It falls
+    to the general arm, as an optional int key does now.
+  - The union builder, where members compare equal but for the index, and
+    `generalize_by_key_set` (`union.rs:388`) join index sets rather than
+    keeping one side's. Their merged shape carries the union of their
+    sets. `unset_offset` keeps the carried set, as it does now.
+  - Display prints nothing new. Two members that differ only in index
+    merge into one shape with a joined set before display, so no
+    message shows the same shape twice.
+
+  Fixtures: the `$c[8]` read and the `$b[] = 'y'` after `$b[10]` are
+  clean; the finding's branch merge gives `array{0: 1, 1: 2, 2:
+  9}|array{0: 1, 1: 2, 3: 9}` and `echo $b[2]` reports "might not exist"
+  rather than `offsetAccess.notFound`; a types-crate test checks that
+  two shapes built with and without a redundant carried index are equal.
 - [ ] **F26. `mixed~S` joined with a value inside `S` stays `mixed~S`**
   (`67ed2a1d`). `union_with_mixed` takes each joined member out of the
   subtracted type with `without`, which can't take a literal or a subtype
