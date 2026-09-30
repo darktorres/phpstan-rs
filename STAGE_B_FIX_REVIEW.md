@@ -2883,18 +2883,22 @@ through `check-project`.
   - Grouping. `check_duplicate_function_declarations`
     (`duplicate_functions.rs:40`) sorts by path and cuts a group at every
     signature change between neighbours, so equal signatures separated by a
-    different one never meet. It groups by the signature instead, using
-    `(param_hints, return_hint)` as a hash key. Each group with two or more
-    sites is a report listing that group's sites in path order. The
-    "different signatures are the stub version-split idiom" exemption is
-    kept as it is meant: sites of different signatures aren't duplicates of
-    each other.
+    different one never meet. The signature doesn't decide a duplicate at
+    all in project code: two unconditional declarations of one name are
+    PHP's "Cannot redeclare" fatal whenever both files load, whatever
+    their signatures. The signature exemption exists for phpstorm-stubs'
+    version-split declarations (`strtr`'s two overloads), which describe
+    alternatives, not code that runs. So stub files are not indexed as
+    duplicate sites at all, as the class sites already pass `is_stub`,
+    and every analysed name with two or more unconditional sites is one
+    group listing all of them in path order. `sites_differ` and the
+    signature fields on `FnDeclSite` go.
 
   Fixtures: `class Foo` and `class foo` in two files report
   `class.duplicate`, and `function helper`/`function HELPER` report too;
   `twice(int)` in `c.php` and `e.php` with `twice(string)` in `d.php`
-  reports `c.php` and `e.php`; adding a `twice(int)` in `d0.php` lists
-  all three `int` sites.
+  reports all three sites in one list; a stub file's overloads report
+  nothing.
 - [ ] **F76. A namespace cycle through a context file can go unreported**
   (`find_namespace_cycles`; also before the window). The cycle is
   reported at the alphabetically-first class contributing an edge, chosen
