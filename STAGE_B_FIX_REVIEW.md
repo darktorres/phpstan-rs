@@ -146,6 +146,55 @@ through `check-project`.
   The check itself already reports `function.impossibleType`. Done: the
   disjoint case is `never` in both arms, with a fixture asserting the type
   after the `if`.
+
+  Design: `Relation::narrow` (`types/src/narrowing.rs`) becomes a
+  per-member intersection. For each member `m` of `original` (one member
+  for a non-union) and each member `t` of `target`, the result is:
+
+  - `m` when `m` is a subtype of `t`;
+  - `t` when `t` is a subtype of `m`;
+  - otherwise `self.intersect(vec![m, t])`, which is `never` for disjoint
+    scalars and the overlap for ranges (`int<0, 10>` narrowed to
+    `int<5, 20>` is `int<5, 10>`, where today it is the target).
+
+  The results are unioned, dropping `never`. When every pair is disjoint
+  the result is `never`: both the union arm's `0 => target.clone()` and
+  the non-union `_ => target.clone()` go. `Mixed(_, Some(lacks))` keeps
+  `target.without(lacks)`. A template placeholder `original` narrows as
+  its bound does, and returns `target` when that is not `never`, so a
+  `T` still narrows to the checked type. This is the same rule
+  `narrow_to_instance` needs in its disjoint fallback, since
+  `null&ImageId` is exactly what it avoids, so both share one helper.
+  The eight `narrow` callers (the type-check predicates, `===` in
+  `narrowing.rs`, the assertions and `array_filter`'s callback) all take
+  the new rule. `$i === null` on an `int` then gives `never` in its true
+  branch, where today it gives `null`.
+
+  The hazard is the dead branch. Today `if (!is_int($i)) { $y = $i + 1;
+  echo 'x'; }` on `int $i` already reports `deadCode.unreachable` beside
+  `function.alreadyNarrowedType` (probed): an expression statement typed
+  `never` counts as terminating (`always_terminates`' `Expression` arm).
+  F4 makes that happen in every true branch of an impossible check. So
+  `never` gains PHPStan's explicit/implicit split:
+
+  - `Repr::Never` carries a flag. `Type::never()` is implicit and a new
+    `Type::explicit_never()` is explicit.
+  - A declared `never` return, `throw` as an expression, and
+    `exit`/`die` give the explicit form.
+  - Narrowing, arithmetic and every operation over an implicit `never`
+    give the implicit one.
+  - `always_terminates` and the checks that ask "does this call end
+    execution" read only the explicit form.
+  - Equality, hashing and interning keep the flag, and a union of the two
+    is the explicit one, since that is what a declared-`never` join
+    means.
+
+  F44's `never` from crossed bounds and F39's pow `never` then stop
+  producing unreachable reports even before their own fixes. Fixtures:
+  `int` after `if (is_float($i)) {}` stays `int`; `?string` after `if
+  (is_int($j)) {}` stays `?string`; `strlen($j)` clean; the impossible
+  branch has `$i` typed `*NEVER*` with no `deadCode.unreachable`; a
+  function returning `never` still ends its branch.
 - [ ] **F5. The error type silences reads that report nothing**
   (`11b428f4` with `43349c1a`). `unassigned_variable_type` gives
   `*ERROR*` for every read of a never-assigned variable. That includes
