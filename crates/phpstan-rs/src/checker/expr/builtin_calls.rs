@@ -117,10 +117,11 @@ impl<'a> Checker<'a> {
             // regardless of what any specifier expands to.
             // `sprintf_literal_remainder` returns `None` on anything it
             // can't confidently parse, never wrongly claiming non-falsy.
-            // A literal byte that is neither a digit nor a `-` also keeps
-            // the result a string as an array key.
+            // A byte no decimal int has where it stands keeps the result a
+            // string as an array key.
             "sprintf" | "vsprintf" if !args.is_empty() => {
                 if let Some(fmt) = literal_string_value(&args[0].value)
+                    && let Some(pieces) = sprintf_pieces(&fmt)
                     && let Some(remainder) = sprintf_literal_remainder(&fmt)
                 {
                     let mut members = vec![Type::string()];
@@ -130,7 +131,21 @@ impl<'a> Checker<'a> {
                     {
                         members.push(Type::accessory(AccessoryKind::NonFalsyString));
                     }
-                    if remainder.bytes().any(|b| !b.is_ascii_digit() && b != b'-') {
+                    // `sprintf`'s arguments follow the format; `vsprintf`'s
+                    // are one array.
+                    let non_empty_arg = |arg: usize| {
+                        name == "sprintf"
+                            && args.get(arg + 1).is_some_and(|a| {
+                                !a.spread
+                                    && self
+                                        .infer_expr(&a.value, locals)
+                                        .to_string_type(self.registry)
+                                        .is_some_and(|t| {
+                                            t.is_refined_string(AccessoryKind::NonEmptyString).yes()
+                                        })
+                            })
+                    };
+                    if sprintf_is_non_decimal_int(&pieces, &non_empty_arg) {
                         members.push(Type::accessory(AccessoryKind::NonDecimalIntegerString));
                     }
                     if members.len() > 1 {
@@ -1337,32 +1352,11 @@ impl<'a> Checker<'a> {
                     );
                 }
             }
-            // Extracts one named field from an array of known shapes -
-            // only fires when the element type is a real, known
-            // ArrayShape and the column key is a compile-time-known
-            // literal, mirroring check_shape_key_access's "only a
-            // literal, never a dynamic value" precedent.
-            //
-            // `array_keys()` always returns a real list (sequentially
-            // re-keyed from zero), regardless of whether the input
-            // array's own keys were already sequential - the same
-            // "always list<V>" shape `array_values()` gets above. The
-            // 2-/3-arg `$search_value`/`$strict` form gets identical
-            // treatment: those arguments only narrow which keys survive,
-            // never the key type itself.
+            // A list of the array's keys; the search arguments only choose
+            // which.
             "array_keys" if (1..=3).contains(&args.len()) => {
                 let arg_ty = self.infer_expr(&args[0].value, locals);
-                // `array_key_type` handles `ArrayShape` directly (a real
-                // union of each field's own key kind) - reused here for a
-                // literal-shaped argument only, not for a plain,
-                // non-shape array's key type: this project's
-                // dynamic-key-write widening doesn't track the real key
-                // expression's type precisely, so a plain array's
-                // key type can already be a too-wide `unknown_array_key()`
-                // even when every real key written is always an `int`.
-                // Only an `ArrayShape`'s own key type is trustworthy
-                // enough to propagate.
-                if arg_ty.as_array_shape().is_some()
+                if arg_ty.is_array().yes()
                     && let Some(key_ty) = arg_ty.array_key_type()
                 {
                     return Type::intersection_of(vec![
@@ -1370,16 +1364,9 @@ impl<'a> Checker<'a> {
                         Type::accessory(AccessoryKind::ArrayList),
                     ]);
                 }
-                // The native stub's own `@return int[]|string[]` is real
-                // but useless without this project's key-type tracking -
-                // falls back to `Mixed` rather than guess beyond it.
-                if arg_ty.is_array().yes() {
-                    return Type::intersection_of(vec![
-                        Type::array(Type::unknown_array_key(), Type::mixed()),
-                        Type::accessory(AccessoryKind::ArrayList),
-                    ]);
-                }
             }
+            // One named column of each row: a shaped row's field, an
+            // unshaped row's value type.
             "array_column" if args.len() == 2 || args.len() == 3 => {
                 if let Some(row_ty) = (self.infer_expr(&args[0].value, locals)).array_value_type() {
                     // A shaped row looks up the one named field; an
@@ -3219,12 +3206,39 @@ enum SscanfSpecifier {
 /// A hand-rolled scan since this project has no regex engine available
 /// (see `parse_sscanf_format` below).
 fn sprintf_literal_remainder(fmt: &str) -> Option<String> {
+    Some(
+        sprintf_pieces(fmt)?
+            .into_iter()
+            .filter_map(|piece| match piece {
+                FormatPiece::Literal(c) => Some(c),
+                FormatPiece::Conversion { .. } => None,
+            })
+            .collect(),
+    )
+}
+
+/// A piece of a `sprintf` format: a literal character (`%%` as `%`), or
+/// a conversion of the argument at `arg` (0-based), with whether it has a
+/// width or a precision.
+enum FormatPiece {
+    Literal(char),
+    Conversion {
+        conversion: char,
+        arg: usize,
+        width: bool,
+        precision: bool,
+    },
+}
+
+/// `fmt`'s pieces; `None` for anything this parser doesn't read.
+fn sprintf_pieces(fmt: &str) -> Option<Vec<FormatPiece>> {
     let chars: Vec<char> = fmt.chars().collect();
     let mut i = 0;
-    let mut out = String::new();
+    let mut next_arg = 0;
+    let mut out = Vec::new();
     while i < chars.len() {
         if chars[i] != '%' {
-            out.push(chars[i]);
+            out.push(FormatPiece::Literal(chars[i]));
             i += 1;
             continue;
         }
@@ -3233,22 +3247,25 @@ fn sprintf_literal_remainder(fmt: &str) -> Option<String> {
             return None;
         }
         if chars[i] == '%' {
-            out.push('%');
+            out.push(FormatPiece::Literal('%'));
             i += 1;
             continue;
         }
-        // Optional positional argument number (`1$`) - backtracks to
-        // `start` if the digits aren't actually followed by `$` (they're
-        // real width digits instead, handled below).
+        // Optional positional argument number (`1$`); digits not followed
+        // by `$` are the width.
         let start = i;
         while i < chars.len() && chars[i].is_ascii_digit() {
             i += 1;
         }
-        if i > start && i < chars.len() && chars[i] == '$' {
+        let arg = if i > start && i < chars.len() && chars[i] == '$' {
+            let n: usize = chars[start..i].iter().collect::<String>().parse().ok()?;
             i += 1;
+            n.checked_sub(1)?
         } else {
             i = start;
-        }
+            next_arg += 1;
+            next_arg - 1
+        };
         // Optional custom padding character (`'x`).
         if i < chars.len() && chars[i] == '\'' && i + 1 < chars.len() {
             i += 2;
@@ -3257,28 +3274,61 @@ fn sprintf_literal_remainder(fmt: &str) -> Option<String> {
         while i < chars.len() && matches!(chars[i], '-' | '+' | ' ' | '0') {
             i += 1;
         }
-        // Optional width.
+        let width_start = i;
         while i < chars.len() && chars[i].is_ascii_digit() {
             i += 1;
         }
-        // Optional precision.
+        let width = chars[width_start..i].iter().any(|c| *c != '0');
+        let mut precision = false;
         if i < chars.len() && chars[i] == '.' {
+            precision = true;
             i += 1;
             while i < chars.len() && chars[i].is_ascii_digit() {
                 i += 1;
             }
         }
-        if i >= chars.len() {
+        let conversion = *chars.get(i)?;
+        if !matches!(
+            conversion,
+            'b' | 'c' | 'd' | 'e' | 'E' | 'f' | 'F' | 'g' | 'G' | 'o' | 's' | 'u' | 'x' | 'X'
+        ) {
             return None;
         }
-        match chars[i] {
-            'b' | 'c' | 'd' | 'e' | 'E' | 'f' | 'F' | 'g' | 'G' | 'o' | 's' | 'u' | 'x' | 'X' => {
-                i += 1;
-            }
-            _ => return None,
-        }
+        i += 1;
+        out.push(FormatPiece::Conversion {
+            conversion,
+            arg,
+            width,
+            precision,
+        });
     }
     Some(out)
+}
+
+/// Whether every result of formatting `pieces` holds a byte no
+/// decimal-int string has there: a literal that is neither a digit nor a
+/// `-`, or a `-` after something that surely writes a byte (a literal, a
+/// numeric or `%c` conversion, a padded `%s`, or a `%s` whose argument is
+/// surely non-empty, as `non_empty_arg` says).
+fn sprintf_is_non_decimal_int(
+    pieces: &[FormatPiece],
+    non_empty_arg: &dyn Fn(usize) -> bool,
+) -> bool {
+    let writes = |piece: &FormatPiece| match piece {
+        FormatPiece::Literal(_) => true,
+        FormatPiece::Conversion {
+            conversion: 's',
+            arg,
+            width,
+            precision,
+        } => *width || (!*precision && non_empty_arg(*arg)),
+        FormatPiece::Conversion { .. } => true,
+    };
+    pieces.iter().enumerate().any(|(i, piece)| match piece {
+        FormatPiece::Literal('-') => pieces[..i].iter().any(writes),
+        FormatPiece::Literal(c) => !c.is_ascii_digit(),
+        FormatPiece::Conversion { .. } => false,
+    })
 }
 
 /// Walks a literal `sscanf()`/`fscanf()` format string for every real

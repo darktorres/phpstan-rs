@@ -647,8 +647,9 @@ impl Relation<'_> {
                         )));
                     }
                     if lo >= 1 && lo <= limit {
+                        // Offset 0 comes with non-emptiness.
                         let mut narrowed = member.to_non_empty_array();
-                        for i in 0..lo {
+                        for i in 1..lo {
                             narrowed = narrowed.with_key_presence(&ShapeKey::Int(i), true);
                         }
                         return Some(narrowed);

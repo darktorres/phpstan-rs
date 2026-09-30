@@ -27,31 +27,31 @@ function passes(array $in): void {
 
 /** @param list<string> $l */
 function flips(array $l): void {
-    assertType('array<int|string, int<0, max>>', array_flip($l));
+    assertType('array<(int|string), int<0, max>>', array_flip($l));
 }
 
 /** @param array<mixed> $a */
 function searches(array $a, mixed $needle): void {
-    assertType('int|string|false', array_search($needle, $a, true));
+    assertType('(int|non-decimal-int-string)|false', array_search($needle, $a, true));
 }
 
 function builds(int $id, int $n, mixed $x): void {
     $a = [];
     $a['user_' . $id] = 1;
-    assertType('non-empty-array<non-falsy-non-decimal-int-string, 1>', $a);
+    assertType('non-empty-array<string, 1>', $a);
     $b = [];
     $b[sprintf('%s-%s', $id, $n)] = 1;
     assertType('non-empty-array<string, 1>', $b);
     $c = [];
     $c['-' . $n] = 1;
-    assertType('non-empty-array<int|string, 1>', $c);
+    assertType('non-empty-array<(int|string), 1>', $c);
     $d = [];
     $d[md5((string) $x)] = 1;
     assertType('non-empty-array<string, 1>', $d);
     $e = [];
     $e[md5((string) $x, true)] = 1;
-    assertType('non-empty-array<int|string, 1>', $e);
-    if (!is_numeric($x) && is_string($x)) {
+    assertType('non-empty-array<(int|string), 1>', $e);
+    if (is_string($x) && !is_numeric($x)) {
         assertType('non-decimal-int-string', $x);
     }
 }

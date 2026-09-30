@@ -34,6 +34,13 @@ impl Type {
             Repr::Intersection(members) => {
                 let is_list = members.contains(&Type::accessory(AccessoryKind::ArrayList));
                 let key = literal_key(offset);
+                // A non-empty list starts at 0.
+                if is_list
+                    && members.contains(&Type::accessory(AccessoryKind::NonEmptyArray))
+                    && key == Some(ShapeKey::Int(0))
+                {
+                    return TrinaryLogic::Yes;
+                }
                 let answers: Vec<TrinaryLogic> = members
                     .iter()
                     .map(|m| match m.repr() {
