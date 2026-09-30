@@ -1442,6 +1442,34 @@ through `check-project`.
   bare call to it goes unreported. Done: `static::` needs the same
   non-overridable target `$this->` does, and a class constant or `::class`
   read doesn't disqualify, with fixtures.
+
+  Design: two edits in `registry/purity.rs`, each mirrored in the
+  impure-points walk, so the declared-purity report and the inferred
+  purity agree.
+
+  - `resolve_static_call` (line 534) splits `static` from `self`.
+    `self::m()` and `parent::m()` are lexically bound and stay as they are.
+    `static::m()` dispatches on the runtime class, so it adds the dependency
+    only when `is_non_overridable(registry, class, &owner, method, sig)`
+    holds, the rule `resolve_this_method_call` already applies to
+    `$this->m()`, and disqualifies otherwise.
+    `ImpurePoints::static_call_resolves` (line 696) takes the same split.
+    While there, a static call through a class name (`Foo::bar()`, today
+    `None`, so it disqualifies) resolves lexically through `lookup_class`
+    and `lookup_method_with_owner`, since it too names one declaration.
+  - `Disqualifier::visit_expr` (line 371) stops disqualifying
+    `ClassConstFetch` and `ClassNameFetch`. A class constant, an enum case
+    and `::class` are immutable reads whichever class `static::` names,
+    which is also what `ImpurePoints` already says (line 745).
+    `StaticPropertyFetch` and its dynamic form stay disqualifying. The
+    comment above the arm is rewritten to say just that (F59's bullet).
+
+  Fixtures: the finding's
+  `final public function run(): int { return static::compute(); }` on a
+  non-final class is impure, so `$b->run();` is clean. The same method
+  on a `final` class, or with `compute()` private or final, stays pure
+  and is reported. A getter returning `self::X` is pure, and a bare call
+  to it reports `method.resultUnused`.
 - [ ] **F57. An arrow function's body stops before `and`/`or`/`xor`**
   (`parse_arrow_fn`, `parser/closures_and_match.rs`; also before the
   window). The body is parsed with `parse_assignment`, but PHP's
