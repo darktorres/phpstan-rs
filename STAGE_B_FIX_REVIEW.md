@@ -209,6 +209,53 @@ through `check-project`.
   The pre-window binary gave `mixed`. Done: only a reported read yields
   the error type. A quiet read yields `mixed`, or whatever the
   `??`/`isset` semantics give.
+
+  Design: the error type comes from `unassigned_variable_type`, reached
+  by both `check_expr`'s and `infer_expr`'s `Variable` arms and by every
+  narrowing lookup of an absent variable. It has no idea whether the
+  read it answers reported. A probe also shows the harm is wider than
+  never-assigned names. `merge_scopes` keeps only the variables both
+  branches hold, so after `if ($c) { $v = 1; }` the variable `$v` is
+  absent. Then `$v ?? 2` and `$v` inside `isset($v)` are `*ERROR*` too,
+  where PHP gives `1|2` and `1`: the common maybe-defined shape.
+
+  The fix gives `Locals` PHPStan's certainty:
+
+  - An entry is `Yes` or `Maybe` defined: a `maybe_undefined` name set
+    beside the types, bumped with the version.
+  - `merge_scopes` keeps a one-sided variable with its type, marked
+    `Maybe`, and `Maybe` on either side stays `Maybe`. The loop
+    convergence's "may run zero times" join goes through the same rule.
+  - `insert`/`declare` clear the mark. `unset` removes the entry, making
+    it certainly undefined.
+
+  Then the reads:
+
+  - `check_expr`'s `Variable` arm reports `variable.undefined` when the
+    name is absent or `Maybe` (the message can say "might not be defined"
+    for `Maybe`). It returns `Type::error()` only for an absent name; a
+    `Maybe` read returns the known type, since the value is that type
+    whenever the read succeeds.
+  - `infer_expr`'s `Variable` arm keeps the error type for an absent
+    name, which only follows a reported read.
+  - A new `quiet_variable_type(name, locals)` answers the quiet
+    positions: `null` for an absent name (PHP's `isset`/`??` see an
+    undefined variable as null), the type unioned with `null` for a
+    `Maybe` one, and `mixed` when `any_variable_may_exist` is set. It is
+    used by `widen_coalesce_result`'s left side (a `quiet_infer` that
+    walks the `Index`/`PropertyAccess` chain as `check_expr_quiet_root`
+    does and roots in this lookup), by `current_narrowed_type` when
+    `isset`/`empty`/`??=` narrow a variable, and by `empty()`'s operand.
+
+  So `$undef ?? 'a'` is `'a'`, `$v ?? 2` is `1|2`, `isset($v)` narrows
+  `$v` to `1`, and inside `if (isset($m))` on a never-assigned `$m` the
+  branch has `$m` as `never`, dead, which F4's implicit `never` keeps
+  silent. A never-assigned name in `isset()` or `??` may get its own
+  report later (PHPStan's "is never defined"); that is not part of this.
+  Fixtures: the five expressions above; `$m->foo()` inside `if
+  (isset($m))` after a conditional `$m = new Foo` is checked against
+  `Foo`; a plain `echo $v` after the conditional definition still
+  reports.
 - [ ] **F6. A rebound closure's `$this` is blessed as undefined**
   (`fda237d8`). The commit's own fixture expects `variable.undefined
   $this` (level 0) inside the two closures it rebinds with `->call(new
