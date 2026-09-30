@@ -2122,6 +2122,48 @@ through `check-project`.
 
   Done: each is fixed or ledgered where it belongs.
 
+  Design, bullet by bullet, re-probed on the 21:15 binary:
+
+  - The growing literal. `$s = 'a'; while ($c) { $s .= 'b'; }` is now
+    `non-falsy-string`, so this bullet is fixed.
+  - `40e086a6`'s intersection. In `types/src/intersection.rs`, the list and
+    shape case checks a shape's keys against the list's. A required string
+    key can't be in a list, sealed shape or unsealed, so the intersection is
+    `never` whenever any required field's key is a string. An optional
+    string field is dropped, and an unsealed tail keeps only its int keys.
+  - `\int`. PHP refuses it at compile time ("Type declaration 'int' must be
+    unqualified", checked with `php`). Where native hints resolve names
+    (`bd7d7a89`'s type-hint node), a fully qualified name whose last segment
+    is a reserved type keyword (`int`, `string`, `bool`, `float`, `array`,
+    `callable`, `iterable`, `object`, `mixed`, `void`, `null`, `never`,
+    `false`, `true`, `static`, `self`, `parent`) gets one non-ignorable
+    report, `typeHint.qualifiedReserved` with PHP's message, and is then
+    read as that keyword, so no `class.notFound` or argument report follows.
+    Probed today: `function k(\int $x)` reports `class.notFound` for `int`.
+  - `$i / 0`: F16's result side, the explicit `never`.
+  - PHPDoc `1e25`: F41's lexer.
+  - `array_pop`/`array_shift` by reference. Probed:
+    - on `array{a: 1, b: 2}` both give `array`;
+    - on `array<string, int>` they give `array`;
+    - on `[1, 2, 3]` they give `list<1|2|3>`;
+    - `non-empty-list` gives `list`, which is right.
+
+  The by-reference effect becomes the array without that element,
+  through a types-crate `without_last`/`without_first`: - a sealed shape
+  loses its last or first field, and `shift` renumbers int keys as PHP
+  does, so `[1, 2, 3]` popped is `array{1, 2}`; - a general array keeps
+  its key and value types and loses only `non-empty`; - a list stays a
+  list; - an unsealed shape turns general. - `$x['a']` on
+  `array{a: 1}|array{b: 2}`. `offset_value_type` (in
+  `types/src/offsets.rs`) gives `mixed` when one member lacks the key.
+  Probed: still `mixed`. The read is the union of the members' values
+  for that key, with `null` for a member that surely lacks it, since PHP
+  reads a missing offset as `null` with a warning: `1|null` here.
+  Whether to report the possibly missing offset is a separate rule.
+
+  Fixtures: one per bullet still open, with the probed types as the
+  before state.
+
 - [ ] **F30. A promoted property's set visibility is ignored.**
   `class_info.rs:1264` sets `write_visibility` from
   `promotion.visibility`, and nothing reads `promotion.set_visibility`
