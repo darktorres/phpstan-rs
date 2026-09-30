@@ -1863,6 +1863,32 @@ through `check-project`.
 
   Done: the next index is tracked as a range; an unknown int key makes it
   unknown (`int`), not 0.
+
+  Design: `infer_array_literal_type` (`expr/array_ops.rs:84`) stops
+  maintaining `next_index` the moment it goes general. The
+  `(key, general)` arm pushes a key without `observe`, and a positional
+  item still asks the stale index. The index has to keep following the
+  keys in general mode, where it can become uncertain:
+
+  - `NextArrayIndex` (`types/src/shape.rs`) gains a range form: per version
+    rule, `next` becomes `(min, Option<max>)`, with the exact index the case
+    `min == max`.
+  - `observe_type(key_ty)` observes each finite int value of a key type. For
+    a key whose int part is a range `int<lo, hi>`, it raises the index to
+    `max(next, lo + 1)` at the bottom and `hi + 1` (or unbounded) at the
+    top. A key type with no int part (`'a'|'b'`) leaves the index alone.
+  - `take()` returns the key type an append gets: an exact key, or
+    `int<min, max>` for a range.
+  - `AppendKey` grows a `Range(min, max)` case beside `Key(n)`.
+
+  The general-mode arm then calls `observe` for an `Ok(Int(n))` key and
+  `observe_type` for an `Err(ty)` key, and a positional item takes
+  `take()`'s key or range. So `[$ab => 1, 5 => 2, 'y']` gives keys
+  `'a'|'b'|5|6`, and `[$r => 1, 'y']` with `int<10, 20> $r` gives `'y'`
+  the key `int<11, 21>`. The duplicate-key check's early `return` on
+  `Err` stays, since a range can't prove a duplicate. F70's first bullet
+  is the same fix. Fixtures: both finding shapes, and `[$i => 1, 'y']`
+  with a plain `int $i`, whose positional key is `int`.
 - [ ] **F14. `iterable<K, V>`'s array member drops `K`** (`321d388c`).
   The `"iterable"` arm in `parse.rs` builds
   `array(unknown_array_key, V)`, though it parsed `K`. For
