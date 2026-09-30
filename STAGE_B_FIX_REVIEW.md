@@ -2354,8 +2354,9 @@ through `check-project`.
     to agree before the by-reference check reports. It is one change with F9
     and F22's identical bullet.
 
-  Fixtures: `'abc' + 1` with `--php-version 7.4` is clean, with 8.0
-  reports, and with a 7.4 to 8.3 range reports.
+  Fixtures: `'abc' + 1` with `--php-version 7.4` reports only
+  `binaryOp.nonNumericValue`, and with 8.0 or a 7.4 to 8.3 range reports
+  `binaryOp.invalid`.
 
 - [ ] **F36. An argument outside its template's bound isn't reported.**
   With `@template T of \Countable @param T $c`, `cnt(5)` gives no
