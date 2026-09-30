@@ -1,0 +1,2 @@
+[rules]
+report_possibly_nonexistent_general_array_offset = true

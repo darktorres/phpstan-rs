@@ -1,1 +1,1 @@
-no diagnostics
+4:27-4:33 offsetAccess.mightNotExist L7 | Offset 'code' might not exist on array{code?: string|null}.

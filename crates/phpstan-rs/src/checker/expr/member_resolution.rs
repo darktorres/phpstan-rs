@@ -282,6 +282,74 @@ impl<'a> Checker<'a> {
         })
     }
 
+    /// The value `base[key]` reads, member by member, as PHP reads it: an
+    /// array's element (`null` added where the type says the key may be
+    /// missing, and `null` for a member that surely lacks it when other
+    /// members have it); `offsetGet()`'s return for an `ArrayAccess`
+    /// object; `null` for `null`, a bool, an int or a float; `mixed` for
+    /// `mixed` and for an object that may be `ArrayAccess` only through a
+    /// subclass. A read the checks report as impossible is the error type.
+    pub(crate) fn offset_read_type(&self, base: &Type, key: &Type) -> Type {
+        let members = base.union_members();
+        let values: Vec<Type> = members
+            .iter()
+            .map(|member| self.member_offset_read_type(member, key, members.len() > 1))
+            .collect();
+        Type::union_of(values)
+    }
+
+    fn member_offset_read_type(&self, member: &Type, key: &Type, in_union: bool) -> Type {
+        if member.is_mixed() {
+            return Type::mixed();
+        }
+        if member.is_never() {
+            return Type::never();
+        }
+        if member.is_array().yes() {
+            return match member.array_offset_read(key) {
+                Some((value, types::OffsetPresence::Present | types::OffsetPresence::Unknown)) => {
+                    value
+                }
+                Some((value, types::OffsetPresence::MayBeAbsent)) => {
+                    Type::union(value, Type::null())
+                }
+                Some((_, types::OffsetPresence::Absent)) if in_union => Type::null(),
+                _ => Type::error(),
+            };
+        }
+        if member.is_string().yes() {
+            return Type::string();
+        }
+        if member.is_null().yes()
+            || member.is_bool().yes()
+            || member.is_int().yes()
+            || member.is_float().yes()
+        {
+            return Type::null();
+        }
+        if let Some((class, _)) = member.as_object() {
+            if self.registry.is_subclass_of(class, "ArrayAccess") {
+                return match self.find_method_receiver(member, "offsetGet") {
+                    Some((called, _, owner, sig)) => {
+                        self.resolve_pseudo_at(sig.return_type(), &owner, &called)
+                    }
+                    None => Type::mixed(),
+                };
+            }
+            let is_final = self
+                .registry
+                .classes
+                .get(class.as_ref())
+                .is_some_and(|info| info.is_final());
+            return if is_final {
+                Type::error()
+            } else {
+                Type::mixed()
+            };
+        }
+        Type::error()
+    }
+
     /// Both `check_expr`'s and `infer_expr`'s own `PropertyAccess` arms
     /// must not match `base_ty` against `Object`/`EnumCase`/`ObjectShape`
     /// directly with no `Union`/`Intersection` arm - falling to the

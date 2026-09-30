@@ -1,2 +1,0 @@
-6:26-6:32 argument.type L5 | Parameter #1 $x of function needsInt expects int, null given.
-6:29-6:31 offsetAccess.notFound L3 | Offset string does not exist on array{}.

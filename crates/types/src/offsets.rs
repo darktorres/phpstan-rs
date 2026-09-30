@@ -84,6 +84,28 @@ impl Type {
         }
     }
 
+    /// Reading `offset` of this array, member by member for a union: the
+    /// value found, and whether the key is there. `None` when a member
+    /// isn't an array.
+    pub fn array_offset_read(&self, offset: &Type) -> Option<(Type, OffsetPresence)> {
+        let mut value: Option<Type> = None;
+        let mut presence: Option<OffsetPresence> = None;
+        for member in self.union_members() {
+            let (v, p) = member_offset_read(member, offset)?;
+            if let Some(v) = v {
+                value = Some(match value {
+                    Some(acc) => Type::union(acc, v),
+                    None => v,
+                });
+            }
+            presence = Some(match presence {
+                Some(acc) => acc.join(p),
+                None => p,
+            });
+        }
+        Some((value.unwrap_or_else(Type::never), presence?))
+    }
+
     /// What a nested write (`$a[offset][…] = v`) writes into: the value at
     /// `offset`, and `array{}` where it is `null` or where a shape may lack
     /// the key, since PHP creates the array there. A general array's key,
@@ -613,4 +635,104 @@ fn general_array_has_offset(key_ty: &Type, is_list: bool, offset: &Type) -> Trin
         return TrinaryLogic::No;
     }
     TrinaryLogic::Maybe
+}
+
+/// Whether an array read finds its key.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum OffsetPresence {
+    /// The key is there.
+    Present,
+    /// The type says the key may be missing: an optional field, or a
+    /// member without it.
+    MayBeAbsent,
+    /// A general array's key, or a shape tail's: the type doesn't say.
+    Unknown,
+    /// The key is surely missing.
+    Absent,
+}
+
+impl OffsetPresence {
+    /// The presence over two members, or two keys the offset may be.
+    pub fn join(self, other: OffsetPresence) -> OffsetPresence {
+        use OffsetPresence::*;
+        match (self, other) {
+            (a, b) if a == b => a,
+            (MayBeAbsent, _) | (_, MayBeAbsent) => MayBeAbsent,
+            (Absent, _) | (_, Absent) => MayBeAbsent,
+            (Unknown, _) | (_, Unknown) => Unknown,
+            _ => Present,
+        }
+    }
+}
+
+/// `array_offset_read` of one member that isn't a union: the value found
+/// (`None` when the key is surely missing) and the key's presence.
+fn member_offset_read(member: &Type, offset: &Type) -> Option<(Option<Type>, OffsetPresence)> {
+    use OffsetPresence::*;
+    if !member.is_array().yes() {
+        return None;
+    }
+    let keys: Option<Vec<ShapeKey>> = offset
+        .finite_types()
+        .iter()
+        .map(literal_key)
+        .collect::<Option<Vec<_>>>()
+        .filter(|keys| !keys.is_empty());
+    if let Some((shape, _)) = crate::union::shape_parts(member) {
+        let Some(keys) = keys else {
+            if shape.is_sealed() && shape.fields.is_empty() {
+                return Some((None, Absent));
+            }
+            return Some((member.offset_value_type(None), Unknown));
+        };
+        let mut value: Option<Type> = None;
+        let mut presence: Option<OffsetPresence> = None;
+        for key in &keys {
+            let (v, p) = match shape.field(key) {
+                Some(field) if field.optional => (Some(field.ty.clone()), MayBeAbsent),
+                Some(field) => (Some(field.ty.clone()), Present),
+                None => match shape.unsealed.as_deref() {
+                    Some(tail) => (Some(tail.1.clone()), Unknown),
+                    None => (None, Absent),
+                },
+            };
+            if let Some(v) = v {
+                value = Some(match value {
+                    Some(acc) => Type::union(acc, v),
+                    None => v,
+                });
+            }
+            presence = Some(match presence {
+                Some(acc) => acc.join(p),
+                None => p,
+            });
+        }
+        return Some((value, presence?));
+    }
+    if member.has_offset_value_type(offset).no() {
+        return Some((None, Absent));
+    }
+    let value = member.offset_value_type_at(offset);
+    let Some(keys) = keys else {
+        return Some((value, Unknown));
+    };
+    // A key an accessory proves, or an index below a list's proven
+    // length, is there; any other is a general array's key.
+    let (least, _) = member.count_range().unwrap_or((0, None));
+    let is_list = member.is_list().yes();
+    let mut presence: Option<OffsetPresence> = None;
+    for key in &keys {
+        let p = if member.has_offset_value_type(&key.to_type()).yes()
+            || (is_list && matches!(key, ShapeKey::Int(n) if (0..least).contains(n)))
+        {
+            Present
+        } else {
+            Unknown
+        };
+        presence = Some(match presence {
+            Some(acc) => acc.join(p),
+            None => p,
+        });
+    }
+    Some((value, presence?))
 }

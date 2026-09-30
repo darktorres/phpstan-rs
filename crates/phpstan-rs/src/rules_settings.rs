@@ -15,6 +15,11 @@ pub struct RulesSettings {
     pub strict_mixed_arrays: bool,
     /// PHPStan's `checkBenevolentUnionTypes`.
     pub check_benevolent_union_types: bool,
+    /// PHPStan's `reportPossiblyNonexistentGeneralArrayOffset`: a read of
+    /// a general array (`array<K, V>`) at a key it may not hold is
+    /// reported (`offsetAccess.mightNotExist`), like one a shape says may
+    /// be missing.
+    pub report_possibly_nonexistent_general_array_offset: bool,
     /// PHPStan's `checkUninitializedProperties`: a typed property nothing
     /// in the class body assigns (`property.uninitialized`).
     pub check_uninitialized_properties: bool,

@@ -1,0 +1,2 @@
+3:13-5:14 missingType.return L6 | Function f() has no return type specified.
+4:27-4:32 offsetAccess.mightNotExist L7 | Offset 'age' might not exist on array{name: string, age?: int}.

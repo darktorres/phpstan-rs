@@ -1,0 +1,2 @@
+9:33-9:36 offsetAccess.mightNotExist L7 | Offset 'a' might not exist on array{a?: int}.
+24:10-24:12 offsetAccess.mightNotExist L7 | Offset 1 might not exist on array{0: string, 1?: string}.

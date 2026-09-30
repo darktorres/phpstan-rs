@@ -1,1 +1,1 @@
-no diagnostics
+7:30-7:36 offsetAccess.mightNotExist L7 | Offset 'flag' might not exist on array{flag: bool}|array{}.

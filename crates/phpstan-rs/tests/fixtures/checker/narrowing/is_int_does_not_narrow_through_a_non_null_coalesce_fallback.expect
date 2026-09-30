@@ -1,1 +1,2 @@
-5:28-5:46 return.type L3 | return type mismatch: expected int, got int|string
+5:28-5:46 return.type L3 | return type mismatch: expected int, got int|string|null
+5:37-5:45 offsetAccess.mightNotExist L7 | Offset 'status' might not exist on array{status?: int|string}.

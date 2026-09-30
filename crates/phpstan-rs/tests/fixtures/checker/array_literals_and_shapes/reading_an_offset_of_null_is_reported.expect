@@ -1,0 +1,2 @@
+9:30-9:33 offsetAccess.nonOffsetAccessible L3 | Cannot access offset on null.
+10:33-10:36 offsetAccess.nonOffsetAccessible L8 | Cannot access offset on array{a: int}|null.

@@ -2296,7 +2296,7 @@ impl<'a> Checker<'a> {
                     Some(i) => {
                         self.check_expr(i, locals, label);
                         self.check_offset_accessibility(&base_ty, i);
-                        self.check_offset_existence(base, i, locals);
+                        self.check_offset_existence(e, base, i, locals);
                         self.check_dim_fetch_key_type(base, i, locals);
                         // The `Index` counterpart of `PropertyAccess`'s
                         // "check the narrowed key first" handling above -
@@ -2314,20 +2314,12 @@ impl<'a> Checker<'a> {
                         {
                             return narrowed.clone();
                         }
-                        // Calls the shared `index_result_type` directly,
-                        // rather than a hand-maintained inline copy of it,
-                        // so its union/intersection arms
-                        // stay in sync - a container widened to a `Union`
-                        // across a loop's multi-pass fixed-point
-                        // convergence must resolve here exactly as
-                        // `infer_expr`'s identical read does.
+                        // The same read `chain_link_type` gives.
                         let key_ty = match crate::checker::literal_shape_key(i) {
                             Some(key) => key.to_type(),
                             None => self.infer_expr(i, locals),
                         };
-                        base_ty
-                            .offset_value_type_at(&key_ty)
-                            .unwrap_or(Type::mixed())
+                        self.offset_read_type(&base_ty, &key_ty)
                     }
                     // `OffsetAccessWithoutDimForReadingRule` - every
                     // write target routes around this arm, and a
@@ -4417,10 +4409,8 @@ impl<'a> Checker<'a> {
                 // with `check_expr`'s identical arm.
                 self.property_access_type(&base_ty, prop)
             }
-            // A homogeneous array's element type applies regardless of
-            // which key is accessed; optimistically assumes the access is
-            // in bounds/present rather than widening to `V|null` for a
-            // possibly-missing element.
+            // A general array's element is taken as present; a key the
+            // type says may be missing reads `V|null` (`offset_read_type`).
             ExprKind::Index(base, Some(idx)) => {
                 // The narrowed key first: `apply_narrowing` writes a
                 // narrowed type under `narrowing_key`'s `"base[key]"`
@@ -4435,9 +4425,7 @@ impl<'a> Checker<'a> {
                     Some(key) => key.to_type(),
                     None => self.infer_expr(idx, locals),
                 };
-                self.chain_link_type(base, locals)
-                    .offset_value_type_at(&key_ty)
-                    .unwrap_or(Type::mixed())
+                self.offset_read_type(&self.chain_link_type(base, locals), &key_ty)
             }
             // Parentheses don't end a chain.
             ExprKind::Grouping(inner) => self.chain_link_type(inner, locals),

@@ -657,7 +657,24 @@ impl<'a> Checker<'a> {
     /// array's key type rules out (a
     /// non-numeric string on int keys or a list, an int on string keys,
     /// a negative int on a list).
-    pub(crate) fn check_offset_existence(&mut self, base: &Expr, idx: &Expr, locals: &Locals) {
+    ///
+    /// `read` is the whole read (`$x['k']`): an element an earlier check
+    /// narrowed to a type without `null` is there.
+    pub(crate) fn check_offset_existence(
+        &mut self,
+        read: &Expr,
+        base: &Expr,
+        idx: &Expr,
+        locals: &Locals,
+    ) {
+        if locals.may_have_member_narrowing()
+            && let Some(key) = narrowing_key(read)
+            && locals
+                .get(&key)
+                .is_some_and(|narrowed| narrowed.is_null().no())
+        {
+            return;
+        }
         let container = self.infer_expr(base, locals);
         let dim = self.infer_expr(idx, locals);
         self.report_missing_offset(&container, &dim, idx.span);
@@ -695,21 +712,54 @@ impl<'a> Checker<'a> {
     }
 
     /// Reports `offsetAccess.notFound` when `container` provably lacks
-    /// `dim`. Returns whether it did.
+    /// `dim`, and `offsetAccess.mightNotExist` (level 7) when its array
+    /// members say `dim` may be missing: an optional field, or a member
+    /// without it. A general array's (or a list's) key is taken as
+    /// present unless
+    /// `rules.report_possibly_nonexistent_general_array_offset` is on.
+    /// Returns whether it reported.
     pub(crate) fn report_missing_offset(
         &mut self,
         container: &Type,
         dim: &Type,
         span: syntax::token::Span,
     ) -> bool {
-        if !container.has_offset_value_type(dim).no() {
+        if container.has_offset_value_type(dim).no() {
+            self.report(
+                format!("Offset {dim} does not exist on {container}."),
+                span,
+                3,
+                "offsetAccess.notFound",
+            );
+            return true;
+        }
+        let arrays: Vec<Type> = container
+            .union_members()
+            .iter()
+            .filter(|m| m.is_array().yes())
+            .cloned()
+            .collect();
+        let presence = match Type::union_of(arrays).array_offset_read(dim) {
+            Some((_, presence)) => presence,
+            None => return false,
+        };
+        let might_not_exist = match presence {
+            types::OffsetPresence::MayBeAbsent | types::OffsetPresence::Absent => true,
+            types::OffsetPresence::Unknown => {
+                self.settings
+                    .rules
+                    .report_possibly_nonexistent_general_array_offset
+            }
+            types::OffsetPresence::Present => false,
+        };
+        if !might_not_exist {
             return false;
         }
         self.report(
-            format!("Offset {dim} does not exist on {container}."),
+            format!("Offset {dim} might not exist on {container}."),
             span,
-            3,
-            "offsetAccess.notFound",
+            7,
+            "offsetAccess.mightNotExist",
         );
         true
     }
@@ -722,9 +772,11 @@ impl<'a> Checker<'a> {
     /// into an array on write, so this is only ever wired into a read
     /// site, never `check_assignment_target`'s.
     pub(crate) fn check_offset_accessibility(&mut self, base_ty: &Type, idx: &Expr) {
-        if let Some(level) =
-            self.failing_level(base_ty, 3, |m| self.relation().is_offset_accessible(m).no())
-        {
+        // Reading an offset of `null` gives `null` with a warning (PHP
+        // 7.4+), and is a bug on every version.
+        if let Some(level) = self.failing_level(base_ty, 3, |m| {
+            m.is_null().yes() || self.relation().is_offset_accessible(m).no()
+        }) {
             self.report(
                 format!("Cannot access offset on {base_ty}."),
                 idx.span,
