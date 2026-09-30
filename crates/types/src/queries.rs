@@ -413,7 +413,7 @@ impl Type {
     /// optional; a key's value joins the members', and other keys any
     /// unsealed member allows join into the tail. With whether every
     /// member is known non-empty.
-    fn combined_shape(&self) -> Option<(Shape, bool)> {
+    pub(crate) fn combined_shape(&self) -> Option<(Shape, bool)> {
         match self.repr() {
             Repr::Union(members) => {
                 let parts: Vec<(&Shape, bool)> = members

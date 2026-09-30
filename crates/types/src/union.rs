@@ -1,4 +1,4 @@
-use crate::{AccessoryKind, Repr, Shape, ShapeField, ShapeKey, Type};
+use crate::{AccessoryKind, ClassHierarchy, Repr, Shape, ShapeField, ShapeKey, Type};
 
 /// How many members a union keeps: past it, its members are generalized
 /// (shapes by key set, extension payloads widened, literals to their base
@@ -15,16 +15,21 @@ impl Type {
     pub fn union(self, other: Type) -> Type {
         let arguments = [&self.clone(), &other.clone()];
         crate::intern::memoized(crate::intern::Operation::Union, &arguments, || {
-            union_types_impl(self, other)
+            union_types_impl(self, other, None)
         })
     }
 }
 
 impl crate::Relation<'_> {
-    /// The union of `a` and `b`, as `Type::union` builds it, with the
-    /// class hierarchy at hand for what only it decides.
+    /// The union of `a` and `b`, as `Type::union` builds it, but past the
+    /// member cap objects fold to the classes they share, which only the
+    /// hierarchy knows. Below the cap the two agree, so only operands that
+    /// together could reach it are joined again.
     pub fn union(&self, a: Type, b: Type) -> Type {
-        Type::union(a, b)
+        if a.union_members().len() + b.union_members().len() <= MAX_UNION_MEMBERS {
+            return Type::union(a, b);
+        }
+        union_types_impl(a, b, Some(self.hierarchy))
     }
 
     /// The union of `members`, as `union` joins them.
@@ -36,7 +41,7 @@ impl crate::Relation<'_> {
     }
 }
 
-fn union_types_impl(a: Type, b: Type) -> Type {
+fn union_types_impl(a: Type, b: Type, hierarchy: Option<&dyn ClassHierarchy>) -> Type {
     syntax::stack::guard(|| {
         // `never` has no values to add.
         if a == Type::never() {
@@ -221,9 +226,21 @@ fn union_types_impl(a: Type, b: Type) -> Type {
             members = widen_extension_types(members);
         }
         if members.len() > MAX_UNION_MEMBERS {
+            members = fold_value_families(members);
+        }
+        if members.len() > MAX_UNION_MEMBERS {
+            members = fold_objects(members, hierarchy);
+        }
+        if members.len() > MAX_UNION_MEMBERS {
             members = generalize_members(members);
         }
         if members.len() > MAX_UNION_MEMBERS {
+            debug_assert!(
+                members
+                    .iter()
+                    .any(|m| matches!(m.repr(), Repr::Extension(_))),
+                "only extension types that refuse to widen outlast the folds"
+            );
             return Type::mixed();
         }
         if members.len() == 1 {
@@ -354,6 +371,207 @@ fn absorb_contained_members(members: &mut Vec<Type>) {
         index += 1;
         !dropped[index - 1]
     });
+}
+
+/// Past the cap, each family of values as one member: ints and ranges
+/// as their hull, floats as `float`, strings as `string` with every
+/// refinement all of them have, and array shapes as one shape where a
+/// key some lack is optional (a general array past `MAX_SHAPE_FIELDS`).
+fn fold_value_families(members: Vec<Type>) -> Vec<Type> {
+    let is_int = |m: &Type| {
+        matches!(
+            m.repr(),
+            Repr::Int | Repr::IntLiteral(_) | Repr::IntRange(..)
+        )
+    };
+    let is_float = |m: &Type| matches!(m.repr(), Repr::Float | Repr::FloatLiteral(_));
+    let is_string = |m: &Type| {
+        m.is_string().yes() && !matches!(m.repr(), Repr::ClassString(_) | Repr::ClassKindString(_))
+    };
+    let is_shape = |m: &Type| shape_parts(m).is_some();
+    let mut out: Vec<Type> = Vec::new();
+    let mut folded = |family: &dyn Fn(&Type) -> bool,
+                      fold: &dyn Fn(Vec<Type>) -> Type,
+                      members: &mut Vec<Type>| {
+        let (family_members, rest): (Vec<Type>, Vec<Type>) =
+            std::mem::take(members).into_iter().partition(|m| family(m));
+        *members = rest;
+        if family_members.len() > 1 {
+            out.push(fold(family_members));
+        } else {
+            out.extend(family_members);
+        }
+    };
+    let mut members = members;
+    folded(&is_int, &int_hull, &mut members);
+    folded(&is_float, &|_| Type::float(), &mut members);
+    folded(&is_string, &common_string, &mut members);
+    folded(&is_shape, &one_shape, &mut members);
+    out.extend(members);
+    out
+}
+
+/// `int<min, max>` over every member's bounds.
+fn int_hull(members: Vec<Type>) -> Type {
+    let bounds: Vec<(Option<i64>, Option<i64>)> =
+        members.iter().filter_map(Type::int_bounds).collect();
+    let min = bounds
+        .iter()
+        .map(|b| b.0)
+        .reduce(|a, b| a.zip(b).map(|(a, b)| a.min(b)))
+        .flatten();
+    let max = bounds
+        .iter()
+        .map(|b| b.1)
+        .reduce(|a, b| a.zip(b).map(|(a, b)| a.max(b)))
+        .flatten();
+    match (min, max) {
+        (None, None) => Type::int(),
+        (min, max) => Type::int_range(min, max),
+    }
+}
+
+/// `string` with every refinement all of `members` have.
+fn common_string(members: Vec<Type>) -> Type {
+    [
+        AccessoryKind::NonFalsyString,
+        AccessoryKind::NonEmptyString,
+        AccessoryKind::LowercaseString,
+        AccessoryKind::UppercaseString,
+        AccessoryKind::LiteralString,
+        AccessoryKind::DecimalIntegerString,
+        AccessoryKind::NumericString,
+        AccessoryKind::NonDecimalIntegerString,
+    ]
+    .into_iter()
+    .filter(|kind| members.iter().all(|m| m.is_refined_string(*kind).yes()))
+    .fold(Type::string(), |acc, kind| acc.with_string_accessory(kind))
+}
+
+/// The shapes as one: a key some lack optional, values joined.
+fn one_shape(members: Vec<Type>) -> Type {
+    match Type::new(Repr::Union(members.clone())).combined_shape() {
+        Some((shape, non_empty)) if shape.fields.len() <= crate::offsets::MAX_SHAPE_FIELDS => {
+            shape_type(shape, non_empty)
+        }
+        _ => Type::new(Repr::Union(members)),
+    }
+}
+
+/// Past the cap, objects as the classes they share: an enum's cases as
+/// the enum, one generic class's instantiations as that class with each
+/// argument joined, and then, with the hierarchy, every class as the
+/// most specific ancestors all of them have (their intersection, or
+/// `object` when none is common). Without it, `object`.
+fn fold_objects(members: Vec<Type>, hierarchy: Option<&dyn ClassHierarchy>) -> Vec<Type> {
+    let (objects, mut out): (Vec<Type>, Vec<Type>) =
+        members.into_iter().partition(|m| m.is_object().yes());
+    if objects.len() < 2 {
+        out.extend(objects);
+        return out;
+    }
+    // Each class once, its arguments joined across instantiations.
+    let mut classes: Vec<(crate::Name, Vec<Type>)> = Vec::new();
+    let mut others: Vec<Type> = Vec::new();
+    for object in objects {
+        let (class, args) = match object.repr() {
+            Repr::EnumCase(class, _) => (class.clone(), Vec::new()),
+            Repr::Object(class, args) => (class.clone(), args.clone()),
+            _ => {
+                others.push(object);
+                continue;
+            }
+        };
+        match classes.iter_mut().find(|(c, _)| c.eq_ignore_case(&class)) {
+            Some((_, joined)) if joined.len() == args.len() => {
+                for (j, a) in joined.iter_mut().zip(args) {
+                    *j = Type::union(j.clone(), a);
+                }
+            }
+            // Instantiations that disagree on arity are the raw class.
+            Some((_, joined)) => joined.clear(),
+            None => classes.push((class, args)),
+        }
+    }
+    let as_objects = |classes: Vec<(crate::Name, Vec<Type>)>| -> Vec<Type> {
+        classes
+            .into_iter()
+            .map(|(class, args)| Type::object(class, args))
+            .collect()
+    };
+    if classes.len() + others.len() + out.len() <= MAX_UNION_MEMBERS {
+        out.extend(as_objects(classes));
+        out.extend(others);
+        return out;
+    }
+    // An object that isn't one class's (`object`, an intersection, an
+    // object shape) shares no class with the rest to fold to.
+    out.push(match hierarchy {
+        Some(hierarchy) if others.is_empty() => common_supertype(&classes, hierarchy),
+        _ => Type::object_without_class(),
+    });
+    out
+}
+
+/// The most specific classes and interfaces every one of `classes` is or
+/// extends, as their intersection, each generic one instantiated with the
+/// arguments every class binds joined; `object` when there are none.
+fn common_supertype(classes: &[(crate::Name, Vec<Type>)], hierarchy: &dyn ClassHierarchy) -> Type {
+    let lineage = |class: &crate::Name| -> Vec<crate::Name> {
+        let mut names = hierarchy.ancestor_names(class);
+        names.push(class.clone());
+        names.retain(|n| {
+            hierarchy
+                .find_class(n)
+                .is_some_and(|facts| facts.kind != syntax::ast::ClassKind::Trait)
+        });
+        names
+    };
+    let mut common = lineage(&classes[0].0);
+    for (class, _) in &classes[1..] {
+        let names = lineage(class);
+        common.retain(|n| names.iter().any(|m| m.eq_ignore_case(n)));
+    }
+    // Only the most specific: none another common one extends.
+    let minimal: Vec<crate::Name> = common
+        .iter()
+        .filter(|n| {
+            !common
+                .iter()
+                .any(|m| !m.eq_ignore_case(n) && hierarchy.is_subclass_of(m, n))
+        })
+        .cloned()
+        .collect();
+    if minimal.is_empty() {
+        return Type::object_without_class();
+    }
+    let parts: Vec<Type> = minimal
+        .into_iter()
+        .map(|ancestor| {
+            let templates: Vec<crate::Name> = hierarchy
+                .find_class(&ancestor)
+                .map(|facts| facts.templates.to_vec())
+                .unwrap_or_default();
+            let args: Vec<Type> = templates
+                .iter()
+                .map(|template| {
+                    classes
+                        .iter()
+                        .map(|(class, args)| {
+                            hierarchy
+                                .ancestor_template_bindings(class, args, &ancestor)
+                                .get(template.as_ref())
+                                .cloned()
+                                .unwrap_or_else(Type::mixed)
+                        })
+                        .reduce(Type::union)
+                        .unwrap_or_else(Type::mixed)
+                })
+                .collect();
+            Type::object(ancestor, args)
+        })
+        .collect();
+    crate::intersect_types(parts)
 }
 
 /// The union cap's third fallback: each member generalized (a literal to
