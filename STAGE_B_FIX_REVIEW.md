@@ -1227,6 +1227,34 @@ through `check-project`.
   `identical.alwaysTrue`. Done: when the key may be more than one
   literal, each entry becomes the union of its prior value and the
   written one, with a fixture.
+
+  Design (F85 too): the per-key entries are a second copy of what the
+  container's shape now says, and the copy is the one that goes wrong.
+  In `bind_assignment_target` (`assignment.rs`, the dynamic-key block
+  near 486), `purge_aliased_index_entries` has already removed every
+  `row[…]` entry (the prefix for a non-literal index is `row[`). The
+  loop over `literal_keys_from_type` therefore always takes its
+  `None => ty.clone()` arm, and `$row['id']` reads back `null`. Since
+  `783727da`, `set_offset_value_type`'s several-literal-keys arm
+  (`types/src/offsets.rs`) joins each existing field with the written
+  value and adds missing keys as optional. So the loop is removed rather
+  than repaired: after the purge, a read of `$row['id']` falls through
+  to the container's field, `1|null`, and container and element agree by
+  construction. The "`foreach` over several literal keys, once per key"
+  case the comment cites is covered by the shape, whose fields union
+  across the passes. A general-array container (no shape) reads its
+  value type, as it does for any other write through an unknown key.
+
+  F85's second half is in the same arm: a key the shape lacks becomes
+  `ShapeField::new(key, value, true)`. On an unsealed shape whose tail
+  key type may hold that key, the field's type is the written value
+  unioned with the tail's value type, since the key may already hold one
+  of the tail's values. Fixtures: `$row[$key] = null` with
+  `'id'|'name' $key` gives `$row['id'] === null` no report and
+  `$row['id']` typed `1|null`; the open shape
+  `array{a: 1, ...<string, int>}` written at `'a'|'b'` gains
+  `b?: 'z'|int`; the corpus shape (a `foreach` over a literal key list
+  writing `$row[$key]`) keeps each field's union.
 - [ ] **F49. Builtin return types that claim more than the function
   gives** (`checker/expr/builtin_calls.rs`, read whole; all but the
   report noted were already there before the window):
@@ -1769,6 +1797,10 @@ through `check-project`.
   `array{a: 1, ...<string, int>}` written at `'a'|'b'` gains `b?: 'z'`,
   though `b` may hold an `int` from the tail. Done: F48's entry union,
   and a missing key taking the tail's value type too, with fixtures.
+
+  Design: with F48. The per-key entry loop in `bind_assignment_target`
+  goes, so reads come from the shape `783727da` already fixes, and a key
+  added to an unsealed shape takes the tail's value type too.
 
 ### Design
 
