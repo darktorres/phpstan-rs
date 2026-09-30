@@ -974,8 +974,9 @@ through `check-project`.
     numeric-string literal becomes its value, `numeric-string` becomes
     `int|float`, `true`/`false`/`null` become `1`/`0`/`0`. Each side is then
     split into union members, the operation runs per pair, and the results
-    are unioned. Past 16 pairs it falls back to a per-kind summary: `int`,
-    `float`, or `int|float`, by whether each side may be an int or a float.
+    are unioned. Past 16 pairs it runs once on each side's hull (the
+    int members' smallest covering range, and `float` if any member is
+    one) instead of a per-kind summary, so the result keeps range bounds.
     A pair with a float member gives `float` (folded when both are
     constants), and a pair of ints runs the range math. So `int|float + 1`
     is `int|float`, `'1.5' + $i` is `float`, `$numericString + 1` is
@@ -2016,8 +2017,12 @@ through `check-project`.
   `observe_type` for an `Err(ty)` key, and a positional item takes
   `take()`'s key or range. So `[$ab => 1, 5 => 2, 'y']` gives keys
   `'a'|'b'|5|6`, and `[$r => 1, 'y']` with `int<10, 20> $r` gives `'y'`
-  the key `int<11, 21>`. The duplicate-key check's early `return` on
-  `Err` stays, since a range can't prove a duplicate. F70's first bullet
+  the key `int<11, 21>`. The duplicate-key check
+  (`check_array_literal_duplicate_keys`) stops returning at the first
+  unknown key: a later literal key that repeats an earlier literal one is
+  a duplicate whatever the unknown key was (`['a' => 1, $k => 2, 'a' =>
+  3]`). It skips only the unknown key itself and positional keys whose
+  index became a range, which can't prove or rule out a duplicate. F70's first bullet
   is the same fix. Fixtures: both finding shapes, and `[$i => 1, 'y']`
   with a plain `int $i`, whose positional key is `int`.
 - [ ] **F14. `iterable<K, V>`'s array member drops `K`** (`321d388c`).
@@ -2771,15 +2776,16 @@ through `check-project`.
   `merge_shape_field` (`expr/array_ops.rs:283`), which both the spread
   literal and `array_merge` use, and in the spread path's list-ness.
 
-  - An optional int field. `merge_shape_field` renumbers it to the next
-    index as if present and advances the index by one, so every later
-    renumbered key assumes it. Each optional int field doubles the possible
-    layouts. The merge carries a small set of candidate shapes (at most 8,
-    so three optional int fields) and forks the set at each optional int
-    field, into a copy where it was present and a copy where it wasn't. The
-    result is the union of the candidates. Past the cap it degrades to the
-    general array as today. `[...$a, 'c']` with `array{0: 'a', 1?: 'b'}` is
-    then `array{0: 'a', 1: 'b', 2: 'c'}|array{0: 'a', 1: 'c'}`.
+  - An optional int field. `merge_shape_field` renumbers it to the next index as
+    if present and advances the index by one, so every later renumbered key
+    assumes it. Each optional int field doubles the possible layouts. The merge
+    carries a small set of candidate shapes (at most 8, so three optional int
+    fields) and forks the set at each optional int field, into a copy where it
+    was present and a copy where it wasn't. The result is the union of the
+    candidates. Past the cap it degrades to the general array, whose key type
+    then comes from F13's range index (`int<n, n + k>` for the renumbered keys),
+    not plain `int`. `[...$a, 'c']` with `array{0: 'a', 1?: 'b'}` is then
+    `array{0: 'a', 1: 'b', 2: 'c'}|array{0: 'a', 1: 'c'}`.
   - An optional string field over an existing key. A later optional field
     may be absent, so the earlier value survives:
     - an existing required field stays required, with its type joined with
@@ -3309,7 +3315,7 @@ through `check-project`.
     config) run every case on shared parameters, so `$s++` on line 12 turns
     `$s` into `int|float|string` before `$s--` (line 13) and `$i **= $s`
     (line 16) read it. Each case gets its own fresh parameter: `string $s1`
-    for `$s1++`, `string $s2` for `$s2--`, `string $s3` for and
+    for `$s1++`, `string $s2` for `$s2--`, and `string $s3` for
     `$i **= $s3`. The expectations then read "post-decrement, string given",
     and the `**=` operand report comes back with `string` on the right side.
     They are regenerated and compared by hand with the pre-`15b5b494`
@@ -4072,14 +4078,12 @@ through `check-project`.
     states what is mapped (attributes; see F79 for which properties).
     `DoctrineEntity`'s doc says the discriminator map is modeled
     (`discriminator_map`, line 94), matching the module doc.
-  - `project/duplicate_fn_sites.rs:25-27`. The sites are always indexed, and
-    the check that reads them is opt-in
-    (`check_duplicate_function_declarations`). The doc says both, and drops
-    "always-on". `duplicate_functions.rs:22` either gives the `strtr` reason
-    it points at (the stubs declare version-split signatures of one
-    function) or drops the pointer. `duplicate_classes.rs` and
-    `duplicate_class_sites.rs` state their rules without the corpus
-    argument.
+  - `project/duplicate_fn_sites.rs:25-27`. The sites are always indexed, and the
+    check that reads them is opt-in (`check_duplicate_function_declarations`).
+    The doc says both, and drops "always-on". `duplicate_functions.rs:22`'s
+    pointer to the `strtr` reason goes with F75, which removes the signature
+    check it explained. `duplicate_classes.rs` and `duplicate_class_sites.rs`
+    state their rules without the corpus argument.
   - `project/whole_program/dead_members.rs`. The module doc's Piwigo
     measurement and past fixes (lines 17, 46, 59, 75: "used to have", "used
     to be a real gap here too", "Fixed at the parser level") go. The
@@ -4094,10 +4098,12 @@ through `check-project`.
   - `syntax/parser/tokens.rs`. `take_name_segment`'s example (line 235) uses
     a neutral `App\Enum\Foo`. `parse_leading_attributes` (line 392) drops
     "before this phase" and says what is parsed.
-  - `syntax/visit.rs:10`. The module doc says the shared walk visits type
-    hints and names, and that `VisitorMut`'s defaults don't visit type hints
-    or names (its `visit_type_hint` is a no-op), so a mutating visitor that
-    needs them walks them itself.
+  - `syntax/visit.rs:10`. The doc's claim is made true rather than
+    corrected: `VisitorMut`'s walk visits type hints and names as
+    `Visitor`'s does (`visit_type_hint` walks, `walk_*_mut` hand names to
+    `visit_name`), so a mutating visitor never silently misses a class
+    name in a hint. A test runs both walks over one AST and compares the
+    sequence of nodes they visit.
 
 - [ ] **F88. Comments that still describe the truncation `cc4e6b5e`
   replaced:** `converge_loop_body`'s doc calls discarding a pass "the
@@ -4111,9 +4117,10 @@ through `check-project`.
   says a discarded pass "is rolled back with `rewind_to` to the pass's
   `PassMark`: its diagnostics, throw and return points, semantic tokens
   and inlay hints". `check_while`'s comment (`stmt/loops.rs`, near line
-  73) says every pass but the kept one is rolled back the same way. If
-  F87 lands first, both name the records it adds, or say "every per-pass
-  record" and point at `PassMark`'s doc as the one list.
+  73) says every pass but the kept one is rolled back the same way. F87
+  lands with this, so both say "every per-pass record" and point at
+  `PassMark`'s doc as the one list, instead of listing records that go
+  stale when one is added.
 
 ## The Stage B review's done items
 
