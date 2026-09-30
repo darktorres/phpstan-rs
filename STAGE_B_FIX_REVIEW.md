@@ -1966,6 +1966,32 @@ through `check-project`.
   `is_zero` compares only with int `0` and float `0.0`. Done: a divisor
   whose every value converts to zero is reported - to a number for `/`,
   to an int for `%`.
+
+  Design: `check_division_by_zero` (`operators.rs:364`) compares each
+  finite value of the divisor with `0` and `0.0` as written. PHP
+  converts first, differently per operator (checked with `php`: every
+  case of the finding throws, and so do `1 / '0.0'`, `1 % -0.9` and
+  `1 % ' 0'`):
+
+  - `/` converts to a number: `null` and `false` are `0`, `true` is `1`, and
+    a numeric string is its value.
+  - `%` converts to an int: a float or numeric string truncates toward zero,
+    so any `|f| < 1` is `0`, and `null`/`false`/`true` are `0`/`0`/`1`.
+  - A non-numeric string or an array is a `TypeError` ("Unsupported operand
+    types"), which `binaryOp.invalid` owns, so it doesn't count as zero
+    here.
+
+  So the test becomes: every finite value, converted by the operator's
+  rule, is zero. The conversions are the types-crate `to_number` from
+  F39 and a sibling `to_int` for `%`. `-0.0` counts, and its literal
+  already compares equal. F19's fourth bullet is the result side of the
+  same fact. When the divisor always converts to zero, `infer_binary`
+  gives the explicit `never` of F4's split rather than `int|float`,
+  since the expression always throws. Fixtures: `$i / false`, `/ null`,
+  `/ '0'`, `/ '0.0'`, `% 0.5`, `% '0.9'`, `% false` and `% null` each
+  report, and `/ ''` reports only `binaryOp.invalid`.
+  `$r = $i / 0; echo $r;` reports `division.byZero` and
+  `deadCode.unreachable`.
 - [ ] **F17. `new` with a non-name class expression isn't checked.**
   `check_expr`'s `New` arm (`expr.rs:2218`) runs `infer_expr` on the whole
   `new` and handles a `Name` class only. `new $undef()`,
