@@ -3620,21 +3620,20 @@ through `check-project`.
   and keep the sites in that file: files times names. Done: the checks
   run once over the sites and hand each file its diagnostics.
 
-  Design: `finish_diagnostics` (`project.rs:1474`) runs both checks for
-  each file, and each check walks every recorded name to keep the sites
-  in that file. The checks become one pass per run:
+  Design: `finish_diagnostics` (`project.rs:1474`) runs both checks for each
+  file, and each check walks every recorded name to keep the sites in that file.
+  The checks become one pass per run:
   `duplicate_declaration_diagnostics(&self) -> FxHashMap<PathBuf, Vec<Diagnostic>>`
-  walks the site maps once, groups as F75 describes, and hands each
-  group's diagnostics to the files its sites are in. `Project` caches
-  the map behind a dirty flag that `index`/`remove_declarations`/`merge`
-  on either site map set. `finish_diagnostics` reads its file's entry,
-  recomputing the map first if it is dirty. So a batch run pays once,
-  and an LSP edit pays once per edit rather than once per file per edit.
-  The two opt-in gates stay where they are and decide whether the map is
-  built at all. Fixture: the existing duplicate fixtures, unchanged. The
-  scaling check is a generated project of 2,000 files and 20,000
-  functions timed before and after, recorded with the other scale
-  timings (F18).
+  walks the site maps once, groups as F75 describes, and hands each group's
+  diagnostics to the files its sites are in. `Project` caches the map behind a
+  dirty flag that `index`/`remove_declarations`/`merge` on either site map set.
+  `finish_diagnostics` reads its file's entry, recomputing the map first if it
+  is dirty. So a batch run pays once, and an LSP edit pays once per edit rather
+  than once per file per edit. With F75's load-set test the checks run by
+  default, so the map is always built, from the load sets computed once per run.
+  Fixture: the existing duplicate fixtures, unchanged. The scaling check is a
+  generated project of 2,000 files and 20,000 functions timed before and after,
+  recorded with the other scale timings (F18).
 - [ ] **F79. Smaller gaps read in the submodules** (read, not probed):
   - `compute_doctrine_entity` makes every property a mapped field,
     `#[ORM\Column]` or not, so a DQL path to a transient property isn't
