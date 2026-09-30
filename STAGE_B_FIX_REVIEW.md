@@ -1895,6 +1895,22 @@ through `check-project`.
   `iterable<string, int>`, the `foreach` key is `int|string` and
   `is_array($it)` gives `array<string>`. The commit's fixture asserts
   `int|string`. Done: `array<K, V>`.
+
+  Design: in the `"iterable"` arm (`types/src/parse.rs:1129`; after F41
+  it moves into `keyword_type`), the array member's key is the written
+  `K` restricted to what an array key can be: `K` itself when it is
+  within `int|string`, `unknown_array_key()` for `mixed`, and the
+  intersection with `int|string` otherwise. When that intersection is
+  `never` (`iterable<object, V>`, a generator-only key), the array
+  member is dropped and the type is `Traversable<K, V>` alone, since no
+  array can have those keys. The arm builds its union with
+  `Type::union_of` rather than a raw `Repr::Union`, so it is normalized
+  like every other union. `321d388c`'s fixture, which asserts
+  `int|string` for the key, is corrected to `string`. Fixtures: for
+  `iterable<string, int>`, the `foreach` key is `string` and
+  `is_array($it)` narrows to `array<string, int>`;
+  `iterable<int|object, V>` has an `array<int, V>` member;
+  `iterable<object, V>` is `Traversable<object, V>`.
 - [ ] **F15. A negated `instanceof` keeps a generic member.**
   - For `Iterator<int, string>|IteratorAggregate<int, string>`,
     `!$x instanceof Iterator` keeps the whole union, because
