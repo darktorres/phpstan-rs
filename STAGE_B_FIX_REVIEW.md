@@ -1383,6 +1383,30 @@ through `check-project`.
   `===` recognized (the same narrowing the arm bodies already get), with
   fixtures.
 
+  Design: decide "the last arm must be true" the way PHPStan's type
+  specifier does. The last arm is exhaustive when assuming it false
+  leaves no possible value. `condition_is_provably_true`
+  (`expr.rs:6325`) gains a narrowing test after its two existing ones:
+  clone `accumulated_before_last_arm`, run
+  `apply_narrowing(cond, &mut clone, false)` for each of the last arm's
+  conditions (a multi-condition arm fails only when all of them do, so
+  each is applied false in turn), and answer true when some key the
+  narrowing touched is now `never` and wasn't before. That covers
+  `instanceof`, the `is_*` predicates, `===` against a literal and
+  `&&`/`||` compositions, since those are exactly the conditions
+  `apply_narrowing` already understands, with no new per-shape logic. It
+  relies on F4: today an impossible narrowing falls back to the checked
+  type instead of `never`, so this test needs F4's `never` to see the
+  empty branch. F4 lands first. The single-condition restriction at the
+  call site (`[only_cond]`, `expr.rs:3415`) goes. The
+  `UnhandledMatchError` throw state recorded when the arm isn't
+  exhaustive follows the same answer. Fixtures: the finding's three
+  matches (`instanceof A`/`B` on `A|B`, `is_int`/`is_string` on
+  `int|string`, `=== true`/`=== false` on `bool`) report nothing and
+  record no throw point; a match missing a class still reports; a
+  two-condition last arm (`$x instanceof B, $x instanceof C =>`) on
+  `A|B|C` is exhaustive.
+
 - [ ] **F55. A class declaring `__tostring()` in lower case isn't
   `Stringable`** (`ClassReflection::from_def`; also before the window).
   The implicit interface is added on `methods.contains_key("__toString")`,
