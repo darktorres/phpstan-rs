@@ -682,6 +682,29 @@ through `check-project`.
   `missingType.iterableValue` names `$array` too. This was already the
   case before the fix window; `f51447bd` relies on the stub winning.
   Done: a declaration's body is checked against its own parameters.
+
+  Design: the mechanism already exists. `check_function` asks
+  `own_declaration_sig` (`function_decl.rs:216`), which builds `f`'s own
+  signature with `FunctionReflection::from_decl` and
+  `finalize_standalone_sig` whenever the registry's slot for the name
+  was built from another declaration. It reads the slot's site from
+  `registry.function_decl_sites` with a `?`, so a name that has no entry
+  counts as "the slot is `f`'s". A stub-provided builtin is exactly that
+  case: `registry/index.rs` records a site only when a project
+  declaration wins the slot (`Some(site)`) or merges (`None`), and when
+  `better_conditional_function_declaration` keeps the stub, the
+  polyfill's declaration leaves no entry. The fix is in the lookup:
+  `match sites.get(key) { Some(Some(site)) if site == f's => None, _ =>
+  build fresh }`, so an absent entry means "not this declaration". It is
+  reinforced where the stub wins: that branch inserts the losing
+  declaration's key as `None` if absent, so the map says "some other
+  declaration holds this slot" rather than nothing. Callers keep the
+  stub's signature, which is right, since on a PHP version with the
+  builtin the guard skips the polyfill. Fixtures: the finding's polyfill
+  reports no `variable.undefined` and names `$a` (not `$array`) in
+  `missingType.iterableValue`; a polyfill with a different arity and a
+  namespaced one behave the same; a project function with no stub is
+  unaffected (a unit test that `own_declaration_sig` is `None` for it).
 - [ ] **F29. The trait-collision check gets PHP's rule wrong**
   (`check_trait_conflicts`, `oop.rs:626`). All three were already the
   case before the fix window; `4ed3cfe3` rebuilt the conflict set.
