@@ -108,3 +108,15 @@ fn equal_types_hash_alike() {
         ])),
     );
 }
+
+#[test]
+fn a_refined_array_shows_its_tracked_offsets() {
+    let tracked = crate::intersect_types(vec![
+        Type::array(Type::unknown_array_key(), Type::mixed()),
+        Type::has_offset_value(ShapeKey::Str("a".into()), Type::string_literal("x".into())),
+    ]);
+    assert_eq!(
+        tracked.to_non_empty_array().to_string(),
+        "non-empty-array&hasOffsetValue('a', 'x')"
+    );
+}

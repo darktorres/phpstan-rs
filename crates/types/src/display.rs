@@ -257,12 +257,30 @@ fn describe_accessory_intersection(members: &[Type]) -> Option<String> {
         } else {
             format!("<{elem}>")
         };
-        return match (is_list, has(AccessoryKind::NonEmptyArray)) {
-            (true, true) => Some(format!("non-empty-list{elem_str}")),
-            (true, false) => Some(format!("list{elem_str}")),
-            (false, true) => Some(format!("non-empty-array{elem_str}")),
-            (false, false) => None,
+        let name = match (is_list, has(AccessoryKind::NonEmptyArray)) {
+            (true, true) => format!("non-empty-list{elem_str}"),
+            (true, false) => format!("list{elem_str}"),
+            (false, true) => format!("non-empty-array{elem_str}"),
+            (false, false) => return None,
         };
+        // Parts the name doesn't cover (`hasOffsetValue('a', 1)`) follow it.
+        let rest: Vec<String> = members
+            .iter()
+            .filter(|m| {
+                !matches!(
+                    m.repr(),
+                    Repr::Array(..)
+                        | Repr::Accessory(AccessoryKind::ArrayList | AccessoryKind::NonEmptyArray)
+                )
+            })
+            .map(Type::to_string)
+            .collect();
+        return Some(
+            std::iter::once(name)
+                .chain(rest)
+                .collect::<Vec<_>>()
+                .join("&"),
+        );
     }
     if members.contains(&Type::string()) {
         // A generic ordered-parts join correctly composes any
