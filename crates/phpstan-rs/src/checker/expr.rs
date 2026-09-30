@@ -363,6 +363,36 @@ impl<'a> Checker<'a> {
     /// throw point, before its arms.
     fn thrown_by(&mut self, e: &Expr, locals: &Locals) -> Option<Type> {
         let anything = || Type::object("Throwable".into(), Vec::new());
+        // An offset of an `ArrayAccess` object calls one of its methods
+        // (`array_access`).
+        let implicit = if matches!(
+            e.kind,
+            ExprKind::Call(..)
+                | ExprKind::New(..)
+                | ExprKind::NewAnonymousClass { .. }
+                | ExprKind::MethodCall(..)
+                | ExprKind::DynamicMethodCall(..)
+                | ExprKind::StaticCall(..)
+                | ExprKind::DynamicStaticCall(..)
+        ) {
+            None
+        } else {
+            self.call_throw_types.remove(&e.span).flatten()
+        };
+        let own = self.thrown_by_itself(e, locals, anything);
+        match (implicit, own) {
+            (Some(a), Some(b)) => Some(Type::union(a, b)),
+            (a, b) => a.or(b),
+        }
+    }
+
+    /// `thrown_by` for what `e` does itself, beside an implicit call.
+    fn thrown_by_itself(
+        &mut self,
+        e: &Expr,
+        locals: &Locals,
+        anything: impl Fn() -> Type,
+    ) -> Option<Type> {
         match &e.kind {
             ExprKind::Call(..)
             | ExprKind::New(..)
@@ -1613,6 +1643,7 @@ impl<'a> Checker<'a> {
                     "on left side of ??",
                     null_probe_verdict,
                 );
+                self.implicit_array_access_probe(l, &["offsetExists", "offsetGet"], e.span, locals);
                 let r_ty = self.check_expr(r, locals, label);
                 self.widen_coalesce_result(l, r_ty, locals)
             }
@@ -1711,6 +1742,7 @@ impl<'a> Checker<'a> {
                 };
                 // `$x++`/`$x--` is real, visible rebinding syntax, the
                 // same category as `$x += 1`.
+                self.implicit_array_access_write(inner, e.span, locals);
                 self.bind_assignment_target(inner, updated.clone(), locals);
                 // `++$x` is the value after the step, `$x++` the one before.
                 if matches!(op, UnaryOp::PreInc | UnaryOp::PreDec) {
@@ -1816,6 +1848,7 @@ impl<'a> Checker<'a> {
                         label,
                         ("isset", "in isset()", null_probe_verdict),
                     );
+                    self.implicit_array_access_probe(operand, &["offsetExists"], e.span, locals);
                 }
                 Type::bool()
             }
@@ -1825,6 +1858,12 @@ impl<'a> Checker<'a> {
                     locals,
                     label,
                     ("empty", "in empty()", empty_probe_verdict),
+                );
+                self.implicit_array_access_probe(
+                    operand,
+                    &["offsetExists", "offsetGet"],
+                    e.span,
+                    locals,
                 );
                 Type::bool()
             }
@@ -2064,6 +2103,14 @@ impl<'a> Checker<'a> {
                 // still need their *base* checked (`$obj->prop = ...`
                 // reads $obj).
                 self.check_assignment_target(lhs, locals, label);
+                if matches!(&e.kind, ExprKind::Assign(..)) {
+                    self.implicit_array_access_write(lhs, e.span, locals);
+                    // Destructuring an `ArrayAccess` object reads each key
+                    // through `offsetGet`.
+                    if matches!(&lhs.kind, ExprKind::Destructure(..)) {
+                        self.implicit_array_access_call(rhs, &rhs_ty, "offsetGet", e.span, locals);
+                    }
+                }
                 self.check_self_assignment(lhs, rhs);
                 self.check_property_assignment(lhs, rhs, locals);
                 // A bare by-ref-parameter variable directly assigned a
@@ -2138,11 +2185,18 @@ impl<'a> Checker<'a> {
                         "on left side of ??=",
                         null_probe_verdict,
                     );
+                    self.implicit_array_access_probe(
+                        lhs,
+                        &["offsetExists", "offsetGet"],
+                        e.span,
+                        locals,
+                    );
                     ty
                 } else {
                     self.check_expr(lhs, locals, label)
                 };
                 let rhs_ty = self.check_expr(rhs, locals, label);
+                self.implicit_array_access_write(lhs, e.span, locals);
                 self.check_offset_assignment(lhs, &rhs_ty, true, locals);
                 if *op != BinOp::Coalesce {
                     let _ =
@@ -2298,6 +2352,18 @@ impl<'a> Checker<'a> {
                         self.check_offset_accessibility(&base_ty, i);
                         self.check_offset_existence(e, base, i, locals);
                         self.check_dim_fetch_key_type(base, i, locals);
+                        let key_ty = match crate::checker::literal_shape_key(i) {
+                            Some(key) => key.to_type(),
+                            None => self.infer_expr(i, locals),
+                        };
+                        self.check_array_access_offset(&base_ty, "offsetGet", &key_ty, i.span);
+                        self.implicit_array_access_call(
+                            base,
+                            &base_ty,
+                            "offsetGet",
+                            e.span,
+                            locals,
+                        );
                         // The `Index` counterpart of `PropertyAccess`'s
                         // "check the narrowed key first" handling above -
                         // without this, `check_expr` (unlike `infer_expr`,
@@ -2315,10 +2381,6 @@ impl<'a> Checker<'a> {
                             return narrowed.clone();
                         }
                         // The same read `chain_link_type` gives.
-                        let key_ty = match crate::checker::literal_shape_key(i) {
-                            Some(key) => key.to_type(),
-                            None => self.infer_expr(i, locals),
-                        };
                         self.offset_read_type(&base_ty, &key_ty)
                     }
                     // `OffsetAccessWithoutDimForReadingRule` - every

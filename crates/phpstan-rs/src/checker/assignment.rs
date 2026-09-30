@@ -332,8 +332,9 @@ impl<'a> Checker<'a> {
                     self.probe_hit_at(lhs.span, &ty);
                     locals.declare(name.to_string(), ty, lhs.span);
                 }
-                // Each element takes the value at its key: a keyed element's
-                // literal key, a positional one's index.
+                // Each element takes the value read at its key, as a read
+                // of it would: a keyed element's literal key, a positional
+                // one's index.
                 ExprKind::Destructure(items, _) => {
                     for (position, item) in items.iter().enumerate() {
                         let Some(target) = &item.target else {
@@ -344,7 +345,7 @@ impl<'a> Checker<'a> {
                             (None, Some(key)) => self.infer_expr(key, locals).to_array_key(),
                             (None, None) => Type::unknown_array_key(),
                         };
-                        let element_ty = ty.offset_value_type_at(&key_ty).unwrap_or(Type::mixed());
+                        let element_ty = self.offset_read_type(&ty, &key_ty);
                         self.bind_assignment_target(target, element_ty, locals);
                     }
                 }
@@ -574,6 +575,13 @@ impl<'a> Checker<'a> {
     /// exist is no error.
     pub(crate) fn check_unset_target(&mut self, target: &Expr, locals: &mut Locals, label: &str) {
         self.check_expr_quiet_root(target, locals, label);
+        // `unset($o[$k])` calls `offsetUnset`; a statement has no
+        // expression of its own to throw from, so its throw goes to the
+        // enclosing `try` here.
+        self.implicit_array_access_probe(target, &["offsetUnset"], target.span, locals);
+        if let Some(Some(thrown)) = self.call_throw_types.remove(&target.span) {
+            self.record_throw_state(thrown, locals);
+        }
         if let Some(key) = narrowing_key(target) {
             purge_stale_narrowing_for(locals, &key);
             locals.remove(&key);

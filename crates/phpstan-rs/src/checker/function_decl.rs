@@ -291,7 +291,6 @@ impl<'a> Checker<'a> {
             self.check_magic_numbers_in_params(&f.params);
         }
         self.check_declared_purity_tag(f, sig, class_name.is_some(), &label);
-        self.check_purity_impure_points(f, sig, class_name.is_some(), &label);
         self.check_declared_param_callable_tags(f);
         self.check_internal_param_and_return_types(f, class_name, &label);
         self.check_restricted_param_and_return_types(f, class_name);
@@ -969,12 +968,16 @@ impl<'a> Checker<'a> {
         // top-level body is exactly as eligible for `deadCode.unreachable`
         // as any nested `{ ... }` block is - it just needs to be routed
         // through the one place that check lives.
+        let previous_implicit_calls = std::mem::take(&mut self.implicit_calls);
         self.check_block(
             f.body_stmts(),
             &mut locals,
             declared_return.as_ref(),
             &label,
         );
+        let implicit_calls = std::mem::replace(&mut self.implicit_calls, previous_implicit_calls);
+        // Judged after the body, which finds the offsets that are calls.
+        self.check_purity_impure_points(f, sig, class_name.is_some(), &label, &implicit_calls);
 
         // A function that falls off the end of its body with no `return`
         // at all implicitly returns `null` too - equally a real mismatch

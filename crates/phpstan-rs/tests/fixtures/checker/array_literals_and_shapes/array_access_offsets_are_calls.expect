@@ -1,0 +1,4 @@
+96:15-96:16 offsetAccess.invalidOffset L3 | Cannot access offset 1 on Typed.
+114:5-114:14 offsetAssign.indirectModification L3 | Indirect modification of overloaded element of Bag has no effect.
+118:13-118:16 offsetAccess.nonOffsetAccessible L3 | Cannot access offset on Plain.
+132:1-134:2 throws.unusedType L2 | Function notThrown() has NotThere in PHPDoc @throws tag but it's not thrown.

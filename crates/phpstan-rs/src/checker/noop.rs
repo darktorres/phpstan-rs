@@ -452,6 +452,7 @@ impl<'a> Checker<'a> {
         sig: Option<&FunctionReflection>,
         is_method: bool,
         label: &str,
+        implicit_calls: &[syntax::token::Span],
     ) {
         let Some(sig) = sig else {
             return;
@@ -501,7 +502,8 @@ impl<'a> Checker<'a> {
         } else {
             None
         };
-        for occ in collect_impure_points(f.body_stmts(), class_name, self.registry) {
+        for occ in collect_impure_points(f.body_stmts(), class_name, self.registry, implicit_calls)
+        {
             let (verb, identifier) = if occ.certain {
                 ("Impure", format!("impure.{}", occ.identifier))
             } else {

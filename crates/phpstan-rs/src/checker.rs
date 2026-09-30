@@ -402,6 +402,9 @@ pub struct Checker<'a> {
     // What each call checked inside a `try` body can throw, by the call's
     // span, from its resolved signature; `None` when it cannot throw.
     pub(crate) call_throw_types: rustc_hash::FxHashMap<Span, Option<Type>>,
+    /// Each `$o[…]` in the function body being checked that calls an
+    /// `ArrayAccess` method (`array_access`), for its purity check.
+    pub(crate) implicit_calls: Vec<Span>,
     // Every real throw point recorded so far inside the enclosing
     // function/method/closure body - an explicit `throw` expression's
     // thrown-value type, or a call's resolved `@throws` type (a matching
@@ -840,6 +843,7 @@ pub(crate) enum InferQuestion {
 }
 
 mod access_attributes;
+mod array_access;
 mod locals;
 pub(crate) use locals::Locals;
 mod assignment;
@@ -1028,6 +1032,7 @@ impl<'a> Checker<'a> {
             current_function_throw_points: Vec::new(),
             try_throw_states: Vec::new(),
             call_throw_types: rustc_hash::FxHashMap::default(),
+            implicit_calls: Vec::new(),
             current_function_has_unannotated_call: false,
             current_function_explicit_throw_points: Vec::new(),
             current_function_return_points: Vec::new(),

@@ -653,10 +653,14 @@ pub(crate) struct ImpurePointOccurrence {
 /// here and in `resolve_static_call`/`resolve_this_method_call`, to stay
 /// consistent) to a literal class name and an arbitrary receiver type,
 /// and fix `namespace\`-relative call-name resolution generally.
+///
+/// `implicit_calls` are the offsets in `body` the checker found calling an
+/// `ArrayAccess` method, which the walk can't tell from an array's.
 pub(crate) fn collect_impure_points(
     body: &[Stmt],
     declaring_class: Option<&str>,
     registry: &Registry,
+    implicit_calls: &[Span],
 ) -> Vec<ImpurePointOccurrence> {
     let mut points = ImpurePoints {
         declaring_class,
@@ -664,6 +668,9 @@ pub(crate) fn collect_impure_points(
         out: Vec::new(),
     };
     walk_stmts(&mut points, body);
+    for span in implicit_calls {
+        points.push(*span, "methodCall", "call to unknown method", false);
+    }
     points.out
 }
 

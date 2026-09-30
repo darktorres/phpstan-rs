@@ -173,6 +173,8 @@ pub struct FunctionReflection {
     // (`Checker::check_no_discard_statement`), matching real PHPStan's
     // short-name, case-insensitive match convention.
     pub(in crate::registry) no_discard: bool,
+    // `function &f()`: returns a reference.
+    pub(in crate::registry) returns_ref: bool,
     // `MustUseResult` (php-language-extensions): `no_discard` while that
     // extension is active.
     pub(in crate::registry) must_use_result: bool,
@@ -307,6 +309,11 @@ impl FunctionReflection {
 
     pub fn no_discard(&self) -> bool {
         self.no_discard
+    }
+
+    /// Whether it returns a reference (`function &f()`).
+    pub fn returns_ref(&self) -> bool {
+        self.returns_ref
     }
 
     pub fn must_use_result(&self) -> bool {
@@ -753,6 +760,7 @@ impl FunctionReflection {
             return_explicit_mixed_hint: f.return_type.as_ref().is_some_and(TypeHint::is_mixed)
                 || doc_return.is_some_and(mentions_mixed),
             no_discard,
+            returns_ref: f.by_ref,
             must_use_result,
             visibility,
             is_internal,
@@ -875,6 +883,8 @@ impl FunctionReflection {
             return_explicit_mixed_hint: self.return_explicit_mixed_hint
                 || other.return_explicit_mixed_hint,
             no_discard,
+            // Only a reference when every overload returns one.
+            returns_ref: self.returns_ref && other.returns_ref,
             must_use_result,
             // Both real overloads share one declaration (a stub-modeled
             // PHP-version split of the same underlying function/method,

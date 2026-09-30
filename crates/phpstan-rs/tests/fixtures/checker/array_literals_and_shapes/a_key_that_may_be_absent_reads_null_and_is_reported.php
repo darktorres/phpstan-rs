@@ -23,6 +23,7 @@ function read(array $row, array $map, string $k): void {
 function destructure(array $oneOrTwo): void {
     [$x, $y] = $oneOrTwo;
     assertType('string', $x);
+    assertType('string|null', $y);
 }
 
 read([], ['k' => 1], 'k');
