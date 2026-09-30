@@ -3709,6 +3709,49 @@ through `check-project`.
 
   Done: each doc sits on its item and says what the code does.
 
+  Design, each checked present at `3eaddbd1`:
+
+  - `control_flow.rs:458-476`. `merge_scopes`' doc ("Joins two branch-local
+    scopes…") and its `#[hotpath::measure]` move from above
+    `add_implied_fact` (line 476) to above `merge_scopes` (line 563), and
+    `add_implied_fact` gets a one-line doc of its own. This is a behaviour
+    fix for profiling too: under `--features hotpath` the merge's time is
+    currently measured as `add_implied_fact`'s.
+  - `stmt.rs:1303-1340`. `statement_defined_variable_names`' doc moves from
+    above `bare_assert_condition` (line 1321) to above its function (line
+    1340). Its "Deliberately doesn't cover `foreach`" sentence goes, since
+    the function has a `Foreach` arm. The post-dispatch comment in
+    `check_stmt_impl` ("Deliberately does NOT extend this to a tag sitting
+    directly on a `foreach` header") is rewritten to say that
+    `check_foreach` takes the statement's inline `@var`s.
+  - `member_resolution.rs`. `method_call_return_type`'s doc moves from above
+    `class_argument_return` (line 408) to its own function (line 445). The
+    `168e` citation at line 715 names the convention instead: the
+    `getQuery`/`getResult` synthesized generic slot, per F24's mapping.
+  - `builtin_calls.rs`:
+    - line 159, "`array_pop`/`array_shift` are deliberately NOT
+      special-cased", goes, since an `array_pop | array_shift` arm follows;
+    - `get_defined_vars`' comment (line 683) moves from above the
+      `mysqli_query` arm to its own arm (line 706);
+    - `array_merge`'s comments name `types::offsets`' writer (F43) and lose
+      "closing the gap this arm used to leave" (line 1019) and "Loosened
+      from an exact `string` match" (line 961), each becoming the rule it
+      states;
+    - `sscanf_result_fields` (line 3135) says its fields are keyed by ints
+      (`ShapeKey::Int`), as built. F49's lexer rewrite touches this function
+      anyway.
+  - `expr.rs`:
+    - the `Index` arm (line 2317) says it calls `offset_value_type`;
+    - `widen_coalesce_result`'s doc (line 5188) describes the general case
+      as the code has it: the left side's non-null type joined with `r`, `r`
+      alone when the left is `null` or `r` never returns, and the array
+      exception. The "usually just `r`" and "not a blanket union" claims go;
+    - the "A synthetic `target::method(args)` call" doc moves from above
+      `unhandled_match_error` (line 5945) to `static_call` (line 5960), and
+      `unhandled_match_error` gets its own;
+    - the first-class-callable arm (line 4159) loses "Closes a real, live
+      bypass … previously went unchecked" and states the check.
+
 - [ ] **F59. Comments in the registry, project, LSP and syntax modules
   read whole:**
   - `project.rs`: `update_file`'s doc ("Re-parses one already-loaded
