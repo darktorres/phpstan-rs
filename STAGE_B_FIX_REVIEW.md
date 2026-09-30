@@ -3463,6 +3463,49 @@ through `check-project`.
 
   Done: each says what the code does.
 
+  Design, each checked still present at `3eaddbd1`:
+
+  - `parser/tokens.rs:114-119`. `take_token`'s note becomes: "Sound because
+    the parser reads tokens only at `pos` and `pos + k` for `k >= 0`, so a
+    slot behind `pos` is never read again." The claim about the `elseif`
+    backtrack goes, since it doesn't exist.
+  - `parser.rs:26-27`. The field comment becomes: "Parallel to `tokens`
+    (same length, same indices): `spans[i]` is `tokens[i]`'s span. Kept
+    separate so the token accessors in `parser/tokens.rs` index one vector."
+    The "there are many" claim goes.
+  - The 29 `168a`-`168k` codes (listed by `grep -rn "168[a-k]"`). Each code
+    is replaced by the component it names, from the commits that introduced
+    them:
+    - `168a`: the entity metadata (`registry::class_info::doctrine_entity`);
+    - `168b`: the QueryBuilder chain resolver
+      (`checker::doctrine::query_builder`);
+    - `168c`: the DQL select-item parser (`checker::doctrine::dql`);
+    - `168d`: the result-shape builder (`checker::doctrine::result_shape`);
+    - `168e`: the `getQuery`/`getResult` wiring (`member_resolution`'s
+      `doctrine_query_result`);
+    - `168f`: the scalar hydration modes;
+    - `168g`: `EntityManager::createQuery`;
+    - `168h`: the custom DQL function config;
+    - `168j`: entity inheritance mapping;
+    - `168k`: scalar subqueries.
+
+  Sentences that only narrate the history ("168b already resolved this")
+  are rewritten to state the fact. - `union.rs:663-667`. The first two
+  lines ("A shape as the general array it is…") move down to sit on
+  `shape_as_general_array` (line 745), leaving `general_array_parts`
+  with its own doc. - The `resource` message. This is not a comment but
+  a display clash: a class named `resource` and the resource type print
+  alike (the `a_native_resource_hint_names_a_class` fixture expects
+  "expects resource, resource given"). Display prints an object type
+  whose class name, case-folded, equals a type keyword (`resource`, and
+  any other non-reserved keyword name PHP allows as a class) with a
+  leading `\`. That fixture then reads "expects \resource, resource
+  given".
+
+  Verification: `grep -rn "168[a-k]" crates` is empty afterwards, and
+  the fixture expectation is updated in the same commit as the display
+  change.
+
 - [ ] **F34. Comments from commits 100 to 155:**
   - `coercion.rs` `to_number`'s doc says a non-numeric literal like
     `'5 apples'` throws on PHP 8. PHP 8.5 gives `"5 apples" + 1` as `6`
