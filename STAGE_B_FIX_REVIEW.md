@@ -1078,8 +1078,9 @@ through `check-project`.
     statement after it really is unreachable. A
     `function.impossibleCall`-style report is not part of this.
 
-  The zero-argument forms (`rand()`, `mt_rand()`) keep the stub's
-  `int<0, max>`, not this arm. Fixtures: `$r = rand(10, 1);` is
+  The zero-argument forms (`rand()`, `mt_rand()`) are `int` today; they
+  return `int<0, getrandmax()>` (`2147483647` on every platform PHP 8
+  supports), which the same arm gives. Fixtures: `$r = rand(10, 1);` is
   `int<1, 10>` and the next statement is reachable; `rand($a, $b)` with
   `$a` in `int<5, 10>` and `$b` in `int<0, 3>` is `int<0, 10>`;
   `random_int(10, 1)` makes what follows unreachable.
