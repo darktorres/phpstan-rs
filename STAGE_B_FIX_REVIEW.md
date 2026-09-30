@@ -1531,6 +1531,34 @@ through `check-project`.
   Done: `c - int<lo, hi>` is `int<c - hi, c - lo>`, an unbounded end
   staying unbounded; a negative constant divisor mirrors the range; the
   pair sweep is a unit test.
+
+  Design: replace the transcriptions with identities that can't flip a
+  sign.
+
+  - Subtraction. `l - r` is `l + (-r)` on bounds. The negation maps
+    `int<lo, hi>` to `int<-hi, -lo>`, an unbounded end staying unbounded on
+    the other side, and `-PHP_INT_MIN` overflows, which adds `float` as
+    `negate` already does. The addition then runs `checked_bound_op` per
+    end. `sub_int_range_full` (`arithmetic.rs`) and the `Sub` arm's
+    constant-right-operand shortcut both go, since the identity covers them.
+    `c - int<lo, hi>` comes out `int<c - hi, c - lo>`: `-1 - int<min, -1>`
+    is `int<0, max>`, and `3 - int<-1, max>` is `int<min, 4>`.
+  - Division by a negative constant. `div_int_range(l, r)` with `r` entirely
+    negative is `-(div_int_range(l, -r))`, the int half negated with the
+    same helper and the `float` half kept. The tail that swaps the bounds
+    when one is unbounded ("invert maximas on division with negative
+    constants") goes, since it is what flips the unbounded case:
+    `int<0, max> / -1` is `int<min, 0>|float`, and `int<min, -3> / -3` is
+    `int<1, max>|float`. A divisor range spanning zero keeps the existing
+    split into a negative and a positive half, and the negative half now
+    goes through the identity.
+
+  The sweep that found this (every operator over ranges with ends in
+  `{min, -3, -1, 0, 1, 3, max}`, and exhaustively over `[-4, 4]`)
+  becomes a types-crate unit test. The expected table is generated once
+  with `php` into a checked-in data file, as F39's widened sweep does,
+  so the test runs without PHP. The finding's `smaller.alwaysTrue` probe
+  is a fixture.
 - [ ] **F61. `isset()` and `??` on a property of a nullable object are
   reported pointless** (`resolve_always_exists`,
   `checker/expr/probe_checks.rs`; also before the window). The
