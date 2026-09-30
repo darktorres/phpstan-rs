@@ -1569,6 +1569,34 @@ through `check-project`.
   `$x` makes them `false` and `2`. `unset($x->p); isset($x->p)` reports
   the same. Done: a receiver that may be null, or a property unset on the
   path, makes the chain not always present, with fixtures.
+
+  Design: `resolve_always_exists` (`expr/probe_checks.rs:180`) answers
+  "always present" for a chain. Each link must then prove the value that
+  the next link reads from can't be null and can't be missing:
+
+  - After resolving `base_ty` in both the `Index` and the `PropertyAccess`
+    arm, return `None` unless `base_ty.is_null().no()`. A `?Foo` receiver,
+    or a nullable offset value under a deeper `['a']['b']`, makes the chain
+    not always present. A nullsafe link is the same case.
+  - The `PropertyAccess` arm requires every union member to be an object
+    whose class declares the property, where today `find_property_owner`
+    succeeds on the first member that has it. So `Foo|Bar` with `Bar`
+    lacking `p` isn't always present either.
+  - The property's type is the narrowed entry for the chain's narrowing key
+    when `locals` has one, else the declared type.
+    `$x->p = null; isset($x->p)` on an `int|null` property then reads
+    `null`, not the declaration.
+  - `unset($x->p)` makes the property uninitialized. `Locals` keeps a small
+    set of unset property keys: `check_unset_target` adds the key, and any
+    write to the key or its base removes it. The arm returns `None` for a
+    key in the set. The same set is what an "accessed before initialization"
+    report would read, which is not part of this.
+
+  Fixtures: with `?Foo $x` and `Foo::$p` an `int` with a default,
+  `isset($x->p)` and `$x->p ?? 2` are clean.
+  `unset($x->p); isset($x->p)` is clean. A non-null `Foo $x` still
+  reports `isset.property`. A `Foo|Bar` receiver where only `Foo`
+  declares `p` is clean.
 - [ ] **F62. A property keeps its narrowed type across a call that can
   change it** (also before the window). After `$this->x = null;
   $this->load();`, where `load()` assigns `$this->x`, `$this->x` is still
