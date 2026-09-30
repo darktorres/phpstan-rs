@@ -3651,6 +3651,24 @@ through `check-project`.
 
   Done: each says what the code does.
 
+  Design:
+
+  - `lib.rs:224`, `Repr::HasOffsetValue`. The construction site is
+    `write_literal_key_aware` in `types/src/offsets.rs` (line 428, called
+    from `set_offset_value_type`), not `checker::assignment`. The comment
+    names it there. The "Confirmed directly against the vendored real
+    `phpstan.phar`" narration becomes a statement of the rule: a literal
+    write onto a general array adds a member, and a second literal write
+    adds another. The same rename applies at `builtin_calls.rs:937` and in
+    `union.rs:476`/`482`/`514`, found by `grep -rn write_literal_key_aware`.
+    Every mention outside `offsets.rs` then names the module.
+  - `lib.rs:204`, `Repr::IntRange`. "A `T` range" becomes "An int range".
+  - `display.rs:152-160`, the `HasOffsetValue` arm's comment. It says no
+    fast path of `describe_accessory_intersection` matches an intersection
+    holding one. After F42's fix that is true, and the comment says it as
+    the reason this arm is reached: the fast path takes only list and
+    non-empty accessories. F42 and F43 land together.
+
 - [ ] **F51. Comments in the checker modules read whole:**
   - `control_flow.rs`: `merge_scopes`'s doc ("Joins two branch-local
     scopes...") and its `#[hotpath::measure]` sit above
