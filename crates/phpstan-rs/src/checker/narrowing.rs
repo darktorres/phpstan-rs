@@ -5,6 +5,7 @@ use syntax::ast::*;
 use syntax::token::Span;
 use types::{AccessoryKind, Type};
 mod assertions;
+mod phpunit;
 mod predicates;
 mod preg;
 
@@ -845,14 +846,8 @@ impl<'a> Checker<'a> {
             // values, true the falsy ones - for a defined variable, which
             // `empty()` of an undefined one can't be told apart from.
             ExprKind::Empty(operand) => {
-                if let Some(key) = narrowing_key(operand) {
-                    let current = self.current_narrowed_type(operand, &key, locals);
-                    if !branch_true {
-                        locals.insert(key, current.without_falsy());
-                    } else if is_defined_variable(operand, locals) {
-                        locals.insert(key, current.only_falsy(&self.relation()));
-                    }
-                }
+                let defined = is_defined_variable(operand, locals);
+                self.narrow_emptiness(operand, branch_true, defined, locals);
             }
             // `isset($x)`'s truthy branch means specifically "not null" -
             // it's true for `0`, `''`, `false`, an empty array - so this
@@ -999,93 +994,31 @@ impl<'a> Checker<'a> {
                     // juggling makes the real match set wider than the
                     // haystack's own values.
                     && matches!(&strict.value.kind, ExprKind::Literal(Literal::Bool(true)))
-                    && let Some((target_ty, excluded_ty)) =
-                        self.in_array_narrowing(&haystack.value, locals)
-                    && let Some(key) = narrowing_key(&needle.value)
                 {
-                    let current = self.current_narrowed_type(&needle.value, &key, locals);
-                    let narrowed = if branch_true {
-                        Some(self.relation().narrow(&current, &target_ty))
-                    } else {
-                        excluded_ty.map(|excluded| self.exclude(&current, &excluded))
-                    };
-                    if let Some(narrowed) = narrowed {
-                        locals.insert(key, narrowed);
-                    }
+                    self.narrow_strict_membership(
+                        &needle.value,
+                        &haystack.value,
+                        branch_true,
+                        locals,
+                    );
                 } else if let ExprKind::Name(name) = &callee.kind
                     && name.trim_start_matches('\\') == "in_array"
                     && let [needle, haystack, rest @ ..] = args.as_slice()
                     && !rest.iter().any(|strict| {
                         !matches!(&strict.value.kind, ExprKind::Literal(Literal::Bool(false)))
                     })
-                    && let Some(key) = narrowing_key(&needle.value)
-                    && let Some(values) =
-                        self.infer_expr(&haystack.value, locals).array_value_type()
                 {
-                    // Without `strict`, each value compares loosely: the
-                    // needle may equal any; it surely equals none only
-                    // against a haystack of constants it surely differs from.
-                    let current = self.current_narrowed_type(&needle.value, &key, locals);
-                    let version = self.comparison_php_version();
-                    let narrowed = if branch_true {
-                        Some(
-                            self.relation()
-                                .narrow_loose(&current, &values, true, version),
-                        )
-                    } else {
-                        let constants = values.finite_types();
-                        (!constants.is_empty()).then(|| {
-                            constants.iter().fold(current.into_owned(), |acc, c| {
-                                self.relation().narrow_loose(&acc, c, false, version)
-                            })
-                        })
-                    };
-                    if let Some(narrowed) = narrowed {
-                        locals.insert(key, narrowed);
-                    }
+                    self.narrow_loose_membership(
+                        &needle.value,
+                        &haystack.value,
+                        branch_true,
+                        locals,
+                    );
                 } else if let ExprKind::Name(name) = &callee.kind
                     && name.trim_start_matches('\\') == "array_key_exists"
                     && let [key_arg, arr_arg] = args.as_slice()
-                    // `literal_string_key` (not a bare `Literal::String`
-                    // match) also accepts an int literal, stringifying it
-                    // the same way an `ArrayShape`'s own field keys already
-                    // are internally - without this, `array_key_exists(0,
-                    // $arr)` (a common tuple/numeric-shape check, as
-                    // common as the string-key form) would never trigger
-                    // this narrowing, silently keeping a `Union` member
-                    // that couldn't possibly have offset `0` at all.
-                    && let Some(lit_key) = literal_string_key(&key_arg.value)
-                    && let Some(shape_key) = crate::checker::literal_shape_key(&key_arg.value)
-                    && let Some(arr_key) = narrowing_key(&arr_arg.value)
                 {
-                    // The checked expression here is
-                    // the array argument, not the key - proving/disproving
-                    // whether a specific offset is present lets a `Union`
-                    // member that could never make the call come out this
-                    // way be dropped, the same "keep/drop a Union member
-                    // based on a provable fact" shape `instanceof`'s own
-                    // member resolution already uses.
-                    let current = self.current_narrowed_type(&arr_arg.value, &arr_key, locals);
-                    let narrowed = current.with_key_presence(&shape_key, branch_true);
-                    // Also narrow the specific element
-                    // access itself (`$arr['key']`), not just `$arr`'s
-                    // own overall type - see `array_value_type_for_key`'s
-                    // own doc comment for why this project's own
-                    // composite `narrowing_key` mechanism is the right,
-                    // proportionate stand-in for real PHPStan's
-                    // `HasOffsetValueType`. Only the true branch: a
-                    // *missing* key has no value type to narrow to at
-                    // all (real PHP itself throws a warning and yields
-                    // `null` on read, a fact this project doesn't model
-                    // here - `isset`'s own narrowing already owns the
-                    // "exclude `Null`" half of that for the false
-                    // branch, a different, already-covered concern).
-                    if branch_true
-                        && let Some(value_ty) = narrowed.offset_value_type(Some(&shape_key))
-                    {
-                        locals.insert(format!("{arr_key}[{lit_key}]"), value_ty);
-                    }
-                    locals.insert(arr_key, narrowed);
+                    self.narrow_key_presence(&key_arg.value, &arr_arg.value, branch_true, locals);
                 } else if let ExprKind::Name(name) = &callee.kind
                     && matches!(
                         name.trim_start_matches('\\'),
@@ -1683,6 +1616,127 @@ impl Checker<'_> {
         let recursive =
             mode.is_some_and(|m| self.infer_expr(m, locals).int_literal_value() != Some(0));
         let other_ty = self.infer_expr(other, locals);
+        self.narrow_counted(counted, recursive, op, &other_ty, holds, locals);
+        // The other side, as the comparison narrows it against the count.
+        let (l, r) = if count_on_left {
+            (l, other)
+        } else {
+            (other, r)
+        };
+        match op {
+            BinOp::Identical | BinOp::NotIdentical => {
+                let equal = matches!(op, BinOp::Identical) == holds;
+                self.apply_equality_narrowing(l, r, locals, equal);
+            }
+            BinOp::Eq | BinOp::NotEq => {
+                let equal = matches!(op, BinOp::Eq) == holds;
+                self.apply_loose_equality_narrowing(l, r, locals, equal);
+            }
+            _ => {
+                if let Some(ordering) = crate::checker::operators::ordering_op(&op) {
+                    let ordering = if count_on_left {
+                        ordering
+                    } else {
+                        crate::checker::operators::ordering_op(&mirror_comparison(&op))
+                            .unwrap_or(ordering)
+                    };
+                    self.apply_ordering_narrowing(l, r, ordering, holds, locals);
+                }
+            }
+        }
+    }
+}
+
+impl Checker<'_> {
+    /// `empty(operand)` was `empty`: the falsy values stay when it was,
+    /// the truthy ones when it wasn't. An undefined variable is empty too,
+    /// so the empty side narrows only one `known_defined`.
+    pub(crate) fn narrow_emptiness(
+        &self,
+        operand: &Expr,
+        empty: bool,
+        known_defined: bool,
+        locals: &mut Locals,
+    ) {
+        let Some(key) = narrowing_key(operand) else {
+            return;
+        };
+        let current = self.current_narrowed_type(operand, &key, locals);
+        if !empty {
+            locals.insert(key, current.without_falsy());
+        } else if known_defined {
+            locals.insert(key, current.only_falsy(&self.relation()));
+        }
+    }
+
+    /// `array_key_exists(key, arr)` was `present`: a union member that
+    /// can't answer so is dropped, an optional field becomes required or
+    /// goes, and when present `arr[key]` reads the field's value. The key
+    /// is a literal, an int one stringified as shape keys are.
+    pub(crate) fn narrow_key_presence(
+        &self,
+        key: &Expr,
+        arr: &Expr,
+        present: bool,
+        locals: &mut Locals,
+    ) {
+        let (Some(lit_key), Some(shape_key), Some(arr_key)) = (
+            literal_string_key(key),
+            crate::checker::literal_shape_key(key),
+            narrowing_key(arr),
+        ) else {
+            return;
+        };
+        let current = self.current_narrowed_type(arr, &arr_key, locals);
+        let narrowed = current.with_key_presence(&shape_key, present);
+        if present && let Some(value_ty) = narrowed.offset_value_type(Some(&shape_key)) {
+            locals.insert(format!("{arr_key}[{lit_key}]"), value_ty);
+        }
+        locals.insert(arr_key, narrowed);
+    }
+
+    /// `in_array(needle, haystack, true)` was `contained`: the needle is
+    /// one of the haystack's values, or, against a haystack of constants,
+    /// none of them.
+    pub(crate) fn narrow_strict_membership(
+        &self,
+        needle: &Expr,
+        haystack: &Expr,
+        contained: bool,
+        locals: &mut Locals,
+    ) {
+        let Some((target_ty, excluded_ty)) = self.in_array_narrowing(haystack, locals) else {
+            return;
+        };
+        let Some(key) = narrowing_key(needle) else {
+            return;
+        };
+        let current = self.current_narrowed_type(needle, &key, locals);
+        let narrowed = if contained {
+            Some(self.relation().narrow(&current, &target_ty))
+        } else {
+            excluded_ty.map(|excluded| self.exclude(&current, &excluded))
+        };
+        if let Some(narrowed) = narrowed {
+            locals.insert(key, narrowed);
+        }
+    }
+}
+
+impl Checker<'_> {
+    /// `count(counted) op other` was `holds`, with `other` of type
+    /// `other_ty`: `counted` narrowed to the count range it proves
+    /// (`Relation::narrow_count`); a recursive count proves only that it
+    /// isn't empty.
+    pub(crate) fn narrow_counted(
+        &self,
+        counted: &Expr,
+        recursive: bool,
+        op: BinOp,
+        other_ty: &Type,
+        holds: bool,
+        locals: &mut Locals,
+    ) {
         if let Some(key) = narrowing_key(counted)
             && other_ty.is_int().yes()
             && let Some((bl, bh)) = other_ty.int_bounds()
@@ -1733,32 +1787,43 @@ impl Checker<'_> {
                 locals.insert(key, narrowed);
             }
         }
-        // The other side, as the comparison narrows it against the count.
-        let (l, r) = if count_on_left {
-            (l, other)
-        } else {
-            (other, r)
+    }
+}
+
+impl Checker<'_> {
+    /// `in_array(needle, haystack)` without `strict` was `contained`: the
+    /// needle may loosely equal some value, or, against a haystack of
+    /// constants, surely equals none of them.
+    pub(crate) fn narrow_loose_membership(
+        &self,
+        needle: &Expr,
+        haystack: &Expr,
+        contained: bool,
+        locals: &mut Locals,
+    ) {
+        let Some(key) = narrowing_key(needle) else {
+            return;
         };
-        match op {
-            BinOp::Identical | BinOp::NotIdentical => {
-                let equal = matches!(op, BinOp::Identical) == holds;
-                self.apply_equality_narrowing(l, r, locals, equal);
-            }
-            BinOp::Eq | BinOp::NotEq => {
-                let equal = matches!(op, BinOp::Eq) == holds;
-                self.apply_loose_equality_narrowing(l, r, locals, equal);
-            }
-            _ => {
-                if let Some(ordering) = crate::checker::operators::ordering_op(&op) {
-                    let ordering = if count_on_left {
-                        ordering
-                    } else {
-                        crate::checker::operators::ordering_op(&mirror_comparison(&op))
-                            .unwrap_or(ordering)
-                    };
-                    self.apply_ordering_narrowing(l, r, ordering, holds, locals);
-                }
-            }
+        let Some(values) = self.infer_expr(haystack, locals).array_value_type() else {
+            return;
+        };
+        let current = self.current_narrowed_type(needle, &key, locals);
+        let version = self.comparison_php_version();
+        let narrowed = if contained {
+            Some(
+                self.relation()
+                    .narrow_loose(&current, &values, true, version),
+            )
+        } else {
+            let constants = values.finite_types();
+            (!constants.is_empty()).then(|| {
+                constants.iter().fold(current.into_owned(), |acc, c| {
+                    self.relation().narrow_loose(&acc, c, false, version)
+                })
+            })
+        };
+        if let Some(narrowed) = narrowed {
+            locals.insert(key, narrowed);
         }
     }
 }

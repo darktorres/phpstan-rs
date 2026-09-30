@@ -1,7 +1,5 @@
 use crate::checker::Discriminant;
-use crate::checker::narrowing::predicates::{
-    narrowing_infer_target, narrowing_key, narrowing_type_for_predicate,
-};
+use crate::checker::narrowing::predicates::{narrowing_infer_target, narrowing_key};
 use crate::checker::{Checker, Locals};
 use syntax::ast::*;
 use types::Type;
@@ -372,96 +370,6 @@ impl<'a> Checker<'a> {
                 _ => false,
             }
         })
-    }
-
-    /// PHPUnit's own narrowing-relevant assertions (`self::assertIsString
-    /// ($output)`, `$this->assertNotNull($x)`, ...) - a real, common
-    /// idiom (real PHPStan explicitly supports it via its own
-    /// `phpstan/phpstan-phpunit` extension, which this project doesn't
-    /// depend on, so the narrowing is replicated directly here) - matches
-    /// exactly the same "statement narrows the rest of the scope
-    /// unconditionally" shape `assert($cond)` already gets in `check_stmt`'s
-    /// `StmtKind::Expression` arm: if execution continues past a failing
-    /// assertion, PHPUnit's own `AssertionFailedError` would have been
-    /// thrown, so there's only one surviving path forward, no branch/merge
-    /// needed. Matched purely on method name, not on confirming the
-    /// receiver is really a `PHPUnit\Framework\TestCase` - these names are
-    /// specific enough that a false match isn't a realistic concern,
-    /// matching this project's existing "trust the name" precedent for
-    /// `is_string`/`empty`/`isset` and friends. `assertIsX`/`assertIsNotX`
-    /// narrow as `is_x()` does.
-    pub(crate) fn apply_phpunit_assertion_narrowing(
-        &self,
-        method: &str,
-        args: &[Arg],
-        locals: &mut Locals,
-    ) {
-        let narrow_to = |locals: &mut Locals, idx: usize, target: &Type| {
-            if let Some(arg) = args.get(idx)
-                && let Some(key) = narrowing_key(&arg.value)
-            {
-                let current = self.current_narrowed_type(&arg.value, &key, locals);
-                locals.insert(key, self.relation().narrow(&current, target));
-            }
-        };
-        let narrow_excluding = |locals: &mut Locals, idx: usize, excluded: &Type| {
-            if let Some(arg) = args.get(idx)
-                && let Some(key) = narrowing_key(&arg.value)
-            {
-                let current = self.current_narrowed_type(&arg.value, &key, locals);
-                locals.insert(key, self.exclude(&current, excluded));
-            }
-        };
-        let kind_check = |kind: &str| -> Option<Type> {
-            match kind {
-                "Numeric" => Some(types::parse_type_string("int|float|numeric-string")),
-                "List" => Some(types::parse_type_string("list<mixed>")),
-                "ClosedResource" => Some(Type::resource(true)),
-                "Integer" => narrowing_type_for_predicate("is_int"),
-                "Boolean" => narrowing_type_for_predicate("is_bool"),
-                other => {
-                    narrowing_type_for_predicate(&format!("is_{}", other.to_ascii_lowercase()))
-                }
-            }
-        };
-        if let Some(kind) = method.strip_prefix("assertIsNot")
-            && let Some(target) = kind_check(kind)
-        {
-            narrow_excluding(locals, 0, &target);
-            return;
-        }
-        if let Some(kind) = method.strip_prefix("assertIs")
-            && let Some(target) = kind_check(kind)
-        {
-            narrow_to(locals, 0, &target);
-            return;
-        }
-        match method {
-            "assertNull" => narrow_to(locals, 0, &Type::null()),
-            "assertTrue" => narrow_to(locals, 0, &Type::bool_literal(true)),
-            "assertFalse" => narrow_to(locals, 0, &Type::bool_literal(false)),
-            "assertNotNull" => narrow_excluding(locals, 0, &Type::null()),
-            "assertNotFalse" => narrow_excluding(locals, 0, &Type::bool_literal(false)),
-            "assertNotTrue" => narrow_excluding(locals, 0, &Type::bool_literal(true)),
-            // `assertInstanceOf(string $expected, mixed $actual)` - note
-            // the argument order (expected class first, actual value
-            // second), the reverse of `instanceof`'s own left-to-right
-            // reading - `$expected` is conventionally `Foo::class`, a
-            // `ClassNameFetch` expression.
-            "assertInstanceOf" => {
-                if let Some(class_arg) = args.first()
-                    && let ExprKind::ClassNameFetch(target) = &class_arg.value.kind
-                    && let Some(class_name) = target.as_name()
-                    && let Some(actual_arg) = args.get(1)
-                    && let Some(key) = narrowing_key(&actual_arg.value)
-                {
-                    let class = self.resolve_name_expr(class_name);
-                    let current = self.current_narrowed_type(&actual_arg.value, &key, locals);
-                    locals.insert(key, self.relation().narrow_to_instance(&current, &class));
-                }
-            }
-            _ => {}
-        }
     }
 
     /// Applies one `@phpstan-assert`-family list (`sig.assert_if_true`,

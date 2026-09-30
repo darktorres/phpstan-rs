@@ -496,15 +496,7 @@ impl<'a> Checker<'a> {
                 // - the same "statement narrows unconditionally" shape as
                 // `assert($cond)` above, just per-assertion-name rather
                 // than a generic boolean condition.
-                match &e.kind {
-                    ExprKind::MethodCall(_, method, args, _) => {
-                        self.apply_phpunit_assertion_narrowing(method, args, locals);
-                    }
-                    ExprKind::StaticCall(_, method, args) => {
-                        self.apply_phpunit_assertion_narrowing(method, args, locals);
-                    }
-                    _ => {}
-                }
+                self.apply_phpunit_assertion_narrowing(e, locals);
                 // A bare `@phpstan-assert Type $target` on this call's
                 // own declaration - the same "narrows unconditionally,
                 // no branch needed" shape `assert($cond)`/PHPUnit's own

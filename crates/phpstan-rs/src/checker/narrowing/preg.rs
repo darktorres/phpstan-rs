@@ -94,7 +94,12 @@ impl Checker<'_> {
     /// whose match is never empty, and a numeric one when the match is
     /// the whole subject and holds only digits (a final newline the end
     /// anchor allows is numeric from PHP 8 on).
-    fn narrow_preg_outcome(&self, call: &PregCall<'_>, result: &Type, locals: &mut Locals) {
+    pub(super) fn narrow_preg_outcome(
+        &self,
+        call: &PregCall<'_>,
+        result: &Type,
+        locals: &mut Locals,
+    ) {
         let Some(outcome) = preg_result_outcome(result) else {
             return;
         };
@@ -138,6 +143,6 @@ impl Checker<'_> {
                 target
             };
         let current = self.current_narrowed_type(subject, &key, locals);
-        locals.insert(key, self.relation().narrow(&current, &target));
+        locals.insert(key, self.refine_string_members(&current, &target, true));
     }
 }
