@@ -1009,6 +1009,48 @@ through `check-project`.
   the conditional's branches are split past the callable return and `::`
   (and a nullable branch); fixtures for each.
 
+  Design: a PHPDoc type is parsed twice today. `phpdoc::grammar` lexes
+  and parses it into a `TypeNode`, reporting `phpDoc.parseError`. Then
+  `registry/type_node.rs:8` renders the node back to text
+  (`to_source_string`) and `types::parse_written_type` parses that text
+  again with a second, string-splitting parser. Each bullet of the
+  finding is a place where one of the two gets the language wrong:
+
+  - the float fallback is in the string parser (`parse.rs:686`);
+  - the `1_000`, `0x1F` and `1e25` (F19) errors are in the grammar's
+    `lex_number` (`lexer.rs:140`), which reads only digits and one `.`;
+  - the conditional's `:` split is `try_parse_conditional_type`
+    (`parse.rs:311`), while the grammar already builds
+    `TypeNode::Conditional` with its branches parsed.
+
+  The fix is one parser:
+
+  - `lex_number` follows phpdoc-parser's lexemes: decimal, `0x`, `0o` or
+    leading-`0` octal, and `0b` integers with `_` separators, and floats
+    with a fraction or exponent (`1e25`, `.5`, `1_000.5`). An integer past
+    `i64` becomes a float, as PHPStan's constant-expression reader does.
+  - A new lowering `TypeNode -> Type` (in `types`, beside `parse.rs`) walks
+    the node's variants: identifier, nullable, union, intersection, generic,
+    wildcard, variance, `ArrayOf`, offset access, shapes, callables with
+    their templates, int ranges, literals, const fetch and conditional. It
+    reuses the string parser's keyword table (`int`, `non-empty-string`,
+    `class-string<…>`, …), extracted into one `keyword_type(name, args)`
+    function that both call.
+  - `parse_type_node` becomes that lowering. A float literal can then come
+    only from a `FloatLiteral` token, so `Infinity`, `NaN` and `inf` are
+    class names, and each conditional branch is the node the grammar built,
+    including `\Closure(): int`, `self::A` and `?T`.
+  - `parse_written_type` stays for native hints and the few internal strings
+    (`predefined_constants.rs`, stub synthesis). Its float fallback is gated
+    on a first character that is a digit, a sign or a `.`, since native
+    hints never hold a float.
+
+  Fixtures: `@param Infinity $i` with a class `Infinity` is clean,
+  `$n->v` on `Nan` resolves, `1_000`, `0x1F` and `1e25` read as `1000`,
+  `31` and `1.0E+25`, and the conditional with a callable true branch
+  resolves with no `class.notFound`. A grammar unit test covers each
+  lexeme.
+
 - [ ] **F44. `rand()` with its bounds reversed is `never`** (`dedc1ad8`).
   `Type::int_range` now gives `never` when the bounds cross, and the
   `rand`/`mt_rand`/`random_int` arm (`builtin_calls.rs`) builds its range
