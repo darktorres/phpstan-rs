@@ -2600,7 +2600,11 @@ through `check-project`.
     equal `1` (`'1'`, `' 1'`, `'01'`, `'1.0'`, `'1e0'` do, `'0x1'` and
     `'1abc'` don't, checked with `php`). Against a non-numeric string
     literal the comparison is byte equality, so it narrows to that
-    literal, and the false branch removes it.
+    literal, and the false branch removes it. Before PHP 8 a string
+    compared with a number is converted to one (`'abc' == 0` and
+    `'1abc' == 1` are true), so when the version range reaches below 8.0
+    the string part isn't narrowed against a number, as F40's
+    version-gated int/string pair already reasons.
 
   `switch` cases apply the true branch per `case` and the accumulated
   false branches to later cases and `default`, as they do now, only
