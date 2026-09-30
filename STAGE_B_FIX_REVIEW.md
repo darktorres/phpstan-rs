@@ -42,6 +42,8 @@ Some designs depend on others, and they land in this order:
 - F7's site record before F8, F59 and F66.
 - F81's recursive types with F20's depth test, which must cover them.
 - F13's range index before F25's and F70's range-keyed tails.
+- F66's typed callable references with F89, which reads the same
+  resolved member accesses.
 
 Four designs add per-variable state to `Locals`: F5 (definedness
 certainty), F6 (a closure-literal alias), F45 (reference groups) and F61
