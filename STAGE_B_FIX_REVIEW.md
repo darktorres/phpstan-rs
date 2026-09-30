@@ -2206,6 +2206,32 @@ through `check-project`.
   go through the declared class's checks: completeness, class
   references, ancestors and generics, and property and constant checks.
   Done: it does.
+
+  Design: one class-check sequence for both kinds of class.
+
+  - The body of the declared-class loop in `checker.rs` (from the
+    `check_misplaced_var_tag` call near line 1502 to the methods loop and
+    the private-member pass near 1640) moves into
+    `check_class_def(fqn, def, name_span, anonymous: bool)`.
+  - The declared-class loop calls it with `false`, and
+    `check_anonymous_class` (`expr.rs:154`) with `true`, which replaces its
+    hand-picked subset.
+  - The few checks that mean nothing for an anonymous class skip on the
+    flag: the class name's case, the misplaced class `@var`, `@sealed` and
+    `@require-*`, which need a nameable class. So do the checks the
+    anonymous path reaches another way, like `check_attributes`, which
+    `NewAnonymousClass` already runs.
+
+  Everything else then runs for an anonymous class: completeness (the
+  `Countable` and abstract-parent fatals), class references (the unknown
+  interface), generics and ancestor bounds, overrides, property and
+  constant checks, trait conflicts, uninitialized properties, and the
+  private-member pass. Messages name the class through the anonymous
+  display name (see F33's bullet on it). Fixtures: the three shapes of
+  the finding report,
+  `new class extends Base { public function abstractOne() {} }` is
+  clean, and an anonymous class using two colliding traits reports the
+  collision (F29).
 - [ ] **F32. Smaller gaps from commits 100 to 155:**
   - `b1dddb6c`'s companion `binaryOp.invalid` says `'abc' + 1` "results
     in an error" on `--php-version 7.4` too, where it is `1` with a
