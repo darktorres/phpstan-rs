@@ -651,8 +651,9 @@ through `check-project`.
   keys, and make it part of the type.
 
   - `Shape::next_index` becomes a normalized `NextIndex` value: a small
-    sorted set of `NextArrayIndex` (capped at 8, past which it is
-    `Unknown`), where the absent case means "derived from the int keys".
+    sorted set of `NextArrayIndex` (at most 8 exact values; past that it
+    becomes the hull, a `min..max` range, as F13's range index is), where
+    the absent case means "derived from the int keys".
     A constructor normalizes a carried set equal to what the fields
     derive back to the derived case, so the same array built two ways is
     one type.
@@ -666,8 +667,13 @@ through `check-project`.
     written. The open-key arm already clears it.
   - The append arm takes the set: one candidate appends as today. Several
     give one shape per candidate key, unioned (PHP puts the element at
-    exactly one of them), and `Unknown` gives no precise append. It falls
-    to the general arm, as an optional int key does now.
+    exactly one of them). A range index keeps the shape instead of going
+    general: the known fields stay, and the appended element goes into an
+    unsealed tail keyed `int<min, max>` with the value's type, so the
+    shape is `array{0: 1, 1: 2, ...<int<3, 9>, 'x'>}` and the fields
+    already known are still read exactly. An optional int key, which
+    today sends an append to the general arm, becomes a range index the
+    same way.
   - The union builder, where members compare equal but for the index, and
     `generalize_by_key_set` (`union.rs:388`) join index sets rather than
     keeping one side's. Their merged shape carries the union of their
@@ -2873,9 +2879,12 @@ through `check-project`.
     carries a small set of candidate shapes (at most 8, so three optional int
     fields) and forks the set at each optional int field, into a copy where it
     was present and a copy where it wasn't. The result is the union of the
-    candidates. Past the cap it degrades to the general array, whose key type
-    then comes from F13's range index (`int<n, n + k>` for the renumbered keys),
-    not plain `int`. `[...$a, 'c']` with `array{0: 'a', 1?: 'b'}` is then
+    candidates. Past the cap it keeps one shape instead of going general: every
+    field merged before the first uncertain renumbering stays exact, every
+    string-keyed field stays exact (string keys aren't renumbered), and the
+    renumbered int fields after it go into an unsealed tail keyed by F13's range
+    index (`int<n, n + k>`), their values joined. `[...$a, 'c']` with
+    `array{0: 'a', 1?: 'b'}` is then
     `array{0: 'a', 1: 'b', 2: 'c'}|array{0: 'a', 1: 'c'}`.
   - An optional string field over an existing key. A later optional field
     may be absent, so the earlier value survives:
@@ -2891,9 +2900,10 @@ through `check-project`.
     `[...['a' => 1], ...$l]` is then `non-empty-array<'a'|int, 1|int>`, not
     `list<int>`.
 
-  `array_merge`'s arm shares `merge_shape_field`, so it gets both field
-  fixes. Fixtures: the three remaining shapes, each through a spread and
-  through `array_merge`, and a four-optional-field merge that degrades.
+  `array_merge`'s arm shares `merge_shape_field`, so it gets both field fixes.
+  Fixtures: the three remaining shapes, each through a spread and through
+  `array_merge`, and a four-optional-field merge that keeps its string fields
+  exact and puts the renumbered ones in a range-keyed tail.
 - [ ] **F71. `preg_match_all`'s pattern-order groups never hold `''`**
   (`preg_match_all_pattern_order_shape`, `checker/expr/preg_shapes.rs`;
   also before the window). A group that doesn't take part in a match
