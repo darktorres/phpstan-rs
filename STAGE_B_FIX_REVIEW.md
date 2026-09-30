@@ -508,6 +508,38 @@ through `check-project`.
   done note omits them. Done: an unresolvable property type is ignored
   after its one report, as a parameter's is.
 
+  Design: `22d4ff21` swapped in the native type at one consumer, the
+  function body (`function_decl.rs`, `doc_unresolvable`). Every other
+  consumer still reads the registry's merged PHPDoc type. A probe while
+  designing shows how far that reaches:
+
+  - A property typed `@var non-empty-foo` with no native type gets four
+    reports: `class.notFound`, `property.unresolvableType`,
+    `property.defaultValue` on its default `1`, and `assign.propertyType`
+    at each write. Its reads are typed from the write, not declared.
+  - A function with an unresolvable `@param` still reports
+    `argument.type` ("expects non-empty-foo, 5 given") at every call.
+  - With a native type, a parameter's name is also reported as
+    `class.notFound` beside `parameter.unresolvableType`.
+
+  So the decision moves to where the type is made. The node walk in
+  `checker/phpdoc_unresolvable.rs` (`type_node_unresolvable` and its
+  helpers) moves into the registry. It needs only the registry, the
+  file's `NameContext` and the declaring class, which the resolve pass
+  (`registry/resolve.rs`) has for every parameter, return, property,
+  `@phpstan-assert`, `@phpstan-self-out` and inline `@var`. Each of
+  `ParameterReflection`, the return, and `PropertyReflection` records
+  `doc_unresolvable`. When it is set, the merged type is the native
+  type, or `mixed` with none. That covers the body, the callers, other
+  files, the property default, assignments and reads alike. The
+  reporting sites in `phpdoc_type_compat.rs` read the flag instead of
+  re-walking. The class-existence check skips a position whose PHPDoc is
+  unresolvable, since its names are not class references. `22d4ff21`'s
+  swap in `function_decl.rs` then goes, because the signature already
+  carries the native type. Fixtures: the probe's file reports only the
+  `*.unresolvableType` diagnostics (one each for `$p`, `$q` and `$x`);
+  `@var parent` in a parentless class the same; `f(5)` is clean.
+
 - [ ] **F25. A shape's carried next index goes wrong** (`25ee9d62`).
   - A literal-key write leaves `next_index` where it was.
     `$c = [1]; $c[] = 2; $c[7] = 3; $c[] = 4;` gives
