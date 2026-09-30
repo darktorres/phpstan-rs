@@ -2849,6 +2849,49 @@ through `check-project`.
   ones included), a static property write classifies as a write, a
   `mixed` parameter counts as code-running, and the implicit calls above
   forget like a call on that object, with fixtures.
+
+  Design: `forget_members_a_call_may_change` (`expr.rs:190`) chooses
+  what to forget by syntax: the receiver's narrowing key, and for
+  `Anything` the argument keys. Facts are keyed by the expression that
+  reached the object, while a call changes the object. So the choice
+  moves from keys to objects:
+
+  - May-alias by type. A property fact `$v->p` (or deeper) is stale after a
+    call that may write objects of class `C` when `$v`'s type may be a `C`,
+    meaning not disjoint by F15's `objects_disjoint`. This covers
+    `$o = $this; $o->load()`, a second variable holding the object, and
+    `$this->c` reached through a helper. `PropertyWrites` keeps its levels,
+    and its `Receiver`/`Own` levels name the classes they may touch: the
+    callee's declaring class, plus the classes of object arguments.
+  - `Anything` forgets every `->` fact and every static-property fact. Its
+    current receiver-and-arguments set is what makes the finding's second
+    bullet (`$this->h->run()` writing `$this->c->x`) stay stale.
+  - Static properties. `property_target_owner`
+    (`registry/property_writes.rs`) classifies `self::$x = …`,
+    `static::$x = …` and `Foo::$x = …` (and their compound forms) as writes
+    of that class's static property. A method's `PropertyWrites` carries the
+    static keys it writes, and a call forgets the matching `Foo::$x` facts,
+    with `static::` resolved as `self::`, since the key is per class
+    hierarchy.
+  - Builtins that run object code. A builtin whose stub parameter is
+    `mixed`, `object` or a union with either, given an argument that may be
+    an object, may call that object's magic methods. Probed:
+    `json_encode($j)` runs `jsonSerialize()`. By the stub rule the same
+    holds for `var_dump`, `print_r`, `serialize`, `strval` and
+    `sprintf('%s')`. Such a call forgets that object's facts by the alias
+    rule. A builtin taking a `callable` runs user code, so it is `Anything`
+    unless the callable resolves (F9's `pipe_callee` resolver) to a function
+    whose `PropertyWrites` is known.
+  - Calls without call syntax. The implicit-call helpers F69 shares
+    (`__toString` for `echo`, `print`, `.`, interpolation and `(string)`;
+    `__get`/`__set` for undeclared properties and hooks; `offsetGet` and its
+    siblings for `ArrayAccess`; the `Iterator` methods for `foreach`) each
+    forget like a method call on that object, with the magic method's
+    `PropertyWrites` when it resolves, and `Anything` otherwise.
+
+  F62's guards can go once these land. Fixtures: one per bullet of the
+  finding, each ending with `$this->x === null` not reported, plus a
+  negative one: a call on an unrelated final class keeps `$this->x`.
 - [ ] **F83. A `foreach` that rewrites its elements drops a write to
   another element** (`converge_loop_body`, `checker/control_flow.rs`;
   `91666577`). The subject becomes the element the body leaves at
