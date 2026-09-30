@@ -2548,6 +2548,37 @@ through `check-project`.
   false; }` leaves `$ok` `true`, as do `'a' . $s`, `$m->foo` and `include
   $f`. Done: each records a `Throwable` throw point (the offset read and
   the conversion only for an object with the method), with fixtures.
+
+  Design: `thrown_by` (`expr.rs:364`) lists the expressions that throw.
+  The code PHP runs implicitly is already recognized one file over:
+  `noop.rs`'s `own_hidden_effects` and its helpers
+  (`property_read_is_plain`, `offset_read_is_plain`,
+  `may_be_stringable_object`) answer "does this run user code" for a
+  property read, an offset read and a string conversion. Those helpers
+  move to a shared `checker/implicit_calls.rs`, and `thrown_by` gains
+  arms from them:
+
+  - a `PropertyAccess` or `DynamicPropertyAccess` read that isn't plain
+    (`__get`, or a `get` hook);
+  - an `Index` read that isn't plain (`ArrayAccess::offsetGet`);
+  - a string conversion of a possibly-object operand: `(string)`, `.`,
+    interpolation, `print`, and `echo` (at the statement, through
+    `record_throw_state`);
+  - `include`/`require` and their `_once` forms: anything, since the file
+    may throw;
+  - the writes and probes that dispatch the same way: a property write
+    through `__set` or a `set` hook, `isset`/`empty` on an `ArrayAccess`
+    (`offsetExists`), `unset($o[k])` (`offsetUnset`), and `foreach` over a
+    non-array `Traversable` (the `Iterator` methods).
+
+  The thrown type is the magic method's own `@throws` when the
+  receiver's class resolves one, through `call_throw_types`'s lookup for
+  that method, and `Throwable` otherwise. F82's implicit-call forgetting
+  reads the same shared helpers, so the two can't disagree about what
+  runs code. Fixtures: the four shapes of the finding leave `$ok` `bool`
+  after the `try`; a plain declared property read or array offset read
+  keeps the catch dead; a `__get` with `@throws RuntimeException` makes
+  a `catch (LogicException)` still dead.
 - [ ] **F70. Array literal and spread keys** (`checker/expr/array_ops.rs`):
   - Since `8febbd1e`, a literal whose key isn't known goes general but
     keeps taking positional keys from an index that no longer sees int
