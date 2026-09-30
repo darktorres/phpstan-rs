@@ -755,6 +755,23 @@ impl Type {
         self.is_within(&Type::list_of(Type::mixed()))
     }
 
+    /// How many elements this array may hold, as the least and the most
+    /// (`None`: no most), over every member of a union; `None` when a
+    /// member isn't an array. A shape's required keys are its least, and
+    /// its optional ones add to its most when it's sealed; offsets an
+    /// array is known to hold (`hasOffset`) count toward its least.
+    pub fn count_range(&self) -> Option<(i64, Option<i64>)> {
+        let mut hull: Option<(i64, Option<i64>)> = None;
+        for member in self.union_members() {
+            let (least, most) = member_count_range(member)?;
+            hull = Some(match hull {
+                None => (least, most),
+                Some((l, m)) => (l.min(least), m.zip(most).map(|(a, b)| a.max(b))),
+            });
+        }
+        hull
+    }
+
     /// Whether every value is a non-empty array.
     pub fn is_non_empty_array(&self) -> TrinaryLogic {
         self.is_within(&Type::new(Repr::Intersection(vec![
@@ -1012,5 +1029,35 @@ impl Type {
             }),
             _ => None,
         }
+    }
+}
+
+/// `count_range` of one member that isn't a union.
+fn member_count_range(member: &Type) -> Option<(i64, Option<i64>)> {
+    if let Some((shape, non_empty)) = crate::union::shape_parts(member) {
+        let required = shape.fields.iter().filter(|f| !f.optional).count() as i64;
+        let most = shape.is_sealed().then_some(shape.fields.len() as i64);
+        return Some((required.max(i64::from(non_empty)), most));
+    }
+    match member.repr() {
+        Repr::Array(..) => Some((0, None)),
+        Repr::Intersection(members) => {
+            if !members.iter().any(|m| matches!(m.repr(), Repr::Array(..))) {
+                return None;
+            }
+            let mut keys: Vec<&crate::ShapeKey> = Vec::new();
+            let mut least = 0;
+            for m in members {
+                match m.repr() {
+                    Repr::Accessory(crate::AccessoryKind::NonEmptyArray) => least = least.max(1),
+                    Repr::HasOffset(key) | Repr::HasOffsetValue(key, _) if !keys.contains(&key) => {
+                        keys.push(key);
+                    }
+                    _ => {}
+                }
+            }
+            Some((least.max(keys.len() as i64), None))
+        }
+        _ => None,
     }
 }

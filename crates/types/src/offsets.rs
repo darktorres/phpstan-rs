@@ -150,7 +150,10 @@ impl Type {
     /// PHPStan's `getOffsetValueType()` for an array: the value at `key`,
     /// `None` for an offset not known literally (every value it could
     /// be; `null` from `array{}`). `None` when this isn't an array, or a
-    /// sealed shape surely lacks `key`.
+    /// sealed shape surely lacks `key`. A union reads each member: one
+    /// that surely lacks `key`, or is `null`, a bool, an int or a float,
+    /// reads `null` as PHP does; any other member it can't read makes the
+    /// whole read `None`.
     pub fn offset_value_type(&self, key: Option<&ShapeKey>) -> Option<Type> {
         syntax::stack::guard(|| match self.repr() {
             Repr::Array(_, value) => Some((*value).clone()),
@@ -171,12 +174,29 @@ impl Type {
                 });
                 tracked.or_else(|| members.iter().find_map(|m| m.offset_value_type(key)))
             }
-            Repr::Union(members) | Repr::BenevolentUnion(members) => members
-                .iter()
-                .map(|m| m.offset_value_type(key))
-                .collect::<Option<Vec<_>>>()?
-                .into_iter()
-                .reduce(Type::union),
+            Repr::Union(members) | Repr::BenevolentUnion(members) => {
+                let mut values = Vec::with_capacity(members.len());
+                for member in members {
+                    let value = match member.offset_value_type(key) {
+                        Some(value) => value,
+                        None if key
+                            .is_some_and(|k| member.with_key_presence(k, true).is_never()) =>
+                        {
+                            Type::null()
+                        }
+                        None if member.is_null().yes()
+                            || member.is_bool().yes()
+                            || member.is_int().yes()
+                            || member.is_float().yes() =>
+                        {
+                            Type::null()
+                        }
+                        None => return None,
+                    };
+                    values.push(value);
+                }
+                values.into_iter().reduce(Type::union)
+            }
             Repr::TemplateParam(param) => param.bound.offset_value_type(key),
             _ => None,
         })

@@ -617,3 +617,63 @@ fn isset_on_an_offset_already_tracked_narrows_it_instead_of_repeating_it() {
         "non-empty-array&hasOffsetValue('a', int)"
     );
 }
+
+fn shape_of(fields: &[(&str, Type, bool)]) -> Type {
+    Type::array_shape(Shape::from_named(
+        fields.iter().map(|(k, t, o)| (*k, t.clone(), *o)),
+    ))
+}
+
+#[test]
+fn an_offset_read_of_a_union_joins_what_each_member_reads() {
+    let key = ShapeKey::Int(2);
+    let matched = Type::array_shape(Shape::sealed(vec![
+        ShapeField::new(ShapeKey::Int(0), Type::string(), false),
+        ShapeField::new(ShapeKey::Int(2), Type::string(), false),
+    ]));
+    let with_empty = Type::union(matched.clone(), shape_of(&[]));
+    assert_eq!(
+        with_empty.offset_value_type(Some(&key)),
+        Some(Type::union(Type::string(), Type::null()))
+    );
+    let two_shapes = Type::union(
+        shape_of(&[("a", Type::int(), false)]),
+        shape_of(&[("b", Type::float(), false)]),
+    );
+    assert_eq!(
+        two_shapes.offset_value_type(Some(&ShapeKey::from_name("a"))),
+        Some(Type::union(Type::int(), Type::null()))
+    );
+    let with_null = Type::union(shape_of(&[("a", Type::int(), false)]), Type::null());
+    assert_eq!(
+        with_null.offset_value_type(Some(&ShapeKey::from_name("a"))),
+        Some(Type::union(Type::int(), Type::null()))
+    );
+    let with_object = Type::union(
+        shape_of(&[("a", Type::int(), false)]),
+        Type::object("Foo".into(), Vec::new()),
+    );
+    assert_eq!(
+        with_object.offset_value_type(Some(&ShapeKey::from_name("a"))),
+        None
+    );
+}
+
+#[test]
+fn count_range_is_the_hull_of_what_each_member_may_hold() {
+    let sealed = shape_of(&[("a", Type::int(), false), ("b", Type::int(), true)]);
+    assert_eq!(sealed.count_range(), Some((1, Some(2))));
+    assert_eq!(shape_of(&[]).count_range(), Some((0, Some(0))));
+    assert_eq!(
+        Type::union(shape_of(&[]), sealed.clone()).count_range(),
+        Some((0, Some(2)))
+    );
+    assert_eq!(Type::array_of(Type::int()).count_range(), Some((0, None)));
+    assert_eq!(
+        Type::array_of(Type::int())
+            .to_non_empty_array()
+            .count_range(),
+        Some((1, None))
+    );
+    assert_eq!(Type::union(sealed, Type::null()).count_range(), None);
+}
