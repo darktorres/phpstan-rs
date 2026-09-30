@@ -1144,9 +1144,9 @@ through `check-project`.
     since it can only throw: `argument.invalidRange` at level 0 ("Call to
     random_int() with minimum 10 greater than maximum 1 always throws
     ValueError."). When the bounds may cross but needn't, the call is
-    reported at level 5 as possibly throwing, the level of the other
-    argument-value reports. A `rand()` with crossed bounds is not reported,
-    since it runs.
+    reported at level 7 as possibly throwing, the level where the other
+    "maybe" reports (a union member that fails) start. A `rand()` with
+    crossed bounds is not reported, since it runs.
 
   The zero-argument forms (`rand()`, `mt_rand()`) are `int` today; they
   return `int<0, getrandmax()>` (`2147483647` on every platform PHP 8
@@ -1659,8 +1659,17 @@ through `check-project`.
   - `unset($x->p)` makes the property uninitialized. `Locals` keeps a small
     set of unset property keys: `check_unset_target` adds the key, and any
     write to the key or its base removes it. The arm returns `None` for a
-    key in the set. The same set is what an "accessed before initialization"
-    report would read, which is not part of this.
+    key in the set.
+  - The same set drives the read that PHP refuses: reading a typed
+    property after `unset`, before any write, is an `Error` ("must not be
+    accessed before initialization"). A plain read (not `isset`, `??` or
+    `empty`) of a key in the set reports `property.uninitialized` at level
+    0, the identifier the constructor-dataflow check
+    (`uninitialized_dataflow.rs`) uses for the same runtime error. An
+    untyped property reads `null` after `unset` with PHP's "Undefined
+    property" warning (checked with `php`), reported as
+    `property.notFound` at level 0, the identifier an undeclared property
+    read already gets.
 
   Fixtures: with `?Foo $x` and `Foo::$p` an `int` with a default,
   `isset($x->p)` and `$x->p ?? 2` are clean.
