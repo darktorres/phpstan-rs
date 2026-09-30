@@ -1763,6 +1763,41 @@ through `check-project`.
   Done: a PHPDoc type counts as a reference and member references fold
   case, with fixtures.
 
+  Design: two index changes, each at the recording end.
+
+  - PHPDoc class references. `ClassFnRefWalker` (`project/use_sites.rs`)
+    also reads each doc comment the AST carries: a declaration's, a
+    parameter's, a property's, and a statement's inline `@var`. It parses
+    them with `phpdoc::docblock::parse` and walks every `TypeNode` in its
+    tags (`@param`, `@return`, `@var`, `@throws`, `@method`, `@property*`,
+    `@mixin`, `@extends`/`@implements`/`@use`, `@template … of`,
+    `@phpstan-assert*`, `@phpstan-type`/`-import-type`, `@param-out`,
+    `@param-closure-this`, `@phpstan-self-out`, `@see`/`@uses` excluded).
+    Each `Identifier`, `Generic` head, `ConstFetch` class and callable
+    keyword that isn't a type keyword, a template in scope or a local type
+    alias is resolved against the file's name context, and recorded as
+    `RefTarget::Class`. The walker keeps that context as it walks the file's
+    `namespace` and `use` statements. The site is the name's exact span
+    within the comment when the source is retained, else the comment's span,
+    the fallback `index_class_fn_refs_without_source` already uses. The
+    dead-code module doc's list of gaps loses nothing false: PHPDoc was
+    never listed as a gap.
+  - Member case. `RefTarget::Member(owner, name)` splits by kind into
+    `Method(owner, lowercased name)`, `Property(owner, name)`,
+    `Constant(owner, name)` and `EnumCase(owner, name)`, since only method
+    names fold in PHP. `record_member_ref` (`checker.rs:1226`) takes the
+    kind, which each of its call sites knows (a call, a property fetch, a
+    constant fetch), and the dead-member and dead-case queries
+    (`dead_members.rs:216`, `dead_enum_cases.rs:62`) build the matching key.
+    A method named in a string callable, which F7's function index doesn't
+    cover, is unchanged.
+
+  Fixtures: with `check_dead_code` on, `@param DocOnly $d` keeps
+  `DocOnly` used, as do `@return list<DocOnly>`, `@var DocOnly $x`
+  inline and `@extends Base<DocOnly>`; `$a->MIXEDCASE()` keeps
+  `mixedCase()` used; a property read as `$a->Prop` doesn't count for
+  `$prop`.
+
 - [ ] **F81. A loop's shape widening builds a self-nesting array to a
   fixed depth and types the bottom wrong** (`widen_towards`,
   `types::queries`; since `f0ad71f8`, which lets a shape gain string keys
