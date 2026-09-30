@@ -491,10 +491,15 @@ impl Type {
     /// whose value isn't `null`, so it's none of the scalar/null types an
     /// offset read always yields `null` for, and a shape with `key` listed
     /// has it present and non-null. `key` is `None` for a non-literal
-    /// subscript.
+    /// subscript, which still proves an array non-empty.
     pub fn to_isset_container(&self, key: Option<&ShapeKey>) -> Type {
         syntax::stack::guard(|| {
             match self.repr() {
+                Repr::ArrayShape(_) | Repr::Array(..) | Repr::Intersection(_)
+                    if key.is_none() && self.is_array().yes() =>
+                {
+                    self.to_non_empty_array()
+                }
                 Repr::Null
                 | Repr::Void
                 | Repr::Bool
