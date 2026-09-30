@@ -3788,6 +3788,51 @@ through `check-project`.
 
   Done: each says what the code does, on the item it documents.
 
+  Design, each checked present at `3eaddbd1`:
+
+  - `project.rs`:
+    - `update_file`'s doc ("Re-parses one already-loaded file…", line 787)
+      moves from above `unindex_file` (line 800) to `update_file` (line
+      928), and `unindex_file` gets its own one-line doc;
+    - the plan references ("VSCode plan item 2.2" at 936, "(3.2)" at 1152,
+      "this item's own open-risks note" at 876 and 1432, "1.1's own
+      `phpstan-rs.toml` `paths`") become what they point at: the debounce
+      worker, workspace folders, and the concurrency or ordering risk
+      itself, stated in a sentence;
+    - the narration ("`unindex_file` used to run first unconditionally" at
+      954, "a real bug on an earlier pass of this exact method" at 1652)
+      becomes the invariant it protects.
+  - `lsp/navigation.rs:11`. The module doc names
+    `Server::document_highlight` directly and drops the self-correction.
+  - `project/use_sites.rs:230`. This is a comment and a bug. The arm records
+    a bare `Name` expression as a function reference, but a first-class
+    callable `foo(...)` is a `Call` (handled above), so a bare `Name` here
+    is a constant (`FOO`, `PHP_EOL`). Constant reads are indexed as
+    references to a function of that name, so LSP references on a function
+    list its same-named constants' reads, and dead code counts them. The arm
+    records nothing, or a `RefTarget::Constant` if constant references are
+    wanted later, and the comment says a bare name is a constant. A fixture:
+    `function FOO() {}` with only `echo FOO;` is `function.unused`.
+  - `registry/purity.rs`: F56's rewrite of the "Any static property access
+    at all" label.
+  - `syntax/ast.rs`:
+    - `PropertyDecl::hooks` (line 333): hook bodies are type-checked by
+      `checker/oop/property_hooks.rs`;
+    - `FunctionDecl::body` (line 260): bodies are found by provenance; the
+      `body` field claim and the `src/intern.rs` path go;
+    - the `PropertyAccess` comment (line 1426) describes `ObjectOperator`,
+      not a trailing `bool`;
+    - `StaticCall` (line 1462) drops the `"?"` sentinel history;
+    - `LogicalAnd` (line 744) drops "the way this comment used to argue
+      for";
+    - `UseImport::kind` (line 427): the registry does keep global constants
+      (`register_global_constant`), so the sentence is replaced with what
+      `kind` distinguishes;
+    - `Stmt::doc_comment` (line 54) cites `inline_var_annotations`.
+  - `syntax/parser`. `functions.rs:181` names `parse_class_body` alone,
+    since an enum body goes through it. `enums.rs:92` cites
+    `ClassDef::attrs`.
+
 - [ ] **F80. Comments in the submodules read whole:**
   - `checker/expr/array_ops.rs`: a paragraph on `array_element_type` for
     literal shapes heads `check_array_item_key_type`'s doc; the spread
