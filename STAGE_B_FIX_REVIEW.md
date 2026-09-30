@@ -2475,6 +2475,39 @@ through `check-project`.
   Done: a loose comparison narrows to every value of the operand's type
   that loosely equals the other side, or not at all, and a `switch`
   narrows its cases that way, with fixtures.
+
+  Design: a loose-equality narrowing beside `apply_equality_narrowing`,
+  used by `check_switch` (`stmt/switch.rs`) for every `case`, by
+  `or_chain_narrowing_target`'s `BinOp::Eq` leaf
+  (`narrowing/predicates.rs`), and by the plain `==`/`!=` narrowing if
+  that shares the strict path too.
+  `loose_equality_narrow(subject, other, branch) -> Option<Type>`
+  answers only where PHP 8's rules pin the set down, and `None` (no
+  narrowing) elsewhere:
+
+  - Finite subject. For a union of literals (and `bool`), the true branch
+    keeps each member whose `loosely_equals(other)` isn't `Some(false)`, and
+    the false branch drops each member whose answer is `Some(true)`. With
+    F40's null/string rule, this is exact.
+  - `null` on the other side. `x == null` holds for `null`, `false`, `0`,
+    `0.0`, `''` and `[]`, not for `'0'`. The true branch intersects the
+    subject with that set: `?string == null` gives `''|null`. The false
+    branch removes `null` and `false`, removes `0`/`0.0` from int and float
+    ranges, turns `string` into `non-empty-string`, and removes `array{}`.
+  - `true`/`false` on the other side is truthiness: `without_falsy` or the
+    falsy part.
+  - An int literal against an int or float subject is `===` on the number
+    (`int|string`'s int part narrows to `1` for `== 1`). The string part is
+    left unnarrowed, since `'01'`, `'1.0'` and `' 1'` all equal `1` and no
+    type names that set.
+
+  `switch` cases apply the true branch per `case` and the accumulated
+  false branches to later cases and `default`, as they do now, only
+  through this function. Fixtures: with `string $x`, `case 0:` leaves
+  `$x` a `string`; `case null:` on `?string` gives `''|null`;
+  `case '1':` on `int|string` gives `1|string`;
+  `$x == null || $x == 'a'` on `?string` narrows to `''|'a'|null`;
+  `$x == 1 || $x == 2` on `int|string` leaves the string part as is.
 - [ ] **F68. A `break` inside an `if` in a `switch` case loses its path**
   (`check_switch`; also before the window). The frame pushed onto
   `loop_break_states` is popped and discarded, and only a case's last
