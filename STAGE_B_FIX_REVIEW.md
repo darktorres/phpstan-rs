@@ -15,6 +15,10 @@ claim against the code, and reads the modules the fixes reshaped in their
 final state; its coverage is tracked at the end, and its findings are the F
 tasks.
 
+Each open finding carries a "Design" paragraph: the fix worked out
+against the code at `3eaddbd1`, before any of it is built, naming the
+functions it changes, the approach and the fixtures that pin it.
+
 Legend: `[x]` done (commit given), `[>]` moved to the crate-split plan
 (where given), `[ ]` open.
 
@@ -63,6 +67,32 @@ through `check-project`.
   receiver's class template bindings are substituted into the signature
   (as a method call's return is) before `with_own_templates`, for static
   calls too.
+
+  Design: the substitution belongs in `first_class_callable_target`
+  (`checker/expr.rs`), not in `first_class_callable_type`, because the
+  callback path in `infer_closure_return_with_param_overrides` (its
+  `ExprKind::FirstClassCallable` arm near `expr.rs:5073`) reads the same
+  target and so gives `array_map($b->get(...), …)` the same `T`.
+  `FirstClassTarget::sig` becomes a `Cow<'a, FunctionReflection>`, and
+  it carries the declaring `owner` next to `class`. The method-call arm
+  keeps the receiver's `type_args` from `as_object()`, looks the method
+  up with `lookup_method_with_owner` and runs
+  `substitute_class_templates(sig, class, type_args, owner)`, as
+  `generic_object_method_return_type` does. A union receiver builds one
+  closure per member that has the method and unions them, rather than
+  taking `find_method_receiver_class`'s first hit. The static-call arm
+  does the same when the target is an expression (`$b::get(...)`: infer
+  it and keep its type arguments). For a class-name target (`Box::get`)
+  the class's templates erase through `substitute_class_templates` with
+  no arguments (default, then bound). `self::`, `static::` and
+  `parent::` keep the placeholders, since they are the enclosing class's
+  templates in scope. `with_own_templates` then sees only the method's
+  own templates. Its scope test should compare against the scope
+  `build_template_params` gave them rather than the bare method name
+  (F22's third bullet; the same edit). Fixtures: `$b->get(...)` on
+  `Box<int>` is `Closure(): int`, `$g()` passed to `h(int)` is clean,
+  `array_map($b->get(...), $xs)` maps to `int`, and a union receiver
+  `Box<int>|Box<string>` gives `Closure(): int|Closure(): string`.
 - [ ] **F3. `foreach` over a generic `IteratorAggregate` yields template
   names.** `iterable_element_type` (`loops.rs:493-517`) takes
   `getIterator()`'s declared return without the receiver's bindings.
