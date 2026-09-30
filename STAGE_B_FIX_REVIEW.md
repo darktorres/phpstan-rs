@@ -3828,9 +3828,11 @@ through `check-project`.
     frame. `PassMark` records that frame's length (one number per open
     frame, since a pass only pushes to frames open at the mark), and
     `rewind_to` truncates each.
-  - `property_assign_facts`. It is a map, so `PassMark` records the keys a
-    pass added or changed (a small undo log: key and prior value), and
-    `rewind_to` restores them.
+  - `property_assign_facts`. It is a `class -> property -> Vec<Type>` map
+    (`PropertyAssignFacts`, `checker.rs:235`) that a pass appends to. So
+    `PassMark` carries an undo log, filled on a pair's first push after
+    the mark with that pair's `Vec` length (or "absent"), and `rewind_to`
+    truncates each logged `Vec` and removes the pairs that were absent.
   - `named_argument_call_facts`. It becomes a length recorded in `PassMark`
     and truncated like the diagnostics, and the linear `contains` dedup
     added in `cc4e6b5e` goes.
