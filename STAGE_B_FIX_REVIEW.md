@@ -963,6 +963,28 @@ through `check-project`.
   `equal.alwaysTrue` and treats the `else` branch as dead. Done: `null`
   against a string literal compares `''` with it; the other `null` and
   `bool` pairs stay as they are.
+
+  Design: `Type::loosely_equals` (`types/src/arithmetic.rs:348`) opens
+  with a bool-cast shortcut for any `true`/`false`/`null` side. PHP 8's
+  table (checked with `php`: `null == "0"` false, `null == ""` true,
+  `null == 0` and `null == []` true) casts to bool only when one side is
+  a bool, or when `null` meets a non-string. `null` against a string
+  compares `''` with the string, as strings. So the shortcut splits:
+
+  - a `true`/`false` side keeps the bool cast;
+  - `null` against a `StringLiteral` compares the literal with `''`: true
+    only for `''`, and `'0'` is false, since `''` is not numeric;
+  - `null` against anything else keeps the bool cast.
+
+  While there, the float/non-numeric-string pair answers `None` today,
+  as if unknown, though PHP 8 compares the float's string form with the
+  string. `1.5 == '1.5abc'` is false and `INF == 'INF'` is true (both
+  checked). That pair answers with `php_float_format`'s rendering when
+  the version is 8 or later, as the int pair already does with
+  `to_string`. The doc's "bool/null-vs-anything" sentence is corrected
+  with it. Fixtures: `null == '0'` is `equal.alwaysFalse`, its `else`
+  branch is live, `null == ''` is `equal.alwaysTrue`, and
+  `1.5 == '1.5abc'` is `equal.alwaysFalse` on PHP 8.
 - [ ] **F41. A PHPDoc type that names a class or a literal the parser
   mistakes** (`types::parse`, read whole; also before the window).
   - `parse_type_atom` tries `s.parse::<f64>()` before class names, and
