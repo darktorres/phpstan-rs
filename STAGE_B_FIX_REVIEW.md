@@ -3903,8 +3903,14 @@ through `check-project`.
     is a constant (`FOO`, `PHP_EOL`). Constant reads are indexed as
     references to a function of that name, so LSP references on a function
     list its same-named constants' reads, and dead code counts them. The arm
-    records nothing, or a `RefTarget::Constant` if constant references are
-    wanted later, and the comment says a bare name is a constant. Probed: in
+    records a new `RefTarget::Constant`, keyed case-sensitively as PHP
+    constants are, with an unqualified name in a namespace recorded under
+    both candidates and resolved at query time the way F7 resolves
+    functions. `define('FOO', …)` and `const FOO` declarations are the
+    targets. LSP references and rename then work on global constants.
+    Dead code gains `constant.unused` for a project `const`/`define` with
+    no reference, beside `function.unused`. The comment says a bare name
+    is a constant. Probed: in
     `namespace App;` with `const FOO`, `function FOO()` and
     `function bar()`, and only `echo FOO;`, dead code reports `bar` and not
     `FOO`. That is the fixture, with both reported after the fix.
