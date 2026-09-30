@@ -30,6 +30,7 @@ function notSame(mixed $expected, mixed $actual): void
 /**
  * @template T of object
  * @param class-string<T> $class
+ * @param iterable<mixed> $items
  * @phpstan-assert iterable<T> $items
  */
 function allOf(string $class, iterable $items): void
@@ -41,7 +42,7 @@ function allOf(string $class, iterable $items): void
  * @param class-string<T> $class
  * @phpstan-assert =T $actual
  */
-function instanceOf(string $class, mixed $actual): void
+function assertInstance(string $class, mixed $actual): void
 {
     if (!$actual instanceof $class) {
         throw new LogicException('not');
@@ -58,10 +59,10 @@ function f(int $n, ?string $s, mixed $o, string $className, iterable $items, mix
     notSame(null, $s);
     assertType('string', $s);
     allOf(Foo::class, $items);
-    assertType('iterable<Foo>', $items);
-    instanceOf(Foo::class, $o);
+    assertType('array<Foo>|Traversable<mixed, Foo>', $items);
+    assertInstance(Foo::class, $o);
     assertType('Foo', $o);
-    instanceOf($className, $p);
+    assertInstance($className, $p);
     assertType('Foo', $p);
 }
 

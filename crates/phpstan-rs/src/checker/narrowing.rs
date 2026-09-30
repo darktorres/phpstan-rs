@@ -1482,7 +1482,11 @@ impl<'a> Checker<'a> {
             return;
         };
         let negated_prefix = if info.negated { "negated " } else { "" };
-        let is_super = self.accepts(&info.ty, param.ty()).yes();
+        // A template's asserted type is only known per call.
+        let is_super = self
+            .relation()
+            .is_super_type_of(&info.ty, param.ty())
+            .yes();
         let is_disjoint = self.relation().disjoint(&info.ty, param.ty());
         let (impossible, already_narrowed) = if info.negated {
             (is_super, is_disjoint)
