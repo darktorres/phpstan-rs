@@ -2387,7 +2387,13 @@ through `check-project`.
     - a general array keeps its key and value types and loses only
       `non-empty`;
     - a list stays a list;
-    - an unsealed shape turns general.
+    - an unsealed shape stays a shape: the removed element is either
+      its last field or an element of the tail, so `array_pop` keeps the
+      fields and makes the last one optional, typing the tail as possibly
+      one element shorter. `array_shift` makes the first field optional
+      and, when the shape's int keys are renumbered, turns the int fields
+      after it into range-keyed ones as F70 does, rather than giving up
+      the string fields.
   - `$x['a']` on `array{a: 1}|array{b: 2}`. `offset_value_type` (in
     `types/src/offsets.rs`) gives `mixed` when one member lacks the key.
     Probed: still `mixed`. The read is the union of the members' values for
