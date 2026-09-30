@@ -2035,18 +2035,17 @@ through `check-project`.
     - the pair is PHP's mutually exclusive `Iterator`/`IteratorAggregate`
       (implementing both is a fatal error), or one of their subtypes each.
 
-  `IteratorAggregate<int, string>` narrowed to `Iterator` is then
-  `never`, and so is any `final class C` narrowed to an interface it
-  lacks. With F4's `never`, the union case drops that member. - Carrying
-  arguments down. When `narrow_to_instance` narrows a generic `current`
-  (`Traversable<int, string>`) to a generic target named without
-  arguments (`Iterator`), it binds the target's templates. The
-  hierarchy's
-  `ancestor_template_bindings(target, placeholders, current_class)` says
-  how the target's placeholders map to the ancestor's arguments, and
-  `infer_template_bindings` against `current`'s arguments solves them.
-  The result is `Iterator<int, string>`, with an unsolved template left
-  at its bound.
+    `IteratorAggregate<int, string>` narrowed to `Iterator` is then `never`,
+    and so is any `final class C` narrowed to an interface it lacks. With
+    F4's `never`, the union case drops that member.
+  - Carrying arguments down. When `narrow_to_instance` narrows a generic
+    `current` (`Traversable<int, string>`) to a generic target named without
+    arguments (`Iterator`), it binds the target's templates. The hierarchy's
+    `ancestor_template_bindings(target, placeholders, current_class)` says
+    how the target's placeholders map to the ancestor's arguments, and
+    `infer_template_bindings` against `current`'s arguments solves them. The
+    result is `Iterator<int, string>`, with an unsolved template left at its
+    bound.
 
   Fixtures: the three shapes of the finding, and `final class C {}`
   narrowed to `Countable` being `*NEVER*` (with `instanceof.alwaysFalse`
@@ -2242,27 +2241,28 @@ through `check-project`.
     - on `[1, 2, 3]` they give `list<1|2|3>`;
     - `non-empty-list` gives `list`, which is right.
 
-  The by-reference effect becomes the array without that element,
-  through a types-crate `without_last`/`without_first`: - a sealed shape
-  loses its last or first field, and `shift` renumbers int keys as PHP
-  does, so `[1, 2, 3]` popped is `array{1, 2}`; - a general array keeps
-  its key and value types and loses only `non-empty`; - a list stays a
-  list; - an unsealed shape turns general. - `$x['a']` on
-  `array{a: 1}|array{b: 2}`. `offset_value_type` (in
-  `types/src/offsets.rs`) gives `mixed` when one member lacks the key.
-  Probed: still `mixed`. The read is the union of the members' values
-  for that key, with `null` for a member that surely lacks it, since PHP
-  reads a missing offset as `null` with a warning: `1|null` here.
-  The read itself is also reported, since a member that lacks the key
-  makes PHP warn "Undefined array key". `report_missing_offset` answers
-  today only when every member lacks the key (`offsetAccess.notFound`).
-  It gains the "some member" case: `offsetAccess.maybeNotFound` ("Offset
-  'a' might not exist on array{a: 1}|array{b: 2}.") at level 7, the
-  maybe level, for a literal key some constant-array member surely
-  lacks, or has only as optional. The quiet reads (`isset`, `??`,
-  `empty`, `array_key_exists` guards) are exempt, as they are for the
-  definite report, and so is a read the enclosing condition has
-  narrowed (`if (isset($x['a']))`).
+    The by-reference effect becomes the array without that element, through
+    a types-crate `without_last`/`without_first`:
+    - a sealed shape loses its last or first field, and `shift` renumbers
+      int keys as PHP does, so `[1, 2, 3]` popped is `array{1, 2}`;
+    - a general array keeps its key and value types and loses only
+      `non-empty`;
+    - a list stays a list;
+    - an unsealed shape turns general.
+  - `$x['a']` on `array{a: 1}|array{b: 2}`. `offset_value_type` (in
+    `types/src/offsets.rs`) gives `mixed` when one member lacks the key.
+    Probed: still `mixed`. The read is the union of the members' values for
+    that key, with `null` for a member that surely lacks it, since PHP reads
+    a missing offset as `null` with a warning: `1|null` here. The read
+    itself is also reported, since a member that lacks the key makes PHP
+    warn "Undefined array key". `report_missing_offset` answers today only
+    when every member lacks the key (`offsetAccess.notFound`). It gains the
+    "some member" case: `offsetAccess.maybeNotFound` ("Offset 'a' might not
+    exist on array{a: 1}|array{b: 2}.") at level 7, the maybe level, for a
+    literal key some constant-array member surely lacks, or has only as
+    optional. The quiet reads (`isset`, `??`, `empty`, `array_key_exists`
+    guards) are exempt, as they are for the definite report, and so is a
+    read the enclosing condition has narrowed (`if (isset($x['a']))`).
 
   Fixtures: one per bullet still open, with the probed types as the
   before state.
@@ -3615,18 +3615,18 @@ through `check-project`.
     - `168j`: entity inheritance mapping;
     - `168k`: scalar subqueries.
 
-  Sentences that only narrate the history ("168b already resolved this")
-  are rewritten to state the fact. - `union.rs:663-667`. The first two
-  lines ("A shape as the general array it is…") move down to sit on
-  `shape_as_general_array` (line 745), leaving `general_array_parts`
-  with its own doc. - The `resource` message. This is not a comment but
-  a display clash: a class named `resource` and the resource type print
-  alike (the `a_native_resource_hint_names_a_class` fixture expects
-  "expects resource, resource given"). Display prints an object type
-  whose class name, case-folded, equals a type keyword (`resource`, and
-  any other non-reserved keyword name PHP allows as a class) with a
-  leading `\`. That fixture then reads "expects \resource, resource
-  given".
+    Sentences that only narrate the history ("168b already resolved this")
+    are rewritten to state the fact.
+  - `union.rs:663-667`. The first two lines ("A shape as the general array
+    it is…") move down to sit on `shape_as_general_array` (line 745),
+    leaving `general_array_parts` with its own doc.
+  - The `resource` message. This is not a comment but a display clash: a
+    class named `resource` and the resource type print alike (the
+    `a_native_resource_hint_names_a_class` fixture expects "expects
+    resource, resource given"). Display prints an object type whose class
+    name, case-folded, equals a type keyword (`resource`, and any other
+    non-reserved keyword name PHP allows as a class) with a leading `\`.
+    That fixture then reads "expects \resource, resource given".
 
   Verification: `grep -rn "168[a-k]" crates` is empty afterwards, and
   the fixture expectation is updated in the same commit as the display
