@@ -9,6 +9,26 @@ pub(super) fn all_diagnostics_for(src: &str) -> Vec<Diagnostic> {
     all_diagnostics_for_with(src, |_| {})
 }
 
+/// Every statement's recorded variable types, as the type dump writes them.
+pub(super) fn type_dump_for(src: &str) -> Vec<String> {
+    let tokens = Lexer::new(src).tokenize_with_spans();
+    let program = Parser::new(tokens).parse_program().unwrap();
+    let mut registry = Registry::build(&program);
+    registry.merge_stubs(crate::registry::stubs::generated_stubs());
+    registry.merge_stub_classes(crate::registry::stubs::generated_stub_classes());
+    registry.merge_stub_constants(crate::registry::stubs::generated_stub_constants());
+    registry.precompute_ancestor_names();
+    registry.precompute_member_owners();
+    let settings = CheckSettings::default();
+    let bodies = crate::registry::FileBodies::of(&program);
+    let mut checker = Checker::new(&registry)
+        .with_settings(&settings)
+        .with_bodies(&bodies);
+    checker.set_dump_types(true);
+    checker.check_program(&program);
+    checker.take_type_dump()
+}
+
 pub(super) fn all_diagnostics_for_with(
     src: &str,
     configure: impl FnOnce(&mut CheckSettings),

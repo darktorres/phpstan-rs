@@ -513,6 +513,10 @@ impl<'a> Checker<'a> {
                             ) {
                                 if was_defined || is_superglobal(name) {
                                     locals.insert(name.to_string(), new_ty);
+                                    if let Some(native) = locals.native(name) {
+                                        let native = native_after_offset_change(native, true);
+                                        locals.set_native(name, native);
+                                    }
                                 } else {
                                     locals.declare(name.to_string(), new_ty, base.span);
                                 }
@@ -599,6 +603,10 @@ impl<'a> Checker<'a> {
                     .discriminant_array_facts_mut()
                     .retain(|(container, _, _), _| container != name.as_ref());
                 locals.insert(name.to_string(), after);
+                if let Some(native) = locals.native(name) {
+                    let native = native_after_offset_change(native, false);
+                    locals.set_native(name, native);
+                }
             }
             _ => self.bind_assignment_target(base, after, locals),
         }
@@ -815,6 +823,32 @@ pub(crate) fn literal_string_key(e: &Expr) -> Option<String> {
         ExprKind::Literal(Literal::Int(n)) => Some(n.to_string()),
         _ => None,
     }
+}
+
+/// A variable's native type after a write (`written`) or an `unset` at one
+/// of its offsets: an array is a general array, non-empty after a write;
+/// `null` becomes an array on a write; objects and strings stay what they
+/// are.
+fn native_after_offset_change(native: &Type, written: bool) -> Type {
+    let general = Type::array(Type::unknown_array_key(), Type::mixed());
+    let general = if written {
+        general.to_non_empty_array()
+    } else {
+        general
+    };
+    Type::union_of(
+        native
+            .union_members()
+            .iter()
+            .map(|m| {
+                if m.is_array().yes() || (written && m.is_null().yes()) {
+                    general.clone()
+                } else {
+                    m.clone()
+                }
+            })
+            .collect(),
+    )
 }
 
 /// `literal_key_from_type`'s own plural form - every `StringLiteral`/

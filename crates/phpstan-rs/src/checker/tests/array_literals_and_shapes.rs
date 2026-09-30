@@ -1,6 +1,7 @@
 //! Array literal typing, shapes, list-ness, index assignment, destructuring.
 
 use super::super::*;
+use super::helpers::*;
 use types::Shape;
 
 // Array-shape generalization, tried before the hard
@@ -91,5 +92,29 @@ fn generalize_by_key_set_only_merges_the_matching_subset() {
     assert_eq!(
         untouched_y_shapes, 5,
         "expected all 5 y-shapes to pass through unmerged"
+    );
+}
+
+#[test]
+fn an_offset_write_or_unset_keeps_the_variables_native_type_true() {
+    let dump = type_dump_for(
+        "<?php\nfunction f(string $k): void {\n    $a = [];\n    $a[$k] = 1;\n    $b = ['x' => 1];\n    unset($b['x']);\n    $c = null;\n    $c['y'] = 2;\n}\n",
+    );
+    let at = |line: u32| {
+        dump.iter()
+            .find(|l| l.starts_with(&format!("{line}:")))
+            .unwrap_or_else(|| panic!("no dump for line {line}: {dump:#?}"))
+            .clone()
+    };
+    assert!(
+        at(4).contains("a: non-empty-array<(int|string), 1> (native non-empty-array)"),
+        "{}",
+        at(4)
+    );
+    assert!(at(6).contains("(native array)"), "{}", at(6));
+    assert!(
+        at(8).contains("c: array{y: 2} (native non-empty-array)"),
+        "{}",
+        at(8)
     );
 }
