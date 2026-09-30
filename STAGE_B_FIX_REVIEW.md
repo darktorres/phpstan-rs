@@ -2601,6 +2601,38 @@ through `check-project`.
   the keys renumbered after it uncertain; an optional field keeps a
   required one's key required, its type joined; list-ness and
   non-emptiness count the fields already merged, with fixtures.
+
+  Design: the first bullet is F13's fix: general mode keeps observing
+  keys, and the next index becomes a range. The rest is in
+  `merge_shape_field` (`expr/array_ops.rs:283`), which both the spread
+  literal and `array_merge` use, and in the spread path's list-ness.
+
+  - An optional int field. `merge_shape_field` renumbers it to the next
+    index as if present and advances the index by one, so every later
+    renumbered key assumes it. Each optional int field doubles the possible
+    layouts. The merge carries a small set of candidate shapes (at most 8,
+    so three optional int fields) and forks the set at each optional int
+    field, into a copy where it was present and a copy where it wasn't. The
+    result is the union of the candidates. Past the cap it degrades to the
+    general array as today. `[...$a, 'c']` with `array{0: 'a', 1?: 'b'}` is
+    then `array{0: 'a', 1: 'b', 2: 'c'}|array{0: 'a', 1: 'c'}`.
+  - An optional string field over an existing key. A later optional field
+    may be absent, so the earlier value survives:
+    - an existing required field stays required, with its type joined with
+      the new one (`['x' => 1, ...$a]` with `x?: 2` gives `x: 1|2`);
+    - an existing optional field stays optional, joined;
+    - a required new field replaces as today.
+  - List-ness and non-emptiness in `infer_spread_array_literal_type`. When
+    the path degrades, the fields already merged into `shape` count too:
+    `list_safe` is false if any merged key is a string, and
+    `known_non_empty` is true if any merged field is required. Today only
+    the sources after the degradation are consulted.
+    `[...['a' => 1], ...$l]` is then `non-empty-array<'a'|int, 1|int>`, not
+    `list<int>`.
+
+  `array_merge`'s arm shares `merge_shape_field`, so it gets both field
+  fixes. Fixtures: the three remaining shapes, each through a spread and
+  through `array_merge`, and a four-optional-field merge that degrades.
 - [ ] **F71. `preg_match_all`'s pattern-order groups never hold `''`**
   (`preg_match_all_pattern_order_shape`, `checker/expr/preg_shapes.rs`;
   also before the window). A group that doesn't take part in a match
