@@ -263,6 +263,36 @@ re-triage run once over all of them, under V2.
   `array{active: int<0, max>, inactive: int<0, max>, missing: int<1, max>,
   merged: int<0, max>, ...<(int|string), int<1, max>>}`.
 
+- [x] **TP-1. What the batch's fixture pass found.** The first full
+  fixture run after step 18 failed 56 fixtures; each was read against its
+  source and, where the answer turned on runtime behaviour, against
+  `php` 7.4, 8.0, 8.3 and 8.5. Most were intended changes (the key
+  refinement in messages, keys cast as PHP casts them, narrower ranges,
+  new findings the new fixtures exist for) or expected text of fixtures
+  that had never run. The real defects, each fixed with a test:
+  - loose `==` with a non-numeric string kept number and bool members
+    whole: PHP 7 compares a number with the string's leading number, PHP
+    8 only `INF`/`-INF`, and a bool by the string's truthiness
+    (`dbdd6df7`); a bool against a number compares by the number's
+    truthiness (`10790753`);
+  - `instanceof` was typed `mixed` everywhere, so `$o = $x instanceof
+    Foo` bound `mixed`; it is a bool, decided by the always-true/false
+    rule's verdict (`78762da8`);
+  - a variable's truthiness facts were keyed like `$x === true`, so a
+    falsy `$x` replayed what `$x === false` implied; reassigning `$x`
+    also never dropped facts keyed `isset($x)` (`1eacd606`);
+  - the assertion rule compared with `accepts`, so template, equality
+    and unknown-class assertions were "already narrowed" (`79020536`);
+  - a parenthesised `instanceof` under `!` was reported twice
+    (`2606f88e`);
+  - a `sprintf` `-` after a written byte, `array_keys` of a general
+    array, offset 0 of a non-empty list (`b9bbc1c1`), a foreach key's
+    native type carrying the key refinement (`95f2b53f`), and excluding
+    an int literal, which now trims or splits the range (`c595a4a7`).
+  Fixtures whose names described the old behaviour were renamed
+  (`gates/test-renames/stage-b-fixes.txt`), and ones that assumed PHP 8
+  semantics without a `php_version` were pinned, with a PHP 7.4 sibling.
+
 - [ ] **W1. A nested write at a key union joins every key's container.**
   `$a[$k]['x'] = v` with `$k: 'a'|'b'` reads the container at both keys
   and writes their join back at both, so `b` can gain `a`'s fields
@@ -295,6 +325,62 @@ re-triage run once over all of them, under V2.
   object, isn't reported. For checked exceptions a caller must catch or
   declare what it calls. Decide whether callee throw points count;
   if they do, both kinds of call report.
+
+- [ ] **CMP-1. A number against an array or object "results in an
+  error".** `check_comparison_validity` (`checker/operators.rs`, a port
+  of `InvalidComparisonOperationRule`) says it and documents a PHP 8
+  `TypeError`, but PHP compares them: `[] > 0` is true with no
+  diagnostic (7.4 and 8.5), and an object is converted to 1 with a
+  notice (`Object of class stdClass could not be converted to int`). For
+  an array the comparison model's always-true/false finding already
+  reports it, so both fire, one false. Done: the array case left to the
+  comparison model, and the object case reported as the conversion
+  notice PHP emits.
+
+- [ ] **DF-1. `ucwords` drops whether a string is a decimal int.** The
+  other case functions keep `decimal-int-string` and
+  `non-decimal-int-string` (digits have no case); `ucwords` isn't in
+  that arm (`checker/expr/builtin_calls.rs`), so its result is plain
+  `string`. Done: `ucwords` keeps them as the other case functions do.
+
+- [ ] **DF-2. A `sprintf` leading `0` isn't a breaker.** `sprintf('0%d',
+  $n)` is `"05"`, never a decimal int, so it stays a string key; the
+  position rule (`sprintf_is_non_decimal_int`) only counts non-digits
+  and a `-` after a written byte. Done: a literal `0` followed by
+  something that surely writes a byte makes the result non-decimal-int,
+  as in concatenation.
+
+- [ ] **DF-3. A failed `is_numeric` keeps `numeric-string` members.**
+  Its false branch removes ints and floats and refines strings as
+  non-decimal-int, but a `numeric-string` member (or a numeric literal)
+  survives, though `is_numeric` just ruled it out
+  (`checker/narrowing.rs`, the `is_numeric` arm). Done: numeric-string
+  members dropped on the false branch.
+
+- [ ] **DF-4. `mixed` loses non-numeric-ness.** After `!is_numeric($x)`
+  on `mixed`, `$x` is `mixed~(int|float|numeric-string)`; a later
+  `is_string($x)` gives plain `string`, where a string that isn't numeric
+  is a `non-decimal-int-string`. Done: narrowing a `mixed~S` to `string`
+  keeps what `S` rules out (numeric, and so decimal-int).
+
+- [ ] **DF-5. C1 skips the value side when it reads the target.** In
+  `if ($a = $a['x'])` or `(($i = $i + 1) < $max)` the value's subjects
+  aren't narrowed at all (`reads_assigned_variable`), since after the
+  assignment the variable holds the new value. Done: the value side
+  narrowed against the pre-assignment scope, with the rebound keys then
+  reset to the assignment's result.
+
+- [ ] **DF-6. A preg offset is typed `int`.** With
+  `PREG_OFFSET_CAPTURE` an unmatched group's offset is `-1`
+  (`php -r`), a matched one's at least 0, so the leaf is exactly
+  `int<-1, max>`; `preg_leaf_type` says `int`. Done: `int<-1, max>`.
+
+- [ ] **DF-7. The string-parameter refinement keeps what can't pass.**
+  `refine_string_members` (`checker/narrowing/phpunit.rs`, also used by
+  the preg subject) keeps any object but an enum case as maybe
+  `Stringable`, so an enum's own type and a final class without
+  `__toString` survive a `string` parameter that rejects them with a
+  `TypeError`. Done: only an object that may have `__toString` is kept.
 
 - [ ] **Typed purity.** `is_transitively_pure` is computed in the registry
   before any types exist, so it can't see implicit calls
