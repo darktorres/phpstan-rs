@@ -3245,9 +3245,11 @@ through `check-project`.
     call that may write objects of class `C` when `$v`'s type may be a `C`,
     meaning not disjoint by F15's `objects_disjoint`. This covers
     `$o = $this; $o->load()`, a second variable holding the object, and
-    `$this->c` reached through a helper. `PropertyWrites` keeps its levels,
-    and its `Receiver`/`Own` levels name the classes they may touch: the
-    callee's declaring class, plus the classes of object arguments.
+    `$this->c` reached through a helper. `PropertyWrites`
+    (`registry/property_writes.rs`) keeps its three levels, `Nothing`,
+    `OwnObject` and `Anything`. `OwnObject` means the receiver's class, so
+    the facts it makes stale are those on any key whose type may be an
+    instance of that class, not only the receiver's key.
   - `Anything` forgets every `->` fact and every static-property fact. Its
     current receiver-and-arguments set is what makes the finding's second
     bullet (`$this->h->run()` writing `$this->c->x`) stay stale.
