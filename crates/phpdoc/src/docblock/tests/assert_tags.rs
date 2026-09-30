@@ -60,18 +60,6 @@ fn parses_a_bare_this_target() {
 }
 
 #[test]
-fn a_template_equality_form_is_never_parsed() {
-    let block = parse("/** @phpstan-assert =ExpectedType $actual */");
-    assert!(block.assert.is_empty());
-}
-
-#[test]
-fn a_value_inequality_form_is_never_parsed() {
-    let block = parse("/** @phpstan-assert-if-true !=null $this->getId() */");
-    assert!(block.assert_if_true.is_empty());
-}
-
-#[test]
 fn a_generic_type_argument_is_kept_as_part_of_the_type_text() {
     let block = parse("/** @phpstan-assert-if-true Collection<TKey,T> $this->collection */");
     assert_eq!(
@@ -112,5 +100,19 @@ fn an_equality_assertion_is_read_with_its_negation() {
                 target: "$other".to_string(),
             },
         ]
+    );
+}
+
+#[test]
+fn an_inequality_form_on_a_call_target_is_read() {
+    let block = parse("/** @phpstan-assert-if-true !=null $this->getId() */");
+    assert_eq!(
+        block.assert_if_true,
+        vec![AssertTag {
+            equality: true,
+            negated: true,
+            ty: node("null"),
+            target: "$this->getId()".to_string(),
+        }]
     );
 }
