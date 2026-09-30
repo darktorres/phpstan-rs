@@ -235,6 +235,13 @@ pub enum PhpFeature {
     /// An element appended after a negative integer key takes the next
     /// integer (`[-5 => 'a', 'b']` puts `'b'` at -4), not 0.
     NegativeArrayKeysAdvanceTheNextIndex,
+    /// `++` on a non-alphanumeric string and `--` on a non-numeric one are
+    /// deprecated, and `++`/`--` on a bool or `--` on `null` warn that they
+    /// have no effect.
+    IncDecDeprecations,
+    /// `++` on any non-numeric string is deprecated (`str_increment()`
+    /// replaces it).
+    AlphanumericStringIncrementDeprecated,
     ReadonlyPropertyReinitializationOnClone,
     /// The `FILTER_THROW_ON_FAILURE` constant/flag for `filter_var()`/
     /// `filter_input()`. `PhpVersion::hasFilterThrowOnFailureConstant`
@@ -384,12 +391,14 @@ impl PhpFeature {
             NativeTypedClassConstants
             | DynamicClassConstantFetch
             | ReadOnlyAnonymousClasses
-            | ReadonlyPropertyReinitializationOnClone => PhpVersion::new(8, 3),
+            | ReadonlyPropertyReinitializationOnClone
+            | IncDecDeprecations => PhpVersion::new(8, 3),
             ImplicitlyNullableParameterDeprecated
             | PropertyHooks
             | FinalProperties
             | AsymmetricVisibility => PhpVersion::new(8, 4),
             FinalPromotedProperties
+            | AlphanumericStringIncrementDeprecated
             | VoidCast
             | DeprecatedNonStandardCasts
             | DeprecatedBacktickOperator

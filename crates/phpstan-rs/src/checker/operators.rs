@@ -517,17 +517,13 @@ impl<'a> Checker<'a> {
         );
     }
 
-    /// Real PHPStan's `InvalidIncDecOperationRule`. Two independent
-    /// checks, matching the real rule's own two identifier families:
-    /// `{name}.expr` when the target isn't an assignable l-value at all
-    /// (`5++`, `foo()++`), `{name}.type` when it is one but its current
-    /// type can never legally be incremented/decremented (an array, or a
-    /// plain object with no native operator overload). Deliberately
-    /// ignores real PHPStan's own PHP-version-gated deprecation nuance
-    /// (non-numeric-string/`null`/`bool` inc-dec is deprecated, not
-    /// illegal, on newer PHP versions) - this project has no per-target
-    /// PHP-version concept to gate that on, so the older, always-legal
-    /// behavior is assumed throughout.
+    /// Real PHPStan's `InvalidIncDecOperationRule`: `{name}.expr` when the
+    /// target isn't an assignable l-value at all (`5++`, `foo()++`),
+    /// `{name}.type` when it is one but its current type can never legally
+    /// be incremented/decremented (an array, or a plain object with no
+    /// native operator overload). On PHP versions that warn about it, an
+    /// operand PHP deprecates or ignores is reported too
+    /// (`check_incdec_version_warnings`).
     pub(crate) fn check_incdec_validity(
         &mut self,
         op: &UnaryOp,
@@ -568,7 +564,12 @@ impl<'a> Checker<'a> {
             return;
         }
         // A `never` operand is unreachable code, not a bad operand.
-        if inner_ty.is_never() || self.is_incdec_operand_valid(inner_ty) {
+        if inner_ty.is_never() {
+            return;
+        }
+        if self.is_incdec_operand_valid(inner_ty) {
+            let increment = matches!(op, UnaryOp::PreInc | UnaryOp::PostInc);
+            self.check_incdec_version_warnings(increment, inner_ty, span, name);
             return;
         }
         self.report(
@@ -576,6 +577,82 @@ impl<'a> Checker<'a> {
             span,
             0,
             format!("{name}.type"),
+        );
+    }
+
+    /// What PHP deprecates or ignores about `++`/`--` (`increment`) on
+    /// `inner_ty`, reported when every configured PHP version warns about
+    /// it: from PHP 8.3, `++` on a non-alphanumeric string and `--` on a
+    /// non-numeric one are deprecated (`{name}.deprecated`, level 0), and
+    /// `++`/`--` on a bool or `--` on `null` have no effect
+    /// (`{name}.noEffect`, level 3); from PHP 8.5 `++` on any non-numeric
+    /// string is deprecated. A type only some of whose values do this is
+    /// reported at level 7.
+    fn check_incdec_version_warnings(
+        &mut self,
+        increment: bool,
+        inner_ty: &Type,
+        span: Span,
+        name: &str,
+    ) {
+        if !self
+            .registry
+            .php_supports(types::PhpFeature::IncDecDeprecations)
+            .yes()
+        {
+            return;
+        }
+        let alphanumeric_deprecated = self
+            .registry
+            .php_supports(types::PhpFeature::AlphanumericStringIncrementDeprecated)
+            .yes();
+        let verb = if increment { "Increment" } else { "Decrement" };
+        let rows: Vec<Option<(&'static str, String)>> = inner_ty
+            .union_members()
+            .iter()
+            .map(|member| {
+                if member.is_bool().yes() {
+                    return Some(("noEffect", format!("{verb} on type bool has no effect")));
+                }
+                if !increment && member.is_null().yes() {
+                    return Some(("noEffect", format!("{verb} on type null has no effect")));
+                }
+                let [s] = member.constant_strings()[..] else {
+                    return None;
+                };
+                let bytes = s.as_bytes();
+                if types::numeric_value(bytes).is_some() {
+                    return None;
+                }
+                let message = if increment {
+                    if bytes.is_empty() || !bytes.iter().all(u8::is_ascii_alphanumeric) {
+                        "Increment on non-alphanumeric string is deprecated"
+                    } else if alphanumeric_deprecated {
+                        "Increment on non-numeric string is deprecated, use str_increment() instead"
+                    } else {
+                        return None;
+                    }
+                } else if bytes.is_empty() {
+                    "Decrement on empty string is deprecated as non-numeric"
+                } else {
+                    "Decrement on non-numeric string has no effect and is deprecated"
+                };
+                Some(("deprecated", message.to_string()))
+            })
+            .collect();
+        let Some((kind, message)) = rows.iter().flatten().next().cloned() else {
+            return;
+        };
+        let level = if rows.iter().all(Option::is_some) {
+            if kind == "deprecated" { 0 } else { 3 }
+        } else {
+            7
+        };
+        self.report(
+            format!("{message} ({inner_ty} given)."),
+            span,
+            level,
+            format!("{name}.{kind}"),
         );
     }
 
