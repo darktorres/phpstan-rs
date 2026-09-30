@@ -2173,6 +2173,25 @@ through `check-project`.
   property's `private(set)` is reported. This was already the case
   before the fix window. Done: `set_visibility`, falling back to the
   visibility, as a declared property has it.
+
+  Design: at `class_info.rs:1264` the promoted arm sets
+  `write_visibility` from `promotion.visibility`. It becomes
+  `promotion.set_visibility.unwrap_or(promotion.visibility)`, the
+  declared arm's rule (line 1161,
+  `p.write_visibility.unwrap_or(p.visibility)`).
+  `implicit_protected_set` follows the declared arm too: readonly, no
+  explicit set visibility, and public. Today the promoted arm leaves out
+  the "no explicit set visibility" condition, so
+  `public private(set) readonly` would also get the implicit
+  `protected(set)`. A set visibility alone promotes
+  (`protected(set) string $z` is a public property, as the `Promotion`
+  doc says), and that stays. Checked with `php`:
+  `public private(set) int $x` and `protected(set) string $z` written
+  from the global scope fail with "Cannot modify private(set) property"
+  and "Cannot modify protected(set) property". Fixtures: those two
+  writes from outside report, as a declared `private(set)` does; a write
+  from inside the class is clean; a subclass writing the
+  `protected(set)` one is clean.
 - [ ] **F31. An anonymous class skips the class-level checks.**
   `check_anonymous_class` (`027811e4`) runs only inheritance kinds,
   magic serialization, property declarations, readonly version, methods
