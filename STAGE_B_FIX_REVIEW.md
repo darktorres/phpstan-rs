@@ -3820,19 +3820,23 @@ through `check-project`.
   every per-pass record is in `PassMark` (or keyed so a repeat can't add),
   and the trait re-check rewinds the LSP records after its first host.
 
-  Design: complete `PassMark` (`checker.rs`) so a discarded pass leaves
-  nothing, rather than reasoning per record about why a leftover is
-  harmless.
+  Design: a discarded pass must leave nothing, by construction rather
+  than by reasoning per record about why a leftover is harmless. One rule
+  covers every per-pass record: an append-only list (diagnostics,
+  semantic tokens, inlay hints, throw and return points) is rewound by
+  `PassMark`, and every other record is keyed by the source site that
+  writes it, so a later pass overwrites an earlier one and the kept pass,
+  which runs last, is what remains.
 
   - `try_throw_states`. `record_throw_state` pushes into the innermost `try`
-    frame. `PassMark` records that frame's length (one number per open
-    frame, since a pass only pushes to frames open at the mark), and
-    `rewind_to` truncates each.
+    frame. The frame becomes a map from the throw point's span to its
+    `(thrown, scope)`, so a later pass overwrites an earlier pass's entry
+    for the same site, and the kept pass, which runs last, is what the
+    catch clauses read. No rewind is needed for it.
   - `property_assign_facts`. It is a `class -> property -> Vec<Type>` map
-    (`PropertyAssignFacts`, `checker.rs:235`) that a pass appends to. So
-    `PassMark` carries an undo log, filled on a pair's first push after
-    the mark with that pair's `Vec` length (or "absent"), and `rewind_to`
-    truncates each logged `Vec` and removes the pairs that were absent.
+    (`PropertyAssignFacts`, `checker.rs:235`) that each pass appends to.
+    Its innermost `Vec` becomes a map from the write's span to its type,
+    last write winning, for the same reason.
   - `named_argument_call_facts`. It is a map from `(class, method,
     parameter)` to the call sites' spans (`NamedArgumentCallFacts`,
     `named_argument_renames.rs:31`). A span names one site, so its values
