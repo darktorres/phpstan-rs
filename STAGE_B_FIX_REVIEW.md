@@ -2333,6 +2333,40 @@ through `check-project`.
 
   Done: each gives the type or message it names, with a fixture.
 
+  Design, per bullet:
+
+  - `promote_class_string_literals` (`types/src/templates.rs:197`) walks the
+    argument in parallel with the parameter. For an `Array` parameter it
+    maps the argument's value types however the argument is built: a general
+    array's value, each field and the tail of an `ArrayShape`, the array
+    member of an `Intersection` (accessories kept), and each member of a
+    union argument. A `list<class-string<T>>` parameter (an intersection)
+    matches through its array member. `first(['Foo'])` then binds `T` to
+    `Foo`.
+  - `describe_accessory_intersection` (`types/src/display.rs`) takes its
+    `Array` fast path only when every other member is the list or non-empty
+    accessory. Any other accessory, `hasOffsetValue` among them, falls
+    through to the general `&`-joined rendering, so messages and
+    `assertType` show
+    `non-empty-array<string, mixed>&hasOffsetValue('x', 1)`. The comment F43
+    flags is corrected with it.
+  - The `?iterable` message. The missing-typehint walk (`2b1ce22b`)
+    describes the type by its first member, and the parser expands a native
+    `iterable` into `array|Traversable`, so the array member names it. The
+    walk describes a native hint from the hint node (`iterable`), as it did
+    before `2b1ce22b`, and falls back to the parsed type only for PHPDoc
+    types, where `iterable<…>` is written out anyway.
+  - `argv`/`argc`. They leave `is_superglobal` (`syntax/src/ast.rs:1589`).
+    The checker seeds them into the global scope's `Locals` only, typed
+    `list<string>` and `int<1, max>` (the CLI shape; unset under a web SAPI,
+    where reading them is as undefined as any variable), and
+    `unassigned_variable_type`'s `argc` arm goes. Inside a function they are
+    undefined unless `global $argv;` brings them in, which the `Global`
+    statement already handles.
+
+  Fixtures: one per bullet. `$argv` read inside a function reports
+  `variable.undefined`, and at the top level it is `list<string>`.
+
 - [ ] **F50. Calls that narrow are matched by the name's case** (also
   before the window). PHP function and method names ignore case, but:
   - `names_with_assert_tags` (`apply_bare_statement_assert_narrowing`)
