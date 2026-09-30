@@ -1923,6 +1923,43 @@ through `check-project`.
 
   Done: exclusion matches a generic member by class through the
   hierarchy, and the two exclusive interfaces don't intersect.
+
+  Design: three changes in `types`.
+
+  - The raw class is a supertype of its generic instances. In
+    `super_type.rs`, the first `Object`/`Object` arm (line 201) answers
+    `Yes` only when both argument lists are empty. An `instanceof` target
+    always carries no arguments, so `Iterator` must be a supertype of
+    `Iterator<int, string>` and of any subclass instance whatever its
+    arguments. The arm becomes: a sup with no arguments, whose class
+    declares templates or not, is `Yes` for a sub of the same class or a
+    subclass (`hierarchy.is_subclass_of`). `without`, and so the negated
+    `instanceof`, then removes the generic member, and `narrow_to_instance`
+    keeps it whole in the true branch, both through the ordinary relation.
+  - Object disjointness. `narrow_to_instance`'s intersection fallback asks a
+    new `objects_disjoint(a, b)` first, and builds `never` when it holds. It
+    holds when:
+    - two classes (not interfaces) are unrelated, by single inheritance;
+    - a final class or an enum isn't a subtype of the other;
+    - the pair is PHP's mutually exclusive `Iterator`/`IteratorAggregate`
+      (implementing both is a fatal error), or one of their subtypes each.
+
+  `IteratorAggregate<int, string>` narrowed to `Iterator` is then
+  `never`, and so is any `final class C` narrowed to an interface it
+  lacks. With F4's `never`, the union case drops that member. - Carrying
+  arguments down. When `narrow_to_instance` narrows a generic `current`
+  (`Traversable<int, string>`) to a generic target named without
+  arguments (`Iterator`), it binds the target's templates. The
+  hierarchy's
+  `ancestor_template_bindings(target, placeholders, current_class)` says
+  how the target's placeholders map to the ancestor's arguments, and
+  `infer_template_bindings` against `current`'s arguments solves them.
+  The result is `Iterator<int, string>`, with an unsolved template left
+  at its bound.
+
+  Fixtures: the three shapes of the finding, and `final class C {}`
+  narrowed to `Countable` being `*NEVER*` (with `instanceof.alwaysFalse`
+  reported as today).
 - [ ] **F16. Division by zero misses the divisors PHP converts to zero**
   (`b1dddb6c`). `$i / false`, `/ null`, `/ '0'`, `% 0.5`, `% false` and
   `% '0'` all throw `DivisionByZeroError` (checked with `php -r`), but
