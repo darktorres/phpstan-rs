@@ -335,6 +335,26 @@ type benevolent. A union containing `mixed` alongside other members now
 correctly collapses to plain `mixed` in every construction path, not
 just the common one.
 
+Offsets are read and written as PHP performs them: a union's read joins
+what each member reads (`null` for a member that surely lacks the key,
+or for `null`, a bool, an int or a float); a string's offsets read its
+characters (negative ones from the end since PHP 7.1) and a write pads,
+takes the first byte or fails as PHP does; an `ArrayAccess` object's
+offsets are calls of `offsetGet`/`offsetSet`/`offsetExists`/
+`offsetUnset`, with their throw points, purity and forgetting, and a
+nested write through a non-reference `offsetGet` has no effect; a key
+that may be absent reads `V|null`. A string key read out of an array is
+a `non-decimal-int-string`, a refinement array types never store, so
+writing it back keeps a string key; concatenations, `sprintf`,
+`implode`, long hex digests and `json_encode` of arrays produce it, and
+`array_fill_keys`, `array_combine`, `array_column`, `array_flip` and
+`array_count_values` key their results by PHP's own conversions. Past
+the union member cap a union keeps what its members share: int hulls,
+refined-string folds, one shape with optional keys, an enum for its
+cases, and with the class hierarchy (`Relation::union`, the checker's
+only join) the most specific ancestors the classes have in common.
+Every displayed type parses back (`types::try_parse_displayed_with`).
+
 ## Narrowing engine
 
 `instanceof`, equality/identity, `isset`/`??`/`??=` (including the
@@ -456,6 +476,27 @@ from `alwaysTrue` (a plain `$i === $armsCount - 1` check, not the
 trailing `default` arm still counts as "something after," so a
 genuinely redundant last named arm followed only by an unreachable
 `default` still gets reported.
+
+**One PHP comparison model** (`types::comparison`) decides and narrows
+`==`, `!=`, `<`, `<=`, `>`, `>=` and `<=>` for every kind of value,
+PHP 7 and PHP 8 alike, checked against a matrix PHP itself generates
+(`tools/php-comparison-matrix`): loose equality narrows both sides,
+`switch` cases compare loosely, orderings cut both sides' ranges and
+drop what can't compare, `<=>` against a constant narrows as the
+ordering it encodes, and non-strict `in_array`/`array_search` follow it.
+Narrowing is a meet, a contradiction is `never`, and an assertion that
+narrows to `never` ends the statement's reachability. `count()` is a
+range and a comparison with it narrows the array to the proven count. A
+`preg_match`/`preg_match_all` result narrows `$matches` and the subject
+however it's compared, stored in a variable or not, with named
+arguments, flags and any keyed target. An assignment used as a
+condition narrows its target and its value's subjects. Every PHPUnit
+assertion (methods of `PHPUnit\Framework\Assert`, the global `assertX()`
+functions and `assertThat` with factory constraints) narrows as its
+check does, `assertEquals` through a model of `sebastian/comparator`
+checked against comparator 4 to 7 (`tools/phpunit-comparator-matrix`);
+`@phpstan-assert` reads its `=T`/`!=T` forms and binds the call's
+templates.
 
 ## Rule catalog (checker)
 
@@ -1184,6 +1225,17 @@ filtered-Union default (a `Union` is flagged the moment *any* member is
 confirmed closed) - confirmed via a follow-up corpus diff to produce
 zero false positives on piwigo16.
 
+Increment and decrement warn by PHP version: from 8.3 `++` on a
+non-alphanumeric string, `--` on a non-numeric one and either on `bool`
+or `--` on `null`, from 8.5 `++` on any non-numeric string, each
+reported when every configured version warns. Reading an offset of
+`null`, an out-of-range string offset, a possibly-absent key
+(`offsetAccess.mightNotExist`, general arrays behind
+`rules.report_possibly_nonexistent_general_array_offset`), a string
+offset write PHP rejects, `array_combine` with sizes that surely differ
+and `array_flip`/`array_count_values` over values they skip are
+reported.
+
 ## Performance & tooling
 
 CI-friendly output formats (`json`, `checkstyle`, `junit` - a failing test case
@@ -1535,6 +1587,14 @@ same-binary rules only; `dlopen` dynamic loading and NEON-style
 registration both stay declined outright.
 
 ---
+
+A runtime oracle (`cargo test -p phpstan-rs --test runtime_oracle`) runs
+each fixture under `php` (older versions in Docker) and fails when an
+`assertType` doesn't hold for the value PHP produced, or, with
+`runtime_warnings = "exact"`, when a runtime warning has no diagnostic.
+`cargo xtask type-drift` relates every binding of two recorded type
+dumps within the project's class hierarchy and reports what widened,
+became incomparable, stopped parsing, or appeared and disappeared.
 
 # Pending / partial
 

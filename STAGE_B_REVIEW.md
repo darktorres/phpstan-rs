@@ -65,7 +65,9 @@ The Piwigo gate delta between `54fea123` and `91666577`, triaged row by
 row (diagnostics) and binding by binding (type dumps: 78,258 changed
 bindings, 30,534 narrower, 1,134 equal, 6,925 wider, 39,665 undecided).
 Every loss traced to code is an item here; so are the gaps in the same
-machinery that its fixes depend on.
+machinery that its fixes depend on. An item is ticked with its commits
+when its code lands; the fixture suite, the runtime oracle and the corpus
+re-triage run once over all of them, under V2.
 
 - [x] **P1. Displayed types don't parse back.** (`96a22f09`) The type dumps and every
   fixture's `assertType` text are in the display grammar, which
@@ -95,8 +97,8 @@ machinery that its fixes depend on.
   and five conditional-return fixtures whose functions didn't return
   what their PHPDoc said (`7795bd2d`).
 
-- [ ] **FIX-1. Offset reads and writes aren't modeled as PHP performs
-  them.**
+- [x] **FIX-1. Offset reads and writes aren't modeled as PHP performs
+  them.** (`757e2f0d`, `b6cecb8b`, `132f0549`, `3c141347`, `72dd4f43`)
   - `offsets.rs` `offset_value_type`'s `Union` arm collects with `?`: one
     member without the key makes the read `mixed` (about 190 corpus
     bindings, e.g. `preg_match` matches read with `?? null`).
@@ -122,15 +124,17 @@ machinery that its fixes depend on.
   `rules.report_possibly_nonexistent_general_array_offset`. Corpus:
   `ConfigurationSubController.php:810`.
 
-- [ ] **N1. Narrowing forgets what was known.** `Relation::narrow`
+- [x] **N1. Narrowing forgets what was known.** (`3d4ffb7d`, `d310887a`) `Relation::narrow`
   (`types/narrowing.rs`) returns the target for a non-union original, and
   keeps a union member only when it contains the target; `$order_value`
   loses `non-empty` (`ElementSetRanksPageRenderer:122`). An assertion that
   narrows to `never` doesn't terminate. Done: narrowing meets
   (`intersect`), a contradiction is `never`, and a statement assertion
   that narrows to `never` terminates (`Checker::terminating_assertions`).
+  Intersecting ints meets their bounds (`int<0, 10>&int<5, 20>` is
+  `int<5, 10>`), so a range narrowed by a range keeps what both allow.
 
-- [ ] **L1. No shared PHP comparison model.** Nothing narrows on `==` /
+- [x] **L1. No shared PHP comparison model.** (`ff3dc7e7`) Nothing narrows on `==` /
   `!=`; `switch` narrows its cases with strict equality, which is unsound
   (`case 0:` also runs for `'0'`, `case null:` for `false`, `0`, `''`,
   `[]`); non-strict `in_array` doesn't narrow; detection uses two partial
@@ -141,19 +145,19 @@ machinery that its fixes depend on.
   generated matrix (`tools/php-comparison-matrix/matrix.php`, PHP 7.4,
   8.0, 8.5); narrowing and detection both use it.
 
-- [ ] **R1. Orderings narrow one side, against literals only.** Done:
+- [x] **R1. Orderings narrow one side, against literals only.** (`b140ec59`) Done:
   both sides narrow, int ranges by `narrow_int_ordering`, every other
   kind through L1's model (null, bool, arrays, objects, uncomparable
   pairs), and the spaceship operator compared with a constant.
 
-- [ ] **FIX-2. `count()` is a literal or `int<0, max>`.** Its type is
+- [x] **FIX-2. `count()` is a literal or `int<0, max>`.** (`ba41530f`) Its type is
   exact only for one all-required shape, and narrowing proves only
   non-emptiness against `0` and `1` (`triggers_list.php:1073`, twice).
   Done: `Type::count_range`, `Relation::narrow_count`, count comparisons
   by range on both branches, `sizeof` and `COUNT_RECURSIVE`, `Countable`
   objects through their `count()`.
 
-- [ ] **I1. Increment and decrement ignore the PHP version.**
+- [x] **I1. Increment and decrement ignore the PHP version.** (`c034aa66`)
   `check_incdec_validity` says there's no per-target version concept, but
   `php_version_consensus` exists. PHP 8.3+ deprecates non-numeric string
   increments and warns on `bool` and `null--`. Done: rows keyed to their
@@ -161,34 +165,62 @@ machinery that its fixes depend on.
   `{name}.noEffect` level 3 (7 when only partly), and result types that
   follow the runtime.
 
-- [ ] **A1. `@phpstan-assert` loses its equality forms and the call's
-  templates.** `parse_assert_tag` drops `=T` and `!=T`, and
+- [x] **A1. `@phpstan-assert` loses its equality forms and the call's
+  templates.** (`5f3eec5d`) `parse_assert_tag` drops `=T` and `!=T`, and
   `apply_assert_infos` applies the type without the call's template
   bindings, so PHPUnit's `assertSame` / `assertInstanceOf` tags narrow to
   an unbound template. Done: `AssertTag::equality`, and
   `call_template_bindings` shared with `bound_call_return_type`.
 
-- [ ] **FIX-4. Preg results and PHPUnit assertions narrow partially.** A
+- [x] **FIX-4. Preg results and PHPUnit assertions narrow partially.**
+  (`1a75a0c2`, `fd81d57c`, `116a6b81`) A
   stored `preg_match` result isn't a condition alias; the replay accepts
   three positional arguments and `=== 0/1` only; `preg_match_all` and the
   matched subject aren't narrowed; `PREG_SET_ORDER` gives
   `array<(int|string), shape>`; PHPUnit narrowing matches method names and
   covers a handful of assertions, skipping the global functions and
-  `assertThat`. Done: the alias, `preg_result_outcome` over the call's
-  result type, `preg_match_all` sizes, subject narrowing
-  (`ParsedPattern::min_len`, `digits_only`), and every `Assert.php`
-  assertion keyed to the installed PHPUnit, with `assertEquals` through a
-  `sebastian/comparator` model (not PHP `==`) generated from
-  `tools/phpunit-comparator-matrix/matrix.php`.
+  `assertThat`. Done:
+  - preg calls resolve their arguments by name (flags, offset, any keyed
+    `$matches` target); the result is typed `0|1|false` or a count or
+    `false`, and a comparison with it, direct or through a stored
+    variable, applies to that type through L1's model; `preg_match_all`
+    lists are sized by the proven count, set order is a list, and a
+    runtime failure keeps lists of any size (`[]` with an out-of-range
+    offset);
+  - a sure match makes the subject non-empty, and numeric when the whole
+    subject is digits (a final newline the end anchor allows is numeric
+    from PHP 8 only); `\d` and `[:digit:]` under `/u` or `(*UCP)` match
+    Unicode digits, so they no longer make a capture group numeric;
+  - every `Assert.php` assertion, the global `assertX()` functions and
+    `assertThat` with factory constraints (`logicalNot`, `logicalAnd`,
+    `logicalOr`) map to one check each, on a method whose owner is
+    `PHPUnit\Framework\Assert`;
+  - `assertEquals` goes through `Relation::comparator_equal`, checked
+    against `tools/phpunit-comparator-matrix/matrix.php` run with
+    comparator 4, 5, 6 and 7; the four agree on all 1,225 pairs, so no
+    row is keyed to the installed PHPUnit, and the version plumbing
+    wasn't kept. PHPUnit 8's loose `assertContains` is told apart by its
+    `checkForNonObjectIdentity` parameter;
+  - corrections to the design: `assertContainsEquals` compares with PHP
+    `==` (`TraversableContainsEqual`), not the comparator, and
+    `assertGreaterThanOrEqual` is `logicalOr(equalTo, greaterThan)`, the
+    comparator or the ordering; the string assertions refine only string
+    members, since a `string` parameter coerces an int outside strict
+    types.
 
-- [ ] **C1. An assignment used as a condition narrows only its target's
-  truthiness.** `if ($r = preg_match(…, $m))`, `if (!$pos = strpos(…))`
+- [x] **C1. An assignment used as a condition narrows only its target's
+  truthiness.** (`40105583`) `if ($r = preg_match(…, $m))`, `if (!$pos = strpos(…))`
   and `(($n = count($x)) > 0)` narrow neither the right side's subjects
   nor, inside a comparison, the target. Done: the right side's own
-  narrowing (skipping keys the assignment rebinds), both branches for the
-  target, and an assignment operand peeled in comparisons.
+  narrowing, skipped when it reads a variable the target replaced, both
+  branches for the target, and an assignment operand compared as its
+  target and then as its value. Found on the way: the condition re-read
+  the right side after the assignment, so `if ($a = $a['x'])` gave `$a`
+  the inner field's type; the condition now binds each assignment's value
+  as it was checked (`Checker::assigned_values`).
 
-- [ ] **FIX-3. Array keys lose their string-ness.** A string key read out
+- [x] **FIX-3. Array keys lose their string-ness.** (`4f3cc3e3`,
+  `d35d815b`, `dafbb7da`) A string key read out
   of an array is plain `string`, so writing it back is `(int|string)`:
   4,968 `array<string, X>` bindings read `array<(int|string), X>`, 135
   `string` keys read `(int|string)`, and 12 `(int|string) given` findings.
@@ -198,16 +230,25 @@ machinery that its fixes depend on.
   stripped from array types, kept on writes, produced by concatenation,
   `sprintf`, `implode`, hex hashes, `json_encode` and case mapping; the
   value-to-key builtins cast with the offset cast, the string conversion
-  (`to_string_array_key`), or int-and-string-only with a warning.
+  (`to_string_array_key`), or int-and-string-only with a warning. The
+  refinement is stripped in `Type::new`, so template substitution and
+  transforms can't store it either; a hex digest counts when it's longer
+  than 20 characters (47 algorithms), and `json_encode` only for arrays
+  and objects that can't be `JsonSerializable`.
 
-- [ ] **G1. Past the union cap, members collapse to base types or
-  `mixed`.** `generalize_members` drops bounds, shape keys and common
+- [x] **G1. Past the union cap, members collapse to base types or
+  `mixed`.** (`17683753`, `e5a23436`, `3844e4c7`) `generalize_members` drops bounds, shape keys and common
   classes. Done: int hulls, refined-string folds, one combined shape, and
   objects folded to their least common supertypes through a class-aware
   `Relation::union`, which every checker join uses (enforced by a clippy
-  `disallowed_methods` entry).
+  `disallowed_methods` entry in `crates/phpstan-rs/clippy.toml`). It
+  recomputes only when both operands together hold more than the cap's
+  members; below that it is the memoized `Type::union`. Joins of a few
+  known types, registry building and tests keep `Type::union`, each
+  allowed with its reason; without the hierarchy objects fold to
+  `object`. A union holds `bool` when it holds `true` and `false`.
 
-- [ ] **T1. Type drift is classified by pattern.** 39,665 of the changed
+- [x] **T1. Type drift is classified by pattern.** (`8ce4d74b`) 39,665 of the changed
   bindings are undecided. Done: `cargo xtask type-drift`, relating every
   changed binding with the project's hierarchy (`equal`, `narrower`,
   `wider`, `incomparable`, `unparsed`, `added`, `removed`, `moved`, and
