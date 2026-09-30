@@ -1445,10 +1445,12 @@ through `check-project`.
     keys shape gives a sealed result shape with one required field per
     distinct key, non-empty when the keys array is.
   - `get_parent_class` (line 1632). A final class, or an enum, answers its
-    declared parent's name, or `false` without one. A non-final class with a
-    parent answers `class-string`, since a subclass's parent may be any
-    class under it; one without a parent answers `class-string|false`
-    (`false` only when the value is exactly that class). The string-argument
+    declared parent's name, or `false` without one. A non-final class `C`
+    with parent `P`: when the value is exactly a `C` the answer is `'P'`,
+    and when it is a subclass the parent is `C` or a class under it, so
+    the answer is `'P'|class-string<C>`. Without a parent it is
+    `class-string<C>|false`, with `false` only when the value is exactly a
+    `C`. The string-argument
     form reads the named class the same way.
   - `array_slice` (line 482). Non-emptiness survives only for a literal
     offset of `0`, or a negative literal whose magnitude is at most the
@@ -3639,9 +3641,13 @@ through `check-project`.
   checker runs `cargo test --test fixtures` filtered by the fixture
   directories whose names match the changed area (`array_merge`,
   `shapes`, …), or the whole fixture target when the change is in shared
-  type code. `xtask` can offer that as `xtask fixtures-for <path>`,
-  mapping a source file to the fixture directories that exercise it by
-  the fixture names that mention its functions. Done is the workflow
+  type code. The mapping comes from coverage, not names:
+  `xtask fixtures-map` runs the fixture target once under
+  `cargo llvm-cov` with one profile per fixture, and records which
+  source functions each fixture executes into a checked-in map,
+  regenerated at each V1 checkpoint. `xtask fixtures-for <path>` reads
+  the map and runs every fixture that executes a function in the
+  changed file, or a function the diff touches. Done is the workflow
   note in the contributor docs and the xtask helper.
 
 - [ ] **F87. A discarded pass still leaves some records behind**
