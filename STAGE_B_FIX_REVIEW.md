@@ -778,6 +778,40 @@ through `check-project`.
   tables fold case; member sets were left out. Done: member-name sets and
   lookups fold case as PHP does.
 
+  Design: the sets are one symptom. A probe while designing shows that
+  resolution itself is case-sensitive between a class and its parent.
+  For `class P { function foo(): int }` and `final class C extends P {
+  function FOO(): string }`, `(new C())->foo()` is typed `int`, P's
+  method, where PHP runs C's (and rejects the pair as incompatible,
+  which prs does report). `method_owner_by_class` is keyed by declared
+  spelling, so `foo` and `FOO` are two entries. `lookup_method`
+  (`hierarchy.rs:377`) finds the exact one first and falls back to a
+  case-insensitive scan only when nothing matches.
+
+  So a class's methods are keyed the way `registry::name_table` already
+  keys classes and functions, ASCII-lowercased, with the declared
+  spelling kept beside the value:
+
+  - `ClassReflection::methods` becomes a `NameTable<FunctionReflection>`,
+    whose `get`/`contains_key` fold and whose `iter` yields declared
+    names.
+  - `method_owner_by_class`'s inner maps fold, so a subclass's `FOO`
+    replaces the parent's `foo` as PHP's override does, and
+    `lookup_method`'s fallback scan goes.
+  - `abstract_methods`, `final_methods`, `static_methods` and
+    `final_methods_by_phpdoc` become a `FoldedNameSet` (a set of
+    `name_table::Folded`), so `contains` folds.
+  - Property and constant tables stay case-sensitive, as PHP's are.
+
+  The 56 `methods().get`/`contains_key` call sites then fold with no
+  edit. `method.nameCase` compares the call's text with the declared
+  name the table returns (`lookup_method_canonical_name`), as it does
+  now. F55's `__toString` lookup and `ImpurePoints`' `__construct` (F22)
+  fold by the same change. Fixtures: the probe's `foo()` is typed
+  `string`; `RUN()` implementing `abstract run()` reports only
+  `method.nameCase`; `bar()` overriding `final Bar()` reports
+  `method.parentMethodFinal`, and so does `final __Construct`.
+
 - [ ] **F38. A template in `@phpstan-assert` narrows to the bare
   placeholder.** `apply_assert_infos` (`narrowing/assertions.rs`)
   narrows the target to `info.ty` without substituting the call's
