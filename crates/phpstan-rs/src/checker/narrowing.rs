@@ -1,14 +1,13 @@
 use crate::checker::expr::type_definitely_excludes_null;
-use crate::checker::{Checker, Discriminant, Locals, build_matched_shape, literal_string_key};
-use crate::regex_groups;
+use crate::checker::{Checker, Discriminant, Locals, literal_string_key};
 use crate::registry::{AssertTarget, FunctionReflection};
 use syntax::ast::*;
 use syntax::token::Span;
 use types::{AccessoryKind, Type};
 mod assertions;
 mod predicates;
+mod preg;
 
-use predicates::preg_match_condition;
 pub(crate) use predicates::{
     is_real_variable_key, key_depends_on, narrowing_key, narrowing_type_for_predicate,
     propagate_container_field_facts, purge_stale_narrowing_for,
@@ -48,7 +47,7 @@ fn count_call(e: &Expr) -> Option<(&Expr, Option<&Expr>)> {
 /// Flips a comparison operator to the operand-swapped equivalent - `0 <
 /// count($x)` narrows the same way `count($x) > 0` already does, once
 /// the operator itself is mirrored to match.
-fn mirror_comparison(op: &BinOp) -> BinOp {
+pub(super) fn mirror_comparison(op: &BinOp) -> BinOp {
     match op {
         BinOp::Lt => BinOp::Gt,
         BinOp::Gt => BinOp::Lt,
@@ -584,6 +583,21 @@ fn condition_alias_targets(rhs: &Expr) -> Option<Vec<String>> {
                 l,
                 r,
             ) => Some(vec![narrowing_key(l).or_else(|| narrowing_key(r))?]),
+            // A stored preg call is replayed with its operands' later
+            // values, so rebinding any of them drops the alias.
+            ExprKind::Call(..) if let Some(call) = crate::checker::preg_call(rhs) => {
+                let mut targets = vec![narrowing_key(call.matches?)?];
+                targets.extend(call.subject.and_then(narrowing_key));
+                for operand in [Some(call.pattern), call.offset].into_iter().flatten() {
+                    if !matches!(
+                        operand.peeled().kind,
+                        ExprKind::Literal(_) | ExprKind::Name(_) | ExprKind::ClassConstFetch(..)
+                    ) {
+                        targets.push(narrowing_key(operand)?);
+                    }
+                }
+                Some(targets)
+            }
             ExprKind::Call(_, args) => match args.as_slice() {
                 [single_arg] => Some(vec![narrowing_key(&single_arg.value)?]),
                 _ => None,
@@ -627,33 +641,10 @@ impl<'a> Checker<'a> {
     }
 
     fn apply_narrowing_unguarded(&self, cond: &Expr, locals: &mut Locals, branch_true: bool) {
-        // `preg_match(...)` (bare, or compared against a literal 0/1)
-        // doesn't otherwise match any existing narrowing shape below,
-        // so this doesn't shadow anything: the `Binary(op, l, r)` arm
-        // further down does also run afterward for a comparison form,
-        // dispatching to `apply_equality_narrowing`, but that function's
-        // own `narrowing_key(l)`/`narrowing_key(r)` calls have no arm for
-        // `ExprKind::Call` at all, so it's a genuine no-op for this
-        // shape, not a silent double-narrowing.
-        if let Some((pattern_arg, matches_arg, true_means_matched)) = preg_match_condition(cond)
-            && let ExprKind::Variable(matches_name) = &matches_arg.kind
-            && let Some(pattern_str) = self.constant_string_value(pattern_arg, locals)
-            && let Some(parsed) = regex_groups::parse_capture_groups(&pattern_str)
-        {
-            let narrowed = if branch_true == true_means_matched {
-                build_matched_shape(
-                    &parsed.groups,
-                    &parsed.alternation_branch_counts,
-                    &parsed.alternation_wrapped_in_optional_quantifier,
-                    &Type::string(),
-                    false,
-                )
-            } else {
-                Type::array_shape(types::Shape::sealed(Vec::new()))
-            };
-            purge_stale_narrowing_for(locals, matches_name);
-            locals.insert(matches_name.to_string(), narrowed);
-        }
+        // A preg call's result, however it's compared, narrows its
+        // `$matches` and subject; the arms below still narrow a variable
+        // the call was stored in.
+        self.apply_preg_result_narrowing(cond, locals, branch_true);
         // `function_exists('foo')`'s own true branch proves `foo` is
         // callable for the rest of that branch - a project-specific
         // adaptation (this project's own registry, unlike real PHPStan's

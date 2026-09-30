@@ -932,7 +932,7 @@ pub(crate) use control_flow::{
     merge_scopes, stmt_contains_break, stmt_contains_escaping_exit, type_allows_generator_return,
 };
 pub(crate) use duplicates::class_kind_identifier;
-pub(crate) use expr::build_matched_shape;
+pub(crate) use expr::{PregCall, preg_call, preg_result_outcome, preg_result_type};
 pub(crate) use internal_usage::class_type_word;
 pub(crate) use missing_typehint::{ITERABLE_GENERIC_CLASS_NAMES, class_kind_word};
 pub(crate) use named_argument_renames::NamedArgumentCallFacts;

@@ -50,6 +50,10 @@ impl<'a> Checker<'a> {
             // the argument: `strlen()` can never be negative. Real
             // PHPStan additionally refines a literal or known-non-empty-
             // string argument's exact/minimum length; not modeled here.
+            // A match count, or `false` when the call fails.
+            "preg_match" | "preg_match_all" => {
+                return crate::checker::preg_result_type(name == "preg_match_all");
+            }
             "strlen" if args.len() == 1 => {
                 return Type::int_range(Some(0), None);
             }

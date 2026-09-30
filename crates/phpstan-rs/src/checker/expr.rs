@@ -11,14 +11,13 @@ use crate::checker::{
 };
 use crate::checker::{InferKey, InferQuestion};
 use crate::pest_config;
-use crate::regex_groups;
 use crate::registry::FunctionReflection;
 use diagnostics::DiagnosticBuilder;
 use syntax::ast::*;
 use syntax::token::Span;
 use syntax::visit::{body_contains_yield, expr_contains_yield};
 use types::Name;
-use types::{self, Shape, Type};
+use types::{self, Type};
 
 mod array_ops;
 mod builtin_calls;
@@ -36,11 +35,7 @@ pub(crate) use ranges::{NullProbeVerdictFn, empty_probe_verdict, null_probe_verd
 // `builtin_calls.rs`'s `json_encode`/`filter_var` return-type narrowing
 // uses.
 pub(crate) use builtin_calls::contains_flag_name;
-pub(crate) use preg_shapes::build_matched_shape;
-use preg_shapes::{
-    PregFlags, parse_preg_flags, preg_leaf_type, preg_match_all_pattern_order_shape,
-    preg_match_matches_shape,
-};
+pub(crate) use preg_shapes::{PregCall, preg_call, preg_result_outcome, preg_result_type};
 
 /// A bare `ExprKind::Name` with no registered global constant (an
 /// unresolved name stays `Mixed`, e.g. `PHP_EOL`/`M_PI`) - except
@@ -1021,113 +1016,27 @@ impl<'a> Checker<'a> {
                     // unbounded.
                     self.current_function_has_unannotated_call = true;
                 }
-                // `preg_match`'s by-ref `$matches` shape, including
-                // `PREG_OFFSET_CAPTURE`/`PREG_UNMATCHED_AS_NULL`
-                // recognition - `parse_preg_flags` bails (`None`) on any
-                // other flag, leaving this whole check inert for it.
-                // Overrides the generic widening
-                // `predefine_byref_or_unknown_args` already did above,
-                // rather than replacing it - anything outside this scope
-                // keeps that call's Mixed-or-widened fallback unchanged.
-                // Placed after `check_args` above, not right after
-                // `predefine_byref_or_unknown_args`: `check_args` checks
-                // whether the argument `$matches` is compatible with the
-                // declared `?array<string> $matches` parameter (the
-                // real phpstorm-stubs stub is more specific than the
-                // bare native `?array` hint), and that check needs to see
-                // `$matches`'s own *pre-call* type, not this override's
-                // freshly-computed *post-call* shape - placing this
-                // before `check_args` would make every `$matches` shape
-                // whose leaf type isn't plain `string` (a `[string, int]`
-                // tuple, or `string|null`) spuriously fail that check.
-                if resolved_name == Some("preg_match")
-                    && resolved.get(1).copied().flatten().is_some()
-                    && let Some(pattern_arg) = resolved.first().copied().flatten()
-                    && let Some(matches_arg) = resolved.get(2).copied().flatten()
-                    && let ExprKind::Variable(matches_name) = &matches_arg.kind
-                    && let Some(pattern_str) = self.constant_string_value(pattern_arg, locals)
-                    && let Some(parsed) = regex_groups::parse_capture_groups(&pattern_str)
-                    && let Some(flags) = resolved
-                        .get(3)
-                        .copied()
-                        .flatten()
-                        .map_or(Some(PregFlags::default()), |e| parse_preg_flags(e, false))
+                // `preg_match`'s and `preg_match_all`'s by-ref `$matches`,
+                // for every result the call can give. Placed after
+                // `check_args`, which checks `$matches`'s pre-call type
+                // against the `?array<string>` parameter.
+                if matches!(resolved_name, Some("preg_match" | "preg_match_all"))
+                    && let Some(call) = preg_call(e)
+                    && call.subject.is_some()
+                    && let Some(matches_arg) = call.matches
+                    && let Some(outcome) = preg_result_outcome(&preg_result_type(call.all))
+                    && let Some(shape) = self.preg_matches_type(&call, outcome, locals)
                 {
-                    let leaf = preg_leaf_type(flags.offset_capture);
-                    let matched = build_matched_shape(
-                        &parsed.groups,
-                        &parsed.alternation_branch_counts,
-                        &parsed.alternation_wrapped_in_optional_quantifier,
-                        &leaf,
-                        flags.unmatched_as_null,
-                    );
-                    // Unioned with an empty shape for the real
-                    // `0`-return/no-match case (real PHP genuinely sets
-                    // `$matches = []` then) - sound on its own only
-                    // because `check_offset_existence`/`infer_expr`'s
-                    // `Index` arm are `Union`-aware, and precision for the
-                    // common `if (preg_match(...)) { use $matches }`
-                    // idiom is recovered by `apply_narrowing`'s
-                    // `preg_match_condition` recognizer, not by this
-                    // unconditional type itself.
-                    let shape = Type::union(matched, Type::array_shape(Shape::sealed(Vec::new())));
-                    purge_stale_narrowing_for(locals, matches_name);
-                    // `$matches` is very commonly undeclared before this
-                    // exact call - its real first appearance, so
-                    // `declare` when there's nothing here yet to preserve
-                    // (an already-existing `$matches` keeps its own real
-                    // provenance instead).
-                    if locals.contains_key(matches_name) {
-                        locals.insert(matches_name.to_string(), shape);
-                    } else {
-                        locals.declare(matches_name.to_string(), shape, matches_arg.span);
-                    }
-                }
-                // `preg_match_all`'s by-ref `$matches` shape - a sibling
-                // special case to `preg_match`'s above, sharing the same
-                // pattern-parsing/flag-parsing/leaf-type machinery but
-                // building a structurally different shape
-                // (`PREG_PATTERN_ORDER`, the real default, groups results
-                // by capture group across every match; `PREG_SET_ORDER`
-                // groups them by match, reusing `preg_match_matches_shape`
-                // unchanged for each entry).
-                if resolved_name == Some("preg_match_all")
-                    && resolved.get(1).copied().flatten().is_some()
-                    && let Some(pattern_arg) = resolved.first().copied().flatten()
-                    && let Some(matches_arg) = resolved.get(2).copied().flatten()
-                    && let ExprKind::Variable(matches_name) = &matches_arg.kind
-                    && let Some(pattern_str) = self.constant_string_value(pattern_arg, locals)
-                    && let Some(parsed) = regex_groups::parse_capture_groups(&pattern_str)
-                    && let Some(flags) = resolved
-                        .get(3)
-                        .copied()
-                        .flatten()
-                        .map_or(Some(PregFlags::default()), |e| parse_preg_flags(e, true))
-                {
-                    let leaf = preg_leaf_type(flags.offset_capture);
-                    let shape = if flags.set_order {
-                        Type::array(
-                            Type::unknown_array_key(),
-                            preg_match_matches_shape(
-                                &parsed.groups,
-                                &leaf,
-                                flags.unmatched_as_null,
-                            ),
-                        )
-                    } else {
-                        preg_match_all_pattern_order_shape(
-                            &parsed.groups,
-                            &leaf,
-                            flags.unmatched_as_null,
-                        )
-                    };
-                    purge_stale_narrowing_for(locals, matches_name);
-                    // Same reasoning as `preg_match`'s identical treatment
-                    // above.
-                    if locals.contains_key(matches_name) {
-                        locals.insert(matches_name.to_string(), shape);
-                    } else {
-                        locals.declare(matches_name.to_string(), shape, matches_arg.span);
+                    if let ExprKind::Variable(matches_name) = &matches_arg.kind {
+                        purge_stale_narrowing_for(locals, matches_name);
+                        // `$matches` is often first bound by this call.
+                        if locals.contains_key(matches_name) {
+                            locals.insert(matches_name.to_string(), shape);
+                        } else {
+                            locals.declare(matches_name.to_string(), shape, matches_arg.span);
+                        }
+                    } else if narrowing_key(matches_arg).is_some() {
+                        self.bind_assignment_target(matches_arg, shape, locals);
                     }
                 }
                 // `proc_open()`'s by-ref `$pipes` out-parameter (its 3rd

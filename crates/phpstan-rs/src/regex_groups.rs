@@ -136,6 +136,18 @@ pub(crate) struct ParsedPattern {
     /// bare `{0: subject}` possibility even though every branch already
     /// has a group.
     pub alternation_wrapped_in_optional_quantifier: Vec<u32>,
+    /// The fewest bytes a match of the whole pattern has.
+    pub min_len: u64,
+    /// Whether a match of the whole pattern holds only ASCII digits.
+    pub digits_only: bool,
+    /// Whether a match is the whole subject, but for a final newline when
+    /// `final_newline` is set: the pattern starts with `^` or `\A`, ends
+    /// with `$`, `\z` or `\Z`, has no top-level `|`, and no `m` modifier.
+    pub fully_anchored: bool,
+    /// Whether the end anchor also matches before a final newline (`$`
+    /// without the `D` modifier, or `\Z`), so the subject may hold one
+    /// after the match.
+    pub final_newline: bool,
 }
 
 /// Parses a PHP PCRE pattern literal's own delimiters/modifiers and
@@ -156,8 +168,16 @@ pub(crate) fn parse_capture_groups(pattern_literal: &str) -> Option<ParsedPatter
     if modifiers.contains('J') {
         return None;
     }
-    let mut scanner = Scanner::new(body, modifiers.contains('i'), modifiers.contains('x'));
-    scanner.scan_alternation()?;
+    let mut scanner = Scanner::new(
+        body,
+        modifiers.contains('i'),
+        modifiers.contains('x'),
+        modifiers.contains('u') || body.contains("(*UCP)"),
+    );
+    let whole = scanner.scan_alternation()?;
+    let anchor = (!modifiers.contains('m'))
+        .then(|| whole_subject_anchor(body, modifiers.contains('D')))
+        .flatten();
     if scanner.remaining_input() {
         // Leftover, unconsumed text - a stray unmatched `)`, or a
         // construct the atom dispatch below didn't recognize as ending
@@ -199,7 +219,49 @@ pub(crate) fn parse_capture_groups(pattern_literal: &str) -> Option<ParsedPatter
         alternation_branch_counts: scanner.alternation_branch_counts,
         alternation_wrapped_in_optional_quantifier: scanner
             .alternation_wrapped_in_optional_quantifier,
+        min_len: whole.min_len,
+        digits_only: whole.digits_only,
+        fully_anchored: anchor.is_some(),
+        final_newline: anchor.unwrap_or(true),
     })
+}
+
+/// When `body` starts with `^` or `\A`, ends with an unescaped `$` or a
+/// `\z` / `\Z` escape, and has no `|` outside a group or character class:
+/// whether its end also matches before a final newline (`$` without the
+/// `D` modifier, or `\Z`).
+fn whole_subject_anchor(body: &str, dollar_end_only: bool) -> Option<bool> {
+    if !(body.starts_with('^') || body.starts_with("\\A")) {
+        return None;
+    }
+    let bytes = body.as_bytes();
+    let (mut depth, mut in_class) = (0i32, false);
+    let mut last: Option<(u8, bool)> = None;
+    let mut i = 0;
+    while i < bytes.len() {
+        let b = bytes[i];
+        if b == b'\\' {
+            last = bytes.get(i + 1).map(|&c| (c, true));
+            i += 2;
+            continue;
+        }
+        match b {
+            b'[' if !in_class => in_class = true,
+            b']' if in_class => in_class = false,
+            b'(' if !in_class => depth += 1,
+            b')' if !in_class => depth -= 1,
+            b'|' if !in_class && depth == 0 => return None,
+            _ => {}
+        }
+        last = Some((b, in_class));
+        i += 1;
+    }
+    match last? {
+        (b'$', false) => Some(!dollar_end_only),
+        (b'z', true) => Some(false),
+        (b'Z', true) => Some(true),
+        _ => None,
+    }
 }
 
 /// Splits a PHP PCRE pattern literal into its raw body and modifier
@@ -431,10 +493,14 @@ struct Scanner {
     /// (`scan_group_inner`'s own `"imsxuJU-"` branch) rather than
     /// dynamically toggling this mid-scan.
     free_spacing: bool,
+    /// Whether `\d` and `[:digit:]` match every Unicode decimal digit, as
+    /// PHP's `u` modifier (which turns on PCRE2's UCP) or a `(*UCP)` verb
+    /// makes them, so they aren't ASCII digits.
+    unicode_digits: bool,
 }
 
 impl Scanner {
-    fn new(body: &str, case_insensitive: bool, free_spacing: bool) -> Self {
+    fn new(body: &str, case_insensitive: bool, free_spacing: bool, unicode_digits: bool) -> Self {
         Scanner {
             chars: body.chars().collect(),
             pos: 0,
@@ -447,6 +513,7 @@ impl Scanner {
             alternation_branch_counts: Vec::new(),
             alternation_wrapped_in_optional_quantifier: Vec::new(),
             free_spacing,
+            unicode_digits,
         }
     }
 
@@ -946,7 +1013,7 @@ impl Scanner {
             match self.chars.get(i) {
                 None => return false, // unterminated
                 Some('\\') => {
-                    if self.chars.get(i + 1) != Some(&'d') {
+                    if self.unicode_digits || self.chars.get(i + 1) != Some(&'d') {
                         return false;
                     }
                     i += 2;
@@ -964,7 +1031,7 @@ impl Scanner {
                         }
                     }
                     let name: String = self.chars[name_start..j].iter().collect();
-                    if name != "digit" {
+                    if self.unicode_digits || name != "digit" {
                         return false;
                     }
                     i = j + 2;
@@ -1098,6 +1165,7 @@ impl Scanner {
             Some(c) => {
                 self.pos += 1;
                 let (min_len, digits_only) = escape_class_info(c).unwrap_or((0, false));
+                let digits_only = digits_only && !(c == 'd' && self.unicode_digits);
                 Some(AtomResult {
                     handles: Vec::new(),
                     literal_values: None,

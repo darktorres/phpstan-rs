@@ -168,7 +168,7 @@ pub(crate) fn preg_match_matches_shape(
 /// otherwise. `preg_match_all` never calls this - it needs none of this,
 /// since both its own modes already produce a single, unconditional,
 /// always-correct shape for every match count.
-pub(crate) fn build_matched_shape(
+pub(super) fn build_matched_shape(
     groups: &[regex_groups::RegexCaptureGroup],
     alternation_branch_counts: &[(u32, usize)],
     alternation_wrapped_in_optional_quantifier: &[u32],
@@ -336,11 +336,13 @@ pub(crate) fn build_matched_shape(
 /// element. So no field is ever `optional` at the top level here, and a
 /// group's own `optional` flag only ever affects the *element* type
 /// nested inside its array (when combined with `PREG_UNMATCHED_AS_NULL`),
-/// never whether the top-level key itself is present.
+/// never whether the top-level key itself is present. `sized` is applied
+/// to each group's list, as the match count bounds it.
 pub(super) fn preg_match_all_pattern_order_shape(
     groups: &[regex_groups::RegexCaptureGroup],
     leaf: &Type,
     unmatched_as_null: bool,
+    sized: impl Fn(Type) -> Type,
 ) -> Type {
     let element_ty = |base: Type, optional: bool| {
         if optional && unmatched_as_null {
@@ -349,16 +351,7 @@ pub(super) fn preg_match_all_pattern_order_shape(
             base
         }
     };
-    // Every one of these per-key match arrays is itself always real,
-    // sequentially-int-keyed (one slot per match, 0..match_count-1) -
-    // verified via dumpType() that real PHPStan types each as a genuine
-    // `list<T>`, not merely `array<T>`.
-    let list_of = |elem: Type| {
-        Type::intersection_of(vec![
-            Type::array(Type::unknown_array_key(), elem),
-            Type::accessory(AccessoryKind::ArrayList),
-        ])
-    };
+    let list_of = |elem: Type| sized(list_of(elem));
     let mut fields = vec![(
         "0".to_string(),
         list_of(element_ty(leaf.clone(), false)),
@@ -429,4 +422,192 @@ pub(super) fn parse_preg_flags(e: &Expr, allow_order: bool) -> Option<PregFlags>
         return None;
     }
     Some(flags)
+}
+
+/// A `preg_match` or `preg_match_all` call, its arguments resolved by
+/// parameter name.
+pub(crate) struct PregCall<'e> {
+    pub(crate) all: bool,
+    pub(crate) pattern: &'e Expr,
+    pub(crate) subject: Option<&'e Expr>,
+    pub(crate) matches: Option<&'e Expr>,
+    pub(crate) flags: Option<&'e Expr>,
+    pub(crate) offset: Option<&'e Expr>,
+}
+
+/// What a preg call's result, as narrowed, says happened: the match
+/// counts it allows (`None` when it can't be a count), and whether it
+/// may be `false`, a failed call.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct PregOutcome {
+    pub(crate) count: Option<(i64, Option<i64>)>,
+    pub(crate) may_fail: bool,
+}
+
+impl PregOutcome {
+    /// Whether the call surely found a match.
+    pub(crate) fn matched(self) -> bool {
+        !self.may_fail && self.count.is_some_and(|(lo, _)| lo >= 1)
+    }
+}
+
+/// `e` as a `preg_match` / `preg_match_all` call. The parameters are
+/// PHP's own (`pattern`, `subject`, `matches`, `flags`, `offset`), so
+/// named arguments resolve without the registry; a spread gives `None`.
+pub(crate) fn preg_call(e: &Expr) -> Option<PregCall<'_>> {
+    const PARAMS: [&str; 5] = ["pattern", "subject", "matches", "flags", "offset"];
+    let ExprKind::Call(callee, args) = &e.peeled().kind else {
+        return None;
+    };
+    let ExprKind::Name(name) = &callee.kind else {
+        return None;
+    };
+    let name = name.trim_start_matches('\\');
+    let all = if name.eq_ignore_ascii_case("preg_match") {
+        false
+    } else if name.eq_ignore_ascii_case("preg_match_all") {
+        true
+    } else {
+        return None;
+    };
+    let mut resolved: [Option<&Expr>; 5] = [None; 5];
+    let mut position = 0;
+    for arg in args {
+        if arg.spread {
+            return None;
+        }
+        let index = match &arg.name {
+            Some(n) => PARAMS.iter().position(|p| *p == &*n.name)?,
+            None => {
+                position += 1;
+                position - 1
+            }
+        };
+        *resolved.get_mut(index)? = Some(&arg.value);
+    }
+    Some(PregCall {
+        all,
+        pattern: resolved[0]?,
+        subject: resolved[1],
+        matches: resolved[2],
+        flags: resolved[3],
+        offset: resolved[4],
+    })
+}
+
+/// The result type of a preg call: `0|1|false` for `preg_match`, the
+/// match count or `false` for `preg_match_all`.
+pub(crate) fn preg_result_type(all: bool) -> Type {
+    let count = if all {
+        Type::int_range(Some(0), None)
+    } else {
+        Type::union(Type::int_literal(0), Type::int_literal(1))
+    };
+    Type::union(count, Type::bool_literal(false))
+}
+
+/// The outcome `result`, a preg call's result type as narrowed, allows.
+/// `None` when it holds anything but ints and `false`, or nothing.
+pub(crate) fn preg_result_outcome(result: &Type) -> Option<PregOutcome> {
+    let mut count: Option<(i64, Option<i64>)> = None;
+    let mut may_fail = false;
+    for member in result.union_members().iter() {
+        if *member == Type::bool_literal(false) {
+            may_fail = true;
+            continue;
+        }
+        if !member.is_int().yes() {
+            return None;
+        }
+        let (lo, hi) = member.int_bounds()?;
+        let lo = lo.unwrap_or(0).max(0);
+        count = Some(match count {
+            None => (lo, hi),
+            Some((l, h)) => (l.min(lo), h.zip(hi).map(|(a, b)| a.max(b))),
+        });
+    }
+    (count.is_some() || may_fail).then_some(PregOutcome { count, may_fail })
+}
+
+impl crate::checker::Checker<'_> {
+    /// The type `call` leaves in `$matches` when its result is within
+    /// `outcome`. A compiling pattern (one `parse_capture_groups`
+    /// reads) always fills `$matches`: `preg_match` with the match or
+    /// `[]`, `preg_match_all` with one list per group (or one per match
+    /// under `PREG_SET_ORDER`) of the count's size, or of any size when
+    /// it failed part way, and `[]` when an offset argument is out of
+    /// range. A pattern that doesn't compile leaves `$matches` unchanged,
+    /// and constant flags are needed, so either gives `None`.
+    pub(crate) fn preg_matches_type(
+        &self,
+        call: &PregCall<'_>,
+        outcome: PregOutcome,
+        locals: &crate::checker::Locals,
+    ) -> Option<Type> {
+        let pattern = self.constant_string_value(call.pattern, locals)?;
+        let parsed = regex_groups::parse_capture_groups(&pattern)?;
+        let flags = match call.flags {
+            Some(e) => parse_preg_flags(e, call.all)?,
+            None => PregFlags::default(),
+        };
+        let leaf = preg_leaf_type(flags.offset_capture);
+        let empty = || Type::array_shape(Shape::sealed(Vec::new()));
+        let mut parts = Vec::new();
+        if !call.all {
+            if outcome
+                .count
+                .is_some_and(|(_, hi)| hi.is_none_or(|h| h >= 1))
+            {
+                parts.push(build_matched_shape(
+                    &parsed.groups,
+                    &parsed.alternation_branch_counts,
+                    &parsed.alternation_wrapped_in_optional_quantifier,
+                    &leaf,
+                    flags.unmatched_as_null,
+                ));
+            }
+            if outcome.may_fail || outcome.count.is_some_and(|(lo, _)| lo <= 0) {
+                parts.push(empty());
+            }
+            return Some(Type::union_of(parts));
+        }
+        let lists = |count: Option<(i64, Option<i64>)>| {
+            let sized = |list: Type| match count {
+                Some((lo, hi)) => self.relation().narrow_count(&list, lo, hi),
+                None => list,
+            };
+            if flags.set_order {
+                sized(list_of(preg_match_matches_shape(
+                    &parsed.groups,
+                    &leaf,
+                    flags.unmatched_as_null,
+                )))
+            } else {
+                preg_match_all_pattern_order_shape(
+                    &parsed.groups,
+                    &leaf,
+                    flags.unmatched_as_null,
+                    sized,
+                )
+            }
+        };
+        if let Some(count) = outcome.count {
+            parts.push(lists(Some(count)));
+        }
+        if outcome.may_fail {
+            parts.push(lists(None));
+            if call.offset.is_some() {
+                parts.push(empty());
+            }
+        }
+        Some(Type::union_of(parts))
+    }
+}
+
+/// `list<elem>`: one slot per match, keyed `0..count`.
+fn list_of(elem: Type) -> Type {
+    Type::intersection_of(vec![
+        Type::array(Type::unknown_array_key(), elem),
+        Type::accessory(AccessoryKind::ArrayList),
+    ])
 }
