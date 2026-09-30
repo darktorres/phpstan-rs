@@ -129,6 +129,14 @@ impl Relation<'_> {
                         )
                     }
                 }
+                // `bool` is `true|false` for a union to hold.
+                (Repr::Union(_) | Repr::BenevolentUnion(_), Repr::Bool) => {
+                    TrinaryLogic::extreme_identity(
+                        [Type::bool_literal(true), Type::bool_literal(false)]
+                            .iter()
+                            .map(|b| self.is_super_type_of(sup, b)),
+                    )
+                }
                 (Repr::Union(members) | Repr::BenevolentUnion(members), _) => {
                     let by_member = TrinaryLogic::max_min(
                         members.iter().map(|m| self.is_super_type_of(m, sub)),

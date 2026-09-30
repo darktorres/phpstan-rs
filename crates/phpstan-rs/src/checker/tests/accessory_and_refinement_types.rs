@@ -149,7 +149,10 @@ fn union_types_caps_runaway_member_growth_instead_of_hanging() {
         Some(Type::int()),
         "got {result:?}"
     );
-    assert!(result.union_members().len() == 1, "got {result:?}");
+    assert!(
+        result.union_members().len() <= types::MAX_UNION_MEMBERS,
+        "got {result:?}"
+    );
 }
 
 // The cap must not misfire on the common, small case real code

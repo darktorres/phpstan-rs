@@ -762,7 +762,7 @@ fn a_method_call_target_classifies_as_unknown_not_misclassified() {
 }
 
 #[test]
-fn a_template_equality_form_is_never_resolved() {
+fn an_equality_assertion_is_recorded_with_its_form() {
     let r = build_registry(
         r#"<?php
             class Foo {
@@ -772,5 +772,6 @@ fn a_template_equality_form_is_never_resolved() {
         "#,
     );
     let sig = &r.classes["Foo"].methods["f"];
-    assert!(sig.assert.is_empty());
+    assert_eq!(sig.assert.len(), 1);
+    assert!(sig.assert[0].equality);
 }
