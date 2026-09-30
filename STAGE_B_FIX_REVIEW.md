@@ -2343,8 +2343,9 @@ through `check-project`.
     The operands that fail on every version (an array with `-`, an object
     without number casting) are unaffected. The leading-numeric case
     (`'5 apples' + 1` is `6` with a warning on 8.5, checked with `php`)
-    isn't an error on any version, which F34's doc fix states. Whether it
-    gets a separate warning-level report is not part of this.
+    isn't an error on any version. F34 types it as its leading number
+    and gives it its own warning report, `binaryOp.nonNumericValue`,
+    which applies on every version, since PHP 7 warns the same way.
   - The pipe's callable union. The same resolver as F9's `pipe_callee`,
     which resolves each member of a union of names and requires all of them
     to agree before the by-reference check reports. It is one change with F9
