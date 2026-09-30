@@ -3136,13 +3136,11 @@ through `check-project`.
     config) run every case on shared parameters, so `$s++` on line 12 turns
     `$s` into `int|float|string` before `$s--` (line 13) and `$i **= $s`
     (line 16) read it. Each case gets its own fresh parameter: `string $s1`
-    for `$s1++`, `string $s2` for `$s2--`, `string $s3` for `$i **= $s3`,
-    and `?int $maybe2` for `$maybe2++`, since line 14 has the same coupling
-    through `$maybe * 2` (no write there, but the pattern should not recur).
-    The expectations then read "post-decrement, string given", and the `**=`
-    operand report comes back with `string` on the right side. They are
-    regenerated and compared by hand with the pre-`15b5b494` expectations
-    for those lines.
+    for `$s1++`, `string $s2` for `$s2--`, `string $s3` for and
+    `$i **= $s3`. The expectations then read "post-decrement, string given",
+    and the `**=` operand report comes back with `string` on the right side.
+    They are regenerated and compared by hand with the pre-`15b5b494`
+    expectations for those lines.
   - `43758de2`'s default-value message prints the bound-resolved type
     (`array<(int|string), int>`), because the check compares against the
     resolved type and prints what it compared. The comparison stays against
