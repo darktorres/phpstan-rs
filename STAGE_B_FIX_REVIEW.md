@@ -3172,6 +3172,46 @@ through `check-project`.
 
   Done: each is decided and fixed or ledgered.
 
+  Design, one decision per bullet:
+
+  - The infer cache (`2750baf2`/`1b7022ad`). The key gains a context epoch:
+    `Checker` bumps a counter whenever the state `infer_expr` reads changes
+    (the current class or function, the `$this` binding, the facts-only and
+    member-reference flags), and the key includes it. The assumption stops
+    depending on the "reset at each outermost `check_expr`" discipline. The
+    cross-check the finding proposes is added too: under
+    `cfg(debug_assertions)` and an environment switch
+    (`PHPSTAN_RS_CHECK_INFER_CACHE=1`, off by default so debug test runs
+    keep their speed), a hit recomputes and `debug_assert_eq!`s. The
+    fixtures run once with it on in the gate.
+  - The anonymous class name (`027811e4`).
+    - The name embeds the path relative to the project root, which `Session`
+      already knows. An LSP URI is made relative the same way. A message
+      then doesn't depend on how the argument was spelled or on the LSP's
+      absolute paths.
+    - `anonymous_class_type`'s silent `mixed` fallback becomes a
+      `debug_assert!`, and naming moves into the one parse entry point
+      (`Session::load`/`read_and_parse_file`, and the LSP's reparse). No AST
+      reaches the checker unnamed, so the fallback is unreachable.
+  - The memo (`a25d77c6`, `intern.rs:436`). At `MEMO_CAPACITY`, `memoized`
+    clears all 65,536 entries. It becomes two generations: a full current
+    map is kept as the previous one, and the one before that is dropped. A
+    lookup checks current, then previous, promoting a hit, so a hot working
+    set survives the rollover. The interner's dead-weak buckets are swept
+    incrementally: an insert that probes a bucket drops its dead entries,
+    and every N-th insert sweeps one shard, so reclaiming no longer waits
+    for the shard to double.
+  - Lossy columns (`ba7ffe83`, `lexer.rs:189`). `relative_line_col_at`
+    counts characters from the nearest mark. A lossy decoding counts an
+    invalid sequence as one character only when read whole, so a mark inside
+    one gives a different column than counting from the line start. A mark
+    is inserted only at a boundary of the line's lossy decoding: the
+    position is walked with `utf8_chunks` from the previous mark, which is
+    always a boundary. A position strictly inside an invalid chunk gets the
+    column of that chunk's replacement character and is not cached. A lexer
+    test puts tokens after, between and inside invalid runs and compares
+    every column with a count from the line start.
+
 - [ ] **F58. A hover or definition request clones the enclosing scope
   once per variable in the file** (`ae18f21d`). `lsp::navigation`'s
   `record_var_read`, `record_var_self`, `instance` and
