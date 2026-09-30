@@ -3196,8 +3196,11 @@ through `check-project`.
     It takes a mode: `Surely` for the allow gates (every value has the
     flag), and `Possibly` for the disallow gate (some value has it). The
     `allow_except_param_flags` sites pass `Possibly`. A non-constant
-    argument stays "no match", as the upstream extension treats it, and the
-    doc says so.
+    argument's flags are unknown, so under `Possibly` it may carry the
+    flag and the call is disallowed, with the message saying the flag
+    "may be set". Under `Surely` it doesn't match, so an allow gate
+    doesn't open for it. Both follow from what the argument can hold,
+    not from the upstream extension's choice.
   - `ImpurePoints` and `new`. `resolve_new` (`purity.rs:563`) looks up
     `__construct` by exact case in the class's own methods and disqualifies
     a class without one. With F35's folded table the case goes. A class with
