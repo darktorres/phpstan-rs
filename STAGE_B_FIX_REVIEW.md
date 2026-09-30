@@ -2734,6 +2734,26 @@ through `check-project`.
   reports it always false. Done: an exact version selects its release,
   and a release counts when any of its patches satisfies the constraint,
   with a fixture.
+
+  Design: `declared_php_versions` (`project/session.rs:225`) samples
+  each release at two patches, `.0` and `.99`, and keeps it when either
+  satisfies the constraint. That misses every constraint that admits
+  only patches in between. An exact `config.platform.php` such as
+  `8.1.12` is the common case, and `>=8.1.5 <8.1.10` would miss too.
+  `composer::constraint` already parses each condition into a version
+  range (`range(min, max)`, `constraint.rs:62`). It gains
+  `pub fn overlaps(constraint, lo, hi_exclusive) -> Option<bool>`, which
+  is true when some `||` alternative's conditions intersect `[lo, hi)`.
+  The alternative's comparison and wildcard conditions intersect as
+  ranges. A `!=` only removes a point, so it can't empty a release's
+  interval of patches. `declared_php_versions` asks
+  `overlaps(constraint, "{v}.0", "{next minor}.0")` for each known
+  release `v`, so a release counts when any patch satisfies, the rule
+  its doc already states. The exact platform version is then just the
+  one-point range, with no special case. Fixtures: `"8.1.12"` selects
+  8.1 and `PHP_VERSION_ID >= 80200` reports always false, as `"8.1"`
+  does; `">=8.1.5 <8.1.10"` selects 8.1; `"^8.1 != 8.1.3"` still selects
+  8.1 through 8.x; unit tests for `overlaps` at the interval edges.
 - [ ] **F75. The duplicate-declaration checks miss case variants and
   split groups** (`project/duplicate_classes.rs`,
   `duplicate_functions.rs`; also before the window). Sites are keyed by
