@@ -7,7 +7,7 @@ use function PHPStan\Testing\assertType;
  */
 function f(array $arr, array $map, int $int): void {
     $arr[$int] = 2;
-    assertType('non-empty-array<2|1>', $arr);
+    assertType('array{a: 1, ...<int, 2>}', $arr);
     $map[] = 5;
     assertType('non-empty-array<int>', $map);
     $x = [];

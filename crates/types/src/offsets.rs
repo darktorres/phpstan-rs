@@ -164,6 +164,57 @@ impl Type {
                         shape.set(ShapeField::new(key, value, false));
                         Some(Type::array_shape(shape))
                     }
+                    // A key that is one of several literal keys may write
+                    // each of them: each keeps its value or takes the
+                    // written one, and one the shape lacks may now exist.
+                    None if let Some(written) = offset
+                        && let Some(keys) = written
+                            .union_members()
+                            .iter()
+                            .map(literal_key)
+                            .collect::<Option<Vec<_>>>() =>
+                    {
+                        let mut shape = Shape::clone(shape);
+                        for key in keys {
+                            let field = match shape.field(&key) {
+                                Some(field) => ShapeField::new(
+                                    key,
+                                    Type::union(field.ty.clone(), value.clone()),
+                                    field.optional,
+                                ),
+                                None => ShapeField::new(key, value.clone(), true),
+                            };
+                            shape.set(field);
+                        }
+                        Some(Type::array_shape(shape))
+                    }
+                    // Any other key may write a field it could equal, or
+                    // another key: the shape stays, open to that key. Only
+                    // a shape a required field keeps non-empty stays one,
+                    // as an open part can't say the write made it non-empty.
+                    None if let Some(written) = offset
+                        && shape.fields.iter().any(|f| !f.optional) =>
+                    {
+                        let written = written.write_key_type();
+                        let relation = crate::Relation::structural();
+                        let mut shape = Shape::clone(shape);
+                        for field in &mut shape.fields {
+                            if !relation
+                                .is_super_type_of(&written, &field.key.to_type())
+                                .no()
+                            {
+                                field.ty = Type::union(field.ty.clone(), value.clone());
+                            }
+                        }
+                        shape.unsealed = Some(Box::new(match shape.unsealed.take() {
+                            Some(tail) => {
+                                (Type::union(tail.0, written), Type::union(tail.1, value))
+                            }
+                            None => (written, value),
+                        }));
+                        shape.next_index = None;
+                        Some(Type::array_shape(shape))
+                    }
                     None => {
                         let widened = shape
                             .types()
