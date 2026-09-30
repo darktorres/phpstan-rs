@@ -705,10 +705,13 @@ through `check-project`.
   - `gettype`'s return (`builtin_calls.rs:2708`) keeps answering `'resource
     (closed)'` for `Closed`, and gives both strings for `Either`.
 
-  A fresh resource from `fopen` stays `Either` (its stub says
-  `resource`). That is sound: the loop and the `if` have no constant
-  verdict, and `fclose($fp); is_resource($fp)` is then `false`, reported
-  as `function.impossibleType` only once the closing table has run.
+  A resource a builtin returns is freshly opened, so a stub's `resource`
+  in return position (`fopen`, `opendir`, `proc_open`, `popen`,
+  `tmpfile`, …) means `Open`. `Either` is for parameters, properties and
+  PHPDoc, where the value may have been closed already. So right after
+  `$fp = fopen(…)` (and its `false` narrowed away), `is_resource($fp)` is
+  `true`, and after `fclose($fp)` it is `false`, reported as
+  `function.impossibleType`.
   Fixtures: `while (is_resource($fp)) { fclose($fp); }` is clean,
   `fclose($fp); if (is_resource($fp))` reports the impossible check, and
   the `operators.rs`/`strict_rules.rs` resource lists still build their
