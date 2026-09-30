@@ -3226,6 +3226,32 @@ through `check-project`.
   matches (a closure passed to `record`, or the check hoisted), and
   `collect_all` builds the probe scope once per scope.
 
+  Design: `Walker::record` (`lsp/navigation.rs:336`) takes a finished
+  `Resolved`, so `record_var_read` (396), `instance` (357),
+  `record_var_self` and `record_receiver_member` pay for `probe_scope()`
+  (329) before the anchor test. That is a boxed clone of the
+  `FunctionDecl`, or a clone of the whole top-level statement list.
+
+  - `record(span, value: impl FnOnce(&Self) -> Resolved)`: the closure runs
+    only when `self.anchor.matches(span)`. The four builders pass closures,
+    and `record_class`'s existing early test becomes the same shape.
+    `Anchor::At` then clones once per request.
+  - `ProbeScope` holds an `Rc`: `Function(Rc<FunctionDecl>)` and
+    `TopLevel(Rc<[Stmt]>)`. `Walker` keeps the current scope's `Rc`, made
+    when it enters a function body (`visit_function_decl`,
+    `visit_method_decl`, closures) and once for the top level. So under
+    `Anchor::All` (`collect_all`) every entry in a scope shares one
+    allocation, and `probe_scope()` is an `Rc::clone`. If the AST's
+    `FunctionDecl` is already shared (`Arc` in the project's AST), the `Rc`
+    wraps that handle instead of a deep clone.
+  - `Resolved`'s consumers read the scope by reference, so only the
+    construction sites change.
+
+  Verification: a unit test counts `probe_scope` constructions for an
+  `At` request on a file with many variable reads (one), and a generated
+  20,000-line script's hover time is recorded before and after with the
+  other scale timings (F18).
+
 - [ ] **F77. A file that doesn't parse is skipped without a report**
   (`Session::load`; also before the window). `read_and_parse_file` gives
   `None` for a parse error and the file is only counted: `0 file(s)
