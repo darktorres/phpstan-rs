@@ -263,6 +263,39 @@ through `check-project`.
   scan feeds only unused-member counting. Done: a closure rebound to an
   object has `$this` of that object's type (or `object`), and the fixture
   expects no `variable.undefined`.
+
+  Design: the checker already seeds `$this` for a literal it can see at
+  the rebind. `check_closure_literal_with_this_and_scope`
+  (`calls/closure_context.rs`) is called for `Closure::bind(<literal>,
+  …)` (`expr.rs` near 2620), `(<literal>)->bindTo(…)` (near 1140),
+  `@param-closure-this` and Pest. Three gaps remain:
+
+  - `(<literal>)->call($obj, …)` has no arm.
+  - The two existing arms compare `method == "bind"` and `**method ==
+    *"bindTo"` by case, where `unused/rebind.rs` folds it.
+  - A closure held in a variable and rebound later, the fixture's shape,
+    is checked at its definition with no `$this`.
+
+  The fix adds the `call` arm, with `$this` the first argument's type
+  and the scope that object's class (PHP's `call` rebinds both), and
+  folds both names' case. For the variable shape, each function-like
+  body gets a pre-scan: the `ClosureVariables`/`Rebinds` walk in
+  `unused/rebind.rs`, made to return a map from a closure variable to
+  its rebind sites (`$v->call(E)`, `$v->bindTo(E, S)`,
+  `Closure::bind($v, E, S)`), not only the scope classes. The checker
+  keeps that map per body, as it keeps the other per-function pre-scans.
+  When the closure literal assigned to such a variable is checked,
+  `$this` is the union of each site's new-this, read syntactically since
+  the site comes later in the flow: `new C(…)` is `C`, a `$var` already
+  assigned at the definition takes that variable's type there, and
+  anything else is `object`. The scope class is the site's scope
+  argument (a class-string literal or `C::class`), or the object's class
+  for `call`. A rebind to `null` (`bindTo(null)`) adds nothing, and a
+  closure that is never rebound keeps reporting `$this` undefined, which
+  is a runtime `Error`. The fixture then expects no
+  `variable.undefined`. New fixtures: `$fn->call(new Foo())` reaching
+  `Foo`'s private method with `$this` typed `Foo`, a literal `->call()`,
+  and `BINDTO` in upper case.
 - [ ] **F7. An unqualified call to a global function from a namespace is
   indexed under the namespaced name.** `use_sites::function_at`
   (`use_sites.rs:176-179`) records `name.candidates().0`. With dead code
