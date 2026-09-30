@@ -244,21 +244,23 @@ pub struct MethodTag {
 #[derive(Debug, Clone, PartialEq)]
 pub struct AssertTag {
     pub negated: bool,
+    /// `=Type`: the target is identical to a value of the type (a literal
+    /// narrows to that literal), rather than of the type.
+    pub equality: bool,
     pub ty: TypeNode,
     pub target: String,
 }
 
 /// Parses one `@phpstan-assert`-family tag's own `rest` text
-/// (`"!null $this->testFilesFile"`) into a negation flag, a type text,
-/// and a target text - `None` for the `=Type`/`!=value` forms this
-/// project doesn't model (a genuinely different, value/generic-argument
-/// comparison, not a real type check anyway).
+/// (`"!null $this->testFilesFile"`, `"=T $actual"`, `"!=T $actual"`) into
+/// a negation flag, an equality flag, a type text and a target text.
 fn parse_assert_tag(rest: &str) -> (Option<AssertTag>, Vec<PhpDocParseError>) {
     let rest = rest.trim();
-    if rest.starts_with("!=") || rest.starts_with('=') {
-        return (None, Vec::new());
-    }
     let (negated, rest) = match rest.strip_prefix('!') {
+        Some(after) => (true, after),
+        None => (false, rest),
+    };
+    let (equality, rest) = match rest.strip_prefix('=') {
         Some(after) => (true, after),
         None => (false, rest),
     };
@@ -273,6 +275,7 @@ fn parse_assert_tag(rest: &str) -> (Option<AssertTag>, Vec<PhpDocParseError>) {
     (
         Some(AssertTag {
             negated,
+            equality,
             ty,
             target: target.to_string(),
         }),

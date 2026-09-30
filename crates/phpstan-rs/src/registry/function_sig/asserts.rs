@@ -50,6 +50,8 @@ pub enum AssertTarget {
 #[derive(Debug, Clone)]
 pub struct AssertInfo {
     pub negated: bool,
+    /// `=Type`: the target is identical to a value of `ty`.
+    pub equality: bool,
     pub ty: Type,
     pub target: AssertTarget,
     // Shares the exact same type-resolution pipeline as every other
@@ -118,6 +120,7 @@ pub(crate) fn resolve_assert_tags(
             let ty = resolve_names_in_type(ty, ctx);
             AssertInfo {
                 negated: tag.negated,
+                equality: tag.equality,
                 ty,
                 target,
                 case_refs,

@@ -471,6 +471,39 @@ impl<'a> Checker<'a> {
         resolved: &[Option<&Expr>],
         locals: &Locals,
     ) -> Type {
+        let (bindings, param_bindings) = self.call_template_bindings(sig, resolved, locals);
+        // The call's own templates (scoped to this function or method,
+        // not to a class) that no argument inferred resolve to their
+        // bounds; a class template left unbound here belongs to an
+        // erased receiver and stays `Mixed`.
+        let substituted = self.substitute_call_templates(sig.return_type(), &bindings);
+        substituted.resolve_conditional(&param_bindings, &self.relation())
+    }
+
+    /// `ty` with a call's template bindings substituted, its own templates
+    /// that no argument bound resolving to their bounds.
+    pub(crate) fn substitute_call_templates(&self, ty: &Type, bindings: &TemplateBindings) -> Type {
+        let relation = self.relation();
+        ty.substitute_templates_resolving_to_bounds(
+            bindings,
+            &|tp| {
+                tp.scope
+                    .as_deref()
+                    .is_some_and(|scope| !self.registry.classes.contains_key(scope))
+            },
+            &relation,
+        )
+    }
+
+    /// What a call binds `sig`'s templates to from its arguments
+    /// (`resolved`, in parameter order), and each parameter to its
+    /// argument's type (an omitted one's default) for conditional types.
+    pub(crate) fn call_template_bindings(
+        &self,
+        sig: &FunctionReflection,
+        resolved: &[Option<&Expr>],
+        locals: &Locals,
+    ) -> (TemplateBindings, rustc_hash::FxHashMap<String, Type>) {
         let mut bindings: TemplateBindings = TemplateBindings::default();
         let mut param_bindings: rustc_hash::FxHashMap<String, Type> =
             rustc_hash::FxHashMap::default();
@@ -496,21 +529,7 @@ impl<'a> Checker<'a> {
                 .infer_template_bindings(param.ty(), &promoted, &mut bindings);
             param_bindings.insert(param.name().to_string(), arg_ty);
         }
-        // The call's own templates (scoped to this function or method,
-        // not to a class) that no argument inferred resolve to their
-        // bounds; a class template left unbound here belongs to an
-        // erased receiver and stays `Mixed`.
-        let relation = self.relation();
-        let substituted = sig.return_type().substitute_templates_resolving_to_bounds(
-            &bindings,
-            &|tp| {
-                tp.scope
-                    .as_deref()
-                    .is_some_and(|scope| !self.registry.classes.contains_key(scope))
-            },
-            &relation,
-        );
-        substituted.resolve_conditional(&param_bindings, &relation)
+        (bindings, param_bindings)
     }
 
     /// `Suit::from(1)`/`Suit::tryFrom(1)` called with a literal

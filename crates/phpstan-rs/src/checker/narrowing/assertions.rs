@@ -483,16 +483,24 @@ impl<'a> Checker<'a> {
         args: &[Arg],
         locals: &mut Locals,
     ) {
+        let resolved = crate::checker::resolve_call_args(args, sig.params());
+        let (bindings, _) = self.call_template_bindings(sig, &resolved, locals);
         for info in infos {
             let Some((key, current)) =
-                self.assert_target_key_and_current(&info.target, sig, recv, args, locals)
+                self.assert_target_key_and_current(&info.target, sig, recv, &resolved, locals)
             else {
                 continue;
             };
-            let narrowed = if info.negated {
-                self.exclude(&current, &info.ty)
-            } else {
-                self.relation().narrow(&current, &info.ty)
+            // The asserted type as this call binds its templates.
+            let asserted = self.substitute_call_templates(&info.ty, &bindings);
+            let narrowed = match (info.equality, info.negated) {
+                (false, false) => self.relation().narrow(&current, &asserted),
+                (false, true) => self.exclude(&current, &asserted),
+                // `=T`: identical to a value of `T`, as `===` narrows.
+                (true, false) => self.relation().narrow(&current, &asserted),
+                // `!=T`: not identical to it, which excludes only one value.
+                (true, true) if asserted.is_single_value() => self.exclude(&current, &asserted),
+                (true, true) => continue,
             };
             locals.insert(key, narrowed);
         }
@@ -516,16 +524,16 @@ impl<'a> Checker<'a> {
         target: &crate::registry::AssertTarget,
         sig: &crate::registry::FunctionReflection,
         recv: Option<&Expr>,
-        args: &[Arg],
+        resolved: &[Option<&Expr>],
         locals: &'l Locals,
     ) -> Option<(String, std::borrow::Cow<'l, Type>)> {
         use crate::registry::AssertTarget;
         match target {
             AssertTarget::Param(name) => {
                 let idx = sig.params().iter().position(|p| p.name() == name)?;
-                let arg = args.get(idx)?;
-                let key = narrowing_key(&arg.value)?;
-                let current = self.current_narrowed_type(&arg.value, &key, locals);
+                let arg = (*resolved.get(idx)?)?;
+                let key = narrowing_key(arg)?;
+                let current = self.current_narrowed_type(arg, &key, locals);
                 Some((key, current))
             }
             AssertTarget::ThisSelf => {

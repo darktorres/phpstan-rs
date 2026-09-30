@@ -85,8 +85,13 @@ impl Registry {
                 Some(rest) => (true, rest),
                 None => (false, entry.ty.as_str()),
             };
+            let (equality, written) = match written.strip_prefix('=') {
+                Some(rest) => (true, rest),
+                None => (false, written),
+            };
             let info = AssertInfo {
                 negated,
+                equality,
                 ty: types::parse_type_string(written),
                 target: AssertTarget::Param(Name::from(parameter)),
                 case_refs: Vec::new(),

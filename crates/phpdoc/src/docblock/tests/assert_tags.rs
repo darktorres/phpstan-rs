@@ -9,6 +9,7 @@ fn parses_an_assert_if_true_tag_naming_a_this_property() {
     assert_eq!(
         block.assert_if_true,
         vec![AssertTag {
+            equality: false,
             negated: true,
             ty: node("null"),
             target: "$this->testFilesFile".to_string(),
@@ -22,6 +23,7 @@ fn parses_an_assert_if_false_tag() {
     assert_eq!(
         block.assert_if_false,
         vec![AssertTag {
+            equality: false,
             negated: true,
             ty: node("null"),
             target: "$this->parseError()".to_string(),
@@ -35,6 +37,7 @@ fn parses_an_unconditional_assert_tag_naming_a_parameter() {
     assert_eq!(
         block.assert,
         vec![AssertTag {
+            equality: false,
             negated: false,
             ty: node("string"),
             target: "$actual".to_string(),
@@ -48,6 +51,7 @@ fn parses_a_bare_this_target() {
     assert_eq!(
         block.assert_if_true,
         vec![AssertTag {
+            equality: false,
             negated: false,
             ty: node("After"),
             target: "$this".to_string(),
@@ -73,6 +77,7 @@ fn a_generic_type_argument_is_kept_as_part_of_the_type_text() {
     assert_eq!(
         block.assert_if_true,
         vec![AssertTag {
+            equality: false,
             negated: false,
             ty: node("Collection<TKey, T>"),
             target: "$this->collection".to_string(),
@@ -86,4 +91,26 @@ fn no_assert_tags_at_all_leaves_every_list_empty() {
     assert!(block.assert.is_empty());
     assert!(block.assert_if_true.is_empty());
     assert!(block.assert_if_false.is_empty());
+}
+
+#[test]
+fn an_equality_assertion_is_read_with_its_negation() {
+    let block = parse("/**\n * @phpstan-assert =T $actual\n * @phpstan-assert !=T $other\n */");
+    assert_eq!(
+        block.assert,
+        vec![
+            AssertTag {
+                equality: true,
+                negated: false,
+                ty: node("T"),
+                target: "$actual".to_string(),
+            },
+            AssertTag {
+                equality: true,
+                negated: true,
+                ty: node("T"),
+                target: "$other".to_string(),
+            },
+        ]
+    );
 }
