@@ -30,6 +30,9 @@ impl<'a> Checker<'a> {
         if container.is_mixed() || (container.is_never() || container.is_null().yes()) {
             return;
         }
+        if container.is_string().yes() {
+            self.check_string_offset_write(lhs, &container, dim.as_ref(), value);
+        }
         if is_assign_op
             && let Some(dim) = &dim
             && container.has_offset_value_type(dim).no()
@@ -64,7 +67,38 @@ impl<'a> Checker<'a> {
         self.report(message, lhs.span, level, identifier);
     }
 
-    /// Why writing `value` at `dim` into one container type fails, if
+    /// A write to a string offset PHP rejects or cuts short
+    /// (`offsetAssign.valueType`): an empty value throws, a longer one
+    /// writes only its first byte, and a negative offset before the
+    /// start of the string writes nothing.
+    fn check_string_offset_write(
+        &mut self,
+        lhs: &Expr,
+        container: &Type,
+        dim: Option<&Type>,
+        value: &Type,
+    ) {
+        let values = value.constant_strings();
+        let message = if !values.is_empty() && values.iter().all(|v| v.as_bytes().is_empty()) {
+            Some("Cannot assign an empty string to a string offset.".to_string())
+        } else if !values.is_empty() && values.iter().all(|v| v.as_bytes().len() > 1) {
+            Some("Only the first byte will be assigned to the string offset.".to_string())
+        } else if let Some(k) = dim.and_then(Type::int_literal_value)
+            && k < 0
+            && let strings = container.constant_strings()
+            && !strings.is_empty()
+            && strings.iter().all(|s| (s.as_bytes().len() as i64) < -k)
+        {
+            Some(format!("Illegal string offset {k}."))
+        } else {
+            None
+        };
+        if let Some(message) = message {
+            self.report(message, lhs.span, 3, "offsetAssign.valueType");
+        }
+    }
+
+    /// Why writing `value` at `dim` into one container type fails, if    /// Why writing `value` at `dim` into one container type fails, if
     /// it does: `offsetAssign.dimType` or `offsetAssign.valueType`.
     fn offset_write_error(
         &self,

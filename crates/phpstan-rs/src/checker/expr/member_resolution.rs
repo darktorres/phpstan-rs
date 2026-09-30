@@ -298,6 +298,14 @@ impl<'a> Checker<'a> {
         Type::union_of(values)
     }
 
+    /// Whether a negative string offset counts from the end on every PHP
+    /// version the project runs on (7.1 on).
+    pub(crate) fn negative_string_offsets_count_from_end(&self) -> bool {
+        self.registry
+            .php_version_min()
+            .is_none_or(|v| v >= types::PhpVersion::new(7, 1))
+    }
+
     fn member_offset_read_type(&self, member: &Type, key: &Type, in_union: bool) -> Type {
         if member.is_mixed() {
             return Type::mixed();
@@ -318,7 +326,9 @@ impl<'a> Checker<'a> {
             };
         }
         if member.is_string().yes() {
-            return Type::string();
+            return member
+                .string_offset_read(key, self.negative_string_offsets_count_from_end())
+                .0;
         }
         if member.is_null().yes()
             || member.is_bool().yes()

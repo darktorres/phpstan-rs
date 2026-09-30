@@ -106,6 +106,104 @@ impl Type {
         Some((value.unwrap_or_else(Type::never), presence?))
     }
 
+    /// Reading `offset` of this string: the character found, and whether
+    /// the offset is in range. A literal string at a few literal int
+    /// offsets reads those characters (`''` out of range); a non-empty
+    /// string at `0` (or `-1`) reads a non-empty one; anything else reads
+    /// `string`. `negative_from_end`: a negative offset counts from the end
+    /// (PHP 7.1+); without it, one reads `string`.
+    pub fn string_offset_read(
+        &self,
+        offset: &Type,
+        negative_from_end: bool,
+    ) -> (Type, OffsetPresence) {
+        use OffsetPresence::*;
+        let general = (Type::string(), Unknown);
+        let Some(ints) = int_offsets(offset) else {
+            return general;
+        };
+        if !negative_from_end && ints.iter().any(|k| *k < 0) {
+            return general;
+        }
+        let strings = self.constant_strings();
+        if !strings.is_empty() && strings.len() * ints.len() <= crate::MAX_UNION_MEMBERS {
+            let mut values = Vec::new();
+            let mut presence: Option<OffsetPresence> = None;
+            for s in &strings {
+                let bytes = s.as_bytes();
+                for k in &ints {
+                    let (value, p) = match string_index(bytes.len(), *k) {
+                        Some(i) => (
+                            Type::string_literal(crate::PhpString::from_bytes(&bytes[i..=i])),
+                            Present,
+                        ),
+                        None => (
+                            Type::string_literal(crate::PhpString::from_bytes(&[][..])),
+                            Absent,
+                        ),
+                    };
+                    values.push(value);
+                    presence = Some(presence.map_or(p, |acc| acc.join(p)));
+                }
+            }
+            return (Type::union_of(values), presence.unwrap_or(Unknown));
+        }
+        let non_empty = Type::string().with_string_accessory(crate::AccessoryKind::NonEmptyString);
+        if matches!(ints.as_slice(), [0] | [-1])
+            && crate::Relation::structural()
+                .is_super_type_of(&non_empty, self)
+                .yes()
+        {
+            return (non_empty, Present);
+        }
+        general
+    }
+
+    /// This string after `[offset] = value`: a literal string, int offset
+    /// and value give the literal result (padded with spaces past the end,
+    /// only the value's first byte written); otherwise a non-empty string
+    /// when the offset is surely not negative, else `string`. A write PHP
+    /// rejects (an empty value, a negative offset before the start)
+    /// leaves the string as it was.
+    pub fn string_offset_write(&self, offset: Option<&Type>, value: &Type) -> Type {
+        let bases = self.constant_strings();
+        let (Some(offset), [base]) = (offset, bases.as_slice()) else {
+            return self.general_string_after_write(offset);
+        };
+        let values = value.constant_strings();
+        let (Some(k), [written]) = (offset.int_literal_value(), values.as_slice()) else {
+            return self.general_string_after_write(Some(offset));
+        };
+        let Some(&byte) = written.as_bytes().first() else {
+            return self.clone();
+        };
+        let mut bytes = base.as_bytes().to_vec();
+        let index = if k < 0 {
+            match (bytes.len() as i64).checked_add(k) {
+                Some(i) if i >= 0 => i as usize,
+                _ => return self.clone(),
+            }
+        } else {
+            k as usize
+        };
+        if index >= bytes.len() {
+            bytes.resize(index + 1, b' ');
+        }
+        bytes[index] = byte;
+        Type::string_literal(crate::PhpString::from_bytes(bytes.as_slice()))
+    }
+
+    fn general_string_after_write(&self, offset: Option<&Type>) -> Type {
+        let non_negative = offset
+            .and_then(|o| o.int_bounds()?.0)
+            .is_some_and(|min| min >= 0);
+        if non_negative {
+            Type::string().with_string_accessory(crate::AccessoryKind::NonEmptyString)
+        } else {
+            Type::string()
+        }
+    }
+
     /// What a nested write (`$a[offset][…] = v`) writes into: the value at
     /// `offset`, and `array{}` where it is `null` or where a shape may lack
     /// the key, since PHP creates the array there. A general array's key,
@@ -735,4 +833,24 @@ fn member_offset_read(member: &Type, offset: &Type) -> Option<(Option<Type>, Off
         });
     }
     Some((value, presence?))
+}
+
+/// The int offsets `offset` may be, when there are few enough to list.
+fn int_offsets(offset: &Type) -> Option<Vec<i64>> {
+    let finite = offset.finite_types();
+    if finite.is_empty() {
+        return None;
+    }
+    finite.iter().map(Type::int_literal_value).collect()
+}
+
+/// The byte index offset `k` reads in a string of `len` bytes, a negative
+/// one counting from the end; `None` out of range.
+fn string_index(len: usize, k: i64) -> Option<usize> {
+    let index = if k < 0 {
+        (len as i64).checked_add(k)?
+    } else {
+        k
+    };
+    (0..len as i64).contains(&index).then_some(index as usize)
 }

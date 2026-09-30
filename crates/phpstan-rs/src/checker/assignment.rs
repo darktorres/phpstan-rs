@@ -506,12 +506,18 @@ impl<'a> Checker<'a> {
                                     locals.insert(synthetic_key, merged);
                                 }
                             }
-                            if let Some(new_ty) = current.set_offset_value_type(
-                                idx_ty.as_ref(),
-                                ty,
-                                in_range,
-                                self.loop_depth == 0,
-                            ) {
+                            // A string takes the write as a string does.
+                            let written = if current.is_string().yes() {
+                                Some(current.string_offset_write(idx_ty.as_ref(), &ty))
+                            } else {
+                                current.set_offset_value_type(
+                                    idx_ty.as_ref(),
+                                    ty,
+                                    in_range,
+                                    self.loop_depth == 0,
+                                )
+                            };
+                            if let Some(new_ty) = written {
                                 if was_defined || is_superglobal(name) {
                                     locals.insert(name.to_string(), new_ty);
                                     if let Some(native) = locals.native(name) {
@@ -747,9 +753,33 @@ impl<'a> Checker<'a> {
             .filter(|m| m.is_array().yes())
             .cloned()
             .collect();
-        let presence = match Type::union_of(arrays).array_offset_read(dim) {
-            Some((_, presence)) => presence,
-            None => return false,
+        let strings: Vec<Type> = container
+            .union_members()
+            .iter()
+            .filter(|m| m.is_string().yes())
+            .cloned()
+            .collect();
+        let string_presence = (!strings.is_empty()).then(|| {
+            Type::union_of(strings)
+                .string_offset_read(dim, self.negative_string_offsets_count_from_end())
+                .1
+        });
+        if string_presence == Some(types::OffsetPresence::Absent) && arrays.is_empty() {
+            self.report(
+                format!("Offset {dim} does not exist on {container}."),
+                span,
+                3,
+                "offsetAccess.notFound",
+            );
+            return true;
+        }
+        let array_presence = Type::union_of(arrays)
+            .array_offset_read(dim)
+            .map(|(_, p)| p);
+        let presence = match (array_presence, string_presence) {
+            (Some(a), Some(s)) => a.join(s),
+            (Some(p), None) | (None, Some(p)) => p,
+            (None, None) => return false,
         };
         let might_not_exist = match presence {
             types::OffsetPresence::MayBeAbsent | types::OffsetPresence::Absent => true,
