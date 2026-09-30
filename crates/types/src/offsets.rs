@@ -5,7 +5,7 @@ use crate::{AccessoryKind, AppendKey, Repr, Shape, ShapeField, ShapeKey, Trinary
 
 /// The most fields an append grows a shape to; past it, the array is
 /// general.
-const MAX_SHAPE_FIELDS: usize = 256;
+pub(crate) const MAX_SHAPE_FIELDS: usize = 256;
 
 impl Type {
     /// PHPStan's `hasOffsetValueType()`: whether this array surely has

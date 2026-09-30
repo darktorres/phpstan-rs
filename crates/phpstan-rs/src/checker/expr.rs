@@ -497,6 +497,24 @@ impl<'a> Checker<'a> {
                     self.check_expr(&actual_arg.value, locals, label);
                     return Type::mixed();
                 }
+                // `count($o)` on a `Countable` object calls its `count()`.
+                if let ExprKind::Name(name) = &callee.kind
+                    && matches!(
+                        name.trim_start_matches('\\').to_ascii_lowercase().as_str(),
+                        "count" | "sizeof"
+                    )
+                    && let Some(counted) = args.first()
+                {
+                    let counted_ty = self.infer_expr(&counted.value, locals);
+                    self.implicit_method_call(
+                        &counted.value,
+                        &counted_ty,
+                        "Countable",
+                        "count",
+                        e.span,
+                        locals,
+                    );
+                }
                 if let ExprKind::Name(name) = &callee.kind
                     && name == "extract"
                 {

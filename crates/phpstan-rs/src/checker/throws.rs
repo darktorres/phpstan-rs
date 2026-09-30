@@ -101,8 +101,15 @@ impl<'a> Checker<'a> {
         span: Span,
     ) {
         if !self.try_throw_states.is_empty() {
+            // Two calls one expression makes (an implicit one beside its
+            // own) throw either's.
             let thrown = call_throw_type(dynamic.as_ref(), sig);
-            self.call_throw_types.insert(span, thrown);
+            let joined = match (self.call_throw_types.remove(&span), thrown) {
+                (Some(Some(a)), Some(b)) => Some(Type::union(a, b)),
+                (Some(a), b) => a.or(b),
+                (None, b) => b,
+            };
+            self.call_throw_types.insert(span, joined);
         }
         if let Some(t) = dynamic {
             if !t.is_void() {

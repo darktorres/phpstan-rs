@@ -1,8 +1,9 @@
 //! `$o[…]` on an `ArrayAccess` object is a call of one of its methods
-//! (`offsetGet`, `offsetSet`, `offsetExists`, `offsetUnset`), with what an
+//! (`offsetGet`, `offsetSet`, `offsetExists`, `offsetUnset`), and
+//! `count($o)` on a `Countable` one a call of `count`, with what an
 //! explicit call of it does: it may throw, it may change the object's
-//! properties, and it isn't pure. An object that is `ArrayAccess` only
-//! through a subclass may run any code there.
+//! properties, and it isn't pure. An object that is one only through a
+//! subclass may run any code there.
 
 use crate::checker::{Checker, Locals, narrowing_key, purge_stale_narrowing_for};
 use syntax::ast::{Expr, ExprKind};
@@ -14,12 +15,18 @@ impl<'a> Checker<'a> {
     /// that is `ArrayAccess`, `false` for one that may be through a
     /// subclass (an interface or a non-final class).
     fn array_access_members(&self, ty: &Type) -> Vec<(Type, bool)> {
+        self.members_implementing(ty, "ArrayAccess")
+    }
+
+    /// The members of `ty` that are `interface` objects (`true`), or may
+    /// be through a subclass (`false`).
+    fn members_implementing(&self, ty: &Type, interface: &str) -> Vec<(Type, bool)> {
         ty.union_members()
             .iter()
             .filter_map(|member| {
                 let (class, _) = member.as_object()?;
-                if self.registry.is_subclass_of(class, "ArrayAccess")
-                    || class.eq_ignore_ascii_case("ArrayAccess")
+                if self.registry.is_subclass_of(class, interface)
+                    || class.eq_ignore_ascii_case(interface)
                 {
                     return Some((member.clone(), true));
                 }
@@ -45,8 +52,23 @@ impl<'a> Checker<'a> {
         span: Span,
         locals: &mut Locals,
     ) {
+        self.implicit_method_call(base, base_ty, "ArrayAccess", method, span, locals);
+    }
+
+    /// The effects of PHP calling `method` of `interface` on each member of
+    /// `base_ty` that is (or may be) one: `$o[…]` on an `ArrayAccess`
+    /// object, `count($o)` on a `Countable` one.
+    pub(crate) fn implicit_method_call(
+        &mut self,
+        base: &Expr,
+        base_ty: &Type,
+        interface: &str,
+        method: &str,
+        span: Span,
+        locals: &mut Locals,
+    ) {
         use crate::registry::PropertyWrites;
-        let members = self.array_access_members(base_ty);
+        let members = self.members_implementing(base_ty, interface);
         if members.is_empty() {
             return;
         }
@@ -55,7 +77,6 @@ impl<'a> Checker<'a> {
             let resolved = exact
                 .then(|| self.find_method_receiver(member, method))
                 .flatten();
-            let previous = self.call_throw_types.remove(&span);
             match &resolved {
                 Some((class, _, owner, sig)) => {
                     let dynamic = self.dynamic_method_throw_type(class, method, &[]);
@@ -77,14 +98,6 @@ impl<'a> Checker<'a> {
                     self.record_call_throw_point(None, None, span);
                     writes = PropertyWrites::Anything;
                 }
-            }
-            if let Some(previous) = previous {
-                let current = self.call_throw_types.remove(&span).flatten();
-                let joined = match (previous, current) {
-                    (Some(a), Some(b)) => Some(Type::union(a, b)),
-                    (a, b) => a.or(b),
-                };
-                self.call_throw_types.insert(span, joined);
             }
         }
         if writes > PropertyWrites::Nothing

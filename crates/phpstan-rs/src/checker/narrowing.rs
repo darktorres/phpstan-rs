@@ -21,20 +21,28 @@ pub(crate) use predicates::{
 /// key). Returns the call's own argument and whether `count(...)` was
 /// written on the left (`count($x) > 0`) or the right (`0 < count($x)`).
 pub(crate) fn count_call_operand<'e>(l: &'e Expr, r: &'e Expr) -> Option<(&'e Expr, bool)> {
-    fn as_count_arg(e: &Expr) -> Option<&Expr> {
-        if let ExprKind::Call(callee, args) = &e.kind
-            && let ExprKind::Name(name) = &callee.kind
-            && name.trim_start_matches('\\') == "count"
-            && let [single_arg] = args.as_slice()
-        {
-            Some(&single_arg.value)
-        } else {
-            None
-        }
+    count_call(l)
+        .map(|(a, _)| (a, true))
+        .or_else(|| count_call(r).map(|(a, _)| (a, false)))
+}
+
+/// `count($x)` or `sizeof($x)`, with its mode argument if written: `$x`
+/// and the mode.
+fn count_call(e: &Expr) -> Option<(&Expr, Option<&Expr>)> {
+    let ExprKind::Call(callee, args) = &e.peeled().kind else {
+        return None;
+    };
+    let ExprKind::Name(name) = &callee.kind else {
+        return None;
+    };
+    if !matches!(name.trim_start_matches('\\'), "count" | "sizeof") {
+        return None;
     }
-    as_count_arg(l)
-        .map(|a| (a, true))
-        .or_else(|| as_count_arg(r).map(|a| (a, false)))
+    match args.as_slice() {
+        [counted] => Some((&counted.value, None)),
+        [counted, mode] => Some((&counted.value, Some(&mode.value))),
+        _ => None,
+    }
 }
 
 /// Flips a comparison operator to the operand-swapped equivalent - `0 <
@@ -807,6 +815,11 @@ impl<'a> Checker<'a> {
                     None => self.apply_loose_equality_narrowing(a, b, locals, branch_true),
                 }
             }
+            // A comparison with `count($x)` narrows `$x` by the count it
+            // proves, then the other side as any comparison does.
+            ExprKind::Binary(op, l, r) if comparison_count_operand(op, l, r).is_some() => {
+                self.apply_count_narrowing(op, l, r, branch_true, locals);
+            }
             ExprKind::Binary(op, l, r) => {
                 let is_eq = matches!(op, BinOp::Identical);
                 let is_neq = matches!(op, BinOp::NotIdentical);
@@ -817,40 +830,6 @@ impl<'a> Checker<'a> {
                     // PHP's loose comparison (`comparison.rs`).
                     let equal = matches!(op, BinOp::Eq) == branch_true;
                     self.apply_loose_equality_narrowing(l, r, locals, equal);
-                } else if let Some((count_arg, count_on_left)) = count_call_operand(l, r)
-                    && let Some(key) = narrowing_key(count_arg)
-                    && let bound_expr = if count_on_left { r } else { l }
-                    && let effective_op = if count_on_left {
-                        *op
-                    } else {
-                        mirror_comparison(op)
-                    }
-                    && let ExprKind::Literal(Literal::Int(n)) = &bound_expr.kind
-                    && ((branch_true
-                        && ((matches!(effective_op, BinOp::Gt) && *n == 0)
-                            || (matches!(effective_op, BinOp::GtEq) && *n == 1)))
-                        // `if (count($x) < 1) { $this->ierror(...); }`
-                        // (a `never`-typed early-exit idiom) proves the
-                        // exact same "`$x` is non-empty" fact on the
-                        // surviving path, just phrased as the false
-                        // branch of the mirrored comparison
-                        // (`count($x) < 1` false, or `count($x) <= 0`
-                        // false, both mean `count($x) >= 1`) - the
-                        // reversed-operand form (`1 > count($x)`) is
-                        // handled too, via `count_call_operand`/
-                        // `mirror_comparison` above.
-                        || (!branch_true
-                            && ((matches!(effective_op, BinOp::Lt) && *n == 1)
-                                || (matches!(effective_op, BinOp::LtEq) && *n == 0))))
-                {
-                    // `count($x) > 0`/`count($x) >=
-                    // 1` proves `$x` non-empty - handles both operand
-                    // orders (`count($x) > 0` and `0 < count($x)`), via
-                    // `count_call_operand`'s own left/right detection and
-                    // `mirror_comparison` canonicalizing the operator back
-                    // to the `count(...)`-on-the-left shape below.
-                    let current = self.current_narrowed_type(count_arg, &key, locals);
-                    locals.insert(key, current.to_non_empty_array());
                 } else if let Some(ordering) = crate::checker::operators::ordering_op(op) {
                     self.apply_ordering_narrowing(l, r, ordering, branch_true, locals);
                 }
@@ -1662,4 +1641,133 @@ fn spaceship_comparison<'e>(
         _ => return None,
     };
     Some((encoded, a, b))
+}
+
+/// The `count($x)` side of a comparison: `$x`, its mode argument, and
+/// whether it's on the left.
+fn comparison_count_operand<'e>(
+    op: &BinOp,
+    l: &'e Expr,
+    r: &'e Expr,
+) -> Option<(&'e Expr, Option<&'e Expr>, bool)> {
+    if !matches!(
+        op,
+        BinOp::Lt
+            | BinOp::LtEq
+            | BinOp::Gt
+            | BinOp::GtEq
+            | BinOp::Eq
+            | BinOp::NotEq
+            | BinOp::Identical
+            | BinOp::NotIdentical
+    ) {
+        return None;
+    }
+    count_call(l)
+        .map(|(a, m)| (a, m, true))
+        .or_else(|| count_call(r).map(|(a, m)| (a, m, false)))
+}
+
+impl Checker<'_> {
+    /// `count($x) op n` (`holds`): `$x` narrowed to the count range it
+    /// proves (`Relation::narrow_count`), then the other side as the
+    /// comparison narrows it, against the count's type.
+    fn apply_count_narrowing(
+        &self,
+        op: &BinOp,
+        l: &Expr,
+        r: &Expr,
+        holds: bool,
+        locals: &mut Locals,
+    ) {
+        let Some((counted, mode, count_on_left)) = comparison_count_operand(op, l, r) else {
+            return;
+        };
+        let other = if count_on_left { r } else { l };
+        let op = if count_on_left {
+            *op
+        } else {
+            mirror_comparison(op)
+        };
+        let recursive =
+            mode.is_some_and(|m| self.infer_expr(m, locals).int_literal_value() != Some(0));
+        let other_ty = self.infer_expr(other, locals);
+        if let Some(key) = narrowing_key(counted)
+            && other_ty.is_int().yes()
+            && let Some((bl, bh)) = other_ty.int_bounds()
+        {
+            let (bl, bh) = (bl.unwrap_or(i64::MIN), bh);
+            // `!=`/`!==` is `==`/`===` with the branches swapped.
+            let (op, holds) = match op {
+                BinOp::NotEq => (BinOp::Eq, !holds),
+                BinOp::NotIdentical => (BinOp::Identical, !holds),
+                other => (other, holds),
+            };
+            let range = match (op, holds) {
+                (BinOp::Gt, true) => Some((bl.saturating_add(1), None)),
+                (BinOp::Gt, false) => Some((0, bh)),
+                (BinOp::GtEq, true) => Some((bl, None)),
+                (BinOp::GtEq, false) => Some((0, bh.map(|h| h.saturating_sub(1)))),
+                (BinOp::Lt, true) => Some((0, bh.map(|h| h.saturating_sub(1)))),
+                (BinOp::Lt, false) => Some((bl, None)),
+                (BinOp::LtEq, true) => Some((0, bh)),
+                (BinOp::LtEq, false) => Some((bl.saturating_add(1), None)),
+                (BinOp::Eq | BinOp::Identical, true) => Some((bl, bh)),
+                _ => None,
+            };
+            let current = self.current_narrowed_type(counted, &key, locals);
+            let narrowed = match range {
+                // A recursive count proves only that the array isn't empty.
+                Some((lo, _)) if recursive => (lo >= 1).then(|| current.to_non_empty_array()),
+                Some((lo, hi)) => Some(self.relation().narrow_count(&current, lo.max(0), hi)),
+                // `count($x) !== n` for one `n`: the members that hold
+                // exactly `n` go, and `n = 0` leaves a non-empty array.
+                None if !recursive && bh == Some(bl) => {
+                    let kept: Vec<Type> = current
+                        .union_members()
+                        .iter()
+                        .filter(|m| m.count_range() != Some((bl, Some(bl))))
+                        .cloned()
+                        .collect();
+                    let kept = Type::union_of(kept);
+                    Some(if bl == 0 {
+                        kept.to_non_empty_array()
+                    } else {
+                        kept
+                    })
+                }
+                None => None,
+            };
+            if let Some(narrowed) = narrowed {
+                locals.insert(key, narrowed);
+            }
+        }
+        // The other side, as the comparison narrows it against the count.
+        let (l, r) = if count_on_left {
+            (l, other)
+        } else {
+            (other, r)
+        };
+        match op {
+            BinOp::Identical | BinOp::NotIdentical => {
+                let equal = matches!(op, BinOp::Identical) == holds;
+                self.apply_equality_narrowing(l, r, locals, equal);
+            }
+            BinOp::Eq | BinOp::NotEq => {
+                let equal = matches!(op, BinOp::Eq) == holds;
+                self.apply_loose_equality_narrowing(l, r, locals, equal);
+            }
+            _ => {
+                if let Some(ordering) = crate::checker::operators::ordering_op(&op) {
+                    let ordering = if count_on_left {
+                        ordering
+                    } else {
+                        crate::checker::operators::ordering_op(&mirror_comparison(&op))
+                            .unwrap_or(ordering)
+                    };
+                    self.apply_ordering_narrowing(l, r, ordering, holds, locals);
+                }
+            }
+        }
+    }
 }

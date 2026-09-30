@@ -110,3 +110,34 @@ fn an_ordering_keeps_the_members_that_may_satisfy_it() {
         Type::int_range(Some(5), None)
     );
 }
+
+#[test]
+fn narrow_count_keeps_what_the_count_allows() {
+    use crate::{Shape, ShapeField, ShapeKey};
+    let relation = Relation::structural();
+    let two = Type::array_shape(Shape::sealed(vec![
+        ShapeField::new(ShapeKey::Int(0), Type::string(), false),
+        ShapeField::new(ShapeKey::Int(1), Type::string(), false),
+    ]));
+    let empty = Type::array_shape(Shape::sealed(Vec::new()));
+    let either = Type::union(empty.clone(), two.clone());
+    assert_eq!(relation.narrow_count(&either, 1, None), two);
+    assert_eq!(relation.narrow_count(&either, 0, Some(0)), empty);
+    let list = Type::list_of(Type::string());
+    assert_eq!(relation.narrow_count(&list, 2, Some(2)), two);
+    let optional = Type::array_shape(Shape::from_named([
+        ("a", Type::int(), false),
+        ("b", Type::int(), true),
+    ]));
+    assert_eq!(
+        relation.narrow_count(&optional, 0, Some(1)),
+        Type::array_shape(Shape::from_named([("a", Type::int(), false)]))
+    );
+    assert_eq!(
+        relation.narrow_count(&optional, 2, None),
+        Type::array_shape(Shape::from_named([
+            ("a", Type::int(), false),
+            ("b", Type::int(), false)
+        ]))
+    );
+}

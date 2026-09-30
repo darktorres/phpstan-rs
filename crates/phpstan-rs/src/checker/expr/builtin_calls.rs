@@ -107,19 +107,37 @@ impl<'a> Checker<'a> {
             "var_export" if args.len() == 2 && is_true_literal(&args[1].value) => {
                 return Type::string();
             }
-            // Narrowed to the plain 1-argument form (no `$mode`, i.e.
-            // always `COUNT_NORMAL`). A known `ArrayShape` with no
-            // optional field has an exact, literal count - anything else
-            // gets the same always-true "never negative" floor `strlen`
-            // above does.
-            "count" | "sizeof" if args.len() == 1 => {
+            // The count an array's type allows (`Type::count_range`), or a
+            // `Countable` object's `count()` (PHP throws on a negative
+            // one); `COUNT_RECURSIVE` counts at least as many, and a mode
+            // that isn't a literal anything from 0.
+            "count" | "sizeof" if !args.is_empty() => {
                 let counted = self.infer_expr(&args[0].value, locals);
-                if let [shape] = counted.constant_arrays()[..]
-                    && shape.fields.iter().all(|f| !f.optional)
-                {
-                    return Type::int_literal(shape.fields.len() as i64);
-                }
-                return Type::int_range(Some(0), None);
+                let recursive = match args.get(1) {
+                    None => false,
+                    Some(mode) => match self.infer_expr(&mode.value, locals).int_literal_value() {
+                        Some(0) => false,
+                        Some(1) => true,
+                        _ => return Type::int_range(Some(0), None),
+                    },
+                };
+                let non_negative = Type::int_range(Some(0), None);
+                let counts: Vec<Type> = counted
+                    .union_members()
+                    .iter()
+                    .map(|member| match member.count_range() {
+                        Some((least, most)) => {
+                            Type::int_range(Some(least), if recursive { None } else { most })
+                        }
+                        None => match self.find_method_receiver(member, "count") {
+                            Some((_, _, _, sig)) if member.is_object().yes() => self
+                                .relation()
+                                .intersect(vec![sig.return_type().clone(), non_negative.clone()]),
+                            _ => non_negative.clone(),
+                        },
+                    })
+                    .collect();
+                return Type::union_of(counts);
             }
             // `random_int`/`rand`/`mt_rand($min, $max)` always produce a
             // value within `[$min, $max]` inclusive; a non-literal,

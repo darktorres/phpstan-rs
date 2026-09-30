@@ -600,3 +600,67 @@ impl Type {
         }
     }
 }
+
+impl Relation<'_> {
+    /// `ty` where its count is in `[lo, hi]` (`hi` `None`: no most), member
+    /// by member: a member whose own count can't be is dropped; one known
+    /// to hold `lo` or more is non-empty, one holding none is `array{}`; a
+    /// list's first `lo` indices are present, and with an exact count it's
+    /// a sealed list of that many; a shape's optional fields go when `hi`
+    /// is its required count, and are present when `lo` is its full one.
+    /// A member that isn't an array (a `Countable` object) stays.
+    pub fn narrow_count(&self, ty: &Type, lo: i64, hi: Option<i64>) -> Type {
+        let kept: Vec<Type> = ty
+            .union_members()
+            .iter()
+            .filter_map(|member| {
+                let Some((least, most)) = member.count_range() else {
+                    return Some(member.clone());
+                };
+                if hi.is_some_and(|h| h < least) || most.is_some_and(|m| m < lo) {
+                    return None;
+                }
+                if hi == Some(0) {
+                    return Some(Type::array_shape(Shape::sealed(Vec::new())));
+                }
+                if let Some((shape, _)) = crate::union::shape_parts(member) {
+                    let required = shape.fields.iter().filter(|f| !f.optional).count() as i64;
+                    let mut shape = shape.clone();
+                    if shape.is_sealed() && hi == Some(required) {
+                        shape.fields.retain(|f| !f.optional);
+                    } else if shape.is_sealed() && lo == shape.fields.len() as i64 {
+                        for f in &mut shape.fields {
+                            f.optional = false;
+                        }
+                    }
+                    return Some(crate::union::shape_type(shape, lo >= 1));
+                }
+                if member.is_list().yes()
+                    && let Some(value) = member.array_value_type()
+                {
+                    let limit = crate::offsets::MAX_SHAPE_FIELDS as i64;
+                    if hi == Some(lo) && lo <= limit {
+                        return Some(Type::array_shape(Shape::sealed(
+                            (0..lo)
+                                .map(|i| ShapeField::new(ShapeKey::Int(i), value.clone(), false))
+                                .collect(),
+                        )));
+                    }
+                    if lo >= 1 && lo <= limit {
+                        let mut narrowed = member.to_non_empty_array();
+                        for i in 0..lo {
+                            narrowed = narrowed.with_key_presence(&ShapeKey::Int(i), true);
+                        }
+                        return Some(narrowed);
+                    }
+                }
+                Some(if lo >= 1 {
+                    member.to_non_empty_array()
+                } else {
+                    member.clone()
+                })
+            })
+            .collect();
+        Type::union_of(kept)
+    }
+}
