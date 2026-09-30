@@ -1483,6 +1483,35 @@ through `check-project`.
   body is a full expression (`parse_expression`), and a ternary in the
   `else` of another without parentheses is a parse error, with fixtures.
 
+  Design: two parser edits, checked against `php -l`.
+
+  - The arrow body. `parse_arrow_fn` (`closures_and_match.rs:82`) calls
+    `parse_expression()` (the `or` tier, `expr.rs:8`) instead of
+    `parse_assignment()`. PHP gives the arrow function the lowest
+    precedence, so the body takes `and`/`or`/`xor` too. A comma still ends
+    it, since commas are not operators (`[fn() => 1, 2]` is two items), and
+    so do `)`, `]` and `;`. `$f = fn() => false or $b;` is then one
+    assignment of a closure returning `false or $b`, and the
+    `logicalOr.resultUnused` goes.
+  - Nested ternaries. PHP's ternary is left-associative and rejects every
+    unparenthesized nesting in the else position except a pure `?:` chain:
+    - `a ? b : c ? d : e` fails, and so do `a ?: b ? c : d` and
+      `a ? b : c ?: d`;
+    - `a ?: b ?: c` and `a ? (b ? c : d) : e` parse.
+
+  `parse_ternary` (`expr.rs:259`) parses the else branch as now, then
+  refuses it when it is an `ExprKind::Ternary` (not wrapped in
+  `Grouping`) unless both the outer and the inner are short ternaries.
+  The `ParseError` quotes PHP's message ("Unparenthesized
+  `a ? b : c ? d : e` is not supported"). The right-nested tree the
+  parser builds for a pure `?:` chain evaluates the same as PHP's
+  left-nested one, so it can stay.
+
+  Such a file then fails to parse, which F77 makes a reported error
+  rather than a silent skip. Parser tests cover the eight `php -l`
+  cases, and a fixture checks `(fn() => false or true)()` as `true` with
+  no `if.alwaysFalse`.
+
 - [ ] **F60. Subtracting a half-unbounded range from a constant, or
   dividing one by a negative constant, flips the result**
   (`types::arithmetic`; also before the window). Checked against PHP for
