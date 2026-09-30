@@ -199,6 +199,8 @@ pub(crate) fn is_truthy_literal(e: &Expr) -> bool {
 /// `function.impossibleType`). Any other call condition is answered like
 /// any other shape.
 fn should_skip_constant_condition(e: &Expr) -> bool {
+    // Parentheses don't change what reports the condition.
+    let e = e.peeled();
     // A type-check call (`is_int($x)`) reports itself
     // (`function.alreadyNarrowedType`/`function.impossibleType`).
     if let ExprKind::Call(callee, _) = &e.kind
