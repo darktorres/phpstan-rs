@@ -1920,8 +1920,13 @@ through `check-project`.
     kind, which each of its call sites knows (a call, a property fetch, a
     constant fetch), and the dead-member and dead-case queries
     (`dead_members.rs:216`, `dead_enum_cases.rs:62`) build the matching key.
-    A method named in a string callable, which F7's function index doesn't
-    cover, is unchanged.
+    Callables that name a method without call syntax count too. The
+    checker, which knows the types, records a `Method` reference for
+    `[$obj, 'm']`, `[Foo::class, 'm']`, `'Foo::m'`, `[static::class, 'm']`
+    and `Closure::fromCallable` of any of them, whenever the class and the
+    name resolve to constant values, and a `Function` reference for a
+    string callable naming a function (`array_map('trim', …)`). The dead
+    code module's "string callables" gap then goes.
 
   Fixtures: with `check_dead_code` on, `@param DocOnly $d` keeps
   `DocOnly` used, as do `@return list<DocOnly>`, `@var DocOnly $x`
@@ -2513,9 +2518,12 @@ through `check-project`.
     types, where `iterable<…>` is written out anyway.
   - `argv`/`argc`. They leave `is_superglobal` (`syntax/src/ast.rs:1589`).
     The checker seeds them into the global scope's `Locals` only, typed
-    `list<string>` and `int<1, max>` (the CLI shape; unset under a web SAPI,
-    where reading them is as undefined as any variable), and
-    `unassigned_variable_type`'s `argc` arm goes. Inside a function they are
+    `non-empty-list<string>` (the script name is always `$argv[0]`) and
+    `int<1, max>`. They exist only under the CLI SAPI, so their
+    definedness uses F5's certainty: `Yes` in a file that is a CLI entry
+    point (a `#!` line, or a path listed in `composer.json`'s `bin`), and
+    `Maybe` elsewhere, where a read reports "might not be defined". The
+    `unassigned_variable_type` `argc` arm goes. Inside a function they are
     undefined unless `global $argv;` brings them in, which the `Global`
     statement already handles.
 
