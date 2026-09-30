@@ -1039,19 +1039,19 @@ through `check-project`.
       that one identifier without losing real float mismatches, and the
       default reports it, since the value really can be a float.
     - Real bounds come in where the engine has them. `count()` and the
-      array-size functions return `int<0, 1073741824>`: `HT_MAX_SIZE`
-      is `0x40000000` on 64-bit builds and `0x02000000` on 32-bit ones
-      (read from PHP 8.5's `Zend/zend_types.h`), and the bound follows the
-      configured `PHP_INT_SIZE`. So `count($a) + 1` never overflows.
-      String lengths and offsets (`strlen`, `mb_strlen`, `strpos`,
-      `substr_count`, …) are bounded the same way. The engine's
-      `ZSTR_MAX_LEN` is `SIZE_MAX` minus a header, beyond any `int`, so
-      the real limit is the address space: `2^52` on the 64-bit
-      platforms PHP supports, `2^31` on 32-bit. `strlen($s) + 1` doesn't
-      overflow either. A loop counter narrowed by its
-      condition (`$i < count($a)`) is bounded the same way. `(int)`,
-      `intdiv`, `is_int` narrowing and a comparison with an int bound all
-      drop the overflow float, as they drop any float.
+      array-size functions return `int<0, 1073741824>`: `HT_MAX_SIZE` is
+      `0x40000000` on 64-bit builds and `0x02000000` on 32-bit ones (read from
+      PHP 8.5's `Zend/zend_types.h`), and the bound follows the configured
+      `PHP_INT_SIZE`. So `count($a) + 1` never overflows. String lengths and
+      offsets (`strlen`, `mb_strlen`, `strpos`, `substr_count`, …) are bounded
+      the same way. The engine's `ZSTR_MAX_LEN` is `SIZE_MAX` minus a header,
+      beyond any `int`, so the real limit is the address space: `2^57` on 64-bit
+      platforms (x86-64 with 5-level paging); a 32-bit build's user space can
+      exceed `PHP_INT_MAX`, so there the length stays unbounded. On 64-bit
+      builds `strlen($s) + 1` doesn't overflow either. A loop counter narrowed
+      by its condition (`$i < count($a)`) is bounded the same way. `(int)`,
+      `intdiv`, `is_int` narrowing and a comparison with an int bound all drop
+      the overflow float, as they drop any float.
 
   The finding's last bullet is then fixed as written, not closed by a
   convention.
