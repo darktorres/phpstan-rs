@@ -1760,8 +1760,9 @@ through `check-project`.
     pre-loop state, so dead code can report again. It stops checking
     after the report instead: statements after an always-terminating one
     are not analysed, except a label some `goto` targets, where checking
-    resumes with a scope that no fall-through reaches (the `goto`
-    sites' scopes, or an empty one when those aren't tracked). This
+    resumes with the merge of the `goto` sites' scopes, recorded at each
+    `goto` the way `break` states are. A backward `goto` makes a loop
+    and goes through the same convergence as one. This
     holds for every terminating statement, not only endless loops.
   - `check_for` calls it both for the condition-less arm (`None`), which
     today starts from `body_locals` and so carries the body's end state (the
