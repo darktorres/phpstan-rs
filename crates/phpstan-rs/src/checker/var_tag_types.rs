@@ -53,7 +53,8 @@ fn native_iterable_value(ty: &Type) -> Type {
 
 fn native_iterable_key(ty: &Type) -> Type {
     if ty.is_array().yes() {
-        ty.array_key_type().unwrap_or(Type::mixed())
+        ty.array_key_type()
+            .map_or_else(Type::mixed, |key| key.without_key_refinement())
     } else {
         Type::mixed()
     }

@@ -846,6 +846,12 @@ impl Type {
         })
     }
 
+    /// This type without the non-decimal-int refinement on its strings,
+    /// as a native type, which can't express it, reads a key.
+    pub fn without_key_refinement(&self) -> Type {
+        crate::strip_key_refinement(self)
+    }
+
     /// Whether this is `int|string`, the key type of an array with nothing
     /// known of its keys, however its strings are refined.
     pub fn is_unknown_array_key(&self) -> bool {
