@@ -2642,6 +2642,31 @@ through `check-project`.
   `/(\d+)?b/` `list<numeric-string>`. The `PREG_SET_ORDER` result is
   `array<...>`, though it is a list. Done: an optional group's element
   adds `''`, and the set-order result is a list, with fixtures.
+
+  Design:
+
+  - Pattern order. In `preg_match_all_pattern_order_shape`
+    (`expr/preg_shapes.rs:340`), `element_ty` adds `null` for an optional
+    group only under `PREG_UNMATCHED_AS_NULL`, and nothing otherwise. PHP
+    fills an unmatched group's slot in every match. With `php`,
+    `preg_match_all('/(a)?b/', 'b ab', $m)` gives `$m[1] = ['', 'a']`, and
+    with `PREG_OFFSET_CAPTURE` the unmatched slot is `['', -1]`. So an
+    optional group's element joins its matched leaf with the unmatched leaf:
+    `''`, or `null` under the flag, or under `PREG_OFFSET_CAPTURE` the pair
+    `array{'', -1}` (`array{null, -1}` with both flags). `preg_leaf_type`
+    gains that unmatched form so the two stay in one place.
+  - Set order. The arm at `expr.rs:1061` builds
+    `Type::array( unknown_array_key(), preg_match_matches_shape(…))`. The
+    result is a list (`array_is_list` is `true`, checked), so it is
+    `list<preg_match_matches_shape(…)>`. It is not non-empty, since zero
+    matches give `[]`. Each element keeps `preg_match`'s shape, whose
+    trailing unmatched groups are omitted, which is also what PHP does in
+    set order (`$m[0]` for the `'b'` match is `['b']`, checked).
+
+  Fixtures: `/(a)?b/` gives `$m[1]` `list<''|'a'>`; `/(\d+)?b/` gives
+  `list<''|numeric-string>`; the offset-capture and unmatched-as-null
+  variants; the set-order result is a `list`, and `$m[0][1]` on it is
+  "might not exist", not typed as present.
 - [ ] **F72. Narrowing that picks the wrong argument or value** (also
   before the window):
   - `assert_target_key_and_current` (`checker/narrowing/assertions.rs`)
