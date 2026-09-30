@@ -2903,6 +2903,34 @@ through `check-project`.
   'y'|'x'}` (itself missing the element without `nb`). Done: the element
   override applies only when the body writes the subject at no other key,
   with a fixture.
+
+  Design: the override in `converge_loop_body` (`control_flow.rs`, the
+  `LoopZeroIterations::Possible { subject_exempt, subject_key }` block)
+  replaces every element's type with the exit entry for
+  `$subject[$key]`. That stands for "every element ends as the body
+  leaves the one its key names", which holds only if the body writes the
+  subject nowhere else. `check_foreach` (`stmt/loops.rs`) sets
+  `subject_key` only when the body passes a syntactic test,
+  `writes_subject_only_at_key(body, subject, key)`. The test fails on:
+
+  - a write target rooted at `$subject` whose first index isn't exactly the
+    `$key` variable: `$items[$day + 1]`, `$items[] = …`, `$items['x']`;
+  - `unset($subject[…])` at any other key;
+  - the subject passed by reference: an argument slot the callee declares
+    by-ref, or any argument to an unresolved call;
+  - the subject reassigned whole;
+  - `$key` itself reassigned, since then `$subject[$key]` no longer names
+    the element being visited;
+  - a nested function or closure capturing the subject by reference.
+
+  On failure the loop falls back to the join the zero-iteration merge
+  already does (`iterated`, with the entry's value type joined), which
+  is the pre-`91666577` behaviour that F83 describes as sound but
+  imprecise. The walk stops at nested function and class bodies, like
+  the other scans. Fixtures: the finding's shape keeps `file?: 'x'|'y'`
+  with `nb` optional; the plain `$items[$day]['file'] = 'y'` loop still
+  types every element with `file`; a body that reassigns `$day` falls
+  back.
 - [ ] **F84. A template bound two siblings away still reads as `mixed`**
   (`build_template_params`; `2a31cc0c` substitutes one level). With
   `@template X of int`, `@template E of X`, `@template R of Holder<E>`
