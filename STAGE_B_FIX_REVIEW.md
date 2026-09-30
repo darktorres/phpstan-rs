@@ -202,9 +202,11 @@ through `check-project`.
     `$j` `string|int`, so `h($j)` reports "expects int, string|int
     given"; `is_int(?string)` gives `strlen()` the same false positive.
 
-  The check itself already reports `function.impossibleType`. Done: the
-  disjoint case is `never` in both arms, with a fixture asserting the type
-  after the `if`.
+  The check itself already reports `function.impossibleType`. Done:
+  narrowing intersects member by member, so the disjoint case is `never`
+  in both arms and a template narrows to `T&target`; an implicit `never`
+  doesn't end execution; fixtures assert the type after the `if` and no
+  `deadCode.unreachable` in the dead branch.
 
   Design: `Relation::narrow` (`types/src/narrowing.rs`) becomes a
   per-member intersection. For each member `m` of `original` (one member
@@ -270,9 +272,11 @@ through `check-project`.
     are `*ERROR*`, not `mixed~null`, so `$m->foo()` is unchecked at level
     9.
 
-  The pre-window binary gave `mixed`. Done: only a reported read yields
-  the error type. A quiet read yields `mixed`, or whatever the
-  `??`/`isset` semantics give.
+  The pre-window binary gave `mixed`. Done: a variable's definedness has
+  certainty, a quiet read gives `null` for an undefined name and the type
+  with `null` for a maybe-defined one, only a reported read gives the
+  error type, and a probe of a never-defined name is reported, with
+  fixtures.
 
   Design: the error type comes from `unassigned_variable_type`, reached
   by both `check_expr`'s and `infer_expr`'s `Variable` arms and by every
@@ -328,12 +332,14 @@ through `check-project`.
   `Foo`; a plain `echo $v` after the conditional definition still
   reports.
 - [ ] **F6. A rebound closure's `$this` is blessed as undefined**
-  (`fda237d8`). The commit's own fixture expects `variable.undefined
-  $this` (level 0) inside the two closures it rebinds with `->call(new
-  Foo)` and `Closure::bind`. PHP runs both with `$this` bound. The rebind
-  scan feeds only unused-member counting. Done: a closure rebound to an
-  object has `$this` of that object's type (or `object`), and the fixture
-  expects no `variable.undefined`.
+  (`fda237d8`). The commit's own fixture expects
+  `variable.undefined $this` (level 0) inside the two closures it rebinds
+  with `->call(new Foo)` and `Closure::bind`. PHP runs both with `$this`
+  bound. The rebind scan feeds only unused-member counting. Done: a
+  closure rebound to an object, as a literal or through a variable, is
+  checked with `$this` of that object's type at the rebind site, `call`
+  and folded names included, and the fixture expects no
+  `variable.undefined`.
 
   Design: the checker already seeds `$this` for a literal it can see at
   the rebind. `check_closure_literal_with_this_and_scope`
@@ -382,12 +388,12 @@ through `check-project`.
   indexed under the namespaced name.** `use_sites::function_at`
   (`use_sites.rs:176-179`) records `name.candidates().0`. With dead code
   on, a global `helper()` called as `helper()` from `namespace App;`
-  reports `Function helper is never referenced`. LSP references and
-  rename (`lsp.rs` 1262/1321/1360) and composer attribution read the same
-  index; `navigation.rs` uses `registry.called_function_name`, which is
-  right. This was already the case before the fix window; `d82888a8`
-  moved the index and kept it. Done: the index records the function the
-  call reaches (`called_function_name`'s fallback rule).
+  reports `Function helper is never referenced`. LSP references and rename
+  (`lsp.rs` 1262/1321/1360) and composer attribution read the same index;
+  `navigation.rs` uses `registry.called_function_name`, which is right.
+  This was already the case before the fix window; `d82888a8` moved the
+  index and kept it. Done: the index resolves an unqualified call's global
+  fallback at query time, through a site record that marks it.
 
   The key is also the name as written, so `Helper()` doesn't count as a
   reference to `function helper` and `function.unused` fires for it
@@ -457,11 +463,14 @@ through `check-project`.
   the attribute site at its exact span (and a rename rewrites it), and a
   hover test resolves `#[Marker]`.
 - [ ] **F9. A pipe into an impure callable is "does not do anything."**
-  `$x |> 'var_dump';`, `$x |> 'printf';` and `$x |> fn($v) =>
-  print($v);` as statements report `expr.resultUnused`. A pipe calls its
-  right side. This was already the case before the fix window; the
-  window's two pipe commits (`1cb1e25d`, `b3412c22`) didn't touch it.
-  Done: a pipe statement is a no-op only when its callee is known pure.
+  `$x |> 'var_dump';`, `$x |> 'printf';` and `$x |> fn($v) => print($v);`
+  as statements report `expr.resultUnused`. A pipe calls its right side.
+  This was already the case before the fix window; the window's two pipe
+  commits (`1cb1e25d`, `b3412c22`) didn't touch it. Done: a pipe is a call
+  to every walk that classifies calls (noop, purity, impure points,
+  forgetting), through one callee resolver, so a pipe statement is a no-op
+  only when its callee is known pure, with fixtures for the statement and
+  its callers.
 
   Design: a pipe is a call, so every walk that classifies calls has to
   see it as one. Today none does:
@@ -551,7 +560,8 @@ through `check-project`.
   (and `NAN == NAN` is false, which is reported right). The NaN literal
   compares equal to itself, as `scalars_disjoint`'s "NAN is itself" says.
   This was already the case before the fix window; `89da4c25` and
-  `d89ea9e5` kept it. Done: a NaN literal is never identical to anything.
+  `d89ea9e5` kept it. Done: no value is identical to a NaN literal, in the
+  verdict, the `===` narrowing and a `match` arm, with fixtures.
 
   Design: the always-true verdict comes from
   `Relation::identical_result` (`types/src/relation/accepts.rs:810`).
@@ -588,10 +598,11 @@ through `check-project`.
   (`22d4ff21`, F63's property half). `/** @var non-empty-foo */` on a
   property gives `class.notFound`, `property.unresolvableType`, and - new
   in the window - `assign.propertyType` "expects non-empty-foo, 2 given".
-  `@var parent` gives the unresolvable report plus the assignment one.
-  The Stage B ledger's F63 said the same goes for properties, and its
-  done note omits them. Done: an unresolvable property type is ignored
-  after its one report, as a parameter's is.
+  `@var parent` gives the unresolvable report plus the assignment one. The
+  Stage B ledger's F63 said the same goes for properties, and its done
+  note omits them. Done: unresolvability is decided where the registry
+  builds the signature, so every consumer reads the native type and each
+  position reports once, with fixtures.
 
   Design: `22d4ff21` swapped in the native type at one consumer, the
   function body (`function_decl.rs`, `doc_unresolvable`). Every other
@@ -642,10 +653,9 @@ through `check-project`.
     apart, but equality doesn't.
   - `generalize_by_key_set` drops the index of the shapes it merges.
 
-  Done: a write past the carried index moves it (PHP's `nextAutoIndexes`
-  after an explicit key). Two shapes with different next indexes are
-  distinct types, or their merge gives each appended shape (or an
-  unknown index). Fixtures cover both reports.
+  Done: the next index is a normalized set (a range past its cap), part of
+  the type, observed on literal writes and joined on merges, with a range
+  index appending into a range-keyed tail; fixtures cover both reports.
 
   Design: follow PHPStan's `nextAutoIndexes`, a set of possible next
   keys, and make it part of the type.
@@ -694,8 +704,9 @@ through `check-project`.
   `if (!is_string($z)) { $v = $z; } else { $v = 'x'; }` makes `$v`
   `mixed~string`, and `$v === 'x'` reports `identical.alwaysFalse`. The
   same happens with `mixed~int` and `5`, and `mixed~array` and `[1]`.
-  Done: the subtracted part keeps only what no joined member overlaps,
-  with fixtures for a literal and a refined join.
+  Done: a union absorbs a member into `mixed~S` only when it is disjoint
+  from `S`, keeps it as its own member otherwise, and intersects two
+  subtractions, with fixtures.
 
   Design: in `union_with_mixed` (`types/src/union.rs:885`), `without` is
   the wrong operation. `s.without(ty)` removes what `ty` wholly covers,
@@ -735,9 +746,9 @@ through `check-project`.
   `is_resource` (`gettype` gives "resource (closed)"). This was already
   the case before the fix window; since `c78732bc` the call is also typed
   `true`, so the loop reads as `while (true)`, and after an `fclose` an
-  `if (is_resource($fp))` has a dead `else`. Done: `resource` answers
-  `is_resource` maybe, or `fclose()` and the like leave a closed
-  resource.
+  `if (is_resource($fp))` has a dead `else`. Done: `resource` is open or
+  closed, a builtin's returned resource is open, `is_resource` narrows to
+  open and a closing function marks its argument closed, with fixtures.
 
   Design: the type model already has a closed resource (`Repr::Resource
   { closed }`, PHPDoc `closed-resource`), but `parse.rs:1012` reads a
@@ -998,10 +1009,11 @@ through `check-project`.
     `int<min, -6>`, and `PHP_INT_MIN + -3` is a float. F60's sweep finds
     this at the ends for `+`, `-`, `*` and `**`.
 
-  Done: a base range that spans zero or is negative is split by sign
-  (even and odd exponents differ), an overflowing bound adds `float`, and
-  an operand that may be a float makes the result `int|float` (or `float`
-  when every member is one), with fixtures for each.
+  Done: arithmetic distributes over number-coerced members, unary
+  operators are multiplications, `**` splits by sign and parity, every
+  possible overflow adds a marked overflow float with its own report
+  identifiers, and engine limits bound counts and string lengths, with
+  fixtures and a `php`-generated sweep.
 
   Design: restructure `Type::binary_operation`
   (`types/src/arithmetic.rs:640`) around the operands' members rather
@@ -1137,10 +1149,9 @@ through `check-project`.
     `return.unusedType`. A branch with `self::A` falls back to the union
     of both branches. A `?T` branch splits on its `?` the same way.
 
-  Done: a float literal is read only when the text starts with a digit,
-  a sign or a dot; integer literals take PHP's separators and prefixes;
-  the conditional's branches are split past the callable return and `::`
-  (and a nullable branch); fixtures for each.
+  Done: one grammar parses every written type, PHPDoc and internal strings
+  alike, lowered from its node, with phpdoc-parser's number lexemes;
+  fixtures for each bullet.
 
   Design: a PHPDoc type is parsed twice today. `phpdoc::grammar` lexes
   and parses it into a `TypeNode`, reporting `phpDoc.parseError`. Then
@@ -1200,10 +1211,12 @@ through `check-project`.
   `rand()` accepts `rand(10, 1)` and returns a value in `[1, 10]`, so
   `$r = rand(10, 1);` is `never` and the next statement reports
   `deadCode.unreachable`; the pre-window binary gave `int<10, 1>` and no
-  report. `rand($a, $b)` with `$a` in `int<5, 10>` and `$b` in
-  `int<0, 3>` is `never` the same way. (`mt_rand` and `random_int` throw
-  on crossed bounds, so `never` is right for them.) Done: `rand`'s range
-  spans both arguments' bounds in either order, with a fixture.
+  report. `rand($a, $b)` with `$a` in `int<5, 10>` and `$b` in `int<0, 3>`
+  is `never` the same way. (`mt_rand` and `random_int` throw on crossed
+  bounds, so `never` is right for them.) Done: `rand`'s range spans both
+  arguments' bounds in either order, and crossed `mt_rand`/`random_int`
+  bounds are an explicit `never` and reported (possibly crossed ones at
+  the maybe level), with fixtures.
 
   Design: split the `random_int | rand | mt_rand` arm
   (`expr/builtin_calls.rs:132`) by what PHP does with crossed bounds
@@ -1237,11 +1250,13 @@ through `check-project`.
   `identical.alwaysFalse`; after `$r = &$x; $r++;`, `$x === 1` reports
   `identical.alwaysTrue`. A fact the branch-implied-facts mechanism
   recorded for `$s` is replayed across such a write too, and
-  `check_pointless_null_probe` reports `$x ?? 'd'` after `$x = null; $r =
-  &$x; $r = 'a';` as `nullCoalesce.variable` ("always null"). Done: an
-  assignment by reference records the alias, and a write to either name
-  updates (or at least forgets the narrowing of) the other, with
-  fixtures for both shapes.
+  `check_pointless_null_probe` reports `$x ?? 'd'` after
+  `$x = null; $r = &$x; $r = 'a';` as `nullCoalesce.variable` ("always
+  null"). Done: `Locals` keeps reference groups (assignment, `foreach` by
+  reference, which outlives the loop, and array or property targets), a
+  write or narrowing of one member reaches all, globals forget across
+  calls, and a dangling `foreach` reference write is reported, with
+  fixtures.
 
   Design: `AssignRef` shares `Assign`'s arm (`expr.rs:2013`) and binds
   the left side's type, so the checker forgets, after the statement,
@@ -1385,9 +1400,9 @@ through `check-project`.
   the union with the prior value the code intends never happens. With
   `$key` `'id'|'name'`, `$row[$key] = null;` makes `$row['id']` and
   `$row['name']` both `null`, so `$row['id'] === null` reports
-  `identical.alwaysTrue`. Done: when the key may be more than one
-  literal, each entry becomes the union of its prior value and the
-  written one, with a fixture.
+  `identical.alwaysTrue`. Done: the per-key entries a several-literal-key
+  write set are removed, so reads come from the shape, whose fields join
+  the written value, with a fixture.
 
   Design (F85 too): the per-key entries are a second copy of what the
   container's shape now says, and the copy is the one that goes wrong.
@@ -1441,10 +1456,10 @@ through `check-project`.
     `sscanf($s, "%d %X", $a, $b)` reports `argument.sscanf` ("contains 1
     placeholder(s), 2 value(s) given") at level 0.
 
-  Done: each gives what PHP returns (keys from the keys array, re-cased
-  shape keys, array-key conversion, the declared parent only for a final
-  class, non-emptiness only when it survives, every scanf conversion
-  counted), with a fixture for each.
+  Done: each gives what PHP returns (the zipped or converted keys,
+  re-cased shape keys, array-key conversion, `get_parent_class` exact for
+  final and non-final classes, non-emptiness only when it survives, one
+  scanf lexer for count and shape), with a fixture each.
 
   Design: one fix per arm in `expr/builtin_calls.rs`, each checked
   against `php` output.
@@ -1727,12 +1742,13 @@ through `check-project`.
   reported pointless** (`resolve_always_exists`,
   `checker/expr/probe_checks.rs`; also before the window). The
   `PropertyAccess` arm finds the property on the receiver's type without
-  asking whether the receiver can be null: with `?Foo $x` and `Foo::$p`
-  an `int` with a default, `isset($x->p)` reports `isset.property` ("is
-  not nullable") and `$x->p ?? 2` `nullCoalesce.property`, though a null
-  `$x` makes them `false` and `2`. `unset($x->p); isset($x->p)` reports
-  the same. Done: a receiver that may be null, or a property unset on the
-  path, makes the chain not always present, with fixtures.
+  asking whether the receiver can be null: with `?Foo $x` and `Foo::$p` an
+  `int` with a default, `isset($x->p)` reports `isset.property` ("is not
+  nullable") and `$x->p ?? 2` `nullCoalesce.property`, though a null `$x`
+  makes them `false` and `2`. `unset($x->p); isset($x->p)` reports the
+  same. Done: a chain is always present only when each link is non-null,
+  declared on every member and not unset on the path, and a read of an
+  unset property is reported, with fixtures.
 
   Design: `resolve_always_exists` (`expr/probe_checks.rs:180`) answers
   "always present" for a chain. Each link must then prove the value that
@@ -1817,9 +1833,10 @@ through `check-project`.
     `doWhile.alwaysFalse`. A `break` in the body exempts this run-once
     idiom; a `continue`, which leaves the loop the same way here, doesn't.
 
-  Done: `for (;;)` exits through its `break` states only, and a
-  `continue` exempts `doWhile.alwaysFalse` as a `break` does, with
-  fixtures.
+  Done: every endless loop exits through its `break` states alone, dead
+  statements after a terminating one are not checked (resuming at a `goto`
+  target), and a `continue` that targets the loop exempts
+  `doWhile.alwaysFalse`, with fixtures.
 
   Design: share the endless-loop exit.
 
@@ -1897,12 +1914,15 @@ through `check-project`.
   `mysqli_result|true`.
 - [ ] **F65. A spread argument counts as one argument**
   (`checker/expr/array_ops.rs`; also before the window).
-  `check_useless_return_value_call` reads `args.len()`, so `$x =
-  var_export(...$args)` reports `function.uselessReturnValue` though
+  `check_useless_return_value_call` reads `args.len()`, so
+  `$x = var_export(...$args)` reports `function.uselessReturnValue` though
   `$args` may hold `true` for `$return`. `check_array_filter_no_op` and
-  `check_array_values_no_op` do the same and judge `array_filter(...$args)`
-  by the type of `$args` itself (read, not probed). Done: a spread
-  argument makes each check bail, with a fixture.
+  `check_array_values_no_op` do the same and judge
+  `array_filter(...$args)` by the type of `$args` itself (read, not
+  probed). Done: one argument normalization (named arguments moved, gaps
+  filled with defaults, sealed spreads expanded) runs ahead of every
+  builtin special case and call check, which bail only on a spread it
+  can't expand, with fixtures.
 
   Design: the three checks are instances of a wider pattern. The builtin
   special cases (`infer_builtin_call_return_type`, 140
@@ -1953,8 +1973,9 @@ through `check-project`.
   - `method.unused` for `A::mixedCase()` called as `$a->MIXEDCASE()`:
     member references are recorded under the name as written.
 
-  Done: a PHPDoc type counts as a reference and member references fold
-  case, with fixtures.
+  Done: PHPDoc types and callables naming a method or function count as
+  references, doc links are indexed for LSP but not dead code, and member
+  references carry their kind so only methods fold, with fixtures.
 
   Design: two index changes, each at the recording end.
 
@@ -2000,20 +2021,21 @@ through `check-project`.
 - [ ] **F81. A loop's shape widening builds a self-nesting array to a
   fixed depth and types the bottom wrong** (`widen_towards`,
   `types::queries`; since `f0ad71f8`, which lets a shape gain string keys
-  while widening; the 18:15 binary before it is sound). `$a = ['x' => 1];
-  while ($c) { $a = ['x' => $a['x'] * 2, 'y' => $a]; }` gives `$a` six
-  levels of `y?:`, the innermost `array{x: 1}`, where the binary before
-  gave `non-empty-array<string, ...>` below the first level. Each pass
-  widens the nested field field by field, one level deeper, until the
-  passes run out. After the loop, `($a['y']['y']['y']['y']['y']['y']['x']
-  ?? 1) === 1` reports `identical.alwaysTrue`; PHP gives `4` after eight
-  iterations. `$a = ['prev' => $a, 'i' => $i]` bottoms out the same way,
-  at `prev?: array{}`. Separately (read, not probed), `combined_shape`
-  makes a key some unsealed member lacks optional with the other members'
-  values only, not that member's tail value. Done: a nested field that
-  gains a level widens by generalizing, so that pass sequence reaches a
-  fixed point, and `combined_shape` joins an unsealed member's tail into
-  the keys it lacks, with fixtures.
+  while widening; the 18:15 binary before it is sound).
+  `$a = ['x' => 1]; while ($c) { $a = ['x' => $a['x'] * 2, 'y' => $a]; }`
+  gives `$a` six levels of `y?:`, the innermost `array{x: 1}`, where the
+  binary before gave `non-empty-array<string, ...>` below the first level.
+  Each pass widens the nested field field by field, one level deeper,
+  until the passes run out. After the loop,
+  `($a['y']['y']['y']['y']['y']['y']['x'] ?? 1) === 1` reports
+  `identical.alwaysTrue`; PHP gives `4` after eight iterations.
+  `$a = ['prev' => $a, 'i' => $i]` bottoms out the same way, at
+  `prev?: array{}`. Separately (read, not probed), `combined_shape` makes
+  a key some unsealed member lacks optional with the other members' values
+  only, not that member's tail value. Done: the type language has
+  recursive types, so a self-nesting loop widens to its exact fixed point
+  (with the depth rule as a fallback), and `combined_shape` joins an
+  unsealed member's tail into the keys it lacks, with fixtures.
 
   Design: a widening operator has to reach a fixed point in a bounded
   number of passes whatever the body does. `widen_towards`
@@ -2080,8 +2102,9 @@ through `check-project`.
   - after `[$r => 1, 'y']`, with `$r` an `int<10, 20>`, the positional key
     is 0, where PHP gives 11..21.
 
-  Done: the next index is tracked as a range; an unknown int key makes it
-  unknown (`int`), not 0.
+  Done: the next index follows every key in general mode and becomes a
+  range once a key's int part is one, and the duplicate-key check keeps
+  going past an unknown key, with fixtures.
 
   Design: `infer_array_literal_type` (`expr/array_ops.rs:84`) stops
   maintaining `next_index` the moment it goes general. The
@@ -2186,8 +2209,9 @@ through `check-project`.
   (`b1dddb6c`). `$i / false`, `/ null`, `/ '0'`, `% 0.5`, `% false` and
   `% '0'` all throw `DivisionByZeroError` (checked with `php -r`), but
   `is_zero` compares only with int `0` and float `0.0`. Done: a divisor
-  whose every value converts to zero is reported - to a number for `/`,
-  to an int for `%`.
+  whose every value converts to zero (to a number for `/`, to an int for
+  `%`) is reported, and the expression is an explicit `never`, with
+  fixtures.
 
   Design: `check_division_by_zero` (`operators.rs:364`) compares each
   finite value of the divisor with `0` and `0.0` as written. PHP
@@ -2220,7 +2244,9 @@ through `check-project`.
   `new $undef->cls()` and `new $undef['k']()` report no undefined
   variable. This was already the case before the fix window; `3f04ac3f`
   widened the grammar there without checking it. Done: the class
-  expression goes through `check_expr`.
+  expression goes through `check_expr`, a value that can't name a class is
+  reported and becomes the error type, and the instance is typed from the
+  value, with fixtures.
 
   Design: both `New` arms treat a non-`Name` class expression as opaque.
   `check_expr`'s arm (`expr.rs:2352`) starts from `infer_expr(e)`, never
@@ -2352,7 +2378,9 @@ through `check-project`.
     (`offset_value_type` gives up on the whole union when one member lacks
     the key).
 
-  Done: each is fixed or ledgered where it belongs.
+  Done: each bullet is fixed as its design states (the list/shape
+  intersection, `\int`, `array_pop`/`array_shift`, a union's offset read
+  and its possibly-missing report), with a fixture each.
 
   Design, bullet by bullet, re-probed on the 21:15 binary:
 
@@ -2487,7 +2515,9 @@ through `check-project`.
   - `1cb1e25d`: a union of callable names isn't resolved for the pipe's
     by-reference check.
 
-  Done: each is fixed or ledgered.
+  Done: the non-numeric-string report consults the PHP version range (a
+  warning below 8.0, an error from 8.0), and the pipe's union of callables
+  is resolved member by member, with fixtures.
 
   Design:
 
@@ -2521,11 +2551,12 @@ through `check-project`.
 - [ ] **F36. An argument outside its template's bound isn't reported.**
   With `@template T of \Countable @param T $c`, `cnt(5)` gives no
   `argument.type` at level 9, and returns `Countable`, where the
-  pre-window binary returned `5`. `@template T of int` with
-  `onlyInt('s')` isn't reported either. The Stage B review's F38 names
-  this ("an argument outside `T of Foo` binds anyway") and is marked done
-  without it. Done: an argument is checked against the bound of the
-  template its parameter names.
+  pre-window binary returned `5`. `@template T of int` with `onlyInt('s')`
+  isn't reported either. The Stage B review's F38 names this ("an argument
+  outside `T of Foo` binds anyway") and is marked done without it. Done:
+  an argument is checked against its parameter with the call's templates
+  substituted (a rejected one by its bound), and a rejected argument
+  leaves no bindings behind.
 
   `3cea2a20` checks the bound with the bindings found so far substituted
   in (`R of Repo<E>` holds a `Repo<Entity>` once `E` is `Entity`), in
@@ -2584,7 +2615,8 @@ through `check-project`.
     only in the global scope, so `$argv` read inside a function isn't
     `variable.undefined`.
 
-  Done: each gives the type or message it names, with a fixture.
+  Done: each gives the type or message it names (`argv`/`argc` with
+  CLI-entry certainty), with a fixture each.
 
   Design, per bullet:
 
@@ -2868,11 +2900,10 @@ through `check-project`.
     being a list: `[...['a' => 1], ...$l]` with `list<int> $l` is
     `list<int>`, and not non-empty (also before the window).
 
-  Done: general mode observes every int key and makes a later positional
-  key `int` once an unknown key may be an int; an optional int field makes
-  the keys renumbered after it uncertain; an optional field keeps a
-  required one's key required, its type joined; list-ness and
-  non-emptiness count the fields already merged, with fixtures.
+  Done: general mode observes every key (F13), an optional int field forks
+  candidate shapes and past the cap keeps a range-keyed tail, an optional
+  field joins a required one, and list-ness and non-emptiness count the
+  merged fields, with fixtures.
 
   Design: the first bullet is F13's fix: general mode keeps observing
   keys, and the next index becomes a range. The rest is in
@@ -2955,8 +2986,9 @@ through `check-project`.
     `'a'|'b' $x` and `array{0: 'a', 1?: 'b'} $h`, `!in_array($x, $h,
     true)` makes `$x` `never`.
 
-  Done: a named argument maps by name (a spread bails), and the not-found
-  branch rules out only required fields' values, with fixtures.
+  Done: an asserted parameter reads its resolved argument slot (named
+  arguments mapped, sealed spreads expanded), and the not-found branch
+  rules out only required fields' values, with fixtures.
 
   Design:
 
@@ -3033,17 +3065,20 @@ through `check-project`.
   8.1 and `PHP_VERSION_ID >= 80200` reports always false, as `"8.1"`
   does; `">=8.1.5 <8.1.10"` selects 8.1; `"^8.1 != 8.1.3"` still selects
   8.1 through 8.x; unit tests for `overlaps` at the interval edges.
-- [ ] **F75. The duplicate-declaration checks miss case variants and
-  split groups** (`project/duplicate_classes.rs`,
-  `duplicate_functions.rs`; also before the window). Sites are keyed by
-  the name as written, so `class Foo` and `class foo`, or `function
-  helper` and `function HELPER`, in two files aren't reported; PHP
-  refuses the second. Function sites are grouped by comparing each with
-  the previous one in path order, so `twice(int)` in `c.php` and `e.php`
-  with `twice(string)` in `d.php` between them are never compared; with
-  another `twice(int)` in `d0.php`, the list names `d0.php` and `e.php`
-  but not `c.php`. Done: sites are keyed by the lowercased name and
-  grouped by signature, with fixtures.
+- [ ] **F75. The duplicate-declaration checks miss case variants and split
+  groups** (`project/duplicate_classes.rs`, `duplicate_functions.rs`; also
+  before the window). Sites are keyed by the name as written, so
+  `class Foo` and `class foo`, or `function helper` and `function HELPER`,
+  in two files aren't reported; PHP refuses the second. Function sites are
+  grouped by comparing each with the previous one in path order, so
+  `twice(int)` in `c.php` and `e.php` with `twice(string)` in `d.php`
+  between them are never compared; with another `twice(int)` in `d0.php`,
+  the list names `d0.php` and `e.php` but not `c.php`. Done: a duplicate
+  is two declarations that run in one process: sites keyed by the folded
+  name, conditional ones judged by their guard, load sets from autoload
+  `files`, the test run and the include graph, certain collisions at level
+  0 and possible ones at level 7, and ambiguous class autoloading
+  reported; the checks run by default, with fixtures.
 
   Design:
 
@@ -3236,12 +3271,13 @@ through `check-project`.
   `91666577`). The subject becomes the element the body leaves at
   `$subject[$key]`: with `array<int, array{nb: 1}> $items`,
   `foreach ($items as $day => $d) { $items[$day + 1]['file'] = 'x';
-  $items[$day]['file'] = 'y'; }` types every element `array{nb: 1,
-  file: 'y'}`, though the last iteration leaves `$items[$last + 1]` as
-  `['file' => 'x']`. The binary before gave `array{nb: 1, file?:
-  'y'|'x'}` (itself missing the element without `nb`). Done: the element
-  override applies only when the body writes the subject at no other key,
-  with a fixture.
+  $items[$day]['file'] = 'y'; }`
+  types every element `array{nb: 1, file: 'y'}`, though the last iteration
+  leaves `$items[$last + 1]` as `['file' => 'x']`. The binary before gave
+  `array{nb: 1, file?: 'y'|'x'}` (itself missing the element without
+  `nb`). Done: the element override records the elements the body writes
+  at other keys and joins them in, falling back only on escapes the pass
+  can't see, with a fixture.
 
   Design: the override in `converge_loop_body` (`control_flow.rs`, the
   `LoopZeroIterations::Possible { subject_exempt, subject_key }` block)
@@ -3311,16 +3347,17 @@ through `check-project`.
   or `@return`; a two-template cycle parses without a hang or a report;
   a default naming a sibling (`@template B = A`) resolves through the
   same order.
-- [ ] **F85. A write through several literal keys fixes the shape but
-  not the keys' entries** (`783727da`, with F48). `$row[$key] = null`
-  with `'id'|'name' $key` now types `$row` as `array{id: 1|null, name:
-  'n'|null}`, but `$row['id']` still reads its per-key entry, `null`, so
-  `$row['id'] === null` still reports `identical.alwaysTrue`, and the
-  container and its element now disagree. A key the shape lacks becomes
-  optional with the written value only, even when the shape is open:
-  `array{a: 1, ...<string, int>}` written at `'a'|'b'` gains `b?: 'z'`,
-  though `b` may hold an `int` from the tail. Done: F48's entry union,
-  and a missing key taking the tail's value type too, with fixtures.
+- [ ] **F85. A write through several literal keys fixes the shape but not
+  the keys' entries** (`783727da`, with F48). `$row[$key] = null` with
+  `'id'|'name' $key` now types `$row` as
+  `array{id: 1|null, name: 'n'|null}`, but `$row['id']` still reads its
+  per-key entry, `null`, so `$row['id'] === null` still reports
+  `identical.alwaysTrue`, and the container and its element now disagree.
+  A key the shape lacks becomes optional with the written value only, even
+  when the shape is open: `array{a: 1, ...<string, int>}` written at
+  `'a'|'b'` gains `b?: 'z'`, though `b` may hold an `int` from the tail.
+  Done: with F48: the entries go, reads come from the shape, and a key new
+  to an open shape takes the tail's value type too, with fixtures.
 
   Design: with F48. The per-key entry loop in `bind_assignment_target`
   goes, so reads come from the shape `783727da` already fixes, and a key
@@ -3331,10 +3368,9 @@ through `check-project`.
 - [ ] **F20. Nothing enforces the stack guard** (`041fcc46`). It is a
   convention on about 200 hand-picked recursive functions, with no lint or
   test catching a new recursive walk without one. The types crate depends
-  on `syntax` for `stack::guard` alone. Done: a test drives every
-  `Visitor`/type traversal at depth, or a clippy-style check lists the
-  recursive functions, and the guard lives in a crate both can use without
-  the parser.
+  on `syntax` for `stack::guard` alone. Done: the guard lives in its own
+  crate, and both an `xtask recursion` lint and a small-stack depth test
+  over every traversal enforce it.
 
   Design:
 
@@ -3365,11 +3401,10 @@ through `check-project`.
   The 195 current `guard` sites stay. The lint's first run lists the
   recursive functions without one, and each is guarded or allowlisted in
   the same change.
-- [ ] **F21. The error type has no central rule** (`7ec336de`). Each
-  "is this unknown" check has to learn `is_error()` by hand;
-  `7ec336de` adds one more. Done: `is_error` folds into the one
-  unknown-type predicate the checks already share, so a new check can't
-  miss it.
+- [ ] **F21. The error type has no central rule** (`7ec336de`). Each "is
+  this unknown" check has to learn `is_error()` by hand; `7ec336de` adds
+  one more. Done: the error type is a kind of `mixed`, so every
+  unknown-type guard covers it without learning it.
 
   Design: make the error type a kind of `mixed`, so every "is this
   unknown" test sees it without learning it. Today `Repr::Error` is a
@@ -3422,7 +3457,7 @@ through `check-project`.
   - `daa88e7c`: case folding is certain regardless of the configured PHP
     version, but final sigma differs before 8.3.
 
-  Done: each is decided and fixed or ledgered.
+  Done: each bullet is fixed as its design states.
 
   Design, one decision per bullet:
 
@@ -3521,7 +3556,7 @@ through `check-project`.
   - `ba7ffe83`: lossy character counting from a mark inside an invalid
     UTF-8 run can differ from counting from the line start.
 
-  Done: each is decided and fixed or ledgered.
+  Done: each bullet is fixed as its design states.
 
   Design, one decision per bullet:
 
@@ -3726,11 +3761,12 @@ through `check-project`.
 
 - [ ] **F86. `c0c51bca` landed with two fixtures failing.** Its
   `unseal_with` gives an open shape's tail its types, which changes the
-  expected output of `an_open_shape_join_keeps_the_tail_type_for_a_one_sided_key`
-  and `array_shape_writes_across_several_independent_branches_converge_instead_of_blowing_up`
+  expected output of
+  `an_open_shape_join_keeps_the_tail_type_for_a_one_sided_key` and
+  `array_shape_writes_across_several_independent_branches_converge_instead_of_blowing_up`
   (both reach `array_merge`); `41e2198d` updated them two hours later.
-  Done: nothing to change in the code; a fix commit's scoped test run
-  includes the fixtures its function reaches.
+  Done: a fix commit's scoped run includes the fixtures that execute its
+  code, from a coverage map `xtask fixtures-map` builds.
 
   Design: nothing in the code. `41e2198d` fixed the two fixtures. The
   lesson is about scoped verification: a fix commit's scoped test run
@@ -3749,18 +3785,17 @@ through `check-project`.
   note in the contributor docs and the xtask helper.
 
 - [ ] **F87. A discarded pass still leaves some records behind**
-  (`Checker::pass_mark`, `cc4e6b5e`; read, not probed). `rewind_to`
-  covers diagnostics, semantic tokens, throw and return points and inlay
-  hints. What a discarded loop pass adds elsewhere stays:
-  `record_throw_state`'s entries in the enclosing `try`'s frame and
-  `property_assign_facts`. Both only gain the narrower types of earlier
-  passes, so neither changes an outcome today. `named_argument_call_facts`
-  is deduplicated by a linear `contains` per push instead of being
-  rewound. `check_trait_methods` checks a trait's methods once per host
-  and dedups the diagnostics only, so its semantic tokens and inlay hints
-  still repeat per host. Done: every per-pass record is in `PassMark`
-  (or keyed so a repeat can't add), and the trait re-check rewinds the
-  LSP records after its first host.
+  (`Checker::pass_mark`, `cc4e6b5e`; read, not probed). `rewind_to` covers
+  diagnostics, semantic tokens, throw and return points and inlay hints.
+  What a discarded loop pass adds elsewhere stays: `record_throw_state`'s
+  entries in the enclosing `try`'s frame and `property_assign_facts`. Both
+  only gain the narrower types of earlier passes, so neither changes an
+  outcome today. `named_argument_call_facts` is deduplicated by a linear
+  `contains` per push instead of being rewound. `check_trait_methods`
+  checks a trait's methods once per host and dedups the diagnostics only,
+  so its semantic tokens and inlay hints still repeat per host. Done:
+  every per-pass record is in `PassMark` (or keyed so a repeat can't add),
+  and the trait re-check rewinds the LSP records after its first host.
 
   Design: complete `PassMark` (`checker.rs`) so a discarded pass leaves
   nothing, rather than reasoning per record about why a leftover is
@@ -3864,7 +3899,8 @@ through `check-project`.
     with a warning; only a wholly non-numeric `'abc'` throws. Reporting
     the leading-numeric case may stay as a choice; the doc's claim goes.
 
-  Done: the doc says what PHP does.
+  Done: a leading-numeric string is its leading number, with its own
+  warning report, and the doc says what PHP does.
 
   Design: the doc and the code share the claim. `to_number`
   (`types/src/coercion.rs:78`) returns `None` for any string literal
@@ -3933,7 +3969,9 @@ through `check-project`.
   - `accepts.rs`: the object-shape arm compares `class == "stdClass"` by
     case (code rather than a comment, but the same sweep).
 
-  Done: each says what the code does, on the item it documents.
+  Done: each comment says what the code does, on the item it documents,
+  and the class-default padding and folded `stdClass` its false premises
+  hid are fixed.
 
   Design, each checked present at `3eaddbd1`. Every replacement states
   what the code does, in the file's register, without history.
@@ -4138,7 +4176,9 @@ through `check-project`.
     cites "`ClassDecl.attrs`'s identical note" (the field is
     `ClassDef::attrs`).
 
-  Done: each says what the code does, on the item it documents.
+  Done: each comment says what the code does, on its item, and a bare name
+  in `use_sites.rs` is indexed as a constant reference, with
+  `constant.unused` and LSP references for constants.
 
   Design, each checked present at `3eaddbd1`:
 
@@ -4282,9 +4322,9 @@ through `check-project`.
   replaced:** `converge_loop_body`'s doc calls discarding a pass "the
   existing `diagnostics.truncate` pattern", and `check_while`'s comment
   says every pass but the kept one "has its diagnostics discarded via
-  `converge_loop_body`'s own `diagnostics.truncate`"; both now go
-  through `rewind_to`, which drops more than diagnostics. Done: both
-  name `rewind_to`.
+  `converge_loop_body`'s own `diagnostics.truncate`"; both now go through
+  `rewind_to`, which drops more than diagnostics. Done: both point at
+  `PassMark`'s doc as the one list of what `rewind_to` rolls back.
 
   Design: `converge_loop_body`'s doc (`control_flow.rs`, near line 280)
   says a discarded pass "is rolled back with `rewind_to` to the pass's
