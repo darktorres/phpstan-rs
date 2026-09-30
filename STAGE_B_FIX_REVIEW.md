@@ -3260,6 +3260,38 @@ through `check-project`.
   input a parse error (`474920e5`, `f4128dec`) turns a file that was
   checked into one skipped silently. Done: a parse error is a
   non-ignorable diagnostic at its span, and it fails the run.
+
+  Design: `read_and_parse_file` (`project/session.rs:569`) turns three
+  different failures into one `None`: an unreadable file, a
+  `ParseError`, and a parser panic (`catch_unwind(...).ok()?`). `load`
+  only counts them, and `check_project.rs:289` prints "N file(s)
+  skipped: parse error".
+
+  - The function returns `Result<(String, ParsedFile), LoadFailure>`, where
+    `LoadFailure` is `Unreadable(io::Error)`, `Parse(ParseError)` (which
+    carries a span and a message), or `Panic(String)`.
+  - For an analysed file, `load` records each failure as a diagnostic in the
+    file's result:
+    - a parse error is `phpstanRs.parseError`, level 0, non-ignorable, at
+      the error's span, with the parser's message;
+    - a panic is `phpstanRs.internalError` at the file's first line, naming
+      it an internal error to report;
+    - an unreadable file is `phpstanRs.unreadableFile`.
+
+  The file counts as checked, with those diagnostics, so the run's
+  diagnostic count and exit status (non-zero with diagnostics) follow
+  without new plumbing. The "skipped" summary line goes. - A context
+  (scan-path) file isn't analysed, so it gets no diagnostic. It is
+  listed in a summary line with its path under `-v` and counted
+  otherwise, since its declarations are missing from the registry, which
+  the user should know. - The LSP reparse path publishes the same
+  diagnostic for the open document.
+
+  Each commit that widens what is a parse error (`474920e5`, `f4128dec`,
+  and F10/F57's) then shows up as a reported error. Fixtures: a file
+  with `(yield and $b)` before F10, or any `php -l` failure, reports
+  `phpstanRs.parseError` at the offending token, and the run exits
+  non-zero; the old "skipped" count is gone from the summary.
 - [ ] **F78. The duplicate-declaration checks walk every name for every
   file** (`finish_diagnostics`, `project.rs`). With either opt-in on,
   each file's diagnostics loop over every recorded name in the project
