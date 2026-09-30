@@ -2528,7 +2528,9 @@ through `check-project`.
     statement already handles.
 
   Fixtures: one per bullet. `$argv` read inside a function reports
-  `variable.undefined`, and at the top level it is `list<string>`.
+  `variable.undefined`; at the top level of a `#!` script it is
+  `non-empty-list<string>` and defined, and of an ordinary file it
+  reports "might not be defined".
 
 - [ ] **F50. Calls that narrow are matched by the name's case** (also
   before the window). PHP function and method names ignore case, but:
