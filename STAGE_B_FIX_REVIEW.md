@@ -3907,7 +3907,9 @@ through `check-project`.
     constants are, with an unqualified name in a namespace recorded under
     both candidates and resolved at query time the way F7 resolves
     functions. `define('FOO', …)` and `const FOO` declarations are the
-    targets. LSP references and rename then work on global constants.
+    targets, and a literal argument to `constant()` or `defined()` is
+    a reference too. LSP references and rename then work on global
+    constants.
     Dead code gains `constant.unused` for a project `const`/`define` with
     no reference, beside `function.unused`. The comment says a bare name
     is a constant. Probed: in
