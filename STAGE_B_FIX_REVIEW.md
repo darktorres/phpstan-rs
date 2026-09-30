@@ -2615,8 +2615,13 @@ through `check-project`.
   Design: a loose-equality narrowing beside `apply_equality_narrowing`,
   used by `check_switch` (`stmt/switch.rs`) for every `case`, by
   `or_chain_narrowing_target`'s `BinOp::Eq` leaf
-  (`narrowing/predicates.rs`), and by the plain `==`/`!=` narrowing if
-  that shares the strict path too.
+  (`narrowing/predicates.rs`), and by a new plain `==`/`!=` arm in
+  `apply_narrowing`: today `if ($x == 1)` narrows nothing at all, since
+  no arm handles `BinOp::Eq`. One more site treats `==` as `===`:
+  `primary_discriminant` (`narrowing.rs:382`) records `$x == 1` as the
+  discriminant value `1`, so a fact recorded under it replays for a
+  value that may be `'1'` or `'01'`. It records a `==` discriminant only
+  when the loose narrowing of the subject is that single literal.
   `loose_equality_narrow(subject, other, branch) -> Option<Type>`
   answers only where PHP 8's rules pin the set down, and `None` (no
   narrowing) elsewhere:
