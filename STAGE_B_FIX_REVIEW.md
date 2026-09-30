@@ -380,6 +380,51 @@ through `check-project`.
   right side. This was already the case before the fix window; the
   window's two pipe commits (`1cb1e25d`, `b3412c22`) didn't touch it.
   Done: a pipe statement is a no-op only when its callee is known pure.
+
+  Design: a pipe is a call, so every walk that classifies calls has to
+  see it as one. Today none does:
+
+  - `noop.rs`'s `own_side_effects` has no `Binary(Pipe, ..)` arm, so the
+    statement is effect-free unless its operands hold a call. `$x |>
+    printf(...)` passes only because the first-class callable is an
+    `ExprKind::Call` inside.
+  - `registry/purity.rs` has the same gap, in `Disqualifier` and in
+    `ImpurePoints`. It also stops at a closure literal ("doesn't run by
+    being constructed"), which a pipe does run. Probed while designing
+    this: `function show3(string $x): int { $x |> 'var_dump'; return 1; }`
+    and `function show4(string $x): int { return $x |> fn($v) =>
+    print($v); }` are both judged pure, so the bare statements `show3('a');`
+    and `show4('a');` report `function.resultUnused`. That is a second
+    false positive, at the callers.
+
+  One resolver, `pipe_callee(rhs) -> PipeCallee`, sits beside
+  `check_pipe_byref`, which resolves the same right side for the
+  by-reference check. It answers:
+
+  - `Function(name)` for a string literal or `f(...)`;
+  - `Method(receiver, name)` or `Static(class, name)` for a method's
+    first-class callable;
+  - `Literal(body)` for a closure or arrow function;
+  - `Unknown` otherwise, including a union of names (F32/F22's pipe
+    bullet is the same resolver learning unions: each member is
+    resolved).
+
+  The walks then use it:
+
+  - `own_side_effects` gives the pipe `Effects::Some`, and
+    `check_pure_call_without_effect` gains a pipe arm that reports only
+    when the callee resolves and is transitively pure (`'a' |>
+    strtoupper(...)` is then `function.resultUnused`).
+  - `Disqualifier` pushes a `PurityDependency` for a resolved function or
+    a non-overridable method, walks a literal's body as if inline, and
+    disqualifies on `Unknown`.
+  - `ImpurePoints` pushes the matching point.
+  - The call-forgetting path of F62/F82 counts a pipe as a call with that
+    verdict.
+
+  Fixtures: the three statements from the finding are clean, `show3` and
+  `show4` are impure, and a pipe into a pure named function as a
+  statement is reported.
 - [ ] **F10. A bare `yield` followed by a binary-operator keyword is a
   parse error** (`ad2a5635` is incomplete). `(yield and $b)`,
   `or`/`xor`, `(yield & $b)`, `(yield |> $b)` and `(yield instanceof
