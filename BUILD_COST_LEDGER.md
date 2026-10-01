@@ -13,13 +13,13 @@ Status: DONE, OPEN, NOTE.
 | G1 | #34 | `resolve_deferred_value_of` ran sequentially. Now parallel: each class resolves against the classes as they were before the pass (a class's reference to itself still degrades to `Mixed`); results no longer depend on visit order | DONE (`862d168a`); lib suite passed, fixtures pending |
 | G2 | #19 | a body-only edit still walked every body for property writes and global variables. Property-write classifications and each file's global-variable sites are kept; only declarations and files the edit reaches are walked again | DONE (`feec6a57`); lib suite passed, fixtures pending |
 | G3 | #14, #15 | lazy per-class tables and per-pass candidate flags not implemented; "folded" into the shared base and scoping without measurement | OPEN (measure) |
-| G4 | #8 | completion and `class_exists` still see classes of never-enabled extensions (behaviour predates this work) | OPEN |
+| G4 | #8 | completion and `class_exists` still see classes of never-enabled extensions (behaviour predates this work) | NOT DONE ON PURPOSE: enabling only some extensions would make code using an undeclared one report `class.notFound`; loading all matches PHPStan, and unreferenced extension classes cost nothing per project (#6, #7, #11) |
 | G5 | #9 | a cold stub cache still pays full stub indexing (~0.85 s gate, ~3 s debug) | OPEN (measure) |
-| G6 | #21 | cost of `retain_source` + use-site indexing never measured | OPEN (measure) |
+| G6 | #21 | cost of `retain_source` + use-site indexing never measured | DONE (`54ec427b`): the workspace indexes class and function use sites at the first references or rename request |
 | G7 | #23 | project drop cost never measured after #11 | OPEN (measure) |
-| G8 | #24 | arena allocation not done | OPEN (only if measurements show allocation matters) |
-| G9 | section 7 | only option 2 (`with_min_len`) done; options 1 (fused passes), 4 (`ROUNDS_UNTIL_SLEEPY` experiment) and 5 (`chili`) not done | OPEN |
-| G10 | #5/#11 | a project naming `PHPStan\` resolves PHPStan's ~2k classes itself; no second shared base. Swapping the base under a loaded project must reconcile overlay entries that shadow the old base, so measure the cost first | OPEN (measure) |
+| G8 | #24 | arena allocation not done | DONE as mimalloc (`433e07f2`); true arenas aren't possible with std containers on stable |
+| G9 | section 7 | only option 2 (`with_min_len`) done; options 1 (fused passes), 4 (`ROUNDS_UNTIL_SLEEPY` experiment) and 5 (`chili`) not done | PARTLY (`e2523b66`): `PHPSTAN_RS_THREADS`; fused passes and the rayon experiments remain, measurement-driven |
+| G10 | #5/#11 | a project naming `PHPStan\` resolves PHPStan's ~2k classes itself; no second shared base. Swapping the base under a loaded project must reconcile overlay entries that shadow the old base, so measure the cost first | DONE (`c395b928`) |
 
 ## Correctness gaps
 | id | gap | status |
