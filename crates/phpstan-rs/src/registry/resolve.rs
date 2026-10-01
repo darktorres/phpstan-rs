@@ -655,8 +655,10 @@ impl Registry {
                 }
             }
         }
-        let scope = &self.scope;
-        for (_, info) in self.classes.iter_mut_where(|name| scope.has_class(name)) {
+        for name in self.scoped_class_names() {
+            let Some(info) = self.classes.get_mut(&name) else {
+                continue;
+            };
             for sig in info.consts.values_mut() {
                 if sig.ty.contains_deferred() {
                     sig.ty = unresolved_class_const_to_mixed(std::mem::replace(

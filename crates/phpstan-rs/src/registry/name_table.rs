@@ -2,11 +2,15 @@
 //! those names: case-insensitively.
 
 use std::borrow::{Borrow, Cow};
+use std::cmp::Ordering;
 use std::hash::{Hash, Hasher};
+use std::ops::Range;
 
 use rustc_hash::{FxHashMap, FxHashSet};
 use std::sync::{Arc, OnceLock};
 use syntax::name::Name;
+
+use super::container::{Buffer, Reader, Writer};
 
 /// A name's lookup key: the name ASCII-lowercased, as PHP compares class
 /// and function names.
@@ -21,6 +25,14 @@ pub(crate) fn function_key(name: &str) -> Cow<'_, str> {
 /// `function_key`, as a stored key.
 pub(crate) fn folded_key(name: &str) -> Name {
     function_key(name).into()
+}
+
+/// How `text` orders against `key`, a lowercased name: by its own
+/// lowercase form, without building it.
+fn cmp_folded(text: &str, key: &str) -> Ordering {
+    text.bytes()
+        .map(|b| b.to_ascii_lowercase())
+        .cmp(key.bytes())
 }
 
 /// A name as a table key: hashed, compared and borrowed as its lowercase
@@ -54,8 +66,12 @@ impl Borrow<str> for Folded {
 /// A table can sit over a shared, immutable base (`freeze`): cloning it
 /// then shares the base, and a change copies the entry it touches into
 /// the table's own entries first, the base staying as it is. A base read
-/// back from its serialized form (`Deserialize`) decodes each entry the
-/// first time it is read.
+/// back from a stored file (`load`) is read in place: its names become
+/// `Name`s, and its entries are decoded, the first time each is read.
+///
+/// Iteration yields the table's own entries first, then the base's. The
+/// base's come in the order of their lowercased names, whichever way the
+/// base was made; the own entries' order is the hash map's.
 #[derive(Debug, Clone)]
 pub struct NameTable<V> {
     entries: FxHashMap<Folded, V>,
@@ -65,23 +81,160 @@ pub struct NameTable<V> {
     hidden: FxHashSet<Folded>,
 }
 
-/// A table's shared base: each entry decoded already, or kept encoded
-/// until first read.
+/// What decodes a stored entry.
+type Decoder<V> = fn(&[u8]) -> V;
+
+/// A table's shared base: its entries sorted by lowercased name, each
+/// decoded already, or kept stored until first read.
 #[derive(Debug)]
 struct Base<V> {
-    entries: FxHashMap<Folded, Lazy<V>>,
+    keys: Keys,
+    slots: Box<[Slot<V>]>,
+    // What decodes an entry of a stored base.
+    decode: Option<Decoder<V>>,
 }
 
-/// What decodes an encoded `Lazy` value.
-type Decoder<V> = fn(&[u8]) -> V;
+/// A base's names in order.
+#[derive(Debug)]
+enum Keys {
+    /// The records of a stored table in the file's buffer: each four
+    /// little-endian `u32`s, the name's offset and length, then the
+    /// entry's.
+    Stored {
+        buffer: Buffer,
+        records: Range<usize>,
+    },
+    Built(Vec<Name>),
+}
+
+/// What a base keeps of one entry once it is read: the name as a `Name`,
+/// for a stored one, and the decoded value.
+#[derive(Debug)]
+struct Slot<V> {
+    name: OnceLock<Name>,
+    value: OnceLock<Box<V>>,
+}
+
+impl<V> Default for Slot<V> {
+    fn default() -> Self {
+        Slot {
+            name: OnceLock::new(),
+            value: OnceLock::new(),
+        }
+    }
+}
+
+/// The bytes of one record of a stored table.
+const RECORD_LEN: usize = 16;
+
+impl Keys {
+    fn len(&self) -> usize {
+        match self {
+            Keys::Stored { records, .. } => records.len() / RECORD_LEN,
+            Keys::Built(names) => names.len(),
+        }
+    }
+
+    /// The record `i` of a stored table: the ranges of its name and entry.
+    fn record(&self, i: usize) -> (Range<usize>, Range<usize>) {
+        let Keys::Stored { buffer, records } = self else {
+            unreachable!("only a stored table has records")
+        };
+        let at = records.start + i * RECORD_LEN;
+        let field = |n: usize| {
+            u32::from_le_bytes(buffer[at + n * 4..at + n * 4 + 4].try_into().unwrap()) as usize
+        };
+        (field(0)..field(0) + field(1), field(2)..field(2) + field(3))
+    }
+
+    /// The name `i` as text.
+    fn text(&self, i: usize) -> &str {
+        match self {
+            Keys::Stored { buffer, .. } => {
+                let (name, _) = self.record(i);
+                std::str::from_utf8(&buffer[name]).expect("a stored name is text")
+            }
+            Keys::Built(names) => names[i].as_str(),
+        }
+    }
+}
+
+impl<V> Base<V> {
+    fn empty() -> Base<V> {
+        Base {
+            keys: Keys::Built(Vec::new()),
+            slots: Box::default(),
+            decode: None,
+        }
+    }
+
+    /// A base of `entries`, in memory.
+    fn built(mut entries: Vec<(Name, V)>) -> Base<V> {
+        entries.sort_by(|a, b| cmp_folded(a.0.as_str(), b.0.lower()));
+        let mut names = Vec::with_capacity(entries.len());
+        let mut slots = Vec::with_capacity(entries.len());
+        for (name, value) in entries {
+            names.push(name);
+            let slot = Slot::default();
+            slot.value
+                .set(Box::new(value))
+                .unwrap_or_else(|_| unreachable!("a new slot is empty"));
+            slots.push(slot);
+        }
+        Base {
+            keys: Keys::Built(names),
+            slots: slots.into_boxed_slice(),
+            decode: None,
+        }
+    }
+
+    fn len(&self) -> usize {
+        self.keys.len()
+    }
+
+    /// The position of the entry whose lowercased name is `key`.
+    fn find(&self, key: &str) -> Option<usize> {
+        let (mut low, mut high) = (0, self.len());
+        while low < high {
+            let middle = low + (high - low) / 2;
+            match cmp_folded(self.keys.text(middle), key) {
+                Ordering::Less => low = middle + 1,
+                Ordering::Greater => high = middle,
+                Ordering::Equal => return Some(middle),
+            }
+        }
+        None
+    }
+
+    /// The declared name of entry `i`.
+    fn name(&self, i: usize) -> &Name {
+        match &self.keys {
+            Keys::Built(names) => &names[i],
+            Keys::Stored { .. } => self.slots[i]
+                .name
+                .get_or_init(|| Name::from(self.keys.text(i))),
+        }
+    }
+
+    /// Entry `i`, decoded the first time it is read.
+    fn value(&self, i: usize) -> &V {
+        self.slots[i].value.get_or_init(|| {
+            let decode = self.decode.expect("a slot built decoded holds its value");
+            let Keys::Stored { buffer, .. } = &self.keys else {
+                unreachable!("a slot built decoded holds its value")
+            };
+            let (_, entry) = self.keys.record(i);
+            Box::new(decode(&buffer[entry]))
+        })
+    }
+}
 
 /// A value kept encoded until first read, once read back from its
 /// serialized form; a value built in memory holds it decoded.
 #[derive(Debug)]
 pub(crate) struct Lazy<V> {
     value: OnceLock<V>,
-    // The entry encoded (`NameTable`'s `Serialize`), with what decodes it;
-    // `None` once built decoded.
+    // The entry encoded, with what decodes it; `None` once built decoded.
     encoded: Option<(Arc<Vec<u8>>, Decoder<V>)>,
 }
 
@@ -109,20 +262,19 @@ impl<V> Default for NameTable<V> {
 
 impl<V> NameTable<V> {
     /// The base's entry for `key` (a lowercased name), unless hidden.
-    fn base_get(&self, key: &str) -> Option<(&Folded, &V)> {
+    fn base_get(&self, key: &str) -> Option<(&Name, &V)> {
         let base = self.base.as_ref()?;
         if self.hidden.contains(key) {
             return None;
         }
-        base.entries
-            .get_key_value(key)
-            .map(|(declared, slot)| (declared, slot.get()))
+        let i = base.find(key)?;
+        Some((base.name(i), base.value(i)))
     }
 
     fn base_contains(&self, key: &str) -> bool {
         self.base
             .as_ref()
-            .is_some_and(|base| base.entries.contains_key(key))
+            .is_some_and(|base| base.find(key).is_some())
     }
 
     pub fn get(&self, name: &str) -> Option<&V> {
@@ -137,8 +289,8 @@ impl<V> NameTable<V> {
         let key = function_key(name);
         self.entries
             .get_key_value(key.as_ref())
-            .or_else(|| self.base_get(&key))
             .map(|(declared, value)| (&declared.0, value))
+            .or_else(|| self.base_get(&key))
     }
 
     pub fn contains_key(&self, name: &str) -> bool {
@@ -154,12 +306,12 @@ impl<V> NameTable<V> {
 
     /// Every declared name, without reading any value.
     pub fn keys(&self) -> impl Iterator<Item = &Name> {
-        let base = self
-            .base
-            .iter()
-            .flat_map(|base| base.entries.keys())
-            .filter(|key| !self.hidden.contains(key.0.lower()));
-        self.entries.keys().chain(base).map(|key| &key.0)
+        let base = self.base.iter().flat_map(|base| {
+            (0..base.len())
+                .map(move |i| base.name(i))
+                .filter(|name| !self.hidden.contains(name.lower()))
+        });
+        self.entries.keys().map(|key| &key.0).chain(base)
     }
 
     pub fn values(&self) -> impl Iterator<Item = &V> {
@@ -173,8 +325,7 @@ impl<V> NameTable<V> {
     }
 
     pub fn len(&self) -> usize {
-        self.entries.len() + self.base.as_ref().map_or(0, |base| base.entries.len())
-            - self.hidden.len()
+        self.entries.len() + self.base.as_ref().map_or(0, |base| base.len()) - self.hidden.len()
     }
 
     pub fn is_empty(&self) -> bool {
@@ -191,8 +342,8 @@ impl<V: Clone> NameTable<V> {
         }
         if let Some((declared, value)) = self.base_get(key) {
             let (declared, value) = (declared.clone(), value.clone());
-            self.hidden.insert(declared.clone());
-            self.entries.insert(declared, value);
+            self.hidden.insert(Folded(declared.clone()));
+            self.entries.insert(Folded(declared), value);
         }
     }
 
@@ -241,7 +392,7 @@ impl<V: Clone> NameTable<V> {
         }
         let (declared, value) = self.base_get(&key)?;
         let (declared, value) = (declared.clone(), value.clone());
-        self.hidden.insert(declared);
+        self.hidden.insert(Folded(declared));
         Some(value)
     }
 
@@ -250,18 +401,19 @@ impl<V: Clone> NameTable<V> {
         self.iter_mut_where(|_| true)
     }
 
-    /// The values whose declared name `wanted` accepts, with that name,
-    /// mutably.
+    /// The values whose declared name's text `wanted` accepts, with that
+    /// name, mutably. Names it rejects are not read as `Name`s.
     pub fn iter_mut_where(
         &mut self,
-        wanted: impl Fn(&Name) -> bool,
+        wanted: impl Fn(&str) -> bool,
     ) -> impl Iterator<Item = (&Name, &mut V)> {
         let from_base: Vec<String> = match &self.base {
-            Some(base) => base
-                .entries
-                .keys()
-                .filter(|key| !self.hidden.contains(key.0.lower()) && wanted(&key.0))
-                .map(|key| key.0.lower().to_string())
+            Some(base) => (0..base.len())
+                .filter(|&i| {
+                    let text = base.keys.text(i);
+                    wanted(text) && !self.hidden.contains(function_key(text).as_ref())
+                })
+                .map(|i| function_key(base.keys.text(i)).into_owned())
                 .collect(),
             None => Vec::new(),
         };
@@ -270,8 +422,8 @@ impl<V: Clone> NameTable<V> {
         }
         self.entries
             .iter_mut()
+            .filter(move |(name, _)| wanted(name.0.as_str()))
             .map(|(k, v)| (&k.0, v))
-            .filter(move |(name, _)| wanted(name))
     }
 
     pub fn values_mut(&mut self) -> impl Iterator<Item = &mut V> {
@@ -283,25 +435,26 @@ impl<V: Clone> NameTable<V> {
     pub fn freeze(&mut self) {
         if self.entries.is_empty() && self.hidden.is_empty() {
             if self.base.is_none() {
-                self.base = Some(Arc::new(Base {
-                    entries: FxHashMap::default(),
-                }));
+                self.base = Some(Arc::new(Base::empty()));
             }
             return;
         }
-        let mut all: FxHashMap<Folded, Lazy<V>> = FxHashMap::default();
+        let mut all: Vec<(Name, V)> = Vec::with_capacity(self.len());
         if let Some(base) = self.base.take() {
-            for (key, slot) in base.entries.iter() {
-                if !self.hidden.contains(key.0.lower()) {
-                    all.insert(key.clone(), Lazy::decoded(slot.get().clone()));
+            for i in 0..base.len() {
+                let name = base.name(i);
+                if !self.hidden.contains(name.lower()) {
+                    all.push((name.clone(), base.value(i).clone()));
                 }
             }
         }
-        for (key, value) in std::mem::take(&mut self.entries) {
-            all.insert(key, Lazy::decoded(value));
-        }
+        all.extend(
+            std::mem::take(&mut self.entries)
+                .into_iter()
+                .map(|(k, v)| (k.0, v)),
+        );
         self.hidden.clear();
-        self.base = Some(Arc::new(Base { entries: all }));
+        self.base = Some(Arc::new(Base::built(all)));
     }
 }
 
@@ -318,7 +471,7 @@ impl<V> std::ops::Index<&str> for NameTable<V> {
 /// it doesn't hide.
 pub struct Iter<'a, V> {
     entries: std::collections::hash_map::Iter<'a, Folded, V>,
-    base: Option<std::collections::hash_map::Iter<'a, Folded, Lazy<V>>>,
+    base: Option<(&'a Base<V>, Range<usize>)>,
     hidden: &'a FxHashSet<Folded>,
 }
 
@@ -329,10 +482,12 @@ impl<'a, V> Iterator for Iter<'a, V> {
         if let Some((key, value)) = self.entries.next() {
             return Some((&key.0, value));
         }
-        let base = self.base.as_mut()?;
-        for (key, slot) in base {
-            if !self.hidden.contains(key.0.lower()) {
-                return Some((&key.0, slot.get()));
+        let (base, positions) = self.base.as_mut()?;
+        let base: &'a Base<V> = base;
+        for i in positions {
+            let name = base.name(i);
+            if !self.hidden.contains(name.lower()) {
+                return Some((name, base.value(i)));
             }
         }
         None
@@ -346,7 +501,7 @@ impl<'a, V> IntoIterator for &'a NameTable<V> {
     fn into_iter(self) -> Self::IntoIter {
         Iter {
             entries: self.entries.iter(),
-            base: self.base.as_ref().map(|base| base.entries.iter()),
+            base: self.base.as_ref().map(|base| (&**base, 0..base.len())),
             hidden: &self.hidden,
         }
     }
@@ -359,9 +514,10 @@ impl<V: Clone> IntoIterator for NameTable<V> {
     fn into_iter(self) -> Self::IntoIter {
         let mut all: Vec<(Name, V)> = Vec::with_capacity(self.len());
         if let Some(base) = &self.base {
-            for (key, slot) in base.entries.iter() {
-                if !self.hidden.contains(key.0.lower()) {
-                    all.push((key.0.clone(), slot.get().clone()));
+            for i in 0..base.len() {
+                let name = base.name(i);
+                if !self.hidden.contains(name.lower()) {
+                    all.push((name.clone(), base.value(i).clone()));
                 }
             }
         }
@@ -379,111 +535,84 @@ impl<V> Lazy<V> {
     }
 }
 
-/// A table serializes as its entries, each with its declared name and
-/// the entry itself encoded on its own, so a table read back decodes only
-/// the entries it reads.
-impl<V: serde::Serialize> serde::Serialize for NameTable<V> {
-    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        use serde::ser::{Error, SerializeSeq};
-        let mut seq = serializer.serialize_seq(Some(self.len()))?;
-        for (name, value) in self.iter() {
-            let mut bytes = Vec::new();
-            ciborium::ser::into_writer(value, &mut bytes).map_err(S::Error::custom)?;
-            seq.serialize_element(&(name, Bytes(bytes)))?;
-        }
-        seq.end()
-    }
-}
-
-/// A table read back is a frozen base whose entries decode on first read.
-impl<'de, V: Clone + serde::de::DeserializeOwned> serde::Deserialize<'de> for NameTable<V> {
-    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let entries = <Vec<(Name, Bytes)>>::deserialize(deserializer)?;
-        let entries = entries
-            .into_iter()
-            .map(|(name, bytes)| {
-                let slot = Lazy {
-                    value: OnceLock::new(),
-                    encoded: Some((Arc::new(bytes.0), decode_entry::<V> as Decoder<V>)),
-                };
-                (Folded(name), slot)
-            })
+impl<V: serde::Serialize> NameTable<V> {
+    /// Writes the table as section `section`: a record for each entry,
+    /// sorted by lowercased name, pointing at the entry's name and its
+    /// encoding in the file. Names and entries equal to ones already in
+    /// the file are not written again, so a table that differs from
+    /// another in a few entries costs the records and those entries.
+    pub(super) fn store(&self, writer: &mut Writer, section: &str) -> Result<(), String> {
+        let mut rows: Vec<(Cow<'_, str>, &Name, &V)> = self
+            .iter()
+            .map(|(name, value)| (function_key(name), name, value))
             .collect();
+        rows.sort_by(|a, b| a.0.cmp(&b.0));
+        if rows.windows(2).any(|pair| pair[0].0 == pair[1].0) {
+            return Err(format!("{section} holds a name twice"));
+        }
+        let mut records = Vec::with_capacity(rows.len() * RECORD_LEN);
+        for (_, name, value) in rows {
+            let mut encoded = Vec::new();
+            ciborium::ser::into_writer(value, &mut encoded).map_err(|e| e.to_string())?;
+            let name = writer.name(name.as_str())?;
+            let entry = writer.entry(&encoded)?;
+            for field in [name.offset, name.len, entry.offset, entry.len] {
+                records.extend_from_slice(&field.to_le_bytes());
+            }
+        }
+        writer.section(section, &records)
+    }
+}
+
+impl<V: serde::de::DeserializeOwned> NameTable<V> {
+    /// The table `store` wrote as section `section`: a base read in place.
+    pub(super) fn load(reader: &Reader, section: &str) -> Result<NameTable<V>, String> {
+        let records = reader.section(section)?;
+        let buffer = reader.buffer().clone();
+        if records.len() % RECORD_LEN != 0 {
+            return Err(format!("{section} is cut in the middle of a record"));
+        }
+        let keys = Keys::Stored { buffer, records };
+        validate(&keys, section)?;
+        let slots = (0..keys.len()).map(|_| Slot::default()).collect();
         Ok(NameTable {
             entries: FxHashMap::default(),
-            base: Some(Arc::new(Base { entries })),
+            base: Some(Arc::new(Base {
+                keys,
+                slots,
+                decode: Some(decode_entry::<V>),
+            })),
             hidden: FxHashSet::default(),
         })
     }
 }
 
-/// A table's entries stored as what differs from another table's: an entry
-/// that table holds identically is not written again, and reads back
-/// sharing that entry's encoding.
-#[derive(serde::Serialize, serde::Deserialize)]
-pub(crate) struct Diff(Vec<(Name, Option<Bytes>)>);
-
-impl<V: Clone + serde::Serialize + serde::de::DeserializeOwned> NameTable<V> {
-    /// This table's entries, without those `other` holds identically.
-    pub(crate) fn diff_against(&self, other: &NameTable<V>) -> Result<Diff, String> {
-        let encode = |value: &V| -> Result<Vec<u8>, String> {
-            let mut bytes = Vec::new();
-            ciborium::ser::into_writer(value, &mut bytes).map_err(|e| e.to_string())?;
-            Ok(bytes)
-        };
-        let mut entries = Vec::with_capacity(self.len());
-        for (name, value) in self.iter() {
-            let bytes = encode(value)?;
-            let same = match other.get(name) {
-                Some(theirs) => encode(theirs)? == bytes,
-                None => false,
-            };
-            entries.push((name.clone(), (!same).then_some(Bytes(bytes))));
+/// Whether the records of a stored table point inside the file, at names
+/// that are text in strictly increasing order: what a lookup by bisection
+/// relies on.
+fn validate(keys: &Keys, section: &str) -> Result<(), String> {
+    let Keys::Stored { buffer, .. } = keys else {
+        return Ok(());
+    };
+    let mut previous: Option<&str> = None;
+    for i in 0..keys.len() {
+        let (name, entry) = keys.record(i);
+        if name.end > buffer.len() || entry.end > buffer.len() {
+            return Err(format!("{section}'s record {i} points outside the file"));
         }
-        Ok(Diff(entries))
-    }
-
-    /// The table `diff` was made from, reading what it leaves out from
-    /// `other`.
-    pub(crate) fn from_diff(diff: Diff, other: &NameTable<V>) -> Result<NameTable<V>, String> {
-        let mut entries: FxHashMap<Folded, Lazy<V>> = FxHashMap::default();
-        for (name, bytes) in diff.0 {
-            let encoded: Arc<Vec<u8>> = match bytes {
-                Some(bytes) => Arc::new(bytes.0),
-                None => {
-                    let key = function_key(&name);
-                    let slot = other
-                        .base
-                        .as_ref()
-                        .and_then(|base| base.entries.get(key.as_ref()));
-                    match slot.and_then(|slot| slot.encoded.as_ref()) {
-                        Some((encoded, _)) => Arc::clone(encoded),
-                        None => {
-                            let value = other
-                                .get(&name)
-                                .ok_or_else(|| format!("{name} is in neither table"))?;
-                            let mut bytes = Vec::new();
-                            ciborium::ser::into_writer(value, &mut bytes)
-                                .map_err(|e| e.to_string())?;
-                            Arc::new(bytes)
-                        }
-                    }
-                }
-            };
-            entries.insert(
-                Folded(name),
-                Lazy {
-                    value: OnceLock::new(),
-                    encoded: Some((encoded, decode_entry::<V> as Decoder<V>)),
-                },
-            );
+        let text = std::str::from_utf8(&buffer[name])
+            .map_err(|_| format!("{section}'s name {i} is not text"))?;
+        if let Some(before) = previous
+            && !before
+                .bytes()
+                .map(|b| b.to_ascii_lowercase())
+                .lt(text.bytes().map(|b| b.to_ascii_lowercase()))
+        {
+            return Err(format!("{section}'s names are not in order at {i}"));
         }
-        Ok(NameTable {
-            entries: FxHashMap::default(),
-            base: Some(Arc::new(Base { entries })),
-            hidden: FxHashSet::default(),
-        })
+        previous = Some(text);
     }
+    Ok(())
 }
 
 /// A lazy value serializes encoded on its own.
@@ -551,5 +680,138 @@ impl<V: Clone> FromIterator<(Name, V)> for NameTable<V> {
             table.insert(name, value);
         }
         table
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn stored(entries: &[(&str, u32)]) -> Reader {
+        let mut writer = Writer::new();
+        let table: NameTable<u32> = entries
+            .iter()
+            .map(|(name, value)| (Name::from(*name), *value))
+            .collect();
+        table.store(&mut writer, "t").unwrap();
+        match Reader::new(writer.finish()) {
+            Ok(reader) => reader,
+            Err(_) => panic!("a written file reads"),
+        }
+    }
+
+    #[test]
+    fn a_stored_table_finds_every_name_in_any_case() {
+        let names = [
+            "Zeta",
+            "alpha",
+            "Mid\\Class",
+            "ALPHABET",
+            "b",
+            "\u{e9}t\u{e9}",
+        ];
+        let entries: Vec<(&str, u32)> = names.iter().copied().zip(0..).collect();
+        let reader = stored(&entries);
+        let table: NameTable<u32> = NameTable::load(&reader, "t").unwrap();
+        assert_eq!(table.len(), names.len());
+        for (name, value) in &entries {
+            assert_eq!(table.get(name), Some(value), "{name}");
+            assert_eq!(table.get(&name.to_ascii_uppercase()), Some(value), "{name}");
+            assert_eq!(table.get(&name.to_ascii_lowercase()), Some(value), "{name}");
+            let (declared, found) = table.get_with_name(&name.to_ascii_lowercase()).unwrap();
+            assert_eq!((declared.as_str(), found), (*name, value));
+        }
+        for missing in ["alph", "alphabets", "c", "zet", "zz", "\u{c9}t\u{c9}", ""] {
+            assert!(!table.contains_key(missing), "{missing:?}");
+            assert_eq!(table.get(missing), None);
+        }
+    }
+
+    #[test]
+    fn a_stored_table_iterates_in_lowercased_order_with_declared_spellings() {
+        let reader = stored(&[("Zeta", 1), ("alpha", 2), ("Beta", 3)]);
+        let table: NameTable<u32> = NameTable::load(&reader, "t").unwrap();
+        let seen: Vec<(&str, u32)> = table.iter().map(|(n, v)| (n.as_str(), *v)).collect();
+        assert_eq!(seen, [("alpha", 2), ("Beta", 3), ("Zeta", 1)]);
+        let keys: Vec<&str> = table.keys().map(|n| n.as_str()).collect();
+        assert_eq!(keys, ["alpha", "Beta", "Zeta"]);
+    }
+
+    #[test]
+    fn changes_over_a_stored_base_hide_and_replace_its_entries() {
+        let reader = stored(&[("One", 1), ("Two", 2), ("Three", 3)]);
+        let mut table: NameTable<u32> = NameTable::load(&reader, "t").unwrap();
+        let before = table.clone();
+        *table.get_mut("two").unwrap() = 20;
+        assert_eq!(table.remove("THREE"), Some(3));
+        assert_eq!(table.insert(Name::from("Four"), 4), None);
+        assert_eq!(table.insert(Name::from("ONE"), 10), Some(1));
+        assert_eq!(table.len(), 3);
+        assert_eq!(table.get("one"), Some(&10));
+        assert_eq!(table.get("two"), Some(&20));
+        assert_eq!(table.get("three"), None);
+        assert_eq!(table.get("four"), Some(&4));
+        let mut seen: Vec<(String, u32)> = table.iter().map(|(n, v)| (n.to_string(), *v)).collect();
+        seen.sort();
+        assert_eq!(
+            seen,
+            [("Four".into(), 4), ("ONE".into(), 10), ("Two".into(), 20)]
+        );
+        // The clone taken before shares the base and sees none of it.
+        assert_eq!(before.get("two"), Some(&2));
+        assert_eq!(before.get("three"), Some(&3));
+        assert_eq!(before.len(), 3);
+    }
+
+    #[test]
+    fn freezing_keeps_what_a_table_holds() {
+        let reader = stored(&[("One", 1), ("Two", 2)]);
+        let mut table: NameTable<u32> = NameTable::load(&reader, "t").unwrap();
+        table.remove("one");
+        table.insert(Name::from("Three"), 3);
+        table.freeze();
+        assert_eq!(table.len(), 2);
+        assert_eq!(table.own_iter().count(), 0);
+        assert_eq!(table.get("two"), Some(&2));
+        assert_eq!(table.get("THREE"), Some(&3));
+        assert_eq!(table.get("one"), None);
+        let names: Vec<&str> = table.keys().map(|n| n.as_str()).collect();
+        assert_eq!(names, ["Three", "Two"]);
+    }
+
+    #[test]
+    fn a_table_with_unordered_names_does_not_load() {
+        let mut writer = Writer::new();
+        let (a, b) = (writer.name("b").unwrap(), writer.name("a").unwrap());
+        let entry = writer.entry(&[0]).unwrap();
+        let mut records = Vec::new();
+        for name in [a, b] {
+            for field in [name.offset, name.len, entry.offset, entry.len] {
+                records.extend_from_slice(&field.to_le_bytes());
+            }
+        }
+        writer.section("t", &records).unwrap();
+        let reader = match Reader::new(writer.finish()) {
+            Ok(reader) => reader,
+            Err(_) => panic!("a written file reads"),
+        };
+        assert!(NameTable::<u32>::load(&reader, "t").is_err());
+    }
+
+    #[test]
+    fn equal_entries_of_two_tables_are_written_once() {
+        let mut writer = Writer::new();
+        let one: NameTable<u32> = [(Name::from("A"), 7), (Name::from("B"), 8)]
+            .into_iter()
+            .collect();
+        let two: NameTable<u32> = [(Name::from("A"), 7), (Name::from("B"), 9)]
+            .into_iter()
+            .collect();
+        one.store(&mut writer, "one").unwrap();
+        let written = writer.body_len();
+        two.store(&mut writer, "two").unwrap();
+        // Two sets of records and one new entry; the names and the other
+        // entry are the ones already written.
+        assert_eq!(writer.body_len() - written, 2 * RECORD_LEN + 1);
     }
 }

@@ -9,6 +9,7 @@ mod anonymous_class;
 mod assertion_table;
 pub mod bodies;
 mod class_info;
+mod container;
 mod function_sig;
 mod generics;
 mod global_vars;
@@ -25,7 +26,9 @@ mod relation;
 mod resolve;
 pub(crate) mod scope;
 mod stub_cache;
-pub(crate) use stub_cache::{load as load_cached, store as store_cached};
+pub(crate) use stub_cache::{
+    load as load_cached, load_container, store as store_cached, store_container,
+};
 pub mod settings;
 pub mod stubs;
 mod type_node;
@@ -108,24 +111,38 @@ pub(crate) struct ResolvedSnapshot {
     global_variables: FxHashMap<Name, Type>,
 }
 
+/// The sections a stored registry is in: one per table, the declarations as
+/// built, and the rest.
+const REST: &str = "rest";
+const RAW_CLASSES: &str = "table:raw.classes";
+const RAW_FUNCTIONS: &str = "table:raw.functions";
+
+/// `Registry::store_tables` and `load_tables` for the tables named: each a
+/// section called `table:<field>`.
+macro_rules! stored_tables {
+    ($($field:ident),* $(,)?) => {
+        fn store_tables(&self, writer: &mut container::Writer) -> Result<(), String> {
+            $(self.$field.store(writer, concat!("table:", stringify!($field)))?;)*
+            Ok(())
+        }
+
+        fn load_tables(&mut self, reader: &container::Reader) -> Result<(), String> {
+            $(self.$field = NameTable::load(reader, concat!("table:", stringify!($field)))?;)*
+            Ok(())
+        }
+    };
+}
+
 /// `Registry::raw`.
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone)]
 struct RawDeclarations {
     classes: NameTable<ClassReflection>,
     functions: FunctionTable,
 }
 
-/// A registry as stored: its raw declarations apart from the rest, as what
-/// differs from the resolved ones, which they mostly equal.
-#[derive(serde::Serialize, serde::Deserialize)]
-pub(crate) struct StoredRegistry {
-    registry: Registry,
-    raw_classes: Option<name_table::Diff>,
-    raw_functions: Option<name_table::Diff>,
-}
-
 #[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize)]
 pub struct Registry {
+    #[serde(skip)]
     pub classes: NameTable<ClassReflection>,
     // Configured `[[assertions]]`/`[[class_argument_returns]]` entries,
     // on top of the built-in ones (`assertion_table`).
@@ -133,6 +150,7 @@ pub struct Registry {
     pub(crate) configured_assertions: Vec<crate::assertion_tables::AssertionEntry>,
     #[serde(skip)]
     pub(crate) configured_class_argument_returns: Vec<crate::assertion_tables::ClassArgumentReturn>,
+    #[serde(skip)]
     pub functions: FunctionTable,
     // Global-constant name -> inferred-value-type table, covering both
     // `const NAME = value;` and `define('NAME', value)` (keyed like
@@ -182,6 +200,7 @@ pub struct Registry {
     // them, before the finishing passes resolved them - kept so the
     // passes can run again from scratch after declarations change
     // (`keep_raw_declarations`).
+    #[serde(skip)]
     raw: Option<Box<RawDeclarations>>,
     // Whether `classes` and `functions` hold the declarations as built,
     // swapped with `raw`'s resolved ones while declarations change
@@ -222,6 +241,7 @@ pub struct Registry {
     // class (`PHPUnit\Framework\TestCase`-vs-`class_exists`-guarded-
     // fallback) would wrongly leak a defensive fallback's members onto
     // the real class everything else sees.
+    #[serde(skip)]
     pub(crate) built_in_stub_classes: NameTable<()>,
     // The function-side sibling of the tracking set above -
     // phpstorm-stubs represents a real PHP internal function overload
@@ -263,22 +283,31 @@ pub struct Registry {
     // closure - see `is_subclass_of`/`precompute_ancestor_names`
     // (`registry/hierarchy.rs`). Rebuilt whenever the class graph could
     // have changed.
+    #[serde(skip)]
     pub(crate) ancestor_names: NameTable<FxHashSet<Name>>,
     // The reverse of each class's direct `extends`/`implements` edges, and
     // of its `uses`: a class-like's direct subtypes and direct trait users
     // (`precompute_ancestor_names`).
+    #[serde(skip)]
     pub(crate) subtype_children: NameTable<FxHashSet<Name>>,
+    #[serde(skip)]
     pub(crate) trait_users: NameTable<FxHashSet<Name>>,
     // Each class's direct supertypes and used traits as those two indexes
     // record them, to take it out of them again.
+    #[serde(skip)]
     recorded_parents: NameTable<(Vec<Name>, Vec<Name>)>,
     // Every registered class's precomputed member-name ->
     // owning-ancestor-name map, one per member kind - see
     // `lookup_method`/`precompute_member_owners` (`registry/hierarchy.rs`).
+    #[serde(skip)]
     pub(crate) method_owner_by_class: NameTable<FxHashMap<Name, Name>>,
+    #[serde(skip)]
     pub(crate) ancestor_method_owner_by_class: NameTable<FxHashMap<Name, Name>>,
+    #[serde(skip)]
     pub(crate) property_owner_by_class: NameTable<FxHashMap<Name, Name>>,
+    #[serde(skip)]
     pub(crate) ancestor_property_owner_by_class: NameTable<FxHashMap<Name, Name>>,
+    #[serde(skip)]
     pub(crate) const_owner_by_class: NameTable<FxHashMap<Name, Name>>,
     // Whose properties each function and method with a body may write
     // (`registry::property_writes`), keyed by lowercased (class, name).
@@ -576,39 +605,70 @@ impl Registry {
             .collect()
     }
 
-    /// The registry in the form stored (`StoredRegistry`).
-    pub(crate) fn to_stored(&self) -> Result<StoredRegistry, String> {
-        let mut registry = self.clone();
-        let raw = registry.raw.take();
-        let (raw_classes, raw_functions) = match raw {
-            Some(raw) => (
-                Some(raw.classes.diff_against(&registry.classes)?),
-                Some(raw.functions.diff_against(&registry.functions)?),
-            ),
-            None => (None, None),
-        };
-        Ok(StoredRegistry {
-            registry,
-            raw_classes,
-            raw_functions,
-        })
+    /// Writes the registry into `writer`: its tables as sections of their
+    /// own, and the rest of it, encoded, as one.
+    pub(crate) fn store(&self, writer: &mut container::Writer) -> Result<(), String> {
+        debug_assert!(
+            !self.raw_active,
+            "the declarations as built are stored with the resolved ones"
+        );
+        self.store_tables(writer)?;
+        if let Some(raw) = &self.raw {
+            raw.classes.store(writer, RAW_CLASSES)?;
+            raw.functions.store(writer, RAW_FUNCTIONS)?;
+        }
+        let mut rest = Vec::new();
+        ciborium::ser::into_writer(self, &mut rest).map_err(|e| e.to_string())?;
+        writer.section(REST, &rest)
     }
 
-    /// The registry a `StoredRegistry` was made from.
-    pub(crate) fn from_stored(stored: StoredRegistry) -> Result<Registry, String> {
-        let StoredRegistry {
-            mut registry,
-            raw_classes,
-            raw_functions,
-        } = stored;
-        if let (Some(classes), Some(functions)) = (raw_classes, raw_functions) {
+    /// The registry stored under `name` for this build, if there is a
+    /// readable file of it.
+    pub(crate) fn load_cached(name: &str) -> Option<Result<Registry, String>> {
+        let reader = load_container(name)?;
+        Some(Registry::load(&reader))
+    }
+
+    /// Stores the registry under `name` for this build.
+    pub(crate) fn store_cached(&self, name: &str) -> Result<(), String> {
+        let mut writer = container::Writer::new();
+        self.store(&mut writer)?;
+        store_container(name, writer);
+        Ok(())
+    }
+
+    /// The registry `store` wrote, its tables read in place.
+    pub(crate) fn load(reader: &container::Reader) -> Result<Registry, String> {
+        let rest = reader.section(REST)?;
+        let mut registry: Registry = ciborium::de::from_reader_with_recursion_limit(
+            &reader.buffer()[rest],
+            stub_cache::RECURSION_LIMIT,
+        )
+        .map_err(|e| e.to_string())?;
+        registry.load_tables(reader)?;
+        if reader.has_section(RAW_CLASSES) {
             registry.raw = Some(Box::new(RawDeclarations {
-                classes: NameTable::from_diff(classes, &registry.classes)?,
-                functions: NameTable::from_diff(functions, &registry.functions)?,
+                classes: NameTable::load(reader, RAW_CLASSES)?,
+                functions: NameTable::load(reader, RAW_FUNCTIONS)?,
             }));
         }
         Ok(registry)
     }
+
+    stored_tables!(
+        classes,
+        functions,
+        built_in_stub_classes,
+        ancestor_names,
+        subtype_children,
+        trait_users,
+        recorded_parents,
+        method_owner_by_class,
+        ancestor_method_owner_by_class,
+        property_owner_by_class,
+        ancestor_property_owner_by_class,
+        const_owner_by_class,
+    );
 
     /// Replaces the declarations with `base`'s, keeping the settings and
     /// the names changed so far.

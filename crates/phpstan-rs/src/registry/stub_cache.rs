@@ -3,14 +3,15 @@
 //! the stub sources again. Each file is keyed by the build's source hash
 //! (`build.rs`), so a build never reads what different code or stubs
 //! stored; one that can't be read or written is built in memory as
-//! before. A file starts with a checksum of the rest, so a truncated or
+//! before. A file (`container`) carries a checksum, so a truncated or
 //! damaged one is rebuilt rather than read; one that passes it but doesn't
 //! decode is a bug, and says so. `PHPSTAN_RS_NO_STUB_CACHE`
 //! turns the cache off.
 
 use std::fs;
-use std::hash::Hasher;
 use std::path::PathBuf;
+
+use super::container::{Reader, Unreadable, Writer};
 
 /// The key every cache file carries in its name.
 const KEY: &str = env!("PHPSTAN_RS_SOURCE_HASH");
@@ -38,22 +39,62 @@ fn path(name: &str) -> Option<PathBuf> {
     Some(cache_dir()?.join(format!("{name}-{KEY}.cbor")))
 }
 
-fn checksum(body: &[u8]) -> [u8; 8] {
-    // Not for security, only to tell a damaged file from a whole one: a
-    // hasher that takes eight bytes at a time, as the file is megabytes.
-    let mut hasher = rustc_hash::FxHasher::default();
-    hasher.write(body);
-    hasher.finish().to_le_bytes()
+/// The file stored under `name` for this build, if it can be read: the
+/// bytes of a file whole by its checksum and of this layout, else `None`,
+/// for the caller to build it again.
+pub(crate) fn load_container(name: &str) -> Option<Reader> {
+    let bytes = fs::read(path(name)?).ok()?;
+    match Reader::new(bytes) {
+        Ok(reader) => Some(reader),
+        Err(Unreadable::Damaged) => None,
+        Err(Unreadable::Inconsistent(reason)) => {
+            // The checksum held, so this is not a damaged file: what was
+            // stored can't be read back, which only a bug causes.
+            debug_assert!(false, "the stored {name} no longer reads: {reason}");
+            eprintln!(
+                "phpstan-rs: the stored {name} no longer reads ({reason}); building it again"
+            );
+            None
+        }
+    }
 }
+
+/// Stores `writer`'s file under `name` for this build, pruning the oldest
+/// of what other builds stored under it. Writes a temporary file first and
+/// renames it, so a concurrent load never reads a partial file.
+pub(crate) fn store_container(name: &str, writer: Writer) {
+    let Some(target) = path(name) else {
+        return;
+    };
+    let Some(dir) = target.parent() else {
+        return;
+    };
+    if fs::create_dir_all(dir).is_err() {
+        return;
+    }
+    let temporary = dir.join(format!("{name}-{KEY}.{}.tmp", std::process::id()));
+    let written = fs::write(&temporary, writer.finish()).is_ok();
+    if !written || fs::rename(&temporary, &target).is_err() {
+        let _ = fs::remove_file(&temporary);
+        return;
+    }
+    prune(dir, name, &target);
+}
+
+/// The section of a stored value.
+const VALUE: &str = "value";
 
 /// What `store` stored under `name` for this build, if it can be read.
 pub(crate) fn load<T: serde::de::DeserializeOwned>(name: &str) -> Option<T> {
-    let bytes = fs::read(path(name)?).ok()?;
-    let (sum, body) = bytes.split_at_checked(8)?;
-    if sum != checksum(body) {
-        return None;
-    }
-    match ciborium::de::from_reader_with_recursion_limit(body, RECURSION_LIMIT) {
+    let reader = load_container(name)?;
+    let decoded = reader
+        .section(VALUE)
+        .map_err(|e| e.to_string())
+        .and_then(|range| {
+            ciborium::de::from_reader_with_recursion_limit(&reader.buffer()[range], RECURSION_LIMIT)
+                .map_err(|e| e.to_string())
+        });
+    match decoded {
         Ok(value) => Some(value),
         Err(error) => {
             // The checksum held, so this is not a damaged file: what was
@@ -67,28 +108,16 @@ pub(crate) fn load<T: serde::de::DeserializeOwned>(name: &str) -> Option<T> {
     }
 }
 
-/// Stores `value` under `name` for this build, pruning the oldest of what
-/// other builds stored under it. Writes a temporary file first and renames
-/// it, so a concurrent `load` never reads a partial file.
+/// Stores `value` under `name` for this build, as a file of one section.
 pub(crate) fn store<T: serde::Serialize>(name: &str, value: &T) {
-    let Some(target) = path(name) else {
-        return;
-    };
-    let Some(dir) = target.parent() else {
-        return;
-    };
-    if fs::create_dir_all(dir).is_err() {
-        return;
-    }
-    let temporary = dir.join(format!("{name}-{KEY}.{}.tmp", std::process::id()));
     let mut body = Vec::new();
-    let written = ciborium::ser::into_writer(value, &mut body).is_ok()
-        && fs::write(&temporary, [checksum(&body).as_slice(), &body].concat()).is_ok();
-    if !written || fs::rename(&temporary, &target).is_err() {
-        let _ = fs::remove_file(&temporary);
+    if ciborium::ser::into_writer(value, &mut body).is_err() {
         return;
     }
-    prune(dir, name, &target);
+    let mut writer = Writer::new();
+    if writer.section(VALUE, &body).is_ok() {
+        store_container(name, writer);
+    }
 }
 
 /// How many builds' files of one kind stay: a branch switch back to a

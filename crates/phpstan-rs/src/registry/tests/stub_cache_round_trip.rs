@@ -1,23 +1,25 @@
-//! What the stub cache stores must read back: the resolved registry, with
-//! every class and function entry decoding.
+//! What the stub cache stores must read back: the resolved registry and
+//! the declarations as built, with every class and function entry decoding.
 
 use crate::project::Project;
 use crate::registry::Registry;
+use crate::registry::container::{Reader, Writer};
+
+fn stored_and_read_back(registry: &Registry) -> Registry {
+    let mut writer = Writer::new();
+    registry.store(&mut writer).expect("stores");
+    let reader = match Reader::new(writer.finish()) {
+        Ok(reader) => reader,
+        Err(_) => panic!("a stored registry is a whole file"),
+    };
+    Registry::load(&reader).expect("reads back")
+}
 
 #[test]
 fn the_resolved_stub_registry_survives_a_round_trip() {
     let project = Project::new();
     let registry = project.registry();
-    let mut stored = Vec::new();
-    ciborium::ser::into_writer(&registry.to_stored().expect("diffs"), &mut stored).expect("stores");
-    let back = Registry::from_stored(
-        ciborium::de::from_reader_with_recursion_limit(
-            &stored[..],
-            crate::registry::stub_cache::RECURSION_LIMIT,
-        )
-        .expect("reads back"),
-    )
-    .expect("rebuilds");
+    let back = stored_and_read_back(registry);
 
     assert_eq!(back.classes.len(), registry.classes.len());
     assert_eq!(back.functions.len(), registry.functions.len());
@@ -27,4 +29,76 @@ fn the_resolved_stub_registry_survives_a_round_trip() {
     for (name, function) in registry.functions.iter() {
         assert_eq!(back.functions.get(name), Some(function), "function {name}");
     }
+}
+
+#[test]
+fn the_declarations_as_built_survive_a_round_trip() {
+    let project = Project::new();
+    let registry = project.registry();
+    assert!(
+        registry.has_resolved_declarations(),
+        "the stub registry keeps its declarations as built"
+    );
+    let back = stored_and_read_back(registry);
+    let (before, after) = (
+        registry.raw.as_ref().expect("kept"),
+        back.raw.as_ref().expect("stored with the registry"),
+    );
+    assert_eq!(after.classes.len(), before.classes.len());
+    assert_eq!(after.functions.len(), before.functions.len());
+    for (name, class) in before.classes.iter() {
+        assert_eq!(after.classes.get(name), Some(class), "class {name}");
+    }
+    for (name, function) in before.functions.iter() {
+        assert_eq!(after.functions.get(name), Some(function), "function {name}");
+    }
+}
+
+#[test]
+fn every_stored_table_reads_back_with_its_names_and_values() {
+    let project = Project::new();
+    let registry = project.registry();
+    let back = stored_and_read_back(registry);
+
+    macro_rules! same_table {
+        ($($field:ident),*) => {$(
+            assert_eq!(
+                back.$field.len(),
+                registry.$field.len(),
+                concat!(stringify!($field), " has as many entries")
+            );
+            for (name, value) in registry.$field.iter() {
+                let (declared, read) = back
+                    .$field
+                    .get_with_name(name)
+                    .unwrap_or_else(|| panic!(concat!(stringify!($field), " lacks {}"), name));
+                assert_eq!(declared.as_str(), name.as_str());
+                assert_eq!(read, value, concat!(stringify!($field), " {}"), name);
+            }
+        )*};
+    }
+    same_table!(
+        built_in_stub_classes,
+        ancestor_names,
+        subtype_children,
+        trait_users,
+        recorded_parents,
+        method_owner_by_class,
+        ancestor_method_owner_by_class,
+        property_owner_by_class,
+        ancestor_property_owner_by_class,
+        const_owner_by_class
+    );
+}
+
+#[test]
+fn a_read_back_registry_iterates_its_names_in_lowercased_order() {
+    let project = Project::new();
+    let back = stored_and_read_back(project.registry());
+    let keys: Vec<String> = back
+        .classes
+        .keys()
+        .map(|name| name.to_ascii_lowercase())
+        .collect();
+    assert!(keys.windows(2).all(|pair| pair[0] < pair[1]));
 }

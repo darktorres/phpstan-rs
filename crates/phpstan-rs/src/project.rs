@@ -438,8 +438,8 @@ impl Project {
         } else {
             "stub-base"
         };
-        if let Some(stored) = crate::registry::load_cached(cache_name) {
-            match Registry::from_stored(stored) {
+        if let Some(stored) = Registry::load_cached(cache_name) {
+            match stored {
                 Ok(mut registry) => {
                     registry.freeze();
                     return registry;
@@ -467,9 +467,8 @@ impl Project {
         base.phpstan_pinned = with_phpstan;
         base.finish_loading();
         let mut registry = base.registry;
-        match registry.to_stored() {
-            Ok(stored) => crate::registry::store_cached(cache_name, &stored),
-            Err(error) => eprintln!("phpstan-rs: the {cache_name} can't be stored ({error})"),
+        if let Err(error) = registry.store_cached(cache_name) {
+            eprintln!("phpstan-rs: the {cache_name} can't be stored ({error})");
         }
         registry.freeze();
         registry
