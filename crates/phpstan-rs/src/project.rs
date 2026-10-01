@@ -924,9 +924,18 @@ impl Project {
             .map(|(path, state)| (state.analyzed, path.as_path(), state.ast.as_slice()))
             .collect();
         sources.sort_by(|a, b| (a.0, a.1).cmp(&(b.0, b.1)));
-        for (analyzed, path, ast) in sources {
-            let origin = Origin::File(Arc::from(path));
-            for decl in crate::registry::build_declarations(ast, &origin) {
+        // Each file's declarations are built on their own, as when the
+        // file was parsed; only their insertion is in order.
+        let built: Vec<Vec<BuiltDecl>> = worker_pool().install(|| {
+            sources
+                .par_iter()
+                .map(|(_, path, ast)| {
+                    crate::registry::build_declarations(ast, &Origin::File(Arc::from(*path)))
+                })
+                .collect()
+        });
+        for ((analyzed, path, _), decls) in sources.into_iter().zip(built) {
+            for decl in decls {
                 if let BuiltDecl::Class { name, .. } = &decl {
                     self.registry.record_phpstan_class_file(name, path);
                 }

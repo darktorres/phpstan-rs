@@ -154,6 +154,10 @@ pub(crate) fn run_check_project_command(args: CheckProjectArgs) {
         args.fix,
         args.format.unwrap_or_default(),
     );
+    // The process ends here: freeing the project's tables one by one, on
+    // this thread, would only delay it.
+    std::mem::forget(analysis);
+    std::mem::forget(run);
 }
 
 fn report(
