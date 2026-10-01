@@ -433,145 +433,35 @@ impl Registry {
     /// like `flatten_phpdoc_inheritance` above: a `value-of<value-of<X>>`-
     /// style chain isn't attempted.
     ///
-    /// Every class is taken out of `self.classes` before being mutated
-    /// (`HashMap::remove`, reinserted at the end of its own iteration),
-    /// not the collect-then-apply shape `flatten_phpdoc_inheritance_
-    /// one_pass` needs - that one's shape exists to let a fixed-point
-    /// loop read an ancestor's still-unmodified signature while
-    /// backfilling a descendant's; this pass only needs to read some
-    /// other class/enum's `properties["value"]` while rewriting the
-    /// current one's types, and temporarily removing the current entry
-    /// sidesteps borrowing `self.classes` both ways at once. (A class
-    /// whose own docblock names `value-of<self>` on itself, where `self`
-    /// is genuinely an enum, degrades to `Mixed` while it's temporarily
-    /// removed - the same "can't verify, don't guess" outcome every
-    /// other unresolvable case here gets.) Top-level functions
-    /// (`self.functions`) need no such dance at all - mutating one
-    /// function's signature while reading `self.classes` for a lookup
-    /// borrows two disjoint fields of `self`, which the borrow checker
-    /// already allows without help.
+    /// Each class is resolved in parallel against the classes as they are
+    /// before the pass, and the results are inserted together, so no
+    /// result depends on the order classes are visited in. (A class whose
+    /// own docblock names `value-of<self>` on itself, where `self` is
+    /// genuinely an enum, degrades to `Mixed` - the same "can't verify,
+    /// don't guess" outcome every other unresolvable case here gets.)
+    /// Top-level functions are resolved after, against the classes with
+    /// theirs in.
     #[hotpath::measure]
     pub(crate) fn resolve_deferred_value_of(&mut self) {
         self.resolve_class_constant_references();
         let class_names: Vec<Name> = self.scoped_class_names();
-        for class_name in class_names {
-            // Only a class with a deferred sentinel somewhere needs its
-            // inherited-constant view (the overwhelming majority, stubs
-            // included, have none).
-            let own_consts = match self.classes.get(&class_name) {
-                Some(info) if class_has_deferred_type(info) => {
-                    visible_class_consts(&class_name, &self.classes)
-                }
-                Some(_) => continue,
-                None => continue,
-            };
-            let Some(mut info) = self.classes.remove(&class_name) else {
-                continue;
-            };
-            let resolve = |ty: &mut Type, native: &Type, classes: &_| {
-                if ty.contains_deferred() {
-                    let bound = bind_class_const_self(
-                        std::mem::replace(ty, Type::mixed()),
-                        &class_name,
-                        &own_consts,
-                    );
-                    *ty = resolve_deferred_value_of_with_native_fallback(bound, native, classes);
-                }
-            };
-            for sig in info.methods.values_mut() {
-                for param in &mut sig.params {
-                    resolve(&mut param.ty, &param.ty_native, &self.classes);
-                    let native = param.ty_native.clone();
-                    for extra in [
-                        &mut param.doc_ty,
-                        &mut param.out_ty,
-                        &mut param.closure_this_type,
-                    ]
-                    .into_iter()
-                    .flatten()
-                    {
-                        resolve(extra, &native, &self.classes);
-                    }
-                }
-                resolve(&mut sig.return_type, &sig.return_type_native, &self.classes);
-                if let Some(doc_ty) = &mut sig.return_doc_ty {
-                    resolve(doc_ty, &sig.return_type_native, &self.classes);
-                }
-                if let Some(out) = &mut sig.self_out {
-                    resolve(out, &Type::mixed(), &self.classes);
-                }
-            }
-            for prop in info.properties.values_mut() {
-                if prop.ty.contains_deferred() {
-                    let ty = bind_class_const_self(
-                        std::mem::replace(&mut prop.ty, Type::mixed()),
-                        &class_name,
-                        &own_consts,
-                    );
-                    prop.ty = resolve_deferred_value_of_in_type(ty, &self.classes);
-                }
-                if let Some(doc) = &mut prop.doc_ty
-                    && doc.contains_deferred()
-                {
-                    let ty = bind_class_const_self(
-                        std::mem::replace(doc, Type::mixed()),
-                        &class_name,
-                        &own_consts,
-                    );
-                    *doc = resolve_deferred_value_of_in_type(ty, &self.classes);
-                }
-                if let Some(set_ty) = &prop.set_ty
-                    && set_ty.contains_deferred()
-                {
-                    let ty = bind_class_const_self(
-                        prop.set_ty.take().unwrap(),
-                        &class_name,
-                        &own_consts,
-                    );
-                    prop.set_ty = Some(resolve_deferred_value_of_in_type(ty, &self.classes));
-                }
-            }
-            for c in info.consts.values_mut() {
-                if c.ty.contains_deferred() {
-                    let ty = bind_class_const_self(
-                        std::mem::replace(&mut c.ty, Type::mixed()),
-                        &class_name,
-                        &own_consts,
-                    );
-                    c.ty = resolve_deferred_value_of_in_type(ty, &self.classes);
-                }
-            }
-            for bound in info.template_bounds.values_mut() {
-                if bound.contains_deferred() {
-                    let ty = bind_class_const_self(
-                        std::mem::replace(bound, Type::mixed()),
-                        &class_name,
-                        &own_consts,
-                    );
-                    *bound = resolve_deferred_value_of_in_type(ty, &self.classes);
-                }
-            }
-            // `@extends Lexer<self::T_*>`: what inherited PHPDoc binds to.
-            let ancestor_args = info
-                .extends_args
-                .iter_mut()
-                .chain(info.implements_args.values_mut().flatten());
-            for arg in ancestor_args {
-                if arg.contains_deferred() {
-                    let ty = bind_class_const_self(
-                        std::mem::replace(arg, Type::mixed()),
-                        &class_name,
-                        &own_consts,
-                    );
-                    *arg = resolve_deferred_value_of_in_type(ty, &self.classes);
-                }
-            }
-            self.classes.insert(class_name, info);
+        let registry: &Registry = self;
+        let resolved: Vec<(Name, ClassReflection)> = class_names
+            .par_iter()
+            .with_min_len(crate::registry::PASS_CHUNK)
+            .filter_map(|name| {
+                registry
+                    .resolved_deferred_class(name)
+                    .map(|info| (name.clone(), info))
+            })
+            .collect();
+        for (name, info) in resolved {
+            self.classes.insert(name, info);
         }
         let resolve = |ty: &mut Type, native: &Type, classes: &_| {
             if ty.contains_deferred() {
                 let taken = std::mem::replace(ty, Type::mixed());
-                *ty = resolve_deferred_value_of_with_native_fallback(taken, native, classes);
+                *ty = resolve_deferred_value_of_with_native_fallback(taken, native, classes, None);
             }
         };
         let scope = &self.scope;
@@ -600,6 +490,126 @@ impl Registry {
         }
     }
 
+    /// `class_name`'s declaration with its deferred types resolved, when it
+    /// has any, read against the classes as they are before the pass.
+    fn resolved_deferred_class(&self, class_name: &Name) -> Option<ClassReflection> {
+        // Only a class with a deferred sentinel somewhere needs its
+        // inherited-constant view (the overwhelming majority, stubs
+        // included, have none).
+        let own_consts = match self.classes.get(class_name) {
+            Some(info) if class_has_deferred_type(info) => {
+                visible_class_consts(class_name, &self.classes)
+            }
+            _ => return None,
+        };
+        let mut info = self.classes.get(class_name)?.clone();
+        let resolve = |ty: &mut Type, native: &Type, classes: &_| {
+            if ty.contains_deferred() {
+                let bound = bind_class_const_self(
+                    std::mem::replace(ty, Type::mixed()),
+                    class_name,
+                    &own_consts,
+                );
+                *ty = resolve_deferred_value_of_with_native_fallback(
+                    bound,
+                    native,
+                    classes,
+                    Some(class_name),
+                );
+            }
+        };
+        for sig in info.methods.values_mut() {
+            for param in &mut sig.params {
+                resolve(&mut param.ty, &param.ty_native, &self.classes);
+                let native = param.ty_native.clone();
+                for extra in [
+                    &mut param.doc_ty,
+                    &mut param.out_ty,
+                    &mut param.closure_this_type,
+                ]
+                .into_iter()
+                .flatten()
+                {
+                    resolve(extra, &native, &self.classes);
+                }
+            }
+            resolve(&mut sig.return_type, &sig.return_type_native, &self.classes);
+            if let Some(doc_ty) = &mut sig.return_doc_ty {
+                resolve(doc_ty, &sig.return_type_native, &self.classes);
+            }
+            if let Some(out) = &mut sig.self_out {
+                resolve(out, &Type::mixed(), &self.classes);
+            }
+        }
+        for prop in info.properties.values_mut() {
+            if prop.ty.contains_deferred() {
+                let ty = bind_class_const_self(
+                    std::mem::replace(&mut prop.ty, Type::mixed()),
+                    class_name,
+                    &own_consts,
+                );
+                prop.ty = resolve_deferred_value_of_in_type(ty, &self.classes, Some(class_name));
+            }
+            if let Some(doc) = &mut prop.doc_ty
+                && doc.contains_deferred()
+            {
+                let ty = bind_class_const_self(
+                    std::mem::replace(doc, Type::mixed()),
+                    class_name,
+                    &own_consts,
+                );
+                *doc = resolve_deferred_value_of_in_type(ty, &self.classes, Some(class_name));
+            }
+            if let Some(set_ty) = &prop.set_ty
+                && set_ty.contains_deferred()
+            {
+                let ty =
+                    bind_class_const_self(prop.set_ty.take().unwrap(), class_name, &own_consts);
+                prop.set_ty = Some(resolve_deferred_value_of_in_type(
+                    ty,
+                    &self.classes,
+                    Some(class_name),
+                ));
+            }
+        }
+        for c in info.consts.values_mut() {
+            if c.ty.contains_deferred() {
+                let ty = bind_class_const_self(
+                    std::mem::replace(&mut c.ty, Type::mixed()),
+                    class_name,
+                    &own_consts,
+                );
+                c.ty = resolve_deferred_value_of_in_type(ty, &self.classes, Some(class_name));
+            }
+        }
+        for bound in info.template_bounds.values_mut() {
+            if bound.contains_deferred() {
+                let ty = bind_class_const_self(
+                    std::mem::replace(bound, Type::mixed()),
+                    class_name,
+                    &own_consts,
+                );
+                *bound = resolve_deferred_value_of_in_type(ty, &self.classes, Some(class_name));
+            }
+        }
+        // `@extends Lexer<self::T_*>`: what inherited PHPDoc binds to.
+        let ancestor_args = info
+            .extends_args
+            .iter_mut()
+            .chain(info.implements_args.values_mut().flatten());
+        for arg in ancestor_args {
+            if arg.contains_deferred() {
+                let ty = bind_class_const_self(
+                    std::mem::replace(arg, Type::mixed()),
+                    class_name,
+                    &own_consts,
+                );
+                *arg = resolve_deferred_value_of_in_type(ty, &self.classes, Some(class_name));
+            }
+        }
+        Some(info)
+    }
+
     /// Resolves every `ClassConstant` inside class constants'
     /// own types (`const B = self::A;`, `const ALL = [self::A,
     /// Other::B];` - `infer_class_const_type`'s output) before anything
@@ -625,6 +635,7 @@ impl Registry {
                     let step = resolve_deferred_value_of_in_type(
                         bind_class_const_self(sig.ty.clone(), class_name, &own_consts),
                         &self.classes,
+                        None,
                     );
                     if step != sig.ty {
                         updates.push((class_name.clone(), const_name.clone(), step));
@@ -831,7 +842,7 @@ impl Registry {
         if !ty.contains_deferred() {
             return ty;
         }
-        resolve_deferred_value_of_in_type(ty, &self.classes)
+        resolve_deferred_value_of_in_type(ty, &self.classes, None)
     }
 
     /// `resolve_deferred_value_of_now`'s native-fallback-aware sibling.
@@ -851,7 +862,7 @@ impl Registry {
         if !ty.contains_deferred() {
             return ty;
         }
-        resolve_deferred_value_of_with_native_fallback(ty, native, &self.classes)
+        resolve_deferred_value_of_with_native_fallback(ty, native, &self.classes, None)
     }
 
     /// `class_name`'s concrete binding for each templated ancestor
@@ -1209,20 +1220,46 @@ fn class_namespace(fqn: &str) -> &str {
 /// any depth. See `Registry::resolve_deferred_value_of`'s doc comment
 /// for why this exists, and `types::parse_type_keyword_or_class`'s
 /// `"value-of"` arm for where a `ValueOf` is produced.
-fn resolve_deferred_value_of_in_type(ty: Type, classes: &NameTable<ClassReflection>) -> Type {
-    ty.resolve_class_references(&DeclaredConstants(classes))
+fn resolve_deferred_value_of_in_type(
+    ty: Type,
+    classes: &NameTable<ClassReflection>,
+    excluded: Option<&str>,
+) -> Type {
+    ty.resolve_class_references(&DeclaredConstants { classes, excluded })
 }
 
-/// The constants and enum cases of the classes indexed so far.
-struct DeclaredConstants<'a>(&'a NameTable<ClassReflection>);
+/// The constants and enum cases of the classes indexed so far, but for
+/// the one `excluded` class being resolved: a reference to it from its own
+/// types degrades to `Mixed`, the same "can't verify, don't guess"
+/// outcome every other unresolvable one gets.
+struct DeclaredConstants<'a> {
+    classes: &'a NameTable<ClassReflection>,
+    excluded: Option<&'a str>,
+}
+
+impl DeclaredConstants<'_> {
+    fn is_excluded(&self, class: &str) -> bool {
+        self.excluded
+            .is_some_and(|excluded| excluded.eq_ignore_ascii_case(class.trim_start_matches('\\')))
+    }
+}
 
 impl types::ClassConstants for DeclaredConstants<'_> {
     fn enum_values(&self, class: &str) -> Type {
-        resolve_value_of_target(class, self.0)
+        if self.is_excluded(class) {
+            return Type::mixed();
+        }
+        resolve_value_of_target(class, self.classes)
     }
 
     fn class_constants(&self, class: &Type, pattern: &str) -> Type {
-        resolve_class_const_type(class, pattern, self.0)
+        if class
+            .as_object()
+            .is_some_and(|(fqn, _)| self.is_excluded(fqn))
+        {
+            return Type::mixed();
+        }
+        resolve_class_const_type(class, pattern, self.classes)
     }
 }
 
@@ -1475,8 +1512,9 @@ fn resolve_deferred_value_of_with_native_fallback(
     ty: Type,
     native: &Type,
     classes: &NameTable<ClassReflection>,
+    excluded: Option<&str>,
 ) -> Type {
-    let resolved = resolve_deferred_value_of_in_type(ty, classes);
+    let resolved = resolve_deferred_value_of_in_type(ty, classes, excluded);
     if resolved.is_mixed() && !native.is_mixed() {
         native.clone()
     } else {
@@ -1846,7 +1884,12 @@ impl Registry {
         let resolve = |ty: &mut Type, native: &Type| {
             if ty.contains_deferred() {
                 let taken = std::mem::replace(ty, Type::mixed());
-                *ty = resolve_deferred_value_of_with_native_fallback(taken, native, &self.classes);
+                *ty = resolve_deferred_value_of_with_native_fallback(
+                    taken,
+                    native,
+                    &self.classes,
+                    None,
+                );
             }
         };
         for p in &mut sig.params {
