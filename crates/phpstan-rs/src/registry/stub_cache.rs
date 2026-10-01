@@ -4,7 +4,8 @@
 //! (`build.rs`), so a build never reads what different code or stubs
 //! stored; one that can't be read or written is built in memory as
 //! before. A file starts with a checksum of the rest, so a truncated or
-//! damaged one is rebuilt rather than read. `PHPSTAN_RS_NO_STUB_CACHE`
+//! damaged one is rebuilt rather than read; one that passes it but doesn't
+//! decode is a bug, and says so. `PHPSTAN_RS_NO_STUB_CACHE`
 //! turns the cache off.
 
 use std::fs;
@@ -50,7 +51,18 @@ pub(crate) fn load<T: serde::de::DeserializeOwned>(name: &str) -> Option<T> {
     if sum != checksum(body) {
         return None;
     }
-    ciborium::de::from_reader_with_recursion_limit(body, RECURSION_LIMIT).ok()
+    match ciborium::de::from_reader_with_recursion_limit(body, RECURSION_LIMIT) {
+        Ok(value) => Some(value),
+        Err(error) => {
+            // The checksum held, so this is not a damaged file: what was
+            // stored can't be read back, which only a bug causes.
+            debug_assert!(false, "the stored {name} no longer decodes: {error}");
+            eprintln!(
+                "phpstan-rs: the stored {name} no longer decodes ({error}); building it again"
+            );
+            None
+        }
+    }
 }
 
 /// Stores `value` under `name` for this build, pruning the oldest of what

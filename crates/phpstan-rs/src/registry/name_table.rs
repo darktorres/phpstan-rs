@@ -470,7 +470,7 @@ impl<'de> serde::Deserialize<'de> for Bytes {
                 Ok(Bytes(bytes))
             }
         }
-        deserializer.deserialize_bytes(Visitor)
+        deserializer.deserialize_byte_buf(Visitor)
     }
 }
 

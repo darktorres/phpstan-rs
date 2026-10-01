@@ -1,4 +1,5 @@
 mod helpers;
+mod stub_cache_round_trip;
 
 mod anonymous_class;
 mod assignability;
