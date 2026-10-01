@@ -67,7 +67,7 @@ fn run_one(source: &str) {
         // same way an ordinary, real (non-stub) user file would be.
         let _ = project::parse_file(
             Path::new("fuzz.php"),
-            source,
+            source.as_bytes(),
             false,
             syntax::name::Interner::global(),
         );
