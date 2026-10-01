@@ -18,6 +18,13 @@ only what a later change still has to know or do.
   either way, and the clones cost 0.35% of the run, so it stays as it is.
   The peak is elsewhere (the parsed files and the types of the checks).
 
+- **The worker pool is not sized by workload.** A one-file run takes about
+  the same on 1 thread and on 8 (47.4 and 47.0 ms over 15 runs of `perf stat`;
+  three alternating rounds of `hyperfine` differ by under 2 ms, within the
+  noise), so the cost of idle threads is not worth plumbing a size through
+  discovery. An earlier reading of 9 ms came from one 8-thread run that was
+  last in a sequence while the load changed.
+
 ## Gates
 
 `cargo xtask gates` (the quick tier) passes at the end of this work. Four
@@ -28,8 +35,6 @@ the `--full` tier's feature matrix, `machete` and the performance gate.
 
 ## Follow-ups, each a few percent at most
 
-- Size the worker pool by workload: a one-file run takes 54 ms on 8 threads
-  and 45 ms on 1-4 (the file count isn't known before the pool exists).
 - Parallelize the sequential insert of loaded files, mainly
   `register_references` (about 5% of the Piwigo run).
 - Left under the last profile, each under 3% of a run: name interning,
