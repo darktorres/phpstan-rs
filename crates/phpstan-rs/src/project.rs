@@ -50,6 +50,9 @@ struct FileState {
     ast: Vec<Stmt>,
     // The source's length in bytes: what checking the file costs, roughly.
     source_len: usize,
+    // Where the file came in the order files were loaded, which a rebuild of
+    // a name declared in several of them follows; an edited file keeps it.
+    load_order: u64,
     functions: Vec<String>,
     classes: Vec<String>,
     // The global constants it declares (`const`, `define()`).
@@ -149,6 +152,8 @@ pub struct Project {
     // Whether PHPStan's source stays merged in whatever the loaded files
     // mention: for the project building the registry that has it.
     phpstan_pinned: bool,
+    // The `FileState::load_order` the next new file gets.
+    next_load_order: u64,
     // The files loaded or edited since the finishing passes last walked
     // them for global variables.
     globals_stale: FxHashSet<PathBuf>,
@@ -464,6 +469,7 @@ impl Project {
             finished: false,
             unchecked: Vec::new(),
             phpstan_pinned: false,
+            next_load_order: 0,
             globals_stale: FxHashSet::default(),
             duplicate_fn_sites: DuplicateFunctionSites::default(),
             duplicate_class_sites: DuplicateClassSites::default(),
@@ -819,11 +825,14 @@ impl Project {
         );
         let owner = self.packages.owner(&self.absolute_path(&path));
         self.globals_stale.insert(path.clone());
+        let load_order = self.next_load_order;
+        self.next_load_order += 1;
         self.files.insert(
             path,
             FileState {
                 ast,
                 source_len: source.len(),
+                load_order,
                 mentions_phpstan: mentions_phpstan(&functions, &classes, &references),
                 functions,
                 classes,
@@ -971,29 +980,36 @@ impl Project {
     /// PHPStan's own source in it, instead of resolving that source for
     /// this project alone: the loaded files' declarations go into it as
     /// they went into the registry without it, from the built-in stubs
-    /// first, context files before analyzed ones and each group by path.
+    /// first, context files before analyzed ones and each group in load order.
     /// Only for a project that hasn't finished yet, whose resolved
     /// declarations are all the shared base's.
     fn switch_to_phpstan_base(&mut self) {
         self.registry.switch_base(Project::phpstan_base().clone());
         self.begin_declaration_changes();
-        let mut sources: Vec<(bool, &Path, &[Stmt])> = self
+        let mut sources: Vec<(bool, u64, &Path, &[Stmt])> = self
             .files
             .iter()
-            .map(|(path, state)| (state.analyzed, path.as_path(), state.ast.as_slice()))
+            .map(|(path, state)| {
+                (
+                    state.analyzed,
+                    state.load_order,
+                    path.as_path(),
+                    state.ast.as_slice(),
+                )
+            })
             .collect();
-        sources.sort_by(|a, b| (a.0, a.1).cmp(&(b.0, b.1)));
+        sources.sort_by_key(|source| (source.0, source.1));
         // Each file's declarations are built on their own, as when the
         // file was parsed; only their insertion is in order.
         let built: Vec<Vec<BuiltDecl>> = worker_pool().install(|| {
             sources
                 .par_iter()
-                .map(|(_, path, ast)| {
+                .map(|(_, _, path, ast)| {
                     crate::registry::build_declarations(ast, &Origin::File(Arc::from(*path)))
                 })
                 .collect()
         });
-        for ((analyzed, path, _), decls) in sources.into_iter().zip(built) {
+        for ((analyzed, _, path, _), decls) in sources.into_iter().zip(built) {
             for decl in decls {
                 if let BuiltDecl::Class { name, .. } = &decl {
                     self.registry.record_phpstan_class_file(name, path);
@@ -1212,6 +1228,7 @@ impl Project {
         );
         Some(UnindexedFile {
             analyzed: old.analyzed,
+            load_order: old.load_order,
             functions: old.functions,
             classes: old.classes,
             constants: old.constants,
@@ -1221,13 +1238,13 @@ impl Project {
     /// Rebuilds the registry entries of `functions` and `classes` from
     /// every declaration of them still loaded: the built-in stub's first,
     /// as `Project::new` merges it, then each file's, context files before
-    /// analyzed ones and each group by path - the order a project loads
+    /// analyzed ones and each group in load order - the order a project loads
     /// them in. `pending` is a file whose parse isn't in `self.files` yet;
     /// all of its declarations are inserted, at its place in that order.
     fn rebuild_declarations(
         &mut self,
         names: &DeclaredNames,
-        pending: Option<(&Path, &[Stmt], bool)>,
+        pending: Option<(&Path, &[Stmt], bool, u64)>,
     ) {
         self.begin_declaration_changes();
         self.registry
@@ -1273,17 +1290,25 @@ impl Project {
                     .iter()
                     .any(|n| constant_keys.contains(n.as_str()))
         };
-        let mut sources: Vec<(bool, &Path, &[Stmt], bool)> = self
+        let mut sources: Vec<(bool, u64, &Path, &[Stmt], bool)> = self
             .files
             .iter()
             .filter(|(_, state)| declares_one(state))
-            .map(|(path, state)| (state.analyzed, path.as_path(), state.ast.as_slice(), false))
+            .map(|(path, state)| {
+                (
+                    state.analyzed,
+                    state.load_order,
+                    path.as_path(),
+                    state.ast.as_slice(),
+                    false,
+                )
+            })
             .collect();
-        if let Some((path, ast, analyzed)) = pending {
-            sources.push((analyzed, path, ast, true));
+        if let Some((path, ast, analyzed, load_order)) = pending {
+            sources.push((analyzed, load_order, path, ast, true));
         }
-        sources.sort_by(|a, b| (a.0, a.1).cmp(&(b.0, b.1)));
-        for (analyzed, path, ast, is_pending) in sources {
+        sources.sort_by_key(|source| (source.0, source.1));
+        for (analyzed, _, path, ast, is_pending) in sources {
             let origin = Origin::File(Arc::from(path));
             for decl in crate::registry::build_declarations(ast, &origin) {
                 let rebuilt = match &decl {
@@ -1500,6 +1525,14 @@ impl Project {
             || !path_under_excluded_dir(path, DEFAULT_SCAN_EXCLUDED_DIR_NAMES),
             |previous| previous.analyzed,
         );
+        let load_order = previous.as_ref().map_or_else(
+            || {
+                let order = self.next_load_order;
+                self.next_load_order += 1;
+                order
+            },
+            |previous| previous.load_order,
+        );
         let mut rebuilt = DeclaredNames {
             functions: functions.clone(),
             classes: classes.clone(),
@@ -1510,7 +1543,7 @@ impl Project {
             rebuilt.classes.extend(previous.classes);
             rebuilt.constants.extend(previous.constants);
         }
-        self.rebuild_declarations(&rebuilt, Some((path, &ast, analyzed)));
+        self.rebuild_declarations(&rebuilt, Some((path, &ast, analyzed, load_order)));
         let anonymous_classes = anonymous_class_names(&ast);
         self.duplicate_fn_sites.index(&ast, path);
         // `is_stub: false` - same reasoning as `load_file_impl`'s own
@@ -1530,6 +1563,7 @@ impl Project {
             FileState {
                 ast,
                 source_len: new_source.len(),
+                load_order,
                 mentions_phpstan: mentions_phpstan(&functions, &classes, &references),
                 functions,
                 classes,
@@ -2592,6 +2626,7 @@ pub fn collect_php_files_excluding(
 /// What `Project::unindex_file` removed.
 struct UnindexedFile {
     analyzed: bool,
+    load_order: u64,
     functions: Vec<String>,
     classes: Vec<String>,
     constants: Vec<String>,

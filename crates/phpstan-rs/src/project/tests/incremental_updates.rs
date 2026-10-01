@@ -1147,3 +1147,38 @@ fn a_changed_global_variable_type_rechecks_the_files_declaring_it_global() {
         "{reader:?}"
     );
 }
+
+#[test]
+fn a_rebuild_follows_the_order_files_were_loaded_not_their_paths() {
+    // `z.php` loads before `a.php`; both declare `Dup`, the second replacing
+    // what the first gave, so the result depends on the order.
+    let z = "<?php class Dup { function fromZ() {} }";
+    let a_before = "<?php class Dup { function fromA() {} }";
+    let a_after = "<?php class Dup { function fromA() {} function edited() {} }";
+    let load = |first: &str, second: &str| {
+        let mut project = Project::new();
+        project
+            .load_analyzed_file(PathBuf::from("z.php"), first)
+            .unwrap();
+        project
+            .load_analyzed_file(PathBuf::from("a.php"), second)
+            .unwrap();
+        project.finish_loading();
+        project
+    };
+    let methods = |project: &Project| -> Vec<String> {
+        let mut names: Vec<String> = project.registry().classes["Dup"]
+            .methods()
+            .keys()
+            .map(|name| name.to_string())
+            .collect();
+        names.sort();
+        names
+    };
+    let mut edited = load(z, a_before);
+    edited
+        .update_file(Path::new("a.php"), a_after)
+        .expect("parses");
+    let fresh = load(z, a_after);
+    assert_eq!(methods(&edited), methods(&fresh));
+}

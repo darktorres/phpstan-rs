@@ -11,14 +11,6 @@ only what a later change still has to know or do.
   `class.notFound`. Loading all matches PHPStan, and unreferenced extension
   classes cost nothing per project since the stub cache, the lazy entries
   and the shared base.
-- **Rebuild order (found by the differential test).** Files load in the order
-  given, but a rebuild of a name declared in several files takes them in
-  path order, so duplicate declarations can resolve differently after an edit
-  than in a fresh load unless files load path-sorted.
-- **Rebuild order, in production:** both loaders (`Session::load`,
-  `load_workspace_files`) load context files then analyzed ones, each sorted
-  by path, which is the order a rebuild uses, so the caveat above touches only
-  loads in another order (tests, embedders calling `load_file` one by one).
 - **Fixtures run under the `test` profile** (opt-level 1), not `gate`.
 - **`Project::built_once`** only gates a `debug_assert`; the shared base
   always keeps raw declarations, and `end_declaration_changes`' `keep_raw`
