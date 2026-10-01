@@ -3,7 +3,7 @@
 What the one-fixture `callgrind` profile found, and every change it
 calls for. Nothing is left out for being small or for churn: each cost
 the profile showed has a step, the stored registry's format is replaced
-rather than patched, and the steps that need a measurement first say so.
+rather than patched.
 It sits beside `PROJECT_BUILD_COST_INVESTIGATION.md` and
 `BUILD_COST_LEDGER.md`, and continues that work: the stored registry
 loaded in 40 ms there, and this is what is left of it.
@@ -87,12 +87,6 @@ everything around the entries: every name, every `Bytes` as its own
 `u32` at a time: `next_element::<u32>` 7.4 M, `Deserializer::integer`
 5.6 M. The other 5.2 M of `run_finishing_passes` is not attributed yet.
 
-### 1.4 What the profile does not show
-
-The fixture's own analysis is under 1 M, so per-fixture cost is not
-visible. A fixture is one of 3,807 in a process that pays the load once.
-Step 0 adds the measurement that shows it.
-
 ## 2. Rules
 
 - Behaviour-neutral except where a step says otherwise: fixture
@@ -116,28 +110,6 @@ Step 0 adds the measurement that shows it.
 
 ## 3. Steps
 
-### S0. Measurement
-
-- **S0a. A one-command profile.** `cargo xtask profile-one [<fixture>]`:
-  builds the frame-pointer `dhat` test binary in a target directory of its
-  own, runs the fixture once to warm the cache, runs it under callgrind,
-  and prints the instructions per thread and the named inclusive costs of
-  section 1 (`collect`, `fixture_config`, `resolved_stubs`,
-  `Registry::deserialize` by field, `memcpy`, `Interner::name`,
-  `stub_cache::load`), writing them to
-  `.corpus-runs/gate/profile/<commit>.tsv`. The CLAUDE.md recipe, as a
-  command, with the `--exact` name as its argument.
-- **S0b. The per-fixture baseline.** The same under callgrind for a
-  filter of a few hundred fixtures in one process (`checker/narrowing`,
-  284; `project/`, 223 multi-file), once on the base commit. Its
-  inclusive costs beyond `resolved_stubs` and `collect` are the missing
-  half of the picture; each cost over 5% of the run gets a row in
-  section 5 of this file before S9 is planned.
-- **S0c. `check-project` start-up.** The same profile for the CLI's
-  workload (CLAUDE.md: one file in a directory, `check-project
-  --no-composer .`): which of these costs the CLI pays, and what it waits
-  on while the registry loads.
-
 ### S1. Overlap the registry load with listing the fixtures
 
 - `phpstan_rs::project` exposes a call that starts the stub registry's
@@ -148,9 +120,6 @@ Step 0 adds the measurement that shows it.
 - Both loads start together, so the test thread never waits for
   `closure_scope` to read the index.
 - The `LazyLock` stays the one owner; the thread only forces it.
-- Applies equally to every binary that loads a project before it has
-  anything to do with it: S0c says where (`check-project` reading the
-  config and composer manifest, the LSP's `initialize`).
 
 ### S2. Fixture listing
 
@@ -266,7 +235,7 @@ one ciborium value. The shape that comes out of the profile:
   against every section.
 - **S3i. How the file is read.** `fs::read` copies the whole file
   (23 MB; 57 MB with PHPStan's source) before anything is decoded; the
-  kernel's copy is not in these counts. Measure it (S0a's wall time
+  kernel's copy is not in these counts. Measure it (wall time
   beside the instruction counts, `strace -c`), then, if it matters, read
   the header and the sections a run needs with positional reads
   (`FileExt::read_at`) instead of the whole file. Keep the whole read
@@ -280,8 +249,9 @@ one ciborium value. The shape that comes out of the profile:
   other dependencies and through `cargo deny`), so `Name` deserialises
   from `&str` straight into the interner with no `String`. `Type`'s
   `Repr` impl and `syntax::stack::guard` stay: stack depth, not a
-  format's limit, bounds recursion. Decide by S0b's profile: the
-  entries a few hundred fixtures read, decoded.
+  format's limit, bounds recursion. Decide by the one-fixture profile
+  after S3a to S3i: what remains of the entries decoded, and of
+  `Decoder::pull`.
 - Expected for the fixture thread: 123 M to about 15 M (the lookups, the
   few hundred entries a fixture touches, and the first `Name`s).
 
@@ -298,27 +268,12 @@ independent of the registry load it moves onto the thread S1 starts.
 `get_or_insert`s, allocating `Name::new` on a miss. After S3 the stored
 registry stops being its biggest caller; what remains is read by whoever
 interns names in bulk: the lexer and parser for every file, and decoded
-entries. Measure that on the S0b profile, then: reserve the shards' capacity
+entries. Measure that on the one-fixture profile after S3, then: reserve the shards' capacity
 from the stub index's name count, intern from the borrowed text of S3j
 without an intermediate `String`, and look at the shard count against the
 rayon pool's threads.
 
-### S6. Per-fixture cost
-
-Everything S0b finds above 5% that is not the registry's load: the step
-list is written then, one row each, into section 5. Candidates the code
-suggests, none measured yet: `Project::new`'s clone of the base and what
-`finish_loading` redoes for a project of one file, the worker pool each
-`Session` is given, and `check_program`'s per-file setup.
-
-### S7. `check-project`
-
-What S0c shows the CLI pays: the same load, so the format of S3 serves
-it; the overlap of S1 for the stretch between process start and the
-first file read; and whatever it does serially that the profile of the
-corpus runs showed before (`GATE_SPEED_PLAN.md` section 2).
-
-### S8. Gates and docs
+### S6. Gates and docs
 
 - `gates/module-graph.txt` gets a line for each new module (the
   container, the records view, the key set).
@@ -336,7 +291,8 @@ corpus runs showed before (`GATE_SPEED_PLAN.md` section 2).
 
 ## 4. Checkpoints
 
-The one-fixture profile (S0a) is run on the base commit and after:
+The one-fixture profile (the recipe in `CLAUDE.md`, with `callgrind`) was
+taken at `4a8d8f38`; it is run again after:
 
 | after | what moved |
 |---|---|
@@ -350,11 +306,3 @@ The one-fixture profile (S0a) is run on the base commit and after:
 Targets, to be replaced by measurements: `main` under 10 M, the fixture
 thread about 15 M, the worker about 2 M; about 30 M of 231 M. Anything
 that lands far from them is traced before the next step, not carried.
-
-## 5. Per-fixture findings
-
-Filled in from S0b and S0c, one row per cost, each with the step that
-takes it.
-
-| cost | Ir | step |
-|---|---|---|
