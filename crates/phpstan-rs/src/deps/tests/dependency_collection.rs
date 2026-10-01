@@ -142,3 +142,10 @@ fn collects_class_names_in_phpdoc_tags() {
     assert!(!names.contains("other"));
     assert!(!names.contains("app\\param"));
 }
+
+#[test]
+fn collects_use_import_paths() {
+    let names = refs("<?php namespace App; use Lib\\Imported; use function Lib\\helper;");
+    assert!(names.contains("lib\\imported"));
+    assert!(names.contains("lib\\helper"));
+}

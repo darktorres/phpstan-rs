@@ -112,7 +112,11 @@ impl<'ast> Visitor<'ast> for Collector {
     fn visit_stmt(&mut self, stmt: &'ast Stmt) {
         match &stmt.kind {
             StmtKind::Namespace(name) => self.ctx.set_namespace(name),
-            StmtKind::Use(imports) => self.ctx.add_uses(imports),
+            StmtKind::Use(imports) => {
+                self.ctx.add_uses(imports);
+                self.names
+                    .extend(imports.iter().map(|import| dependency_key(&import.path)));
+            }
             _ => {}
         }
         self.doc_names(stmt.doc_comment.as_deref());
