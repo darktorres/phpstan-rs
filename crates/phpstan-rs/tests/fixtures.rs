@@ -43,10 +43,11 @@ fn main() {
     let mut trials: Vec<Trial> = pool.install(|| {
         listed
             .into_par_iter()
-            .map(|(name, path)| {
-                let ignored = requires_missing_feature(&path);
+            .map(|fixture| {
+                let ignored = fixture.has_config && requires_missing_feature(&fixture.expect);
                 let pool = Arc::clone(&pool);
-                Trial::test(name.clone(), move || run_fixture(&name, &path, pool))
+                let Fixture { name, expect, .. } = fixture;
+                Trial::test(name.clone(), move || run_fixture(&name, &expect, pool))
                     .with_ignored_flag(ignored)
             })
             .collect()
@@ -55,15 +56,25 @@ fn main() {
     libtest_mimic::run(&args, trials).exit();
 }
 
-/// Every fixture under `dir` as its name (its path under the fixture root,
-/// without the extension) and its `.expect` file, `prefix` being `dir`'s
-/// own name with the separator, or empty at the root. One listing of each
-/// directory, subdirectories listed in parallel.
-fn list(dir: &Path, prefix: &str) -> Vec<(String, PathBuf)> {
+/// A fixture found by `list`.
+struct Fixture {
+    /// Its path under the fixture root, without the extension.
+    name: String,
+    /// Its `.expect` file.
+    expect: PathBuf,
+    /// Whether a `.toml` sits beside it.
+    has_config: bool,
+}
+
+/// Every fixture under `dir`, `prefix` being `dir`'s own name with the
+/// separator, or empty at the root. One listing of each directory,
+/// subdirectories listed in parallel.
+fn list(dir: &Path, prefix: &str) -> Vec<Fixture> {
     let Ok(entries) = std::fs::read_dir(dir) else {
         return Vec::new();
     };
-    let mut fixtures = Vec::new();
+    let mut stems = FxHashSet::default();
+    let mut configs = FxHashSet::default();
     let mut directories = Vec::new();
     for entry in entries.flatten() {
         let Ok(kind) = entry.file_type() else {
@@ -76,20 +87,26 @@ fn list(dir: &Path, prefix: &str) -> Vec<(String, PathBuf)> {
         if kind.is_dir() {
             directories.push(file_name.to_string());
         } else if let Some(stem) = file_name.strip_suffix(".expect") {
-            fixtures.push((format!("{prefix}{stem}"), entry.path()));
+            stems.insert(stem.to_string());
+        } else if let Some(stem) = file_name.strip_suffix(".toml") {
+            configs.insert(stem.to_string());
         }
     }
     // A multi-file fixture's own directory holds no fixtures: it is named
     // like a listed `.expect` file.
-    let stems: FxHashSet<&str> = fixtures
-        .iter()
-        .map(|(name, _)| &name[prefix.len()..])
-        .collect();
     let nested: Vec<String> = directories
         .into_iter()
-        .filter(|name| !stems.contains(name.as_str()))
+        .filter(|name| !stems.contains(name))
         .collect();
-    let below: Vec<Vec<(String, PathBuf)>> = nested
+    let mut fixtures: Vec<Fixture> = stems
+        .iter()
+        .map(|stem| Fixture {
+            name: format!("{prefix}{stem}"),
+            expect: dir.join(format!("{stem}.expect")),
+            has_config: configs.contains(stem),
+        })
+        .collect();
+    let below: Vec<Vec<Fixture>> = nested
         .par_iter()
         .map(|name| list(&dir.join(name), &format!("{prefix}{name}/")))
         .collect();
@@ -97,9 +114,9 @@ fn list(dir: &Path, prefix: &str) -> Vec<(String, PathBuf)> {
     fixtures
 }
 
-/// Whether the fixture whose expectation is `expect_file` requires a cargo
-/// feature this build lacks. Its config is read in full only when it sets
-/// `requires_feature`.
+/// Whether the fixture whose expectation is `expect_file`, which has a
+/// config, requires a cargo feature this build lacks. The config is read
+/// in full only when it sets `requires_feature`.
 fn requires_missing_feature(expect_file: &Path) -> bool {
     let config_file = expect_file.with_extension("toml");
     if !gate::declares_required_feature(&config_file) {
