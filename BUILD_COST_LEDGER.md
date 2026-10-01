@@ -33,14 +33,14 @@ Status: DONE, OPEN, NOTE.
 | id | gap | status |
 |---|---|---|
 | G15 | regression gates not run: corpus/type/baseline snapshots (`gates/approved`), performance gate | DONE: scoped, all-on and type snapshots are identical to the merge-base except the two approved fixtures (`gates/approved/build-cost`). Gates failing before this work and still failing: test manifest (renames in master's earlier history), fuzz crate (`parse_file` takes bytes), `cargo deny` (yanked `yoke-derive`), 14 module-graph edges |
-| G16 | differential test sampled only: now a shared helper with a sampled run, a proptest random-edit run, and an every-fixture run (`#[ignore]`, 226 s; passes) | DONE (`e35088b3`) |
+| G16 | differential test sampled only: now a shared helper with a sampled run, a proptest random-edit run, and an every-fixture run (23 s; passes, runs with the default tests) | DONE (`e35088b3`) |
 | G17 | section 4 numbers, section 6 projections and section 9 questions not re-measured | DONE: measurements in section 12 of the doc |
-| G24 | workspace tests and the 3,807 fixtures not rerun since G1, G2, G11-G13, G21 | DONE: lib 952, integration 44, fixtures 3,807, runtime oracle 3,807, other crates |
+| G24 | workspace tests and the 3,807 fixtures not rerun since G1, G2, G11-G13, G21 | DONE: lib 956, integration 44, fixtures 3,807, runtime oracle 3,807, other crates |
 
 ## Doc and comment staleness
 | id | gap | status |
 |---|---|---|
-| G18 | doc sections 3, 5, 6 and 11 described pre-implementation behaviour | DONE (doc edited; the doc is not yet committed) |
+| G18 | doc sections 3, 5, 6 and 11 described pre-implementation behaviour | DONE (doc edited and committed) |
 | G19 | "2351 files" in `registry/stubs.rs` comments | DONE (`7106cb2b`) |
 
 ## Process notes
