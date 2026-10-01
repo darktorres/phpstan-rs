@@ -1000,14 +1000,15 @@ fn php_files_under(dir: &Path) -> Vec<PathBuf> {
     files
 }
 
-#[test]
-fn edits_across_many_fixtures_match_a_fresh_load() {
-    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/checker");
-    let sources: Vec<String> = php_files_under(&root)
-        .iter()
-        .step_by(40)
-        .filter_map(|path| std::fs::read_to_string(path).ok())
-        .collect();
+/// Loads `sources` as one project, replaces `edits` of its files in turn
+/// with the other sources, and asserts after each that the project's
+/// diagnostics are those of a project loading the files as they now are.
+/// `pick` chooses which file each edit replaces, from the edit's number.
+fn assert_edits_match_fresh_loads(
+    sources: &[String],
+    edits: usize,
+    pick: impl Fn(usize, usize) -> usize,
+) {
     let (loaded, replacements) = sources.split_at(sources.len() / 2);
     let mut texts: Vec<(String, String)> = loaded
         .iter()
@@ -1042,8 +1043,8 @@ fn edits_across_many_fixtures_match_a_fresh_load() {
         all
     };
     let mut project = load(&texts);
-    for (step, replacement) in replacements.iter().enumerate().take(8) {
-        let edited = step * 7 % texts.len();
+    for (step, replacement) in replacements.iter().enumerate().take(edits) {
+        let edited = pick(step, texts.len());
         if project
             .update_file(Path::new(&texts[edited].0), replacement)
             .is_err()
@@ -1057,6 +1058,54 @@ fn edits_across_many_fixtures_match_a_fresh_load() {
             "after replacing {} (step {step})",
             texts[edited].0
         );
+    }
+}
+
+fn fixture_sources(subdirectory: &str) -> Vec<String> {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/fixtures")
+        .join(subdirectory);
+    php_files_under(&root)
+        .iter()
+        .filter_map(|path| std::fs::read_to_string(path).ok())
+        .collect()
+}
+
+#[test]
+fn edits_across_many_fixtures_match_a_fresh_load() {
+    let sources: Vec<String> = fixture_sources("checker").into_iter().step_by(40).collect();
+    assert_edits_match_fresh_loads(&sources, 8, |step, len| step * 7 % len);
+}
+
+/// Every fixture takes part in some project: consecutive groups of 50,
+/// four edits each.
+#[test]
+#[ignore = "slow: every fixture; run with --ignored"]
+fn edits_across_every_fixture_match_a_fresh_load() {
+    let sources = fixture_sources("checker");
+    for (group, chunk) in sources.chunks(50).enumerate() {
+        assert_edits_match_fresh_loads(chunk, 4, |step, len| (step * 5 + group) % len);
+    }
+}
+
+proptest::proptest! {
+    #![proptest_config(proptest::prelude::ProptestConfig::with_cases(6))]
+
+    /// Random files in random projects, edited in random order.
+    #[test]
+    fn random_edits_match_a_fresh_load(
+        seed in 0usize..10_000,
+        stride in 25usize..90,
+        edits in 3usize..7,
+    ) {
+        let sources: Vec<String> = fixture_sources("checker")
+            .into_iter()
+            .skip(seed % stride)
+            .step_by(stride)
+            .collect();
+        assert_edits_match_fresh_loads(&sources, edits, |step, len| {
+            (seed.wrapping_mul(31).wrapping_add(step * 17)) % len
+        });
     }
 }
 
