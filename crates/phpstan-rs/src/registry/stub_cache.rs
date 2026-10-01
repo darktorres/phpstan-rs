@@ -3,10 +3,12 @@
 //! the stub sources again. Each file is keyed by the build's source hash
 //! (`build.rs`), so a build never reads what different code or stubs
 //! stored; one that can't be read or written is built in memory as
-//! before. `PHPSTAN_RS_NO_STUB_CACHE` turns the cache off.
+//! before. A file starts with a checksum of the rest, so a truncated or
+//! damaged one is rebuilt rather than read. `PHPSTAN_RS_NO_STUB_CACHE`
+//! turns the cache off.
 
 use std::fs;
-use std::io::{BufReader, BufWriter};
+use std::hash::Hasher;
 use std::path::PathBuf;
 
 /// The key every cache file carries in its name.
@@ -35,10 +37,20 @@ fn path(name: &str) -> Option<PathBuf> {
     Some(cache_dir()?.join(format!("{name}-{KEY}.cbor")))
 }
 
+fn checksum(body: &[u8]) -> [u8; 8] {
+    let mut hasher = std::hash::DefaultHasher::new();
+    hasher.write(body);
+    hasher.finish().to_le_bytes()
+}
+
 /// What `store` stored under `name` for this build, if it can be read.
 pub(crate) fn load<T: serde::de::DeserializeOwned>(name: &str) -> Option<T> {
-    let file = fs::File::open(path(name)?).ok()?;
-    ciborium::de::from_reader_with_recursion_limit(BufReader::new(file), RECURSION_LIMIT).ok()
+    let bytes = fs::read(path(name)?).ok()?;
+    let (sum, body) = bytes.split_at_checked(8)?;
+    if sum != checksum(body) {
+        return None;
+    }
+    ciborium::de::from_reader_with_recursion_limit(body, RECURSION_LIMIT).ok()
 }
 
 /// Stores `value` under `name` for this build, replacing what other
@@ -55,10 +67,9 @@ pub(crate) fn store<T: serde::Serialize>(name: &str, value: &T) {
         return;
     }
     let temporary = dir.join(format!("{name}-{KEY}.{}.tmp", std::process::id()));
-    let written = fs::File::create(&temporary)
-        .ok()
-        .and_then(|file| ciborium::ser::into_writer(value, BufWriter::new(file)).ok())
-        .is_some();
+    let mut body = Vec::new();
+    let written = ciborium::ser::into_writer(value, &mut body).is_ok()
+        && fs::write(&temporary, [checksum(&body).as_slice(), &body].concat()).is_ok();
     if !written || fs::rename(&temporary, &target).is_err() {
         let _ = fs::remove_file(&temporary);
         return;
