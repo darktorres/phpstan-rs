@@ -941,6 +941,13 @@ What the measurements found, beyond the planned items:
   were inserted rebuilt them one after the other (two seconds on 14k files);
   the choice is now made before the first insertion.
 - The CLI no longer frees the project it is about to leave.
+- Three serial stretches of the Piwigo run (7.5 s to 5.1 s): every body's
+  property writes classified in parallel, a scope's cached declarations
+  decoded in parallel before the passes read them one at a time, and the
+  checks scheduled largest first in `check_files`. The last is not what
+  helped the CLI - `Session::load` already passes its files largest first, so
+  the order is the same there (commit `6a6c2a9c`'s message says otherwise);
+  it serves the other callers, which pass path-ordered lists.
 - The profile's remaining hotspots were then taken in turn: the cache's
   SipHash checksum (a tenth of a one-file run), a copy of every cached entry,
   the stub index decoded as tens of thousands of strings (now sorted records
