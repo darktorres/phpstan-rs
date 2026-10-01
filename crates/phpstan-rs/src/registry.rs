@@ -45,6 +45,7 @@ pub(crate) use function_sig::{DeclaredType, declared_type};
 pub(crate) use function_sig::{
     build_template_params, infer_const_type, mark_template_params, substitute_type_aliases,
 };
+pub(crate) use name_table::Lazy;
 pub use name_table::NameTable;
 pub type FunctionTable = NameTable<FunctionReflection>;
 pub(crate) use index::{BuiltDecl, build_declarations, register_global_constant};

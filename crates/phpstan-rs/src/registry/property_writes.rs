@@ -83,7 +83,8 @@ impl Registry {
     /// class is indexed and flattened.
     pub(crate) fn resolve_property_writes(&mut self, bodies: &dyn BodySource) {
         let mut classified: FxHashMap<DeclKey, Option<Classification>> = FxHashMap::default();
-        for (name, sig) in &self.functions {
+        // A shared base holds only built-in stubs, which have no body.
+        for (name, sig) in self.functions.own_iter() {
             if sig.is_stub {
                 continue;
             }
@@ -93,7 +94,7 @@ impl Registry {
                 body.and_then(|body| classify(body, None, sig, self)),
             );
         }
-        for (class, info) in &self.classes {
+        for (class, info) in self.classes.own_iter() {
             for (method, sig) in &info.methods {
                 if sig.is_stub {
                     continue;

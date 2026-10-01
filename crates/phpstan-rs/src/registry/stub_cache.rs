@@ -14,7 +14,7 @@ const KEY: &str = env!("PHPSTAN_RS_SOURCE_HASH");
 
 /// How deep a stored value may nest: types nest far deeper than the CBOR
 /// reader's default allows.
-const RECURSION_LIMIT: usize = 1 << 16;
+pub(super) const RECURSION_LIMIT: usize = 1 << 16;
 
 /// The cache directory: `PHPSTAN_RS_CACHE_DIR`, else `phpstan-rs` under
 /// `XDG_CACHE_HOME` or `~/.cache`; `None` when the cache is off.
