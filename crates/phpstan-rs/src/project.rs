@@ -1226,37 +1226,11 @@ impl Project {
     /// same `transitive_affected_files` + `check_file` pipeline
     /// `update_file` already uses.
     ///
-    /// KNOWN LIMITATION (confirmed empirically, not assumed): the
-    /// finishing-pass rerun below only ever recomputes registry-wide
-    /// derived state off each *still-loaded* class's own, unchanged
-    /// declaration - it never reparses any file besides `path` itself.
-    /// So a still-loaded class that names a just-removed one directly
-    /// (`class Child extends Base {}`, removing `base.php`) stays stale:
-    /// `class_extends_implements_closure` reads `Child`'s own `extends`
-    /// field verbatim and records "Base" as an ancestor unconditionally,
-    /// with no check that "Base" is still a real `self.classes` entry,
-    /// so `is_subclass_of("Child", "Base")` incorrectly stays `true`.
-    /// What the rebuild *does* fix is a relationship that was only ever
-    /// transitively true *through* the removed class: for `Grandchild
-    /// extends Child extends Base` (three files), removing `child.php`
-    /// correctly flips `is_subclass_of("Grandchild", "Base")` to `false`
-    /// (the closure can no longer look `self.classes["Child"]` up to
-    /// walk past it to "Base"), even though
-    /// `is_subclass_of("Grandchild", "Child")` itself stays stale for
-    /// the identical direct-reference reason as the `Child`/`Base` case.
-    /// The same staleness class also covers a trait's or `@mixin`'s
-    /// members that some OTHER, still-loaded class already baked into
-    /// its own persistent `ClassReflection.methods`/`properties` (via
-    /// `flatten_traits`/`resolve_deferred_mixins`'s
-    /// `Entry::Vacant`-gated `or_insert` - additive-only, no provenance
-    /// tracking, nothing in the registry ever clears/resets a class's own
-    /// baked-in member set). This is a pre-existing gap `update_file`
-    /// already has today for the identical reason (editing a trait to
-    /// drop a method, or a class to drop `extends`, doesn't unstick an
-    /// existing user/subclass either, unless that file is also
-    /// reparsed) - not a regression this introduces, and closing it
-    /// needs own-vs-baked provenance tracking on `ClassReflection`, a
-    /// separate, larger registry-architecture change.
+    /// The finishing passes start again from every remaining class's
+    /// declaration as built, so nothing the removed files contributed
+    /// survives in the classes using them (trait and `@mixin` members,
+    /// inherited PHPDoc); a class still naming a removed one directly
+    /// (`extends Base`) reads as it would with `Base` never loaded.
     ///
     /// `path` itself is always a key in the returned map
     /// (`transitive_affected_files` unconditionally seeds `affected` with
