@@ -144,6 +144,9 @@ pub struct Project {
     built_once: bool,
     // Whether the finishing passes have run.
     finished: bool,
+    // Whether PHPStan's source stays merged in whatever the loaded files
+    // mention: for the project building the registry that has it.
+    phpstan_pinned: bool,
     // The files loaded or edited since the finishing passes last walked
     // them for global variables.
     globals_stale: FxHashSet<PathBuf>,
@@ -388,6 +391,7 @@ impl Project {
             registry.merge_stub_constants(stubs::builtin_stub_constants());
         }
         let mut base = Project::with_registry(registry);
+        base.phpstan_pinned = with_phpstan;
         base.finish_loading();
         let mut registry = base.registry;
         crate::registry::store_cached(cache_name, &registry);
@@ -413,6 +417,7 @@ impl Project {
             built_once: false,
             finished: false,
             unchecked: Vec::new(),
+            phpstan_pinned: false,
             globals_stale: FxHashSet::default(),
             duplicate_fn_sites: DuplicateFunctionSites::default(),
             duplicate_class_sites: DuplicateClassSites::default(),
@@ -868,7 +873,7 @@ impl Project {
     /// first and then every file declaring them, as `Project::new`'s merge
     /// and the loads after it would have built them.
     fn sync_phpstan_stubs(&mut self) {
-        let wanted = self.files.values().any(|f| f.mentions_phpstan);
+        let wanted = self.phpstan_pinned || self.files.values().any(|f| f.mentions_phpstan);
         if wanted == self.registry.phpstan_stubs_loaded {
             return;
         }

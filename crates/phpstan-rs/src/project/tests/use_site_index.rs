@@ -360,7 +360,6 @@ fn member_reference_index_is_not_built_until_first_requested() {
         )
         .unwrap();
     project.finish_loading();
-    project.ensure_member_index_built();
 
     let target = RefTarget::Member("Bar".to_string(), "BAZ".to_string());
     assert_eq!(
