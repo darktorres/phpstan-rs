@@ -44,14 +44,22 @@ broken_intra_doc_links = "deny"
 lto = "thin"
 codegen-units = 1
 
+# `cargo test`: nearly all of a unit test's time is building a `Project`
+# over the stub registry, which runs 4-6x faster at `opt-level = 1`, while
+# an incremental rebuild stays as quick as at `opt-level = 0`.
+[profile.test]
+opt-level = 1
+
 # The regression gates' corpus, type and baseline snapshots: release
 # optimizations without LTO, since those outputs don't depend on
 # optimization and the gate rebuilds on every commit. The performance
-# gate measures `release`.
+# gate measures `release`. Incremental, unlike `release`: without it any
+# edit recompiles the whole crate.
 [profile.gate]
 inherits = "release"
 lto = false
 codegen-units = 16
+incremental = true
 
 # Release-speed build that keeps debug info, so profiles symbolicate their
 # call stacks: `dhat-heap`'s output
