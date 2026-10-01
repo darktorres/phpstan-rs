@@ -38,7 +38,10 @@ only then starts libtest's test thread, so those two are a serial chain
 - `gate::fixture_config`: 36.8 M. `ConfigFile::load` 14.7 M (`parse`
   13.6 M, of which `toml::from_str` 7.9 M; `validate` 13.7 M), and
   `app::config_schema` rebuilt on each call, 6.1 M. It is called for each
-  `.expect` file, and `run_fixture` calls it again for the one that runs.
+  `.expect` file, but does that work only for the 755 fixtures that have a
+  `.toml` (the other 3,052 cost one `is_file`); only 2 of the 755 use
+  `requires_feature`, the one key `collect` reads. `run_fixture` parses
+  the config again for the fixture that runs.
 - `Path` work: about 25 M. `strip_prefix` 13.7 M, `with_extension`
   10.9 M, `Components::next_back` and `parse_next_component_back`
   underneath both. Per entry it also does `is_dir()` and
@@ -85,7 +88,11 @@ everything around the entries: every name, every `Bytes` as its own
 `closure_scope` initialises the `StubIndex` (`stub_cache::load`, 12.3 M).
 `packed::Records` stores `offsets: Vec<u32>` and ciborium reads it one
 `u32` at a time: `next_element::<u32>` 7.4 M, `Deserializer::integer`
-5.6 M. The other 5.2 M of `run_finishing_passes` is not attributed yet.
+5.6 M. The other 5.2 M of `run_finishing_passes` is four passes over a scope of
+one file: `resolve_transitive_purity` 1.85 M, `resolve_deferred_value_of`
+1.80 M, `canonicalize_class_name_case` 1.11 M, `resolve_method_tags`
+0.39 M. Their callees are a few thousand instructions, so the cost is in
+their own bodies.
 
 ## 2. Rules
 
@@ -119,17 +126,24 @@ everything around the entries: every name, every `Bytes` as its own
   wall time of that stretch is the larger of the two.
 - Both loads start together, so the test thread never waits for
   `closure_scope` to read the index.
-- The `LazyLock` stays the one owner; the thread only forces it.
+- The `LazyLock` stays the one owner; the thread only forces it. Two
+  statics exist: `Project::new::BASE` (plain stubs) and `phpstan_base()`
+  (stubs plus PHPStan's source, 57 MB, needed only by a project whose
+  files mention PHPStan). The call warms the plain base and
+  `stubs::stub_index()` (a process-wide `OnceLock`); it does not load the
+  PHPStan base, which most fixtures never use.
 
 ### S2. Fixture listing
 
 - **S2a.** `app::config_schema()` is built once (`OnceLock`) instead of
   per call, which it is today in `fixture_config`.
-- **S2b.** `collect` stops parsing configs. A fixture's `.toml` is read
-  only for the trials it ignores: `collect` checks the file's text for
-  `requires_feature` and parses only those, as that key is the only
-  thing `collect` uses. A file that fails to parse today is not ignored
-  (the `Err(_) => false` arm); that stays, since the failure then
+- **S2b.** `collect` stops loading each config through the schema and
+  `validate`. It needs one thing from a `.toml`, the `requires_feature`
+  list, so `gate` gets a function that parses the file with the plain TOML
+  parser and reads that top-level key (a real parse, not a text search:
+  a key can be quoted or escaped). It runs for the 755 files with a
+  `.toml`, in parallel (S2d). A file that fails to parse today is not
+  ignored (the `Err(_) => false` arm); that stays, since the failure then
   surfaces when the fixture runs.
 - **S2c.** One `read_dir` pass per directory using `DirEntry::file_type`
   (no `is_dir` `stat`), names built from the parent's relative name
@@ -166,19 +180,32 @@ one ciborium value. The shape that comes out of the profile:
   `name_table::Bytes` becomes a `(Arc<[u8]>, Range<u32>)` slice with no
   copy. The truncated-file and damaged-file behaviour of `load` stays:
   the checksum is checked, a mismatch rebuilds, a file that passes it
-  and doesn't decode says so.
+  and doesn't decode says so. `store` writes the sections the same way
+  on a cold cache; the first run after a build is timed once against the
+  base commit's, so the cold path does not regress.
 - **S3b. Tables as records.** `NameTable`'s frozen base becomes a view
   over a section: a key array of `(name_off, name_len, entry_off,
   entry_len)` in little-endian `u32`s sorted by the folded name, a string
-  pool, an entry pool. Lookup by `function_key` is a bisection on the
-  folded text, with no `Folded` and no hash map built at load; this
+  pool, an entry pool. Both the folded key and the declared name are
+  stored (the declared name is what `&Name` returns; they differ only in
+  ASCII case, as `function_key` folds with `to_ascii_lowercase`), and the
+  array is sorted by the folded bytes. Lookup by `function_key` is a
+  bisection on them, with no `Folded` and no hash map built at load; this
   removes the string decode, the intern, the hashing and the inserts of
-  1.2 (about 90 M with 3c to 3f). Each slot has a `OnceLock<Name>` for
-  the places that hand out `&Name` (`get_with_name`, iteration): a zeroed
-  array at load, filled on demand.
+  1.2 (the bulk of the 95.6 M, with S3c to S3f). Each slot has a
+  `OnceLock<Name>` for the places that hand out `&Name`
+  (`get_with_name`, iteration): a zeroed array at load, filled on demand.
+  Bisection is about 13 comparisons at the 8,000 entries of `classes`,
+  and a run does hundreds of lookups; a hash index on disk, a perfect
+  hash or an FST would save comparisons a run doesn't make and cost
+  either a rebuilt map at load or a dependency, and a sorted layout also
+  gives one stable iteration order.
   - **Iteration order.** The base was a hash map, so its iteration order
     was hash order and is now key order. Every `for (name, _) in &table`
-    and `.iter()` over a `NameTable` is audited: where the result is
+    and `.iter()`, `.keys()` and `.values()` over a `NameTable` (35 sites
+    outside tests, in `scope.rs`, `resolve.rs`, `hierarchy.rs`,
+    `project.rs`, the LSP's `workspace_symbol` and `completion`, and
+    `main/demo.rs`) is audited: where the result is
     sorted or counted afterwards, nothing changes; where it is not, the
     consumer sorts explicitly (that is a behaviour fix first, as its
     own commit, with the approved delta if any output moves). The
@@ -197,11 +224,14 @@ one ciborium value. The shape that comes out of the profile:
   reads raw entries through the same view.
 - **S3d. Shared keys for the derived tables.** `ancestor_names`,
   `subtype_children`, `trait_users`, `recorded_parents`, the five
-  member-owner tables and `built_in_stub_classes` index nearly the same
-  names as `classes`. Each is a column over one shared key array (one
-  `Arc<KeySet>` in the stored registry; each table keeps its own offset
-  column and its own overlay). Names are stored once; the 15.4 M and
-  3.5 M of those tables' name decodes go.
+  member-owner tables and `built_in_stub_classes` are keyed by class
+  names, but whether each key set equals `classes`' is not verified. The
+  first commit of this step checks it on the stored registry (a test that
+  compares every table's keys with `classes`'). The design does not need
+  them equal: one shared key array is the union, and each table is a
+  column over it (its own offset column, with an absent marker, and its
+  own overlay; one `Arc<KeySet>` in the stored registry). Names are
+  stored once; the 15.4 M and 3.5 M of those tables' name decodes go.
 - **S3e. `global_constants` and `global_variables`.** Both are
   `FxHashMap<Name, Type>` decoded whole (23.5 M) though a run reads a few
   entries. They become `NameTable<Type>`, which keeps the `pub` API in
@@ -215,7 +245,10 @@ one ciborium value. The shape that comes out of the profile:
 - **S3f. The other eager fields.** `unconditionally_declared_classes`,
   `unconditionally_declared_functions`, `stub_provided_functions`,
   `names_with_assert_tags`, `function_decl_sites`, `phpstan_class_files`,
-  `property_writes`: each is audited for what a run reads. A set read
+  `property_writes`: each is audited for what a run reads. The profile
+  puts about 13 M on `FxHashSet<Name>` fields without saying which; the
+  first commit attributes it by field (the callee tree of `visit_map`),
+  so each change is checked against its own share. A set read
   by `contains` becomes a sorted-key view with an overlay for the
   project's additions (a `NameSet`, a `NameTable<()>`); a map read by key
   becomes a `NameTable`; one read whole or recomputable is recomputed on
@@ -228,10 +261,11 @@ one ciborium value. The shape that comes out of the profile:
   nor copies.
 - **S3h. Checksums.** One per section, checked when the section is read,
   so a run that never reads the PHPStan overlay (the 57 MB file) doesn't
-  hash it. The hash itself: four independent 64-bit lanes over 32-byte
-  blocks, folded at the end, rather than `FxHasher::write` over the whole
-  buffer (5.9 M, one dependent chain). It only has to tell a damaged
-  file from a whole one. The truncated and corrupted-file tests run
+  hash it. The hash itself is a vetted one (`xxhash-rust`'s XXH3, or
+  `crc32fast`; exact-pinned, through `cargo deny`), not `FxHasher::write`
+  over the whole buffer (5.9 M, one dependent chain) and not one written
+  here. Neither is for security: it only has to tell a damaged file from
+  a whole one, which the rename on write already makes rare. The truncated and corrupted-file tests run
   against every section.
 - **S3i. How the file is read.** `fs::read` copies the whole file
   (23 MB; 57 MB with PHPStan's source) before anything is decoded; the
@@ -247,9 +281,16 @@ one ciborium value. The shape that comes out of the profile:
   every entry a run touches. Replace it with a compact non-self-describing
   serde format that borrows strings (`postcard`, exact-pinned like the
   other dependencies and through `cargo deny`), so `Name` deserialises
-  from `&str` straight into the interner with no `String`. `Type`'s
-  `Repr` impl and `syntax::stack::guard` stay: stack depth, not a
-  format's limit, bounds recursion. Decide by the one-fixture profile
+  from `&str` straight into the interner with no `String`. No stored type uses
+  `skip_serializing_if`, `untagged`, `flatten`, `with` or
+  `deserialize_any` (checked by search of `registry`, `types` and
+  `syntax`), the attributes a non-self-describing format can't take.
+  `Type`'s `Repr` impl and `syntax::stack::guard` stay: stack depth, not
+  a format's limit, bounds recursion. Considered and not chosen: keeping
+  CBOR (the cost above), and a zero-copy archive such as `rkyv`, which
+  needs an archived form of every stored type (`Type` is interned, `Name`
+  is an `Arc<str>`) and makes consumers read archived forms: a rewrite of
+  the registry's API, not of the format. Decide by the one-fixture profile
   after S3a to S3i: what remains of the entries decoded, and of
   `Decoder::pull`.
 - Expected for the fixture thread: 123 M to about 15 M (the lookups, the
@@ -257,21 +298,21 @@ one ciborium value. The shape that comes out of the profile:
 
 ### S4. The rest of the worker's start-up
 
-After S3g, the `StubIndex` load is small; what is left of
-`run_finishing_passes` (5.2 M, unattributed) gets a profile of its own:
-its inclusive tree, then a step per cost over 1% of the run. If it is
-independent of the registry load it moves onto the thread S1 starts.
+After S3g the `StubIndex` load is small. What is left of
+`run_finishing_passes` is the four passes of 1.3 (5.2 M), each over a
+scope of one file and spending its time in its own body. Each is read for
+work that grows with the stubs, not with the scope (a walk over every
+class or function, an entry decoded that the scope doesn't name), and
+bounded by the scope. If they are independent of the registry load they
+run on the thread S1 starts.
 
 ### S5. Interning
 
-`Interner::name` hashes the text (`text_hash`), takes a shard and
-`get_or_insert`s, allocating `Name::new` on a miss. After S3 the stored
-registry stops being its biggest caller; what remains is read by whoever
-interns names in bulk: the lexer and parser for every file, and decoded
-entries. Measure that on the one-fixture profile after S3, then: reserve the shards' capacity
-from the stub index's name count, intern from the borrowed text of S3j
-without an intermediate `String`, and look at the shard count against the
-rayon pool's threads.
+In the fixture thread every call of `Interner::name` (16.4 M) comes from
+`Name::from(Cow<str>)`, which is how stored names are decoded; S3b and
+S3j remove them. What the interner costs after that is read from the
+one-fixture profile taken after S3, and only a cost it shows gets a
+change.
 
 ### S6. Gates and docs
 
