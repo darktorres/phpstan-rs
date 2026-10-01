@@ -918,7 +918,7 @@ machine carried other jobs, load 1-4, both sides alike):
 | guzzle (70 files): full load / no-change edit | 672 ms / 185 ms (6 files rechecked) | 150 ms / 62 ms (1 file) |
 | symfony Console (378 files): load / edit | 950 ms / 620 ms (193 files) | 230 ms / 65 ms (1 file) |
 | symfony Routing (267 files): load / edit | 870 ms / 400 ms (120 files) | 190 ms / 70 ms (1 file) |
-| Piwigo scoped corpus, CLI | 9.2-9.6 s, 25-27 s CPU | 7.3 s, 18.5 s CPU |
+| Piwigo scoped corpus, CLI | 9.2-9.6 s, 25-27 s CPU | 5.1 s, 20.6 s CPU (4 threads 6.5 s, was 9.1 s) |
 | mimalloc against the system allocator (Piwigo scoped, HEAD) | 14.1 s | 10.5 s |
 
 What the measurements found, beyond the planned items:
