@@ -910,15 +910,15 @@ machine carried other jobs, load 1-4, both sides alike):
 
 | workload | merge-base | HEAD |
 |---|---|---|
-| one-file project, `check-project` | 743 ms, 3.1 s CPU | 65 ms, 47 ms CPU |
+| one-file project, `check-project` | 743 ms, 3.1 s CPU | 46 ms, 29 ms CPU |
 | one test process (lib tests, `test` profile) | 600 ms, 3.2 s CPU | 180 ms, 0.14 s CPU |
 | lib suite (952 tests) | 33-42 s | 7 s |
 | fixture suite (3,807) | 203 s | 6.6 s |
 | every-fixture edit differential | 226 s | 23 s |
 | guzzle (70 files): full load / no-change edit | 672 ms / 185 ms (6 files rechecked) | 150 ms / 62 ms (1 file) |
-| symfony Console (378 files): load / edit | 950 ms / 620 ms (193 files) | 350 ms / 130 ms (1 file) |
+| symfony Console (378 files): load / edit | 950 ms / 620 ms (193 files) | 230 ms / 65 ms (1 file) |
 | symfony Routing (267 files): load / edit | 870 ms / 400 ms (120 files) | 190 ms / 70 ms (1 file) |
-| Piwigo scoped corpus, CLI | 9.2-9.6 s, 25-27 s CPU | 8.2-8.5 s, 22 s CPU |
+| Piwigo scoped corpus, CLI | 9.2-9.6 s, 25-27 s CPU | 7.3 s, 18.5 s CPU |
 | mimalloc against the system allocator (Piwigo scoped, HEAD) | 14.1 s | 10.5 s |
 
 What the measurements found, beyond the planned items:
@@ -941,6 +941,13 @@ What the measurements found, beyond the planned items:
   were inserted rebuilt them one after the other (two seconds on 14k files);
   the choice is now made before the first insertion.
 - The CLI no longer frees the project it is about to leave.
+- The profile's remaining hotspots were then taken in turn: the cache's
+  SipHash checksum (a tenth of a one-file run), a copy of every cached entry,
+  the stub index decoded as tens of thousands of strings (now sorted records
+  read in place), a stack-limit query on every guarded recursion (now a
+  comparison against a remembered address), two binary-search lookups per
+  token for line and column (now a cursor), and twelve nested functions per
+  expression for the binary operators (now one precedence-climbing loop).
 
 The resolution scope (#12) now closes over declaration-level references only;
 purity, property writes and global variables rerun over the wider scope of

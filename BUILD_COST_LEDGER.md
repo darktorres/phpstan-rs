@@ -53,4 +53,5 @@ Status: DONE, OPEN, NOTE.
 | G26 | the stub cache never loaded (ciborium byte reader limit); found by timing the CLI, fixed with a round-trip test | DONE (`fb9b3137` and before) |
 | G27 | the PHPDoc dependency collector read descriptions and template names as classes | DONE (deps.rs) |
 | G28 | whole-program closed-class check decoded every stub class | DONE (`9c52a784`) |
+| G29 | profile hotspots S1 (checksum), S2 (entry copy), S4-S6 (stub index), E1/P8 (parser, lexer), P5 (stack guard) | DONE (`c12fb048`..`479ee2f6`); S3 (name interning), S7 (`Name::lower`), S8-S10 and the purity walks left: each under 3% of a run |
 | G25 | files load in the order given, but a rebuild of a name declared in several files uses path order, so duplicate declarations can resolve differently after an edit than in a fresh load unless files load path-sorted | NOTE (found by the differential test) |
