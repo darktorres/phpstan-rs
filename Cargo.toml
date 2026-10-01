@@ -45,6 +45,7 @@ broken_intra_doc_links = "deny"
 [profile.release]
 lto = "thin"
 codegen-units = 1
+incremental = true
 
 # `cargo test`: nearly all of a unit test's time is building a `Project`
 # over the stub registry, which runs 4-6x faster at `opt-level = 1`, while
