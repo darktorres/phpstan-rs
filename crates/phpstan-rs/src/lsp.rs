@@ -418,33 +418,22 @@ impl Server {
             .collect()
     }
 
-    /// Reads and parses one file, dispatching to `Project::load_file`
-    /// (context: vendor/scan/stub, never analyzed or reported) or
-    /// `Project::load_analyzed_file` (a real, first-party file under
-    /// `root`) based on `analyzed`. A parse failure is logged (both to
-    /// stderr and as a `window/logMessage` notification) and skipped,
-    /// not fatal to the rest of the scan.
-    fn load_one_file(&mut self, path: PathBuf, analyzed: bool, messages: &mut Vec<Message>) {
-        let Ok(bytes) = std::fs::read(&path) else {
-            return;
-        };
-        let source = String::from_utf8_lossy(&bytes).into_owned();
-        let path_for_log = path.clone();
-        let result = if analyzed {
-            self.project.load_analyzed_file(path, &source)
-        } else {
-            self.project.load_file(path, &source)
-        };
-        if let Err(e) = result {
+    /// Reads and parses `files` in parallel on the worker pool, inserting
+    /// each as context (vendor/scan/stub, never analyzed or reported) or
+    /// analyzed (a real, first-party file under `root`) in order. A parse
+    /// failure is logged (both to stderr and as a `window/logMessage`
+    /// notification) and skipped, not fatal to the rest of the scan.
+    fn load_files(&mut self, files: &[(PathBuf, bool)], messages: &mut Vec<Message>) {
+        for (path, e) in self.project.load_files(files, Some(&self.pool)) {
             eprintln!(
                 "phpstan-rs lsp: skipping {} - failed to parse: {e}",
-                path_for_log.display()
+                path.display()
             );
             messages.push(log_message_notification(
                 MessageType::WARNING,
                 format!(
                     "phpstan-rs: skipping {} - failed to parse: {e}",
-                    path_for_log.display()
+                    path.display()
                 ),
             ));
         }
@@ -484,6 +473,7 @@ impl Server {
     ) -> Vec<Message> {
         let mut messages = Vec::new();
         let mut loaded: rustc_hash::FxHashSet<PathBuf> = rustc_hash::FxHashSet::default();
+        let mut to_load: Vec<(PathBuf, bool)> = Vec::new();
 
         let mut context_files = context.vendor.files.clone();
         for dir in context.vendor.dirs.iter().chain(context.extra_dirs.iter()) {
@@ -496,7 +486,7 @@ impl Server {
             if !loaded.insert(canonical) {
                 continue;
             }
-            self.load_one_file(path, false, &mut messages);
+            to_load.push((path, false));
         }
 
         let mut files = Vec::new();
@@ -535,8 +525,9 @@ impl Server {
             if self.project.ast(&path).is_some() {
                 continue;
             }
-            self.load_one_file(path, true, &mut messages);
+            to_load.push((path, true));
         }
+        self.load_files(&to_load, &mut messages);
         messages
     }
 

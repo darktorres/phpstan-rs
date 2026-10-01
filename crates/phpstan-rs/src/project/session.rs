@@ -625,7 +625,12 @@ impl Session {
         let mut combined_parsed: Vec<Option<(String, ParsedFile)>> = pool.install(|| {
             combined_files
                 .par_iter()
-                .map(|p| self.read_and_parse_file(p, stub_files.contains(p.as_path()), &interner))
+                .map(|p| {
+                    let (source, mut parsed) =
+                        self.read_and_parse_file(p, stub_files.contains(p.as_path()), &interner)?;
+                    project.index_use_sites(&mut parsed, &source);
+                    Some((source, parsed))
+                })
                 .collect()
         });
         let analyze_parsed = combined_parsed.split_off(context_files.len());

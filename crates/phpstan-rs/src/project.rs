@@ -685,31 +685,12 @@ impl Project {
             duplicate_fn_sites,
             duplicate_class_sites,
             bodies,
+            class_fn_refs,
         } = parsed;
         for decl in built_decls {
             self.registry.insert_built_decl(decl, analyzed);
         }
-        // Real source text (`retain_source`) buys narrower per-identifier
-        // spans (`use_sites::index_class_fn_refs`'s own doc comment) - a
-        // batch run with no retained source can still get real, just less
-        // precisely-scoped, entries via `index_class_fn_refs_without_
-        // source`, which `whole_program::dead_code` (existence-
-        // only, never reads a use-site's span) can't tell apart from the
-        // precise version at all. But this
-        // walk is NOT cheap enough to run unconditionally in batch mode -
-        // measured on a real corpus (Piwigo, ~14k loaded files including
-        // vendor context): running it for every loaded file regardless of
-        // whether anything consumes it roughly doubled `check-project`'s
-        // own wall time. Gated on `check_dead_code` (its only batch-mode
-        // consumer) for exactly that reason - a run with the check left
-        // off, the default, pays nothing extra here at all.
-        let class_fn_refs = if self.retain_source {
-            use_sites::index_class_fn_refs(&ast, &source)
-        } else if self.settings.rules.check_dead_code {
-            use_sites::index_class_fn_refs_without_source(&ast)
-        } else {
-            Vec::new()
-        };
+        let class_fn_refs = class_fn_refs.unwrap_or_else(|| self.class_fn_refs_of(&ast, &source));
         for (span, target) in class_fn_refs {
             self.use_sites.insert(&path, target, span);
         }
@@ -738,6 +719,72 @@ impl Project {
                 bodies,
             },
         );
+    }
+
+    /// The class and function use sites of a file being loaded.
+    ///
+    /// Real source text (`retain_source`) buys narrower per-identifier
+    /// spans (`use_sites::index_class_fn_refs`'s own doc comment) - a
+    /// batch run with no retained source can still get real, just less
+    /// precisely-scoped, entries via `index_class_fn_refs_without_
+    /// source`, which `whole_program::dead_code` (existence-
+    /// only, never reads a use-site's span) can't tell apart from the
+    /// precise version at all. But this
+    /// walk is NOT cheap enough to run unconditionally in batch mode -
+    /// measured on a real corpus (Piwigo, ~14k loaded files including
+    /// vendor context): running it for every loaded file regardless of
+    /// whether anything consumes it roughly doubled `check-project`'s
+    /// own wall time. Gated on `check_dead_code` (its only batch-mode
+    /// consumer) for exactly that reason - a run with the check left
+    /// off, the default, pays nothing extra here at all.
+    fn class_fn_refs_of(&self, ast: &[Stmt], source: &str) -> Vec<(Span, use_sites::RefTarget)> {
+        if self.retain_source {
+            use_sites::index_class_fn_refs(ast, source)
+        } else if self.settings.rules.check_dead_code {
+            use_sites::index_class_fn_refs_without_source(ast)
+        } else {
+            Vec::new()
+        }
+    }
+
+    /// Indexes `parsed`'s use sites ahead of `insert_parsed_file`, so a
+    /// caller parsing many files in parallel indexes them there too.
+    pub(crate) fn index_use_sites(&self, parsed: &mut ParsedFile, source: &str) {
+        parsed.class_fn_refs = Some(self.class_fn_refs_of(&parsed.ast, source));
+    }
+
+    /// Reads, parses and indexes `files` in parallel on `pool`, then
+    /// inserts them in order - context and analyzed alike (`analyzed`
+    /// as `load_analyzed_file`'s). A file that can't be read is skipped;
+    /// one that fails to parse is skipped and returned with its error.
+    pub fn load_files(
+        &mut self,
+        files: &[(PathBuf, bool)],
+        pool: Option<&rayon::ThreadPool>,
+    ) -> Vec<(PathBuf, ParseError)> {
+        let interner = Arc::clone(&self.interner);
+        let this = &*self;
+        let parsed = map_on_pool(pool, files, |(path, _)| {
+            let bytes = fs::read(path).ok()?;
+            let source = String::from_utf8_lossy(&bytes).into_owned();
+            Some(
+                parse_file(path, source.as_bytes(), false, &interner).map(|mut parsed| {
+                    this.index_use_sites(&mut parsed, &source);
+                    (source, parsed)
+                }),
+            )
+        });
+        let mut failed = Vec::new();
+        for ((path, analyzed), parsed) in files.iter().zip(parsed) {
+            match parsed {
+                Some(Ok((source, parsed))) => {
+                    self.insert_parsed_file(path.clone(), parsed, source, *analyzed)
+                }
+                Some(Err(e)) => failed.push((path.clone(), e)),
+                None => {}
+            }
+        }
+        failed
     }
 
     /// Finalizes an initial batch of `load_file` calls (trait flattening).
@@ -2088,6 +2135,10 @@ pub struct ParsedFile {
     // field's own doc comment for why it's needed at all).
     duplicate_class_sites: DuplicateClassSites,
     bodies: FileBodies,
+    // The file's class and function use sites, when indexed alongside the
+    // parse (`Project::index_use_sites`); `insert_parsed_file` indexes
+    // them itself otherwise.
+    class_fn_refs: Option<Vec<(Span, use_sites::RefTarget)>>,
 }
 
 /// Computes a `ParsedFile` from `source` - see that type's own doc
@@ -2127,6 +2178,7 @@ pub fn parse_file(
         duplicate_class_sites,
         ignores,
         bodies,
+        class_fn_refs: None,
     })
 }
 
