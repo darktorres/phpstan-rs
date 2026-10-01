@@ -815,6 +815,16 @@ pub fn generated_stub_classes_named(name: &str) -> Vec<(Name, ClassReflection)> 
         .collect()
 }
 
+/// The entry of `generated_stub_constants` named exactly `name`, if any.
+pub fn generated_stub_constants_named(name: &str) -> Vec<(Name, Type)> {
+    let data = generated_stub_data();
+    data.constant_positions
+        .get(name)
+        .map(|&i| data.constants[i].clone())
+        .into_iter()
+        .collect()
+}
+
 fn named_positions<'a>(
     positions: &'a rustc_hash::FxHashMap<String, Vec<usize>>,
     name: &str,
@@ -874,6 +884,8 @@ struct GeneratedStubData {
     // Lowercased name -> its positions in `functions`/`classes`.
     function_positions: rustc_hash::FxHashMap<String, Vec<usize>>,
     class_positions: rustc_hash::FxHashMap<String, Vec<usize>>,
+    // Name (constants are case-sensitive) -> its position in `constants`.
+    constant_positions: rustc_hash::FxHashMap<String, usize>,
     // Lowercased name -> the phpstorm-stubs directory (extension) that
     // declares it; PHPStan's own classes aren't built-ins and aren't here.
     function_extensions: rustc_hash::FxHashMap<String, &'static str>,
@@ -1065,12 +1077,18 @@ fn generated_stub_data() -> &'static GeneratedStubData {
         patch_phpstan_stub_classes(&mut classes);
         patch_spl_iterator_templates(&mut classes);
         patch_datetime_fluent_returns(&mut classes);
+        let constants: Vec<(Name, Type)> = merged_constants.into_iter().collect();
         GeneratedStubData {
             function_positions: positions_by_name(&functions),
             class_positions: positions_by_name(&classes),
+            constant_positions: constants
+                .iter()
+                .enumerate()
+                .map(|(i, (name, _))| (name.to_string(), i))
+                .collect(),
             functions,
             classes,
-            constants: merged_constants.into_iter().collect(),
+            constants,
             function_extensions,
             class_extensions,
         }

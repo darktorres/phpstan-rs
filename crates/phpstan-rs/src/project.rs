@@ -49,6 +49,8 @@ struct FileState {
     ast: Vec<Stmt>,
     functions: Vec<String>,
     classes: Vec<String>,
+    // The global constants it declares (`const`, `define()`).
+    constants: Vec<String>,
     references: FxHashSet<String>,
     // Inline `@phpstan-ignore*` comments, read while the file was lexed
     // (the AST carries no comment text).
@@ -666,6 +668,7 @@ impl Project {
             lex_warnings: _,
             functions,
             classes,
+            constants,
             references,
             ignores,
             built_decls,
@@ -698,6 +701,7 @@ impl Project {
                 ast,
                 functions,
                 classes,
+                constants,
                 references,
                 ignores,
                 anonymous_classes,
@@ -856,11 +860,13 @@ impl Project {
             .remove_declarations(path, &old.classes);
         changed_symbols.extend(old.functions.iter().map(|s| deps::dependency_key(s)));
         changed_symbols.extend(old.classes.iter().map(|s| deps::dependency_key(s)));
+        changed_symbols.extend(old.constants.iter().map(|s| deps::dependency_key(s)));
         unregister_references(&mut self.dependents, path, &old.references);
         Some(UnindexedFile {
             analyzed: old.analyzed,
             functions: old.functions,
             classes: old.classes,
+            constants: old.constants,
         })
     }
 
@@ -872,15 +878,25 @@ impl Project {
     /// all of its declarations are inserted, at its place in that order.
     fn rebuild_declarations(
         &mut self,
-        functions: &[String],
-        classes: &[String],
+        names: &DeclaredNames,
         pending: Option<(&Path, &[Stmt], bool)>,
     ) {
-        self.registry.remove_declarations(functions, classes);
-        let function_keys: FxHashSet<String> =
-            functions.iter().map(|n| n.to_ascii_lowercase()).collect();
-        let class_keys: FxHashSet<String> =
-            classes.iter().map(|n| n.to_ascii_lowercase()).collect();
+        self.registry
+            .remove_declarations(&names.functions, &names.classes);
+        let function_keys: FxHashSet<String> = names
+            .functions
+            .iter()
+            .map(|n| n.to_ascii_lowercase())
+            .collect();
+        let class_keys: FxHashSet<String> = names
+            .classes
+            .iter()
+            .map(|n| n.to_ascii_lowercase())
+            .collect();
+        let constant_keys: FxHashSet<&str> = names.constants.iter().map(String::as_str).collect();
+        for name in &constant_keys {
+            self.registry.global_constants.remove(*name);
+        }
         for name in &function_keys {
             self.registry
                 .merge_stubs(stubs::generated_stubs_named(name));
@@ -888,6 +904,10 @@ impl Project {
         for name in &class_keys {
             self.registry
                 .merge_stub_classes(stubs::generated_stub_classes_named(name));
+        }
+        for name in &constant_keys {
+            self.registry
+                .merge_stub_constants(stubs::generated_stub_constants_named(name));
         }
         let declares_one = |state: &FileState| {
             state
@@ -898,6 +918,10 @@ impl Project {
                     .classes
                     .iter()
                     .any(|n| class_keys.contains(&n.to_ascii_lowercase()))
+                || state
+                    .constants
+                    .iter()
+                    .any(|n| constant_keys.contains(n.as_str()))
         };
         let mut sources: Vec<(bool, &Path, &[Stmt], bool)> = self
             .files
@@ -919,7 +943,7 @@ impl Project {
                     BuiltDecl::Function { name, .. } => {
                         function_keys.contains(&name.to_ascii_lowercase())
                     }
-                    BuiltDecl::GlobalConst { .. } => false,
+                    BuiltDecl::GlobalConst { name, .. } => constant_keys.contains(name.as_str()),
                 };
                 if !rebuilt && !is_pending {
                     continue;
@@ -1080,9 +1104,11 @@ impl Project {
         let mut changed_symbols: FxHashSet<String> = FxHashSet::default();
         let previous = self.unindex_file(path, &mut changed_symbols);
         let (functions, classes) = declared_names(&ast);
+        let constants = declared_constants(&ast);
         let references = deps::referenced_names(&ast);
         changed_symbols.extend(functions.iter().map(|s| deps::dependency_key(s)));
         changed_symbols.extend(classes.iter().map(|s| deps::dependency_key(s)));
+        changed_symbols.extend(constants.iter().map(|s| deps::dependency_key(s)));
 
         // A file `update_file` has already seen keeps its own recorded
         // `analyzed` flag (an edit doesn't change what kind of file it
@@ -1103,17 +1129,17 @@ impl Project {
             || !path_under_excluded_dir(path, DEFAULT_SCAN_EXCLUDED_DIR_NAMES),
             |previous| previous.analyzed,
         );
-        let mut rebuilt_functions = functions.clone();
-        let mut rebuilt_classes = classes.clone();
+        let mut rebuilt = DeclaredNames {
+            functions: functions.clone(),
+            classes: classes.clone(),
+            constants: constants.clone(),
+        };
         if let Some(previous) = previous {
-            rebuilt_functions.extend(previous.functions);
-            rebuilt_classes.extend(previous.classes);
+            rebuilt.functions.extend(previous.functions);
+            rebuilt.classes.extend(previous.classes);
+            rebuilt.constants.extend(previous.constants);
         }
-        self.rebuild_declarations(
-            &rebuilt_functions,
-            &rebuilt_classes,
-            Some((path, &ast, analyzed)),
-        );
+        self.rebuild_declarations(&rebuilt, Some((path, &ast, analyzed)));
         let anonymous_classes = anonymous_class_names(&ast);
         self.duplicate_fn_sites.index(&ast, path);
         // `is_stub: false` - same reasoning as `load_file_impl`'s own
@@ -1128,6 +1154,7 @@ impl Project {
                 ast,
                 functions,
                 classes,
+                constants,
                 references,
                 ignores,
                 anonymous_classes,
@@ -1224,19 +1251,19 @@ impl Project {
     /// case, since there is nothing for it to discover.
     pub fn remove_files(&mut self, paths: &[PathBuf]) -> FxHashMap<PathBuf, Vec<Diagnostic>> {
         let mut changed_symbols: FxHashSet<String> = FxHashSet::default();
-        let mut removed_functions = Vec::new();
-        let mut removed_classes = Vec::new();
+        let mut removed = DeclaredNames::default();
         let mut any_removed = false;
         for path in paths {
-            if let Some(removed) = self.unindex_file(path, &mut changed_symbols) {
-                removed_functions.extend(removed.functions);
-                removed_classes.extend(removed.classes);
+            if let Some(file) = self.unindex_file(path, &mut changed_symbols) {
+                removed.functions.extend(file.functions);
+                removed.classes.extend(file.classes);
+                removed.constants.extend(file.constants);
                 any_removed = true;
             }
         }
         let mut affected: FxHashSet<PathBuf> = paths.iter().cloned().collect();
         if any_removed {
-            self.rebuild_declarations(&removed_functions, &removed_classes, None);
+            self.rebuild_declarations(&removed, None);
             self.finish_loading();
             affected.extend(self.transitive_affected_files_from(changed_symbols));
         }
@@ -2041,6 +2068,7 @@ pub struct ParsedFile {
     lex_warnings: Vec<LexWarning>,
     functions: Vec<String>,
     classes: Vec<String>,
+    constants: Vec<String>,
     references: FxHashSet<String>,
     ignores: ignore_comments::IgnoreComments,
     // This file's own declarations, already built into
@@ -2092,6 +2120,7 @@ pub fn parse_file(
 ) -> Result<ParsedFile, ParseError> {
     let (ast, ignores, lex_warnings) = parse_with_ignores(path, source, interner)?;
     let (functions, classes) = declared_names(&ast);
+    let constants = declared_constants(&ast);
     let references = deps::referenced_names(&ast);
     let origin = Origin::File(Arc::from(path));
     let built_decls = crate::registry::build_declarations(&ast, &origin);
@@ -2106,6 +2135,7 @@ pub fn parse_file(
         lex_warnings,
         functions,
         classes,
+        constants,
         references,
         built_decls,
         anonymous_classes,
@@ -2211,6 +2241,27 @@ struct UnindexedFile {
     analyzed: bool,
     functions: Vec<String>,
     classes: Vec<String>,
+    constants: Vec<String>,
+}
+
+/// Names a file declares, by kind.
+#[derive(Default)]
+struct DeclaredNames {
+    functions: Vec<String>,
+    classes: Vec<String>,
+    constants: Vec<String>,
+}
+
+/// The global constants one file's parse tree declares, by the names
+/// `Registry::global_constants` holds them under.
+fn declared_constants(stmts: &[Stmt]) -> Vec<String> {
+    let mut constants = Vec::new();
+    syntax::declarations::for_each_declaration(stmts, |declaration, _| {
+        if let Declared::Constant(_) | Declared::Define { .. } = declaration.declared {
+            constants.push(declaration.name().trim_start_matches('\\').to_string());
+        }
+    });
+    constants
 }
 
 /// The function and class names one file's parse tree declares - exactly

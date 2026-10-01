@@ -720,3 +720,88 @@ fn a_same_named_class_in_another_namespace_is_not_rechecked() {
     );
     assert_eq!(rechecked, ["base.php"]);
 }
+
+#[test]
+fn editing_a_constant_takes_its_new_value() {
+    let mut project = Project::new();
+    project
+        .load_analyzed_file(PathBuf::from("c.php"), "<?php const VERSION = 1;")
+        .unwrap();
+    project.finish_loading();
+    project
+        .update_file(&PathBuf::from("c.php"), "<?php const VERSION = 2;")
+        .unwrap();
+    assert_eq!(
+        project.registry().global_constants["VERSION"].to_string(),
+        "2"
+    );
+}
+
+#[test]
+fn a_constant_deleted_from_its_file_is_undefined() {
+    let mut project = Project::new();
+    project
+        .load_analyzed_file(
+            PathBuf::from("c.php"),
+            "<?php const GONE = 1; const KEPT = 1;",
+        )
+        .unwrap();
+    project.finish_loading();
+    project
+        .update_file(&PathBuf::from("c.php"), "<?php const KEPT = 1;")
+        .unwrap();
+    assert!(!project.registry().global_constants.contains_key("GONE"));
+    assert!(project.registry().global_constants.contains_key("KEPT"));
+}
+
+#[test]
+fn removing_a_file_keeps_another_files_definition_of_its_constant() {
+    let mut project = Project::new();
+    project
+        .load_analyzed_file(PathBuf::from("a.php"), "<?php define('SHARED', 1);")
+        .unwrap();
+    project
+        .load_analyzed_file(PathBuf::from("b.php"), "<?php define('SHARED', 2);")
+        .unwrap();
+    project.finish_loading();
+    assert!(project.registry().global_constants["SHARED"].is_mixed());
+    project.remove_files(&[PathBuf::from("b.php")]);
+    assert_eq!(
+        project.registry().global_constants["SHARED"].to_string(),
+        "1"
+    );
+}
+
+#[test]
+fn editing_a_file_defining_a_built_in_constant_keeps_the_built_in() {
+    let mut project = Project::new();
+    let built_in = project.registry().global_constants["PHP_EOL"].clone();
+    project
+        .load_analyzed_file(PathBuf::from("c.php"), "<?php const UNRELATED = 1;")
+        .unwrap();
+    project.finish_loading();
+    project
+        .update_file(
+            &PathBuf::from("c.php"),
+            "<?php if (!defined('PHP_EOL')) { define('PHP_EOL', \"\\n\"); }",
+        )
+        .unwrap();
+    project
+        .update_file(&PathBuf::from("c.php"), "<?php const UNRELATED = 1;")
+        .unwrap();
+    assert_eq!(project.registry().global_constants["PHP_EOL"], built_in);
+}
+
+#[test]
+fn a_file_using_a_changed_constant_is_rechecked() {
+    let rechecked = rechecked_by_edit(
+        &[
+            ("c.php", "<?php namespace App; const VERSION = 1;"),
+            ("use.php", "<?php namespace App; echo VERSION;"),
+            ("global.php", "<?php echo \\App\\VERSION;"),
+        ],
+        "c.php",
+        "<?php namespace App; const VERSION = 2;",
+    );
+    assert_eq!(rechecked, ["c.php", "global.php", "use.php"]);
+}
