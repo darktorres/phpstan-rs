@@ -28,7 +28,9 @@ use crate::registry::{FunctionReflection, Registry, is_non_overridable};
 use types::Type;
 
 /// Whose properties a call may write, in increasing order of reach.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, serde::Serialize, serde::Deserialize,
+)]
 pub(crate) enum PropertyWrites {
     /// No object's that existed before the call.
     Nothing,

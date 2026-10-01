@@ -8,21 +8,21 @@ use crate::registry::name_context::class_ref;
 use syntax::ast::{Arg, Attribute, BinOp, Expr, ExprKind, Literal, StaticTarget, UnaryOp};
 
 /// One attribute on a declaration.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct ReflectionAttribute {
     name: Name,
     arguments: Vec<AttributeArgument>,
 }
 
 /// One argument an attribute is given: positional, or named.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct AttributeArgument {
     pub name: Option<Name>,
     pub value: AttributeValue,
 }
 
 /// An argument's value, as far as it's a constant expression.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub enum AttributeValue {
     Null,
     Bool(bool),

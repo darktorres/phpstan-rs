@@ -20,7 +20,7 @@ use syntax::name_resolution::NameContext;
 /// project's narrowing machinery has no way to key a call's own return
 /// value the way it keys a variable/property, and guessing wrong here
 /// risks a false assertion rather than just a missed one.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub enum AssertTarget {
     /// `$name` matching one of this declaration's own parameters.
     Param(Name),
@@ -47,7 +47,7 @@ pub enum AssertTarget {
     Unknown(Name),
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct AssertInfo {
     pub negated: bool,
     /// `=Type`: the target is identical to a value of `ty`.

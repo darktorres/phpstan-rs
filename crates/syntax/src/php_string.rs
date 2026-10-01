@@ -5,7 +5,9 @@ use std::borrow::Cow;
 use std::fmt;
 use std::sync::Arc;
 
-#[derive(Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Default)]
+#[derive(
+    Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Default, serde::Serialize, serde::Deserialize,
+)]
 pub struct PhpString(Arc<[u8]>);
 
 #[cfg(feature = "fuzzing")]

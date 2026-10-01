@@ -963,6 +963,7 @@ pub fn generated_stub_constants() -> Vec<(Name, Type)> {
 /// three separate times (once per projection) just to read a different
 /// field off what is otherwise the identical deterministic per-file
 /// result was pure waste.
+#[derive(serde::Serialize, serde::Deserialize)]
 struct GeneratedStubData {
     functions: Vec<(Name, FunctionReflection)>,
     classes: Vec<(Name, ClassReflection)>,
@@ -981,8 +982,36 @@ struct GeneratedStubData {
     builtin_constant_positions: rustc_hash::FxHashMap<String, usize>,
     // Lowercased name -> the phpstorm-stubs directory (extension) that
     // declares it; PHPStan's own classes aren't built-ins and aren't here.
+    #[serde(with = "embedded_str_map")]
     function_extensions: rustc_hash::FxHashMap<String, &'static str>,
+    #[serde(with = "embedded_str_map")]
     class_extensions: rustc_hash::FxHashMap<String, &'static str>,
+}
+
+/// A map to embedded stub paths or extensions, serialized as text.
+mod embedded_str_map {
+    use rustc_hash::FxHashMap;
+    use serde::{Deserialize, Deserializer, Serialize, Serializer};
+
+    pub(super) fn serialize<S: Serializer>(
+        map: &FxHashMap<String, &'static str>,
+        serializer: S,
+    ) -> Result<S::Ok, S::Error> {
+        map.serialize(serializer)
+    }
+
+    pub(super) fn deserialize<'de, D: Deserializer<'de>>(
+        deserializer: D,
+    ) -> Result<FxHashMap<String, &'static str>, D::Error> {
+        let map = <FxHashMap<String, String>>::deserialize(deserializer)?;
+        map.into_iter()
+            .map(|(key, text)| {
+                let text = crate::registry::provenance::embedded_str(&text)
+                    .map_err(serde::de::Error::custom)?;
+                Ok((key, text))
+            })
+            .collect()
+    }
 }
 
 impl GeneratedStubData {
@@ -1117,114 +1146,122 @@ fn index_stub_file(source: &str, origin: &Origin) -> StubFileDeclarations {
 
 fn generated_stub_data() -> &'static GeneratedStubData {
     static CACHE: std::sync::LazyLock<GeneratedStubData> = std::sync::LazyLock::new(|| {
-        let mut seen_functions = rustc_hash::FxHashSet::default();
-        let mut functions = Vec::new();
-        let mut seen_classes = rustc_hash::FxHashSet::default();
-        let mut classes = Vec::new();
-        let mut merged_constants: rustc_hash::FxHashMap<Name, Type> =
-            rustc_hash::FxHashMap::default();
-        let mut builtin_constants: rustc_hash::FxHashMap<Name, Type> =
-            rustc_hash::FxHashMap::default();
-        let mut function_extensions = rustc_hash::FxHashMap::default();
-        let mut class_extensions = rustc_hash::FxHashMap::default();
-        let builtins = PHPSTORM_STUBS_SOURCES
-            .iter()
-            .zip(PHPSTORM_STUBS_PATHS)
-            .zip(PHPSTORM_STUBS_EXTENSIONS)
-            .map(|((source, file), extension)| {
-                (
-                    *source,
-                    Some(*extension),
-                    Origin::Builtin { file, extension },
-                )
-            });
-        let phpstan = PHPSTAN_SRC_SOURCES
-            .iter()
-            .zip(PHPSTAN_SRC_PATHS)
-            .map(|(source, file)| (*source, None, Origin::Phpstan { file }));
-        let files: Vec<(&'static str, Option<&'static str>, Origin)> =
-            builtins.chain(phpstan).collect();
-        // Each file indexes on its own; merging stays sequential, in file
-        // order, so which declaration wins doesn't depend on scheduling.
-        let indexed: Vec<StubFileDeclarations> = files
-            .par_iter()
-            .map(|(source, _, origin)| index_stub_file(source, origin))
-            .collect();
-        let mut dependents: rustc_hash::FxHashMap<String, Vec<(bool, Name)>> =
-            rustc_hash::FxHashMap::default();
-        for ((_, extension, _), file) in files.into_iter().zip(indexed) {
-            let declared: Vec<(bool, Name)> = file
-                .classes
-                .iter()
-                .map(|(name, _)| (true, name.clone()))
-                .chain(file.functions.iter().map(|(name, _)| (false, name.clone())))
-                .collect();
-            for key in &file.references {
-                dependents
-                    .entry(key.clone())
-                    .or_default()
-                    .extend(declared.iter().cloned());
-            }
-            for (name, sig) in file.functions {
-                if seen_functions.insert(name.clone()) {
-                    if let Some(extension) = extension {
-                        function_extensions.insert(name.to_ascii_lowercase(), extension);
-                    }
-                    functions.push((name, sig));
-                }
-            }
-            for (name, info) in file.classes {
-                if seen_classes.insert(name.clone()) {
-                    if let Some(extension) = extension {
-                        class_extensions.insert(name.to_ascii_lowercase(), extension);
-                    }
-                    classes.push((name, info));
-                }
-            }
-            for (name, ty) in file.constants {
-                if extension.is_some() {
-                    register_global_constant(&mut builtin_constants, name.clone(), ty.clone());
-                }
-                register_global_constant(&mut merged_constants, name, ty);
-            }
+        if let Some(data) = crate::registry::load_cached("stub-data") {
+            return data;
         }
-        patch_array_multisort_by_ref(&mut functions);
-        patch_debug_backtrace(&mut functions);
-        patch_usleep(&mut functions);
-        patch_printf_values(&mut functions);
-        patch_array_callback_family(&mut functions);
-        patch_functionmap_array_shapes(&mut functions);
-        patch_reflection_class_constructor_template(&mut classes);
-        patch_reflection_method_and_property_templates(&mut classes);
-        patch_reflection_and_exception_list_types(&mut classes);
-        patch_phpstan_stub_classes(&mut classes);
-        patch_spl_iterator_templates(&mut classes);
-        patch_datetime_fluent_returns(&mut classes);
-        let constants: Vec<(Name, Type)> = merged_constants.into_iter().collect();
-        let builtin_constants: Vec<(Name, Type)> = builtin_constants.into_iter().collect();
-        GeneratedStubData {
-            dependents,
-            builtin_constant_positions: builtin_constants
-                .iter()
-                .enumerate()
-                .map(|(i, (name, _))| (name.to_string(), i))
-                .collect(),
-            builtin_constants,
-            function_positions: positions_by_name(&functions),
-            class_positions: positions_by_name(&classes),
-            constant_positions: constants
-                .iter()
-                .enumerate()
-                .map(|(i, (name, _))| (name.to_string(), i))
-                .collect(),
-            functions,
-            classes,
-            constants,
-            function_extensions,
-            class_extensions,
-        }
+        let data = build_generated_stub_data();
+        crate::registry::store_cached("stub-data", &data);
+        data
     });
     &CACHE
+}
+
+/// Indexes every embedded stub file and merges the results.
+fn build_generated_stub_data() -> GeneratedStubData {
+    let mut seen_functions = rustc_hash::FxHashSet::default();
+    let mut functions = Vec::new();
+    let mut seen_classes = rustc_hash::FxHashSet::default();
+    let mut classes = Vec::new();
+    let mut merged_constants: rustc_hash::FxHashMap<Name, Type> = rustc_hash::FxHashMap::default();
+    let mut builtin_constants: rustc_hash::FxHashMap<Name, Type> = rustc_hash::FxHashMap::default();
+    let mut function_extensions = rustc_hash::FxHashMap::default();
+    let mut class_extensions = rustc_hash::FxHashMap::default();
+    let builtins = PHPSTORM_STUBS_SOURCES
+        .iter()
+        .zip(PHPSTORM_STUBS_PATHS)
+        .zip(PHPSTORM_STUBS_EXTENSIONS)
+        .map(|((source, file), extension)| {
+            (
+                *source,
+                Some(*extension),
+                Origin::Builtin { file, extension },
+            )
+        });
+    let phpstan = PHPSTAN_SRC_SOURCES
+        .iter()
+        .zip(PHPSTAN_SRC_PATHS)
+        .map(|(source, file)| (*source, None, Origin::Phpstan { file }));
+    let files: Vec<(&'static str, Option<&'static str>, Origin)> =
+        builtins.chain(phpstan).collect();
+    // Each file indexes on its own; merging stays sequential, in file
+    // order, so which declaration wins doesn't depend on scheduling.
+    let indexed: Vec<StubFileDeclarations> = files
+        .par_iter()
+        .map(|(source, _, origin)| index_stub_file(source, origin))
+        .collect();
+    let mut dependents: rustc_hash::FxHashMap<String, Vec<(bool, Name)>> =
+        rustc_hash::FxHashMap::default();
+    for ((_, extension, _), file) in files.into_iter().zip(indexed) {
+        let declared: Vec<(bool, Name)> = file
+            .classes
+            .iter()
+            .map(|(name, _)| (true, name.clone()))
+            .chain(file.functions.iter().map(|(name, _)| (false, name.clone())))
+            .collect();
+        for key in &file.references {
+            dependents
+                .entry(key.clone())
+                .or_default()
+                .extend(declared.iter().cloned());
+        }
+        for (name, sig) in file.functions {
+            if seen_functions.insert(name.clone()) {
+                if let Some(extension) = extension {
+                    function_extensions.insert(name.to_ascii_lowercase(), extension);
+                }
+                functions.push((name, sig));
+            }
+        }
+        for (name, info) in file.classes {
+            if seen_classes.insert(name.clone()) {
+                if let Some(extension) = extension {
+                    class_extensions.insert(name.to_ascii_lowercase(), extension);
+                }
+                classes.push((name, info));
+            }
+        }
+        for (name, ty) in file.constants {
+            if extension.is_some() {
+                register_global_constant(&mut builtin_constants, name.clone(), ty.clone());
+            }
+            register_global_constant(&mut merged_constants, name, ty);
+        }
+    }
+    patch_array_multisort_by_ref(&mut functions);
+    patch_debug_backtrace(&mut functions);
+    patch_usleep(&mut functions);
+    patch_printf_values(&mut functions);
+    patch_array_callback_family(&mut functions);
+    patch_functionmap_array_shapes(&mut functions);
+    patch_reflection_class_constructor_template(&mut classes);
+    patch_reflection_method_and_property_templates(&mut classes);
+    patch_reflection_and_exception_list_types(&mut classes);
+    patch_phpstan_stub_classes(&mut classes);
+    patch_spl_iterator_templates(&mut classes);
+    patch_datetime_fluent_returns(&mut classes);
+    let constants: Vec<(Name, Type)> = merged_constants.into_iter().collect();
+    let builtin_constants: Vec<(Name, Type)> = builtin_constants.into_iter().collect();
+    GeneratedStubData {
+        dependents,
+        builtin_constant_positions: builtin_constants
+            .iter()
+            .enumerate()
+            .map(|(i, (name, _))| (name.to_string(), i))
+            .collect(),
+        builtin_constants,
+        function_positions: positions_by_name(&functions),
+        class_positions: positions_by_name(&classes),
+        constant_positions: constants
+            .iter()
+            .enumerate()
+            .map(|(i, (name, _))| (name.to_string(), i))
+            .collect(),
+        functions,
+        classes,
+        constants,
+        function_extensions,
+        class_extensions,
+    }
 }
 
 #[cfg(test)]

@@ -1,6 +1,6 @@
 //! PHPStan's `TrinaryLogic`: yes, no, or maybe.
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub enum TrinaryLogic {
     Yes,
     Maybe,

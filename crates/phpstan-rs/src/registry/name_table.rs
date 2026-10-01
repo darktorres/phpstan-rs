@@ -309,6 +309,20 @@ impl<V: Clone> IntoIterator for NameTable<V> {
     }
 }
 
+/// A table serializes as its entries, each with its declared name.
+impl<V: serde::Serialize> serde::Serialize for NameTable<V> {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.collect_seq(self.iter())
+    }
+}
+
+impl<'de, V: Clone + serde::Deserialize<'de>> serde::Deserialize<'de> for NameTable<V> {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let entries = <Vec<(Name, V)>>::deserialize(deserializer)?;
+        Ok(entries.into_iter().collect())
+    }
+}
+
 impl<V: Clone> FromIterator<(Name, V)> for NameTable<V> {
     fn from_iter<I: IntoIterator<Item = (Name, V)>>(iter: I) -> Self {
         let mut table = NameTable::default();

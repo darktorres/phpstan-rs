@@ -52,7 +52,9 @@ use syntax::visit::{Visitor, walk_expr, walk_stmt, walk_stmts};
 /// (matching real PHPStan's own `functionKey`/`methodKey`, which
 /// `strtolower`s both parts) - so the same declaration referenced under
 /// different call-site casing always resolves to the same graph node.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
+#[derive(
+    Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, serde::Serialize, serde::Deserialize,
+)]
 pub enum PurityDependency {
     Function(Name),
     Method(Name, Name),

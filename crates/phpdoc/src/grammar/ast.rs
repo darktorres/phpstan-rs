@@ -7,13 +7,13 @@ use syntax::token::Span;
 /// `PhpDocParseError`, and parsing continues with the rest of the
 /// comment - real PHPStan's own `phpDoc.parseError` is reported the same
 /// way, one comment can carry several independent findings.
-#[derive(Debug, Clone, PartialEq, Default)]
+#[derive(Debug, Clone, PartialEq, Default, serde::Serialize, serde::Deserialize)]
 pub struct PhpDocNode {
     pub tags: Vec<PhpDocTag>,
     pub errors: Vec<PhpDocParseError>,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct PhpDocParseError {
     pub message: String,
     pub span: Span,
@@ -25,7 +25,7 @@ pub struct PhpDocParseError {
 /// present - unlike `docblock::parse`'s own two-pass plain-then-
 /// `phpstan-`-prefixed precedence resolution, that's a consumer
 /// concern, not a parsing one.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct PhpDocTag {
     pub name: String,
     pub span: Span,
@@ -35,7 +35,7 @@ pub struct PhpDocTag {
     pub errors: Vec<PhpDocParseError>,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub enum PhpDocTagValue {
     /// `@param`/`@param-out`/`@property`/`@property-read`/
     /// `@property-write`/`@var` - every tag shaped `[Type] [&][...]$name
@@ -85,7 +85,7 @@ pub enum PhpDocTagValue {
     Generic(String),
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct MethodTagParam {
     pub ty: Option<TypeNode>,
     pub name: String,
@@ -95,13 +95,13 @@ pub struct MethodTagParam {
 }
 
 /// A generic argument's written call-site variance.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum ArgVariance {
     Covariant,
     Contravariant,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub enum TypeNode {
     /// A bare name - `int`, `string`, `Foo\Bar`, `self`, `static`,
     /// `$this`, `mixed`, `class-string`, `non-empty-array`, ... - every
@@ -356,14 +356,14 @@ impl TypeNode {
     }
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct ArrayShapeField {
     pub key: Option<ShapeKey>,
     pub ty: TypeNode,
     pub optional: bool,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub enum ShapeKey {
     Int(i64),
     String(String),
@@ -371,7 +371,7 @@ pub enum ShapeKey {
 }
 
 /// One entry of a callable type's template list.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct CallableTemplate {
     pub name: String,
     pub bound: Option<TypeNode>,
@@ -379,7 +379,7 @@ pub struct CallableTemplate {
     pub default: Option<TypeNode>,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct CallableParam {
     pub ty: TypeNode,
     pub variadic: bool,

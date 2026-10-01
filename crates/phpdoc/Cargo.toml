@@ -11,6 +11,7 @@ name = "phpdoc"
 [dependencies]
 hotpath.workspace = true
 rustc-hash.workspace = true
+serde.workspace = true
 syntax.workspace = true
 
 [lints]

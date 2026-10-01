@@ -28,9 +28,83 @@ pub enum Origin {
     Phpstan { file: &'static str },
 }
 
+/// `Origin` as serialized: the embedded stub paths as text, found in the
+/// embedded tables again on the way back.
+#[derive(serde::Serialize, serde::Deserialize)]
+enum OriginData {
+    Unknown,
+    File(Arc<Path>),
+    Builtin { file: String, extension: String },
+    Phpstan { file: String },
+}
+
+impl serde::Serialize for Origin {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        OriginData::from(self.clone()).serialize(serializer)
+    }
+}
+
+impl<'de> serde::Deserialize<'de> for Origin {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Origin, D::Error> {
+        Origin::try_from(OriginData::deserialize(deserializer)?).map_err(serde::de::Error::custom)
+    }
+}
+
+impl From<Origin> for OriginData {
+    fn from(origin: Origin) -> OriginData {
+        match origin {
+            Origin::Unknown => OriginData::Unknown,
+            Origin::File(path) => OriginData::File(path),
+            Origin::Builtin { file, extension } => OriginData::Builtin {
+                file: file.to_string(),
+                extension: extension.to_string(),
+            },
+            Origin::Phpstan { file } => OriginData::Phpstan {
+                file: file.to_string(),
+            },
+        }
+    }
+}
+
+impl TryFrom<OriginData> for Origin {
+    type Error = String;
+
+    fn try_from(data: OriginData) -> Result<Origin, String> {
+        Ok(match data {
+            OriginData::Unknown => Origin::Unknown,
+            OriginData::File(path) => Origin::File(path),
+            OriginData::Builtin { file, extension } => Origin::Builtin {
+                file: embedded_str(&file)?,
+                extension: embedded_str(&extension)?,
+            },
+            OriginData::Phpstan { file } => Origin::Phpstan {
+                file: embedded_str(&file)?,
+            },
+        })
+    }
+}
+
+/// An embedded stub file's path or extension, as the embedded tables
+/// hold it.
+pub(crate) fn embedded_str(text: &str) -> Result<&'static str, String> {
+    static EMBEDDED: std::sync::LazyLock<rustc_hash::FxHashSet<&'static str>> =
+        std::sync::LazyLock::new(|| {
+            stub_sources::PHPSTORM_STUBS_PATHS
+                .iter()
+                .chain(stub_sources::PHPSTORM_STUBS_EXTENSIONS)
+                .chain(stub_sources::PHPSTAN_SRC_PATHS)
+                .copied()
+                .collect()
+        });
+    EMBEDDED
+        .get(text)
+        .copied()
+        .ok_or_else(|| format!("{text} is not an embedded stub"))
+}
+
 /// A declaration's source, the span of its name there, and for a member,
 /// the class-like that declares it.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub struct Provenance {
     origin: Origin,
     span: Span,

@@ -11,13 +11,13 @@ use syntax::ast::{Attribute, Expr, ExprKind, Literal, StaticTarget};
 
 /// `NamespaceVisibility`: callers must be in `namespace` (or, unless
 /// `exclude_sub_namespaces`, below it).
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct NamespaceVisibility {
     pub namespace: String,
     pub exclude_sub_namespaces: bool,
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct AccessAttributes {
     /// `Friend`: the only other classes that may call it.
     pub friends: Vec<Name>,

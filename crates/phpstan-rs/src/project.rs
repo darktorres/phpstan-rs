@@ -346,6 +346,10 @@ impl Project {
     /// registry resolved once per process, sharing its tables.
     pub fn new() -> Self {
         static BASE: std::sync::LazyLock<Registry> = std::sync::LazyLock::new(|| {
+            if let Some(mut registry) = crate::registry::load_cached::<Registry>("stub-base") {
+                registry.freeze();
+                return registry;
+            }
             let mut registry = Registry::default();
             registry.merge_stubs(stubs::builtin_stubs());
             registry.merge_stub_classes(stubs::builtin_stub_classes());
@@ -353,6 +357,7 @@ impl Project {
             let mut base = Project::with_registry(registry);
             base.finish_loading();
             let mut registry = base.registry;
+            crate::registry::store_cached("stub-base", &registry);
             registry.freeze();
             registry
         });

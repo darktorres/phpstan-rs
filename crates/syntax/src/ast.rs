@@ -298,7 +298,7 @@ pub fn is_constructor_name(name: &str) -> bool {
     name.eq_ignore_ascii_case("__construct")
 }
 
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize)]
 pub enum Visibility {
     Public,
     Private,
@@ -494,7 +494,7 @@ impl ClassConst {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub enum ClassKind {
     Class,
     Interface,

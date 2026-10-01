@@ -137,13 +137,27 @@ impl Drop for Node {
     }
 }
 
+/// A type serializes as its representation, and deserializes into an
+/// interned type again.
+impl serde::Serialize for Type {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        syntax::stack::guard(|| self.repr().serialize(serializer))
+    }
+}
+
+impl<'de> serde::Deserialize<'de> for Type {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Type, D::Error> {
+        syntax::stack::guard(|| Repr::deserialize(deserializer).map(Type::new))
+    }
+}
+
 impl std::fmt::Debug for Type {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         syntax::stack::guard(|| self.repr().fmt(f))
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub(crate) enum Repr {
     // PHPStan's `MixedType::isExplicitMixed()`: `true` when `mixed` was
     // written (the keyword, or an unbounded `@template T`), `false` when
@@ -287,6 +301,7 @@ pub(crate) enum Repr {
         pattern: Name,
     },
     // An extension's own payload (`crate::ExtensionTypeData`).
+    #[serde(skip)]
     Extension(Arc<dyn ExtensionTypeData>),
     // `($subject is $target ? $if_true : $if_false)` - PHPDoc's
     // conditional-return-type syntax, lazily resolved once the real type
@@ -302,7 +317,7 @@ pub(crate) enum Repr {
 }
 
 /// What a conditional type (`(subject is target ? A : B)`) tests.
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub enum ConditionalSubject {
     /// A parameter (`$param is ...`), named without its `$`: resolved per
     /// call from the argument passed for it.
@@ -623,7 +638,9 @@ fn semantic_hash(repr: &Repr) -> u64 {
 // subclass relationship, or must stay exactly fixed (`Invariant`, the
 // default). `checker::generics::check_variance` composes this through
 // nested generics.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Hash, Default, serde::Serialize, serde::Deserialize,
+)]
 pub enum Variance {
     #[default]
     Invariant,
@@ -633,7 +650,7 @@ pub enum Variance {
 
 /// The variance a generic type argument is annotated with at its use
 /// site.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub enum CallSiteVariance {
     Covariant,
     Contravariant,
@@ -642,7 +659,7 @@ pub enum CallSiteVariance {
 }
 
 /// A `@template` parameter's own metadata.
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub struct TemplateParam {
     pub name: String,
     // `@template T of Bound` - `Mixed` when no `of` clause was written.
@@ -685,7 +702,7 @@ impl TemplateParam {
 /// One parameter of a parsed `Closure(...)`/`callable(...)` PHPDoc shape.
 /// A dedicated struct rather than `registry::ParameterReflection`, whose sibling
 /// `FunctionReflection` can't cheaply derive `PartialEq`.
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub struct CallableParam {
     pub ty: Type,
     pub variadic: bool,
@@ -699,7 +716,7 @@ pub struct CallableParam {
 /// return-type slice, with its own templates (`callable<T>(T): T`) -
 /// deliberately not the rest of what real PHPStan's `CallableType`
 /// tracks (purity, assertions).
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub struct CallableSig {
     pub params: Vec<CallableParam>,
     pub return_type: Box<Type>,
@@ -785,7 +802,7 @@ impl CallableSig {
 // Mirrors real PHPStan's `Accessory*Type` family
 // (`vendor/phpstan-src/src/Type/Accessory/*.php`) - each kind only ever
 // appears wrapped in a `Repr::Intersection` alongside its base type.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub enum AccessoryKind {
     NonEmptyString,
     NonFalsyString,

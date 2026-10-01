@@ -8,7 +8,9 @@ use crate::{PhpString, Repr, TrinaryLogic, Type, parse::canonical_int_key};
 /// An array shape key, canonicalized the way PHP canonicalizes an array
 /// key: a decimal integer string is an int key. A string key is bytes,
 /// as PHP's are: `"\xff"` and `"\xfe"` are two keys.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
+#[derive(
+    Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, serde::Serialize, serde::Deserialize,
+)]
 pub enum ShapeKey {
     Int(i64),
     Str(PhpString),
@@ -68,7 +70,7 @@ impl fmt::Display for ShapeKey {
 /// 8.0 it does (at -4). Once `PHP_INT_MAX` is a key there is none, and
 /// appending throws ("Cannot add element to the array as the next
 /// element is already occupied").
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct NextArrayIndex {
     /// Whether the PHP 8.0 rule applies: `Maybe` when the versions the
     /// code runs on straddle it, and both rules are followed.
@@ -78,7 +80,7 @@ pub struct NextArrayIndex {
 }
 
 /// One rule's next key: `None` once appending throws.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 struct NextKey {
     next: Option<i64>,
     has_int_key: bool,
@@ -158,7 +160,7 @@ impl NextArrayIndex {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub struct ShapeField {
     pub key: ShapeKey,
     pub ty: Type,
@@ -174,7 +176,7 @@ impl ShapeField {
 /// A shape's fields, in order, and - when the shape is unsealed
 /// (`array{a: int, ...}`: other keys may exist too) - the key and value
 /// types those other entries have.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct Shape {
     pub fields: Vec<ShapeField>,
     pub unsealed: Option<Box<(Type, Type)>>,

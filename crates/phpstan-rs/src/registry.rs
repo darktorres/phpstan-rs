@@ -23,6 +23,8 @@ pub mod reflection_attribute;
 mod relation;
 mod resolve;
 pub(crate) mod scope;
+mod stub_cache;
+pub(crate) use stub_cache::{load as load_cached, store as store_cached};
 pub mod settings;
 pub mod stubs;
 mod type_node;
@@ -104,18 +106,20 @@ pub(crate) struct ResolvedSnapshot {
 }
 
 /// `Registry::raw`.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 struct RawDeclarations {
     classes: NameTable<ClassReflection>,
     functions: FunctionTable,
 }
 
-#[derive(Debug, Default, Clone)]
+#[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize)]
 pub struct Registry {
     pub classes: NameTable<ClassReflection>,
     // Configured `[[assertions]]`/`[[class_argument_returns]]` entries,
     // on top of the built-in ones (`assertion_table`).
+    #[serde(skip)]
     pub(crate) configured_assertions: Vec<crate::assertion_tables::AssertionEntry>,
+    #[serde(skip)]
     pub(crate) configured_class_argument_returns: Vec<crate::assertion_tables::ClassArgumentReturn>,
     pub functions: FunctionTable,
     // Global-constant name -> inferred-value-type table, covering both
@@ -160,6 +164,7 @@ pub struct Registry {
     // one found wins rather than picking arbitrarily on every lookup,
     // since this project has no real corpus case to verify a "which
     // one wins" rule against.
+    #[serde(skip)]
     doctrine_entity_table_index: std::sync::OnceLock<FxHashMap<Name, Name>>,
     // `classes` and `functions` as indexing and the stub merges built
     // them, before the finishing passes resolved them - kept so the
@@ -169,19 +174,23 @@ pub struct Registry {
     // Whether `classes` and `functions` hold the declarations as built,
     // swapped with `raw`'s resolved ones while declarations change
     // (`begin_declaration_changes`).
+    #[serde(skip)]
     raw_active: bool,
     // The names declarations changed under since the finishing passes
     // last ran, once they have.
+    #[serde(skip)]
     changed: ChangedNames,
     // Whether PHPStan's own source is merged in with the built-in stubs
     // (`Project::sync_phpstan_stubs`).
     pub(crate) phpstan_stubs_loaded: bool,
     // Which classes and functions the finishing passes resolve.
+    #[serde(skip)]
     scope: scope::Scope,
     // The PHP versions the project runs on: exactly the configured
     // `php_version`, else the range its composer.json declares. `None`
     // means neither says, and every version-gated rule stays silent. See
     // `types::php_version::PhpFeature` for the feature table.
+    #[serde(skip)]
     pub php_versions: Option<types::PhpVersions>,
     // Class names with at least one *unconditional* declaration indexed
     // so far - lets `insert_built_decl` tell "this name's entry is

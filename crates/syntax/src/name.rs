@@ -151,6 +151,21 @@ impl fmt::Display for Name {
     }
 }
 
+/// A name serializes as its text, and deserializes into the global
+/// interner.
+impl serde::Serialize for Name {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(&self.0.text)
+    }
+}
+
+impl<'de> serde::Deserialize<'de> for Name {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Name, D::Error> {
+        let text = <std::borrow::Cow<'de, str>>::deserialize(deserializer)?;
+        Ok(Name::from(text))
+    }
+}
+
 impl From<&str> for Name {
     /// Interns into the global interner.
     fn from(text: &str) -> Name {

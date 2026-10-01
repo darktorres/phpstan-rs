@@ -26,7 +26,7 @@ impl Type {
     }
 }
 
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 enum Position {
     Parameter,
     Return,

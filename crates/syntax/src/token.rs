@@ -8,7 +8,9 @@ use crate::php_string::PhpString;
 /// (string literals with em-dashes/curly quotes/accented characters), and
 /// a byte-offset column would silently overshoot the true character
 /// position on every such line.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Hash, Default, serde::Serialize, serde::Deserialize,
+)]
 #[cfg_attr(feature = "fuzzing", derive(arbitrary::Arbitrary))]
 pub struct Position {
     pub line: u32,
@@ -21,7 +23,9 @@ pub struct Position {
 /// `Hash`: `Locals`'s own declaration-provenance tracking uses a `Span`
 /// as a `HashSet` element, one entry per candidate declaration site for
 /// a variable.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Hash, Default, serde::Serialize, serde::Deserialize,
+)]
 #[cfg_attr(feature = "fuzzing", derive(arbitrary::Arbitrary))]
 pub struct Span {
     pub start: Position,
