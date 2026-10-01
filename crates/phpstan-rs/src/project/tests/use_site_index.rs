@@ -1,9 +1,10 @@
 //! `Project::use_sites()`'s two-tier index: Tier 1 (class/function
 //! reference sites) - eager, syntactic - and Tier 2 (member reference
 //! sites) - lazy, checker-driven, built once by `ensure_member_index_
-//! built`. Tier 1 is populated whenever `retain_source` is on (the LSP;
-//! real, precise per-identifier spans via `use_sites::
-//! index_class_fn_refs`) OR `check_dead_code` is on (a batch
+//! built`. Tier 1 is populated when `retain_source` is on (the LSP; real,
+//! precise per-identifier spans via `use_sites::index_class_fn_refs`) at
+//! that same first `ensure_member_index_built`, and as files load once it
+//! has, OR `check_dead_code` is on (a batch
 //! `check-project` run with no retained source, via `index_class_fn_
 //! refs_without_source` - real references still, just scoped to a less
 //! narrow AST-node span - see that function's own doc comment); with
@@ -37,6 +38,7 @@ fn class_and_function_reference_sites_are_indexed_after_finish_loading() {
         )
         .unwrap();
     project.finish_loading();
+    project.ensure_member_index_built();
 
     let refs = project
         .use_sites()
@@ -65,6 +67,7 @@ fn updating_a_file_drops_its_stale_use_sites() {
         .load_file(path.clone(), "<?php function greet(): void {}\ngreet();\n")
         .unwrap();
     project.finish_loading();
+    project.ensure_member_index_built();
     assert_eq!(
         project
             .use_sites()
@@ -148,6 +151,7 @@ fn a_type_hint_reference_and_a_static_access_class_half_are_both_indexed() {
         )
         .unwrap();
     project.finish_loading();
+    project.ensure_member_index_built();
 
     let refs = project
         .use_sites()
@@ -172,6 +176,7 @@ fn a_self_reference_inside_its_own_class_is_not_indexed_as_a_rename_site() {
         )
         .unwrap();
     project.finish_loading();
+    project.ensure_member_index_built();
 
     let refs = project
         .use_sites()
@@ -193,6 +198,7 @@ fn parameter_default_value_reference_is_indexed() {
         )
         .unwrap();
     project.finish_loading();
+    project.ensure_member_index_built();
 
     let refs = project
         .use_sites()
@@ -214,6 +220,7 @@ fn class_constant_value_reference_is_indexed() {
         )
         .unwrap();
     project.finish_loading();
+    project.ensure_member_index_built();
 
     let refs = project
         .use_sites()
@@ -235,6 +242,7 @@ fn property_default_value_reference_is_indexed() {
         )
         .unwrap();
     project.finish_loading();
+    project.ensure_member_index_built();
 
     let refs = project
         .use_sites()
@@ -262,6 +270,7 @@ fn untyped_class_constant_value_reference_is_indexed() {
         .unwrap();
     project.finish_loading();
     project.ensure_member_index_built();
+    project.ensure_member_index_built();
 
     let refs = project.use_sites().references(&RefTarget::Member(
         "LogLevel".to_string(),
@@ -285,6 +294,7 @@ fn typed_class_constant_value_reference_is_indexed_and_not_duplicated() {
         )
         .unwrap();
     project.finish_loading();
+    project.ensure_member_index_built();
     project.ensure_member_index_built();
 
     let refs = project.use_sites().references(&RefTarget::Member(
@@ -312,6 +322,7 @@ fn parameter_default_value_member_reference_is_indexed() {
         .unwrap();
     project.finish_loading();
     project.ensure_member_index_built();
+    project.ensure_member_index_built();
 
     let refs = project.use_sites().references(&RefTarget::Member(
         "SomeClass".to_string(),
@@ -331,6 +342,7 @@ fn property_default_value_member_reference_is_indexed() {
         .unwrap();
     project.finish_loading();
     project.ensure_member_index_built();
+    project.ensure_member_index_built();
 
     let refs = project
         .use_sites()
@@ -348,6 +360,7 @@ fn member_reference_index_is_not_built_until_first_requested() {
         )
         .unwrap();
     project.finish_loading();
+    project.ensure_member_index_built();
 
     let target = RefTarget::Member("Bar".to_string(), "BAZ".to_string());
     assert_eq!(
@@ -361,4 +374,26 @@ fn member_reference_index_is_not_built_until_first_requested() {
         1,
         "expected the reference to appear once the index is actually built"
     );
+}
+
+#[test]
+fn nothing_is_indexed_as_files_load_with_retained_source_until_a_request_needs_it() {
+    let mut project = project_with_retained_source();
+    let path = PathBuf::from("a.php");
+    project
+        .load_file(path.clone(), "<?php function greet(): void {}\ngreet();\n")
+        .unwrap();
+    project.finish_loading();
+    let greet = RefTarget::Function("greet".to_string());
+    assert!(project.use_sites().references(&greet).is_empty());
+
+    project.ensure_member_index_built();
+    assert_eq!(project.use_sites().references(&greet).len(), 1);
+
+    // Files loaded after that are indexed as they load.
+    project
+        .load_file(PathBuf::from("b.php"), "<?php greet();\n")
+        .unwrap();
+    project.finish_loading();
+    assert_eq!(project.use_sites().references(&greet).len(), 2);
 }

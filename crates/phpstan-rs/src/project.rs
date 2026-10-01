@@ -167,8 +167,9 @@ pub struct Project {
     // `textDocument/references`/`textDocument/rename`'s own whole-project
     // use-site index - see `use_sites`'s own module doc comment for the
     // two-tier split. Tier 1 (class/function references) is indexed
-    // eagerly here whenever `retain_source` is on (the LSP; real, narrow
-    // per-identifier spans) or `check_dead_code` is on (a batch
+    // when `retain_source` is on (the LSP; real, narrow per-identifier
+    // spans) at the first `ensure_member_index_built`, or eagerly as files
+    // load when `check_dead_code` is on (a batch
     // `check-project` run with no retained source; real but less
     // narrowly-scoped AST-node spans instead - see `use_sites::
     // index_class_fn_refs_without_source`'s own doc comment) - NOT
@@ -799,7 +800,14 @@ impl Project {
     /// off, the default, pays nothing extra here at all.
     fn class_fn_refs_of(&self, ast: &[Stmt], source: &str) -> Vec<(Span, use_sites::RefTarget)> {
         if self.retain_source {
-            use_sites::index_class_fn_refs(ast, source)
+            // Until the first request that reads the index
+            // (`ensure_member_index_built`), a loaded workspace pays
+            // nothing for it.
+            if self.member_index_built {
+                use_sites::index_class_fn_refs(ast, source)
+            } else {
+                Vec::new()
+            }
         } else if self.settings.rules.check_dead_code {
             use_sites::index_class_fn_refs_without_source(ast)
         } else {
@@ -1222,6 +1230,7 @@ impl Project {
     ) {
         self.use_sites.remove_file(path);
         if self.retain_source
+            && self.member_index_built
             && let Some(file) = self.files.get(path)
             && let Some(source) = &file.source
         {
@@ -1252,6 +1261,29 @@ impl Project {
     pub(crate) fn ensure_member_index_built(&mut self) {
         if self.member_index_built {
             return;
+        }
+        if self.retain_source {
+            // The class and function sites weren't indexed as the files
+            // loaded (`class_fn_refs_of`).
+            let indexed: Vec<(&PathBuf, Vec<(Span, use_sites::RefTarget)>)> = worker_pool()
+                .install(|| {
+                    self.files
+                        .par_iter()
+                        .filter_map(|(path, file)| {
+                            let source = file.source.as_ref()?;
+                            Some((path, use_sites::index_class_fn_refs(&file.ast, source)))
+                        })
+                        .collect()
+                });
+            let indexed: Vec<(PathBuf, Vec<(Span, use_sites::RefTarget)>)> = indexed
+                .into_iter()
+                .map(|(path, refs)| (path.clone(), refs))
+                .collect();
+            for (path, refs) in indexed {
+                for (span, target) in refs {
+                    self.use_sites.insert(&path, target, span);
+                }
+            }
         }
         let paths: Vec<PathBuf> = self.files.keys().cloned().collect();
         for path in paths {
