@@ -889,7 +889,7 @@ not run - validation was left to the end of the plan):
 | #9, #23 | - | moot after #6 / #11 |
 | #24 | - | not done: only if allocation shows up after #11/#12 (unmeasured) |
 
-Gap work after the first pass (see `BUILD_COST_LEDGER.md`):
+Gap work after the first pass (what is still open is in `BUILD_COST_LEDGER.md`):
 
 | item | commit | notes |
 |---|---|---|
