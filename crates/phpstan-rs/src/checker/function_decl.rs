@@ -97,16 +97,17 @@ impl<'a> Checker<'a> {
         // but not another) survives this, since its message genuinely
         // differs per host. This local sort exists only to bring
         // duplicates adjacent for `dedup_by` (which only removes
-        // consecutive matches).
-        self.diagnostics[start..].sort_by(|a, b| {
+        // consecutive matches). Only this trait's own diagnostics are
+        // sorted and deduplicated; what precedes `start` is left as is.
+        let mut own = self.diagnostics.split_off(start);
+        own.sort_by(|a, b| {
             (a.span.start.line, a.span.start.col, &a.message).cmp(&(
                 b.span.start.line,
                 b.span.start.col,
                 &b.message,
             ))
         });
-        self.diagnostics
-            .dedup_by(|a, b| a.span == b.span && a.message == b.message);
+        own.dedup_by(|a, b| a.span == b.span && a.message == b.message);
         // Real PHPStan's own `ConstantConditionInTraitRule` (`checker/
         // control_flow/boolean_conditions.rs`'s own doc comment on why a
         // bare call condition is folded into the ordinary if/while/
@@ -117,16 +118,16 @@ impl<'a> Checker<'a> {
         // true while another proves it false, or while another can't
         // decide it at all, suppresses it for every host.
         if has_hosts {
-            let tail = self.diagnostics.split_off(start);
-            self.diagnostics.extend(tail.into_iter().filter(|d| {
+            own.retain(|d| {
                 !is_constant_condition_family_identifier(&d.identifier)
                     || family_verdicts_by_span
                         .get(&d.span)
                         .is_some_and(|(hosts, verdicts)| {
                             hosts.len() == host_count && verdicts.len() == 1
                         })
-            }));
+            });
         }
+        self.diagnostics.extend(own);
     }
 
     /// Looks up this exact declaration's resolved signature in the
