@@ -977,12 +977,74 @@ Validation (end of plan) found and fixed:
 
 The stub cache (#6) writes `~/.cache/phpstan-rs/stub-{data,base}-<hash>.cbor`.
 
-A later profile of one fixture's run under `callgrind` (231.5 M instructions,
-113-118 ms warm) found what was left of the stored registry's load and of
-the fixture listing: every stored name decoded and interned, every entry's
-bytes copied, a map built per table, the cache's checksum a multiply per
-eight bytes, and a config tried for every fixture. The registry is now one
-file of sections its tables are read from in place (`registry/container.rs`,
-`name_table.rs`, `name_map.rs`), and the same run is 50.9 M instructions and
-26-30 ms; `STARTUP_COST_PLAN.md` has the steps, the measurements after each
-and what was decided against.
+### 12.1 Start-up of one fixture, counted in instructions
+
+A run of a few tens of milliseconds gives a sampling profile too few
+samples, so one fixture
+(`checker/narrowing/a_while_loop_excluding_iterator_aggregate_narrows_traversable_to_iterator`)
+was run under `valgrind --tool=callgrind --separate-threads=yes`, from the
+`fixtures` test binary built with the `dhat` profile and frame pointers,
+cache warm (the recipe is in `CLAUDE.md`). At `4a8d8f38` it ran 231.5 M
+instructions in 113-118 ms. `main` listed all 3,807 fixtures first (89 M),
+and only then did the test thread load the stored registry (123 M): every
+stored name decoded to a string and interned, every entry's bytes copied
+twice, a hash map built per table, the file's checksum a multiply per eight
+bytes, and a config tried for every fixture (3,985 `openat` calls, 3,060
+failing). The fixture's own analysis was under 1 M.
+
+The registry is now one file of sections (`registry/container.rs`) whose
+tables are sorted records read in place (`name_table.rs`, `name_map.rs`,
+`packed.rs`): a name is interned and an entry decoded when first asked for,
+equal entries of two tables are written once, a lookup is a bisection, and
+the file carries one CRC. The stubs load on threads of their own while the
+fixtures are listed, the listing reads each directory once and opens only
+the configs it finds, and the finishing passes look up the names in their
+scope instead of walking every stored name.
+
+| after | instructions | `main` | registry thread |
+|---|---|---|---|
+| `4a8d8f38` | 231.5 M | 89.2 M | 123.3 M |
+| the container and record tables | 123.1 M | 6.0 M | 65.1 M |
+| the stub index in sections | 83.6 M | 6.0 M | 32.8 M |
+| CRC, bounds-only validation, the declared-names view | 66.4 M | 6.0 M | 30.5 M |
+| scoped lookups in the finishing passes | 53.4 M | 6.0 M | 17.0 M |
+| the final listing changes | 50.9 M | under 3.6 M | 17.6 M |
+
+Warm, one fixture: 113-118 ms to 26-30 ms (`hyperfine -N`, alternating,
+load average about 2.4 at `nice -n 19`). Cold cache: 0.74-0.94 s to
+0.62-0.66 s. The 3,807 fixtures pass in 2.63 s on the `gate` profile, the
+lib, CLI, stub-index, scaling, LSP-exit-code and version tests pass, and
+every fixture's type output is byte-identical to the base's snapshot. The
+corpus, the runtime oracle and the determinism check were not run for this
+work.
+
+What is left on that profile: the CRC (10 M of SIMD, about 1.5 ms), the
+TOML parse of the 755 fixture configs (about 4 M), the finishing passes
+over a scope of one file, and the fixture (about 2 M). A stored base now
+iterates in lowercased name order, not hash order; no consumer's output
+moved.
+
+Decided against, with the figures a later profile can be compared with:
+
+- **A shared key array for the derived tables.** The writer stores each name
+  once and a table is sixteen bytes a name read in place, so there is
+  nothing to share, and a column design adds an indirection to every lookup.
+- **Positional reads of the cache file.** Reading the 22.7 MB file takes
+  4.3 ms and its CRC about 1.5 ms. Reading only the entries a run touches
+  would save most of the copy but needs either the whole-file check gone or
+  one per entry, and a damaged file would fail mid-run instead of being
+  rebuilt.
+- **A different codec for the entries** (non-self-describing, borrowing
+  strings). No entry decode is among the costs of a one-fixture run, so the
+  profile does not support it; a run that touches many stub classes needs
+  profiling first. No stored type uses `skip_serializing_if`, `untagged`,
+  `flatten`, `with` or `deserialize_any`, so it would not be blocked by the
+  types. A zero-copy archive such as `rkyv` was ruled out: it needs an
+  archived form of every stored type (`Type` is interned, `Name` is an
+  `Arc<str>`), which is a rewrite of the registry's API.
+- **Eager fields kept.** `global_variables` and `property_writes` are
+  decoded whole: all of `Registry::load` is 2.9 M instructions.
+- **Interning.** Every `Interner::name` call in the fixture thread came
+  from decoding stored names, and none are decoded to a string now.
+- **Per-fixture and `check-project` cost.** Not profiled; the single
+  fixture shows start-up, which the suite pays once per process.
