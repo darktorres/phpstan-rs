@@ -82,23 +82,6 @@ impl BodySource for FxHashMap<PathBuf, FileState> {
     }
 }
 
-/// The loaded files' bodies, with one file's not in the file table yet.
-struct PendingFileBodies<'a> {
-    project: &'a FxHashMap<PathBuf, FileState>,
-    path: &'a Path,
-    bodies: &'a FileBodies,
-}
-
-impl BodySource for PendingFileBodies<'_> {
-    fn body(&self, provenance: &Provenance) -> Option<&Arc<Vec<Stmt>>> {
-        if provenance.file() == Some(self.path) {
-            self.bodies.get(provenance.declaration_span())
-        } else {
-            self.project.body(provenance)
-        }
-    }
-}
-
 /// A multi-file PHP project: every loaded file's own parse tree, one
 /// registry merged across all of them (so a class in one file can extend a
 /// class declared in another), and a reverse index - `dependents[name]` is
@@ -210,15 +193,20 @@ pub struct Project {
 /// growths.
 pub const WORKER_STACK_SIZE: usize = 64 * 1024 * 1024;
 
-/// A pool of one `WORKER_STACK_SIZE` thread per core. A process builds one
-/// and runs every parallel parse and check on it.
+/// The process's pool of one `WORKER_STACK_SIZE` thread per core, which
+/// runs every parallel parse, check and registry pass - one pool, so
+/// concurrent sessions and projects share the cores rather than each
+/// starting threads of its own.
 pub fn worker_pool() -> Arc<rayon::ThreadPool> {
-    Arc::new(
-        rayon::ThreadPoolBuilder::new()
-            .stack_size(WORKER_STACK_SIZE)
-            .build()
-            .expect("failed to build the worker pool"),
-    )
+    static POOL: std::sync::LazyLock<Arc<rayon::ThreadPool>> = std::sync::LazyLock::new(|| {
+        Arc::new(
+            rayon::ThreadPoolBuilder::new()
+                .stack_size(WORKER_STACK_SIZE)
+                .build()
+                .expect("failed to build the worker pool"),
+        )
+    });
+    Arc::clone(&POOL)
 }
 
 /// The result of `Project::check_paths_isolating_panics`: successful
@@ -790,6 +778,10 @@ impl Project {
     /// Finalizes an initial batch of `load_file` calls (trait flattening).
     #[hotpath::measure]
     pub fn finish_loading(&mut self) {
+        worker_pool().install(|| self.run_finishing_passes());
+    }
+
+    fn run_finishing_passes(&mut self) {
         self.registry.canonicalize_class_name_case();
         self.registry.flatten_traits();
         self.registry.resolve_method_tags();
@@ -1137,55 +1129,8 @@ impl Project {
         // identical note: `update_file` is the LSP/incremental-edit path,
         // which has no `stub_paths` concept.
         self.duplicate_class_sites.index(&ast, path, false);
-        // A changed class's `use TraitName;` list (added, removed, or a
-        // trait's own members changed in this same file) means the whole
-        // registry's trait flattening can't be assumed still correct -
-        // re-run it. Still far cheaper than a full reload: a HashMap scan
-        // over already-parsed ClassReflection, not a re-parse of anything.
-        self.registry.canonicalize_class_name_case();
-        self.registry.flatten_traits();
-        self.registry.resolve_method_tags();
-        // `flatten_phpdoc_inheritance` consumes `lookup_ancestor_method_
-        // with_owner`/`lookup_method_with_owner` internally - see
-        // `Registry::index_and_flatten`'s own identical two-precompute-
-        // calls comment for why a single call at the very end (like
-        // `precompute_ancestor_names`) isn't enough here.
-        self.registry.precompute_member_owners();
-        // Aliases and deferred value types resolve first, so inherited
-        // PHPDoc copies an ancestor's finished types.
-        self.registry.resolve_deferred_type_imports();
-        self.registry.resolve_deferred_value_of();
-        self.registry.flatten_phpdoc_inheritance();
-        self.registry.inherit_property_hooks();
-        self.registry.apply_assertion_table();
-        // Adds more method/property names (mixin members) -
-        // `resolve_transitive_purity` right after this also consumes a
-        // lookup internally, so the member-owner maps need a second
-        // rebuild here, before it runs - neither it nor anything below
-        // it adds/removes a name, so this second rebuild is also the
-        // final, correct one for the checker's own later use.
-        self.registry.resolve_deferred_mixins();
-        self.registry.precompute_member_owners();
         let bodies = FileBodies::of(&ast);
-        self.registry.resolve_transitive_purity(&PendingFileBodies {
-            project: &self.files,
-            path,
-            bodies: &bodies,
-        });
-        self.registry.precompute_ancestor_names();
-        self.registry.resolve_constant_named_types();
-        self.registry.drop_doc_members_excluded_by_native();
-        {
-            let mut files: Vec<(&Path, &[Stmt])> = self
-                .files
-                .iter()
-                .map(|(p, f)| (p.as_path(), f.ast.as_slice()))
-                .collect();
-            files.push((path, ast.as_slice()));
-            self.registry.infer_global_variables(&files);
-        }
         register_references(&mut self.dependents, path, &references);
-
         self.files.insert(
             path.to_path_buf(),
             FileState {
@@ -1201,7 +1146,9 @@ impl Project {
                 bodies,
             },
         );
-        self.rebuild_pest_config();
+        // Any declaration the file changed can change what other classes
+        // derive from it, so the whole registry's derived state is redone.
+        self.finish_loading();
 
         let mut results = FxHashMap::default();
         for p in self.transitive_affected_files(path, changed_symbols) {
