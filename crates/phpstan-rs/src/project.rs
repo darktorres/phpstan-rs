@@ -1001,7 +1001,17 @@ impl Project {
     /// Finalizes an initial batch of `load_file` calls (trait flattening).
     #[hotpath::measure]
     pub fn finish_loading(&mut self) {
-        worker_pool().install(|| self.run_finishing_passes());
+        self.finish_declarations();
+    }
+
+    /// Settles which stubs the project has, then runs the finishing passes
+    /// on the worker pool. The stubs are settled on the calling thread: a
+    /// registry resolved once per process may have to be built first, on
+    /// the pool, which a pool thread waiting for it would starve.
+    fn finish_declarations(&mut self) -> FxHashSet<String> {
+        self.begin_declaration_changes();
+        self.sync_phpstan_stubs();
+        worker_pool().install(|| self.run_finishing_passes())
     }
 
     /// Runs the finishing passes, returning the `deps::dependency_key`s of
@@ -1009,7 +1019,6 @@ impl Project {
     /// changed (none the first time, when everything is new).
     fn run_finishing_passes(&mut self) -> FxHashSet<String> {
         self.begin_declaration_changes();
-        self.sync_phpstan_stubs();
         let (scope, body_scope, changed) = if self.registry.has_resolved_declarations() {
             let changed = self.registry.take_changed();
             let (scope, body_scope) = self.finishing_scopes(&changed);
@@ -1450,7 +1459,7 @@ impl Project {
                 bodies,
             },
         );
-        let changed = worker_pool().install(|| self.run_finishing_passes());
+        let changed = self.finish_declarations();
 
         let mut results = FxHashMap::default();
         let mut affected = self.affected_files(changed);
@@ -1529,7 +1538,7 @@ impl Project {
         let mut affected: FxHashSet<PathBuf> = paths.iter().cloned().collect();
         if any_removed {
             self.rebuild_declarations(&removed, None);
-            let changed = worker_pool().install(|| self.run_finishing_passes());
+            let changed = self.finish_declarations();
             affected.extend(self.affected_files(changed));
         }
 
