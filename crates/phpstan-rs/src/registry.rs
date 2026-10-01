@@ -92,7 +92,15 @@ pub(crate) const PASS_CHUNK: usize = 32;
 pub(crate) struct ChangedNames {
     pub(crate) classes: FxHashSet<String>,
     pub(crate) functions: FxHashSet<String>,
-    pub(crate) constants: FxHashSet<String>,
+    // With each constant's type before its first change.
+    pub(crate) constants: FxHashMap<String, Option<Type>>,
+}
+
+/// `Registry::resolved_snapshot`.
+pub(crate) struct ResolvedSnapshot {
+    classes: Vec<(String, Option<ClassReflection>)>,
+    functions: Vec<(String, Option<FunctionReflection>)>,
+    property_writes: FxHashMap<(Option<String>, String), PropertyWrites>,
 }
 
 /// `Registry::raw`.
@@ -448,9 +456,65 @@ impl Registry {
     }
 
     fn record_changed_constant(&mut self, name: &str) {
-        if self.raw.is_some() {
-            self.changed.constants.insert(name.to_string());
+        if self.raw.is_some() && !self.changed.constants.contains_key(name) {
+            let before = self.global_constants.get(name).cloned();
+            self.changed.constants.insert(name.to_string(), before);
         }
+    }
+
+    /// The resolved forms of `scope`'s classes and functions, and every
+    /// property-write verdict, for `changed_since` to compare against.
+    pub(crate) fn resolved_snapshot(&self, scope: &scope::Scope) -> ResolvedSnapshot {
+        ResolvedSnapshot {
+            classes: scope
+                .class_keys()
+                .into_iter()
+                .flatten()
+                .map(|key| (key.clone(), self.classes.get(key).cloned()))
+                .collect(),
+            functions: scope
+                .function_keys()
+                .into_iter()
+                .flatten()
+                .map(|key| (key.clone(), self.functions.get(key).cloned()))
+                .collect(),
+            property_writes: self.property_writes.clone(),
+        }
+    }
+
+    /// The `deps::dependency_key`s of the classes, functions and
+    /// constants whose resolved form differs from `before` (and, for
+    /// constants, from `changed`'s earlier types).
+    pub(crate) fn changed_since(
+        &self,
+        before: ResolvedSnapshot,
+        changed: &ChangedNames,
+    ) -> FxHashSet<String> {
+        let mut keys = FxHashSet::default();
+        for (key, old) in before.classes {
+            if self.classes.get(&key) != old.as_ref() {
+                keys.insert(key);
+            }
+        }
+        for (key, old) in before.functions {
+            if self.functions.get(&key) != old.as_ref() {
+                keys.insert(key);
+            }
+        }
+        for (name, old) in &changed.constants {
+            if self.global_constants.get(name.as_str()) != old.as_ref() {
+                keys.insert(crate::deps::dependency_key(name));
+            }
+        }
+        let decls = before
+            .property_writes
+            .keys()
+            .chain(self.property_writes.keys())
+            .filter(|key| before.property_writes.get(*key) != self.property_writes.get(*key));
+        for (class, function) in decls {
+            keys.insert(class.clone().unwrap_or_else(|| function.clone()));
+        }
+        keys
     }
 
     /// Drops what was computed lazily from the classes, for the next

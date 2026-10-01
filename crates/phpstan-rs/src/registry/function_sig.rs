@@ -23,7 +23,7 @@ pub(crate) use generics::{
 };
 pub(crate) use type_resolution::{DeclaredType, apply_implicit_nullable_default, declared_type};
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct ParameterReflection {
     pub(in crate::registry) name: Name,
     pub(in crate::registry) ty: Type,
@@ -149,7 +149,7 @@ impl ParameterReflection {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct FunctionReflection {
     pub(in crate::registry) params: Vec<ParameterReflection>,
     pub(in crate::registry) return_type: Type,

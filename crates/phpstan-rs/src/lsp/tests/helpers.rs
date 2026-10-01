@@ -414,12 +414,8 @@ pub(super) fn response_result(messages: &[Value], id: i64) -> Value {
 }
 
 /// The LAST `textDocument/publishDiagnostics` notification for `uri` in
-/// `messages` - never the first. `Project::update_file` unconditionally
-/// seeds `changed_symbols` from both a file's old and new declared names
-/// regardless of whether they actually differ, so ANY `didOpen`/
-/// `didChange` of a file already known to the project republishes every
-/// direct dependent, even ones whose diagnostics didn't change - a uri
-/// can legitimately appear in more than one `publishDiagnostics`
+/// `messages` - never the first. Every edit republishes the files it
+/// rechecks, so a uri can appear in more than one `publishDiagnostics`
 /// notification within a single test's message stream, and only the
 /// last one reflects the state under test (e.g. the version it should be
 /// stamped with).

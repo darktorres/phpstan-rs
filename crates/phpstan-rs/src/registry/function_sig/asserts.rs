@@ -47,7 +47,7 @@ pub enum AssertTarget {
     Unknown(Name),
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct AssertInfo {
     pub negated: bool,
     /// `=Type`: the target is identical to a value of `ty`.

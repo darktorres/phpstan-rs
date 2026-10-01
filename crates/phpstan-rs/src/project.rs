@@ -55,6 +55,9 @@ struct FileState {
     // Whether it declares or references a `PHPStan\` name.
     mentions_phpstan: bool,
     references: FxHashSet<String>,
+    // The names its declarations themselves mention
+    // (`deps::declaration_referenced_names`).
+    declaration_references: FxHashSet<String>,
     // Inline `@phpstan-ignore*` comments, read while the file was lexed
     // (the AST carries no comment text).
     ignores: ignore_comments::IgnoreComments,
@@ -95,23 +98,18 @@ impl BodySource for FxHashMap<PathBuf, FileState> {
 ///
 /// `load_file` is for the initial, full load of a codebase; `update_file`
 /// is the incremental path: re-parsing and re-checking only the file that
-/// changed, plus the *transitive* closure of every file that references a
-/// symbol it declares, or references a symbol declared by one of those
-/// files, and so on (see `transitive_affected_files`) - every other file's
-/// parse tree and registry entries are untouched.
-///
-/// What this does NOT do: narrow by *which* aspect of a symbol changed -
-/// any file reachable through that chain gets re-checked, even if the
-/// specific thing it uses didn't change. That's a safe over-approximation
-/// (it costs an occasional extra re-check, never a missed one) and
-/// straightforward to tighten later if the extra re-checking ever matters
-/// in practice.
+/// changed, plus the files reading a declaration whose resolved form the
+/// change altered (see `affected_files`) - every other file's parse tree
+/// and registry entries are untouched.
 pub struct Project {
     files: FxHashMap<PathBuf, FileState>,
     // What the names in this project's parsed files are interned into,
     // freed with the project.
     interner: Arc<Interner>,
     dependents: FxHashMap<String, FxHashSet<PathBuf>>,
+    // `dependents` for the names files' declarations themselves mention
+    // (`deps::declaration_referenced_names`).
+    signature_dependents: FxHashMap<String, FxHashSet<PathBuf>>,
     registry: Registry,
     sql: sql::context::SqlContext,
     // Directory-scoped Pest `$this`-binding config, rebuilt from every
@@ -366,6 +364,7 @@ impl Project {
             files: FxHashMap::default(),
             interner: Arc::new(Interner::new()),
             dependents: FxHashMap::default(),
+            signature_dependents: FxHashMap::default(),
             registry,
             sql: sql::context::SqlContext::default(),
             pest_config: PestConfig::default(),
@@ -698,6 +697,7 @@ impl Project {
             classes,
             constants,
             references,
+            declaration_references,
             ignores,
             built_decls,
             anonymous_classes,
@@ -723,6 +723,11 @@ impl Project {
         self.duplicate_fn_sites.merge(duplicate_fn_sites);
         self.duplicate_class_sites.merge(duplicate_class_sites);
         register_references(&mut self.dependents, &path, &references);
+        register_references(
+            &mut self.signature_dependents,
+            &path,
+            &declaration_references,
+        );
         let owner = self.packages.owner(&self.absolute_path(&path));
         self.files.insert(
             path,
@@ -733,6 +738,7 @@ impl Project {
                 classes,
                 constants,
                 references,
+                declaration_references,
                 ignores,
                 anonymous_classes,
                 source: self.retain_source.then_some(source),
@@ -854,7 +860,7 @@ impl Project {
             .iter()
             .chain(&functions)
             .cloned()
-            .chain(changed.constants.iter().map(|c| deps::dependency_key(c)))
+            .chain(changed.constants.keys().map(|c| deps::dependency_key(c)))
             .collect();
         let mut seen: FxHashSet<String> = FxHashSet::default();
         while let Some(key) = frontier.pop() {
@@ -899,15 +905,21 @@ impl Project {
         worker_pool().install(|| self.run_finishing_passes());
     }
 
-    fn run_finishing_passes(&mut self) {
+    /// Runs the finishing passes, returning the `deps::dependency_key`s of
+    /// the classes, functions and constants whose resolved form they
+    /// changed (none the first time, when everything is new).
+    fn run_finishing_passes(&mut self) -> FxHashSet<String> {
         self.begin_declaration_changes();
         self.sync_phpstan_stubs();
-        let scope = if self.registry.has_resolved_declarations() {
+        let (scope, changed) = if self.registry.has_resolved_declarations() {
             let changed = self.registry.take_changed();
-            self.resolution_scope(&changed)
+            (self.resolution_scope(&changed), Some(changed))
         } else {
-            Scope::all()
+            (Scope::all(), None)
         };
+        let before = changed
+            .as_ref()
+            .map(|_| self.registry.resolved_snapshot(&scope));
         self.registry
             .end_declaration_changes(&scope, !self.built_once);
         self.registry.set_scope(scope);
@@ -953,6 +965,10 @@ impl Project {
         self.registry.infer_global_variables(&files);
         self.registry.set_scope(Scope::all());
         self.rebuild_pest_config();
+        match (before, changed) {
+            (Some(before), Some(changed)) => self.registry.changed_since(before, &changed),
+            _ => FxHashSet::default(),
+        }
     }
 
     /// Re-parses one already-loaded file, patches just its own registry
@@ -964,15 +980,10 @@ impl Project {
     /// the changed file is always included, even with zero diagnostics.
     /// Unwinds `path`'s prior contributions to the shared registry/
     /// `dependents` - the same undo both `update_file` (before
-    /// re-indexing a new parse) and `remove_files` (permanently) need -
-    /// extending `changed_symbols` with every bare name it owned.
+    /// re-indexing a new parse) and `remove_files` (permanently) need.
     /// Returns what the removed file was, or `None` when `path` wasn't
     /// loaded (a no-op - both callers treat that as "nothing to undo").
-    fn unindex_file(
-        &mut self,
-        path: &Path,
-        changed_symbols: &mut FxHashSet<String>,
-    ) -> Option<UnindexedFile> {
+    fn unindex_file(&mut self, path: &Path) -> Option<UnindexedFile> {
         self.begin_declaration_changes();
         let old = self.files.remove(path)?;
         let classes: Vec<String> = old
@@ -987,10 +998,12 @@ impl Project {
             .remove_declarations(path, &old.functions);
         self.duplicate_class_sites
             .remove_declarations(path, &old.classes);
-        changed_symbols.extend(old.functions.iter().map(|s| deps::dependency_key(s)));
-        changed_symbols.extend(old.classes.iter().map(|s| deps::dependency_key(s)));
-        changed_symbols.extend(old.constants.iter().map(|s| deps::dependency_key(s)));
         unregister_references(&mut self.dependents, path, &old.references);
+        unregister_references(
+            &mut self.signature_dependents,
+            path,
+            &old.declaration_references,
+        );
         Some(UnindexedFile {
             analyzed: old.analyzed,
             functions: old.functions,
@@ -1232,14 +1245,11 @@ impl Project {
         // long as the file kept failing to parse, not just for the one
         // request that happened to race a genuinely-invalid save.
         let (ast, ignores, _) = parse_with_ignores(path, new_source.as_bytes(), &self.interner)?;
-        let mut changed_symbols: FxHashSet<String> = FxHashSet::default();
-        let previous = self.unindex_file(path, &mut changed_symbols);
+        let previous = self.unindex_file(path);
         let (functions, classes) = declared_names(&ast);
         let constants = declared_constants(&ast);
         let references = deps::referenced_names(&ast);
-        changed_symbols.extend(functions.iter().map(|s| deps::dependency_key(s)));
-        changed_symbols.extend(classes.iter().map(|s| deps::dependency_key(s)));
-        changed_symbols.extend(constants.iter().map(|s| deps::dependency_key(s)));
+        let declaration_references = deps::declaration_referenced_names(&ast);
 
         // A file `update_file` has already seen keeps its own recorded
         // `analyzed` flag (an edit doesn't change what kind of file it
@@ -1279,6 +1289,11 @@ impl Project {
         self.duplicate_class_sites.index(&ast, path, false);
         let bodies = FileBodies::of(&ast);
         register_references(&mut self.dependents, path, &references);
+        register_references(
+            &mut self.signature_dependents,
+            path,
+            &declaration_references,
+        );
         self.files.insert(
             path.to_path_buf(),
             FileState {
@@ -1288,6 +1303,7 @@ impl Project {
                 classes,
                 constants,
                 references,
+                declaration_references,
                 ignores,
                 anonymous_classes,
                 source: self.retain_source.then(|| new_source.to_string()),
@@ -1296,12 +1312,12 @@ impl Project {
                 bodies,
             },
         );
-        // Any declaration the file changed can change what other classes
-        // derive from it, so the whole registry's derived state is redone.
-        self.finish_loading();
+        let changed = worker_pool().install(|| self.run_finishing_passes());
 
         let mut results = FxHashMap::default();
-        for p in self.transitive_affected_files(path, changed_symbols) {
+        let mut affected = self.affected_files(changed);
+        affected.insert(path.to_path_buf());
+        for p in affected {
             if should_abort() {
                 break;
             }
@@ -1320,11 +1336,9 @@ impl Project {
     /// Unwinds `path`'s prior contributions to the shared registry/
     /// `dependents` - the same undo `update_file` performs before
     /// re-indexing a new parse - but with no re-index step afterward:
-    /// `path` is gone, not changed. Reruns `update_file`'s own
-    /// finishing-pass sequence, then re-checks the transitive closure of
-    /// files that referenced any declaration `path` used to own, via the
-    /// same `transitive_affected_files` + `check_file` pipeline
-    /// `update_file` already uses.
+    /// `path` is gone, not changed. Reruns the finishing passes, then
+    /// re-checks the files reading a declaration they changed or removed
+    /// (`affected_files`), as `update_file` does.
     ///
     /// The finishing passes start again from every remaining class's
     /// declaration as built, so nothing the removed files contributed
@@ -1332,9 +1346,7 @@ impl Project {
     /// inherited PHPDoc); a class still naming a removed one directly
     /// (`extends Base`) reads as it would with `Base` never loaded.
     ///
-    /// `path` itself is always a key in the returned map
-    /// (`transitive_affected_files` unconditionally seeds `affected` with
-    /// it), with an empty `Vec` when `path` was never loaded in the first
+    /// `path` itself is always a key in the returned map, with an empty `Vec` when `path` was never loaded in the first
     /// place - a harmless no-op a caller doesn't need to guard with a
     /// prior loaded-state check, and exactly the empty
     /// `publishDiagnostics` payload needed to clear whatever the editor
@@ -1356,11 +1368,10 @@ impl Project {
     /// loaded - but the recompute/BFS itself is skipped entirely in that
     /// case, since there is nothing for it to discover.
     pub fn remove_files(&mut self, paths: &[PathBuf]) -> FxHashMap<PathBuf, Vec<Diagnostic>> {
-        let mut changed_symbols: FxHashSet<String> = FxHashSet::default();
         let mut removed = DeclaredNames::default();
         let mut any_removed = false;
         for path in paths {
-            if let Some(file) = self.unindex_file(path, &mut changed_symbols) {
+            if let Some(file) = self.unindex_file(path) {
                 removed.functions.extend(file.functions);
                 removed.classes.extend(file.classes);
                 removed.constants.extend(file.constants);
@@ -1370,8 +1381,8 @@ impl Project {
         let mut affected: FxHashSet<PathBuf> = paths.iter().cloned().collect();
         if any_removed {
             self.rebuild_declarations(&removed, None);
-            self.finish_loading();
-            affected.extend(self.transitive_affected_files_from(changed_symbols));
+            let changed = worker_pool().install(|| self.run_finishing_passes());
+            affected.extend(self.affected_files(changed));
         }
 
         affected
@@ -1389,72 +1400,42 @@ impl Project {
             .collect()
     }
 
-    /// The full, transitive closure of files that need re-checking after
-    /// `changed_file`'s declared symbols became `seed_symbols` (its own
-    /// old+new declared names) - not just the files that directly
-    /// reference one of those symbols, but the fixed point of "declares ->
-    /// is referenced by -> declares -> is referenced by -> ...".
-    ///
-    /// This is what makes invalidation correct across inheritance chains:
-    /// if file A references class B (`function f(B $b) { ... $b->x ... }`)
-    /// and B `extends` class C declared in a third file, a change to C's
-    /// shape can change what A's use of `$b->x` type-checks to, even
-    /// though A's own source never mentions C by name. A one-hop lookup
-    /// from C's dependents would find B but stop there and miss A; this
-    /// keeps expanding the frontier through every newly-affected file's
-    /// own declarations until nothing new turns up.
-    fn transitive_affected_files(
-        &self,
-        changed_file: &Path,
-        seed_symbols: FxHashSet<String>,
-    ) -> FxHashSet<PathBuf> {
-        let mut affected = self.transitive_affected_files_from(seed_symbols);
-        affected.insert(changed_file.to_path_buf());
-        affected
-    }
-
-    /// The pure BFS core of `transitive_affected_files`, without that
-    /// method's own anchor-file insertion - for a caller with no single
-    /// surviving "the file that changed" to seed with (`remove_files`'s
-    /// batch of files that no longer exist to check).
-    fn transitive_affected_files_from(
-        &self,
-        seed_symbols: FxHashSet<String>,
-    ) -> FxHashSet<PathBuf> {
+    /// The files to recheck once the classes, functions and constants
+    /// `changed` names (`deps::dependency_key`s) took a new resolved form:
+    /// every file referencing one of them, or a declaration whose own
+    /// signature, hierarchy or PHPDoc mentions one of them, transitively.
+    /// A declaration taking its shape from a changed one is itself among
+    /// `changed` when its resolved form changed; the signature closure
+    /// reaches the files that read a changed declaration only through
+    /// another's types (`f(A $a) { $a->b()->c(); }` where `A::b()`
+    /// returns the changed `B`).
+    fn affected_files(&self, changed: FxHashSet<String>) -> FxHashSet<PathBuf> {
         let mut affected = FxHashSet::default();
-
-        let mut seen_symbols = FxHashSet::default();
-        let mut frontier: Vec<String> = Vec::new();
-        for symbol in seed_symbols {
-            if seen_symbols.insert(symbol.clone()) {
-                frontier.push(symbol);
-            }
-        }
-
-        while let Some(symbol) = frontier.pop() {
-            let Some(files) = self.dependents.get(&symbol) else {
+        let mut seen: FxHashSet<String> = FxHashSet::default();
+        let mut frontier: Vec<String> = changed.into_iter().collect();
+        while let Some(key) = frontier.pop() {
+            if !seen.insert(key.clone()) {
                 continue;
-            };
-            for file in files {
-                if !affected.insert(file.clone()) {
-                    continue;
-                }
-                // `file` is newly affected - its own effective shape may
-                // have just changed too (e.g. it `extends` the symbol that
-                // changed), so anything depending on what *it* declares
-                // needs to be considered next.
+            }
+            affected.extend(self.dependents.get(&key).into_iter().flatten().cloned());
+            for file in self.signature_dependents.get(&key).into_iter().flatten() {
                 let Some(state) = self.files.get(file) else {
                     continue;
                 };
-                for name in state.functions.iter().chain(state.classes.iter()) {
-                    let key = deps::dependency_key(name);
-                    if seen_symbols.insert(key.clone()) {
-                        frontier.push(key);
-                    }
-                }
+                frontier.extend(
+                    state
+                        .functions
+                        .iter()
+                        .chain(&state.classes)
+                        .map(|name| deps::dependency_key(name)),
+                );
             }
+            frontier.extend(
+                stubs::stub_dependents(&key)
+                    .iter()
+                    .map(|(_, name)| deps::dependency_key(name)),
+            );
         }
-
         affected
     }
 
@@ -2176,6 +2157,7 @@ pub struct ParsedFile {
     classes: Vec<String>,
     constants: Vec<String>,
     references: FxHashSet<String>,
+    declaration_references: FxHashSet<String>,
     ignores: ignore_comments::IgnoreComments,
     // This file's own declarations, already built into
     // registry-independent `ClassReflection`/`FunctionReflection`/`Type` values (see
@@ -2228,6 +2210,7 @@ pub fn parse_file(
     let (functions, classes) = declared_names(&ast);
     let constants = declared_constants(&ast);
     let references = deps::referenced_names(&ast);
+    let declaration_references = deps::declaration_referenced_names(&ast);
     let origin = Origin::File(Arc::from(path));
     let built_decls = crate::registry::build_declarations(&ast, &origin);
     let anonymous_classes = anonymous_class_names(&ast);
@@ -2243,6 +2226,7 @@ pub fn parse_file(
         classes,
         constants,
         references,
+        declaration_references,
         built_decls,
         anonymous_classes,
         duplicate_fn_sites,

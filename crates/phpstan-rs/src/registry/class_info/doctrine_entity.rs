@@ -32,7 +32,7 @@ use crate::registry::name_context::class_ref;
 
 /// One Doctrine association property (`#[ORM\ManyToOne]`/`OneToOne`/
 /// `OneToMany`/`ManyToMany`).
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct DoctrineAssociation {
     /// The target entity's fully-qualified class name.
     pub target: Name,
@@ -44,7 +44,7 @@ pub struct DoctrineAssociation {
 /// One `#[ORM\Entity]`-mapped class's metadata, keyed by property name -
 /// see this module's own doc comment for what's deliberately not modeled
 /// (entity inheritance).
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, PartialEq)]
 pub struct DoctrineEntity {
     /// The `#[ORM\Id]`-attributed property name, if this entity has
     /// exactly one (a composite identifier - more than one `#[ORM\Id]`

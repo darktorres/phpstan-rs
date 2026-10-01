@@ -19,6 +19,20 @@ pub fn referenced_names(stmts: &[Stmt]) -> FxHashSet<String> {
     let mut collector = Collector {
         names: FxHashSet::default(),
         ctx: NameContext::default(),
+        bodies: true,
+    };
+    walk_stmts(&mut collector, stmts);
+    collector.names
+}
+
+/// `referenced_names` without what only function and method bodies
+/// mention: the names a file's declarations can take their shape from
+/// (signatures, hierarchies, PHPDoc, constant values).
+pub fn declaration_referenced_names(stmts: &[Stmt]) -> FxHashSet<String> {
+    let mut collector = Collector {
+        names: FxHashSet::default(),
+        ctx: NameContext::default(),
+        bodies: false,
     };
     walk_stmts(&mut collector, stmts);
     collector.names
@@ -37,6 +51,8 @@ pub fn dependency_key(name: &str) -> String {
 struct Collector {
     names: FxHashSet<String>,
     ctx: NameContext,
+    // Whether function and method bodies are walked.
+    bodies: bool,
 }
 
 impl Collector {
@@ -105,7 +121,19 @@ impl<'ast> Visitor<'ast> for Collector {
 
     fn visit_function_decl(&mut self, function: &'ast FunctionDecl) {
         self.doc_names(function.doc_comment.as_deref());
-        walk_function_decl(self, function);
+        if self.bodies {
+            walk_function_decl(self, function);
+            return;
+        }
+        for attr in &function.attrs {
+            self.visit_attribute(attr);
+        }
+        for param in &function.params {
+            self.visit_param(param);
+        }
+        if let Some(hint) = &function.return_type {
+            self.visit_type_hint(hint);
+        }
     }
 
     fn visit_class_def(&mut self, class: &'ast ClassDef) {

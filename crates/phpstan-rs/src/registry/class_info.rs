@@ -45,7 +45,7 @@ impl PropertyReflection {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct PropertyReflection {
     pub(in crate::registry) ty: Type,
     pub(in crate::registry) is_static: bool,
@@ -268,7 +268,7 @@ impl PropertyReflection {
 // A class constant's `public`/`private`/`protected` modifier (PHP 7.1+).
 // Mirrors `PropertyReflection`'s shape, minus the property-only concerns
 // (`is_static`/`is_readonly`/`set_ty`) a constant has no equivalent of.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct ConstantReflection {
     pub(in crate::registry) ty: Type,
     pub(in crate::registry) visibility: Visibility,
@@ -335,14 +335,14 @@ impl ConstantReflection {
 
 /// A trait method's alias from a trait-use block (`use T { m as n; }`):
 /// `trait_name` resolved, `None` when the clause names no trait.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct TraitAlias {
     pub trait_name: Option<Name>,
     pub method: Name,
     pub alias: Name,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 #[allow(clippy::type_complexity)]
 pub struct ClassReflection {
     pub(in crate::registry) kind: ClassKind,
@@ -790,7 +790,7 @@ impl ClassReflection {
 }
 
 /// See `ClassReflection::type_imports`'s own doc comment.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct ResolvedTypeImport {
     // The key this class's own already-built member types reference the
     // import under (`substitute_type_aliases` matches on this exact key,

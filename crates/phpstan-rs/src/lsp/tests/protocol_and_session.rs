@@ -609,12 +609,6 @@ fn a_dependent_files_diagnostics_keep_its_own_last_known_version_not_the_editors
     let messages = run(
         &dir,
         &[
-            // Opened with content identical to what's already on disk -
-            // Project::update_file unconditionally re-seeds
-            // changed_symbols from a.php's own declared names regardless
-            // of whether they changed, so this alone already fans out an
-            // earlier, version-None publish for b.php that the final
-            // assertion below must not mistake for the one under test.
             notification(
                 "textDocument/didOpen",
                 json!({"textDocument": {"uri": a_uri, "languageId": "php", "version": 5, "text": a_src}}),
