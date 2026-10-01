@@ -39,8 +39,10 @@ fn main() {
     // and check, run on it, alongside the fixtures libtest-mimic runs in
     // parallel.
     let pool = worker_pool();
-    let listed = pool.install(|| list(&root, ""));
-    let mut trials: Vec<Trial> = pool.install(|| {
+    let trials: Vec<Trial> = pool.install(|| {
+        let mut listed = list(&root, "");
+        // Names are unique, so the order is the same however it is sorted.
+        listed.par_sort_unstable_by(|a, b| a.name.cmp(&b.name));
         listed
             .into_par_iter()
             .map(|fixture| {
@@ -52,7 +54,6 @@ fn main() {
             })
             .collect()
     });
-    trials.sort_by(|a, b| a.name().cmp(b.name()));
     libtest_mimic::run(&args, trials).exit();
 }
 
