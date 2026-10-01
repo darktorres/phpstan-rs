@@ -516,3 +516,35 @@ fn update_file_refreshes_inferred_global_variable_types() {
         Some(&types::Type::object("Other".into(), vec![]))
     );
 }
+
+#[test]
+fn an_edited_context_file_stays_context() {
+    let mut project = Project::new();
+    let path = PathBuf::from("lib/helper.php");
+    project
+        .load_file(path.clone(), "<?php function helper(): int { return 1; }")
+        .unwrap();
+    project.finish_loading();
+    assert!(!project.files[&path].analyzed);
+
+    project
+        .update_file(&path, "<?php function helper(): int { return 2; }")
+        .unwrap();
+    assert!(!project.files[&path].analyzed);
+}
+
+#[test]
+fn an_edited_analyzed_file_stays_analyzed() {
+    let mut project = Project::new();
+    let path = PathBuf::from("vendor/acme/helper.php");
+    project
+        .load_analyzed_file(path.clone(), "<?php function helper(): int { return 1; }")
+        .unwrap();
+    project.finish_loading();
+    assert!(project.files[&path].analyzed);
+
+    project
+        .update_file(&path, "<?php function helper(): int { return 2; }")
+        .unwrap();
+    assert!(project.files[&path].analyzed);
+}

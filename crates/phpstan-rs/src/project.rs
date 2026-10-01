@@ -795,12 +795,15 @@ impl Project {
     /// `dependents` - the same undo both `update_file` (before
     /// re-indexing a new parse) and `remove_files` (permanently) need -
     /// extending `changed_symbols` with every bare name it owned.
-    /// Returns whether `path` was actually loaded (a no-op, `false`
-    /// return otherwise - both callers treat that as "nothing to undo").
-    fn unindex_file(&mut self, path: &Path, changed_symbols: &mut FxHashSet<String>) -> bool {
-        let Some(old) = self.files.remove(path) else {
-            return false;
-        };
+    /// Returns the removed file's `analyzed` flag, or `None` when `path`
+    /// wasn't loaded (a no-op - both callers treat that as "nothing to
+    /// undo").
+    fn unindex_file(
+        &mut self,
+        path: &Path,
+        changed_symbols: &mut FxHashSet<String>,
+    ) -> Option<bool> {
+        let old = self.files.remove(path)?;
         let classes: Vec<String> = old
             .classes
             .iter()
@@ -816,7 +819,7 @@ impl Project {
         changed_symbols.extend(old.functions.iter().map(|s| bare_name(s).to_string()));
         changed_symbols.extend(old.classes.iter().map(|s| bare_name(s).to_string()));
         unregister_references(&mut self.dependents, path, &old.references);
-        true
+        Some(old.analyzed)
     }
 
     /// Recomputes `path`'s own Tier-1 (class/function) use-sites from its
@@ -965,7 +968,7 @@ impl Project {
         // request that happened to race a genuinely-invalid save.
         let (ast, ignores, _) = parse_with_ignores(path, new_source.as_bytes(), &self.interner)?;
         let mut changed_symbols: FxHashSet<String> = FxHashSet::default();
-        self.unindex_file(path, &mut changed_symbols);
+        let previously_analyzed = self.unindex_file(path, &mut changed_symbols);
         let (functions, classes) = declared_names(&ast);
         let references = deps::referenced_names(&ast);
         // `changed_symbols` seeds transitive_affected_files' BFS, which
@@ -995,10 +998,8 @@ impl Project {
         // same-name collision (`insert_built_decl`'s own doc comment)
         // would let an opened-but-never-discovered vendor file outright
         // overwrite a real declaration instead of merging into it.
-        let analyzed = match self.files.get(path) {
-            Some(existing) => existing.analyzed,
-            None => !path_under_excluded_dir(path, DEFAULT_SCAN_EXCLUDED_DIR_NAMES),
-        };
+        let analyzed = previously_analyzed
+            .unwrap_or_else(|| !path_under_excluded_dir(path, DEFAULT_SCAN_EXCLUDED_DIR_NAMES));
         let origin = Origin::File(Arc::from(path));
         self.registry.index(&ast, &origin, analyzed);
         let anonymous_classes = anonymous_class_names(&ast);
@@ -1161,7 +1162,7 @@ impl Project {
         let mut changed_symbols: FxHashSet<String> = FxHashSet::default();
         let mut any_removed = false;
         for path in paths {
-            any_removed |= self.unindex_file(path, &mut changed_symbols);
+            any_removed |= self.unindex_file(path, &mut changed_symbols).is_some();
         }
         let mut affected: FxHashSet<PathBuf> = paths.iter().cloned().collect();
         if any_removed {
