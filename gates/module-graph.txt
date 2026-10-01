@@ -251,7 +251,6 @@ allow project::composer_hygiene project E1
 
 allow checker checker::expr::preg_shapes E2
 allow checker::assignment checker::expr::array_ops E2
-allow checker::calls checker::expr::array_ops E2
 allow checker::expr checker::date_interval E2
 allow checker::expr checker::date_time E2
 allow checker::expr checker::expr::array_ops E2
@@ -260,14 +259,11 @@ allow checker::expr checker::expr::preg_shapes E2
 allow checker::expr checker::throws::dynamic E2
 allow checker::expr checker::xml_name E2
 allow checker::expr checker::xml_wellformedness E2
-allow checker::expr regex_groups E2
 allow checker::expr::member_resolution checker::expr::array_ops E2
 allow checker::expr::member_resolution checker::expr::builtin_calls E2
 allow checker::narrowing checker::expr::array_ops E2
 allow checker::narrowing checker::expr::preg_shapes E2
 allow checker::narrowing regex_groups E2
-allow checker::stmt checker::expr::array_ops E2
-allow checker::var_tag_types checker::expr::array_ops E2
 
 allow checker checker::includes E3a
 allow checker checker::keywords E3a
@@ -315,7 +311,6 @@ allow checker::stmt checker::by_ref_params E3d
 
 allow checker checker::duplicates E3e
 allow checker checker::function_like_declarations E3e
-allow checker checker::generics::ancestors E3e
 allow checker checker::generics::bounds E3e
 allow checker checker::generics::variance E3e
 allow checker checker::missing_typehint E3e
@@ -473,3 +468,13 @@ allow lsp app F1
 allow lsp ext F1
 allow lsp ext::disallowed_calls F1
 allow lsp ext::sql F1
+allow checker checker::throws::dynamic E2
+allow checker::control_flow project F1
+allow checker::expr checker::property_type_too_wide E1
+allow checker::expr::probe_checks checker::operators E3b
+allow checker::function_decl checker::phpdoc_unresolvable E3e
+allow checker::narrowing checker::operators E3b
+allow checker::stmt checker::property_type_too_wide E1
+allow checker::uninitialized_dataflow project F1
+allow project checker::property_type_too_wide E1
+allow registry project F1
