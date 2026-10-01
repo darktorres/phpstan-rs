@@ -33,11 +33,32 @@ gates had been failing before it - the test manifest, the fuzz crate,
 the same four failures, so merging brings these fixes along. Not run here:
 the `--full` tier's feature matrix, `machete` and the performance gate.
 
-## Follow-ups, each a few percent at most
+## Investigated and declined
 
-- Parallelize the sequential insert of loaded files, mainly
-  `register_references` (about 5% of the Piwigo run).
-- Left under the last profile, each under 3% of a run: name interning,
-  `Name::lower`, the purity walks.
-- Fused finishing passes and a patched rayon sleep threshold: the data shows
-  spinning is a small share, so only if a profile ever points there.
+Each was measured from the profiles of the Piwigo corpus run (8 threads, 4.6 s
+at the end of this work), so a later profile can be compared with them.
+
+- **Parallelize the sequential insert of loaded files.** It is a 0.5 s serial
+  stretch (11% of the run) after the files are parsed: `register_references`
+  30% of it, `closure_scope` 19%, the load of the registry with PHPStan's
+  source 12%, `insert_built_decl` 8%, `PackageIndex::owner` 6%. Only a large
+  first load pays it, never an edit. Overlapping it with the parse means
+  inserting files as they finish parsing, which conflicts with choosing the
+  registry before the first insertion (it needs every file's mention of
+  PHPStan; a textual scan would do) and moves the borrow of the project
+  between the parse tasks and the inserting loop. Worth about 0.4 s of 4.6 s
+  on a corpus of fourteen thousand files; revisit if load time on such
+  corpora matters.
+- **Name interning and `Name::lower`.** `Interner::name` is 4.75% inclusive and
+  about 80 ns a call (a hash, a shard lock, a weak-pointer upgrade);
+  `Name::lower` is a cached field read behind two pointers, and its 1.5-4.8%
+  is the memory latency of that indirection on the hottest lookup path, which
+  a cached hash can't remove because a table is looked up by `&str`.
+- **The purity walks.** `resolve_transitive_purity` is 2.8% of the corpus run;
+  its classification is parallel since the serial-stretch work, what is left
+  are two fixed-point loops over declarations.
+- **Fused finishing passes, a patched rayon sleep threshold.** The scheduler
+  is 6.4% of the corpus profile, 5.3% of it the kernel's `finish_task_switch`
+  (threads waking after file reads, locks and parking); rayon's own spinning
+  and stealing is under 0.1%. A one-file run takes the same on 1 thread and on
+  8 (47.4 and 47.0 ms), so the pool's size is not worth tuning either.
