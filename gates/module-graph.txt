@@ -66,7 +66,7 @@ module app app
 module baseline project
 module ignore_errors project
 module ignore_comments project
-module deps project
+module deps reflection
 module rules_settings rules
 module php_date_parser builtins
 module regex_groups builtins
@@ -436,6 +436,8 @@ allow checker::restricted_symbol_usage ignore_errors F1
 allow lsp banned F1
 allow lsp @sql F1
 allow project architecture F1
+allow checker project F1
+allow rule project F1
 allow project banned F1
 allow project parent_calls F1
 allow project pest_config F1
