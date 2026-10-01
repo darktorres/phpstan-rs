@@ -39,7 +39,9 @@ fn path(name: &str) -> Option<PathBuf> {
 }
 
 fn checksum(body: &[u8]) -> [u8; 8] {
-    let mut hasher = std::hash::DefaultHasher::new();
+    // Not for security, only to tell a damaged file from a whole one: a
+    // hasher that takes eight bytes at a time, as the file is megabytes.
+    let mut hasher = rustc_hash::FxHasher::default();
     hasher.write(body);
     hasher.finish().to_le_bytes()
 }
