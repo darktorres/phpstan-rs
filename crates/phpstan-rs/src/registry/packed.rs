@@ -45,23 +45,27 @@ impl Records {
             return Err(format!("{section}'s offsets are cut in the middle of one"));
         }
         // The last offset must end the data, or a record could point past
-        // it; that every offset follows the one before is only checked in
-        // a debug build, as the file's checksum holds.
+        // it. That every offset follows the one before is checked by the
+        // tests of what is stored (`check_order`), not on every load.
         let count = records.offsets.len() / 4;
         if count > 0 && records.offset(count - 1) != records.data.len() {
             return Err(format!("{section}'s last record doesn't end its data"));
         }
-        if cfg!(debug_assertions) {
-            let mut before = 0;
-            for position in 0..count {
-                let offset = records.offset(position);
-                if offset < before {
-                    return Err(format!("{section}'s offset {position} is out of order"));
-                }
-                before = offset;
-            }
-        }
         Ok(records)
+    }
+
+    /// Whether every offset follows the one before it.
+    #[cfg(test)]
+    pub(super) fn check_order(&self, section: &str) -> Result<(), String> {
+        let mut before = 0;
+        for position in 0..self.offsets.len() / 4 {
+            let offset = self.offset(position);
+            if offset < before {
+                return Err(format!("{section}'s offset {position} is out of order"));
+            }
+            before = offset;
+        }
+        Ok(())
     }
 }
 
@@ -113,6 +117,19 @@ impl Packed {
 
     pub(super) fn load(reader: &Reader, section: &str) -> Result<Packed, String> {
         Ok(Packed(Records::load(reader, section)?))
+    }
+
+    /// Whether the offsets hold together and the keys are in strictly
+    /// increasing order, which `get` relies on.
+    #[cfg(test)]
+    pub(super) fn check_order(&self, section: &str) -> Result<(), String> {
+        self.0.check_order(section)?;
+        for position in 1..self.0.len() {
+            if self.key(position - 1) >= self.key(position) {
+                return Err(format!("{section}'s keys are not in order at {position}"));
+            }
+        }
+        Ok(())
     }
 
     fn key(&self, position: usize) -> &[u8] {
@@ -214,9 +231,8 @@ mod tests {
         }
     }
 
-    #[cfg(debug_assertions)]
     #[test]
-    fn offsets_that_do_not_hold_together_do_not_load() {
+    fn offsets_that_do_not_hold_together_fail_the_order_check() {
         let mut writer = Writer::new();
         writer
             .section(
@@ -232,6 +248,7 @@ mod tests {
             Ok(reader) => reader,
             Err(_) => panic!("a written file reads"),
         };
-        assert!(Records::load(&reader, "p").is_err());
+        let records = Records::load(&reader, "p").expect("the last offset ends the data");
+        assert!(records.check_order("p").is_err());
     }
 }

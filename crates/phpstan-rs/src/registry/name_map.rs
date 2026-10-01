@@ -268,6 +268,16 @@ impl Stored for NameSet {
     }
 }
 
+#[cfg(test)]
+impl<V> NameMap<V> {
+    /// `Base::check_order` of the map's base.
+    pub(super) fn check_order(&self, section: &str) -> Result<(), String> {
+        self.base
+            .as_ref()
+            .map_or(Ok(()), |base| base.check_order(section))
+    }
+}
+
 /// A set of names as written, over the same base as `NameMap`.
 #[derive(Debug, Clone, Default)]
 pub struct NameSet(NameMap<()>);
@@ -309,6 +319,11 @@ impl NameSet {
 
     pub(super) fn load(reader: &Reader, section: &str) -> Result<NameSet, String> {
         Ok(NameSet(NameMap::load(reader, section)?))
+    }
+
+    #[cfg(test)]
+    pub(super) fn check_order(&self, section: &str) -> Result<(), String> {
+        self.0.check_order(section)
     }
 }
 

@@ -10,7 +10,28 @@ fn read_back() -> StubIndex {
         Ok(reader) => reader,
         Err(_) => panic!("a stored index is a whole file"),
     };
-    StubIndex::load(&reader).expect("reads back")
+    let index = StubIndex::load(&reader).expect("reads back");
+    for (section, packed) in [
+        ("dependents", &index.dependents),
+        ("function_extensions", &index.function_extensions),
+        ("class_extensions", &index.class_extensions),
+        ("class_names", &index.class_names),
+        ("function_names", &index.function_names),
+        ("constant_names", &index.constant_names),
+    ] {
+        packed.check_order(section).expect("its keys are in order");
+    }
+    for (section, records) in [
+        ("declared_by_file", &index.declared_by_file),
+        ("phpstan_functions", &index.phpstan_functions),
+        ("phpstan_classes", &index.phpstan_classes),
+        ("phpstan_constants", &index.phpstan_constants),
+    ] {
+        records
+            .check_order(section)
+            .expect("its offsets are in order");
+    }
+    index
 }
 
 fn same_records(name: &str, a: &Records, b: &Records) {

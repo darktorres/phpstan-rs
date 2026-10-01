@@ -670,7 +670,7 @@ pub(super) fn load_base<V: serde::de::DeserializeOwned>(
         return Err(format!("{section} is cut in the middle of a record"));
     }
     let keys = Keys::Stored { buffer, records };
-    validate(&keys, section, fold)?;
+    validate(&keys, section)?;
     let slots = (0..keys.len()).map(|_| Slot::default()).collect();
     Ok(Base {
         keys,
@@ -680,39 +680,61 @@ pub(super) fn load_base<V: serde::de::DeserializeOwned>(
     })
 }
 
-/// Whether the records of a stored table point inside the file. In a debug
-/// build also whether the names are text in strictly increasing order,
-/// which a lookup by bisection relies on: the file's checksum holds, so
-/// only a bug in `store_entries` could break either, and a test of every
-/// stored table is what finds one.
-fn validate(keys: &Keys, section: &str, fold: bool) -> Result<(), String> {
+/// Whether the records of a stored table point inside the file: what
+/// reading one needs. That the names are text, in strictly increasing order,
+/// which a lookup by bisection relies on, is not checked here: the file's
+/// checksum holds, so only a bug in `store_entries` could break it, and the
+/// tests of the stored registry check every table (`check_order`).
+fn validate(keys: &Keys, section: &str) -> Result<(), String> {
     let Keys::Stored { buffer, .. } = keys else {
         return Ok(());
     };
-    let mut previous: Option<&str> = None;
     for i in 0..keys.len() {
         let (name, entry) = keys.record(i);
         if name.end > buffer.len() || entry.end > buffer.len() {
             return Err(format!("{section}'s record {i} points outside the file"));
         }
-        if !cfg!(debug_assertions) {
-            continue;
-        }
-        let text = std::str::from_utf8(&buffer[name])
-            .map_err(|_| format!("{section}'s name {i} is not text"))?;
-        if let Some(before) = previous {
-            let order = if fold {
-                cmp_folded(before, &text.to_ascii_lowercase())
-            } else {
-                before.cmp(text)
-            };
-            if order != Ordering::Less {
-                return Err(format!("{section}'s names are not in order at {i}"));
-            }
-        }
-        previous = Some(text);
     }
     Ok(())
+}
+
+#[cfg(test)]
+impl<V> Base<V> {
+    /// Whether the names of a stored base are text in strictly increasing
+    /// order.
+    pub(super) fn check_order(&self, section: &str) -> Result<(), String> {
+        let Keys::Stored { buffer, .. } = &self.keys else {
+            return Ok(());
+        };
+        let mut previous: Option<&str> = None;
+        for i in 0..self.keys.len() {
+            let (name, _) = self.keys.record(i);
+            let text = std::str::from_utf8(&buffer[name])
+                .map_err(|_| format!("{section}'s name {i} is not text"))?;
+            if let Some(before) = previous {
+                let order = if self.fold {
+                    cmp_folded(before, &text.to_ascii_lowercase())
+                } else {
+                    before.cmp(text)
+                };
+                if order != Ordering::Less {
+                    return Err(format!("{section}'s names are not in order at {i}"));
+                }
+            }
+            previous = Some(text);
+        }
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+impl<V> NameTable<V> {
+    /// `Base::check_order` of the table's base.
+    pub(super) fn check_order(&self, section: &str) -> Result<(), String> {
+        self.base
+            .as_ref()
+            .map_or(Ok(()), |base| base.check_order(section))
+    }
 }
 
 /// A lazy value serializes encoded on its own.
@@ -930,9 +952,8 @@ mod tests {
         assert_eq!(names, ["Three", "Two"]);
     }
 
-    #[cfg(debug_assertions)]
     #[test]
-    fn a_table_with_unordered_names_does_not_load() {
+    fn a_table_with_unordered_names_fails_the_order_check() {
         let mut writer = Writer::new();
         let (a, b) = (writer.name("b").unwrap(), writer.name("a").unwrap());
         let entry = writer.entry(&[0]).unwrap();
@@ -947,7 +968,8 @@ mod tests {
             Ok(reader) => reader,
             Err(_) => panic!("a written file reads"),
         };
-        assert!(NameTable::<u32>::load(&reader, "t").is_err());
+        let table = NameTable::<u32>::load(&reader, "t").expect("its records are in the file");
+        assert!(table.check_order("t").is_err());
     }
 
     #[test]

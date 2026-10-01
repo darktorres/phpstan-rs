@@ -12,7 +12,9 @@ fn stored_and_read_back(registry: &Registry) -> Registry {
         Ok(reader) => reader,
         Err(_) => panic!("a stored registry is a whole file"),
     };
-    Registry::load(&reader).expect("reads back")
+    let back = Registry::load(&reader).expect("reads back");
+    back.check_stored().expect("every stored table is in order");
+    back
 }
 
 #[test]

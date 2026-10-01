@@ -128,6 +128,12 @@ macro_rules! stored_tables {
             Ok(())
         }
 
+        #[cfg(test)]
+        fn check_tables(&self) -> Result<(), String> {
+            $(self.$field.check_order(concat!("table:", stringify!($field)))?;)*
+            Ok(())
+        }
+
         fn load_tables(&mut self, reader: &container::Reader) -> Result<(), String> {
             $(self.$field = container::Stored::load(
                 reader,
@@ -632,6 +638,20 @@ impl Registry {
         let mut rest = Vec::new();
         ciborium::ser::into_writer(self, &mut rest).map_err(|e| e.to_string())?;
         writer.section(REST, &rest)
+    }
+
+    /// Whether every stored table, map and set of a registry read back is
+    /// in the order a lookup by bisection relies on. A load checks only
+    /// that its records are inside the file, so the tests of what is stored
+    /// call this on what they read back.
+    #[cfg(test)]
+    pub(crate) fn check_stored(&self) -> Result<(), String> {
+        self.check_tables()?;
+        if let Some(raw) = &self.raw {
+            raw.classes.check_order(RAW_CLASSES)?;
+            raw.functions.check_order(RAW_FUNCTIONS)?;
+        }
+        Ok(())
     }
 
     /// The registry stored under `name` for this build, if there is a
