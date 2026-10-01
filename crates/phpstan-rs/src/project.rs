@@ -48,6 +48,8 @@ use use_sites::UseSiteIndex;
 /// a full reload.
 struct FileState {
     ast: Vec<Stmt>,
+    // The source's length in bytes: what checking the file costs, roughly.
+    source_len: usize,
     functions: Vec<String>,
     classes: Vec<String>,
     // The global constants it declares (`const`, `define()`).
@@ -299,6 +301,37 @@ fn map_on_pool<T: Sync, R: Send>(
         Some(pool) => pool.install(|| items.par_iter().map(&f).collect()),
         None => items.iter().map(f).collect(),
     }
+}
+
+/// `map_on_pool`, with the costliest items started first: a file as large
+/// as the rest of a run's combined, started last, would run alone after the
+/// others are done. The results are still in `items`' order.
+fn map_on_pool_largest_first<T: Sync, R: Send>(
+    pool: Option<&rayon::ThreadPool>,
+    items: &[T],
+    cost: impl Fn(&T) -> usize,
+    f: impl Fn(&T) -> R + Sync + Send,
+) -> Vec<R> {
+    let Some(pool) = pool else {
+        return items.iter().map(f).collect();
+    };
+    let mut order: Vec<usize> = (0..items.len()).collect();
+    order.sort_by_key(|&i| std::cmp::Reverse(cost(&items[i])));
+    let done: Vec<(usize, R)> = pool.install(|| {
+        order
+            .par_iter()
+            .with_max_len(1)
+            .map(|&i| (i, f(&items[i])))
+            .collect()
+    });
+    let mut results: Vec<Option<R>> = items.iter().map(|_| None).collect();
+    for (i, result) in done {
+        results[i] = Some(result);
+    }
+    results
+        .into_iter()
+        .map(|result| result.expect("every item was mapped"))
+        .collect()
 }
 
 /// Everything a project is configured with, applied together
@@ -790,6 +823,7 @@ impl Project {
             path,
             FileState {
                 ast,
+                source_len: source.len(),
                 mentions_phpstan: mentions_phpstan(&functions, &classes, &references),
                 functions,
                 classes,
@@ -1073,6 +1107,9 @@ impl Project {
         } else {
             (Scope::all(), Scope::all(), None)
         };
+        if !body_scope.is_all() {
+            self.registry.warm(&body_scope);
+        }
         let before = changed
             .as_ref()
             .map(|_| self.registry.resolved_snapshot(&body_scope));
@@ -1492,6 +1529,7 @@ impl Project {
             path.to_path_buf(),
             FileState {
                 ast,
+                source_len: new_source.len(),
                 mentions_phpstan: mentions_phpstan(&functions, &classes, &references),
                 functions,
                 classes,
@@ -1708,13 +1746,18 @@ impl Project {
         collect_member_refs: bool,
         dump_types: bool,
     ) -> Vec<(PathBuf, CheckOutcome)> {
-        let mut checks = map_on_pool(pool, paths, |path| {
-            let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                self.run_checker(path, collect_member_refs, dump_types)
-            }))
-            .map_err(panic_message);
-            (path.clone(), outcome)
-        });
+        let mut checks = map_on_pool_largest_first(
+            pool,
+            paths,
+            |path| self.files.get(path).map_or(0, |file| file.source_len),
+            |path| {
+                let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    self.run_checker(path, collect_member_refs, dump_types)
+                }))
+                .map_err(panic_message);
+                (path.clone(), outcome)
+            },
+        );
         self.judge_property_types(&mut checks, pool);
         for (path, outcome) in &mut checks {
             if let Ok(check) = outcome {

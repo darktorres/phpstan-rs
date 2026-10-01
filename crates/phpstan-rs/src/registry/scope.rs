@@ -141,6 +141,35 @@ impl Registry {
             .collect()
     }
 
+    /// Reads the declarations of the names in `scope`, in parallel. A table
+    /// read back from the cache decodes an entry the first time it is read,
+    /// and the passes would otherwise read a scope's thousands of entries
+    /// one after another.
+    pub(crate) fn warm(&self, scope: &Scope) {
+        use rayon::prelude::*;
+        let raw = self.raw.as_deref();
+        let classes: Vec<&String> = scope.class_keys().into_iter().flatten().collect();
+        classes
+            .par_iter()
+            .with_min_len(crate::registry::PASS_CHUNK)
+            .for_each(|key| {
+                self.classes.get_with_name(key);
+                if let Some(raw) = raw {
+                    raw.classes.get_with_name(key);
+                }
+            });
+        let functions: Vec<&String> = scope.function_keys().into_iter().flatten().collect();
+        functions
+            .par_iter()
+            .with_min_len(crate::registry::PASS_CHUNK)
+            .for_each(|key| {
+                self.functions.get_with_name(key);
+                if let Some(raw) = raw {
+                    raw.functions.get_with_name(key);
+                }
+            });
+    }
+
     /// Forgets the purity of the functions and methods in `scope`, for
     /// the purity passes to settle again; their declarations are as
     /// resolved otherwise.

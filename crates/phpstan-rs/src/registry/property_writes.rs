@@ -18,6 +18,7 @@
 //! unless a parameter of it takes something through which it runs code
 //! or writes properties (`CODE_RUNNING_PARAMETER_TYPES`).
 
+use rayon::prelude::*;
 use rustc_hash::{FxHashMap, FxHashSet};
 use syntax::ast::*;
 use syntax::name::Name;
@@ -90,7 +91,6 @@ impl Registry {
                 Some(class) => !scope.has_class(class),
                 None => !scope.has_function(name),
             });
-        let mut classified: Vec<(DeclKey, Option<Classification>)> = Vec::new();
         // A shared base holds only built-in stubs, which have no body.
         let functions: Vec<(&Name, &FunctionReflection)> = if scope.is_all() {
             self.functions.own_iter().collect()
@@ -101,16 +101,6 @@ impl Registry {
                 .filter_map(|name| self.functions.get_with_name(name.lower()))
                 .collect()
         };
-        for (name, sig) in functions {
-            if sig.is_stub {
-                continue;
-            }
-            let body = bodies.body(&sig.provenance);
-            classified.push((
-                function_key(name),
-                body.and_then(|body| classify(body, None, sig, self)),
-            ));
-        }
         let classes: Vec<_> = if scope.is_all() {
             self.classes.own_iter().collect()
         } else {
@@ -120,18 +110,41 @@ impl Registry {
                 .filter_map(|name| self.classes.get_with_name(name.lower()))
                 .collect()
         };
-        for (class, info) in classes {
-            for (method, sig) in &info.methods {
-                if sig.is_stub {
-                    continue;
-                }
+        let methods: Vec<(&Name, &Name, &FunctionReflection)> = classes
+            .iter()
+            .flat_map(|(class, info)| {
+                info.methods
+                    .iter()
+                    .filter(|(_, sig)| !sig.is_stub)
+                    .map(move |(method, sig)| (*class, method, sig))
+            })
+            .collect();
+        // Each body is read on its own, so they are classified in parallel.
+        let registry: &Registry = self;
+        let mut classified: Vec<(DeclKey, Option<Classification>)> = functions
+            .par_iter()
+            .with_min_len(crate::registry::PASS_CHUNK)
+            .filter(|(_, sig)| !sig.is_stub)
+            .map(|(name, sig)| {
                 let body = bodies.body(&sig.provenance);
-                classified.push((
-                    method_key(class, method),
-                    body.and_then(|body| classify(body, Some(class), sig, self)),
-                ));
-            }
-        }
+                (
+                    function_key(name),
+                    body.and_then(|body| classify(body, None, sig, registry)),
+                )
+            })
+            .collect();
+        classified.par_extend(
+            methods
+                .par_iter()
+                .with_min_len(crate::registry::PASS_CHUNK)
+                .map(|(class, method, sig)| {
+                    let body = bodies.body(&sig.provenance);
+                    (
+                        method_key(class, method),
+                        body.and_then(|body| classify(body, Some(class), sig, registry)),
+                    )
+                }),
+        );
         self.scope = scope;
         self.property_write_classes.extend(classified);
         let classified = &self.property_write_classes;
