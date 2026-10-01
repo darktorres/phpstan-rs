@@ -18,16 +18,15 @@ that date.
 1. Finish **level 6**: recreate master's 87 commits on `master2`, one row
    at a time (`MASTER_REIMPLEMENTATION_LEDGER.md`: 86 open, 1 skipped, none
    done).
-2. Then pop back, in this order: **level 3** (the 140 open review tasks) and
-   **level 2** (the crate split from Stage C on). **Level 1** (the lanes) was
-   being carried on `master` in the meantime; what is left of it is in
-   `AB_LEDGER.md` there.
+2. Then pop back, in this order: **level 3** (the 140 open review tasks, and
+   the A/B ledger's open steps 19 and 21 on `master`), then **level 2** (the
+   crate split from Stage C on), then **level 1** (the lanes).
 
 ## The two checkouts
 
 | | branch | directory | holds |
 |---|---|---|---|
-| main | `master` | `/home/torres/projects/phpstan-rs` | the lanes' work: 87 commits `master2` lacks, `AB_LEDGER.md` |
+| main | `master` | `/home/torres/projects/phpstan-rs` | the fixes to the stage A/B review findings: 87 commits `master2` lacks, and their ledger, `AB_LEDGER.md` |
 | second | `master2` | `/home/torres/projects/phpstan-rs-master2` | the crate split, the stage reviews, the gate speed-up, the start-up and build cost work |
 
 Merge base `5d86aac1`. A rebase or a cherry-pick of master's commits onto
@@ -42,12 +41,8 @@ The main plan: phases toward PHPStan-level checking, split between two
 instances working in parallel, lane A and lane B (`ROADMAP.md` names which
 lane owns which phase). **Paused** to split the codebase into crates.
 
-- Lane work has gone on in the `master` checkout and is tracked in
-  `AB_LEDGER.md` (on `master` only), which follows the plan at
-  `~/.claude/plans/peppy-drifting-coral.md` (outside the repo).
-  At the last look: steps 1-18 and 20 done; step 19 (summary-mode tuning) and
-  step 21 (finishing the second version of the plan) open.
-  *Confirm that this plan is the lanes' work before relying on it.*
+- Where each lane stands is in `ROADMAP.md`'s own phase statuses; no other
+  file here tracks it.
 - Resume: when levels 2-6 are done. Edits `GATE_SPEED_PLAN.md` §5 lists for
   `ROADMAP.md` are recorded there.
 
@@ -75,7 +70,13 @@ Reading every commit of the stages against the code, with findings as tasks.
 | `STAGE_B_FIX_REVIEW.md` | the fixes to that review | 107 | 241 |
 | `STAGE_C_REVIEW.md` | Stage C so far | 16 | 14 |
 
-- Resume: work the open tasks in each file; tick them there.
+- `AB_LEDGER.md` (on `master` only) tracks the plan that fixes the stage A/B
+  review findings, at `~/.claude/plans/peppy-drifting-coral.md` (outside the
+  repo): the 87 commits of level 6 are that work. At the last look: steps 1-18
+  and 20 (the test pass) done; step 19 (summary-mode tuning) and step 21
+  (finishing the second version of the plan) open, 16 unticked boxes.
+- Resume: work the open tasks in each file; tick them there; finish the A/B
+  ledger's steps 19 and 21 on `master`.
 
 ### 4. Faster gates — `GATE_SPEED_PLAN.md`
 
