@@ -444,7 +444,7 @@ fn update_file_cancellable_can_be_aborted_mid_cascade_by_a_concurrent_generation
             .unwrap()
             .update_file_cancellable(
                 &PathBuf::from("base.php"),
-                "<?php function base(): int { return 2; }",
+                "<?php function base(): string { return 'x'; }",
                 should_abort,
             )
             .unwrap()
@@ -978,7 +978,7 @@ fn phpstans_own_classes_are_loaded_only_while_a_file_names_them() {
 }
 
 #[test]
-fn a_project_declaring_a_phpstan_class_keeps_its_own_declaration_over_the_stub() {
+fn a_project_declaring_a_phpstan_class_merges_its_declaration_into_the_stub() {
     let mut project = Project::new();
     project
         .load_analyzed_file(
@@ -989,7 +989,7 @@ fn a_project_declaring_a_phpstan_class_keeps_its_own_declaration_over_the_stub()
     project.finish_loading();
     let rule = &project.registry().classes["PHPStan\\Rules\\Rule"];
     assert!(rule.methods().contains_key("ownMethod"));
-    assert!(!rule.methods().contains_key("processNode"));
+    assert!(rule.methods().contains_key("processNode"));
 }
 
 /// Every `.php` file under `dir`, sorted.

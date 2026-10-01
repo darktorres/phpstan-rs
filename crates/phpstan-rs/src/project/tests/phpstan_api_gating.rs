@@ -6,7 +6,7 @@ use super::super::*;
 /// Not a normal regression test (nothing in this project's own behavior
 /// is asserted beyond "the class exists") - a documented, deliberate
 /// sanity check that PHPStan's `PHPStan\Rules\Rule` interface, as merged
-/// in unconditionally via `registry::stubs::generated_stub_classes`, really
+/// in once a loaded file names `PHPStan\` (`Project::sync_phpstan_stubs`), really
 /// does carry the `@api` tag once parsed through this project's own
 /// docblock/registry pipeline: no extra vendor-loading work is needed
 /// for this checker to see accurate `@api` state for PHPStan classes,
@@ -15,7 +15,14 @@ use super::super::*;
 /// an ordinary project file's declaration would be.
 #[test]
 fn real_phpstan_rule_interface_is_recognized_as_api_via_the_generated_stub_pipeline() {
-    let project = Project::new();
+    let mut project = Project::new();
+    project
+        .load_analyzed_file(
+            PathBuf::from("rule.php"),
+            "<?php function f(\\PHPStan\\Rules\\Rule $rule): void {}",
+        )
+        .unwrap();
+    project.finish_loading();
     let registry = project.registry();
 
     let rule = registry

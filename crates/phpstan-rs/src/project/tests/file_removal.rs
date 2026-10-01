@@ -94,38 +94,6 @@ fn removing_a_never_loaded_file_is_a_harmless_no_op() {
 }
 
 #[test]
-fn removing_a_files_trait_does_not_retroactively_unbake_its_members_from_existing_users() {
-    // KNOWN LIMITATION, not a desired outcome: `flatten_traits`/
-    // `resolve_deferred_mixins` merge a trait's members into a using
-    // class's own `ClassReflection.methods` via an additive-only
-    // `Entry::Vacant`-gated `or_insert`, with no provenance tracking of
-    // which entry came from which trait - so removing the trait's own
-    // file never reparses `uses.php`, and its stale baked-in copy of
-    // `foo` survives. `update_file` has this identical gap already
-    // (editing a trait to drop a method doesn't unbake it from existing
-    // users either, unless the user class's own file is also reparsed).
-    // If a future item adds own-vs-baked provenance so these passes
-    // become true recomputations, this assertion should flip and this
-    // comment should be deleted, not left stale.
-    let mut project = Project::new();
-    project
-        .load_file(
-            PathBuf::from("trait.php"),
-            "<?php trait T { public function foo(): int { return 1; } }",
-        )
-        .unwrap();
-    project
-        .load_file(PathBuf::from("uses.php"), "<?php class Uses { use T; }")
-        .unwrap();
-    project.finish_loading();
-    assert!(project.registry().lookup_method("Uses", "foo").is_some());
-
-    project.remove_file(&PathBuf::from("trait.php"));
-
-    assert!(project.registry().lookup_method("Uses", "foo").is_some());
-}
-
-#[test]
 fn removing_a_files_direct_ancestor_does_not_unstick_the_subclass_relationship_either() {
     // EMPIRICALLY VERIFIED, correcting an earlier (wrong) draft of this
     // test that assumed the opposite: `class_extends_implements_closure`

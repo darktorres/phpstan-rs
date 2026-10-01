@@ -486,18 +486,23 @@ impl Registry {
     /// The resolved forms of `scope`'s classes and functions, and every
     /// property-write verdict, for `changed_since` to compare against.
     pub(crate) fn resolved_snapshot(&self, scope: &scope::Scope) -> ResolvedSnapshot {
+        // While declarations change, the resolved tables sit in `raw`.
+        let (classes, functions) = match &self.raw {
+            Some(raw) if self.raw_active => (&raw.classes, &raw.functions),
+            _ => (&self.classes, &self.functions),
+        };
         ResolvedSnapshot {
             classes: scope
                 .class_keys()
                 .into_iter()
                 .flatten()
-                .map(|key| (key.clone(), self.classes.get(key).cloned()))
+                .map(|key| (key.clone(), classes.get(key).cloned()))
                 .collect(),
             functions: scope
                 .function_keys()
                 .into_iter()
                 .flatten()
-                .map(|key| (key.clone(), self.functions.get(key).cloned()))
+                .map(|key| (key.clone(), functions.get(key).cloned()))
                 .collect(),
             property_writes: self.property_writes.clone(),
         }
