@@ -976,3 +976,13 @@ Validation (end of plan) found and fixed:
 - The 5.6 fixture's `.expect` needed `no diagnostics`.
 
 The stub cache (#6) writes `~/.cache/phpstan-rs/stub-{data,base}-<hash>.cbor`.
+
+A later profile of one fixture's run under `callgrind` (231.5 M instructions,
+113-118 ms warm) found what was left of the stored registry's load and of
+the fixture listing: every stored name decoded and interned, every entry's
+bytes copied, a map built per table, the cache's checksum a multiply per
+eight bytes, and a config tried for every fixture. The registry is now one
+file of sections its tables are read from in place (`registry/container.rs`,
+`name_table.rs`, `name_map.rs`), and the same run is 50.9 M instructions and
+26-30 ms; `STARTUP_COST_PLAN.md` has the steps, the measurements after each
+and what was decided against.

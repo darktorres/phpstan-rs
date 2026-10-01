@@ -347,3 +347,98 @@ taken at `4a8d8f38`; it is run again after:
 Targets, to be replaced by measurements: `main` under 10 M, the fixture
 thread about 15 M, the worker about 2 M; about 30 M of 231 M. Anything
 that lands far from them is traced before the next step, not carried.
+
+## 5. Outcome
+
+Measured on the same fixture, with the same recipe (the `dhat` profile with
+frame pointers, a warm cache, `callgrind --separate-threads=yes`), after
+each of the steps below. Wall time is `hyperfine -N` on the same binaries,
+alternating, under a load average of about 2.4 at `nice -n 19`.
+
+| after | instructions | main | registry thread |
+|---|---|---|---|
+| base (`4a8d8f38`) | 231.5 M | 89.2 M | 123.3 M |
+| the container and record tables | 123.1 M | 6.0 M | 65.1 M |
+| the stub index in sections | 83.6 M | 6.0 M | 32.8 M |
+| CRC, bounds-only validation, the declared-names view | 66.4 M | 6.0 M | 30.5 M |
+| scoped lookups in the finishing passes | 53.4 M | 6.0 M | 17.0 M |
+| the final listing changes | 50.9 M | under 3.6 M | 17.6 M |
+
+Warm, one fixture: 113-118 ms before, 26-30 ms after (about 4 times).
+Cold cache: 0.74-0.94 s before, 0.62-0.66 s after, so the first run after
+a build does not regress. The whole fixture suite, 3,807 fixtures, passes
+and runs in 2.63 s on the `gate` profile; the lib suite (981), the CLI,
+stub-index, scaling, LSP exit code and version tests pass; the type
+output of every fixture is byte-identical to the base's snapshot
+(compared as the gate records it, in byte order of the dump names).
+
+What was done, by step, and where it differs from the text above:
+
+- **S1** `93e5d4a7`: `Project::warm_stubs()` starts the registry and the
+  stub index loading on threads of their own; `fixtures::main` calls it.
+- **S2** `216e8ef1`, `3436a023`, `fc8d6875`: one `read_dir` pass per
+  directory, listed in parallel; a config is parsed (by the plain TOML
+  parser, for `requires_feature`) only where the listing shows one, and
+  read in full only where it sets the key; the schema is built once; the
+  names are sorted before the trials are made, in parallel. `strace`
+  showed the other cost the instruction counts hid: 3,985 `openat` calls,
+  3,060 of them failing, for configs that were not there; it is now 931.
+  The listing is the same, name for name.
+- **S3a-c** `5a13c35a`: the container (`registry/container.rs`), the
+  tables as records read in place (`name_table.rs`), the declarations as
+  built stored as records pointing at the resolved entries' bytes. The
+  raw declarations needed no diff: entries are written once by content, so
+  an entry equal in both tables is one set of bytes. Iteration of a stored
+  base is in lowercased name order; no consumer's output moved (the
+  fixtures, the type dumps and the lib suite are identical).
+- **S3e, S3f** `7b183f91`: `NameMap` and `NameSet` (`name_map.rs`) over the
+  same base, exact-name: `global_constants`, `function_decl_sites`,
+  `phpstan_class_files` and the four sets. `global_variables` and
+  `property_writes` stay eager: after these steps the whole of
+  `Registry::load` is 2.9 M instructions, so there is nothing left in
+  them to save.
+- **S3g** `864607fe`: `Records` and `Packed` read their offsets and data in
+  place; the stub index is sections; PHPStan's own names are records read
+  when asked for.
+- **S3h** `739abc65`: one CRC over the file (`crc32fast`, already in the
+  lockfile; it takes 10 M instructions of SIMD, which is the largest item
+  left on the registry thread, and about 1.5 ms). Not per section: the
+  PHPStan registry is a file of its own, so a run never hashes what it
+  doesn't read. The records' bounds are checked on every load; their text
+  and order only in a debug build, as only a bug in the writer could break
+  them and the round-trip tests read every table of the real registry.
+- **S3d** (shared keys): dropped. The writer stores each name once, and a
+  table is sixteen bytes a name read in place, so there is nothing left to
+  share; a column design would add indirection to every lookup.
+- **S3i** (how the file is read): measured, kept as it is. Reading the
+  22.7 MB file takes 4.3 ms and its CRC about 1.5 ms. Positional reads of
+  the entries a run touches would save most of the copy but need either
+  the whole-file check gone or one per entry, and a damaged file would
+  then fail mid-run instead of being rebuilt. The read runs on the thread
+  S1 starts, beside the listing.
+- **S3j** (the entry codec): not done. In the final profile no entry
+  decode is among the costs of a one-fixture run, so the profile does not
+  support the change; it needs a profile of a run that touches many stub
+  classes first.
+- **S4** `739abc65`, `d12af24e`: the finishing passes read the names in
+  their scope. `canonicalize_class_name_case` asks a read-only view of the
+  table's names (`declared_names`) for the names it is given instead of
+  building a map of every class; `iter_mut_scoped` and
+  `resolve_property_writes` look up the scope's own keys instead of
+  filtering every stored name through the scope.
+- **S5**: nothing to do. Every `Interner::name` call in the fixture thread
+  came from decoding stored names, and no stored name is decoded to a
+  string now.
+- **S6**: `gates/module-graph.txt` needs no line: a module inherits its
+  parent's crate, and `cargo xtask modgraph` passes with `container` and
+  `name_map` in it. The stored-registry tests (`stub_cache_round_trip.rs`,
+  `stubs/tests/stored_index.rs`, and unit tests in `container.rs`,
+  `name_table.rs`, `name_map.rs`, `packed.rs`) compare every table, map,
+  set and record with the registry they were stored from, and cover
+  bisection in any case, changes over a stored base, a frozen table, damaged
+  and truncated files and a file of another version.
+
+What is left on the one-fixture profile (50.9 M): the CRC (10 M), the
+listing's TOML parse of the 755 configs (about 4 M) and its tasks, the
+finishing passes over a scope of one file (a few million), and the fixture
+itself (about 2 M).

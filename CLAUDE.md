@@ -56,6 +56,28 @@ perf record -o <file> -F 499 -g <dir>/fp/dhat/phpstan-rs <command>
   Fit wall = serial + parallel / threads; the serial part is what is left to
   find.
 
+## Short runs: count instructions
+
+A run of a few tens of milliseconds gives a sampling profile a few hundred
+samples and a report step that takes minutes. For those, `valgrind` is
+installed: the instruction counts are exact, and the run takes about a
+minute under it.
+
+```sh
+valgrind --tool=callgrind --callgrind-out-file=<dir>/cg.out \
+  --separate-threads=yes <dir>/fp/dhat/<binary> <command>
+callgrind_annotate --inclusive=yes --tree=none <dir>/cg.out-<thread>
+```
+
+- One output file per thread (`cg.out-01` is `main`); read the largest ones
+  first, and note which run in series (a test thread starts after `main`
+  has listed its tests) and which beside each other.
+- `--tree=calling` lists a function's callees and `--tree=caller` its
+  callers; a callee that is inlined shows only as part of its caller.
+- Instruction counts are not time: memory-bound work weighs more in wall
+  time than here, and system calls are not counted. `strace -f -c` counts
+  those.
+
 ## Workloads
 
 | what it shows | command |
