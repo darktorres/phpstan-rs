@@ -40,6 +40,7 @@
 //! classes from its own dependency, `nikic/php-doc-parser`
 //! (`PHPStan\PhpDocParser\Ast\Type\*`), not vendored here.
 
+use super::container::{Reader, Writer};
 use super::packed::{Packed, Records, RecordsBuilder};
 use syntax::name::Name;
 
@@ -875,7 +876,17 @@ pub fn builtin_stub_constants() -> Vec<(Name, Type)> {
 /// `generated_stub_constants` hold only because PHPStan's own source
 /// declares them.
 pub fn phpstan_stub_names() -> PhpstanStubNames {
-    stub_index().phpstan_names.clone()
+    let index = stub_index();
+    let names = |records: &Records| -> Vec<String> {
+        (0..records.len())
+            .map(|i| String::from_utf8_lossy(records.get(i)).into_owned())
+            .collect()
+    };
+    PhpstanStubNames {
+        functions: names(&index.phpstan_functions),
+        classes: names(&index.phpstan_classes),
+        constants: names(&index.phpstan_constants),
+    }
 }
 
 /// `phpstan_stub_names`'s result.
@@ -1031,32 +1042,132 @@ struct GeneratedStubData {
 /// What is asked of the stubs without reading their declarations, kept
 /// apart from them so that a process asking only this reads a small file
 /// rather than all of `GeneratedStubData`.
-#[derive(Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Default, serde::Serialize, serde::Deserialize)]
 struct StubIndex {
     // `deps::dependency_key` -> the stub files referencing it, as
     // positions in `declared_by_file` (four bytes each).
+    #[serde(skip)]
     dependents: Packed,
     // The classes and functions each stub file declares: a flag (1 for a
     // class), the name's length and the name, repeated.
+    #[serde(skip)]
     declared_by_file: Records,
     // Lowercased name -> the phpstorm-stubs directory (extension) that
     // declares it, as a position in `extension_names`; PHPStan's own
     // classes aren't built-ins and aren't here.
+    #[serde(skip)]
     function_extensions: Packed,
+    #[serde(skip)]
     class_extensions: Packed,
     extension_names: Vec<String>,
     #[serde(skip)]
     extensions: Vec<&'static str>,
-    phpstan_names: PhpstanStubNames,
+    // The names PHPStan's own source declares and the built-ins don't, as
+    // records of text: a function, a class and a constant list.
+    #[serde(skip)]
+    phpstan_functions: Records,
+    #[serde(skip)]
+    phpstan_classes: Records,
+    #[serde(skip)]
+    phpstan_constants: Records,
     // The names the stubs declare - classes and functions lowercased,
     // constants as written - so a name no stub declares is known without
     // reading the declarations.
+    #[serde(skip)]
     class_names: Packed,
+    #[serde(skip)]
     function_names: Packed,
+    #[serde(skip)]
     constant_names: Packed,
 }
 
+/// The sections a stored index is in, besides `rest`.
+const INDEX_PACKED: [&str; 6] = [
+    "index:dependents",
+    "index:function_extensions",
+    "index:class_extensions",
+    "index:class_names",
+    "index:function_names",
+    "index:constant_names",
+];
+const INDEX_RECORDS: [&str; 4] = [
+    "index:declared_by_file",
+    "index:phpstan_functions",
+    "index:phpstan_classes",
+    "index:phpstan_constants",
+];
+
 impl StubIndex {
+    fn store(&self, writer: &mut Writer) -> Result<(), String> {
+        let packed = [
+            &self.dependents,
+            &self.function_extensions,
+            &self.class_extensions,
+            &self.class_names,
+            &self.function_names,
+            &self.constant_names,
+        ];
+        for (map, section) in packed.into_iter().zip(INDEX_PACKED) {
+            map.store(writer, section)?;
+        }
+        let records = [
+            &self.declared_by_file,
+            &self.phpstan_functions,
+            &self.phpstan_classes,
+            &self.phpstan_constants,
+        ];
+        for (records, section) in records.into_iter().zip(INDEX_RECORDS) {
+            records.store(writer, section)?;
+        }
+        let mut rest = Vec::new();
+        ciborium::ser::into_writer(self, &mut rest).map_err(|e| e.to_string())?;
+        writer.section("index:rest", &rest)
+    }
+
+    fn load(reader: &Reader) -> Result<StubIndex, String> {
+        let rest = reader.section("index:rest")?;
+        let mut index: StubIndex = ciborium::de::from_reader_with_recursion_limit(
+            &reader.buffer()[rest],
+            crate::registry::stub_cache::RECURSION_LIMIT,
+        )
+        .map_err(|e| e.to_string())?;
+        let [a, b, c, d, e, f] = INDEX_PACKED.map(|section| Packed::load(reader, section));
+        index.dependents = a?;
+        index.function_extensions = b?;
+        index.class_extensions = c?;
+        index.class_names = d?;
+        index.function_names = e?;
+        index.constant_names = f?;
+        let [a, b, c, d] = INDEX_RECORDS.map(|section| Records::load(reader, section));
+        index.declared_by_file = a?;
+        index.phpstan_functions = b?;
+        index.phpstan_classes = c?;
+        index.phpstan_constants = d?;
+        Ok(index.resolved())
+    }
+
+    /// The index stored for this build, if there is a readable file of it.
+    fn load_cached() -> Option<StubIndex> {
+        let reader = crate::registry::load_container("stub-index")?;
+        match StubIndex::load(&reader) {
+            Ok(index) => Some(index),
+            Err(error) => {
+                debug_assert!(false, "the stored stub-index is inconsistent: {error}");
+                eprintln!(
+                    "phpstan-rs: the stored stub-index is inconsistent ({error}); building it again"
+                );
+                None
+            }
+        }
+    }
+
+    fn store_cached(&self) {
+        let mut writer = Writer::new();
+        if self.store(&mut writer).is_ok() {
+            crate::registry::store_container("stub-index", writer);
+        }
+    }
+
     /// The index with its extension names as the embedded strings they are.
     fn resolved(mut self) -> StubIndex {
         self.extensions = self
@@ -1213,7 +1324,7 @@ fn built_stub_corpus() -> &'static (StubIndex, GeneratedStubData) {
     static BUILT: std::sync::LazyLock<(StubIndex, GeneratedStubData)> =
         std::sync::LazyLock::new(|| {
             let built = build_generated_stub_data();
-            crate::registry::store_cached("stub-index", &built.0);
+            built.0.store_cached();
             crate::registry::store_cached("stub-data", &built.1);
             built
         });
@@ -1222,7 +1333,7 @@ fn built_stub_corpus() -> &'static (StubIndex, GeneratedStubData) {
 
 fn stub_index() -> &'static StubIndex {
     static INDEX: std::sync::OnceLock<&'static StubIndex> = std::sync::OnceLock::new();
-    INDEX.get_or_init(|| match crate::registry::load_cached("stub-index") {
+    INDEX.get_or_init(|| match StubIndex::load_cached() {
         Some(index) => Box::leak(Box::new(StubIndex::resolved(index))),
         None => &built_stub_corpus().0,
     })
@@ -1400,29 +1511,36 @@ fn build_generated_stub_data() -> (StubIndex, GeneratedStubData) {
         class_extensions,
         extension_names,
         extensions: Vec::new(),
-        phpstan_names: PhpstanStubNames {
-            functions: data
-                .functions
+        phpstan_functions: name_records(
+            data.functions
                 .iter()
                 .filter(|entry| entry.phpstan)
-                .map(|entry| entry.name.to_string())
-                .collect(),
-            classes: data
-                .classes
+                .map(|entry| entry.name.as_str()),
+        ),
+        phpstan_classes: name_records(
+            data.classes
                 .iter()
                 .filter(|entry| entry.phpstan)
-                .map(|entry| entry.name.to_string())
-                .collect(),
-            constants: data
-                .constants
+                .map(|entry| entry.name.as_str()),
+        ),
+        phpstan_constants: name_records(
+            data.constants
                 .iter()
                 .filter(|(name, ty)| data.builtin_constant(name) != Some(ty))
-                .map(|(name, _)| name.to_string())
-                .collect(),
-        },
+                .map(|(name, _)| name.as_str()),
+        ),
     }
     .resolved();
     (index, data)
+}
+
+/// One record for each of `names`.
+fn name_records<'a>(names: impl Iterator<Item = &'a str>) -> Records {
+    let mut records = RecordsBuilder::default();
+    for name in names {
+        records.push(name.as_bytes());
+    }
+    records.finish()
 }
 
 #[cfg(test)]

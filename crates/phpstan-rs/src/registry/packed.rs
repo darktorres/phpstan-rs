@@ -3,24 +3,59 @@
 //! stored as two buffers rather than as tens of thousands of strings and
 //! small vectors each allocated when it is read.
 
-use super::name_table::Bytes;
+use super::container::{Reader, Slice, Writer};
 
 /// Records of bytes, each found by its position.
-#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, Default)]
 pub(super) struct Records {
-    // Where each record starts in `data`, and a last entry where the last
-    // one ends.
-    offsets: Vec<u32>,
-    data: Bytes,
+    // Where each record starts in `data`, as little-endian `u32`s, and a
+    // last entry where the last one ends.
+    offsets: Slice,
+    data: Slice,
 }
 
 impl Records {
     pub(super) fn len(&self) -> usize {
-        self.offsets.len().saturating_sub(1)
+        (self.offsets.len() / 4).saturating_sub(1)
+    }
+
+    fn offset(&self, position: usize) -> usize {
+        let at = position * 4;
+        u32::from_le_bytes(self.offsets[at..at + 4].try_into().unwrap()) as usize
     }
 
     pub(super) fn get(&self, position: usize) -> &[u8] {
-        &self.data.0[self.offsets[position] as usize..self.offsets[position + 1] as usize]
+        &self.data[self.offset(position)..self.offset(position + 1)]
+    }
+
+    /// Writes the records as the sections `<section>:offsets` and
+    /// `<section>:data`.
+    pub(super) fn store(&self, writer: &mut Writer, section: &str) -> Result<(), String> {
+        writer.section(&format!("{section}:offsets"), &self.offsets)?;
+        writer.section(&format!("{section}:data"), &self.data)
+    }
+
+    /// The records `store` wrote, read in place.
+    pub(super) fn load(reader: &Reader, section: &str) -> Result<Records, String> {
+        let records = Records {
+            offsets: reader.slice(&format!("{section}:offsets"))?,
+            data: reader.slice(&format!("{section}:data"))?,
+        };
+        if !records.offsets.len().is_multiple_of(4) {
+            return Err(format!("{section}'s offsets are cut in the middle of one"));
+        }
+        let mut before = 0;
+        for position in 0..records.offsets.len() / 4 {
+            let offset = records.offset(position);
+            if offset < before || offset > records.data.len() {
+                return Err(format!("{section}'s offset {position} is out of order"));
+            }
+            before = offset;
+        }
+        if !records.offsets.is_empty() && before != records.data.len() {
+            return Err(format!("{section}'s last record doesn't end its data"));
+        }
+        Ok(records)
     }
 }
 
@@ -40,15 +75,15 @@ impl RecordsBuilder {
     pub(super) fn finish(mut self) -> Records {
         self.offsets.push(self.data.len() as u32);
         Records {
-            offsets: self.offsets,
-            data: Bytes(self.data),
+            offsets: Slice::Owned(self.offsets.iter().flat_map(|o| o.to_le_bytes()).collect()),
+            data: Slice::Owned(self.data),
         }
     }
 }
 
 /// A map from text to bytes: `Records` sorted by key, each a length, the
 /// key and the payload, searched by bisection.
-#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, Default)]
 pub(super) struct Packed(Records);
 
 impl Packed {
@@ -64,6 +99,14 @@ impl Packed {
             records.push(&record);
         }
         Packed(records.finish())
+    }
+
+    pub(super) fn store(&self, writer: &mut Writer, section: &str) -> Result<(), String> {
+        self.0.store(writer, section)
+    }
+
+    pub(super) fn load(reader: &Reader, section: &str) -> Result<Packed, String> {
+        Ok(Packed(Records::load(reader, section)?))
     }
 
     fn key(&self, position: usize) -> &[u8] {
@@ -89,6 +132,18 @@ impl Packed {
         let record = self.0.get(low);
         let length = u16::from_le_bytes([record[0], record[1]]) as usize;
         Some(&record[2 + length..])
+    }
+
+    /// How many keys the map holds.
+    #[cfg(test)]
+    pub(super) fn records_len(&self) -> usize {
+        self.0.len()
+    }
+
+    /// The key at `position`, as text.
+    #[cfg(test)]
+    pub(super) fn key_text(&self, position: usize) -> &str {
+        std::str::from_utf8(self.key(position)).expect("a key is text")
     }
 
     pub(super) fn contains(&self, key: &str) -> bool {
@@ -127,13 +182,49 @@ mod tests {
         assert_eq!(Packed::build(Vec::new()).get("a"), None);
     }
 
+    fn read_back(map: &Packed) -> Packed {
+        let mut writer = Writer::new();
+        map.store(&mut writer, "p").unwrap();
+        let reader = match Reader::new(writer.finish()) {
+            Ok(reader) => reader,
+            Err(_) => panic!("a written file reads"),
+        };
+        Packed::load(&reader, "p").unwrap()
+    }
+
     #[test]
     fn a_map_survives_being_stored() {
         let map = packed(&["one", "two", "three"]);
-        let mut stored = Vec::new();
-        ciborium::ser::into_writer(&map, &mut stored).unwrap();
-        let back: Packed = ciborium::de::from_reader(&stored[..]).unwrap();
+        let back = read_back(&map);
         assert_eq!(back.get("two"), map.get("two"));
         assert!(!back.contains("four"));
+    }
+
+    #[test]
+    fn an_empty_map_survives_being_stored() {
+        for map in [Packed::default(), Packed::build(Vec::new())] {
+            let back = read_back(&map);
+            assert!(!back.contains(""));
+        }
+    }
+
+    #[test]
+    fn offsets_that_do_not_hold_together_do_not_load() {
+        let mut writer = Writer::new();
+        writer
+            .section(
+                "p:offsets",
+                &[0u32, 5, 3]
+                    .iter()
+                    .flat_map(|o| o.to_le_bytes())
+                    .collect::<Vec<u8>>(),
+            )
+            .unwrap();
+        writer.section("p:data", &[0; 3]).unwrap();
+        let reader = match Reader::new(writer.finish()) {
+            Ok(reader) => reader,
+            Err(_) => panic!("a written file reads"),
+        };
+        assert!(Records::load(&reader, "p").is_err());
     }
 }

@@ -168,6 +168,30 @@ impl std::fmt::Debug for Buffer {
     }
 }
 
+/// Bytes either held by their owner or read in place from a file's buffer.
+#[derive(Debug, Clone)]
+pub(crate) enum Slice {
+    Owned(Vec<u8>),
+    Stored(Buffer, Range<usize>),
+}
+
+impl Default for Slice {
+    fn default() -> Self {
+        Slice::Owned(Vec::new())
+    }
+}
+
+impl std::ops::Deref for Slice {
+    type Target = [u8];
+
+    fn deref(&self) -> &[u8] {
+        match self {
+            Slice::Owned(bytes) => bytes,
+            Slice::Stored(buffer, range) => &buffer[range.clone()],
+        }
+    }
+}
+
 /// A file read: its bytes, and where its sections are.
 pub(crate) struct Reader {
     buffer: Buffer,
@@ -212,6 +236,11 @@ impl Reader {
 
     pub(super) fn has_section(&self, name: &str) -> bool {
         self.sections.contains_key(name)
+    }
+
+    /// Section `name`, read in place.
+    pub(super) fn slice(&self, name: &str) -> Result<Slice, String> {
+        Ok(Slice::Stored(self.buffer.clone(), self.section(name)?))
     }
 
     pub(super) fn buffer(&self) -> &Buffer {
