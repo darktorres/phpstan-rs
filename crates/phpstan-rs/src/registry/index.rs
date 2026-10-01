@@ -430,6 +430,7 @@ impl Registry {
             // `functions` for it to point at.
             self.unconditionally_declared_functions
                 .remove(function_key(name).as_ref());
+            self.function_decl_sites.remove(function_key(name).as_ref());
         }
         for name in classes {
             self.classes.remove(name.as_str());

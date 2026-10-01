@@ -164,10 +164,11 @@ pub struct Registry {
     // merges into a callable accepting either shape, instead of a blind
     // `self.functions.insert` discarding the first's params.
     unconditionally_declared_functions: FxHashSet<Name>,
-    // The declaration (its name's `(line, col)`) a `functions` slot was
-    // built from - `None` once two declarations merged into it. Lets the
-    // checker tell a second same-named declaration from the one the slot
-    // describes.
+    // The declaration (its name's `(line, col)`, in the file the slot's
+    // provenance names) a `functions` slot was built from - `None` once
+    // two declarations merged into it, and no entry when no declaration
+    // in a file won the slot (a built-in stub's). Lets the checker tell a
+    // second same-named declaration from the one the slot describes.
     pub(crate) function_decl_sites: FxHashMap<Name, Option<(u32, u32)>>,
     // Names `merge_stubs` provided a signature for, not yet
     // overwritten by a real, already-indexed conditional declaration -

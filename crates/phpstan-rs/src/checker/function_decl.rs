@@ -212,14 +212,24 @@ impl<'a> Checker<'a> {
     }
 
     /// `f`'s own signature when the registry's slot for its name was built
-    /// from a different declaration (or merged from several); `None` when
-    /// the slot is `f`'s.
+    /// from something else - another declaration, several merged, or a
+    /// built-in stub; `None` when the slot is `f`'s.
     fn own_declaration_sig(&self, f: &FunctionDecl) -> Option<FunctionReflection> {
-        let site = *self
+        let site = (f.name.span.start.line, f.name.span.start.col);
+        let slot_site = self
             .registry
             .function_decl_sites
-            .get(crate::registry::function_key(f.fq_name()).as_ref())?;
-        if site == Some((f.name.span.start.line, f.name.span.start.col)) {
+            .get(crate::registry::function_key(f.fq_name()).as_ref());
+        let slot_file = self
+            .registry
+            .functions
+            .get(f.fq_name())
+            .and_then(|slot| slot.provenance().file());
+        let same_file = match (self.current_file.as_deref(), slot_file) {
+            (Some(current), Some(slot)) => current == slot,
+            _ => true,
+        };
+        if slot_site == Some(&Some(site)) && same_file {
             return None;
         }
         let fresh = FunctionReflection::from_decl(
