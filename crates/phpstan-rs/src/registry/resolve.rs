@@ -66,6 +66,7 @@ impl Registry {
             .map(|(_, info)| info)
             .collect::<Vec<_>>()
             .into_par_iter()
+            .with_min_len(crate::registry::PASS_CHUNK)
             .for_each(|info| {
                 for name in info
                     .extends
@@ -142,6 +143,7 @@ impl Registry {
         let registry: &Registry = self;
         let additions: Vec<TraitAddition> = class_names
             .par_iter()
+            .with_min_len(crate::registry::PASS_CHUNK)
             .filter_map(|class_name| {
                 let uses = registry.classes[class_name].uses.clone();
                 let trait_aliases = registry.classes[class_name].trait_aliases.clone();
@@ -316,6 +318,7 @@ impl Registry {
             .map(|(_, info)| info)
             .collect::<Vec<_>>()
             .into_par_iter()
+            .with_min_len(crate::registry::PASS_CHUNK)
             .for_each(|info| {
                 for (name, sig, is_static) in std::mem::take(&mut info.method_tags) {
                     if let std::collections::hash_map::Entry::Vacant(slot) =
@@ -980,6 +983,7 @@ impl Registry {
         let registry: &Registry = self;
         let backfills: Vec<Backfill> = class_names
             .par_iter()
+            .with_min_len(crate::registry::PASS_CHUNK)
             .flat_map(|class_name| {
                 let mut per_class: Vec<Backfill> = Vec::new();
                 let Some(info) = registry.classes.get(class_name) else {
@@ -1541,6 +1545,7 @@ impl Registry {
         let functions = self.scoped_functions();
         let mut fixes: Vec<Fix> = classes
             .par_iter()
+            .with_min_len(crate::registry::PASS_CHUNK)
             .flat_map_iter(|(class, info)| {
                 info.methods
                     .iter()
@@ -1550,10 +1555,12 @@ impl Registry {
         fixes.par_extend(
             functions
                 .par_iter()
+                .with_min_len(crate::registry::PASS_CHUNK)
                 .flat_map_iter(|(name, sig)| sig_fixes(None, name, sig)),
         );
         let property_fixes: Vec<(Name, Name, Type)> = classes
             .par_iter()
+            .with_min_len(crate::registry::PASS_CHUNK)
             .flat_map_iter(|(class, info)| {
                 info.properties.iter().filter_map(|(name, prop)| {
                     if !prop.has_native_type {
@@ -1686,6 +1693,7 @@ impl Registry {
         let functions = self.scoped_functions();
         let method_fixes: Vec<(Name, Name, FunctionReflection)> = classes
             .par_iter()
+            .with_min_len(crate::registry::PASS_CHUNK)
             .flat_map_iter(|(class, info)| {
                 info.methods.iter().filter_map(|(name, sig)| {
                     let fixed = fixed_sig(registry, sig, &lookup)?;
@@ -1695,10 +1703,12 @@ impl Registry {
             .collect();
         let function_fixes: Vec<(Name, FunctionReflection)> = functions
             .par_iter()
+            .with_min_len(crate::registry::PASS_CHUNK)
             .filter_map(|(name, sig)| Some(((*name).clone(), fixed_sig(registry, sig, &lookup)?)))
             .collect();
         let property_fixes: Vec<(Name, Name, Option<Type>, Option<Type>)> = classes
             .par_iter()
+            .with_min_len(crate::registry::PASS_CHUNK)
             .flat_map_iter(|(class, info)| {
                 info.properties.iter().filter_map(|(name, prop)| {
                     let ty = lookup(registry, &prop.ty);

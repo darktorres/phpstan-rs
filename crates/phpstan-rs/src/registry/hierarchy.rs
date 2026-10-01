@@ -69,6 +69,7 @@ impl Registry {
         let registry: &Registry = self;
         let ancestor_names: Vec<_> = class_names
             .par_iter()
+            .with_min_len(crate::registry::PASS_CHUNK)
             .map(|name| {
                 (
                     name.clone(),
@@ -287,6 +288,7 @@ impl Registry {
 
         let own_by_class: Vec<_> = class_names
             .par_iter()
+            .with_min_len(crate::registry::PASS_CHUNK)
             .map(|name| {
                 let (methods, properties, consts) = registry.own_owner_names(name);
                 (name.clone(), methods, properties, consts)
@@ -319,6 +321,7 @@ impl Registry {
         let registry: &Registry = self;
         let ancestor_method_owner_by_class: Vec<(Name, FxHashMap<Name, Name>)> = class_names
             .par_iter()
+            .with_min_len(crate::registry::PASS_CHUNK)
             .map(|name| {
                 let parents = registry
                     .classes
@@ -347,6 +350,7 @@ impl Registry {
         // `implements` - mirrored here.
         let ancestor_property_owner_by_class: Vec<(Name, FxHashMap<Name, Name>)> = class_names
             .par_iter()
+            .with_min_len(crate::registry::PASS_CHUNK)
             .map(|name| {
                 let parents = registry
                     .classes

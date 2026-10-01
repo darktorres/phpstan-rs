@@ -103,6 +103,7 @@ impl Registry {
         let registry: &Registry = self;
         let function_deps: Vec<(Name, Option<Vec<PurityDependency>>)> = function_names
             .par_iter()
+            .with_min_len(crate::registry::PASS_CHUNK)
             .filter_map(|name| {
                 let sig = &registry.functions[name];
                 if !purity_gate_passes(sig, false) {
@@ -121,6 +122,7 @@ impl Registry {
         let registry: &Registry = self;
         let method_deps: Vec<(Name, Name, Option<Vec<PurityDependency>>)> = class_names
             .par_iter()
+            .with_min_len(crate::registry::PASS_CHUNK)
             .flat_map(|class_name| {
                 let method_names: Vec<Name> = registry.classes[class_name]
                     .methods

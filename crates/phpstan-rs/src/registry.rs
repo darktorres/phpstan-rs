@@ -81,6 +81,11 @@ pub(crate) fn is_phpstan_namespace(fqn: &str) -> bool {
 /// everything up front instead). `merge_stubs` layers in curated built-in
 /// signatures (`stubs.rs`) the same way php-src stubs would sit alongside
 /// project code in a real implementation.
+/// The fewest classes or functions a finishing pass hands one parallel
+/// job: a pass over fewer runs on the calling thread alone, without
+/// waking the pool, as an edit's passes mostly do.
+pub(crate) const PASS_CHUNK: usize = 32;
+
 /// `Registry::changed`: lowercased class and function names, and
 /// constant names as declared.
 #[derive(Debug, Default, Clone)]
