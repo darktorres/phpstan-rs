@@ -57,7 +57,7 @@ impl Registry {
         };
         let scope = &self.scope;
         self.classes
-            .iter_mut_where(|name| scope.has_class(name))
+            .iter_mut_scoped(scope.class_keys())
             .map(|(_, info)| info)
             .collect::<Vec<_>>()
             .into_par_iter()
@@ -309,7 +309,7 @@ impl Registry {
     pub(crate) fn resolve_method_tags(&mut self) {
         let scope = &self.scope;
         self.classes
-            .iter_mut_where(|name| scope.has_class(name))
+            .iter_mut_scoped(scope.class_keys())
             .map(|(_, info)| info)
             .collect::<Vec<_>>()
             .into_par_iter()
@@ -460,10 +460,7 @@ impl Registry {
             }
         };
         let scope = &self.scope;
-        for (_, sig) in self
-            .functions
-            .iter_mut_where(|name| scope.has_function(name))
-        {
+        for (_, sig) in self.functions.iter_mut_scoped(scope.function_keys()) {
             for param in &mut sig.params {
                 resolve(&mut param.ty, &param.ty_native, &self.classes);
                 let native = param.ty_native.clone();

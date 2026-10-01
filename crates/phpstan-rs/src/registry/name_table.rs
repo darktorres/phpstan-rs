@@ -453,31 +453,39 @@ impl<V: Clone> NameTable<V> {
 
     /// Every value with its declared name, mutably.
     pub fn iter_mut(&mut self) -> impl Iterator<Item = (&Name, &mut V)> {
-        self.iter_mut_where(|_| true)
+        self.iter_mut_scoped(None)
     }
 
-    /// The values whose declared name's text `wanted` accepts, with that
-    /// name, mutably. Names it rejects are not read as `Name`s.
-    pub fn iter_mut_where(
-        &mut self,
-        wanted: impl Fn(&str) -> bool,
-    ) -> impl Iterator<Item = (&Name, &mut V)> {
-        let from_base: Vec<String> = match &self.base {
-            Some(base) => (0..base.len())
-                .filter(|&i| {
-                    let text = base.keys.text(i);
-                    wanted(text) && !self.hidden.contains(function_key(text).as_ref())
-                })
-                .map(|i| function_key(base.keys.text(i)).into_owned())
-                .collect(),
-            None => Vec::new(),
-        };
-        for key in from_base {
-            self.own(&key);
+    /// The values of the lowercased names in `keys` (every value when
+    /// `None`) with their declared names, mutably. Only those names are
+    /// looked up: a base of many entries is not walked for a few.
+    pub fn iter_mut_scoped<'a>(
+        &'a mut self,
+        keys: Option<&'a FxHashSet<String>>,
+    ) -> impl Iterator<Item = (&'a Name, &'a mut V)> + 'a {
+        match keys {
+            Some(keys) => {
+                for key in keys {
+                    self.own(key);
+                }
+            }
+            None => {
+                let from_base: Vec<String> = match &self.base {
+                    Some(base) => (0..base.len())
+                        .map(|i| base.name(i))
+                        .filter(|name| !self.hidden.contains(name.lower()))
+                        .map(|name| name.lower().to_string())
+                        .collect(),
+                    None => Vec::new(),
+                };
+                for key in from_base {
+                    self.own(&key);
+                }
+            }
         }
         self.entries
             .iter_mut()
-            .filter(move |(name, _)| wanted(name.0.as_str()))
+            .filter(move |(name, _)| keys.is_none_or(|keys| keys.contains(name.0.lower())))
             .map(|(k, v)| (&k.0, v))
     }
 
@@ -874,6 +882,36 @@ mod tests {
         table.remove("three");
         assert_eq!(declared("six"), None);
         assert_eq!(declared("three").as_deref(), Some("Three"));
+    }
+
+    #[test]
+    fn scoped_mutation_reaches_only_the_names_asked_for() {
+        let reader = stored(&[("One", 1), ("Two", 2), ("Three", 3)]);
+        let mut table: NameTable<u32> = NameTable::load(&reader, "t").unwrap();
+        let before = table.clone();
+        let keys: FxHashSet<String> = ["one", "three", "missing"]
+            .map(String::from)
+            .into_iter()
+            .collect();
+        let touched: Vec<String> = table
+            .iter_mut_scoped(Some(&keys))
+            .map(|(name, value)| {
+                *value += 100;
+                name.to_string()
+            })
+            .collect();
+        assert_eq!(touched.len(), 2);
+        assert_eq!(table.get("one"), Some(&101));
+        assert_eq!(table.get("two"), Some(&2));
+        assert_eq!(table.get("three"), Some(&103));
+        assert_eq!(table.own_iter().count(), 2);
+        assert_eq!(table.len(), 3);
+        assert_eq!(before.get("one"), Some(&1));
+        for (_, value) in table.iter_mut_scoped(None) {
+            *value += 1;
+        }
+        assert_eq!(table.get("two"), Some(&3));
+        assert_eq!(table.own_iter().count(), 3);
     }
 
     #[test]

@@ -92,23 +92,19 @@ impl Registry {
                 None => !scope.has_function(name),
             });
         // A shared base holds only built-in stubs, which have no body.
-        let functions: Vec<(&Name, &FunctionReflection)> = if scope.is_all() {
-            self.functions.own_iter().collect()
-        } else {
-            self.functions
-                .keys()
-                .filter(|name| scope.has_function(name))
-                .filter_map(|name| self.functions.get_with_name(name.lower()))
-                .collect()
+        let functions: Vec<(&Name, &FunctionReflection)> = match scope.function_keys() {
+            Some(keys) => keys
+                .iter()
+                .filter_map(|key| self.functions.get_with_name(key))
+                .collect(),
+            None => self.functions.own_iter().collect(),
         };
-        let classes: Vec<_> = if scope.is_all() {
-            self.classes.own_iter().collect()
-        } else {
-            self.classes
-                .keys()
-                .filter(|name| scope.has_class(name))
-                .filter_map(|name| self.classes.get_with_name(name.lower()))
-                .collect()
+        let classes: Vec<_> = match scope.class_keys() {
+            Some(keys) => keys
+                .iter()
+                .filter_map(|key| self.classes.get_with_name(key))
+                .collect(),
+            None => self.classes.own_iter().collect(),
         };
         let methods: Vec<(&Name, &Name, &FunctionReflection)> = classes
             .iter()
