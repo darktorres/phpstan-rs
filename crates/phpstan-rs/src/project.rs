@@ -207,14 +207,20 @@ pub struct Project {
 /// growths.
 pub const WORKER_STACK_SIZE: usize = 64 * 1024 * 1024;
 
-/// The process's pool of one `WORKER_STACK_SIZE` thread per core, which
-/// runs every parallel parse, check and registry pass - one pool, so
-/// concurrent sessions and projects share the cores rather than each
-/// starting threads of its own.
+/// The process's pool of one `WORKER_STACK_SIZE` thread per core (or
+/// `PHPSTAN_RS_THREADS`, for a harness running many projects at once,
+/// where the cores are already busy), which runs every parallel parse,
+/// check and registry pass - one pool, so concurrent sessions and
+/// projects share the cores rather than each starting threads of its own.
 pub fn worker_pool() -> Arc<rayon::ThreadPool> {
     static POOL: std::sync::LazyLock<Arc<rayon::ThreadPool>> = std::sync::LazyLock::new(|| {
+        let threads = std::env::var("PHPSTAN_RS_THREADS")
+            .ok()
+            .and_then(|value| value.parse::<usize>().ok())
+            .unwrap_or(0);
         Arc::new(
             rayon::ThreadPoolBuilder::new()
+                .num_threads(threads)
                 .stack_size(WORKER_STACK_SIZE)
                 .build()
                 .expect("failed to build the worker pool"),
