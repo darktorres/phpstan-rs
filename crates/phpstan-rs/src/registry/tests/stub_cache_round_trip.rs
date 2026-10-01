@@ -102,3 +102,45 @@ fn a_read_back_registry_iterates_its_names_in_lowercased_order() {
         .collect();
     assert!(keys.windows(2).all(|pair| pair[0] < pair[1]));
 }
+
+#[test]
+fn the_stored_maps_and_sets_read_back_whole() {
+    let project = Project::new();
+    let registry = project.registry();
+    let back = stored_and_read_back(registry);
+
+    assert!(!registry.global_constants.is_empty());
+    assert_eq!(back.global_constants.len(), registry.global_constants.len());
+    for (name, ty) in registry.global_constants.iter() {
+        assert_eq!(back.global_constants.get(name), Some(ty), "constant {name}");
+    }
+    assert_eq!(
+        back.function_decl_sites.len(),
+        registry.function_decl_sites.len()
+    );
+    for (name, site) in registry.function_decl_sites.iter() {
+        assert_eq!(back.function_decl_sites.get(name), Some(site), "{name}");
+    }
+    assert_eq!(
+        back.phpstan_class_files.len(),
+        registry.phpstan_class_files.len()
+    );
+
+    assert!(!registry.unconditionally_declared_classes.is_empty());
+    assert!(!registry.unconditionally_declared_functions.is_empty());
+
+    macro_rules! same_set {
+        ($($field:ident),*) => {$(
+            assert_eq!(back.$field.len(), registry.$field.len(), stringify!($field));
+            for name in registry.$field.iter() {
+                assert!(back.$field.contains(name), concat!(stringify!($field), " {}"), name);
+            }
+        )*};
+    }
+    same_set!(
+        unconditionally_declared_classes,
+        unconditionally_declared_functions,
+        stub_provided_functions,
+        names_with_assert_tags
+    );
+}

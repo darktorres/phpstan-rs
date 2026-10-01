@@ -16,6 +16,7 @@ mod global_vars;
 mod hierarchy;
 mod index;
 mod name_context;
+mod name_map;
 mod name_table;
 mod packed;
 mod property_writes;
@@ -49,6 +50,7 @@ pub(crate) use function_sig::{DeclaredType, declared_type};
 pub(crate) use function_sig::{
     build_template_params, infer_const_type, mark_template_params, substitute_type_aliases,
 };
+pub use name_map::{NameMap, NameSet};
 pub(crate) use name_table::Lazy;
 pub use name_table::NameTable;
 pub type FunctionTable = NameTable<FunctionReflection>;
@@ -127,7 +129,10 @@ macro_rules! stored_tables {
         }
 
         fn load_tables(&mut self, reader: &container::Reader) -> Result<(), String> {
-            $(self.$field = NameTable::load(reader, concat!("table:", stringify!($field)))?;)*
+            $(self.$field = container::Stored::load(
+                reader,
+                concat!("table:", stringify!($field)),
+            )?;)*
             Ok(())
         }
     };
@@ -161,7 +166,8 @@ pub struct Registry {
     // (`infer_const_type`'s scope) - anything more dynamic is left
     // unindexed, the same "don't know, don't guess" leniency that
     // function already documents.
-    pub global_constants: FxHashMap<Name, Type>,
+    #[serde(skip)]
+    pub global_constants: NameMap<Type>,
     // `global $x;`-declared variable name -> inferred-type table, built by
     // folding every real assignment site to that name anywhere in the
     // corpus (`global_vars::infer_global_variables`) - the project-wide
@@ -180,7 +186,8 @@ pub struct Registry {
     // (`is_phpstan_code`, `checker/phpstan_api.rs`). Only populated for a
     // name already passing `is_phpstan_namespace`, so it stays empty for
     // any corpus with no `PHPStan\*`-namespaced code.
-    pub phpstan_class_files: FxHashMap<String, std::path::PathBuf>,
+    #[serde(skip)]
+    pub phpstan_class_files: NameMap<std::path::PathBuf>,
     // Real DB table name -> the one mapped `DoctrineEntity`'s own class
     // name (`checker::sql_reflection::resolve`'s own entity cross-
     // reference, gap #9 of the live SQL reflection phase) - lazily
@@ -230,7 +237,8 @@ pub struct Registry {
     // "this name's entry is only a conditional stub, so the first real
     // unconditional declaration should replace it outright" - both look
     // identical from `self.classes.contains_key(&name)` alone.
-    unconditionally_declared_classes: FxHashSet<Name>,
+    #[serde(skip)]
+    unconditionally_declared_classes: NameSet,
     // Names `merge_stub_classes` provided a built-in native-class stub
     // for (jetbrains/phpstorm-stubs) - a *subset* of
     // `unconditionally_declared_classes` above, distinguishing "a
@@ -251,13 +259,15 @@ pub struct Registry {
     // `array $replace_pairs` form). Needed so the second declaration
     // merges into a callable accepting either shape, instead of a blind
     // `self.functions.insert` discarding the first's params.
-    unconditionally_declared_functions: FxHashSet<Name>,
+    #[serde(skip)]
+    unconditionally_declared_functions: NameSet,
     // The declaration (its name's `(line, col)`, in the file the slot's
     // provenance names) a `functions` slot was built from - `None` once
     // two declarations merged into it, and no entry when no declaration
     // in a file won the slot (a built-in stub's). Lets the checker tell a
     // second same-named declaration from the one the slot describes.
-    pub(crate) function_decl_sites: FxHashMap<Name, Option<(u32, u32)>>,
+    #[serde(skip)]
+    pub(crate) function_decl_sites: NameMap<Option<(u32, u32)>>,
     // Names `merge_stubs` provided a signature for, not yet
     // overwritten by a real, already-indexed conditional declaration -
     // the same ambiguity `unconditionally_declared_functions` resolves
@@ -267,7 +277,8 @@ pub struct Registry {
     // symfony/polyfill-php80) doesn't lose its real, more-precise
     // (here, nullable) parameter types to `entry(...).or_insert_with(...)`
     // being a no-op once the built-in stub already occupies the slot.
-    stub_provided_functions: FxHashSet<Name>,
+    #[serde(skip)]
+    stub_provided_functions: NameSet,
     // Every bare function/method name with a non-empty `assert` list
     // on some indexed `FunctionReflection`. `@phpstan-assert` is rare in real
     // corpora (zero occurrences across the full Symfony monorepo plus
@@ -278,7 +289,8 @@ pub struct Registry {
     // `remove_declarations` - a harmless, rare false positive (still a
     // "may still do the real check" set, not a "known good" one), never
     // a false negative.
-    pub(crate) names_with_assert_tags: FxHashSet<Name>,
+    #[serde(skip)]
+    pub(crate) names_with_assert_tags: NameSet,
     // Every class's precomputed `extends`+`implements` transitive
     // closure - see `is_subclass_of`/`precompute_ancestor_names`
     // (`registry/hierarchy.rs`). Rebuilt whenever the class graph could
@@ -668,6 +680,13 @@ impl Registry {
         property_owner_by_class,
         ancestor_property_owner_by_class,
         const_owner_by_class,
+        global_constants,
+        unconditionally_declared_classes,
+        unconditionally_declared_functions,
+        stub_provided_functions,
+        names_with_assert_tags,
+        function_decl_sites,
+        phpstan_class_files,
     );
 
     /// Replaces the declarations with `base`'s, keeping the settings and

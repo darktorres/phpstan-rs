@@ -1046,7 +1046,7 @@ impl<'a> Checker<'a> {
     fn apply_bare_statement_assert_narrowing(&mut self, e: &Expr, locals: &mut Locals) {
         match &e.kind {
             ExprKind::MethodCall(recv, method, args, _) => {
-                if !self.registry.names_with_assert_tags.contains(&*method.name) {
+                if !self.registry.names_with_assert_tags.contains(&method.name) {
                     return;
                 }
                 let recv_ty = self.infer_expr(recv, locals);
@@ -1057,7 +1057,7 @@ impl<'a> Checker<'a> {
                 }
             }
             ExprKind::StaticCall(target, method, args) => {
-                if !self.registry.names_with_assert_tags.contains(&*method.name) {
+                if !self.registry.names_with_assert_tags.contains(&method.name) {
                     return;
                 }
                 if let Some(class) = self.infer_static_target_class(target, locals)

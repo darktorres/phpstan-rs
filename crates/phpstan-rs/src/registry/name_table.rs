@@ -10,7 +10,7 @@ use rustc_hash::{FxHashMap, FxHashSet};
 use std::sync::{Arc, OnceLock};
 use syntax::name::Name;
 
-use super::container::{Buffer, Reader, Writer};
+use super::container::{Buffer, Reader, Stored, Writer};
 
 /// A name's lookup key: the name ASCII-lowercased, as PHP compares class
 /// and function names.
@@ -87,11 +87,14 @@ type Decoder<V> = fn(&[u8]) -> V;
 /// A table's shared base: its entries sorted by lowercased name, each
 /// decoded already, or kept stored until first read.
 #[derive(Debug)]
-struct Base<V> {
+pub(super) struct Base<V> {
     keys: Keys,
     slots: Box<[Slot<V>]>,
     // What decodes an entry of a stored base.
     decode: Option<Decoder<V>>,
+    // Whether the names are ordered and found by their lowercased form, as
+    // class and function names are, or as they are written.
+    fold: bool,
 }
 
 /// A base's names in order.
@@ -159,18 +162,32 @@ impl Keys {
     }
 }
 
+/// How a name's text orders against a key: the key is already lowercased
+/// when `fold`.
+fn cmp_text(fold: bool, text: &str, key: &str) -> Ordering {
+    if fold {
+        cmp_folded(text, key)
+    } else {
+        text.cmp(key)
+    }
+}
+
 impl<V> Base<V> {
-    fn empty() -> Base<V> {
+    pub(super) fn empty(fold: bool) -> Base<V> {
         Base {
             keys: Keys::Built(Vec::new()),
             slots: Box::default(),
             decode: None,
+            fold,
         }
     }
 
     /// A base of `entries`, in memory.
-    fn built(mut entries: Vec<(Name, V)>) -> Base<V> {
-        entries.sort_by(|a, b| cmp_folded(a.0.as_str(), b.0.lower()));
+    pub(super) fn built(mut entries: Vec<(Name, V)>, fold: bool) -> Base<V> {
+        entries.sort_by(|a, b| {
+            let key = if fold { b.0.lower() } else { b.0.as_str() };
+            cmp_text(fold, a.0.as_str(), key)
+        });
         let mut names = Vec::with_capacity(entries.len());
         let mut slots = Vec::with_capacity(entries.len());
         for (name, value) in entries {
@@ -185,19 +202,21 @@ impl<V> Base<V> {
             keys: Keys::Built(names),
             slots: slots.into_boxed_slice(),
             decode: None,
+            fold,
         }
     }
 
-    fn len(&self) -> usize {
+    pub(super) fn len(&self) -> usize {
         self.keys.len()
     }
 
-    /// The position of the entry whose lowercased name is `key`.
-    fn find(&self, key: &str) -> Option<usize> {
+    /// The position of the entry whose name (lowercased, for a base that
+    /// folds) is `key`.
+    pub(super) fn find(&self, key: &str) -> Option<usize> {
         let (mut low, mut high) = (0, self.len());
         while low < high {
             let middle = low + (high - low) / 2;
-            match cmp_folded(self.keys.text(middle), key) {
+            match cmp_text(self.fold, self.keys.text(middle), key) {
                 Ordering::Less => low = middle + 1,
                 Ordering::Greater => high = middle,
                 Ordering::Equal => return Some(middle),
@@ -207,7 +226,7 @@ impl<V> Base<V> {
     }
 
     /// The declared name of entry `i`.
-    fn name(&self, i: usize) -> &Name {
+    pub(super) fn name(&self, i: usize) -> &Name {
         match &self.keys {
             Keys::Built(names) => &names[i],
             Keys::Stored { .. } => self.slots[i]
@@ -217,7 +236,7 @@ impl<V> Base<V> {
     }
 
     /// Entry `i`, decoded the first time it is read.
-    fn value(&self, i: usize) -> &V {
+    pub(super) fn value(&self, i: usize) -> &V {
         self.slots[i].value.get_or_init(|| {
             let decode = self.decode.expect("a slot built decoded holds its value");
             let Keys::Stored { buffer, .. } = &self.keys else {
@@ -435,7 +454,7 @@ impl<V: Clone> NameTable<V> {
     pub fn freeze(&mut self) {
         if self.entries.is_empty() && self.hidden.is_empty() {
             if self.base.is_none() {
-                self.base = Some(Arc::new(Base::empty()));
+                self.base = Some(Arc::new(Base::empty(true)));
             }
             return;
         }
@@ -454,7 +473,7 @@ impl<V: Clone> NameTable<V> {
                 .map(|(k, v)| (k.0, v)),
         );
         self.hidden.clear();
-        self.base = Some(Arc::new(Base::built(all)));
+        self.base = Some(Arc::new(Base::built(all, true)));
     }
 }
 
@@ -542,55 +561,85 @@ impl<V: serde::Serialize> NameTable<V> {
     /// the file are not written again, so a table that differs from
     /// another in a few entries costs the records and those entries.
     pub(super) fn store(&self, writer: &mut Writer, section: &str) -> Result<(), String> {
-        let mut rows: Vec<(Cow<'_, str>, &Name, &V)> = self
-            .iter()
-            .map(|(name, value)| (function_key(name), name, value))
-            .collect();
-        rows.sort_by(|a, b| a.0.cmp(&b.0));
-        if rows.windows(2).any(|pair| pair[0].0 == pair[1].0) {
-            return Err(format!("{section} holds a name twice"));
-        }
-        let mut records = Vec::with_capacity(rows.len() * RECORD_LEN);
-        for (_, name, value) in rows {
-            let mut encoded = Vec::new();
-            ciborium::ser::into_writer(value, &mut encoded).map_err(|e| e.to_string())?;
-            let name = writer.name(name.as_str())?;
-            let entry = writer.entry(&encoded)?;
-            for field in [name.offset, name.len, entry.offset, entry.len] {
-                records.extend_from_slice(&field.to_le_bytes());
-            }
-        }
-        writer.section(section, &records)
+        store_entries(writer, section, self.iter().collect(), true)
     }
 }
 
 impl<V: serde::de::DeserializeOwned> NameTable<V> {
     /// The table `store` wrote as section `section`: a base read in place.
     pub(super) fn load(reader: &Reader, section: &str) -> Result<NameTable<V>, String> {
-        let records = reader.section(section)?;
-        let buffer = reader.buffer().clone();
-        if records.len() % RECORD_LEN != 0 {
-            return Err(format!("{section} is cut in the middle of a record"));
-        }
-        let keys = Keys::Stored { buffer, records };
-        validate(&keys, section)?;
-        let slots = (0..keys.len()).map(|_| Slot::default()).collect();
         Ok(NameTable {
             entries: FxHashMap::default(),
-            base: Some(Arc::new(Base {
-                keys,
-                slots,
-                decode: Some(decode_entry::<V>),
-            })),
+            base: Some(Arc::new(load_base(reader, section, true)?)),
             hidden: FxHashSet::default(),
         })
     }
 }
 
+impl<V: serde::de::DeserializeOwned> Stored for NameTable<V> {
+    fn load(reader: &Reader, section: &str) -> Result<NameTable<V>, String> {
+        NameTable::load(reader, section)
+    }
+}
+
+/// Writes `rows` as section `section`, ordered as a base that `fold`s or
+/// not orders its names.
+pub(super) fn store_entries<V: serde::Serialize>(
+    writer: &mut Writer,
+    section: &str,
+    mut rows: Vec<(&Name, &V)>,
+    fold: bool,
+) -> Result<(), String> {
+    let key = |name: &Name| {
+        if fold {
+            name.lower().to_string()
+        } else {
+            name.to_string()
+        }
+    };
+    rows.sort_by_cached_key(|(name, _)| key(name));
+    if rows.windows(2).any(|pair| key(pair[0].0) == key(pair[1].0)) {
+        return Err(format!("{section} holds a name twice"));
+    }
+    let mut records = Vec::with_capacity(rows.len() * RECORD_LEN);
+    for (name, value) in rows {
+        let mut encoded = Vec::new();
+        ciborium::ser::into_writer(value, &mut encoded).map_err(|e| e.to_string())?;
+        let name = writer.name(name.as_str())?;
+        let entry = writer.entry(&encoded)?;
+        for field in [name.offset, name.len, entry.offset, entry.len] {
+            records.extend_from_slice(&field.to_le_bytes());
+        }
+    }
+    writer.section(section, &records)
+}
+
+/// The base `store_entries` wrote as section `section`, read in place.
+pub(super) fn load_base<V: serde::de::DeserializeOwned>(
+    reader: &Reader,
+    section: &str,
+    fold: bool,
+) -> Result<Base<V>, String> {
+    let records = reader.section(section)?;
+    let buffer = reader.buffer().clone();
+    if records.len() % RECORD_LEN != 0 {
+        return Err(format!("{section} is cut in the middle of a record"));
+    }
+    let keys = Keys::Stored { buffer, records };
+    validate(&keys, section, fold)?;
+    let slots = (0..keys.len()).map(|_| Slot::default()).collect();
+    Ok(Base {
+        keys,
+        slots,
+        decode: Some(decode_entry::<V>),
+        fold,
+    })
+}
+
 /// Whether the records of a stored table point inside the file, at names
 /// that are text in strictly increasing order: what a lookup by bisection
 /// relies on.
-fn validate(keys: &Keys, section: &str) -> Result<(), String> {
+fn validate(keys: &Keys, section: &str, fold: bool) -> Result<(), String> {
     let Keys::Stored { buffer, .. } = keys else {
         return Ok(());
     };
@@ -602,13 +651,15 @@ fn validate(keys: &Keys, section: &str) -> Result<(), String> {
         }
         let text = std::str::from_utf8(&buffer[name])
             .map_err(|_| format!("{section}'s name {i} is not text"))?;
-        if let Some(before) = previous
-            && !before
-                .bytes()
-                .map(|b| b.to_ascii_lowercase())
-                .lt(text.bytes().map(|b| b.to_ascii_lowercase()))
-        {
-            return Err(format!("{section}'s names are not in order at {i}"));
+        if let Some(before) = previous {
+            let order = if fold {
+                cmp_folded(before, &text.to_ascii_lowercase())
+            } else {
+                before.cmp(text)
+            };
+            if order != Ordering::Less {
+                return Err(format!("{section}'s names are not in order at {i}"));
+            }
         }
         previous = Some(text);
     }

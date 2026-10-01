@@ -720,15 +720,38 @@ fn define_constant(const_name: &PhpString, value: &Expr) -> Option<(Name, Type)>
 /// to a specific type, since the true value is still just as
 /// undetermined regardless of which site happens to run at this
 /// constant's real, load-order-dependent definition time.
-pub(crate) fn register_global_constant(map: &mut FxHashMap<Name, Type>, name: Name, ty: Type) {
-    match map.get(&name) {
-        None => {
-            map.insert(name, ty);
-        }
+pub(crate) fn register_global_constant(map: &mut impl ConstantTable, name: Name, ty: Type) {
+    match map.constant(&name) {
+        None => map.set_constant(name, ty),
         Some(existing) if *existing == ty && !ty.is_mixed() => {}
-        Some(_) => {
-            map.insert(name, Type::mixed());
-        }
+        Some(_) => map.set_constant(name, Type::mixed()),
+    }
+}
+
+/// A table of global constants' types, which `register_global_constant`
+/// adds to.
+pub(crate) trait ConstantTable {
+    fn constant(&self, name: &str) -> Option<&Type>;
+    fn set_constant(&mut self, name: Name, ty: Type);
+}
+
+impl ConstantTable for FxHashMap<Name, Type> {
+    fn constant(&self, name: &str) -> Option<&Type> {
+        self.get(name)
+    }
+
+    fn set_constant(&mut self, name: Name, ty: Type) {
+        self.insert(name, ty);
+    }
+}
+
+impl ConstantTable for super::NameMap<Type> {
+    fn constant(&self, name: &str) -> Option<&Type> {
+        self.get(name)
+    }
+
+    fn set_constant(&mut self, name: Name, ty: Type) {
+        self.insert(name, ty);
     }
 }
 

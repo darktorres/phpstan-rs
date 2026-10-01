@@ -145,6 +145,11 @@ impl Writer {
     }
 }
 
+/// What a registry field is stored as: a section of its own.
+pub(crate) trait Stored: Sized {
+    fn load(reader: &Reader, section: &str) -> Result<Self, String>;
+}
+
 /// The bytes of a file, shared by everything read out of it.
 #[derive(Clone)]
 pub(crate) struct Buffer(Arc<Vec<u8>>);
