@@ -60,8 +60,11 @@ impl Registry {
                 *name = canonical.clone();
             }
         };
+        let scope = &self.scope;
         self.classes
-            .values_mut()
+            .iter_mut()
+            .filter(|(name, _)| scope.has_class(name))
+            .map(|(_, info)| info)
             .collect::<Vec<_>>()
             .into_par_iter()
             .for_each(|info| {
@@ -105,7 +108,7 @@ impl Registry {
     /// flattened" once the bound is hit is the honest answer.
     #[hotpath::measure]
     pub(crate) fn flatten_traits(&mut self) {
-        let max_iterations = self.classes.len().max(1);
+        let max_iterations = self.scoped_class_names().len().max(1);
         for _ in 0..max_iterations {
             if !self.flatten_traits_one_pass() {
                 break;
@@ -136,7 +139,7 @@ impl Registry {
             FxHashSet<Name>,
         );
 
-        let class_names: Vec<Name> = self.classes.keys().cloned().collect();
+        let class_names: Vec<Name> = self.scoped_class_names();
         let registry: &Registry = self;
         let additions: Vec<TraitAddition> = class_names
             .par_iter()
@@ -308,8 +311,11 @@ impl Registry {
     /// below (which do need one, since they read other classes).
     #[hotpath::measure]
     pub(crate) fn resolve_method_tags(&mut self) {
+        let scope = &self.scope;
         self.classes
-            .values_mut()
+            .iter_mut()
+            .filter(|(name, _)| scope.has_class(name))
+            .map(|(_, info)| info)
             .collect::<Vec<_>>()
             .into_par_iter()
             .for_each(|info| {
@@ -352,12 +358,12 @@ impl Registry {
         // Each class's ancestor bindings, computed at most once for the
         // whole fixed point: they're built from its declared hierarchy and
         // template arguments, which the passes never change.
-        let bindings: FxHashMap<Name, OnceLock<AncestorBindings>> = self
-            .classes
-            .keys()
-            .map(|name| (name.clone(), OnceLock::new()))
+        let class_names = self.scoped_class_names();
+        let max_iterations = class_names.len().max(1);
+        let bindings: FxHashMap<Name, OnceLock<AncestorBindings>> = class_names
+            .into_iter()
+            .map(|name| (name, OnceLock::new()))
             .collect();
-        let max_iterations = self.classes.len().max(1);
         for _ in 0..max_iterations {
             if !self.flatten_phpdoc_inheritance_one_pass(&bindings) {
                 break;
@@ -370,7 +376,7 @@ impl Registry {
     /// and its own hooks never use the backing value.
     #[hotpath::measure]
     pub(crate) fn inherit_property_hooks(&mut self) {
-        let max_iterations = self.classes.len().max(1);
+        let max_iterations = self.scoped_class_names().len().max(1);
         for _ in 0..max_iterations {
             if !self.inherit_property_hooks_one_pass() {
                 break;
@@ -380,7 +386,7 @@ impl Registry {
 
     fn inherit_property_hooks_one_pass(&mut self) -> bool {
         let mut updates: Vec<(Name, Name, PropertyReflection)> = Vec::new();
-        for (class_name, info) in &self.classes {
+        for (class_name, info) in self.scoped_classes() {
             let Some(parent) = info.extends.first() else {
                 continue;
             };
@@ -446,7 +452,7 @@ impl Registry {
     #[hotpath::measure]
     pub(crate) fn resolve_deferred_value_of(&mut self) {
         self.resolve_class_constant_references();
-        let class_names: Vec<Name> = self.classes.keys().cloned().collect();
+        let class_names: Vec<Name> = self.scoped_class_names();
         for class_name in class_names {
             // Only a class with a deferred sentinel somewhere needs its
             // inherited-constant view (the overwhelming majority, stubs
@@ -567,7 +573,12 @@ impl Registry {
                 *ty = resolve_deferred_value_of_with_native_fallback(taken, native, classes);
             }
         };
-        for sig in self.functions.values_mut() {
+        let scope = &self.scope;
+        for (_, sig) in self
+            .functions
+            .iter_mut()
+            .filter(|(name, _)| scope.has_function(name))
+        {
             for param in &mut sig.params {
                 resolve(&mut param.ty, &param.ty_native, &self.classes);
                 let native = param.ty_native.clone();
@@ -602,7 +613,7 @@ impl Registry {
         const MAX_ROUNDS: usize = 16;
         for _ in 0..MAX_ROUNDS {
             let mut updates: Vec<(Name, Name, Type)> = Vec::new();
-            for (class_name, info) in &self.classes {
+            for (class_name, info) in self.scoped_classes() {
                 if !info.consts.values().any(|sig| sig.ty.contains_deferred()) {
                     continue;
                 }
@@ -633,7 +644,12 @@ impl Registry {
                 }
             }
         }
-        for info in self.classes.values_mut() {
+        let scope = &self.scope;
+        for (_, info) in self
+            .classes
+            .iter_mut()
+            .filter(|(name, _)| scope.has_class(name))
+        {
             for sig in info.consts.values_mut() {
                 if sig.ty.contains_deferred() {
                     sig.ty = unresolved_class_const_to_mixed(std::mem::replace(
@@ -674,7 +690,7 @@ impl Registry {
     pub(crate) fn resolve_deferred_type_imports(&mut self) {
         let mut classes_with_imports: Vec<Name> = Vec::new();
         let mut resolved: Vec<(Name, Name, Type)> = Vec::new();
-        for (class_name, info) in &self.classes {
+        for (class_name, info) in self.scoped_classes() {
             if info.type_imports.is_empty() {
                 continue;
             }
@@ -774,7 +790,7 @@ impl Registry {
     pub(crate) fn resolve_deferred_mixins(&mut self) {
         let mut method_additions: Vec<(Name, Name, FunctionReflection)> = Vec::new();
         let mut property_additions: Vec<(Name, Name, PropertyReflection)> = Vec::new();
-        for (class_name, info) in &self.classes {
+        for (class_name, info) in self.scoped_classes() {
             for mixin_fqn in &info.mixins {
                 let Some(mixin_info) = self.classes.get(mixin_fqn) else {
                     continue;
@@ -967,7 +983,7 @@ impl Registry {
     ) -> bool {
         type Backfill = (Name, Name, Vec<(usize, Type, bool)>, Option<(Type, bool)>);
 
-        let class_names: Vec<Name> = self.classes.keys().cloned().collect();
+        let class_names: Vec<Name> = bindings.keys().cloned().collect();
         let registry: &Registry = self;
         let backfills: Vec<Backfill> = class_names
             .par_iter()
@@ -1528,8 +1544,8 @@ impl Registry {
             }
             fixes
         };
-        let classes: Vec<(&Name, &ClassReflection)> = self.classes.iter().collect();
-        let functions: Vec<(&Name, &FunctionReflection)> = self.functions.iter().collect();
+        let classes = self.scoped_classes();
+        let functions = self.scoped_functions();
         let mut fixes: Vec<Fix> = classes
             .par_iter()
             .flat_map_iter(|(class, info)| {
@@ -1673,8 +1689,8 @@ impl Registry {
     pub(crate) fn resolve_constant_named_types(&mut self) {
         let lookup = |registry: &Registry, ty: &Type| resolve_constant_names(ty, registry);
         let registry: &Registry = self;
-        let classes: Vec<(&Name, &ClassReflection)> = self.classes.iter().collect();
-        let functions: Vec<(&Name, &FunctionReflection)> = self.functions.iter().collect();
+        let classes = self.scoped_classes();
+        let functions = self.scoped_functions();
         let method_fixes: Vec<(Name, Name, FunctionReflection)> = classes
             .par_iter()
             .flat_map_iter(|(class, info)| {

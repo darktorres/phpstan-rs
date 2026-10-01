@@ -65,7 +65,7 @@ impl Registry {
     /// class's result can invalidate another's.
     #[hotpath::measure]
     pub fn precompute_ancestor_names(&mut self) {
-        let class_names: Vec<Name> = self.classes.keys().cloned().collect();
+        let class_names: Vec<Name> = self.scoped_class_names();
         let registry: &Registry = self;
         let ancestor_names: Vec<_> = class_names
             .par_iter()
@@ -76,7 +76,16 @@ impl Registry {
                 )
             })
             .collect();
-        self.ancestor_names = ancestor_names.into_iter().collect();
+        if self.scope.is_all() {
+            self.ancestor_names = ancestor_names.into_iter().collect();
+        } else {
+            for name in self.scoped_removed_class_keys() {
+                self.ancestor_names.remove(&name);
+            }
+            for (name, ancestors) in ancestor_names {
+                self.ancestor_names.insert(name, ancestors);
+            }
+        }
     }
 
     /// Is `class` (or any ancestor it `extends`) tagged
@@ -273,16 +282,9 @@ impl Registry {
     /// finish before any class's `ancestor` map starts.
     #[hotpath::measure]
     pub fn precompute_member_owners(&mut self) {
-        let class_names: Vec<Name> = self.classes.keys().cloned().collect();
+        let class_names: Vec<Name> = self.scoped_class_names();
         let registry: &Registry = self;
 
-        // Every `self.X = ...`-style assignment below is deferred to
-        // the end of this function, once `registry` (a borrow of the
-        // *whole* `self`) is no longer needed - each intermediate map is
-        // built into a plain local first, since `registry` must outlive
-        // every `par_iter()` call below, including the two `ancestor_*`
-        // ones that read `method_owner_by_class`/`property_owner_by_class`
-        // back as locals, not as `self` fields.
         let own_by_class: Vec<_> = class_names
             .par_iter()
             .map(|name| {
@@ -290,15 +292,31 @@ impl Registry {
                 (name.clone(), methods, properties, consts)
             })
             .collect();
-        let mut method_owner_by_class = NameTable::default();
-        let mut property_owner_by_class = NameTable::default();
-        let mut const_owner_by_class = NameTable::default();
+        if self.scope.is_all() {
+            self.method_owner_by_class = NameTable::default();
+            self.property_owner_by_class = NameTable::default();
+            self.const_owner_by_class = NameTable::default();
+            self.ancestor_method_owner_by_class = NameTable::default();
+            self.ancestor_property_owner_by_class = NameTable::default();
+        } else {
+            for name in self.scoped_removed_class_keys() {
+                self.method_owner_by_class.remove(&name);
+                self.property_owner_by_class.remove(&name);
+                self.const_owner_by_class.remove(&name);
+                self.ancestor_method_owner_by_class.remove(&name);
+                self.ancestor_property_owner_by_class.remove(&name);
+            }
+        }
         for (name, methods, properties, consts) in own_by_class {
-            method_owner_by_class.insert(name.clone(), methods);
-            property_owner_by_class.insert(name.clone(), properties);
-            const_owner_by_class.insert(name, consts);
+            self.method_owner_by_class.insert(name.clone(), methods);
+            self.property_owner_by_class
+                .insert(name.clone(), properties);
+            self.const_owner_by_class.insert(name, consts);
         }
 
+        // A class's ancestor maps merge its direct parents' own maps, which
+        // every class's own map, in the scope or not, is final for by now.
+        let registry: &Registry = self;
         let ancestor_method_owner_by_class: Vec<(Name, FxHashMap<Name, Name>)> = class_names
             .par_iter()
             .map(|name| {
@@ -315,7 +333,10 @@ impl Registry {
                     .unwrap_or_default();
                 (
                     name.clone(),
-                    Self::merge_ancestor_owner_names(parents.into_iter(), &method_owner_by_class),
+                    Self::merge_ancestor_owner_names(
+                        parents.into_iter(),
+                        &registry.method_owner_by_class,
+                    ),
                 )
             })
             .collect();
@@ -334,17 +355,20 @@ impl Registry {
                     .unwrap_or_default();
                 (
                     name.clone(),
-                    Self::merge_ancestor_owner_names(parents.into_iter(), &property_owner_by_class),
+                    Self::merge_ancestor_owner_names(
+                        parents.into_iter(),
+                        &registry.property_owner_by_class,
+                    ),
                 )
             })
             .collect();
 
-        self.method_owner_by_class = method_owner_by_class;
-        self.property_owner_by_class = property_owner_by_class;
-        self.const_owner_by_class = const_owner_by_class;
-        self.ancestor_method_owner_by_class = ancestor_method_owner_by_class.into_iter().collect();
-        self.ancestor_property_owner_by_class =
-            ancestor_property_owner_by_class.into_iter().collect();
+        for (name, owners) in ancestor_method_owner_by_class {
+            self.ancestor_method_owner_by_class.insert(name, owners);
+        }
+        for (name, owners) in ancestor_property_owner_by_class {
+            self.ancestor_property_owner_by_class.insert(name, owners);
+        }
     }
 
     /// Looks up a method, walking the extends/implements ancestor graph

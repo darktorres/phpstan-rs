@@ -99,7 +99,7 @@ impl Registry {
     /// needs `&mut self` again.
     #[allow(clippy::type_complexity)]
     fn classify_purity(&mut self, bodies: &dyn BodySource) {
-        let function_names: Vec<Name> = self.functions.keys().cloned().collect();
+        let function_names: Vec<Name> = self.scoped_function_names();
         let registry: &Registry = self;
         let function_deps: Vec<(Name, Option<Vec<PurityDependency>>)> = function_names
             .par_iter()
@@ -117,7 +117,7 @@ impl Registry {
             self.functions.get_mut(&name).unwrap().purity_dependencies = deps;
         }
 
-        let class_names: Vec<Name> = self.classes.keys().cloned().collect();
+        let class_names: Vec<Name> = self.scoped_class_names();
         let registry: &Registry = self;
         let method_deps: Vec<(Name, Name, Option<Vec<PurityDependency>>)> = class_names
             .par_iter()
@@ -162,11 +162,12 @@ impl Registry {
     /// pure base case is correctly never marked pure, matching real
     /// PHPStan's own identical behavior for the same shape.
     fn run_purity_fixed_point(&mut self) {
+        let function_names: Vec<Name> = self.scoped_function_names();
+        let class_names: Vec<Name> = self.scoped_class_names();
         loop {
             let mut changed = false;
-            let function_names: Vec<Name> = self.functions.keys().cloned().collect();
-            for name in function_names {
-                let sig = &self.functions[&name];
+            for name in &function_names {
+                let sig = &self.functions[name];
                 if sig.is_transitively_pure {
                     continue;
                 }
@@ -174,14 +175,13 @@ impl Registry {
                     continue;
                 };
                 if deps.iter().all(|d| self.dependency_is_pure(d)) {
-                    self.functions.get_mut(&name).unwrap().is_transitively_pure = true;
+                    self.functions.get_mut(name).unwrap().is_transitively_pure = true;
                     changed = true;
                 }
             }
-            let class_names: Vec<Name> = self.classes.keys().cloned().collect();
-            for class_name in class_names {
+            for class_name in &class_names {
                 let method_names: Vec<Name> =
-                    self.classes[&class_name].methods.keys().cloned().collect();
+                    self.classes[class_name].methods.keys().cloned().collect();
                 for method_name in method_names {
                     let sig = &self.classes[&class_name].methods[&method_name];
                     if sig.is_transitively_pure {

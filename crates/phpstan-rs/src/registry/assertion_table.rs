@@ -50,6 +50,7 @@ impl Registry {
                     .functions
                     .iter_mut()
                     .find(|(name, _)| name.eq_ignore_ascii_case(function.trim_start_matches('\\')))
+                    .filter(|(name, _)| self.scope.has_function(name))
                     .map(|(name, sig)| {
                         let bare = name.rsplit('\\').next().unwrap_or(name);
                         tagged.push(Name::from(bare));
@@ -62,6 +63,9 @@ impl Registry {
                     else {
                         continue;
                     };
+                    if !self.scope.has_class(&canonical) {
+                        continue;
+                    }
                     self.classes.get_mut(&canonical).and_then(|info| {
                         info.methods
                             .iter_mut()

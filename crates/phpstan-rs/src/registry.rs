@@ -22,6 +22,7 @@ mod purity;
 pub mod reflection_attribute;
 mod relation;
 mod resolve;
+pub(crate) mod scope;
 pub mod settings;
 pub mod stubs;
 mod type_node;
@@ -146,6 +147,8 @@ pub struct Registry {
     // Whether PHPStan's own source is merged in with the built-in stubs
     // (`Project::sync_phpstan_stubs`).
     pub(crate) phpstan_stubs_loaded: bool,
+    // Which classes and functions the finishing passes resolve.
+    scope: scope::Scope,
     // The PHP versions the project runs on: exactly the configured
     // `php_version`, else the range its composer.json declares. `None`
     // means neither says, and every version-gated rule stays silent. See
