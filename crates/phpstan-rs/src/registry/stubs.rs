@@ -984,7 +984,7 @@ pub fn generated_stub_constants() -> Vec<(Name, Type)> {
 /// shared pass over the vendored corpus instead of three independent
 /// ones - `Registry::index_and_flatten` already builds `.functions`,
 /// `.classes`, and `.global_constants` together on the same `Registry`
-/// per file, so lexing/parsing/indexing each of the 2351 vendored files
+/// per file, so lexing/parsing/indexing each vendored file
 /// three separate times (once per projection) just to read a different
 /// field off what is otherwise the identical deterministic per-file
 /// result was pure waste.
@@ -1066,7 +1066,7 @@ pub fn builtin_class_extension(name: &str) -> Option<&'static str> {
 
 /// Computes `GeneratedStubData` exactly once per process
 /// (`std::sync::LazyLock`) and returns a `'static` reference to it -
-/// re-parsing the combined 2351-file corpus from scratch on every call
+/// re-parsing the combined vendored corpus from scratch on every call
 /// is fine for the CLI binary, which calls each of the three public
 /// accessors above exactly once per process, but makes the test suite
 /// (hundreds of `diagnostics_for`/`Project::new` calls, each
