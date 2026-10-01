@@ -360,6 +360,15 @@ impl FunctionReflection {
         &self.purity_dependencies
     }
 
+    pub(in crate::registry) fn has_purity(&self) -> bool {
+        self.purity_dependencies.is_some() || self.is_transitively_pure
+    }
+
+    pub(in crate::registry) fn clear_purity(&mut self) {
+        self.purity_dependencies = None;
+        self.is_transitively_pure = false;
+    }
+
     pub fn is_transitively_pure(&self) -> bool {
         self.is_transitively_pure
     }

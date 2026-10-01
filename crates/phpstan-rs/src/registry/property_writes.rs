@@ -42,7 +42,7 @@ pub(crate) enum PropertyWrites {
 
 /// A declaration, keyed case-insensitively: `(class, method)` for a
 /// method, `(None, function)` for a function.
-type DeclKey = (Option<String>, String);
+pub(in crate::registry) type DeclKey = (Option<String>, String);
 
 fn function_key(name: &str) -> DeclKey {
     (None, name.to_ascii_lowercase())
@@ -71,8 +71,8 @@ enum Need {
 }
 
 /// One body's own property writes and the calls it inherits writes from.
-#[derive(Debug, Default)]
-struct Classification {
+#[derive(Debug, Default, Clone)]
+pub(in crate::registry) struct Classification {
     writes_own_object: bool,
     deps: Vec<(DeclKey, Need)>,
 }
@@ -82,37 +82,66 @@ impl Registry {
     /// their verdicts. Run with `resolve_transitive_purity`, after every
     /// class is indexed and flattened.
     pub(crate) fn resolve_property_writes(&mut self, bodies: &dyn BodySource) {
-        let mut classified: FxHashMap<DeclKey, Option<Classification>> = FxHashMap::default();
+        // Only the declarations in scope are classified again; the rest
+        // keep the classification of their unchanged bodies.
+        let scope = std::mem::take(&mut self.scope);
+        self.property_write_classes
+            .retain(|(class, name), _| match class {
+                Some(class) => !scope.has_class(class),
+                None => !scope.has_function(name),
+            });
+        let mut classified: Vec<(DeclKey, Option<Classification>)> = Vec::new();
         // A shared base holds only built-in stubs, which have no body.
-        for (name, sig) in self.functions.own_iter() {
+        let functions: Vec<(&Name, &FunctionReflection)> = if scope.is_all() {
+            self.functions.own_iter().collect()
+        } else {
+            self.functions
+                .keys()
+                .filter(|name| scope.has_function(name))
+                .filter_map(|name| self.functions.get_with_name(name.lower()))
+                .collect()
+        };
+        for (name, sig) in functions {
             if sig.is_stub {
                 continue;
             }
             let body = bodies.body(&sig.provenance);
-            classified.insert(
+            classified.push((
                 function_key(name),
                 body.and_then(|body| classify(body, None, sig, self)),
-            );
+            ));
         }
-        for (class, info) in self.classes.own_iter() {
+        let classes: Vec<_> = if scope.is_all() {
+            self.classes.own_iter().collect()
+        } else {
+            self.classes
+                .keys()
+                .filter(|name| scope.has_class(name))
+                .filter_map(|name| self.classes.get_with_name(name.lower()))
+                .collect()
+        };
+        for (class, info) in classes {
             for (method, sig) in &info.methods {
                 if sig.is_stub {
                     continue;
                 }
                 let body = bodies.body(&sig.provenance);
-                classified.insert(
+                classified.push((
                     method_key(class, method),
                     body.and_then(|body| classify(body, Some(class), sig, self)),
-                );
+                ));
             }
         }
+        self.scope = scope;
+        self.property_write_classes.extend(classified);
+        let classified = &self.property_write_classes;
         let mut verdicts: FxHashMap<DeclKey, PropertyWrites> = classified
             .keys()
             .map(|key| (key.clone(), PropertyWrites::Anything))
             .collect();
         loop {
             let mut changed = false;
-            for (key, classification) in &classified {
+            for (key, classification) in classified {
                 let Some(classification) = classification else {
                     continue;
                 };

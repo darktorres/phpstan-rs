@@ -144,6 +144,9 @@ pub struct Project {
     built_once: bool,
     // Whether the finishing passes have run.
     finished: bool,
+    // The files loaded or edited since the finishing passes last walked
+    // them for global variables.
+    globals_stale: FxHashSet<PathBuf>,
     // The files a cancelled recheck never reached, whose last diagnostics
     // are therefore stale (`take_unchecked`).
     unchecked: Vec<PathBuf>,
@@ -385,6 +388,7 @@ impl Project {
             built_once: false,
             finished: false,
             unchecked: Vec::new(),
+            globals_stale: FxHashSet::default(),
             duplicate_fn_sites: DuplicateFunctionSites::default(),
             duplicate_class_sites: DuplicateClassSites::default(),
             use_sites: UseSiteIndex::default(),
@@ -738,6 +742,7 @@ impl Project {
             &declaration_references,
         );
         let owner = self.packages.owner(&self.absolute_path(&path));
+        self.globals_stale.insert(path.clone());
         self.files.insert(
             path,
             FileState {
@@ -858,11 +863,26 @@ impl Project {
         self.registry.begin_declaration_changes();
     }
 
-    /// The classes and functions whose resolved form `changed` can have
-    /// changed: the changed ones themselves, and every class and function
-    /// declared where a name in the scope is referenced, transitively - in
-    /// a loaded file or a built-in stub file.
-    fn resolution_scope(&self, changed: &crate::registry::ChangedNames) -> Scope {
+    /// The classes and functions the finishing passes must run over after
+    /// `changed`, as two scopes: what resolution reads from a
+    /// declaration (its signature, hierarchy, PHPDoc and constant values)
+    /// and what purity and property writes read from a body too, a
+    /// superset. Each is the changed names plus every class and function
+    /// declared where a name in it is referenced - in declarations only,
+    /// or anywhere - transitively, in a loaded file or a built-in stub
+    /// file.
+    fn finishing_scopes(&self, changed: &crate::registry::ChangedNames) -> (Scope, Scope) {
+        (
+            self.closure_scope(changed, &self.signature_dependents),
+            self.closure_scope(changed, &self.dependents),
+        )
+    }
+
+    fn closure_scope(
+        &self,
+        changed: &crate::registry::ChangedNames,
+        index: &FxHashMap<String, FxHashSet<PathBuf>>,
+    ) -> Scope {
         let mut classes: FxHashSet<String> = changed.classes.clone();
         let mut functions: FxHashSet<String> = changed.functions.clone();
         let mut frontier: Vec<String> = classes
@@ -887,7 +907,7 @@ impl Project {
                     frontier.push(key);
                 }
             };
-            for file in self.dependents.get(&key).into_iter().flatten() {
+            for file in index.get(&key).into_iter().flatten() {
                 let Some(state) = self.files.get(file) else {
                     continue;
                 };
@@ -920,18 +940,22 @@ impl Project {
     fn run_finishing_passes(&mut self) -> FxHashSet<String> {
         self.begin_declaration_changes();
         self.sync_phpstan_stubs();
-        let (scope, changed) = if self.registry.has_resolved_declarations() {
+        let (scope, body_scope, changed) = if self.registry.has_resolved_declarations() {
             let changed = self.registry.take_changed();
-            (self.resolution_scope(&changed), Some(changed))
+            let (scope, body_scope) = self.finishing_scopes(&changed);
+            (scope, body_scope, Some(changed))
         } else {
-            (Scope::all(), None)
+            (Scope::all(), Scope::all(), None)
         };
         let before = changed
             .as_ref()
-            .map(|_| self.registry.resolved_snapshot(&scope));
+            .map(|_| self.registry.resolved_snapshot(&body_scope));
         self.registry
             .end_declaration_changes(&scope, !self.built_once);
-        self.registry.set_scope(scope);
+        if !body_scope.is_all() {
+            self.registry.clear_purity(&body_scope.minus(&scope));
+        }
+        self.registry.set_scope(scope.clone());
         self.finished = true;
         self.registry.reset_lazy_tables();
         self.registry.canonicalize_class_name_case();
@@ -962,22 +986,32 @@ impl Project {
         // member-owner maps built just above stay correct through this
         // point and for the checker's own later use - no third rebuild
         // needed.
+        self.registry.set_scope(body_scope);
         self.registry.resolve_transitive_purity(&self.files);
+        self.registry.set_scope(scope);
         self.registry.precompute_ancestor_names();
         self.registry.resolve_constant_named_types();
         self.registry.drop_doc_members_excluded_by_native();
+        let mut changed_keys = match (&before, &changed) {
+            (Some(before), Some(changed)) => self.registry.changed_since(before, changed),
+            _ => FxHashSet::default(),
+        };
+        // What a file contributes to a global's type reads what it
+        // references, so a file is walked again when one of those changed.
+        let mut stale = std::mem::take(&mut self.globals_stale);
+        stale.extend(self.affected_files(changed_keys.clone()));
         let files: Vec<(&Path, &[Stmt])> = self
             .files
             .iter()
             .map(|(p, f)| (p.as_path(), f.ast.as_slice()))
             .collect();
-        self.registry.infer_global_variables(&files);
+        self.registry.infer_global_variables_of(&files, &stale);
         self.registry.set_scope(Scope::all());
         self.rebuild_pest_config();
-        match (before, changed) {
-            (Some(before), Some(changed)) => self.registry.changed_since(before, &changed),
-            _ => FxHashSet::default(),
+        if let Some(before) = &before {
+            changed_keys.extend(self.registry.changed_global_variables(before));
         }
+        changed_keys
     }
 
     /// Re-parses one already-loaded file, patches just its own registry
@@ -1303,6 +1337,7 @@ impl Project {
             path,
             &declaration_references,
         );
+        self.globals_stale.insert(path.to_path_buf());
         self.files.insert(
             path.to_path_buf(),
             FileState {

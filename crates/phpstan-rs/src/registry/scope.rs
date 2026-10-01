@@ -49,6 +49,22 @@ impl Scope {
             .is_none_or(|functions| functions.contains(function_key(name).as_ref()))
     }
 
+    /// What `self` has that `other` hasn't; both are named sets.
+    pub(crate) fn minus(&self, other: &Scope) -> Scope {
+        let diff = |ours: &Option<FxHashSet<String>>, theirs: &Option<FxHashSet<String>>| {
+            ours.as_ref().map(|ours| {
+                ours.iter()
+                    .filter(|key| !theirs.as_ref().is_none_or(|theirs| theirs.contains(*key)))
+                    .cloned()
+                    .collect()
+            })
+        };
+        Scope {
+            classes: diff(&self.classes, &other.classes),
+            functions: diff(&self.functions, &other.functions),
+        }
+    }
+
     /// The lowercased class names, when not every class.
     pub(crate) fn class_keys(&self) -> Option<&FxHashSet<String>> {
         self.classes.as_ref()
@@ -123,6 +139,32 @@ impl Registry {
             .filter(|key| !self.classes.contains_key(key))
             .cloned()
             .collect()
+    }
+
+    /// Forgets the purity of the functions and methods in `scope`, for
+    /// the purity passes to settle again; their declarations are as
+    /// resolved otherwise.
+    pub(crate) fn clear_purity(&mut self, scope: &Scope) {
+        for key in scope.function_keys().into_iter().flatten() {
+            let Some((name, sig)) = self.functions.get_with_name(key) else {
+                continue;
+            };
+            if sig.has_purity() {
+                let name = name.clone();
+                self.functions.get_mut(&name).unwrap().clear_purity();
+            }
+        }
+        for key in scope.class_keys().into_iter().flatten() {
+            let Some((name, info)) = self.classes.get_with_name(key) else {
+                continue;
+            };
+            if info.methods.values().any(|m| m.has_purity()) {
+                let name = name.clone();
+                for method in self.classes.get_mut(&name).unwrap().methods.values_mut() {
+                    method.clear_purity();
+                }
+            }
+        }
     }
 
     /// Sets which classes and functions the next finishing passes resolve.

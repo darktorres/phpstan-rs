@@ -101,6 +101,7 @@ impl GlobalAccumulator {
 }
 
 /// One field-level contribution: `$name[<key>] = <value>`.
+#[derive(Debug, Clone)]
 struct FieldContribution {
     key: String,
     ty: Type,
@@ -109,6 +110,7 @@ struct FieldContribution {
 /// What a single assignment site contributes - applied to a
 /// `GlobalAccumulator` only once the include-graph gate (for a top-level
 /// site) has been resolved.
+#[derive(Debug, Clone)]
 enum SiteContribution {
     WholeValue(Type),
     ShapeField(String, Type),
@@ -140,17 +142,26 @@ impl SiteContribution {
 /// applied once `file` is confirmed to be a genuine global-scope
 /// candidate), `None` for a function-body site already gated by its own
 /// enclosing `global $x;` at collection time (always applied).
-struct StagedSite {
+#[derive(Debug, Clone)]
+pub(in crate::registry) struct StagedSite {
     gate: Option<PathBuf>,
     name: Name,
     contribution: SiteContribution,
 }
 
-/// One raw `include`-shaped call site found anywhere in the corpus.
-struct IncludeSite<'a> {
-    source: &'a Path,
+/// One raw `include`-shaped call site found anywhere in the corpus, with
+/// the literal path suffix its target names, if it names one.
+#[derive(Debug, Clone)]
+struct IncludeSite {
     top_level: bool,
-    target: &'a Expr,
+    suffix: Option<String>,
+}
+
+/// What one file's walk found: its sites, and its include sites.
+#[derive(Debug, Clone, Default)]
+pub(in crate::registry) struct FileSites {
+    sites: Vec<StagedSite>,
+    include_sites: Vec<IncludeSite>,
 }
 
 /// Per-file, per-scope walk state that doesn't change as the walk
@@ -164,9 +175,9 @@ struct FileCtx<'a> {
 /// threaded through by `&mut` rather than returned, since both
 /// collections grow independently at arbitrary points in the recursion.
 #[derive(Default)]
-struct WalkOutput<'a> {
+struct WalkOutput {
     sites: Vec<StagedSite>,
-    include_sites: Vec<IncludeSite<'a>>,
+    include_sites: Vec<IncludeSite>,
 }
 
 impl Registry {
@@ -178,29 +189,67 @@ impl Registry {
     /// already run at in all three places, since every function/class this
     /// pass's own resolver depends on must already be indexed.
     pub(crate) fn infer_global_variables(&mut self, files: &[(&Path, &[Stmt])]) {
+        self.global_sites.clear();
+        self.infer_global_variables_of(files, &FxHashSet::default());
+    }
+
+    /// `infer_global_variables`, walking only the files in `stale` and
+    /// those it hasn't walked before; every other file's sites are those
+    /// of its last walk.
+    pub(crate) fn infer_global_variables_of(
+        &mut self,
+        files: &[(&Path, &[Stmt])],
+        stale: &FxHashSet<PathBuf>,
+    ) {
+        let loaded: FxHashSet<&Path> = files.iter().map(|(path, _)| *path).collect();
+        self.global_sites
+            .retain(|path, _| loaded.contains(path.as_path()) && !stale.contains(path));
         // Every read below goes through this reborrow, mirroring
         // `precompute_member_owners`'s own established shape
         // (`hierarchy.rs`): build the whole result into locals first,
         // assign into `self` only once the borrow is done.
         let registry: &Registry = self;
+        let walked: Vec<(PathBuf, FileSites)> = files
+            .iter()
+            .filter(|(path, _)| !registry.global_sites.contains_key(*path))
+            .map(|(path, stmts)| {
+                let file_ctx = FileCtx { registry, path };
+                let mut out = WalkOutput::default();
+                walk_top_level(stmts, &file_ctx, &mut out);
+                (
+                    path.to_path_buf(),
+                    FileSites {
+                        sites: out.sites,
+                        include_sites: out.include_sites,
+                    },
+                )
+            })
+            .collect();
+        self.global_sites.extend(walked);
 
-        let mut out = WalkOutput::default();
-        for (path, stmts) in files {
-            let file_ctx = FileCtx { registry, path };
-            walk_top_level(stmts, &file_ctx, &mut out);
-        }
-
-        let global_scope_files = resolve_global_scope_files(files, &out.include_sites);
+        let include_sites: Vec<(&Path, &IncludeSite)> = files
+            .iter()
+            .flat_map(|(path, _)| {
+                self.global_sites[*path]
+                    .include_sites
+                    .iter()
+                    .map(move |site| (*path, site))
+            })
+            .collect();
+        let global_scope_files = resolve_global_scope_files(files, &include_sites);
 
         let mut accumulators: FxHashMap<Name, GlobalAccumulator> = FxHashMap::default();
-        for site in out.sites {
-            if let Some(path) = &site.gate
-                && !global_scope_files.contains(path)
-            {
-                continue;
+        for (path, _) in files {
+            for site in &self.global_sites[*path].sites {
+                if let Some(path) = &site.gate
+                    && !global_scope_files.contains(path)
+                {
+                    continue;
+                }
+                site.contribution
+                    .clone()
+                    .apply(accumulators.entry(site.name.clone()).or_default());
             }
-            site.contribution
-                .apply(accumulators.entry(site.name).or_default());
         }
 
         let global_variables = accumulators
@@ -220,7 +269,7 @@ impl Registry {
 /// body is excluded.
 fn resolve_global_scope_files<'a>(
     files: &[(&'a Path, &[Stmt])],
-    include_sites: &[IncludeSite<'a>],
+    include_sites: &[(&Path, &IncludeSite)],
 ) -> FxHashSet<PathBuf> {
     // Each file's path with `/` separators, grouped by file name: an
     // include's target can only be a file of its last segment's name.
@@ -241,8 +290,8 @@ fn resolve_global_scope_files<'a>(
     // "excluded" outcome that shape is supposed to get).
     let mut has_any_incoming: FxHashSet<PathBuf> = FxHashSet::default();
 
-    for site in include_sites {
-        let Some(suffix) = resolve_include_target_suffix(site.target) else {
+    for (source, site) in include_sites {
+        let Some(suffix) = &site.suffix else {
             continue;
         };
         if suffix.is_empty() {
@@ -263,7 +312,7 @@ fn resolve_global_scope_files<'a>(
         has_any_incoming.insert(target.to_path_buf());
         if site.top_level {
             top_level_edges
-                .entry(site.source.to_path_buf())
+                .entry(source.to_path_buf())
                 .or_default()
                 .push(target.to_path_buf());
         }
@@ -325,7 +374,7 @@ fn resolve_include_target_suffix(expr: &Expr) -> Option<String> {
 /// is staged as a top-level site (gated by the include-graph result
 /// applied later), regardless of any `global $x;` (file top level is
 /// already, potentially, the real global scope).
-fn walk_top_level<'a>(stmts: &'a [Stmt], file_ctx: &FileCtx<'a>, out: &mut WalkOutput<'a>) {
+fn walk_top_level<'a>(stmts: &'a [Stmt], file_ctx: &FileCtx<'a>, out: &mut WalkOutput) {
     let empty = FxHashSet::default();
     walk_scope(stmts, file_ctx, true, &empty, out);
 }
@@ -338,7 +387,7 @@ fn walk_top_level<'a>(stmts: &'a [Stmt], file_ctx: &FileCtx<'a>, out: &mut WalkO
 /// the walk with per-branch cloning). Every site found here is
 /// unconditional (`gate: None`) - a function body's own scope isn't
 /// subject to the include-graph check the way file top level is.
-fn walk_function_body<'a>(stmts: &'a [Stmt], file_ctx: &FileCtx<'a>, out: &mut WalkOutput<'a>) {
+fn walk_function_body<'a>(stmts: &'a [Stmt], file_ctx: &FileCtx<'a>, out: &mut WalkOutput) {
     let global_names = collect_global_names(stmts);
     walk_scope(stmts, file_ctx, false, &global_names, out);
 }
@@ -365,7 +414,7 @@ fn walk_scope<'a>(
     file_ctx: &FileCtx<'a>,
     top_level: bool,
     global_names: &FxHashSet<Name>,
-    out: &mut WalkOutput<'a>,
+    out: &mut WalkOutput,
 ) {
     let mut scope = Scope {
         file_ctx,
@@ -384,7 +433,7 @@ struct Scope<'r, 'a> {
     file_ctx: &'r FileCtx<'a>,
     top_level: bool,
     global_names: &'r FxHashSet<Name>,
-    out: &'r mut WalkOutput<'a>,
+    out: &'r mut WalkOutput,
 }
 
 impl<'a> Visitor<'a> for Scope<'_, 'a> {
@@ -428,9 +477,8 @@ impl<'a> Visitor<'a> for Scope<'_, 'a> {
             }
             ExprKind::Include(_, target) => {
                 self.out.include_sites.push(IncludeSite {
-                    source: self.file_ctx.path,
                     top_level: self.top_level,
-                    target,
+                    suffix: resolve_include_target_suffix(target),
                 });
             }
             _ => {}
@@ -448,7 +496,7 @@ fn handle_top_expr_statement<'a>(
     file_ctx: &FileCtx<'a>,
     top_level: bool,
     global_names: &FxHashSet<Name>,
-    out: &mut WalkOutput<'a>,
+    out: &mut WalkOutput,
 ) {
     let is_site = |name: &str| top_level || global_names.contains(name);
     let gate = || top_level.then(|| file_ctx.path.to_path_buf());
@@ -474,7 +522,7 @@ fn handle_assignment_target<'a>(
     file_ctx: &FileCtx<'a>,
     is_site: &dyn Fn(&str) -> bool,
     gate: &dyn Fn() -> Option<PathBuf>,
-    out: &mut WalkOutput<'a>,
+    out: &mut WalkOutput,
     force_mixed: bool,
 ) {
     match &lhs.peeled().kind {

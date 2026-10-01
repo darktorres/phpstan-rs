@@ -273,6 +273,15 @@ pub struct Registry {
     // Whose properties each function and method with a body may write
     // (`registry::property_writes`), keyed by lowercased (class, name).
     pub(crate) property_writes: FxHashMap<(Option<String>, String), PropertyWrites>,
+    // What each file's walk for global variables found, kept for the files
+    // a later finish doesn't walk again (`infer_global_variables_of`).
+    #[serde(skip)]
+    global_sites: FxHashMap<std::path::PathBuf, global_vars::FileSites>,
+    // What each body's property writes were classified as, kept for the
+    // declarations a later finish doesn't classify again.
+    #[serde(skip)]
+    property_write_classes:
+        FxHashMap<(Option<String>, String), Option<property_writes::Classification>>,
 }
 
 impl Registry {
@@ -515,32 +524,24 @@ impl Registry {
     /// constants, from `changed`'s earlier types).
     pub(crate) fn changed_since(
         &self,
-        before: ResolvedSnapshot,
+        before: &ResolvedSnapshot,
         changed: &ChangedNames,
     ) -> FxHashSet<String> {
         let mut keys = FxHashSet::default();
-        for (key, old) in before.classes {
-            if self.classes.get(&key) != old.as_ref() {
-                keys.insert(key);
+        for (key, old) in &before.classes {
+            if self.classes.get(key) != old.as_ref() {
+                keys.insert(key.clone());
             }
         }
-        for (key, old) in before.functions {
-            if self.functions.get(&key) != old.as_ref() {
-                keys.insert(key);
+        for (key, old) in &before.functions {
+            if self.functions.get(key) != old.as_ref() {
+                keys.insert(key.clone());
             }
         }
         for (name, old) in &changed.constants {
             if self.global_constants.get(name.as_str()) != old.as_ref() {
                 keys.insert(crate::deps::dependency_key(name));
             }
-        }
-        for name in before
-            .global_variables
-            .keys()
-            .chain(self.global_variables.keys())
-            .filter(|name| before.global_variables.get(*name) != self.global_variables.get(*name))
-        {
-            keys.insert(crate::deps::global_variable_key(name));
         }
         let decls = before
             .property_writes
@@ -551,6 +552,18 @@ impl Registry {
             keys.insert(class.clone().unwrap_or_else(|| function.clone()));
         }
         keys
+    }
+
+    /// The keys of the global variables whose inferred type differs from
+    /// `before`'s (`deps::global_variable_key`).
+    pub(crate) fn changed_global_variables(&self, before: &ResolvedSnapshot) -> FxHashSet<String> {
+        before
+            .global_variables
+            .keys()
+            .chain(self.global_variables.keys())
+            .filter(|name| before.global_variables.get(*name) != self.global_variables.get(*name))
+            .map(|name| crate::deps::global_variable_key(name))
+            .collect()
     }
 
     /// Drops what was computed lazily from the classes, for the next
