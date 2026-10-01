@@ -9,12 +9,15 @@ fn the_resolved_stub_registry_survives_a_round_trip() {
     let project = Project::new();
     let registry = project.registry();
     let mut stored = Vec::new();
-    ciborium::ser::into_writer(registry, &mut stored).expect("stores");
-    let back: Registry = ciborium::de::from_reader_with_recursion_limit(
-        &stored[..],
-        crate::registry::stub_cache::RECURSION_LIMIT,
+    ciborium::ser::into_writer(&registry.to_stored().expect("diffs"), &mut stored).expect("stores");
+    let back = Registry::from_stored(
+        ciborium::de::from_reader_with_recursion_limit(
+            &stored[..],
+            crate::registry::stub_cache::RECURSION_LIMIT,
+        )
+        .expect("reads back"),
     )
-    .expect("reads back");
+    .expect("rebuilds");
 
     assert_eq!(back.classes.len(), registry.classes.len());
     assert_eq!(back.functions.len(), registry.functions.len());

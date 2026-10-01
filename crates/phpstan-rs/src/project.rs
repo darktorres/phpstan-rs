@@ -375,9 +375,23 @@ impl Project {
         } else {
             "stub-base"
         };
-        if let Some(mut registry) = crate::registry::load_cached::<Registry>(cache_name) {
-            registry.freeze();
-            return registry;
+        let t0 = std::time::Instant::now();
+        if let Some(stored) = crate::registry::load_cached(cache_name) {
+            let t1 = t0.elapsed();
+            match Registry::from_stored(stored) {
+                Ok(mut registry) => {
+                    let t2 = t0.elapsed();
+                    registry.freeze();
+                    eprintln!("TIMING load {t1:?} from_stored {:?} freeze {:?}", t2 - t1, t0.elapsed() - t2);
+                    return registry;
+                }
+                Err(error) => {
+                    debug_assert!(false, "the stored {cache_name} is inconsistent: {error}");
+                    eprintln!(
+                        "phpstan-rs: the stored {cache_name} is inconsistent ({error}); building it again"
+                    );
+                }
+            }
         }
         let mut registry = Registry::default();
         if with_phpstan {
@@ -394,7 +408,10 @@ impl Project {
         base.phpstan_pinned = with_phpstan;
         base.finish_loading();
         let mut registry = base.registry;
-        crate::registry::store_cached(cache_name, &registry);
+        match registry.to_stored() {
+            Ok(stored) => crate::registry::store_cached(cache_name, &stored),
+            Err(error) => eprintln!("phpstan-rs: the {cache_name} can't be stored ({error})"),
+        }
         registry.freeze();
         registry
     }

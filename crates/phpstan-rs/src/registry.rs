@@ -114,6 +114,15 @@ struct RawDeclarations {
     functions: FunctionTable,
 }
 
+/// A registry as stored: its raw declarations apart from the rest, as what
+/// differs from the resolved ones, which they mostly equal.
+#[derive(serde::Serialize, serde::Deserialize)]
+pub(crate) struct StoredRegistry {
+    registry: Registry,
+    raw_classes: Option<name_table::Diff>,
+    raw_functions: Option<name_table::Diff>,
+}
+
 #[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize)]
 pub struct Registry {
     pub classes: NameTable<ClassReflection>,
@@ -564,6 +573,40 @@ impl Registry {
             .filter(|name| before.global_variables.get(*name) != self.global_variables.get(*name))
             .map(|name| crate::deps::global_variable_key(name))
             .collect()
+    }
+
+    /// The registry in the form stored (`StoredRegistry`).
+    pub(crate) fn to_stored(&self) -> Result<StoredRegistry, String> {
+        let mut registry = self.clone();
+        let raw = registry.raw.take();
+        let (raw_classes, raw_functions) = match raw {
+            Some(raw) => (
+                Some(raw.classes.diff_against(&registry.classes)?),
+                Some(raw.functions.diff_against(&registry.functions)?),
+            ),
+            None => (None, None),
+        };
+        Ok(StoredRegistry {
+            registry,
+            raw_classes,
+            raw_functions,
+        })
+    }
+
+    /// The registry a `StoredRegistry` was made from.
+    pub(crate) fn from_stored(stored: StoredRegistry) -> Result<Registry, String> {
+        let StoredRegistry {
+            mut registry,
+            raw_classes,
+            raw_functions,
+        } = stored;
+        if let (Some(classes), Some(functions)) = (raw_classes, raw_functions) {
+            registry.raw = Some(Box::new(RawDeclarations {
+                classes: NameTable::from_diff(classes, &registry.classes)?,
+                functions: NameTable::from_diff(functions, &registry.functions)?,
+            }));
+        }
+        Ok(registry)
     }
 
     /// Replaces the declarations with `base`'s, keeping the settings and

@@ -82,7 +82,7 @@ pub(crate) struct Lazy<V> {
     value: OnceLock<V>,
     // The entry encoded (`NameTable`'s `Serialize`), with what decodes it;
     // `None` once built decoded.
-    encoded: Option<(Box<[u8]>, Decoder<V>)>,
+    encoded: Option<(Arc<[u8]>, Decoder<V>)>,
 }
 
 impl<V> Lazy<V> {
@@ -404,11 +404,80 @@ impl<'de, V: Clone + serde::de::DeserializeOwned> serde::Deserialize<'de> for Na
             .map(|(name, bytes)| {
                 let slot = Lazy {
                     value: OnceLock::new(),
-                    encoded: Some((bytes.0.into_boxed_slice(), decode_entry::<V> as Decoder<V>)),
+                    encoded: Some((Arc::from(bytes.0), decode_entry::<V> as Decoder<V>)),
                 };
                 (Folded(name), slot)
             })
             .collect();
+        Ok(NameTable {
+            entries: FxHashMap::default(),
+            base: Some(Arc::new(Base { entries })),
+            hidden: FxHashSet::default(),
+        })
+    }
+}
+
+/// A table's entries stored as what differs from another table's: an entry
+/// that table holds identically is not written again, and reads back
+/// sharing that entry's encoding.
+#[derive(serde::Serialize, serde::Deserialize)]
+pub(crate) struct Diff(Vec<(Name, Option<Bytes>)>);
+
+impl<V: Clone + serde::Serialize + serde::de::DeserializeOwned> NameTable<V> {
+    /// This table's entries, without those `other` holds identically.
+    pub(crate) fn diff_against(&self, other: &NameTable<V>) -> Result<Diff, String> {
+        let encode = |value: &V| -> Result<Vec<u8>, String> {
+            let mut bytes = Vec::new();
+            ciborium::ser::into_writer(value, &mut bytes).map_err(|e| e.to_string())?;
+            Ok(bytes)
+        };
+        let mut entries = Vec::with_capacity(self.len());
+        for (name, value) in self.iter() {
+            let bytes = encode(value)?;
+            let same = match other.get(name) {
+                Some(theirs) => encode(theirs)? == bytes,
+                None => false,
+            };
+            entries.push((name.clone(), (!same).then_some(Bytes(bytes))));
+        }
+        Ok(Diff(entries))
+    }
+
+    /// The table `diff` was made from, reading what it leaves out from
+    /// `other`.
+    pub(crate) fn from_diff(diff: Diff, other: &NameTable<V>) -> Result<NameTable<V>, String> {
+        let mut entries: FxHashMap<Folded, Lazy<V>> = FxHashMap::default();
+        for (name, bytes) in diff.0 {
+            let encoded: Arc<[u8]> = match bytes {
+                Some(bytes) => Arc::from(bytes.0),
+                None => {
+                    let key = function_key(&name);
+                    let slot = other
+                        .base
+                        .as_ref()
+                        .and_then(|base| base.entries.get(key.as_ref()));
+                    match slot.and_then(|slot| slot.encoded.as_ref()) {
+                        Some((encoded, _)) => Arc::clone(encoded),
+                        None => {
+                            let value = other
+                                .get(&name)
+                                .ok_or_else(|| format!("{name} is in neither table"))?;
+                            let mut bytes = Vec::new();
+                            ciborium::ser::into_writer(value, &mut bytes)
+                                .map_err(|e| e.to_string())?;
+                            Arc::from(bytes)
+                        }
+                    }
+                }
+            };
+            entries.insert(
+                Folded(name),
+                Lazy {
+                    value: OnceLock::new(),
+                    encoded: Some((encoded, decode_entry::<V> as Decoder<V>)),
+                },
+            );
+        }
         Ok(NameTable {
             entries: FxHashMap::default(),
             base: Some(Arc::new(Base { entries })),
@@ -432,7 +501,7 @@ impl<'de, V: serde::de::DeserializeOwned> serde::Deserialize<'de> for Lazy<V> {
         let bytes = Bytes::deserialize(deserializer)?;
         Ok(Lazy {
             value: OnceLock::new(),
-            encoded: Some((bytes.0.into_boxed_slice(), decode_entry::<V> as Decoder<V>)),
+            encoded: Some((Arc::from(bytes.0), decode_entry::<V> as Decoder<V>)),
         })
     }
 }
