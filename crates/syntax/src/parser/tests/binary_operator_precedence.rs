@@ -34,7 +34,7 @@ fn each_operator_binds_tighter_than_the_one_above_it_in_the_table() {
     );
     assert_eq!(
         grouping_of("$a * $b + $c << $d . $e |> $f < $g == $h & $i ^ $j | $k && $l || $m"),
-        "(((((((((((a Mul b) Add c) Shl d) Concat e) Pipe f) Lt g) Eq h) BitAnd i) BitXor j) BitOr k) And l) Or m)"
+        "((((((((((((a Mul b) Add c) Shl d) Concat e) Pipe f) Lt g) Eq h) BitAnd i) BitXor j) BitOr k) And l) Or m)"
     );
 }
 
