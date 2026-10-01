@@ -1080,7 +1080,6 @@ fn edits_across_many_fixtures_match_a_fresh_load() {
 /// Every fixture takes part in some project: consecutive groups of 50,
 /// four edits each.
 #[test]
-#[ignore = "slow: every fixture; run with --ignored"]
 fn edits_across_every_fixture_match_a_fresh_load() {
     let sources = fixture_sources("checker");
     for (group, chunk) in sources.chunks(50).enumerate() {
