@@ -70,4 +70,6 @@ incremental = true
 [profile.dhat]
 inherits = "release"
 debug = 1
+lto = false
+incremental = true
 
