@@ -371,6 +371,53 @@ impl Registry {
         }
     }
 
+    /// Brings the member-owner tables up to date with the members
+    /// `resolve_deferred_mixins` just added: rebuilds them for the scope's
+    /// classes that have a class with `@mixin`s in the scope somewhere in
+    /// their hierarchy, itself included - the only ones whose members
+    /// changed since `precompute_member_owners` last ran.
+    pub(crate) fn precompute_member_owners_after_mixins(&mut self) {
+        let class_names = self.scoped_class_names();
+        let with_mixins: FxHashSet<String> = class_names
+            .iter()
+            .filter(|name| {
+                self.classes
+                    .get(name)
+                    .is_some_and(|info| !info.mixins.is_empty())
+            })
+            .map(|name| name.to_ascii_lowercase())
+            .collect();
+        if with_mixins.is_empty() {
+            return;
+        }
+        let affected: Vec<&Name> = class_names
+            .iter()
+            .filter(|name| {
+                let mut seen = FxHashSet::default();
+                let mut queue: Vec<Name> = vec![(*name).clone()];
+                while let Some(current) = queue.pop() {
+                    if !seen.insert(current.to_ascii_lowercase()) {
+                        continue;
+                    }
+                    if with_mixins.contains(&current.to_ascii_lowercase()) {
+                        return true;
+                    }
+                    if let Some(info) = self.classes.get(&current) {
+                        queue.extend(info.extends.iter().chain(&info.implements).cloned());
+                    }
+                }
+                false
+            })
+            .collect();
+        let scope = crate::registry::scope::Scope::of(
+            affected.iter().map(|name| name.as_ref()),
+            std::iter::empty(),
+        );
+        let outer = std::mem::replace(&mut self.scope, scope);
+        self.precompute_member_owners();
+        self.scope = outer;
+    }
+
     /// Looks up a method, walking the extends/implements ancestor graph
     /// if not declared directly on `class`. Traits aren't modeled here as
     /// a distinct concept - `flatten_traits` already merges a trait's

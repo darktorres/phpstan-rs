@@ -932,10 +932,10 @@ impl Project {
         // Adds more method/property names (mixin members) -
         // `resolve_transitive_purity` right after this also consumes
         // `lookup_method_with_owner`/`lookup_ancestor_method_with_owner`
-        // internally, so the member-owner maps need a second rebuild
-        // here, before it runs, not just once at the very end.
+        // internally, so the member-owner maps take in the mixin members
+        // here, before it runs.
         self.registry.resolve_deferred_mixins();
-        self.registry.precompute_member_owners();
+        self.registry.precompute_member_owners_after_mixins();
         // Neither `resolve_transitive_purity` nor anything below it adds
         // or removes a method/property/const name anywhere, so the
         // member-owner maps built just above stay correct through this

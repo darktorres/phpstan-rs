@@ -334,7 +334,7 @@ impl Registry {
         registry.precompute_ancestor_names();
         registry.resolve_constant_named_types();
         registry.drop_doc_members_excluded_by_native();
-        registry.precompute_member_owners();
+        registry.precompute_member_owners_after_mixins();
         registry.infer_global_variables(&[(std::path::Path::new("<flattened>"), program)]);
         registry
     }
