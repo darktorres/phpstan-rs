@@ -252,6 +252,14 @@ pub struct Registry {
     // (`registry/hierarchy.rs`). Rebuilt whenever the class graph could
     // have changed.
     pub(crate) ancestor_names: NameTable<FxHashSet<Name>>,
+    // The reverse of each class's direct `extends`/`implements` edges, and
+    // of its `uses`: a class-like's direct subtypes and direct trait users
+    // (`precompute_ancestor_names`).
+    pub(crate) subtype_children: NameTable<FxHashSet<Name>>,
+    pub(crate) trait_users: NameTable<FxHashSet<Name>>,
+    // Each class's direct supertypes and used traits as those two indexes
+    // record them, to take it out of them again.
+    recorded_parents: NameTable<(Vec<Name>, Vec<Name>)>,
     // Every registered class's precomputed member-name ->
     // owning-ancestor-name map, one per member kind - see
     // `lookup_method`/`precompute_member_owners` (`registry/hierarchy.rs`).
@@ -441,6 +449,9 @@ impl Registry {
         self.functions.freeze();
         self.built_in_stub_classes.freeze();
         self.ancestor_names.freeze();
+        self.subtype_children.freeze();
+        self.trait_users.freeze();
+        self.recorded_parents.freeze();
         self.method_owner_by_class.freeze();
         self.ancestor_method_owner_by_class.freeze();
         self.property_owner_by_class.freeze();

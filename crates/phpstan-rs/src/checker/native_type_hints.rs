@@ -167,11 +167,9 @@ impl<'a> Checker<'a> {
                 continue;
             };
             let suggested_ty = self.suggested_type(&suggested, Some(fqn));
-            let redeclared_incompatibly = self.registry.classes.iter().any(|(name, info)| {
-                name.as_ref() != fqn
-                    && self.registry.is_subclass_of(name, fqn)
-                    && info
-                        .consts()
+            let redeclared_incompatibly = self.registry.subclasses(fqn).iter().any(|name| {
+                self.registry.classes.get(name).is_some_and(|info| {
+                    info.consts()
                         .get(constant.name.as_ref())
                         .is_some_and(|child| {
                             child.native_ty().as_ref().is_none_or(|child_ty| {
@@ -179,6 +177,7 @@ impl<'a> Checker<'a> {
                                     != TrinaryLogic::Yes
                             })
                         })
+                })
             });
             if redeclared_incompatibly {
                 continue;
@@ -207,20 +206,17 @@ impl<'a> Checker<'a> {
     /// Whether some class overriding `class::method` declares no return
     /// type, or one outside `suggested`.
     fn overriding_returns_block(&self, class: &str, method: &str, suggested: &Type) -> bool {
-        self.registry.classes.keys().any(|name| {
-            name.as_ref() != class
-                && self.registry.is_subclass_of(name, class)
-                && self
-                    .registry
-                    .lookup_method_with_owner(name, method)
-                    .is_some_and(|(owner, overriding)| {
-                        owner.as_ref() != class
-                            && (overriding.return_type_native().is_implicit_mixed()
-                                || self
-                                    .registry
-                                    .is_super_type_of(suggested, overriding.return_type_native())
-                                    != TrinaryLogic::Yes)
-                    })
+        self.registry.subclasses(class).iter().any(|name| {
+            self.registry
+                .lookup_method_with_owner(name, method)
+                .is_some_and(|(owner, overriding)| {
+                    owner.as_ref() != class
+                        && (overriding.return_type_native().is_implicit_mixed()
+                            || self
+                                .registry
+                                .is_super_type_of(suggested, overriding.return_type_native())
+                                != TrinaryLogic::Yes)
+                })
         })
     }
 }

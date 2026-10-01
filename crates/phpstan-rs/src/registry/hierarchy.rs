@@ -79,14 +79,96 @@ impl Registry {
             .collect();
         if self.scope.is_all() {
             self.ancestor_names = ancestor_names.into_iter().collect();
+            self.subtype_children = NameTable::default();
+            self.trait_users = NameTable::default();
+            self.recorded_parents = NameTable::default();
         } else {
             for name in self.scoped_removed_class_keys() {
                 self.ancestor_names.remove(&name);
+                self.unrecord_parents(&name);
             }
             for (name, ancestors) in ancestor_names {
                 self.ancestor_names.insert(name, ancestors);
             }
         }
+        for name in class_names {
+            self.unrecord_parents(&name);
+            let Some(info) = self.classes.get(&name) else {
+                continue;
+            };
+            let supertypes: Vec<Name> = info
+                .extends
+                .iter()
+                .chain(info.implements.iter())
+                .cloned()
+                .collect();
+            let traits: Vec<Name> = info.uses.clone();
+            for parent in &supertypes {
+                self.subtype_children
+                    .get_or_insert_with(parent.clone(), FxHashSet::default)
+                    .insert(name.clone());
+            }
+            for used in &traits {
+                self.trait_users
+                    .get_or_insert_with(used.clone(), FxHashSet::default)
+                    .insert(name.clone());
+            }
+            self.recorded_parents.insert(name, (supertypes, traits));
+        }
+    }
+
+    /// Takes `class` out of the subtype and trait-user indexes.
+    fn unrecord_parents(&mut self, class: &str) {
+        let Some((supertypes, traits)) = self.recorded_parents.remove(class) else {
+            return;
+        };
+        for (index, parents) in [
+            (&mut self.subtype_children, supertypes),
+            (&mut self.trait_users, traits),
+        ] {
+            for parent in parents {
+                if let Some(children) = index.get_mut(&parent) {
+                    children.retain(|child| !child.eq_ignore_case(&Name::from(class)));
+                    if children.is_empty() {
+                        index.remove(&parent);
+                    }
+                }
+            }
+        }
+    }
+
+    /// Every class-like extending or implementing `class`, directly or
+    /// transitively - `is_subclass_of`'s converse, without `class`.
+    pub(crate) fn subclasses(&self, class: &str) -> Vec<Name> {
+        self.descendants(class, false)
+    }
+
+    /// `subclasses`, and every class-like using `class` as a trait or
+    /// descending from one that does - `all_ancestor_names`'s converse.
+    pub(crate) fn inheritors(&self, class: &str) -> Vec<Name> {
+        self.descendants(class, true)
+    }
+
+    fn descendants(&self, class: &str, with_traits: bool) -> Vec<Name> {
+        let mut seen: FxHashSet<String> = FxHashSet::default();
+        seen.insert(class.to_ascii_lowercase());
+        let mut result = Vec::new();
+        let mut stack = vec![Name::from(class)];
+        while let Some(current) = stack.pop() {
+            let children = self.subtype_children.get(&current).into_iter().flatten();
+            let users = with_traits
+                .then(|| self.trait_users.get(&current))
+                .flatten()
+                .into_iter()
+                .flatten();
+            for child in children.chain(users) {
+                if seen.insert(child.to_ascii_lowercase()) {
+                    result.push(child.clone());
+                    stack.push(child.clone());
+                }
+            }
+        }
+        result
     }
 
     /// Is `class` (or any ancestor it `extends`) tagged
@@ -157,17 +239,19 @@ impl Registry {
             if !seen.insert(current.clone()) {
                 continue;
             }
-            for (name, info) in &self.classes {
-                if !info.uses.iter().any(|u| u == &current) {
-                    continue;
-                }
-                if info.kind == ClassKind::Trait {
+            for name in self.trait_users.get(&current).into_iter().flatten() {
+                if self
+                    .classes
+                    .get(name)
+                    .is_some_and(|info| info.kind == ClassKind::Trait)
+                {
                     stack.push(name.clone());
                 } else {
                     result.push(name.clone());
                 }
             }
         }
+        result.sort();
         result
     }
 
