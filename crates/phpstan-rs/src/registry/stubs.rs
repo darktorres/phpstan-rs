@@ -796,6 +796,46 @@ pub fn generated_stub_classes() -> Vec<(Name, ClassReflection)> {
     generated_stub_data().classes.clone()
 }
 
+/// The entries of `generated_stubs` named `name` in any case, in its order.
+pub fn generated_stubs_named(name: &str) -> Vec<(Name, FunctionReflection)> {
+    let data = generated_stub_data();
+    named_positions(&data.function_positions, name)
+        .iter()
+        .map(|&i| data.functions[i].clone())
+        .collect()
+}
+
+/// The entries of `generated_stub_classes` named `name` in any case, in
+/// its order.
+pub fn generated_stub_classes_named(name: &str) -> Vec<(Name, ClassReflection)> {
+    let data = generated_stub_data();
+    named_positions(&data.class_positions, name)
+        .iter()
+        .map(|&i| data.classes[i].clone())
+        .collect()
+}
+
+fn named_positions<'a>(
+    positions: &'a rustc_hash::FxHashMap<String, Vec<usize>>,
+    name: &str,
+) -> &'a [usize] {
+    positions
+        .get(&name.trim_start_matches('\\').to_ascii_lowercase())
+        .map_or(&[], Vec::as_slice)
+}
+
+/// Each lowercased name's positions in `entries`.
+fn positions_by_name<T>(entries: &[(Name, T)]) -> rustc_hash::FxHashMap<String, Vec<usize>> {
+    let mut positions: rustc_hash::FxHashMap<String, Vec<usize>> = rustc_hash::FxHashMap::default();
+    for (i, (name, _)) in entries.iter().enumerate() {
+        positions
+            .entry(name.to_ascii_lowercase())
+            .or_default()
+            .push(i);
+    }
+    positions
+}
+
 /// The constant-side sibling of `generated_stub_classes` just above -
 /// undefined-`use const`/bare-constant detection needs built-in/extension
 /// constants (`JSON_PRETTY_PRINT`, `SORT_*`, `CURLOPT_*`, ...) to actually
@@ -831,6 +871,9 @@ struct GeneratedStubData {
     functions: Vec<(Name, FunctionReflection)>,
     classes: Vec<(Name, ClassReflection)>,
     constants: Vec<(Name, Type)>,
+    // Lowercased name -> its positions in `functions`/`classes`.
+    function_positions: rustc_hash::FxHashMap<String, Vec<usize>>,
+    class_positions: rustc_hash::FxHashMap<String, Vec<usize>>,
     // Lowercased name -> the phpstorm-stubs directory (extension) that
     // declares it; PHPStan's own classes aren't built-ins and aren't here.
     function_extensions: rustc_hash::FxHashMap<String, &'static str>,
@@ -1023,6 +1066,8 @@ fn generated_stub_data() -> &'static GeneratedStubData {
         patch_spl_iterator_templates(&mut classes);
         patch_datetime_fluent_returns(&mut classes);
         GeneratedStubData {
+            function_positions: positions_by_name(&functions),
+            class_positions: positions_by_name(&classes),
             functions,
             classes,
             constants: merged_constants.into_iter().collect(),

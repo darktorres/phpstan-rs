@@ -548,3 +548,107 @@ fn an_edited_analyzed_file_stays_analyzed() {
         .unwrap();
     assert!(project.files[&path].analyzed);
 }
+
+fn class_has_method(project: &Project, class: &str, method: &str) -> bool {
+    project
+        .registry()
+        .classes
+        .get(class)
+        .is_some_and(|c| c.methods().contains_key(method))
+}
+
+#[test]
+fn editing_a_file_merged_into_a_built_in_class_keeps_the_built_in_members() {
+    let sources = [
+        "<?php if (!class_exists('ArrayObject')) { class ArrayObject { public function polyOnly(): int { return 1; } } }",
+        "<?php class ArrayObject { public function polyOnly(): int { return 1; } }",
+    ];
+    for source in sources {
+        for analyzed in [false, true] {
+            let mut project = Project::new();
+            let path = PathBuf::from("polyfill.php");
+            if analyzed {
+                project.load_analyzed_file(path.clone(), source).unwrap();
+            } else {
+                project.load_file(path.clone(), source).unwrap();
+            }
+            project.finish_loading();
+            assert!(class_has_method(&project, "ArrayObject", "count"));
+            assert!(class_has_method(&project, "ArrayObject", "polyOnly"));
+
+            project.update_file(&path, &format!("{source}\n")).unwrap();
+            assert!(
+                class_has_method(&project, "ArrayObject", "count"),
+                "{source} (analyzed: {analyzed})"
+            );
+            assert!(class_has_method(&project, "ArrayObject", "polyOnly"));
+        }
+    }
+}
+
+#[test]
+fn editing_a_polyfill_a_built_in_function_beat_keeps_the_built_in() {
+    let source = "<?php if (!function_exists('mb_str_pad')) { function mb_str_pad($string, $length) { return $string; } }";
+    let mut project = Project::new();
+    let path = PathBuf::from("polyfill.php");
+    project.load_file(path.clone(), source).unwrap();
+    project.finish_loading();
+    let params = |project: &Project| project.registry().functions["mb_str_pad"].params().len();
+    assert_eq!(params(&project), 5);
+
+    project.update_file(&path, &format!("{source}\n")).unwrap();
+    assert_eq!(params(&project), 5);
+}
+
+#[test]
+fn removing_a_file_merged_into_a_built_in_class_restores_the_built_in() {
+    let mut project = Project::new();
+    let path = PathBuf::from("polyfill.php");
+    project
+        .load_file(
+            path.clone(),
+            "<?php if (!class_exists('ArrayObject')) { class ArrayObject { public function polyOnly(): int { return 1; } } }",
+        )
+        .unwrap();
+    project.finish_loading();
+
+    project.remove_file(&path);
+    assert!(class_has_method(&project, "ArrayObject", "count"));
+    assert!(!class_has_method(&project, "ArrayObject", "polyOnly"));
+}
+
+#[test]
+fn editing_one_of_two_merged_declarations_keeps_the_other() {
+    let mut project = Project::new();
+    let first = PathBuf::from("lib/a.php");
+    let second = PathBuf::from("lib/b.php");
+    project
+        .load_file(
+            first.clone(),
+            "<?php class Shared { public function fromA(): int { return 1; } }",
+        )
+        .unwrap();
+    project
+        .load_file(
+            second.clone(),
+            "<?php class Shared { public function fromB(): int { return 1; } }",
+        )
+        .unwrap();
+    project.finish_loading();
+    assert!(class_has_method(&project, "Shared", "fromA"));
+    assert!(class_has_method(&project, "Shared", "fromB"));
+
+    project
+        .update_file(
+            &first,
+            "<?php class Shared { public function fromA2(): int { return 1; } }",
+        )
+        .unwrap();
+    assert!(!class_has_method(&project, "Shared", "fromA"));
+    assert!(class_has_method(&project, "Shared", "fromA2"));
+    assert!(class_has_method(&project, "Shared", "fromB"));
+
+    project.remove_file(&second);
+    assert!(class_has_method(&project, "Shared", "fromA2"));
+    assert!(!class_has_method(&project, "Shared", "fromB"));
+}

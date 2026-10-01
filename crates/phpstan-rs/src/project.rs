@@ -12,7 +12,7 @@ use crate::deps;
 use crate::ignore_comments;
 use crate::pest_config::PestConfig;
 use crate::registry::stubs;
-use crate::registry::{BodySource, FileBodies, Origin, Provenance, Registry};
+use crate::registry::{BodySource, BuiltDecl, FileBodies, Origin, Provenance, Registry};
 use diagnostics::{self, Diagnostic, DiagnosticBuilder};
 use syntax::ast::{Stmt, StmtKind};
 use syntax::declarations::Declared;
@@ -795,14 +795,13 @@ impl Project {
     /// `dependents` - the same undo both `update_file` (before
     /// re-indexing a new parse) and `remove_files` (permanently) need -
     /// extending `changed_symbols` with every bare name it owned.
-    /// Returns the removed file's `analyzed` flag, or `None` when `path`
-    /// wasn't loaded (a no-op - both callers treat that as "nothing to
-    /// undo").
+    /// Returns what the removed file was, or `None` when `path` wasn't
+    /// loaded (a no-op - both callers treat that as "nothing to undo").
     fn unindex_file(
         &mut self,
         path: &Path,
         changed_symbols: &mut FxHashSet<String>,
-    ) -> Option<bool> {
+    ) -> Option<UnindexedFile> {
         let old = self.files.remove(path)?;
         let classes: Vec<String> = old
             .classes
@@ -819,7 +818,79 @@ impl Project {
         changed_symbols.extend(old.functions.iter().map(|s| bare_name(s).to_string()));
         changed_symbols.extend(old.classes.iter().map(|s| bare_name(s).to_string()));
         unregister_references(&mut self.dependents, path, &old.references);
-        Some(old.analyzed)
+        Some(UnindexedFile {
+            analyzed: old.analyzed,
+            functions: old.functions,
+            classes: old.classes,
+        })
+    }
+
+    /// Rebuilds the registry entries of `functions` and `classes` from
+    /// every declaration of them still loaded: the built-in stub's first,
+    /// as `Project::new` merges it, then each file's, context files before
+    /// analyzed ones and each group by path - the order a project loads
+    /// them in. `pending` is a file whose parse isn't in `self.files` yet;
+    /// all of its declarations are inserted, at its place in that order.
+    fn rebuild_declarations(
+        &mut self,
+        functions: &[String],
+        classes: &[String],
+        pending: Option<(&Path, &[Stmt], bool)>,
+    ) {
+        self.registry.remove_declarations(functions, classes);
+        let function_keys: FxHashSet<String> =
+            functions.iter().map(|n| n.to_ascii_lowercase()).collect();
+        let class_keys: FxHashSet<String> =
+            classes.iter().map(|n| n.to_ascii_lowercase()).collect();
+        for name in &function_keys {
+            self.registry
+                .merge_stubs(stubs::generated_stubs_named(name));
+        }
+        for name in &class_keys {
+            self.registry
+                .merge_stub_classes(stubs::generated_stub_classes_named(name));
+        }
+        let declares_one = |state: &FileState| {
+            state
+                .functions
+                .iter()
+                .any(|n| function_keys.contains(&n.to_ascii_lowercase()))
+                || state
+                    .classes
+                    .iter()
+                    .any(|n| class_keys.contains(&n.to_ascii_lowercase()))
+        };
+        let mut sources: Vec<(bool, &Path, &[Stmt], bool)> = self
+            .files
+            .iter()
+            .filter(|(_, state)| declares_one(state))
+            .map(|(path, state)| (state.analyzed, path.as_path(), state.ast.as_slice(), false))
+            .collect();
+        if let Some((path, ast, analyzed)) = pending {
+            sources.push((analyzed, path, ast, true));
+        }
+        sources.sort_by(|a, b| (a.0, a.1).cmp(&(b.0, b.1)));
+        for (analyzed, path, ast, is_pending) in sources {
+            let origin = Origin::File(Arc::from(path));
+            for decl in crate::registry::build_declarations(ast, &origin) {
+                let rebuilt = match &decl {
+                    BuiltDecl::Class { name, .. } => {
+                        class_keys.contains(&name.to_ascii_lowercase())
+                    }
+                    BuiltDecl::Function { name, .. } => {
+                        function_keys.contains(&name.to_ascii_lowercase())
+                    }
+                    BuiltDecl::GlobalConst { .. } => false,
+                };
+                if !rebuilt && !is_pending {
+                    continue;
+                }
+                if let BuiltDecl::Class { name, .. } = &decl {
+                    self.registry.record_phpstan_class_file(name, path);
+                }
+                self.registry.insert_built_decl(decl, analyzed);
+            }
+        }
     }
 
     /// Recomputes `path`'s own Tier-1 (class/function) use-sites from its
@@ -968,7 +1039,7 @@ impl Project {
         // request that happened to race a genuinely-invalid save.
         let (ast, ignores, _) = parse_with_ignores(path, new_source.as_bytes(), &self.interner)?;
         let mut changed_symbols: FxHashSet<String> = FxHashSet::default();
-        let previously_analyzed = self.unindex_file(path, &mut changed_symbols);
+        let previous = self.unindex_file(path, &mut changed_symbols);
         let (functions, classes) = declared_names(&ast);
         let references = deps::referenced_names(&ast);
         // `changed_symbols` seeds transitive_affected_files' BFS, which
@@ -998,14 +1069,22 @@ impl Project {
         // same-name collision (`insert_built_decl`'s own doc comment)
         // would let an opened-but-never-discovered vendor file outright
         // overwrite a real declaration instead of merging into it.
-        let analyzed = previously_analyzed
-            .unwrap_or_else(|| !path_under_excluded_dir(path, DEFAULT_SCAN_EXCLUDED_DIR_NAMES));
-        let origin = Origin::File(Arc::from(path));
-        self.registry.index(&ast, &origin, analyzed);
-        let anonymous_classes = anonymous_class_names(&ast);
-        for name in &classes {
-            self.registry.record_phpstan_class_file(name, path);
+        let analyzed = previous.as_ref().map_or_else(
+            || !path_under_excluded_dir(path, DEFAULT_SCAN_EXCLUDED_DIR_NAMES),
+            |previous| previous.analyzed,
+        );
+        let mut rebuilt_functions = functions.clone();
+        let mut rebuilt_classes = classes.clone();
+        if let Some(previous) = previous {
+            rebuilt_functions.extend(previous.functions);
+            rebuilt_classes.extend(previous.classes);
         }
+        self.rebuild_declarations(
+            &rebuilt_functions,
+            &rebuilt_classes,
+            Some((path, &ast, analyzed)),
+        );
+        let anonymous_classes = anonymous_class_names(&ast);
         self.duplicate_fn_sites.index(&ast, path);
         // `is_stub: false` - same reasoning as `load_file_impl`'s own
         // identical note: `update_file` is the LSP/incremental-edit path,
@@ -1160,12 +1239,19 @@ impl Project {
     /// case, since there is nothing for it to discover.
     pub fn remove_files(&mut self, paths: &[PathBuf]) -> FxHashMap<PathBuf, Vec<Diagnostic>> {
         let mut changed_symbols: FxHashSet<String> = FxHashSet::default();
+        let mut removed_functions = Vec::new();
+        let mut removed_classes = Vec::new();
         let mut any_removed = false;
         for path in paths {
-            any_removed |= self.unindex_file(path, &mut changed_symbols).is_some();
+            if let Some(removed) = self.unindex_file(path, &mut changed_symbols) {
+                removed_functions.extend(removed.functions);
+                removed_classes.extend(removed.classes);
+                any_removed = true;
+            }
         }
         let mut affected: FxHashSet<PathBuf> = paths.iter().cloned().collect();
         if any_removed {
+            self.rebuild_declarations(&removed_functions, &removed_classes, None);
             self.finish_loading();
             affected.extend(self.transitive_affected_files_from(changed_symbols));
         }
@@ -2142,6 +2228,13 @@ pub fn collect_php_files_excluding(
 /// first.
 fn bare_name(fqn: &str) -> &str {
     fqn.rsplit('\\').next().unwrap_or(fqn)
+}
+
+/// What `Project::unindex_file` removed.
+struct UnindexedFile {
+    analyzed: bool,
+    functions: Vec<String>,
+    classes: Vec<String>,
 }
 
 /// The function and class names one file's parse tree declares - exactly
