@@ -1587,11 +1587,8 @@ impl Project {
                         .map(|name| deps::dependency_key(name)),
                 );
             }
-            frontier.extend(
-                stubs::stub_dependents(&key)
-                    .iter()
-                    .map(|(_, name)| deps::dependency_key(name)),
-            );
+            frontier
+                .extend(stubs::stub_dependents(&key).map(|(_, name)| deps::dependency_key(name)));
         }
         affected
     }
