@@ -198,18 +198,8 @@ fn invalidation_is_transitive_across_an_inheritance_chain() {
 #[test]
 fn invalidation_still_works_for_namespaced_classes() {
     // Same shape as invalidation_is_transitive_across_an_inheritance_chain,
-    // but every class lives in a namespace - real code, unlike almost
-    // every other test in this file. `declared_names` returns
-    // fully-qualified names (to match Registry::index's namespace-aware
-    // keys, for correct incremental removal), but
-    // `deps::referenced_names` deliberately still collects bare names
-    // (an intentional, documented approximation - see its own doc
-    // comment) - `changed_symbols` (fed from `declared_names`) and
-    // `dependents`'s keys (fed from `referenced_names`) must actually
-    // agree for `transitive_affected_files`' lookup to find anything at
-    // all: `dependents.get("App\\C")` must find something under an
-    // "App\\C" key, not only a bare "C" key, or a.php is never
-    // re-checked even though it genuinely depends on the changed class.
+    // but every class lives in a namespace: the declared names and the
+    // references must reach the same keys.
     let mut project = Project::new();
     project
         .load_file(
@@ -651,4 +641,82 @@ fn editing_one_of_two_merged_declarations_keeps_the_other() {
     project.remove_file(&second);
     assert!(class_has_method(&project, "Shared", "fromA2"));
     assert!(!class_has_method(&project, "Shared", "fromB"));
+}
+
+/// Loads `files`, then edits `edited` to `new_source`, returning which
+/// files the edit rechecked.
+fn rechecked_by_edit(files: &[(&str, &str)], edited: &str, new_source: &str) -> Vec<String> {
+    let mut project = Project::new();
+    for (path, source) in files {
+        project
+            .load_analyzed_file(PathBuf::from(path), source)
+            .unwrap();
+    }
+    project.finish_loading();
+    let result = project
+        .update_file(&PathBuf::from(edited), new_source)
+        .unwrap();
+    let mut rechecked: Vec<String> = result.keys().map(|p| p.display().to_string()).collect();
+    rechecked.sort();
+    rechecked
+}
+
+#[test]
+fn a_fully_qualified_class_reference_is_rechecked() {
+    let rechecked = rechecked_by_edit(
+        &[
+            ("base.php", "<?php class Base { function m() {} }"),
+            ("top.php", "<?php (new \\Base())->m();"),
+            ("ns.php", "<?php namespace App; (new \\Base())->m();"),
+        ],
+        "base.php",
+        "<?php class Base {}",
+    );
+    assert_eq!(rechecked, ["base.php", "ns.php", "top.php"]);
+}
+
+#[test]
+fn a_class_referenced_only_in_phpdoc_is_rechecked() {
+    let rechecked = rechecked_by_edit(
+        &[
+            ("base.php", "<?php class Base { function m() {} }"),
+            (
+                "doc.php",
+                "<?php /** @param Base $b */ function f($b) { $b->m(); }",
+            ),
+            (
+                "mixin.php",
+                "<?php /** @mixin Base */ class Host {} function g(Host $h) { $h->m(); }",
+            ),
+        ],
+        "base.php",
+        "<?php class Base {}",
+    );
+    assert_eq!(rechecked, ["base.php", "doc.php", "mixin.php"]);
+}
+
+#[test]
+fn a_fully_qualified_function_call_is_rechecked() {
+    let rechecked = rechecked_by_edit(
+        &[
+            ("g.php", "<?php function g(int $i) {}"),
+            ("call.php", "<?php namespace App; \\g(1);"),
+        ],
+        "g.php",
+        "<?php function g(string $s) {}",
+    );
+    assert_eq!(rechecked, ["call.php", "g.php"]);
+}
+
+#[test]
+fn a_same_named_class_in_another_namespace_is_not_rechecked() {
+    let rechecked = rechecked_by_edit(
+        &[
+            ("base.php", "<?php namespace A; class Base {}"),
+            ("other.php", "<?php namespace B; class Base {} new Base();"),
+        ],
+        "base.php",
+        "<?php namespace A; class Base { function m() {} }",
+    );
+    assert_eq!(rechecked, ["base.php"]);
 }

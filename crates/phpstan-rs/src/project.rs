@@ -854,8 +854,8 @@ impl Project {
             .remove_declarations(path, &old.functions);
         self.duplicate_class_sites
             .remove_declarations(path, &old.classes);
-        changed_symbols.extend(old.functions.iter().map(|s| bare_name(s).to_string()));
-        changed_symbols.extend(old.classes.iter().map(|s| bare_name(s).to_string()));
+        changed_symbols.extend(old.functions.iter().map(|s| deps::dependency_key(s)));
+        changed_symbols.extend(old.classes.iter().map(|s| deps::dependency_key(s)));
         unregister_references(&mut self.dependents, path, &old.references);
         Some(UnindexedFile {
             analyzed: old.analyzed,
@@ -1081,17 +1081,8 @@ impl Project {
         let previous = self.unindex_file(path, &mut changed_symbols);
         let (functions, classes) = declared_names(&ast);
         let references = deps::referenced_names(&ast);
-        // `changed_symbols` seeds transitive_affected_files' BFS, which
-        // looks names up in `self.dependents` - keyed by the bare names
-        // deps::referenced_names collects (a deliberate simplification,
-        // see that function's own doc comment), not the fully-qualified
-        // ones `functions`/`classes` carry (needed for correct Registry
-        // removal above). Feeding FQNs into a bare-keyed lookup would
-        // silently find nothing for any namespaced class, so editing a
-        // widely-depended-on namespaced class wouldn't cascade to any of
-        // its real dependents at all.
-        changed_symbols.extend(functions.iter().map(|s| bare_name(s).to_string()));
-        changed_symbols.extend(classes.iter().map(|s| bare_name(s).to_string()));
+        changed_symbols.extend(functions.iter().map(|s| deps::dependency_key(s)));
+        changed_symbols.extend(classes.iter().map(|s| deps::dependency_key(s)));
 
         // A file `update_file` has already seen keeps its own recorded
         // `analyzed` flag (an edit doesn't change what kind of file it
@@ -1322,13 +1313,10 @@ impl Project {
                 let Some(state) = self.files.get(file) else {
                     continue;
                 };
-                // Bare, not FQN - see update_file's identical note on
-                // changed_symbols; this frontier feeds the same
-                // bare-keyed `self.dependents` lookup above.
                 for name in state.functions.iter().chain(state.classes.iter()) {
-                    let bare = bare_name(name).to_string();
-                    if seen_symbols.insert(bare.clone()) {
-                        frontier.push(bare);
+                    let key = deps::dependency_key(name);
+                    if seen_symbols.insert(key.clone()) {
+                        frontier.push(key);
                     }
                 }
             }
@@ -2216,17 +2204,6 @@ pub fn collect_php_files_excluding(
     } else if path.extension().is_some_and(|e| e == "php") {
         out.push(path.to_path_buf());
     }
-}
-
-/// The last segment of a fully-qualified name (`"App\Foo\Bar"` becomes
-/// `"Bar"`). `declared_names` returns FQNs (needed to match
-/// `Registry::index`'s namespace-aware keys, for correct removal), but
-/// the invalidation graph (`dependents`, built from
-/// `deps::referenced_names`) is deliberately keyed by bare names, so
-/// anything feeding that graph's BFS needs converting back down to bare
-/// first.
-fn bare_name(fqn: &str) -> &str {
-    fqn.rsplit('\\').next().unwrap_or(fqn)
 }
 
 /// What `Project::unindex_file` removed.
