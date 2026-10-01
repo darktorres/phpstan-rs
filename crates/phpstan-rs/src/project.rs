@@ -786,6 +786,7 @@ impl Project {
     }
 
     fn run_finishing_passes(&mut self) {
+        self.registry.reset_lazy_tables();
         self.registry.canonicalize_class_name_case();
         self.registry.flatten_traits();
         self.registry.resolve_method_tags();

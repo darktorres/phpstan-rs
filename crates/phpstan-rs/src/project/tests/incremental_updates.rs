@@ -805,3 +805,38 @@ fn a_file_using_a_changed_constant_is_rechecked() {
     );
     assert_eq!(rechecked, ["c.php", "global.php", "use.php"]);
 }
+
+#[test]
+fn an_edited_entity_table_name_is_found_after_the_edit() {
+    let entity = |table: &str| {
+        format!(
+            "<?php use Doctrine\\ORM\\Mapping as ORM; #[ORM\\Entity] #[ORM\\Table(name: '{table}')] class Tag {{ #[ORM\\Id] #[ORM\\Column] public int $id; }}"
+        )
+    };
+    let mut project = Project::new();
+    project
+        .load_analyzed_file(PathBuf::from("tag.php"), &entity("tags"))
+        .unwrap();
+    project.finish_loading();
+    assert!(
+        project
+            .registry()
+            .doctrine_entity_for_table("tags")
+            .is_some()
+    );
+    project
+        .update_file(&PathBuf::from("tag.php"), &entity("labels"))
+        .unwrap();
+    assert!(
+        project
+            .registry()
+            .doctrine_entity_for_table("tags")
+            .is_none()
+    );
+    assert!(
+        project
+            .registry()
+            .doctrine_entity_for_table("labels")
+            .is_some()
+    );
+}

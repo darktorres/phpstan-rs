@@ -305,6 +305,12 @@ impl Registry {
         registry
     }
 
+    /// Drops what was computed lazily from the classes, for the next
+    /// lookup to compute again from the classes as they are now.
+    pub(crate) fn reset_lazy_tables(&mut self) {
+        self.doctrine_entity_table_index = std::sync::OnceLock::new();
+    }
+
     /// The one `DoctrineEntity`-mapped class whose own `#[ORM\Table(name:
     /// ...)]` matches `table` exactly, if any - see `doctrine_entity_
     /// table_index`'s own doc comment for why this is lazily built
