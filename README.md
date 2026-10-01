@@ -77,17 +77,28 @@ Three tools, each for what it measures well:
   ./target/release/phpstan-rs check-project --config phpstan-rs.toml
   ```
 
-- **Where the time goes inside the recursion: a sampling profiler.** Build
-  the `dhat` profile (release with debug info) without the hotpath
-  features, and record call stacks with `perf` or `samply`; recursion folds
-  into one path in the flame graph.
+- **Where the time goes, anywhere: a sampling profiler.** `hotpath` times
+  only the functions marked for it, so it shows what was already suspected;
+  a sampler needs no marks. Build the `dhat` profile (release optimizations,
+  debug info, no LTO, incremental) with frame pointers, so that call stacks
+  are complete, and record with `perf`. Recursion folds into one path in the
+  flame graph.
 
   ```sh
-  cargo build -p phpstan-rs --profile dhat
-  perf record -g --call-graph dwarf ./target/dhat/phpstan-rs check-project --config phpstan-rs.toml
-  perf report
-  # or: samply record ./target/dhat/phpstan-rs check-project --config phpstan-rs.toml
+  RUSTFLAGS="-C force-frame-pointers=yes" CARGO_TARGET_DIR=target/fp \
+    cargo build -p phpstan-rs --profile dhat --bin phpstan-rs
+  # run it once first: the stub cache is built on the first run after a rebuild
+  perf record -F 499 -g target/fp/dhat/phpstan-rs check-project --config phpstan-rs.toml
+  perf report --children --stdio -g none --no-inline --percent-limit 3
+  # or: samply record target/fp/dhat/phpstan-rs check-project --config phpstan-rs.toml
   ```
+
+  Use `--no-inline` with `perf report` and `perf script`: resolving inlined
+  frames takes minutes on a debug-info binary. Frame pointers, not
+  `--call-graph dwarf`, which is slow and whose stacks stop short. A run
+  that scales badly with cores has serial stretches; `PHPSTAN_RS_THREADS`
+  sets the worker pool's size for a scaling curve, and the call stacks of a
+  window of the run show what is serial (see `CLAUDE.md`).
 
 - **Which call sites allocate: dhat.** The `dhat-heap` feature swaps in
   dhat's allocator and writes `dhat-heap.json` on exit, for
