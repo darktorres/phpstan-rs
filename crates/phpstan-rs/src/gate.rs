@@ -152,8 +152,8 @@ pub fn fixture_config(path: &Path) -> Result<FixtureConfig, String> {
             runtime_packages: Vec::new(),
         });
     }
-    let schema = crate::app::config_schema();
-    let mut config = config::ConfigFile::load(path, &schema)?;
+    let schema = fixture_schema();
+    let mut config = config::ConfigFile::load(path, schema)?;
     let strings = |value: Option<toml::Value>, key: &str| -> Result<Vec<String>, String> {
         let Some(value) = value else {
             return Ok(Vec::new());
@@ -179,7 +179,7 @@ pub fn fixture_config(path: &Path) -> Result<FixtureConfig, String> {
             ));
         }
     };
-    config.validate(&schema)?;
+    config.validate(schema)?;
     if let Some(warning) = config.warnings().first() {
         return Err(format!("{}: {warning}", path.display()));
     }
@@ -189,6 +189,23 @@ pub fn fixture_config(path: &Path) -> Result<FixtureConfig, String> {
         runtime_warnings_exact,
         runtime_packages,
     })
+}
+
+/// The config schema every fixture is read against, built once.
+fn fixture_schema() -> &'static config::Schema {
+    static SCHEMA: std::sync::OnceLock<config::Schema> = std::sync::OnceLock::new();
+    SCHEMA.get_or_init(crate::app::config_schema)
+}
+
+/// Whether the config at `path` sets `requires_feature`: a plain parse of
+/// the file, without the schema, for a caller that reads the rest of a
+/// fixture's config only when it does. A file that can't be read or
+/// parsed sets nothing.
+pub fn declares_required_feature(path: &Path) -> bool {
+    std::fs::read_to_string(path)
+        .ok()
+        .and_then(|text| toml::from_str::<toml::Table>(&text).ok())
+        .is_some_and(|table| table.contains_key("requires_feature"))
 }
 
 /// A fixture's session and the directory its paths are relative to:

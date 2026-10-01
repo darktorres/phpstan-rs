@@ -27,52 +27,90 @@ use diagnostics::Diagnostic;
 use libtest_mimic::{Arguments, Failed, Trial};
 use phpstan_rs::gate::{self, FixtureConfig};
 use phpstan_rs::project::worker_pool;
+use rayon::prelude::*;
+use rustc_hash::FxHashSet;
 
 fn main() {
     let args = Arguments::from_args();
     // The stubs load while the fixtures are listed.
     phpstan_rs::project::Project::warm_stubs();
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures");
-    // One pool for the whole suite: every fixture's parse and check runs
-    // on it, alongside the fixtures libtest-mimic runs in parallel.
+    // One pool for the whole suite: the listing, and every fixture's parse
+    // and check, run on it, alongside the fixtures libtest-mimic runs in
+    // parallel.
     let pool = worker_pool();
-    let mut trials = Vec::new();
-    collect(&root, &root, &pool, &mut trials);
+    let listed = pool.install(|| list(&root, ""));
+    let mut trials: Vec<Trial> = pool.install(|| {
+        listed
+            .into_par_iter()
+            .map(|(name, path)| {
+                let ignored = requires_missing_feature(&path);
+                let pool = Arc::clone(&pool);
+                Trial::test(name.clone(), move || run_fixture(&name, &path, pool))
+                    .with_ignored_flag(ignored)
+            })
+            .collect()
+    });
     trials.sort_by(|a, b| a.name().cmp(b.name()));
     libtest_mimic::run(&args, trials).exit();
 }
 
-fn collect(root: &Path, dir: &Path, pool: &Arc<rayon::ThreadPool>, trials: &mut Vec<Trial>) {
+/// Every fixture under `dir` as its name (its path under the fixture root,
+/// without the extension) and its `.expect` file, `prefix` being `dir`'s
+/// own name with the separator, or empty at the root. One listing of each
+/// directory, subdirectories listed in parallel.
+fn list(dir: &Path, prefix: &str) -> Vec<(String, PathBuf)> {
     let Ok(entries) = std::fs::read_dir(dir) else {
-        return;
+        return Vec::new();
     };
+    let mut fixtures = Vec::new();
+    let mut directories = Vec::new();
     for entry in entries.flatten() {
-        let path = entry.path();
-        if path.is_dir() {
-            // A multi-file fixture's own directory holds no fixtures.
-            if !path.with_extension("expect").is_file() {
-                collect(root, &path, pool, trials);
-            }
-        } else if path.extension().is_some_and(|e| e == "expect") {
-            let name = path
-                .strip_prefix(root)
-                .unwrap_or(&path)
-                .with_extension("")
-                .display()
-                .to_string();
-            let pool = Arc::clone(pool);
-            let missing = match gate::fixture_config(&path.with_extension("toml")) {
-                Ok(config) => config
-                    .requires_feature
-                    .iter()
-                    .any(|f| !enabled(f).unwrap_or(true)),
-                Err(_) => false,
-            };
-            trials.push(
-                Trial::test(name.clone(), move || run_fixture(&name, &path, pool))
-                    .with_ignored_flag(missing),
-            );
+        let Ok(kind) = entry.file_type() else {
+            continue;
+        };
+        let file_name = entry.file_name();
+        let Some(file_name) = file_name.to_str() else {
+            continue;
+        };
+        if kind.is_dir() {
+            directories.push(file_name.to_string());
+        } else if let Some(stem) = file_name.strip_suffix(".expect") {
+            fixtures.push((format!("{prefix}{stem}"), entry.path()));
         }
+    }
+    // A multi-file fixture's own directory holds no fixtures: it is named
+    // like a listed `.expect` file.
+    let stems: FxHashSet<&str> = fixtures
+        .iter()
+        .map(|(name, _)| &name[prefix.len()..])
+        .collect();
+    let nested: Vec<String> = directories
+        .into_iter()
+        .filter(|name| !stems.contains(name.as_str()))
+        .collect();
+    let below: Vec<Vec<(String, PathBuf)>> = nested
+        .par_iter()
+        .map(|name| list(&dir.join(name), &format!("{prefix}{name}/")))
+        .collect();
+    fixtures.extend(below.into_iter().flatten());
+    fixtures
+}
+
+/// Whether the fixture whose expectation is `expect_file` requires a cargo
+/// feature this build lacks. Its config is read in full only when it sets
+/// `requires_feature`.
+fn requires_missing_feature(expect_file: &Path) -> bool {
+    let config_file = expect_file.with_extension("toml");
+    if !gate::declares_required_feature(&config_file) {
+        return false;
+    }
+    match gate::fixture_config(&config_file) {
+        Ok(config) => config
+            .requires_feature
+            .iter()
+            .any(|f| !enabled(f).unwrap_or(true)),
+        Err(_) => false,
     }
 }
 
