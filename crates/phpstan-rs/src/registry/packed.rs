@@ -44,16 +44,22 @@ impl Records {
         if !records.offsets.len().is_multiple_of(4) {
             return Err(format!("{section}'s offsets are cut in the middle of one"));
         }
-        let mut before = 0;
-        for position in 0..records.offsets.len() / 4 {
-            let offset = records.offset(position);
-            if offset < before || offset > records.data.len() {
-                return Err(format!("{section}'s offset {position} is out of order"));
-            }
-            before = offset;
-        }
-        if !records.offsets.is_empty() && before != records.data.len() {
+        // The last offset must end the data, or a record could point past
+        // it; that every offset follows the one before is only checked in
+        // a debug build, as the file's checksum holds.
+        let count = records.offsets.len() / 4;
+        if count > 0 && records.offset(count - 1) != records.data.len() {
             return Err(format!("{section}'s last record doesn't end its data"));
+        }
+        if cfg!(debug_assertions) {
+            let mut before = 0;
+            for position in 0..count {
+                let offset = records.offset(position);
+                if offset < before {
+                    return Err(format!("{section}'s offset {position} is out of order"));
+                }
+                before = offset;
+            }
         }
         Ok(records)
     }
@@ -208,6 +214,7 @@ mod tests {
         }
     }
 
+    #[cfg(debug_assertions)]
     #[test]
     fn offsets_that_do_not_hold_together_do_not_load() {
         let mut writer = Writer::new();

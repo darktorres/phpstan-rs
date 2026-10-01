@@ -22,14 +22,10 @@ const VERSION: u32 = 1;
 pub(super) const HEADER_LEN: usize = 8 + 4 + 4 + 8 + 8 + 8;
 
 /// What the file's `checksum` covers is the bytes after the header: the
-/// body, then the directory.
+/// body, then the directory. A CRC, which the processor computes a block at
+/// a time: it only has to tell a damaged file from a whole one.
 pub(super) fn checksum(bytes: &[u8]) -> u64 {
-    use std::hash::Hasher;
-    // Not for security, only to tell a damaged file from a whole one: a
-    // hasher that takes eight bytes at a time, as the file is megabytes.
-    let mut hasher = rustc_hash::FxHasher::default();
-    hasher.write(bytes);
-    hasher.finish()
+    u64::from(crc32fast::hash(bytes))
 }
 
 /// Where bytes sit in the file: the offset from its start and the length.

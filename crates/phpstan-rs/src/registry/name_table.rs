@@ -352,6 +352,42 @@ impl<V> NameTable<V> {
     }
 }
 
+/// The names a table finds, as a view that stays whole while the table's
+/// entries change: a lookup by any case answers with the declared name.
+pub(crate) struct DeclaredNames<V> {
+    own: FxHashSet<Folded>,
+    base: Option<Arc<Base<V>>>,
+    hidden: FxHashSet<Folded>,
+}
+
+impl<V> DeclaredNames<V> {
+    /// The declared name `name` finds, in any case.
+    pub(crate) fn get(&self, name: &str) -> Option<&Name> {
+        let key = function_key(name);
+        if let Some(own) = self.own.get(key.as_ref()) {
+            return Some(&own.0);
+        }
+        let base = self.base.as_ref()?;
+        if self.hidden.contains(key.as_ref()) {
+            return None;
+        }
+        base.find(&key).map(|i| base.name(i))
+    }
+}
+
+impl<V> NameTable<V> {
+    /// A view of the table's names as they are now: reading it needs no
+    /// borrow of the table, and no name of the base is read as a `Name`
+    /// until it is asked for.
+    pub(crate) fn declared_names(&self) -> DeclaredNames<V> {
+        DeclaredNames {
+            own: self.entries.keys().cloned().collect(),
+            base: self.base.clone(),
+            hidden: self.hidden.clone(),
+        }
+    }
+}
+
 impl<V: Clone> NameTable<V> {
     /// Copies the base's entry for `key` into the table's own entries,
     /// when it has a visible one.
@@ -636,9 +672,11 @@ pub(super) fn load_base<V: serde::de::DeserializeOwned>(
     })
 }
 
-/// Whether the records of a stored table point inside the file, at names
-/// that are text in strictly increasing order: what a lookup by bisection
-/// relies on.
+/// Whether the records of a stored table point inside the file. In a debug
+/// build also whether the names are text in strictly increasing order,
+/// which a lookup by bisection relies on: the file's checksum holds, so
+/// only a bug in `store_entries` could break either, and a test of every
+/// stored table is what finds one.
 fn validate(keys: &Keys, section: &str, fold: bool) -> Result<(), String> {
     let Keys::Stored { buffer, .. } = keys else {
         return Ok(());
@@ -648,6 +686,9 @@ fn validate(keys: &Keys, section: &str, fold: bool) -> Result<(), String> {
         let (name, entry) = keys.record(i);
         if name.end > buffer.len() || entry.end > buffer.len() {
             return Err(format!("{section}'s record {i} points outside the file"));
+        }
+        if !cfg!(debug_assertions) {
+            continue;
         }
         let text = std::str::from_utf8(&buffer[name])
             .map_err(|_| format!("{section}'s name {i} is not text"))?;
@@ -815,6 +856,27 @@ mod tests {
     }
 
     #[test]
+    fn declared_names_answer_in_any_case_with_the_table_as_it_was() {
+        let reader = stored(&[("One", 1), ("Two", 2), ("Three", 3)]);
+        let mut table: NameTable<u32> = NameTable::load(&reader, "t").unwrap();
+        table.remove("TWO");
+        table.insert(Name::from("FOUR"), 4);
+        table.insert(Name::from("one"), 10);
+        let names = table.declared_names();
+        let declared = |key: &str| names.get(key).map(|name| name.as_str().to_string());
+        assert_eq!(declared("ONE").as_deref(), Some("one"));
+        assert_eq!(declared("three").as_deref(), Some("Three"));
+        assert_eq!(declared("Four").as_deref(), Some("FOUR"));
+        assert_eq!(declared("two"), None);
+        assert_eq!(declared("six"), None);
+        // A change after the view was taken is not in it.
+        table.insert(Name::from("Six"), 6);
+        table.remove("three");
+        assert_eq!(declared("six"), None);
+        assert_eq!(declared("three").as_deref(), Some("Three"));
+    }
+
+    #[test]
     fn freezing_keeps_what_a_table_holds() {
         let reader = stored(&[("One", 1), ("Two", 2)]);
         let mut table: NameTable<u32> = NameTable::load(&reader, "t").unwrap();
@@ -830,6 +892,7 @@ mod tests {
         assert_eq!(names, ["Three", "Two"]);
     }
 
+    #[cfg(debug_assertions)]
     #[test]
     fn a_table_with_unordered_names_does_not_load() {
         let mut writer = Writer::new();

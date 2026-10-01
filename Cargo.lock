@@ -1536,6 +1536,7 @@ version = "0.1.0"
 dependencies = [
  "ciborium",
  "clap",
+ "crc32fast",
  "criterion",
  "crossbeam-channel",
  "dhat",

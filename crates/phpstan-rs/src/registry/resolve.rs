@@ -42,19 +42,14 @@ impl Registry {
     /// parallelized, since it's the part whose cost actually scales with
     /// how many reference-shaped fields each class has. Each class's own
     /// rewrite touches only its own `ClassReflection` and reads only the
-    /// immutable, already-fully-built `canonical_by_lower` table - no
+    /// immutable `declared_names` view of the classes as they were when the pass began - no
     /// other class is ever read or written, so `values_mut()` directly
     /// (no remove/reinsert dance) is sound to run concurrently.
     #[hotpath::measure]
     pub(crate) fn canonicalize_class_name_case(&mut self) {
-        let mut canonical_by_lower: FxHashMap<String, Name> = FxHashMap::default();
-        for key in self.classes.keys() {
-            canonical_by_lower
-                .entry(key.to_ascii_lowercase())
-                .or_insert_with(|| key.clone());
-        }
+        let declared = self.classes.declared_names();
         let canonicalize = |name: &mut Name| {
-            if let Some(canonical) = canonical_by_lower.get(&name.to_ascii_lowercase())
+            if let Some(canonical) = declared.get(name)
                 && canonical.as_ref() != name.as_ref()
             {
                 *name = canonical.clone();
