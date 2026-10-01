@@ -40,6 +40,10 @@ pub struct Lexer<'a> {
     // counted about once, even as a string's own positions are resolved
     // before the token starting before them.
     line_marks: (usize, Vec<(usize, Position)>),
+    // The latest position resolved, as (byte offset, position, where its
+    // line ends): tokens come in source order, so the next one is
+    // usually on the same line, later, and costs the characters between.
+    cursor: (usize, Position, usize),
     // Where the source starts in its file: line 1, column 1 for a whole
     // file; a string interpolation fragment's own position when one is
     // lexed on its own, so its tokens get their real positions.
@@ -96,6 +100,15 @@ fn compute_line_starts(src: &[u8]) -> Vec<usize> {
     starts
 }
 
+/// `Lexer::cursor` at the start of the source.
+fn first_line_cursor(line_starts: &[usize], len: usize) -> (usize, Position, usize) {
+    (
+        0,
+        Position { line: 1, col: 1 },
+        line_starts.get(1).copied().unwrap_or(len + 1),
+    )
+}
+
 /// A token, its span, and a keyword's original spelling.
 pub type SpannedToken = (Token, Span, Option<String>);
 
@@ -107,11 +120,13 @@ impl<'a> Lexer<'a> {
     /// A file's source as its bytes, which need not be UTF-8: a string
     /// literal keeps them as written.
     pub fn from_bytes(bytes: &'a [u8]) -> Self {
+        let line_starts = compute_line_starts(bytes);
         Lexer {
             src: bytes,
             pos: 0,
             in_php: false,
-            line_starts: compute_line_starts(bytes),
+            cursor: first_line_cursor(&line_starts, bytes.len()),
+            line_starts,
             last_token_start: 0,
             line_marks: (0, vec![(0, Position { line: 1, col: 1 })]),
             base: Position { line: 1, col: 1 },
@@ -127,11 +142,13 @@ impl<'a> Lexer<'a> {
     /// mode entirely.
     pub fn new_in_php(src: &'a str) -> Self {
         let bytes = src.as_bytes();
+        let line_starts = compute_line_starts(bytes);
         Lexer {
             src: bytes,
             pos: 0,
             in_php: true,
-            line_starts: compute_line_starts(bytes),
+            cursor: first_line_cursor(&line_starts, bytes.len()),
+            line_starts,
             last_token_start: 0,
             line_marks: (0, vec![(0, Position { line: 1, col: 1 })]),
             base: Position { line: 1, col: 1 },
@@ -189,6 +206,32 @@ impl<'a> Lexer<'a> {
 
     fn relative_line_col_at(&mut self, byte_pos: usize) -> Position {
         let byte_pos = byte_pos.min(self.src.len());
+        let (offset, from, line_end) = self.cursor;
+        if byte_pos >= offset && byte_pos < line_end {
+            if byte_pos == offset {
+                return from;
+            }
+            let position = Position {
+                line: from.line,
+                col: from.col + char_count(&self.src[offset..byte_pos]) as u32,
+            };
+            self.cursor = (byte_pos, position, line_end);
+            return position;
+        }
+        let position = self.line_col_from_marks(byte_pos);
+        if byte_pos >= offset {
+            let next_line = self.line_idx_at(byte_pos) + 1;
+            let line_end = self
+                .line_starts
+                .get(next_line)
+                .copied()
+                .unwrap_or(self.src.len() + 1);
+            self.cursor = (byte_pos, position, line_end);
+        }
+        position
+    }
+
+    fn line_col_from_marks(&mut self, byte_pos: usize) -> Position {
         let line_idx = self.line_idx_at(byte_pos);
         if self.line_marks.0 != line_idx {
             let line_start = self.line_starts[line_idx];
