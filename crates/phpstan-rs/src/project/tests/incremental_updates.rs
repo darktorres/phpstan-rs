@@ -991,3 +991,71 @@ fn a_project_declaring_a_phpstan_class_keeps_its_own_declaration_over_the_stub()
     assert!(rule.methods().contains_key("ownMethod"));
     assert!(!rule.methods().contains_key("processNode"));
 }
+
+/// Every `.php` file under `dir`, sorted.
+fn php_files_under(dir: &Path) -> Vec<PathBuf> {
+    let mut files = Vec::new();
+    collect_php_files(dir, &mut files);
+    files.sort();
+    files
+}
+
+#[test]
+fn edits_across_many_fixtures_match_a_fresh_load() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/checker");
+    let sources: Vec<String> = php_files_under(&root)
+        .iter()
+        .step_by(40)
+        .filter_map(|path| std::fs::read_to_string(path).ok())
+        .collect();
+    let (loaded, replacements) = sources.split_at(sources.len() / 2);
+    let mut texts: Vec<(String, String)> = loaded
+        .iter()
+        .enumerate()
+        .map(|(i, source)| (format!("f{i}.php"), source.clone()))
+        .collect();
+    let load = |texts: &[(String, String)]| {
+        let mut project = Project::new();
+        for (path, source) in texts {
+            let _ = project.load_analyzed_file(PathBuf::from(path), source);
+        }
+        project.finish_loading();
+        project
+    };
+    let diagnostics = |project: &Project| -> Vec<String> {
+        let mut all: Vec<String> = project
+            .analyzed_paths()
+            .iter()
+            .flat_map(|path| {
+                project.check_file(path).into_iter().map(move |d| {
+                    format!(
+                        "{} {}:{} {}",
+                        path.display(),
+                        d.span.start.line,
+                        d.span.start.col,
+                        d.message
+                    )
+                })
+            })
+            .collect();
+        all.sort();
+        all
+    };
+    let mut project = load(&texts);
+    for (step, replacement) in replacements.iter().enumerate().take(8) {
+        let edited = step * 7 % texts.len();
+        if project
+            .update_file(Path::new(&texts[edited].0), replacement)
+            .is_err()
+        {
+            continue;
+        }
+        texts[edited].1 = replacement.clone();
+        assert_eq!(
+            diagnostics(&project),
+            diagnostics(&load(&texts)),
+            "after replacing {} (step {step})",
+            texts[edited].0
+        );
+    }
+}

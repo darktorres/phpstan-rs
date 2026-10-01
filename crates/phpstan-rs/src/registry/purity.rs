@@ -183,7 +183,7 @@ impl Registry {
                 let method_names: Vec<Name> =
                     self.classes[class_name].methods.keys().cloned().collect();
                 for method_name in method_names {
-                    let sig = &self.classes[&class_name].methods[&method_name];
+                    let sig = &self.classes[class_name].methods[&method_name];
                     if sig.is_transitively_pure {
                         continue;
                     }
@@ -192,7 +192,7 @@ impl Registry {
                     };
                     if deps.iter().all(|d| self.dependency_is_pure(d)) {
                         self.classes
-                            .get_mut(&class_name)
+                            .get_mut(class_name)
                             .unwrap()
                             .methods
                             .get_mut(&method_name)

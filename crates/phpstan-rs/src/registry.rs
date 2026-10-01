@@ -81,6 +81,15 @@ pub(crate) fn is_phpstan_namespace(fqn: &str) -> bool {
 /// everything up front instead). `merge_stubs` layers in curated built-in
 /// signatures (`stubs.rs`) the same way php-src stubs would sit alongside
 /// project code in a real implementation.
+/// `Registry::changed`: lowercased class and function names, and
+/// constant names as declared.
+#[derive(Debug, Default)]
+pub(crate) struct ChangedNames {
+    pub(crate) classes: FxHashSet<String>,
+    pub(crate) functions: FxHashSet<String>,
+    pub(crate) constants: FxHashSet<String>,
+}
+
 /// `Registry::raw`.
 #[derive(Debug)]
 struct RawDeclarations {
@@ -144,6 +153,13 @@ pub struct Registry {
     // passes can run again from scratch after declarations change
     // (`keep_raw_declarations`).
     raw: Option<Box<RawDeclarations>>,
+    // Whether `classes` and `functions` hold the declarations as built,
+    // swapped with `raw`'s resolved ones while declarations change
+    // (`begin_declaration_changes`).
+    raw_active: bool,
+    // The names declarations changed under since the finishing passes
+    // last ran, once they have.
+    changed: ChangedNames,
     // Whether PHPStan's own source is merged in with the built-in stubs
     // (`Project::sync_phpstan_stubs`).
     pub(crate) phpstan_stubs_loaded: bool,
@@ -323,23 +339,94 @@ impl Registry {
         registry
     }
 
-    /// Keeps a copy of `classes` and `functions` as they are, before the
-    /// finishing passes resolve them.
-    pub(crate) fn keep_raw_declarations(&mut self) {
-        self.raw = Some(Box::new(RawDeclarations {
-            classes: self.classes.clone(),
-            functions: self.functions.clone(),
-        }));
+    /// Makes `classes` and `functions` the declarations as built, for
+    /// declarations to change on, once the finishing passes have resolved
+    /// them; a no-op before then, while they still are the declarations as
+    /// built.
+    pub(crate) fn begin_declaration_changes(&mut self) {
+        if let Some(raw) = &mut self.raw
+            && !self.raw_active
+        {
+            std::mem::swap(&mut self.classes, &mut raw.classes);
+            std::mem::swap(&mut self.functions, &mut raw.functions);
+            self.raw_active = true;
+        }
     }
 
-    /// Puts back `classes` and `functions` as they were before the
-    /// finishing passes resolved them, discarding everything the passes
-    /// derived into them; a no-op when no copy was kept or it already was
-    /// put back.
-    pub(crate) fn restore_raw_declarations(&mut self) {
-        if let Some(raw) = self.raw.take() {
-            self.classes = raw.classes;
-            self.functions = raw.functions;
+    /// Whether the finishing passes have resolved declarations that are
+    /// kept apart from the declarations as built.
+    pub(crate) fn has_resolved_declarations(&self) -> bool {
+        self.raw.is_some()
+    }
+
+    /// Takes the names declarations changed under since the last
+    /// `end_declaration_changes`.
+    pub(crate) fn take_changed(&mut self) -> ChangedNames {
+        std::mem::take(&mut self.changed)
+    }
+
+    /// Makes `classes` and `functions` the resolved declarations again,
+    /// with the entries in `scope` reset to their declarations as built
+    /// (or removed with them), for the finishing passes to resolve. The
+    /// first time, with `keep_raw`, keeps a copy of the declarations as
+    /// built instead.
+    pub(crate) fn end_declaration_changes(&mut self, scope: &scope::Scope, keep_raw: bool) {
+        let Some(raw) = &mut self.raw else {
+            if keep_raw {
+                self.raw = Some(Box::new(RawDeclarations {
+                    classes: self.classes.clone(),
+                    functions: self.functions.clone(),
+                }));
+            }
+            return;
+        };
+        if self.raw_active {
+            std::mem::swap(&mut self.classes, &mut raw.classes);
+            std::mem::swap(&mut self.functions, &mut raw.functions);
+            self.raw_active = false;
+        }
+        if scope.is_all() {
+            self.classes = raw.classes.clone();
+            self.functions = raw.functions.clone();
+            return;
+        }
+        for key in scope.class_keys().into_iter().flatten() {
+            match raw.classes.get_with_name(key) {
+                Some((name, info)) => {
+                    self.classes.insert(name.clone(), info.clone());
+                }
+                None => {
+                    self.classes.remove(key);
+                }
+            }
+        }
+        for key in scope.function_keys().into_iter().flatten() {
+            match raw.functions.get_with_name(key) {
+                Some((name, sig)) => {
+                    self.functions.insert(name.clone(), sig.clone());
+                }
+                None => {
+                    self.functions.remove(key);
+                }
+            }
+        }
+    }
+
+    fn record_changed_class(&mut self, name: &str) {
+        if self.raw.is_some() {
+            self.changed.classes.insert(name.to_ascii_lowercase());
+        }
+    }
+
+    fn record_changed_function(&mut self, name: &str) {
+        if self.raw.is_some() {
+            self.changed.functions.insert(name.to_ascii_lowercase());
+        }
+    }
+
+    fn record_changed_constant(&mut self, name: &str) {
+        if self.raw.is_some() {
+            self.changed.constants.insert(name.to_string());
         }
     }
 

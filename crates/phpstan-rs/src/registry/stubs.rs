@@ -796,6 +796,15 @@ pub fn generated_stub_classes() -> Vec<(Name, ClassReflection)> {
     generated_stub_data().classes.clone()
 }
 
+/// The classes (`true`) and functions declared in the stub files that
+/// reference `key` (a `deps::dependency_key`).
+pub fn stub_dependents(key: &str) -> &'static [(bool, Name)] {
+    generated_stub_data()
+        .dependents
+        .get(key)
+        .map_or(&[], Vec::as_slice)
+}
+
 /// `generated_stubs` without PHPStan's own source: the PHP built-ins.
 pub fn builtin_stubs() -> Vec<(Name, FunctionReflection)> {
     let data = generated_stub_data();
@@ -963,6 +972,9 @@ struct GeneratedStubData {
     class_positions: rustc_hash::FxHashMap<String, Vec<usize>>,
     // Name (constants are case-sensitive) -> its position in `constants`.
     constant_positions: rustc_hash::FxHashMap<String, usize>,
+    // `deps::dependency_key` -> the classes (`true`) and functions declared
+    // in the stub files referencing it.
+    dependents: rustc_hash::FxHashMap<String, Vec<(bool, Name)>>,
     // The constants as the built-ins alone define them, without PHPStan's
     // own source.
     builtin_constants: Vec<(Name, Type)>,
@@ -1062,6 +1074,8 @@ struct StubFileDeclarations {
     functions: Vec<(Name, FunctionReflection)>,
     classes: Vec<(Name, ClassReflection)>,
     constants: Vec<(Name, Type)>,
+    // The names the file references (`deps::referenced_names`).
+    references: rustc_hash::FxHashSet<String>,
 }
 
 /// Parses and indexes one embedded stub file, from `origin`.
@@ -1072,6 +1086,7 @@ fn index_stub_file(source: &str, origin: &Origin) -> StubFileDeclarations {
     crate::stub_attributes::apply_stub_attributes(&mut program);
     let registry = Registry::index_and_flatten(&program, origin);
     StubFileDeclarations {
+        references: crate::deps::referenced_names(&program),
         functions: registry
             .functions
             .into_iter()
@@ -1135,7 +1150,21 @@ fn generated_stub_data() -> &'static GeneratedStubData {
             .par_iter()
             .map(|(source, _, origin)| index_stub_file(source, origin))
             .collect();
+        let mut dependents: rustc_hash::FxHashMap<String, Vec<(bool, Name)>> =
+            rustc_hash::FxHashMap::default();
         for ((_, extension, _), file) in files.into_iter().zip(indexed) {
+            let declared: Vec<(bool, Name)> = file
+                .classes
+                .iter()
+                .map(|(name, _)| (true, name.clone()))
+                .chain(file.functions.iter().map(|(name, _)| (false, name.clone())))
+                .collect();
+            for key in &file.references {
+                dependents
+                    .entry(key.clone())
+                    .or_default()
+                    .extend(declared.iter().cloned());
+            }
             for (name, sig) in file.functions {
                 if seen_functions.insert(name.clone()) {
                     if let Some(extension) = extension {
@@ -1174,6 +1203,7 @@ fn generated_stub_data() -> &'static GeneratedStubData {
         let constants: Vec<(Name, Type)> = merged_constants.into_iter().collect();
         let builtin_constants: Vec<(Name, Type)> = builtin_constants.into_iter().collect();
         GeneratedStubData {
+            dependents,
             builtin_constant_positions: builtin_constants
                 .iter()
                 .enumerate()

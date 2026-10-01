@@ -11,6 +11,7 @@ use crate::checker::{self, Checker, PropertyAssignFacts};
 use crate::deps;
 use crate::ignore_comments;
 use crate::pest_config::PestConfig;
+use crate::registry::scope::Scope;
 use crate::registry::stubs;
 use crate::registry::{BodySource, BuiltDecl, FileBodies, Origin, Provenance, Registry};
 use diagnostics::{self, Diagnostic, DiagnosticBuilder};
@@ -818,15 +819,65 @@ impl Project {
         );
     }
 
-    /// Puts the registry's classes and functions back as indexing built
-    /// them, so declarations change on those and the finishing passes
-    /// then derive everything again from scratch.
+    /// Makes the registry's classes and functions the declarations as
+    /// built, for declarations to change on; the finishing passes then
+    /// resolve again whatever the changes can have affected.
     fn begin_declaration_changes(&mut self) {
         debug_assert!(
             !(self.built_once && self.finished),
             "a project built once can't change after its finishing passes ran"
         );
-        self.registry.restore_raw_declarations();
+        self.registry.begin_declaration_changes();
+    }
+
+    /// The classes and functions whose resolved form `changed` can have
+    /// changed: the changed ones themselves, and every class and function
+    /// declared where a name in the scope is referenced, transitively - in
+    /// a loaded file or a built-in stub file.
+    fn resolution_scope(&self, changed: &crate::registry::ChangedNames) -> Scope {
+        let mut classes: FxHashSet<String> = changed.classes.clone();
+        let mut functions: FxHashSet<String> = changed.functions.clone();
+        let mut frontier: Vec<String> = classes
+            .iter()
+            .chain(&functions)
+            .cloned()
+            .chain(changed.constants.iter().map(|c| deps::dependency_key(c)))
+            .collect();
+        let mut seen: FxHashSet<String> = FxHashSet::default();
+        while let Some(key) = frontier.pop() {
+            if !seen.insert(key.clone()) {
+                continue;
+            }
+            let mut reached = |name: &str, is_class: bool| {
+                let key = deps::dependency_key(name);
+                let set = if is_class {
+                    &mut classes
+                } else {
+                    &mut functions
+                };
+                if set.insert(key.clone()) {
+                    frontier.push(key);
+                }
+            };
+            for file in self.dependents.get(&key).into_iter().flatten() {
+                let Some(state) = self.files.get(file) else {
+                    continue;
+                };
+                for name in state.classes.iter().chain(&state.anonymous_classes) {
+                    reached(name, true);
+                }
+                for name in &state.functions {
+                    reached(name, false);
+                }
+            }
+            for (is_class, name) in stubs::stub_dependents(&key) {
+                reached(name, *is_class);
+            }
+        }
+        Scope::of(
+            classes.iter().map(String::as_str),
+            functions.iter().map(String::as_str),
+        )
     }
 
     /// Finalizes an initial batch of `load_file` calls (trait flattening).
@@ -838,9 +889,15 @@ impl Project {
     fn run_finishing_passes(&mut self) {
         self.begin_declaration_changes();
         self.sync_phpstan_stubs();
-        if !self.built_once {
-            self.registry.keep_raw_declarations();
-        }
+        let scope = if self.registry.has_resolved_declarations() {
+            let changed = self.registry.take_changed();
+            self.resolution_scope(&changed)
+        } else {
+            Scope::all()
+        };
+        self.registry
+            .end_declaration_changes(&scope, !self.built_once);
+        self.registry.set_scope(scope);
         self.finished = true;
         self.registry.reset_lazy_tables();
         self.registry.canonicalize_class_name_case();
@@ -881,6 +938,7 @@ impl Project {
             .map(|(p, f)| (p.as_path(), f.ast.as_slice()))
             .collect();
         self.registry.infer_global_variables(&files);
+        self.registry.set_scope(Scope::all());
         self.rebuild_pest_config();
     }
 
@@ -955,7 +1013,7 @@ impl Project {
         let constant_keys: FxHashSet<&str> = names.constants.iter().map(String::as_str).collect();
         let with_phpstan = self.registry.phpstan_stubs_loaded;
         for name in &constant_keys {
-            self.registry.global_constants.remove(*name);
+            self.registry.remove_global_constant(name);
         }
         for name in &function_keys {
             self.registry

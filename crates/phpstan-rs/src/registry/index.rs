@@ -102,6 +102,11 @@ impl Registry {
     /// entry the way two context-only declarations legitimately do.
     pub(crate) fn insert_built_decl(&mut self, decl: BuiltDecl, analyzed: bool) {
         self.record_assert_tagged_names(&decl);
+        match &decl {
+            BuiltDecl::Class { name, .. } => self.record_changed_class(name),
+            BuiltDecl::Function { name, .. } => self.record_changed_function(name),
+            BuiltDecl::GlobalConst { name, .. } => self.record_changed_constant(name),
+        }
         match decl {
             BuiltDecl::Class {
                 name,
@@ -422,6 +427,7 @@ impl Registry {
     /// namespace-modeling gap.
     pub(crate) fn remove_declarations(&mut self, functions: &[String], classes: &[String]) {
         for name in functions {
+            self.record_changed_function(name);
             self.functions.remove(name.as_str());
             // Stay in lockstep with `functions`, for the identical
             // reason the class side does below - otherwise a later
@@ -433,6 +439,7 @@ impl Registry {
             self.function_decl_sites.remove(function_key(name).as_ref());
         }
         for name in classes {
+            self.record_changed_class(name);
             self.classes.remove(name.as_str());
             // Must stay in lockstep with `classes` - otherwise a
             // later re-index of the same name (incremental re-checking's
@@ -479,6 +486,7 @@ impl Registry {
     pub fn merge_stubs<S: Into<Name>>(&mut self, stubs: Vec<(S, FunctionReflection)>) {
         for (name, sig) in stubs {
             let name: Name = name.into();
+            self.record_changed_function(&name);
             self.unconditionally_declared_functions
                 .insert(folded_key(&name));
             self.stub_provided_functions.insert(folded_key(&name));
@@ -507,6 +515,7 @@ impl Registry {
     pub fn merge_stub_classes<S: Into<Name>>(&mut self, stubs: Vec<(S, ClassReflection)>) {
         for (name, info) in stubs {
             let name: Name = name.into();
+            self.record_changed_class(&name);
             self.unconditionally_declared_classes.insert(name.clone());
             self.built_in_stub_classes.insert(name.clone(), ());
             match self.classes.remove(&name) {
@@ -531,8 +540,15 @@ impl Registry {
     /// every vendored stub file at once.
     pub fn merge_stub_constants(&mut self, stubs: Vec<(Name, Type)>) {
         for (name, ty) in stubs {
+            self.record_changed_constant(&name);
             register_global_constant(&mut self.global_constants, name, ty);
         }
+    }
+
+    /// Removes the global constant `name`.
+    pub(crate) fn remove_global_constant(&mut self, name: &str) {
+        self.record_changed_constant(name);
+        self.global_constants.remove(name);
     }
 }
 
