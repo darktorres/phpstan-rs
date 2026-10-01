@@ -10,8 +10,8 @@ Status: DONE, OPEN, NOTE.
 ## Skipped or partly done catalog items
 | id | item | gap | status |
 |---|---|---|---|
-| G1 | #34 | `resolve_deferred_value_of` ran sequentially. Now parallel: each class resolves against the classes as they were before the pass (a class's reference to itself still degrades to `Mixed`); results no longer depend on visit order | DONE (`862d168a`); lib suite passed, fixtures pending |
-| G2 | #19 | a body-only edit still walked every body for property writes and global variables. Property-write classifications and each file's global-variable sites are kept; only declarations and files the edit reaches are walked again | DONE (`feec6a57`); lib suite passed, fixtures pending |
+| G1 | #34 | `resolve_deferred_value_of` ran sequentially. Now parallel: each class resolves against the classes as they were before the pass (a class's reference to itself still degrades to `Mixed`); results no longer depend on visit order | DONE (`862d168a`); lib, fixtures and differential tests pass |
+| G2 | #19 | a body-only edit still walked every body for property writes and global variables. Property-write classifications and each file's global-variable sites are kept; only declarations and files the edit reaches are walked again | DONE (`feec6a57`); lib, fixtures and differential tests pass |
 | G3 | #14, #15 | lazy per-class tables and per-pass candidate flags not implemented; "folded" into the shared base and scoping without measurement | CLOSED by measurement: a one-function project's whole finish is a few milliseconds; the passes no longer show in any profile |
 | G4 | #8 | completion and `class_exists` still see classes of never-enabled extensions (behaviour predates this work) | NOT DONE ON PURPOSE: enabling only some extensions would make code using an undeclared one report `class.notFound`; loading all matches PHPStan, and unreferenced extension classes cost nothing per project (#6, #7, #11) |
 | G5 | #9 | a cold stub cache still pays full stub indexing (~0.85 s gate, ~3 s debug) | NOT NEEDED: a cold cache costs one build of the stubs per source change, and the cache now loads in 60 ms |
@@ -27,7 +27,7 @@ Status: DONE, OPEN, NOTE.
 | G11 | a change in inferred global variables seeded no recheck: `global $x;` is a tracked reference (`deps::global_variable_key`) and `changed_global_variables` seeds the recheck | DONE (`3d77ee38`) |
 | G12 | corrupt or truncated cache file panicked mid-run: cache files carry a checksum and are rebuilt when it fails | DONE (`c4eacee4`) |
 | G13 | a cancelled cascade left stale `last_diagnostics`: `Project::take_unchecked` drops them | DONE (`9ad44af6`) |
-| G14 | the resolution scope closed over every reference, bodies included: now two scopes, declaration references for resolution and all references for purity, property writes and global variables | DONE (`feec6a57`); lib suite passed, fixtures pending |
+| G14 | the resolution scope closed over every reference, bodies included: now two scopes, declaration references for resolution and all references for purity, property writes and global variables | DONE (`feec6a57`); lib, fixtures and differential tests pass |
 
 ## Validation
 | id | gap | status |
