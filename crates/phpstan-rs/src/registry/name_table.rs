@@ -82,7 +82,7 @@ pub(crate) struct Lazy<V> {
     value: OnceLock<V>,
     // The entry encoded (`NameTable`'s `Serialize`), with what decodes it;
     // `None` once built decoded.
-    encoded: Option<(Arc<[u8]>, Decoder<V>)>,
+    encoded: Option<(Arc<Vec<u8>>, Decoder<V>)>,
 }
 
 impl<V> Lazy<V> {
@@ -404,7 +404,7 @@ impl<'de, V: Clone + serde::de::DeserializeOwned> serde::Deserialize<'de> for Na
             .map(|(name, bytes)| {
                 let slot = Lazy {
                     value: OnceLock::new(),
-                    encoded: Some((Arc::from(bytes.0), decode_entry::<V> as Decoder<V>)),
+                    encoded: Some((Arc::new(bytes.0), decode_entry::<V> as Decoder<V>)),
                 };
                 (Folded(name), slot)
             })
@@ -448,8 +448,8 @@ impl<V: Clone + serde::Serialize + serde::de::DeserializeOwned> NameTable<V> {
     pub(crate) fn from_diff(diff: Diff, other: &NameTable<V>) -> Result<NameTable<V>, String> {
         let mut entries: FxHashMap<Folded, Lazy<V>> = FxHashMap::default();
         for (name, bytes) in diff.0 {
-            let encoded: Arc<[u8]> = match bytes {
-                Some(bytes) => Arc::from(bytes.0),
+            let encoded: Arc<Vec<u8>> = match bytes {
+                Some(bytes) => Arc::new(bytes.0),
                 None => {
                     let key = function_key(&name);
                     let slot = other
@@ -465,7 +465,7 @@ impl<V: Clone + serde::Serialize + serde::de::DeserializeOwned> NameTable<V> {
                             let mut bytes = Vec::new();
                             ciborium::ser::into_writer(value, &mut bytes)
                                 .map_err(|e| e.to_string())?;
-                            Arc::from(bytes)
+                            Arc::new(bytes)
                         }
                     }
                 }
@@ -501,7 +501,7 @@ impl<'de, V: serde::de::DeserializeOwned> serde::Deserialize<'de> for Lazy<V> {
         let bytes = Bytes::deserialize(deserializer)?;
         Ok(Lazy {
             value: OnceLock::new(),
-            encoded: Some((Arc::from(bytes.0), decode_entry::<V> as Decoder<V>)),
+            encoded: Some((Arc::new(bytes.0), decode_entry::<V> as Decoder<V>)),
         })
     }
 }
@@ -513,7 +513,8 @@ fn decode_entry<V: serde::de::DeserializeOwned>(bytes: &[u8]) -> V {
 }
 
 /// Bytes serialized as one byte string.
-struct Bytes(Vec<u8>);
+#[derive(Debug, Clone, Default)]
+pub(super) struct Bytes(pub(super) Vec<u8>);
 
 impl serde::Serialize for Bytes {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {

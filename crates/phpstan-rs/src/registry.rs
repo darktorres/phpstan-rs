@@ -16,6 +16,7 @@ mod hierarchy;
 mod index;
 mod name_context;
 mod name_table;
+mod packed;
 mod property_writes;
 pub mod provenance;
 mod purity;

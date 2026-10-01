@@ -40,6 +40,7 @@
 //! classes from its own dependency, `nikic/php-doc-parser`
 //! (`PHPStan\PhpDocParser\Ast\Type\*`), not vendored here.
 
+use super::packed::{Packed, Records, RecordsBuilder};
 use syntax::name::Name;
 
 use rayon::prelude::*;
@@ -820,15 +821,39 @@ struct StubEntry<V> {
 }
 
 /// The classes (`true`) and functions declared in the stub files that
+/// The classes (`true`) and functions declared in the stub files that
 /// reference `key` (a `deps::dependency_key`).
-pub fn stub_dependents(key: &str) -> impl Iterator<Item = &'static (bool, String)> {
+pub fn stub_dependents(key: &str) -> impl Iterator<Item = (bool, &'static str)> {
     let index = stub_index();
     index
         .dependents
         .get(key)
-        .into_iter()
-        .flatten()
-        .flat_map(|&file| index.declared_by_file[file as usize].iter())
+        .unwrap_or(&[])
+        .as_chunks::<4>()
+        .0
+        .iter()
+        .flat_map(|file| {
+            DeclaredNames(
+                index
+                    .declared_by_file
+                    .get(u32::from_le_bytes(*file) as usize),
+            )
+        })
+}
+
+/// The names in one record of `StubIndex::declared_by_file`.
+struct DeclaredNames(&'static [u8]);
+
+impl Iterator for DeclaredNames {
+    type Item = (bool, &'static str);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let (&is_class, rest) = self.0.split_first()?;
+        let length = u16::from_le_bytes([rest[0], rest[1]]) as usize;
+        let name = std::str::from_utf8(&rest[2..2 + length]).expect("a name stored as text");
+        self.0 = &rest[2 + length..];
+        Some((is_class == 1, name))
+    }
 }
 
 /// `generated_stubs` without PHPStan's own source: the PHP built-ins.
@@ -1008,49 +1033,45 @@ struct GeneratedStubData {
 /// rather than all of `GeneratedStubData`.
 #[derive(Clone, serde::Serialize, serde::Deserialize)]
 struct StubIndex {
-    // `deps::dependency_key` -> the stub files referencing it, by position
-    // in `declared_by_file`.
-    dependents: rustc_hash::FxHashMap<String, Vec<u32>>,
-    // The classes (`true`) and functions each stub file declares.
-    declared_by_file: Vec<Vec<(bool, String)>>,
+    // `deps::dependency_key` -> the stub files referencing it, as
+    // positions in `declared_by_file` (four bytes each).
+    dependents: Packed,
+    // The classes and functions each stub file declares: a flag (1 for a
+    // class), the name's length and the name, repeated.
+    declared_by_file: Records,
     // Lowercased name -> the phpstorm-stubs directory (extension) that
-    // declares it; PHPStan's own classes aren't built-ins and aren't here.
-    #[serde(with = "embedded_str_map")]
-    function_extensions: rustc_hash::FxHashMap<String, &'static str>,
-    #[serde(with = "embedded_str_map")]
-    class_extensions: rustc_hash::FxHashMap<String, &'static str>,
+    // declares it, as a position in `extension_names`; PHPStan's own
+    // classes aren't built-ins and aren't here.
+    function_extensions: Packed,
+    class_extensions: Packed,
+    extension_names: Vec<String>,
+    #[serde(skip)]
+    extensions: Vec<&'static str>,
     phpstan_names: PhpstanStubNames,
     // The names the stubs declare - classes and functions lowercased,
     // constants as written - so a name no stub declares is known without
     // reading the declarations.
-    class_names: rustc_hash::FxHashSet<String>,
-    function_names: rustc_hash::FxHashSet<String>,
-    constant_names: rustc_hash::FxHashSet<String>,
+    class_names: Packed,
+    function_names: Packed,
+    constant_names: Packed,
 }
 
-/// A map to embedded stub paths or extensions, serialized as text.
-mod embedded_str_map {
-    use rustc_hash::FxHashMap;
-    use serde::{Deserialize, Deserializer, Serialize, Serializer};
-
-    pub(super) fn serialize<S: Serializer>(
-        map: &FxHashMap<String, &'static str>,
-        serializer: S,
-    ) -> Result<S::Ok, S::Error> {
-        map.serialize(serializer)
+impl StubIndex {
+    /// The index with its extension names as the embedded strings they are.
+    fn resolved(mut self) -> StubIndex {
+        self.extensions = self
+            .extension_names
+            .iter()
+            .map(|name| {
+                crate::registry::provenance::embedded_str(name).expect("an embedded extension")
+            })
+            .collect();
+        self
     }
 
-    pub(super) fn deserialize<'de, D: Deserializer<'de>>(
-        deserializer: D,
-    ) -> Result<FxHashMap<String, &'static str>, D::Error> {
-        let map = <FxHashMap<String, String>>::deserialize(deserializer)?;
-        map.into_iter()
-            .map(|(key, text)| {
-                let text = crate::registry::provenance::embedded_str(&text)
-                    .map_err(serde::de::Error::custom)?;
-                Ok((key, text))
-            })
-            .collect()
+    fn extension(&self, map: &Packed, lowercased: &str) -> Option<&'static str> {
+        let position = *map.get(lowercased)?.first()?;
+        self.extensions.get(position as usize).copied()
     }
 }
 
@@ -1065,18 +1086,20 @@ impl GeneratedStubData {
 /// The phpstorm-stubs directory (the extension) declaring built-in
 /// function `name`, when it's a PHP built-in.
 pub fn builtin_function_extension(name: &str) -> Option<&'static str> {
-    stub_index()
-        .function_extensions
-        .get(&name.trim_start_matches('\\').to_ascii_lowercase())
-        .copied()
+    let index = stub_index();
+    index.extension(
+        &index.function_extensions,
+        &name.trim_start_matches('\\').to_ascii_lowercase(),
+    )
 }
 
 /// The class-like counterpart of `builtin_function_extension`.
 pub fn builtin_class_extension(name: &str) -> Option<&'static str> {
-    stub_index()
-        .class_extensions
-        .get(&name.trim_start_matches('\\').to_ascii_lowercase())
-        .copied()
+    let index = stub_index();
+    index.extension(
+        &index.class_extensions,
+        &name.trim_start_matches('\\').to_ascii_lowercase(),
+    )
 }
 
 /// Computes `GeneratedStubData` exactly once per process
@@ -1200,7 +1223,7 @@ fn built_stub_corpus() -> &'static (StubIndex, GeneratedStubData) {
 fn stub_index() -> &'static StubIndex {
     static INDEX: std::sync::OnceLock<&'static StubIndex> = std::sync::OnceLock::new();
     INDEX.get_or_init(|| match crate::registry::load_cached("stub-index") {
-        Some(index) => Box::leak(Box::new(index)),
+        Some(index) => Box::leak(Box::new(StubIndex::resolved(index))),
         None => &built_stub_corpus().0,
     })
 }
@@ -1323,14 +1346,55 @@ fn build_generated_stub_data() -> (StubIndex, GeneratedStubData) {
         classes,
         constants,
     };
+    let to_packed =
+        |keys: Vec<String>| Packed::build(keys.into_iter().map(|key| (key, Vec::new())).collect());
+    let mut extension_names: Vec<String> = Vec::new();
+    let mut extensions_packed = |map: rustc_hash::FxHashMap<String, &'static str>| {
+        Packed::build(
+            map.into_iter()
+                .map(|(name, extension)| {
+                    let position = extension_names
+                        .iter()
+                        .position(|known| known == extension)
+                        .unwrap_or_else(|| {
+                            extension_names.push(extension.to_string());
+                            extension_names.len() - 1
+                        });
+                    (
+                        name,
+                        vec![u8::try_from(position).expect("under 256 extensions")],
+                    )
+                })
+                .collect(),
+        )
+    };
+    let function_extensions = extensions_packed(function_extensions);
+    let class_extensions = extensions_packed(class_extensions);
+    let mut declared_records = RecordsBuilder::default();
+    for declared in &declared_by_file {
+        let mut record = Vec::new();
+        for (is_class, name) in declared {
+            record.push(u8::from(*is_class));
+            record.extend_from_slice(&(name.len() as u16).to_le_bytes());
+            record.extend_from_slice(name.as_bytes());
+        }
+        declared_records.push(&record);
+    }
     let index = StubIndex {
-        class_names: data.class_positions.keys().cloned().collect(),
-        function_names: data.function_positions.keys().cloned().collect(),
-        constant_names: data.constant_positions.keys().cloned().collect(),
-        dependents,
-        declared_by_file,
+        class_names: to_packed(data.class_positions.keys().cloned().collect()),
+        function_names: to_packed(data.function_positions.keys().cloned().collect()),
+        constant_names: to_packed(data.constant_positions.keys().cloned().collect()),
+        dependents: Packed::build(
+            dependents
+                .into_iter()
+                .map(|(key, files)| (key, files.iter().flat_map(|f| f.to_le_bytes()).collect()))
+                .collect(),
+        ),
+        declared_by_file: declared_records.finish(),
         function_extensions,
         class_extensions,
+        extension_names,
+        extensions: Vec::new(),
         phpstan_names: PhpstanStubNames {
             functions: data
                 .functions
@@ -1351,7 +1415,8 @@ fn build_generated_stub_data() -> (StubIndex, GeneratedStubData) {
                 .map(|(name, _)| name.to_string())
                 .collect(),
         },
-    };
+    }
+    .resolved();
     (index, data)
 }
 

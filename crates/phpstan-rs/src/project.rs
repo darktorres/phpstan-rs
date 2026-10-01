@@ -1036,7 +1036,7 @@ impl Project {
                 }
             }
             for (is_class, name) in stubs::stub_dependents(&key) {
-                reached(name, *is_class);
+                reached(name, is_class);
             }
         }
         Scope::of(
