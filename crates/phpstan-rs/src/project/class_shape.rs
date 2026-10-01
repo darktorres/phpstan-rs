@@ -86,29 +86,6 @@ impl Project {
         if !closed_classes && parent_calls.is_empty() {
             return out;
         }
-        let mut subclassed: FxHashSet<String> = FxHashSet::default();
-        let mut overridden: FxHashSet<(String, String)> = FxHashSet::default();
-        for info in self.registry.classes.values() {
-            if let Some(parent) = info.extends().first() {
-                subclassed.insert(parent.to_ascii_lowercase());
-            }
-            let mut ancestor = info.extends().first().cloned();
-            let mut seen = FxHashSet::default();
-            while let Some(a) = ancestor {
-                if !seen.insert(a.to_ascii_lowercase()) {
-                    break;
-                }
-                for method in info.methods().keys() {
-                    overridden.insert((a.to_ascii_lowercase(), method.to_ascii_lowercase()));
-                }
-                ancestor = self
-                    .registry
-                    .classes
-                    .get(&a)
-                    .and_then(|i| i.extends().first().cloned());
-            }
-        }
-
         let mut files: Vec<(&PathBuf, &super::FileState)> =
             self.files.iter().filter(|(_, f)| f.analyzed).collect();
         files.sort_by(|a, b| a.0.cmp(b.0));
@@ -118,7 +95,7 @@ impl Project {
             let mut found = Vec::new();
             for (fqn, c) in classes {
                 if closed_classes {
-                    self.closed_class_shape(&fqn, c, &subclassed, &overridden, &mut found);
+                    self.closed_class_shape(&fqn, c, &mut found);
                 }
                 if !parent_calls.is_empty() {
                     self.parent_call_rules(&fqn, &c.def, parent_calls, &mut found);
@@ -132,14 +109,64 @@ impl Project {
         out
     }
 
-    fn closed_class_shape(
-        &self,
-        fqn: &str,
-        c: &ClassDecl,
-        subclassed: &FxHashSet<String>,
-        overridden: &FxHashSet<(String, String)>,
-        out: &mut Vec<Diagnostic>,
-    ) {
+    /// The classes extending `class` through their first parent,
+    /// directly or transitively. Only the subtypes the registry indexes
+    /// are read, not every class there is.
+    fn extending_classes(&self, class: &str) -> Vec<&crate::registry::ClassReflection> {
+        let mut seen: FxHashSet<String> = FxHashSet::default();
+        seen.insert(class.to_ascii_lowercase());
+        let mut found = Vec::new();
+        let mut stack = vec![class.to_ascii_lowercase()];
+        while let Some(current) = stack.pop() {
+            for child in self
+                .registry
+                .subtype_children
+                .get(&current)
+                .into_iter()
+                .flatten()
+            {
+                let Some(info) = self.registry.classes.get(child) else {
+                    continue;
+                };
+                let extends_current = info
+                    .extends()
+                    .first()
+                    .is_some_and(|parent| parent.eq_ignore_ascii_case(&current));
+                if extends_current && seen.insert(child.to_ascii_lowercase()) {
+                    found.push(info);
+                    stack.push(child.to_ascii_lowercase());
+                }
+            }
+        }
+        found
+    }
+
+    /// Whether some class extends `lower` directly.
+    fn is_extended(&self, lower: &str) -> bool {
+        self.registry
+            .subtype_children
+            .get(lower)
+            .into_iter()
+            .flatten()
+            .any(|child| {
+                self.registry.classes.get(child).is_some_and(|info| {
+                    info.extends()
+                        .first()
+                        .is_some_and(|parent| parent.eq_ignore_ascii_case(lower))
+                })
+            })
+    }
+
+    /// Whether a class below `lower` declares `method`.
+    fn is_overridden(&self, lower: &str, method: &str) -> bool {
+        self.extending_classes(lower).iter().any(|info| {
+            info.methods()
+                .keys()
+                .any(|name| name.eq_ignore_ascii_case(method))
+        })
+    }
+
+    fn closed_class_shape(&self, fqn: &str, c: &ClassDecl, out: &mut Vec<Diagnostic>) {
         if c.def.kind != ClassKind::Class {
             return;
         }
@@ -155,7 +182,7 @@ impl Project {
         let lower = fqn.to_ascii_lowercase();
         if !info.is_abstract()
             && !info.is_final()
-            && !subclassed.contains(&lower)
+            && !self.is_extended(&lower)
             && !is_doctrine_mapped(&c.def, &attribute_names)
         {
             out.push(
@@ -241,7 +268,7 @@ impl Project {
                     || m.is_final
                     || m.visibility == Visibility::Private
                     || syntax::ast::is_constructor_name(name)
-                    || overridden.contains(&(lower.clone(), name.to_ascii_lowercase()))
+                    || self.is_overridden(&lower, name)
                 {
                     continue;
                 }
