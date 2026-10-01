@@ -20,6 +20,7 @@ pub fn referenced_names(stmts: &[Stmt]) -> FxHashSet<String> {
         names: FxHashSet::default(),
         ctx: NameContext::default(),
         bodies: true,
+        templates: Vec::new(),
     };
     walk_stmts(&mut collector, stmts);
     collector.names
@@ -33,6 +34,7 @@ pub fn declaration_referenced_names(stmts: &[Stmt]) -> FxHashSet<String> {
         names: FxHashSet::default(),
         ctx: NameContext::default(),
         bodies: false,
+        templates: Vec::new(),
     };
     walk_stmts(&mut collector, stmts);
     collector.names
@@ -60,30 +62,180 @@ struct Collector {
     ctx: NameContext,
     // Whether function and method bodies are walked.
     bodies: bool,
+    // The template parameters declared by the classes and functions being
+    // walked, innermost last: names that are not classes.
+    templates: Vec<FxHashSet<String>>,
 }
 
 impl Collector {
     /// The names a doc comment's tags mention, each resolved as a class
     /// and also taken as written (a constant-named type's global
-    /// fallback). A tag's own name and `$variables` are skipped.
+    /// fallback). Only the types of a tag are read, not its description,
+    /// and a template parameter in scope isn't a class.
     fn doc_names(&mut self, doc: Option<&str>) {
         let Some(doc) = doc else { return };
-        for line in doc.lines() {
-            let line = line
-                .trim_start()
-                .trim_start_matches("/**")
-                .trim_start_matches('*')
-                .trim_start();
-            let Some(tag) = line.strip_prefix('@') else {
-                continue;
-            };
-            let rest = tag.trim_start_matches(|c: char| !c.is_whitespace() && c != '(');
-            for token in name_tokens(rest) {
+        let tags = doc_tags(doc);
+        let declared = declared_templates(&tags);
+        for (tag, rest) in &tags {
+            for token in tag_type_tokens(tag, rest) {
+                if declared.contains(token) || self.templates.iter().any(|t| t.contains(token)) {
+                    continue;
+                }
                 self.names.insert(dependency_key(&self.ctx.resolve(token)));
                 self.names.insert(dependency_key(token));
             }
         }
     }
+
+    /// The template parameters `doc` declares.
+    fn templates_of(doc: Option<&str>) -> FxHashSet<String> {
+        doc.map(|doc| declared_templates(&doc_tags(doc)))
+            .unwrap_or_default()
+    }
+}
+
+/// A doc comment's tags: each tag's name (without its `@`) and what
+/// follows it on its line.
+fn doc_tags(doc: &str) -> Vec<(&str, &str)> {
+    doc.lines()
+        .filter_map(|line| {
+            let line = line
+                .trim_start()
+                .trim_start_matches("/**")
+                .trim_start_matches('*')
+                .trim_start();
+            let tag = line.strip_prefix('@')?;
+            let end = tag
+                .find(|c: char| c.is_whitespace() || c == '(')
+                .unwrap_or(tag.len());
+            Some((&tag[..end], &tag[end..]))
+        })
+        .collect()
+}
+
+/// A tag's name without a `phpstan-` or `psalm-` prefix.
+fn tag_base(tag: &str) -> &str {
+    tag.strip_prefix("phpstan-")
+        .or_else(|| tag.strip_prefix("psalm-"))
+        .unwrap_or(tag)
+}
+
+/// The names `@template` tags declare.
+fn declared_templates(tags: &[(&str, &str)]) -> FxHashSet<String> {
+    tags.iter()
+        .filter(|(tag, _)| {
+            matches!(
+                tag_base(tag),
+                "template" | "template-covariant" | "template-contravariant"
+            )
+        })
+        .filter_map(|(_, rest)| rest.split_whitespace().next())
+        .map(str::to_string)
+        .collect()
+}
+
+/// The name-shaped tokens in the types of one tag. A tag whose grammar is
+/// known is read only where it holds types; one that isn't is read whole.
+fn tag_type_tokens<'a>(tag: &str, rest: &'a str) -> Vec<&'a str> {
+    let mut types: Vec<&'a str> = Vec::new();
+    match tag_base(tag) {
+        "param"
+        | "param-out"
+        | "param-immediately-invoked-callable"
+        | "param-later-invoked-callable"
+        | "param-closure-this"
+        | "return"
+        | "throws"
+        | "property"
+        | "property-read"
+        | "property-write"
+        | "mixin"
+        | "extends"
+        | "implements"
+        | "use"
+        | "template-extends"
+        | "template-implements"
+        | "template-use"
+        | "this"
+        | "self-out"
+        | "if-this-is"
+        | "assert"
+        | "assert-if-true"
+        | "assert-if-false" => {
+            types.push(type_head(rest).0);
+        }
+        "var" => {
+            let (head, after) = type_head(rest);
+            types.push(head);
+            // `@var $x Type`
+            let after = after.trim_start();
+            if after.starts_with('$') {
+                let after = after.trim_start_matches(|c: char| !c.is_whitespace());
+                types.push(type_head(after).0);
+            }
+        }
+        "template" | "template-covariant" | "template-contravariant" => {
+            let mut words = rest.trim_start();
+            words = words.trim_start_matches(|c: char| !c.is_whitespace());
+            loop {
+                let trimmed = words.trim_start();
+                let Some(after) = ["of ", "as ", "super ", "= "]
+                    .iter()
+                    .find_map(|keyword| trimmed.strip_prefix(keyword))
+                else {
+                    break;
+                };
+                let (head, remainder) = type_head(after);
+                types.push(head);
+                words = remainder;
+            }
+        }
+        "type" => {
+            if let Some((_, definition)) = rest.split_once('=') {
+                types.push(type_head(definition).0);
+            }
+        }
+        "import-type" => {
+            if let Some((_, from)) = rest.split_once(" from ") {
+                types.push(type_head(from).0);
+            }
+        }
+        "deprecated" | "see" | "link" | "author" | "since" | "version" | "internal" | "todo"
+        | "example" | "copyright" | "license" | "package" | "subpackage" | "category" | "api"
+        | "inheritdoc" | "covers" => {}
+        _ => types.push(rest),
+    }
+    types.into_iter().flat_map(name_tokens).collect()
+}
+
+/// The type expression starting `text` and what follows it: up to the
+/// first space outside brackets, unless it continues (`|`, `&`, `:`).
+fn type_head(text: &str) -> (&str, &str) {
+    let text = text.trim_start();
+    let mut depth = 0usize;
+    let mut quote: Option<char> = None;
+    let mut end = text.len();
+    for (i, c) in text.char_indices() {
+        match (quote, c) {
+            (Some(q), c) if c == q => quote = None,
+            (Some(_), _) => {}
+            (None, '\'' | '"') => quote = Some(c),
+            (None, '<' | '(' | '[' | '{') => depth += 1,
+            (None, '>' | ')' | ']' | '}') => depth = depth.saturating_sub(1),
+            (None, c) if c.is_whitespace() && depth == 0 => {
+                let before = text[..i].chars().next_back();
+                let after = text[i..].trim_start().chars().next();
+                let continues =
+                    matches!(before, Some('|' | '&' | ':')) || matches!(after, Some('|' | '&'));
+                if !continues {
+                    end = i;
+                    break;
+                }
+            }
+            _ => {}
+        }
+    }
+    (&text[..end], &text[end..])
 }
 
 /// The name-shaped tokens of `text`: runs of identifier characters and
@@ -98,7 +250,7 @@ fn name_tokens(text: &str) -> impl Iterator<Item = &str> {
         match start {
             Some(_) if is_name_char(c) => {}
             Some(s) => {
-                tokens.push(&text[s..i]);
+                tokens.push((&text[s..i], &text[i..]));
                 start = None;
             }
             None if is_name_char(c) && !c.is_ascii_digit() && prev != '$' => start = Some(i),
@@ -107,11 +259,17 @@ fn name_tokens(text: &str) -> impl Iterator<Item = &str> {
         prev = c;
     }
     if let Some(s) = start {
-        tokens.push(&text[s..]);
+        tokens.push((&text[s..], ""));
     }
     tokens
         .into_iter()
-        .map(|t| t.trim_end_matches('\\'))
+        // An array shape's key (`array{a: int}`), not a class; `Foo::BAR`
+        // is a class.
+        .filter(|(_, after)| {
+            let after = after.trim_start();
+            !((after.starts_with(':') && !after.starts_with("::")) || after.starts_with("?:"))
+        })
+        .map(|(token, _)| token.trim_end_matches('\\'))
         .filter(|t| !t.trim_start_matches('\\').is_empty())
 }
 
@@ -137,27 +295,33 @@ impl<'ast> Visitor<'ast> for Collector {
 
     fn visit_function_decl(&mut self, function: &'ast FunctionDecl) {
         self.doc_names(function.doc_comment.as_deref());
+        self.templates
+            .push(Collector::templates_of(function.doc_comment.as_deref()));
         if self.bodies {
             walk_function_decl(self, function);
-            return;
+        } else {
+            for attr in &function.attrs {
+                self.visit_attribute(attr);
+            }
+            for param in &function.params {
+                self.visit_param(param);
+            }
+            if let Some(hint) = &function.return_type {
+                self.visit_type_hint(hint);
+            }
         }
-        for attr in &function.attrs {
-            self.visit_attribute(attr);
-        }
-        for param in &function.params {
-            self.visit_param(param);
-        }
-        if let Some(hint) = &function.return_type {
-            self.visit_type_hint(hint);
-        }
+        self.templates.pop();
     }
 
     fn visit_class_def(&mut self, class: &'ast ClassDef) {
         self.doc_names(class.doc_comment.as_deref());
+        self.templates
+            .push(Collector::templates_of(class.doc_comment.as_deref()));
         for trait_use in &class.trait_uses {
             self.doc_names(trait_use.doc_comment.as_deref());
         }
         walk_class_def(self, class);
+        self.templates.pop();
     }
 
     fn visit_property_decl(&mut self, property: &'ast PropertyDecl) {

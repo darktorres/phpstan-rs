@@ -149,3 +149,42 @@ fn collects_use_import_paths() {
     assert!(names.contains("lib\\imported"));
     assert!(names.contains("lib\\helper"));
 }
+
+#[test]
+fn a_tags_description_and_the_templates_in_scope_are_not_references() {
+    let names = refs(
+        r#"<?php
+            /**
+             * @template T
+             * @template-covariant K of Key
+             */
+            class Box {
+                /**
+                 * @param T $value a thing of Prose that mentions Words
+                 * @param callable(K): Closure $f called with the value
+                 * @return array{a: T, b: Shape} the result
+                 * @throws Failure when it fails
+                 */
+                public function m($value, $f) {}
+
+                /**
+                 * @template U
+                 * @param U|Other $u
+                 * @param Typed $x   what $x is about
+                 */
+                public function n($u, $x) {}
+            }
+
+            /** @param T $a A Class named like a template elsewhere */
+            function outside($a) {}
+        "#,
+    );
+    for wanted in ["key", "closure", "shape", "failure", "other", "typed", "t"] {
+        assert!(names.contains(wanted), "{wanted} is a type in a tag");
+    }
+    for ignored in [
+        "k", "u", "a", "prose", "words", "thing", "fails", "called", "result",
+    ] {
+        assert!(!names.contains(ignored), "{ignored} is not a reference");
+    }
+}
