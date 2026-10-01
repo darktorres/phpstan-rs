@@ -53,9 +53,9 @@ pub(crate) fn load<T: serde::de::DeserializeOwned>(name: &str) -> Option<T> {
     ciborium::de::from_reader_with_recursion_limit(body, RECURSION_LIMIT).ok()
 }
 
-/// Stores `value` under `name` for this build, replacing what other
-/// builds stored under it. Writes a temporary file first and renames it,
-/// so a concurrent `load` never reads a partial file.
+/// Stores `value` under `name` for this build, pruning the oldest of what
+/// other builds stored under it. Writes a temporary file first and renames
+/// it, so a concurrent `load` never reads a partial file.
 pub(crate) fn store<T: serde::Serialize>(name: &str, value: &T) {
     let Some(target) = path(name) else {
         return;
@@ -74,12 +74,34 @@ pub(crate) fn store<T: serde::Serialize>(name: &str, value: &T) {
         let _ = fs::remove_file(&temporary);
         return;
     }
-    let stale = format!("{name}-");
-    for entry in fs::read_dir(dir).into_iter().flatten().flatten() {
-        let file_name = entry.file_name();
-        let file_name = file_name.to_string_lossy();
-        if file_name.starts_with(&stale) && entry.path() != target && file_name.ends_with(".cbor") {
-            let _ = fs::remove_file(entry.path());
-        }
+    prune(dir, name, &target);
+}
+
+/// How many builds' files of one kind stay: a branch switch back to a
+/// recent build finds its file instead of building again.
+const KEPT_BUILDS: usize = 3;
+
+/// Removes all but the `KEPT_BUILDS` most recently written files of kind
+/// `name` in `dir`, `keep` among them.
+fn prune(dir: &std::path::Path, name: &str, keep: &std::path::Path) {
+    let prefix = format!("{name}-");
+    let mut files: Vec<(std::time::SystemTime, PathBuf)> = fs::read_dir(dir)
+        .into_iter()
+        .flatten()
+        .flatten()
+        .filter(|entry| {
+            let file_name = entry.file_name();
+            let file_name = file_name.to_string_lossy();
+            file_name.starts_with(&prefix) && file_name.ends_with(".cbor")
+        })
+        .filter_map(|entry| Some((entry.metadata().ok()?.modified().ok()?, entry.path())))
+        .collect();
+    files.sort_by_key(|file| std::cmp::Reverse(file.0));
+    for (_, path) in files
+        .into_iter()
+        .filter(|(_, path)| path != keep)
+        .skip(KEPT_BUILDS - 1)
+    {
+        let _ = fs::remove_file(path);
     }
 }
