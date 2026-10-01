@@ -566,6 +566,17 @@ impl Registry {
             .collect()
     }
 
+    /// Replaces the declarations with `base`'s, keeping the settings and
+    /// the names changed so far.
+    pub(crate) fn switch_base(&mut self, mut base: Registry) {
+        base.php_versions = self.php_versions.take();
+        base.configured_assertions = std::mem::take(&mut self.configured_assertions);
+        base.configured_class_argument_returns =
+            std::mem::take(&mut self.configured_class_argument_returns);
+        base.changed = std::mem::take(&mut self.changed);
+        *self = base;
+    }
+
     /// Drops what was computed lazily from the classes, for the next
     /// lookup to compute again from the classes as they are now.
     pub(crate) fn reset_lazy_tables(&mut self) {

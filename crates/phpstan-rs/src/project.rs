@@ -351,23 +351,41 @@ impl Project {
     /// A project holding the built-in stubs, resolved: a clone of a
     /// registry resolved once per process, sharing its tables.
     pub fn new() -> Self {
-        static BASE: std::sync::LazyLock<Registry> = std::sync::LazyLock::new(|| {
-            if let Some(mut registry) = crate::registry::load_cached::<Registry>("stub-base") {
-                registry.freeze();
-                return registry;
-            }
-            let mut registry = Registry::default();
+        static BASE: std::sync::LazyLock<Registry> =
+            std::sync::LazyLock::new(|| Project::resolved_stubs(false));
+        Project::with_registry(BASE.clone())
+    }
+
+    /// The registry of the built-in stubs, with PHPStan's own source when
+    /// `with_phpstan`, resolved: loaded from the stub cache when it holds
+    /// it, else built and stored there. Frozen, to share.
+    fn resolved_stubs(with_phpstan: bool) -> Registry {
+        let cache_name = if with_phpstan {
+            "stub-base-phpstan"
+        } else {
+            "stub-base"
+        };
+        if let Some(mut registry) = crate::registry::load_cached::<Registry>(cache_name) {
+            registry.freeze();
+            return registry;
+        }
+        let mut registry = Registry::default();
+        if with_phpstan {
+            registry.phpstan_stubs_loaded = true;
+            registry.merge_stubs(stubs::generated_stubs());
+            registry.merge_stub_classes(stubs::generated_stub_classes());
+            registry.merge_stub_constants(stubs::generated_stub_constants());
+        } else {
             registry.merge_stubs(stubs::builtin_stubs());
             registry.merge_stub_classes(stubs::builtin_stub_classes());
             registry.merge_stub_constants(stubs::builtin_stub_constants());
-            let mut base = Project::with_registry(registry);
-            base.finish_loading();
-            let mut registry = base.registry;
-            crate::registry::store_cached("stub-base", &registry);
-            registry.freeze();
-            registry
-        });
-        Project::with_registry(BASE.clone())
+        }
+        let mut base = Project::with_registry(registry);
+        base.finish_loading();
+        let mut registry = base.registry;
+        crate::registry::store_cached(cache_name, &registry);
+        registry.freeze();
+        registry
     }
 
     fn with_registry(registry: Registry) -> Self {
@@ -840,6 +858,10 @@ impl Project {
         if wanted == self.registry.phpstan_stubs_loaded {
             return;
         }
+        if wanted && !self.finished {
+            self.switch_to_phpstan_base();
+            return;
+        }
         self.registry.phpstan_stubs_loaded = wanted;
         let names = stubs::phpstan_stub_names();
         self.rebuild_declarations(
@@ -850,6 +872,35 @@ impl Project {
             },
             None,
         );
+    }
+
+    /// Starts again from the registry resolved once per process with
+    /// PHPStan's own source in it, instead of resolving that source for
+    /// this project alone: the loaded files' declarations go into it as
+    /// they went into the registry without it, from the built-in stubs
+    /// first, context files before analyzed ones and each group by path.
+    /// Only for a project that hasn't finished yet, whose resolved
+    /// declarations are all the shared base's.
+    fn switch_to_phpstan_base(&mut self) {
+        static BASE: std::sync::LazyLock<Registry> =
+            std::sync::LazyLock::new(|| Project::resolved_stubs(true));
+        self.registry.switch_base(BASE.clone());
+        self.begin_declaration_changes();
+        let mut sources: Vec<(bool, &Path, &[Stmt])> = self
+            .files
+            .iter()
+            .map(|(path, state)| (state.analyzed, path.as_path(), state.ast.as_slice()))
+            .collect();
+        sources.sort_by(|a, b| (a.0, a.1).cmp(&(b.0, b.1)));
+        for (analyzed, path, ast) in sources {
+            let origin = Origin::File(Arc::from(path));
+            for decl in crate::registry::build_declarations(ast, &origin) {
+                if let BuiltDecl::Class { name, .. } = &decl {
+                    self.registry.record_phpstan_class_file(name, path);
+                }
+                self.registry.insert_built_decl(decl, analyzed);
+            }
+        }
     }
 
     /// Makes the registry's classes and functions the declarations as
