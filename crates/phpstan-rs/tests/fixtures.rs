@@ -30,6 +30,8 @@ use phpstan_rs::project::worker_pool;
 
 fn main() {
     let args = Arguments::from_args();
+    // The stubs load while the fixtures are listed.
+    phpstan_rs::project::Project::warm_stubs();
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures");
     // One pool for the whole suite: every fixture's parse and check runs
     // on it, alongside the fixtures libtest-mimic runs in parallel.

@@ -399,9 +399,34 @@ impl Project {
     /// A project holding the built-in stubs, resolved: a clone of a
     /// registry resolved once per process, sharing its tables.
     pub fn new() -> Self {
+        Project::with_registry(Project::plain_base().clone())
+    }
+
+    /// The registry of the built-in stubs, resolved once per process.
+    fn plain_base() -> &'static Registry {
         static BASE: std::sync::LazyLock<Registry> =
             std::sync::LazyLock::new(|| Project::resolved_stubs(false));
-        Project::with_registry(BASE.clone())
+        &BASE
+    }
+
+    /// Starts loading the built-in stubs' registry and index on threads of
+    /// their own and returns at once, for a caller that has other work to
+    /// do before its first project: the loads are then done, or under
+    /// way, when `Project::new` first asks. The registry with PHPStan's
+    /// source is not loaded: only a project whose files mention PHPStan
+    /// needs it.
+    pub fn warm_stubs() {
+        let spawn = |name: &str, load: fn()| {
+            // A failure to start a thread only loses the head start.
+            let _ = std::thread::Builder::new()
+                .name(name.to_string())
+                .stack_size(WORKER_STACK_SIZE)
+                .spawn(load);
+        };
+        spawn("warm-stub-registry", || {
+            Project::plain_base();
+        });
+        spawn("warm-stub-index", stubs::warm_index);
     }
 
     /// The registry of the built-in stubs, with PHPStan's own source when

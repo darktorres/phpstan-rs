@@ -1228,6 +1228,11 @@ fn stub_index() -> &'static StubIndex {
     })
 }
 
+/// Loads the stubs' index now, for `Project::warm_stubs`.
+pub(crate) fn warm_index() {
+    stub_index();
+}
+
 fn generated_stub_data() -> &'static GeneratedStubData {
     static DATA: std::sync::OnceLock<&'static GeneratedStubData> = std::sync::OnceLock::new();
     DATA.get_or_init(|| match crate::registry::load_cached("stub-data") {
