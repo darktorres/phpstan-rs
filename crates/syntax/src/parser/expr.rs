@@ -299,184 +299,56 @@ impl Parser {
         Ok(lhs)
     }
 
+    /// The binary operators from `||` down to `*`, each left-associative,
+    /// by precedence, loosest first. `|>` (PHP 8.5's pipe: `$value |>
+    /// callable` is `callable($value)`) was checked against a real PHP 8.5
+    /// build: tighter than relational, looser than shift, concat and
+    /// additive; `.` is looser than `<<`/`>>` and `+`/`-` since PHP 8, so
+    /// `"a" . $x + 1` is `"a" . ($x + 1)`.
+    fn binary_operator(&self) -> Option<(u8, BinOp)> {
+        Some(match self.peek() {
+            Token::PipePipe => (1, BinOp::Or),
+            Token::AmpAmp => (2, BinOp::And),
+            Token::Pipe => (3, BinOp::BitOr),
+            Token::Caret => (4, BinOp::BitXor),
+            Token::Amp => (5, BinOp::BitAnd),
+            Token::EqualsEquals => (6, BinOp::Eq),
+            Token::EqualsEqualsEquals => (6, BinOp::Identical),
+            Token::BangEquals => (6, BinOp::NotEq),
+            Token::BangEqualsEquals => (6, BinOp::NotIdentical),
+            Token::Spaceship => (6, BinOp::Spaceship),
+            Token::Lt => (7, BinOp::Lt),
+            Token::Gt => (7, BinOp::Gt),
+            Token::LtEquals => (7, BinOp::LtEq),
+            Token::GtEquals => (7, BinOp::GtEq),
+            Token::PipeGt => (8, BinOp::Pipe),
+            Token::Dot => (9, BinOp::Concat),
+            Token::LtLt => (10, BinOp::Shl),
+            Token::GtGt => (10, BinOp::Shr),
+            Token::Plus => (11, BinOp::Add),
+            Token::Minus => (11, BinOp::Sub),
+            Token::Star => (12, BinOp::Mul),
+            Token::Slash => (12, BinOp::Div),
+            Token::Percent => (12, BinOp::Mod),
+            _ => return None,
+        })
+    }
+
     pub(crate) fn parse_logical_or(&mut self) -> Result<Expr, ParseError> {
-        let start = self.current_pos();
-        let mut lhs = self.parse_logical_and()?;
-        while self.eat(&Token::PipePipe) {
-            let rhs = self.parse_logical_and()?;
-            lhs = self.expr(
-                ExprKind::Binary(BinOp::Or, Box::new(lhs), Box::new(rhs)),
-                start,
-            );
-        }
-        Ok(lhs)
+        self.parse_binary(1)
     }
 
-    pub(crate) fn parse_logical_and(&mut self) -> Result<Expr, ParseError> {
-        let start = self.current_pos();
-        let mut lhs = self.parse_bit_or()?;
-        while self.eat(&Token::AmpAmp) {
-            let rhs = self.parse_bit_or()?;
-            lhs = self.expr(
-                ExprKind::Binary(BinOp::And, Box::new(lhs), Box::new(rhs)),
-                start,
-            );
-        }
-        Ok(lhs)
-    }
-
-    pub(crate) fn parse_bit_or(&mut self) -> Result<Expr, ParseError> {
-        let start = self.current_pos();
-        let mut lhs = self.parse_bit_xor()?;
-        while self.eat(&Token::Pipe) {
-            let rhs = self.parse_bit_xor()?;
-            lhs = self.expr(
-                ExprKind::Binary(BinOp::BitOr, Box::new(lhs), Box::new(rhs)),
-                start,
-            );
-        }
-        Ok(lhs)
-    }
-
-    pub(crate) fn parse_bit_xor(&mut self) -> Result<Expr, ParseError> {
-        let start = self.current_pos();
-        let mut lhs = self.parse_bit_and()?;
-        while self.eat(&Token::Caret) {
-            let rhs = self.parse_bit_and()?;
-            lhs = self.expr(
-                ExprKind::Binary(BinOp::BitXor, Box::new(lhs), Box::new(rhs)),
-                start,
-            );
-        }
-        Ok(lhs)
-    }
-
-    pub(crate) fn parse_bit_and(&mut self) -> Result<Expr, ParseError> {
-        let start = self.current_pos();
-        let mut lhs = self.parse_equality()?;
-        while self.eat(&Token::Amp) {
-            let rhs = self.parse_equality()?;
-            lhs = self.expr(
-                ExprKind::Binary(BinOp::BitAnd, Box::new(lhs), Box::new(rhs)),
-                start,
-            );
-        }
-        Ok(lhs)
-    }
-
-    pub(crate) fn parse_equality(&mut self) -> Result<Expr, ParseError> {
-        let start = self.current_pos();
-        let mut lhs = self.parse_relational()?;
-        loop {
-            let op = match self.peek() {
-                Token::EqualsEquals => BinOp::Eq,
-                Token::EqualsEqualsEquals => BinOp::Identical,
-                Token::BangEquals => BinOp::NotEq,
-                Token::BangEqualsEquals => BinOp::NotIdentical,
-                Token::Spaceship => BinOp::Spaceship,
-                _ => break,
-            };
-            self.skip();
-            let rhs = self.parse_relational()?;
-            lhs = self.expr(ExprKind::Binary(op, Box::new(lhs), Box::new(rhs)), start);
-        }
-        Ok(lhs)
-    }
-
-    pub(crate) fn parse_relational(&mut self) -> Result<Expr, ParseError> {
-        let start = self.current_pos();
-        let mut lhs = self.parse_pipe()?;
-        loop {
-            let op = match self.peek() {
-                Token::Lt => BinOp::Lt,
-                Token::Gt => BinOp::Gt,
-                Token::LtEquals => BinOp::LtEq,
-                Token::GtEquals => BinOp::GtEq,
-                _ => break,
-            };
-            self.skip();
-            let rhs = self.parse_pipe()?;
-            lhs = self.expr(ExprKind::Binary(op, Box::new(lhs), Box::new(rhs)), start);
-        }
-        Ok(lhs)
-    }
-
-    /// PHP 8.5's `|> ` pipe operator: `$value |> callable` desugars to
-    /// `callable($value)`. Left-associative. Precedence empirically checked
-    /// against a real PHP 8.5 build: tighter than relational (`<`), looser
-    /// than shift/concat/additive.
-    pub(crate) fn parse_pipe(&mut self) -> Result<Expr, ParseError> {
-        let start = self.current_pos();
-        let mut lhs = self.parse_concat()?;
-        while self.eat(&Token::PipeGt) {
-            let rhs = self.parse_concat()?;
-            lhs = self.expr(
-                ExprKind::Binary(BinOp::Pipe, Box::new(lhs), Box::new(rhs)),
-                start,
-            );
-        }
-        Ok(lhs)
-    }
-
-    /// `.`, looser than `<<`/`>>` and `+`/`-` since PHP 8: `"a" . $x + 1` is
-    /// `"a" . ($x + 1)`.
-    pub(crate) fn parse_concat(&mut self) -> Result<Expr, ParseError> {
-        let start = self.current_pos();
-        let mut lhs = self.parse_shift()?;
-        while self.eat(&Token::Dot) {
-            let rhs = self.parse_shift()?;
-            lhs = self.expr(
-                ExprKind::Binary(BinOp::Concat, Box::new(lhs), Box::new(rhs)),
-                start,
-            );
-        }
-        Ok(lhs)
-    }
-
-    pub(crate) fn parse_shift(&mut self) -> Result<Expr, ParseError> {
-        let start = self.current_pos();
-        let mut lhs = self.parse_additive()?;
-        loop {
-            let op = match self.peek() {
-                Token::LtLt => BinOp::Shl,
-                Token::GtGt => BinOp::Shr,
-                _ => break,
-            };
-            self.skip();
-            let rhs = self.parse_additive()?;
-            lhs = self.expr(ExprKind::Binary(op, Box::new(lhs), Box::new(rhs)), start);
-        }
-        Ok(lhs)
-    }
-
-    pub(crate) fn parse_additive(&mut self) -> Result<Expr, ParseError> {
-        let start = self.current_pos();
-        let mut lhs = self.parse_multiplicative()?;
-        loop {
-            let op = match self.peek() {
-                Token::Plus => BinOp::Add,
-                Token::Minus => BinOp::Sub,
-                _ => break,
-            };
-            self.skip();
-            let rhs = self.parse_multiplicative()?;
-            lhs = self.expr(ExprKind::Binary(op, Box::new(lhs), Box::new(rhs)), start);
-        }
-        Ok(lhs)
-    }
-
-    pub(crate) fn parse_multiplicative(&mut self) -> Result<Expr, ParseError> {
+    /// The operands joined by binary operators of precedence `min` or
+    /// tighter.
+    fn parse_binary(&mut self, min: u8) -> Result<Expr, ParseError> {
         let start = self.current_pos();
         let mut lhs = self.parse_not()?;
-        loop {
-            let op = match self.peek() {
-                Token::Star => BinOp::Mul,
-                Token::Slash => BinOp::Div,
-                Token::Percent => BinOp::Mod,
-                _ => break,
-            };
+        while let Some((precedence, op)) = self.binary_operator() {
+            if precedence < min {
+                break;
+            }
             self.skip();
-            let rhs = self.parse_not()?;
+            let rhs = self.parse_binary(precedence + 1)?;
             lhs = self.expr(ExprKind::Binary(op, Box::new(lhs), Box::new(rhs)), start);
         }
         Ok(lhs)

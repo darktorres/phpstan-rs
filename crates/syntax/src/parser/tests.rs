@@ -1,3 +1,4 @@
+mod binary_operator_precedence;
 mod declarations;
 mod doc_comments_and_robustness;
 mod expressions_and_operators;
