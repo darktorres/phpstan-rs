@@ -45,6 +45,13 @@ pub fn dependency_key(name: &str) -> String {
     name.trim_start_matches('\\').to_ascii_lowercase()
 }
 
+/// The key a `global $name;` statement is tracked under, for the files
+/// whose checking reads the project-wide type inferred for `$name`. A `$`
+/// keeps it apart from every class, function and constant key.
+pub fn global_variable_key(name: &str) -> String {
+    format!("${name}")
+}
+
 /// Collects every name a file mentions, resolved against the `namespace`
 /// and `use` statements in effect, anywhere in the file (nested scopes
 /// included).
@@ -117,6 +124,11 @@ impl<'ast> Visitor<'ast> for Collector {
                 self.names
                     .extend(imports.iter().map(|import| dependency_key(&import.path)));
             }
+            StmtKind::Global(vars) => self.names.extend(
+                vars.iter()
+                    .filter_map(|v| v.name())
+                    .map(|n| global_variable_key(n)),
+            ),
             _ => {}
         }
         self.doc_names(stmt.doc_comment.as_deref());

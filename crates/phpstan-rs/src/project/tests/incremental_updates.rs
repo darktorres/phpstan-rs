@@ -1059,3 +1059,43 @@ fn edits_across_many_fixtures_match_a_fresh_load() {
         );
     }
 }
+
+#[test]
+fn a_changed_global_variable_type_rechecks_the_files_declaring_it_global() {
+    let mut project = Project::new();
+    let load = |project: &mut Project, path: &str, source: &str| {
+        project
+            .load_file(PathBuf::from(path), source)
+            .expect("parses");
+    };
+    load(
+        &mut project,
+        "classes.php",
+        "<?php class A { function m() {} } class B {}",
+    );
+    load(
+        &mut project,
+        "writer.php",
+        "<?php function w() { global $t; $t = new A(); }",
+    );
+    load(
+        &mut project,
+        "reader.php",
+        "<?php function r() { global $t; $t->m(); }",
+    );
+    project.finish_loading();
+
+    let results = project
+        .update_file(
+            &PathBuf::from("writer.php"),
+            "<?php function w() { global $t; $t = new B(); }",
+        )
+        .unwrap();
+    let reader = results
+        .get(&PathBuf::from("reader.php"))
+        .expect("the reader is rechecked");
+    assert!(
+        reader.iter().any(|d| d.message.contains("m()")),
+        "{reader:?}"
+    );
+}

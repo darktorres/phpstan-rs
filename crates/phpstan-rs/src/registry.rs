@@ -104,6 +104,7 @@ pub(crate) struct ResolvedSnapshot {
     classes: Vec<(String, Option<ClassReflection>)>,
     functions: Vec<(String, Option<FunctionReflection>)>,
     property_writes: FxHashMap<(Option<String>, String), PropertyWrites>,
+    global_variables: FxHashMap<Name, Type>,
 }
 
 /// `Registry::raw`.
@@ -505,6 +506,7 @@ impl Registry {
                 .map(|key| (key.clone(), functions.get(key).cloned()))
                 .collect(),
             property_writes: self.property_writes.clone(),
+            global_variables: self.global_variables.clone(),
         }
     }
 
@@ -531,6 +533,14 @@ impl Registry {
             if self.global_constants.get(name.as_str()) != old.as_ref() {
                 keys.insert(crate::deps::dependency_key(name));
             }
+        }
+        for name in before
+            .global_variables
+            .keys()
+            .chain(self.global_variables.keys())
+            .filter(|name| before.global_variables.get(*name) != self.global_variables.get(*name))
+        {
+            keys.insert(crate::deps::global_variable_key(name));
         }
         let decls = before
             .property_writes
