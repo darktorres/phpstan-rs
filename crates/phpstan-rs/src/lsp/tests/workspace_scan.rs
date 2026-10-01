@@ -215,3 +215,59 @@ fn opening_an_undiscovered_vendor_file_does_not_clobber_a_first_party_declaratio
         "the vendor Shared must not clobber the real one via didOpen: got: {result:?}"
     );
 }
+
+#[test]
+fn opening_a_file_as_it_was_loaded_publishes_its_diagnostics() {
+    let dir = TempDir::new("didopen_unchanged_analyzed");
+    let src = "<?php function f(): int { return $undefinedVar; }\n";
+    let path = dir.write("src/F.php", src);
+    let uri = path_to_uri(&path).to_string();
+
+    let messages = run(
+        &dir,
+        &[notification(
+            "textDocument/didOpen",
+            json!({"textDocument": {"uri": uri, "languageId": "php", "version": 7, "text": src}}),
+        )],
+    );
+    let diags = last_publish_diagnostics_for(&messages, &uri);
+    assert_eq!(diags["params"]["version"], 7, "got: {diags:?}");
+    assert!(
+        diags["params"]["diagnostics"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|d| d["code"] == "variable.undefined"),
+        "got: {diags:?}"
+    );
+}
+
+#[test]
+fn opening_a_context_file_as_it_was_loaded_publishes_its_diagnostics() {
+    let dir = TempDir::new("didopen_unchanged_context");
+    dir.write("composer.json", "{}");
+    dir.write(
+        "vendor/composer/autoload_classmap.php",
+        "<?php\nreturn ['Acme\\\\VendorOnly' => __DIR__ . '/../acme/VendorOnly.php'];\n",
+    );
+    let vendor_src = "<?php\nnamespace Acme;\nclass VendorOnly { public function m(): int { return $undefinedVar; } }\n";
+    let vendor_path = dir.write("vendor/acme/VendorOnly.php", vendor_src);
+    let vendor_uri = path_to_uri(&vendor_path).to_string();
+
+    let messages = run(
+        &dir,
+        &[notification(
+            "textDocument/didOpen",
+            json!({"textDocument": {"uri": vendor_uri, "languageId": "php", "version": 1, "text": vendor_src}}),
+        )],
+    );
+    let diags = last_publish_diagnostics_for(&messages, &vendor_uri);
+    assert!(
+        diags["params"]["diagnostics"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|d| d["code"] == "variable.undefined"),
+        "got: {diags:?}"
+    );
+}

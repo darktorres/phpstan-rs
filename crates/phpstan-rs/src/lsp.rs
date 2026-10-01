@@ -712,6 +712,21 @@ impl Server {
         *self.file_versions.entry(path.clone()).or_insert(0) += 1;
         self.open_uris.insert(path.clone(), (uri.clone(), version));
         self.latest_text.insert(path.clone(), text.to_string());
+        // Opening a file exactly as it was loaded changes nothing in the
+        // project, so only its own diagnostics need publishing.
+        if self.project.source(&path) == Some(text) {
+            let diags = match self.last_diagnostics.get(&path) {
+                Some(diags) => diags.clone(),
+                None => {
+                    let checked =
+                        FxHashMap::from_iter([(path.clone(), self.project.check_file(&path))]);
+                    self.apply_post_filters(checked)
+                        .remove(&path)
+                        .unwrap_or_default()
+                }
+            };
+            return self.publish_diagnostics_for(FxHashMap::from_iter([(path, diags)]));
+        }
         // Same graceful-degradation as load_workspace, and more exposed
         // in practice here: momentarily-invalid syntax is the normal
         // state while a file is being typed, not an edge case.
