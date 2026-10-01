@@ -8,7 +8,11 @@
 /// The allocator every project's tables are allocated from and freed to:
 /// building and dropping a project is mostly allocation, and this serves
 /// many threads' allocations and frees faster than the system's.
-#[cfg(not(any(feature = "dhat-heap", feature = "hotpath-alloc")))]
+#[cfg(not(any(
+    feature = "dhat-heap",
+    feature = "hotpath-alloc",
+    feature = "system-allocator"
+)))]
 #[global_allocator]
 static ALLOCATOR: mimalloc::MiMalloc = mimalloc::MiMalloc;
 

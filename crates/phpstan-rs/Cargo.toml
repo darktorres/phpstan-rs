@@ -36,6 +36,8 @@ toml.workspace = true
 
 [features]
 default = ["pcre-validate"]
+# Leaves the allocator to the system's: for comparing it with mimalloc.
+system-allocator = []
 hotpath = ["hotpath/hotpath"]
 hotpath-alloc = ["hotpath/hotpath-alloc"]
 # One-shot heap profiler (https://docs.rs/dhat): swaps in `dhat::Alloc` as
