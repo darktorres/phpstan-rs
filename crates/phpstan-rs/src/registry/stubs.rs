@@ -796,31 +796,108 @@ pub fn generated_stub_classes() -> Vec<(Name, ClassReflection)> {
     generated_stub_data().classes.clone()
 }
 
-/// The entries of `generated_stubs` named `name` in any case, in its order.
-pub fn generated_stubs_named(name: &str) -> Vec<(Name, FunctionReflection)> {
+/// `generated_stubs` without PHPStan's own source: the PHP built-ins.
+pub fn builtin_stubs() -> Vec<(Name, FunctionReflection)> {
+    let data = generated_stub_data();
+    data.functions
+        .iter()
+        .filter(|(_, sig)| !is_phpstan_origin(sig.provenance().origin()))
+        .cloned()
+        .collect()
+}
+
+/// `generated_stub_classes` without PHPStan's own source.
+pub fn builtin_stub_classes() -> Vec<(Name, ClassReflection)> {
+    let data = generated_stub_data();
+    data.classes
+        .iter()
+        .filter(|(_, info)| !is_phpstan_origin(info.provenance.origin()))
+        .cloned()
+        .collect()
+}
+
+/// `generated_stub_constants` without PHPStan's own source.
+pub fn builtin_stub_constants() -> Vec<(Name, Type)> {
+    generated_stub_data().builtin_constants.clone()
+}
+
+/// The names `generated_stubs`, `generated_stub_classes` and
+/// `generated_stub_constants` hold only because PHPStan's own source
+/// declares them.
+pub fn phpstan_stub_names() -> PhpstanStubNames {
+    let data = generated_stub_data();
+    PhpstanStubNames {
+        functions: data
+            .functions
+            .iter()
+            .filter(|(_, sig)| is_phpstan_origin(sig.provenance().origin()))
+            .map(|(name, _)| name.to_string())
+            .collect(),
+        classes: data
+            .classes
+            .iter()
+            .filter(|(_, info)| is_phpstan_origin(info.provenance.origin()))
+            .map(|(name, _)| name.to_string())
+            .collect(),
+        constants: data
+            .constants
+            .iter()
+            .filter(|(name, ty)| data.builtin_constant(name) != Some(ty))
+            .map(|(name, _)| name.to_string())
+            .collect(),
+    }
+}
+
+/// `phpstan_stub_names`'s result.
+pub struct PhpstanStubNames {
+    pub functions: Vec<String>,
+    pub classes: Vec<String>,
+    pub constants: Vec<String>,
+}
+
+fn is_phpstan_origin(origin: &Origin) -> bool {
+    matches!(origin, Origin::Phpstan { .. })
+}
+
+/// The entries of `generated_stubs` named `name` in any case, in its
+/// order; PHPStan's own only `with_phpstan`.
+pub fn generated_stubs_named(name: &str, with_phpstan: bool) -> Vec<(Name, FunctionReflection)> {
     let data = generated_stub_data();
     named_positions(&data.function_positions, name)
         .iter()
-        .map(|&i| data.functions[i].clone())
+        .map(|&i| &data.functions[i])
+        .filter(|(_, sig)| with_phpstan || !is_phpstan_origin(sig.provenance().origin()))
+        .cloned()
         .collect()
 }
 
 /// The entries of `generated_stub_classes` named `name` in any case, in
-/// its order.
-pub fn generated_stub_classes_named(name: &str) -> Vec<(Name, ClassReflection)> {
+/// its order; PHPStan's own only `with_phpstan`.
+pub fn generated_stub_classes_named(
+    name: &str,
+    with_phpstan: bool,
+) -> Vec<(Name, ClassReflection)> {
     let data = generated_stub_data();
     named_positions(&data.class_positions, name)
         .iter()
-        .map(|&i| data.classes[i].clone())
+        .map(|&i| &data.classes[i])
+        .filter(|(_, info)| with_phpstan || !is_phpstan_origin(info.provenance.origin()))
+        .cloned()
         .collect()
 }
 
-/// The entry of `generated_stub_constants` named exactly `name`, if any.
-pub fn generated_stub_constants_named(name: &str) -> Vec<(Name, Type)> {
+/// The entry of `generated_stub_constants` named exactly `name`, if any;
+/// as the built-ins alone define it unless `with_phpstan`.
+pub fn generated_stub_constants_named(name: &str, with_phpstan: bool) -> Vec<(Name, Type)> {
     let data = generated_stub_data();
-    data.constant_positions
-        .get(name)
-        .map(|&i| data.constants[i].clone())
+    let ty = if with_phpstan {
+        data.constant_positions
+            .get(name)
+            .map(|&i| &data.constants[i].1)
+    } else {
+        data.builtin_constant(name)
+    };
+    ty.map(|ty| (Name::from(name), ty.clone()))
         .into_iter()
         .collect()
 }
@@ -886,10 +963,22 @@ struct GeneratedStubData {
     class_positions: rustc_hash::FxHashMap<String, Vec<usize>>,
     // Name (constants are case-sensitive) -> its position in `constants`.
     constant_positions: rustc_hash::FxHashMap<String, usize>,
+    // The constants as the built-ins alone define them, without PHPStan's
+    // own source.
+    builtin_constants: Vec<(Name, Type)>,
+    builtin_constant_positions: rustc_hash::FxHashMap<String, usize>,
     // Lowercased name -> the phpstorm-stubs directory (extension) that
     // declares it; PHPStan's own classes aren't built-ins and aren't here.
     function_extensions: rustc_hash::FxHashMap<String, &'static str>,
     class_extensions: rustc_hash::FxHashMap<String, &'static str>,
+}
+
+impl GeneratedStubData {
+    fn builtin_constant(&self, name: &str) -> Option<&Type> {
+        self.builtin_constant_positions
+            .get(name)
+            .map(|&i| &self.builtin_constants[i].1)
+    }
 }
 
 /// The phpstorm-stubs directory (the extension) declaring built-in
@@ -1019,6 +1108,8 @@ fn generated_stub_data() -> &'static GeneratedStubData {
         let mut classes = Vec::new();
         let mut merged_constants: rustc_hash::FxHashMap<Name, Type> =
             rustc_hash::FxHashMap::default();
+        let mut builtin_constants: rustc_hash::FxHashMap<Name, Type> =
+            rustc_hash::FxHashMap::default();
         let mut function_extensions = rustc_hash::FxHashMap::default();
         let mut class_extensions = rustc_hash::FxHashMap::default();
         let builtins = PHPSTORM_STUBS_SOURCES
@@ -1062,6 +1153,9 @@ fn generated_stub_data() -> &'static GeneratedStubData {
                 }
             }
             for (name, ty) in file.constants {
+                if extension.is_some() {
+                    register_global_constant(&mut builtin_constants, name.clone(), ty.clone());
+                }
                 register_global_constant(&mut merged_constants, name, ty);
             }
         }
@@ -1078,7 +1172,14 @@ fn generated_stub_data() -> &'static GeneratedStubData {
         patch_spl_iterator_templates(&mut classes);
         patch_datetime_fluent_returns(&mut classes);
         let constants: Vec<(Name, Type)> = merged_constants.into_iter().collect();
+        let builtin_constants: Vec<(Name, Type)> = builtin_constants.into_iter().collect();
         GeneratedStubData {
+            builtin_constant_positions: builtin_constants
+                .iter()
+                .enumerate()
+                .map(|(i, (name, _))| (name.to_string(), i))
+                .collect(),
+            builtin_constants,
             function_positions: positions_by_name(&functions),
             class_positions: positions_by_name(&classes),
             constant_positions: constants

@@ -51,6 +51,8 @@ struct FileState {
     classes: Vec<String>,
     // The global constants it declares (`const`, `define()`).
     constants: Vec<String>,
+    // Whether it declares or references a `PHPStan\` name.
+    mentions_phpstan: bool,
     references: FxHashSet<String>,
     // Inline `@phpstan-ignore*` comments, read while the file was lexed
     // (the AST carries no comment text).
@@ -343,9 +345,9 @@ impl Project {
 
     pub fn new() -> Self {
         let mut registry = Registry::default();
-        registry.merge_stubs(stubs::generated_stubs());
-        registry.merge_stub_classes(stubs::generated_stub_classes());
-        registry.merge_stub_constants(stubs::generated_stub_constants());
+        registry.merge_stubs(stubs::builtin_stubs());
+        registry.merge_stub_classes(stubs::builtin_stub_classes());
+        registry.merge_stub_constants(stubs::builtin_stub_constants());
         Project {
             files: FxHashMap::default(),
             interner: Arc::new(Interner::new()),
@@ -712,6 +714,7 @@ impl Project {
             path,
             FileState {
                 ast,
+                mentions_phpstan: mentions_phpstan(&functions, &classes, &references),
                 functions,
                 classes,
                 constants,
@@ -792,6 +795,29 @@ impl Project {
         failed
     }
 
+    /// Merges PHPStan's own source in with the built-in stubs while some
+    /// loaded file mentions a `PHPStan\` name, and takes it out again once
+    /// none does: most projects never name it, and it is over half of the
+    /// stub classes. The names it declares are rebuilt, from the stubs
+    /// first and then every file declaring them, as `Project::new`'s merge
+    /// and the loads after it would have built them.
+    fn sync_phpstan_stubs(&mut self) {
+        let wanted = self.files.values().any(|f| f.mentions_phpstan);
+        if wanted == self.registry.phpstan_stubs_loaded {
+            return;
+        }
+        self.registry.phpstan_stubs_loaded = wanted;
+        let names = stubs::phpstan_stub_names();
+        self.rebuild_declarations(
+            &DeclaredNames {
+                functions: names.functions,
+                classes: names.classes,
+                constants: names.constants,
+            },
+            None,
+        );
+    }
+
     /// Puts the registry's classes and functions back as indexing built
     /// them, so declarations change on those and the finishing passes
     /// then derive everything again from scratch.
@@ -811,6 +837,7 @@ impl Project {
 
     fn run_finishing_passes(&mut self) {
         self.begin_declaration_changes();
+        self.sync_phpstan_stubs();
         if !self.built_once {
             self.registry.keep_raw_declarations();
         }
@@ -926,20 +953,21 @@ impl Project {
             .map(|n| n.to_ascii_lowercase())
             .collect();
         let constant_keys: FxHashSet<&str> = names.constants.iter().map(String::as_str).collect();
+        let with_phpstan = self.registry.phpstan_stubs_loaded;
         for name in &constant_keys {
             self.registry.global_constants.remove(*name);
         }
         for name in &function_keys {
             self.registry
-                .merge_stubs(stubs::generated_stubs_named(name));
+                .merge_stubs(stubs::generated_stubs_named(name, with_phpstan));
         }
         for name in &class_keys {
             self.registry
-                .merge_stub_classes(stubs::generated_stub_classes_named(name));
+                .merge_stub_classes(stubs::generated_stub_classes_named(name, with_phpstan));
         }
         for name in &constant_keys {
             self.registry
-                .merge_stub_constants(stubs::generated_stub_constants_named(name));
+                .merge_stub_constants(stubs::generated_stub_constants_named(name, with_phpstan));
         }
         let declares_one = |state: &FileState| {
             state
@@ -1184,6 +1212,7 @@ impl Project {
             path.to_path_buf(),
             FileState {
                 ast,
+                mentions_phpstan: mentions_phpstan(&functions, &classes, &references),
                 functions,
                 classes,
                 constants,
@@ -2248,6 +2277,21 @@ struct UnindexedFile {
     functions: Vec<String>,
     classes: Vec<String>,
     constants: Vec<String>,
+}
+
+/// Whether a file declaring `functions` and `classes` and referencing
+/// `references` (`deps::dependency_key`s) names anything in `PHPStan\`.
+fn mentions_phpstan(
+    functions: &[String],
+    classes: &[String],
+    references: &FxHashSet<String>,
+) -> bool {
+    let is_phpstan = |key: &str| key.starts_with("phpstan\\");
+    references.iter().any(|r| is_phpstan(r))
+        || functions
+            .iter()
+            .chain(classes)
+            .any(|n| is_phpstan(&deps::dependency_key(n)))
 }
 
 /// Names a file declares, by kind.

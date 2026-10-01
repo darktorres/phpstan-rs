@@ -953,3 +953,41 @@ fn removing_a_trait_file_drops_its_members_from_its_users() {
     project.remove_files(&[PathBuf::from("t.php")]);
     assert!(!project.registry().classes["C"].methods().contains_key("m"));
 }
+
+#[test]
+fn phpstans_own_classes_are_loaded_only_while_a_file_names_them() {
+    let rule = "PHPStan\\Rules\\Rule";
+    let mut project = Project::new();
+    project
+        .load_analyzed_file(PathBuf::from("a.php"), "<?php class A {}")
+        .unwrap();
+    project.finish_loading();
+    assert!(!project.registry().classes.contains_key(rule));
+    project
+        .update_file(
+            &PathBuf::from("a.php"),
+            "<?php class A { public function f(\\PHPStan\\Rules\\Rule $r): void {} }",
+        )
+        .unwrap();
+    assert!(project.registry().classes.contains_key(rule));
+    project
+        .update_file(&PathBuf::from("a.php"), "<?php class A {}")
+        .unwrap();
+    assert!(!project.registry().classes.contains_key(rule));
+    assert!(project.registry().classes.contains_key("Exception"));
+}
+
+#[test]
+fn a_project_declaring_a_phpstan_class_keeps_its_own_declaration_over_the_stub() {
+    let mut project = Project::new();
+    project
+        .load_analyzed_file(
+            PathBuf::from("rule.php"),
+            "<?php namespace PHPStan\\Rules; interface Rule { public function ownMethod(): void; }",
+        )
+        .unwrap();
+    project.finish_loading();
+    let rule = &project.registry().classes["PHPStan\\Rules\\Rule"];
+    assert!(rule.methods().contains_key("ownMethod"));
+    assert!(!rule.methods().contains_key("processNode"));
+}

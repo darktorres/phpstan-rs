@@ -143,6 +143,9 @@ pub struct Registry {
     // passes can run again from scratch after declarations change
     // (`keep_raw_declarations`).
     raw: Option<Box<RawDeclarations>>,
+    // Whether PHPStan's own source is merged in with the built-in stubs
+    // (`Project::sync_phpstan_stubs`).
+    pub(crate) phpstan_stubs_loaded: bool,
     // The PHP versions the project runs on: exactly the configured
     // `php_version`, else the range its composer.json declares. `None`
     // means neither says, and every version-gated rule stays silent. See
