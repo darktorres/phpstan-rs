@@ -1,9 +1,6 @@
 use super::*;
 use crate::checker::Checker;
-use crate::registry::Registry;
 use diagnostics::DiagnosticBuilder;
-use syntax::lexer::Lexer;
-use syntax::parser::Parser;
 
 /// Flags every bare-variable expression named `$flag_me`, regardless of
 /// its own inferred type - just enough to prove `wants_expr`/
@@ -53,17 +50,14 @@ impl Rule for FlagsEchoStatements {
 }
 
 fn diagnostics_with(src: &str, rules: &[Box<dyn Rule>]) -> Vec<Diagnostic> {
-    let tokens = Lexer::new(src).tokenize_with_spans();
-    let program = Parser::new(tokens).parse_program().unwrap();
-    let mut registry = Registry::build(&program);
-    registry.merge_stubs(crate::registry::stubs::generated_stubs());
-    registry.merge_stub_classes(crate::registry::stubs::generated_stub_classes());
-    registry.merge_stub_constants(crate::registry::stubs::generated_stub_constants());
-    registry.precompute_ancestor_names();
-    registry.precompute_member_owners();
-    let mut checker = Checker::new(&registry);
+    let path = std::path::Path::new("test.php");
+    let mut project = crate::project::Project::new();
+    project.load_analyzed_file(path.to_path_buf(), src).unwrap();
+    project.finish_loading();
+    let program = project.ast(path).unwrap();
+    let mut checker = Checker::new(project.registry());
     checker.set_external_rules(rules);
-    checker.check_program(&program);
+    checker.check_program(program);
     checker.into_diagnostics()
 }
 

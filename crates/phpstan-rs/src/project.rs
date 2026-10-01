@@ -1444,6 +1444,25 @@ impl Project {
         affected
     }
 
+    /// The checking settings, to change directly.
+    #[cfg(test)]
+    pub(crate) fn check_settings_mut(&mut self) -> &mut CheckSettings {
+        &mut self.settings
+    }
+
+    /// `path`'s type dump: every statement's recorded variable types.
+    #[cfg(test)]
+    pub(crate) fn type_dump(&self, path: &Path) -> Vec<String> {
+        match self
+            .check_files(&[path.to_path_buf()], None, false, true)
+            .pop()
+        {
+            Some((_, Ok(check))) => check.type_dump,
+            Some((_, Err(message))) => panic!("{message}"),
+            None => Vec::new(),
+        }
+    }
+
     /// Type-checks one already-loaded file against the project's current
     /// registry, returning its diagnostics. Its private property types are
     /// judged against the writes of every file making them - its own, and
