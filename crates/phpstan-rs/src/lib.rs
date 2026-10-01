@@ -5,6 +5,13 @@
 //! `phpstan_rs::project::Project`/`phpstan_rs::checker::Checker`. The full
 //! module paths remain available either way.
 
+/// The allocator every project's tables are allocated from and freed to:
+/// building and dropping a project is mostly allocation, and this serves
+/// many threads' allocations and frees faster than the system's.
+#[cfg(not(any(feature = "dhat-heap", feature = "hotpath-alloc")))]
+#[global_allocator]
+static ALLOCATOR: mimalloc::MiMalloc = mimalloc::MiMalloc;
+
 pub mod app;
 pub mod architecture;
 pub mod assertion_tables;
