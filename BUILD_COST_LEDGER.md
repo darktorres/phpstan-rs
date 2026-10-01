@@ -18,13 +18,13 @@ only what a later change still has to know or do.
   either way, and the clones cost 0.35% of the run, so it stays as it is.
   The peak is elsewhere (the parsed files and the types of the checks).
 
-## Gates failing before this work, still failing
+## Gates
 
-- Test manifest: renames in master's history before the merge-base, without
-  `gates/test-renames/` entries.
-- Fuzz crate: `project::parse_file` takes bytes.
-- `cargo deny`: yanked `yoke-derive`.
-- Module graph: 14 edges (and 5 allow lines for edges that no longer exist).
+`cargo xtask gates` (the quick tier) passes at the end of this work. Four
+gates had been failing before it - the test manifest, the fuzz crate,
+`cargo deny` and the module graph - and were fixed on this branch; master has
+the same four failures, so merging brings these fixes along. Not run here:
+the `--full` tier's feature matrix, `machete` and the performance gate.
 
 ## Follow-ups, each a few percent at most
 
