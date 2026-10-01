@@ -375,14 +375,10 @@ impl Project {
         } else {
             "stub-base"
         };
-        let t0 = std::time::Instant::now();
         if let Some(stored) = crate::registry::load_cached(cache_name) {
-            let t1 = t0.elapsed();
             match Registry::from_stored(stored) {
                 Ok(mut registry) => {
-                    let t2 = t0.elapsed();
                     registry.freeze();
-                    eprintln!("TIMING load {t1:?} from_stored {:?} freeze {:?}", t2 - t1, t0.elapsed() - t2);
                     return registry;
                 }
                 Err(error) => {
