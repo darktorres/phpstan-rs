@@ -11,10 +11,12 @@ only what a later change still has to know or do.
   `class.notFound`. Loading all matches PHPStan, and unreferenced extension
   classes cost nothing per project since the stub cache, the lazy entries
   and the shared base.
-- **Fixtures run under the `test` profile** (opt-level 1), not `gate`.
 - **`Project::built_once`** only gates a `debug_assert`; the shared base
   always keeps raw declarations, and `end_declaration_changes`' `keep_raw`
-  matters only for the base build.
+  matters only for the base build. Dropping a built-once project's raw
+  declarations after its finish was tried: peak memory on Piwigo is 2.17 GB
+  either way, and the clones cost 0.35% of the run, so it stays as it is.
+  The peak is elsewhere (the parsed files and the types of the checks).
 
 ## Gates failing before this work, still failing
 
