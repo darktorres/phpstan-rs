@@ -25,6 +25,20 @@ impl Registry {
         assertions: Vec<AssertionEntry>,
         returns: Vec<ClassArgumentReturn>,
     ) {
+        let targets: Vec<(Option<String>, Option<String>)> = self
+            .configured_assertions
+            .iter()
+            .chain(&assertions)
+            .map(|entry| (entry.function.clone(), entry.class.clone()))
+            .collect();
+        for (function, class) in targets {
+            if let Some(function) = function {
+                self.record_changed_function(function.trim_start_matches('\\'));
+            }
+            if let Some(class) = class {
+                self.record_changed_class(class.trim_start_matches('\\'));
+            }
+        }
         self.configured_assertions = assertions;
         self.configured_class_argument_returns = returns;
     }
@@ -46,16 +60,23 @@ impl Registry {
         let mut tagged: Vec<Name> = Vec::new();
         for entry in entries {
             let sig = match (&entry.function, &entry.class, &entry.method) {
-                (Some(function), _, _) => self
-                    .functions
-                    .iter_mut()
-                    .find(|(name, _)| name.eq_ignore_ascii_case(function.trim_start_matches('\\')))
-                    .filter(|(name, _)| self.scope.has_function(name))
-                    .map(|(name, sig)| {
-                        let bare = name.rsplit('\\').next().unwrap_or(name);
-                        tagged.push(Name::from(bare));
-                        sig
-                    }),
+                (Some(function), _, _) => {
+                    let function = function.trim_start_matches('\\');
+                    if !self.scope.has_function(function) {
+                        continue;
+                    }
+                    let Some(declared) = self
+                        .functions
+                        .get_with_name(function)
+                        .map(|(name, _)| name.clone())
+                    else {
+                        continue;
+                    };
+                    tagged.push(Name::from(
+                        declared.rsplit('\\').next().unwrap_or(&declared),
+                    ));
+                    self.functions.get_mut(&declared)
+                }
                 (None, Some(class), Some(method)) => {
                     let Some(canonical) = self
                         .lookup_class(class.trim_start_matches('\\'))

@@ -4,7 +4,8 @@
 use std::borrow::{Borrow, Cow};
 use std::hash::{Hash, Hasher};
 
-use rustc_hash::FxHashMap;
+use rustc_hash::{FxHashMap, FxHashSet};
+use std::sync::Arc;
 use syntax::name::Name;
 
 /// A name's lookup key: the name ASCII-lowercased, as PHP compares class
@@ -25,7 +26,7 @@ pub(crate) fn folded_key(name: &str) -> Name {
 /// A name as a table key: hashed, compared and borrowed as its lowercase
 /// form.
 #[derive(Debug, Clone)]
-pub struct Folded(Name);
+struct Folded(Name);
 
 impl PartialEq for Folded {
     fn eq(&self, other: &Folded) -> bool {
@@ -49,45 +50,119 @@ impl Borrow<str> for Folded {
 
 /// Values by a case-insensitive name. Every lookup folds case, and each
 /// entry keeps the spelling it was declared with, which iteration yields.
+///
+/// A table can sit over a shared, immutable base (`freeze`): cloning it
+/// then shares the base, and a change copies the entry it touches into
+/// the table's own entries first, the base staying as it is.
 #[derive(Debug, Clone)]
 pub struct NameTable<V> {
     entries: FxHashMap<Folded, V>,
+    base: Option<Arc<FxHashMap<Folded, V>>>,
+    // The base's names this table hides: replaced in `entries`, or
+    // removed.
+    hidden: FxHashSet<Folded>,
 }
 
 impl<V> Default for NameTable<V> {
     fn default() -> Self {
         NameTable {
             entries: FxHashMap::default(),
+            base: None,
+            hidden: FxHashSet::default(),
         }
     }
 }
 
 impl<V> NameTable<V> {
+    /// The base's entry for `key` (a lowercased name), unless hidden.
+    fn base_get(&self, key: &str) -> Option<(&Folded, &V)> {
+        let base = self.base.as_ref()?;
+        if self.hidden.contains(key) {
+            return None;
+        }
+        base.get_key_value(key)
+    }
+
+    fn base_contains(&self, key: &str) -> bool {
+        self.base
+            .as_ref()
+            .is_some_and(|base| base.contains_key(key))
+    }
+
     pub fn get(&self, name: &str) -> Option<&V> {
-        self.entries.get(function_key(name).as_ref())
+        let key = function_key(name);
+        self.entries
+            .get(key.as_ref())
+            .or_else(|| self.base_get(&key).map(|(_, value)| value))
     }
 
     /// The value `name` finds, with its declared name.
     pub fn get_with_name(&self, name: &str) -> Option<(&Name, &V)> {
+        let key = function_key(name);
         self.entries
-            .get_key_value(function_key(name).as_ref())
+            .get_key_value(key.as_ref())
+            .or_else(|| self.base_get(&key))
             .map(|(declared, value)| (&declared.0, value))
     }
 
-    pub fn get_mut(&mut self, name: &str) -> Option<&mut V> {
-        self.entries.get_mut(function_key(name).as_ref())
+    pub fn contains_key(&self, name: &str) -> bool {
+        let key = function_key(name);
+        self.entries.contains_key(key.as_ref()) || self.base_get(&key).is_some()
     }
 
-    pub fn contains_key(&self, name: &str) -> bool {
-        self.entries.contains_key(function_key(name).as_ref())
+    /// Every value with its declared name.
+    pub fn iter(&self) -> Iter<'_, V> {
+        self.into_iter()
+    }
+
+    /// Every declared name.
+    pub fn keys(&self) -> impl Iterator<Item = &Name> {
+        self.iter().map(|(name, _)| name)
+    }
+
+    pub fn values(&self) -> impl Iterator<Item = &V> {
+        self.iter().map(|(_, value)| value)
+    }
+
+    pub fn len(&self) -> usize {
+        self.entries.len() + self.base.as_ref().map_or(0, |base| base.len()) - self.hidden.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+}
+
+impl<V: Clone> NameTable<V> {
+    /// Copies the base's entry for `key` into the table's own entries,
+    /// when it has a visible one.
+    fn own(&mut self, key: &str) {
+        if self.entries.contains_key(key) {
+            return;
+        }
+        if let Some((declared, value)) = self.base_get(key) {
+            let (declared, value) = (declared.clone(), value.clone());
+            self.hidden.insert(declared.clone());
+            self.entries.insert(declared, value);
+        }
+    }
+
+    pub fn get_mut(&mut self, name: &str) -> Option<&mut V> {
+        let key = function_key(name);
+        self.own(&key);
+        self.entries.get_mut(key.as_ref())
     }
 
     /// Stores `value` under `name`, which becomes the declared spelling,
     /// replacing whatever `name` found before.
     pub fn insert(&mut self, name: impl Into<Name>, value: V) -> Option<V> {
         let name = name.into();
-        let old = self.entries.remove(name.lower());
-        self.entries.insert(Folded(name), value);
+        let old = self.remove(name.lower());
+        let key = Folded(name);
+        if self.base_contains(key.0.lower()) {
+            self.hidden.insert(key.clone());
+        }
+        self.entries.insert(key, value);
         old
     }
 
@@ -103,42 +178,69 @@ impl<V> NameTable<V> {
         name: impl Into<Name>,
         make: impl FnOnce() -> V,
     ) -> &mut V {
-        self.entries.entry(Folded(name.into())).or_insert_with(make)
+        let name = name.into();
+        if !self.contains_key(&name) {
+            self.insert(name.clone(), make());
+        }
+        self.get_mut(&name).expect("just found or inserted")
     }
 
     pub fn remove(&mut self, name: &str) -> Option<V> {
-        self.entries.remove(function_key(name).as_ref())
-    }
-
-    /// Every value with its declared name.
-    pub fn iter(&self) -> impl Iterator<Item = (&Name, &V)> {
-        self.into_iter()
-    }
-
-    /// Every declared name.
-    pub fn keys(&self) -> impl Iterator<Item = &Name> {
-        self.entries.keys().map(|k| &k.0)
+        let key = function_key(name);
+        if let Some(value) = self.entries.remove(key.as_ref()) {
+            return Some(value);
+        }
+        let (declared, value) = self.base_get(&key)?;
+        let (declared, value) = (declared.clone(), value.clone());
+        self.hidden.insert(declared);
+        Some(value)
     }
 
     /// Every value with its declared name, mutably.
     pub fn iter_mut(&mut self) -> impl Iterator<Item = (&Name, &mut V)> {
-        self.entries.iter_mut().map(|(k, v)| (&k.0, v))
+        self.iter_mut_where(|_| true)
     }
 
-    pub fn values(&self) -> impl Iterator<Item = &V> {
-        self.entries.values()
+    /// The values whose declared name `wanted` accepts, with that name,
+    /// mutably.
+    pub fn iter_mut_where(
+        &mut self,
+        wanted: impl Fn(&Name) -> bool,
+    ) -> impl Iterator<Item = (&Name, &mut V)> {
+        let from_base: Vec<String> = match &self.base {
+            Some(base) => base
+                .keys()
+                .filter(|key| !self.hidden.contains(key.0.lower()) && wanted(&key.0))
+                .map(|key| key.0.lower().to_string())
+                .collect(),
+            None => Vec::new(),
+        };
+        for key in from_base {
+            self.own(&key);
+        }
+        self.entries
+            .iter_mut()
+            .map(|(k, v)| (&k.0, v))
+            .filter(move |(name, _)| wanted(name))
     }
 
     pub fn values_mut(&mut self) -> impl Iterator<Item = &mut V> {
-        self.entries.values_mut()
+        self.iter_mut().map(|(_, value)| value)
     }
 
-    pub fn len(&self) -> usize {
-        self.entries.len()
-    }
-
-    pub fn is_empty(&self) -> bool {
-        self.entries.is_empty()
+    /// Makes every entry part of a shared base, for clones of the table
+    /// to share.
+    pub fn freeze(&mut self) {
+        let mut all: FxHashMap<Folded, V> = std::mem::take(&mut self.entries);
+        if let Some(base) = self.base.take() {
+            for (key, value) in base.iter() {
+                if !self.hidden.contains(key.0.lower()) {
+                    all.insert(key.clone(), value.clone());
+                }
+            }
+        }
+        self.hidden.clear();
+        self.base = Some(Arc::new(all));
     }
 }
 
@@ -151,35 +253,63 @@ impl<V> std::ops::Index<&str> for NameTable<V> {
     }
 }
 
-fn split<'a, V>((k, v): (&'a Folded, &'a V)) -> (&'a Name, &'a V) {
-    (&k.0, v)
+/// `NameTable::iter`'s iterator: the table's own entries, then the base's
+/// it doesn't hide.
+pub struct Iter<'a, V> {
+    entries: std::collections::hash_map::Iter<'a, Folded, V>,
+    base: Option<std::collections::hash_map::Iter<'a, Folded, V>>,
+    hidden: &'a FxHashSet<Folded>,
+}
+
+impl<'a, V> Iterator for Iter<'a, V> {
+    type Item = (&'a Name, &'a V);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if let Some((key, value)) = self.entries.next() {
+            return Some((&key.0, value));
+        }
+        let base = self.base.as_mut()?;
+        for (key, value) in base {
+            if !self.hidden.contains(key.0.lower()) {
+                return Some((&key.0, value));
+            }
+        }
+        None
+    }
 }
 
 impl<'a, V> IntoIterator for &'a NameTable<V> {
     type Item = (&'a Name, &'a V);
-    type IntoIter = std::iter::Map<
-        std::collections::hash_map::Iter<'a, Folded, V>,
-        fn((&'a Folded, &'a V)) -> (&'a Name, &'a V),
-    >;
+    type IntoIter = Iter<'a, V>;
 
     fn into_iter(self) -> Self::IntoIter {
-        self.entries.iter().map(split)
+        Iter {
+            entries: self.entries.iter(),
+            base: self.base.as_ref().map(|base| base.iter()),
+            hidden: &self.hidden,
+        }
     }
 }
 
-impl<V> IntoIterator for NameTable<V> {
+impl<V: Clone> IntoIterator for NameTable<V> {
     type Item = (Name, V);
-    type IntoIter = std::iter::Map<
-        std::collections::hash_map::IntoIter<Folded, V>,
-        fn((Folded, V)) -> (Name, V),
-    >;
+    type IntoIter = std::vec::IntoIter<(Name, V)>;
 
     fn into_iter(self) -> Self::IntoIter {
-        self.entries.into_iter().map(|(k, v)| (k.0, v))
+        let mut all: Vec<(Name, V)> = Vec::with_capacity(self.len());
+        if let Some(base) = &self.base {
+            for (key, value) in base.iter() {
+                if !self.hidden.contains(key.0.lower()) {
+                    all.push((key.0.clone(), value.clone()));
+                }
+            }
+        }
+        all.extend(self.entries.into_iter().map(|(k, v)| (k.0, v)));
+        all.into_iter()
     }
 }
 
-impl<V> FromIterator<(Name, V)> for NameTable<V> {
+impl<V: Clone> FromIterator<(Name, V)> for NameTable<V> {
     fn from_iter<I: IntoIterator<Item = (Name, V)>>(iter: I) -> Self {
         let mut table = NameTable::default();
         for (name, value) in iter {

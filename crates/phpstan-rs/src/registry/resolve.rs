@@ -62,8 +62,7 @@ impl Registry {
         };
         let scope = &self.scope;
         self.classes
-            .iter_mut()
-            .filter(|(name, _)| scope.has_class(name))
+            .iter_mut_where(|name| scope.has_class(name))
             .map(|(_, info)| info)
             .collect::<Vec<_>>()
             .into_par_iter()
@@ -313,8 +312,7 @@ impl Registry {
     pub(crate) fn resolve_method_tags(&mut self) {
         let scope = &self.scope;
         self.classes
-            .iter_mut()
-            .filter(|(name, _)| scope.has_class(name))
+            .iter_mut_where(|name| scope.has_class(name))
             .map(|(_, info)| info)
             .collect::<Vec<_>>()
             .into_par_iter()
@@ -576,8 +574,7 @@ impl Registry {
         let scope = &self.scope;
         for (_, sig) in self
             .functions
-            .iter_mut()
-            .filter(|(name, _)| scope.has_function(name))
+            .iter_mut_where(|name| scope.has_function(name))
         {
             for param in &mut sig.params {
                 resolve(&mut param.ty, &param.ty_native, &self.classes);
@@ -645,11 +642,7 @@ impl Registry {
             }
         }
         let scope = &self.scope;
-        for (_, info) in self
-            .classes
-            .iter_mut()
-            .filter(|(name, _)| scope.has_class(name))
-        {
+        for (_, info) in self.classes.iter_mut_where(|name| scope.has_class(name)) {
             for sig in info.consts.values_mut() {
                 if sig.ty.contains_deferred() {
                     sig.ty = unresolved_class_const_to_mixed(std::mem::replace(

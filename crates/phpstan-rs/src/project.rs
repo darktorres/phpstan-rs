@@ -344,11 +344,24 @@ impl Project {
         &self.interner
     }
 
+    /// A project holding the built-in stubs, resolved: a clone of a
+    /// registry resolved once per process, sharing its tables.
     pub fn new() -> Self {
-        let mut registry = Registry::default();
-        registry.merge_stubs(stubs::builtin_stubs());
-        registry.merge_stub_classes(stubs::builtin_stub_classes());
-        registry.merge_stub_constants(stubs::builtin_stub_constants());
+        static BASE: std::sync::LazyLock<Registry> = std::sync::LazyLock::new(|| {
+            let mut registry = Registry::default();
+            registry.merge_stubs(stubs::builtin_stubs());
+            registry.merge_stub_classes(stubs::builtin_stub_classes());
+            registry.merge_stub_constants(stubs::builtin_stub_constants());
+            let mut base = Project::with_registry(registry);
+            base.finish_loading();
+            let mut registry = base.registry;
+            registry.freeze();
+            registry
+        });
+        Project::with_registry(BASE.clone())
+    }
+
+    fn with_registry(registry: Registry) -> Self {
         Project {
             files: FxHashMap::default(),
             interner: Arc::new(Interner::new()),

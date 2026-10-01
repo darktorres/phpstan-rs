@@ -83,7 +83,7 @@ pub(crate) fn is_phpstan_namespace(fqn: &str) -> bool {
 /// project code in a real implementation.
 /// `Registry::changed`: lowercased class and function names, and
 /// constant names as declared.
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 pub(crate) struct ChangedNames {
     pub(crate) classes: FxHashSet<String>,
     pub(crate) functions: FxHashSet<String>,
@@ -91,13 +91,13 @@ pub(crate) struct ChangedNames {
 }
 
 /// `Registry::raw`.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 struct RawDeclarations {
     classes: NameTable<ClassReflection>,
     functions: FunctionTable,
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 pub struct Registry {
     pub classes: NameTable<ClassReflection>,
     // Configured `[[assertions]]`/`[[class_argument_returns]]` entries,
@@ -412,13 +412,31 @@ impl Registry {
         }
     }
 
-    fn record_changed_class(&mut self, name: &str) {
+    /// Makes the class, function and derived tables a shared base, for
+    /// clones of the registry to share rather than copy.
+    pub(crate) fn freeze(&mut self) {
+        self.classes.freeze();
+        self.functions.freeze();
+        self.built_in_stub_classes.freeze();
+        self.ancestor_names.freeze();
+        self.method_owner_by_class.freeze();
+        self.ancestor_method_owner_by_class.freeze();
+        self.property_owner_by_class.freeze();
+        self.ancestor_property_owner_by_class.freeze();
+        self.const_owner_by_class.freeze();
+        if let Some(raw) = &mut self.raw {
+            raw.classes.freeze();
+            raw.functions.freeze();
+        }
+    }
+
+    pub(crate) fn record_changed_class(&mut self, name: &str) {
         if self.raw.is_some() {
             self.changed.classes.insert(name.to_ascii_lowercase());
         }
     }
 
-    fn record_changed_function(&mut self, name: &str) {
+    pub(crate) fn record_changed_function(&mut self, name: &str) {
         if self.raw.is_some() {
             self.changed.functions.insert(name.to_ascii_lowercase());
         }
