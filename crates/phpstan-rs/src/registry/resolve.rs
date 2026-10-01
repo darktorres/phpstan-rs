@@ -1513,37 +1513,48 @@ impl Registry {
         // (class, method or function, parameter index or `None` for the
         // return, corrected type)
         type Fix = (Option<Name>, Name, Option<usize>, Type);
-        let mut fixes: Vec<Fix> = Vec::new();
-        let mut visit = |class: Option<&Name>, name: &Name, sig: &FunctionReflection| {
+        let registry: &Registry = self;
+        let sig_fixes = |class: Option<&Name>, name: &Name, sig: &FunctionReflection| {
+            let mut fixes: Vec<Fix> = Vec::new();
             for (i, p) in sig.params.iter().enumerate() {
-                if let Some(ty) = self.excluding_native(&p.ty, &p.ty_native, class) {
+                if let Some(ty) = registry.excluding_native(&p.ty, &p.ty_native, class) {
                     fixes.push((class.cloned(), name.clone(), Some(i), ty));
                 }
             }
             if let Some(ty) =
-                self.excluding_native(&sig.return_type, &sig.return_type_native, class)
+                registry.excluding_native(&sig.return_type, &sig.return_type_native, class)
             {
                 fixes.push((class.cloned(), name.clone(), None, ty));
             }
+            fixes
         };
-        for (class, info) in &self.classes {
-            for (name, sig) in &info.methods {
-                visit(Some(class), name, sig);
-            }
-        }
-        for (name, sig) in &self.functions {
-            visit(None, name, sig);
-        }
-        let mut property_fixes = Vec::new();
-        for (class, info) in &self.classes {
-            for (name, prop) in &info.properties {
-                if prop.has_native_type
-                    && let Some(ty) = self.excluding_native(&prop.ty, &prop.ty_native, Some(class))
-                {
-                    property_fixes.push((class.clone(), name.clone(), ty));
-                }
-            }
-        }
+        let classes: Vec<(&Name, &ClassReflection)> = self.classes.iter().collect();
+        let functions: Vec<(&Name, &FunctionReflection)> = self.functions.iter().collect();
+        let mut fixes: Vec<Fix> = classes
+            .par_iter()
+            .flat_map_iter(|(class, info)| {
+                info.methods
+                    .iter()
+                    .flat_map(|(name, sig)| sig_fixes(Some(class), name, sig))
+            })
+            .collect();
+        fixes.par_extend(
+            functions
+                .par_iter()
+                .flat_map_iter(|(name, sig)| sig_fixes(None, name, sig)),
+        );
+        let property_fixes: Vec<(Name, Name, Type)> = classes
+            .par_iter()
+            .flat_map_iter(|(class, info)| {
+                info.properties.iter().filter_map(|(name, prop)| {
+                    if !prop.has_native_type {
+                        return None;
+                    }
+                    let ty = registry.excluding_native(&prop.ty, &prop.ty_native, Some(class))?;
+                    Some(((*class).clone(), name.clone(), ty))
+                })
+            })
+            .collect();
         for (class, name, ty) in property_fixes {
             if let Some(prop) = self
                 .classes
@@ -1661,30 +1672,33 @@ impl Registry {
     /// first, then PHP's global fallback.
     pub(crate) fn resolve_constant_named_types(&mut self) {
         let lookup = |registry: &Registry, ty: &Type| resolve_constant_names(ty, registry);
-        let mut method_fixes = Vec::new();
-        for (class, info) in &self.classes {
-            for (name, sig) in &info.methods {
-                if let Some(fixed) = fixed_sig(self, sig, &lookup) {
-                    method_fixes.push((class.clone(), name.clone(), fixed));
-                }
-            }
-        }
-        let mut function_fixes = Vec::new();
-        for (name, sig) in &self.functions {
-            if let Some(fixed) = fixed_sig(self, sig, &lookup) {
-                function_fixes.push((name.clone(), fixed));
-            }
-        }
-        let mut property_fixes = Vec::new();
-        for (class, info) in &self.classes {
-            for (name, prop) in &info.properties {
-                let ty = lookup(self, &prop.ty);
-                let doc = prop.doc_ty.as_ref().and_then(|d| lookup(self, d));
-                if ty.is_some() || doc.is_some() {
-                    property_fixes.push((class.clone(), name.clone(), ty, doc));
-                }
-            }
-        }
+        let registry: &Registry = self;
+        let classes: Vec<(&Name, &ClassReflection)> = self.classes.iter().collect();
+        let functions: Vec<(&Name, &FunctionReflection)> = self.functions.iter().collect();
+        let method_fixes: Vec<(Name, Name, FunctionReflection)> = classes
+            .par_iter()
+            .flat_map_iter(|(class, info)| {
+                info.methods.iter().filter_map(|(name, sig)| {
+                    let fixed = fixed_sig(registry, sig, &lookup)?;
+                    Some(((*class).clone(), name.clone(), fixed))
+                })
+            })
+            .collect();
+        let function_fixes: Vec<(Name, FunctionReflection)> = functions
+            .par_iter()
+            .filter_map(|(name, sig)| Some(((*name).clone(), fixed_sig(registry, sig, &lookup)?)))
+            .collect();
+        let property_fixes: Vec<(Name, Name, Option<Type>, Option<Type>)> = classes
+            .par_iter()
+            .flat_map_iter(|(class, info)| {
+                info.properties.iter().filter_map(|(name, prop)| {
+                    let ty = lookup(registry, &prop.ty);
+                    let doc = prop.doc_ty.as_ref().and_then(|d| lookup(registry, d));
+                    (ty.is_some() || doc.is_some())
+                        .then(|| ((*class).clone(), name.clone(), ty, doc))
+                })
+            })
+            .collect();
         for (class, name, ty, doc) in property_fixes {
             if let Some(prop) = self
                 .classes
