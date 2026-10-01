@@ -1013,7 +1013,7 @@ fn assert_edits_match_fresh_loads(
     let mut texts: Vec<(String, String)> = loaded
         .iter()
         .enumerate()
-        .map(|(i, source)| (format!("f{i}.php"), source.clone()))
+        .map(|(i, source)| (format!("f{i:03}.php"), source.clone()))
         .collect();
     let load = |texts: &[(String, String)]| {
         let mut project = Project::new();
