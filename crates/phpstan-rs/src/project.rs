@@ -144,6 +144,9 @@ pub struct Project {
     built_once: bool,
     // Whether the finishing passes have run.
     finished: bool,
+    // The files a cancelled recheck never reached, whose last diagnostics
+    // are therefore stale (`take_unchecked`).
+    unchecked: Vec<PathBuf>,
     // Every top-level function's own unconditional declaration site(s) -
     // always populated (no `retain_source` gate), the same indexing-side/
     // check-side split
@@ -381,6 +384,7 @@ impl Project {
             retain_source: false,
             built_once: false,
             finished: false,
+            unchecked: Vec::new(),
             duplicate_fn_sites: DuplicateFunctionSites::default(),
             duplicate_class_sites: DuplicateClassSites::default(),
             use_sites: UseSiteIndex::default(),
@@ -1322,8 +1326,12 @@ impl Project {
         let mut results = FxHashMap::default();
         let mut affected = self.affected_files(changed);
         affected.insert(path.to_path_buf());
-        for p in affected {
+        self.unchecked.clear();
+        let mut affected = affected.into_iter();
+        while let Some(p) = affected.next() {
             if should_abort() {
+                self.unchecked.push(p);
+                self.unchecked.extend(affected);
                 break;
             }
             let (diagnostics, member_refs) = if self.member_index_built {
@@ -1336,6 +1344,12 @@ impl Project {
             results.insert(p, diagnostics);
         }
         Ok(results)
+    }
+
+    /// The files the last cancelled `update_file_cancellable` affected but
+    /// never rechecked; their previous diagnostics no longer hold.
+    pub fn take_unchecked(&mut self) -> Vec<PathBuf> {
+        std::mem::take(&mut self.unchecked)
     }
 
     /// Unwinds `path`'s prior contributions to the shared registry/

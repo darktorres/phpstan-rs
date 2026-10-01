@@ -783,6 +783,9 @@ impl Server {
                 )];
             }
         };
+        for stale in self.project.take_unchecked() {
+            self.last_diagnostics.remove(&stale);
+        }
         self.publish_diagnostics_for(self.apply_post_filters(results))
     }
 
