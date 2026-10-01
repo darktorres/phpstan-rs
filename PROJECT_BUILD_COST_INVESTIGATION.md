@@ -905,6 +905,43 @@ Gap work after the first pass (see `BUILD_COST_LEDGER.md`):
 | G9 | `e2523b66` | `PHPSTAN_RS_THREADS` sizes the worker pool |
 | G4 (#8) | - | not done on purpose: loading only enabled extensions would make code using an undeclared extension report `class.notFound`; unreferenced extension classes cost nothing per project since #6/#7/#11 |
 
+Measured at the end (merge-base `5d86aac1` against HEAD, `gate` binaries; the
+machine carried other jobs, load 1-4, both sides alike):
+
+| workload | merge-base | HEAD |
+|---|---|---|
+| one-file project, `check-project` | 743 ms, 3.1 s CPU | 65 ms, 47 ms CPU |
+| one test process (lib tests, `test` profile) | 600 ms, 3.2 s CPU | 180 ms, 0.14 s CPU |
+| lib suite (952 tests) | 33-42 s | 7 s |
+| fixture suite (3,807) | 203 s | 6.6 s |
+| every-fixture edit differential | 226 s | 23 s |
+| guzzle (70 files): full load / no-change edit | 672 ms / 185 ms (6 files rechecked) | 150 ms / 62 ms (1 file) |
+| symfony Console (378 files): load / edit | 950 ms / 620 ms (193 files) | 350 ms / 130 ms (1 file) |
+| symfony Routing (267 files): load / edit | 870 ms / 400 ms (120 files) | 190 ms / 70 ms (1 file) |
+| Piwigo scoped corpus, CLI | 9.2-9.6 s, 25-27 s CPU | 8.2-8.5 s, 22 s CPU |
+| mimalloc against the system allocator (Piwigo scoped, HEAD) | 14.1 s | 10.5 s |
+
+What the measurements found, beyond the planned items:
+
+- The stub cache (#6) never worked until `fb9b3137`'s predecessor: ciborium's
+  byte reader fails on entries over 4 KB, so every run rebuilt and rewrote
+  90 MB. A stored file that passes its checksum but doesn't decode now says so.
+- The stubs' index was read with all of the stub data (90 MB) for the one
+  lookup it serves; it is a file of its own, 1.2 MB.
+- The stored registry wrote its raw declarations beside the resolved ones,
+  94% of classes and every function identical: 41 MB became 23 MB (85 MB
+  with PHPStan's source became 57 MB).
+- The dependency collector took every word of a PHPDoc tag line, descriptions
+  and template parameters included, as a class name: a project function
+  called `a` made 5,757 stub declarations dependents. It now reads the types of
+  a tag only.
+- The closed-class check decoded all stub classes to answer for the
+  project's own, two thirds of a one-file run.
+- Switching to the registry with PHPStan's source after the declarations
+  were inserted rebuilt them one after the other (two seconds on 14k files);
+  the choice is now made before the first insertion.
+- The CLI no longer frees the project it is about to leave.
+
 The resolution scope (#12) now closes over declaration-level references only;
 purity, property writes and global variables rerun over the wider scope of
 every reference, bodies included, as before.
