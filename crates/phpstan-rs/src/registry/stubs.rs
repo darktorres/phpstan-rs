@@ -868,6 +868,12 @@ fn is_phpstan_origin(origin: &Origin) -> bool {
 /// The entries of `generated_stubs` named `name` in any case, in its
 /// order; PHPStan's own only `with_phpstan`.
 pub fn generated_stubs_named(name: &str, with_phpstan: bool) -> Vec<(Name, FunctionReflection)> {
+    if !stub_index()
+        .function_names
+        .contains(&name.trim_start_matches('\\').to_ascii_lowercase())
+    {
+        return Vec::new();
+    }
     let data = generated_stub_data();
     named_positions(&data.function_positions, name)
         .iter()
@@ -883,6 +889,12 @@ pub fn generated_stub_classes_named(
     name: &str,
     with_phpstan: bool,
 ) -> Vec<(Name, ClassReflection)> {
+    if !stub_index()
+        .class_names
+        .contains(&name.trim_start_matches('\\').to_ascii_lowercase())
+    {
+        return Vec::new();
+    }
     let data = generated_stub_data();
     named_positions(&data.class_positions, name)
         .iter()
@@ -895,6 +907,9 @@ pub fn generated_stub_classes_named(
 /// The entry of `generated_stub_constants` named exactly `name`, if any;
 /// as the built-ins alone define it unless `with_phpstan`.
 pub fn generated_stub_constants_named(name: &str, with_phpstan: bool) -> Vec<(Name, Type)> {
+    if !stub_index().constant_names.contains(name) {
+        return Vec::new();
+    }
     let data = generated_stub_data();
     let ty = if with_phpstan {
         data.constant_positions
@@ -1005,6 +1020,12 @@ struct StubIndex {
     #[serde(with = "embedded_str_map")]
     class_extensions: rustc_hash::FxHashMap<String, &'static str>,
     phpstan_names: PhpstanStubNames,
+    // The names the stubs declare - classes and functions lowercased,
+    // constants as written - so a name no stub declares is known without
+    // reading the declarations.
+    class_names: rustc_hash::FxHashSet<String>,
+    function_names: rustc_hash::FxHashSet<String>,
+    constant_names: rustc_hash::FxHashSet<String>,
 }
 
 /// A map to embedded stub paths or extensions, serialized as text.
@@ -1303,6 +1324,9 @@ fn build_generated_stub_data() -> (StubIndex, GeneratedStubData) {
         constants,
     };
     let index = StubIndex {
+        class_names: data.class_positions.keys().cloned().collect(),
+        function_names: data.function_positions.keys().cloned().collect(),
+        constant_names: data.constant_positions.keys().cloned().collect(),
         dependents,
         declared_by_file,
         function_extensions,
