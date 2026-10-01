@@ -1,3 +1,7 @@
+# Where the work stands
+
+`WORK_STACK.md` lists what is paused, in what order, and where to resume. When work is paused for a fix, add the fix there instead of starting a new tracking file.
+
 # Profiling
 
 Find hotspots with a sampling profiler, not with `hotpath`: `hotpath` times
