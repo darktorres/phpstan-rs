@@ -80,6 +80,13 @@ pub(crate) fn is_phpstan_namespace(fqn: &str) -> bool {
 /// everything up front instead). `merge_stubs` layers in curated built-in
 /// signatures (`stubs.rs`) the same way php-src stubs would sit alongside
 /// project code in a real implementation.
+/// `Registry::raw`.
+#[derive(Debug)]
+struct RawDeclarations {
+    classes: NameTable<ClassReflection>,
+    functions: FunctionTable,
+}
+
 #[derive(Debug, Default)]
 pub struct Registry {
     pub classes: NameTable<ClassReflection>,
@@ -131,6 +138,11 @@ pub struct Registry {
     // since this project has no real corpus case to verify a "which
     // one wins" rule against.
     doctrine_entity_table_index: std::sync::OnceLock<FxHashMap<Name, Name>>,
+    // `classes` and `functions` as indexing and the stub merges built
+    // them, before the finishing passes resolved them - kept so the
+    // passes can run again from scratch after declarations change
+    // (`keep_raw_declarations`).
+    raw: Option<Box<RawDeclarations>>,
     // The PHP versions the project runs on: exactly the configured
     // `php_version`, else the range its composer.json declares. `None`
     // means neither says, and every version-gated rule stays silent. See
@@ -303,6 +315,26 @@ impl Registry {
         registry.precompute_member_owners();
         registry.infer_global_variables(&[(std::path::Path::new("<flattened>"), program)]);
         registry
+    }
+
+    /// Keeps a copy of `classes` and `functions` as they are, before the
+    /// finishing passes resolve them.
+    pub(crate) fn keep_raw_declarations(&mut self) {
+        self.raw = Some(Box::new(RawDeclarations {
+            classes: self.classes.clone(),
+            functions: self.functions.clone(),
+        }));
+    }
+
+    /// Puts back `classes` and `functions` as they were before the
+    /// finishing passes resolved them, discarding everything the passes
+    /// derived into them; a no-op when no copy was kept or it already was
+    /// put back.
+    pub(crate) fn restore_raw_declarations(&mut self) {
+        if let Some(raw) = self.raw.take() {
+            self.classes = raw.classes;
+            self.functions = raw.functions;
+        }
     }
 
     /// Drops what was computed lazily from the classes, for the next

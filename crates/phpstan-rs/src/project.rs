@@ -139,6 +139,10 @@ pub struct Project {
     // editor's `didChange` most recently sent - not necessarily what's on
     // disk.
     retain_source: bool,
+    // `ProjectSettings::built_once`.
+    built_once: bool,
+    // Whether the finishing passes have run.
+    finished: bool,
     // Every top-level function's own unconditional declaration site(s) -
     // always populated (no `retain_source` gate), the same indexing-side/
     // check-side split
@@ -304,6 +308,10 @@ pub struct ProjectSettings {
     /// Keeps each file's source text (the language server's hover and
     /// definition need it).
     pub retain_source: bool,
+    /// Whether the project is built once and never changed afterwards (a
+    /// batch run), so it keeps no copy of its declarations as built for
+    /// recomputing them after a change.
+    pub built_once: bool,
     pub rules: crate::rules_settings::RulesSettings,
     /// Which extensions are active; each extension's checks default to it.
     pub extensions: crate::ext::ActiveExtensions,
@@ -351,6 +359,8 @@ impl Project {
             settings: CheckSettings::default(),
             defer_inline_ignores: false,
             retain_source: false,
+            built_once: false,
+            finished: false,
             duplicate_fn_sites: DuplicateFunctionSites::default(),
             duplicate_class_sites: DuplicateClassSites::default(),
             use_sites: UseSiteIndex::default(),
@@ -372,6 +382,7 @@ impl Project {
             phpstan_api_check_enabled,
             defer_inline_ignores,
             retain_source,
+            built_once,
             rules,
             extensions: active,
             extras,
@@ -393,6 +404,7 @@ impl Project {
         self.absolute_root = absolute_root;
         self.defer_inline_ignores = defer_inline_ignores;
         self.retain_source = retain_source;
+        self.built_once = built_once;
 
         self.registry.php_versions = php_versions;
         self.registry
@@ -678,6 +690,7 @@ impl Project {
             bodies,
             class_fn_refs,
         } = parsed;
+        self.begin_declaration_changes();
         for decl in built_decls {
             self.registry.insert_built_decl(decl, analyzed);
         }
@@ -779,6 +792,17 @@ impl Project {
         failed
     }
 
+    /// Puts the registry's classes and functions back as indexing built
+    /// them, so declarations change on those and the finishing passes
+    /// then derive everything again from scratch.
+    fn begin_declaration_changes(&mut self) {
+        debug_assert!(
+            !(self.built_once && self.finished),
+            "a project built once can't change after its finishing passes ran"
+        );
+        self.registry.restore_raw_declarations();
+    }
+
     /// Finalizes an initial batch of `load_file` calls (trait flattening).
     #[hotpath::measure]
     pub fn finish_loading(&mut self) {
@@ -786,6 +810,11 @@ impl Project {
     }
 
     fn run_finishing_passes(&mut self) {
+        self.begin_declaration_changes();
+        if !self.built_once {
+            self.registry.keep_raw_declarations();
+        }
+        self.finished = true;
         self.registry.reset_lazy_tables();
         self.registry.canonicalize_class_name_case();
         self.registry.flatten_traits();
@@ -846,6 +875,7 @@ impl Project {
         path: &Path,
         changed_symbols: &mut FxHashSet<String>,
     ) -> Option<UnindexedFile> {
+        self.begin_declaration_changes();
         let old = self.files.remove(path)?;
         let classes: Vec<String> = old
             .classes
@@ -882,6 +912,7 @@ impl Project {
         names: &DeclaredNames,
         pending: Option<(&Path, &[Stmt], bool)>,
     ) {
+        self.begin_declaration_changes();
         self.registry
             .remove_declarations(&names.functions, &names.classes);
         let function_keys: FxHashSet<String> = names

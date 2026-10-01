@@ -840,3 +840,116 @@ fn an_edited_entity_table_name_is_found_after_the_edit() {
             .is_some()
     );
 }
+
+/// Asserts that editing `edited` to `new_source` leaves every file with the
+/// diagnostics a project loading the edited text from the start reports.
+fn assert_edit_matches_a_fresh_load(files: &[(&str, &str)], edited: &str, new_source: &str) {
+    let load = |files: &[(&str, &str)]| {
+        let mut project = Project::new();
+        for (path, source) in files {
+            project
+                .load_analyzed_file(PathBuf::from(path), source)
+                .unwrap();
+        }
+        project.finish_loading();
+        project
+    };
+    let mut edited_project = load(files);
+    edited_project
+        .update_file(&PathBuf::from(edited), new_source)
+        .unwrap();
+    let fresh_files: Vec<(&str, &str)> = files
+        .iter()
+        .map(|&(path, source)| (path, if path == edited { new_source } else { source }))
+        .collect();
+    let fresh_project = load(&fresh_files);
+    let messages = |project: &Project, path: &str| -> Vec<String> {
+        project
+            .check_file(Path::new(path))
+            .iter()
+            .map(|d| format!("{}:{} {}", d.span.start.line, d.span.start.col, d.message))
+            .collect()
+    };
+    for (path, _) in files {
+        assert_eq!(
+            messages(&edited_project, path),
+            messages(&fresh_project, path),
+            "{path} after editing {edited}"
+        );
+    }
+}
+
+#[test]
+fn a_function_that_became_impure_makes_its_callers_impure() {
+    assert_edit_matches_a_fresh_load(
+        &[
+            ("g.php", "<?php function g(): int { return 1; }"),
+            ("f.php", "<?php function f(): int { return g(); } f();"),
+        ],
+        "g.php",
+        "<?php function g(): int { echo 'x'; return 1; }",
+    );
+}
+
+#[test]
+fn an_inherited_return_tag_follows_the_parents_edit() {
+    assert_edit_matches_a_fresh_load(
+        &[
+            (
+                "parent.php",
+                "<?php class P { /** @return int */ public function m() { return 1; } }",
+            ),
+            (
+                "child.php",
+                "<?php class C extends P { public function m() { return 2; } } function f(C $c): int { return $c->m(); }",
+            ),
+        ],
+        "parent.php",
+        "<?php class P { /** @return string */ public function m() { return 'a'; } }",
+    );
+}
+
+#[test]
+fn a_method_removed_from_a_trait_is_gone_from_its_users() {
+    assert_edit_matches_a_fresh_load(
+        &[
+            ("t.php", "<?php trait T { public function m(): void {} }"),
+            ("c.php", "<?php class C { use T; } (new C())->m();"),
+        ],
+        "t.php",
+        "<?php trait T {}",
+    );
+}
+
+#[test]
+fn value_of_an_edited_enum_takes_its_new_cases() {
+    assert_edit_matches_a_fresh_load(
+        &[
+            ("e.php", "<?php enum E: string { case A = 'a'; }"),
+            (
+                "f.php",
+                "<?php /** @param value-of<E> $v */ function f(string $v): void {} f('b');",
+            ),
+        ],
+        "e.php",
+        "<?php enum E: string { case A = 'a'; case B = 'b'; }",
+    );
+}
+
+#[test]
+fn removing_a_trait_file_drops_its_members_from_its_users() {
+    let mut project = Project::new();
+    project
+        .load_analyzed_file(
+            PathBuf::from("t.php"),
+            "<?php trait T { public function m(): void {} }",
+        )
+        .unwrap();
+    project
+        .load_analyzed_file(PathBuf::from("c.php"), "<?php class C { use T; }")
+        .unwrap();
+    project.finish_loading();
+    assert!(project.registry().classes["C"].methods().contains_key("m"));
+    project.remove_files(&[PathBuf::from("t.php")]);
+    assert!(!project.registry().classes["C"].methods().contains_key("m"));
+}

@@ -198,6 +198,7 @@ pub(crate) fn resolve(
         phpstan_api_check_enabled,
         defer_inline_ignores: false,
         retain_source: true,
+        built_once: false,
         rules: section(&config),
         extensions,
         extras: section(&config),

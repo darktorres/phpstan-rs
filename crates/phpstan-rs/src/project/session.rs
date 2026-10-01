@@ -439,6 +439,7 @@ impl Session {
             phpstan_api_check_enabled,
             defer_inline_ignores: true,
             retain_source: false,
+            built_once: true,
             rules,
             extensions,
             extras: config.section::<ext::extras::ExtrasSettings>()?,
