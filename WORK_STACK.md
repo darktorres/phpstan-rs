@@ -37,12 +37,37 @@ Merge base `5d86aac1`. A rebase or a cherry-pick of master's commits onto
 
 ### 1. The roadmap, in two lanes — `ROADMAP.md`
 
-The main plan: phases toward PHPStan-level checking, split between two
-instances working in parallel, lane A and lane B (`ROADMAP.md` names which
-lane owns which phase). **Paused** to split the codebase into crates.
+The main plan: phases toward PHPStan-level checking, split between two Claude
+sessions working in parallel on separate checkouts, one lane each (ground
+rules for both: build the complete, correct version, and treat PHPStan's
+behaviour as the minimum, not the target). **Paused** on 2026-09-23 (Lane B
+reported "paused with a clean tree" at `47ca5bb`; the branches converged at
+`ab4c2b5`) to split the codebase into crates.
 
-- Where each lane stands is in `ROADMAP.md`'s own phase statuses; no other
-  file here tracks it.
+- **Lane A** (the `master` checkout): PHPDoc, the type system, narrowing.
+- **Lane B** (the `master2` checkout): declaration and OOP rules, and tooling
+  (Composer, baseline, codemods, output formats).
+- `ROADMAP.md` names which lane owns which phase (around line 1810).
+- Where it stopped, from the report written at the pause (2026-09-23, so
+  check `ROADMAP.md`'s phase statuses for anything newer):
+  - Lane A, remaining: Phase 130 (the PHPDoc-versus-native check for
+    properties and hooks was next; `*.unresolvableType`; template checks on
+    callable shapes; `@phpstan-self-out`; assert and `@var`-family checks;
+    conditional-return declarations), Phase 131 (templates on `@method`, the
+    rest of `@use<...>`), Phase 134 (`nullCoalesce`/`isset`/`empty`,
+    `compact()`, `unset()`), items 173, 140d, A4, A6, O1, 180, and a
+    known limit with narrowing on two correlated conditions.
+  - Lane B, remaining: Phase 139 (`InvalidTypesInUnionRule`, malformed
+    `@phpstan-ignore`), Composer phases 113-120, baseline Phase 122
+    (N1, N2, N4), output formats (Phase 154), codemods (Phase 111, I1-I4).
+  - Unassigned, whoever frees up first: Phase 87 (whole-program value
+    flow), 89 (structural duplication), 91 (parameter narrowing from call
+    sites), 94 (closed-world precision), AA, and Parts 10 and 11 (the
+    Packagist extension survey, the Psalm-derived findings).
+- The report itself is in the session transcript
+  `~/.claude/projects/-home-torres-projects-phpstan-rs/5b4ed89e-44f2-40ee-b852-a4162eb0bae8.jsonl`
+  (message at 2026-09-23T03:15); the lane sessions' exchanges are in that file
+  and in `-home-torres-projects-phpstan-rs-master2/ddf6301a-50ab-484b-9119-41a790c6f310.jsonl`.
 - Resume: when levels 2-6 are done. Edits `GATE_SPEED_PLAN.md` §5 lists for
   `ROADMAP.md` are recorded there.
 
