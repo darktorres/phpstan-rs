@@ -636,6 +636,12 @@ impl Session {
         });
         let analyze_parsed = combined_parsed.split_off(context_files.len());
         let context_parsed = combined_parsed;
+        project.expect_files(
+            context_parsed
+                .iter()
+                .chain(&analyze_parsed)
+                .filter_map(|parsed| parsed.as_ref().map(|(_, parsed)| parsed)),
+        );
 
         // Context files first, so an analysed file's declaration wins a
         // name collision.

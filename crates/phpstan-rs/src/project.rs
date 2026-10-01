@@ -866,6 +866,10 @@ impl Project {
                 }),
             )
         });
+        self.expect_files(parsed.iter().filter_map(|p| match p {
+            Some(Ok((_, parsed))) => Some(parsed),
+            _ => None,
+        }));
         let mut failed = Vec::new();
         for ((path, analyzed), parsed) in files.iter().zip(parsed) {
             match parsed {
@@ -906,6 +910,29 @@ impl Project {
         );
     }
 
+    /// The registry of the built-in stubs and PHPStan's own source,
+    /// resolved once per process.
+    fn phpstan_base() -> &'static Registry {
+        static BASE: std::sync::LazyLock<Registry> =
+            std::sync::LazyLock::new(|| Project::resolved_stubs(true));
+        &BASE
+    }
+
+    /// Before the files `parsed` are inserted into a project that has none
+    /// yet: starts from the registry with PHPStan's source when one of
+    /// them mentions it, so that no declaration is inserted twice.
+    pub(crate) fn expect_files<'a>(&mut self, parsed: impl IntoIterator<Item = &'a ParsedFile>) {
+        if self.finished || !self.files.is_empty() || self.registry.phpstan_stubs_loaded {
+            return;
+        }
+        if parsed
+            .into_iter()
+            .any(|p| mentions_phpstan(&p.functions, &p.classes, &p.references))
+        {
+            self.registry.switch_base(Project::phpstan_base().clone());
+        }
+    }
+
     /// Starts again from the registry resolved once per process with
     /// PHPStan's own source in it, instead of resolving that source for
     /// this project alone: the loaded files' declarations go into it as
@@ -914,9 +941,7 @@ impl Project {
     /// Only for a project that hasn't finished yet, whose resolved
     /// declarations are all the shared base's.
     fn switch_to_phpstan_base(&mut self) {
-        static BASE: std::sync::LazyLock<Registry> =
-            std::sync::LazyLock::new(|| Project::resolved_stubs(true));
-        self.registry.switch_base(BASE.clone());
+        self.registry.switch_base(Project::phpstan_base().clone());
         self.begin_declaration_changes();
         let mut sources: Vec<(bool, &Path, &[Stmt])> = self
             .files
