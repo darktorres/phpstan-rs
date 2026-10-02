@@ -489,11 +489,11 @@ impl Registry {
                 let mut seen = FxHashSet::default();
                 let mut queue: Vec<Name> = vec![(*name).clone()];
                 while let Some(current) = queue.pop() {
-                    if !seen.insert(current.to_ascii_lowercase()) {
-                        continue;
-                    }
-                    if with_mixins.contains(&current.to_ascii_lowercase()) {
+                    if with_mixins.contains(current.lower()) {
                         return true;
+                    }
+                    if !seen.insert(current.clone()) {
+                        continue;
                     }
                     if let Some(info) = self.classes.get(&current) {
                         queue.extend(info.extends.iter().chain(&info.implements).cloned());

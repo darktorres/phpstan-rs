@@ -345,6 +345,15 @@ fn try_parse_conditional_type(s: &str) -> Option<Type> {
     }))
 }
 
+/// Whether `s` starts with the ASCII `prefix`, in any case: the
+/// comparison `s.to_ascii_lowercase().starts_with(prefix)` makes for a
+/// lowercase `prefix`, without the copy.
+fn starts_with_ignore_case(s: &str, prefix: &str) -> bool {
+    s.as_bytes()
+        .get(..prefix.len())
+        .is_some_and(|head| head.eq_ignore_ascii_case(prefix.as_bytes()))
+}
+
 /// `array{name: string, age?: int}` - PHPDoc's structural array shape.
 /// Field values can themselves be full type strings (unions, generics,
 /// nested shapes), so each is re-run through `parse_type_string`.
@@ -361,10 +370,9 @@ fn try_parse_conditional_type(s: &str) -> Option<Type> {
 /// found via this project's own `class.notFound` existence checking newly
 /// reaching an inline `@var list<list{Tk, Tv}> $entries` tag.
 fn try_parse_array_shape(s: &str) -> Option<Type> {
-    let lower = s.to_ascii_lowercase();
     let prefix_len = ["non-empty-array", "non-empty-list", "array", "list"]
         .iter()
-        .find(|p| lower.starts_with(*p))?
+        .find(|p| starts_with_ignore_case(s, p))?
         .len();
     let rest = s[prefix_len..].trim_start();
     if !rest.starts_with('{') || !rest.ends_with('}') {
@@ -455,8 +463,7 @@ fn try_parse_array_shape(s: &str) -> Option<Type> {
 /// `parse_type_string` recursion), minus the positional-field/`...`-
 /// unsealed-marker concept (an object's properties are always named).
 fn try_parse_object_shape(s: &str) -> Option<Type> {
-    let lower = s.to_ascii_lowercase();
-    if !lower.starts_with("object") {
+    if !starts_with_ignore_case(s, "object") {
         return None;
     }
     let rest = s[6..].trim_start();
@@ -641,11 +648,10 @@ fn parse_type_atom(s: &str) -> Type {
     // leading `\` first, since real corpus code commonly spells this
     // fully qualified (amphp/amp's own convention throughout).
     let stripped = s.trim_start_matches('\\');
-    let lower = stripped.to_ascii_lowercase();
     let callable_head = ["closure", "callable", "pure-closure", "pure-callable"]
         .iter()
-        .find_map(|k| lower.strip_prefix(k))
-        .map(str::trim_start);
+        .find(|k| starts_with_ignore_case(stripped, k))
+        .map(|k| stripped[k.len()..].trim_start());
     if let Some(rest) = callable_head {
         if rest.starts_with('(') {
             return try_parse_callable_shape(stripped).unwrap_or(Type::callable(None));
@@ -874,7 +880,20 @@ fn parse_int_bound(s: &str) -> Option<Option<i64>> {
 /// look identical to a relative one, mis-qualifying it as
 /// `CurrentNamespace\Doctrine\ORM\QueryBuilder`.
 fn parse_type_keyword_or_class(bare: &str, original: &str, generic_args: &[&str]) -> Type {
-    match bare.to_ascii_lowercase().as_str() {
+    // Lowercased on the stack: a keyword is short, and a longer name is a
+    // class, whatever its case.
+    let mut buffer = [0u8; 32];
+    let owned;
+    let lowered: &str = if bare.len() <= buffer.len() {
+        let bytes = &mut buffer[..bare.len()];
+        bytes.copy_from_slice(bare.as_bytes());
+        bytes.make_ascii_lowercase();
+        std::str::from_utf8(bytes).expect("lowercasing ASCII letters keeps UTF-8")
+    } else {
+        owned = bare.to_ascii_lowercase();
+        &owned
+    };
+    match lowered {
         // `int<min, max>` and its named shorthands are real ranges,
         // not aliased to plain `Int`. `int`/`integer` also read
         // `generic_args` when present (`int<0, 255>`) - a malformed
