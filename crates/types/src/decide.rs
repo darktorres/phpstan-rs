@@ -11,9 +11,15 @@ impl Type {
     /// resolves to the real, useful native type instead of losing all
     /// precision.
     pub fn reconcile_with_native(self, native_ty: Type) -> Type {
-        let members: Vec<Type> = match self.into_repr() {
-            Repr::Union(members) => members,
-            other => vec![Type::new(other)],
+        // A type that is not a union is its own one member, not its form
+        // taken apart and built again.
+        let members: Vec<Type> = if matches!(self.repr(), Repr::Union(_)) {
+            match self.into_repr() {
+                Repr::Union(members) => members,
+                other => vec![Type::new(other)],
+            }
+        } else {
+            vec![self]
         };
         let mut kept: Vec<Type> = members
             .into_iter()
@@ -204,7 +210,7 @@ fn refine_callable_member(m: Type, native_ty: &Type) -> Type {
 // statement was reached."
 fn member_possible_given_native(m: &Type, native_ty: &Type) -> bool {
     syntax::stack::guard(|| {
-        if *native_ty == Type::void() && *m != Type::void() && *m != Type::never() {
+        if matches!(native_ty.repr(), Repr::Void) && !matches!(m.repr(), Repr::Void | Repr::Never) {
             return false;
         }
         match m.repr() {
