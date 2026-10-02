@@ -257,6 +257,14 @@ fn composer_roots(dirs: &[PathBuf], root: &Path) -> Vec<PathBuf> {
     roots
 }
 
+/// A file read and parsed: how long it is as checking weighs it, its text
+/// when the project keeps it (empty otherwise), and its parse.
+struct ReadFile {
+    len: usize,
+    source: String,
+    parsed: ParsedFile,
+}
+
 impl Session {
     /// Resolves `config`, whose relative paths are relative to
     /// `config_dir` (or to `root` without one), and the command-line
@@ -572,14 +580,36 @@ impl Session {
         path: &Path,
         is_stub: bool,
         interner: &Arc<Interner>,
-    ) -> Option<(String, ParsedFile)> {
+    ) -> Option<ReadFile> {
         let bytes = std::fs::read(self.root.join(path)).ok()?;
-        let source = String::from_utf8_lossy(&bytes).into_owned();
         let parsed =
             std::panic::catch_unwind(|| super::parse_file(path, &bytes, is_stub, interner))
                 .ok()?
                 .ok()?;
-        Some((source, parsed))
+        // The parse reads the bytes. The text of the file is made only when
+        // the project keeps it; what checking costs is told by its length
+        // as a lossy reading of it has, which is the bytes' own for a file
+        // that is UTF-8.
+        let (len, source) = match String::from_utf8(bytes) {
+            Ok(text) if self.settings.retain_source => (text.len(), text),
+            Ok(text) => (text.len(), String::new()),
+            Err(error) => {
+                let text = String::from_utf8_lossy(error.as_bytes()).into_owned();
+                (
+                    text.len(),
+                    if self.settings.retain_source {
+                        text
+                    } else {
+                        String::new()
+                    },
+                )
+            }
+        };
+        Some(ReadFile {
+            len,
+            source,
+            parsed,
+        })
     }
 
     /// Loads and checks every analysed file, with the `--dump-types`
@@ -623,14 +653,14 @@ impl Session {
 
         let combined_files: Vec<&PathBuf> =
             context_files.iter().chain(analyze_files.iter()).collect();
-        let mut combined_parsed: Vec<Option<(String, ParsedFile)>> = pool.install(|| {
+        let mut combined_parsed: Vec<Option<ReadFile>> = pool.install(|| {
             combined_files
                 .par_iter()
                 .map(|p| {
-                    let (source, mut parsed) =
+                    let mut read =
                         self.read_and_parse_file(p, stub_files.contains(p.as_path()), &interner)?;
-                    project.index_use_sites(&mut parsed, &source);
-                    Some((source, parsed))
+                    project.index_use_sites(&mut read.parsed, &read.source);
+                    Some(read)
                 })
                 .collect()
         });
@@ -640,7 +670,7 @@ impl Session {
             context_parsed
                 .iter()
                 .chain(&analyze_parsed)
-                .filter_map(|parsed| parsed.as_ref().map(|(_, parsed)| parsed)),
+                .filter_map(|read| read.as_ref().map(|read| &read.parsed)),
         );
 
         // Context files first, so an analysed file's declaration wins a
@@ -660,7 +690,7 @@ impl Session {
         let mut skipped_context = 0usize;
         for (path, parsed) in context_files.iter().zip(context_parsed) {
             match parsed {
-                Some((source, parsed)) => {
+                Some(ReadFile { source, parsed, .. }) => {
                     note_lex_warnings(path, &parsed);
                     project.insert_parsed_file(path.clone(), parsed, source, false)
                 }
@@ -672,9 +702,13 @@ impl Session {
         let mut skipped_analyze = 0usize;
         for (path, parsed) in analyze_files.iter().zip(analyze_parsed) {
             match parsed {
-                Some((source, parsed)) => {
+                Some(ReadFile {
+                    len,
+                    source,
+                    parsed,
+                }) => {
                     note_lex_warnings(path, &parsed);
-                    analyze_sizes.insert(path.clone(), source.len());
+                    analyze_sizes.insert(path.clone(), len);
                     project.insert_parsed_file(path.clone(), parsed, source, true)
                 }
                 None => skipped_analyze += 1,
