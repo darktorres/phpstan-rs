@@ -73,59 +73,7 @@ impl Type {
     /// Calls `f` on each directly nested type - the children
     /// `map_children` rebuilds, in the same order.
     pub fn for_each_child<'t>(&'t self, f: &mut impl FnMut(&'t Type)) {
-        syntax::stack::guard(|| match self.repr() {
-            Repr::Array(k, v) => {
-                f(k);
-                f(v);
-            }
-            Repr::ClassString(inner)
-            | Repr::VarianceArg(_, inner)
-            | Repr::HasOffsetValue(_, inner)
-            | Repr::ReflectedMember(inner, _)
-            | Repr::ValueOf(inner)
-            | Repr::KeyOf(inner)
-            | Repr::ClassConstant { class: inner, .. } => f(inner),
-            Repr::OffsetAccess(base, key) => {
-                f(base);
-                f(key);
-            }
-            Repr::ArrayShape(shape) | Repr::ObjectShape(shape) => {
-                for field in &shape.fields {
-                    f(&field.ty);
-                }
-                if let Some((key, value)) = shape.unsealed.as_deref() {
-                    f(key);
-                    f(value);
-                }
-            }
-            Repr::TemplateParam(tp) => template_children(tp, f),
-            Repr::Object(_, args) | Repr::SelfRef(args) | Repr::StaticRef(args) => {
-                args.iter().for_each(f)
-            }
-            Repr::Callable(Some(sig)) => {
-                for p in &sig.params {
-                    f(&p.ty);
-                }
-                f(&sig.return_type);
-                for tp in &sig.templates {
-                    template_children(tp, f);
-                }
-            }
-            Repr::Union(ms) | Repr::BenevolentUnion(ms) | Repr::Intersection(ms) => {
-                ms.iter().for_each(f)
-            }
-            Repr::Conditional {
-                target,
-                if_true,
-                if_false,
-                ..
-            } => {
-                f(target);
-                f(if_true);
-                f(if_false);
-            }
-            _ => {}
-        })
+        for_each_repr_child(self.repr(), f);
     }
 
     /// Whether `f` holds for some directly nested type.
@@ -134,6 +82,63 @@ impl Type {
         self.for_each_child(&mut |t| found = found || f(t));
         found
     }
+}
+
+/// `Type::for_each_child` for a representation not yet a type.
+pub(crate) fn for_each_repr_child<'t>(repr: &'t Repr, f: &mut impl FnMut(&'t Type)) {
+    syntax::stack::guard(|| match repr {
+        Repr::Array(k, v) => {
+            f(k);
+            f(v);
+        }
+        Repr::ClassString(inner)
+        | Repr::VarianceArg(_, inner)
+        | Repr::HasOffsetValue(_, inner)
+        | Repr::ReflectedMember(inner, _)
+        | Repr::ValueOf(inner)
+        | Repr::KeyOf(inner)
+        | Repr::ClassConstant { class: inner, .. } => f(inner),
+        Repr::OffsetAccess(base, key) => {
+            f(base);
+            f(key);
+        }
+        Repr::ArrayShape(shape) | Repr::ObjectShape(shape) => {
+            for field in &shape.fields {
+                f(&field.ty);
+            }
+            if let Some((key, value)) = shape.unsealed.as_deref() {
+                f(key);
+                f(value);
+            }
+        }
+        Repr::TemplateParam(tp) => template_children(tp, f),
+        Repr::Object(_, args) | Repr::SelfRef(args) | Repr::StaticRef(args) => {
+            args.iter().for_each(f)
+        }
+        Repr::Callable(Some(sig)) => {
+            for p in &sig.params {
+                f(&p.ty);
+            }
+            f(&sig.return_type);
+            for tp in &sig.templates {
+                template_children(tp, f);
+            }
+        }
+        Repr::Union(ms) | Repr::BenevolentUnion(ms) | Repr::Intersection(ms) => {
+            ms.iter().for_each(f)
+        }
+        Repr::Conditional {
+            target,
+            if_true,
+            if_false,
+            ..
+        } => {
+            f(target);
+            f(if_true);
+            f(if_false);
+        }
+        _ => {}
+    })
 }
 
 /// A shape with `f` applied to each field's type and to its unsealed

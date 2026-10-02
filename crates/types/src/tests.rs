@@ -1,4 +1,5 @@
 mod accessory_and_refinement_types;
+mod binding_references;
 mod comparator;
 mod comparison;
 mod concat;

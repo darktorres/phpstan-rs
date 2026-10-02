@@ -289,10 +289,13 @@ impl Type {
     /// PHP's full legal-array-key domain (`int|string`) - the default for
     /// a bare `array`/`array<V>` with no key argument given.
     pub fn unknown_array_key() -> Type {
-        Type::new(Repr::Union(vec![
-            Type::new(Repr::Int),
-            Type::new(Repr::String),
-        ]))
+        static KEY: std::sync::LazyLock<Type> = std::sync::LazyLock::new(|| {
+            Type::new(Repr::Union(vec![
+                Type::new(Repr::Int),
+                Type::new(Repr::String),
+            ]))
+        });
+        KEY.clone()
     }
 
     /// `Repr::Array(unknown_array_key(), value)`, for a construction site

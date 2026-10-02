@@ -110,7 +110,13 @@ fn insert(repr: Repr, semantic_hash: fn(&Repr) -> u64) -> Arc<Node> {
         }
     }
     let hash = semantic_hash(&repr);
-    let node = Arc::new(Node { repr, hash, exact });
+    let flags = crate::reference_flags(&repr);
+    let node = Arc::new(Node {
+        repr,
+        hash,
+        exact,
+        flags,
+    });
     shard
         .entries
         .entry(exact)

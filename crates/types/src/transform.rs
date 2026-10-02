@@ -11,6 +11,9 @@ use crate::{
 impl Type {
     /// This type with `static` and `$this` as `class`, at any depth.
     pub fn bind_static(&self, class: &str) -> Type {
+        if self.0.flags & crate::HAS_STATIC == 0 {
+            return self.clone();
+        }
         syntax::stack::guard(|| match self.repr() {
             Repr::StaticRef(args) => Type::object(
                 class.into(),
@@ -23,6 +26,9 @@ impl Type {
 
     /// This type with `self` as `class`, at any depth.
     pub fn bind_self(&self, class: &str) -> Type {
+        if self.0.flags & crate::HAS_SELF == 0 {
+            return self.clone();
+        }
         syntax::stack::guard(|| match self.repr() {
             Repr::SelfRef(args) => Type::object(
                 class.into(),
@@ -34,6 +40,9 @@ impl Type {
 
     /// This type with `parent` as `class`, at any depth.
     pub fn bind_parent(&self, class: &str) -> Type {
+        if self.0.flags & crate::HAS_PARENT == 0 {
+            return self.clone();
+        }
         syntax::stack::guard(|| match self.repr() {
             Repr::ParentRef => Type::object(class.into(), Vec::new()),
             _ => self.map_children(&mut |t| t.bind_parent(class)),
