@@ -474,6 +474,15 @@ pub(crate) struct Lazy<V> {
     encoded: Option<(Arc<Vec<u8>>, Decoder<V>)>,
 }
 
+impl<V: Clone> Clone for Lazy<V> {
+    fn clone(&self) -> Lazy<V> {
+        Lazy {
+            value: self.value.clone(),
+            encoded: self.encoded.clone(),
+        }
+    }
+}
+
 impl<V> Lazy<V> {
     pub(crate) fn get(&self) -> &V {
         self.value.get_or_init(|| {

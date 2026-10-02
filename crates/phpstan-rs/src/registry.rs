@@ -366,11 +366,7 @@ pub struct Registry {
     // owning-ancestor-name map, one per member kind - see
     // `lookup_method`/`precompute_member_owners` (`registry/hierarchy.rs`).
     #[serde(skip)]
-    pub(crate) method_owner_by_class: NameTable<FxHashMap<Name, Name>>,
-    #[serde(skip)]
-    pub(crate) property_owner_by_class: NameTable<FxHashMap<Name, Name>>,
-    #[serde(skip)]
-    pub(crate) const_owner_by_class: NameTable<FxHashMap<Name, Name>>,
+    pub(crate) member_owners: NameTable<hierarchy::ClassOwners>,
     // Whose properties each function and method with a body may write
     // (`registry::property_writes`), keyed by lowercased (class, name).
     pub(crate) property_writes: FxHashMap<(Option<String>, String), PropertyWrites>,
@@ -578,9 +574,7 @@ impl Registry {
         self.subtype_children.freeze();
         self.trait_users.freeze();
         self.recorded_parents.freeze();
-        self.method_owner_by_class.freeze();
-        self.property_owner_by_class.freeze();
-        self.const_owner_by_class.freeze();
+        self.member_owners.freeze();
         if let Some(raw) = &mut self.raw {
             raw.classes.freeze();
             raw.functions.freeze();
@@ -723,9 +717,7 @@ impl Registry {
         subtype_children,
         trait_users,
         recorded_parents,
-        method_owner_by_class,
-        property_owner_by_class,
-        const_owner_by_class,
+        member_owners,
         global_constants,
         unconditionally_declared_classes,
         unconditionally_declared_functions,

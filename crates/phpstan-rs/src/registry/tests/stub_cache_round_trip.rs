@@ -92,9 +92,7 @@ fn every_stored_table_reads_back_with_its_names_and_values() {
         subtype_children,
         trait_users,
         recorded_parents,
-        method_owner_by_class,
-        property_owner_by_class,
-        const_owner_by_class
+        member_owners
     );
 }
 

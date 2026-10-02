@@ -4,14 +4,65 @@ use syntax::name::Name;
 
 use rayon::prelude::*;
 
+use crate::registry::name_table::TableKey;
 use crate::registry::{
     ClassReflection, ConstantReflection, FunctionReflection, PropertyReflection,
 };
-use crate::registry::{NameTable, Registry};
+use crate::registry::{Lazy, NameTable, Registry};
 use syntax::ast::ClassKind;
 use types::Type;
 
+/// What owns the members of one class, by kind: for each method, property
+/// and constant name, the class (or ancestor) that declares it, found
+/// walking `extends` and `implements` from the class itself. A map is
+/// decoded when first read, so a lookup of methods does not decode the
+/// other two.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub(crate) struct ClassOwners {
+    pub(crate) methods: Lazy<FxHashMap<Name, Name>>,
+    pub(crate) properties: Lazy<FxHashMap<Name, Name>>,
+    pub(crate) consts: Lazy<FxHashMap<Name, Name>>,
+}
+
+impl PartialEq for ClassOwners {
+    fn eq(&self, other: &ClassOwners) -> bool {
+        self.methods.get() == other.methods.get()
+            && self.properties.get() == other.properties.get()
+            && self.consts.get() == other.consts.get()
+    }
+}
+
 impl Registry {
+    /// The owners of `class`'s method names, see `ClassOwners`.
+    pub(crate) fn method_owners<K: TableKey + ?Sized>(
+        &self,
+        class: &K,
+    ) -> Option<&FxHashMap<Name, Name>> {
+        self.member_owners
+            .get(class)
+            .map(|owners| owners.methods.get())
+    }
+
+    /// The owners of `class`'s property names.
+    pub(crate) fn property_owners<K: TableKey + ?Sized>(
+        &self,
+        class: &K,
+    ) -> Option<&FxHashMap<Name, Name>> {
+        self.member_owners
+            .get(class)
+            .map(|owners| owners.properties.get())
+    }
+
+    /// The owners of `class`'s constant names.
+    pub(crate) fn const_owners<K: TableKey + ?Sized>(
+        &self,
+        class: &K,
+    ) -> Option<&FxHashMap<Name, Name>> {
+        self.member_owners
+            .get(class)
+            .map(|owners| owners.consts.get())
+    }
+
     /// Does `class` derive from or implement `of`, directly or
     /// transitively? A single `HashSet::contains` against
     /// `self.ancestor_names` (see `precompute_ancestor_names`) - cheaper
@@ -370,21 +421,21 @@ impl Registry {
             })
             .collect();
         if self.scope.is_all() {
-            self.method_owner_by_class = NameTable::default();
-            self.property_owner_by_class = NameTable::default();
-            self.const_owner_by_class = NameTable::default();
+            self.member_owners = NameTable::default();
         } else {
             for name in self.scoped_removed_class_keys() {
-                self.method_owner_by_class.remove(&name);
-                self.property_owner_by_class.remove(&name);
-                self.const_owner_by_class.remove(&name);
+                self.member_owners.remove(&name);
             }
         }
         for (name, methods, properties, consts) in own_by_class {
-            self.method_owner_by_class.insert(name.clone(), methods);
-            self.property_owner_by_class
-                .insert(name.clone(), properties);
-            self.const_owner_by_class.insert(name, consts);
+            self.member_owners.insert(
+                name,
+                ClassOwners {
+                    methods: Lazy::decoded(methods),
+                    properties: Lazy::decoded(properties),
+                    consts: Lazy::decoded(consts),
+                },
+            );
         }
     }
 
@@ -463,7 +514,7 @@ impl Registry {
     }
 
     pub fn lookup_method(&self, class: &str, method: &str) -> Option<&FunctionReflection> {
-        let owners = self.method_owner_by_class.get(class)?;
+        let owners = self.method_owners(class)?;
         if let Some(owner) = owners.get(method) {
             return self.classes.get(owner)?.methods.get(method);
         }
@@ -484,7 +535,7 @@ impl Registry {
     /// owner` would resolve `method` to, for comparing against the
     /// as-written call-site text.
     pub(crate) fn lookup_method_canonical_name(&self, class: &str, method: &str) -> Option<&str> {
-        let owners = self.method_owner_by_class.get(class)?;
+        let owners = self.method_owners(class)?;
         if let Some((name, _)) = owners.get_key_value(method) {
             return Some(name.as_ref());
         }
@@ -499,8 +550,7 @@ impl Registry {
     /// just the already-precomputed `method_owner_by_class` key set, no
     /// extra ancestor walk needed.
     pub(crate) fn all_method_names(&self, class: &str) -> impl Iterator<Item = &str> {
-        self.method_owner_by_class
-            .get(class)
+        self.method_owners(class)
             .into_iter()
             .flat_map(|m| m.keys().map(|s| s.as_ref()))
     }
@@ -508,8 +558,7 @@ impl Registry {
     /// `all_method_names`'s own property counterpart, for
     /// `textDocument/completion`'s member-completion candidate list.
     pub(crate) fn all_property_names(&self, class: &str) -> impl Iterator<Item = &str> {
-        self.property_owner_by_class
-            .get(class)
+        self.property_owners(class)
             .into_iter()
             .flat_map(|m| m.keys().map(|s| s.as_ref()))
     }
@@ -518,8 +567,7 @@ impl Registry {
     /// folded into this same map - see `ClassReflection::consts`'s own doc
     /// comment).
     pub(crate) fn all_const_names(&self, class: &str) -> impl Iterator<Item = &str> {
-        self.const_owner_by_class
-            .get(class)
+        self.const_owners(class)
             .into_iter()
             .flat_map(|m| m.keys().map(|s| s.as_ref()))
     }
@@ -533,7 +581,7 @@ impl Registry {
         class: &str,
         method: &str,
     ) -> Option<(Name, Name)> {
-        let owners = self.method_owner_by_class.get(class)?;
+        let owners = self.method_owners(class)?;
         owners.iter().find_map(|(name, owner)| {
             (name.eq_ignore_ascii_case(method) && name.as_ref() != method)
                 .then(|| (owner.clone(), name.clone()))
@@ -552,7 +600,7 @@ impl Registry {
         class: &str,
         method: &str,
     ) -> Option<(Name, &FunctionReflection)> {
-        let owners = self.method_owner_by_class.get(class)?;
+        let owners = self.method_owners(class)?;
         if let Some(owner) = owners.get(method) {
             let sig = self.classes.get(owner)?.methods.get(method)?;
             return Some((owner.clone(), sig));
@@ -580,7 +628,7 @@ impl Registry {
         info.extends
             .iter()
             .chain(info.implements.iter())
-            .filter_map(|parent| self.method_owner_by_class.get(parent))
+            .filter_map(|parent| self.method_owners(parent))
     }
 
     /// The ancestor of `info` that owns its method `method`, the first
@@ -604,7 +652,7 @@ impl Registry {
     ) -> Option<&Name> {
         info.extends
             .iter()
-            .filter_map(|parent| self.property_owner_by_class.get(parent))
+            .filter_map(|parent| self.property_owners(parent))
             .find_map(|owners| owners.get(prop))
     }
 
@@ -1017,7 +1065,7 @@ impl Registry {
     /// `HashMap` lookup against `self.property_owner_by_class` - see
     /// `precompute_member_owners`'s own doc comment.
     pub fn lookup_property(&self, class: &str, prop: &str) -> Option<&PropertyReflection> {
-        let owner = self.property_owner_by_class.get(class)?.get(prop)?;
+        let owner = self.property_owners(class)?.get(prop)?;
         self.classes.get(owner)?.properties.get(prop)
     }
 
@@ -1029,7 +1077,7 @@ impl Registry {
         class: &str,
         prop: &str,
     ) -> Option<(Name, &PropertyReflection)> {
-        let owner = self.property_owner_by_class.get(class)?.get(prop)?;
+        let owner = self.property_owners(class)?.get(prop)?;
         let sig = self.classes.get(owner)?.properties.get(prop)?;
         Some((owner.clone(), sig))
     }
@@ -1037,7 +1085,7 @@ impl Registry {
     /// Looks up a class constant, walking the ancestor graph if not
     /// declared directly on `class` - mirrors `lookup_property`.
     pub fn lookup_const(&self, class: &str, const_name: &str) -> Option<&ConstantReflection> {
-        let owner = self.const_owner_by_class.get(class)?.get(const_name)?;
+        let owner = self.const_owners(class)?.get(const_name)?;
         self.classes.get(owner)?.consts.get(const_name)
     }
 
@@ -1052,7 +1100,7 @@ impl Registry {
         class: &str,
         const_name: &str,
     ) -> Option<(Name, &ConstantReflection)> {
-        let owner = self.const_owner_by_class.get(class)?.get(const_name)?;
+        let owner = self.const_owners(class)?.get(const_name)?;
         let sig = self.classes.get(owner)?.consts.get(const_name)?;
         Some((owner.clone(), sig))
     }

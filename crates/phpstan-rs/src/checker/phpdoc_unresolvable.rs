@@ -279,8 +279,7 @@ impl<'a> Checker<'a> {
         match const_name.strip_suffix('*') {
             Some(prefix) => !self
                 .registry
-                .const_owner_by_class
-                .get(canonical)
+                .const_owners(canonical)
                 .is_some_and(|consts| consts.keys().any(|k| k.starts_with(prefix))),
             None => self.registry.lookup_const(canonical, const_name).is_none(),
         }
