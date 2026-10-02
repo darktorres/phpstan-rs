@@ -1905,9 +1905,27 @@ fn fixed_sig(
 /// `ty` with every constant-named `Object` resolved; `None` when there
 /// is none.
 fn resolve_constant_names(ty: &Type, registry: &Registry) -> Option<Type> {
+    // Looked for first, without building anything: almost no type has one,
+    // and rebuilding a type is interning every node of it again.
+    if !mentions_constant_name(ty, registry) {
+        return None;
+    }
     let mut changed = false;
     let out = resolve_constant_names_rec(ty, registry, &mut changed);
     changed.then_some(out)
+}
+
+/// Whether `ty` has a constant-named `Object` anywhere in it.
+fn mentions_constant_name(ty: &Type, registry: &Registry) -> bool {
+    syntax::stack::guard(|| {
+        if let Some((name, args)) = ty.as_object()
+            && args.is_empty()
+            && constant_named_value(name, registry).is_some()
+        {
+            return true;
+        }
+        ty.any_child(|child| mentions_constant_name(child, registry))
+    })
 }
 
 fn resolve_constant_names_rec(ty: &Type, registry: &Registry, changed: &mut bool) -> Type {
@@ -1924,6 +1942,12 @@ fn resolve_constant_names_rec(ty: &Type, registry: &Registry, changed: &mut bool
 }
 
 fn constant_named_type(name: &str, registry: &Registry) -> Option<Type> {
+    constant_named_value(name, registry).cloned()
+}
+
+/// The type of the global constant a class-like name stands for, when it
+/// is not a class and is spelled like a constant.
+fn constant_named_value<'r>(name: &str, registry: &'r Registry) -> Option<&'r Type> {
     let short = name.rsplit('\\').next().unwrap_or(name);
     let looks_constant = short
         .chars()
@@ -1940,7 +1964,6 @@ fn constant_named_type(name: &str, registry: &Registry) -> Option<Type> {
         .global_constants
         .get(name)
         .or_else(|| registry.global_constants.get(short))
-        .cloned()
 }
 
 impl Registry {
