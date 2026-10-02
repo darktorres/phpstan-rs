@@ -1011,10 +1011,10 @@ impl Registry {
     /// `class_template_bindings` for that erased case returns an empty
     /// map (`zip(Container.templates=["T"], type_args=[])`), which must
     /// still refuse backfill.
-    pub(crate) fn template_param_scopes_all_safe_to_backfill(
+    pub(crate) fn template_param_scopes_all_safe_to_backfill<'b>(
         ty: &Type,
         method_name: &str,
-        ancestor_bindings: &FxHashMap<Name, FxHashMap<String, Type>>,
+        ancestor_bindings: &dyn Fn() -> &'b FxHashMap<Name, FxHashMap<String, Type>>,
     ) -> bool {
         ty.nested_templates().iter().all(|tp| {
             tp.scope.as_deref() == Some(method_name)
@@ -1022,7 +1022,7 @@ impl Registry {
                 || tp
                     .scope
                     .as_deref()
-                    .is_some_and(|s| ancestor_bindings.get(s).is_some_and(|b| !b.is_empty()))
+                    .is_some_and(|s| ancestor_bindings().get(s).is_some_and(|b| !b.is_empty()))
         })
     }
 
@@ -1217,7 +1217,7 @@ impl Registry {
                                     && Registry::template_param_scopes_all_safe_to_backfill(
                                         &ancestor_param.ty,
                                         method_name,
-                                        ancestor_bindings(),
+                                        &ancestor_bindings,
                                     )
                                     && Registry::safe_to_backfill_object_type(
                                         &ancestor_param.ty,
@@ -1228,7 +1228,7 @@ impl Registry {
                                         i,
                                         Registry::substitute_class_scoped_ancestor_templates(
                                             &ancestor_param.ty.bind_self(owner),
-                                            ancestor_bindings(),
+                                            &ancestor_bindings,
                                         )
                                         .reconcile_with_native(p.ty_native.clone()),
                                         ancestor_param.explicit_mixed_hint,
@@ -1249,7 +1249,7 @@ impl Registry {
                                     && Registry::template_param_scopes_all_safe_to_backfill(
                                         &ancestor_param.ty,
                                         method_name,
-                                        ancestor_bindings(),
+                                        &ancestor_bindings,
                                     )
                                     && Registry::safe_to_backfill_object_type(
                                         &ancestor_param.ty,
@@ -1260,7 +1260,7 @@ impl Registry {
                                         i,
                                         Registry::substitute_class_scoped_ancestor_templates(
                                             &ancestor_param.ty.bind_self(owner),
-                                            ancestor_bindings(),
+                                            &ancestor_bindings,
                                         )
                                         .reconcile_with_native(p.ty_native.clone()),
                                         ancestor_param.explicit_mixed_hint,
@@ -1287,7 +1287,7 @@ impl Registry {
                         && Registry::template_param_scopes_all_safe_to_backfill(
                             &ancestor_sig.return_type,
                             method_name,
-                            ancestor_bindings(),
+                            &ancestor_bindings,
                         )
                         && Registry::safe_to_backfill_object_type(
                             &ancestor_sig.return_type,
@@ -1297,7 +1297,7 @@ impl Registry {
                         (
                             Registry::substitute_class_scoped_ancestor_templates(
                                 &ancestor_sig.return_type.bind_self(owner),
-                                ancestor_bindings(),
+                                &ancestor_bindings,
                             )
                             .reconcile_with_native(sig.return_type_native.clone()),
                             ancestor_sig.return_explicit_mixed_hint,

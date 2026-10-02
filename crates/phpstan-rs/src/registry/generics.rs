@@ -168,14 +168,16 @@ impl Registry {
     /// binding, makes the stored signature already-concrete before
     /// anything ever reads it, closing that gap regardless of which of
     /// the (at least two) paths reads the signature next.
-    pub(crate) fn substitute_class_scoped_ancestor_templates(
+    pub(crate) fn substitute_class_scoped_ancestor_templates<'b>(
         ty: &Type,
-        ancestor_bindings: &FxHashMap<Name, FxHashMap<String, Type>>,
+        ancestor_bindings: &dyn Fn() -> &'b FxHashMap<Name, FxHashMap<String, Type>>,
     ) -> Type {
+        // The bindings are asked for at the first template that has a
+        // scope, not before: most types hold no template.
         ty.replace_templates(&mut |tp| {
             tp.scope
                 .as_deref()
-                .and_then(|s| ancestor_bindings.get(s))
+                .and_then(|s| ancestor_bindings().get(s))
                 .and_then(|b| b.get(&tp.name))
                 .cloned()
         })
