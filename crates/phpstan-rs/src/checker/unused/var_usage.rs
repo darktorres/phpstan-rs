@@ -110,7 +110,8 @@ impl<'ast> Visitor<'ast> for Vars {
                 // variable would otherwise read as a use of the outer one.
                 // An arrow function implicitly captures every outer variable
                 // it references by value, so its body is walked.
-                ExprKind::Closure { uses, .. } => {
+                ExprKind::Closure(closure) => {
+                    let syntax::ast::ClosureExpr { uses, .. } = &**closure;
                     for u in uses {
                         self.names.insert(u.name.name.clone());
                     }

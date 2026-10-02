@@ -674,9 +674,10 @@ impl<'ast> Visitor<'ast> for Walker<'_> {
                     self.record_receiver_member(recv, property);
                     return;
                 }
-                ExprKind::Closure {
-                    params, uses, body, ..
-                } => {
+                ExprKind::Closure(closure) => {
+                    let syntax::ast::ClosureExpr {
+                        params, uses, body, ..
+                    } = &**closure;
                     for p in params {
                         self.visit_param(p);
                     }
@@ -702,7 +703,8 @@ impl<'ast> Visitor<'ast> for Walker<'_> {
                     self.scope_frames.pop();
                     return;
                 }
-                ExprKind::ArrowFn { params, body, .. } => {
+                ExprKind::ArrowFn(arrow) => {
+                    let syntax::ast::ArrowFnExpr { params, body, .. } = &**arrow;
                     for p in params {
                         self.visit_param(p);
                     }

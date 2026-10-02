@@ -308,13 +308,15 @@ impl<'ast> Visitor<'ast> for Builder {
         }
         self.path.push(expr.id);
         match &expr.kind {
-            ExprKind::Closure { params, body, .. } => {
+            ExprKind::Closure(closure) => {
+                let ClosureExpr { params, body, .. } = &**closure;
                 for param in params {
                     self.visit_param(param);
                 }
                 self.body(body);
             }
-            ExprKind::ArrowFn { params, body, .. } => {
+            ExprKind::ArrowFn(arrow) => {
+                let ArrowFnExpr { params, body, .. } = &**arrow;
                 for param in params {
                     self.visit_param(param);
                 }

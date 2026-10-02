@@ -3505,15 +3505,16 @@ impl<'a> Checker<'a> {
                     .reduce(|a, b| self.relation().union(a, b))
                     .unwrap_or(Type::never())
             }
-            ExprKind::Closure {
-                params,
-                uses,
-                body,
-                is_static,
-                return_type,
-                attrs,
-                ..
-            } => {
+            ExprKind::Closure(closure) => {
+                let syntax::ast::ClosureExpr {
+                    params,
+                    uses,
+                    body,
+                    is_static,
+                    return_type,
+                    attrs,
+                    ..
+                } = &**closure;
                 // Mirrors real PHPStan's `ClosureAttributesRule` -
                 // existence plus target-validity for a closure
                 // expression's own `#[Attr]` group.
@@ -3956,13 +3957,14 @@ impl<'a> Checker<'a> {
                 });
                 self.closure_literal_type(params, return_type.as_deref(), inferred_return, None)
             }
-            ExprKind::ArrowFn {
-                params,
-                body,
-                return_type,
-                attrs,
-                ..
-            } => {
+            ExprKind::ArrowFn(arrow) => {
+                let syntax::ast::ArrowFnExpr {
+                    params,
+                    body,
+                    return_type,
+                    attrs,
+                    ..
+                } = &**arrow;
                 // Mirrors real PHPStan's `ArrowFunctionAttributesRule` -
                 // see the `Closure` arm's identical comment above.
                 self.check_attributes(attrs, label);
@@ -4534,24 +4536,26 @@ impl<'a> Checker<'a> {
             // arrow-fn literal additionally carries its own signature
             // (`closure_literal_type`).
             ExprKind::FirstClassCallable(inner) => self.first_class_callable_type(inner, locals),
-            ExprKind::Closure {
-                params,
-                uses,
-                body,
-                is_static,
-                return_type,
-                ..
-            } => {
+            ExprKind::Closure(closure) => {
+                let syntax::ast::ClosureExpr {
+                    params,
+                    uses,
+                    body,
+                    is_static,
+                    return_type,
+                    ..
+                } = &**closure;
                 let inferred = self
                     .closure_syntactic_return_type(params, uses, body, *is_static, locals, None);
                 self.closure_literal_type(params, return_type.as_deref(), inferred, None)
             }
-            ExprKind::ArrowFn {
-                params,
-                return_type,
-                body,
-                ..
-            } => {
+            ExprKind::ArrowFn(arrow) => {
+                let syntax::ast::ArrowFnExpr {
+                    params,
+                    return_type,
+                    body,
+                    ..
+                } = &**arrow;
                 let inferred = self.arrow_fn_inferred_return(params, body, locals, None);
                 self.closure_literal_type(params, return_type.as_deref(), inferred, None)
             }
@@ -5023,12 +5027,13 @@ impl<'a> Checker<'a> {
         locals: &Locals,
     ) -> Option<Type> {
         match &callback.kind {
-            ExprKind::ArrowFn {
-                params,
-                body,
-                return_type,
-                ..
-            } => {
+            ExprKind::ArrowFn(arrow) => {
+                let syntax::ast::ArrowFnExpr {
+                    params,
+                    body,
+                    return_type,
+                    ..
+                } = &**arrow;
                 if params.len() != param_overrides.len()
                     || params.iter().any(|p| p.variadic || p.by_ref)
                 {
@@ -5041,14 +5046,15 @@ impl<'a> Checker<'a> {
                 let inferred = self.infer_expr(body, &arrow_locals);
                 Some(self.prefer_inferred_over_declared_return(return_type.as_deref(), inferred))
             }
-            ExprKind::Closure {
-                params,
-                uses,
-                body,
-                is_static,
-                return_type,
-                ..
-            } => {
+            ExprKind::Closure(closure) => {
+                let syntax::ast::ClosureExpr {
+                    params,
+                    uses,
+                    body,
+                    is_static,
+                    return_type,
+                    ..
+                } = &**closure;
                 if params.len() != param_overrides.len()
                     || params.iter().any(|p| p.variadic || p.by_ref)
                 {
@@ -5942,12 +5948,13 @@ impl<'a> Checker<'a> {
             .or_else(|| expected.union_members().iter().find_map(Type::callable_sig))?;
         let overrides: Vec<Type> = sig.params.iter().map(|p| p.ty.clone()).collect();
         match &arg.peeled().kind {
-            ExprKind::ArrowFn {
-                params,
-                return_type,
-                body,
-                ..
-            } => {
+            ExprKind::ArrowFn(arrow) => {
+                let syntax::ast::ArrowFnExpr {
+                    params,
+                    return_type,
+                    body,
+                    ..
+                } = &**arrow;
                 let inferred =
                     self.arrow_fn_inferred_return(params, body, locals, Some(&overrides));
                 Some(self.closure_literal_type(
@@ -5957,14 +5964,15 @@ impl<'a> Checker<'a> {
                     Some(&overrides),
                 ))
             }
-            ExprKind::Closure {
-                params,
-                uses,
-                body,
-                is_static,
-                return_type,
-                ..
-            } => {
+            ExprKind::Closure(closure) => {
+                let syntax::ast::ClosureExpr {
+                    params,
+                    uses,
+                    body,
+                    is_static,
+                    return_type,
+                    ..
+                } = &**closure;
                 let inferred = self.closure_syntactic_return_type(
                     params,
                     uses,

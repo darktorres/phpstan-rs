@@ -282,10 +282,10 @@ fn a_bare_anonymous_by_ref_function_statement_still_parses_as_an_expression() {
             program[0].kind
         );
     };
-    let ExprKind::Closure { by_ref, .. } = &e.kind else {
+    let ExprKind::Closure(closure) = &e.kind else {
         panic!("expected a Closure, got {:?}", e.kind);
     };
-    assert!(by_ref);
+    assert!(closure.by_ref);
 }
 
 #[test]
@@ -730,7 +730,7 @@ fn dollar_brace_variable_variable_forms_parse() {
     ));
     assert!(matches!(
         &program[2].kind,
-        StmtKind::Expression(Expr { kind: ExprKind::Assign(lhs, _), .. }) if matches!(&lhs.kind, ExprKind::DynamicStaticPropertyFetch(StaticTarget::Name(c), _) if c == "C")
+        StmtKind::Expression(Expr { kind: ExprKind::Assign(lhs, _), .. }) if matches!(&lhs.kind, ExprKind::DynamicStaticPropertyFetch(StaticTarget::Name(c), _) if **c == "C")
     ));
 }
 
@@ -938,11 +938,11 @@ fn an_attributed_closure_expression_carries_its_own_attrs() {
     else {
         panic!("expected assignment");
     };
-    let ExprKind::Closure { attrs, .. } = &rhs.kind else {
+    let ExprKind::Closure(closure) = &rhs.kind else {
         panic!("expected a Closure, got {:?}", rhs.kind);
     };
-    assert_eq!(attrs.len(), 1);
-    assert_eq!(attrs[0].name, "Pure");
+    assert_eq!(closure.attrs.len(), 1);
+    assert_eq!(closure.attrs[0].name, "Pure");
 }
 
 #[test]
@@ -955,15 +955,12 @@ fn an_attributed_static_arrow_function_carries_its_own_attrs() {
     else {
         panic!("expected assignment");
     };
-    let ExprKind::ArrowFn {
-        attrs, is_static, ..
-    } = &rhs.kind
-    else {
+    let ExprKind::ArrowFn(arrow) = &rhs.kind else {
         panic!("expected an ArrowFn, got {:?}", rhs.kind);
     };
-    assert_eq!(attrs.len(), 1);
-    assert_eq!(attrs[0].name, "Pure");
-    assert!(is_static);
+    assert_eq!(arrow.attrs.len(), 1);
+    assert_eq!(arrow.attrs[0].name, "Pure");
+    assert!(arrow.is_static);
 }
 
 #[test]
@@ -976,10 +973,10 @@ fn a_plain_closure_with_no_attributes_has_an_empty_attrs_list() {
     else {
         panic!("expected assignment");
     };
-    let ExprKind::Closure { attrs, .. } = &rhs.kind else {
+    let ExprKind::Closure(closure) = &rhs.kind else {
         panic!("expected a Closure, got {:?}", rhs.kind);
     };
-    assert!(attrs.is_empty());
+    assert!(closure.attrs.is_empty());
 }
 
 #[test]
@@ -1063,7 +1060,7 @@ fn double_dollar_variable_variable_in_member_position_parses() {
     ));
     assert!(matches!(
         &program[1].kind,
-        StmtKind::Expression(Expr { kind: ExprKind::DynamicStaticPropertyFetch(StaticTarget::Name(c), _), .. }) if c == "Foo"
+        StmtKind::Expression(Expr { kind: ExprKind::DynamicStaticPropertyFetch(StaticTarget::Name(c), _), .. }) if **c == "Foo"
     ));
     assert!(matches!(
         &program[2].kind,

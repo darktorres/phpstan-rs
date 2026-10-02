@@ -157,7 +157,7 @@ impl Parser {
                 {
                     self.skip();
                     let target = match &expr.kind {
-                        ExprKind::Name(n) => StaticTarget::Name(n.clone()),
+                        ExprKind::Name(n) => StaticTarget::Name(Box::new(n.clone())),
                         _ => StaticTarget::Expr(Box::new(expr)),
                     };
                     expr = if matches!(self.peek(), Token::Variable(_)) {
@@ -496,9 +496,8 @@ impl Parser {
                 let is_static = self.eat(&Token::Keyword(Keyword::Static));
                 let mut e = self.parse_closure_like(is_static)?;
                 match &mut e.kind {
-                    ExprKind::Closure { attrs: a, .. } | ExprKind::ArrowFn { attrs: a, .. } => {
-                        *a = attrs;
-                    }
+                    ExprKind::Closure(closure) => closure.attrs = attrs,
+                    ExprKind::ArrowFn(arrow) => arrow.attrs = attrs,
                     _ => {}
                 }
                 e

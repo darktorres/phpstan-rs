@@ -66,8 +66,8 @@ impl<'a> Checker<'a> {
             return;
         }
         let has_assertion = match &closure.kind {
-            ExprKind::Closure { body, .. } => body_has_assertion(body),
-            ExprKind::ArrowFn { body, .. } => expr_has_assertion(body),
+            ExprKind::Closure(closure) => body_has_assertion(&closure.body),
+            ExprKind::ArrowFn(arrow) => expr_has_assertion(&arrow.body),
             _ => return,
         };
         if has_assertion {

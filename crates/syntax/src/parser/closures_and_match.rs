@@ -50,7 +50,7 @@ impl Parser {
         let body = self.parse_stmt_list_block()?;
 
         Ok(self.expr(
-            ExprKind::Closure {
+            ExprKind::Closure(Box::new(ClosureExpr {
                 params,
                 uses,
                 body,
@@ -63,7 +63,7 @@ impl Parser {
                 // after `static` (if present) has already been consumed,
                 // past where an attribute group would sit.
                 attrs: Vec::new(),
-            },
+            })),
             start,
         ))
     }
@@ -81,7 +81,7 @@ impl Parser {
         self.expect(&Token::FatArrow)?;
         let body = self.parse_assignment()?;
         Ok(self.expr(
-            ExprKind::ArrowFn {
+            ExprKind::ArrowFn(Box::new(ArrowFnExpr {
                 params,
                 body: Box::new(body),
                 is_static,
@@ -89,7 +89,7 @@ impl Parser {
                 return_type,
                 // See `Closure`'s identical note in `parse_closure`.
                 attrs: Vec::new(),
-            },
+            })),
             start,
         ))
     }

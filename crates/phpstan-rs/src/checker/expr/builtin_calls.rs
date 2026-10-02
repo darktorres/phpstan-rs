@@ -2464,10 +2464,10 @@ fn is_null_filter_callback(e: &Expr) -> bool {
                 || (is_var_named(r, param) && is_null_literal(l)))
     }
     match &e.kind {
-        ExprKind::ArrowFn { params, body, .. } => {
-            matches!(params.as_slice(), [p] if is_not_null_check(body, &p.name))
+        ExprKind::ArrowFn(arrow) => {
+            matches!(arrow.params.as_slice(), [p] if is_not_null_check(&arrow.body, &p.name))
         }
-        ExprKind::Closure { params, body, .. } => match (params.as_slice(), body.as_slice()) {
+        ExprKind::Closure(closure) => match (closure.params.as_slice(), closure.body.as_slice()) {
             ([p], [stmt]) => {
                 matches!(&stmt.kind, StmtKind::Return(Some(ret_expr)) if is_not_null_check(ret_expr, &p.name))
             }
@@ -2501,11 +2501,11 @@ fn is_instanceof_filter_callback(e: &Expr) -> Option<&QualifiedName> {
         }
     }
     match &e.kind {
-        ExprKind::ArrowFn { params, body, .. } => match params.as_slice() {
-            [p] => as_instanceof_class(body, &p.name),
+        ExprKind::ArrowFn(arrow) => match arrow.params.as_slice() {
+            [p] => as_instanceof_class(&arrow.body, &p.name),
             _ => None,
         },
-        ExprKind::Closure { params, body, .. } => match (params.as_slice(), body.as_slice()) {
+        ExprKind::Closure(closure) => match (closure.params.as_slice(), closure.body.as_slice()) {
             ([p], [stmt]) => match &stmt.kind {
                 StmtKind::Return(Some(ret_expr)) => as_instanceof_class(ret_expr, &p.name),
                 _ => None,
@@ -2558,11 +2558,11 @@ fn is_type_check_filter_callback(e: &Expr) -> Option<Type> {
             },
             _ => None,
         },
-        ExprKind::ArrowFn { params, body, .. } => match params.as_slice() {
-            [p] => as_predicate_call(body, &p.name).and_then(type_for_predicate),
+        ExprKind::ArrowFn(arrow) => match arrow.params.as_slice() {
+            [p] => as_predicate_call(&arrow.body, &p.name).and_then(type_for_predicate),
             _ => None,
         },
-        ExprKind::Closure { params, body, .. } => match (params.as_slice(), body.as_slice()) {
+        ExprKind::Closure(closure) => match (closure.params.as_slice(), closure.body.as_slice()) {
             ([p], [stmt]) => match &stmt.kind {
                 StmtKind::Return(Some(ret_expr)) => {
                     as_predicate_call(ret_expr, &p.name).and_then(type_for_predicate)

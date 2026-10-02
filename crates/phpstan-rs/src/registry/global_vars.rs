@@ -465,7 +465,8 @@ impl<'a> Visitor<'a> for Scope<'_, 'a> {
 
     fn visit_expr(&mut self, expr: &'a Expr) {
         match &expr.kind {
-            ExprKind::Closure { body, .. } => {
+            ExprKind::Closure(closure) => {
+                let syntax::ast::ClosureExpr { body, .. } = &**closure;
                 walk_function_body(body, self.file_ctx, self.out);
                 return;
             }

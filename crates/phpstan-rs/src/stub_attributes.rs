@@ -337,11 +337,16 @@ impl VisitorMut for Pass {
     }
 
     fn visit_expr(&mut self, expr: &mut Expr) {
-        if let ExprKind::Closure { params, attrs, .. } | ExprKind::ArrowFn { params, attrs, .. } =
-            &mut expr.kind
-        {
-            self.strip(attrs);
-            self.params(params, &mut None);
+        match &mut expr.kind {
+            ExprKind::Closure(closure) => {
+                self.strip(&mut closure.attrs);
+                self.params(&mut closure.params, &mut None);
+            }
+            ExprKind::ArrowFn(arrow) => {
+                self.strip(&mut arrow.attrs);
+                self.params(&mut arrow.params, &mut None);
+            }
+            _ => {}
         }
         syntax::visit::walk_expr_mut(self, expr);
     }

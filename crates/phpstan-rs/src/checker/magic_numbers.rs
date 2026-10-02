@@ -111,9 +111,8 @@ impl<'a> Checker<'a> {
                 self.check_magic_arguments(&class.args);
                 self.check_magic_numbers_in_properties(&class.def.properties);
             }
-            ExprKind::Closure { params, .. } | ExprKind::ArrowFn { params, .. } => {
-                self.check_magic_numbers_in_params(params);
-            }
+            ExprKind::Closure(closure) => self.check_magic_numbers_in_params(&closure.params),
+            ExprKind::ArrowFn(arrow) => self.check_magic_numbers_in_params(&arrow.params),
             ExprKind::Binary(op, l, r) => {
                 let (id, place) = match op {
                     BinOp::Add | BinOp::Sub | BinOp::Mul | BinOp::Div | BinOp::Mod | BinOp::Pow => {

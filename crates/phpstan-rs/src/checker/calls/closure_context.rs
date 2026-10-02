@@ -48,10 +48,10 @@ impl<'a> Checker<'a> {
         } else {
             self.check_expr(closure_expr, &mut seeded, label);
         }
-        let ExprKind::Closure { uses, .. } = &closure_expr.kind else {
+        let ExprKind::Closure(closure) = &closure_expr.kind else {
             return;
         };
-        for u in uses.iter().filter(|u| u.by_ref) {
+        for u in closure.uses.iter().filter(|u| u.by_ref) {
             let Some(ty) = seeded.get(&u.name).cloned() else {
                 continue;
             };
@@ -92,12 +92,13 @@ impl<'a> Checker<'a> {
     ) -> bool {
         let closure_expr = closure_expr.peeled();
         match &closure_expr.kind {
-            ExprKind::ArrowFn {
-                params,
-                body,
-                return_type,
-                ..
-            } => {
+            ExprKind::ArrowFn(arrow) => {
+                let syntax::ast::ArrowFnExpr {
+                    params,
+                    body,
+                    return_type,
+                    ..
+                } = &**arrow;
                 if params.len() != param_overrides.len()
                     || params.iter().any(|p| p.variadic || p.by_ref)
                 {
@@ -164,14 +165,15 @@ impl<'a> Checker<'a> {
                 }
                 true
             }
-            ExprKind::Closure {
-                params,
-                uses,
-                body,
-                is_static,
-                return_type,
-                ..
-            } => {
+            ExprKind::Closure(closure) => {
+                let syntax::ast::ClosureExpr {
+                    params,
+                    uses,
+                    body,
+                    is_static,
+                    return_type,
+                    ..
+                } = &**closure;
                 if params.len() != param_overrides.len()
                     || params.iter().any(|p| p.variadic || p.by_ref)
                 {

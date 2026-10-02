@@ -88,13 +88,14 @@ impl<'ast> Visitor<'ast> for Promotions<'_, '_> {
 
     fn visit_expr(&mut self, e: &'ast Expr) {
         syntax::stack::guard(|| match &e.kind {
-            ExprKind::Closure {
-                params,
-                body,
-                by_ref,
-                return_type,
-                ..
-            } => {
+            ExprKind::Closure(closure) => {
+                let syntax::ast::ClosureExpr {
+                    params,
+                    body,
+                    by_ref,
+                    return_type,
+                    ..
+                } = &**closure;
                 self.checker.check_function_like_declaration(
                     params,
                     (return_type.as_deref(), e.span),
@@ -106,13 +107,14 @@ impl<'ast> Visitor<'ast> for Promotions<'_, '_> {
                     .check_literal_default_parameter_types(params, "anonymous function");
                 walk_stmts(self, body);
             }
-            ExprKind::ArrowFn {
-                params,
-                body,
-                by_ref,
-                return_type,
-                ..
-            } => {
+            ExprKind::ArrowFn(arrow) => {
+                let syntax::ast::ArrowFnExpr {
+                    params,
+                    body,
+                    by_ref,
+                    return_type,
+                    ..
+                } = &**arrow;
                 self.checker.check_function_like_declaration(
                     params,
                     (return_type.as_deref(), e.span),

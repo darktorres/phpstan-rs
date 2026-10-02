@@ -805,7 +805,7 @@ pub enum InstanceofTarget {
 /// name - only the *receiver* side is ever `Expr` here).
 #[derive(Debug, Clone)]
 pub enum StaticTarget {
-    Name(QualifiedName),
+    Name(Box<QualifiedName>),
     Expr(Box<Expr>),
 }
 
@@ -1338,6 +1338,35 @@ impl ObjectOperator {
     }
 }
 
+/// `function (...) use (...) { ... }`.
+#[derive(Debug, Clone)]
+pub struct ClosureExpr {
+    pub params: Vec<Param>,
+    pub uses: Vec<ClosureUse>,
+    pub body: Vec<Stmt>,
+    pub is_static: bool,
+    pub by_ref: bool,
+    // Boxed: keeps `Expr` small, since expression parsing recurses.
+    pub return_type: Option<Box<TypeHint>>,
+    // `#[Attr]` groups on the closure expression itself
+    // (`$f = #[Foo] function () {};`), not on any of its parameters.
+    pub attrs: Vec<Attribute>,
+}
+
+/// `fn (...) => expr`.
+#[derive(Debug, Clone)]
+pub struct ArrowFnExpr {
+    pub params: Vec<Param>,
+    pub body: Box<Expr>,
+    pub is_static: bool,
+    // `fn &() => ...` - returns by reference.
+    pub by_ref: bool,
+    // See `ClosureExpr::return_type`.
+    pub return_type: Option<Box<TypeHint>>,
+    // See `ClosureExpr::attrs`.
+    pub attrs: Vec<Attribute>,
+}
+
 /// An expression, plus the real source span it occupies - see `Stmt`'s
 /// equivalent doc comment.
 #[derive(Debug, Clone)]
@@ -1510,29 +1539,9 @@ pub enum ExprKind {
     // `yield from $generator;`
     YieldFrom(Box<Expr>),
     Interpolated(Vec<Expr>),
-    Closure {
-        params: Vec<Param>,
-        uses: Vec<ClosureUse>,
-        body: Vec<Stmt>,
-        is_static: bool,
-        by_ref: bool,
-        // Boxed: keeps `Expr` small, since expression parsing recurses.
-        return_type: Option<Box<TypeHint>>,
-        // `#[Attr]` groups on the closure expression itself
-        // (`$f = #[Foo] function () {};`), not on any of its parameters.
-        attrs: Vec<Attribute>,
-    },
-    ArrowFn {
-        params: Vec<Param>,
-        body: Box<Expr>,
-        is_static: bool,
-        // `fn &() => ...` - returns by reference.
-        by_ref: bool,
-        // See `Closure.return_type`.
-        return_type: Option<Box<TypeHint>>,
-        // See `Closure.attrs` above.
-        attrs: Vec<Attribute>,
-    },
+    // Boxed: keeps `Expr` small, since expression parsing recurses.
+    Closure(Box<ClosureExpr>),
+    ArrowFn(Box<ArrowFnExpr>),
     // The arms in written order, `default` among them.
     Match {
         subject: Box<Expr>,

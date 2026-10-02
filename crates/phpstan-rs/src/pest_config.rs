@@ -155,10 +155,10 @@ pub(crate) fn file_local_hook_properties(program: &[Stmt]) -> FxHashSet<String> 
 /// resolves by the property base's *type* via PHPStan's own `Scope` -
 /// an aliased `$self = $this; $self->prop` isn't covered here).
 fn collect_hook_closure_properties(expr: &Expr, props: &mut FxHashSet<String>) {
-    let ExprKind::Closure { body, .. } = &expr.kind else {
+    let ExprKind::Closure(closure) = &expr.kind else {
         return;
     };
-    for stmt in body {
+    for stmt in &closure.body {
         let StmtKind::Expression(e) = &stmt.kind else {
             continue;
         };

@@ -275,23 +275,25 @@ impl<'a> Walker<'a> {
                     .build(),
                 );
             }
-            ExprKind::Closure {
-                params,
-                by_ref,
-                return_type,
-                ..
-            } => {
+            ExprKind::Closure(closure) => {
+                let syntax::ast::ClosureExpr {
+                    params,
+                    by_ref,
+                    return_type,
+                    ..
+                } = &**closure;
                 if *by_ref {
                     self.by_ref_return(e.span, "a closure");
                 }
                 self.hint_types(params, return_type.as_deref(), "a closure");
             }
-            ExprKind::ArrowFn {
-                params,
-                by_ref,
-                return_type,
-                ..
-            } => {
+            ExprKind::ArrowFn(arrow) => {
+                let syntax::ast::ArrowFnExpr {
+                    params,
+                    by_ref,
+                    return_type,
+                    ..
+                } = &**arrow;
                 if *by_ref {
                     self.by_ref_return(e.span, "an arrow function");
                 }

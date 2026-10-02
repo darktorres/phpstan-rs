@@ -366,14 +366,15 @@ pub fn walk_expr<'ast, V: Visitor<'ast> + ?Sized>(v: &mut V, expr: &'ast Expr) {
                 v.visit_expr(part);
             }
         }
-        ExprKind::Closure {
-            params,
-            uses,
-            body,
-            return_type,
-            attrs,
-            ..
-        } => {
+        ExprKind::Closure(closure) => {
+            let ClosureExpr {
+                params,
+                uses,
+                body,
+                return_type,
+                attrs,
+                ..
+            } = &**closure;
             for attr in attrs {
                 v.visit_attribute(attr);
             }
@@ -388,13 +389,14 @@ pub fn walk_expr<'ast, V: Visitor<'ast> + ?Sized>(v: &mut V, expr: &'ast Expr) {
             }
             walk_stmts(v, body);
         }
-        ExprKind::ArrowFn {
-            params,
-            body,
-            return_type,
-            attrs,
-            ..
-        } => {
+        ExprKind::ArrowFn(arrow) => {
+            let ArrowFnExpr {
+                params,
+                body,
+                return_type,
+                attrs,
+                ..
+            } = &**arrow;
             for attr in attrs {
                 v.visit_attribute(attr);
             }
@@ -1112,13 +1114,14 @@ pub fn walk_expr_mut<V: VisitorMut + ?Sized>(v: &mut V, expr: &mut Expr) {
                 v.visit_expr(part);
             }
         }
-        ExprKind::Closure {
-            params,
-            body,
-            return_type,
-            attrs,
-            ..
-        } => {
+        ExprKind::Closure(closure) => {
+            let ClosureExpr {
+                params,
+                body,
+                return_type,
+                attrs,
+                ..
+            } = &mut **closure;
             for attr in attrs {
                 v.visit_attribute(attr);
             }
@@ -1130,13 +1133,14 @@ pub fn walk_expr_mut<V: VisitorMut + ?Sized>(v: &mut V, expr: &mut Expr) {
             }
             walk_stmts_mut(v, body);
         }
-        ExprKind::ArrowFn {
-            params,
-            body,
-            return_type,
-            attrs,
-            ..
-        } => {
+        ExprKind::ArrowFn(arrow) => {
+            let ArrowFnExpr {
+                params,
+                body,
+                return_type,
+                attrs,
+                ..
+            } = &mut **arrow;
             for attr in attrs {
                 v.visit_attribute(attr);
             }

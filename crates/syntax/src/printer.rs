@@ -514,14 +514,15 @@ fn write_expr_unguarded(out: &mut String, e: &Expr) {
             write_interpolated_parts(out, parts, b'"');
             out.push('"');
         }
-        ExprKind::Closure {
-            params,
-            uses,
-            is_static,
-            by_ref,
-            return_type,
-            ..
-        } => {
+        ExprKind::Closure(closure) => {
+            let ClosureExpr {
+                params,
+                uses,
+                is_static,
+                by_ref,
+                return_type,
+                ..
+            } = &**closure;
             if *is_static {
                 out.push_str("static ");
             }
@@ -544,14 +545,15 @@ fn write_expr_unguarded(out: &mut String, e: &Expr) {
             write_return_type(out, return_type.as_deref());
             out.push_str(" {\n}");
         }
-        ExprKind::ArrowFn {
-            params,
-            body,
-            is_static,
-            by_ref,
-            return_type,
-            ..
-        } => {
+        ExprKind::ArrowFn(arrow) => {
+            let ArrowFnExpr {
+                params,
+                body,
+                is_static,
+                by_ref,
+                return_type,
+                ..
+            } = &**arrow;
             if *is_static {
                 out.push_str("static ");
             }

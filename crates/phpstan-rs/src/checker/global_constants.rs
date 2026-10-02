@@ -83,8 +83,9 @@ impl<'ast> Visitor<'ast> for Collector {
             {
                 self.out.magic_in_closure.insert(e.span);
             }
-            ExprKind::Closure { body, .. } => self.body(body, true),
-            ExprKind::ArrowFn { body, .. } => {
+            ExprKind::Closure(closure) => self.body(&closure.body, true),
+            ExprKind::ArrowFn(arrow) => {
+                let syntax::ast::ArrowFnExpr { body, .. } = &**arrow;
                 let outer = std::mem::replace(&mut self.in_closure, true);
                 self.visit_expr(body);
                 self.in_closure = outer;
