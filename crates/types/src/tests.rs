@@ -6,6 +6,7 @@ mod concat;
 mod constructors;
 mod display_and_misc;
 mod intersections;
+mod keyword_hints;
 mod kinds;
 mod narrowing;
 mod parsing;

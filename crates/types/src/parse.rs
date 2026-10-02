@@ -801,7 +801,7 @@ fn parse_type_atom(s: &str) -> Type {
 pub fn native_type(hint: &syntax::ast::TypeHint) -> Type {
     use syntax::ast::TypeHintKind;
     syntax::stack::guard(|| match &hint.kind {
-        TypeHintKind::Keyword(_, written) => parse_type_string(written),
+        TypeHintKind::Keyword(kind, _) => keyword_type(*kind),
         TypeHintKind::Name(name) => Type::object(
             name.resolved_class().unwrap_or(&name.written).into(),
             Vec::new(),
@@ -816,6 +816,37 @@ pub fn native_type(hint: &syntax::ast::TypeHint) -> Type {
             members.iter().map(native_type).collect(),
         )),
     })
+}
+
+/// The type a keyword type declaration denotes, built once: the parser reads
+/// a keyword without regard to its case, so every spelling of one keyword is
+/// the same type.
+pub(crate) fn keyword_type(kind: syntax::ast::NativeType) -> Type {
+    use std::sync::OnceLock;
+    use syntax::ast::NativeType as N;
+    static TYPES: [OnceLock<Type>; 17] = [const { OnceLock::new() }; 17];
+    let slot = match kind {
+        N::Int => 0,
+        N::Float => 1,
+        N::String => 2,
+        N::Bool => 3,
+        N::Array => 4,
+        N::Object => 5,
+        N::Mixed => 6,
+        N::Void => 7,
+        N::Never => 8,
+        N::Null => 9,
+        N::True => 10,
+        N::False => 11,
+        N::Iterable => 12,
+        N::Callable => 13,
+        N::SelfType => 14,
+        N::Static => 15,
+        N::Parent => 16,
+    };
+    TYPES[slot]
+        .get_or_init(|| parse_type_string(kind.as_str()))
+        .clone()
 }
 
 /// Parses one bound of an `int<min, max>` range - real PHPStan's own
