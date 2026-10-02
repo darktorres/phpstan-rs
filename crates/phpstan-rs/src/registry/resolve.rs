@@ -140,8 +140,8 @@ impl Registry {
             .par_iter()
             .with_min_len(crate::registry::PASS_CHUNK)
             .filter_map(|class_name| {
-                let uses = registry.classes[class_name].uses.clone();
-                let trait_aliases = registry.classes[class_name].trait_aliases.clone();
+                let own = &registry.classes[class_name];
+                let (uses, trait_aliases) = (&own.uses, &own.trait_aliases);
                 if uses.is_empty() && trait_aliases.is_empty() {
                     return None;
                 }
@@ -150,12 +150,11 @@ impl Registry {
                 // directly-declared method for that same name (checked here,
                 // before any trait's contribution is applied) always wins,
                 // matching the same `or_insert` "first/own wins" semantics
-                // `methods` itself already uses below.
-                let own_method_names: FxHashSet<Name> = registry.classes[class_name]
-                    .methods
-                    .keys()
-                    .cloned()
-                    .collect();
+                // `methods` itself already uses below. What the class has
+                // of its own is not copied out either: the apply loop only
+                // inserts into a vacant slot, so a member the class
+                // declares is left out here instead of cloned and dropped.
+                let own_method_names = &own.methods;
                 let mut methods = Vec::new();
                 let mut properties = Vec::new();
                 let mut consts = Vec::new();
@@ -168,18 +167,17 @@ impl Registry {
                 // method's (correctly flattened-in) `FunctionReflection` is
                 // right there in `info.methods`.
                 let mut static_from_traits: FxHashSet<Name> = FxHashSet::default();
-                for trait_name in &uses {
+                for trait_name in uses {
                     if let Some(trait_info) = registry.classes.get(trait_name) {
                         for (name, sig) in &trait_info.methods {
+                            if own_method_names.contains_key(name) {
+                                continue;
+                            }
                             methods.push((name.clone(), sig.clone()));
-                            if trait_info.abstract_methods.contains(name)
-                                && !own_method_names.contains(name)
-                            {
+                            if trait_info.abstract_methods.contains(name) {
                                 abstract_from_traits.insert(name.clone());
                             }
-                            if trait_info.static_methods.contains(name)
-                                && !own_method_names.contains(name)
-                            {
+                            if trait_info.static_methods.contains(name) {
                                 static_from_traits.insert(name.clone());
                             }
                         }
@@ -187,6 +185,7 @@ impl Registry {
                             trait_info
                                 .properties
                                 .iter()
+                                .filter(|(n, _)| !own.properties.contains_key(*n))
                                 .map(|(n, s)| (n.clone(), s.clone())),
                         );
                         // PHP 8.2+ trait constants - composed into the
@@ -210,6 +209,7 @@ impl Registry {
                             trait_info
                                 .consts
                                 .iter()
+                                .filter(|(n, _)| !own.consts.contains_key(*n))
                                 .map(|(n, s)| (n.clone(), s.clone())),
                         );
                     }
@@ -221,7 +221,7 @@ impl Registry {
                 // valid PHP when the name is unambiguous among the traits
                 // used) resolves against the first used trait that
                 // declares it.
-                for alias in &trait_aliases {
+                for alias in trait_aliases {
                     let source_sig = match &alias.trait_name {
                         Some(t) => registry
                             .classes
@@ -231,7 +231,9 @@ impl Registry {
                             .iter()
                             .find_map(|t| registry.classes.get(t)?.methods.get(&alias.method)),
                     };
-                    if let Some(sig) = source_sig {
+                    if let Some(sig) = source_sig
+                        && !own_method_names.contains_key(&alias.alias)
+                    {
                         methods.push((alias.alias.clone(), sig.clone()));
                     }
                 }
