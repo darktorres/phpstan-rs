@@ -130,18 +130,13 @@ enum Keys {
     Built(Vec<Name>),
 }
 
-/// The hash a stored table's index files a name under: of its bytes, in
-/// lowercase when the table folds.
-fn hash_name(fold: bool, bytes: &[u8]) -> usize {
-    let mut hash: u64 = 0;
-    for &byte in bytes {
-        let byte = if fold {
-            byte.to_ascii_lowercase()
-        } else {
-            byte
-        };
-        hash = (hash.rotate_left(5) ^ u64::from(byte)).wrapping_mul(0x517c_c1b7_2722_0a95);
-    }
+/// The hash a stored table's index files a name under: of its key, which is
+/// the name lowercased when the table folds, eight bytes at a time.
+fn hash_key(key: &[u8]) -> usize {
+    use std::hash::Hasher;
+    let mut hasher = rustc_hash::FxHasher::default();
+    hasher.write(key);
+    let hash = hasher.finish();
     (hash ^ (hash >> 32)) as usize
 }
 
@@ -296,7 +291,7 @@ impl<V> Base<V> {
     fn find_indexed(&self, buffer: &Buffer, index: &Range<usize>, key: &[u8]) -> Option<usize> {
         let places = index.len() / 4;
         let mask = places - 1;
-        let mut place = hash_name(self.fold, key) & mask;
+        let mut place = hash_key(key) & mask;
         loop {
             let at = index.start + place * 4;
             let entry = u32::from_le_bytes(buffer[at..at + 4].try_into().unwrap()) as usize;
@@ -740,7 +735,7 @@ pub(super) fn store_entries<V: serde::Serialize>(
     let mut records = Vec::with_capacity(rows.len() * RECORD_LEN);
     let mut names: Vec<&str> = Vec::with_capacity(rows.len());
     for (name, value) in rows {
-        names.push(name.as_str());
+        names.push(if fold { name.lower() } else { name.as_str() });
         let mut encoded = Vec::new();
         ciborium::ser::into_writer(value, &mut encoded).map_err(|e| e.to_string())?;
         let name = writer.name(name.as_str())?;
@@ -753,7 +748,7 @@ pub(super) fn store_entries<V: serde::Serialize>(
     let mut index = vec![0u32; index_places(names.len())];
     let mask = index.len() - 1;
     for (i, name) in names.iter().enumerate() {
-        let mut place = hash_name(fold, name.as_bytes()) & mask;
+        let mut place = hash_key(name.as_bytes()) & mask;
         while index[place] != 0 {
             place = (place + 1) & mask;
         }
