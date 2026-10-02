@@ -505,8 +505,10 @@ impl<'a> Checker<'a> {
         locals: &Locals,
     ) -> (TemplateBindings, rustc_hash::FxHashMap<String, Type>) {
         let mut bindings: TemplateBindings = TemplateBindings::default();
+        // One entry for each parameter at most: the table is made once, at
+        // its size.
         let mut param_bindings: rustc_hash::FxHashMap<String, Type> =
-            rustc_hash::FxHashMap::default();
+            rustc_hash::FxHashMap::with_capacity_and_hasher(sig.params().len(), Default::default());
         for (param, slot) in sig.params().iter().zip(resolved.iter()) {
             let Some(arg) = slot else {
                 // An omitted argument's conditional-return subject is its
