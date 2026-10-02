@@ -286,8 +286,18 @@ impl<T: ?Sized> WeakTable<T> {
             return value;
         }
         let value = make();
-        self.entries
-            .insert_unique(hash, (hash, Arc::downgrade(&value)), |(h, _)| *h);
+        let weak = Arc::downgrade(&value);
+        // A value of this text that was dropped leaves its entry, which the
+        // new one takes, so a name interned and dropped over and over keeps
+        // one entry and not a longer chain of dead ones to probe.
+        if let Some(entry) = self
+            .entries
+            .find_mut(hash, |(h, old)| *h == hash && old.strong_count() == 0)
+        {
+            entry.1 = weak;
+            return value;
+        }
+        self.entries.insert_unique(hash, (hash, weak), |(h, _)| *h);
         if self.entries.len() >= self.sweep_at {
             self.sweep();
         }
