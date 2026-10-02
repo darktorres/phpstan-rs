@@ -83,6 +83,13 @@ impl Type {
         self.0.flags & crate::HAS_CONSTANT_NAME != 0
     }
 
+    /// Which node this type is: the same number for equal types as long as
+    /// either is alive, since types are interned. A holder that keeps the
+    /// type alive can key on it.
+    pub fn identity(&self) -> usize {
+        std::sync::Arc::as_ptr(&self.0) as usize
+    }
+
     /// Whether this is the error type: an expression already reported
     /// invalid, which nothing reports on again.
     pub fn is_error(&self) -> bool {

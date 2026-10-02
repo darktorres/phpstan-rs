@@ -1697,17 +1697,22 @@ impl Registry {
         // (class, method or function, parameter index or `None` for the
         // return, corrected type)
         type Fix = (Option<Name>, Name, Option<usize>, Type);
+        let pass = next_keep_pass();
         let registry: &Registry = self;
         let sig_fixes = |class: Option<&Name>, name: &Name, sig: &FunctionReflection| {
             let mut fixes: Vec<Fix> = Vec::new();
             for (i, p) in sig.params.iter().enumerate() {
-                if let Some(ty) = registry.excluding_native(&p.ty, &p.ty_native, class) {
+                if let Some(ty) = registry.excluding_native(&p.ty, &p.ty_native, class, Some(pass))
+                {
                     fixes.push((class.cloned(), name.clone(), Some(i), ty));
                 }
             }
-            if let Some(ty) =
-                registry.excluding_native(&sig.return_type, &sig.return_type_native, class)
-            {
+            if let Some(ty) = registry.excluding_native(
+                &sig.return_type,
+                &sig.return_type_native,
+                class,
+                Some(pass),
+            ) {
                 fixes.push((class.cloned(), name.clone(), None, ty));
             }
             fixes
@@ -1737,7 +1742,12 @@ impl Registry {
                     if !prop.has_native_type {
                         return None;
                     }
-                    let ty = registry.excluding_native(&prop.ty, &prop.ty_native, Some(class))?;
+                    let ty = registry.excluding_native(
+                        &prop.ty,
+                        &prop.ty_native,
+                        Some(class),
+                        Some(pass),
+                    )?;
                     Some(((*class).clone(), name.clone(), ty))
                 })
             })
@@ -1769,7 +1779,13 @@ impl Registry {
 
     /// `ty` without the members `native` provably excludes, when any are
     /// excluded; `None` when nothing changes.
-    fn excluding_native(&self, ty: &Type, native: &Type, class: Option<&Name>) -> Option<Type> {
+    fn excluding_native(
+        &self,
+        ty: &Type,
+        native: &Type,
+        class: Option<&Name>,
+        pass: Option<u64>,
+    ) -> Option<Type> {
         if ty == native || native.is_mixed() {
             return None;
         }
@@ -1789,16 +1805,7 @@ impl Registry {
         let mut changed = false;
         for m in members {
             let bound = bind(class, m);
-            let keep = match self.is_super_type_of(&native, &bound) {
-                types::TrinaryLogic::Yes => true,
-                types::TrinaryLogic::No => false,
-                // Two fully known class names only partly overlapping: the
-                // hint is what's guaranteed.
-                types::TrinaryLogic::Maybe => {
-                    !(self.is_fully_known_class_type(&bound)
-                        && self.is_fully_known_class_type(&native))
-                }
-            };
+            let keep = self.keeps_member(&native, &bound, pass);
             if keep {
                 kept.push(m.clone());
                 continue;
@@ -1839,6 +1846,44 @@ impl Registry {
 }
 
 impl Registry {
+    /// Whether a documented member `bound` stays against the native type
+    /// `native`: held by it, or not provably apart from it. Kept for the
+    /// pass `pass` names, by the two types: the same pair of types comes
+    /// again and again across the classes of a pass.
+    fn keeps_member(&self, native: &Type, bound: &Type, pass: Option<u64>) -> bool {
+        let decide = || match self.is_super_type_of(native, bound) {
+            types::TrinaryLogic::Yes => true,
+            types::TrinaryLogic::No => false,
+            // Two fully known class names only partly overlapping: the
+            // hint is what's guaranteed.
+            types::TrinaryLogic::Maybe => {
+                !(self.is_fully_known_class_type(bound) && self.is_fully_known_class_type(native))
+            }
+        };
+        let Some(pass) = pass else {
+            return decide();
+        };
+        let key = (native.identity(), bound.identity());
+        let remembered = KEEP_DECISIONS.with(|memo| {
+            let mut memo = memo.borrow_mut();
+            if memo.0 != pass {
+                *memo = (pass, FxHashMap::default());
+            }
+            memo.1.get(&key).map(|(_, _, keep)| *keep)
+        });
+        if let Some(keep) = remembered {
+            return keep;
+        }
+        let keep = decide();
+        KEEP_DECISIONS.with(|memo| {
+            let mut memo = memo.borrow_mut();
+            if memo.0 == pass {
+                memo.1.insert(key, (native.clone(), bound.clone(), keep));
+            }
+        });
+        keep
+    }
+
     /// Whether `ty` is only class names (and `null`) whose whole
     /// hierarchy the registry indexed - no template, shape, or unknown
     /// class.
@@ -2074,14 +2119,31 @@ impl Registry {
         }
         for i in 0..sig.params.len() {
             if let Some(ty) =
-                self.excluding_native(&sig.params[i].ty, &sig.params[i].ty_native, None)
+                self.excluding_native(&sig.params[i].ty, &sig.params[i].ty_native, None, None)
             {
                 sig.params[i].ty = ty;
             }
         }
-        if let Some(ty) = self.excluding_native(&sig.return_type, &sig.return_type_native, None) {
+        if let Some(ty) =
+            self.excluding_native(&sig.return_type, &sig.return_type_native, None, None)
+        {
             sig.return_type = ty;
         }
         sig
     }
+}
+
+/// What `Registry::keeps_member` decided in the pass it is for, by the
+/// identity of the two types, which are held so that it stays theirs.
+type KeepDecisions = FxHashMap<(usize, usize), (Type, Type, bool)>;
+
+thread_local! {
+    static KEEP_DECISIONS: std::cell::RefCell<(u64, KeepDecisions)> =
+        std::cell::RefCell::new((0, FxHashMap::default()));
+}
+
+/// A number no pass of `drop_doc_members_excluded_by_native` has had.
+fn next_keep_pass() -> u64 {
+    static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+    NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
 }
