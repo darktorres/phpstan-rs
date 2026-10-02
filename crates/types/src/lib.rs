@@ -110,14 +110,21 @@ pub(crate) const HAS_LATE: u16 = 128;
 /// constant is: an upper-case letter or `_`, then upper-case letters,
 /// digits and `_` only.
 pub fn looks_like_constant_name(name: &str) -> bool {
-    let short = name.rsplit('\\').next().unwrap_or(name);
+    let is_constant_byte = |b: u8| b.is_ascii_uppercase() || b.is_ascii_digit() || b == b'_';
+    // The whole segment is in the set, so a name ending outside it is not
+    // one: most class names end in a lower-case letter, and are decided
+    // without looking for the segment.
+    let Some(&last) = name.as_bytes().last() else {
+        return false;
+    };
+    if !is_constant_byte(last) {
+        return false;
+    }
+    let short = name.rsplit('\\').next().unwrap_or(name).as_bytes();
     short
-        .chars()
-        .next()
-        .is_some_and(|c| c.is_ascii_uppercase() || c == '_')
-        && short
-            .chars()
-            .all(|c| c.is_ascii_uppercase() || c.is_ascii_digit() || c == '_')
+        .first()
+        .is_some_and(|&b| b.is_ascii_uppercase() || b == b'_')
+        && short.iter().all(|&b| is_constant_byte(b))
 }
 
 /// The flags a node passes up to the node it is a child of.
