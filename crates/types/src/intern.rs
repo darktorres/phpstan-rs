@@ -155,8 +155,41 @@ impl Constant {
     }
 }
 
+/// How many nodes a thread keeps close at hand (`FRONT`).
+const FRONT_SLOTS: usize = 4096;
+
+thread_local! {
+    /// The nodes this thread found or made most lately, each in the slot
+    /// its exact hash picks (a newer node takes the slot of an older one):
+    /// a type looked for again is found here by comparing it with one
+    /// node, without the shard's lock or a weak reference to upgrade. A
+    /// node is held strongly, so a few thousand per thread outlive their
+    /// users; each is the node the table has for its form.
+    static FRONT: std::cell::RefCell<Vec<Option<Arc<Node>>>> =
+        std::cell::RefCell::new(vec![None; FRONT_SLOTS]);
+}
+
 fn insert(repr: Repr, semantic_hash: fn(&Repr) -> u64) -> Arc<Node> {
     let exact = exact_hash(&repr);
+    let slot = (exact as usize) % FRONT_SLOTS;
+    let near = FRONT.with(|front| {
+        let front = front.borrow();
+        match &front[slot] {
+            Some(node) if node.exact == exact && exact_eq(&node.repr, &repr) => {
+                Some(Arc::clone(node))
+            }
+            _ => None,
+        }
+    });
+    if let Some(node) = near {
+        return node;
+    }
+    let node = insert_shared(repr, semantic_hash, exact);
+    FRONT.with(|front| front.borrow_mut()[slot] = Some(Arc::clone(&node)));
+    node
+}
+
+fn insert_shared(repr: Repr, semantic_hash: fn(&Repr) -> u64, exact: u64) -> Arc<Node> {
     let shard = &TABLE[(exact as usize) % SHARDS];
     let mut shard = shard
         .lock()

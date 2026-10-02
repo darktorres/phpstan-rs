@@ -68,3 +68,36 @@ fn a_refined_string_probe_is_string_with_its_own_accessory() {
         ));
     }
 }
+
+#[test]
+fn one_exact_form_is_one_node_on_every_thread_and_through_the_front_cache() {
+    use std::sync::Arc;
+    let build = || {
+        Type::union_of(vec![
+            Type::object("Front".into(), vec![Type::int()]),
+            Type::string_literal("front".into()),
+            Type::null(),
+        ])
+    };
+    let here = build();
+    // Found again from this thread's front cache.
+    assert!(Arc::ptr_eq(&here.0, &build().0));
+    // Found from the shared table by other threads, and by one that makes
+    // thousands of other nodes first, so that a slot is taken over.
+    let there = std::thread::spawn(move || {
+        let found = build();
+        for n in 0..10_000 {
+            let _ = Type::int_literal(n);
+        }
+        (found, build())
+    })
+    .join()
+    .expect("the thread finishes");
+    assert!(Arc::ptr_eq(&here.0, &there.0.0));
+    assert!(Arc::ptr_eq(&here.0, &there.1.0));
+    // And after this thread has taken over every slot too.
+    for n in 0..10_000 {
+        let _ = Type::int_literal(n);
+    }
+    assert!(Arc::ptr_eq(&here.0, &build().0));
+}
