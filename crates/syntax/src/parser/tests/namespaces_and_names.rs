@@ -214,3 +214,54 @@ fn namespace_relative_call_statement_is_not_a_declaration() {
             if matches!(&callee.kind, ExprKind::Name(n) if n == "namespace\\foo")
     ));
 }
+
+#[test]
+fn a_parser_of_the_spanned_tokens_and_one_of_what_the_lexer_found_read_the_same_tree() {
+    use crate::lexer::{LexOutput, Lexer};
+    let sources = [
+        "<?php /** a */ class Foo { /** b */ public function m() {} /** c */ /** d */ public $p; }",
+        "<?php /** one */ /** two */ function f() {} /** three */ $x = 1; /** tail */",
+        "<?php namespace App; /** @var int */ $a = 1; /** @template T */ interface I {} /** end */",
+        "<?php CLASS Foo { FUNCTION Bar() {} } Interface Baz {} /** doc */ ENUM E { case A; }",
+        "<?php class Public { const Static = 1; function Function() {} } /** x */ echo 1;",
+        "<?php /** only a doc comment */",
+        "<?php",
+        "<html><?php /** in html */ function g() {} ?>text<?php /** last */",
+    ];
+    for source in sources {
+        let by_tuples = Parser::new(Lexer::new(source).tokenize_with_spans())
+            .parse_program()
+            .map(|stmts| format!("{stmts:?}"));
+        let LexOutput { lexed, .. } = Lexer::new(source).lex();
+        let by_lexed = Parser::from_lexed(lexed)
+            .parse_program()
+            .map(|stmts| format!("{stmts:?}"));
+        assert_eq!(by_lexed.is_ok(), by_tuples.is_ok(), "{source}");
+        if let (Ok(a), Ok(b)) = (by_lexed, by_tuples) {
+            assert_eq!(a, b, "{source}");
+        }
+    }
+}
+
+#[test]
+fn the_spanned_tokens_come_back_from_what_the_lexer_found_with_docs_and_spellings() {
+    use crate::lexer::Lexer;
+    let source = "<?php /** a */ /** b */ Class Foo { /** c */ public function M() {} }";
+    let spanned = Lexer::new(source).tokenize_with_spans();
+    let docs: Vec<&str> = spanned
+        .iter()
+        .filter_map(|(token, _, _)| match token {
+            crate::token::Token::DocComment(text) => Some(&**text),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(docs, ["/** a */", "/** b */", "/** c */"]);
+    // The first doc comment is the first token's neighbour, and `Class`
+    // keeps its spelling.
+    assert!(matches!(spanned[1].0, crate::token::Token::DocComment(_)));
+    let class = spanned
+        .iter()
+        .find(|(token, _, _)| matches!(token, crate::token::Token::Keyword(_)))
+        .expect("the file has a keyword");
+    assert_eq!(class.2.as_deref(), Some("Class"));
+}

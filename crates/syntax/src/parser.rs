@@ -1,6 +1,7 @@
 use std::sync::Arc;
 
 use crate::ast::*;
+use crate::lexer::{Lexed, LexedDoc};
 use crate::name::{Interner, Name};
 use crate::token::{Keyword, Position, Span, Token};
 
@@ -27,14 +28,12 @@ pub struct Parser {
     // access throughout this file (there are many) keeps working
     // unchanged.
     pub(crate) spans: Vec<Span>,
-    // Parallel to `tokens`/`spans` the same way - `keyword_raw[i]` is
-    // `Some(original spelling)` when
-    // `tokens[i]` is a `Token::Keyword`, `None` otherwise (including for
-    // every non-keyword token). Lets `take_name_segment` recover a
-    // keyword-shaped identifier's true declared-name case without
-    // touching `Token`'s own shape or any of its ~167 existing match/
-    // construct sites.
-    pub(crate) keyword_raw: Vec<Option<String>>,
+    // The original spelling of the keyword `tokens[index]` is, for each
+    // keyword spelled other than in lower case, by index, ascending. Lets
+    // `take_name_segment` recover a keyword-shaped identifier's true
+    // declared-name case without touching `Token`'s own shape or any of
+    // its ~167 existing match/construct sites.
+    pub(crate) keyword_raw: Vec<(usize, String)>,
     pub(crate) pos: usize,
     // A doc comment's raw text, keyed by the index (in `tokens`, after
     // filtering) of the token it immediately precedes. Built once up front
@@ -92,46 +91,76 @@ pub(crate) struct MemberStart {
 }
 
 impl Parser {
+    /// A parser of spanned tokens, doc comments among them as tokens of
+    /// their own (the list `Lexer::tokenize_with_spans` makes).
     pub fn new(tokens: Vec<(Token, Span, Option<String>)>) -> Self {
-        let mut filtered = Vec::with_capacity(tokens.len());
-        let mut filtered_spans = Vec::with_capacity(tokens.len());
-        let mut filtered_keyword_raw = Vec::with_capacity(tokens.len());
+        let mut lexed = Lexed {
+            tokens: Vec::with_capacity(tokens.len()),
+            spans: Vec::with_capacity(tokens.len()),
+            keyword_raw: Vec::new(),
+            docs: Vec::new(),
+        };
+        for (token, span, keyword_raw) in tokens {
+            match token {
+                Token::DocComment(text) => lexed.docs.push(LexedDoc {
+                    before: lexed.tokens.len(),
+                    text,
+                    span,
+                }),
+                other => {
+                    if let Some(raw) = keyword_raw {
+                        lexed.keyword_raw.push((lexed.tokens.len(), raw));
+                    }
+                    lexed.tokens.push(other);
+                    lexed.spans.push(span);
+                }
+            }
+        }
+        Parser::from_lexed(lexed)
+    }
+
+    /// A parser of what the lexer found, which it reads in place: the
+    /// vectors are the parser's own.
+    pub fn from_lexed(lexed: Lexed) -> Self {
+        let Lexed {
+            tokens,
+            spans,
+            keyword_raw,
+            docs,
+        } = lexed;
         let mut doc_comments = rustc_hash::FxHashMap::default();
         let mut doc_comment_lines = rustc_hash::FxHashMap::default();
         let mut doc_comments_all = rustc_hash::FxHashMap::default();
         let mut doc_comment_starts = rustc_hash::FxHashMap::default();
-        let mut pending: Vec<(Arc<str>, crate::token::Position)> = Vec::new();
-        for (tok, span, keyword_raw) in tokens {
-            match tok {
-                Token::DocComment(s) => pending.push((s, span.start)),
-                other => {
-                    if let Some((first_start, last)) = pending
-                        .first()
-                        .map(|(_, start)| *start)
-                        .zip(pending.last().cloned())
-                    {
-                        doc_comments.insert(filtered.len(), last.0);
-                        doc_comment_lines.insert(filtered.len(), first_start.line);
-                        doc_comment_starts.insert(filtered.len(), first_start);
-                        if pending.len() > 1 {
-                            let lines: Vec<(Arc<str>, u32)> = pending
-                                .iter()
-                                .map(|(doc, start)| (doc.clone(), start.line))
-                                .collect();
-                            doc_comments_all.insert(filtered.len(), fold_doc_comments(&lines));
-                        }
-                        pending.clear();
-                    }
-                    filtered.push(other);
-                    filtered_spans.push(span);
-                    filtered_keyword_raw.push(keyword_raw);
-                }
+        // The doc comments before one token are one group: the last is the
+        // token's doc comment, the first says where and on which line it
+        // starts, and several fold into one for a statement to read.
+        let mut group_start = 0;
+        while group_start < docs.len() {
+            let before = docs[group_start].before;
+            let group_end = group_start
+                + docs[group_start..]
+                    .iter()
+                    .take_while(|doc| doc.before == before)
+                    .count();
+            let group = &docs[group_start..group_end];
+            let first_start = group[0].span.start;
+            doc_comments.insert(before, Arc::clone(&group[group.len() - 1].text));
+            doc_comment_lines.insert(before, first_start.line);
+            doc_comment_starts.insert(before, first_start);
+            if group.len() > 1 {
+                let lines: Vec<(Arc<str>, u32)> = group
+                    .iter()
+                    .map(|doc| (Arc::clone(&doc.text), doc.span.start.line))
+                    .collect();
+                doc_comments_all.insert(before, fold_doc_comments(&lines));
             }
+            group_start = group_end;
         }
         Parser {
-            tokens: filtered,
-            spans: filtered_spans,
-            keyword_raw: filtered_keyword_raw,
+            tokens,
+            spans,
+            keyword_raw,
             pos: 0,
             doc_comments,
             doc_comment_lines,

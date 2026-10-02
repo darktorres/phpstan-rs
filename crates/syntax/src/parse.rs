@@ -5,7 +5,7 @@ use std::sync::Arc;
 
 use crate::annotations::{Annotations, annotate};
 use crate::ast::Stmt;
-use crate::lexer::{LexWarning, Lexer};
+use crate::lexer::{LexOutput, LexWarning, Lexer};
 use crate::name::Interner;
 use crate::parser::{ParseError, Parser};
 use crate::token::{Position, Token};
@@ -35,9 +35,11 @@ pub struct ParsedFile {
 
 /// Lexes and parses `source`, interning its names in `interner`.
 pub fn parse(source: &[u8], interner: &Arc<Interner>) -> Result<ParsedFile, ParseError> {
-    let (tokens, line_comments, warnings) = Lexer::from_bytes(source)
-        .with_interner(interner)
-        .tokenize_with_comments();
+    let LexOutput {
+        lexed,
+        comments: line_comments,
+        warnings,
+    } = Lexer::from_bytes(source).with_interner(interner).lex();
     let mut comments: Vec<Comment> = line_comments
         .into_iter()
         .map(|(start, text)| Comment {
@@ -46,23 +48,21 @@ pub fn parse(source: &[u8], interner: &Arc<Interner>) -> Result<ParsedFile, Pars
             is_doc: false,
         })
         .collect();
+    comments.extend(lexed.docs.iter().map(|doc| Comment {
+        start: doc.span.start,
+        text: doc.text.to_string(),
+        is_doc: true,
+    }));
     let mut code_line_starts: Vec<Position> = Vec::new();
-    for (token, span, _) in &tokens {
-        match token {
-            Token::Eof => {}
-            Token::DocComment(text) => comments.push(Comment {
-                start: span.start,
-                text: text.to_string(),
-                is_doc: true,
-            }),
-            _ => {
-                if code_line_starts
-                    .last()
-                    .is_none_or(|last| last.line != span.start.line)
-                {
-                    code_line_starts.push(span.start);
-                }
-            }
+    for (token, span) in lexed.tokens.iter().zip(&lexed.spans) {
+        if matches!(token, Token::Eof) {
+            continue;
+        }
+        if code_line_starts
+            .last()
+            .is_none_or(|last| last.line != span.start.line)
+        {
+            code_line_starts.push(span.start);
         }
     }
     comments.sort_by_key(|c| (c.start.line, c.start.col));
@@ -72,7 +72,7 @@ pub fn parse(source: &[u8], interner: &Arc<Interner>) -> Result<ParsedFile, Pars
             span: error.span,
         });
     }
-    let stmts = Parser::new(tokens)
+    let stmts = Parser::from_lexed(lexed)
         .with_interner(interner)
         .parse_program()?;
     let annotations = annotate(&stmts);

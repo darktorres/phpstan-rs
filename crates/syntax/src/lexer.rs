@@ -114,6 +114,63 @@ fn first_line_cursor(line_starts: &[usize], len: usize) -> (usize, Position, usi
 /// A token, its span, and a keyword's original spelling.
 pub type SpannedToken = (Token, Span, Option<String>);
 
+/// What the lexer found, as the parser reads it: the tokens and their spans
+/// in step, and apart from them the spellings of the keywords that are not
+/// spelled as the language does and the doc comments, which are not tokens
+/// to the parser.
+pub struct Lexed {
+    /// Every token but a doc comment, `Token::Eof` last.
+    pub tokens: Vec<Token>,
+    /// `spans[i]` is `tokens[i]`'s.
+    pub spans: Vec<Span>,
+    /// The original spelling of the keyword `tokens[index]` is, for each
+    /// keyword spelled other than in lower case; by index, ascending.
+    pub keyword_raw: Vec<(usize, String)>,
+    /// The doc comments, in order.
+    pub docs: Vec<LexedDoc>,
+}
+
+/// A doc comment, and the token it comes before.
+pub struct LexedDoc {
+    /// The index in `Lexed::tokens` of the next token.
+    pub before: usize,
+    pub text: Arc<str>,
+    pub span: Span,
+}
+
+impl Lexed {
+    /// The tokens as the spanned list the lexer made before the parser read
+    /// the vectors of `Lexed`: a doc comment a token of its own, before the
+    /// token it precedes, and every keyword with its spelling or none.
+    pub fn into_spanned(self) -> Vec<SpannedToken> {
+        let Lexed {
+            tokens,
+            spans,
+            keyword_raw,
+            docs,
+        } = self;
+        let mut out: Vec<SpannedToken> = Vec::with_capacity(tokens.len() + docs.len());
+        let mut docs = docs.into_iter().peekable();
+        let mut raws = keyword_raw.into_iter().peekable();
+        for (index, (token, span)) in tokens.into_iter().zip(spans).enumerate() {
+            while let Some(doc) = docs.next_if(|doc| doc.before == index) {
+                out.push((Token::DocComment(doc.text), doc.span, None));
+            }
+            let raw = raws.next_if(|(i, _)| *i == index).map(|(_, raw)| raw);
+            out.push((token, span, raw));
+        }
+        out
+    }
+}
+
+/// `Lexer::lex`'s result.
+pub struct LexOutput {
+    pub lexed: Lexed,
+    /// Every non-doc comment: its start and its text.
+    pub comments: Vec<(Position, String)>,
+    pub warnings: Vec<LexWarning>,
+}
+
 impl<'a> Lexer<'a> {
     pub fn new(src: &'a str) -> Self {
         Lexer::from_bytes(src.as_bytes())
@@ -288,9 +345,21 @@ impl<'a> Lexer<'a> {
     /// `tokenize_with_spans`, plus every non-doc comment as its start
     /// position and source text, and the warnings for what was skipped.
     pub fn tokenize_with_comments(
-        mut self,
+        self,
     ) -> (Vec<SpannedToken>, Vec<(Position, String)>, Vec<LexWarning>) {
-        let tokens = self.run();
+        let LexOutput {
+            lexed,
+            comments,
+            warnings,
+        } = self.lex();
+        (lexed.into_spanned(), comments, warnings)
+    }
+
+    /// The tokens as the parser reads them, with every non-doc comment as
+    /// its start position and source text, and the warnings for what was
+    /// skipped.
+    pub fn lex(mut self) -> LexOutput {
+        let lexed = self.run_lexed();
         let comments = std::mem::take(&mut self.comments)
             .into_iter()
             .map(|(start, end)| {
@@ -298,10 +367,18 @@ impl<'a> Lexer<'a> {
                 (self.line_col_at(start), text)
             })
             .collect();
-        (tokens, comments, self.warnings)
+        LexOutput {
+            lexed,
+            comments,
+            warnings: self.warnings,
+        }
     }
 
     fn run(&mut self) -> Vec<(Token, Span, Option<String>)> {
+        self.run_lexed().into_spanned()
+    }
+
+    fn run_lexed(&mut self) -> Lexed {
         // A real PHP file averages well under one token per 4 source
         // bytes (identifiers/keywords/string contents are usually several
         // bytes each, and whitespace/comments between tokens contribute
@@ -310,21 +387,42 @@ impl<'a> Lexer<'a> {
         // case needs zero of `Vec::push`'s own amortized-growth
         // reallocations instead of the ~log2(n) a bare `Vec::new()` would
         // pay for a file with thousands of tokens.
-        let mut tokens: Vec<(Token, Span, Option<String>)> = Vec::with_capacity(self.src.len() / 4);
+        let estimate = self.src.len() / 4;
+        let mut tokens: Vec<Token> = Vec::with_capacity(estimate);
+        let mut spans: Vec<Span> = Vec::with_capacity(estimate);
+        let mut keyword_raw: Vec<(usize, String)> = Vec::new();
+        let mut docs: Vec<LexedDoc> = Vec::new();
         loop {
-            let tok = self.next_token();
-            let keyword_raw = self.pending_keyword_raw.take();
+            let token = self.next_token();
+            let raw = self.pending_keyword_raw.take();
             let span = Span {
                 start: self.line_col_at(self.last_token_start),
                 end: self.line_col_at(self.pos),
             };
-            let done = tok == Token::Eof;
-            tokens.push((tok, span, keyword_raw));
+            if let Token::DocComment(text) = token {
+                docs.push(LexedDoc {
+                    before: tokens.len(),
+                    text,
+                    span,
+                });
+                continue;
+            }
+            let done = matches!(token, Token::Eof);
+            if let Some(raw) = raw {
+                keyword_raw.push((tokens.len(), raw));
+            }
+            tokens.push(token);
+            spans.push(span);
             if done {
                 break;
             }
         }
-        tokens
+        Lexed {
+            tokens,
+            spans,
+            keyword_raw,
+            docs,
+        }
     }
 
     pub fn tokenize(self) -> Vec<Token> {

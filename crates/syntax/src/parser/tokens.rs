@@ -256,9 +256,9 @@ impl Parser {
                 // token stream).
                 let raw = self
                     .keyword_raw
-                    .get(idx)
-                    .cloned()
-                    .flatten()
+                    .binary_search_by_key(&idx, |(index, _)| *index)
+                    .ok()
+                    .map(|at| self.keyword_raw[at].1.clone())
                     .unwrap_or_else(|| kw.as_str().to_string());
                 Some(self.interner.name(&raw))
             }
