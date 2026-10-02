@@ -1652,6 +1652,7 @@ version = "0.1.0"
 dependencies = [
  "arbitrary",
  "criterion",
+ "hashbrown 0.17.1",
  "hotpath",
  "memchr",
  "rustc-hash 2.1.3",

@@ -17,7 +17,7 @@ use std::fmt;
 use std::hash::{Hash, Hasher};
 use std::sync::{Arc, LazyLock, Mutex, Weak};
 
-use rustc_hash::{FxHashMap, FxHasher};
+use rustc_hash::FxHasher;
 
 struct NameData {
     text: Box<str>,
@@ -246,16 +246,14 @@ const SHARDS: usize = 16;
 /// every holder dropped stays until the table next sweeps, which it does
 /// once it has grown to twice what the last sweep left.
 struct WeakTable<T: ?Sized> {
-    buckets: FxHashMap<u64, Vec<Weak<T>>>,
-    len: usize,
+    entries: hashbrown::HashTable<(u64, Weak<T>)>,
     sweep_at: usize,
 }
 
 impl<T: ?Sized> Default for WeakTable<T> {
     fn default() -> Self {
         WeakTable {
-            buckets: FxHashMap::default(),
-            len: 0,
+            entries: hashbrown::HashTable::new(),
             sweep_at: MIN_SWEEP,
         }
     }
@@ -265,27 +263,32 @@ const MIN_SWEEP: usize = 1024;
 
 impl<T: ?Sized> WeakTable<T> {
     /// The live value with text hash `hash` that `is_it` accepts, else
-    /// the one `make` builds, now interned.
+    /// the one `make` builds, now interned. The table is keyed by the
+    /// hash it is given, which is not hashed again.
     fn get_or_insert(
         &mut self,
         hash: u64,
         is_it: impl Fn(&T) -> bool,
         make: impl FnOnce() -> Arc<T>,
     ) -> Arc<T> {
-        let bucket = self.buckets.entry(hash).or_default();
-        if let Some(found) = bucket.iter().filter_map(Weak::upgrade).find(|v| is_it(v)) {
-            return found;
+        let mut found = None;
+        self.entries.find(hash, |(h, weak)| {
+            *h == hash
+                && match weak.upgrade() {
+                    Some(value) if is_it(&value) => {
+                        found = Some(value);
+                        true
+                    }
+                    _ => false,
+                }
+        });
+        if let Some(value) = found {
+            return value;
         }
-        // Entries whose value is gone leave the bucket where a value is
-        // added to it, so a name interned and dropped over and over does
-        // not pile up.
-        let before = bucket.len();
-        bucket.retain(|w| w.strong_count() > 0);
-        self.len -= before - bucket.len();
         let value = make();
-        bucket.push(Arc::downgrade(&value));
-        self.len += 1;
-        if self.len >= self.sweep_at {
+        self.entries
+            .insert_unique(hash, (hash, Arc::downgrade(&value)), |(h, _)| *h);
+        if self.entries.len() >= self.sweep_at {
             self.sweep();
         }
         value
@@ -293,12 +296,8 @@ impl<T: ?Sized> WeakTable<T> {
 
     /// Drops every entry whose value is gone.
     fn sweep(&mut self) {
-        self.buckets.retain(|_, bucket| {
-            bucket.retain(|w| w.strong_count() > 0);
-            !bucket.is_empty()
-        });
-        self.len = self.buckets.values().map(Vec::len).sum();
-        self.sweep_at = (self.len * 2).max(MIN_SWEEP);
+        self.entries.retain(|(_, weak)| weak.strong_count() > 0);
+        self.sweep_at = (self.entries.len() * 2).max(MIN_SWEEP);
     }
 }
 
@@ -344,7 +343,8 @@ impl Interner {
     /// another thread panicked while holding it; the table itself is
     /// still consistent.
     fn shard(&self, hash: u64) -> std::sync::MutexGuard<'_, Shard> {
-        self.shards[hash as usize % SHARDS]
+        // Bits the shard's table does not index by: it takes the low ones.
+        self.shards[(hash >> 24) as usize % SHARDS]
             .lock()
             .unwrap_or_else(|e| e.into_inner())
     }
@@ -400,7 +400,7 @@ mod tests {
         let entries: usize = interner
             .shards
             .iter()
-            .map(|s| s.lock().unwrap().strs.len)
+            .map(|s| s.lock().unwrap().strs.entries.len())
             .sum();
         assert!(entries < SHARDS * MIN_SWEEP, "{entries} entries kept");
     }
