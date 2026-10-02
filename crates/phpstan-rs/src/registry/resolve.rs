@@ -359,10 +359,8 @@ impl Registry {
         let class_names = self.scoped_class_names();
         let max_iterations = class_names.len().max(1);
         let levels = self.hierarchy_levels(&class_names);
-        let bindings: FxHashMap<Name, OnceLock<AncestorBindings>> = class_names
-            .iter()
-            .map(|name| (name.clone(), OnceLock::new()))
-            .collect();
+        let bindings: Vec<OnceLock<AncestorBindings>> =
+            class_names.iter().map(|_| OnceLock::new()).collect();
         match levels {
             // What a class takes from its ancestors is read from their
             // signatures as they stand and written to its own alone, so
@@ -370,14 +368,15 @@ impl Registry {
             // reaches the fixed point in one sweep.
             Some(levels) => {
                 for level in &levels {
-                    self.flatten_phpdoc_inheritance_one_pass(level, &bindings);
+                    self.flatten_phpdoc_inheritance_one_pass(&class_names, level, &bindings);
                 }
             }
             // A class that is its own ancestor has no first level: the
             // passes run until nothing changes.
             None => {
+                let order: Vec<usize> = (0..class_names.len()).collect();
                 for _ in 0..max_iterations {
-                    if !self.flatten_phpdoc_inheritance_one_pass(&class_names, &bindings) {
+                    if !self.flatten_phpdoc_inheritance_one_pass(&class_names, &order, &bindings) {
                         break;
                     }
                 }
@@ -385,26 +384,32 @@ impl Registry {
         }
     }
 
-    /// `class_names` grouped by the longest chain of ancestors among them
-    /// each has, those with none first; `None` when a class is among its
-    /// own ancestors. Parents outside `class_names` are not counted: they
-    /// are not resolved again.
-    fn hierarchy_levels(&self, class_names: &[Name]) -> Option<Vec<Vec<Name>>> {
+    /// The positions in `class_names` grouped by the longest chain of
+    /// ancestors among the classes each has, those with none first; `None`
+    /// when a class is among its own ancestors. Parents outside
+    /// `class_names` are not counted: they are not resolved again.
+    fn hierarchy_levels(&self, class_names: &[Name]) -> Option<Vec<Vec<usize>>> {
         let scoped: FxHashSet<&str> = class_names.iter().map(|name| name.lower()).collect();
         let mut depth: FxHashMap<&str, usize> = FxHashMap::default();
         let mut visiting: FxHashSet<&str> = FxHashSet::default();
         // Explicit stack: a chain of ancestors can be as long as the
-        // classes are many.
+        // classes are many. An entry expanded holds the class it read.
         for start in class_names {
-            let mut stack: Vec<(&Name, bool)> = vec![(start, false)];
+            let mut stack: Vec<(&Name, Option<&ClassReflection>)> = vec![(start, None)];
             while let Some((name, expanded)) = stack.pop() {
                 let key = name.lower();
                 if depth.contains_key(key) {
                     continue;
                 }
-                let Some(info) = self.classes.get(name) else {
-                    depth.insert(key, 0);
-                    continue;
+                let info = match expanded {
+                    Some(info) => info,
+                    None => {
+                        let Some(info) = self.classes.get(name) else {
+                            depth.insert(key, 0);
+                            continue;
+                        };
+                        info
+                    }
                 };
                 let parents = || {
                     info.extends
@@ -413,17 +418,17 @@ impl Registry {
                         .chain(&info.uses)
                         .filter(|parent| scoped.contains(parent.lower()))
                 };
-                if !expanded {
+                if expanded.is_none() {
                     if !visiting.insert(key) {
                         return None;
                     }
-                    stack.push((name, true));
+                    stack.push((name, Some(info)));
                     for parent in parents() {
                         if visiting.contains(parent.lower()) {
                             return None;
                         }
                         if !depth.contains_key(parent.lower()) {
-                            stack.push((parent, false));
+                            stack.push((parent, None));
                         }
                     }
                 } else {
@@ -436,13 +441,13 @@ impl Registry {
                 }
             }
         }
-        let mut levels: Vec<Vec<Name>> = Vec::new();
-        for name in class_names {
+        let mut levels: Vec<Vec<usize>> = Vec::new();
+        for (index, name) in class_names.iter().enumerate() {
             let level = depth.get(name.lower()).copied().unwrap_or(0);
             if levels.len() <= level {
                 levels.resize_with(level + 1, Vec::new);
             }
-            levels[level].push(name.clone());
+            levels[level].push(index);
         }
         Some(levels)
     }
@@ -1061,19 +1066,21 @@ impl Registry {
     fn flatten_phpdoc_inheritance_one_pass(
         &mut self,
         class_names: &[Name],
-        bindings: &FxHashMap<Name, OnceLock<AncestorBindings>>,
+        order: &[usize],
+        bindings: &[OnceLock<AncestorBindings>],
     ) -> bool {
-        type Backfill = (Name, Name, Vec<(usize, Type, bool)>, Option<(Type, bool)>);
+        // What one method takes from its ancestors: the parameters by
+        // position and the return type.
+        type Backfill = (Name, Vec<(usize, Type, bool)>, Option<(Type, bool)>);
 
         let registry: &Registry = self;
-        let backfills: Vec<Backfill> = class_names
+        let backfills: Vec<(Name, Vec<Backfill>)> = order
             .par_iter()
             .with_min_len(crate::registry::PASS_CHUNK)
-            .flat_map(|class_name| {
+            .filter_map(|&index| {
+                let class_name = &class_names[index];
                 let mut per_class: Vec<Backfill> = Vec::new();
-                let Some(info) = registry.classes.get(class_name) else {
-                    return per_class;
-                };
+                let info = registry.classes.get(class_name)?;
                 // What `lookup_ancestor_method_with_owner` reads, read once
                 // per class and only when a method needs it: the maps of
                 // its parents' methods to their owners, and the owners
@@ -1127,10 +1134,7 @@ impl Registry {
                     // the real resolved bindings, not merely "is this
                     // ancestor name reachable at all".
                     let ancestor_bindings = || {
-                        bindings
-                            .get(class_name)
-                            .expect("every class has a bindings slot")
-                            .get_or_init(|| registry.ancestor_bindings(class_name, info))
+                        bindings[index].get_or_init(|| registry.ancestor_bindings(class_name, info))
                     };
                     // Mirrors real PHPStan's identical carve-out
                     // (`PhpDocInheritanceResolver::resolvePhpDocForMethod`):
@@ -1269,25 +1273,22 @@ impl Registry {
                         )
                     });
                     if !param_fills.is_empty() || return_fill.is_some() {
-                        per_class.push((
-                            class_name.clone(),
-                            method_name.clone(),
-                            param_fills,
-                            return_fill,
-                        ));
+                        per_class.push((method_name.clone(), param_fills, return_fill));
                     }
                 }
-                per_class
+                (!per_class.is_empty()).then(|| (class_name.clone(), per_class))
             })
             .collect();
 
         let mut changed = false;
-        for (class_name, method_name, param_fills, return_fill) in backfills {
-            if let Some(sig) = self
-                .classes
-                .get_mut(&class_name)
-                .and_then(|info| info.methods.get_mut(&method_name))
-            {
+        for (class_name, per_class) in backfills {
+            let Some(info) = self.classes.get_mut(&class_name) else {
+                continue;
+            };
+            for (method_name, param_fills, return_fill) in per_class {
+                let Some(sig) = info.methods.get_mut(&method_name) else {
+                    continue;
+                };
                 for (i, ty, explicit_mixed_hint) in param_fills {
                     if let Some(p) = sig.params.get_mut(i) {
                         p.ty = ty;
