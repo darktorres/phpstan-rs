@@ -64,7 +64,18 @@ pub(crate) fn tag_type_nodes(doc: &str) -> TagTypeNodes {
 /// Every `@var` tag's winning type node, keyed by its variable name
 /// (`None` for a bare `@var Type`), in first-appearance order - the same
 /// prefix precedence as `tag_type_nodes`.
-pub(crate) fn var_tag_nodes(doc: &str) -> Vec<(Option<String>, TypeNode)> {
+///
+/// Kept by the doc comment's text: a statement's comment is asked for its
+/// `@var` tags by four checks, and selecting the winners clones their
+/// type nodes.
+pub(crate) fn var_tag_nodes(doc: &str) -> std::sync::Arc<Vec<(Option<String>, TypeNode)>> {
+    type Tags = Vec<(Option<String>, TypeNode)>;
+    static MEMO: std::sync::LazyLock<syntax::memo::Memo<Tags>> =
+        std::sync::LazyLock::new(|| syntax::memo::Memo::with_limits(1024, 256 * 1024));
+    MEMO.get(doc, select_var_tag_nodes)
+}
+
+fn select_var_tag_nodes(doc: &str) -> Vec<(Option<String>, TypeNode)> {
     let node = grammar::parse_shared(doc);
     let mut named: Vec<(Option<String>, TypeNode)> = Vec::new();
     // When any tag is unnamed, only the unnamed tags of the last tag kind

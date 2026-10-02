@@ -285,9 +285,10 @@ impl<'a> Checker<'a> {
     /// makes.
     pub(crate) fn statement_var_tags(&self, doc: &str) -> Vec<(Option<String>, Type)> {
         super::phpdoc_unresolvable::var_tag_nodes(doc)
-            .into_iter()
+            .iter()
             .map(|(name, node)| {
-                let ty = self.resolve_type_node(&node);
+                let name = name.clone();
+                let ty = self.resolve_type_node(node);
                 let ty = match &self.current_class {
                     Some(class) => match self.registry.classes.get(class.as_str()) {
                         Some(info) if !info.type_aliases().is_empty() => {

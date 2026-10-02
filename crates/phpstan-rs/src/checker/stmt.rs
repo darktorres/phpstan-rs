@@ -153,8 +153,8 @@ impl<'a> Checker<'a> {
             return true;
         }
         let tags: Vec<Option<String>> = super::phpdoc_unresolvable::var_tag_nodes(doc)
-            .into_iter()
-            .map(|(name, _)| name)
+            .iter()
+            .map(|(name, _)| name.clone())
             .collect();
         if tags.is_empty() {
             return true;
@@ -368,8 +368,8 @@ impl<'a> Checker<'a> {
             start: syntax::token::Position { line, col: 1 },
             end: syntax::token::Position { line, col: 1 },
         };
-        for (variable, node) in super::phpdoc_unresolvable::var_tag_nodes(doc) {
-            if self.type_node_unresolvable(&node, class.as_deref()) {
+        for (variable, node) in super::phpdoc_unresolvable::var_tag_nodes(doc).iter() {
+            if self.type_node_unresolvable(node, class.as_deref()) {
                 let subject = match variable {
                     Some(v) => format!("PHPDoc tag @var for variable ${v}"),
                     None => "PHPDoc tag @var".to_string(),
