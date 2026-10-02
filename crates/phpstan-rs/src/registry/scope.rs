@@ -2,6 +2,8 @@
 //! all of them, or only those a change can have affected, every other
 //! entry being read as already resolved.
 
+use std::sync::Arc;
+
 use rustc_hash::FxHashSet;
 use syntax::name::Name;
 
@@ -11,8 +13,8 @@ use crate::registry::Registry;
 /// name; `None` for every one.
 #[derive(Debug, Clone, Default)]
 pub(crate) struct Scope {
-    classes: Option<FxHashSet<String>>,
-    functions: Option<FxHashSet<String>>,
+    classes: Option<Arc<FxHashSet<String>>>,
+    functions: Option<Arc<FxHashSet<String>>>,
 }
 
 impl Scope {
@@ -27,8 +29,12 @@ impl Scope {
         functions: impl IntoIterator<Item = &'a str>,
     ) -> Scope {
         Scope {
-            classes: Some(classes.into_iter().map(str::to_ascii_lowercase).collect()),
-            functions: Some(functions.into_iter().map(str::to_ascii_lowercase).collect()),
+            classes: Some(Arc::new(
+                classes.into_iter().map(str::to_ascii_lowercase).collect(),
+            )),
+            functions: Some(Arc::new(
+                functions.into_iter().map(str::to_ascii_lowercase).collect(),
+            )),
         }
     }
 
@@ -42,8 +48,8 @@ impl Scope {
             "a scope's keys are lowercased"
         );
         Scope {
-            classes: Some(classes),
-            functions: Some(functions),
+            classes: Some(Arc::new(classes)),
+            functions: Some(Arc::new(functions)),
         }
     }
 
@@ -65,12 +71,15 @@ impl Scope {
 
     /// What `self` has that `other` hasn't; both are named sets.
     pub(crate) fn minus(&self, other: &Scope) -> Scope {
-        let diff = |ours: &Option<FxHashSet<String>>, theirs: &Option<FxHashSet<String>>| {
+        type Keys = Option<Arc<FxHashSet<String>>>;
+        let diff = |ours: &Keys, theirs: &Keys| -> Keys {
             ours.as_ref().map(|ours| {
-                ours.iter()
-                    .filter(|key| !theirs.as_ref().is_none_or(|theirs| theirs.contains(*key)))
-                    .cloned()
-                    .collect()
+                Arc::new(
+                    ours.iter()
+                        .filter(|key| !theirs.as_ref().is_none_or(|theirs| theirs.contains(*key)))
+                        .cloned()
+                        .collect(),
+                )
             })
         };
         Scope {
@@ -81,12 +90,22 @@ impl Scope {
 
     /// The lowercased class names, when not every class.
     pub(crate) fn class_keys(&self) -> Option<&FxHashSet<String>> {
-        self.classes.as_ref()
+        self.classes.as_deref()
+    }
+
+    /// `class_keys`, shared: the same set, in the same order.
+    pub(crate) fn shared_class_keys(&self) -> Option<Arc<FxHashSet<String>>> {
+        self.classes.clone()
     }
 
     /// The lowercased function names, when not every function.
     pub(crate) fn function_keys(&self) -> Option<&FxHashSet<String>> {
-        self.functions.as_ref()
+        self.functions.as_deref()
+    }
+
+    /// `function_keys`, shared: the same set, in the same order.
+    pub(crate) fn shared_function_keys(&self) -> Option<Arc<FxHashSet<String>>> {
+        self.functions.clone()
     }
 }
 

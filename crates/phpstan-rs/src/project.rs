@@ -1161,11 +1161,11 @@ impl Project {
         if !body_scope.is_all() {
             self.registry.warm(&body_scope);
         }
-        let before = changed
-            .as_ref()
-            .map(|_| self.registry.resolved_snapshot(&body_scope));
-        self.registry
-            .end_declaration_changes(&scope, !self.built_once);
+        let before = self.registry.end_declaration_changes(
+            &scope,
+            changed.as_ref().map(|_| &body_scope),
+            !self.built_once,
+        );
         if !body_scope.is_all() {
             self.registry.clear_purity(&body_scope.minus(&scope));
         }

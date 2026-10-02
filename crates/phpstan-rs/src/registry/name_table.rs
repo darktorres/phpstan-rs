@@ -104,7 +104,7 @@ type Decoder<V> = fn(&[u8]) -> V;
 /// A table's shared base: its entries sorted by lowercased name, each
 /// decoded already, or kept stored until first read.
 #[derive(Debug)]
-pub(super) struct Base<V> {
+pub(crate) struct Base<V> {
     keys: Keys,
     slots: Box<[Slot<V>]>,
     // What decodes an entry of a stored base.
@@ -470,6 +470,43 @@ impl<V> NameTable<V> {
             base: self.base.clone(),
             hidden: self.hidden.clone(),
         }
+    }
+}
+
+/// An entry taken out of a table: the table's own value moved out, or a
+/// base's, which stays where it is in the base it is read from.
+pub(crate) enum Detached<V> {
+    Own(V),
+    Base(Arc<Base<V>>, usize),
+}
+
+impl<V> Detached<V> {
+    pub(crate) fn get(&self) -> &V {
+        match self {
+            Detached::Own(value) => value,
+            Detached::Base(base, i) => base.value(*i),
+        }
+    }
+}
+
+impl<V> NameTable<V> {
+    /// Takes out what `name` finds, without copying it: the table's own
+    /// value is moved out, and a base's is hidden from the table and read
+    /// where it is. `take` is the same, returning a copy of a base's.
+    pub(crate) fn detach(&mut self, name: &str) -> Option<Detached<V>> {
+        with_function_key(name, move |key| {
+            if let Some(value) = self.entries.remove(key) {
+                return Some(Detached::Own(value));
+            }
+            if self.hidden.contains(key) {
+                return None;
+            }
+            let base = self.base.as_ref()?;
+            let i = base.find(key)?;
+            let (declared, base) = (base.name(i).clone(), Arc::clone(base));
+            self.hidden.insert(Folded(declared));
+            Some(Detached::Base(base, i))
+        })
     }
 }
 

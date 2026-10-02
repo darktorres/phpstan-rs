@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use rustc_hash::{FxHashMap, FxHashSet};
 use syntax::name::Name;
 
@@ -51,8 +53,8 @@ pub(crate) use function_sig::{
     build_template_params, infer_const_type, mark_template_params, substitute_type_aliases,
 };
 pub use name_map::{NameMap, NameSet};
-pub(crate) use name_table::Lazy;
 pub use name_table::NameTable;
+pub(crate) use name_table::{Detached, Lazy};
 pub type FunctionTable = NameTable<FunctionReflection>;
 pub(crate) use index::{BuiltDecl, build_declarations, register_global_constant};
 pub(crate) use name_context::{collect_class_name_case_refs, resolve_names_in_type};
@@ -105,10 +107,51 @@ pub(crate) struct ChangedNames {
     pub(crate) constants: FxHashMap<String, Option<Type>>,
 }
 
-/// `Registry::resolved_snapshot`.
+/// `scope_keys`' entries of `resolved` reset to `raw`'s (or removed with
+/// them). Returns, for each of `snapshot_keys` in order, what `resolved`
+/// held under it: taken out where the key is reset, copied where it is not.
+fn reset_scoped<V: Clone>(
+    resolved: &mut NameTable<V>,
+    raw: &NameTable<V>,
+    scope_keys: Option<&FxHashSet<String>>,
+    snapshot_keys: Option<&FxHashSet<String>>,
+) -> Vec<Option<Detached<V>>> {
+    let reset = |resolved: &mut NameTable<V>, key: &String| {
+        let old = resolved.detach(key);
+        if let Some((name, value)) = raw.get_with_name(key) {
+            resolved.insert(name.clone(), value.clone());
+        }
+        old
+    };
+    let mut before = Vec::new();
+    let mut reset_count = 0;
+    for key in snapshot_keys.into_iter().flatten() {
+        before.push(if scope_keys.is_some_and(|keys| keys.contains(key)) {
+            reset_count += 1;
+            reset(resolved, key)
+        } else {
+            resolved.get(key).cloned().map(Detached::Own)
+        });
+    }
+    // Scope keys the snapshot has none of, and every one without a snapshot.
+    if reset_count < scope_keys.map_or(0, FxHashSet::len) {
+        for key in scope_keys.into_iter().flatten() {
+            if !snapshot_keys.is_some_and(|keys| keys.contains(key)) {
+                reset(resolved, key);
+            }
+        }
+    }
+    before
+}
+
+/// What `Registry::end_declaration_changes` returns.
 pub(crate) struct ResolvedSnapshot {
-    classes: Vec<(String, Option<ClassReflection>)>,
-    functions: Vec<(String, Option<FunctionReflection>)>,
+    // The entries of the scope's keys, in the order of iterating the keys:
+    // the key sets are shared with the scope, never changed.
+    class_keys: Option<Arc<FxHashSet<String>>>,
+    classes: Vec<Option<Detached<ClassReflection>>>,
+    function_keys: Option<Arc<FxHashSet<String>>>,
+    functions: Vec<Option<Detached<FunctionReflection>>>,
     property_writes: FxHashMap<(Option<String>, String), PropertyWrites>,
     global_variables: FxHashMap<Name, Type>,
 }
@@ -464,7 +507,18 @@ impl Registry {
     /// (or removed with them), for the finishing passes to resolve. The
     /// first time, with `keep_raw`, keeps a copy of the declarations as
     /// built instead.
-    pub(crate) fn end_declaration_changes(&mut self, scope: &scope::Scope, keep_raw: bool) {
+    ///
+    /// With a `body_scope` (a scope with `scope` in it), returns the
+    /// resolved forms those entries had, each taken out of the table
+    /// rather than copied where `scope` resets it, and every property-write
+    /// verdict, for `changed_since` to compare against. Only a registry
+    /// that keeps its declarations as built has resolved forms to return.
+    pub(crate) fn end_declaration_changes(
+        &mut self,
+        scope: &scope::Scope,
+        body_scope: Option<&scope::Scope>,
+        keep_raw: bool,
+    ) -> Option<ResolvedSnapshot> {
         let Some(raw) = &mut self.raw else {
             if keep_raw {
                 self.raw = Some(Box::new(RawDeclarations {
@@ -472,38 +526,41 @@ impl Registry {
                     functions: self.functions.clone(),
                 }));
             }
-            return;
+            return None;
         };
-        if self.raw_active {
+        // While declarations change, the resolved tables sit in `raw`.
+        let swap_back = self.raw_active;
+        if swap_back {
             std::mem::swap(&mut self.classes, &mut raw.classes);
             std::mem::swap(&mut self.functions, &mut raw.functions);
             self.raw_active = false;
         }
+        let snapshot = |classes, functions, registry: &Registry| ResolvedSnapshot {
+            class_keys: body_scope.and_then(scope::Scope::shared_class_keys),
+            classes,
+            function_keys: body_scope.and_then(scope::Scope::shared_function_keys),
+            functions,
+            property_writes: registry.property_writes.clone(),
+            global_variables: registry.global_variables.clone(),
+        };
         if scope.is_all() {
             self.classes = raw.classes.clone();
             self.functions = raw.functions.clone();
-            return;
+            return body_scope.map(|_| snapshot(Vec::new(), Vec::new(), self));
         }
-        for key in scope.class_keys().into_iter().flatten() {
-            match raw.classes.get_with_name(key) {
-                Some((name, info)) => {
-                    self.classes.insert(name.clone(), info.clone());
-                }
-                None => {
-                    self.classes.remove(key);
-                }
-            }
-        }
-        for key in scope.function_keys().into_iter().flatten() {
-            match raw.functions.get_with_name(key) {
-                Some((name, sig)) => {
-                    self.functions.insert(name.clone(), sig.clone());
-                }
-                None => {
-                    self.functions.remove(key);
-                }
-            }
-        }
+        let classes = reset_scoped(
+            &mut self.classes,
+            &raw.classes,
+            scope.class_keys(),
+            body_scope.and_then(scope::Scope::class_keys),
+        );
+        let functions = reset_scoped(
+            &mut self.functions,
+            &raw.functions,
+            scope.function_keys(),
+            body_scope.and_then(scope::Scope::function_keys),
+        );
+        body_scope.map(|_| snapshot(classes, functions, self))
     }
 
     /// Makes the class, function and derived tables a shared base, for
@@ -544,32 +601,6 @@ impl Registry {
         }
     }
 
-    /// The resolved forms of `scope`'s classes and functions, and every
-    /// property-write verdict, for `changed_since` to compare against.
-    pub(crate) fn resolved_snapshot(&self, scope: &scope::Scope) -> ResolvedSnapshot {
-        // While declarations change, the resolved tables sit in `raw`.
-        let (classes, functions) = match &self.raw {
-            Some(raw) if self.raw_active => (&raw.classes, &raw.functions),
-            _ => (&self.classes, &self.functions),
-        };
-        ResolvedSnapshot {
-            classes: scope
-                .class_keys()
-                .into_iter()
-                .flatten()
-                .map(|key| (key.clone(), classes.get(key).cloned()))
-                .collect(),
-            functions: scope
-                .function_keys()
-                .into_iter()
-                .flatten()
-                .map(|key| (key.clone(), functions.get(key).cloned()))
-                .collect(),
-            property_writes: self.property_writes.clone(),
-            global_variables: self.global_variables.clone(),
-        }
-    }
-
     /// The `deps::dependency_key`s of the classes, functions and
     /// constants whose resolved form differs from `before` (and, for
     /// constants, from `changed`'s earlier types).
@@ -579,13 +610,17 @@ impl Registry {
         changed: &ChangedNames,
     ) -> FxHashSet<String> {
         let mut keys = FxHashSet::default();
-        for (key, old) in &before.classes {
-            if self.classes.get(key) != old.as_ref() {
+        let class_keys = before.class_keys.iter().flat_map(|keys| keys.iter());
+        debug_assert_eq!(class_keys.clone().count(), before.classes.len());
+        for (key, old) in class_keys.zip(&before.classes) {
+            if self.classes.get(key) != old.as_ref().map(Detached::get) {
                 keys.insert(key.clone());
             }
         }
-        for (key, old) in &before.functions {
-            if self.functions.get(key) != old.as_ref() {
+        let function_keys = before.function_keys.iter().flat_map(|keys| keys.iter());
+        debug_assert_eq!(function_keys.clone().count(), before.functions.len());
+        for (key, old) in function_keys.zip(&before.functions) {
+            if self.functions.get(key) != old.as_ref().map(Detached::get) {
                 keys.insert(key.clone());
             }
         }
