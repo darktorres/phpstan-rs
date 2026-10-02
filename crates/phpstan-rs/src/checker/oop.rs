@@ -727,16 +727,25 @@ impl<'a> Checker<'a> {
         let Some(doc) = doc_comment else {
             return;
         };
-        for tag in docblock::unknown_phpstan_tags(doc) {
-            self.report(
-                format!("Unknown PHPDoc tag: @phpstan-{tag}"),
-                span,
-                2,
-                "phpDoc.phpstanTag",
-            );
+        // A tag is a line that starts with `@`: without one nothing below
+        // has anything to report, and without `@phpstan-` there is no
+        // unknown PHPStan tag.
+        if !doc.contains('@') {
+            return;
         }
-        self.report_invalid_doc_tag_values(doc, span);
-        self.check_doc_see_tag_targets(doc, span);
+        if doc.contains("@phpstan-") {
+            for tag in docblock::unknown_phpstan_tags(doc) {
+                self.report(
+                    format!("Unknown PHPDoc tag: @phpstan-{tag}"),
+                    span,
+                    2,
+                    "phpDoc.phpstanTag",
+                );
+            }
+        }
+        let block = docblock::parse(doc);
+        self.report_invalid_tag_values_of(&block, span);
+        self.check_doc_see_tag_targets(&block, span);
     }
 
     /// `InvalidPhpDocTagValueRule` (`phpDoc.parseError`), level 2: a tag
@@ -744,7 +753,12 @@ impl<'a> Checker<'a> {
     /// type-alias tag names its alias instead of repeating the whole value,
     /// matching real PHPStan's own two message shapes.
     pub(crate) fn report_invalid_doc_tag_values(&mut self, doc: &str, span: Span) {
-        for invalid in docblock::parse(doc).invalid_tag_values {
+        self.report_invalid_tag_values_of(&docblock::parse(doc), span);
+    }
+
+    /// `report_invalid_doc_tag_values` for a docblock already parsed.
+    fn report_invalid_tag_values_of(&mut self, block: &docblock::DocBlock, span: Span) {
+        for invalid in &block.invalid_tag_values {
             let message = if invalid.tag == "type" || invalid.tag == "phpstan-type" {
                 let alias = invalid.value.split_whitespace().next().unwrap_or("");
                 format!(
@@ -766,8 +780,8 @@ impl<'a> Checker<'a> {
     /// the registry. Anything else (a URL, free-text prose, a bare
     /// function name) is left alone - no upstream grammar exists to tell
     /// those apart from a real reference with any confidence.
-    fn check_doc_see_tag_targets(&mut self, doc: &str, span: Span) {
-        for target in &docblock::parse(doc).see {
+    fn check_doc_see_tag_targets(&mut self, block: &docblock::DocBlock, span: Span) {
+        for target in &block.see {
             let (class_part, member) = match target.split_once("::") {
                 Some((c, m)) => (c, Some(m)),
                 None => (target.as_str(), None),
