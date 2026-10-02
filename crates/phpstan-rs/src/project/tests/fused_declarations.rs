@@ -131,3 +131,69 @@ fn the_unconditional_classes_are_those_the_declaration_walk_finds() {
         assert_eq!(by_walk, by_visitor, "source {i}");
     }
 }
+
+#[test]
+fn leaving_out_the_walks_a_file_cannot_need_gives_the_tree_the_walks_gave() {
+    let interner = Arc::new(Interner::new());
+    let sources = [
+        "<?php class A { public function m() {} }",
+        "<?php $o = new class { public function m() {} }; $p = new class {};",
+        "<?php $a = fn() => new class {}; function f() { return new class extends B {}; }",
+        "<?php use JetBrains\\PhpStorm\\Internal\\LanguageLevelTypeAware; class C { #[LanguageLevelTypeAware(['8.0' => 'int'], default: 'string')] public $p; }",
+        "<?php use JetBrains\\PhpStorm\\Internal\\PhpStormStubsElementAvailable as Avail; function g(#[Avail(from: '5.3', to: '7.4')] $a, #[Avail('8.0')] $b) {}",
+        "<?php #[\\JetBrains\\PhpStorm\\Internal\\PhpStormStubsElementAvailable('8.0')] function h() {} #[\\JetBrains\\PhpStorm\\Internal\\PhpStormStubsElementAvailable(from: '5.3', to: '7.4')] function h() {}",
+        "<?php namespace N; use JetBrains\\PhpStorm\\Internal as I; #[I\\PhpVersionAware(['8.1' => 'int'], default: 'string')] function k(): int|string { return 1; }",
+        "<?php #[Other] function plain() {} $x = new class {};",
+        "<?php",
+    ];
+    for (i, source) in sources.iter().enumerate() {
+        let path = Path::new("/p/file.php");
+        let parsed = syntax::parse(source.as_bytes(), &interner).expect("parses");
+        let facts = parsed.facts;
+        // What the walks give with nothing left out.
+        let mut every = syntax::parse(source.as_bytes(), &interner)
+            .expect("parses")
+            .stmts;
+        crate::stub_attributes::apply_stub_attributes(&mut every);
+        crate::registry::name_anonymous_classes(&mut every, &path.display().to_string());
+        let (gated, _, _, gated_facts) =
+            parse_with_ignores(path, source.as_bytes(), &interner).expect("parses");
+        assert_eq!(gated_facts, facts, "facts of source {i}");
+        assert_eq!(format!("{gated:?}"), format!("{every:?}"), "source {i}");
+        // The anonymous classes' registry entries.
+        let origin = Origin::File(Arc::from(path));
+        let all = crate::registry::anonymous_class_decls(&gated, &origin);
+        assert_eq!(
+            !all.is_empty(),
+            facts.has_anonymous_class,
+            "anonymous classes of source {i}"
+        );
+    }
+}
+
+#[test]
+fn what_a_file_names_is_found_among_its_identifiers() {
+    let interner = Arc::new(Interner::new());
+    let facts = |source: &str| syntax::parse(source.as_bytes(), &interner).unwrap().facts;
+    assert_eq!(facts("<?php class A {}"), syntax::FileFacts::default());
+    assert!(facts("<?php $f = new class {};").has_anonymous_class);
+    assert!(facts("<?php $f = new #[A] class {};").has_anonymous_class);
+    assert!(!facts("<?php $f = new Foo(); class Bar {}").has_anonymous_class);
+    for rebind in [
+        "<?php Closure::bind($f, null, A::class);",
+        "<?php $f->bindTo($o);",
+        "<?php $f->BINDTO($o);",
+        "<?php $f->call($o);",
+    ] {
+        assert!(facts(rebind).mentions_closure_rebind, "{rebind}");
+    }
+    assert!(!facts("<?php $f->bound($o); $g->called();").mentions_closure_rebind);
+    for attribute in [
+        "<?php use X\\PhpVersionAware; ",
+        "<?php #[\\X\\LanguageLevelTypeAware([])] function f() {}",
+        "<?php use X\\PhpStormStubsElementAvailable as Y;",
+    ] {
+        assert!(facts(attribute).mentions_stub_attribute, "{attribute}");
+    }
+    assert!(!facts("<?php #[Other] function f() {}").mentions_stub_attribute);
+}

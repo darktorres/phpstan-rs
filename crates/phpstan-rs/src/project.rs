@@ -18,6 +18,7 @@ use crate::registry::{
     BodySource, BuiltDecl, DeclKind, FileBodies, Keep, Origin, Provenance, Registry,
 };
 use diagnostics::{self, Diagnostic, DiagnosticBuilder};
+use syntax::FileFacts;
 use syntax::ast::{Stmt, StmtKind};
 use syntax::declarations::Declared;
 use syntax::lexer::LexWarning;
@@ -126,6 +127,8 @@ struct FileState {
     // Its function and method bodies, which the declarations' provenance
     // finds.
     bodies: FileBodies,
+    // What is true of the file as a whole (`syntax::FileFacts`).
+    facts: FileFacts,
 }
 
 /// The loaded files' function and method bodies, found by provenance.
@@ -866,6 +869,7 @@ impl Project {
             duplicate_class_sites,
             bodies,
             origin_path,
+            facts,
             class_fn_refs,
         } = parsed;
         self.begin_declaration_changes();
@@ -910,6 +914,7 @@ impl Project {
                 analyzed,
                 owner,
                 bodies,
+                facts,
             },
         );
     }
@@ -1589,7 +1594,8 @@ impl Project {
         // *before* the very edit that introduced its own trigger) for as
         // long as the file kept failing to parse, not just for the one
         // request that happened to race a genuinely-invalid save.
-        let (ast, ignores, _) = parse_with_ignores(path, new_source.as_bytes(), &self.interner)?;
+        let (ast, ignores, _, facts) =
+            parse_with_ignores(path, new_source.as_bytes(), &self.interner)?;
         let previous = self.unindex_file(path);
         let (functions, classes) = declared_names(&ast);
         let constants = declared_constants(&ast);
@@ -1634,7 +1640,11 @@ impl Project {
             rebuilt.constants.extend(previous.constants);
         }
         self.rebuild_declarations(&rebuilt, Some((path, &ast, analyzed, load_order)));
-        let anonymous_classes = anonymous_class_names(&ast);
+        let anonymous_classes = if facts.has_anonymous_class {
+            anonymous_class_names(&ast)
+        } else {
+            Vec::new()
+        };
         self.duplicate_fn_sites.index(&ast, path);
         // `is_stub: false` - same reasoning as `load_file_impl`'s own
         // identical note: `update_file` is the LSP/incremental-edit path,
@@ -1663,6 +1673,7 @@ impl Project {
                 analyzed,
                 owner: self.packages.owner(&self.absolute_path(path)),
                 bodies,
+                facts,
             },
         );
         let mut affected = self.finish_declarations();
@@ -2024,6 +2035,7 @@ impl Project {
         checker.set_current_file(path);
         checker.set_current_file_absolute(self.absolute_path(path));
         checker.set_working_dir(self.working_dir.clone());
+        checker.set_closure_rebind_possible(file.facts.mentions_closure_rebind);
         Some((checker, &file.ast))
     }
 
@@ -2544,7 +2556,12 @@ fn trait_line_ranges(ast: &[Stmt]) -> Vec<(u32, u32)> {
 }
 
 /// Parses `source`, with its inline ignore comments.
-type Parsed = (Vec<Stmt>, ignore_comments::IgnoreComments, Vec<LexWarning>);
+type Parsed = (
+    Vec<Stmt>,
+    ignore_comments::IgnoreComments,
+    Vec<LexWarning>,
+    FileFacts,
+);
 
 fn parse_with_ignores(
     path: &Path,
@@ -2554,9 +2571,15 @@ fn parse_with_ignores(
     let parsed = syntax::parse(source, interner)?;
     let ignores = ignore_comments::scan_parsed(&parsed);
     let mut ast = parsed.stmts;
-    crate::stub_attributes::apply_stub_attributes(&mut ast);
-    crate::registry::name_anonymous_classes(&mut ast, &path.display().to_string());
-    Ok((ast, ignores, parsed.warnings))
+    // What the file does not name, or hold, there is nothing to find of by
+    // walking it.
+    if parsed.facts.mentions_stub_attribute {
+        crate::stub_attributes::apply_stub_attributes(&mut ast);
+    }
+    if parsed.facts.has_anonymous_class {
+        crate::registry::name_anonymous_classes(&mut ast, &path.display().to_string());
+    }
+    Ok((ast, ignores, parsed.warnings, parsed.facts))
 }
 
 /// Everything about loading one file that's pure - parsing, plus every
@@ -2606,6 +2629,8 @@ pub struct ParsedFile {
     bodies: FileBodies,
     // The path the file's declarations name it by.
     origin_path: Arc<Path>,
+    // What is true of the file as a whole (`syntax::FileFacts`).
+    facts: FileFacts,
     // The file's class and function use sites, when indexed alongside the
     // parse (`Project::index_use_sites`); `insert_parsed_file` indexes
     // them itself otherwise.
@@ -2626,7 +2651,7 @@ pub fn parse_file(
     is_stub: bool,
     interner: &Arc<Interner>,
 ) -> Result<ParsedFile, ParseError> {
-    let (ast, ignores, lex_warnings) = parse_with_ignores(path, source, interner)?;
+    let (ast, ignores, lex_warnings, facts) = parse_with_ignores(path, source, interner)?;
     let origin_path: Arc<Path> = Arc::from(path);
     let origin = Origin::File(Arc::clone(&origin_path));
     let file_declarations::FileDeclarations {
@@ -2636,7 +2661,7 @@ pub fn parse_file(
         built_decls,
         duplicate_fn_sites,
         duplicate_class_sites,
-    } = file_declarations::collect(&ast, path, is_stub, &origin);
+    } = file_declarations::collect(&ast, path, is_stub, &origin, facts.has_anonymous_class);
     let (references, declaration_references) = deps::both_referenced_names(&ast);
     // The anonymous classes are the declarations built last, one per
     // `new class`, so the file's own walk need not be repeated for them.
@@ -2663,6 +2688,7 @@ pub fn parse_file(
         ignores,
         bodies,
         origin_path,
+        facts,
         class_fn_refs: None,
     })
 }

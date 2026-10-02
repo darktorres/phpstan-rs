@@ -19,6 +19,49 @@ pub struct Comment {
     pub is_doc: bool,
 }
 
+/// What is true of a file as a whole, found as it is lexed and parsed, so
+/// that a walk over its tree that can only find something in a file where
+/// the fact holds can be left out of the others.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct FileFacts {
+    /// The file has an anonymous class (`new class`).
+    pub has_anonymous_class: bool,
+    /// The file names `bind`, `bindTo` or `call`, in any case: a closure
+    /// rebind (`Closure::bind`, `->bindTo()`, `->call()`) needs one of
+    /// them.
+    pub mentions_closure_rebind: bool,
+    /// The file names one of the attributes the stub readers act on
+    /// (`PhpStormStubsElementAvailable`, `LanguageLevelTypeAware`,
+    /// `PhpVersionAware`), in any case, however it imports them.
+    pub mentions_stub_attribute: bool,
+}
+
+impl FileFacts {
+    /// The facts a token list gives: what the file names. An identifier
+    /// is a whole name, or one segment of a qualified one.
+    fn of_tokens(tokens: &[Token]) -> FileFacts {
+        let mut facts = FileFacts::default();
+        for token in tokens {
+            let Token::Identifier(name) = token else {
+                continue;
+            };
+            let name = name.as_str();
+            let is_one_of = |names: &[&str]| {
+                names
+                    .iter()
+                    .any(|n| name.len() == n.len() && name.eq_ignore_ascii_case(n))
+            };
+            facts.mentions_closure_rebind |= is_one_of(&["bind", "call", "bindto"]);
+            facts.mentions_stub_attribute |= is_one_of(&[
+                "PhpVersionAware",
+                "LanguageLevelTypeAware",
+                "PhpStormStubsElementAvailable",
+            ]);
+        }
+        facts
+    }
+}
+
 /// A parsed file.
 #[derive(Debug)]
 pub struct ParsedFile {
@@ -31,6 +74,7 @@ pub struct ParsedFile {
     /// What the lexer skipped over.
     pub warnings: Vec<LexWarning>,
     pub annotations: Annotations,
+    pub facts: FileFacts,
 }
 
 /// Lexes and parses `source`, interning its names in `interner`.
@@ -72,9 +116,10 @@ pub fn parse(source: &[u8], interner: &Arc<Interner>) -> Result<ParsedFile, Pars
             span: error.span,
         });
     }
-    let stmts = Parser::from_lexed(lexed)
-        .with_interner(interner)
-        .parse_program()?;
+    let mut facts = FileFacts::of_tokens(&lexed.tokens);
+    let mut parser = Parser::from_lexed(lexed).with_interner(interner);
+    let stmts = parser.parse_program()?;
+    facts.has_anonymous_class = parser.saw_anonymous_class();
     let annotations = annotate(&stmts);
     Ok(ParsedFile {
         stmts,
@@ -82,6 +127,7 @@ pub fn parse(source: &[u8], interner: &Arc<Interner>) -> Result<ParsedFile, Pars
         code_line_starts,
         warnings,
         annotations,
+        facts,
     })
 }
 

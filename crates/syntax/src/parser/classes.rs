@@ -119,6 +119,7 @@ impl Parser {
             span: self.span_from(decl_start),
         };
 
+        self.saw_anonymous_class = true;
         Ok(self.expr(
             ExprKind::NewAnonymousClass(Box::new(AnonymousClass {
                 def,

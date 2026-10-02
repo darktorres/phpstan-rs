@@ -19,4 +19,4 @@ pub mod stack;
 pub mod token;
 pub mod visit;
 
-pub use parse::{Comment, ParsedFile, parse};
+pub use parse::{Comment, FileFacts, ParsedFile, parse};

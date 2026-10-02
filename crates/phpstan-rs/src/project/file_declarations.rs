@@ -32,12 +32,15 @@ pub(super) struct FileDeclarations {
 }
 
 /// The declarations of `ast`, the file at `path`. `is_stub` is whether the
-/// file falls under a configured stub path.
+/// file falls under a configured stub path. `has_anonymous_class` is
+/// whether it has an anonymous class, which is all its walk for them
+/// (`anonymous_class_decls`) can find.
 pub(super) fn collect(
     ast: &[Stmt],
     path: &Path,
     is_stub: bool,
     origin: &Origin,
+    has_anonymous_class: bool,
 ) -> FileDeclarations {
     let mut found = FileDeclarations {
         functions: Vec::new(),
@@ -76,6 +79,8 @@ pub(super) fn collect(
         }
         built_declaration(declaration, ctx, origin, None, &mut found.built_decls);
     });
-    found.built_decls.extend(anonymous_class_decls(ast, origin));
+    if has_anonymous_class {
+        found.built_decls.extend(anonymous_class_decls(ast, origin));
+    }
     found
 }

@@ -721,6 +721,9 @@ pub struct Checker<'a> {
     // false "unused" report on a member a rebound closure actually
     // reaches.
     pub(crate) rebind_target_classes: FxHashSet<Name>,
+    // Whether the file names anything a closure rebind needs (`bind`,
+    // `bindTo`, `call`); when it does not, no walk of it finds one.
+    pub(crate) closure_rebind_possible: bool,
     pub(crate) rebind_escape_all: bool,
     // The LSP's one-off "what type is this instance receiver" probe.
     // `probe_span` is the exact `Span` of the receiver `Expr` the caller
@@ -1108,6 +1111,7 @@ impl<'a> Checker<'a> {
             active_discriminant: Vec::new(),
             static_var_names: FxHashSet::default(),
             rebind_target_classes: FxHashSet::default(),
+            closure_rebind_possible: true,
             rebind_escape_all: false,
             probe_span: Cell::new(None),
             probe_hit: RefCell::new(None),
@@ -1455,6 +1459,13 @@ impl<'a> Checker<'a> {
         self.diagnostics
     }
 
+    /// Whether the file being checked names what a closure rebind needs
+    /// (`syntax::FileFacts::mentions_closure_rebind`); true until said
+    /// otherwise.
+    pub fn set_closure_rebind_possible(&mut self, possible: bool) {
+        self.closure_rebind_possible = possible;
+    }
+
     #[hotpath::measure]
     pub fn check_program(&mut self, program: &[Stmt]) {
         self.current_function_assigned_variables =
@@ -1476,7 +1487,11 @@ impl<'a> Checker<'a> {
         self.check_use_const_imports(program);
         self.check_use_class_imports(program);
         self.check_used_names(program);
-        let (rebind_targets, rebind_escape_all) = unused::scan_program_for_rebind_targets(program);
+        let (rebind_targets, rebind_escape_all) = if self.closure_rebind_possible {
+            unused::scan_program_for_rebind_targets(program)
+        } else {
+            (FxHashSet::default(), false)
+        };
         self.rebind_target_classes = rebind_targets;
         self.rebind_escape_all = rebind_escape_all;
         // A file-local `uses(...)` call (no `->in(...)`) wins over

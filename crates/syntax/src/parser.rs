@@ -64,6 +64,8 @@ pub struct Parser {
     pub(crate) pattern_only: Vec<(NodeId, ParseError)>,
     // The `array(...)` literals, which can't be destructuring targets.
     pub(crate) long_arrays: rustc_hash::FxHashSet<NodeId>,
+    // Whether the parse has built an anonymous class (`new class`).
+    pub(crate) saw_anonymous_class: bool,
 }
 
 mod classes;
@@ -170,7 +172,13 @@ impl Parser {
             interner: Arc::clone(Interner::global()),
             pattern_only: Vec::new(),
             long_arrays: rustc_hash::FxHashSet::default(),
+            saw_anonymous_class: false,
         }
+    }
+
+    /// Whether the tree built so far has an anonymous class in it.
+    pub fn saw_anonymous_class(&self) -> bool {
+        self.saw_anonymous_class
     }
 
     /// The span of the token about to be read.
