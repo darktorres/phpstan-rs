@@ -34,6 +34,22 @@ pub struct VendorContext {
     pub files: Vec<PathBuf>,
     /// Directories to recursively load (PSR-4 base dirs).
     pub dirs: Vec<PathBuf>,
+    /// What of `files` and `dirs` the autoloader finds by name.
+    pub autoload: NamedAutoload,
+}
+
+/// The parts of `VendorContext` that composer's autoloader finds a class
+/// in by its name, as `ClassLoader` does: a class map, and PSR-4 prefixes
+/// with their directories. What it leaves out of these, `files` entries
+/// and the directories of PSR-0 prefixes, are loaded whole.
+#[derive(Debug, Default, Clone, PartialEq)]
+pub struct NamedAutoload {
+    /// Each class map entry: the class name as the map spells it and its
+    /// file. Every file is one of `VendorContext::files`.
+    pub class_map: Vec<(String, PathBuf)>,
+    /// Each PSR-4 prefix as the map spells it (`Acme\Lib\`) and one of its
+    /// directories, which is one of `VendorContext::dirs`.
+    pub psr4: Vec<(String, PathBuf)>,
 }
 
 /// Discovers `vendor/` context for the Composer project rooted at
@@ -107,8 +123,15 @@ fn parse_static_file(path: &Path, vendor_dir: &Path, base_dir: &Path) -> Option<
             continue;
         };
         match prop.name.as_ref() {
-            "classMap" | "files" => resolver.collect_files(default, &mut ctx.files),
-            "prefixDirsPsr4" => resolver.collect_dirs(default, &mut ctx.dirs),
+            "classMap" => {
+                resolver.collect_files(default, &mut ctx.files);
+                resolver.collect_named_files(default, &mut ctx.autoload.class_map);
+            }
+            "files" => resolver.collect_files(default, &mut ctx.files),
+            "prefixDirsPsr4" => {
+                resolver.collect_dirs(default, &mut ctx.dirs);
+                resolver.collect_named_dirs(default, &mut ctx.autoload.psr4);
+            }
             _ => {}
         }
     }
@@ -123,12 +146,18 @@ fn parse_separate_files(composer_dir: &Path, vendor_dir: &Path, base_dir: &Path)
         let path = composer_dir.join(name);
         if let Some(arr) = parse_top_level_array(&path) {
             resolver.collect_files(&arr, &mut ctx.files);
+            if name == "autoload_classmap.php" {
+                resolver.collect_named_files(&arr, &mut ctx.autoload.class_map);
+            }
         }
     }
     for name in ["autoload_psr4.php", "autoload_namespaces.php"] {
         let path = composer_dir.join(name);
         if let Some(arr) = parse_top_level_array(&path) {
             resolver.collect_dirs(&arr, &mut ctx.dirs);
+            if name == "autoload_psr4.php" {
+                resolver.collect_named_dirs(&arr, &mut ctx.autoload.psr4);
+            }
         }
     }
     dedup(&mut ctx);
@@ -192,6 +221,42 @@ impl<'p> Resolver<'p> {
         for item in items {
             if let Some(path) = self.path(&item.value) {
                 out.push(path);
+            }
+        }
+    }
+
+    /// `collect_files`, each file with the string its entry is keyed by.
+    fn collect_named_files(&mut self, array: &Expr, out: &mut Vec<(String, PathBuf)>) {
+        let ExprKind::ArrayLiteral(items) = &array.kind else {
+            return;
+        };
+        for item in items {
+            let Some(key) = item.key.as_ref().and_then(string_literal) else {
+                continue;
+            };
+            if let Some(path) = self.path(&item.value) {
+                out.push((key, path));
+            }
+        }
+    }
+
+    /// `collect_dirs`, each directory with the string its entry is keyed
+    /// by.
+    fn collect_named_dirs(&mut self, array: &Expr, out: &mut Vec<(String, PathBuf)>) {
+        let ExprKind::ArrayLiteral(items) = &array.kind else {
+            return;
+        };
+        for item in items {
+            let Some(key) = item.key.as_ref().and_then(string_literal) else {
+                continue;
+            };
+            let ExprKind::ArrayLiteral(dirs) = &item.value.kind else {
+                continue;
+            };
+            for dir_item in dirs {
+                if let Some(path) = self.path(&dir_item.value) {
+                    out.push((key.clone(), path));
+                }
             }
         }
     }
@@ -313,6 +378,13 @@ fn eval_concat(
             _ => None,
         }
     })
+}
+
+fn string_literal(expr: &Expr) -> Option<String> {
+    match &expr.peeled().kind {
+        ExprKind::Literal(Literal::String(s)) => Some(s.to_string()),
+        _ => None,
+    }
 }
 
 fn dedup(ctx: &mut VendorContext) {
