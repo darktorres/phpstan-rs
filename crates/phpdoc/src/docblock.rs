@@ -465,11 +465,18 @@ fn apply_tag_recording_errors(block: &mut DocBlock, written: &str, tag: &str, re
             block.parse_errors.extend(errors);
         }
     }
-    let mut scratch = DocBlock::default();
-    apply_tag(&mut scratch, tag, rest);
     let parsed_by_phpstan =
         written.starts_with("phpstan-") || PLAIN_TAGS_PHPSTAN_PARSES.contains(&tag);
-    if parsed_by_phpstan && let Some(first) = scratch.parse_errors.first() {
+    // A tag real PHPStan reads as no more than a generic one is never
+    // dropped for its errors, so it is applied to the block as it is,
+    // which is what merging its scratch block would have done.
+    if !parsed_by_phpstan {
+        apply_tag(block, tag, rest);
+        return;
+    }
+    let mut scratch = DocBlock::default();
+    apply_tag(&mut scratch, tag, rest);
+    if let Some(first) = scratch.parse_errors.first() {
         block.invalid_tag_values.push(InvalidTagValue {
             tag: written.to_string(),
             value: rest.to_string(),
