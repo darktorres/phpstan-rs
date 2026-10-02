@@ -313,11 +313,18 @@ impl<'a> Checker<'a> {
     pub(crate) fn check_expr(&mut self, e: &Expr, locals: &mut Locals, label: &str) -> Type {
         let outermost = self.infer_cache.borrow().is_none();
         if outermost {
-            *self.infer_cache.borrow_mut() = Some(Default::default());
+            let spare = std::mem::take(&mut *self.infer_spare.borrow_mut());
+            *self.infer_cache.borrow_mut() = Some(spare);
         }
         let ty = self.check_expr_cached(e, locals, label);
         if outermost {
-            *self.infer_cache.borrow_mut() = None;
+            let mut cache = self.infer_cache.borrow_mut().take().unwrap_or_default();
+            if cache.capacity() > crate::checker::INFER_SPARE_CAPACITY {
+                cache = Default::default();
+            } else {
+                cache.clear();
+            }
+            *self.infer_spare.borrow_mut() = cache;
         }
         ty
     }

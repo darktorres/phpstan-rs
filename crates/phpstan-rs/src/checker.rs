@@ -830,9 +830,16 @@ pub struct Checker<'a> {
     // outside an expression check, where the checker's own state may
     // move on between two inferences.
     infer_cache: RefCell<Option<InferCache>>,
+    // The emptied map of the last outermost expression check, kept for the
+    // next one so its table is not built and grown again.
+    infer_spare: RefCell<InferCache>,
 }
 
 type InferCache = FxHashMap<InferKey, Type>;
+
+/// The most entries an emptied infer cache keeps room for: one very large
+/// expression does not leave its table to every later one.
+const INFER_SPARE_CAPACITY: usize = 4096;
 
 /// What `infer_cache` holds an answer to: one question about one
 /// expression (its address and id) in one scope version.
@@ -1114,6 +1121,7 @@ impl<'a> Checker<'a> {
             pending_or_disjunctions: Vec::new(),
             type_dump: None,
             infer_cache: RefCell::new(None),
+            infer_spare: RefCell::new(InferCache::default()),
         }
     }
 
