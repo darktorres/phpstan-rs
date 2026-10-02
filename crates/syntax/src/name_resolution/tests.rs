@@ -176,3 +176,59 @@ fn the_context_at_a_position_has_only_what_precedes_it() {
     assert_eq!(at(4).resolve("Y"), "X\\Y");
     assert_eq!(at(6).resolve("Y"), "Z\\Y");
 }
+
+#[test]
+fn resolves_to_is_resolve_equal_to_the_name() {
+    let sources = [
+        "<?php",
+        "<?php namespace App\\Models; use Lib\\Thing; use Other\\Deep\\Name as Alias; use Vendor\\Pkg;",
+        "<?php namespace App; use Lib\\Thing;",
+    ];
+    let names = [
+        "Thing",
+        "thing",
+        "Alias",
+        "\\Thing",
+        "\\App\\Models\\Thing",
+        "Pkg\\Sub\\Class_",
+        "pkg\\Sub\\Class_",
+        "namespace\\Thing",
+        "Models\\Thing",
+        "Missing",
+        "",
+    ];
+    let candidates = [
+        "Thing",
+        "Lib\\Thing",
+        "App\\Models\\Thing",
+        "App\\Thing",
+        "Other\\Deep\\Name",
+        "Vendor\\Pkg\\Sub\\Class_",
+        "Models\\Thing",
+        "Missing",
+        "App\\Models\\Missing",
+        "App",
+        "",
+    ];
+    for source in sources {
+        let stmts = parse(source);
+        let ctx = context_at(
+            &stmts,
+            Position {
+                line: u32::MAX,
+                col: 1,
+            },
+        );
+        for name in names {
+            for fqn in candidates {
+                assert_eq!(
+                    ctx.resolves_to(name, fqn),
+                    ctx.resolve(name) == fqn,
+                    "{source}: {name} against {fqn}"
+                );
+            }
+            let resolved = ctx.resolve(name);
+            assert!(ctx.resolves_to(name, &resolved), "{source}: {name}");
+        }
+    }
+}

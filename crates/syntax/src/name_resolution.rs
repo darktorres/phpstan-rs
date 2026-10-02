@@ -142,6 +142,45 @@ impl NameContext {
             .contains_key(&(UseKind::Class, first_segment.to_ascii_lowercase()))
     }
 
+    /// Whether `name`, a class reference as written, resolves to `fqn`:
+    /// `resolve(name) == fqn`, with no name built to compare.
+    pub fn resolves_to(&self, name: &str, fqn: &str) -> bool {
+        if let Some(fq) = name.strip_prefix('\\') {
+            return fq == fqn;
+        }
+        if let Some(rest) = strip_namespace_relative_prefix(name) {
+            return self.declares_as(rest, fqn);
+        }
+        let mut segments = name.splitn(2, '\\');
+        let first = segments.next().unwrap_or(name);
+        let rest = segments.next();
+        if let Some(imported) = self
+            .use_map
+            .get(&(UseKind::Class, use_map_key(UseKind::Class, first)))
+        {
+            return match rest {
+                Some(r) => fqn
+                    .strip_prefix(imported.as_str())
+                    .and_then(|tail| tail.strip_prefix('\\'))
+                    .is_some_and(|tail| tail == r),
+                None => imported == fqn,
+            };
+        }
+        self.declares_as(name, fqn)
+    }
+
+    /// Whether a declaration with this bare name gets the name `fqn` in
+    /// the current namespace: `declared_name(bare) == fqn`.
+    fn declares_as(&self, bare: &str, fqn: &str) -> bool {
+        if self.namespace.is_empty() {
+            bare == fqn
+        } else {
+            fqn.strip_prefix(self.namespace.as_str())
+                .and_then(|tail| tail.strip_prefix('\\'))
+                .is_some_and(|tail| tail == bare)
+        }
+    }
+
     /// Keys are `(kind, name)`: PHP's class, function, and constant
     /// imports live in three separate namespaces, so `use function
     /// assert;` must never answer a class reference to `Assert`, nor

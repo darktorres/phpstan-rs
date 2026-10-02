@@ -537,7 +537,7 @@ fn find_use_insertion_point(stmts: &[Stmt]) -> Option<Position> {
 /// importing over an unrelated existing name.
 fn resolve_import(stmts: &[Stmt], ctx: &NameContext, fqn: &str) -> (String, Option<TextEdit>) {
     let short = short_name(fqn);
-    if ctx.resolve(short) == fqn {
+    if ctx.resolves_to(short, fqn) {
         return (short.to_string(), None);
     }
     if ctx.is_use_imported(short) {
@@ -553,7 +553,13 @@ fn resolve_import(stmts: &[Stmt], ctx: &NameContext, fqn: &str) -> (String, Opti
                 short.to_string(),
                 Some(TextEdit {
                     range: to_lsp_range(insert_span),
-                    new_text: format!("\nuse {fqn};"),
+                    new_text: {
+                        let mut text = String::with_capacity(fqn.len() + 6);
+                        text.push_str("\nuse ");
+                        text.push_str(fqn);
+                        text.push(';');
+                        text
+                    },
                 }),
             )
         }
