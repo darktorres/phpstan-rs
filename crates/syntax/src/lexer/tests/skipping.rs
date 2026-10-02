@@ -103,3 +103,32 @@ fn identifier_bytes_are_those_the_character_classes_name() {
         }
     }
 }
+
+#[test]
+fn a_name_the_lexer_repeats_is_the_one_the_interner_holds() {
+    let interner = Arc::new(Interner::new());
+    let tokens = Lexer::new_in_php("<?php $a = foo($a, foo);")
+        .with_interner(&interner)
+        .tokenize();
+    let names: Vec<&Name> = tokens
+        .iter()
+        .filter_map(|t| match t {
+            Token::Variable(n) | Token::Identifier(n) => Some(n),
+            _ => None,
+        })
+        .collect();
+    let first = |text: &str| names.iter().find(|n| n.as_str() == text).copied().unwrap();
+    for text in ["a", "foo"] {
+        let held = interner.name(text);
+        for n in names.iter().filter(|n| n.as_str() == text) {
+            assert!(n.same_allocation(&held), "{text}");
+        }
+        assert!(first(text).same_allocation(&held));
+    }
+    // Another lexer, while these are alive, finds the same names.
+    let again = Lexer::new_in_php("$a").with_interner(&interner).tokenize();
+    let Token::Variable(n) = &again[0] else {
+        panic!("a variable")
+    };
+    assert!(n.same_allocation(first("a")));
+}

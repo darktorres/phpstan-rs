@@ -43,6 +43,12 @@ impl Name {
         &self.0.text
     }
 
+    /// Whether the two are one allocation: names of the same text that an
+    /// interner made while one was alive are.
+    pub fn same_allocation(&self, other: &Name) -> bool {
+        Arc::ptr_eq(&self.0, &other.0)
+    }
+
     /// The name in ASCII lowercase, PHP's key for class, function and
     /// method names.
     pub fn lower(&self) -> &str {
@@ -332,7 +338,8 @@ impl Default for Interner {
     }
 }
 
-fn text_hash(text: &str) -> u64 {
+/// The hash an [`Interner`] files `text` under.
+pub fn text_hash(text: &str) -> u64 {
     let mut hasher = FxHasher::default();
     text.hash(&mut hasher);
     hasher.finish()
@@ -369,7 +376,11 @@ impl Interner {
 
     /// The shared [`Name`] for `text`.
     pub fn name(&self, text: &str) -> Name {
-        let hash = text_hash(text);
+        self.name_hashed(text, text_hash(text))
+    }
+
+    /// `name`, for a caller that has made `text_hash(text)` already.
+    pub fn name_hashed(&self, text: &str, hash: u64) -> Name {
         Name(
             self.shard(hash)
                 .names

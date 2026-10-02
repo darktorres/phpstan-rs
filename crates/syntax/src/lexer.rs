@@ -1,6 +1,6 @@
 use std::borrow::Cow;
 
-use crate::name::Interner;
+use crate::name::{Interner, Name};
 use crate::token::{Keyword, Position, Span, Token};
 use std::sync::Arc;
 
@@ -68,6 +68,11 @@ pub struct Lexer<'a> {
     warnings: Vec<LexWarning>,
     // What identifiers, variables and other token text are interned into.
     interner: Arc<Interner>,
+    // The names this lexer has interned, by their text's hash: a file
+    // repeats its identifiers and variables, and a repeat is found here
+    // without the interner's lock. Held for as long as the lexer is, so
+    // the names it returns are those the interner holds for the text.
+    names: hashbrown::HashTable<(u64, Name)>,
 }
 
 /// Where the `/* */` comment starting at `at` ends: past its `*/`, which
@@ -216,6 +221,7 @@ impl<'a> Lexer<'a> {
             comments: Vec::new(),
             warnings: Vec::new(),
             interner: Arc::clone(Interner::global()),
+            names: hashbrown::HashTable::new(),
         }
     }
 
@@ -240,12 +246,29 @@ impl<'a> Lexer<'a> {
             comments: Vec::new(),
             warnings: Vec::new(),
             interner: Arc::clone(Interner::global()),
+            names: hashbrown::HashTable::new(),
         }
+    }
+
+    /// The name for `text`: this lexer's own, or the interner's.
+    fn name(&mut self, text: &str) -> Name {
+        let hash = crate::name::text_hash(text);
+        if let Some((_, name)) = self
+            .names
+            .find(hash, |(h, name)| *h == hash && name.as_str() == text)
+        {
+            return name.clone();
+        }
+        let name = self.interner.name_hashed(text, hash);
+        self.names
+            .insert_unique(hash, (hash, name.clone()), |(h, _)| *h);
+        name
     }
 
     /// Interns token text into `interner` rather than the global one.
     pub fn with_interner(mut self, interner: &Arc<Interner>) -> Self {
         self.interner = Arc::clone(interner);
+        self.names.clear();
         self
     }
 
@@ -563,7 +586,7 @@ impl<'a> Lexer<'a> {
         if c == b'$' && (is_ident_start(self.peek_at(1))) {
             self.pos += 1;
             let s = self.lex_ident_raw();
-            return Token::Variable(self.interner.name(&s));
+            return Token::Variable(self.name(&s));
         }
 
         // `${expr}` - the older "variable variable" syntax, where the
@@ -615,7 +638,7 @@ impl<'a> Lexer<'a> {
                 return Token::Keyword(kw);
             }
             let s = lossy(&self.src[span]);
-            return Token::Identifier(self.interner.name(&s));
+            return Token::Identifier(self.name(&s));
         }
 
         if c.is_ascii_digit() || (c == b'.' && self.peek_at(1).is_ascii_digit()) {
