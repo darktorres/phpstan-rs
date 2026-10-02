@@ -992,6 +992,50 @@ fn a_project_declaring_a_phpstan_class_merges_its_declaration_into_the_stub() {
     assert!(rule.methods().contains_key("processNode"));
 }
 
+#[test]
+fn a_class_respelled_by_an_edit_leaves_the_subtype_index_once() {
+    let mut project = Project::new();
+    let path = PathBuf::from("a.php");
+    project
+        .load_analyzed_file(
+            path.clone(),
+            "<?php class Base {} class Child extends Base {} trait T {} class User { use T; }",
+        )
+        .unwrap();
+    project.finish_loading();
+    let subclasses = |project: &Project| -> Vec<String> {
+        project
+            .registry()
+            .subclasses("Base")
+            .iter()
+            .map(|name| name.to_string())
+            .collect()
+    };
+    let users = |project: &Project| -> Vec<String> {
+        project
+            .registry()
+            .inheritors("T")
+            .iter()
+            .map(|name| name.to_string())
+            .collect()
+    };
+    assert_eq!(subclasses(&project), ["Child"]);
+    assert_eq!(users(&project), ["User"]);
+    project
+        .update_file(
+            &path,
+            "<?php class Base {} class CHILD extends Base {} trait T {} class USER { use T; }",
+        )
+        .unwrap();
+    assert_eq!(subclasses(&project), ["CHILD"]);
+    assert_eq!(users(&project), ["USER"]);
+    project
+        .update_file(&path, "<?php class Base {} trait T {}")
+        .unwrap();
+    assert!(subclasses(&project).is_empty());
+    assert!(users(&project).is_empty());
+}
+
 /// Every `.php` file under `dir`, sorted.
 fn php_files_under(dir: &Path) -> Vec<PathBuf> {
     let mut files = Vec::new();

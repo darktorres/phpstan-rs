@@ -117,8 +117,13 @@ impl Registry {
         }
     }
 
-    /// Takes `class` out of the subtype and trait-user indexes.
+    /// Takes `class` out of the subtype and trait-user indexes. It is in
+    /// them under the spelling it was recorded with, which the record keeps.
     fn unrecord_parents(&mut self, class: &str) {
+        let Some((declared, _)) = self.recorded_parents.get_with_name(class) else {
+            return;
+        };
+        let declared = declared.clone();
         let Some((supertypes, traits)) = self.recorded_parents.remove(class) else {
             return;
         };
@@ -128,7 +133,7 @@ impl Registry {
         ] {
             for parent in parents {
                 if let Some(children) = index.get_mut(&parent) {
-                    children.retain(|child| !child.eq_ignore_case(&Name::from(class)));
+                    children.remove(&declared);
                     if children.is_empty() {
                         index.remove(&parent);
                     }
