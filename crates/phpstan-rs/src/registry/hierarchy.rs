@@ -96,10 +96,22 @@ impl Registry {
             }
         }
         for name in class_names.iter() {
-            self.unrecord_parents(name);
             let Some(info) = self.classes.get(name) else {
+                self.unrecord_parents(name);
                 continue;
             };
+            // Recorded already, under this spelling, with these parents.
+            if self.recorded_parents.get_with_name(name).is_some_and(
+                |(declared, (supertypes, traits))| {
+                    declared == name
+                        && supertypes
+                            .iter()
+                            .eq(info.extends.iter().chain(info.implements.iter()))
+                        && *traits == info.uses
+                },
+            ) {
+                continue;
+            }
             let supertypes: Vec<Name> = info
                 .extends
                 .iter()
@@ -107,6 +119,7 @@ impl Registry {
                 .cloned()
                 .collect();
             let traits: Vec<Name> = info.uses.clone();
+            self.unrecord_parents(name);
             for parent in &supertypes {
                 self.subtype_children
                     .get_or_insert_with(parent.clone(), FxHashSet::default)
@@ -125,11 +138,8 @@ impl Registry {
     /// Takes `class` out of the subtype and trait-user indexes. It is in
     /// them under the spelling it was recorded with, which the record keeps.
     fn unrecord_parents(&mut self, class: &str) {
-        let Some((declared, _)) = self.recorded_parents.get_with_name(class) else {
-            return;
-        };
-        let declared = declared.clone();
-        let Some((supertypes, traits)) = self.recorded_parents.take(class) else {
+        let Some((declared, (supertypes, traits))) = self.recorded_parents.get_with_name(class)
+        else {
             return;
         };
         for (index, parents) in [
@@ -137,14 +147,15 @@ impl Registry {
             (&mut self.trait_users, traits),
         ] {
             for parent in parents {
-                if let Some(children) = index.get_mut(&parent) {
-                    children.remove(&declared);
+                if let Some(children) = index.get_mut(parent) {
+                    children.remove(declared);
                     if children.is_empty() {
-                        index.remove(&parent);
+                        index.remove(parent);
                     }
                 }
             }
         }
+        self.recorded_parents.remove(class);
     }
 
     /// Every class-like extending or implementing `class`, directly or
