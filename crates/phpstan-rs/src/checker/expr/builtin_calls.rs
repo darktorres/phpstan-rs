@@ -2885,7 +2885,7 @@ fn get_debug_type_for(ty: &Type, registry: &Registry) -> Option<Type> {
         } else if member.is_array().yes() {
             named("array")
         } else if member.is_object().yes()
-            && let [class] = member.object_class_names()[..]
+            && let Some(class) = member.single_object_class()
         {
             // An enum is final by definition; another class's own name
             // is the answer only when no subclass can stand in for it.

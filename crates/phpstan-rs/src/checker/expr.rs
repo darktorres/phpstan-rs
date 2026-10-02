@@ -714,10 +714,7 @@ impl<'a> Checker<'a> {
                         // `Closure::bind`/`->bindTo()` third argument does,
                         // since `current_class` has no other way to
                         // reflect Pest's file-scoped binding.
-                        let scope_class = match this_ty.object_class_names()[..] {
-                            [class] => Some(class.to_string()),
-                            _ => None,
-                        };
+                        let scope_class = this_ty.single_object_class().map(|c| c.to_string());
                         self.check_closure_literal_with_this_and_scope(
                             a.value.peeled(),
                             locals,
@@ -1173,7 +1170,7 @@ impl<'a> Checker<'a> {
                 // for a `Union`/`Intersection` receiver (e.g. a multi-type
                 // `catch` variable), using a representative member (the
                 // first `Object` found) for argument-checking.
-                let recv_class = recv_ty.object_class_names().first().map(|c| (*c).clone());
+                let recv_class = recv_ty.first_object_class().cloned();
                 // `method.nonObject` - a receiver whose type is confirmed
                 // to never be an object at all (a scalar, an array,
                 // `stdClass`) gets flagged here and short-circuits the
@@ -1957,7 +1954,7 @@ impl<'a> Checker<'a> {
                     // genuine bare class-name reference.
                     InstanceofTarget::Name(name) => {
                         let resolved = self.resolve_name_expr(name);
-                        if let [class] = resolved.object_class_names()[..]
+                        if let Some(class) = resolved.single_object_class()
                             && !resolved.is_enum_case()
                         {
                             if !self.class_name_exists(class) && !Self::class_guarded(class, locals)
@@ -2359,10 +2356,7 @@ impl<'a> Checker<'a> {
                 // the way real PHPStan does, when `Foo` is itself generic
                 // (`@template` on the class).
                 let new_ty = self.infer_expr(e, locals);
-                let resolved_class = match new_ty.object_class_names()[..] {
-                    [class] => Some(class.clone()),
-                    _ => None,
-                };
+                let resolved_class = new_ty.single_object_class().cloned();
                 // Rebind to the registry's canonical-case spelling up
                 // front, once, rather than at each individual lookup
                 // below - `lookup_method`'s ancestor-walk starts from an
@@ -4220,7 +4214,7 @@ impl<'a> Checker<'a> {
                     }
                     ExprKind::MethodCall(recv, method, _, _) => {
                         let recv_ty = self.check_expr(recv, locals, label);
-                        let recv_class = recv_ty.object_class_names().first().map(|c| (*c).clone());
+                        let recv_class = recv_ty.first_object_class().cloned();
                         if let Some(class) = &recv_class
                             && self.registry.classes.contains_key(class.as_str())
                         {
@@ -5544,7 +5538,7 @@ pub(crate) fn invalid_array_key_description(
             "array".to_string()
         } else if member.is_object().yes()
             && !member.is_enum_case()
-            && let [class] = member.object_class_names()[..]
+            && let Some(class) = member.single_object_class()
         {
             class.to_string()
         } else if *member == Type::float()

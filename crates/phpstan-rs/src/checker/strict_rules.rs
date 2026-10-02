@@ -456,7 +456,7 @@ impl<'a> Checker<'a> {
     pub(crate) fn converts_to_string(&self, ty: &Type) -> bool {
         ty.union_members().iter().all(|m| {
             m.to_string_type(self.registry).is_some()
-                && !(m.is_object().yes() && m.object_class_names().is_empty())
+                && !(m.is_object().yes() && m.first_object_class().is_none())
                 && !self
                     .relation()
                     .is_super_type_of(&Type::callable(None), m)

@@ -370,9 +370,11 @@ impl<'a> Checker<'a> {
                     .all(|m| self.member_confirmed_missing(m, has_member));
             }
             // An enum case is an instance of its enum for member lookup.
-            match ty.object_class_names()[..] {
-                [class] => self.registry.classes.contains_key(class.as_str()) && !has_member(class),
-                _ => false,
+            match ty.single_object_class() {
+                Some(class) => {
+                    self.registry.classes.contains_key(class.as_str()) && !has_member(class)
+                }
+                None => false,
             }
         })
     }

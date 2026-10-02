@@ -172,7 +172,7 @@ fn loose_kinds(ty: &Type, out: &mut Vec<LooseKind>) -> bool {
         } else if member.is_enum_case() {
             LooseKind::Enum
         } else if member.is_object().yes()
-            && let Some(class) = member.object_class_names().first()
+            && let Some(class) = member.first_object_class()
         {
             LooseKind::Object(class.to_string())
         } else {

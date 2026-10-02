@@ -1429,7 +1429,7 @@ impl<'a> Checker<'a> {
     /// representative-class extraction `ExprKind::MethodCall`'s own
     /// `recv_class` uses for a Union/Intersection operand.
     pub(crate) fn check_implicit_tostring_usage(&mut self, ty: &Type, span: Span) {
-        let Some(class) = ty.object_class_names().first().map(|c| (*c).clone()) else {
+        let Some(class) = ty.first_object_class().cloned() else {
             return;
         };
         let Some((owner, sig)) = self.registry.lookup_method_with_owner(&class, "__toString")

@@ -123,12 +123,52 @@ impl Type {
     /// PHPStan's `getObjectClassNames()`: the classes of the objects and
     /// enum cases among this type's union and intersection members.
     pub fn object_class_names(&self) -> Vec<&crate::Name> {
-        match self.repr() {
-            Repr::Object(class, _) | Repr::EnumCase(class, _) => vec![class],
-            Repr::Union(members) | Repr::BenevolentUnion(members) | Repr::Intersection(members) => {
-                members.iter().flat_map(Type::object_class_names).collect()
+        let mut names = Vec::new();
+        let _ = self.each_object_class(&mut |class| {
+            names.push(class);
+            std::ops::ControlFlow::Continue(())
+        });
+        names
+    }
+
+    /// `object_class_names`'s first, without making the list.
+    pub fn first_object_class(&self) -> Option<&crate::Name> {
+        let mut first = None;
+        let _ = self.each_object_class(&mut |class| {
+            first = Some(class);
+            std::ops::ControlFlow::Break(())
+        });
+        first
+    }
+
+    /// The only class `object_class_names` has, if it has one and no more.
+    pub fn single_object_class(&self) -> Option<&crate::Name> {
+        let mut found: Option<&crate::Name> = None;
+        let more = self.each_object_class(&mut |class| {
+            if found.is_some() {
+                return std::ops::ControlFlow::Break(());
             }
-            _ => Vec::new(),
+            found = Some(class);
+            std::ops::ControlFlow::Continue(())
+        });
+        if more.is_break() { None } else { found }
+    }
+
+    /// Calls `f` with each class of `object_class_names`, in order, until
+    /// it breaks.
+    pub fn each_object_class<'a>(
+        &'a self,
+        f: &mut impl FnMut(&'a crate::Name) -> std::ops::ControlFlow<()>,
+    ) -> std::ops::ControlFlow<()> {
+        match self.repr() {
+            Repr::Object(class, _) | Repr::EnumCase(class, _) => f(class),
+            Repr::Union(members) | Repr::BenevolentUnion(members) | Repr::Intersection(members) => {
+                for member in members {
+                    member.each_object_class(f)?;
+                }
+                std::ops::ControlFlow::Continue(())
+            }
+            _ => std::ops::ControlFlow::Continue(()),
         }
     }
 

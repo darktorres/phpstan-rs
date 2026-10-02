@@ -1098,7 +1098,7 @@ impl<'a> Checker<'a> {
             // generically, Union or not.
             ExprKind::MethodCall(recv, method, args, _) => {
                 let recv_ty = self.infer_expr(recv, locals);
-                let class = recv_ty.object_class_names().first().map(|c| (*c).clone());
+                let class = recv_ty.first_object_class().cloned();
                 if let Some(class) = class
                     && let Some(sig) = self.registry.lookup_method(&class, method)
                 {
