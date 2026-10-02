@@ -3,6 +3,9 @@
 //! stored as two buffers rather than as tens of thousands of strings and
 //! small vectors each allocated when it is read.
 
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::{Arc, OnceLock};
+
 use super::container::{Reader, Slice, Writer};
 
 /// Records of bytes, each found by its position.
@@ -92,9 +95,80 @@ impl RecordsBuilder {
 }
 
 /// A map from text to bytes: `Records` sorted by key, each a length, the
-/// key and the payload, searched by bisection.
+/// key and the payload, searched by bisection - or, for a map looked up
+/// often enough, through a hash index made in memory.
 #[derive(Debug, Clone, Default)]
-pub(super) struct Packed(Records);
+pub(super) struct Packed(Records, Arc<Lookups>);
+
+/// How a `Packed` map has been looked up so far, shared by its clones, which
+/// hold the same records.
+#[derive(Debug, Default)]
+struct Lookups {
+    count: AtomicUsize,
+    index: OnceLock<Index>,
+}
+
+/// Open addressing over the positions of a map's keys: a slot holds a
+/// position plus one, `0` for none. At most half the slots are used, so a
+/// search always meets an empty one.
+#[derive(Debug)]
+struct Index {
+    slots: Box<[u32]>,
+    shift: u32,
+}
+
+/// The lookups after which an index is made: the cost of making it, a
+/// hash of every key, is about that of this many bisections.
+fn lookups_before_index(keys: usize) -> usize {
+    keys / 16 + 64
+}
+
+fn hash(key: &[u8]) -> u64 {
+    use std::hash::Hasher;
+    let mut hasher = rustc_hash::FxHasher::default();
+    hasher.write(key);
+    hasher.finish()
+}
+
+impl Index {
+    /// The index of `map`'s keys. A key present twice, which a damaged file
+    /// could hold, finds its first position, as bisection does.
+    fn of(map: &Packed) -> Index {
+        let keys = map.0.len();
+        let places = (keys * 2).next_power_of_two().max(2);
+        let shift = 64 - places.trailing_zeros();
+        let mut slots = vec![0u32; places].into_boxed_slice();
+        let mask = places - 1;
+        'keys: for position in 0..keys {
+            let key = map.key(position);
+            let mut at = Self::start(hash(key), shift);
+            while slots[at] != 0 {
+                if map.key(slots[at] as usize - 1) == key {
+                    continue 'keys;
+                }
+                at = (at + 1) & mask;
+            }
+            slots[at] = position as u32 + 1;
+        }
+        Index { slots, shift }
+    }
+
+    fn start(hash: u64, shift: u32) -> usize {
+        (hash.wrapping_mul(0x9E37_79B9_7F4A_7C15) >> shift) as usize
+    }
+
+    fn find(&self, map: &Packed, key: &[u8]) -> Option<usize> {
+        let mask = self.slots.len() - 1;
+        let mut at = Self::start(hash(key), self.shift);
+        loop {
+            match self.slots[at] {
+                0 => return None,
+                slot if map.key(slot as usize - 1) == key => return Some(slot as usize - 1),
+                _ => at = (at + 1) & mask,
+            }
+        }
+    }
+}
 
 impl Packed {
     /// The map of `entries`, keys unique.
@@ -108,7 +182,7 @@ impl Packed {
             record.extend_from_slice(payload);
             records.push(&record);
         }
-        Packed(records.finish())
+        Packed(records.finish(), Arc::default())
     }
 
     pub(super) fn store(&self, writer: &mut Writer, section: &str) -> Result<(), String> {
@@ -116,7 +190,7 @@ impl Packed {
     }
 
     pub(super) fn load(reader: &Reader, section: &str) -> Result<Packed, String> {
-        Ok(Packed(Records::load(reader, section)?))
+        Ok(Packed(Records::load(reader, section)?, Arc::default()))
     }
 
     /// Whether the offsets hold together and the keys are in strictly
@@ -138,21 +212,38 @@ impl Packed {
         &record[2..2 + length]
     }
 
-    /// What `key` maps to.
-    pub(super) fn get(&self, key: &str) -> Option<&[u8]> {
+    /// The position of `key` among the keys, by bisection.
+    fn bisect(&self, key: &[u8]) -> Option<usize> {
         let (mut low, mut high) = (0, self.0.len());
         while low < high {
             let middle = low + (high - low) / 2;
-            if self.key(middle) < key.as_bytes() {
+            if self.key(middle) < key {
                 low = middle + 1;
             } else {
                 high = middle;
             }
         }
-        if low == self.0.len() || self.key(low) != key.as_bytes() {
-            return None;
-        }
-        let record = self.0.get(low);
+        (low < self.0.len() && self.key(low) == key).then_some(low)
+    }
+
+    /// What `key` maps to.
+    pub(super) fn get(&self, key: &str) -> Option<&[u8]> {
+        let key = key.as_bytes();
+        let keys = self.0.len();
+        let index = match self.1.index.get() {
+            Some(index) => Some(index),
+            None if keys > 0
+                && self.1.count.fetch_add(1, Ordering::Relaxed) >= lookups_before_index(keys) =>
+            {
+                Some(self.1.index.get_or_init(|| Index::of(self)))
+            }
+            None => None,
+        };
+        let position = match index {
+            Some(index) => index.find(self, key),
+            None => self.bisect(key),
+        }?;
+        let record = self.0.get(position);
         let length = u16::from_le_bytes([record[0], record[1]]) as usize;
         Some(&record[2 + length..])
     }
@@ -197,6 +288,58 @@ mod tests {
         for missing in ["alph", "alphabets", "c", "zet", "zz", "\u{e9}"] {
             assert!(!map.contains(missing), "{missing:?}");
         }
+    }
+
+    #[test]
+    fn the_index_finds_what_bisection_finds() {
+        let keys: Vec<String> = (0..500)
+            .map(|i| format!("key{i}\\{}", "x".repeat(i % 9)))
+            .chain(["".to_string(), "\u{e9}t\u{e9}".to_string()])
+            .collect();
+        let refs: Vec<&str> = keys.iter().map(String::as_str).collect();
+        let map = packed(&refs);
+        let index = Index::of(&map);
+        for key in keys
+            .iter()
+            .map(String::as_str)
+            .chain(["key", "key1\\xx", "zzz", "key499", "\u{e9}", "keys"])
+        {
+            assert_eq!(
+                index.find(&map, key.as_bytes()),
+                map.bisect(key.as_bytes()),
+                "{key:?}"
+            );
+        }
+        // A map past its lookup threshold answers through the index.
+        for key in &keys {
+            for _ in 0..2 {
+                assert!(map.contains(key), "{key:?}");
+            }
+        }
+        for _ in 0..lookups_before_index(keys.len()) + 1 {
+            assert!(!map.contains("absent"));
+        }
+        assert!(map.1.index.get().is_some());
+        assert!(map.contains(&keys[7]) && !map.contains("absent"));
+    }
+
+    #[test]
+    fn an_index_over_a_duplicate_key_finds_its_first_position() {
+        let map = Packed(
+            {
+                let mut records = RecordsBuilder::default();
+                for (key, payload) in [("a", 1u8), ("b", 2), ("b", 3), ("c", 4)] {
+                    let mut record = (key.len() as u16).to_le_bytes().to_vec();
+                    record.extend_from_slice(key.as_bytes());
+                    record.push(payload);
+                    records.push(&record);
+                }
+                records.finish()
+            },
+            Arc::default(),
+        );
+        assert_eq!(Index::of(&map).find(&map, b"b"), map.bisect(b"b"));
+        assert_eq!(map.bisect(b"b"), Some(1));
     }
 
     #[test]
