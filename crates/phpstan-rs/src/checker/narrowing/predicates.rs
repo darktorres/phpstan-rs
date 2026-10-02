@@ -163,11 +163,13 @@ pub(crate) fn narrowing_key(e: &Expr) -> Option<String> {
 /// gaining a third synthetic shape later without every caller needing
 /// its own update to keep excluding it correctly.
 pub(crate) fn is_real_variable_key(key: &str) -> bool {
-    let mut chars = key.chars();
-    chars
+    // A byte of a character past ASCII is none of the classes, as the
+    // character is not.
+    let mut bytes = key.bytes();
+    bytes
         .next()
-        .is_some_and(|c| c.is_ascii_alphabetic() || c == '_')
-        && chars.all(|c| c.is_ascii_alphanumeric() || c == '_')
+        .is_some_and(|b| b.is_ascii_alphabetic() || b == b'_')
+        && bytes.all(|b| b.is_ascii_alphanumeric() || b == b'_')
 }
 
 /// Drops every `locals` entry that depended on `key`'s pre-reassignment

@@ -6,6 +6,7 @@ use crate::token::{Keyword, Position, Span, Token};
 impl Parser {
     // ---- token stream helpers ----
 
+    #[inline]
     pub(crate) fn peek(&self) -> &Token {
         self.tokens.get(self.pos).unwrap_or(&Token::Eof)
     }
@@ -126,8 +127,12 @@ impl Parser {
         }
     }
 
+    /// Whether the next token is `t`. Most checks find another kind of
+    /// token, which the kinds alone settle.
+    #[inline]
     pub(crate) fn check(&self, t: &Token) -> bool {
-        self.peek() == t
+        let next = self.peek();
+        std::mem::discriminant(next) == std::mem::discriminant(t) && next == t
     }
 
     pub(crate) fn eat(&mut self, t: &Token) -> bool {
