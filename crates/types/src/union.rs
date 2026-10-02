@@ -1081,14 +1081,18 @@ fn legacy_is_keys_superset(relation: &crate::Relation, this: &Shape, other: &Sha
     {
         return false;
     }
-    let lacking = this
-        .fields()
-        .iter()
-        .enumerate()
-        .filter(|(at, f)| !f.optional && other.field_near(&f.key, *at).is_none())
-        .count();
-    if lacking > 1 {
-        return false;
+    // Every key of `other` is in `this`, so with as many keys the two
+    // have the same ones and `this` lacks none.
+    if this.fields().len() > other.fields().len() {
+        let lacking = this
+            .fields()
+            .iter()
+            .enumerate()
+            .filter(|(at, f)| !f.optional && other.field_near(&f.key, *at).is_none())
+            .count();
+        if lacking > 1 {
+            return false;
+        }
     }
     // At most one value of `other` disjoint from `this`'s, and none unless
     // both have the same two or more keys.

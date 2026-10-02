@@ -78,6 +78,13 @@ pub use union::{MAX_UNION_MEMBERS, generalize_by_key_set};
 #[derive(Clone)]
 pub struct Type(Arc<Node>);
 
+impl Type {
+    /// Where this type's node is: the same address is the same type.
+    pub(crate) fn node_address(&self) -> usize {
+        Arc::as_ptr(&self.0) as usize
+    }
+}
+
 /// A type's representation, interned (`intern`), with its hashes computed
 /// once: equal types hash alike (`Hash for Type`), so unequal ones mostly
 /// compare in one step, and one exact form is one node.
