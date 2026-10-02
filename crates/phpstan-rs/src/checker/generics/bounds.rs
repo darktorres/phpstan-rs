@@ -195,14 +195,14 @@ impl<'a> Checker<'a> {
                 };
                 self.check_type_class_names_exist(
                     &checked,
-                    &format!("property {fqn}::${}", p.name),
+                    format!("property {fqn}::${}", p.name),
                     p.span,
                 );
                 // `property.trait` - see `check_type_trait_refs`'s
                 // own doc comment.
                 self.check_type_trait_refs(
                     prop_sig.ty(),
-                    &format!("property {fqn}::${}", p.name),
+                    format!("property {fqn}::${}", p.name),
                     p.span,
                     "property.trait",
                 );
@@ -288,7 +288,7 @@ impl<'a> Checker<'a> {
             );
             self.check_type_class_names_exist(
                 prop_sig.ty(),
-                &format!("PHPDoc tag {tag_name} for property {fqn}::${}", tag.name),
+                format!("PHPDoc tag {tag_name} for property {fqn}::${}", tag.name),
                 c.span,
             );
             // `class.nameCase` for this `@property`-tag target.

@@ -497,7 +497,10 @@ impl<'a> Checker<'a> {
                     // variadic parameter's declared type, not the
                     // `array` it collects into), the same reasoning the
                     // Closure/arrow-fn arms in `checker/expr.rs` share.
-                    let subject = format!("parameter ${} of {label}()", param.name());
+                    let subject = ParameterSubject {
+                        name: param.name(),
+                        label: &label,
+                    };
                     // The own PHPDoc type too: a member the native hint
                     // excludes no longer reaches `ty`, but naming an
                     // unknown class is still wrong.
@@ -505,8 +508,8 @@ impl<'a> Checker<'a> {
                         Some(doc) => self.relation().union_of(vec![ty.clone(), doc.clone()]),
                         None => ty.clone(),
                     };
-                    self.check_type_class_names_exist(&checked, &subject, ast_param.span);
-                    self.check_type_trait_refs(&ty, &subject, ast_param.span, "parameter.trait");
+                    self.check_type_class_names_exist(&checked, subject, ast_param.span);
+                    self.check_type_trait_refs(&ty, subject, ast_param.span, "parameter.trait");
                     // A native `parent` without a parent class; one written in
                     // PHPDoc is its unresolvable-type check's.
                     let native = match class_name {
@@ -515,7 +518,7 @@ impl<'a> Checker<'a> {
                     };
                     self.check_no_parent_ref(
                         &native,
-                        &subject,
+                        subject,
                         ast_param.span,
                         "parameter.noParent",
                     );
@@ -595,10 +598,13 @@ impl<'a> Checker<'a> {
                         Some(c) => self.resolve_pseudo(&ty, c),
                         None => ty,
                     };
-                    let subject = format!("parameter ${} of {label}()", p.name);
-                    self.check_type_class_names_exist(&ty, &subject, p.span);
-                    self.check_type_trait_refs(&ty, &subject, p.span, "parameter.trait");
-                    self.check_no_parent_ref(&ty, &subject, p.span, "parameter.noParent");
+                    let subject = ParameterSubject {
+                        name: &p.name,
+                        label: &label,
+                    };
+                    self.check_type_class_names_exist(&ty, subject, p.span);
+                    self.check_type_trait_refs(&ty, subject, p.span, "parameter.trait");
+                    self.check_no_parent_ref(&ty, subject, p.span, "parameter.noParent");
                     self.check_type_class_name_case(&case_refs, p.span);
                     self.check_type_internal_usage(&case_refs, p.span);
                     resolved_params.push((p.name.to_string(), ty.clone(), p.span));
@@ -706,18 +712,18 @@ impl<'a> Checker<'a> {
         // (not the `?`-and-`resolve_pseudo`-adjusted `expected` the
         // falls-off-the-end check further down builds), same as every
         // other existence check in this function.
-        let subject = format!("return type of {label}()");
+        let subject = ReturnSubject { label: &label };
         let declared = declared_return.clone().unwrap_or(Type::mixed());
         let checked = match sig.and_then(|s| s.return_doc_ty().as_ref()) {
             Some(doc) => self.relation().union_of(vec![declared, doc.clone()]),
             None => declared,
         };
-        self.check_type_class_names_exist(&checked, &subject, f.span);
+        self.check_type_class_names_exist(&checked, subject, f.span);
         self.check_type_class_name_case(&declared_return_case_refs, f.span);
         self.check_type_internal_usage(&declared_return_case_refs, f.span);
         self.check_type_trait_refs(
             declared_return.as_ref().unwrap_or(&Type::mixed()),
-            &subject,
+            subject,
             f.span,
             "return.trait",
         );
@@ -732,7 +738,7 @@ impl<'a> Checker<'a> {
                 None => declared_return.clone().unwrap_or(Type::mixed()),
             };
             let resolved_return = self.resolve_pseudo(&native_return, c);
-            self.check_no_parent_ref(&resolved_return, &subject, f.span, "return.noParent");
+            self.check_no_parent_ref(&resolved_return, subject, f.span, "return.noParent");
         }
         // `@throws` tag validity - see `checker::throws`'s module doc
         // comment.
@@ -1246,13 +1252,12 @@ impl<'a> Checker<'a> {
         label: &str,
     ) {
         let kind_word = if is_method { "Method" } else { "Function" };
-        let message = format!(
-            "{kind_word} {label}() uses native union types but they're supported only on PHP 8.0 and later."
-        );
         self.check_native_union_types_supported_raw(
             f.params.iter().map(|p| p.type_hint.as_ref()),
             f.return_type.as_ref(),
-            &message,
+            format_args!(
+                "{kind_word} {label}() uses native union types but they're supported only on PHP 8.0 and later."
+            ),
             f.span,
         );
     }
@@ -1272,7 +1277,7 @@ impl<'a> Checker<'a> {
         &mut self,
         param_hints: impl Iterator<Item = Option<&'p TypeHint>>,
         return_hint: Option<&TypeHint>,
-        message: &str,
+        message: impl std::fmt::Display,
         span: Span,
     ) {
         if self
@@ -1307,7 +1312,7 @@ impl<'a> Checker<'a> {
         for p in &f.params {
             self.check_unresolvable_native_type(
                 p.type_hint.as_ref(),
-                &format!(
+                format_args!(
                     "Parameter ${} of {label}() has unresolvable native type.",
                     p.name
                 ),
@@ -1317,7 +1322,7 @@ impl<'a> Checker<'a> {
         }
         self.check_unresolvable_native_type(
             f.return_type.as_ref(),
-            &format!("{label}() has unresolvable native return type."),
+            format_args!("{label}() has unresolvable native return type."),
             "return.unresolvableNativeType",
             f.span,
         );
@@ -1338,7 +1343,7 @@ impl<'a> Checker<'a> {
     pub(crate) fn check_unresolvable_native_type(
         &mut self,
         hint: Option<&TypeHint>,
-        message: &str,
+        message: impl std::fmt::Display,
         identifier: &'static str,
         span: Span,
     ) {
@@ -1617,4 +1622,30 @@ fn is_bare_native_union(hint: Option<&TypeHint>) -> bool {
             .all(|m| !matches!(m.kind, TypeHintKind::Intersection(_))),
         _ => false,
     })
+}
+
+/// "parameter $name of label()": how a message names a parameter, written
+/// out only when a message is.
+#[derive(Clone, Copy)]
+struct ParameterSubject<'a> {
+    name: &'a dyn std::fmt::Display,
+    label: &'a str,
+}
+
+impl std::fmt::Display for ParameterSubject<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "parameter ${} of {}()", self.name, self.label)
+    }
+}
+
+/// "return type of label()", likewise.
+#[derive(Clone, Copy)]
+struct ReturnSubject<'a> {
+    label: &'a str,
+}
+
+impl std::fmt::Display for ReturnSubject<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "return type of {}()", self.label)
+    }
 }

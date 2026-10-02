@@ -447,7 +447,7 @@ impl<'a> Checker<'a> {
         if let Some(set_ty) = prop_sig.set_ty() {
             self.check_type_class_names_exist(
                 set_ty,
-                &format!(
+                format!(
                     "Parameter ${} of set hook for property {fqn}::${name}",
                     param.map(|p| p.name.as_ref()).unwrap_or("value"),
                 ),
@@ -457,7 +457,7 @@ impl<'a> Checker<'a> {
             // `property.trait`.
             self.check_type_trait_refs(
                 set_ty,
-                &format!(
+                format!(
                     "Parameter ${} of set hook for property {fqn}::${name}",
                     param.map(|p| p.name.as_ref()).unwrap_or("value"),
                 ),
@@ -481,7 +481,7 @@ impl<'a> Checker<'a> {
             self.check_native_union_types_supported_raw(
                 std::iter::once(p.type_hint.as_ref()),
                 None,
-                &format!(
+                format!(
                     "Set hook for property {fqn}::${name} uses native union types but they're supported only on PHP 8.0 and later."
                 ),
                 p.name.span,
@@ -492,7 +492,7 @@ impl<'a> Checker<'a> {
             // parameter half is reachable here.
             self.check_unresolvable_native_type(
                 p.type_hint.as_ref(),
-                &format!(
+                format!(
                     "Parameter ${} of set hook for property {fqn}::${name} has unresolvable native type.",
                     p.name,
                 ),

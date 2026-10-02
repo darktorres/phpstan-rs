@@ -561,7 +561,7 @@ impl<'a> Checker<'a> {
     pub(crate) fn check_type_trait_refs(
         &mut self,
         ty: &Type,
-        subject: &str,
+        subject: impl std::fmt::Display,
         span: Span,
         identifier: &'static str,
     ) {
@@ -584,7 +584,7 @@ impl<'a> Checker<'a> {
     pub(crate) fn check_no_parent_ref(
         &mut self,
         ty: &Type,
-        subject: &str,
+        subject: impl std::fmt::Display,
         span: Span,
         identifier: &'static str,
     ) {
@@ -606,7 +606,12 @@ impl<'a> Checker<'a> {
     /// distinct unresolvable name `ty` references, mirroring the message
     /// `checker/expr.rs`'s `ExprKind::New` arm uses the same identifier
     /// for.
-    pub(crate) fn check_type_class_names_exist(&mut self, ty: &Type, subject: &str, span: Span) {
+    pub(crate) fn check_type_class_names_exist(
+        &mut self,
+        ty: &Type,
+        subject: impl std::fmt::Display,
+        span: Span,
+    ) {
         let mut unknown = Vec::new();
         self.collect_unknown_class_names(ty, &mut unknown);
         let mut seen = rustc_hash::FxHashSet::default();

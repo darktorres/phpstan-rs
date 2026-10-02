@@ -130,7 +130,7 @@ impl<'a> Checker<'a> {
             self.check_readonly_property_declaration(view);
             self.check_unresolvable_native_type(
                 view.type_hint,
-                &format!(
+                format!(
                     "Property {display}::${} has unresolvable native type.",
                     view.name
                 ),

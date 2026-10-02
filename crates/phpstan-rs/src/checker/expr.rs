@@ -3656,12 +3656,12 @@ impl<'a> Checker<'a> {
                     // not `array`.
                     self.check_type_class_names_exist(
                         &ty,
-                        &format!("parameter ${} of anonymous function", p.name),
+                        format!("parameter ${} of anonymous function", p.name),
                         p.span,
                     );
                     self.check_type_trait_refs(
                         &ty,
-                        &format!("parameter ${} of anonymous function", p.name),
+                        format!("parameter ${} of anonymous function", p.name),
                         p.span,
                         "parameter.trait",
                     );
@@ -3987,12 +3987,12 @@ impl<'a> Checker<'a> {
                     // `array`" reasoning as the Closure arm above.
                     self.check_type_class_names_exist(
                         &ty,
-                        &format!("parameter ${} of arrow function", p.name),
+                        format!("parameter ${} of arrow function", p.name),
                         p.span,
                     );
                     self.check_type_trait_refs(
                         &ty,
-                        &format!("parameter ${} of arrow function", p.name),
+                        format!("parameter ${} of arrow function", p.name),
                         p.span,
                         "parameter.trait",
                     );

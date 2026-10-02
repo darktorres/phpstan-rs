@@ -48,15 +48,13 @@ impl<'a> Checker<'a> {
             return;
         };
         let kind = info.kind();
-        let subject = if is_anonymous {
-            "anonymous class".to_string()
-        } else {
-            format!("{} {registry_name}", class_kind_identifier(&kind))
+        let subject = DeclarationName {
+            word: (!is_anonymous).then(|| class_kind_identifier(&kind)),
+            name: registry_name,
         };
-        let bare_name = if is_anonymous {
-            "anonymous class".to_string()
-        } else {
-            format!("class {registry_name}")
+        let bare_name = DeclarationName {
+            word: (!is_anonymous).then_some("class"),
+            name: registry_name,
         };
         let is_readonly = info.is_readonly();
         let target_kind = |name: &str| {
@@ -258,7 +256,7 @@ impl<'a> Checker<'a> {
             for param in sig.params() {
                 self.check_type_class_names_exist(
                     param.ty(),
-                    &format!("PHPDoc tag @method for method {fqn}::{name}()"),
+                    format!("PHPDoc tag @method for method {fqn}::{name}()"),
                     span,
                 );
                 // `class.nameCase` for this `@method`-tag parameter.
@@ -267,7 +265,7 @@ impl<'a> Checker<'a> {
             }
             self.check_type_class_names_exist(
                 sig.return_type(),
-                &format!("PHPDoc tag @method for method {fqn}::{name}()"),
+                format!("PHPDoc tag @method for method {fqn}::{name}()"),
                 span,
             );
             self.check_type_class_name_case(sig.return_case_refs(), span);
@@ -603,7 +601,7 @@ impl<'a> Checker<'a> {
         for (name, ty) in info.type_aliases() {
             self.check_type_class_names_exist(
                 ty,
-                &format!("PHPDoc tag @phpstan-type {name} for class {fqn}"),
+                format!("PHPDoc tag @phpstan-type {name} for class {fqn}"),
                 span,
             );
             // `class.nameCase` for this alias's RHS - looked up by the
@@ -1990,4 +1988,21 @@ fn parent_call_insertion(ctor: &MethodDecl) -> Option<(Span, String)> {
         },
         format!("{{\n{inner}{CALL}\n{outer}}}"),
     ))
+}
+
+/// How a message names a declaration, written out only when a message is:
+/// "anonymous class" without a word, otherwise "<word> <name>".
+#[derive(Clone, Copy)]
+struct DeclarationName<'a> {
+    word: Option<&'static str>,
+    name: &'a str,
+}
+
+impl std::fmt::Display for DeclarationName<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self.word {
+            Some(word) => write!(f, "{word} {}", self.name),
+            None => f.write_str("anonymous class"),
+        }
+    }
 }
