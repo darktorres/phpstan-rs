@@ -11,7 +11,10 @@ use syntax::token::Span;
 use crate::registry::Registry;
 
 /// The source a declaration was indexed from.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Hash)]
+// The equality below is the derived one with a shortcut, so it agrees with
+// the derived hash.
+#[allow(clippy::derived_hash_with_manual_eq)]
+#[derive(Debug, Clone, Default, Eq, Hash)]
 pub enum Origin {
     /// Not recorded: a registry built from bare source.
     #[default]
@@ -26,6 +29,30 @@ pub enum Origin {
     },
     /// PHPStan's own source, embedded (its path below `src/`).
     Phpstan { file: &'static str },
+}
+
+/// Two embedded paths are the same text; they are usually the same static
+/// too, which is cheaper to see than comparing the text.
+fn same_static(a: &'static str, b: &'static str) -> bool {
+    (std::ptr::eq(a.as_ptr(), b.as_ptr()) && a.len() == b.len()) || a == b
+}
+
+impl PartialEq for Origin {
+    fn eq(&self, other: &Origin) -> bool {
+        match (self, other) {
+            (Origin::Unknown, Origin::Unknown) => true,
+            (Origin::File(a), Origin::File(b)) => a == b,
+            (
+                Origin::Builtin { file, extension },
+                Origin::Builtin {
+                    file: other_file,
+                    extension: other_extension,
+                },
+            ) => same_static(file, other_file) && same_static(extension, other_extension),
+            (Origin::Phpstan { file }, Origin::Phpstan { file: other }) => same_static(file, other),
+            _ => false,
+        }
+    }
 }
 
 /// `Origin` as serialized: the embedded stub paths as text, found in the

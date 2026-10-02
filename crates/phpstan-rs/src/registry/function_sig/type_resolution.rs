@@ -83,7 +83,7 @@ pub(crate) fn declared_type(
     });
     DeclaredType {
         ty: reconcile_doc_with_native(doc_ty, native, native_ty.as_ref()),
-        native: native_ty.unwrap_or(Type::mixed()),
+        native: native_ty.unwrap_or_else(Type::mixed),
         case_refs,
     }
 }
@@ -99,7 +99,7 @@ fn reconcile_doc_with_native(
     native_ty: Option<&Type>,
 ) -> Type {
     let Some(ty) = doc else {
-        return native_ty.cloned().unwrap_or(Type::mixed());
+        return native_ty.cloned().unwrap_or_else(Type::mixed);
     };
     // A docblock type is trusted as the complete picture and otherwise
     // fully replaces the native hint (deliberate - it's usually more
