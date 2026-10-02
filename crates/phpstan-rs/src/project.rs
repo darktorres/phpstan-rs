@@ -43,6 +43,15 @@ use duplicate_class_sites::DuplicateClassSites;
 use duplicate_fn_sites::DuplicateFunctionSites;
 use use_sites::UseSiteIndex;
 
+/// The files `Project::walk_affected` has reached, with what it has walked,
+/// so that it can go on from more changed keys without starting again.
+#[derive(Default)]
+struct AffectedWalk {
+    affected: FxHashSet<PathBuf>,
+    seen: FxHashSet<String>,
+    seen_stub_files: FxHashSet<u32>,
+}
+
 /// One file's parsed state, kept around so `Project::update_file` can undo
 /// exactly what that file previously contributed - both to the shared
 /// registry and to `dependents` below - before re-indexing its new parse.
@@ -1142,7 +1151,7 @@ impl Project {
     /// on the worker pool. The stubs are settled on the calling thread: a
     /// registry resolved once per process may have to be built first, on
     /// the pool, which a pool thread waiting for it would starve.
-    fn finish_declarations(&mut self) -> FxHashSet<String> {
+    fn finish_declarations(&mut self) -> FxHashSet<PathBuf> {
         self.begin_declaration_changes();
         self.sync_phpstan_stubs();
         worker_pool().install(|| self.run_finishing_passes())
@@ -1151,7 +1160,7 @@ impl Project {
     /// Runs the finishing passes, returning the `deps::dependency_key`s of
     /// the classes, functions and constants whose resolved form they
     /// changed (none the first time, when everything is new).
-    fn run_finishing_passes(&mut self) -> FxHashSet<String> {
+    fn run_finishing_passes(&mut self) -> FxHashSet<PathBuf> {
         self.begin_declaration_changes();
         let (scope, body_scope, changed) = if self.registry.has_resolved_declarations() {
             let changed = self.registry.take_changed();
@@ -1208,14 +1217,16 @@ impl Project {
         self.registry.precompute_ancestor_names();
         self.registry.resolve_constant_named_types();
         self.registry.drop_doc_members_excluded_by_native();
-        let mut changed_keys = match (&before, &changed) {
+        let changed_keys = match (&before, &changed) {
             (Some(before), Some(changed)) => self.registry.changed_since(before, changed),
             _ => FxHashSet::default(),
         };
         // What a file contributes to a global's type reads what it
         // references, so a file is walked again when one of those changed.
         let mut stale = std::mem::take(&mut self.globals_stale);
-        stale.extend(self.affected_files(changed_keys.clone()));
+        let mut walk = AffectedWalk::default();
+        self.walk_affected(&mut walk, changed_keys.iter().cloned());
+        stale.extend(walk.affected.iter().cloned());
         let files: Vec<(&Path, &[Stmt])> = self
             .files
             .iter()
@@ -1224,10 +1235,12 @@ impl Project {
         self.registry.infer_global_variables_of(&files, &stale);
         self.registry.set_scope(Scope::all());
         self.rebuild_pest_config();
+        // The walk goes on from where it stopped with the globals that
+        // changed too, which `stale` has no use for.
         if let Some(before) = &before {
-            changed_keys.extend(self.registry.changed_global_variables(before));
+            self.walk_affected(&mut walk, self.registry.changed_global_variables(before));
         }
-        changed_keys
+        walk.affected
     }
 
     /// Re-parses one already-loaded file, patches just its own registry
@@ -1611,10 +1624,9 @@ impl Project {
                 bodies,
             },
         );
-        let changed = self.finish_declarations();
+        let mut affected = self.finish_declarations();
 
         let mut results = FxHashMap::default();
-        let mut affected = self.affected_files(changed);
         affected.insert(path.to_path_buf());
         self.unchecked.clear();
         let mut affected = affected.into_iter();
@@ -1690,8 +1702,7 @@ impl Project {
         let mut affected: FxHashSet<PathBuf> = paths.iter().cloned().collect();
         if any_removed {
             self.rebuild_declarations(&removed, None);
-            let changed = self.finish_declarations();
-            affected.extend(self.affected_files(changed));
+            affected.extend(self.finish_declarations());
         }
 
         affected
@@ -1718,10 +1729,12 @@ impl Project {
     /// reaches the files that read a changed declaration only through
     /// another's types (`f(A $a) { $a->b()->c(); }` where `A::b()`
     /// returns the changed `B`).
-    fn affected_files(&self, changed: FxHashSet<String>) -> FxHashSet<PathBuf> {
-        let mut affected = FxHashSet::default();
-        let mut seen: FxHashSet<String> = FxHashSet::default();
-        let mut seen_stub_files: FxHashSet<u32> = FxHashSet::default();
+    fn walk_affected(&self, walk: &mut AffectedWalk, changed: impl IntoIterator<Item = String>) {
+        let AffectedWalk {
+            affected,
+            seen,
+            seen_stub_files,
+        } = walk;
         let mut frontier: Vec<String> = changed.into_iter().collect();
         // Puts the dependency key of `name` on the frontier unless it was
         // reached already, or is `current`, which is being walked; most
@@ -1744,7 +1757,7 @@ impl Project {
                     continue;
                 };
                 for name in state.functions.iter().chain(&state.classes) {
-                    reach(name, &key, &seen, &mut frontier);
+                    reach(name, &key, seen, &mut frontier);
                 }
             }
             for file in stubs::stub_dependent_files(&key) {
@@ -1752,12 +1765,11 @@ impl Project {
                     continue;
                 }
                 for (_, name) in stubs::stub_file_names(file) {
-                    reach(name, &key, &seen, &mut frontier);
+                    reach(name, &key, seen, &mut frontier);
                 }
             }
             seen.insert(key);
         }
-        affected
     }
 
     /// The checking settings, to change directly.
