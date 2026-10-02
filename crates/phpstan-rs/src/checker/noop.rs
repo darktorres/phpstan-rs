@@ -387,7 +387,7 @@ impl<'a> Checker<'a> {
         if !doc.contains("@phpstan-impure") && !doc.contains("@impure") {
             return;
         }
-        let block = docblock::parse(doc);
+        let block = docblock::parse_shared(doc);
         if !block.impure {
             return;
         }
@@ -460,7 +460,7 @@ impl<'a> Checker<'a> {
         let tagged_pure = f
             .doc_comment
             .as_deref()
-            .is_some_and(|doc| doc.contains("pure") && docblock::parse(doc).pure);
+            .is_some_and(|doc| doc.contains("pure") && docblock::parse_shared(doc).pure);
         if !tagged_pure {
             return;
         }
@@ -548,7 +548,7 @@ impl<'a> Checker<'a> {
         {
             return;
         }
-        let block = docblock::parse(doc);
+        let block = docblock::parse_shared(doc);
         for (name, immediately) in &block.param_immediately_invoked_callable {
             let tag = if *immediately { "immediately" } else { "later" };
             let Some(param) = f.params.iter().find(|p| *p.name == **name) else {

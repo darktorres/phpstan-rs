@@ -96,7 +96,7 @@ impl<'a> Checker<'a> {
         let Some(raw) = &e.doc_comment else {
             return;
         };
-        let block = docblock::parse(raw);
+        let block = docblock::parse_shared(raw);
         if block.templates.is_empty() {
             return;
         }

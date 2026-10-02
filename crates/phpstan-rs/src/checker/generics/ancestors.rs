@@ -289,9 +289,11 @@ impl<'a> Checker<'a> {
     /// the registry's, which may hold another declaration of the name).
     fn declared_templates(&self, fqn: &str, doc: Option<&str>) -> Templates {
         match doc {
-            Some(doc) if doc.contains("template") => {
-                registry::build_template_params(&phpdoc::docblock::parse(doc), fqn, &self.name_ctx)
-            }
+            Some(doc) if doc.contains("template") => registry::build_template_params(
+                &phpdoc::docblock::parse_shared(doc),
+                fqn,
+                &self.name_ctx,
+            ),
             _ => Templates::default(),
         }
     }
@@ -507,7 +509,7 @@ impl<'a> Checker<'a> {
         doc: &str,
         tag: AncestorTag,
     ) -> Vec<(grammar::TypeNode, Type)> {
-        let parsed = grammar::parse(doc);
+        let parsed = grammar::parse_shared(doc);
         let aliases = self
             .registry
             .classes

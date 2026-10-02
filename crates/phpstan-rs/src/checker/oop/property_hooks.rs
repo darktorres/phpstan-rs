@@ -115,7 +115,7 @@ impl<'a> Checker<'a> {
     /// at check time since a hook has no `FunctionReflection` of its own to
     /// cache it on.
     fn resolve_hook_throws(&self, doc: Option<&str>) -> Option<Type> {
-        let block = docblock::parse(doc?);
+        let block = docblock::parse_shared(doc?);
         block.throws.iter().fold(None::<Type>, |acc, node| {
             let ty = crate::registry::parse_type_node(node);
             let ty = resolve_names_in_type(ty, &self.name_ctx);

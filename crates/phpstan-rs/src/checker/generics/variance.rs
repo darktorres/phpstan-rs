@@ -104,11 +104,11 @@ impl<'a> Checker<'a> {
         label: &str,
         span: Span,
     ) {
-        // Cheap substring pre-filter before the real docblock::parse below
+        // Cheap substring pre-filter before the real docblock::parse_shared below
         // - this runs unconditionally on every checked function/method,
         // and the overwhelming majority declare no `@template-covariant`/
         // `-contravariant` tag at all. Matched without the leading `@`
-        // so every spelling `docblock::parse` treats identically
+        // so every spelling `docblock::parse_shared` treats identically
         // (`@phpstan-`/`@psalm-`-prefixed aliases included) passes.
         let has_variance_tag = f.doc_comment.as_deref().is_some_and(|d| {
             d.contains("template-covariant") || d.contains("template-contravariant")
@@ -116,7 +116,7 @@ impl<'a> Checker<'a> {
         if !has_variance_tag {
             return;
         }
-        let Some(doc) = f.doc_comment.as_deref().map(docblock::parse) else {
+        let Some(doc) = f.doc_comment.as_deref().map(docblock::parse_shared) else {
             return;
         };
         if doc.covariant_templates.is_empty() && doc.contravariant_templates.is_empty() {

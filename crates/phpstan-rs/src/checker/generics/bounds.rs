@@ -269,7 +269,7 @@ impl<'a> Checker<'a> {
         let Some(info) = self.class_info(fqn) else {
             return;
         };
-        let block = docblock::parse(raw);
+        let block = docblock::parse_shared(raw);
         for tag in &block.properties {
             let Some(prop_sig) = info.properties().get(tag.name.as_str()) else {
                 continue;

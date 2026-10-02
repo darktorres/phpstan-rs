@@ -291,6 +291,24 @@ pub struct PropertyTag {
     pub writable: bool,
 }
 
+fn shared() -> &'static crate::memo::Memo<DocBlock> {
+    static MEMO: std::sync::LazyLock<crate::memo::Memo<DocBlock>> =
+        std::sync::LazyLock::new(crate::memo::Memo::new);
+    &MEMO
+}
+
+/// `parse`, kept by the text: the block of a doc comment parsed before is
+/// the same one, shared. Whoever needs a part of it for their own copies
+/// that part.
+pub fn parse_shared(raw: &str) -> std::sync::Arc<DocBlock> {
+    shared().get(raw, parse)
+}
+
+/// How `parse_shared` has been asked so far.
+pub fn parse_shared_stats() -> crate::MemoStats {
+    shared().stats()
+}
+
 #[hotpath::measure]
 pub fn parse(raw: &str) -> DocBlock {
     let mut block = DocBlock::default();
@@ -1228,7 +1246,7 @@ const KNOWN_PHPSTAN_TAGS: &[&str] = &[
 /// silently doing nothing. Read from the grammar's tags, so only a tag
 /// position counts, not a `@phpstan-` inside a description.
 pub fn unknown_phpstan_tags(raw: &str) -> Vec<String> {
-    grammar::parse(raw)
+    grammar::parse_shared(raw)
         .tags
         .iter()
         .filter_map(|tag| {

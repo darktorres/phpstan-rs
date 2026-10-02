@@ -26,6 +26,23 @@ pub fn parse(raw: &str) -> PhpDocNode {
     parser::parse(raw)
 }
 
+fn shared() -> &'static crate::memo::Memo<PhpDocNode> {
+    static MEMO: std::sync::LazyLock<crate::memo::Memo<PhpDocNode>> =
+        std::sync::LazyLock::new(crate::memo::Memo::new);
+    &MEMO
+}
+
+/// `parse`, kept by the text: the node of a doc comment parsed before is
+/// the same one, shared.
+pub fn parse_shared(raw: &str) -> std::sync::Arc<PhpDocNode> {
+    shared().get(raw, parse)
+}
+
+/// How `parse_shared` has been asked so far.
+pub fn parse_shared_stats() -> crate::MemoStats {
+    shared().stats()
+}
+
 /// See `parser::doctrine_argument_errors`'s own doc comment.
 pub(crate) use parser::doctrine_argument_errors;
 /// See `parser::parse_tag_rest`'s own doc comment.

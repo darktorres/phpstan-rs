@@ -6,3 +6,6 @@
 
 pub mod docblock;
 pub mod grammar;
+mod memo;
+
+pub use memo::MemoStats;

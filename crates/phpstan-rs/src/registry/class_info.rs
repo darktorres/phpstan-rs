@@ -941,7 +941,8 @@ impl ClassReflection {
     /// `name`.
     #[hotpath::measure]
     pub(crate) fn from_def(name: &str, c: &ClassDef, ctx: &NameContext) -> ClassReflection {
-        let class_doc: Option<DocBlock> = c.doc_comment.as_deref().map(docblock::parse);
+        let class_doc: Option<std::sync::Arc<DocBlock>> =
+            c.doc_comment.as_deref().map(docblock::parse_shared);
         // An enum can't be generic; its `@template` tags declare nothing.
         let template_doc = class_doc.as_ref().filter(|_| c.kind != ClassKind::Enum);
         let templates: Vec<Name> = template_doc
@@ -966,7 +967,7 @@ impl ClassReflection {
         // why this must run after `resolve_names_in_type` on each
         // member's surrounding type, not before.
         let (type_aliases, type_alias_case_refs) =
-            build_type_aliases(class_doc.as_ref(), &template_params, ctx);
+            build_type_aliases(class_doc.as_deref(), &template_params, ctx);
         // `@phpstan-import-type` - resolved just enough here (both names,
         // via this class's `ctx`) to be looked up in the source class's
         // `type_aliases` once it's indexed too; see `ResolvedTypeImport`'s
@@ -1028,7 +1029,7 @@ impl ClassReflection {
                 && m.function
                     .doc_comment
                     .as_deref()
-                    .map(docblock::parse)
+                    .map(docblock::parse_shared)
                     .is_some_and(|d| d.is_final)
             {
                 final_methods_by_phpdoc.insert(name.clone());
@@ -1081,7 +1082,7 @@ impl ClassReflection {
                 p.visibility != Visibility::Private
                     && p.doc_comment
                         .as_deref()
-                        .map(docblock::parse)
+                        .map(docblock::parse_shared)
                         .is_some_and(|d| d.is_final)
             })
             .map(|p| Name::from(&p.name))
@@ -1096,7 +1097,7 @@ impl ClassReflection {
                             != Some(&Visibility::Private)
                             && p.doc_comment
                                 .as_deref()
-                                .map(docblock::parse)
+                                .map(docblock::parse_shared)
                                 .is_some_and(|d| d.is_final)
                     })
                     .map(|p| Name::from(&p.name)),
@@ -1107,7 +1108,7 @@ impl ClassReflection {
             .properties
             .iter()
             .map(|p| {
-                let doc_ty = p.doc_comment.as_deref().map(docblock::parse);
+                let doc_ty = p.doc_comment.as_deref().map(docblock::parse_shared);
                 let DeclaredType {
                     ty,
                     native: ty_native,
@@ -1181,7 +1182,11 @@ impl ClassReflection {
         // A `@param` on the constructor's own docblock describes the same
         // promoted property, so it gets the same PHPDoc-wins treatment.
         if let Some(ctor) = c.constructor() {
-            let ctor_doc = ctor.function.doc_comment.as_deref().map(docblock::parse);
+            let ctor_doc = ctor
+                .function
+                .doc_comment
+                .as_deref()
+                .map(docblock::parse_shared);
             for p in &ctor.function.params {
                 if p.promotion.is_none() {
                     continue;
@@ -1200,8 +1205,8 @@ impl ClassReflection {
                     .or_else(|| {
                         p.doc_comment
                             .as_deref()
-                            .map(docblock::parse)
-                            .and_then(|d| d.var_type)
+                            .map(docblock::parse_shared)
+                            .and_then(|d| d.var_type.clone())
                     });
                 let DeclaredType {
                     ty,
@@ -1218,7 +1223,7 @@ impl ClassReflection {
                 // A promoted param's own inline `@readonly` - cheap to
                 // support given `p.doc_comment` is already parsed above
                 // for `@var`'s fallback.
-                let param_doc = p.doc_comment.as_deref().map(docblock::parse);
+                let param_doc = p.doc_comment.as_deref().map(docblock::parse_shared);
                 let doc_readonly = param_doc.as_ref().is_some_and(|d| d.readonly);
                 let doc_allows_private_mutation =
                     param_doc.as_ref().is_some_and(|d| d.allow_private_mutation);
@@ -1383,7 +1388,7 @@ impl ClassReflection {
             .consts
             .iter()
             .map(|cc| {
-                let doc = cc.doc_comment.as_deref().map(docblock::parse);
+                let doc = cc.doc_comment.as_deref().map(docblock::parse_shared);
                 let doc_ty = doc.as_ref().and_then(|d| d.var_type.clone());
                 let has_phpdoc_type = doc_ty.is_some();
                 let ty = match doc_ty {
@@ -1459,8 +1464,8 @@ impl ClassReflection {
             .trait_uses
             .iter()
             .filter_map(|u| u.doc_comment.as_deref())
-            .map(docblock::parse)
-            .flat_map(|d| d.uses)
+            .map(docblock::parse_shared)
+            .flat_map(|d| d.uses.clone())
             .filter_map(|raw| class_and_args(&resolve_generic_tag(&raw)))
             .collect();
         let template_bounds: FxHashMap<Name, Type> = class_doc

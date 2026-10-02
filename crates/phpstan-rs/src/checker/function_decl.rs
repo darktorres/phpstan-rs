@@ -352,10 +352,10 @@ impl<'a> Checker<'a> {
         // correctly instead of misreading `A` as an unknown class) since
         // `FunctionReflection` has no persisted raw template-bound/-default map
         // of its own. Cheap substring pre-filter before the real
-        // docblock::parse below - most documented methods declare no
+        // docblock::parse_shared below - most documented methods declare no
         // `@template` at all, so this skips a real parse cost on every
         // one. Matched on the bare `template` substring rather than
-        // any one spelling: `docblock::parse` treats `@phpstan-`/
+        // any one spelling: `docblock::parse_shared` treats `@phpstan-`/
         // `@psalm-`/`@phan-template*` identically to `@template*`, and
         // a filter checking only some spellings would silently stop
         // catching the rest.
@@ -364,7 +364,7 @@ impl<'a> Checker<'a> {
             .as_deref()
             .is_some_and(|d| d.contains("template"));
         if has_own_template
-            && let Some(doc) = f.doc_comment.as_deref().map(docblock::parse)
+            && let Some(doc) = f.doc_comment.as_deref().map(docblock::parse_shared)
             && !doc.templates.is_empty()
         {
             let shallow: rustc_hash::FxHashMap<String, types::TemplateParam> = doc
@@ -564,7 +564,7 @@ impl<'a> Checker<'a> {
             // `self`/`static`/`parent` pseudo-type against the enclosing
             // class.
             None => {
-                let doc = f.doc_comment.as_deref().map(docblock::parse);
+                let doc = f.doc_comment.as_deref().map(docblock::parse_shared);
                 for p in &f.params {
                     // Same inline-`@var`-on-a-promoted-property fallback
                     // as `FunctionReflection::from_decl`'s param loop.
@@ -575,8 +575,8 @@ impl<'a> Checker<'a> {
                         .or_else(|| {
                             p.doc_comment
                                 .as_deref()
-                                .map(docblock::parse)
-                                .and_then(|d| d.var_type)
+                                .map(docblock::parse_shared)
+                                .and_then(|d| d.var_type.clone())
                         });
                     // This path bypasses `FunctionReflection::from_decl`,
                     // so it collects the param's case refs itself, and resolves a `value-of<T>`
@@ -658,8 +658,8 @@ impl<'a> Checker<'a> {
                 let doc_return = f
                     .doc_comment
                     .as_deref()
-                    .map(docblock::parse)
-                    .and_then(|d| d.return_type);
+                    .map(docblock::parse_shared)
+                    .and_then(|d| d.return_type.clone());
                 // The return-position sibling of the param loop's identical
                 // fix above.
                 let registry::DeclaredType {
@@ -868,7 +868,7 @@ impl<'a> Checker<'a> {
         self.current_method = Some(f.name.to_string());
         let own_templates = match f.doc_comment.as_deref() {
             Some(doc) if doc.contains("template") => crate::registry::build_template_params(
-                &phpdoc::docblock::parse(doc),
+                &phpdoc::docblock::parse_shared(doc),
                 &f.name,
                 &self.name_ctx,
             ),

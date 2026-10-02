@@ -285,8 +285,8 @@ impl<'a> Checker<'a> {
             let doc_var_type = p
                 .doc_comment
                 .as_deref()
-                .map(docblock::parse)
-                .and_then(|d| d.var_type);
+                .map(docblock::parse_shared)
+                .and_then(|d| d.var_type.clone());
             if is_implicit_mixed(&ty, p.type_hint.as_ref(), doc_var_type.as_ref()) {
                 self.report(
                     format!("Property {fqn}::${} has no type specified.", p.name),
@@ -334,8 +334,8 @@ impl<'a> Checker<'a> {
             let doc_var_type = c
                 .doc_comment
                 .as_deref()
-                .map(docblock::parse)
-                .and_then(|d| d.var_type);
+                .map(docblock::parse_shared)
+                .and_then(|d| d.var_type.clone());
             if doc_var_type.is_none() {
                 continue;
             }
@@ -418,7 +418,7 @@ impl<'a> Checker<'a> {
             && f.return_type.is_none()
             && is_magic_method_with_implicit_return_type(&f.name);
         let doc = if sig.is_none() || magic_method_may_need_doc_return {
-            f.doc_comment.as_deref().map(docblock::parse)
+            f.doc_comment.as_deref().map(docblock::parse_shared)
         } else {
             None
         };

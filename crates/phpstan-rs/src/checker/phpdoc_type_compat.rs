@@ -30,7 +30,7 @@ impl<'a> Checker<'a> {
         if !doc.contains("@") {
             return;
         }
-        let block = docblock::parse(doc);
+        let block = docblock::parse_shared(doc);
         let nodes = super::phpdoc_unresolvable::tag_type_nodes(doc);
         let resolve = |this: &Self, ty: &Type| match class_name {
             Some(c) => this.resolve_pseudo(ty, c),
@@ -536,7 +536,7 @@ impl<'a> Checker<'a> {
         let raw = f
             .doc_comment
             .as_deref()
-            .and_then(|d| docblock::parse(d).self_out);
+            .and_then(|d| docblock::parse_shared(d).self_out.clone());
         let unresolvable = raw.is_some_and(|node| self.type_node_unresolvable(&node, Some(class)));
         let class_ty = Type::object(class.into(), Vec::new());
         let resolved = self.resolve_pseudo(out, class);
@@ -610,7 +610,7 @@ impl<'a> Checker<'a> {
         let mut names: Vec<String> = f
             .doc_comment
             .as_deref()
-            .map(|d| docblock::parse(d).templates)
+            .map(|d| docblock::parse_shared(d).templates.clone())
             .unwrap_or_default();
         if let Some(info) = class_name.and_then(|c| self.registry.classes.get(c)) {
             names.extend(info.templates().iter().map(|t| t.to_string()));

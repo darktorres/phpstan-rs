@@ -356,7 +356,7 @@ impl<'a> Checker<'a> {
         removal: Option<Span>,
         usage: &MemberUsage,
     ) {
-        let doc = doc_comment.map(phpdoc::docblock::parse);
+        let doc = doc_comment.map(phpdoc::docblock::parse_shared);
         let tag_always_read = doc.as_ref().is_some_and(|d| d.always_read);
         let tag_always_written = doc.as_ref().is_some_and(|d| d.always_written);
 

@@ -25,7 +25,7 @@ pub(crate) struct TagTypeNodes {
 }
 
 pub(crate) fn tag_type_nodes(doc: &str) -> TagTypeNodes {
-    let node = grammar::parse(doc);
+    let node = grammar::parse_shared(doc);
     let mut out = TagTypeNodes::default();
     for prefix in ["", "phan-", "psalm-", "phpstan-"] {
         for tag in &node.tags {
@@ -65,7 +65,7 @@ pub(crate) fn tag_type_nodes(doc: &str) -> TagTypeNodes {
 /// (`None` for a bare `@var Type`), in first-appearance order - the same
 /// prefix precedence as `tag_type_nodes`.
 pub(crate) fn var_tag_nodes(doc: &str) -> Vec<(Option<String>, TypeNode)> {
-    let node = grammar::parse(doc);
+    let node = grammar::parse_shared(doc);
     let mut named: Vec<(Option<String>, TypeNode)> = Vec::new();
     // When any tag is unnamed, only the unnamed tags of the last tag kind
     // (`@var` < `@phan-var` < `@psalm-var` < `@phpstan-var`) that has one

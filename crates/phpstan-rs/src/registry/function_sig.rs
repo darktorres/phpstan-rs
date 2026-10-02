@@ -616,7 +616,8 @@ impl FunctionReflection {
         class_type_aliases: &FxHashMap<Name, Type>,
         visibility: Visibility,
     ) -> FunctionReflection {
-        let doc: Option<DocBlock> = f.doc_comment.as_deref().map(docblock::parse);
+        let doc: Option<std::sync::Arc<DocBlock>> =
+            f.doc_comment.as_deref().map(docblock::parse_shared);
         let mut template_params: FxHashMap<String, TemplateParam> = doc
             .as_ref()
             .map(|d| build_template_params(d, &f.name, ctx))
@@ -648,8 +649,8 @@ impl FunctionReflection {
                     .or_else(|| {
                         p.doc_comment
                             .as_deref()
-                            .map(docblock::parse)
-                            .and_then(|d| d.var_type)
+                            .map(docblock::parse_shared)
+                            .and_then(|d| d.var_type.clone())
                     });
                 let DeclaredType {
                     ty,

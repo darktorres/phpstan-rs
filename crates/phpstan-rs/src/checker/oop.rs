@@ -283,7 +283,7 @@ impl<'a> Checker<'a> {
         if !doc.contains("method") {
             return;
         }
-        let block = docblock::parse(doc);
+        let block = docblock::parse_shared(doc);
         if block.method_tags.iter().all(|t| t.templates.is_empty()) {
             return;
         }
@@ -400,7 +400,7 @@ impl<'a> Checker<'a> {
     /// dedicated `class.nameCase` pipeline-wide expansion, not
     /// re-litigated per tag family.
     pub(crate) fn check_require_tag_types(&mut self, c: &ClassDef) {
-        let Some(doc) = c.doc_comment.as_deref().map(docblock::parse) else {
+        let Some(doc) = c.doc_comment.as_deref().map(docblock::parse_shared) else {
             return;
         };
         if doc.require_extends.len() > 1 {
@@ -538,7 +538,7 @@ impl<'a> Checker<'a> {
     /// rather than read back from the already-flattened
     /// `ClassReflection::sealed`.
     pub(crate) fn check_sealed_tag_types(&mut self, c: &ClassDef) {
-        let Some(doc) = c.doc_comment.as_deref().map(docblock::parse) else {
+        let Some(doc) = c.doc_comment.as_deref().map(docblock::parse_shared) else {
             return;
         };
         if doc.sealed.is_empty() {
@@ -741,7 +741,7 @@ impl<'a> Checker<'a> {
                 );
             }
         }
-        let block = docblock::parse(doc);
+        let block = docblock::parse_shared(doc);
         self.report_invalid_tag_values_of(&block, span);
         self.check_doc_see_tag_targets(&block, span);
     }
@@ -751,7 +751,7 @@ impl<'a> Checker<'a> {
     /// type-alias tag names its alias instead of repeating the whole value,
     /// matching real PHPStan's own two message shapes.
     pub(crate) fn report_invalid_doc_tag_values(&mut self, doc: &str, span: Span) {
-        self.report_invalid_tag_values_of(&docblock::parse(doc), span);
+        self.report_invalid_tag_values_of(&docblock::parse_shared(doc), span);
     }
 
     /// `report_invalid_doc_tag_values` for a docblock already parsed.

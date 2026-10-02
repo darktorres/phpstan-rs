@@ -165,7 +165,7 @@ impl<'a> Walker<'a> {
                     let Some(node) = p
                         .doc_comment
                         .as_deref()
-                        .and_then(|doc| phpdoc::docblock::parse(doc).var_type)
+                        .and_then(|doc| phpdoc::docblock::parse_shared(doc).var_type.clone())
                     else {
                         continue;
                     };

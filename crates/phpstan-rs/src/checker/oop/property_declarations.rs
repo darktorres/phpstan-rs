@@ -353,7 +353,7 @@ impl<'a> Checker<'a> {
             }
             return;
         }
-        let Some(doc) = view.doc_comment.map(docblock::parse) else {
+        let Some(doc) = view.doc_comment.map(docblock::parse_shared) else {
             return;
         };
         if doc.readonly && !doc.allow_private_mutation && view.has_default {
