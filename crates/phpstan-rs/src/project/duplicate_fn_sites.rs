@@ -54,7 +54,7 @@ impl DuplicateFunctionSites {
         });
     }
 
-    fn record(&mut self, fqn: String, path: &Path, f: &FunctionDecl) {
+    pub(crate) fn record(&mut self, fqn: String, path: &Path, f: &FunctionDecl) {
         self.sites.entry(fqn).or_default().push(FnDeclSite {
             path: path.to_path_buf(),
             span: f.name.span,

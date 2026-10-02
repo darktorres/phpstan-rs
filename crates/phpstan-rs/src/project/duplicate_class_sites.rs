@@ -53,7 +53,14 @@ impl DuplicateClassSites {
         });
     }
 
-    fn record(&mut self, fqn: String, path: &Path, span: Span, kind: ClassKind, is_stub: bool) {
+    pub(crate) fn record(
+        &mut self,
+        fqn: String,
+        path: &Path,
+        span: Span,
+        kind: ClassKind,
+        is_stub: bool,
+    ) {
         self.sites.entry(fqn).or_default().push(ClassDeclSite {
             path: path.to_path_buf(),
             span,

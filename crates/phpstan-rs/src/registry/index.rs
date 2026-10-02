@@ -8,7 +8,8 @@ use crate::registry::{
     ClassReflection, FunctionReflection, folded_key, function_key, infer_const_type,
 };
 use syntax::ast::{Expr, Stmt, Visibility};
-use syntax::declarations::{Declared, for_each_declaration};
+use syntax::declarations::{Declaration, Declared, for_each_declaration};
+use syntax::name_resolution::NameContext;
 use syntax::php_string::PhpString;
 use types::Type;
 
@@ -599,65 +600,78 @@ pub(crate) fn build_declarations_where(
     keep: Option<Keep<'_>>,
 ) -> Vec<BuiltDecl> {
     let mut out = Vec::new();
-    let kept = |kind: DeclKind, name: &str| keep.is_none_or(|keep| keep(kind, name));
     for_each_declaration(stmts, |declaration, ctx| {
-        let conditional = declaration.conditional;
-        match declaration.declared {
-            Declared::Class(c) => {
-                let name = declaration.name();
-                if !kept(DeclKind::Class, &name) {
-                    return;
-                }
-                let name = Name::from(&name);
-                let mut info = ClassReflection::from_decl(c, ctx);
-                info.record_provenance(origin, &name, c.name.span, &MemberSpans::of_class(&c.def));
-                out.push(BuiltDecl::Class {
-                    name,
-                    conditional,
-                    info: Box::new(info),
-                });
-            }
-            Declared::Function(f) => {
-                if keep.is_some() && !kept(DeclKind::Function, &declaration.name()) {
-                    return;
-                }
-                let mut sig = FunctionReflection::from_decl(
-                    f,
-                    ctx,
-                    &FxHashMap::default(),
-                    &FxHashMap::default(),
-                    Visibility::Public,
-                );
-                sig.provenance = Provenance::new(origin.clone(), f.name.span);
-                out.push(BuiltDecl::Function {
-                    name: Name::from(&declaration.name()),
-                    conditional,
-                    sig: Box::new(sig),
-                    site: (f.name.span.start.line, f.name.span.start.col),
-                });
-            }
-            Declared::Constant(c) => {
-                let name = declaration.name();
-                if kept(DeclKind::Constant, &name) {
-                    out.push(BuiltDecl::GlobalConst {
-                        name: Name::from(&name),
-                        ty: infer_const_type(&c.value),
-                    });
-                }
-            }
-            Declared::Define { name, value } => {
-                if let Some((name, ty)) = define_constant(name, value)
-                    && kept(DeclKind::Constant, name.as_str())
-                {
-                    out.push(BuiltDecl::GlobalConst { name, ty });
-                }
-            }
-        }
+        built_declaration(declaration, ctx, origin, keep, &mut out);
     });
     if keep.is_none() {
         out.extend(crate::registry::anonymous_class_decls(stmts, origin));
     }
     out
+}
+
+/// The declaration `declaration` builds into, pushed on `out`: nothing
+/// when `keep` refuses its kind and name. `ctx` is the name context in
+/// effect where it sits.
+pub(crate) fn built_declaration(
+    declaration: Declaration<'_>,
+    ctx: &NameContext,
+    origin: &Origin,
+    keep: Option<Keep<'_>>,
+    out: &mut Vec<BuiltDecl>,
+) {
+    let kept = |kind: DeclKind, name: &str| keep.is_none_or(|keep| keep(kind, name));
+    let conditional = declaration.conditional;
+    match declaration.declared {
+        Declared::Class(c) => {
+            let name = declaration.name();
+            if !kept(DeclKind::Class, &name) {
+                return;
+            }
+            let name = Name::from(&name);
+            let mut info = ClassReflection::from_decl(c, ctx);
+            info.record_provenance(origin, &name, c.name.span, &MemberSpans::of_class(&c.def));
+            out.push(BuiltDecl::Class {
+                name,
+                conditional,
+                info: Box::new(info),
+            });
+        }
+        Declared::Function(f) => {
+            if keep.is_some() && !kept(DeclKind::Function, &declaration.name()) {
+                return;
+            }
+            let mut sig = FunctionReflection::from_decl(
+                f,
+                ctx,
+                &FxHashMap::default(),
+                &FxHashMap::default(),
+                Visibility::Public,
+            );
+            sig.provenance = Provenance::new(origin.clone(), f.name.span);
+            out.push(BuiltDecl::Function {
+                name: Name::from(&declaration.name()),
+                conditional,
+                sig: Box::new(sig),
+                site: (f.name.span.start.line, f.name.span.start.col),
+            });
+        }
+        Declared::Constant(c) => {
+            let name = declaration.name();
+            if kept(DeclKind::Constant, &name) {
+                out.push(BuiltDecl::GlobalConst {
+                    name: Name::from(&name),
+                    ty: infer_const_type(&c.value),
+                });
+            }
+        }
+        Declared::Define { name, value } => {
+            if let Some((name, ty)) = define_constant(name, value)
+                && kept(DeclKind::Constant, name.as_str())
+            {
+                out.push(BuiltDecl::GlobalConst { name, ty });
+            }
+        }
+    }
 }
 
 /// The constant a `define('NAME', value)` declares, with its value's

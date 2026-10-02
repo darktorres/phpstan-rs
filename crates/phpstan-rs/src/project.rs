@@ -34,6 +34,7 @@ pub(crate) mod duplicate_class_sites;
 mod duplicate_classes;
 pub(crate) mod duplicate_fn_sites;
 mod duplicate_functions;
+mod file_declarations;
 mod mock_hygiene;
 mod path_order;
 pub mod session;
@@ -2622,12 +2623,17 @@ pub fn parse_file(
     interner: &Arc<Interner>,
 ) -> Result<ParsedFile, ParseError> {
     let (ast, ignores, lex_warnings) = parse_with_ignores(path, source, interner)?;
-    let (functions, classes) = declared_names(&ast);
-    let constants = declared_constants(&ast);
+    let origin = Origin::File(Arc::from(path));
+    let file_declarations::FileDeclarations {
+        functions,
+        classes,
+        constants,
+        built_decls,
+        duplicate_fn_sites,
+        duplicate_class_sites,
+    } = file_declarations::collect(&ast, path, is_stub, &origin);
     let references = deps::referenced_names(&ast);
     let declaration_references = deps::declaration_referenced_names(&ast);
-    let origin = Origin::File(Arc::from(path));
-    let built_decls = crate::registry::build_declarations(&ast, &origin);
     // The anonymous classes are the declarations built last, one per
     // `new class`, so the file's own walk need not be repeated for them.
     let anonymous_classes = built_decls
@@ -2637,10 +2643,6 @@ pub fn parse_file(
             _ => None,
         })
         .collect();
-    let mut duplicate_fn_sites = DuplicateFunctionSites::default();
-    duplicate_fn_sites.index(&ast, path);
-    let mut duplicate_class_sites = DuplicateClassSites::default();
-    duplicate_class_sites.index(&ast, path, is_stub);
     let bodies = FileBodies::of(&ast);
     Ok(ParsedFile {
         ast,

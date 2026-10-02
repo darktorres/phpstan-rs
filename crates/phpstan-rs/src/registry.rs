@@ -57,7 +57,7 @@ pub use name_table::NameTable;
 pub(crate) use name_table::{Detached, FoldedKey, Lazy};
 pub type FunctionTable = NameTable<FunctionReflection>;
 pub(crate) use index::{
-    BuiltDecl, DeclKind, Keep, build_declarations, build_declarations_where,
+    BuiltDecl, DeclKind, Keep, build_declarations, build_declarations_where, built_declaration,
     register_global_constant,
 };
 pub(crate) use name_context::{collect_class_name_case_refs, resolve_names_in_type};
