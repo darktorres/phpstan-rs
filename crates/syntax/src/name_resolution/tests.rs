@@ -232,3 +232,118 @@ fn resolves_to_is_resolve_equal_to_the_name() {
         }
     }
 }
+
+#[test]
+fn the_import_table_answers_as_the_table_of_owned_strings_did() {
+    use crate::name::Interner;
+    use rustc_hash::FxHashMap;
+    // What the table was: (kind, name as `use_map_key` normalizes it) to
+    // the path, a later import of a name replacing an earlier one.
+    fn key(kind: UseKind, name: &str) -> (UseKind, String) {
+        match kind {
+            UseKind::Const => (kind, name.to_string()),
+            UseKind::Class | UseKind::Function => (kind, name.to_ascii_lowercase()),
+        }
+    }
+    let interner = Interner::new();
+    let paths = [
+        "Foo\\Bar",
+        "Foo\\BAR",
+        "foo\\bar",
+        "Lib\\Thing\\Widget",
+        "Lib\\Thing\\widget",
+        "App",
+        "app",
+        "Vendor\\PHP\\Util\\FUNC_name",
+        "Vendor\\Constants\\MAX_SIZE",
+        "Vendor\\Constants\\max_size",
+        "Z",
+    ];
+    let aliases = [
+        None,
+        None,
+        Some("Baz"),
+        Some("BAZ"),
+        Some("w"),
+        Some("W"),
+        Some("Max"),
+    ];
+    let mut state = 0x1234_5678_9ABC_DEF0u64;
+    let mut next = move |bound: usize| {
+        state = state
+            .wrapping_mul(6364136223846793005)
+            .wrapping_add(1442695040888963407);
+        ((state >> 33) as usize) % bound
+    };
+    for _ in 0..400 {
+        let mut table = UseMap::default();
+        let mut reference: FxHashMap<(UseKind, String), String> = FxHashMap::default();
+        for _ in 0..next(9) {
+            let kind = [UseKind::Class, UseKind::Function, UseKind::Const][next(3)];
+            let path = paths[next(paths.len())];
+            let alias = aliases[next(aliases.len())];
+            let path_name = interner.name(path);
+            match alias {
+                Some(alias) => {
+                    table.insert(kind, &interner.name(alias), 0, path_name.clone());
+                    reference.insert(key(kind, alias), path.to_string());
+                }
+                None => {
+                    let from = path.rfind('\\').map_or(0, |at| at + 1);
+                    table.insert(kind, &path_name, from, path_name.clone());
+                    reference.insert(key(kind, &path[from..]), path.to_string());
+                }
+            }
+        }
+        for kind in [UseKind::Class, UseKind::Function, UseKind::Const] {
+            for name in [
+                "Bar",
+                "BAR",
+                "bar",
+                "Widget",
+                "WIDGET",
+                "widget",
+                "App",
+                "APP",
+                "app",
+                "FUNC_name",
+                "func_NAME",
+                "MAX_SIZE",
+                "max_size",
+                "Max",
+                "MAX",
+                "Baz",
+                "baz",
+                "w",
+                "W",
+                "Z",
+                "z",
+                "Foo",
+                "",
+                "Nope",
+            ] {
+                assert_eq!(
+                    table.get(kind, name).map(|n| n.as_str().to_string()),
+                    reference.get(&key(kind, name)).cloned(),
+                    "{kind:?} {name}"
+                );
+                assert_eq!(
+                    table.contains(kind, name),
+                    reference.contains_key(&key(kind, name))
+                );
+            }
+        }
+    }
+    // A name of more than the stack buffer's length.
+    let long = "A".repeat(200);
+    let mut table = UseMap::default();
+    table.insert(
+        UseKind::Class,
+        &interner.name(&long),
+        0,
+        interner.name("Long\\Path"),
+    );
+    assert!(table.contains(UseKind::Class, &long.to_ascii_lowercase()));
+    assert!(table.contains(UseKind::Class, &long));
+    assert!(!table.contains(UseKind::Const, &long.to_ascii_lowercase()));
+}

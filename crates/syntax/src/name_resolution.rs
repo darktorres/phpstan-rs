@@ -2,13 +2,113 @@
 //! a file refers to, given the file's `namespace` and `use` statements.
 
 use crate::ast::*;
+use crate::name::Name;
 use crate::token::Position;
 use crate::visit::{
     VisitorMut, walk_attribute_mut, walk_catch_clause_mut, walk_class_def_mut, walk_expr_mut,
     walk_stmt_mut, walk_stmts_mut,
 };
 
-type UseMap = rustc_hash::FxHashMap<(UseKind, String), String>;
+/// The imports of one namespace: what each name a `use` brings in was
+/// imported from, in the three key spaces of PHP's imports - classes and
+/// functions by name ignoring case, constants by name as written. A key is
+/// the interned name it is read from with where in it the imported name
+/// starts, and a value is the interned path, so adding an import allocates
+/// nothing and a lookup of a name allocates nothing.
+#[derive(Debug, Clone, Default)]
+struct UseMap {
+    classes: rustc_hash::FxHashMap<ImportKey<true>, Name>,
+    functions: rustc_hash::FxHashMap<ImportKey<true>, Name>,
+    constants: rustc_hash::FxHashMap<ImportKey<false>, Name>,
+}
+
+/// The name an import is known by: the part of `name` from `from` on,
+/// compared ignoring case (`FOLDED`) or as written.
+#[derive(Debug, Clone)]
+struct ImportKey<const FOLDED: bool> {
+    name: Name,
+    from: usize,
+}
+
+impl<const FOLDED: bool> ImportKey<FOLDED> {
+    fn text(&self) -> &str {
+        // Lowercasing ASCII keeps every byte offset.
+        let text = if FOLDED {
+            self.name.lower()
+        } else {
+            self.name.as_str()
+        };
+        &text[self.from..]
+    }
+}
+
+impl<const FOLDED: bool> PartialEq for ImportKey<FOLDED> {
+    fn eq(&self, other: &Self) -> bool {
+        self.text() == other.text()
+    }
+}
+
+impl<const FOLDED: bool> Eq for ImportKey<FOLDED> {}
+
+impl<const FOLDED: bool> std::hash::Hash for ImportKey<FOLDED> {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.text().hash(state);
+    }
+}
+
+impl<const FOLDED: bool> std::borrow::Borrow<str> for ImportKey<FOLDED> {
+    fn borrow(&self) -> &str {
+        self.text()
+    }
+}
+
+/// Calls `f` with `text` in ASCII lowercase, built on the stack when it is
+/// short.
+fn with_folded<R>(text: &str, f: impl FnOnce(&str) -> R) -> R {
+    if !text.bytes().any(|b| b.is_ascii_uppercase()) {
+        return f(text);
+    }
+    let mut buffer = [0u8; 128];
+    if let Some(bytes) = buffer.get_mut(..text.len()) {
+        bytes.copy_from_slice(text.as_bytes());
+        bytes.make_ascii_lowercase();
+        if let Ok(folded) = std::str::from_utf8(bytes) {
+            return f(folded);
+        }
+    }
+    f(&text.to_ascii_lowercase())
+}
+
+impl UseMap {
+    fn clear(&mut self) {
+        self.classes.clear();
+        self.functions.clear();
+        self.constants.clear();
+    }
+
+    /// Records that the name `name` has from `from` on is `path`'s.
+    fn insert(&mut self, kind: UseKind, name: &Name, from: usize, path: Name) {
+        let name = name.clone();
+        match kind {
+            UseKind::Class => self.classes.insert(ImportKey { name, from }, path),
+            UseKind::Function => self.functions.insert(ImportKey { name, from }, path),
+            UseKind::Const => self.constants.insert(ImportKey { name, from }, path),
+        };
+    }
+
+    /// What `name` was imported from in `kind`'s key space.
+    fn get(&self, kind: UseKind, name: &str) -> Option<&Name> {
+        match kind {
+            UseKind::Class => with_folded(name, |folded| self.classes.get(folded)),
+            UseKind::Function => with_folded(name, |folded| self.functions.get(folded)),
+            UseKind::Const => self.constants.get(name),
+        }
+    }
+
+    fn contains(&self, kind: UseKind, name: &str) -> bool {
+        self.get(kind, name).is_some()
+    }
+}
 
 /// A single leading `\` marks "fully qualified from the global namespace"
 /// (`\Exception`) - every declaration is keyed by its own fully-qualified
@@ -138,8 +238,7 @@ impl NameContext {
     /// legitimately imported via a plain `use Foo;`, never `use function`/
     /// `use const`.
     pub fn is_use_imported(&self, first_segment: &str) -> bool {
-        self.use_map
-            .contains_key(&(UseKind::Class, first_segment.to_ascii_lowercase()))
+        self.use_map.contains(UseKind::Class, first_segment)
     }
 
     /// Whether `name`, a class reference as written, resolves to `fqn`:
@@ -154,16 +253,13 @@ impl NameContext {
         let mut segments = name.splitn(2, '\\');
         let first = segments.next().unwrap_or(name);
         let rest = segments.next();
-        if let Some(imported) = self
-            .use_map
-            .get(&(UseKind::Class, use_map_key(UseKind::Class, first)))
-        {
+        if let Some(imported) = self.use_map.get(UseKind::Class, first) {
             return match rest {
                 Some(r) => fqn
                     .strip_prefix(imported.as_str())
                     .and_then(|tail| tail.strip_prefix('\\'))
                     .is_some_and(|tail| tail == r),
-                None => imported == fqn,
+                None => imported.as_str() == fqn,
             };
         }
         self.declares_as(name, fqn)
@@ -189,15 +285,19 @@ impl NameContext {
     /// constant names are case-sensitive and stored as written.
     pub fn add_uses(&mut self, imports: &[UseImport]) {
         for import in imports {
-            let path: &str = &import.path;
-            let short_name = match &import.alias {
-                Some(alias) => &alias.name,
-                None => path.rsplit('\\').next().unwrap_or(path),
-            };
-            self.use_map.insert(
-                (import.kind, use_map_key(import.kind, short_name)),
-                path.to_string(),
-            );
+            // The name an import is known by: its alias, or the last
+            // segment of what it imports.
+            match &import.alias {
+                Some(alias) => {
+                    self.use_map
+                        .insert(import.kind, &alias.name, 0, import.path.clone());
+                }
+                None => {
+                    let from = import.path.rfind('\\').map_or(0, |at| at + 1);
+                    self.use_map
+                        .insert(import.kind, &import.path, from, import.path.clone());
+                }
+            }
         }
     }
 
@@ -255,10 +355,7 @@ impl NameContext {
         // through a class-kind (namespace) import, whatever the kind of
         // the symbol it finally names.
         let lookup_kind = if rest.is_some() { UseKind::Class } else { kind };
-        if let Some(imported_path) = self
-            .use_map
-            .get(&(lookup_kind, use_map_key(lookup_kind, first)))
-        {
+        if let Some(imported_path) = self.use_map.get(lookup_kind, first) {
             return match rest {
                 Some(r) => {
                     let mut resolved = String::with_capacity(imported_path.len() + 1 + r.len());
@@ -267,7 +364,7 @@ impl NameContext {
                     resolved.push_str(r);
                     resolved
                 }
-                None => imported_path.clone(),
+                None => imported_path.to_string(),
             };
         }
         self.declared_name(name)
@@ -296,8 +393,7 @@ impl NameContext {
 
     fn resolve_with_global_fallback(&self, name: &str, kind: UseKind) -> (String, Option<String>) {
         let is_unqualified = !name.contains('\\');
-        let use_matched =
-            is_unqualified && self.use_map.contains_key(&(kind, use_map_key(kind, name)));
+        let use_matched = is_unqualified && self.use_map.contains(kind, name);
         if !is_unqualified || use_matched || self.namespace.is_empty() {
             (self.resolve_as(name, kind), None)
         } else {
@@ -316,14 +412,6 @@ pub fn qualify(namespace: &str, name: &str) -> String {
         qualified.push('\\');
         qualified.push_str(name);
         qualified
-    }
-}
-
-/// `NameContext::use_map`'s key normalization - see `add_uses`.
-fn use_map_key(kind: UseKind, name: &str) -> String {
-    match kind {
-        UseKind::Const => name.to_string(),
-        UseKind::Class | UseKind::Function => name.to_ascii_lowercase(),
     }
 }
 
