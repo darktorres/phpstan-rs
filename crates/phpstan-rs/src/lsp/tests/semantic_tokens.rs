@@ -289,7 +289,7 @@ fn a_file_with_no_flagged_usage_returns_an_empty_data_array_not_null() {
 
     let messages = run(&dir, &[semantic_tokens_request(2, &uri)]);
     let result = response_result(&messages, 2);
-    assert_ne!(result, Value::Null, "must be Tokens{{data: []}}, not null");
+    assert_ne!(*result, Value::Null, "must be Tokens{{data: []}}, not null");
     assert_eq!(result["data"], json!([]));
 }
 

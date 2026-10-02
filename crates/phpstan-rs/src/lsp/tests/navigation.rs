@@ -140,11 +140,11 @@ fn this_method_call_and_self_const_resolve_without_a_receiver_type_probe() {
     let this_result = response_result(&messages, 2);
     let self_result = response_result(&messages, 3);
     assert_ne!(
-        this_result,
+        *this_result,
         Value::Null,
         "expected $this->helper() to resolve"
     );
-    assert_ne!(self_result, Value::Null, "expected self::LIMIT to resolve");
+    assert_ne!(*self_result, Value::Null, "expected self::LIMIT to resolve");
 }
 
 #[test]
@@ -184,8 +184,8 @@ fn nothing_resolvable_returns_null_not_an_error() {
             definition_request(3, &uri, pos),
         ],
     );
-    assert_eq!(response_result(&messages, 2), Value::Null);
-    assert_eq!(response_result(&messages, 3), Value::Null);
+    assert_eq!(*response_result(&messages, 2), Value::Null);
+    assert_eq!(*response_result(&messages, 3), Value::Null);
 }
 
 #[test]
@@ -287,8 +287,8 @@ fn an_uninferrable_receiver_resolves_to_null_not_a_guess() {
             definition_request(3, &uri, pos),
         ],
     );
-    assert_eq!(response_result(&messages, 2), Value::Null);
-    assert_eq!(response_result(&messages, 3), Value::Null);
+    assert_eq!(*response_result(&messages, 2), Value::Null);
+    assert_eq!(*response_result(&messages, 3), Value::Null);
 }
 
 // Closure/arrow-fn body probing: `check_expr`'s own `Closure`/`ArrowFn`

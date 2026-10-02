@@ -144,7 +144,7 @@ fn code_action_on_a_real_unfixable_diagnostic_returns_empty_array_not_null() {
     );
 
     let result = response_result(&messages, 2);
-    assert_eq!(result, json!([]), "got: {result:?}");
+    assert_eq!(*result, json!([]), "got: {result:?}");
 }
 
 #[test]
@@ -155,7 +155,7 @@ fn code_action_for_a_non_file_uri_returns_null() {
         &dir,
         &[code_action_request(2, "untitled:Untitled-1", r, None)],
     );
-    assert_eq!(response_result(&messages, 2), Value::Null);
+    assert_eq!(*response_result(&messages, 2), Value::Null);
 }
 
 #[test]
@@ -174,7 +174,7 @@ fn code_action_with_only_excluding_quickfix_returns_empty_without_needing_a_vali
             Some(vec!["refactor"]),
         )],
     );
-    assert_eq!(response_result(&messages, 2), json!([]));
+    assert_eq!(*response_result(&messages, 2), json!([]));
 }
 
 #[test]
@@ -194,7 +194,7 @@ fn only_with_a_narrower_quickfix_subkind_still_short_circuits() {
             Some(vec!["quickfix.remove"]),
         )],
     );
-    assert_eq!(response_result(&messages, 2), json!([]));
+    assert_eq!(*response_result(&messages, 2), json!([]));
 }
 
 #[test]
@@ -217,7 +217,10 @@ fn code_action_reuses_the_diagnostics_computed_at_didopen_without_a_fresh_rechec
         ],
     );
 
-    assert_eq!(response_result(&messages, 2), response_result(&messages, 3));
+    assert_eq!(
+        *response_result(&messages, 2),
+        response_result(&messages, 3)
+    );
 }
 
 #[test]
@@ -233,7 +236,7 @@ fn code_action_for_a_workspace_file_never_opened_still_returns_diagnostics() {
     let messages = run(&dir, &[code_action_request(2, &uri, r, None)]);
     let result = response_result(&messages, 2);
     assert_eq!(
-        result,
+        *result,
         json!([]),
         "the cache-miss fallback must still compute a real (if empty-of-fixes) answer, got: {result:?}"
     );

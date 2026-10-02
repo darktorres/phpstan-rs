@@ -405,12 +405,11 @@ pub(super) fn pos_after(src: &str, needle: &str) -> Value {
     })
 }
 
-pub(super) fn response_result(messages: &[Value], id: i64) -> Value {
-    messages
+pub(super) fn response_result(messages: &[Value], id: i64) -> &Value {
+    &messages
         .iter()
         .find(|m| m["id"] == id)
         .unwrap_or_else(|| panic!("no response with id {id} in {messages:?}"))["result"]
-        .clone()
 }
 
 /// The LAST `textDocument/publishDiagnostics` notification for `uri` in

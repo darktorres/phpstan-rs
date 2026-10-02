@@ -79,7 +79,7 @@ fn a_plain_class_name_reference_declines() {
     let pos = lsp_pos(src, "Foo $x");
     let messages = run(&dir, &[type_definition_request(2, &uri, pos)]);
     let result = response_result(&messages, 2);
-    assert_eq!(result, Value::Null);
+    assert_eq!(*result, Value::Null);
 }
 
 #[test]
@@ -91,5 +91,5 @@ fn a_scalar_typed_variable_has_no_class_to_jump_to() {
     let pos = lsp_pos(src, "$x; }");
     let messages = run(&dir, &[type_definition_request(2, &uri, pos)]);
     let result = response_result(&messages, 2);
-    assert_eq!(result, Value::Null);
+    assert_eq!(*result, Value::Null);
 }

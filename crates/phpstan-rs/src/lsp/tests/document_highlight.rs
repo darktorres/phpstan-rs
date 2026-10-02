@@ -171,7 +171,7 @@ fn highlighting_returns_no_response_on_an_unresolvable_position() {
     let pos = lsp_pos(src, "just a comment");
 
     let messages = run(&dir, &[document_highlight_request(2, &uri, pos)]);
-    assert_eq!(response_result(&messages, 2), Value::Null);
+    assert_eq!(*response_result(&messages, 2), Value::Null);
 }
 
 #[test]

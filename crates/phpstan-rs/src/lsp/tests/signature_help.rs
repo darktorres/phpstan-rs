@@ -206,7 +206,7 @@ fn signature_help_is_null_for_a_dynamically_called_variable() {
     let pos = pos_after(src, "$fn(");
 
     let messages = run(&dir, &[signature_help_request(2, &uri, pos)]);
-    assert_eq!(response_result(&messages, 2), Value::Null);
+    assert_eq!(*response_result(&messages, 2), Value::Null);
 }
 
 #[test]
@@ -220,7 +220,7 @@ fn signature_help_returns_null_not_the_outer_signature_for_a_dynamic_call_nested
 
     let messages = run(&dir, &[signature_help_request(2, &uri, pos)]);
     assert_eq!(
-        response_result(&messages, 2),
+        *response_result(&messages, 2),
         Value::Null,
         "the cursor is inside $fn(...), not greet(...) - must not leak greet's signature"
     );
@@ -236,7 +236,7 @@ fn signature_help_returns_null_inside_an_anonymous_classs_own_constructor_arg_ga
 
     let messages = run(&dir, &[signature_help_request(2, &uri, pos)]);
     assert_eq!(
-        response_result(&messages, 2),
+        *response_result(&messages, 2),
         Value::Null,
         "the cursor is inside the anonymous class's own constructor args, not outer(...)"
     );
@@ -268,7 +268,7 @@ fn signature_help_is_null_with_the_cursor_still_on_the_callee_name_before_the_op
     let pos = pos_after(call_src, "fo");
 
     let messages = run(&dir, &[signature_help_request(2, &uri, pos)]);
-    assert_eq!(response_result(&messages, 2), Value::Null);
+    assert_eq!(*response_result(&messages, 2), Value::Null);
 
     let dir2 = TempDir::new("sh_pre_paren_gate_method");
     let method_src = "<?php\nclass Foo { function setup(int $a): void {} }\nfunction f(Foo $x) { $x->setup(1); }\n";
@@ -277,7 +277,7 @@ fn signature_help_is_null_with_the_cursor_still_on_the_callee_name_before_the_op
     let pos2 = pos_after(method_src, "$x->se");
 
     let messages2 = run(&dir2, &[signature_help_request(2, &uri2, pos2)]);
-    assert_eq!(response_result(&messages2, 2), Value::Null);
+    assert_eq!(*response_result(&messages2, 2), Value::Null);
 
     let dir3 = TempDir::new("sh_pre_paren_gate_new");
     let new_src = "<?php\nclass Widget { function __construct(int $id) {} }\nnew Widget(1);\n";
@@ -286,7 +286,7 @@ fn signature_help_is_null_with_the_cursor_still_on_the_callee_name_before_the_op
     let pos3 = pos_after(new_src, "new Wid");
 
     let messages3 = run(&dir3, &[signature_help_request(2, &uri3, pos3)]);
-    assert_eq!(response_result(&messages3, 2), Value::Null);
+    assert_eq!(*response_result(&messages3, 2), Value::Null);
 }
 
 #[test]
@@ -298,7 +298,7 @@ fn signature_help_is_null_inside_a_first_class_callable_reference() {
     let pos = pos_after(src, "foo(.");
 
     let messages = run(&dir, &[signature_help_request(2, &uri, pos)]);
-    assert_eq!(response_result(&messages, 2), Value::Null);
+    assert_eq!(*response_result(&messages, 2), Value::Null);
 }
 
 #[test]

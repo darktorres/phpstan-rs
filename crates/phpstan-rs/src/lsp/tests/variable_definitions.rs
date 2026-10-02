@@ -103,7 +103,7 @@ fn a_variable_declared_in_one_function_does_not_leak_into_another() {
     let pos = lsp_pos(src, "$x; }");
 
     let messages = run(&dir, &[definition_request(2, &uri, pos)]);
-    assert_eq!(response_result(&messages, 2), Value::Null);
+    assert_eq!(*response_result(&messages, 2), Value::Null);
 }
 
 // Top-level script-scope navigation. `ProbeScope::TopLevel` re-checks

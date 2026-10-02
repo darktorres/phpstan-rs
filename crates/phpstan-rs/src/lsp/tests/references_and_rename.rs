@@ -115,8 +115,8 @@ fn rename_and_references_return_null_for_a_local_variable_cursor() {
             rename_request(3, &uri, pos, "y"),
         ],
     );
-    assert_eq!(response_result(&messages, 2), Value::Null);
-    assert_eq!(response_result(&messages, 3), Value::Null);
+    assert_eq!(*response_result(&messages, 2), Value::Null);
+    assert_eq!(*response_result(&messages, 3), Value::Null);
 }
 
 #[test]
