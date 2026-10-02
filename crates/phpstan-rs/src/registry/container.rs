@@ -7,7 +7,7 @@
 //! sections by name. The header carries a checksum of everything after it.
 
 use std::ops::Range;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use rustc_hash::FxHashMap;
 
@@ -192,7 +192,13 @@ impl std::ops::Deref for Slice {
 pub(crate) struct Reader {
     buffer: Buffer,
     sections: FxHashMap<String, Span>,
+    decoded: Arc<DecodedEntries>,
 }
+
+/// The entries read out of a file so far, by the type they decoded to and
+/// where their bytes are, for the tables that store the same bytes to share.
+pub(super) type DecodedEntries =
+    Mutex<FxHashMap<(std::any::TypeId, usize), Arc<dyn std::any::Any + Send + Sync>>>;
 
 /// Why a file wasn't read.
 pub(crate) enum Unreadable {
@@ -227,6 +233,7 @@ impl Reader {
         Ok(Reader {
             buffer: Buffer(Arc::new(file)),
             sections,
+            decoded: Arc::default(),
         })
     }
 
@@ -241,6 +248,10 @@ impl Reader {
 
     pub(super) fn buffer(&self) -> &Buffer {
         &self.buffer
+    }
+
+    pub(super) fn decoded(&self) -> &Arc<DecodedEntries> {
+        &self.decoded
     }
 
     /// The range of section `name`.

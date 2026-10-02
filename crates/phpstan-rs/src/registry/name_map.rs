@@ -272,7 +272,7 @@ impl<V: serde::Serialize> NameMap<V> {
     }
 }
 
-impl<V: serde::de::DeserializeOwned> NameMap<V> {
+impl<V: serde::de::DeserializeOwned + Send + Sync + 'static> NameMap<V> {
     /// The map `store` wrote as section `section`: a base read in place.
     pub(super) fn load(reader: &Reader, section: &str) -> Result<NameMap<V>, String> {
         Ok(NameMap {
@@ -283,7 +283,7 @@ impl<V: serde::de::DeserializeOwned> NameMap<V> {
     }
 }
 
-impl<V: serde::de::DeserializeOwned> Stored for NameMap<V> {
+impl<V: serde::de::DeserializeOwned + Send + Sync + 'static> Stored for NameMap<V> {
     fn load(reader: &Reader, section: &str) -> Result<NameMap<V>, String> {
         NameMap::load(reader, section)
     }

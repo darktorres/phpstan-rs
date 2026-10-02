@@ -187,6 +187,18 @@ fn next_version() -> u64 {
 /// What decodes a stored entry.
 type Decoder<V> = fn(&[u8]) -> V;
 
+/// What decodes the entries of a stored base: each by the offset of its
+/// bytes in the file, and by what those bytes are.
+struct Decode<V>(DecodeEntry<V>);
+
+type DecodeEntry<V> = Arc<dyn Fn(usize, &[u8]) -> Arc<V> + Send + Sync>;
+
+impl<V> std::fmt::Debug for Decode<V> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("Decode")
+    }
+}
+
 /// A table's shared base: its entries sorted by lowercased name, each
 /// decoded already, or kept stored until first read.
 #[derive(Debug)]
@@ -194,7 +206,7 @@ pub(crate) struct Base<V> {
     keys: Keys,
     slots: Box<[Slot<V>]>,
     // What decodes an entry of a stored base.
-    decode: Option<Decoder<V>>,
+    decode: Option<Decode<V>>,
     // Whether the names are ordered and found by their lowercased form, as
     // class and function names are, or as they are written.
     fold: bool,
@@ -267,7 +279,7 @@ fn index_places(records: usize) -> usize {
 #[derive(Debug)]
 struct Slot<V> {
     name: OnceLock<Name>,
-    value: OnceLock<Box<V>>,
+    value: OnceLock<Arc<V>>,
 }
 
 impl<V> Default for Slot<V> {
@@ -372,7 +384,7 @@ impl<V> Base<V> {
             names.push(name);
             let slot = Slot::default();
             slot.value
-                .set(Box::new(value))
+                .set(Arc::new(value))
                 .unwrap_or_else(|_| unreachable!("a new slot is empty"));
             slots.push(slot);
         }
@@ -440,12 +452,15 @@ impl<V> Base<V> {
     /// Entry `i`, decoded the first time it is read.
     pub(super) fn value(&self, i: usize) -> &V {
         self.slots[i].value.get_or_init(|| {
-            let decode = self.decode.expect("a slot built decoded holds its value");
+            let decode = self
+                .decode
+                .as_ref()
+                .expect("a slot built decoded holds its value");
             let Keys::Stored { buffer, .. } = &self.keys else {
                 unreachable!("a slot built decoded holds its value")
             };
             let (_, entry) = self.keys.record(i);
-            Box::new(decode(&buffer[entry]))
+            (decode.0)(entry.start, &buffer[entry])
         })
     }
 }
@@ -898,7 +913,7 @@ impl<V: serde::Serialize> NameTable<V> {
     }
 }
 
-impl<V: serde::de::DeserializeOwned> NameTable<V> {
+impl<V: serde::de::DeserializeOwned + Send + Sync + 'static> NameTable<V> {
     /// The table `store` wrote as section `section`: a base read in place.
     pub(super) fn load(reader: &Reader, section: &str) -> Result<NameTable<V>, String> {
         Ok(NameTable {
@@ -910,7 +925,7 @@ impl<V: serde::de::DeserializeOwned> NameTable<V> {
     }
 }
 
-impl<V: serde::de::DeserializeOwned> Stored for NameTable<V> {
+impl<V: serde::de::DeserializeOwned + Send + Sync + 'static> Stored for NameTable<V> {
     fn load(reader: &Reader, section: &str) -> Result<NameTable<V>, String> {
         NameTable::load(reader, section)
     }
@@ -961,7 +976,7 @@ pub(super) fn store_entries<V: serde::Serialize>(
 }
 
 /// The base `store_entries` wrote as section `section`, read in place.
-pub(super) fn load_base<V: serde::de::DeserializeOwned>(
+pub(super) fn load_base<V: serde::de::DeserializeOwned + Send + Sync + 'static>(
     reader: &Reader,
     section: &str,
     fold: bool,
@@ -982,10 +997,30 @@ pub(super) fn load_base<V: serde::de::DeserializeOwned>(
     };
     validate(&keys, section)?;
     let slots = (0..keys.len()).map(|_| Slot::default()).collect();
+    // An entry another table of the file stores with the same bytes (the
+    // writer writes equal bytes once) is decoded once for them all.
+    let shared = Arc::clone(reader.decoded());
+    let decode = Decode(Arc::new(move |offset: usize, bytes: &[u8]| {
+        let key = (std::any::TypeId::of::<V>(), offset);
+        let lock = || {
+            shared
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+        };
+        if let Some(found) = lock().get(&key)
+            && let Ok(value) = Arc::clone(found).downcast::<V>()
+        {
+            return value;
+        }
+        let value = Arc::new(decode_entry::<V>(bytes));
+        let kept: Arc<dyn std::any::Any + Send + Sync> = value.clone();
+        lock().entry(key).or_insert(kept);
+        value
+    }));
     Ok(Base {
         keys,
         slots,
-        decode: Some(decode_entry::<V>),
+        decode: Some(decode),
         fold,
     })
 }
