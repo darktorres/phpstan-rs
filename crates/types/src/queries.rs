@@ -7,6 +7,69 @@ use crate::{
     ShapeField, ShapeKey, TrinaryLogic, Type,
 };
 
+/// The types the `is_*` queries ask whether a type is within, built once.
+struct Probes {
+    array: Type,
+    scalar: Type,
+    list: Type,
+    non_empty_array: Type,
+    empty_array: Type,
+}
+
+static PROBES: std::sync::LazyLock<Probes> = std::sync::LazyLock::new(|| Probes {
+    array: Type::array(Type::mixed(), Type::mixed()),
+    scalar: Type::new(Repr::Union(vec![
+        Type::bool(),
+        Type::int(),
+        Type::float(),
+        Type::string(),
+    ])),
+    list: Type::list_of(Type::mixed()),
+    non_empty_array: Type::new(Repr::Intersection(vec![
+        Type::array(Type::mixed(), Type::mixed()),
+        Type::accessory(AccessoryKind::NonEmptyArray),
+    ])),
+    empty_array: Type::array_shape(Shape::sealed(Vec::new())),
+});
+
+/// `string` refined by `kind`, the type `is_refined_string` asks about.
+pub(crate) fn refined_string_probe(kind: AccessoryKind) -> &'static Type {
+    const KINDS: [AccessoryKind; 10] = [
+        AccessoryKind::NonEmptyString,
+        AccessoryKind::NonFalsyString,
+        AccessoryKind::LiteralString,
+        AccessoryKind::NumericString,
+        AccessoryKind::ArrayList,
+        AccessoryKind::NonEmptyArray,
+        AccessoryKind::LowercaseString,
+        AccessoryKind::UppercaseString,
+        AccessoryKind::DecimalIntegerString,
+        AccessoryKind::NonDecimalIntegerString,
+    ];
+    static PROBES: std::sync::LazyLock<[Type; 10]> = std::sync::LazyLock::new(|| {
+        KINDS.map(|kind| {
+            Type::new(Repr::Intersection(vec![
+                Type::string(),
+                Type::accessory(kind),
+            ]))
+        })
+    });
+    // Exhaustive, so a kind added later cannot index past the table.
+    let index = match kind {
+        AccessoryKind::NonEmptyString => 0,
+        AccessoryKind::NonFalsyString => 1,
+        AccessoryKind::LiteralString => 2,
+        AccessoryKind::NumericString => 3,
+        AccessoryKind::ArrayList => 4,
+        AccessoryKind::NonEmptyArray => 5,
+        AccessoryKind::LowercaseString => 6,
+        AccessoryKind::UppercaseString => 7,
+        AccessoryKind::DecimalIntegerString => 8,
+        AccessoryKind::NonDecimalIntegerString => 9,
+    };
+    &PROBES[index]
+}
+
 impl Type {
     /// Whether this is `mixed`, written or not.
     pub fn is_mixed(&self) -> bool {
@@ -647,10 +710,7 @@ impl Type {
     /// `isNonEmptyString()`, `isNonFalsyString()`, `isLiteralString()`,
     /// `isLowercaseString()`, `isUppercaseString()`, `isNumericString()`.
     pub fn is_refined_string(&self, kind: AccessoryKind) -> TrinaryLogic {
-        self.is_within(&Type::new(Repr::Intersection(vec![
-            Type::string(),
-            Type::accessory(kind),
-        ])))
+        self.is_within(refined_string_probe(kind))
     }
 
     /// This type with its strings refined by `kind`: a `string`, bare or
@@ -721,10 +781,7 @@ impl Type {
 
     /// PHPStan's `isArray()`.
     pub fn is_array(&self) -> TrinaryLogic {
-        self.is_within(&Type::array(
-            Type::new(Repr::Mixed(false, None)),
-            Type::new(Repr::Mixed(false, None)),
-        ))
+        self.is_within(&PROBES.array)
     }
 
     /// PHPStan's `isObject()`.
@@ -740,17 +797,12 @@ impl Type {
 
     /// PHPStan's `isScalar()`: a `bool`, `int`, `float` or `string`.
     pub fn is_scalar(&self) -> TrinaryLogic {
-        self.is_within(&Type::new(Repr::Union(vec![
-            Type::bool(),
-            Type::int(),
-            Type::float(),
-            Type::string(),
-        ])))
+        self.is_within(&PROBES.scalar)
     }
 
     /// PHPStan's `isList()`.
     pub fn is_list(&self) -> TrinaryLogic {
-        self.is_within(&Type::list_of(Type::mixed()))
+        self.is_within(&PROBES.list)
     }
 
     /// How many elements this array may hold, as the least and the most
@@ -772,18 +824,12 @@ impl Type {
 
     /// Whether every value is a non-empty array.
     pub fn is_non_empty_array(&self) -> TrinaryLogic {
-        self.is_within(&Type::new(Repr::Intersection(vec![
-            Type::array(
-                Type::new(Repr::Mixed(false, None)),
-                Type::new(Repr::Mixed(false, None)),
-            ),
-            Type::accessory(AccessoryKind::NonEmptyArray),
-        ])))
+        self.is_within(&PROBES.non_empty_array)
     }
 
     /// Whether every value is the empty array.
     pub fn is_empty_array(&self) -> TrinaryLogic {
-        self.is_within(&Type::array_shape(Shape::sealed(Vec::new())))
+        self.is_within(&PROBES.empty_array)
     }
 
     /// PHPStan's `getIterableValueType()` for a type every value of which
