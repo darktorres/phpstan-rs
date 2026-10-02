@@ -9,6 +9,7 @@ mod display_and_misc;
 mod intersections;
 mod keyword_hints;
 mod kinds;
+mod map_children;
 mod mentions;
 mod narrowing;
 mod node_flags;
