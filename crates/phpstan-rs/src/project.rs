@@ -49,7 +49,34 @@ use use_sites::UseSiteIndex;
 struct AffectedWalk {
     affected: FxHashSet<PathBuf>,
     seen: FxHashSet<String>,
-    seen_stub_files: FxHashSet<u32>,
+    stub_files: StubFileSet,
+}
+
+/// A set of stub files, by number, which is added to a file's closure at a
+/// time.
+#[derive(Default)]
+struct StubFileSet {
+    words: Vec<u64>,
+}
+
+impl StubFileSet {
+    /// Adds every stub file `file` leads to (`stubs::stub_file_closure`),
+    /// calling `visit` with each that was not in the set.
+    fn add_closure(&mut self, file: u32, mut visit: impl FnMut(u32)) {
+        let closure = stubs::stub_file_closure(file);
+        if self.words.len() < closure.len() {
+            self.words.resize(closure.len(), 0);
+        }
+        for (at, (have, add)) in self.words.iter_mut().zip(closure).enumerate() {
+            let mut new = add & !*have;
+            *have |= new;
+            while new != 0 {
+                let bit = new.trailing_zeros();
+                new &= new - 1;
+                visit((at * 64) as u32 + bit);
+            }
+        }
+    }
 }
 
 /// One file's parsed state, kept around so `Project::update_file` can undo
@@ -1094,12 +1121,16 @@ impl Project {
             .chain(changed.constants.keys().map(|c| deps::dependency_key(c)))
             .collect();
         let mut seen: FxHashSet<String> = FxHashSet::default();
-        let mut seen_stub_files: FxHashSet<u32> = FxHashSet::default();
+        let mut stub_files = StubFileSet::default();
         while let Some(key) = frontier.pop() {
             if seen.contains(&key) {
                 continue;
             }
-            let mut reached = |name: &str, is_class: bool| {
+            // A stub's name is a key already, and takes part in the walk
+            // only through the files that reference it, which its stub
+            // file's closure holds: it is walked only if a project file
+            // references it. A project file's name is made a key first.
+            let mut reached = |name: &str, is_class: bool, stub: bool| {
                 let set = if is_class {
                     &mut classes
                 } else {
@@ -1107,34 +1138,40 @@ impl Project {
                 };
                 // `deps::dependency_key`, built on the stack: most names
                 // reached are in the set already.
-                crate::registry::with_function_key(name.trim_start_matches('\\'), |key| {
+                let mut reach = |key: &str| {
                     if !set.contains(key) {
-                        let key = key.to_string();
-                        set.insert(key.clone());
-                        frontier.push(key);
+                        set.insert(key.to_string());
+                        if !stub || index.contains_key(key) {
+                            frontier.push(key.to_string());
+                        }
                     }
-                });
+                };
+                if stub {
+                    reach(name);
+                } else {
+                    crate::registry::with_function_key(name.trim_start_matches('\\'), reach);
+                }
             };
             for file in index.get(&key).into_iter().flatten() {
                 let Some(state) = self.files.get(file) else {
                     continue;
                 };
                 for name in state.classes.iter().chain(&state.anonymous_classes) {
-                    reached(name, true);
+                    reached(name, true, false);
                 }
                 for name in &state.functions {
-                    reached(name, false);
+                    reached(name, false, false);
                 }
             }
-            // A stub file is reached through every key it references;
-            // its names are walked the first time.
+            // A stub file is reached through every key it references, and
+            // with it every stub file that references what it declares;
+            // the names of each are walked the first time.
             for file in stubs::stub_dependent_files(&key) {
-                if !seen_stub_files.insert(file) {
-                    continue;
-                }
-                for (is_class, name) in stubs::stub_file_names(file) {
-                    reached(name, is_class);
-                }
+                stub_files.add_closure(file, |file| {
+                    for (is_class, name) in stubs::stub_file_names(file) {
+                        reached(name, is_class, true);
+                    }
+                });
             }
             seen.insert(key);
         }
@@ -1733,7 +1770,7 @@ impl Project {
         let AffectedWalk {
             affected,
             seen,
-            seen_stub_files,
+            stub_files,
         } = walk;
         let mut frontier: Vec<String> = changed.into_iter().collect();
         // Puts the dependency key of `name` on the frontier unless it was
@@ -1747,6 +1784,17 @@ impl Project {
                     }
                 });
             };
+        // A stub's name is a key already, and only a file that reads it
+        // leads further: through the files that reference it, which its
+        // stub file's closure holds.
+        let reach_stub = |key: &str, seen: &FxHashSet<String>, frontier: &mut Vec<String>| {
+            if !seen.contains(key)
+                && (self.dependents.contains_key(key)
+                    || self.signature_dependents.contains_key(key))
+            {
+                frontier.push(key.to_string());
+            }
+        };
         while let Some(key) = frontier.pop() {
             if seen.contains(&key) {
                 continue;
@@ -1761,12 +1809,13 @@ impl Project {
                 }
             }
             for file in stubs::stub_dependent_files(&key) {
-                if !seen_stub_files.insert(file) {
-                    continue;
-                }
-                for (_, name) in stubs::stub_file_names(file) {
-                    reach(name, &key, seen, &mut frontier);
-                }
+                stub_files.add_closure(file, |file| {
+                    for (_, name) in stubs::stub_file_names(file) {
+                        if name != key {
+                            reach_stub(name, seen, &mut frontier);
+                        }
+                    }
+                });
             }
             seen.insert(key);
         }

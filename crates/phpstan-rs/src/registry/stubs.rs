@@ -834,6 +834,20 @@ pub fn stub_dependent_files(key: &str) -> impl Iterator<Item = u32> {
         .map(|file| u32::from_le_bytes(*file))
 }
 
+/// How many stub files there are.
+#[cfg(test)]
+pub fn stub_file_count() -> usize {
+    stub_index().declared_by_file.len()
+}
+
+/// The stub files `file` leads to, itself included, as a bit set by file
+/// number: the files referencing a name it declares, those referencing a
+/// name one of them declares, and so on. It is a fact of the stubs, made
+/// once for a file.
+pub fn stub_file_closure(file: u32) -> &'static [u64] {
+    stub_index().file_closure(file as usize)
+}
+
 /// The classes (`true`) and functions stub file `file` declares, each by
 /// its own dependency key.
 pub fn stub_file_names(file: u32) -> impl Iterator<Item = (bool, &'static str)> {
@@ -855,6 +869,29 @@ pub fn stub_dependents(key: &str) -> impl Iterator<Item = (bool, &'static str)> 
 type DeclaredKeys = Box<[(bool, Box<str>)]>;
 
 impl StubIndex {
+    fn file_closure(&'static self, file: usize) -> &'static [u64] {
+        self.file_closures[file].get_or_init(|| {
+            let files = self.declared_by_file.len();
+            let mut reached = vec![0u64; files.div_ceil(64)];
+            reached[file / 64] |= 1 << (file % 64);
+            let mut stack = vec![file];
+            while let Some(current) = stack.pop() {
+                for (_, key) in self.declared_keys_of(current).iter() {
+                    let dependents = self.dependents.get(key).unwrap_or(&[]);
+                    for dependent in dependents.as_chunks::<4>().0 {
+                        let dependent = u32::from_le_bytes(*dependent) as usize;
+                        let (word, bit) = (dependent / 64, 1u64 << (dependent % 64));
+                        if reached[word] & bit == 0 {
+                            reached[word] |= bit;
+                            stack.push(dependent);
+                        }
+                    }
+                }
+            }
+            reached.into_boxed_slice()
+        })
+    }
+
     /// The names stub file `file` declares, as dependency keys, read from
     /// the index the first time and kept.
     fn declared_keys_of(&'static self, file: usize) -> &'static DeclaredKeys {
@@ -1071,6 +1108,10 @@ struct StubIndex {
     // for.
     #[serde(skip)]
     declared_keys: Vec<std::sync::OnceLock<DeclaredKeys>>,
+    // Each stub file's closure over the stub files (`stub_file_closure`),
+    // made when first asked for.
+    #[serde(skip)]
+    file_closures: Vec<std::sync::OnceLock<Box<[u64]>>>,
     // Lowercased name -> the phpstorm-stubs directory (extension) that
     // declares it, as a position in `extension_names`; PHPStan's own
     // classes aren't built-ins and aren't here.
@@ -1184,6 +1225,9 @@ impl StubIndex {
     /// The index with its extension names as the embedded strings they are.
     fn resolved(mut self) -> StubIndex {
         self.declared_keys = (0..self.declared_by_file.len())
+            .map(|_| std::sync::OnceLock::new())
+            .collect();
+        self.file_closures = (0..self.declared_by_file.len())
             .map(|_| std::sync::OnceLock::new())
             .collect();
         self.extensions = self
@@ -1527,6 +1571,7 @@ fn build_generated_stub_data() -> (StubIndex, GeneratedStubData) {
         ),
         declared_by_file: declared_records.finish(),
         declared_keys: Vec::new(),
+        file_closures: Vec::new(),
         function_extensions,
         class_extensions,
         extension_names,

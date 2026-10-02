@@ -1,7 +1,10 @@
 //! The stub index the cache stores reads back whole, from the file's own
 //! buffer.
 
-use super::super::{Packed, Reader, Records, StubIndex, Writer, stub_dependents, stub_index};
+use super::super::{
+    Packed, Reader, Records, StubIndex, Writer, stub_dependent_files, stub_dependents,
+    stub_file_closure, stub_file_count, stub_file_names, stub_index,
+};
 
 fn read_back() -> StubIndex {
     let mut writer = Writer::new();
@@ -141,4 +144,32 @@ fn stub_dependents_come_as_the_keys_dependencies_are_tracked_under() {
         }
     }
     assert!(seen > 100, "only {seen} names depend on those keys");
+}
+
+#[test]
+fn a_stub_file_closure_is_every_file_reached_through_the_names_it_declares() {
+    let count = stub_file_count() as u32;
+    // The files the key-by-key walk reaches from `file`.
+    let by_keys = |file: u32| {
+        let mut reached = rustc_hash::FxHashSet::default();
+        reached.insert(file);
+        let mut stack = vec![file];
+        while let Some(current) = stack.pop() {
+            for (_, name) in stub_file_names(current) {
+                for dependent in stub_dependent_files(name) {
+                    if reached.insert(dependent) {
+                        stack.push(dependent);
+                    }
+                }
+            }
+        }
+        reached
+    };
+    for file in (0..count).step_by(37) {
+        let closure = stub_file_closure(file);
+        let bits: rustc_hash::FxHashSet<u32> = (0..count)
+            .filter(|f| closure[(*f / 64) as usize] >> (*f % 64) & 1 == 1)
+            .collect();
+        assert_eq!(bits, by_keys(file), "file {file}");
+    }
 }
