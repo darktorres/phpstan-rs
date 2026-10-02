@@ -452,10 +452,16 @@ impl<'a> Checker<'a> {
             // matching change.
             let is_enum_case_proxy = after_ty.is_enum_case();
             // `cond`'s own truthiness subject is no proxy for itself.
-            let truthy = format!("truthy({name})");
+            let is_truthy_of_name = |k: &str| {
+                k.strip_prefix("truthy(")
+                    .and_then(|rest| rest.strip_suffix(')'))
+                    == Some(name.as_str())
+            };
             if (is_flag_proxy || is_object_proxy || is_enum_case_proxy)
                 && before.get(name) != Some(after_ty)
-                && !subjects.iter().any(|(k, _)| k == name || *k == truthy)
+                && !subjects
+                    .iter()
+                    .any(|(k, _)| k == name || is_truthy_of_name(k))
             {
                 subjects.push((name.clone(), after_ty.clone()));
                 if is_flag_proxy {
