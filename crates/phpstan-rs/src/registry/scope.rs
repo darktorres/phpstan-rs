@@ -6,7 +6,6 @@ use rustc_hash::FxHashSet;
 use syntax::name::Name;
 
 use crate::registry::Registry;
-use crate::registry::name_table::function_key;
 
 /// The classes and functions the finishing passes resolve, by lowercased
 /// name; `None` for every one.
@@ -38,15 +37,15 @@ impl Scope {
     }
 
     pub(crate) fn has_class(&self, name: &str) -> bool {
-        self.classes
-            .as_ref()
-            .is_none_or(|classes| classes.contains(function_key(name).as_ref()))
+        self.classes.as_ref().is_none_or(|classes| {
+            crate::registry::with_function_key(name, |key| classes.contains(key))
+        })
     }
 
     pub(crate) fn has_function(&self, name: &str) -> bool {
-        self.functions
-            .as_ref()
-            .is_none_or(|functions| functions.contains(function_key(name).as_ref()))
+        self.functions.as_ref().is_none_or(|functions| {
+            crate::registry::with_function_key(name, |key| functions.contains(key))
+        })
     }
 
     /// What `self` has that `other` hasn't; both are named sets.

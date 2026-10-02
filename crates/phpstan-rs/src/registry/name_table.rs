@@ -22,6 +22,23 @@ pub(crate) fn function_key(name: &str) -> Cow<'_, str> {
     }
 }
 
+/// Calls `f` with `function_key(name)`, built on the stack when the name is
+/// short, so a lookup of a name with capitals allocates nothing.
+pub(crate) fn with_function_key<R>(name: &str, f: impl FnOnce(&str) -> R) -> R {
+    if !name.bytes().any(|b| b.is_ascii_uppercase()) {
+        return f(name);
+    }
+    let mut buffer = [0u8; 128];
+    if let Some(slot) = buffer.get_mut(..name.len()) {
+        slot.copy_from_slice(name.as_bytes());
+        slot.make_ascii_lowercase();
+        if let Ok(key) = std::str::from_utf8(slot) {
+            return f(key);
+        }
+    }
+    f(&name.to_ascii_lowercase())
+}
+
 /// `function_key`, as a stored key.
 pub(crate) fn folded_key(name: &str) -> Name {
     function_key(name).into()
@@ -370,25 +387,28 @@ impl<V> NameTable<V> {
     }
 
     pub fn get(&self, name: &str) -> Option<&V> {
-        let key = function_key(name);
-        self.entries
-            .get(key.as_ref())
-            .or_else(|| self.base_get(&key).map(|(_, value)| value))
+        with_function_key(name, |key| {
+            self.entries
+                .get(key)
+                .or_else(|| self.base_get(key).map(|(_, value)| value))
+        })
     }
 
     /// The value `name` finds, with its declared name.
     pub fn get_with_name(&self, name: &str) -> Option<(&Name, &V)> {
-        let key = function_key(name);
-        self.entries
-            .get_key_value(key.as_ref())
-            .map(|(declared, value)| (&declared.0, value))
-            .or_else(|| self.base_get(&key))
+        with_function_key(name, |key| {
+            self.entries
+                .get_key_value(key)
+                .map(|(declared, value)| (&declared.0, value))
+                .or_else(|| self.base_get(key))
+        })
     }
 
     pub fn contains_key(&self, name: &str) -> bool {
-        let key = function_key(name);
-        self.entries.contains_key(key.as_ref())
-            || (self.base_contains(&key) && !self.hidden.contains(key.as_ref()))
+        with_function_key(name, |key| {
+            self.entries.contains_key(key)
+                || (self.base_contains(key) && !self.hidden.contains(key))
+        })
     }
 
     /// Every value with its declared name.
@@ -436,15 +456,16 @@ pub(crate) struct DeclaredNames<V> {
 impl<V> DeclaredNames<V> {
     /// The declared name `name` finds, in any case.
     pub(crate) fn get(&self, name: &str) -> Option<&Name> {
-        let key = function_key(name);
-        if let Some(own) = self.own.get(key.as_ref()) {
-            return Some(&own.0);
-        }
-        let base = self.base.as_ref()?;
-        if self.hidden.contains(key.as_ref()) {
-            return None;
-        }
-        base.find(&key).map(|i| base.name(i))
+        with_function_key(name, |key| {
+            if let Some(own) = self.own.get(key) {
+                return Some(&own.0);
+            }
+            let base = self.base.as_ref()?;
+            if self.hidden.contains(key) {
+                return None;
+            }
+            base.find(key).map(|i| base.name(i))
+        })
     }
 }
 
@@ -476,9 +497,10 @@ impl<V: Clone> NameTable<V> {
     }
 
     pub fn get_mut(&mut self, name: &str) -> Option<&mut V> {
-        let key = function_key(name);
-        self.own(&key);
-        self.entries.get_mut(key.as_ref())
+        with_function_key(name, move |key| {
+            self.own(key);
+            self.entries.get_mut(key)
+        })
     }
 
     /// Stores `value` under `name`, which becomes the declared spelling,
@@ -514,14 +536,15 @@ impl<V: Clone> NameTable<V> {
     }
 
     pub fn remove(&mut self, name: &str) -> Option<V> {
-        let key = function_key(name);
-        if let Some(value) = self.entries.remove(key.as_ref()) {
-            return Some(value);
-        }
-        let (declared, value) = self.base_get(&key)?;
-        let (declared, value) = (declared.clone(), value.clone());
-        self.hidden.insert(Folded(declared));
-        Some(value)
+        with_function_key(name, move |key| {
+            if let Some(value) = self.entries.remove(key) {
+                return Some(value);
+            }
+            let (declared, value) = self.base_get(key)?;
+            let (declared, value) = (declared.clone(), value.clone());
+            self.hidden.insert(Folded(declared));
+            Some(value)
+        })
     }
 
     /// Every value with its declared name, mutably.
@@ -1036,6 +1059,30 @@ mod tests {
         }
         assert_eq!(table.get("two"), Some(&3));
         assert_eq!(table.own_iter().count(), 3);
+    }
+
+    #[test]
+    fn the_stack_key_is_the_function_key_for_every_length_and_spelling() {
+        let long = format!("Vendor\\{}", "AbC".repeat(80));
+        let names = [
+            "",
+            "lower",
+            "Mixed\\Case",
+            "ALLCAPS",
+            "\u{c9}t\u{e9} CAPS",
+            "x",
+            long.as_str(),
+        ];
+        for name in names {
+            let seen = with_function_key(name, |key| key.to_string());
+            assert_eq!(seen, function_key(name).as_ref(), "{name:?}");
+        }
+        // A name of exactly the buffer's size, and one past it.
+        for len in [127, 128, 129] {
+            let name = "Ab".repeat(len).chars().take(len).collect::<String>();
+            let seen = with_function_key(&name, |key| key.to_string());
+            assert_eq!(seen, name.to_ascii_lowercase(), "length {len}");
+        }
     }
 
     #[test]

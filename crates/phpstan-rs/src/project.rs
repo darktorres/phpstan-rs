@@ -1088,15 +1088,20 @@ impl Project {
                 continue;
             }
             let mut reached = |name: &str, is_class: bool| {
-                let key = deps::dependency_key(name);
                 let set = if is_class {
                     &mut classes
                 } else {
                     &mut functions
                 };
-                if set.insert(key.clone()) {
-                    frontier.push(key);
-                }
+                // `deps::dependency_key`, built on the stack: most names
+                // reached are in the set already.
+                crate::registry::with_function_key(name.trim_start_matches('\\'), |key| {
+                    if !set.contains(key) {
+                        let key = key.to_string();
+                        set.insert(key.clone());
+                        frontier.push(key);
+                    }
+                });
             };
             for file in index.get(&key).into_iter().flatten() {
                 let Some(state) = self.files.get(file) else {

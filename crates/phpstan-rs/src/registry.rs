@@ -56,7 +56,7 @@ pub use name_table::NameTable;
 pub type FunctionTable = NameTable<FunctionReflection>;
 pub(crate) use index::{BuiltDecl, build_declarations, register_global_constant};
 pub(crate) use name_context::{collect_class_name_case_refs, resolve_names_in_type};
-pub(crate) use name_table::{folded_key, function_key};
+pub(crate) use name_table::{folded_key, function_key, with_function_key};
 pub(crate) use property_writes::PropertyWrites;
 pub use provenance::{Origin, Provenance};
 pub use purity::PurityDependency;
