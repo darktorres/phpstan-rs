@@ -13,9 +13,8 @@ impl Type {
     /// The union of this type and `other`, normalized: nested unions
     /// flattened, subsumed members absorbed, `mixed` kept unknown.
     pub fn union(self, other: Type) -> Type {
-        let arguments = [&self.clone(), &other.clone()];
-        crate::intern::memoized(crate::intern::Operation::Union, &arguments, || {
-            union_types_impl(self, other, None)
+        crate::intern::memoized_owned(crate::intern::Operation::Union, self, other, |a, b| {
+            union_types_impl(a, b, None)
         })
     }
 }

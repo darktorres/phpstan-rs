@@ -152,7 +152,7 @@ impl Type {
     /// identical to it: `is_array(...)`'s false branch excludes
     /// `array<mixed>`, which must drop an `array<string>` too.
     pub fn without(&self, excluded: &Type) -> Type {
-        crate::intern::memoized(crate::intern::Operation::Without, &[self, excluded], || {
+        crate::intern::memoized_pair(crate::intern::Operation::Without, self, excluded, || {
             self.without_uncached(excluded)
         })
     }

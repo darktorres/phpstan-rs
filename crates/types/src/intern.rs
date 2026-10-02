@@ -490,8 +490,15 @@ pub(crate) enum Operation {
 }
 
 // A memo entry keeps its arguments alive, so their nodes (and addresses)
-// stay the ones its key names.
-type MemoEntry = (Vec<Type>, Type);
+// stay the ones its key names; they are held, and never read.
+#[allow(dead_code)]
+enum Kept {
+    // Every operation but an intersection has two arguments.
+    Two(Type, Type),
+    Many(Vec<Type>),
+}
+
+type MemoEntry = (Kept, Type);
 
 /// A memo key: the operation and its arguments' node addresses, the first
 /// two inline (every operation but an intersection has two).
@@ -510,37 +517,87 @@ thread_local! {
         std::cell::RefCell::new(FxHashMap::default());
 }
 
-/// `compute`'s result for `operation` over `arguments`, computed once per
-/// argument tuple on each thread: the arguments are interned, so the same
-/// tuple is the same nodes. Only for an operation that asks nothing but
-/// the types (no class hierarchy), whose result `compute` alone decides.
-pub(crate) fn memoized(
-    operation: Operation,
-    arguments: &[&Type],
-    compute: impl FnOnce() -> Type,
-) -> Type {
-    let address = |i: usize| arguments.get(i).map_or(0, |ty| Arc::as_ptr(&ty.0) as usize);
-    let key = MemoKey {
-        operation,
-        first: address(0),
-        second: address(1),
-        rest: arguments
-            .iter()
-            .skip(2)
-            .map(|ty| Arc::as_ptr(&ty.0) as usize)
-            .collect(),
-    };
-    if let Some(result) = MEMO.with(|memo| memo.borrow().get(&key).map(|(_, r)| r.clone())) {
-        return result;
-    }
-    let result = compute();
+fn address(ty: &Type) -> usize {
+    Arc::as_ptr(&ty.0) as usize
+}
+
+fn remembered(key: &MemoKey) -> Option<Type> {
+    MEMO.with(|memo| memo.borrow().get(key).map(|(_, result)| result.clone()))
+}
+
+fn remember(key: MemoKey, kept: Kept, result: &Type) {
     MEMO.with(|memo| {
         let mut memo = memo.borrow_mut();
         if memo.len() >= MEMO_CAPACITY {
             memo.clear();
         }
-        let kept = arguments.iter().map(|ty| (*ty).clone()).collect();
         memo.insert(key, (kept, result.clone()));
     });
+}
+
+/// `compute`'s result for `operation` over `a` and `b`, computed once per
+/// pair on each thread: the arguments are interned, so the same pair is
+/// the same nodes. Only for an operation that asks nothing but the types
+/// (no class hierarchy), whose result `compute` alone decides. A hit
+/// copies nothing; a miss copies the pair once, to keep it alive.
+pub(crate) fn memoized_pair(
+    operation: Operation,
+    a: &Type,
+    b: &Type,
+    compute: impl FnOnce() -> Type,
+) -> Type {
+    let key = MemoKey {
+        operation,
+        first: address(a),
+        second: address(b),
+        rest: Box::default(),
+    };
+    if let Some(result) = remembered(&key) {
+        return result;
+    }
+    let result = compute();
+    remember(key, Kept::Two(a.clone(), b.clone()), &result);
+    result
+}
+
+/// `memoized_pair` for a `compute` that takes its two arguments by value.
+pub(crate) fn memoized_owned(
+    operation: Operation,
+    a: Type,
+    b: Type,
+    compute: impl FnOnce(Type, Type) -> Type,
+) -> Type {
+    let key = MemoKey {
+        operation,
+        first: address(&a),
+        second: address(&b),
+        rest: Box::default(),
+    };
+    if let Some(result) = remembered(&key) {
+        return result;
+    }
+    let kept = Kept::Two(a.clone(), b.clone());
+    let result = compute(a, b);
+    remember(key, kept, &result);
+    result
+}
+
+/// `memoized_pair` over any number of arguments (an intersection's members).
+pub(crate) fn memoized_many(
+    operation: Operation,
+    arguments: &[Type],
+    compute: impl FnOnce() -> Type,
+) -> Type {
+    let key = MemoKey {
+        operation,
+        first: arguments.first().map_or(0, address),
+        second: arguments.get(1).map_or(0, address),
+        rest: arguments.iter().skip(2).map(address).collect(),
+    };
+    if let Some(result) = remembered(&key) {
+        return result;
+    }
+    let result = compute();
+    remember(key, Kept::Many(arguments.to_vec()), &result);
     result
 }

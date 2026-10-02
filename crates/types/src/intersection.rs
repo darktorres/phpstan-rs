@@ -8,8 +8,7 @@ use crate::{AccessoryKind, Relation, Repr, Shape, ShapeField, ShapeKey, Type};
 /// non-empty-array` is one array (`int` values, `int` keys) carrying both
 /// refinements, i.e. `non-empty-list<int>`.
 pub(crate) fn intersect_types(members: Vec<Type>) -> Type {
-    let arguments: Vec<&Type> = members.iter().collect();
-    crate::intern::memoized(crate::intern::Operation::Intersect, &arguments, || {
+    crate::intern::memoized_many(crate::intern::Operation::Intersect, &members, || {
         Relation::structural().intersect(members.clone())
     })
 }
