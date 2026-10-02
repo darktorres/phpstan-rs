@@ -191,6 +191,25 @@ pub struct Shape {
     /// copy: nothing but those methods can change the keys or their order.
     #[serde(skip)]
     positions: KeyPositions,
+    /// What `key_type` and `value_type` found, kept: a shape is asked for
+    /// them again and again, and a union over every field of a large one
+    /// is long. Dropped by every method that changes a field, and not
+    /// kept by a copy; each remembers the tail it was made with, since
+    /// `unsealed` can be changed in place.
+    #[serde(skip)]
+    summaries: Summaries,
+}
+
+#[derive(Debug, Default)]
+pub(crate) struct Summaries {
+    pub(crate) key: std::sync::OnceLock<(Option<Type>, Type)>,
+    pub(crate) value: std::sync::OnceLock<(Option<Type>, Type)>,
+}
+
+impl Clone for Summaries {
+    fn clone(&self) -> Summaries {
+        Summaries::default()
+    }
 }
 
 /// The fields a shape has before looking a key up by comparing gives way
@@ -234,6 +253,7 @@ impl Shape {
             unsealed,
             next_index,
             positions: KeyPositions::default(),
+            summaries: Summaries::default(),
         }
     }
 
@@ -262,6 +282,10 @@ impl Shape {
             Some(Box::new((Type::unknown_array_key(), Type::mixed()))),
             None,
         )
+    }
+
+    pub(crate) fn summaries(&self) -> &Summaries {
+        &self.summaries
     }
 
     /// The fields, in order.
@@ -344,6 +368,7 @@ impl Shape {
         if let Some(positions) = self.positions.0.get_mut() {
             positions.insert(field.key.clone(), self.fields.len());
         }
+        self.summaries = Summaries::default();
         self.fields.push(field);
     }
 
@@ -352,7 +377,10 @@ impl Shape {
     /// setOffsetValueType`).
     pub fn set(&mut self, field: ShapeField) {
         match self.position(&field.key) {
-            Some(position) => self.fields[position] = field,
+            Some(position) => {
+                self.summaries = Summaries::default();
+                self.fields[position] = field;
+            }
             None => self.push(field),
         }
     }
@@ -365,7 +393,10 @@ impl Shape {
         merge: impl FnOnce(&mut ShapeField, ShapeField),
     ) {
         match self.position(&field.key) {
-            Some(position) => merge(&mut self.fields[position], field),
+            Some(position) => {
+                self.summaries = Summaries::default();
+                merge(&mut self.fields[position], field);
+            }
             None => self.push(field),
         }
     }
@@ -373,6 +404,7 @@ impl Shape {
     /// Lets `f` change each field's type and whether it is optional, in
     /// place: the keys and their order stay as they are.
     pub fn update_fields(&mut self, mut f: impl FnMut(&ShapeKey, &mut Type, &mut bool)) {
+        self.summaries = Summaries::default();
         for field in &mut self.fields {
             f(&field.key, &mut field.ty, &mut field.optional);
         }
@@ -380,6 +412,7 @@ impl Shape {
 
     /// The type of the field at `position`, to change in place.
     pub fn field_type_at_mut(&mut self, position: usize) -> Option<&mut Type> {
+        self.summaries = Summaries::default();
         self.fields.get_mut(position).map(|field| &mut field.ty)
     }
 
@@ -387,6 +420,7 @@ impl Shape {
     pub fn retain(&mut self, keep: impl FnMut(&ShapeField) -> bool) {
         self.fields.retain(keep);
         self.positions = KeyPositions::default();
+        self.summaries = Summaries::default();
     }
 
     /// The shape with `f` applied to each field's type and to the

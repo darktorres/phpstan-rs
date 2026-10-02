@@ -883,15 +883,7 @@ impl Type {
     pub fn array_value_type(&self) -> Option<Type> {
         syntax::stack::guard(|| match self.repr() {
             Repr::Array(_, value) => Some((*value).clone()),
-            Repr::ArrayShape(shape) => Some(
-                shape
-                    .fields()
-                    .iter()
-                    .map(|f| f.ty.clone())
-                    .chain(shape.unsealed.as_deref().map(|tail| tail.1.clone()))
-                    .reduce(Type::union)
-                    .unwrap_or(Type::never()),
-            ),
+            Repr::ArrayShape(shape) => Some(shape.value_type()),
             Repr::Intersection(members) => members.iter().find_map(Type::array_value_type),
             Repr::Union(members) | Repr::BenevolentUnion(members) => members
                 .iter()

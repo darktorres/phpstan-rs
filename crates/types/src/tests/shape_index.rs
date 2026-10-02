@@ -167,3 +167,65 @@ fn merge_field_folds_into_the_field_of_that_key() {
     assert!(seven.optional);
     assert_eq!(seven.ty, Type::union(Type::int(), Type::string()));
 }
+
+#[test]
+fn the_remembered_key_and_value_types_follow_every_change_of_the_shape() {
+    // A copy starts with nothing remembered, so it answers from the fields.
+    fn agrees(shape: &Shape, step: &str) {
+        let fresh = shape.clone();
+        assert_eq!(shape.key_type(), fresh.key_type(), "key type after {step}");
+        assert_eq!(
+            shape.value_type(),
+            fresh.value_type(),
+            "value type after {step}"
+        );
+    }
+    let mut shape = Shape::sealed(Vec::new());
+    agrees(&shape, "nothing");
+    assert_eq!(shape.value_type(), Type::never());
+    for n in 0..24 {
+        // Asked before each change, so there is something to go stale.
+        let _ = (shape.key_type(), shape.value_type());
+        shape.push(ShapeField::new(
+            ShapeKey::from_name(&format!("k{n}")),
+            Type::int_literal(n),
+            false,
+        ));
+        agrees(&shape, "push");
+    }
+    let _ = (shape.key_type(), shape.value_type());
+    shape.set(ShapeField::new(
+        ShapeKey::from_name("k3"),
+        Type::string(),
+        true,
+    ));
+    agrees(&shape, "set");
+    let _ = (shape.key_type(), shape.value_type());
+    shape.update_fields(|_, ty, _| *ty = Type::union(ty.clone(), Type::null()));
+    agrees(&shape, "update_fields");
+    let _ = (shape.key_type(), shape.value_type());
+    if let Some(ty) = shape.field_type_at_mut(0) {
+        *ty = Type::float();
+    }
+    agrees(&shape, "field_type_at_mut");
+    let _ = (shape.key_type(), shape.value_type());
+    shape.retain(|f| f.key != ShapeKey::from_name("k5"));
+    agrees(&shape, "retain");
+    let _ = (shape.key_type(), shape.value_type());
+    shape.merge_field(
+        ShapeField::new(ShapeKey::from_name("k1"), Type::bool(), false),
+        |g, f| g.ty = Type::union(g.ty.clone(), f.ty),
+    );
+    agrees(&shape, "merge_field");
+    // The tail is a public field: changed in place under a remembered type.
+    let _ = (shape.key_type(), shape.value_type());
+    shape.unsealed = Some(Box::new((Type::string(), Type::bool())));
+    agrees(&shape, "a tail set in place");
+    assert!(
+        shape
+            .value_type()
+            .union_members()
+            .iter()
+            .any(|m| *m == Type::bool())
+    );
+}

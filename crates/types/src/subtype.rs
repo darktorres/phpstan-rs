@@ -36,11 +36,31 @@ impl Shape {
     /// `array<int<0, max>, int>` and `array{a: int}` fits
     /// `array<'a'|'b', int>`.
     pub fn key_type(&self) -> Type {
+        self.summary(
+            &self.summaries().key,
+            |tail| tail.0.clone(),
+            Shape::compute_key_type,
+        )
+    }
+
+    fn compute_key_type(&self) -> Type {
         let mut key_types: Vec<Type> = Vec::with_capacity(self.fields().len());
-        for field in self.fields() {
-            let kt = field.key.to_type();
-            if !key_types.contains(&kt) {
-                key_types.push(kt);
+        // The keys of a shape are its own, each once; a list built by hand
+        // may hold one twice.
+        if self.fields().len() < 16 {
+            for field in self.fields() {
+                let kt = field.key.to_type();
+                if !key_types.contains(&kt) {
+                    key_types.push(kt);
+                }
+            }
+        } else {
+            #[allow(clippy::mutable_key_type)]
+            let mut seen: rustc_hash::FxHashSet<crate::ShapeKey> = rustc_hash::FxHashSet::default();
+            for field in self.fields() {
+                if seen.insert(field.key.clone()) {
+                    key_types.push(field.key.to_type());
+                }
             }
         }
         // Distinct literals: a union past the member cap must not collapse.
@@ -52,6 +72,47 @@ impl Shape {
         match self.unsealed.as_deref() {
             Some(tail) => Type::union(literals, tail.0.clone()),
             None => literals,
+        }
+    }
+
+    /// Every value the shape can hold (`ConstantArrayType::
+    /// getIterableValueType()`): the union of its fields' types and an
+    /// unsealed tail's value type; `never` for `array{}`.
+    pub fn value_type(&self) -> Type {
+        self.summary(
+            &self.summaries().value,
+            |tail| tail.1.clone(),
+            Shape::compute_value_type,
+        )
+    }
+
+    fn compute_value_type(&self) -> Type {
+        self.fields()
+            .iter()
+            .map(|f| f.ty.clone())
+            .chain(self.unsealed.as_deref().map(|tail| tail.1.clone()))
+            .reduce(Type::union)
+            .unwrap_or(Type::never())
+    }
+
+    /// `cell`'s summary, made by `compute` when it has none, or has one
+    /// made with another tail than the shape has now (`unsealed` is a field
+    /// anyone can set), which `part` picks the part of the summary reads of.
+    fn summary(
+        &self,
+        cell: &std::sync::OnceLock<(Option<Type>, Type)>,
+        part: impl Fn(&(Type, Type)) -> Type,
+        compute: impl Fn(&Shape) -> Type,
+    ) -> Type {
+        let tail = self.unsealed.as_deref().map(part);
+        match cell.get() {
+            Some((made_with, summary)) if *made_with == tail => summary.clone(),
+            Some(_) => compute(self),
+            None => {
+                let summary = compute(self);
+                let _ = cell.set((tail, summary.clone()));
+                summary
+            }
         }
     }
 }
