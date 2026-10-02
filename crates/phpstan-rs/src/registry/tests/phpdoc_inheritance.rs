@@ -478,3 +478,73 @@ fn an_inherited_return_keeps_the_implementors_own_template_in_place_of_the_inter
     assert_eq!(tp.name, "M");
     assert_eq!(tp.scope.as_deref(), Some("BaseFactory"));
 }
+
+#[test]
+fn a_docblock_reaches_a_descendant_seven_levels_down_whatever_the_declaration_order() {
+    // Declared from the last descendant up, so no class comes after its
+    // ancestors in the file.
+    let r = build_registry(
+        r#"<?php
+            class L6 extends L5 { public function items(): array { return []; } }
+            class L5 extends L4 { public function items(): array { return []; } }
+            class L4 extends L3 { public function items(): array { return []; } }
+            class L3 extends L2 { public function items(): array { return []; } }
+            class L2 extends L1 { public function items(): array { return []; } }
+            class L1 extends L0 { public function items(): array { return []; } }
+            class L0 {
+                /** @return list<string> */
+                public function items(): array { return []; }
+            }
+            "#,
+    );
+    for class in ["L1", "L2", "L3", "L4", "L5", "L6"] {
+        let sig = &r.classes[class].methods["items"];
+        assert_eq!(list_item_type(&sig.return_type), Type::string(), "{class}");
+    }
+}
+
+#[test]
+fn a_docblock_comes_down_an_interface_and_a_class_chain_that_meet() {
+    let r = build_registry(
+        r#"<?php
+            interface Source {
+                /** @param list<int> $ids */
+                public function load(array $ids): void;
+            }
+            interface Cached extends Source {}
+            class Base implements Cached {
+                public function load(array $ids): void {}
+            }
+            class Middle extends Base {
+                public function load(array $ids): void {}
+            }
+            class Leaf extends Middle implements Cached {
+                public function load(array $ids): void {}
+            }
+            "#,
+    );
+    for class in ["Base", "Middle", "Leaf"] {
+        let sig = &r.classes[class].methods["load"];
+        assert_eq!(list_item_type(&sig.params[0].ty), Type::int(), "{class}");
+    }
+}
+
+#[test]
+fn a_class_that_is_its_own_ancestor_does_not_stop_the_others_inheriting() {
+    let r = build_registry(
+        r#"<?php
+            class LoopA extends LoopB { public function f(): array { return []; } }
+            class LoopB extends LoopA { public function f(): array { return []; } }
+            class Root {
+                /** @return list<int> */
+                public function f(): array { return []; }
+            }
+            class Child extends Root { public function f(): array { return []; } }
+            "#,
+    );
+    assert_eq!(
+        list_item_type(&r.classes["Child"].methods["f"].return_type),
+        Type::int()
+    );
+    assert!(r.classes.contains_key("LoopA") && r.classes.contains_key("LoopB"));
+}

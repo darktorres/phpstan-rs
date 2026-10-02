@@ -356,15 +356,93 @@ impl Registry {
         // template arguments, which the passes never change.
         let class_names = self.scoped_class_names();
         let max_iterations = class_names.len().max(1);
+        let levels = self.hierarchy_levels(&class_names);
         let bindings: FxHashMap<Name, OnceLock<AncestorBindings>> = class_names
-            .into_iter()
-            .map(|name| (name, OnceLock::new()))
+            .iter()
+            .map(|name| (name.clone(), OnceLock::new()))
             .collect();
-        for _ in 0..max_iterations {
-            if !self.flatten_phpdoc_inheritance_one_pass(&bindings) {
-                break;
+        match levels {
+            // What a class takes from its ancestors is read from their
+            // signatures as they stand and written to its own alone, so
+            // each level taken after the levels its ancestors are in
+            // reaches the fixed point in one sweep.
+            Some(levels) => {
+                for level in &levels {
+                    self.flatten_phpdoc_inheritance_one_pass(level, &bindings);
+                }
+            }
+            // A class that is its own ancestor has no first level: the
+            // passes run until nothing changes.
+            None => {
+                for _ in 0..max_iterations {
+                    if !self.flatten_phpdoc_inheritance_one_pass(&class_names, &bindings) {
+                        break;
+                    }
+                }
             }
         }
+    }
+
+    /// `class_names` grouped by the longest chain of ancestors among them
+    /// each has, those with none first; `None` when a class is among its
+    /// own ancestors. Parents outside `class_names` are not counted: they
+    /// are not resolved again.
+    fn hierarchy_levels(&self, class_names: &[Name]) -> Option<Vec<Vec<Name>>> {
+        let scoped: FxHashSet<&str> = class_names.iter().map(|name| name.lower()).collect();
+        let mut depth: FxHashMap<&str, usize> = FxHashMap::default();
+        let mut visiting: FxHashSet<&str> = FxHashSet::default();
+        // Explicit stack: a chain of ancestors can be as long as the
+        // classes are many.
+        for start in class_names {
+            let mut stack: Vec<(&Name, bool)> = vec![(start, false)];
+            while let Some((name, expanded)) = stack.pop() {
+                let key = name.lower();
+                if depth.contains_key(key) {
+                    continue;
+                }
+                let Some(info) = self.classes.get(name) else {
+                    depth.insert(key, 0);
+                    continue;
+                };
+                let parents = || {
+                    info.extends
+                        .iter()
+                        .chain(&info.implements)
+                        .chain(&info.uses)
+                        .filter(|parent| scoped.contains(parent.lower()))
+                };
+                if !expanded {
+                    if !visiting.insert(key) {
+                        return None;
+                    }
+                    stack.push((name, true));
+                    for parent in parents() {
+                        if visiting.contains(parent.lower()) {
+                            return None;
+                        }
+                        if !depth.contains_key(parent.lower()) {
+                            stack.push((parent, false));
+                        }
+                    }
+                } else {
+                    visiting.remove(key);
+                    let level = parents()
+                        .map(|parent| depth.get(parent.lower()).map_or(0, |d| d + 1))
+                        .max()
+                        .unwrap_or(0);
+                    depth.insert(key, level);
+                }
+            }
+        }
+        let mut levels: Vec<Vec<Name>> = Vec::new();
+        for name in class_names {
+            let level = depth.get(name.lower()).copied().unwrap_or(0);
+            if levels.len() <= level {
+                levels.resize_with(level + 1, Vec::new);
+            }
+            levels[level].push(name.clone());
+        }
+        Some(levels)
     }
 
     /// A redeclared property inherits each hook of its parent's that it
@@ -980,11 +1058,11 @@ impl Registry {
     /// `flatten_traits_one_pass` parallelizes.
     fn flatten_phpdoc_inheritance_one_pass(
         &mut self,
+        class_names: &[Name],
         bindings: &FxHashMap<Name, OnceLock<AncestorBindings>>,
     ) -> bool {
         type Backfill = (Name, Name, Vec<(usize, Type, bool)>, Option<(Type, bool)>);
 
-        let class_names: Vec<Name> = bindings.keys().cloned().collect();
         let registry: &Registry = self;
         let backfills: Vec<Backfill> = class_names
             .par_iter()
