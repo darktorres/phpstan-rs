@@ -32,6 +32,29 @@ static PROBES: std::sync::LazyLock<Probes> = std::sync::LazyLock::new(|| Probes 
     empty_array: Type::array_shape(Shape::sealed(Vec::new())),
 });
 
+/// The two bits a node keeps for an answer of `is_refined_string`; zero is
+/// not asked yet.
+const REFINED_NO: u32 = 1;
+const REFINED_MAYBE: u32 = 2;
+const REFINED_YES: u32 = 3;
+
+/// Where `kind` is among the probes, and in a node's `refined` bits.
+fn refined_index(kind: AccessoryKind) -> usize {
+    // Exhaustive, so a kind added later cannot index past the table.
+    match kind {
+        AccessoryKind::NonEmptyString => 0,
+        AccessoryKind::NonFalsyString => 1,
+        AccessoryKind::LiteralString => 2,
+        AccessoryKind::NumericString => 3,
+        AccessoryKind::ArrayList => 4,
+        AccessoryKind::NonEmptyArray => 5,
+        AccessoryKind::LowercaseString => 6,
+        AccessoryKind::UppercaseString => 7,
+        AccessoryKind::DecimalIntegerString => 8,
+        AccessoryKind::NonDecimalIntegerString => 9,
+    }
+}
+
 /// `string` refined by `kind`, the type `is_refined_string` asks about.
 pub(crate) fn refined_string_probe(kind: AccessoryKind) -> &'static Type {
     const KINDS: [AccessoryKind; 10] = [
@@ -54,19 +77,7 @@ pub(crate) fn refined_string_probe(kind: AccessoryKind) -> &'static Type {
             ]))
         })
     });
-    // Exhaustive, so a kind added later cannot index past the table.
-    let index = match kind {
-        AccessoryKind::NonEmptyString => 0,
-        AccessoryKind::NonFalsyString => 1,
-        AccessoryKind::LiteralString => 2,
-        AccessoryKind::NumericString => 3,
-        AccessoryKind::ArrayList => 4,
-        AccessoryKind::NonEmptyArray => 5,
-        AccessoryKind::LowercaseString => 6,
-        AccessoryKind::UppercaseString => 7,
-        AccessoryKind::DecimalIntegerString => 8,
-        AccessoryKind::NonDecimalIntegerString => 9,
-    };
+    let index = refined_index(kind);
     &PROBES[index]
 }
 
@@ -725,7 +736,27 @@ impl Type {
     /// `isNonEmptyString()`, `isNonFalsyString()`, `isLiteralString()`,
     /// `isLowercaseString()`, `isUppercaseString()`, `isNumericString()`.
     pub fn is_refined_string(&self, kind: AccessoryKind) -> TrinaryLogic {
-        self.is_within(refined_string_probe(kind))
+        use std::sync::atomic::Ordering::Relaxed;
+        // The answer depends on the node alone, so it is asked of the
+        // relation once and read back after: two threads asking at once
+        // find the same answer and set the same bits.
+        let shift = 2 * refined_index(kind);
+        let known = (self.0.refined.load(Relaxed) >> shift) & 0b11;
+        if known != 0 {
+            return match known {
+                REFINED_NO => TrinaryLogic::No,
+                REFINED_MAYBE => TrinaryLogic::Maybe,
+                _ => TrinaryLogic::Yes,
+            };
+        }
+        let answer = self.is_within(refined_string_probe(kind));
+        let bits = match answer {
+            TrinaryLogic::No => REFINED_NO,
+            TrinaryLogic::Maybe => REFINED_MAYBE,
+            TrinaryLogic::Yes => REFINED_YES,
+        };
+        self.0.refined.fetch_or(bits << shift, Relaxed);
+        answer
     }
 
     /// This type with its strings refined by `kind`: a `string`, bare or

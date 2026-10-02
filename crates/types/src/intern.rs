@@ -180,6 +180,7 @@ fn insert(repr: Repr, semantic_hash: fn(&Repr) -> u64) -> Arc<Node> {
         hash,
         exact,
         flags,
+        refined: std::sync::atomic::AtomicU32::new(0),
     });
     shard
         .entries

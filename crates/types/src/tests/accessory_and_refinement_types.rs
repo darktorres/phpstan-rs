@@ -677,3 +677,79 @@ fn count_range_is_the_hull_of_what_each_member_may_hold() {
     );
     assert_eq!(Type::union(sealed, Type::null()).count_range(), None);
 }
+
+#[test]
+fn a_remembered_refinement_answer_is_the_relations() {
+    use crate::AccessoryKind::*;
+    let kinds = [
+        NonEmptyString,
+        NonFalsyString,
+        LiteralString,
+        NumericString,
+        ArrayList,
+        NonEmptyArray,
+        LowercaseString,
+        UppercaseString,
+        DecimalIntegerString,
+        NonDecimalIntegerString,
+    ];
+    let types = [
+        "string",
+        "non-empty-string",
+        "non-falsy-string",
+        "literal-string",
+        "numeric-string",
+        "lowercase-string",
+        "uppercase-string",
+        "decimal-int-string",
+        "non-decimal-int-string",
+        "non-empty-lowercase-string",
+        "'abc'",
+        "'ABC'",
+        "''",
+        "'0'",
+        "'123'",
+        "'1.5'",
+        "'a'|'b'",
+        "'a'|'1'",
+        "numeric-string|int",
+        "string|null",
+        "int",
+        "float",
+        "bool",
+        "null",
+        "mixed",
+        "never",
+        "array<int>",
+        "list<int>",
+        "non-empty-list<string>",
+        "non-empty-array<string, int>",
+        "array{a: int}",
+        "array{}",
+        "int|string",
+        "Foo",
+    ];
+    for text in types {
+        let ty = parse_type_string(text);
+        for kind in kinds {
+            let by_relation = ty.is_within(crate::queries::refined_string_probe(kind));
+            // The first question is the relation's; the second is read back.
+            assert_eq!(ty.is_refined_string(kind), by_relation, "{text} {kind:?}");
+            assert_eq!(
+                ty.is_refined_string(kind),
+                by_relation,
+                "{text} {kind:?} again"
+            );
+        }
+    }
+}
+
+#[test]
+fn the_remembered_answers_do_not_make_a_node_bigger() {
+    // A node is its representation, two hashes, the reference flags and
+    // the answers, in the space the first three and a word of padding take.
+    assert_eq!(
+        std::mem::size_of::<crate::Node>(),
+        std::mem::size_of::<crate::Repr>() + 24
+    );
+}

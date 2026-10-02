@@ -91,6 +91,10 @@ pub(crate) struct Node {
     // (`HAS_*`), so a binding or a resolution can leave a type without them
     // as it is.
     pub(crate) flags: u16,
+    // What `Type::is_refined_string` answered for each of the ten kinds,
+    // two bits apiece (`REFINED_ASKED` set, then the answer), as asked: a
+    // node answers each question once, by the relation, and then by a load.
+    pub(crate) refined: std::sync::atomic::AtomicU32,
 }
 
 pub(crate) const HAS_SELF: u16 = 1;
