@@ -1,0 +1,2 @@
+registry::name_table::tests::a_table_with_unordered_names_does_not_load -> registry::name_table::tests::a_table_with_unordered_names_fails_the_order_check
+registry::packed::tests::offsets_that_do_not_hold_together_do_not_load -> registry::packed::tests::offsets_that_do_not_hold_together_fail_the_order_check
