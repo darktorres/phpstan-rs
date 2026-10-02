@@ -5,23 +5,30 @@ use crate::project::Project;
 use crate::registry::Registry;
 use crate::registry::container::{Reader, Writer};
 
-fn stored_and_read_back(registry: &Registry) -> Registry {
-    let mut writer = Writer::new();
-    registry.store(&mut writer).expect("stores");
-    let reader = match Reader::new(writer.finish()) {
-        Ok(reader) => reader,
-        Err(_) => panic!("a stored registry is a whole file"),
-    };
-    let back = Registry::load(&reader).expect("reads back");
-    back.check_stored().expect("every stored table is in order");
-    back
+/// The stub registry of `Project::new` stored and read back, once for all
+/// the tests here: storing encodes every entry and reading decodes the ones
+/// a test asks for, which is most of what these tests cost.
+fn read_back() -> &'static Registry {
+    static BACK: std::sync::LazyLock<Registry> = std::sync::LazyLock::new(|| {
+        let project = Project::new();
+        let mut writer = Writer::new();
+        project.registry().store(&mut writer).expect("stores");
+        let reader = match Reader::new(writer.finish()) {
+            Ok(reader) => reader,
+            Err(_) => panic!("a stored registry is a whole file"),
+        };
+        let back = Registry::load(&reader).expect("reads back");
+        back.check_stored().expect("every stored table is in order");
+        back
+    });
+    &BACK
 }
 
 #[test]
 fn the_resolved_stub_registry_survives_a_round_trip() {
     let project = Project::new();
     let registry = project.registry();
-    let back = stored_and_read_back(registry);
+    let back = read_back();
 
     assert_eq!(back.classes.len(), registry.classes.len());
     assert_eq!(back.functions.len(), registry.functions.len());
@@ -41,7 +48,7 @@ fn the_declarations_as_built_survive_a_round_trip() {
         registry.has_resolved_declarations(),
         "the stub registry keeps its declarations as built"
     );
-    let back = stored_and_read_back(registry);
+    let back = read_back();
     let (before, after) = (
         registry.raw.as_ref().expect("kept"),
         back.raw.as_ref().expect("stored with the registry"),
@@ -60,7 +67,7 @@ fn the_declarations_as_built_survive_a_round_trip() {
 fn every_stored_table_reads_back_with_its_names_and_values() {
     let project = Project::new();
     let registry = project.registry();
-    let back = stored_and_read_back(registry);
+    let back = read_back();
 
     macro_rules! same_table {
         ($($field:ident),*) => {$(
@@ -95,8 +102,7 @@ fn every_stored_table_reads_back_with_its_names_and_values() {
 
 #[test]
 fn a_read_back_registry_iterates_its_names_in_lowercased_order() {
-    let project = Project::new();
-    let back = stored_and_read_back(project.registry());
+    let back = read_back();
     let keys: Vec<String> = back
         .classes
         .keys()
@@ -109,7 +115,7 @@ fn a_read_back_registry_iterates_its_names_in_lowercased_order() {
 fn the_stored_maps_and_sets_read_back_whole() {
     let project = Project::new();
     let registry = project.registry();
-    let back = stored_and_read_back(registry);
+    let back = read_back();
 
     assert!(!registry.global_constants.is_empty());
     assert_eq!(back.global_constants.len(), registry.global_constants.len());
