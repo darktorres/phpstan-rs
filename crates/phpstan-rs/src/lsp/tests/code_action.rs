@@ -217,10 +217,7 @@ fn code_action_reuses_the_diagnostics_computed_at_didopen_without_a_fresh_rechec
         ],
     );
 
-    assert_eq!(
-        *response_result(&messages, 2),
-        response_result(&messages, 3)
-    );
+    assert_eq!(response_result(&messages, 2), response_result(&messages, 3));
 }
 
 #[test]

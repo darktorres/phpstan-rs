@@ -42,7 +42,7 @@ fn highlighting_a_class_resolves_every_same_file_usage_but_not_other_files() {
 
     let messages = run(&dir, &[document_highlight_request(2, &uri, pos)]);
     let result = response_result(&messages, 2);
-    assert_eq!(ranges(&result).len(), 3, "got: {result:?}");
+    assert_eq!(ranges(result).len(), 3, "got: {result:?}");
 }
 
 #[test]
@@ -56,7 +56,7 @@ fn highlighting_a_local_variable_covers_every_read_in_its_own_function() {
     let messages = run(&dir, &[document_highlight_request(2, &uri, pos)]);
     let result = response_result(&messages, 2);
     assert_eq!(
-        ranges(&result).len(),
+        ranges(result).len(),
         3,
         "expected the param decl plus both $x reads, got: {result:?}"
     );
@@ -73,7 +73,7 @@ fn highlighting_does_not_cross_into_an_uncaptured_closures_own_local_of_the_same
     let messages = run(&dir, &[document_highlight_request(2, &uri, pos)]);
     let result = response_result(&messages, 2);
     assert_eq!(
-        ranges(&result).len(),
+        ranges(result).len(),
         2,
         "expected only the outer assignment and outer return, not the closure's own $tmp, got: {result:?}"
     );
@@ -90,7 +90,7 @@ fn highlighting_a_captured_variable_reaches_into_the_closures_use_clause_and_bod
     let messages = run(&dir, &[document_highlight_request(2, &uri, pos)]);
     let result = response_result(&messages, 2);
     assert_eq!(
-        ranges(&result).len(),
+        ranges(result).len(),
         4,
         "expected the param, the use($x) clause, the closure-body return, and the outer return, got: {result:?}"
     );
@@ -107,7 +107,7 @@ fn highlighting_an_arrow_fns_implicit_capture_is_treated_as_the_same_variable() 
     let messages = run(&dir, &[document_highlight_request(2, &uri, pos)]);
     let result = response_result(&messages, 2);
     assert_eq!(
-        ranges(&result).len(),
+        ranges(result).len(),
         3,
         "expected the param, the arrow-fn body's implicit capture, and the outer return, got: {result:?}"
     );
@@ -124,7 +124,7 @@ fn highlighting_a_method_does_not_cross_into_an_unrelated_classs_same_named_meth
     let messages = run(&dir, &[document_highlight_request(2, &uri, pos)]);
     let result = response_result(&messages, 2);
     assert_eq!(
-        ranges(&result).len(),
+        ranges(result).len(),
         2,
         "expected only A::bar's own decl and call site, not B::bar's unrelated decl, got: {result:?}"
     );
@@ -141,7 +141,7 @@ fn highlighting_an_instance_method_call_finds_every_call_on_the_same_receiver_ty
 
     let messages = run(&dir, &[document_highlight_request(2, &uri, pos)]);
     let result = response_result(&messages, 2);
-    let rs = ranges(&result);
+    let rs = ranges(result);
     assert_eq!(
         rs.len(),
         3,
@@ -186,7 +186,7 @@ fn highlighting_a_top_level_closures_local_is_scoped_correctly_outside_any_funct
     let messages = run(&dir, &[document_highlight_request(2, &uri, pos)]);
     let result = response_result(&messages, 2);
     assert_eq!(
-        ranges(&result).len(),
+        ranges(result).len(),
         2,
         "expected only the top-level assignment and the trailing echo, not the closure's own $tmp, got: {result:?}"
     );

@@ -66,7 +66,7 @@ fn inlay_hint_shows_parameter_names_before_call_arguments() {
 
     let messages = run(&dir, &[inlay_hint_request(2, &uri, whole_file_range())]);
     let result = response_result(&messages, 2);
-    let hs = hints(&result);
+    let hs = hints(result);
     let name_hint = hs
         .iter()
         .find(|h| h["position"] == lsp_pos(src, "'hi'"))
@@ -89,7 +89,7 @@ fn inlay_hint_skips_named_and_spread_arguments() {
 
     let messages = run(&dir, &[inlay_hint_request(2, &uri, whole_file_range())]);
     let result = response_result(&messages, 2);
-    let hs = hints(&result);
+    let hs = hints(result);
     assert!(
         hs.iter().all(|h| h["kind"] != json!(2)),
         "expected no parameter-name hints for a named or spread argument, got: {hs:?}"
@@ -105,7 +105,7 @@ fn inlay_hint_uses_the_declared_parameter_name_for_variadic_overflow() {
 
     let messages = run(&dir, &[inlay_hint_request(2, &uri, whole_file_range())]);
     let result = response_result(&messages, 2);
-    let hs = hints(&result);
+    let hs = hints(result);
     for needle in ["1, ", "2, ", "3);"] {
         let h = hs
             .iter()
@@ -124,7 +124,7 @@ fn inlay_hint_shows_inferred_type_after_an_unannotated_assignment() {
 
     let messages = run(&dir, &[inlay_hint_request(2, &uri, whole_file_range())]);
     let result = response_result(&messages, 2);
-    let hs = hints(&result);
+    let hs = hints(result);
     let h = hs
         .iter()
         .find(|h| h["kind"] == json!(1))
@@ -143,7 +143,7 @@ fn inlay_hint_suppresses_type_hint_when_an_inline_var_annotation_already_covers_
 
     let messages = run(&dir, &[inlay_hint_request(2, &uri, whole_file_range())]);
     let result = response_result(&messages, 2);
-    let hs = hints(&result);
+    let hs = hints(result);
     assert!(
         hs.iter().all(|h| h["kind"] != json!(1)),
         "expected the @var Bar $x annotation to suppress the type hint, got: {hs:?}"
@@ -164,7 +164,7 @@ fn inlay_hint_response_is_filtered_to_the_requested_range() {
 
     let messages = run(&dir, &[inlay_hint_request(2, &uri, narrow)]);
     let result = response_result(&messages, 2);
-    let hs = hints(&result);
+    let hs = hints(result);
     assert_eq!(
         hs.len(),
         1,
@@ -183,7 +183,7 @@ fn inlay_hint_skips_a_mixed_typed_assignment() {
     let messages = run(&dir, &[inlay_hint_request(2, &uri, whole_file_range())]);
     let result = response_result(&messages, 2);
     assert!(
-        hints(&result).iter().all(|h| h["kind"] != json!(1)),
+        hints(result).iter().all(|h| h["kind"] != json!(1)),
         "expected no TYPE hint for a Mixed-inferred assignment, got: {result:?}"
     );
 }
@@ -197,7 +197,7 @@ fn inlay_hint_covers_method_calls_and_new_expressions_too() {
 
     let messages = run(&dir, &[inlay_hint_request(2, &uri, whole_file_range())]);
     let result = response_result(&messages, 2);
-    let hs = hints(&result);
+    let hs = hints(result);
     let ctor_hint = hs
         .iter()
         .find(|h| h["position"] == lsp_pos(src, "1);"))
@@ -219,7 +219,7 @@ fn inlay_hint_shows_parameter_names_for_call_user_func_and_call_user_func_array(
 
     let messages = run(&dir, &[inlay_hint_request(2, &uri, whole_file_range())]);
     let result = response_result(&messages, 2);
-    let hs = hints(&result);
+    let hs = hints(result);
     let name_hints: Vec<&&Value> = hs.iter().filter(|h| label(h) == "name:").collect();
     assert_eq!(
         name_hints.len(),
@@ -250,9 +250,9 @@ fn inlay_hint_reflects_a_new_call_added_after_a_didchange_edit() {
         &[inlay_hint_request(3, &uri, whole_file_range())],
     );
 
-    let first = hints(&response_result(&messages, 2)).len();
+    let first = hints(response_result(&messages, 2)).len();
     let result_after_edit = response_result(&messages, 3);
-    let second_hints = hints(&result_after_edit);
+    let second_hints = hints(result_after_edit);
     assert_eq!(
         first, 1,
         "expected exactly one hint before the edit, got: {second_hints:?}"

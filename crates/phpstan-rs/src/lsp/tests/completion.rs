@@ -166,7 +166,7 @@ fn member_completion_after_arrow_lists_methods_and_properties() {
     );
 
     let result = response_result(&messages, 3);
-    let got = labels(&result);
+    let got = labels(result);
     assert!(got.contains(&"greet"), "got: {got:?}");
     assert!(got.contains(&"name"), "got: {got:?}");
 }
@@ -229,7 +229,7 @@ fn member_completion_truncates_a_stale_mid_edit_statement_instead_of_doubling_it
     );
 
     let result = response_result(&messages, 3);
-    let got = labels(&result);
+    let got = labels(result);
     assert!(got.contains(&"increment"), "got: {got:?}");
     assert!(got.contains(&"value"), "got: {got:?}");
 }
@@ -257,6 +257,6 @@ fn member_completion_finds_the_enclosing_function_by_name_despite_lines_shifting
     );
 
     let result = response_result(&messages, 3);
-    let got = labels(&result);
+    let got = labels(result);
     assert!(got.contains(&"value"), "got: {got:?}");
 }

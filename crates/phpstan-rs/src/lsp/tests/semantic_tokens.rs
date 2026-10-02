@@ -73,7 +73,7 @@ fn a_deprecated_function_call_gets_a_token_even_with_the_diagnostic_gate_left_of
     );
 
     let result = response_result(&messages, 3);
-    let tokens = decode(&result);
+    let tokens = decode(result);
     assert_eq!(tokens.len(), 1, "got: {result:?}");
     assert_eq!(tokens[0].token_type, 0, "expected a Function-kind token");
     assert_eq!(tokens[0].modifiers, DEPRECATED_BIT);
@@ -104,7 +104,7 @@ fn an_internal_function_called_from_outside_its_root_namespace_gets_a_token() {
 
     let messages = run(&dir, &[semantic_tokens_request(2, &uri)]);
     let result = response_result(&messages, 2);
-    let tokens = decode(&result);
+    let tokens = decode(result);
     assert_eq!(tokens.len(), 1, "got: {result:?}");
     assert_eq!(tokens[0].modifiers, INTERNAL_BIT);
 }
@@ -119,7 +119,7 @@ fn an_internal_function_called_from_within_its_own_root_namespace_gets_no_token(
     let messages = run(&dir, &[semantic_tokens_request(2, &uri)]);
     let result = response_result(&messages, 2);
     assert_eq!(
-        decode(&result).len(),
+        decode(result).len(),
         0,
         "an in-package @internal access must never light up, got: {result:?}"
     );
@@ -134,7 +134,7 @@ fn a_method_with_both_tags_gets_one_token_with_both_bits_set() {
 
     let messages = run(&dir, &[semantic_tokens_request(2, &uri)]);
     let result = response_result(&messages, 2);
-    let tokens = decode(&result);
+    let tokens = decode(result);
     assert_eq!(
         tokens.len(),
         1,
@@ -153,7 +153,7 @@ fn an_untagged_method_on_a_deprecated_class_still_gets_a_token_via_the_cascade()
 
     let messages = run(&dir, &[semantic_tokens_request(2, &uri)]);
     let result = response_result(&messages, 2);
-    let tokens = decode(&result);
+    let tokens = decode(result);
     assert_eq!(tokens.len(), 1, "got: {result:?}");
     assert_eq!(tokens[0].modifiers, DEPRECATED_BIT);
 }
@@ -168,7 +168,7 @@ fn an_untagged_method_on_an_internal_class_gets_no_token_from_within_its_own_roo
     let messages = run(&dir, &[semantic_tokens_request(2, &uri)]);
     let result = response_result(&messages, 2);
     assert_eq!(
-        decode(&result).len(),
+        decode(result).len(),
         0,
         "same-root-namespace access via the class-level @internal cascade must never light up, got: {result:?}"
     );
@@ -183,7 +183,7 @@ fn instantiating_a_deprecated_class_gets_a_class_kind_token_at_the_bare_class_na
 
     let messages = run(&dir, &[semantic_tokens_request(2, &uri)]);
     let result = response_result(&messages, 2);
-    let tokens = decode(&result);
+    let tokens = decode(result);
     assert_eq!(tokens.len(), 1, "got: {result:?}");
     assert_eq!(tokens[0].token_type, 3, "expected a Class-kind token");
     assert_eq!(tokens[0].modifiers, DEPRECATED_BIT);
@@ -203,7 +203,7 @@ fn a_deprecated_class_constant_access_gets_a_property_kind_token() {
 
     let messages = run(&dir, &[semantic_tokens_request(2, &uri)]);
     let result = response_result(&messages, 2);
-    let tokens = decode(&result);
+    let tokens = decode(result);
     assert_eq!(tokens.len(), 1, "got: {result:?}");
     assert_eq!(
         tokens[0].token_type, 2,
@@ -238,7 +238,7 @@ fn a_multi_line_call_span_degrades_to_no_token_while_the_diagnostic_still_fires(
     let messages = run(&dir, &[semantic_tokens_request(2, &uri)]);
     let result = response_result(&messages, 2);
     assert_eq!(
-        decode(&result).len(),
+        decode(result).len(),
         0,
         "a token whose span crosses a line boundary must be dropped, got: {result:?}"
     );
@@ -303,7 +303,7 @@ fn a_deprecated_method_calling_its_own_deprecated_sibling_is_suppressed_but_an_o
 
     let messages = run(&dir, &[semantic_tokens_request(2, &uri)]);
     let result = response_result(&messages, 2);
-    let tokens = decode(&result);
+    let tokens = decode(result);
     assert_eq!(
         tokens.len(),
         1,

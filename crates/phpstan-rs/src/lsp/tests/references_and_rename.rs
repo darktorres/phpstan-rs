@@ -44,7 +44,7 @@ fn references_finds_every_call_site_of_a_function_across_files() {
 
     let messages = run(&dir, &[references_request(2, &b_uri, pos, false)]);
     let result = response_result(&messages, 2);
-    assert_eq!(ranges(&result).len(), 2, "got: {result:?}");
+    assert_eq!(ranges(result).len(), 2, "got: {result:?}");
 }
 
 #[test]
@@ -60,7 +60,7 @@ fn references_with_include_declaration_also_returns_the_declaration_site() {
     let messages = run(&dir, &[references_request(2, &b_uri, pos, true)]);
     let result = response_result(&messages, 2);
     assert_eq!(
-        ranges(&result).len(),
+        ranges(result).len(),
         3,
         "expected both call sites plus the declaration, got: {result:?}"
     );
@@ -77,7 +77,7 @@ fn references_on_an_inherited_method_excludes_an_unrelated_same_named_method() {
     let messages = run(&dir, &[references_request(2, &uri, pos, false)]);
     let result = response_result(&messages, 2);
     assert_eq!(
-        ranges(&result).len(),
+        ranges(result).len(),
         1,
         "expected only A::bar's own call site, not B::bar's unrelated declaration, got: {result:?}"
     );
@@ -94,7 +94,7 @@ fn references_on_a_union_receiver_member_call_lists_every_real_owner() {
     let messages = run(&dir, &[references_request(2, &uri, pos, false)]);
     let result = response_result(&messages, 2);
     assert_eq!(
-        ranges(&result).len(),
+        ranges(result).len(),
         3,
         "expected the union call itself plus both single-typed calls (Foo's and Bar's), got: {result:?}"
     );

@@ -62,7 +62,7 @@ fn signature_help_for_a_plain_function_call_shows_every_parameter() {
 
     let messages = run(&dir, &[signature_help_request(2, &uri, pos)]);
     let result = response_result(&messages, 2);
-    assert_eq!(labels(&result), vec!["greet(string $a, string $b): void"]);
+    assert_eq!(labels(result), vec!["greet(string $a, string $b): void"]);
     assert_eq!(result["activeParameter"], json!(1));
 }
 
@@ -115,7 +115,7 @@ fn signature_help_for_dollar_this_method_call_needs_no_probe() {
 
     let messages = run(&dir, &[signature_help_request(2, &uri, pos)]);
     let result = response_result(&messages, 2);
-    assert_eq!(labels(&result), vec!["Foo::helper(int $x): void"]);
+    assert_eq!(labels(result), vec!["Foo::helper(int $x): void"]);
 }
 
 #[test]
@@ -128,7 +128,7 @@ fn signature_help_for_an_instance_receiver_uses_the_checker_probe() {
 
     let messages = run(&dir, &[signature_help_request(2, &uri, pos)]);
     let result = response_result(&messages, 2);
-    assert_eq!(labels(&result), vec!["Greeter::greet(string $name): void"]);
+    assert_eq!(labels(result), vec!["Greeter::greet(string $name): void"]);
 }
 
 #[test]
@@ -141,7 +141,7 @@ fn signature_help_offers_every_real_signature_for_a_union_receiver() {
 
     let messages = run(&dir, &[signature_help_request(2, &uri, pos)]);
     let result = response_result(&messages, 2);
-    let mut got = labels(&result);
+    let mut got = labels(result);
     got.sort();
     assert_eq!(
         got,
@@ -162,7 +162,7 @@ fn signature_help_for_new_resolves_the_constructor_not_the_class() {
 
     let messages = run(&dir, &[signature_help_request(2, &uri, pos)]);
     let result = response_result(&messages, 2);
-    assert_eq!(labels(&result), vec!["Widget::__construct(int $id): mixed"]);
+    assert_eq!(labels(result), vec!["Widget::__construct(int $id): mixed"]);
 }
 
 #[test]
@@ -175,7 +175,7 @@ fn signature_help_for_an_anonymous_class_resolves_its_own_constructor() {
 
     let messages = run(&dir, &[signature_help_request(2, &uri, pos)]);
     let result = response_result(&messages, 2);
-    let labels = labels(&result);
+    let labels = labels(result);
     assert_eq!(labels.len(), 1, "{labels:?}");
     assert!(labels[0].starts_with("class@anonymous/"), "{labels:?}");
     assert!(
@@ -194,7 +194,7 @@ fn signature_help_targets_the_innermost_of_two_nested_calls() {
 
     let messages = run(&dir, &[signature_help_request(2, &uri, pos)]);
     let result = response_result(&messages, 2);
-    assert_eq!(labels(&result), vec!["inner(int $b): void"]);
+    assert_eq!(labels(result), vec!["inner(int $b): void"]);
 }
 
 #[test]
@@ -253,7 +253,7 @@ fn signature_help_resolves_an_anonymous_classs_constructor_arg_against_the_enclo
     let messages = run(&dir, &[signature_help_request(2, &uri, pos)]);
     let result = response_result(&messages, 2);
     assert_eq!(
-        labels(&result),
+        labels(result),
         vec!["Foo::helper(int $x): void"],
         "the anonymous class's own constructor ARGS execute in the enclosing scope, not its own body's"
     );
@@ -322,5 +322,5 @@ fn signature_help_survives_a_currently_unparseable_document_via_the_last_good_pa
     );
 
     let result = response_result(&messages, 3);
-    assert_eq!(labels(&result), vec!["greet(string $a): void"]);
+    assert_eq!(labels(result), vec!["greet(string $a): void"]);
 }
