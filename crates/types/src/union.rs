@@ -362,6 +362,7 @@ fn absorb_contained_members(members: &mut Vec<Type>) {
                 && containers.iter().any(|&j| {
                     let n = &members[j];
                     j != i
+                        && !cannot_contain(n, m)
                         && relation.is_super_type_of(n, m).yes()
                         && (j < i || !relation.is_super_type_of(m, n).yes())
                 })
@@ -372,6 +373,41 @@ fn absorb_contained_members(members: &mut Vec<Type>) {
         index += 1;
         !dropped[index - 1]
     });
+}
+
+/// Whether `container` provably does not hold every value of `member`
+/// for the relation that knows no classes, read off the two forms alone:
+/// the two are of other families of values, or two classes by other names
+/// (`Base|Child` stays), or the class-strings of two such classes, or
+/// shapes that disagree on which keys they have.
+pub(crate) fn cannot_contain(container: &Type, member: &Type) -> bool {
+    if let (Some(a), Some(b)) = (
+        crate::relation::scalar_family(container),
+        crate::relation::scalar_family(member),
+    ) && a != b
+    {
+        return true;
+    }
+    match (container.repr(), member.repr()) {
+        (Repr::Object(a, _), Repr::Object(b, _)) => !a.eq_ignore_case(b),
+        (Repr::ClassString(a), Repr::ClassString(b)) => match (a.repr(), b.repr()) {
+            (Repr::Object(a, _), Repr::Object(b, _)) => !a.eq_ignore_case(b),
+            _ => false,
+        },
+        (Repr::ArrayShape(sup), Repr::ArrayShape(sub)) => {
+            sup.fields()
+                .iter()
+                .enumerate()
+                .any(|(at, f)| !f.optional && sub.field_near(&f.key, at).is_none())
+                || (sup.is_sealed()
+                    && sub
+                        .fields()
+                        .iter()
+                        .enumerate()
+                        .any(|(at, f)| sup.field_near(&f.key, at).is_none()))
+        }
+        _ => false,
+    }
 }
 
 /// Past the cap, each family of values as one member: ints and ranges

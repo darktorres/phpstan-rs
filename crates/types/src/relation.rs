@@ -6,6 +6,8 @@ mod accepts;
 mod kinds;
 mod super_type;
 
+pub(crate) use super_type::scalar_family;
+
 use crate::{ClassHierarchy, TrinaryLogic};
 
 /// The relations over one class hierarchy, with the settings that make

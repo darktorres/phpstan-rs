@@ -631,7 +631,7 @@ mod structural_memo {
 }
 
 #[derive(PartialEq)]
-enum ScalarFamily {
+pub(crate) enum ScalarFamily {
     Int,
     Float,
     String,
@@ -642,7 +642,7 @@ enum ScalarFamily {
     Resource,
 }
 
-fn scalar_family(ty: &Type) -> Option<ScalarFamily> {
+pub(crate) fn scalar_family(ty: &Type) -> Option<ScalarFamily> {
     match ty.repr() {
         Repr::Int | Repr::IntLiteral(_) | Repr::IntRange(_, _) => Some(ScalarFamily::Int),
         Repr::Float | Repr::FloatLiteral(_) => Some(ScalarFamily::Float),

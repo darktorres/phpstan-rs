@@ -1,3 +1,4 @@
+mod absorb_rejects;
 mod accessory_and_refinement_types;
 mod binding_references;
 mod comparator;
