@@ -495,16 +495,39 @@ impl<V: Clone> NameTable<V> {
     }
 
     /// Stores `value` under `name`, which becomes the declared spelling,
-    /// replacing whatever `name` found before.
-    pub fn insert(&mut self, name: impl Into<Name>, value: V) -> Option<V> {
+    /// replacing whatever `name` found before. What it replaces is not read:
+    /// `replace` hands it back.
+    pub fn insert(&mut self, name: impl Into<Name>, value: V) {
         let name = name.into();
-        let old = self.remove(name.lower());
-        let key = Folded(name);
-        if self.base_contains(key.0.lower()) {
-            self.hidden.insert(key.clone());
-        }
-        self.entries.insert(key, value);
+        self.forget(name.lower());
+        self.entries.insert(Folded(name), value);
+    }
+
+    /// `insert`, returning what `name` found before.
+    pub fn replace(&mut self, name: impl Into<Name>, value: V) -> Option<V> {
+        let name = name.into();
+        let old = self.take(name.lower());
+        self.entries.insert(Folded(name), value);
         old
+    }
+
+    /// Drops what `key` (a lowercased name) finds, without reading it:
+    /// whether there was anything. A base entry is hidden, not copied.
+    fn forget(&mut self, key: &str) -> bool {
+        if self.entries.remove(key).is_some() {
+            return true;
+        }
+        if self.hidden.contains(key) {
+            return false;
+        }
+        let Some(base) = &self.base else {
+            return false;
+        };
+        let Some(i) = base.find(key) else {
+            return false;
+        };
+        self.hidden.insert(Folded(base.name(i).clone()));
+        true
     }
 
     /// Stores `value` under `name` unless `name` already finds a value.
@@ -526,7 +549,14 @@ impl<V: Clone> NameTable<V> {
         self.get_mut(&name).expect("just found or inserted")
     }
 
-    pub fn remove(&mut self, name: &str) -> Option<V> {
+    /// Removes what `name` finds, without reading it: whether there was
+    /// anything. `take` hands it back.
+    pub fn remove(&mut self, name: &str) -> bool {
+        with_function_key(name, move |key| self.forget(key))
+    }
+
+    /// Removes what `name` finds and returns it.
+    pub fn take(&mut self, name: &str) -> Option<V> {
         with_function_key(name, move |key| {
             if let Some(value) = self.entries.remove(key) {
                 return Some(value);
@@ -981,9 +1011,9 @@ mod tests {
         let mut table: NameTable<u32> = NameTable::load(&reader, "t").unwrap();
         let before = table.clone();
         *table.get_mut("two").unwrap() = 20;
-        assert_eq!(table.remove("THREE"), Some(3));
-        assert_eq!(table.insert(Name::from("Four"), 4), None);
-        assert_eq!(table.insert(Name::from("ONE"), 10), Some(1));
+        assert_eq!(table.take("THREE"), Some(3));
+        assert_eq!(table.replace(Name::from("Four"), 4), None);
+        assert_eq!(table.replace(Name::from("ONE"), 10), Some(1));
         assert_eq!(table.len(), 3);
         assert_eq!(table.get("one"), Some(&10));
         assert_eq!(table.get("two"), Some(&20));
@@ -999,6 +1029,22 @@ mod tests {
         assert_eq!(before.get("two"), Some(&2));
         assert_eq!(before.get("three"), Some(&3));
         assert_eq!(before.len(), 3);
+    }
+
+    #[test]
+    fn replacing_or_removing_a_stored_entry_does_not_decode_it() {
+        let reader = stored(&[("One", 1), ("Two", 2), ("Three", 3)]);
+        let mut table: NameTable<u32> = NameTable::load(&reader, "t").unwrap();
+        table.insert(Name::from("one"), 10);
+        assert!(table.remove("TWO"));
+        assert!(!table.remove("two"));
+        assert!(!table.remove("missing"));
+        let base = table.base.as_ref().unwrap();
+        assert!((0..base.len()).all(|i| base.slots[i].value.get().is_none()));
+        assert_eq!(table.get("one"), Some(&10));
+        assert_eq!(table.get("two"), None);
+        assert_eq!(table.get("three"), Some(&3));
+        assert_eq!(table.len(), 2);
     }
 
     #[test]

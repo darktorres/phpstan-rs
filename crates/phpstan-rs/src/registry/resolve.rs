@@ -721,7 +721,7 @@ impl Registry {
                 .insert(local_key, ty);
         }
         for class_name in classes_with_imports {
-            let Some(mut info) = self.classes.remove(&class_name) else {
+            let Some(mut info) = self.classes.take(&class_name) else {
                 continue;
             };
             // A class whose imports all failed to resolve (its source

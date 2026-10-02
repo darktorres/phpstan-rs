@@ -153,7 +153,7 @@ impl Registry {
                     // relationship transitively, wrongly flagging an
                     // unrelated method as overriding a `final` one it
                     // has no real relation to.
-                    if let Some(existing) = self.classes.remove(&name) {
+                    if let Some(existing) = self.classes.take(&name) {
                         let (
                             extends,
                             implements,
@@ -235,7 +235,7 @@ impl Registry {
                         // works exactly as before.
                         let existing = self
                                 .classes
-                                .remove(&name)
+                                .take(&name)
                                 .expect("name is in unconditionally_declared_classes, so it must already be indexed");
                         let (
                             extends,
@@ -266,7 +266,7 @@ impl Registry {
                     } else {
                         let existing = self
                                 .classes
-                                .remove(&name)
+                                .take(&name)
                                 .expect("name is in unconditionally_declared_classes, so it must already be indexed");
                         self.classes.insert(name, existing.merge(new_info));
                     }
@@ -355,7 +355,7 @@ impl Registry {
                     // tell a later, better-typed conditional polyfill
                     // declaration that the slot is no longer stub-
                     // equivalent and off limits.
-                    let existing = self.functions.remove(&name).expect(
+                    let existing = self.functions.take(&name).expect(
                             "name is in unconditionally_declared_functions, so it must already be indexed",
                         );
                     self.function_decl_sites.insert(folded_key(&name), None);
@@ -518,7 +518,7 @@ impl Registry {
             self.record_changed_class(&name);
             self.unconditionally_declared_classes.insert(name.clone());
             self.built_in_stub_classes.insert(name.clone(), ());
-            match self.classes.remove(&name) {
+            match self.classes.take(&name) {
                 Some(existing) => {
                     self.classes.insert(name, info.merge(existing));
                 }

@@ -124,7 +124,7 @@ impl Registry {
             return;
         };
         let declared = declared.clone();
-        let Some((supertypes, traits)) = self.recorded_parents.remove(class) else {
+        let Some((supertypes, traits)) = self.recorded_parents.take(class) else {
             return;
         };
         for (index, parents) in [

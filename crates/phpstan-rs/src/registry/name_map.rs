@@ -105,22 +105,49 @@ impl<V: Clone> NameMap<V> {
         self.entries.get_mut(name)
     }
 
-    /// Stores `value` under `name`, returning what it held before.
-    pub fn insert(&mut self, name: impl Into<Name>, value: V) -> Option<V> {
+    /// Stores `value` under `name`. What it replaces is not read: `replace`
+    /// hands it back.
+    pub fn insert(&mut self, name: impl Into<Name>, value: V) {
         let name = name.into();
-        let old = self.remove(&name);
-        if self
-            .base
-            .as_ref()
-            .is_some_and(|base| base.find(&name).is_some())
-        {
-            self.hidden.insert(name.clone());
-        }
+        self.forget(&name);
+        self.entries.insert(name, value);
+    }
+
+    /// `insert`, returning what `name` held before.
+    pub fn replace(&mut self, name: impl Into<Name>, value: V) -> Option<V> {
+        let name = name.into();
+        let old = self.take(&name);
         self.entries.insert(name, value);
         old
     }
 
-    pub fn remove(&mut self, name: &str) -> Option<V> {
+    /// Drops what `name` holds without reading it: whether there was
+    /// anything. A base entry is hidden, not copied.
+    fn forget(&mut self, name: &str) -> bool {
+        if self.entries.remove(name).is_some() {
+            return true;
+        }
+        if self.hidden.contains(name) {
+            return false;
+        }
+        let Some(base) = &self.base else {
+            return false;
+        };
+        let Some(i) = base.find(name) else {
+            return false;
+        };
+        self.hidden.insert(base.name(i).clone());
+        true
+    }
+
+    /// Removes what `name` holds, without reading it: whether there was
+    /// anything. `take` hands it back.
+    pub fn remove(&mut self, name: &str) -> bool {
+        self.forget(name)
+    }
+
+    /// Removes what `name` holds and returns it.
+    pub fn take(&mut self, name: &str) -> Option<V> {
         if let Some(value) = self.entries.remove(name) {
             return Some(value);
         }
@@ -289,12 +316,17 @@ impl NameSet {
 
     /// Adds `name`; whether it was not there already.
     pub fn insert(&mut self, name: impl Into<Name>) -> bool {
-        self.0.insert(name, ()).is_none()
+        let name = name.into();
+        let new = !self.0.contains_key(&name);
+        if new {
+            self.0.insert(name, ());
+        }
+        new
     }
 
     /// Removes `name`; whether it was there.
     pub fn remove(&mut self, name: &str) -> bool {
-        self.0.remove(name).is_some()
+        self.0.remove(name)
     }
 
     pub fn len(&self) -> usize {
@@ -388,9 +420,9 @@ mod tests {
         let mut stored: NameMap<u32> = NameMap::load(&reader, "m").unwrap();
         let before = stored.clone();
         *stored.get_mut("Two").unwrap() = 20;
-        assert_eq!(stored.remove("Three"), Some(3));
-        assert_eq!(stored.insert(Name::from("Four"), 4), None);
-        assert_eq!(stored.insert(Name::from("One"), 10), Some(1));
+        assert_eq!(stored.take("Three"), Some(3));
+        assert_eq!(stored.replace(Name::from("Four"), 4), None);
+        assert_eq!(stored.replace(Name::from("One"), 10), Some(1));
         assert_eq!(stored.len(), 3);
         let mut seen: Vec<(String, u32)> =
             stored.iter().map(|(n, v)| (n.to_string(), *v)).collect();
