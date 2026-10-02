@@ -273,14 +273,15 @@ impl<T: ?Sized> WeakTable<T> {
         make: impl FnOnce() -> Arc<T>,
     ) -> Arc<T> {
         let bucket = self.buckets.entry(hash).or_default();
-        // Entries whose value is gone leave as the bucket is visited, so a
-        // name interned and dropped over and over does not pile up.
-        let before = bucket.len();
-        bucket.retain(|w| w.strong_count() > 0);
-        self.len -= before - bucket.len();
         if let Some(found) = bucket.iter().filter_map(Weak::upgrade).find(|v| is_it(v)) {
             return found;
         }
+        // Entries whose value is gone leave the bucket where a value is
+        // added to it, so a name interned and dropped over and over does
+        // not pile up.
+        let before = bucket.len();
+        bucket.retain(|w| w.strong_count() > 0);
+        self.len -= before - bucket.len();
         let value = make();
         bucket.push(Arc::downgrade(&value));
         self.len += 1;

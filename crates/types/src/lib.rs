@@ -174,16 +174,20 @@ impl Type {
         if let Some(constant) = intern::Constant::of(&repr) {
             return Type::constant(constant);
         }
+        let needs_strip = match &repr {
+            Repr::Array(key, _) => has_key_refinement(key),
+            Repr::ArrayShape(shape) => shape
+                .unsealed
+                .as_ref()
+                .is_some_and(|tail| has_key_refinement(&tail.0)),
+            _ => false,
+        };
+        if !needs_strip {
+            return Type(intern::intern(repr, semantic_hash));
+        }
         let repr = match repr {
-            Repr::Array(key, value) if has_key_refinement(&key) => {
-                Repr::Array(strip_key_refinement(&key), value)
-            }
-            Repr::ArrayShape(shape)
-                if shape
-                    .unsealed
-                    .as_ref()
-                    .is_some_and(|tail| has_key_refinement(&tail.0)) =>
-            {
+            Repr::Array(key, value) => Repr::Array(strip_key_refinement(&key), value),
+            Repr::ArrayShape(shape) => {
                 let mut shape = Shape::clone(&shape);
                 if let Some(tail) = shape.unsealed.as_mut() {
                     tail.0 = strip_key_refinement(&tail.0);

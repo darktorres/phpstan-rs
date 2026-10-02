@@ -162,7 +162,8 @@ fn insert(repr: Repr, semantic_hash: fn(&Repr) -> u64) -> Arc<Node> {
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner());
     if let Some(bucket) = shard.entries.get_mut(&exact) {
-        bucket.retain(|weak| weak.strong_count() > 0);
+        // A dead entry upgrades to nothing; they are dropped from the
+        // bucket where a node is added to it.
         for weak in bucket.iter() {
             if let Some(node) = weak.upgrade()
                 && exact_eq(&node.repr, &repr)
@@ -170,6 +171,7 @@ fn insert(repr: Repr, semantic_hash: fn(&Repr) -> u64) -> Arc<Node> {
                 return node;
             }
         }
+        bucket.retain(|weak| weak.strong_count() > 0);
     }
     let hash = semantic_hash(&repr);
     let flags = crate::reference_flags(&repr);
