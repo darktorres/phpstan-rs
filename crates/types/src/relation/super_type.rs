@@ -324,44 +324,40 @@ impl Relation<'_> {
     /// accepts; a key `sup` doesn't declare is fine only when `sup` is
     /// unsealed.
     fn shape_super_type_of(&self, sup: &Shape, sub: &Shape) -> TrinaryLogic {
-        let mut results = Vec::new();
+        // The answer is the weakest of the fields' answers, `No` weakest, so
+        // the keys, which cost no type comparison, come first and the first
+        // `No` ends it.
+        let mut verdict = TrinaryLogic::Yes;
         for sup_field in sup.fields() {
-            match sub.field(&sup_field.key) {
-                Some(sub_field) => {
-                    let value = self.is_super_type_of(&sup_field.ty, &sub_field.ty);
-                    results.push(if sub_field.optional && !sup_field.optional {
-                        // Present only sometimes: never always.
-                        match value {
-                            TrinaryLogic::No => TrinaryLogic::No,
-                            _ => TrinaryLogic::Maybe,
-                        }
-                    } else {
-                        value
-                    });
+            if !sup_field.optional && sub.field(&sup_field.key).is_none() {
+                if sub.is_sealed() {
+                    return TrinaryLogic::No;
                 }
-                None if sup_field.optional => {}
-                None if sub.is_sealed() => results.push(TrinaryLogic::No),
-                None => results.push(TrinaryLogic::Maybe),
+                verdict = TrinaryLogic::Maybe;
             }
         }
         if sup.is_sealed() {
             for sub_field in sub.fields() {
                 if sup.field(&sub_field.key).is_none() {
-                    results.push(if sub_field.optional {
-                        TrinaryLogic::Maybe
-                    } else {
-                        TrinaryLogic::No
-                    });
+                    if !sub_field.optional {
+                        return TrinaryLogic::No;
+                    }
+                    verdict = TrinaryLogic::Maybe;
                 }
             }
         }
-        if results.contains(&TrinaryLogic::No) {
-            TrinaryLogic::No
-        } else if results.contains(&TrinaryLogic::Maybe) {
-            TrinaryLogic::Maybe
-        } else {
-            TrinaryLogic::Yes
+        for sup_field in sup.fields() {
+            let Some(sub_field) = sub.field(&sup_field.key) else {
+                continue;
+            };
+            match self.is_super_type_of(&sup_field.ty, &sub_field.ty) {
+                TrinaryLogic::No => return TrinaryLogic::No,
+                // Present only sometimes: never always.
+                TrinaryLogic::Yes if !sub_field.optional || sup_field.optional => {}
+                _ => verdict = TrinaryLogic::Maybe,
+            }
         }
+        verdict
     }
 
     /// `TypeCombinator::union`'s absorption for display: a member some
