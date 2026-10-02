@@ -1074,15 +1074,40 @@ impl Registry {
                 let Some(info) = registry.classes.get(class_name) else {
                     return per_class;
                 };
+                // What `lookup_ancestor_method_with_owner` reads, read once
+                // per class and only when a method needs it: the class's
+                // map of ancestor methods to their owners, and the owners
+                // already found (a class's methods mostly share a few).
+                let mut owners: Option<Option<&FxHashMap<Name, Name>>> = None;
+                let mut owner_classes: Vec<(&Name, &ClassReflection)> = Vec::new();
                 for (method_name, sig) in &info.methods {
                     let needs_param = sig.params.iter().any(|p| !p.has_own_doc);
                     let needs_return = !sig.return_has_own_doc;
                     if !needs_param && !needs_return {
                         continue;
                     }
-                    let Some((owner, ancestor_sig)) =
-                        registry.lookup_ancestor_method_with_owner(class_name, method_name)
-                    else {
+                    let Some(owners) = *owners.get_or_insert_with(|| {
+                        registry.ancestor_method_owner_by_class.get(class_name)
+                    }) else {
+                        // No ancestor has a method: none of the rest does.
+                        break;
+                    };
+                    let Some(owner) = owners.get(method_name) else {
+                        continue;
+                    };
+                    let owner_class = match owner_classes.iter().find(|(name, _)| *name == owner) {
+                        Some((_, class)) => *class,
+                        None => {
+                            let Some(class) = registry.classes.get(owner) else {
+                                continue;
+                            };
+                            if owner_classes.len() < 8 {
+                                owner_classes.push((owner, class));
+                            }
+                            class
+                        }
+                    };
+                    let Some(ancestor_sig) = owner_class.methods.get(method_name) else {
                         continue;
                     };
                     if ancestor_sig.visibility == Visibility::Private {
@@ -1122,7 +1147,7 @@ impl Registry {
                     // `Command`, Doctrine's console commands, ...), which
                     // must still participate in this pass normally.
                     if syntax::ast::is_constructor_name(method_name)
-                        && registry.built_in_stub_classes.contains_key(&owner)
+                        && registry.built_in_stub_classes.contains_key(owner)
                     {
                         continue;
                     }
@@ -1164,7 +1189,7 @@ impl Registry {
                                     param_fills.push((
                                         i,
                                         Registry::substitute_class_scoped_ancestor_templates(
-                                            &ancestor_param.ty.bind_self(&owner),
+                                            &ancestor_param.ty.bind_self(owner),
                                             ancestor_bindings(),
                                         )
                                         .reconcile_with_native(p.ty_native.clone()),
@@ -1196,7 +1221,7 @@ impl Registry {
                                     param_fills.push((
                                         i,
                                         Registry::substitute_class_scoped_ancestor_templates(
-                                            &ancestor_param.ty.bind_self(&owner),
+                                            &ancestor_param.ty.bind_self(owner),
                                             ancestor_bindings(),
                                         )
                                         .reconcile_with_native(p.ty_native.clone()),
@@ -1212,12 +1237,11 @@ impl Registry {
                     // A builtin method's native return type is tentative
                     // (PHP 8.1): an override may omit it, and then has it
                     // still.
-                    let inherits_tentative_type =
-                        registry.built_in_stub_classes.contains_key(&owner)
-                            && sig.return_type_native.is_mixed()
-                            && !ancestor_sig.return_type_native.is_mixed();
                     let return_fill = (needs_return
-                        && (ancestor_sig.return_has_own_doc || inherits_tentative_type)
+                        && (ancestor_sig.return_has_own_doc
+                            || (sig.return_type_native.is_mixed()
+                                && !ancestor_sig.return_type_native.is_mixed()
+                                && registry.built_in_stub_classes.contains_key(owner)))
                         && Registry::safe_to_backfill_mixed(
                             &ancestor_sig.return_type,
                             &sig.return_type_native,
@@ -1234,7 +1258,7 @@ impl Registry {
                     .then(|| {
                         (
                             Registry::substitute_class_scoped_ancestor_templates(
-                                &ancestor_sig.return_type.bind_self(&owner),
+                                &ancestor_sig.return_type.bind_self(owner),
                                 ancestor_bindings(),
                             )
                             .reconcile_with_native(sig.return_type_native.clone()),
