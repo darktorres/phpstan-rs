@@ -1105,19 +1105,21 @@ fn assert_edits_match_fresh_loads(
     }
 }
 
-fn fixture_sources(subdirectory: &str) -> Vec<String> {
-    let root = Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("tests/fixtures")
-        .join(subdirectory);
-    php_files_under(&root)
-        .iter()
-        .filter_map(|path| std::fs::read_to_string(path).ok())
-        .collect()
+/// The checker fixtures' texts, read once for every test of the process.
+fn checker_sources() -> &'static [String] {
+    static SOURCES: std::sync::LazyLock<Vec<String>> = std::sync::LazyLock::new(|| {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/checker");
+        php_files_under(&root)
+            .iter()
+            .filter_map(|path| std::fs::read_to_string(path).ok())
+            .collect()
+    });
+    &SOURCES
 }
 
 #[test]
 fn edits_across_many_fixtures_match_a_fresh_load() {
-    let sources: Vec<String> = fixture_sources("checker").into_iter().step_by(40).collect();
+    let sources: Vec<String> = checker_sources().iter().step_by(40).cloned().collect();
     assert_edits_match_fresh_loads(&sources, 8, |step, len| step * 7 % len);
 }
 
@@ -1126,7 +1128,7 @@ fn edits_across_many_fixtures_match_a_fresh_load() {
 #[test]
 fn edits_across_every_fixture_match_a_fresh_load() {
     use rayon::prelude::*;
-    let sources = fixture_sources("checker");
+    let sources = checker_sources();
     // The groups share nothing, so they run beside each other, on a pool of
     // this test's own. A group that is first to need a registry built
     // lazily (`Project::phpstan_base`) makes the others wait for it, and
@@ -1156,10 +1158,11 @@ proptest::proptest! {
         stride in 25usize..90,
         edits in 3usize..7,
     ) {
-        let sources: Vec<String> = fixture_sources("checker")
-            .into_iter()
+        let sources: Vec<String> = checker_sources()
+            .iter()
             .skip(seed % stride)
             .step_by(stride)
+            .cloned()
             .collect();
         assert_edits_match_fresh_loads(&sources, edits, |step, len| {
             (seed.wrapping_mul(31).wrapping_add(step * 17)) % len
