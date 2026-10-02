@@ -311,20 +311,10 @@ impl<'a> Checker<'a> {
     /// recursive calls needing to know about rule dispatch at all (see
     /// `rule`'s own module doc comment).
     pub(crate) fn check_expr(&mut self, e: &Expr, locals: &mut Locals, label: &str) -> Type {
-        let outermost = self.infer_cache.borrow().is_none();
-        if outermost {
-            let spare = std::mem::take(&mut *self.infer_spare.borrow_mut());
-            *self.infer_cache.borrow_mut() = Some(spare);
-        }
+        let outermost = self.open_infer_scope();
         let ty = self.check_expr_cached(e, locals, label);
         if outermost {
-            let mut cache = self.infer_cache.borrow_mut().take().unwrap_or_default();
-            if cache.capacity() > crate::checker::INFER_SPARE_CAPACITY {
-                cache = Default::default();
-            } else {
-                cache.clear();
-            }
-            *self.infer_spare.borrow_mut() = cache;
+            self.close_infer_scope();
         }
         ty
     }
@@ -4450,9 +4440,41 @@ impl<'a> Checker<'a> {
     }
 
     pub(crate) fn infer_expr(&self, e: &Expr, locals: &Locals) -> Type {
-        self.cached(e, locals, InferQuestion::Type, || {
+        // Inferring is `&self`, so nothing moves under one call: an
+        // inference asked for outside an expression check remembers what it
+        // finds of the operands for as long as it runs, as one inside does,
+        // and not each level of a nested expression infers them again.
+        let outermost = self.open_infer_scope();
+        let ty = self.cached(e, locals, InferQuestion::Type, || {
             self.infer_expr_unguarded(e, locals)
-        })
+        });
+        if outermost {
+            self.close_infer_scope();
+        }
+        ty
+    }
+
+    /// Starts remembering inferred types, unless that is going on already;
+    /// whether it was started here.
+    fn open_infer_scope(&self) -> bool {
+        if self.infer_cache.borrow().is_some() {
+            return false;
+        }
+        let spare = std::mem::take(&mut *self.infer_spare.borrow_mut());
+        *self.infer_cache.borrow_mut() = Some(spare);
+        true
+    }
+
+    /// Stops what `open_infer_scope` started, keeping the emptied table for
+    /// the next.
+    fn close_infer_scope(&self) {
+        let mut cache = self.infer_cache.borrow_mut().take().unwrap_or_default();
+        if cache.capacity() > crate::checker::INFER_SPARE_CAPACITY {
+            cache = Default::default();
+        } else {
+            cache.clear();
+        }
+        *self.infer_spare.borrow_mut() = cache;
     }
 
     /// `answer`'s answer to `question` about `e`, from `infer_cache` while
