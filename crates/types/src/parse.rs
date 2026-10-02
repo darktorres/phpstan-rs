@@ -33,6 +33,14 @@ pub fn parse_written_type(raw: &str) -> Type {
         // Splitting must respect <>/{} nesting - `Collection<int|string>` has
         // no top-level union, but a naive `s.contains('|')` would still split
         // on the one hiding inside the angle brackets.
+        if is_plain_word(s) {
+            let ty = parse_type_atom(s);
+            return if nullable && ty != Type::mixed() {
+                Type::new(Repr::Union(vec![ty, Type::null()]))
+            } else {
+                ty
+            };
+        }
         let pipe_parts = split_top_level(s, '|');
         let amp_parts = split_top_level(s, '&');
         let ty = if pipe_parts.len() > 1 {
@@ -616,7 +624,36 @@ fn split_generic_args(s: &str) -> (&str, Vec<&str>) {
     (base, args)
 }
 
-fn parse_type_atom(s: &str) -> Type {
+/// Whether `s` is one plain word: a name or keyword of letters, digits,
+/// `_`, `-` and `\`, which starts with a letter, `_` or `\`. No other
+/// syntax of a type can be in it, and no number (the words Rust reads as
+/// floats, `inf`, `infinity` and `nan`, are left out), so it is read as the
+/// keyword or class name it is.
+pub(crate) fn is_plain_word(s: &str) -> bool {
+    let bytes = s.as_bytes();
+    let Some(&first) = bytes.first() else {
+        return false;
+    };
+    (first.is_ascii_alphabetic() || first == b'_' || first == b'\\')
+        && bytes
+            .iter()
+            .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'_' | b'-' | b'\\'))
+        && !["inf", "infinity", "nan"]
+            .iter()
+            .any(|word| s.eq_ignore_ascii_case(word))
+}
+
+pub(crate) fn parse_type_atom(s: &str) -> Type {
+    let s = s.trim();
+    if is_plain_word(s) {
+        return parse_type_keyword_or_class(s.trim_start_matches('\\'), s, &[]);
+    }
+    parse_type_atom_by_form(s)
+}
+
+/// `parse_type_atom` read off the text's syntax, without the plain word
+/// shortcut.
+pub(crate) fn parse_type_atom_by_form(s: &str) -> Type {
     let s = s.trim();
     if let Some(shape) = try_parse_array_shape(s) {
         return shape;

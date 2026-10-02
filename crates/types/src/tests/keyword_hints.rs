@@ -45,3 +45,48 @@ fn a_keyword_hint_is_the_type_the_parser_reads_in_any_spelling() {
         }
     }
 }
+
+#[test]
+fn a_plain_word_parses_as_the_syntax_reading_gives() {
+    use crate::parse::{is_plain_word, parse_type_atom, parse_type_atom_by_form};
+    // Every word of up to four characters over an alphabet with the
+    // characters that matter: letters of both cases, digits, `_`, `-`,
+    // `\`, and the letters of the words Rust reads as floats.
+    let alphabet: Vec<char> = "aZ_9-\\niNfEe".chars().collect();
+    let mut words = vec![String::new()];
+    let mut frontier = words.clone();
+    for _ in 0..4 {
+        let mut next = Vec::new();
+        for word in &frontier {
+            for c in &alphabet {
+                next.push(format!("{word}{c}"));
+            }
+        }
+        words.extend(next.iter().cloned());
+        frontier = next;
+    }
+    for word in words.iter().map(String::as_str).chain([
+        "inf",
+        "Infinity",
+        "NaN",
+        "INF",
+        "nan",
+        "closure",
+        "Callable",
+        "array",
+        "list",
+        "non-empty-array",
+        "object",
+        "static",
+        "$this",
+        "int-mask",
+    ]) {
+        if is_plain_word(word) {
+            assert_eq!(
+                parse_type_atom(word),
+                parse_type_atom_by_form(word),
+                "{word:?}"
+            );
+        }
+    }
+}
