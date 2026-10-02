@@ -90,3 +90,72 @@ fn a_plain_word_parses_as_the_syntax_reading_gives() {
         }
     }
 }
+
+#[test]
+fn the_plain_word_test_is_what_it_was_before_it_used_a_table() {
+    use crate::parse::is_plain_word;
+    /// The test as first written.
+    fn by_iterators(s: &str) -> bool {
+        let bytes = s.as_bytes();
+        let Some(&first) = bytes.first() else {
+            return false;
+        };
+        (first.is_ascii_alphabetic() || first == b'_' || first == b'\\')
+            && bytes
+                .iter()
+                .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'_' | b'-' | b'\\'))
+            && !["inf", "infinity", "nan"]
+                .iter()
+                .any(|word| s.eq_ignore_ascii_case(word))
+    }
+    for word in [
+        "",
+        "a",
+        "_",
+        "\\",
+        "\\Foo",
+        "Foo\\Bar",
+        "non-empty-string",
+        "inf",
+        "INF",
+        "Inf",
+        "nan",
+        "NaN",
+        "NAN",
+        "infinity",
+        "Infinity",
+        "INFINITY",
+        "infinit",
+        "infinityy",
+        "nana",
+        "ina",
+        "1a",
+        "a1",
+        "a b",
+        "a.b",
+        "a|b",
+        "é",
+        "aé",
+        "a-",
+        "-a",
+        "a_b",
+        "\u{10348}",
+        "Foo?",
+    ] {
+        assert_eq!(is_plain_word(word), by_iterators(word), "{word:?}");
+    }
+    // Every word of up to three bytes over an alphabet that has the
+    // characters the test tells apart.
+    let alphabet: Vec<char> = "aiInNfF_-\\0 .é".chars().collect();
+    let mut words = vec![String::new()];
+    for _ in 0..3 {
+        let longer: Vec<String> = words
+            .iter()
+            .flat_map(|w| alphabet.iter().map(move |c| format!("{w}{c}")))
+            .collect();
+        for word in &longer {
+            assert_eq!(is_plain_word(word), by_iterators(word), "{word:?}");
+        }
+        words = longer;
+    }
+}

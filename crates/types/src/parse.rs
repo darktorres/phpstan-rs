@@ -630,17 +630,33 @@ fn split_generic_args(s: &str) -> (&str, Vec<&str>) {
 /// floats, `inf`, `infinity` and `nan`, are left out), so it is read as the
 /// keyword or class name it is.
 pub(crate) fn is_plain_word(s: &str) -> bool {
+    /// The bytes a plain word is made of: letters, digits, `_`, `-`, `\`.
+    const WORD_BYTE: [bool; 256] = {
+        let mut table = [false; 256];
+        let mut b = 0;
+        while b < 256 {
+            let c = b as u8;
+            table[b] = c.is_ascii_alphanumeric() || c == b'_' || c == b'-' || c == b'\\';
+            b += 1;
+        }
+        table
+    };
     let bytes = s.as_bytes();
     let Some(&first) = bytes.first() else {
         return false;
     };
-    (first.is_ascii_alphabetic() || first == b'_' || first == b'\\')
-        && bytes
+    if !(first.is_ascii_alphabetic() || first == b'_' || first == b'\\') {
+        return false;
+    }
+    if !bytes.iter().all(|&b| WORD_BYTE[b as usize]) {
+        return false;
+    }
+    // The words Rust reads as floats have the lengths of `inf`, `nan` and
+    // `infinity`; no other word is looked at.
+    !(matches!(bytes.len(), 3 | 8)
+        && ["inf", "infinity", "nan"]
             .iter()
-            .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'_' | b'-' | b'\\'))
-        && !["inf", "infinity", "nan"]
-            .iter()
-            .any(|word| s.eq_ignore_ascii_case(word))
+            .any(|word| s.eq_ignore_ascii_case(word)))
 }
 
 pub(crate) fn parse_type_atom(s: &str) -> Type {
