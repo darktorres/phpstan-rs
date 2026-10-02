@@ -1048,3 +1048,75 @@ Decided against, with the figures a later profile can be compared with:
   from decoding stored names, and none are decoded to a string now.
 - **Per-fixture and `check-project` cost.** Not profiled; the single
   fixture shows start-up, which the suite pays once per process.
+
+### 12.2 The lib suite, counted in instructions
+
+The same recipe on the whole lib test binary (`valgrind --tool=callgrind`,
+one merged profile, the test profile): 201.4 G instructions for 981 tests,
+1,546 s under valgrind, 73% of it in `run_finishing_passes`, which ran 1,131
+times and averaged 87 M instructions a call, nearly all in the differential
+edit tests. The first profile showed that the sorted-record lookups added
+in 12.1 were slow when a run makes millions of them (bisection, a UTF-8
+check per probe, a lowercase `String` per lookup); the later ones took the
+costs under them in turn.
+
+| after | instructions | valgrind wall |
+|---|---|---|
+| the sorted-record tables (12.1) | 201.4 G | 1,546 s |
+| byte compare, hash index, stack key | 139.9 G | 1,060 s |
+| the changes below | 69.2 G | 558 s |
+
+Warm, all gates: 71.5 s to 49.4 s; the lib tests 21.9 s to 6.8 s (one test,
+the every-fixture differential, was 24 s of the suite's 25 on one core, and
+runs its groups in parallel on a pool of its own: on the project's pool they
+deadlock, the first group to need the registry with PHPStan's source holds
+the lock its build needs the pool's workers for).
+
+What changed:
+
+- A table lookup is a hash and a compare or two: an open-addressed index in
+  the file (`name_table.rs`), keys hashed a word at a time, the lowercase
+  key built on the stack (`ArrayString`), names compared as bytes.
+- `insert` and `remove` on a table hide a base entry instead of reading it:
+  they decoded and cloned it to return a value nearly every caller dropped;
+  `replace` and `take` return it. `unrecord_parents` removes a class from
+  the subtype indexes by the name it was recorded under, not by scanning
+  every child while interning its own name once per child.
+- `closure_scope` and `affected_files` read the stubs' dependents as keys
+  stored in the index, decoded once, walk a stub file once per walk, and
+  allocate only for a name they add.
+- The phpdoc a class takes from its ancestors is settled in one sweep,
+  ancestors first, not in passes until none changes; a hierarchy with a
+  class among its own ancestors keeps the passes.
+- The cache stores entries with `postcard`, not CBOR: the base registry is
+  6 MB, not 23, with PHPStan's source 18, not 55, the stub data 10, not 39,
+  and a class decodes in a fraction of the 640 K instructions it took. A
+  `Type`'s skipped variant is last, as serde numbers the variants after a
+  skipped one differently when it reads, which only a format that writes the
+  number shows.
+- A type is searched before it is rebuilt to resolve constant-named classes,
+  and each interned type node carries whether it has `self`, `static` or
+  `parent` in it, so binding them leaves a type without them as it is.
+- A stored table's bounds are checked on every load, its text and order only
+  by the tests of what is stored (`check_order`); those tests share one
+  stored-and-read-back registry.
+
+The corpus, type and baseline snapshots of the gates are unchanged, and so
+is every fixture's type output.
+
+What is left (69.2 G, the passes as shares of the suite): `flatten_phpdoc_
+inheritance` 8.7%, `precompute_member_owners` 8.2%, `resolve_transitive_
+purity` 7.8%, `flatten_traits` 6.7%, `end_declaration_changes` 5.6%,
+`resolved_snapshot` 5.2%, `closure_scope` 4.8%, `precompute_ancestor_names`
+4.2%, `resolve_constant_named_types` 4.1%. Decided against, for now:
+
+- Sharing a class's method, property and constant maps by `Arc`, copied on
+  write: `end_declaration_changes` deep-clones about 200 K classes at 14 K
+  instructions each (3 G), but most classes in scope are changed by some pass
+  anyway, and the maps have about 90 mutation sites.
+- Building the member-owner maps without materialising one per class
+  (`precompute_member_owners`), and fusing the per-class passes: each is a
+  redesign of the passes' barriers, and the passes read one another's
+  results registry-wide.
+- Fingerprinting classes instead of cloning them for `resolved_snapshot`:
+  `ClassReflection` has no `Hash`, and encoding one costs about a clone.
