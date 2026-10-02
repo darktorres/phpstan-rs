@@ -23,7 +23,7 @@ pub(crate) use generics::{
 };
 pub(crate) use type_resolution::{DeclaredType, apply_implicit_nullable_default, declared_type};
 
-#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct ParameterReflection {
     pub(in crate::registry) name: Name,
     pub(in crate::registry) ty: Type,
@@ -78,6 +78,113 @@ pub struct ParameterReflection {
     // `getOutType() ?? getType()`.
     pub(in crate::registry) out_ty: Option<Type>,
     pub(in crate::registry) attributes: Vec<ReflectionAttribute>,
+}
+
+/// `v` copied, with no allocation for an empty one: most of what a
+/// signature holds in a vector is empty, and a signature is copied often.
+fn clone_vec<T: Clone>(v: &[T]) -> Vec<T> {
+    if v.is_empty() { Vec::new() } else { v.to_vec() }
+}
+
+/// Every field is named, so that a field added to the struct is a compile
+/// error here until it is copied.
+impl Clone for ParameterReflection {
+    fn clone(&self) -> ParameterReflection {
+        let ParameterReflection {
+            name,
+            ty,
+            ty_native,
+            variadic,
+            has_default,
+            default_ty,
+            doc_ty,
+            by_ref,
+            has_own_doc,
+            explicit_mixed_hint,
+            case_refs,
+            closure_this_type,
+            out_ty,
+            attributes,
+        } = self;
+        ParameterReflection {
+            name: name.clone(),
+            ty: ty.clone(),
+            ty_native: ty_native.clone(),
+            variadic: *variadic,
+            has_default: *has_default,
+            default_ty: default_ty.clone(),
+            doc_ty: doc_ty.clone(),
+            by_ref: *by_ref,
+            has_own_doc: *has_own_doc,
+            explicit_mixed_hint: *explicit_mixed_hint,
+            case_refs: clone_vec(case_refs),
+            closure_this_type: closure_this_type.clone(),
+            out_ty: out_ty.clone(),
+            attributes: clone_vec(attributes),
+        }
+    }
+}
+
+/// Every field is named, as for `ParameterReflection`.
+impl Clone for FunctionReflection {
+    fn clone(&self) -> FunctionReflection {
+        let FunctionReflection {
+            params,
+            return_type,
+            return_type_native,
+            return_has_own_doc,
+            return_doc_ty,
+            self_out,
+            return_case_refs,
+            return_explicit_mixed_hint,
+            no_discard,
+            returns_ref,
+            must_use_result,
+            visibility,
+            is_internal,
+            is_api,
+            has_override_attr,
+            deprecated,
+            throws,
+            assert_if_true,
+            assert_if_false,
+            assert,
+            purity_dependencies,
+            is_transitively_pure,
+            is_stub,
+            is_magic,
+            attributes,
+            provenance,
+        } = self;
+        FunctionReflection {
+            params: clone_vec(params),
+            return_type: return_type.clone(),
+            return_type_native: return_type_native.clone(),
+            return_has_own_doc: *return_has_own_doc,
+            return_doc_ty: return_doc_ty.clone(),
+            self_out: self_out.clone(),
+            return_case_refs: clone_vec(return_case_refs),
+            return_explicit_mixed_hint: *return_explicit_mixed_hint,
+            no_discard: *no_discard,
+            returns_ref: *returns_ref,
+            must_use_result: *must_use_result,
+            visibility: *visibility,
+            is_internal: *is_internal,
+            is_api: *is_api,
+            has_override_attr: *has_override_attr,
+            deprecated: deprecated.clone(),
+            throws: throws.clone(),
+            assert_if_true: clone_vec(assert_if_true),
+            assert_if_false: clone_vec(assert_if_false),
+            assert: clone_vec(assert),
+            purity_dependencies: purity_dependencies.clone(),
+            is_transitively_pure: *is_transitively_pure,
+            is_stub: *is_stub,
+            is_magic: *is_magic,
+            attributes: clone_vec(attributes),
+            provenance: provenance.clone(),
+        }
+    }
 }
 
 impl ParameterReflection {
@@ -149,7 +256,7 @@ impl ParameterReflection {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct FunctionReflection {
     pub(in crate::registry) params: Vec<ParameterReflection>,
     pub(in crate::registry) return_type: Type,
