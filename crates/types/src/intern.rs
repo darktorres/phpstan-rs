@@ -39,58 +39,120 @@ static TABLE: LazyLock<Vec<Mutex<Shard>>> = LazyLock::new(|| {
 
 /// The node for `repr`: the existing one of its exact form, or a new one.
 pub(crate) fn intern(repr: Repr, semantic_hash: fn(&Repr) -> u64) -> Arc<Node> {
-    if let Some(node) = constant(&repr, semantic_hash) {
-        return node;
+    if let Some(constant) = Constant::of(&repr) {
+        return constant.node(semantic_hash);
     }
     insert(repr, semantic_hash)
 }
 
-/// The node of a type with nothing in it (`int`, `null`, `mixed`, ...),
+/// A type with nothing in it (`int`, `null`, `mixed`, ...): its node is
 /// built once and kept, so the most common types skip the table.
-fn constant(repr: &Repr, semantic_hash: fn(&Repr) -> u64) -> Option<Arc<Node>> {
-    static CONSTANTS: OnceLock<Vec<Arc<Node>>> = OnceLock::new();
-    const FORMS: [fn() -> Repr; 15] = [
-        || Repr::Mixed(false, None),
-        || Repr::Mixed(true, None),
-        || Repr::Error,
-        || Repr::Never,
-        || Repr::Void,
-        || Repr::Null,
-        || Repr::Bool,
-        || Repr::True,
-        || Repr::False,
-        || Repr::Int,
-        || Repr::Float,
-        || Repr::String,
-        || Repr::ObjectWithoutClass,
-        || Repr::ParentRef,
-        || Repr::This,
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Constant {
+    Mixed,
+    ExplicitMixed,
+    Error,
+    Never,
+    Void,
+    Null,
+    Bool,
+    True,
+    False,
+    Int,
+    Float,
+    String,
+    ObjectWithoutClass,
+    ParentRef,
+    This,
+}
+
+impl Constant {
+    #[cfg(test)]
+    pub(crate) const ALL: [Constant; 15] = [
+        Constant::Mixed,
+        Constant::ExplicitMixed,
+        Constant::Error,
+        Constant::Never,
+        Constant::Void,
+        Constant::Null,
+        Constant::Bool,
+        Constant::True,
+        Constant::False,
+        Constant::Int,
+        Constant::Float,
+        Constant::String,
+        Constant::ObjectWithoutClass,
+        Constant::ParentRef,
+        Constant::This,
     ];
-    let index = match repr {
-        Repr::Mixed(false, None) => 0,
-        Repr::Mixed(true, None) => 1,
-        Repr::Error => 2,
-        Repr::Never => 3,
-        Repr::Void => 4,
-        Repr::Null => 5,
-        Repr::Bool => 6,
-        Repr::True => 7,
-        Repr::False => 8,
-        Repr::Int => 9,
-        Repr::Float => 10,
-        Repr::String => 11,
-        Repr::ObjectWithoutClass => 12,
-        Repr::ParentRef => 13,
-        Repr::This => 14,
-        _ => return None,
-    };
-    let constants = CONSTANTS.get_or_init(|| {
-        FORMS
-            .iter()
-            .map(|form| insert(form(), semantic_hash))
-            .collect()
-    });
-    Some(constants[index].clone())
+
+    /// The constant `repr` is, if it is one.
+    pub(crate) fn of(repr: &Repr) -> Option<Constant> {
+        Some(match repr {
+            Repr::Mixed(false, None) => Constant::Mixed,
+            Repr::Mixed(true, None) => Constant::ExplicitMixed,
+            Repr::Error => Constant::Error,
+            Repr::Never => Constant::Never,
+            Repr::Void => Constant::Void,
+            Repr::Null => Constant::Null,
+            Repr::Bool => Constant::Bool,
+            Repr::True => Constant::True,
+            Repr::False => Constant::False,
+            Repr::Int => Constant::Int,
+            Repr::Float => Constant::Float,
+            Repr::String => Constant::String,
+            Repr::ObjectWithoutClass => Constant::ObjectWithoutClass,
+            Repr::ParentRef => Constant::ParentRef,
+            Repr::This => Constant::This,
+            _ => return None,
+        })
+    }
+
+    pub(crate) fn repr(self) -> Repr {
+        match self {
+            Constant::Mixed => Repr::Mixed(false, None),
+            Constant::ExplicitMixed => Repr::Mixed(true, None),
+            Constant::Error => Repr::Error,
+            Constant::Never => Repr::Never,
+            Constant::Void => Repr::Void,
+            Constant::Null => Repr::Null,
+            Constant::Bool => Repr::Bool,
+            Constant::True => Repr::True,
+            Constant::False => Repr::False,
+            Constant::Int => Repr::Int,
+            Constant::Float => Repr::Float,
+            Constant::String => Repr::String,
+            Constant::ObjectWithoutClass => Repr::ObjectWithoutClass,
+            Constant::ParentRef => Repr::ParentRef,
+            Constant::This => Repr::This,
+        }
+    }
+
+    /// The node every type of this constant shares.
+    pub(crate) fn node(self, semantic_hash: fn(&Repr) -> u64) -> Arc<Node> {
+        static NODES: OnceLock<[Arc<Node>; 15]> = OnceLock::new();
+        let nodes = NODES.get_or_init(|| {
+            [
+                Constant::Mixed,
+                Constant::ExplicitMixed,
+                Constant::Error,
+                Constant::Never,
+                Constant::Void,
+                Constant::Null,
+                Constant::Bool,
+                Constant::True,
+                Constant::False,
+                Constant::Int,
+                Constant::Float,
+                Constant::String,
+                Constant::ObjectWithoutClass,
+                Constant::ParentRef,
+                Constant::This,
+            ]
+            .map(|constant| insert(constant.repr(), semantic_hash))
+        });
+        nodes[self as usize].clone()
+    }
 }
 
 fn insert(repr: Repr, semantic_hash: fn(&Repr) -> u64) -> Arc<Node> {

@@ -3,6 +3,7 @@ mod binding_references;
 mod comparator;
 mod comparison;
 mod concat;
+mod constants;
 mod constructors;
 mod display_and_misc;
 mod intersections;

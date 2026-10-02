@@ -114,10 +114,18 @@ pub(crate) fn reference_flags(repr: &Repr) -> u8 {
 }
 
 impl Type {
+    /// The type that is `constant`, from its shared node.
+    pub(crate) fn constant(constant: intern::Constant) -> Type {
+        Type(constant.node(semantic_hash))
+    }
+
     /// The type `repr` represents. An array's key type, a shape's tail
     /// key included, is stored without the non-decimal-int refinement:
     /// it tells a string key read out apart, not the array's keys.
     pub(crate) fn new(repr: Repr) -> Type {
+        if let Some(constant) = intern::Constant::of(&repr) {
+            return Type::constant(constant);
+        }
         let repr = match repr {
             Repr::Array(key, value) if has_key_refinement(&key) => {
                 Repr::Array(strip_key_refinement(&key), value)

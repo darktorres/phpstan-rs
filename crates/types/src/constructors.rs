@@ -2,6 +2,7 @@
 
 use std::sync::Arc;
 
+use crate::intern::Constant;
 use crate::{
     AccessoryKind, CallSiteVariance, CallableSig, ClassKind, ConditionalSubject, ExtensionTypeData,
     Name, PhpString, Repr, Shape, ShapeKey, TemplateParam, Type,
@@ -10,12 +11,12 @@ use crate::{
 impl Type {
     /// `mixed` with no type information behind it.
     pub fn mixed() -> Type {
-        Type::new(Repr::Mixed(false, None))
+        Type::constant(Constant::Mixed)
     }
 
     /// `mixed` as a type written somewhere resolved to it.
     pub fn explicit_mixed() -> Type {
-        Type::new(Repr::Mixed(true, None))
+        Type::constant(Constant::ExplicitMixed)
     }
 
     /// `mixed`, explicit or not.
@@ -24,36 +25,36 @@ impl Type {
     }
 
     pub fn error() -> Type {
-        Type::new(Repr::Error)
+        Type::constant(Constant::Error)
     }
 
     pub fn never() -> Type {
-        Type::new(Repr::Never)
+        Type::constant(Constant::Never)
     }
 
     pub fn void() -> Type {
-        Type::new(Repr::Void)
+        Type::constant(Constant::Void)
     }
 
     pub fn null() -> Type {
-        Type::new(Repr::Null)
+        Type::constant(Constant::Null)
     }
 
     pub fn bool() -> Type {
-        Type::new(Repr::Bool)
+        Type::constant(Constant::Bool)
     }
 
     /// `true` or `false`.
     pub fn bool_literal(value: bool) -> Type {
         if value {
-            Type::new(Repr::True)
+            Type::constant(Constant::True)
         } else {
-            Type::new(Repr::False)
+            Type::constant(Constant::False)
         }
     }
 
     pub fn int() -> Type {
-        Type::new(Repr::Int)
+        Type::constant(Constant::Int)
     }
 
     pub fn int_literal(value: i64) -> Type {
@@ -66,15 +67,15 @@ impl Type {
     /// `IntegerRangeType::fromInterval`).
     pub fn int_range(min: Option<i64>, max: Option<i64>) -> Type {
         match (min, max) {
-            (None, None) => Type::new(Repr::Int),
-            (Some(a), Some(b)) if a > b => Type::new(Repr::Never),
+            (None, None) => Type::constant(Constant::Int),
+            (Some(a), Some(b)) if a > b => Type::constant(Constant::Never),
             (Some(a), Some(b)) if a == b => Type::new(Repr::IntLiteral(a)),
             (min, max) => Type::new(Repr::IntRange(min, max)),
         }
     }
 
     pub fn float() -> Type {
-        Type::new(Repr::Float)
+        Type::constant(Constant::Float)
     }
 
     pub fn float_literal(value: f64) -> Type {
@@ -82,7 +83,7 @@ impl Type {
     }
 
     pub fn string() -> Type {
-        Type::new(Repr::String)
+        Type::constant(Constant::String)
     }
 
     pub fn string_literal(value: PhpString) -> Type {
@@ -119,7 +120,7 @@ impl Type {
 
     /// `object`.
     pub fn object_without_class() -> Type {
-        Type::new(Repr::ObjectWithoutClass)
+        Type::constant(Constant::ObjectWithoutClass)
     }
 
     pub fn resource(closed: bool) -> Type {
@@ -141,7 +142,7 @@ impl Type {
     }
 
     pub fn parent_ref() -> Type {
-        Type::new(Repr::ParentRef)
+        Type::constant(Constant::ParentRef)
     }
 
     pub fn static_ref(args: Vec<Type>) -> Type {
@@ -150,7 +151,7 @@ impl Type {
 
     /// `$this`.
     pub fn this() -> Type {
-        Type::new(Repr::This)
+        Type::constant(Constant::This)
     }
 
     pub fn template_param(param: TemplateParam) -> Type {
@@ -168,7 +169,7 @@ impl Type {
         members
             .into_iter()
             .reduce(Type::union)
-            .unwrap_or(Type::new(Repr::Never))
+            .unwrap_or_else(Type::never)
     }
 
     /// The union of `members`, benevolent: a value checked against it
@@ -291,8 +292,8 @@ impl Type {
     pub fn unknown_array_key() -> Type {
         static KEY: std::sync::LazyLock<Type> = std::sync::LazyLock::new(|| {
             Type::new(Repr::Union(vec![
-                Type::new(Repr::Int),
-                Type::new(Repr::String),
+                Type::constant(Constant::Int),
+                Type::constant(Constant::String),
             ]))
         });
         KEY.clone()
@@ -333,8 +334,8 @@ impl Type {
     /// precise key" site project-wide.
     pub fn benevolent_array_key() -> Type {
         Type::new(Repr::BenevolentUnion(vec![
-            Type::new(Repr::Int),
-            Type::new(Repr::String),
+            Type::constant(Constant::Int),
+            Type::constant(Constant::String),
         ]))
     }
 }
