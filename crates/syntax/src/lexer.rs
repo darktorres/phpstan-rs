@@ -42,6 +42,9 @@ pub struct Lexer<'a> {
     line_marks: (usize, Vec<(usize, Position)>),
     // Whether the source is all ASCII, where a column is a byte count.
     ascii: bool,
+    // Whether the source is valid UTF-8, where the characters between two
+    // character boundaries are the bytes that do not continue one.
+    utf8: bool,
     // The latest position resolved, as (byte offset, position, where its
     // line ends): tokens come in source order, so the next one is
     // usually on the same line, later, and costs the characters between.
@@ -207,6 +210,7 @@ impl<'a> Lexer<'a> {
             last_token_start: 0,
             line_marks: (0, vec![(0, Position { line: 1, col: 1 })]),
             ascii: bytes.is_ascii(),
+            utf8: bytes.is_ascii() || std::str::from_utf8(bytes).is_ok(),
             base: Position { line: 1, col: 1 },
             pending_keyword_raw: None,
             comments: Vec::new(),
@@ -230,6 +234,7 @@ impl<'a> Lexer<'a> {
             last_token_start: 0,
             line_marks: (0, vec![(0, Position { line: 1, col: 1 })]),
             ascii: bytes.is_ascii(),
+            utf8: bytes.is_ascii() || std::str::from_utf8(bytes).is_ok(),
             base: Position { line: 1, col: 1 },
             pending_keyword_raw: None,
             comments: Vec::new(),
@@ -343,10 +348,16 @@ impl<'a> Lexer<'a> {
     /// each, a byte each when the source is ASCII.
     fn columns(&self, from: usize, to: usize) -> usize {
         if self.ascii {
-            to - from
-        } else {
-            char_count(&self.src[from..to])
+            return to - from;
         }
+        let at_boundary = |i: usize| self.src.get(i).is_none_or(|&b| b & 0xC0 != 0x80);
+        if self.utf8 && at_boundary(from) && at_boundary(to) {
+            return self.src[from..to]
+                .iter()
+                .filter(|&&b| b & 0xC0 != 0x80)
+                .count();
+        }
+        char_count(&self.src[from..to])
     }
 
     fn line_col_from_marks(&mut self, byte_pos: usize) -> Position {

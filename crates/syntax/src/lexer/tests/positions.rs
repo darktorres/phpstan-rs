@@ -81,3 +81,25 @@ fn positions_in_a_fragment_are_where_counting_from_its_base_puts_them() {
         assert_eq!(lexer.line_col_at(offset), expected, "offset {offset}");
     }
 }
+
+#[test]
+fn columns_between_any_two_offsets_are_the_characters_a_lossy_decoding_reads() {
+    let sources: [&[u8]; 4] = [
+        "caf\u{e9} \u{10348} \u{4e2d} x".as_bytes(),
+        b"ascii only",
+        b"bad \xff\xfe byte \xe2\x82 cut \xc3\xa9",
+        "tail \u{e9}".as_bytes(),
+    ];
+    for src in sources {
+        let lexer = Lexer::from_bytes(src);
+        for from in 0..=src.len() {
+            for to in from..=src.len() {
+                assert_eq!(
+                    lexer.columns(from, to),
+                    super::super::char_count(&src[from..to]),
+                    "{src:?} {from}..{to}"
+                );
+            }
+        }
+    }
+}
