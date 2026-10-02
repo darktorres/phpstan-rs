@@ -19,6 +19,10 @@ impl Relation<'_> {
         arg: &Type,
         bindings: &mut FxHashMap<String, Type>,
     ) {
+        // A template binds only where the parameter type has one.
+        if !param.references_template() {
+            return;
+        }
         syntax::stack::guard(|| {
             if matches!(arg.repr(), Repr::Never) {
                 return;
@@ -419,6 +423,25 @@ fn substitute(
     to_bound: &dyn Fn(&TemplateParam) -> bool,
     relation: &Relation,
 ) -> Type {
+    substitute_with(ty, bindings, substituted, to_bound, relation, true)
+}
+
+/// `substitute`; `prune` leaves a type with no template, late or deferred
+/// node in it as it is without walking it, which is what walking it gives
+/// (no node of it changes, and `settle` changes only the late ones).
+/// Switched off by the test that holds the two to each other.
+pub(crate) fn substitute_with(
+    ty: &Type,
+    bindings: &FxHashMap<String, Type>,
+    substituted: &dyn Fn(&TemplateParam) -> bool,
+    to_bound: &dyn Fn(&TemplateParam) -> bool,
+    relation: &Relation,
+    prune: bool,
+) -> Type {
+    if prune && ty.0.flags & (crate::HAS_TEMPLATE_REF | crate::HAS_LATE | crate::HAS_DEFERRED) == 0
+    {
+        return ty.clone();
+    }
     syntax::stack::guard(|| {
         match ty.repr() {
             Repr::TemplateParam(tp) if !substituted(tp) => ty.clone(),
@@ -436,7 +459,7 @@ fn substitute(
                 // other, can't recurse forever.
                 let mut guarded = bindings.clone();
                 guarded.insert(tp.name.clone(), Type::mixed());
-                substitute(fallback, &guarded, substituted, to_bound, relation)
+                substitute_with(fallback, &guarded, substituted, to_bound, relation, prune)
             }),
             // A template-subject conditional (`(T is int ? A : B)`) resolves
             // once `T` is bound, the way real PHPStan's `ConditionalType`
@@ -451,18 +474,23 @@ fn substitute(
                 .get(subject.as_str())
                 .is_some_and(|b| !matches!(b.repr(), Repr::Mixed(..))) =>
             {
-                let target = substitute(target, bindings, substituted, to_bound, relation);
+                let target =
+                    substitute_with(target, bindings, substituted, to_bound, relation, prune);
                 match super::conditional::conditional_branch(
                     relation,
                     &bindings[subject.as_str()],
                     &target,
                     *negated,
                 ) {
-                    Some(true) => substitute(if_true, bindings, substituted, to_bound, relation),
-                    Some(false) => substitute(if_false, bindings, substituted, to_bound, relation),
+                    Some(true) => {
+                        substitute_with(if_true, bindings, substituted, to_bound, relation, prune)
+                    }
+                    Some(false) => {
+                        substitute_with(if_false, bindings, substituted, to_bound, relation, prune)
+                    }
                     None => Type::union(
-                        substitute(if_true, bindings, substituted, to_bound, relation),
-                        substitute(if_false, bindings, substituted, to_bound, relation),
+                        substitute_with(if_true, bindings, substituted, to_bound, relation, prune),
+                        substitute_with(if_false, bindings, substituted, to_bound, relation, prune),
                     ),
                 }
             }
@@ -471,11 +499,9 @@ fn substitute(
             // conditional return type's branches (`subject` is a raw
             // parameter name, not a `Type`, so there's nothing to substitute
             // there).
-            _ => {
-                super::late::settle(ty.map_children(&mut |t| {
-                    substitute(t, bindings, substituted, to_bound, relation)
-                }))
-            }
+            _ => super::late::settle(ty.map_children(&mut |t| {
+                substitute_with(t, bindings, substituted, to_bound, relation, prune)
+            })),
         }
     })
 }
