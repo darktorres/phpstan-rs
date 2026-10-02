@@ -1070,15 +1070,29 @@ fn assert_edits_match_fresh_loads(
     > = Default::default();
     let load = |texts: &[(String, String)]| {
         let mut project = Project::new();
-        for (path, source) in texts {
-            let file = parsed
-                .borrow_mut()
-                .entry((path.clone(), source.clone()))
-                .or_insert_with(|| {
-                    crate::project::parse_file(Path::new(path), source.as_bytes(), false, &interner)
+        let files: Vec<Option<crate::project::ParsedFile>> = texts
+            .iter()
+            .map(|(path, source)| {
+                parsed
+                    .borrow_mut()
+                    .entry((path.clone(), source.clone()))
+                    .or_insert_with(|| {
+                        crate::project::parse_file(
+                            Path::new(path),
+                            source.as_bytes(),
+                            false,
+                            &interner,
+                        )
                         .ok()
-                })
-                .clone();
+                    })
+                    .clone()
+            })
+            .collect();
+        // As `load_files` loads a batch: a project that is to have PHPStan's
+        // source in it starts from the registry that has it, and does not
+        // switch to it when it finishes.
+        project.expect_files(files.iter().flatten());
+        for ((path, source), file) in texts.iter().zip(files) {
             if let Some(file) = file {
                 project.insert_parsed_file(PathBuf::from(path), file, source.to_string(), true);
             }
@@ -1262,4 +1276,56 @@ fn a_rebuild_follows_the_order_files_were_loaded_not_their_paths() {
         .expect("parses");
     let fresh = load(z, a_after);
     assert_eq!(methods(&edited), methods(&fresh));
+}
+
+/// The route the edit tests' fresh loads take, a batch, gives what a load
+/// file by file does, which switches to the registry with PHPStan's source
+/// when the project finishes.
+#[test]
+fn a_batch_load_equals_a_load_file_by_file() {
+    let sources = [
+        "<?php function helper(int $a): int { return $a; }",
+        "<?php use PHPStan\\Type\\Type; function takes(Type $t): void { $t->describe(); }",
+        "<?php class Plain { public function run(): string { return helper(1); } }",
+    ];
+    let paths = ["a.php", "b.php", "c.php"];
+    let diagnostics = |project: &Project| -> Vec<String> {
+        let mut all: Vec<String> = project
+            .analyzed_paths()
+            .iter()
+            .flat_map(|path| {
+                project
+                    .check_file(path)
+                    .into_iter()
+                    .map(move |d| format!("{} {}", path.display(), d.message))
+            })
+            .collect();
+        all.sort();
+        all
+    };
+    let mut one_by_one = Project::new();
+    for (path, source) in paths.iter().zip(sources) {
+        let _ = one_by_one.load_analyzed_file(PathBuf::from(path), source);
+    }
+    one_by_one.finish_loading();
+    let mut batch = Project::new();
+    let interner = std::sync::Arc::new(syntax::name::Interner::new());
+    let files: Vec<crate::project::ParsedFile> = paths
+        .iter()
+        .zip(sources)
+        .map(|(path, source)| {
+            crate::project::parse_file(Path::new(path), source.as_bytes(), false, &interner)
+                .expect("parses")
+        })
+        .collect();
+    batch.expect_files(files.iter());
+    for ((path, source), file) in paths.iter().zip(sources).zip(files) {
+        batch.insert_parsed_file(PathBuf::from(path), file, source.to_string(), true);
+    }
+    batch.finish_loading();
+    assert_eq!(diagnostics(&one_by_one), diagnostics(&batch));
+    assert_eq!(
+        one_by_one.registry().classes.len(),
+        batch.registry().classes.len()
+    );
 }
