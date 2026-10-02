@@ -29,10 +29,14 @@ pub(crate) fn folded_key(name: &str) -> Name {
 
 /// How `text` orders against `key`, a lowercased name: by its own
 /// lowercase form, without building it.
-fn cmp_folded(text: &str, key: &str) -> Ordering {
-    text.bytes()
-        .map(|b| b.to_ascii_lowercase())
-        .cmp(key.bytes())
+fn cmp_folded(text: &[u8], key: &[u8]) -> Ordering {
+    for (&a, &b) in text.iter().zip(key) {
+        let a = a.to_ascii_lowercase();
+        if a != b {
+            return a.cmp(&b);
+        }
+    }
+    text.len().cmp(&key.len())
 }
 
 /// A name as a table key: hashed, compared and borrowed as its lowercase
@@ -150,12 +154,22 @@ impl Keys {
         (field(0)..field(0) + field(1), field(2)..field(2) + field(3))
     }
 
-    /// The name `i` as text.
-    fn text(&self, i: usize) -> &str {
+    /// The bytes of name `i`.
+    fn bytes(&self, i: usize) -> &[u8] {
         match self {
             Keys::Stored { buffer, .. } => {
                 let (name, _) = self.record(i);
-                std::str::from_utf8(&buffer[name]).expect("a stored name is text")
+                &buffer[name]
+            }
+            Keys::Built(names) => names[i].as_str().as_bytes(),
+        }
+    }
+
+    /// The name `i` as text.
+    fn text(&self, i: usize) -> &str {
+        match self {
+            Keys::Stored { .. } => {
+                std::str::from_utf8(self.bytes(i)).expect("a stored name is text")
             }
             Keys::Built(names) => names[i].as_str(),
         }
@@ -164,7 +178,7 @@ impl Keys {
 
 /// How a name's text orders against a key: the key is already lowercased
 /// when `fold`.
-fn cmp_text(fold: bool, text: &str, key: &str) -> Ordering {
+fn cmp_text(fold: bool, text: &[u8], key: &[u8]) -> Ordering {
     if fold {
         cmp_folded(text, key)
     } else {
@@ -186,7 +200,7 @@ impl<V> Base<V> {
     pub(super) fn built(mut entries: Vec<(Name, V)>, fold: bool) -> Base<V> {
         entries.sort_by(|a, b| {
             let key = if fold { b.0.lower() } else { b.0.as_str() };
-            cmp_text(fold, a.0.as_str(), key)
+            cmp_text(fold, a.0.as_str().as_bytes(), key.as_bytes())
         });
         let mut names = Vec::with_capacity(entries.len());
         let mut slots = Vec::with_capacity(entries.len());
@@ -213,10 +227,11 @@ impl<V> Base<V> {
     /// The position of the entry whose name (lowercased, for a base that
     /// folds) is `key`.
     pub(super) fn find(&self, key: &str) -> Option<usize> {
+        let key = key.as_bytes();
         let (mut low, mut high) = (0, self.len());
         while low < high {
             let middle = low + (high - low) / 2;
-            match cmp_text(self.fold, self.keys.text(middle), key) {
+            match cmp_text(self.fold, self.keys.bytes(middle), key) {
                 Ordering::Less => low = middle + 1,
                 Ordering::Greater => high = middle,
                 Ordering::Equal => return Some(middle),
@@ -713,7 +728,7 @@ impl<V> Base<V> {
                 .map_err(|_| format!("{section}'s name {i} is not text"))?;
             if let Some(before) = previous {
                 let order = if self.fold {
-                    cmp_folded(before, &text.to_ascii_lowercase())
+                    cmp_folded(before.as_bytes(), text.to_ascii_lowercase().as_bytes())
                 } else {
                     before.cmp(text)
                 };
