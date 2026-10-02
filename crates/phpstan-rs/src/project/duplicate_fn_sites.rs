@@ -12,6 +12,7 @@ use syntax::token::Span;
 /// `check_duplicate_function_declarations` needs to see every occurrence
 /// to build its own full location list, exactly mirroring real PHPStan's
 /// `DuplicateFunctionDeclarationRule`.
+#[cfg_attr(test, derive(Clone))]
 pub(crate) struct FnDeclSite {
     pub(crate) path: PathBuf,
     pub(crate) span: Span,
@@ -27,6 +28,7 @@ pub(crate) struct FnDeclSite {
 /// real PHPStan's own always-on `function.duplicate` rule. A conditional
 /// declaration is never tracked (see `index`).
 #[derive(Default)]
+#[cfg_attr(test, derive(Clone))]
 pub(crate) struct DuplicateFunctionSites {
     sites: FxHashMap<String, Vec<FnDeclSite>>,
 }

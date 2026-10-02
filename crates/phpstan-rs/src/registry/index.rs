@@ -19,6 +19,7 @@ use types::Type;
 /// to be consumed one at a time, in order, by `insert_built_decl`. See
 /// `build_declarations`'s own doc comment for why this exists as a
 /// wholly separate step from the insertion logic below.
+#[cfg_attr(test, derive(Clone))]
 pub(crate) enum BuiltDecl {
     Class {
         name: Name,

@@ -1059,10 +1059,29 @@ fn assert_edits_match_fresh_loads(
         .enumerate()
         .map(|(i, source)| (format!("f{i:03}.php"), source.clone()))
         .collect();
+    // Each fresh load parses every text again, though all but the edited
+    // one are the ones the load before parsed: the parse of a file is a
+    // function of its path and text, and a fresh load takes a copy of it. A
+    // text that does not parse is ignored, as `load_analyzed_file`'s error
+    // is.
+    let interner = std::sync::Arc::new(syntax::name::Interner::new());
+    let parsed: std::cell::RefCell<
+        rustc_hash::FxHashMap<(String, String), Option<crate::project::ParsedFile>>,
+    > = Default::default();
     let load = |texts: &[(String, String)]| {
         let mut project = Project::new();
         for (path, source) in texts {
-            let _ = project.load_analyzed_file(PathBuf::from(path), source);
+            let file = parsed
+                .borrow_mut()
+                .entry((path.clone(), source.clone()))
+                .or_insert_with(|| {
+                    crate::project::parse_file(Path::new(path), source.as_bytes(), false, &interner)
+                        .ok()
+                })
+                .clone();
+            if let Some(file) = file {
+                project.insert_parsed_file(PathBuf::from(path), file, source.to_string(), true);
+            }
         }
         project.finish_loading();
         project

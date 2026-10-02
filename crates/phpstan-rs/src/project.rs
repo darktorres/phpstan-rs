@@ -2555,6 +2555,7 @@ fn parse_with_ignores(
 /// below does the remaining, order-sensitive registry-mutating half,
 /// meant to stay sequential and run in whatever order a caller's own
 /// collision-resolution policy needs (see that method's own doc comment).
+#[cfg_attr(test, derive(Clone))]
 pub struct ParsedFile {
     ast: Vec<Stmt>,
     // What the lexer skipped over (see `ParsedFile::lex_warnings`).
