@@ -22,19 +22,23 @@ pub(crate) fn function_key(name: &str) -> Cow<'_, str> {
     }
 }
 
+const HIGH: u64 = 0x8080_8080_8080_8080;
+
+/// The high bit of each byte of `word` that is an ASCII capital. In each
+/// byte's low seven bits, the high bit of `+ 0x3f` says `>= 'A'` and that
+/// of `+ 0x25` says `> 'Z'`; a byte with its own high bit set is not ASCII.
+fn capitals(word: u64) -> u64 {
+    let low = word & !HIGH;
+    let at_least_a = low.wrapping_add(0x3f3f_3f3f_3f3f_3f3f);
+    let past_z = low.wrapping_add(0x2525_2525_2525_2525);
+    at_least_a & !past_z & !word & HIGH
+}
+
 /// Whether any byte is an ASCII capital, eight bytes at a time.
 fn has_ascii_uppercase(bytes: &[u8]) -> bool {
-    const HIGH: u64 = 0x8080_8080_8080_8080;
     let (chunks, rest) = bytes.as_chunks::<8>();
     for chunk in chunks {
-        let word = u64::from_le_bytes(*chunk);
-        // In each byte's low seven bits, the high bit of `+ 0x3f` says
-        // `>= 'A'` and that of `+ 0x25` says `> 'Z'`; a byte with its own
-        // high bit set is not ASCII.
-        let low = word & !HIGH;
-        let at_least_a = low.wrapping_add(0x3f3f_3f3f_3f3f_3f3f);
-        let past_z = low.wrapping_add(0x2525_2525_2525_2525);
-        if at_least_a & !past_z & !word & HIGH != 0 {
+        if capitals(u64::from_le_bytes(*chunk)) != 0 {
             return true;
         }
     }
@@ -222,10 +226,31 @@ fn hash_key(key: &[u8]) -> usize {
     (hash ^ (hash >> 32)) as usize
 }
 
+/// Whether `text` is `key` once lowercased, for a key already lowercased,
+/// eight bytes at a time.
+fn eq_folded(text: &[u8], key: &[u8]) -> bool {
+    if text.len() != key.len() {
+        return false;
+    }
+    let (text_words, text_rest) = text.as_chunks::<8>();
+    let (key_words, key_rest) = key.as_chunks::<8>();
+    for (text, key) in text_words.iter().zip(key_words) {
+        let word = u64::from_le_bytes(*text);
+        // A capital's lowercase form has the bit `0x20` set.
+        if word | (capitals(word) >> 2) != u64::from_le_bytes(*key) {
+            return false;
+        }
+    }
+    text_rest
+        .iter()
+        .zip(key_rest)
+        .all(|(text, key)| text.to_ascii_lowercase() == *key)
+}
+
 /// Whether `text` is `key` once lowercased, for a key already lowercased.
 fn eq_text(fold: bool, text: &[u8], key: &[u8]) -> bool {
     if fold {
-        text.len() == key.len() && cmp_folded(text, key) == Ordering::Equal
+        eq_folded(text, key)
     } else {
         text == key
     }
@@ -280,13 +305,26 @@ impl Keys {
         (field(0)..field(0) + field(1), field(2)..field(2) + field(3))
     }
 
+    /// The range of the stored name `i`: only its offset and length are
+    /// read, of the record's four.
+    fn name_range(&self, i: usize) -> Range<usize> {
+        let Keys::Stored {
+            buffer, records, ..
+        } = self
+        else {
+            unreachable!("only a stored table has records")
+        };
+        let at = records.start + i * RECORD_LEN;
+        let field = |n: usize| {
+            u32::from_le_bytes(buffer[at + n * 4..at + n * 4 + 4].try_into().unwrap()) as usize
+        };
+        field(0)..field(0) + field(1)
+    }
+
     /// The bytes of name `i`.
     fn bytes(&self, i: usize) -> &[u8] {
         match self {
-            Keys::Stored { buffer, .. } => {
-                let (name, _) = self.record(i);
-                &buffer[name]
-            }
+            Keys::Stored { buffer, .. } => &buffer[self.name_range(i)],
             Keys::Built(names) => names[i].as_str().as_bytes(),
         }
     }
@@ -373,6 +411,7 @@ impl<V> Base<V> {
     fn find_indexed(&self, buffer: &Buffer, index: &Range<usize>, key: &[u8]) -> Option<usize> {
         let places = index.len() / 4;
         let mask = places - 1;
+        let len = self.len();
         let mut place = hash_key(key) & mask;
         loop {
             let at = index.start + place * 4;
@@ -381,7 +420,7 @@ impl<V> Base<V> {
                 return None;
             }
             let i = entry - 1;
-            if i < self.len() && eq_text(self.fold, self.keys.bytes(i), key) {
+            if i < len && eq_text(self.fold, self.keys.bytes(i), key) {
                 return Some(i);
             }
             place = (place + 1) & mask;
@@ -1086,6 +1125,35 @@ impl<V: Clone> FromIterator<(Name, V)> for NameTable<V> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_folded_comparison_agrees_with_the_ordering_one() {
+        // Every length to 17, each byte value in each place, the key being
+        // the text lowercased or the text with one byte altered.
+        for len in 0..=17usize {
+            for place in 0..len.max(1) {
+                for byte in 0..=255u8 {
+                    let mut text: Vec<u8> = (0..len).map(|i| b"aZ_9Bq\xc3\xa9"[i % 8]).collect();
+                    if len > 0 {
+                        text[place] = byte;
+                    }
+                    let lowered = text.to_ascii_lowercase();
+                    let mut altered = lowered.clone();
+                    if len > 0 {
+                        altered[place] ^= 0x20;
+                    }
+                    for key in [&lowered, &altered] {
+                        assert_eq!(
+                            eq_folded(&text, key),
+                            cmp_folded(&text, key) == Ordering::Equal,
+                            "{text:?} against {key:?}"
+                        );
+                    }
+                }
+            }
+        }
+        assert!(!eq_folded(b"abc", b"abcd"));
+    }
 
     #[test]
     fn the_capital_scan_agrees_with_the_byte_scan() {
