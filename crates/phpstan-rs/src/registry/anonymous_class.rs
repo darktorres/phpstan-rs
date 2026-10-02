@@ -46,6 +46,9 @@ pub(crate) fn name_anonymous_classes(stmts: &mut [Stmt], relative_file: &str) {
     for stmt in stmts.iter() {
         lines.visit_stmt(stmt);
     }
+    if lines.0.is_empty() {
+        return;
+    }
     let mut per_line: FxHashMap<u32, u32> = FxHashMap::default();
     for line in &lines.0 {
         *per_line.entry(*line).or_insert(0) += 1;

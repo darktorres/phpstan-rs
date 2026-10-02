@@ -1085,7 +1085,7 @@ impl Project {
         let mut seen: FxHashSet<String> = FxHashSet::default();
         let mut seen_stub_files: FxHashSet<u32> = FxHashSet::default();
         while let Some(key) = frontier.pop() {
-            if !seen.insert(key.clone()) {
+            if seen.contains(&key) {
                 continue;
             }
             let mut reached = |name: &str, is_class: bool| {
@@ -1125,6 +1125,7 @@ impl Project {
                     reached(name, is_class);
                 }
             }
+            seen.insert(key);
         }
         Scope::from_keys(classes, functions)
     }
@@ -1725,26 +1726,27 @@ impl Project {
         let mut seen_stub_files: FxHashSet<u32> = FxHashSet::default();
         let mut frontier: Vec<String> = changed.into_iter().collect();
         // Puts the dependency key of `name` on the frontier unless it was
-        // reached already; most names are, and then nothing is allocated.
-        let reach = |name: &str, seen: &FxHashSet<String>, frontier: &mut Vec<String>| {
-            crate::registry::with_function_key(name.trim_start_matches('\\'), |key| {
-                if !seen.contains(key) {
-                    frontier.push(key.to_string());
-                }
-            });
-        };
+        // reached already, or is `current`, which is being walked; most
+        // names are, and then nothing is allocated.
+        let reach =
+            |name: &str, current: &str, seen: &FxHashSet<String>, frontier: &mut Vec<String>| {
+                crate::registry::with_function_key(name.trim_start_matches('\\'), |key| {
+                    if key != current && !seen.contains(key) {
+                        frontier.push(key.to_string());
+                    }
+                });
+            };
         while let Some(key) = frontier.pop() {
             if seen.contains(&key) {
                 continue;
             }
-            seen.insert(key.clone());
             affected.extend(self.dependents.get(&key).into_iter().flatten().cloned());
             for file in self.signature_dependents.get(&key).into_iter().flatten() {
                 let Some(state) = self.files.get(file) else {
                     continue;
                 };
                 for name in state.functions.iter().chain(&state.classes) {
-                    reach(name, &seen, &mut frontier);
+                    reach(name, &key, &seen, &mut frontier);
                 }
             }
             for file in stubs::stub_dependent_files(&key) {
@@ -1752,9 +1754,10 @@ impl Project {
                     continue;
                 }
                 for (_, name) in stubs::stub_file_names(file) {
-                    reach(name, &seen, &mut frontier);
+                    reach(name, &key, &seen, &mut frontier);
                 }
             }
+            seen.insert(key);
         }
         affected
     }
@@ -2557,7 +2560,15 @@ pub fn parse_file(
     let declaration_references = deps::declaration_referenced_names(&ast);
     let origin = Origin::File(Arc::from(path));
     let built_decls = crate::registry::build_declarations(&ast, &origin);
-    let anonymous_classes = anonymous_class_names(&ast);
+    // The anonymous classes are the declarations built last, one per
+    // `new class`, so the file's own walk need not be repeated for them.
+    let anonymous_classes = built_decls
+        .iter()
+        .filter_map(|decl| match decl {
+            BuiltDecl::Class { name, info, .. } if info.is_anonymous() => Some(name.to_string()),
+            _ => None,
+        })
+        .collect();
     let mut duplicate_fn_sites = DuplicateFunctionSites::default();
     duplicate_fn_sites.index(&ast, path);
     let mut duplicate_class_sites = DuplicateClassSites::default();
