@@ -155,6 +155,7 @@ impl Clone for FunctionReflection {
             is_magic,
             attributes,
             provenance,
+            stub_writes: _,
         } = self;
         FunctionReflection {
             params: clone_vec(params),
@@ -183,6 +184,7 @@ impl Clone for FunctionReflection {
             is_magic: *is_magic,
             attributes: clone_vec(attributes),
             provenance: provenance.clone(),
+            stub_writes: Default::default(),
         }
     }
 }
@@ -345,6 +347,10 @@ pub struct FunctionReflection {
     // This declaration's own attributes, names resolved.
     pub(in crate::registry) attributes: Vec<ReflectionAttribute>,
     pub(in crate::registry) provenance: crate::registry::provenance::Provenance,
+    // What a call to this stub may write (`stub_verdict`), found the first
+    // time it is asked.
+    #[serde(skip)]
+    pub(in crate::registry) stub_writes: crate::registry::property_writes::StubWrites,
 }
 
 impl FunctionReflection {
@@ -897,6 +903,7 @@ impl FunctionReflection {
             is_transitively_pure: false,
             is_stub: false,
             is_magic: false,
+            stub_writes: Default::default(),
         }
     }
 
@@ -1069,6 +1076,7 @@ impl FunctionReflection {
             // wins" precedent `@method`/`@property` synthesis already
             // hold elsewhere.
             is_magic: self.is_magic && other.is_magic,
+            stub_writes: Default::default(),
         }
     }
 }

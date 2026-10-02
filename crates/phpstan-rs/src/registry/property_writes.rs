@@ -41,6 +41,21 @@ pub(crate) enum PropertyWrites {
     Anything,
 }
 
+/// What a stub signature's verdict (`stub_verdict`) was the first time it
+/// was asked, kept with the signature: the same few thousand builtins are
+/// asked about hundreds of thousands of times. It is no part of what a
+/// signature is, so equal signatures are equal whether or not it is
+/// filled, and a copy of a signature starts without it, since the copy's
+/// parameters may yet change.
+#[derive(Debug, Default)]
+pub(in crate::registry) struct StubWrites(std::sync::OnceLock<PropertyWrites>);
+
+impl PartialEq for StubWrites {
+    fn eq(&self, _: &StubWrites) -> bool {
+        true
+    }
+}
+
 /// A declaration, keyed case-insensitively: `(class, method)` for a
 /// method, `(None, function)` for a function.
 pub(in crate::registry) type DeclKey = (Option<String>, String);
@@ -148,37 +163,54 @@ impl Registry {
             .keys()
             .map(|key| (key.clone(), PropertyWrites::Anything))
             .collect();
-        loop {
-            let mut changed = false;
-            for (key, classification) in classified {
-                let Some(classification) = classification else {
-                    continue;
-                };
-                let current = verdicts[key];
-                for candidate in [PropertyWrites::Nothing, PropertyWrites::OwnObject] {
-                    if candidate >= current {
-                        break;
-                    }
-                    if candidate == PropertyWrites::Nothing && classification.writes_own_object {
-                        continue;
-                    }
-                    let satisfied = classification.deps.iter().all(|(dep, need)| {
-                        let verdict = self.dependency_verdict(dep, &verdicts);
-                        match need {
-                            Need::Nothing => verdict == PropertyWrites::Nothing,
-                            Need::OwnObject => verdict <= PropertyWrites::OwnObject,
-                            Need::SameAsCaller => verdict <= candidate,
-                        }
-                    });
-                    if satisfied {
-                        verdicts.insert(key.clone(), candidate);
-                        changed = true;
-                        break;
-                    }
+        // A verdict only ever goes down, and whether a lower one holds only
+        // gets easier as the verdicts it depends on go down. So every
+        // declaration is settled once, and again only when a declaration
+        // it calls has gone down.
+        let mut callers: FxHashMap<&DeclKey, Vec<&DeclKey>> = FxHashMap::default();
+        let mut queue: std::collections::VecDeque<&DeclKey> = std::collections::VecDeque::new();
+        for (key, classification) in classified {
+            let Some(classification) = classification else {
+                continue;
+            };
+            queue.push_back(key);
+            for (dep, _) in &classification.deps {
+                if verdicts.contains_key(dep) {
+                    callers.entry(dep).or_default().push(key);
                 }
             }
-            if !changed {
-                break;
+        }
+        let mut queued: FxHashSet<&DeclKey> = queue.iter().copied().collect();
+        while let Some(key) = queue.pop_front() {
+            queued.remove(key);
+            let Some(Some(classification)) = classified.get(key) else {
+                continue;
+            };
+            let current = verdicts[key];
+            for candidate in [PropertyWrites::Nothing, PropertyWrites::OwnObject] {
+                if candidate >= current {
+                    break;
+                }
+                if candidate == PropertyWrites::Nothing && classification.writes_own_object {
+                    continue;
+                }
+                let satisfied = classification.deps.iter().all(|(dep, need)| {
+                    let verdict = self.dependency_verdict(dep, &verdicts);
+                    match need {
+                        Need::Nothing => verdict == PropertyWrites::Nothing,
+                        Need::OwnObject => verdict <= PropertyWrites::OwnObject,
+                        Need::SameAsCaller => verdict <= candidate,
+                    }
+                });
+                if satisfied {
+                    verdicts.insert(key.clone(), candidate);
+                    for caller in callers.get(key).into_iter().flatten() {
+                        if queued.insert(caller) {
+                            queue.push_back(caller);
+                        }
+                    }
+                    break;
+                }
             }
         }
         self.property_writes = verdicts;
@@ -254,15 +286,17 @@ const CODE_RUNNING_PARAMETER_TYPES: [&str; 11] = [
 /// A builtin writes no object's properties unless a parameter of it takes
 /// one of `CODE_RUNNING_PARAMETER_TYPES`.
 fn stub_verdict(sig: &FunctionReflection) -> PropertyWrites {
-    let runs_code = sig
-        .params
-        .iter()
-        .any(|p| p.ty.mentions_any(&CODE_RUNNING_PARAMETER_TYPES));
-    if runs_code {
-        PropertyWrites::Anything
-    } else {
-        PropertyWrites::Nothing
-    }
+    *sig.stub_writes.0.get_or_init(|| {
+        let runs_code = sig
+            .params
+            .iter()
+            .any(|p| p.ty.mentions_any(&CODE_RUNNING_PARAMETER_TYPES));
+        if runs_code {
+            PropertyWrites::Anything
+        } else {
+            PropertyWrites::Nothing
+        }
+    })
 }
 
 /// `body`'s classification, or `None` when it may write any object's
