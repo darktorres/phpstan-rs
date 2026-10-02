@@ -260,7 +260,13 @@ impl NameContext {
             .get(&(lookup_kind, use_map_key(lookup_kind, first)))
         {
             return match rest {
-                Some(r) => format!("{imported_path}\\{r}"),
+                Some(r) => {
+                    let mut resolved = String::with_capacity(imported_path.len() + 1 + r.len());
+                    resolved.push_str(imported_path);
+                    resolved.push('\\');
+                    resolved.push_str(r);
+                    resolved
+                }
                 None => imported_path.clone(),
             };
         }
