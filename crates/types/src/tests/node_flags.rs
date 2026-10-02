@@ -136,3 +136,60 @@ fn the_key_refinement_flag_is_the_form_test_and_is_not_passed_up() {
     assert!(crate::has_key_refinement(&refined_key()));
     assert!(!crate::has_key_refinement(&boxed));
 }
+
+#[test]
+fn the_constant_name_flag_marks_objects_and_cases_named_like_constants() {
+    let object = |name: &str, args: Vec<Type>| Type::object(name.into(), args);
+    for name in ["FTP_ASCII", "\\Ns\\FOO", "_X", "A", "PDO", "X1"] {
+        assert!(
+            object(name, Vec::new()).has_constant_looking_name(),
+            "{name}"
+        );
+    }
+    for name in ["Foo", "A_b", "foo", "1A", "", "Ns\\Foo"] {
+        assert!(
+            !object(name, Vec::new()).has_constant_looking_name(),
+            "{name}"
+        );
+    }
+    // Arguments make it a generic class; the flag then comes from them.
+    assert!(!object("FOO", vec![Type::int()]).has_constant_looking_name());
+    assert!(object("Box", vec![object("FOO", Vec::new())]).has_constant_looking_name());
+    assert!(Type::enum_case("SUIT".into(), "Hearts".into()).has_constant_looking_name());
+    assert!(!Type::enum_case("Suit".into(), "HEARTS".into()).has_constant_looking_name());
+    assert!(
+        Type::union_of(vec![Type::int(), object("FOO", Vec::new())]).has_constant_looking_name()
+    );
+    assert!(!Type::union_of(vec![Type::int(), Type::string()]).has_constant_looking_name());
+}
+
+#[test]
+fn the_constant_name_flag_is_the_recursive_definition() {
+    fn recursive(ty: &Type) -> bool {
+        match ty.repr() {
+            Repr::Object(name, args)
+                if args.is_empty() && crate::looks_like_constant_name(name) =>
+            {
+                true
+            }
+            Repr::EnumCase(class, _) if crate::looks_like_constant_name(class) => true,
+            _ => ty.any_child(recursive),
+        }
+    }
+    let mut samples = samples();
+    samples.push(Type::object("FTP_ASCII".into(), Vec::new()));
+    samples.push(Type::array(
+        Type::int(),
+        Type::object(
+            "Box".into(),
+            vec![Type::object("PHP_EOL".into(), Vec::new())],
+        ),
+    ));
+    for sample in samples {
+        let mut all = Vec::new();
+        nodes_below(&sample, &mut all);
+        for ty in all {
+            assert_eq!(ty.has_constant_looking_name(), recursive(&ty), "{ty}");
+        }
+    }
+}

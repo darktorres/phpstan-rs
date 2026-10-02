@@ -97,14 +97,28 @@ pub(crate) const HAS_SELF: u16 = 1;
 pub(crate) const HAS_STATIC: u16 = 2;
 pub(crate) const HAS_PARENT: u16 = 4;
 pub(crate) const HAS_DEFERRED: u16 = 8;
-// Taken by the flag for a class name that reads as a constant's.
-#[allow(dead_code)]
-const RESERVED_CONSTANT_NAME: u16 = 16;
+/// An object without arguments, or an enum case, named in a constant's
+/// way: `looks_like_constant_name`.
+pub(crate) const HAS_CONSTANT_NAME: u16 = 16;
 /// A string key refined as no decimal integer, in the key's own form: not
 /// something nested below it, so it is not passed up to a parent.
 pub(crate) const HAS_KEY_REFINEMENT: u16 = 32;
 pub(crate) const HAS_TEMPLATE_REF: u16 = 64;
 pub(crate) const HAS_LATE: u16 = 128;
+
+/// Whether the last segment of the class-like `name` is spelled the way a
+/// constant is: an upper-case letter or `_`, then upper-case letters,
+/// digits and `_` only.
+pub fn looks_like_constant_name(name: &str) -> bool {
+    let short = name.rsplit('\\').next().unwrap_or(name);
+    short
+        .chars()
+        .next()
+        .is_some_and(|c| c.is_ascii_uppercase() || c == '_')
+        && short
+            .chars()
+            .all(|c| c.is_ascii_uppercase() || c.is_ascii_digit() || c == '_')
+}
 
 /// The flags a node passes up to the node it is a child of.
 const PASSED_UP: u16 = !HAS_KEY_REFINEMENT;
@@ -117,6 +131,10 @@ pub(crate) fn reference_flags(repr: &Repr) -> u16 {
         Repr::ParentRef => HAS_PARENT,
         Repr::ValueOf(_) | Repr::ClassConstant { .. } => HAS_DEFERRED,
         Repr::KeyOf(_) | Repr::OffsetAccess(..) => HAS_DEFERRED | HAS_LATE,
+        Repr::Object(name, args) if args.is_empty() && looks_like_constant_name(name) => {
+            HAS_CONSTANT_NAME
+        }
+        Repr::EnumCase(class, _) if looks_like_constant_name(class) => HAS_CONSTANT_NAME,
         Repr::TemplateParam(_)
         | Repr::Conditional {
             subject: ConditionalSubject::Template(_),

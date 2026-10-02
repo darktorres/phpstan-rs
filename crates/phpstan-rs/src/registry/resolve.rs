@@ -1941,7 +1941,7 @@ fn fixed_sig(
 fn resolve_constant_names(ty: &Type, registry: &Registry) -> Option<Type> {
     // Looked for first, without building anything: almost no type has one,
     // and rebuilding a type is interning every node of it again.
-    if !mentions_constant_name(ty, registry) {
+    if !ty.has_constant_looking_name() || !mentions_constant_name(ty, registry) {
         return None;
     }
     let mut changed = false;
@@ -1951,6 +1951,9 @@ fn resolve_constant_names(ty: &Type, registry: &Registry) -> Option<Type> {
 
 /// Whether `ty` has a constant-named `Object` anywhere in it.
 fn mentions_constant_name(ty: &Type, registry: &Registry) -> bool {
+    if !ty.has_constant_looking_name() {
+        return false;
+    }
     syntax::stack::guard(|| {
         if let Some((name, args)) = ty.as_object()
             && args.is_empty()
@@ -1963,6 +1966,9 @@ fn mentions_constant_name(ty: &Type, registry: &Registry) -> bool {
 }
 
 fn resolve_constant_names_rec(ty: &Type, registry: &Registry, changed: &mut bool) -> Type {
+    if !ty.has_constant_looking_name() {
+        return ty.clone();
+    }
     syntax::stack::guard(|| {
         if let Some((name, args)) = ty.as_object()
             && args.is_empty()
@@ -1982,22 +1988,21 @@ fn constant_named_type(name: &str, registry: &Registry) -> Option<Type> {
 /// The type of the global constant a class-like name stands for, when it
 /// is not a class and is spelled like a constant.
 fn constant_named_value<'r>(name: &str, registry: &'r Registry) -> Option<&'r Type> {
-    let short = name.rsplit('\\').next().unwrap_or(name);
-    let looks_constant = short
-        .chars()
-        .next()
-        .is_some_and(|c| c.is_ascii_uppercase() || c == '_')
-        && short
-            .chars()
-            .all(|c| c.is_ascii_uppercase() || c.is_ascii_digit() || c == '_');
-    if !looks_constant || registry.lookup_class(name).is_some() {
+    if !types::looks_like_constant_name(name) {
         return None;
     }
-    let name = name.trim_start_matches('\\');
-    registry
+    let short = name.rsplit('\\').next().unwrap_or(name);
+    // The constant is looked for first, being cheaper than a class lookup,
+    // which most names the constants' table does not have never need.
+    let bare = name.trim_start_matches('\\');
+    let value = registry
         .global_constants
-        .get(name)
-        .or_else(|| registry.global_constants.get(short))
+        .get(bare)
+        .or_else(|| registry.global_constants.get(short))?;
+    if registry.lookup_class(name).is_some() {
+        return None;
+    }
+    Some(value)
 }
 
 impl Registry {

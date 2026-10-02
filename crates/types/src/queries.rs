@@ -76,6 +76,13 @@ impl Type {
         matches!(self.repr(), Repr::Mixed(..))
     }
 
+    /// Whether an object without arguments or an enum case named in a
+    /// constant's way (`looks_like_constant_name`) stands anywhere in this
+    /// type: what a class-like name that is really a constant's can be.
+    pub fn has_constant_looking_name(&self) -> bool {
+        self.0.flags & crate::HAS_CONSTANT_NAME != 0
+    }
+
     /// Whether this is the error type: an expression already reported
     /// invalid, which nothing reports on again.
     pub fn is_error(&self) -> bool {
