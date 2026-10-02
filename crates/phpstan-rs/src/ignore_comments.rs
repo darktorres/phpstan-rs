@@ -38,6 +38,13 @@ enum Event<'t> {
     },
 }
 
+/// Whether `text` holds `@phpstan-ignore`, which every marker begins with.
+fn has_ignore_marker(text: &str) -> bool {
+    static FINDER: std::sync::LazyLock<memchr::memmem::Finder<'static>> =
+        std::sync::LazyLock::new(|| memchr::memmem::Finder::new(b"@phpstan-ignore"));
+    FINDER.find(text.as_bytes()).is_some()
+}
+
 fn position_key(p: Position) -> (u32, u32) {
     (p.line, p.col)
 }
@@ -91,6 +98,10 @@ pub(crate) fn scan_parsed(parsed: &syntax::ParsedFile) -> IgnoreComments {
             }
             Event::Comment { text, line, is_doc } => (*text, *line, *is_doc),
         };
+        // Every marker begins with this, so a comment without it has none.
+        if !has_ignore_marker(text) {
+            continue;
+        }
         let is_next_line = text.contains("@phpstan-ignore-next-line");
         let is_current_line = text.contains("@phpstan-ignore-line");
         if is_doc {
