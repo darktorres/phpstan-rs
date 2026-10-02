@@ -674,3 +674,52 @@ fn a_wrapped_continuation_line_joins_onto_its_own_tag() {
         other => panic!("got: {other:?}"),
     }
 }
+
+#[test]
+fn a_tag_or_type_prefix_found_in_the_memo_is_the_one_parsed_afresh() {
+    let tags = [
+        ("param", "int $x"),
+        ("param", "int|string $x description of it"),
+        ("param", "array<string, list<Foo>> $items"),
+        ("param", "(callable(int): string)|null $f = null"),
+        ("param-out", "int $x"),
+        ("return", "void"),
+        ("return", "array{a: int, b?: string}"),
+        ("return", "\\Foo\\Bar<int>"),
+        ("var", "string"),
+        ("var", "string $name"),
+        ("var", "$name string"),
+        ("throws", "\\RuntimeException when it fails"),
+        ("extends", "Base<T, U>"),
+        ("implements", "Iface<T>"),
+        ("use", "Trait1<T>"),
+        ("method", "static int count(string $x, int ...$rest)"),
+        ("template", "T of Bound"),
+        ("return", "((("),
+        ("param", ""),
+    ];
+    for (tag, rest) in tags {
+        let fresh = parser::parse_tag_rest(tag, rest);
+        assert_eq!(parse_tag_rest_shared(tag, rest), fresh, "{tag} {rest}");
+        assert_eq!(
+            parse_tag_rest_shared(tag, rest),
+            fresh,
+            "{tag} {rest} again"
+        );
+    }
+    for rest in [
+        "int $x",
+        "Foo<int> trailing text",
+        "array{a: int} then more\nand a second line",
+        "?int",
+        "\u{e9}t\u{e9} $x",
+        "(",
+        "",
+        "|",
+    ] {
+        let (ty, remainder, errors) = parse_type_prefix(rest);
+        let shared = parse_type_prefix_shared(rest);
+        assert_eq!(shared, (ty, remainder, errors), "{rest:?}");
+        assert_eq!(parse_type_prefix_shared(rest), shared, "{rest:?} again");
+    }
+}
