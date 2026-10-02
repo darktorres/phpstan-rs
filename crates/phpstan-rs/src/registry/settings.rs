@@ -19,6 +19,11 @@ pub struct ReflectionSettings {
     pub stub_paths: Vec<PathBuf>,
     /// Turns off loading `vendor/` through Composer's autoloader.
     pub no_composer: Option<bool>,
+    /// Loads the classes of `vendor/` by the names the analysed code and
+    /// the vendor code it reaches mention, found as Composer's autoloader
+    /// finds them, and not every file of the autoloader's directories.
+    /// On unless set to `false`.
+    pub lazy_vendor_context: Option<bool>,
 }
 
 impl config::Section for ReflectionSettings {

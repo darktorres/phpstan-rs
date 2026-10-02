@@ -11,6 +11,7 @@ mod file_removal;
 mod fused_declarations;
 mod incremental_updates;
 mod inline_ignore_comments;
+mod lazy_vendor_context;
 pub(super) mod panic_injection;
 mod phpstan_api_gating;
 mod project_settings;

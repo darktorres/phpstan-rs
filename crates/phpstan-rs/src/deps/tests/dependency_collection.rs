@@ -339,3 +339,33 @@ fn doc_names_are_each_comments_types_less_the_templates_in_scope() {
         assert!(!names.contains(not), "{not} is not collected");
     }
 }
+
+#[test]
+fn a_walk_that_collects_strings_finds_the_same_names_and_the_namespaced_class_strings() {
+    let interner = std::sync::Arc::new(syntax::name::Interner::new());
+    let source = r#"<?php
+        namespace App;
+        use Lib\Imported;
+        new Local();
+        $a = 'Acme\Lib\Foo';
+        $b = '\Acme\Lib\Bar::make';
+        $c = ['Acme\Lib\Baz', 'plain', 'Not A\Class', 'Trailing\\', 'x::y'];
+        function f() { return 'Deep\Name'; }
+    "#;
+    let parsed = syntax::parse(source.as_bytes(), &interner).expect("parses");
+    let all = super::super::all_referenced_names(&parsed.stmts);
+    let (names, outside) = super::super::both_referenced_names(&parsed.stmts);
+    assert_eq!(all.names, names);
+    assert_eq!(all.outside, outside);
+    let mut strings: Vec<&str> = all.strings.iter().map(String::as_str).collect();
+    strings.sort();
+    assert_eq!(
+        strings,
+        [
+            "acme\\lib\\bar",
+            "acme\\lib\\baz",
+            "acme\\lib\\foo",
+            "deep\\name"
+        ]
+    );
+}
