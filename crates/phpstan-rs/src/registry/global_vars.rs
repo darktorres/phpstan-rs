@@ -20,7 +20,7 @@
 //! staged, tagged by their own source file, and applied only once that
 //! graph is resolved.
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use rayon::prelude::*;
 use rustc_hash::{FxHashMap, FxHashSet};
@@ -34,6 +34,7 @@ use syntax::visit::{Visitor, any_stmt_in_body, walk_expr_in_scope, walk_stmt};
 use types::{Name, Shape, Type};
 
 use super::Registry;
+use crate::file_id::FileId;
 
 /// Mirrors `types::MAX_UNION_MEMBERS`'s own naming style -
 /// a different, unrelated constant, not that one reused. Past this many
@@ -145,7 +146,7 @@ impl SiteContribution {
 /// enclosing `global $x;` at collection time (always applied).
 #[derive(Debug, Clone)]
 pub(in crate::registry) struct StagedSite {
-    gate: Option<PathBuf>,
+    gate: Option<FileId>,
     name: Name,
     contribution: SiteContribution,
 }
@@ -169,7 +170,7 @@ pub(in crate::registry) struct FileSites {
 /// descends into nested scopes.
 struct FileCtx<'a> {
     registry: &'a Registry,
-    path: &'a Path,
+    id: FileId,
 }
 
 /// Accumulates every site/include-site found across the whole walk,
@@ -189,7 +190,7 @@ impl Registry {
     /// points `precompute_member_owners`/`precompute_ancestor_names`
     /// already run at in all three places, since every function/class this
     /// pass's own resolver depends on must already be indexed.
-    pub(crate) fn infer_global_variables(&mut self, files: &[(&Path, &[Stmt])]) {
+    pub(crate) fn infer_global_variables(&mut self, files: &[(FileId, &Path, &[Stmt])]) {
         self.global_sites.clear();
         self.infer_global_variables_of(files, &FxHashSet::default());
     }
@@ -199,12 +200,12 @@ impl Registry {
     /// of its last walk.
     pub(crate) fn infer_global_variables_of(
         &mut self,
-        files: &[(&Path, &[Stmt])],
-        stale: &FxHashSet<PathBuf>,
+        files: &[(FileId, &Path, &[Stmt])],
+        stale: &FxHashSet<FileId>,
     ) {
-        let loaded: FxHashSet<&Path> = files.iter().map(|(path, _)| *path).collect();
+        let loaded: FxHashSet<FileId> = files.iter().map(|(id, ..)| *id).collect();
         self.global_sites
-            .retain(|path, _| loaded.contains(path.as_path()) && !stale.contains(path));
+            .retain(|id, _| loaded.contains(id) && !stale.contains(id));
         // Every read below goes through this reborrow, mirroring
         // `precompute_member_owners`'s own established shape
         // (`hierarchy.rs`): build the whole result into locals first,
@@ -212,15 +213,15 @@ impl Registry {
         let registry: &Registry = self;
         // Each file's walk reads only the registry, so the files are
         // walked side by side; the sites come back in the files' order.
-        let walked: Vec<(PathBuf, FileSites)> = files
+        let walked: Vec<(FileId, FileSites)> = files
             .par_iter()
-            .filter(|(path, _)| !registry.global_sites.contains_key(*path))
-            .map(|(path, stmts)| {
-                let file_ctx = FileCtx { registry, path };
+            .filter(|(id, ..)| !registry.global_sites.contains_key(id))
+            .map(|(id, _, stmts)| {
+                let file_ctx = FileCtx { registry, id: *id };
                 let mut out = WalkOutput::default();
                 walk_top_level(stmts, &file_ctx, &mut out);
                 (
-                    path.to_path_buf(),
+                    *id,
                     FileSites {
                         sites: out.sites,
                         include_sites: out.include_sites,
@@ -230,22 +231,22 @@ impl Registry {
             .collect();
         self.global_sites.extend(walked);
 
-        let include_sites: Vec<(&Path, &IncludeSite)> = files
+        let include_sites: Vec<(FileId, &IncludeSite)> = files
             .iter()
-            .flat_map(|(path, _)| {
-                self.global_sites[*path]
+            .flat_map(|(id, ..)| {
+                self.global_sites[id]
                     .include_sites
                     .iter()
-                    .map(move |site| (*path, site))
+                    .map(move |site| (*id, site))
             })
             .collect();
         let global_scope_files = resolve_global_scope_files(files, &include_sites);
 
         let mut accumulators: FxHashMap<Name, GlobalAccumulator> = FxHashMap::default();
-        for (path, _) in files {
-            for site in &self.global_sites[*path].sites {
-                if let Some(path) = &site.gate
-                    && !global_scope_files.contains(path)
+        for (id, ..) in files {
+            for site in &self.global_sites[id].sites {
+                if let Some(gate) = &site.gate
+                    && !global_scope_files.contains(gate)
                 {
                     continue;
                 }
@@ -270,20 +271,20 @@ impl Registry {
 /// only ever reach) defaults to included, matching today's behavior; a
 /// file whose only resolved incoming edges are all from inside a function
 /// body is excluded.
-fn resolve_global_scope_files<'a>(
-    files: &[(&'a Path, &[Stmt])],
-    include_sites: &[(&Path, &IncludeSite)],
-) -> FxHashSet<PathBuf> {
+fn resolve_global_scope_files(
+    files: &[(FileId, &Path, &[Stmt])],
+    include_sites: &[(FileId, &IncludeSite)],
+) -> FxHashSet<FileId> {
     // Each file's path with `/` separators, grouped by file name: an
     // include's target can only be a file of its last segment's name.
-    let mut by_file_name: FxHashMap<String, Vec<(&'a Path, String)>> = FxHashMap::default();
-    for (path, _) in files {
+    let mut by_file_name: FxHashMap<String, Vec<(FileId, String)>> = FxHashMap::default();
+    for (id, path, _) in files {
         let text = path.to_string_lossy().replace('\\', "/");
         let name = text.rsplit('/').next().unwrap_or_default().to_string();
-        by_file_name.entry(name).or_default().push((*path, text));
+        by_file_name.entry(name).or_default().push((*id, text));
     }
 
-    let mut top_level_edges: FxHashMap<PathBuf, Vec<PathBuf>> = FxHashMap::default();
+    let mut top_level_edges: FxHashMap<FileId, Vec<FileId>> = FxHashMap::default();
     // Every resolved incoming edge, top-level or not - a file targeted
     // *only* by function-scoped includes still has a real incoming edge
     // here, and must NOT default to "root" just because none of its
@@ -291,7 +292,7 @@ fn resolve_global_scope_files<'a>(
     // file's own top level count as included whenever its only resolved
     // includers were all inside a function, exactly backwards from the
     // "excluded" outcome that shape is supposed to get).
-    let mut has_any_incoming: FxHashSet<PathBuf> = FxHashSet::default();
+    let mut has_any_incoming: FxHashSet<FileId> = FxHashSet::default();
 
     for (source, site) in include_sites {
         let Some(suffix) = &site.suffix else {
@@ -302,22 +303,19 @@ fn resolve_global_scope_files<'a>(
         }
         let suffix = suffix.trim_start_matches('/');
         let name = suffix.rsplit('/').next().unwrap_or_default();
-        let matches: Vec<&Path> = by_file_name
+        let matches: Vec<FileId> = by_file_name
             .get(name)
             .into_iter()
             .flatten()
             .filter(|(_, text)| text_ends_with_suffix(text, suffix))
-            .map(|(path, _)| *path)
+            .map(|(id, _)| *id)
             .collect();
         let [target] = matches[..] else {
             continue;
         };
-        has_any_incoming.insert(target.to_path_buf());
+        has_any_incoming.insert(target);
         if site.top_level {
-            top_level_edges
-                .entry(source.to_path_buf())
-                .or_default()
-                .push(target.to_path_buf());
+            top_level_edges.entry(*source).or_default().push(target);
         }
     }
 
@@ -326,19 +324,18 @@ fn resolve_global_scope_files<'a>(
     // excluded, not defaulted to included; reached only through an
     // unresolved/dynamic include has no edge recorded at all, so it still
     // defaults to included, same as today.
-    let mut result: FxHashSet<PathBuf> = FxHashSet::default();
-    let mut queue: Vec<PathBuf> = Vec::new();
-    for (path, _) in files {
-        let path_buf = path.to_path_buf();
-        if !has_any_incoming.contains(&path_buf) && result.insert(path_buf.clone()) {
-            queue.push(path_buf);
+    let mut result: FxHashSet<FileId> = FxHashSet::default();
+    let mut queue: Vec<FileId> = Vec::new();
+    for (id, ..) in files {
+        if !has_any_incoming.contains(id) && result.insert(*id) {
+            queue.push(*id);
         }
     }
     while let Some(current) = queue.pop() {
         if let Some(targets) = top_level_edges.get(&current) {
             for target in targets {
-                if result.insert(target.clone()) {
-                    queue.push(target.clone());
+                if result.insert(*target) {
+                    queue.push(*target);
                 }
             }
         }
@@ -502,7 +499,7 @@ fn handle_top_expr_statement<'a>(
     out: &mut WalkOutput,
 ) {
     let is_site = |name: &str| top_level || global_names.contains(name);
-    let gate = || top_level.then(|| file_ctx.path.to_path_buf());
+    let gate = || top_level.then_some(file_ctx.id);
 
     match &e.kind {
         ExprKind::Assign(lhs, rhs) | ExprKind::AssignRef(lhs, rhs) => {
@@ -524,7 +521,7 @@ fn handle_assignment_target<'a>(
     rhs: &Expr,
     file_ctx: &FileCtx<'a>,
     is_site: &dyn Fn(&str) -> bool,
-    gate: &dyn Fn() -> Option<PathBuf>,
+    gate: &dyn Fn() -> Option<FileId>,
     out: &mut WalkOutput,
     force_mixed: bool,
 ) {

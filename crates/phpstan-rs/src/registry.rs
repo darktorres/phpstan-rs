@@ -373,7 +373,7 @@ pub struct Registry {
     // What each file's walk for global variables found, kept for the files
     // a later finish doesn't walk again (`infer_global_variables_of`).
     #[serde(skip)]
-    global_sites: FxHashMap<std::path::PathBuf, global_vars::FileSites>,
+    global_sites: FxHashMap<crate::file_id::FileId, global_vars::FileSites>,
     // What each body's property writes were classified as, kept for the
     // declarations a later finish doesn't classify again.
     #[serde(skip)]
@@ -473,7 +473,11 @@ impl Registry {
         registry.resolve_constant_named_types();
         registry.drop_doc_members_excluded_by_native();
         registry.precompute_member_owners_after_mixins();
-        registry.infer_global_variables(&[(std::path::Path::new("<flattened>"), program)]);
+        registry.infer_global_variables(&[(
+            crate::file_id::FileId::new(0),
+            std::path::Path::new("<flattened>"),
+            program,
+        )]);
         registry
     }
 

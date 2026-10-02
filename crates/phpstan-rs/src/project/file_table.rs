@@ -1,0 +1,251 @@
+//! The files a project holds, by path and by `FileId`.
+
+use std::path::{Path, PathBuf};
+use std::sync::Arc;
+
+use rayon::prelude::*;
+use rustc_hash::FxHashMap;
+
+use crate::file_id::FileId;
+
+/// A map from path to what is known of that file, which also numbers the
+/// paths it has seen. Looking a file up by `FileId` hashes nothing; looking
+/// it up by path hashes the path once.
+///
+/// A slot keeps its path after its file is removed, and a path that comes
+/// back has the slot it had: a number is never given to two paths, and a
+/// table keyed by `FileId` can hold the number of a file removed meanwhile.
+pub(crate) struct FileTable<V> {
+    ids: FxHashMap<PathBuf, FileId>,
+    slots: Vec<Slot<V>>,
+    len: usize,
+    // The file by the address of the `Arc<Path>` its declarations name it
+    // by (`bind_origin`): an `Arc` kept in the slot, so its address stays
+    // that file's.
+    by_origin: FxHashMap<usize, FileId>,
+}
+
+struct Slot<V> {
+    path: PathBuf,
+    value: Option<V>,
+    origins: Vec<Arc<Path>>,
+}
+
+impl<V> Default for FileTable<V> {
+    fn default() -> Self {
+        FileTable {
+            ids: FxHashMap::default(),
+            slots: Vec::new(),
+            len: 0,
+            by_origin: FxHashMap::default(),
+        }
+    }
+}
+
+impl<V> FileTable<V> {
+    /// The number of files held.
+    pub(crate) fn len(&self) -> usize {
+        self.len
+    }
+
+    pub(crate) fn is_empty(&self) -> bool {
+        self.len == 0
+    }
+
+    /// The number of `path`, if it has one.
+    pub(crate) fn id_of(&self, path: &Path) -> Option<FileId> {
+        self.ids.get(path).copied()
+    }
+
+    /// The number of `path`, given now if it has none.
+    pub(crate) fn id_for(&mut self, path: &Path) -> FileId {
+        if let Some(id) = self.ids.get(path) {
+            return *id;
+        }
+        let id = FileId::new(self.slots.len());
+        self.ids.insert(path.to_path_buf(), id);
+        self.slots.push(Slot {
+            path: path.to_path_buf(),
+            value: None,
+            origins: Vec::new(),
+        });
+        id
+    }
+
+    /// The path `id` numbers, whether or not its file is held.
+    pub(crate) fn path(&self, id: FileId) -> &Path {
+        &self.slots[id.index()].path
+    }
+
+    /// Notes that declarations naming their file by `origin` are `id`'s.
+    pub(crate) fn bind_origin(&mut self, id: FileId, origin: &Arc<Path>) {
+        let address = Arc::as_ptr(origin).cast::<u8>() as usize;
+        if self.by_origin.insert(address, id).is_none() {
+            self.slots[id.index()].origins.push(Arc::clone(origin));
+        }
+    }
+
+    /// The file `path` is, when it is the `Arc<Path>` of a declaration
+    /// bound by `bind_origin` - found by address, hashing nothing - and
+    /// otherwise by what the path spells.
+    pub(crate) fn get_by_origin(&self, path: &Path) -> Option<&V> {
+        let address = std::ptr::from_ref(path).cast::<u8>() as usize;
+        match self.by_origin.get(&address) {
+            Some(id) => self.get_by_id(*id),
+            None => self.get(path),
+        }
+    }
+
+    pub(crate) fn get(&self, path: &Path) -> Option<&V> {
+        self.get_by_id(self.id_of(path)?)
+    }
+
+    pub(crate) fn get_mut(&mut self, path: &Path) -> Option<&mut V> {
+        let id = self.id_of(path)?;
+        self.slots[id.index()].value.as_mut()
+    }
+
+    pub(crate) fn get_by_id(&self, id: FileId) -> Option<&V> {
+        self.slots.get(id.index())?.value.as_ref()
+    }
+
+    /// Holds `value` for `path`, returning what it held for it.
+    pub(crate) fn insert(&mut self, path: PathBuf, value: V) -> Option<V> {
+        let id = self.id_for(&path);
+        let previous = self.slots[id.index()].value.replace(value);
+        if previous.is_none() {
+            self.len += 1;
+        }
+        previous
+    }
+
+    pub(crate) fn remove(&mut self, path: &Path) -> Option<V> {
+        let id = self.id_of(path)?;
+        let removed = self.slots[id.index()].value.take();
+        if removed.is_some() {
+            self.len -= 1;
+        }
+        removed
+    }
+
+    /// Every file held, in the order its path was first seen.
+    pub(crate) fn iter(&self) -> impl Iterator<Item = (&PathBuf, &V)> {
+        self.slots
+            .iter()
+            .filter_map(|slot| slot.value.as_ref().map(|value| (&slot.path, value)))
+    }
+
+    /// `iter`, with the number of each file.
+    pub(crate) fn iter_with_ids(&self) -> impl Iterator<Item = (FileId, &PathBuf, &V)> {
+        self.slots.iter().enumerate().filter_map(|(index, slot)| {
+            slot.value
+                .as_ref()
+                .map(|value| (FileId::new(index), &slot.path, value))
+        })
+    }
+
+    /// `iter`, side by side.
+    pub(crate) fn par_iter(&self) -> impl ParallelIterator<Item = (&PathBuf, &V)>
+    where
+        V: Sync,
+    {
+        self.slots
+            .par_iter()
+            .filter_map(|slot| slot.value.as_ref().map(|value| (&slot.path, value)))
+    }
+
+    pub(crate) fn keys(&self) -> impl Iterator<Item = &PathBuf> {
+        self.iter().map(|(path, _)| path)
+    }
+
+    pub(crate) fn values(&self) -> impl Iterator<Item = &V> {
+        self.iter().map(|(_, value)| value)
+    }
+}
+
+/// `table[&path]`, for a file that is held.
+impl<V> std::ops::Index<&PathBuf> for FileTable<V> {
+    type Output = V;
+
+    fn index(&self, path: &PathBuf) -> &V {
+        self.get(path).expect("the file is held")
+    }
+}
+
+impl<'a, V> IntoIterator for &'a FileTable<V> {
+    type Item = (&'a PathBuf, &'a V);
+    type IntoIter = Box<dyn Iterator<Item = (&'a PathBuf, &'a V)> + 'a>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        Box::new(self.iter())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_path_keeps_its_number_through_removal_and_a_second_insert() {
+        let mut table: FileTable<u32> = FileTable::default();
+        let a = table.id_for(Path::new("/a.php"));
+        table.insert(PathBuf::from("/a.php"), 1);
+        let b = table.id_for(Path::new("/b.php"));
+        table.insert(PathBuf::from("/b.php"), 2);
+        assert_ne!(a, b);
+        assert_eq!(table.len(), 2);
+        assert_eq!(table.remove(Path::new("/a.php")), Some(1));
+        assert_eq!(table.len(), 1);
+        assert!(table.get(Path::new("/a.php")).is_none());
+        assert!(table.get_by_id(a).is_none());
+        assert_eq!(table.path(a), Path::new("/a.php"));
+        assert_eq!(table.insert(PathBuf::from("/a.php"), 3), None);
+        assert_eq!(table.id_of(Path::new("/a.php")), Some(a));
+        assert_eq!(table.get_by_id(a), Some(&3));
+        assert_eq!(table.insert(PathBuf::from("/a.php"), 4), Some(3));
+        assert_eq!(table.len(), 2);
+    }
+
+    #[test]
+    fn a_bound_origin_finds_its_file_by_address_and_another_by_its_path() {
+        let mut table: FileTable<u32> = FileTable::default();
+        let id = table.id_for(Path::new("/a.php"));
+        table.insert(PathBuf::from("/a.php"), 1);
+        let origin: Arc<Path> = Arc::from(Path::new("/a.php"));
+        table.bind_origin(id, &origin);
+        assert_eq!(table.get_by_origin(&origin), Some(&1));
+        // Another allocation spelling the same path is found by its text.
+        let spelled: Arc<Path> = Arc::from(Path::new("/a.php"));
+        assert_eq!(table.get_by_origin(&spelled), Some(&1));
+        let unknown: Arc<Path> = Arc::from(Path::new("/b.php"));
+        assert_eq!(table.get_by_origin(&unknown), None);
+        // A file removed is not found by its origin.
+        table.remove(Path::new("/a.php"));
+        assert_eq!(table.get_by_origin(&origin), None);
+    }
+
+    #[test]
+    fn iteration_is_in_the_order_paths_were_first_seen_and_skips_removed_files() {
+        let mut table: FileTable<u32> = FileTable::default();
+        for (i, name) in ["/c", "/a", "/b", "/d"].iter().enumerate() {
+            table.insert(PathBuf::from(name), i as u32);
+        }
+        table.remove(Path::new("/a"));
+        let keys: Vec<&Path> = table.keys().map(PathBuf::as_path).collect();
+        assert_eq!(keys, [Path::new("/c"), Path::new("/b"), Path::new("/d")]);
+        assert_eq!(table.values().copied().collect::<Vec<_>>(), [0, 2, 3]);
+        assert_eq!((&table).into_iter().count(), 3);
+    }
+
+    #[test]
+    fn a_path_with_no_number_is_absent_and_gets_one_on_asking() {
+        let mut table: FileTable<u32> = FileTable::default();
+        assert!(table.id_of(Path::new("/x")).is_none());
+        assert!(table.get(Path::new("/x")).is_none());
+        let id = table.id_for(Path::new("/x"));
+        assert_eq!(table.id_of(Path::new("/x")), Some(id));
+        // A number is not a file held.
+        assert!(table.is_empty());
+        assert!(table.get(Path::new("/x")).is_none());
+    }
+}

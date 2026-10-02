@@ -9,6 +9,7 @@ use crate::checker::rule_level_helper::RuleLevelHelper;
 use crate::checker::settings::CheckSettings;
 use crate::checker::{self, Checker, PropertyAssignFacts};
 use crate::deps;
+use crate::file_id::FileId;
 use crate::ignore_comments;
 use crate::pest_config::PestConfig;
 use crate::registry::scope::Scope;
@@ -35,6 +36,7 @@ mod duplicate_classes;
 pub(crate) mod duplicate_fn_sites;
 mod duplicate_functions;
 mod file_declarations;
+mod file_table;
 mod mock_hygiene;
 mod path_order;
 pub mod session;
@@ -49,7 +51,7 @@ use use_sites::UseSiteIndex;
 /// so that it can go on from more changed keys without starting again.
 #[derive(Default)]
 struct AffectedWalk {
-    affected: FxHashSet<PathBuf>,
+    affected: FxHashSet<FileId>,
     seen: FxHashSet<String>,
     stub_files: StubFileSet,
 }
@@ -127,9 +129,9 @@ struct FileState {
 }
 
 /// The loaded files' function and method bodies, found by provenance.
-impl BodySource for FxHashMap<PathBuf, FileState> {
+impl BodySource for file_table::FileTable<FileState> {
     fn body(&self, provenance: &Provenance) -> Option<&Arc<Vec<Stmt>>> {
-        self.get(provenance.file()?)?
+        self.get_by_origin(provenance.file()?)?
             .bodies
             .get(provenance.declaration_span())
     }
@@ -147,14 +149,14 @@ impl BodySource for FxHashMap<PathBuf, FileState> {
 /// change altered (see `affected_files`) - every other file's parse tree
 /// and registry entries are untouched.
 pub struct Project {
-    files: FxHashMap<PathBuf, FileState>,
+    files: file_table::FileTable<FileState>,
     // What the names in this project's parsed files are interned into,
     // freed with the project.
     interner: Arc<Interner>,
-    dependents: FxHashMap<String, FxHashSet<PathBuf>>,
+    dependents: FxHashMap<String, FxHashSet<FileId>>,
     // `dependents` for the names files' declarations themselves mention
     // (`deps::declaration_referenced_names`).
-    signature_dependents: FxHashMap<String, FxHashSet<PathBuf>>,
+    signature_dependents: FxHashMap<String, FxHashSet<FileId>>,
     registry: Registry,
     sql: sql::context::SqlContext,
     // Directory-scoped Pest `$this`-binding config, rebuilt from every
@@ -196,7 +198,7 @@ pub struct Project {
     next_load_order: u64,
     // The files loaded or edited since the finishing passes last walked
     // them for global variables.
-    globals_stale: FxHashSet<PathBuf>,
+    globals_stale: FxHashSet<FileId>,
     // The files a cancelled recheck never reached, whose last diagnostics
     // are therefore stale (`take_unchecked`).
     unchecked: Vec<PathBuf>,
@@ -516,7 +518,7 @@ impl Project {
 
     fn with_registry(registry: Registry) -> Self {
         Project {
-            files: FxHashMap::default(),
+            files: file_table::FileTable::default(),
             interner: Arc::new(Interner::new()),
             dependents: FxHashMap::default(),
             signature_dependents: FxHashMap::default(),
@@ -863,6 +865,7 @@ impl Project {
             duplicate_fn_sites,
             duplicate_class_sites,
             bodies,
+            origin_path,
             class_fn_refs,
         } = parsed;
         self.begin_declaration_changes();
@@ -881,14 +884,12 @@ impl Project {
         }
         self.duplicate_fn_sites.merge(duplicate_fn_sites);
         self.duplicate_class_sites.merge(duplicate_class_sites);
-        register_references(&mut self.dependents, &path, &references);
-        register_references(
-            &mut self.signature_dependents,
-            &path,
-            &declaration_references,
-        );
+        let id = self.files.id_for(&path);
+        self.files.bind_origin(id, &origin_path);
+        register_references(&mut self.dependents, id, &references);
+        register_references(&mut self.signature_dependents, id, &declaration_references);
         let owner = self.packages.owner(&self.absolute_path(&path));
-        self.globals_stale.insert(path.clone());
+        self.globals_stale.insert(id);
         let load_order = self.next_load_order;
         self.next_load_order += 1;
         self.files.insert(
@@ -1112,7 +1113,7 @@ impl Project {
     fn closure_scope(
         &self,
         changed: &crate::registry::ChangedNames,
-        index: &FxHashMap<String, FxHashSet<PathBuf>>,
+        index: &FxHashMap<String, FxHashSet<FileId>>,
     ) -> Scope {
         let mut classes: FxHashSet<String> = changed.classes.clone();
         let mut functions: FxHashSet<String> = changed.functions.clone();
@@ -1155,7 +1156,7 @@ impl Project {
                 }
             };
             for file in index.get(&key).into_iter().flatten() {
-                let Some(state) = self.files.get(file) else {
+                let Some(state) = self.files.get_by_id(*file) else {
                     continue;
                 };
                 for name in state.classes.iter().chain(&state.anonymous_classes) {
@@ -1266,10 +1267,10 @@ impl Project {
         let mut walk = AffectedWalk::default();
         self.walk_affected(&mut walk, changed_keys.iter().cloned());
         stale.extend(walk.affected.iter().cloned());
-        let files: Vec<(&Path, &[Stmt])> = self
+        let files: Vec<(FileId, &Path, &[Stmt])> = self
             .files
-            .iter()
-            .map(|(p, f)| (p.as_path(), f.ast.as_slice()))
+            .iter_with_ids()
+            .map(|(id, p, f)| (id, p.as_path(), f.ast.as_slice()))
             .collect();
         self.registry.infer_global_variables_of(&files, &stale);
         self.registry.set_scope(Scope::all());
@@ -1280,6 +1281,9 @@ impl Project {
             self.walk_affected(&mut walk, self.registry.changed_global_variables(before));
         }
         walk.affected
+            .into_iter()
+            .map(|id| self.files.path(id).to_path_buf())
+            .collect()
     }
 
     /// Re-parses one already-loaded file, patches just its own registry
@@ -1296,6 +1300,7 @@ impl Project {
     /// loaded (a no-op - both callers treat that as "nothing to undo").
     fn unindex_file(&mut self, path: &Path) -> Option<UnindexedFile> {
         self.begin_declaration_changes();
+        let id = self.files.id_of(path)?;
         let old = self.files.remove(path)?;
         let classes: Vec<String> = old
             .classes
@@ -1309,10 +1314,10 @@ impl Project {
             .remove_declarations(path, &old.functions);
         self.duplicate_class_sites
             .remove_declarations(path, &old.classes);
-        unregister_references(&mut self.dependents, path, &old.references);
+        unregister_references(&mut self.dependents, id, &old.references);
         unregister_references(
             &mut self.signature_dependents,
-            path,
+            id,
             &old.declaration_references,
         );
         Some(UnindexedFile {
@@ -1636,13 +1641,10 @@ impl Project {
         // which has no `stub_paths` concept.
         self.duplicate_class_sites.index(&ast, path, false);
         let bodies = FileBodies::of(&ast);
-        register_references(&mut self.dependents, path, &references);
-        register_references(
-            &mut self.signature_dependents,
-            path,
-            &declaration_references,
-        );
-        self.globals_stale.insert(path.to_path_buf());
+        let id = self.files.id_for(path);
+        register_references(&mut self.dependents, id, &references);
+        register_references(&mut self.signature_dependents, id, &declaration_references);
+        self.globals_stale.insert(id);
         self.files.insert(
             path.to_path_buf(),
             FileState {
@@ -1803,7 +1805,7 @@ impl Project {
             }
             affected.extend(self.dependents.get(&key).into_iter().flatten().cloned());
             for file in self.signature_dependents.get(&key).into_iter().flatten() {
-                let Some(state) = self.files.get(file) else {
+                let Some(state) = self.files.get_by_id(*file) else {
                     continue;
                 };
                 for name in state.functions.iter().chain(&state.classes) {
@@ -2602,6 +2604,8 @@ pub struct ParsedFile {
     // field's own doc comment for why it's needed at all).
     duplicate_class_sites: DuplicateClassSites,
     bodies: FileBodies,
+    // The path the file's declarations name it by.
+    origin_path: Arc<Path>,
     // The file's class and function use sites, when indexed alongside the
     // parse (`Project::index_use_sites`); `insert_parsed_file` indexes
     // them itself otherwise.
@@ -2623,7 +2627,8 @@ pub fn parse_file(
     interner: &Arc<Interner>,
 ) -> Result<ParsedFile, ParseError> {
     let (ast, ignores, lex_warnings) = parse_with_ignores(path, source, interner)?;
-    let origin = Origin::File(Arc::from(path));
+    let origin_path: Arc<Path> = Arc::from(path);
+    let origin = Origin::File(Arc::clone(&origin_path));
     let file_declarations::FileDeclarations {
         functions,
         classes,
@@ -2657,6 +2662,7 @@ pub fn parse_file(
         duplicate_class_sites,
         ignores,
         bodies,
+        origin_path,
         class_fn_refs: None,
     })
 }
@@ -2815,26 +2821,31 @@ pub(crate) fn declared_names(stmts: &[Stmt]) -> (Vec<String>, Vec<String>) {
 }
 
 fn register_references(
-    dependents: &mut FxHashMap<String, FxHashSet<PathBuf>>,
-    path: &Path,
+    dependents: &mut FxHashMap<String, FxHashSet<FileId>>,
+    file: FileId,
     references: &FxHashSet<String>,
 ) {
     for name in references {
-        dependents
-            .entry(name.clone())
-            .or_default()
-            .insert(path.to_path_buf());
+        // The name is copied only for the first file to reference it.
+        match dependents.get_mut(name) {
+            Some(files) => {
+                files.insert(file);
+            }
+            None => {
+                dependents.insert(name.clone(), FxHashSet::from_iter([file]));
+            }
+        }
     }
 }
 
 fn unregister_references(
-    dependents: &mut FxHashMap<String, FxHashSet<PathBuf>>,
-    path: &Path,
+    dependents: &mut FxHashMap<String, FxHashSet<FileId>>,
+    file: FileId,
     references: &FxHashSet<String>,
 ) {
     for name in references {
         if let Some(files) = dependents.get_mut(name) {
-            files.remove(path);
+            files.remove(&file);
             if files.is_empty() {
                 dependents.remove(name);
             }
