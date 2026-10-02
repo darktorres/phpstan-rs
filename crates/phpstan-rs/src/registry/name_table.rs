@@ -15,17 +15,36 @@ use super::container::{Buffer, Reader, Stored, Writer};
 /// A name's lookup key: the name ASCII-lowercased, as PHP compares class
 /// and function names.
 pub(crate) fn function_key(name: &str) -> Cow<'_, str> {
-    if name.bytes().any(|b| b.is_ascii_uppercase()) {
+    if has_ascii_uppercase(name.as_bytes()) {
         Cow::Owned(name.to_ascii_lowercase())
     } else {
         Cow::Borrowed(name)
     }
 }
 
+/// Whether any byte is an ASCII capital, eight bytes at a time.
+fn has_ascii_uppercase(bytes: &[u8]) -> bool {
+    const HIGH: u64 = 0x8080_8080_8080_8080;
+    let (chunks, rest) = bytes.as_chunks::<8>();
+    for chunk in chunks {
+        let word = u64::from_le_bytes(*chunk);
+        // In each byte's low seven bits, the high bit of `+ 0x3f` says
+        // `>= 'A'` and that of `+ 0x25` says `> 'Z'`; a byte with its own
+        // high bit set is not ASCII.
+        let low = word & !HIGH;
+        let at_least_a = low.wrapping_add(0x3f3f_3f3f_3f3f_3f3f);
+        let past_z = low.wrapping_add(0x2525_2525_2525_2525);
+        if at_least_a & !past_z & !word & HIGH != 0 {
+            return true;
+        }
+    }
+    rest.iter().any(u8::is_ascii_uppercase)
+}
+
 /// Calls `f` with `function_key(name)`, built on the stack when the name is
 /// short, so a lookup of a name with capitals allocates nothing.
 pub(crate) fn with_function_key<R>(name: &str, f: impl FnOnce(&str) -> R) -> R {
-    if !name.bytes().any(|b| b.is_ascii_uppercase()) {
+    if !has_ascii_uppercase(name.as_bytes()) {
         return f(name);
     }
     if let Ok(mut key) = arrayvec::ArrayString::<128>::from(name) {
@@ -33,6 +52,58 @@ pub(crate) fn with_function_key<R>(name: &str, f: impl FnOnce(&str) -> R) -> R {
         return f(&key);
     }
     f(&name.to_ascii_lowercase())
+}
+
+/// What a table is looked up by: text that is folded to lowercase for the
+/// lookup, or a `Name`, which holds its lowercase form already.
+pub trait TableKey {
+    /// Calls `f` with the lowercased key.
+    fn with_key<R>(&self, f: impl FnOnce(&str) -> R) -> R;
+}
+
+impl TableKey for str {
+    fn with_key<R>(&self, f: impl FnOnce(&str) -> R) -> R {
+        with_function_key(self, f)
+    }
+}
+
+impl TableKey for String {
+    fn with_key<R>(&self, f: impl FnOnce(&str) -> R) -> R {
+        with_function_key(self, f)
+    }
+}
+
+impl TableKey for Cow<'_, str> {
+    fn with_key<R>(&self, f: impl FnOnce(&str) -> R) -> R {
+        with_function_key(self, f)
+    }
+}
+
+impl TableKey for Name {
+    fn with_key<R>(&self, f: impl FnOnce(&str) -> R) -> R {
+        f(self.lower())
+    }
+}
+
+impl<T: TableKey + ?Sized> TableKey for &T {
+    fn with_key<R>(&self, f: impl FnOnce(&str) -> R) -> R {
+        (**self).with_key(f)
+    }
+}
+
+/// A key already lowercased, as a scope's keys are: looked up as it is.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct FoldedKey<'a>(pub(crate) &'a str);
+
+impl TableKey for FoldedKey<'_> {
+    fn with_key<R>(&self, f: impl FnOnce(&str) -> R) -> R {
+        debug_assert!(
+            !self.0.bytes().any(|b| b.is_ascii_uppercase()),
+            "a folded key is lowercased: {}",
+            self.0
+        );
+        f(self.0)
+    }
 }
 
 /// `function_key`, as a stored key.
@@ -394,8 +465,8 @@ impl<V> NameTable<V> {
             .is_some_and(|base| base.find(key).is_some())
     }
 
-    pub fn get(&self, name: &str) -> Option<&V> {
-        with_function_key(name, |key| {
+    pub fn get<K: TableKey + ?Sized>(&self, name: &K) -> Option<&V> {
+        name.with_key(|key| {
             self.entries
                 .get(key)
                 .or_else(|| self.base_get(key).map(|(_, value)| value))
@@ -403,8 +474,8 @@ impl<V> NameTable<V> {
     }
 
     /// The value `name` finds, with its declared name.
-    pub fn get_with_name(&self, name: &str) -> Option<(&Name, &V)> {
-        with_function_key(name, |key| {
+    pub fn get_with_name<K: TableKey + ?Sized>(&self, name: &K) -> Option<(&Name, &V)> {
+        name.with_key(|key| {
             self.entries
                 .get_key_value(key)
                 .map(|(declared, value)| (&declared.0, value))
@@ -412,8 +483,8 @@ impl<V> NameTable<V> {
         })
     }
 
-    pub fn contains_key(&self, name: &str) -> bool {
-        with_function_key(name, |key| {
+    pub fn contains_key<K: TableKey + ?Sized>(&self, name: &K) -> bool {
+        name.with_key(|key| {
             self.entries.contains_key(key)
                 || (self.base_contains(key) && !self.hidden.contains(key))
         })
@@ -510,8 +581,8 @@ impl<V> NameTable<V> {
     /// Takes out what `name` finds, without copying it: the table's own
     /// value is moved out, and a base's is hidden from the table and read
     /// where it is. `take` is the same, returning a copy of a base's.
-    pub(crate) fn detach(&mut self, name: &str) -> Option<Detached<V>> {
-        with_function_key(name, move |key| {
+    pub(crate) fn detach<K: TableKey + ?Sized>(&mut self, name: &K) -> Option<Detached<V>> {
+        name.with_key(move |key| {
             if let Some(value) = self.entries.remove(key) {
                 self.version = next_version();
                 return Some(Detached::Own(value));
@@ -543,8 +614,8 @@ impl<V: Clone> NameTable<V> {
         }
     }
 
-    pub fn get_mut(&mut self, name: &str) -> Option<&mut V> {
-        with_function_key(name, move |key| {
+    pub fn get_mut<K: TableKey + ?Sized>(&mut self, name: &K) -> Option<&mut V> {
+        name.with_key(move |key| {
             self.own(key);
             self.entries.get_mut(key)
         })
@@ -611,13 +682,13 @@ impl<V: Clone> NameTable<V> {
 
     /// Removes what `name` finds, without reading it: whether there was
     /// anything. `take` hands it back.
-    pub fn remove(&mut self, name: &str) -> bool {
-        with_function_key(name, move |key| self.forget(key))
+    pub fn remove<K: TableKey + ?Sized>(&mut self, name: &K) -> bool {
+        name.with_key(move |key| self.forget(key))
     }
 
     /// Removes what `name` finds and returns it.
-    pub fn take(&mut self, name: &str) -> Option<V> {
-        with_function_key(name, move |key| {
+    pub fn take<K: TableKey + ?Sized>(&mut self, name: &K) -> Option<V> {
+        name.with_key(move |key| {
             if let Some(value) = self.entries.remove(key) {
                 self.version = next_version();
                 return Some(value);
@@ -1015,6 +1086,29 @@ impl<V: Clone> FromIterator<(Name, V)> for NameTable<V> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_capital_scan_agrees_with_the_byte_scan() {
+        // Every byte value in every place of lengths 0 to 17, over a
+        // background of lowercase letters and of other ASCII.
+        for background in *b"a0_@[`{" {
+            for len in 0..=17usize {
+                for place in 0..len.max(1) {
+                    for byte in 0..=255u8 {
+                        let mut bytes = vec![background; len];
+                        if len > 0 {
+                            bytes[place] = byte;
+                        }
+                        assert_eq!(
+                            has_ascii_uppercase(&bytes),
+                            bytes.iter().any(u8::is_ascii_uppercase),
+                            "{bytes:?}"
+                        );
+                    }
+                }
+            }
+        }
+    }
 
     fn stored(entries: &[(&str, u32)]) -> Reader {
         let mut writer = Writer::new();

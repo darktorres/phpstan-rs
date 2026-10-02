@@ -8,6 +8,7 @@ use rustc_hash::FxHashSet;
 use syntax::name::Name;
 
 use crate::registry::Registry;
+use crate::registry::name_table::FoldedKey;
 
 /// The classes and functions the finishing passes resolve, by lowercased
 /// name; `None` for every one.
@@ -194,7 +195,7 @@ impl Registry {
                         .iter()
                         .filter_map(|key| {
                             self.classes
-                                .get_with_name(key)
+                                .get_with_name(&FoldedKey(key))
                                 .map(|(name, _)| name.clone())
                         })
                         .collect(),
@@ -213,7 +214,7 @@ impl Registry {
                         .iter()
                         .filter_map(|key| {
                             self.functions
-                                .get_with_name(key)
+                                .get_with_name(&FoldedKey(key))
                                 .map(|(name, _)| name.clone())
                         })
                         .collect(),
@@ -227,7 +228,7 @@ impl Registry {
             None => self.classes.iter().collect(),
             Some(keys) => keys
                 .iter()
-                .filter_map(|key| self.classes.get_with_name(key))
+                .filter_map(|key| self.classes.get_with_name(&FoldedKey(key)))
                 .collect(),
         }
     }
@@ -238,7 +239,7 @@ impl Registry {
             None => self.functions.iter().collect(),
             Some(keys) => keys
                 .iter()
-                .filter_map(|key| self.functions.get_with_name(key))
+                .filter_map(|key| self.functions.get_with_name(&FoldedKey(key)))
                 .collect(),
         }
     }
@@ -250,7 +251,7 @@ impl Registry {
             .class_keys()
             .into_iter()
             .flatten()
-            .filter(|key| !self.classes.contains_key(key))
+            .filter(|key| !self.classes.contains_key(&FoldedKey(key)))
             .cloned()
             .collect()
     }
@@ -267,9 +268,9 @@ impl Registry {
             .par_iter()
             .with_min_len(crate::registry::PASS_CHUNK)
             .for_each(|key| {
-                self.classes.get_with_name(key);
+                self.classes.get_with_name(&FoldedKey(key));
                 if let Some(raw) = raw {
-                    raw.classes.get_with_name(key);
+                    raw.classes.get_with_name(&FoldedKey(key));
                 }
             });
         let functions: Vec<&String> = scope.function_keys().into_iter().flatten().collect();
@@ -277,9 +278,9 @@ impl Registry {
             .par_iter()
             .with_min_len(crate::registry::PASS_CHUNK)
             .for_each(|key| {
-                self.functions.get_with_name(key);
+                self.functions.get_with_name(&FoldedKey(key));
                 if let Some(raw) = raw {
-                    raw.functions.get_with_name(key);
+                    raw.functions.get_with_name(&FoldedKey(key));
                 }
             });
     }
@@ -289,7 +290,7 @@ impl Registry {
     /// resolved otherwise.
     pub(crate) fn clear_purity(&mut self, scope: &Scope) {
         for key in scope.function_keys().into_iter().flatten() {
-            let Some((name, sig)) = self.functions.get_with_name(key) else {
+            let Some((name, sig)) = self.functions.get_with_name(&FoldedKey(key)) else {
                 continue;
             };
             if sig.has_purity() {
@@ -298,7 +299,7 @@ impl Registry {
             }
         }
         for key in scope.class_keys().into_iter().flatten() {
-            let Some((name, info)) = self.classes.get_with_name(key) else {
+            let Some((name, info)) = self.classes.get_with_name(&FoldedKey(key)) else {
                 continue;
             };
             if info.methods.values().any(|m| m.has_purity()) {

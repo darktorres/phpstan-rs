@@ -54,7 +54,7 @@ pub(crate) use function_sig::{
 };
 pub use name_map::{NameMap, NameSet};
 pub use name_table::NameTable;
-pub(crate) use name_table::{Detached, Lazy};
+pub(crate) use name_table::{Detached, FoldedKey, Lazy};
 pub type FunctionTable = NameTable<FunctionReflection>;
 pub(crate) use index::{BuiltDecl, build_declarations, register_global_constant};
 pub(crate) use name_context::{collect_class_name_case_refs, resolve_names_in_type};
@@ -117,8 +117,8 @@ fn reset_scoped<V: Clone>(
     snapshot_keys: Option<&FxHashSet<String>>,
 ) -> Vec<Option<Detached<V>>> {
     let reset = |resolved: &mut NameTable<V>, key: &String| {
-        let old = resolved.detach(key);
-        if let Some((name, value)) = raw.get_with_name(key) {
+        let old = resolved.detach(&FoldedKey(key));
+        if let Some((name, value)) = raw.get_with_name(&FoldedKey(key)) {
             resolved.insert(name.clone(), value.clone());
         }
         old
@@ -130,7 +130,7 @@ fn reset_scoped<V: Clone>(
             reset_count += 1;
             reset(resolved, key)
         } else {
-            resolved.get(key).cloned().map(Detached::Own)
+            resolved.get(&FoldedKey(key)).cloned().map(Detached::Own)
         });
     }
     // Scope keys the snapshot has none of, and every one without a snapshot.
@@ -615,14 +615,14 @@ impl Registry {
         let class_keys = before.class_keys.iter().flat_map(|keys| keys.iter());
         debug_assert_eq!(class_keys.clone().count(), before.classes.len());
         for (key, old) in class_keys.zip(&before.classes) {
-            if self.classes.get(key) != old.as_ref().map(Detached::get) {
+            if self.classes.get(&FoldedKey(key)) != old.as_ref().map(Detached::get) {
                 keys.insert(key.clone());
             }
         }
         let function_keys = before.function_keys.iter().flat_map(|keys| keys.iter());
         debug_assert_eq!(function_keys.clone().count(), before.functions.len());
         for (key, old) in function_keys.zip(&before.functions) {
-            if self.functions.get(key) != old.as_ref().map(Detached::get) {
+            if self.functions.get(&FoldedKey(key)) != old.as_ref().map(Detached::get) {
                 keys.insert(key.clone());
             }
         }
