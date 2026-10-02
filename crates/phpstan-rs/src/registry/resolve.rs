@@ -1075,10 +1075,10 @@ impl Registry {
                     return per_class;
                 };
                 // What `lookup_ancestor_method_with_owner` reads, read once
-                // per class and only when a method needs it: the class's
-                // map of ancestor methods to their owners, and the owners
+                // per class and only when a method needs it: the maps of
+                // its parents' methods to their owners, and the owners
                 // already found (a class's methods mostly share a few).
-                let mut owners: Option<Option<&FxHashMap<Name, Name>>> = None;
+                let mut parent_maps: Option<Vec<&FxHashMap<Name, Name>>> = None;
                 let mut owner_classes: Vec<(&Name, &ClassReflection)> = Vec::new();
                 for (method_name, sig) in &info.methods {
                     let needs_param = sig.params.iter().any(|p| !p.has_own_doc);
@@ -1086,13 +1086,16 @@ impl Registry {
                     if !needs_param && !needs_return {
                         continue;
                     }
-                    let Some(owners) = *owners.get_or_insert_with(|| {
-                        registry.ancestor_method_owner_by_class.get(class_name)
-                    }) else {
+                    let parent_maps = parent_maps
+                        .get_or_insert_with(|| registry.parent_method_owner_maps(info).collect());
+                    if parent_maps.is_empty() {
                         // No ancestor has a method: none of the rest does.
                         break;
-                    };
-                    let Some(owner) = owners.get(method_name) else {
+                    }
+                    let Some(owner) = parent_maps
+                        .iter()
+                        .find_map(|owners| owners.get(method_name))
+                    else {
                         continue;
                     };
                     let owner_class = match owner_classes.iter().find(|(name, _)| *name == owner) {

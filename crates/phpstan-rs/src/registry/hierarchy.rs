@@ -325,33 +325,6 @@ impl Registry {
         (method_owner, property_owner, const_owner)
     }
 
-    /// Builds an `ancestor_*_owner_by_class` entry for `class` from
-    /// already-computed `own` maps - correct, not just fast, because of
-    /// how `lookup_ancestor_method_with_owner`/
-    /// `lookup_ancestor_property_with_owner` are specified: for each of
-    /// `class`'s direct parents *in order*, try that parent's *entire*
-    /// ancestor chain before ever trying the next parent, not a single
-    /// BFS merged across all parents at once. Merging each direct
-    /// parent's own map in order, first-insert-wins, reproduces that
-    /// exact "try parent 0 fully, then parent 1 fully" priority without
-    /// re-walking anything.
-    fn merge_ancestor_owner_names(
-        parents: impl Iterator<Item = Name>,
-        own_owner_by_class: &NameTable<FxHashMap<Name, Name>>,
-    ) -> FxHashMap<Name, Name> {
-        let mut merged = FxHashMap::default();
-        for parent in parents {
-            if let Some(parent_map) = own_owner_by_class.get(&parent) {
-                for (name, owner) in parent_map {
-                    if !merged.contains_key(name) {
-                        merged.insert(name.clone(), owner.clone());
-                    }
-                }
-            }
-        }
-        merged
-    }
-
     /// Rebuilds every `*_owner_by_class` map (see their own doc
     /// comments on `Registry`) from scratch over every registered class,
     /// call this any time the class graph could have changed (called
@@ -364,12 +337,6 @@ impl Registry {
     /// interface/trait/extends priority walk is untouched, since it only
     /// calls `lookup_method_with_owner` as a sub-step, so it benefits
     /// automatically.
-    ///
-    /// Two phases, `own` then `ancestor`, since every
-    /// `ancestor_*_owner_by_class` entry is built by merging its class's
-    /// already-computed direct parents' `own` maps
-    /// (`merge_ancestor_owner_names`) - every class's `own` map must
-    /// finish before any class's `ancestor` map starts.
     #[hotpath::measure]
     pub fn precompute_member_owners(&mut self) {
         let class_names: Vec<Name> = self.scoped_class_names();
@@ -387,15 +354,11 @@ impl Registry {
             self.method_owner_by_class = NameTable::default();
             self.property_owner_by_class = NameTable::default();
             self.const_owner_by_class = NameTable::default();
-            self.ancestor_method_owner_by_class = NameTable::default();
-            self.ancestor_property_owner_by_class = NameTable::default();
         } else {
             for name in self.scoped_removed_class_keys() {
                 self.method_owner_by_class.remove(&name);
                 self.property_owner_by_class.remove(&name);
                 self.const_owner_by_class.remove(&name);
-                self.ancestor_method_owner_by_class.remove(&name);
-                self.ancestor_property_owner_by_class.remove(&name);
             }
         }
         for (name, methods, properties, consts) in own_by_class {
@@ -403,64 +366,6 @@ impl Registry {
             self.property_owner_by_class
                 .insert(name.clone(), properties);
             self.const_owner_by_class.insert(name, consts);
-        }
-
-        // A class's ancestor maps merge its direct parents' own maps, which
-        // every class's own map, in the scope or not, is final for by now.
-        let registry: &Registry = self;
-        let ancestor_method_owner_by_class: Vec<(Name, FxHashMap<Name, Name>)> = class_names
-            .par_iter()
-            .with_min_len(crate::registry::PASS_CHUNK)
-            .map(|name| {
-                let parents = registry
-                    .classes
-                    .get(name)
-                    .map(|info| {
-                        info.extends
-                            .iter()
-                            .chain(info.implements.iter())
-                            .cloned()
-                            .collect::<Vec<_>>()
-                    })
-                    .unwrap_or_default();
-                (
-                    name.clone(),
-                    Self::merge_ancestor_owner_names(
-                        parents.into_iter(),
-                        &registry.method_owner_by_class,
-                    ),
-                )
-            })
-            .collect();
-
-        // Real PHP interfaces can't declare properties at all, so
-        // `lookup_ancestor_property_with_owner`'s own walk (unlike the
-        // method version) only ever considers `extends`, never
-        // `implements` - mirrored here.
-        let ancestor_property_owner_by_class: Vec<(Name, FxHashMap<Name, Name>)> = class_names
-            .par_iter()
-            .with_min_len(crate::registry::PASS_CHUNK)
-            .map(|name| {
-                let parents = registry
-                    .classes
-                    .get(name)
-                    .map(|info| info.extends.clone())
-                    .unwrap_or_default();
-                (
-                    name.clone(),
-                    Self::merge_ancestor_owner_names(
-                        parents.into_iter(),
-                        &registry.property_owner_by_class,
-                    ),
-                )
-            })
-            .collect();
-
-        for (name, owners) in ancestor_method_owner_by_class {
-            self.ancestor_method_owner_by_class.insert(name, owners);
-        }
-        for (name, owners) in ancestor_property_owner_by_class {
-            self.ancestor_property_owner_by_class.insert(name, owners);
         }
     }
 
@@ -642,6 +547,48 @@ impl Registry {
         Some((owner.clone(), sig))
     }
 
+    /// The own-owner maps of the direct parents of `info`, in the order a
+    /// lookup of an ancestor's member tries them: its `extends` and then
+    /// its `implements`, each parent's map covering that parent's whole
+    /// ancestry. For each parent *in order*, the parent's *entire*
+    /// ancestor chain is tried before the next parent, which is the
+    /// priority `lookup_ancestor_method_with_owner` is specified by -
+    /// not a single walk merged across all the parents at once.
+    pub(crate) fn parent_method_owner_maps<'a: 'i, 'i>(
+        &'a self,
+        info: &'i ClassReflection,
+    ) -> impl Iterator<Item = &'a FxHashMap<Name, Name>> + 'i {
+        info.extends
+            .iter()
+            .chain(info.implements.iter())
+            .filter_map(|parent| self.method_owner_by_class.get(parent))
+    }
+
+    /// The ancestor of `info` that owns its method `method`, the first
+    /// parent in `parent_method_owner_maps` order that has one.
+    pub(crate) fn ancestor_method_owner(
+        &self,
+        info: &ClassReflection,
+        method: &str,
+    ) -> Option<&Name> {
+        self.parent_method_owner_maps(info)
+            .find_map(|owners| owners.get(method))
+    }
+
+    /// The ancestor of `info` that owns its property `prop`: only
+    /// `extends` is tried, since real PHP interfaces can't declare
+    /// properties at all.
+    pub(crate) fn ancestor_property_owner(
+        &self,
+        info: &ClassReflection,
+        prop: &str,
+    ) -> Option<&Name> {
+        info.extends
+            .iter()
+            .filter_map(|parent| self.property_owner_by_class.get(parent))
+            .find_map(|owners| owners.get(prop))
+    }
+
     /// Same as `lookup_method_with_owner`, but starts the walk at
     /// `class`'s own parents rather than `class` itself - used for
     /// override-compatibility checking, which needs the signature a
@@ -651,10 +598,7 @@ impl Registry {
         class: &str,
         method: &str,
     ) -> Option<(Name, &FunctionReflection)> {
-        let owner = self
-            .ancestor_method_owner_by_class
-            .get(class)?
-            .get(method)?;
+        let owner = self.ancestor_method_owner(self.classes.get(class)?, method)?;
         let sig = self.classes.get(owner)?.methods.get(method)?;
         Some((owner.clone(), sig))
     }
@@ -853,10 +797,7 @@ impl Registry {
         class: &str,
         prop: &str,
     ) -> Option<(Name, &PropertyReflection)> {
-        let owner = self
-            .ancestor_property_owner_by_class
-            .get(class)?
-            .get(prop)?;
+        let owner = self.ancestor_property_owner(self.classes.get(class)?, prop)?;
         let sig = self.classes.get(owner)?.properties.get(prop)?;
         Some((owner.clone(), sig))
     }

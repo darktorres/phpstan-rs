@@ -320,11 +320,7 @@ pub struct Registry {
     #[serde(skip)]
     pub(crate) method_owner_by_class: NameTable<FxHashMap<Name, Name>>,
     #[serde(skip)]
-    pub(crate) ancestor_method_owner_by_class: NameTable<FxHashMap<Name, Name>>,
-    #[serde(skip)]
     pub(crate) property_owner_by_class: NameTable<FxHashMap<Name, Name>>,
-    #[serde(skip)]
-    pub(crate) ancestor_property_owner_by_class: NameTable<FxHashMap<Name, Name>>,
     #[serde(skip)]
     pub(crate) const_owner_by_class: NameTable<FxHashMap<Name, Name>>,
     // Whose properties each function and method with a body may write
@@ -521,9 +517,7 @@ impl Registry {
         self.trait_users.freeze();
         self.recorded_parents.freeze();
         self.method_owner_by_class.freeze();
-        self.ancestor_method_owner_by_class.freeze();
         self.property_owner_by_class.freeze();
-        self.ancestor_property_owner_by_class.freeze();
         self.const_owner_by_class.freeze();
         if let Some(raw) = &mut self.raw {
             raw.classes.freeze();
@@ -690,9 +684,7 @@ impl Registry {
         trait_users,
         recorded_parents,
         method_owner_by_class,
-        ancestor_method_owner_by_class,
         property_owner_by_class,
-        ancestor_property_owner_by_class,
         const_owner_by_class,
         global_constants,
         unconditionally_declared_classes,
