@@ -14,8 +14,16 @@
     feature = "system-allocator"
 )))]
 #[global_allocator]
-static ALLOCATOR: mimalloc::MiMalloc = mimalloc::MiMalloc;
+static ALLOCATOR: allocator::Allocator = allocator::Allocator;
 
+// mimalloc is reached through its C API.
+#[cfg(not(any(
+    feature = "dhat-heap",
+    feature = "hotpath-alloc",
+    feature = "system-allocator"
+)))]
+#[allow(unsafe_code)]
+pub(crate) mod allocator;
 pub mod app;
 pub mod architecture;
 pub mod assertion_tables;
