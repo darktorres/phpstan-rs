@@ -190,14 +190,19 @@ impl Relation<'_> {
                         Some(_) => TrinaryLogic::Maybe,
                     }
                 }
+                // `No` as soon as one member refuses, `Yes` when every
+                // member holds, else `Maybe`: asked in order, and no
+                // further once one says `No`.
                 (Repr::Intersection(members), _) => {
-                    let results: Vec<TrinaryLogic> = members
-                        .iter()
-                        .map(|m| self.is_super_type_of(m, sub))
-                        .collect();
-                    if results.contains(&TrinaryLogic::No) {
-                        TrinaryLogic::No
-                    } else if results.iter().all(|r| *r == TrinaryLogic::Yes) {
+                    let mut every_member_holds = true;
+                    for member in members.iter() {
+                        match self.is_super_type_of(member, sub) {
+                            TrinaryLogic::No => return TrinaryLogic::No,
+                            TrinaryLogic::Yes => {}
+                            TrinaryLogic::Maybe => every_member_holds = false,
+                        }
+                    }
+                    if every_member_holds {
                         TrinaryLogic::Yes
                     } else {
                         TrinaryLogic::Maybe
