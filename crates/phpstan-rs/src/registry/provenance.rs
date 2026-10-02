@@ -61,13 +61,18 @@ impl PartialEq for Origin {
 enum OriginData {
     Unknown,
     File(Arc<Path>),
-    Builtin { file: String, extension: String },
-    Phpstan { file: String },
+    /// The index of the file in `PHPSTORM_STUBS_PATHS`, whose extension is
+    /// the one at the same index.
+    Builtin(u32),
+    /// The index of the file in `PHPSTAN_SRC_PATHS`.
+    Phpstan(u32),
 }
 
 impl serde::Serialize for Origin {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        OriginData::from(self.clone()).serialize(serializer)
+        OriginData::try_from(self)
+            .map_err(serde::ser::Error::custom)?
+            .serialize(serializer)
     }
 }
 
@@ -77,19 +82,41 @@ impl<'de> serde::Deserialize<'de> for Origin {
     }
 }
 
-impl From<Origin> for OriginData {
-    fn from(origin: Origin) -> OriginData {
-        match origin {
+/// Where each embedded stub file's path sits in its table.
+fn embedded_index(paths: &'static [&'static str]) -> rustc_hash::FxHashMap<&'static str, u32> {
+    paths
+        .iter()
+        .enumerate()
+        .map(|(i, path)| (*path, i as u32))
+        .collect()
+}
+
+impl TryFrom<&Origin> for OriginData {
+    type Error = String;
+
+    fn try_from(origin: &Origin) -> Result<OriginData, String> {
+        static BUILTIN: std::sync::LazyLock<rustc_hash::FxHashMap<&'static str, u32>> =
+            std::sync::LazyLock::new(|| embedded_index(stub_sources::PHPSTORM_STUBS_PATHS));
+        static PHPSTAN: std::sync::LazyLock<rustc_hash::FxHashMap<&'static str, u32>> =
+            std::sync::LazyLock::new(|| embedded_index(stub_sources::PHPSTAN_SRC_PATHS));
+        Ok(match origin {
             Origin::Unknown => OriginData::Unknown,
-            Origin::File(path) => OriginData::File(path),
-            Origin::Builtin { file, extension } => OriginData::Builtin {
-                file: file.to_string(),
-                extension: extension.to_string(),
-            },
-            Origin::Phpstan { file } => OriginData::Phpstan {
-                file: file.to_string(),
-            },
-        }
+            Origin::File(path) => OriginData::File(Arc::clone(path)),
+            Origin::Builtin { file, extension } => {
+                let index = *BUILTIN
+                    .get(file)
+                    .ok_or_else(|| format!("{file} is not an embedded stub"))?;
+                if stub_sources::PHPSTORM_STUBS_EXTENSIONS[index as usize] != *extension {
+                    return Err(format!("{extension} is not the extension of {file}"));
+                }
+                OriginData::Builtin(index)
+            }
+            Origin::Phpstan { file } => OriginData::Phpstan(
+                *PHPSTAN
+                    .get(file)
+                    .ok_or_else(|| format!("{file} is not an embedded stub"))?,
+            ),
+        })
     }
 }
 
@@ -100,19 +127,24 @@ impl TryFrom<OriginData> for Origin {
         Ok(match data {
             OriginData::Unknown => Origin::Unknown,
             OriginData::File(path) => Origin::File(path),
-            OriginData::Builtin { file, extension } => Origin::Builtin {
-                file: embedded_str(&file)?,
-                extension: embedded_str(&extension)?,
+            OriginData::Builtin(index) => Origin::Builtin {
+                file: stub_sources::PHPSTORM_STUBS_PATHS
+                    .get(index as usize)
+                    .copied()
+                    .ok_or_else(|| format!("{index} is not an embedded stub"))?,
+                extension: stub_sources::PHPSTORM_STUBS_EXTENSIONS[index as usize],
             },
-            OriginData::Phpstan { file } => Origin::Phpstan {
-                file: embedded_str(&file)?,
+            OriginData::Phpstan(index) => Origin::Phpstan {
+                file: stub_sources::PHPSTAN_SRC_PATHS
+                    .get(index as usize)
+                    .copied()
+                    .ok_or_else(|| format!("{index} is not an embedded stub"))?,
             },
         })
     }
 }
 
-/// An embedded stub file's path or extension, as the embedded tables
-/// hold it.
+/// An embedded stub file's extension, as the embedded table holds it.
 pub(crate) fn embedded_str(text: &str) -> Result<&'static str, String> {
     static EMBEDDED: std::sync::LazyLock<rustc_hash::FxHashSet<&'static str>> =
         std::sync::LazyLock::new(|| {
@@ -246,5 +278,61 @@ impl Registry {
         self.constant_declaration(owner, name)
             .or_else(|| self.property_declaration(owner, name))
             .or_else(|| self.method_declaration(owner, name))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::registry::stub_cache::{decode, encode};
+
+    #[test]
+    fn the_embedded_paths_are_unique_and_pair_with_their_extensions() {
+        let unique = |paths: &[&str]| {
+            paths.iter().collect::<rustc_hash::FxHashSet<_>>().len() == paths.len()
+        };
+        assert!(unique(stub_sources::PHPSTORM_STUBS_PATHS));
+        assert!(unique(stub_sources::PHPSTAN_SRC_PATHS));
+        assert_eq!(
+            stub_sources::PHPSTORM_STUBS_PATHS.len(),
+            stub_sources::PHPSTORM_STUBS_EXTENSIONS.len()
+        );
+    }
+
+    #[test]
+    fn an_embedded_origin_survives_the_codec_by_its_index() {
+        let paths = stub_sources::PHPSTORM_STUBS_PATHS;
+        for i in [0, paths.len() / 2, paths.len() - 1] {
+            let origin = Origin::Builtin {
+                file: paths[i],
+                extension: stub_sources::PHPSTORM_STUBS_EXTENSIONS[i],
+            };
+            assert_eq!(decode::<Origin>(&encode(&origin).unwrap()).unwrap(), origin);
+        }
+        let paths = stub_sources::PHPSTAN_SRC_PATHS;
+        for i in [0, paths.len() - 1] {
+            let origin = Origin::Phpstan { file: paths[i] };
+            assert_eq!(decode::<Origin>(&encode(&origin).unwrap()).unwrap(), origin);
+        }
+        assert_eq!(
+            decode::<Origin>(&encode(&Origin::Unknown).unwrap()).unwrap(),
+            Origin::Unknown
+        );
+    }
+
+    #[test]
+    fn an_origin_that_is_not_embedded_does_not_encode_and_a_stray_index_does_not_decode() {
+        let stray = Origin::Builtin {
+            file: "not/a/stub.php",
+            extension: "none",
+        };
+        assert!(encode(&stray).is_err());
+        let wrong_extension = Origin::Builtin {
+            file: stub_sources::PHPSTORM_STUBS_PATHS[0],
+            extension: "no-such-extension",
+        };
+        assert!(encode(&wrong_extension).is_err());
+        let past_the_end = postcard::to_allocvec(&OriginData::Builtin(u32::MAX)).unwrap();
+        assert!(decode::<Origin>(&past_the_end).is_err());
     }
 }
