@@ -58,25 +58,23 @@ impl Parser {
             // happens to follow (e.g. `array $items`'s `$items`, or
             // `const array NAME`'s own `NAME`).
             let keyword = match self.peek() {
-                Token::Keyword(Keyword::Array) => Some("array"),
-                Token::Keyword(Keyword::Static) => Some("static"),
-                Token::Keyword(Keyword::Null) => Some("null"),
+                Token::Keyword(Keyword::Array) => Some(NativeType::Array),
+                Token::Keyword(Keyword::Static) => Some(NativeType::Static),
+                Token::Keyword(Keyword::Null) => Some(NativeType::Null),
                 // PHP 8.2+ stand-alone `true`/`false` types, e.g.
                 // `function f(): string|false {}`.
-                Token::Keyword(Keyword::True) => Some("true"),
-                Token::Keyword(Keyword::False) => Some("false"),
+                Token::Keyword(Keyword::True) => Some(NativeType::True),
+                Token::Keyword(Keyword::False) => Some(NativeType::False),
                 _ => None,
             };
-            let name = match keyword {
-                Some(keyword) => {
-                    self.skip();
-                    self.interner.name(keyword)
-                }
-                // Otherwise it's a (possibly namespaced) identifier: `int`,
-                // `Foo`, `\App\Foo`, `App\Foo\Bar` - never two unrelated
-                // identifiers glued together with no backslash between them.
-                None => self.parse_qualified_name(),
-            };
+            if let Some(kind) = keyword {
+                self.skip();
+                return Ok(self.type_hint(TypeHintKind::Keyword(kind, kind.as_str().into()), start));
+            }
+            // Otherwise it's a (possibly namespaced) identifier: `int`,
+            // `Foo`, `\App\Foo`, `App\Foo\Bar` - never two unrelated
+            // identifiers glued together with no backslash between them.
+            let name = self.parse_qualified_name();
             // A bare keyword is the native type; anything else, `integer`
             // and `\int` included, names a class.
             let kind = match NativeType::from_name(&name) {

@@ -40,6 +40,8 @@ pub struct Lexer<'a> {
     // counted about once, even as a string's own positions are resolved
     // before the token starting before them.
     line_marks: (usize, Vec<(usize, Position)>),
+    // Whether the source is all ASCII, where a column is a byte count.
+    ascii: bool,
     // The latest position resolved, as (byte offset, position, where its
     // line ends): tokens come in source order, so the next one is
     // usually on the same line, later, and costs the characters between.
@@ -129,6 +131,7 @@ impl<'a> Lexer<'a> {
             line_starts,
             last_token_start: 0,
             line_marks: (0, vec![(0, Position { line: 1, col: 1 })]),
+            ascii: bytes.is_ascii(),
             base: Position { line: 1, col: 1 },
             pending_keyword_raw: None,
             comments: Vec::new(),
@@ -151,6 +154,7 @@ impl<'a> Lexer<'a> {
             line_starts,
             last_token_start: 0,
             line_marks: (0, vec![(0, Position { line: 1, col: 1 })]),
+            ascii: bytes.is_ascii(),
             base: Position { line: 1, col: 1 },
             pending_keyword_raw: None,
             comments: Vec::new(),
@@ -213,22 +217,38 @@ impl<'a> Lexer<'a> {
             }
             let position = Position {
                 line: from.line,
-                col: from.col + char_count(&self.src[offset..byte_pos]) as u32,
+                col: from.col + self.columns(offset, byte_pos) as u32,
             };
             self.cursor = (byte_pos, position, line_end);
             return position;
         }
-        let position = self.line_col_from_marks(byte_pos);
         if byte_pos >= offset {
-            let next_line = self.line_idx_at(byte_pos) + 1;
+            // A later line, as tokens arrive in order: counted from its own
+            // start, which the cursor then moves to.
+            let line_idx = self.line_idx_at(byte_pos);
+            let position = Position {
+                line: (line_idx + 1) as u32,
+                col: 1 + self.columns(self.line_starts[line_idx], byte_pos) as u32,
+            };
             let line_end = self
                 .line_starts
-                .get(next_line)
+                .get(line_idx + 1)
                 .copied()
                 .unwrap_or(self.src.len() + 1);
             self.cursor = (byte_pos, position, line_end);
+            return position;
         }
-        position
+        self.line_col_from_marks(byte_pos)
+    }
+
+    /// How many columns the bytes from `from` to `to` take: a character
+    /// each, a byte each when the source is ASCII.
+    fn columns(&self, from: usize, to: usize) -> usize {
+        if self.ascii {
+            to - from
+        } else {
+            char_count(&self.src[from..to])
+        }
     }
 
     fn line_col_from_marks(&mut self, byte_pos: usize) -> Position {
@@ -241,17 +261,19 @@ impl<'a> Lexer<'a> {
             };
             self.line_marks = (line_idx, vec![(line_start, start)]);
         }
-        let marks = &mut self.line_marks.1;
-        let at = marks.partition_point(|&(offset, _)| offset <= byte_pos);
-        let (offset, from) = marks[at - 1];
+        let at = self
+            .line_marks
+            .1
+            .partition_point(|&(offset, _)| offset <= byte_pos);
+        let (offset, from) = self.line_marks.1[at - 1];
         if offset == byte_pos {
             return from;
         }
         let position = Position {
             line: from.line,
-            col: from.col + char_count(&self.src[offset..byte_pos]) as u32,
+            col: from.col + self.columns(offset, byte_pos) as u32,
         };
-        marks.insert(at, (byte_pos, position));
+        self.line_marks.1.insert(at, (byte_pos, position));
         position
     }
 
