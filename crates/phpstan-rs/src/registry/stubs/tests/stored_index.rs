@@ -26,6 +26,7 @@ fn read_back() -> StubIndex {
     }
     for (section, records) in [
         ("declared_by_file", &index.declared_by_file),
+        ("file_closures", &index.closures),
         ("phpstan_functions", &index.phpstan_functions),
         ("phpstan_classes", &index.phpstan_classes),
         ("phpstan_constants", &index.phpstan_constants),
@@ -57,6 +58,7 @@ fn the_stub_index_survives_a_round_trip() {
         &before.declared_by_file,
         &after.declared_by_file,
     );
+    same_records("file_closures", &before.closures, &after.closures);
     same_records(
         "phpstan_functions",
         &before.phpstan_functions,

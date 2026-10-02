@@ -871,12 +871,30 @@ type DeclaredKeys = Box<[(bool, Box<str>)]>;
 impl StubIndex {
     fn file_closure(&'static self, file: usize) -> &'static [u64] {
         self.file_closures[file].get_or_init(|| {
-            let files = self.declared_by_file.len();
+            self.closures
+                .get(file)
+                .as_chunks::<8>()
+                .0
+                .iter()
+                .map(|word| u64::from_le_bytes(*word))
+                .collect()
+        })
+    }
+
+    /// Every stub file's closure over the stub files (`file_closure`), as
+    /// the records of little-endian words the index stores: a file's
+    /// closure is the files that reference a name it declares, and those
+    /// that reference a name one of them declares, and so on. `keys` are
+    /// the names each file declares, as `parse_declared_keys` reads them.
+    fn build_closures(&self, keys: &[DeclaredKeys]) -> Records {
+        let files = keys.len();
+        let mut records = RecordsBuilder::default();
+        for file in 0..files {
             let mut reached = vec![0u64; files.div_ceil(64)];
             reached[file / 64] |= 1 << (file % 64);
             let mut stack = vec![file];
             while let Some(current) = stack.pop() {
-                for (_, key) in self.declared_keys_of(current).iter() {
+                for (_, key) in keys[current].iter() {
                     let dependents = self.dependents.get(key).unwrap_or(&[]);
                     for dependent in dependents.as_chunks::<4>().0 {
                         let dependent = u32::from_le_bytes(*dependent) as usize;
@@ -888,24 +906,30 @@ impl StubIndex {
                     }
                 }
             }
-            reached.into_boxed_slice()
-        })
+            let bytes: Vec<u8> = reached.iter().flat_map(|word| word.to_le_bytes()).collect();
+            records.push(&bytes);
+        }
+        records.finish()
+    }
+
+    /// The names the record of `declared_by_file` for `file` holds, as
+    /// dependency keys.
+    fn parse_declared_keys(&self, file: usize) -> DeclaredKeys {
+        let mut names = self.declared_by_file.get(file);
+        let mut keys = Vec::new();
+        while let Some((&is_class, rest)) = names.split_first() {
+            let length = u16::from_le_bytes([rest[0], rest[1]]) as usize;
+            let key = std::str::from_utf8(&rest[2..2 + length]).expect("a name stored as text");
+            keys.push((is_class == 1, Box::from(key)));
+            names = &rest[2 + length..];
+        }
+        keys.into_boxed_slice()
     }
 
     /// The names stub file `file` declares, as dependency keys, read from
     /// the index the first time and kept.
     fn declared_keys_of(&'static self, file: usize) -> &'static DeclaredKeys {
-        self.declared_keys[file].get_or_init(|| {
-            let mut names = self.declared_by_file.get(file);
-            let mut keys = Vec::new();
-            while let Some((&is_class, rest)) = names.split_first() {
-                let length = u16::from_le_bytes([rest[0], rest[1]]) as usize;
-                let key = std::str::from_utf8(&rest[2..2 + length]).expect("a name stored as text");
-                keys.push((is_class == 1, Box::from(key)));
-                names = &rest[2 + length..];
-            }
-            keys.into_boxed_slice()
-        })
+        self.declared_keys[file].get_or_init(|| self.parse_declared_keys(file))
     }
 }
 
@@ -1108,8 +1132,11 @@ struct StubIndex {
     // for.
     #[serde(skip)]
     declared_keys: Vec<std::sync::OnceLock<DeclaredKeys>>,
-    // Each stub file's closure over the stub files (`stub_file_closure`),
-    // made when first asked for.
+    // Each stub file's closure over the stub files (`stub_file_closure`) as
+    // little-endian words, made when the index is built.
+    #[serde(skip)]
+    closures: Records,
+    // Each record of `closures` read once as words, when first asked for.
     #[serde(skip)]
     file_closures: Vec<std::sync::OnceLock<Box<[u64]>>>,
     // Lowercased name -> the phpstorm-stubs directory (extension) that
@@ -1150,8 +1177,9 @@ const INDEX_PACKED: [&str; 6] = [
     "index:function_names",
     "index:constant_names",
 ];
-const INDEX_RECORDS: [&str; 4] = [
+const INDEX_RECORDS: [&str; 5] = [
     "index:declared_by_file",
+    "index:file_closures",
     "index:phpstan_functions",
     "index:phpstan_classes",
     "index:phpstan_constants",
@@ -1172,6 +1200,7 @@ impl StubIndex {
         }
         let records = [
             &self.declared_by_file,
+            &self.closures,
             &self.phpstan_functions,
             &self.phpstan_classes,
             &self.phpstan_constants,
@@ -1192,11 +1221,15 @@ impl StubIndex {
         index.class_names = d?;
         index.function_names = e?;
         index.constant_names = f?;
-        let [a, b, c, d] = INDEX_RECORDS.map(|section| Records::load(reader, section));
+        let [a, b, c, d, e] = INDEX_RECORDS.map(|section| Records::load(reader, section));
         index.declared_by_file = a?;
-        index.phpstan_functions = b?;
-        index.phpstan_classes = c?;
-        index.phpstan_constants = d?;
+        index.closures = b?;
+        index.phpstan_functions = c?;
+        index.phpstan_classes = d?;
+        index.phpstan_constants = e?;
+        if index.closures.len() != index.declared_by_file.len() {
+            return Err("the stored closures are not one per stub file".to_string());
+        }
         Ok(index.resolved())
     }
 
@@ -1571,6 +1604,7 @@ fn build_generated_stub_data() -> (StubIndex, GeneratedStubData) {
         ),
         declared_by_file: declared_records.finish(),
         declared_keys: Vec::new(),
+        closures: Records::default(),
         file_closures: Vec::new(),
         function_extensions,
         class_extensions,
@@ -1594,6 +1628,13 @@ fn build_generated_stub_data() -> (StubIndex, GeneratedStubData) {
                 .filter(|(name, ty)| data.builtin_constant(name) != Some(ty))
                 .map(|(name, _)| name.as_str()),
         ),
+    };
+    let keys: Vec<DeclaredKeys> = (0..index.declared_by_file.len())
+        .map(|file| index.parse_declared_keys(file))
+        .collect();
+    let index = StubIndex {
+        closures: index.build_closures(&keys),
+        ..index
     }
     .resolved();
     (index, data)
