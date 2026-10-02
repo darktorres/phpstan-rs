@@ -1738,18 +1738,22 @@ impl Registry {
         if ty == native || native.is_mixed() {
             return None;
         }
-        let bind = |t: &Type| match class {
-            Some(c) => t.bind_self(c).bind_static(c),
-            None => t.clone(),
-        };
+        fn bind<'t>(class: Option<&Name>, t: &'t Type) -> std::borrow::Cow<'t, Type> {
+            match class {
+                Some(c) if t.mentions_self_or_static() => {
+                    std::borrow::Cow::Owned(t.bind_self(c).bind_static(c))
+                }
+                _ => std::borrow::Cow::Borrowed(t),
+            }
+        }
         let unbound_native = native;
-        let native = bind(native);
+        let native = bind(class, native);
         let members = ty.union_members();
         let native_members = unbound_native.union_members();
         let mut kept: Vec<Type> = Vec::new();
         let mut changed = false;
         for m in members {
-            let bound = bind(m);
+            let bound = bind(class, m);
             let keep = match self.is_super_type_of(&native, &bound) {
                 types::TrinaryLogic::Yes => true,
                 types::TrinaryLogic::No => false,
@@ -1768,7 +1772,7 @@ impl Registry {
             // A wider doc member (`Node` on a `?Class_` hint) still covers
             // the native alternatives it contains.
             for n in native_members {
-                if self.is_super_type_of(&bound, &bind(n)) == types::TrinaryLogic::Yes
+                if self.is_super_type_of(&bound, &bind(class, n)) == types::TrinaryLogic::Yes
                     && !kept.contains(n)
                 {
                     kept.push(n.clone());
@@ -1782,8 +1786,9 @@ impl Registry {
         // alternative the result doesn't cover at all is added back
         // (`?self` documented as `Schema|null` keeps its `self`).
         let covered = |kept: &[Type], n: &Type| {
-            kept.iter()
-                .any(|k| self.is_super_type_of(&bind(n), &bind(k)) != types::TrinaryLogic::No)
+            kept.iter().any(|k| {
+                self.is_super_type_of(&bind(class, n), &bind(class, k)) != types::TrinaryLogic::No
+            })
         };
         for n in native_members {
             if !covered(&kept, n) {

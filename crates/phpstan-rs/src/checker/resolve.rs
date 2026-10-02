@@ -344,6 +344,9 @@ impl<'a> Checker<'a> {
         called_class: &str,
     ) -> Type {
         let bound = ty.bind_self(declaring_class).bind_static(called_class);
+        if !ty.has_parent_ref() {
+            return bound;
+        }
         match self
             .registry
             .classes

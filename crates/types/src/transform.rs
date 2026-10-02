@@ -24,6 +24,11 @@ impl Type {
         })
     }
 
+    /// Whether `self`, `static` or `$this` stands anywhere in this type.
+    pub fn mentions_self_or_static(&self) -> bool {
+        self.0.flags & (crate::HAS_SELF | crate::HAS_STATIC) != 0
+    }
+
     /// This type with `self` as `class`, at any depth.
     pub fn bind_self(&self, class: &str) -> Type {
         if self.0.flags & crate::HAS_SELF == 0 {
