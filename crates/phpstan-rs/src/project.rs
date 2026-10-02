@@ -1903,11 +1903,18 @@ impl Project {
             },
         );
         self.judge_property_types(&mut checks, pool);
-        for (path, outcome) in &mut checks {
+        // Each file's diagnostics are finished from the project as it is,
+        // which nothing here changes, so the files are finished side by
+        // side; they stay where they are in `checks`.
+        let finish = |(path, outcome): &mut (PathBuf, CheckOutcome)| {
             if let Ok(check) = outcome {
                 let diagnostics = std::mem::take(&mut check.diagnostics);
                 check.diagnostics = self.finish_diagnostics(path, diagnostics);
             }
+        };
+        match pool {
+            Some(pool) => pool.install(|| checks.par_iter_mut().for_each(finish)),
+            None => checks.iter_mut().for_each(finish),
         }
         checks
     }
