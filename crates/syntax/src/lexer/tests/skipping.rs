@@ -71,3 +71,35 @@ fn skipping_blanks_and_comments_stops_where_going_byte_by_byte_does() {
         }
     }
 }
+
+#[test]
+fn identifier_bytes_are_those_the_character_classes_name() {
+    for b in 0..=255u8 {
+        let start = b == b'_' || b.is_ascii_alphabetic() || b >= 0x80;
+        assert_eq!(is_ident_start(b), start, "start {b}");
+        assert_eq!(
+            is_ident_continue(b),
+            start || b.is_ascii_digit(),
+            "continue {b}"
+        );
+    }
+    for src in [
+        &b"abc_1 x"[..],
+        b"\xc3\xa9t\xc3\xa9 ",
+        b"123",
+        b"",
+        b"a",
+        b"_",
+    ] {
+        for from in 0..=src.len() {
+            let mut lexer = Lexer::from_bytes(src);
+            lexer.pos = from;
+            let span = lexer.lex_ident_span();
+            let mut end = from;
+            while end < src.len() && is_ident_continue(src[end]) {
+                end += 1;
+            }
+            assert_eq!(span, from..end, "{src:?} from {from}");
+        }
+    }
+}

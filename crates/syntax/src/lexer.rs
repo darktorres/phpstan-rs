@@ -520,7 +520,11 @@ impl<'a> Lexer<'a> {
             return Token::Eof;
         }
 
-        if self.starts_with(b"?>") {
+        // What a token is is mostly settled by its first byte, and the
+        // tests that read more of the source are asked only where it fits.
+        let c = self.peek();
+
+        if c == b'?' && self.starts_with(b"?>") {
             self.pos += 2;
             // A single newline right after `?>` belongs to the tag.
             if self.starts_with(b"\r\n") {
@@ -540,12 +544,10 @@ impl<'a> Lexer<'a> {
         // two special-cased stub attributes never reach this point at
         // all - `skip_whitespace_and_comments` fully consumes them
         // itself before this check ever runs.
-        if self.starts_with(b"#[") {
+        if c == b'#' && self.starts_with(b"#[") {
             self.pos += 2;
             return Token::AttributeStart;
         }
-
-        let c = self.peek();
 
         if c == b'$' && (is_ident_start(self.peek_at(1))) {
             self.pos += 1;
@@ -618,10 +620,10 @@ impl<'a> Lexer<'a> {
         if c == b'`' {
             return self.lex_backtick();
         }
-        if self.starts_with(b"<<<") {
+        if c == b'<' && self.starts_with(b"<<<") {
             return self.lex_heredoc();
         }
-        if self.starts_with(b"/**") {
+        if c == b'/' && self.starts_with(b"/**") {
             return self.lex_doc_comment();
         }
 
@@ -796,9 +798,12 @@ impl<'a> Lexer<'a> {
     /// keyword, wasting that allocation entirely.
     fn lex_ident_span(&mut self) -> std::ops::Range<usize> {
         let start = self.pos;
-        while is_ident_continue(self.peek()) {
-            self.pos += 1;
-        }
+        let rest = &self.src[start.min(self.src.len())..];
+        let len = rest
+            .iter()
+            .position(|&b| !IDENT_CONTINUE[usize::from(b)])
+            .unwrap_or(rest.len());
+        self.pos = start + len;
         start..self.pos
     }
 
@@ -1127,11 +1132,27 @@ fn radix_literal(digits: &str, radix: u32) -> Token {
 }
 
 fn is_ident_start(c: u8) -> bool {
-    c == b'_' || c.is_ascii_alphabetic() || c >= 0x80
+    IDENT_START[usize::from(c)]
 }
 
 fn is_ident_continue(c: u8) -> bool {
-    is_ident_start(c) || c.is_ascii_digit()
+    IDENT_CONTINUE[usize::from(c)]
+}
+
+/// The bytes an identifier can begin with, and those it can go on with.
+const IDENT_START: [bool; 256] = ident_table(false);
+const IDENT_CONTINUE: [bool; 256] = ident_table(true);
+
+const fn ident_table(digits: bool) -> [bool; 256] {
+    let mut table = [false; 256];
+    let mut b = 0;
+    while b < 256 {
+        let c = b as u8;
+        table[b] =
+            c == b'_' || c.is_ascii_alphabetic() || c >= 0x80 || (digits && c.is_ascii_digit());
+        b += 1;
+    }
+    table
 }
 
 #[cfg(test)]
