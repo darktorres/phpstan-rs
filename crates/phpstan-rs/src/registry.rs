@@ -254,7 +254,7 @@ pub struct Registry {
     // since this project has no real corpus case to verify a "which
     // one wins" rule against.
     #[serde(skip)]
-    doctrine_entity_table_index: std::sync::OnceLock<FxHashMap<Name, Name>>,
+    doctrine_entity_index: std::sync::OnceLock<DoctrineEntityIndex>,
     // `classes` and `functions` as indexing and the stub merges built
     // them, before the finishing passes resolved them - kept so the
     // passes can run again from scratch after declarations change
@@ -741,33 +741,75 @@ impl Registry {
     /// Drops what was computed lazily from the classes, for the next
     /// lookup to compute again from the classes as they are now.
     pub(crate) fn reset_lazy_tables(&mut self) {
-        self.doctrine_entity_table_index = std::sync::OnceLock::new();
+        self.doctrine_entity_index = std::sync::OnceLock::new();
+    }
+
+    /// The `DoctrineEntity`-mapped classes by table and by repository, from
+    /// one pass over the project's own classes (a built-in stub declares no
+    /// entity), made when first asked for and dropped with the other lazy
+    /// tables.
+    fn doctrine_entity_index(&self) -> &DoctrineEntityIndex {
+        self.doctrine_entity_index.get_or_init(|| {
+            let mut index = DoctrineEntityIndex::default();
+            for (class_name, info) in self.classes.own_iter() {
+                let Some(entity) = &info.doctrine_entity else {
+                    continue;
+                };
+                if let Some(table_name) = &entity.table_name {
+                    index
+                        .by_table
+                        .entry(table_name.clone())
+                        .or_insert_with(|| class_name.clone());
+                }
+                if let Some(repository) = &entity.repository_class {
+                    index
+                        .by_repository
+                        .entry(repository.clone())
+                        .or_default()
+                        .push(class_name.clone());
+                }
+            }
+            index
+        })
     }
 
     /// The one `DoctrineEntity`-mapped class whose own `#[ORM\Table(name:
     /// ...)]` matches `table` exactly, if any - see `doctrine_entity_
-    /// table_index`'s own doc comment for why this is lazily built
-    /// rather than maintained incrementally.
+    /// index`'s own doc comment for why this is lazily built rather than
+    /// maintained incrementally.
     pub fn doctrine_entity_for_table(
         &self,
         table: &str,
     ) -> Option<&crate::registry::class_info::DoctrineEntity> {
-        let index = self.doctrine_entity_table_index.get_or_init(|| {
-            let mut index = FxHashMap::default();
-            for (class_name, info) in &self.classes {
-                if let Some(entity) = &info.doctrine_entity
-                    && let Some(table_name) = &entity.table_name
-                {
-                    index
-                        .entry(table_name.clone())
-                        .or_insert_with(|| class_name.clone());
-                }
-            }
-            index
-        });
-        let class_name = index.get(table)?;
+        let class_name = self.doctrine_entity_index().by_table.get(table)?;
         self.classes.get(class_name)?.doctrine_entity.as_ref()
     }
+
+    /// The entity that names `repository_fqn` as its own
+    /// `#[ORM\Entity(repositoryClass: ...)]` argument, when exactly one
+    /// does: one repository class can serve several entities (real,
+    /// valid Doctrine), and then nothing in its own method bodies says
+    /// which one a call site's instance is bound to.
+    pub(crate) fn repository_entity(&self, repository_fqn: &str) -> Option<&str> {
+        match self
+            .doctrine_entity_index()
+            .by_repository
+            .get(repository_fqn)?
+            .as_slice()
+        {
+            [only] => Some(only.as_ref()),
+            _ => None,
+        }
+    }
+}
+
+/// `Registry::doctrine_entity_index`.
+#[derive(Debug, Default, Clone)]
+struct DoctrineEntityIndex {
+    /// The first class mapped to each table.
+    by_table: FxHashMap<Name, Name>,
+    /// Every class naming each repository class.
+    by_repository: FxHashMap<Name, Vec<Name>>,
 }
 
 #[cfg(test)]
