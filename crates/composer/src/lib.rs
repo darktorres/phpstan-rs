@@ -10,7 +10,8 @@ pub mod manifest;
 pub mod vendor;
 
 use rustc_hash::FxHashMap;
-use std::path::{Path, PathBuf};
+use std::ffi::OsString;
+use std::path::{Component, Path, PathBuf};
 
 use manifest::{ComposerManifest, lexically_normalized};
 use vendor::VendorContext;
@@ -77,8 +78,56 @@ pub struct PackageIndex {
     dirs: Vec<OwnedDir>,
     // Indices into `dirs` by directory as written, and by its normalized
     // form: a file's owners are among its ancestors.
-    by_dir: FxHashMap<PathBuf, Vec<usize>>,
-    by_normalized: FxHashMap<PathBuf, Vec<usize>>,
+    by_dir: DirTrie,
+    by_normalized: DirTrie,
+}
+
+/// Directories by their path components, so the owners among a path's
+/// ancestors are found by one walk down its components, hashing each
+/// component once, and not by hashing every ancestor path in full.
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
+struct DirTrie {
+    root: TrieNode,
+}
+
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
+struct TrieNode {
+    /// The last of the directories that end here, in the order listed.
+    last: Option<usize>,
+    children: FxHashMap<OsString, TrieNode>,
+}
+
+impl DirTrie {
+    fn insert(&mut self, dir: &Path, index: usize) {
+        let mut node = &mut self.root;
+        for component in dir.components() {
+            node = node
+                .children
+                .entry(component.as_os_str().to_os_string())
+                .or_default();
+        }
+        // Directories are inserted in listing order.
+        node.last = Some(index);
+    }
+
+    /// Calls `found` with the directory that ends at each prefix of
+    /// `components` the trie has one for, shortest prefix first.
+    fn for_each_prefix<'a>(
+        &self,
+        components: impl Iterator<Item = Component<'a>>,
+        mut found: impl FnMut(usize),
+    ) {
+        let mut node = &self.root;
+        for component in components {
+            let Some(next) = node.children.get(component.as_os_str()) else {
+                return;
+            };
+            node = next;
+            if let Some(index) = node.last {
+                found(index);
+            }
+        }
+    }
 }
 
 /// A directory some package owns, with what `PackageIndex::owner`
@@ -118,14 +167,11 @@ impl PackageIndex {
                 dirs.push(OwnedDir::new(package.install_dir.clone(), owner));
             }
         }
-        let mut by_dir: FxHashMap<PathBuf, Vec<usize>> = FxHashMap::default();
-        let mut by_normalized: FxHashMap<PathBuf, Vec<usize>> = FxHashMap::default();
+        let mut by_dir = DirTrie::default();
+        let mut by_normalized = DirTrie::default();
         for (index, dir) in dirs.iter().enumerate() {
-            by_dir.entry(dir.dir.clone()).or_default().push(index);
-            by_normalized
-                .entry(dir.normalized.clone())
-                .or_default()
-                .push(index);
+            by_dir.insert(&dir.dir, index);
+            by_normalized.insert(&dir.normalized, index);
         }
         PackageIndex {
             manifests,
@@ -145,16 +191,36 @@ impl PackageIndex {
         // The directories `path_starts_with(file, dir)` holds for: an
         // ancestor of `file` as written, or of it normalized. Of equally
         // deep ones the last listed wins.
-        let normalized = lexically_normalized(file);
-        let as_written = file.ancestors().filter_map(|a| self.by_dir.get(a));
-        let resolved = normalized
-            .ancestors()
-            .filter_map(|a| self.by_normalized.get(a));
-        as_written
-            .chain(resolved)
-            .flatten()
-            .max_by_key(|&&index| (self.dirs[index].depth, index))
-            .map(|&index| self.dirs[index].owner)
+        let mut best: Option<usize> = None;
+        let mut consider = |index: usize| {
+            let key = |i: usize| (self.dirs[i].depth, i);
+            if best.is_none_or(|b| key(index) > key(b)) {
+                best = Some(index);
+            }
+        };
+        self.by_dir
+            .for_each_prefix(file.components(), &mut consider);
+        // `lexically_normalized`, as the components it would have: a `.` is
+        // dropped, and a `..` takes the last one off unless it is all that
+        // is left of a root, in which case it stays.
+        let mut normalized: Vec<Component<'_>> = Vec::new();
+        for component in file.components() {
+            match component {
+                Component::CurDir => {}
+                Component::ParentDir => {
+                    let can_pop = !matches!(normalized.as_slice(), [] | [Component::RootDir]);
+                    if can_pop {
+                        normalized.pop();
+                    } else {
+                        normalized.push(Component::ParentDir);
+                    }
+                }
+                other => normalized.push(other),
+            }
+        }
+        self.by_normalized
+            .for_each_prefix(normalized.into_iter(), &mut consider);
+        best.map(|index| self.dirs[index].owner)
     }
 
     /// `owner`'s package name; a root package may have none.
