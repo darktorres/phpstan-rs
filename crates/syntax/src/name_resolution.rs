@@ -311,7 +311,11 @@ pub fn qualify(namespace: &str, name: &str) -> String {
     if namespace.is_empty() {
         name.to_string()
     } else {
-        format!("{namespace}\\{name}")
+        let mut qualified = String::with_capacity(namespace.len() + 1 + name.len());
+        qualified.push_str(namespace);
+        qualified.push('\\');
+        qualified.push_str(name);
+        qualified
     }
 }
 
