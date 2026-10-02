@@ -44,7 +44,7 @@ fn collected(relation: &Relation, sup: &Shape, sub: &Shape) -> TrinaryLogic {
     }
 }
 
-struct Lcg(u64);
+pub(super) struct Lcg(pub(super) u64);
 
 impl Lcg {
     fn below(&mut self, n: u64) -> u64 {
@@ -71,7 +71,7 @@ fn value(rng: &mut Lcg, depth: u32) -> Type {
     }
 }
 
-fn shape(rng: &mut Lcg, depth: u32) -> Shape {
+pub(super) fn shape(rng: &mut Lcg, depth: u32) -> Shape {
     let mut fields: Vec<ShapeField> = Vec::new();
     for _ in 0..rng.below(5) {
         let key = ShapeKey::from_name(&format!("k{}", rng.below(5)));
@@ -185,4 +185,30 @@ fn keys_superset_answers_as_the_in_order_comparison_does() {
         );
     }
     assert!(yes > 200 && no > 200, "{yes} {no}");
+}
+
+/// The union of shapes is the same whether the pairs it asks about are
+/// in the thread's memo or not.
+#[test]
+fn a_union_of_shapes_is_the_same_cold_and_warm() {
+    let mut rng = Lcg(0x0DDB_A11D_EADB_EEF5);
+    for _ in 0..300 {
+        let members: Vec<Type> = (0..2 + rng.below(8))
+            .map(|_| Type::new(Repr::ArrayShape(shape(&mut rng, 1).into())))
+            .collect();
+        let fold = |members: Vec<Type>| {
+            members
+                .into_iter()
+                .reduce(Type::union)
+                .expect("some members")
+        };
+        let cold = {
+            let members = members.clone();
+            std::thread::spawn(move || fold(members)).join().unwrap()
+        };
+        let first = fold(members.clone());
+        let warm = fold(members);
+        assert_eq!(cold, first);
+        assert_eq!(first, warm);
+    }
 }

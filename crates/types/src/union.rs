@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use crate::{AccessoryKind, ClassHierarchy, Repr, Shape, ShapeField, ShapeKey, Type};
 
 /// How many members a union keeps: past it, its members are generalized
@@ -816,16 +818,18 @@ fn reduce_array_members(members: &mut Vec<Type>) {
         return;
     }
     // Each shape with whether it's known non-empty; a merge is non-empty
-    // when both sides are.
-    let mut shapes: Vec<Option<(Shape, bool)>> = Vec::new();
-    members.retain(|m| match shape_parts(m) {
+    // when both sides are. A shape that is a member's is shared with it.
+    let mut shapes: Vec<Option<(Arc<Shape>, bool)>> = Vec::new();
+    members.retain(|m| match shape_arc_parts(m) {
         Some((shape, non_empty)) => {
-            shapes.push(Some((Shape::clone(shape), non_empty)));
+            shapes.push(Some((Arc::clone(shape), non_empty)));
             false
         }
         None => true,
     });
     let relation = crate::Relation::structural();
+    let keys_superset =
+        |this: &Arc<Shape>, other: &Arc<Shape>| keys_superset_memo::answer(&relation, this, other);
     // Pairs sharing a key, as `reduceArrays`' first pass takes them.
     for i in 0..shapes.len() {
         for j in (i + 1)..shapes.len() {
@@ -849,15 +853,13 @@ fn reduce_array_members(members: &mut Vec<Type>) {
                     (Type::union(a.fields()[0].ty.clone(), b.fields()[0].ty.clone())).repr(),
                     Repr::Union(_)
                 );
-            if single_key_same_type
-                || (overlapping == a.fields().len() && is_keys_superset(&relation, b, a))
-            {
-                shapes[j] = Some((merge_shapes(b, a, true), non_empty));
+            if single_key_same_type || (overlapping == a.fields().len() && keys_superset(b, a)) {
+                shapes[j] = Some((Arc::new(merge_shapes(b, a, true)), non_empty));
                 shapes[i] = None;
                 break;
             }
-            if overlapping == b.fields().len() && is_keys_superset(&relation, a, b) {
-                shapes[i] = Some((merge_shapes(a, b, false), non_empty));
+            if overlapping == b.fields().len() && keys_superset(a, b) {
+                shapes[i] = Some((Arc::new(merge_shapes(a, b, false)), non_empty));
                 shapes[j] = None;
             }
         }
@@ -876,23 +878,77 @@ fn reduce_array_members(members: &mut Vec<Type>) {
                 continue;
             }
             let non_empty = *a_non_empty && *b_non_empty;
-            if is_keys_superset(&relation, b, a) {
-                shapes[j] = Some((merge_shapes(b, a, true), non_empty));
+            if keys_superset(b, a) {
+                shapes[j] = Some((Arc::new(merge_shapes(b, a, true)), non_empty));
                 shapes[i] = None;
                 break;
             }
-            if is_keys_superset(&relation, a, b) {
-                shapes[i] = Some((merge_shapes(a, b, false), non_empty));
+            if keys_superset(a, b) {
+                shapes[i] = Some((Arc::new(merge_shapes(a, b, false)), non_empty));
                 shapes[j] = None;
             }
         }
     }
-    members.extend(
-        shapes
-            .into_iter()
-            .flatten()
-            .map(|(shape, non_empty)| shape_type(shape, non_empty)),
-    );
+    members.extend(shapes.into_iter().flatten().map(|(shape, non_empty)| {
+        let shape = Arc::try_unwrap(shape).unwrap_or_else(|shared| Shape::clone(&shared));
+        shape_type(shape, non_empty)
+    }));
+}
+
+/// `is_keys_superset` over the structural relation, kept for each pair of
+/// shapes: a union asks it of the same shapes again and again, as the
+/// members of one union join the next.
+mod keys_superset_memo {
+    use std::cell::RefCell;
+    use std::sync::Arc;
+
+    use rustc_hash::FxHashMap;
+
+    use crate::{Relation, Shape};
+
+    /// Past this many pairs a thread's memo is emptied.
+    const LIMIT: usize = 1 << 16;
+
+    /// The pair's shapes are held with the answer, which keeps their
+    /// addresses from being taken by other shapes while the entry stands.
+    type Entries = FxHashMap<(usize, usize), (Arc<Shape>, Arc<Shape>, bool)>;
+
+    thread_local! {
+        static ANSWERS: RefCell<Entries> = RefCell::new(FxHashMap::default());
+    }
+
+    pub(super) fn answer(relation: &Relation, this: &Arc<Shape>, other: &Arc<Shape>) -> bool {
+        let key = (Arc::as_ptr(this) as usize, Arc::as_ptr(other) as usize);
+        if let Some(known) = ANSWERS.with(|a| a.borrow().get(&key).map(|e| e.2)) {
+            return known;
+        }
+        let answer = super::is_keys_superset(relation, this, other);
+        ANSWERS.with(|a| {
+            let mut entries = a.borrow_mut();
+            if entries.len() >= LIMIT {
+                entries.clear();
+            }
+            entries.insert(key, (Arc::clone(this), Arc::clone(other), answer));
+        });
+        answer
+    }
+}
+
+/// `shape_parts`, with the shape as the `Arc` the type holds it by.
+fn shape_arc_parts(ty: &Type) -> Option<(&Arc<Shape>, bool)> {
+    match ty.repr() {
+        Repr::ArrayShape(shape) => Some((shape, shape.fields().iter().any(|f| !f.optional))),
+        Repr::Intersection(members) if members.len() == 2 => {
+            let shape = members.iter().find_map(|m| match m.repr() {
+                Repr::ArrayShape(shape) => Some(shape),
+                _ => None,
+            })?;
+            members
+                .contains(&Type::accessory(AccessoryKind::NonEmptyArray))
+                .then_some((shape, true))
+        }
+        _ => None,
+    }
 }
 
 /// An array shape, or one refined non-empty (`non-empty-array{a?: int}`),
