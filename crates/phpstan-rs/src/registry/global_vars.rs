@@ -22,6 +22,7 @@
 
 use std::path::{Path, PathBuf};
 
+use rayon::prelude::*;
 use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::registry::infer_const_type;
@@ -209,8 +210,10 @@ impl Registry {
         // (`hierarchy.rs`): build the whole result into locals first,
         // assign into `self` only once the borrow is done.
         let registry: &Registry = self;
+        // Each file's walk reads only the registry, so the files are
+        // walked side by side; the sites come back in the files' order.
         let walked: Vec<(PathBuf, FileSites)> = files
-            .iter()
+            .par_iter()
             .filter(|(path, _)| !registry.global_sites.contains_key(*path))
             .map(|(path, stmts)| {
                 let file_ctx = FileCtx { registry, path };
