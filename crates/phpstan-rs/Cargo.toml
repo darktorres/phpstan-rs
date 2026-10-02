@@ -15,6 +15,7 @@ stub-sources.workspace = true
 syntax.workspace = true
 types.workspace = true
 ciborium.workspace = true
+arrayvec.workspace = true
 crc32fast.workspace = true
 clap = { version = "=4.6.7", features = ["derive"] }
 crossbeam-channel = "=0.5.17"

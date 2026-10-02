@@ -28,13 +28,9 @@ pub(crate) fn with_function_key<R>(name: &str, f: impl FnOnce(&str) -> R) -> R {
     if !name.bytes().any(|b| b.is_ascii_uppercase()) {
         return f(name);
     }
-    let mut buffer = [0u8; 128];
-    if let Some(slot) = buffer.get_mut(..name.len()) {
-        slot.copy_from_slice(name.as_bytes());
-        slot.make_ascii_lowercase();
-        if let Ok(key) = std::str::from_utf8(slot) {
-            return f(key);
-        }
+    if let Ok(mut key) = arrayvec::ArrayString::<128>::from(name) {
+        key.make_ascii_lowercase();
+        return f(&key);
     }
     f(&name.to_ascii_lowercase())
 }
