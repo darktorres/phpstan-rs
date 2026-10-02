@@ -246,14 +246,29 @@ fn name_tokens(text: &str) -> impl Iterator<Item = &str> {
     let mut tokens = Vec::new();
     let mut start = None;
     let mut prev = ' ';
+    // Where the hyphenated type keyword being passed over ends.
+    let mut skip_until = 0;
     for (i, c) in text.char_indices() {
+        if i < skip_until {
+            prev = c;
+            continue;
+        }
         match start {
             Some(_) if is_name_char(c) => {}
             Some(s) => {
                 tokens.push((&text[s..i], &text[i..]));
                 start = None;
             }
-            None if is_name_char(c) && !c.is_ascii_digit() && prev != '$' => start = Some(i),
+            None if is_name_char(c) && !c.is_ascii_digit() && prev != '$' => {
+                // `non-empty-string` is one keyword, not the names `non`,
+                // `empty` and `string`.
+                let end = hyphenated_end(text, i, is_name_char);
+                if text[i..end].contains('-') && types::is_reserved_type_word(&text[i..end]) {
+                    skip_until = end;
+                } else {
+                    start = Some(i);
+                }
+            }
             None => {}
         }
         prev = c;
@@ -271,6 +286,28 @@ fn name_tokens(text: &str) -> impl Iterator<Item = &str> {
         })
         .map(|(token, _)| token.trim_end_matches('\\'))
         .filter(|t| !t.trim_start_matches('\\').is_empty())
+        // `int`, `string`, `array` and the other words a type is read from
+        // are never a class: nothing declared can change what they name.
+        .filter(|t| !types::is_reserved_type_word(t))
+}
+
+/// Where the run of name characters and hyphens joining them (a hyphen
+/// between two letters) that starts at `start` ends.
+fn hyphenated_end(text: &str, start: usize, is_name_char: impl Fn(char) -> bool) -> usize {
+    let mut chars = text[start..].char_indices().peekable();
+    let mut end = start;
+    while let Some((offset, c)) = chars.next() {
+        let joins = is_name_char(c)
+            || (c == '-'
+                && chars
+                    .peek()
+                    .is_some_and(|(_, next)| next.is_ascii_alphabetic()));
+        if !joins {
+            break;
+        }
+        end = start + offset + c.len_utf8();
+    }
+    end
 }
 
 impl<'ast> Visitor<'ast> for Collector {

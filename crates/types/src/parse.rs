@@ -905,6 +905,100 @@ fn parse_int_bound(s: &str) -> Option<Option<i64>> {
     }
 }
 
+/// The keywords a written type reads as the type they name, each with every
+/// spelling of it, lower-case: the one list `parse_type_keyword_or_class`
+/// matches on and `is_reserved_type_word` asks.
+macro_rules! type_keywords {
+    ($($variant:ident: $($word:literal),+;)+) => {
+        #[derive(Clone, Copy, PartialEq, Eq, Debug)]
+        pub(crate) enum TypeKeyword {
+            $($variant),+
+        }
+
+        /// The keyword spelled `lowered`, which is lower-case.
+        fn type_keyword(lowered: &str) -> Option<TypeKeyword> {
+            match lowered {
+                $($($word)|+ => Some(TypeKeyword::$variant),)+
+                _ => None,
+            }
+        }
+
+        /// Every spelling of every keyword.
+        #[cfg(test)]
+        pub(crate) const TYPE_KEYWORD_WORDS: &[(&str, TypeKeyword)] =
+            &[$($(($word, TypeKeyword::$variant)),+),+];
+    };
+}
+
+type_keywords! {
+    Int: "int", "integer";
+    PositiveInt: "positive-int";
+    NegativeInt: "negative-int";
+    NonNegativeInt: "non-negative-int";
+    NonPositiveInt: "non-positive-int";
+    NonZeroInt: "non-zero-int";
+    IntMask: "int-mask", "int-mask-of";
+    Float: "float", "double";
+    LowercaseString: "lowercase-string";
+    UppercaseString: "uppercase-string";
+    NonEmptyLowercaseString: "non-empty-lowercase-string";
+    NonEmptyUppercaseString: "non-empty-uppercase-string";
+    DecimalIntString: "decimal-int-string";
+    NonDecimalIntString: "non-decimal-int-string";
+    NonEmptyString: "non-empty-string";
+    NonFalsyString: "non-falsy-string", "truthy-string";
+    LiteralString: "literal-string";
+    NumericString: "numeric-string";
+    String: "string";
+    CallableString: "callable-string";
+    EnumString: "enum-string";
+    InterfaceString: "interface-string";
+    TraitString: "trait-string";
+    ClassString: "class-string";
+    Bool: "bool", "boolean";
+    True: "true";
+    False: "false";
+    ArrayKey: "array-key";
+    Scalar: "scalar";
+    Numeric: "numeric";
+    Resource: "resource", "open-resource";
+    ClosedResource: "closed-resource";
+    ValueOf: "value-of";
+    KeyOf: "key-of";
+    Null: "null";
+    Void: "void";
+    Mixed: "mixed";
+    Never: "never", "noreturn", "never-return", "never-returns", "no-return";
+    Array: "array", "class-string-map";
+    List: "list", "non-empty-array", "non-empty-list";
+    Iterable: "iterable";
+    Closure: "closure";
+    Callable: "callable";
+    SelfType: "self";
+    Parent: "parent";
+    Static: "static", "$this";
+    Object: "object";
+}
+
+/// Whether `word` is a keyword a written type reads as the type it names
+/// and never as a class (`int`, `string`, `array`, `mixed`,
+/// `non-empty-string`, `positive-int`, `self`, `static`, ...), whatever its
+/// case, with or without a leading `\`. `Closure` is read as the class of
+/// that name, so it is not one.
+pub fn is_reserved_type_word(word: &str) -> bool {
+    let word = word.strip_prefix('\\').unwrap_or(word);
+    let mut buffer = [0u8; 32];
+    let Some(bytes) = buffer.get_mut(..word.len()) else {
+        return false;
+    };
+    bytes.copy_from_slice(word.as_bytes());
+    bytes.make_ascii_lowercase();
+    std::str::from_utf8(bytes)
+        .ok()
+        .and_then(type_keyword)
+        .is_some_and(|keyword| keyword != TypeKeyword::Closure)
+}
+
 /// `bare` (backslash-stripped) drives keyword matching; `original`
 /// (backslash-preserved) is what the class-name fallback arm constructs
 /// its `Repr::Object` from - a leading `\` means "already fully
@@ -930,25 +1024,25 @@ fn parse_type_keyword_or_class(bare: &str, original: &str, generic_args: &[&str]
         owned = bare.to_ascii_lowercase();
         &owned
     };
-    match lowered {
+    match type_keyword(lowered) {
         // `int<min, max>` and its named shorthands are real ranges,
         // not aliased to plain `Int`. `int`/`integer` also read
         // `generic_args` when present (`int<0, 255>`) - a malformed
         // bound falls back to plain `Repr::Int` rather than guessing.
-        "int" | "integer" => match generic_args {
+        Some(TypeKeyword::Int) => match generic_args {
             [min, max] => match (parse_int_bound(min), parse_int_bound(max)) {
                 (Some(min), Some(max)) => Type::int_range(min, max),
                 _ => Type::int(),
             },
             _ => Type::int(),
         },
-        "positive-int" => Type::int_range(Some(1), None),
-        "negative-int" => Type::int_range(None, Some(-1)),
-        "non-negative-int" => Type::int_range(Some(0), None),
-        "non-positive-int" => Type::int_range(None, Some(0)),
+        Some(TypeKeyword::PositiveInt) => Type::int_range(Some(1), None),
+        Some(TypeKeyword::NegativeInt) => Type::int_range(None, Some(-1)),
+        Some(TypeKeyword::NonNegativeInt) => Type::int_range(Some(0), None),
+        Some(TypeKeyword::NonPositiveInt) => Type::int_range(None, Some(0)),
         // Real PHPStan represents this as a union of two ranges, not its
         // own type (confirmed via dumpType()) - composed the same way.
-        "non-zero-int" => Type::new(Repr::Union(vec![
+        Some(TypeKeyword::NonZeroInt) => Type::new(Repr::Union(vec![
             Type::int_range(None, Some(-1)),
             Type::int_range(Some(1), None),
         ])),
@@ -961,8 +1055,8 @@ fn parse_type_keyword_or_class(bare: &str, original: &str, generic_args: &[&str]
         // generic class-name branch, which would produce a bogus
         // namespace-qualified "class" that fails every ordinary
         // `int`-typed assignability check.
-        "int-mask" | "int-mask-of" => Type::int(),
-        "float" | "double" => Type::float(),
+        Some(TypeKeyword::IntMask) => Type::int(),
+        Some(TypeKeyword::Float) => Type::float(),
         // The accessory-refined string pseudo-types are real
         // `Intersection([String, Accessory(_)])` types, mirroring real
         // PHPStan's own `IntersectionType([StringType, AccessoryXType])`.
@@ -977,20 +1071,20 @@ fn parse_type_keyword_or_class(bare: &str, original: &str, generic_args: &[&str]
         // `crate::subtype`'s `LowercaseString`/`UppercaseString`
         // literal-fact arms and the `strtolower`/`strtoupper`/etc.
         // case-tracking producers (`checker/expr/builtin_calls.rs`).
-        "lowercase-string" => Type::new(Repr::Intersection(vec![
+        Some(TypeKeyword::LowercaseString) => Type::new(Repr::Intersection(vec![
             Type::string(),
             Type::accessory(AccessoryKind::LowercaseString),
         ])),
-        "uppercase-string" => Type::new(Repr::Intersection(vec![
+        Some(TypeKeyword::UppercaseString) => Type::new(Repr::Intersection(vec![
             Type::string(),
             Type::accessory(AccessoryKind::UppercaseString),
         ])),
-        "non-empty-lowercase-string" => Type::new(Repr::Intersection(vec![
+        Some(TypeKeyword::NonEmptyLowercaseString) => Type::new(Repr::Intersection(vec![
             Type::string(),
             Type::accessory(AccessoryKind::NonEmptyString),
             Type::accessory(AccessoryKind::LowercaseString),
         ])),
-        "non-empty-uppercase-string" => Type::new(Repr::Intersection(vec![
+        Some(TypeKeyword::NonEmptyUppercaseString) => Type::new(Repr::Intersection(vec![
             Type::string(),
             Type::accessory(AccessoryKind::NonEmptyString),
             Type::accessory(AccessoryKind::UppercaseString),
@@ -998,36 +1092,36 @@ fn parse_type_keyword_or_class(bare: &str, original: &str, generic_args: &[&str]
         // `decimal-int-string` mirrors real PHPStan's own
         // `IntersectionType([StringType, AccessoryDecimalIntegerStringType])`,
         // `non-decimal-int-string` its inverse.
-        "decimal-int-string" => Type::new(Repr::Intersection(vec![
+        Some(TypeKeyword::DecimalIntString) => Type::new(Repr::Intersection(vec![
             Type::string(),
             Type::accessory(AccessoryKind::DecimalIntegerString),
         ])),
-        "non-decimal-int-string" => Type::new(Repr::Intersection(vec![
+        Some(TypeKeyword::NonDecimalIntString) => Type::new(Repr::Intersection(vec![
             Type::string(),
             Type::accessory(AccessoryKind::NonDecimalIntegerString),
         ])),
-        "non-empty-string" => Type::new(Repr::Intersection(vec![
+        Some(TypeKeyword::NonEmptyString) => Type::new(Repr::Intersection(vec![
             Type::string(),
             Type::accessory(AccessoryKind::NonEmptyString),
         ])),
-        "non-falsy-string" | "truthy-string" => Type::new(Repr::Intersection(vec![
+        Some(TypeKeyword::NonFalsyString) => Type::new(Repr::Intersection(vec![
             Type::string(),
             Type::accessory(AccessoryKind::NonFalsyString),
         ])),
-        "literal-string" => Type::new(Repr::Intersection(vec![
+        Some(TypeKeyword::LiteralString) => Type::new(Repr::Intersection(vec![
             Type::string(),
             Type::accessory(AccessoryKind::LiteralString),
         ])),
-        "numeric-string" => Type::new(Repr::Intersection(vec![
+        Some(TypeKeyword::NumericString) => Type::new(Repr::Intersection(vec![
             Type::string(),
             Type::accessory(AccessoryKind::NumericString),
         ])),
-        "string" => Type::string(),
+        Some(TypeKeyword::String) => Type::string(),
         // `callable-string` mirrors real PHPStan's own resolution
         // (`IntersectionType([StringType, CallableType])`) -
         // architecturally unrelated to the `class-string` family below
         // despite the shared "-string" name.
-        "callable-string" => Type::new(Repr::Intersection(vec![
+        Some(TypeKeyword::CallableString) => Type::new(Repr::Intersection(vec![
             Type::string(),
             Type::callable(None),
         ])),
@@ -1042,7 +1136,7 @@ fn parse_type_keyword_or_class(bare: &str, original: &str, generic_args: &[&str]
         // assignability for free through the ordinary Object-vs-Object
         // class-hierarchy walk in `registry::accepts` - no new
         // type-system machinery needed.
-        "enum-string" => {
+        Some(TypeKeyword::EnumString) => {
             let unit_enum = Type::object("UnitEnum".into(), Vec::new());
             match generic_args {
                 [single] => Type::class_string(Type::new(Repr::Intersection(vec![
@@ -1059,31 +1153,33 @@ fn parse_type_keyword_or_class(bare: &str, original: &str, generic_args: &[&str]
         // `<T>` form: real PHPStan has none for `trait-string`, and
         // `interface-string<T>` has no real corpus evidence calling for
         // it.
-        "interface-string" => Type::new(Repr::ClassKindString(ClassKind::Interface)),
-        "trait-string" => Type::new(Repr::ClassKindString(ClassKind::Trait)),
+        Some(TypeKeyword::InterfaceString) => {
+            Type::new(Repr::ClassKindString(ClassKind::Interface))
+        }
+        Some(TypeKeyword::TraitString) => Type::new(Repr::ClassKindString(ClassKind::Trait)),
         // Unlike its string-refinement neighbors above, `class-string<T>`
         // carries a real, template-bindable inner type when given one -
         // needed for `@template R of Base` / `@param class-string<R> $x`
         // shapes to bind `R` from a real `Foo::class` argument. A bare
         // `class-string` has nothing to preserve and stays plain
         // `String`.
-        "class-string" => match generic_args {
+        Some(TypeKeyword::ClassString) => match generic_args {
             [] => Type::string(),
             [single] => Type::class_string(parse_written_type(single)),
             _ => Type::string(),
         },
-        "bool" | "boolean" => Type::bool(),
-        "true" => Type::bool_literal(true),
-        "false" => Type::bool_literal(false),
+        Some(TypeKeyword::Bool) => Type::bool(),
+        Some(TypeKeyword::True) => Type::bool_literal(true),
+        Some(TypeKeyword::False) => Type::bool_literal(false),
         // Real, documented PHPStan/Psalm pseudo-types.
-        "array-key" => Type::new(Repr::Union(vec![Type::int(), Type::string()])),
-        "scalar" => Type::new(Repr::Union(vec![
+        Some(TypeKeyword::ArrayKey) => Type::new(Repr::Union(vec![Type::int(), Type::string()])),
+        Some(TypeKeyword::Scalar) => Type::new(Repr::Union(vec![
             Type::int(),
             Type::float(),
             Type::string(),
             Type::bool(),
         ])),
-        "numeric" => Type::new(Repr::Union(vec![
+        Some(TypeKeyword::Numeric) => Type::new(Repr::Union(vec![
             Type::int(),
             Type::float(),
             Type::new(Repr::Intersection(vec![
@@ -1095,8 +1191,8 @@ fn parse_type_keyword_or_class(bare: &str, original: &str, generic_args: &[&str]
         // (file/curl/... handles). `open-resource` is an ordinary (open)
         // `resource`; a `closed-resource` is its own kind, one
         // `is_resource()` rejects (PHPStan's `ClosedResourceType`).
-        "resource" | "open-resource" => Type::new(Repr::Resource { closed: false }),
-        "closed-resource" => Type::new(Repr::Resource { closed: true }),
+        Some(TypeKeyword::Resource) => Type::new(Repr::Resource { closed: false }),
+        Some(TypeKeyword::ClosedResource) => Type::new(Repr::Resource { closed: true }),
         // `value-of<T>`/`key-of<T>` - real PHPStan's own
         // `ValueOfType`/`KeyOfType`, both evaluated against `T`'s
         // resolved type only once needed. This project has no general
@@ -1108,7 +1204,7 @@ fn parse_type_keyword_or_class(bare: &str, original: &str, generic_args: &[&str]
         // needs registry access this parse-time function doesn't have,
         // so it stays a `Repr::ValueOf`, resolved later by
         // `Registry::resolve_deferred_value_of`.
-        "value-of" => match generic_args {
+        Some(TypeKeyword::ValueOf) => match generic_args {
             [single] => {
                 let ty = parse_written_type(single);
                 match ty.repr() {
@@ -1122,7 +1218,7 @@ fn parse_type_keyword_or_class(bare: &str, original: &str, generic_args: &[&str]
             }
             _ => Type::mixed(),
         },
-        "key-of" => match generic_args {
+        Some(TypeKeyword::KeyOf) => match generic_args {
             [single] => {
                 let ty = parse_written_type(single);
                 match ty.repr() {
@@ -1136,11 +1232,11 @@ fn parse_type_keyword_or_class(bare: &str, original: &str, generic_args: &[&str]
             }
             _ => Type::mixed(),
         },
-        "null" => Type::null(),
-        "void" => Type::void(),
+        Some(TypeKeyword::Null) => Type::null(),
+        Some(TypeKeyword::Void) => Type::void(),
         // The written keyword is explicit `mixed` (`Repr::Mixed`).
-        "mixed" => Type::explicit_mixed(),
-        "never" | "noreturn" | "never-return" | "never-returns" | "no-return" => Type::never(),
+        Some(TypeKeyword::Mixed) => Type::explicit_mixed(),
+        Some(TypeKeyword::Never) => Type::never(),
         // `array<K, V>`'s key argument is real
         // (`Repr::Array`'s own key slot), not discarded. Bare `array`
         // still means "key unknown" - `Type::unknown_array_key()`.
@@ -1155,7 +1251,7 @@ fn parse_type_keyword_or_class(bare: &str, original: &str, generic_args: &[&str]
         // <TKey>, TValue>`, this project's own extension with no real
         // PHPStan precedent to check a 1-arg form against) keeps the
         // plain, non-benevolent default it always had.
-        "array" | "class-string-map" => match generic_args.len() {
+        Some(TypeKeyword::Array) => match generic_args.len() {
             0 => Type::array_of(Type::mixed()),
             1 if bare == "array" => Type::array(
                 Type::benevolent_array_key(),
@@ -1176,7 +1272,7 @@ fn parse_type_keyword_or_class(bare: &str, original: &str, generic_args: &[&str]
         // `Intersection([Array(_), Accessory(_)])` types, mirroring real
         // PHPStan's `IntersectionType([ArrayType,
         // AccessoryArrayListType/NonEmptyArrayType])`.
-        "list" | "non-empty-array" | "non-empty-list" => {
+        Some(TypeKeyword::List) => {
             let elem_ty = match generic_args.len() {
                 0 => Type::mixed(),
                 1 => parse_written_type(generic_args[0]),
@@ -1212,7 +1308,7 @@ fn parse_type_keyword_or_class(bare: &str, original: &str, generic_args: &[&str]
         // Parsing it as bare `array` would reject any real
         // Generator/Iterator/IteratorAggregate passed to an
         // `iterable`-hinted parameter.
-        "iterable" => {
+        Some(TypeKeyword::Iterable) => {
             let (key_ty, element_ty) = match generic_args {
                 [] => (Type::mixed(), Type::mixed()),
                 [value] => (Type::mixed(), parse_written_type(value)),
@@ -1248,22 +1344,24 @@ fn parse_type_keyword_or_class(bare: &str, original: &str, generic_args: &[&str]
         // unqualified `Closure` falls through to the ordinary
         // class-reference resolution below instead, deferring to a real
         // `use` import when one exists.
-        "closure" if original.starts_with('\\') => {
+        Some(TypeKeyword::Closure) if original.starts_with('\\') => {
             Type::object(("\\Closure".to_string()).into(), Vec::new())
         }
-        "callable" => Type::callable(None),
+        Some(TypeKeyword::Callable) => Type::callable(None),
         // `self<T>`/`static<T>`: the current class with those arguments.
-        "self" => Type::self_ref(generic_args.iter().map(|a| parse_written_type(a)).collect()),
-        "parent" => Type::parent_ref(),
+        Some(TypeKeyword::SelfType) => {
+            Type::self_ref(generic_args.iter().map(|a| parse_written_type(a)).collect())
+        }
+        Some(TypeKeyword::Parent) => Type::parent_ref(),
         // `@return $this` is a real, PHPStan-documented PHPDoc
         // convention - not a variable reference despite the `$` sigil
         // (real shape: amphp/amp's `@return $this` on several fluent
         // methods).
-        "$this" if generic_args.is_empty() => Type::this(),
-        "static" | "$this" => {
+        Some(TypeKeyword::Static) if lowered == "$this" && generic_args.is_empty() => Type::this(),
+        Some(TypeKeyword::Static) => {
             Type::static_ref(generic_args.iter().map(|a| parse_written_type(a)).collect())
         }
-        "object" => Type::object_without_class(),
+        Some(TypeKeyword::Object) => Type::object_without_class(),
         // A user-defined generic class (`Collection<User>`): each type
         // argument is a full type string, re-run through
         // `parse_generic_arg` (call-site-variance-aware; falls straight

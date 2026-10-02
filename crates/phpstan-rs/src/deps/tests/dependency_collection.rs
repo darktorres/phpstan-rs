@@ -113,7 +113,7 @@ fn collects_class_names_in_phpdoc_tags() {
             namespace App;
             use Lib\Imported;
             /**
-             * @mixin Mixed
+             * @mixin Mixture
              * @template T of Bound
              */
             class Foo {
@@ -132,7 +132,7 @@ fn collects_class_names_in_phpdoc_tags() {
             }
         "#,
     );
-    assert!(names.contains("app\\mixed"));
+    assert!(names.contains("app\\mixture"));
     assert!(names.contains("app\\bound"));
     assert!(names.contains("lib\\imported"));
     assert!(names.contains("lib\\other"));
@@ -141,6 +141,40 @@ fn collects_class_names_in_phpdoc_tags() {
     assert!(!names.contains("app\\ignored"));
     assert!(!names.contains("other"));
     assert!(!names.contains("app\\param"));
+}
+
+#[test]
+fn a_keyword_in_a_phpdoc_type_is_not_a_name() {
+    let names = refs(
+        r#"<?php
+            namespace App;
+            class Foo {
+                /**
+                 * @param int $a
+                 * @param non-empty-string|null $b
+                 * @param list<positive-int>|array{list: Kept} $c
+                 * @param \String $d
+                 * @return Closure|callable-string|Other-Thing
+                 */
+                public function m($a, $b, $c, $d) {}
+            }
+        "#,
+    );
+    for keyword in [
+        "int", "string", "null", "list", "non", "empty", "positive", "callable",
+    ] {
+        assert!(!names.contains(keyword), "{keyword}");
+        assert!(
+            !names.contains(&format!("app\\{keyword}")),
+            "app\\{keyword}"
+        );
+    }
+    assert!(names.contains("app\\kept"));
+    // A class is still a class: `Closure`, and both halves of a name that
+    // only looks hyphenated.
+    assert!(names.contains("app\\closure"));
+    assert!(names.contains("app\\other"));
+    assert!(names.contains("app\\thing"));
 }
 
 #[test]

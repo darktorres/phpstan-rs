@@ -14,6 +14,7 @@ mod mentions;
 mod narrowing;
 mod node_flags;
 mod parsing;
+mod reserved_type_words;
 mod subtyping;
 mod subtyping_properties;
 mod templates_and_substitution;
