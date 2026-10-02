@@ -7,6 +7,7 @@
 
 pub mod constraint;
 pub mod manifest;
+pub mod path_order;
 pub mod vendor;
 
 use rustc_hash::FxHashMap;

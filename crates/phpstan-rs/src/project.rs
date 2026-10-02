@@ -39,7 +39,6 @@ mod duplicate_functions;
 mod file_declarations;
 mod file_table;
 mod mock_hygiene;
-mod path_order;
 pub mod session;
 pub(crate) mod use_sites;
 mod whole_program;

@@ -28,7 +28,7 @@ fn key(path: &Path) -> Vec<u8> {
 }
 
 /// `paths.sort()`, stable, without comparing component walks.
-pub(super) fn sort_paths(paths: &mut [PathBuf]) {
+pub fn sort_paths(paths: &mut [PathBuf]) {
     paths.sort_by_cached_key(|path| key(path));
 }
 

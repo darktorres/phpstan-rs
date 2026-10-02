@@ -169,8 +169,10 @@ struct Resolver<'p> {
     base_dir: &'p Path,
     generated_dir: &'p Path,
     // Each directory's canonical form, found once: autoload entries share
-    // a few thousand directories among tens of thousands of files.
-    canonical_dirs: FxHashMap<PathBuf, Option<PathBuf>>,
+    // a few thousand directories among tens of thousands of files. Keyed by
+    // the directory's text as written, which hashes as bytes - a `Path`
+    // hashes component by component.
+    canonical_dirs: FxHashMap<Vec<u8>, Option<PathBuf>>,
 }
 
 impl<'p> Resolver<'p> {
@@ -220,7 +222,7 @@ impl<'p> Resolver<'p> {
         // Containment is decided on the path as written, not its canonical
         // form: a path-repository package is a `vendor/<name>` symlink to a
         // directory outside `vendor/`, and still belongs to vendor context.
-        let resolved = self.canonical(Path::new(&raw))?;
+        let resolved = self.canonical(&raw)?;
         if resolved.starts_with(self.vendor_dir) {
             return Some(resolved);
         }
@@ -232,7 +234,8 @@ impl<'p> Resolver<'p> {
 
     /// `std::fs::canonicalize(path)`, through its directory's canonical
     /// form when the entry itself isn't a link.
-    fn canonical(&mut self, path: &Path) -> Option<PathBuf> {
+    fn canonical(&mut self, text: &str) -> Option<PathBuf> {
+        let path = Path::new(text);
         let entry = std::fs::symlink_metadata(path).ok()?;
         let (Some(dir), Some(name)) = (path.parent(), path.file_name()) else {
             return std::fs::canonicalize(path).ok();
@@ -240,12 +243,19 @@ impl<'p> Resolver<'p> {
         if entry.file_type().is_symlink() || dir.as_os_str().is_empty() {
             return std::fs::canonicalize(path).ok();
         }
-        let dir = self
-            .canonical_dirs
-            .entry(dir.to_path_buf())
-            .or_insert_with(|| std::fs::canonicalize(dir).ok())
-            .as_ref()?;
-        Some(dir.join(name))
+        // The directory by the text before the file name: `Path::parent`
+        // is that text without its trailing separators, so it is found by
+        // bytes, and a directory spelled twice (`a//b`, `a/b`) is found
+        // under either, as a canonical form that is the same.
+        let dir_text = dir.as_os_str().as_encoded_bytes();
+        let canonical = match self.canonical_dirs.get(dir_text) {
+            Some(found) => found,
+            None => self
+                .canonical_dirs
+                .entry(dir_text.to_vec())
+                .or_insert_with(|| std::fs::canonicalize(dir).ok()),
+        };
+        Some(canonical.as_ref()?.join(name))
     }
 }
 
@@ -306,8 +316,8 @@ fn eval_concat(
 }
 
 fn dedup(ctx: &mut VendorContext) {
-    ctx.files.sort();
+    crate::path_order::sort_paths(&mut ctx.files);
     ctx.files.dedup();
-    ctx.dirs.sort();
+    crate::path_order::sort_paths(&mut ctx.dirs);
     ctx.dirs.dedup();
 }
