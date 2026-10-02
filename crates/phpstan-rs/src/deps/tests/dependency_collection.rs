@@ -252,3 +252,90 @@ fn the_one_walk_for_both_sets_is_the_two_walks() {
         );
     }
 }
+
+#[test]
+fn doc_names_are_each_comments_types_less_the_templates_in_scope() {
+    let names = refs(
+        r#"<?php
+            namespace App;
+            use Lib\Imported;
+
+            /**
+             * @template T of Bound
+             * @extends Base<T, Imported>
+             * Prose that mentions Ignored is skipped.
+             */
+            class Box extends Base {
+                /** @var list<T|Held> */
+                public $items;
+
+                /**
+                 * @template U
+                 * @param T|U|Arg $x
+                 * @param callable(Cb): Ret $f
+                 * @return array{key: Out, other?: T}
+                 */
+                public function m($x, $f) {}
+            }
+
+            /**
+             * @template F
+             * @param F|Free $v
+             * @return Result
+             */
+            function standalone($v) {}
+
+            /** @return non-empty-string|positive-int|Hyphen-Name */
+            function keywords() {}
+        "#,
+    );
+    let expected = [
+        "app\\bound",
+        "app\\base",
+        "lib\\imported",
+        "app\\held",
+        "app\\arg",
+        "app\\cb",
+        "app\\ret",
+        "app\\out",
+        "app\\free",
+        "app\\result",
+        "app\\hyphen",
+        "app\\name",
+        // As written too, for a constant-named type's global fallback.
+        "bound",
+        "base",
+        "imported",
+        "held",
+        "arg",
+        "cb",
+        "ret",
+        "out",
+        "free",
+        "result",
+        "hyphen",
+        "name",
+    ];
+    for name in expected {
+        assert!(names.contains(name), "{name} is collected");
+    }
+    for not in [
+        "t",
+        "u",
+        "f",
+        "app\\t",
+        "app\\u",
+        "app\\f",
+        "app\\ignored",
+        "ignored",
+        "app\\non",
+        "app\\empty",
+        "app\\positive",
+        "int",
+        "string",
+        "array",
+        "list",
+    ] {
+        assert!(!names.contains(not), "{not} is not collected");
+    }
+}

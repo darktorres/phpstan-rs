@@ -66,9 +66,36 @@ struct Collector {
     ctx: NameContext,
     // Whether function and method bodies are walked.
     bodies: bool,
-    // The template parameters declared by the classes and functions being
-    // walked, innermost last: names that are not classes.
-    templates: Vec<FxHashSet<String>>,
+    // The doc comments of the classes and functions being walked,
+    // innermost last: their template parameters are names that are not
+    // classes.
+    templates: Vec<Option<std::sync::Arc<DocNames>>>,
+}
+
+/// What a doc comment's text alone gives the collector, kept by the text:
+/// the same comments are read by each walk, at the statement and at the
+/// declaration, and the names in the types of their tags do not depend on
+/// where they are read.
+struct DocNames {
+    /// The name-shaped tokens of every tag's types, in order.
+    tokens: Vec<String>,
+    /// The template parameters its `@template` tags declare.
+    declared: FxHashSet<String>,
+}
+
+/// `doc`'s `DocNames`.
+fn doc_names_of(doc: &str) -> std::sync::Arc<DocNames> {
+    static MEMO: std::sync::LazyLock<syntax::memo::Memo<DocNames>> =
+        std::sync::LazyLock::new(|| syntax::memo::Memo::with_limits(1024, 256 * 1024));
+    MEMO.get(doc, |doc| {
+        let tags = doc_tags(doc);
+        let declared = declared_templates(&tags);
+        let mut tokens = Vec::new();
+        for (tag, rest) in &tags {
+            tokens.extend(tag_type_tokens(tag, rest).into_iter().map(str::to_string));
+        }
+        DocNames { tokens, declared }
+    })
 }
 
 impl Collector {
@@ -98,24 +125,26 @@ impl Collector {
     /// and a template parameter in scope isn't a class.
     fn doc_names(&mut self, doc: Option<&str>) {
         let Some(doc) = doc else { return };
-        let tags = doc_tags(doc);
-        let declared = declared_templates(&tags);
-        for (tag, rest) in &tags {
-            for token in tag_type_tokens(tag, rest) {
-                if declared.contains(token) || self.templates.iter().any(|t| t.contains(token)) {
-                    continue;
-                }
-                let resolved = dependency_key(&self.ctx.resolve(token));
-                self.add(resolved);
-                self.add(dependency_key(token));
+        let parsed = doc_names_of(doc);
+        for token in &parsed.tokens {
+            if parsed.declared.contains(token)
+                || self
+                    .templates
+                    .iter()
+                    .flatten()
+                    .any(|t| t.declared.contains(token))
+            {
+                continue;
             }
+            let resolved = dependency_key(&self.ctx.resolve(token));
+            self.add(resolved);
+            self.add(dependency_key(token));
         }
     }
 
-    /// The template parameters `doc` declares.
-    fn templates_of(doc: Option<&str>) -> FxHashSet<String> {
-        doc.map(|doc| declared_templates(&doc_tags(doc)))
-            .unwrap_or_default()
+    /// `doc`'s names, for the template parameters it declares.
+    fn templates_of(doc: Option<&str>) -> Option<std::sync::Arc<DocNames>> {
+        doc.map(doc_names_of)
     }
 }
 
@@ -124,6 +153,10 @@ impl Collector {
 fn doc_tags(doc: &str) -> Vec<(&str, &str)> {
     doc.lines()
         .filter_map(|line| {
+            // A tag starts with an `@`; a line with none has no tag.
+            if !line.contains('@') {
+                return None;
+            }
             let line = line
                 .trim_start()
                 .trim_start_matches("/**")
@@ -352,7 +385,18 @@ impl<'ast> Visitor<'ast> for Collector {
             }
             _ => {}
         }
-        self.doc_names(stmt.doc_comment.as_deref());
+        // A function's or a class's own doc comment is read again when the
+        // walk reaches the declaration, by `visit_function_decl` or
+        // `visit_class_def`, to the same names: only a comment the
+        // declaration does not have is read here.
+        let declaration_doc = match &stmt.kind {
+            StmtKind::FunctionDecl(function) => Some(function.doc_comment.as_deref()),
+            StmtKind::ClassDecl(class) => Some(class.def.doc_comment.as_deref()),
+            _ => None,
+        };
+        if declaration_doc != Some(stmt.doc_comment.as_deref()) {
+            self.doc_names(stmt.doc_comment.as_deref());
+        }
         walk_stmt(self, stmt);
     }
 
