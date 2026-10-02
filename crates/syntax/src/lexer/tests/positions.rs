@@ -51,3 +51,33 @@ fn positions_in_an_ascii_source_are_where_counting_puts_them() {
         );
     }
 }
+
+#[test]
+fn positions_in_a_fragment_are_where_counting_from_its_base_puts_them() {
+    let src = "$a = 'héllo';\n  echo $b;\n$c";
+    let base = Position { line: 7, col: 12 };
+    let boundaries: Vec<usize> = (0..=src.len())
+        .filter(|&i| src.is_char_boundary(i))
+        .collect();
+    let mut lexer = Lexer::new_in_php_at(src, base);
+    let order = boundaries
+        .iter()
+        .copied()
+        .chain(boundaries.iter().rev().copied())
+        .chain((0..boundaries.len()).map(|i| boundaries[(i * 5) % boundaries.len()]));
+    for offset in order {
+        let relative = naive(src, offset);
+        let expected = if relative.line == 1 {
+            Position {
+                line: base.line,
+                col: base.col + relative.col - 1,
+            }
+        } else {
+            Position {
+                line: base.line + relative.line - 1,
+                col: relative.col,
+            }
+        };
+        assert_eq!(lexer.line_col_at(offset), expected, "offset {offset}");
+    }
+}

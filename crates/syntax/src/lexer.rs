@@ -255,32 +255,30 @@ impl<'a> Lexer<'a> {
 
     /// The position of a byte offset in the file (see `base`). Tokens
     /// come in source order, so the offset is nearly always on the line of
-    /// the one before: in an ASCII file whose first line is the file's,
-    /// that is a byte count added to the last position.
+    /// the one before: the characters between the two are counted, a byte
+    /// count in an ASCII file.
     #[inline]
     fn line_col_at(&mut self, byte_pos: usize) -> Position {
         let (offset, from, line_end) = self.cursor;
-        if self.ascii
-            && byte_pos >= offset
-            && byte_pos < line_end
-            && self.base.line == 1
-            && self.base.col == 1
-        {
+        if byte_pos >= offset && byte_pos < line_end {
             if byte_pos == offset {
-                return from;
+                return self.in_file(from);
             }
             let position = Position {
                 line: from.line,
-                col: from.col + (byte_pos - offset) as u32,
+                col: from.col + self.columns(offset, byte_pos) as u32,
             };
             self.cursor = (byte_pos, position, line_end);
-            return position;
+            return self.in_file(position);
         }
-        self.line_col_slow(byte_pos)
+        let position = self.relative_line_col_at(byte_pos);
+        self.in_file(position)
     }
 
-    fn line_col_slow(&mut self, byte_pos: usize) -> Position {
-        let pos = self.relative_line_col_at(byte_pos);
+    /// `pos`, a position counted from the start of the source, in the file
+    /// the source is part of (see `base`).
+    #[inline]
+    fn in_file(&self, pos: Position) -> Position {
         if pos.line == 1 {
             Position {
                 line: self.base.line,
