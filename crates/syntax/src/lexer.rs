@@ -67,6 +67,16 @@ pub struct Lexer<'a> {
     interner: Arc<Interner>,
 }
 
+/// Where the `/* */` comment starting at `at` ends: past its `*/`, which
+/// is looked for after the `/*`, or at the end of the source.
+fn block_comment_end(src: &[u8], at: usize) -> usize {
+    let from = (at + 2).min(src.len());
+    match memchr::memmem::find(&src[from..], b"*/") {
+        Some(found) => from + found + 2,
+        None => src.len(),
+    }
+}
+
 /// Advances past a single- or double-quoted string literal starting at
 /// `i` (which must be exactly on the opening quote byte), honoring just
 /// enough escaping (`\'`/`\\`) to find the real closing quote - shared
@@ -243,8 +253,33 @@ impl<'a> Lexer<'a> {
         }
     }
 
-    /// The position of a byte offset in the file (see `base`).
+    /// The position of a byte offset in the file (see `base`). Tokens
+    /// come in source order, so the offset is nearly always on the line of
+    /// the one before: in an ASCII file whose first line is the file's,
+    /// that is a byte count added to the last position.
+    #[inline]
     fn line_col_at(&mut self, byte_pos: usize) -> Position {
+        let (offset, from, line_end) = self.cursor;
+        if self.ascii
+            && byte_pos >= offset
+            && byte_pos < line_end
+            && self.base.line == 1
+            && self.base.col == 1
+        {
+            if byte_pos == offset {
+                return from;
+            }
+            let position = Position {
+                line: from.line,
+                col: from.col + (byte_pos - offset) as u32,
+            };
+            self.cursor = (byte_pos, position, line_end);
+            return position;
+        }
+        self.line_col_slow(byte_pos)
+    }
+
+    fn line_col_slow(&mut self, byte_pos: usize) -> Position {
         let pos = self.relative_line_col_at(byte_pos);
         if pos.line == 1 {
             Position {
@@ -656,11 +691,30 @@ impl<'a> Lexer<'a> {
         self.pos = skip_string_literal_bytes(self.src, self.pos);
     }
 
+    /// Where the line comment at the position ends: at the newline, or at
+    /// the `?>` that closes PHP mode, or at the end of the source.
+    fn line_comment_end(&self) -> usize {
+        let mut at = self.pos;
+        while let Some(found) = memchr::memchr2(b'\n', b'?', &self.src[at..]) {
+            let end = at + found;
+            if self.src[end] == b'\n' || self.src.get(end + 1) == Some(&b'>') {
+                return end;
+            }
+            at = end + 1;
+        }
+        self.src.len()
+    }
+
     fn skip_whitespace_and_comments(&mut self) {
         loop {
             match self.peek() {
                 b' ' | b'\t' | b'\r' | b'\n' => {
-                    self.pos += 1;
+                    let rest = &self.src[self.pos..];
+                    let blanks = rest
+                        .iter()
+                        .position(|b| !matches!(b, b' ' | b'\t' | b'\r' | b'\n'))
+                        .unwrap_or(rest.len());
+                    self.pos += blanks;
                 }
                 b'#' => {
                     if self.starts_with(b"#[") {
@@ -679,23 +733,13 @@ impl<'a> Lexer<'a> {
                         break;
                     } else {
                         let start = self.pos;
-                        while self.pos < self.src.len()
-                            && self.peek() != b'\n'
-                            && !self.starts_with(b"?>")
-                        {
-                            self.pos += 1;
-                        }
+                        self.pos = self.line_comment_end();
                         self.comments.push((start, self.pos));
                     }
                 }
                 b'/' if self.peek_at(1) == b'/' => {
                     let start = self.pos;
-                    while self.pos < self.src.len()
-                        && self.peek() != b'\n'
-                        && !self.starts_with(b"?>")
-                    {
-                        self.pos += 1;
-                    }
+                    self.pos = self.line_comment_end();
                     self.comments.push((start, self.pos));
                 }
                 // `/**/` (empty) is conventionally just a regular comment,
@@ -706,11 +750,7 @@ impl<'a> Lexer<'a> {
                 b'/' if self.starts_with(b"/**") && self.peek_at(3) != b'/' => break,
                 b'/' if self.peek_at(1) == b'*' => {
                     let start = self.pos;
-                    self.pos += 2;
-                    while self.pos < self.src.len() && !self.starts_with(b"*/") {
-                        self.pos += 1;
-                    }
-                    self.pos = (self.pos + 2).min(self.src.len());
+                    self.pos = block_comment_end(self.src, self.pos);
                     self.comments.push((start, self.pos));
                 }
                 _ => break,
