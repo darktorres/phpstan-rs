@@ -11,6 +11,7 @@ name = "syntax"
 [dependencies]
 arbitrary = { version = "=1.4.2", features = ["derive"], optional = true }
 hotpath.workspace = true
+memchr.workspace = true
 rustc-hash.workspace = true
 serde.workspace = true
 stacker.workspace = true

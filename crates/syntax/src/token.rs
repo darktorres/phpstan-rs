@@ -127,80 +127,73 @@ impl Keyword {
         for (dst, src) in buf.iter_mut().zip(bytes) {
             *dst = src.to_ascii_lowercase();
         }
-        // `bytes` is a raw identifier-shaped byte span - `is_ident_
-        // continue` accepts any byte `>= 0x80` without tracking UTF-8
-        // sequence boundaries (the same reason `Lexer::lex_ident_raw`
-        // uses `from_utf8_lossy`, not `from_utf8`, to build the owned
-        // `Identifier` string), so a boundary-split multi-byte character
-        // could make this slice invalid UTF-8. ASCII-lowercasing never
-        // changes that either way - a real keyword is always pure ASCII,
-        // so any such slice was never going to match one regardless;
-        // `None` here is exactly the right answer, not a fallback for an
-        // impossible case.
-        let lowered = std::str::from_utf8(&buf[..bytes.len()]).ok()?;
-        Some(match lowered {
-            "function" => Function,
-            "class" => Class,
-            "interface" => Interface,
-            "trait" => Trait,
-            "enum" => Enum,
-            "extends" => Extends,
-            "implements" => Implements,
-            "public" => Public,
-            "private" => Private,
-            "protected" => Protected,
-            "static" => Static,
-            "const" => Const,
-            "final" => Final,
-            "abstract" => Abstract,
-            "readonly" => Readonly,
-            "if" => If,
-            "elseif" => ElseIf,
-            "else" => Else,
-            "while" => While,
-            "do" => Do,
-            "for" => For,
-            "foreach" => Foreach,
-            "as" => As,
-            "switch" => Switch,
-            "case" => Case,
-            "default" => Default,
-            "break" => Break,
-            "continue" => Continue,
-            "return" => Return,
-            "echo" => Echo,
-            "print" => Print,
-            "new" => New,
-            "clone" => Clone,
-            "instanceof" => Instanceof,
-            "true" => True,
-            "false" => False,
-            "null" => Null,
-            "namespace" => Namespace,
-            "use" => Use,
-            "global" => Global,
-            "try" => Try,
-            "catch" => Catch,
-            "finally" => Finally,
-            "throw" => Throw,
-            "array" => Array,
-            "and" => And,
-            "or" => Or,
-            "xor" => Xor,
-            "include" => Include,
-            "include_once" => IncludeOnce,
-            "require" => Require,
-            "require_once" => RequireOnce,
-            "yield" => Yield,
-            "list" => List,
-            "fn" => Fn,
-            "match" => Match,
-            "endif" => EndIf,
-            "endwhile" => EndWhile,
-            "endfor" => EndFor,
-            "endforeach" => EndForeach,
-            "endswitch" => EndSwitch,
-            "goto" => Goto,
+        // `bytes` is a raw identifier-shaped byte span (`is_ident_continue`
+        // accepts any byte `>= 0x80`), so it may hold what is not UTF-8. A
+        // keyword is pure ASCII: matched as bytes, such a span matches no
+        // keyword, which is the answer for it, with nothing to validate.
+        Some(match &buf[..bytes.len()] {
+            b"function" => Function,
+            b"class" => Class,
+            b"interface" => Interface,
+            b"trait" => Trait,
+            b"enum" => Enum,
+            b"extends" => Extends,
+            b"implements" => Implements,
+            b"public" => Public,
+            b"private" => Private,
+            b"protected" => Protected,
+            b"static" => Static,
+            b"const" => Const,
+            b"final" => Final,
+            b"abstract" => Abstract,
+            b"readonly" => Readonly,
+            b"if" => If,
+            b"elseif" => ElseIf,
+            b"else" => Else,
+            b"while" => While,
+            b"do" => Do,
+            b"for" => For,
+            b"foreach" => Foreach,
+            b"as" => As,
+            b"switch" => Switch,
+            b"case" => Case,
+            b"default" => Default,
+            b"break" => Break,
+            b"continue" => Continue,
+            b"return" => Return,
+            b"echo" => Echo,
+            b"print" => Print,
+            b"new" => New,
+            b"clone" => Clone,
+            b"instanceof" => Instanceof,
+            b"true" => True,
+            b"false" => False,
+            b"null" => Null,
+            b"namespace" => Namespace,
+            b"use" => Use,
+            b"global" => Global,
+            b"try" => Try,
+            b"catch" => Catch,
+            b"finally" => Finally,
+            b"throw" => Throw,
+            b"array" => Array,
+            b"and" => And,
+            b"or" => Or,
+            b"xor" => Xor,
+            b"include" => Include,
+            b"include_once" => IncludeOnce,
+            b"require" => Require,
+            b"require_once" => RequireOnce,
+            b"yield" => Yield,
+            b"list" => List,
+            b"fn" => Fn,
+            b"match" => Match,
+            b"endif" => EndIf,
+            b"endwhile" => EndWhile,
+            b"endfor" => EndFor,
+            b"endforeach" => EndForeach,
+            b"endswitch" => EndSwitch,
+            b"goto" => Goto,
             _ => return None,
         })
     }
@@ -464,4 +457,67 @@ pub enum Token {
     Dollar,
 
     Eof,
+}
+
+#[cfg(test)]
+mod keyword_lookup_tests {
+    use super::*;
+
+    #[test]
+    fn a_keyword_is_found_in_any_case_and_a_near_miss_is_not() {
+        for word in [
+            "function",
+            "class",
+            "interface",
+            "trait",
+            "enum",
+            "extends",
+            "implements",
+            "public",
+            "private",
+            "protected",
+            "static",
+            "const",
+            "final",
+            "abstract",
+            "readonly",
+            "if",
+            "elseif",
+            "else",
+            "while",
+            "return",
+            "match",
+            "namespace",
+            "use",
+            "new",
+            "instanceof",
+        ] {
+            let keyword = Keyword::try_from_bytes(word.as_bytes())
+                .unwrap_or_else(|| panic!("{word} is a keyword"));
+            assert_eq!(keyword.as_str(), word);
+            assert_eq!(
+                Keyword::try_from_bytes(word.to_ascii_uppercase().as_bytes()),
+                Some(keyword.clone()),
+                "{word} in capitals"
+            );
+            let mut mixed = word.to_string();
+            mixed[..1].make_ascii_uppercase();
+            assert_eq!(
+                Keyword::try_from_bytes(mixed.as_bytes()),
+                Some(keyword.clone()),
+                "{mixed}"
+            );
+            // One byte short, one byte long, one byte changed.
+            assert_eq!(Keyword::try_from_bytes(&word.as_bytes()[1..]), None);
+            assert_eq!(Keyword::try_from_bytes(format!("{word}x").as_bytes()), None);
+            assert_eq!(Keyword::try_from_bytes(format!("x{word}").as_bytes()), None);
+        }
+        for not in ["", "Foo", "functio", "classs", "é", "fun\u{e7}tion"] {
+            assert_eq!(Keyword::try_from_bytes(not.as_bytes()), None, "{not:?}");
+        }
+        // A span that is not UTF-8 matches no keyword.
+        assert_eq!(Keyword::try_from_bytes(b"cl\xffss"), None);
+        assert_eq!(Keyword::try_from_bytes(&[0xe9; 3]), None);
+        assert_eq!(Keyword::try_from_bytes(&[b'a'; 200]), None);
+    }
 }

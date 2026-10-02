@@ -299,7 +299,7 @@ impl<'a> Lexer<'a> {
                 self.pos += 1;
                 indent += 1;
             }
-            if self.starts_with(&label) {
+            if self.starts_with_text(&label) {
                 let after = self.pos + label.len();
                 let next_byte = *self.src.get(after).unwrap_or(&0);
                 if !is_ident_continue(next_byte) {

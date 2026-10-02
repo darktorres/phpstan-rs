@@ -93,12 +93,10 @@ fn skip_string_literal_bytes(bytes: &[u8], i: usize) -> usize {
 }
 
 fn compute_line_starts(src: &[u8]) -> Vec<usize> {
-    let mut starts = vec![0];
-    for (i, &b) in src.iter().enumerate() {
-        if b == b'\n' {
-            starts.push(i + 1);
-        }
-    }
+    // A line of PHP is about thirty bytes.
+    let mut starts = Vec::with_capacity(src.len() / 32 + 1);
+    starts.push(0);
+    starts.extend(memchr::memchr_iter(b'\n', src).map(|i| i + 1));
     starts
 }
 
@@ -446,7 +444,16 @@ impl<'a> Lexer<'a> {
         c
     }
 
-    fn starts_with(&self, s: &str) -> bool {
+    /// Whether the source continues with `s` here: a comparison of `N`
+    /// bytes the compiler lays out in place, not a call to compare a slice.
+    fn starts_with<const N: usize>(&self, s: &[u8; N]) -> bool {
+        self.src
+            .get(self.pos..self.pos + N)
+            .is_some_and(|head| head == s)
+    }
+
+    /// `starts_with` for text known only at run time, a heredoc's label.
+    fn starts_with_text(&self, s: &str) -> bool {
         self.src[self.pos..].starts_with(s.as_bytes())
     }
 
@@ -470,12 +477,12 @@ impl<'a> Lexer<'a> {
             return Token::Eof;
         }
 
-        if self.starts_with("?>") {
+        if self.starts_with(b"?>") {
             self.pos += 2;
             // A single newline right after `?>` belongs to the tag.
-            if self.starts_with("\r\n") {
+            if self.starts_with(b"\r\n") {
                 self.pos += 2;
-            } else if self.starts_with("\n") {
+            } else if self.starts_with(b"\n") {
                 self.pos += 1;
             }
             // ?> implies a statement terminator in real PHP; the parser
@@ -490,7 +497,7 @@ impl<'a> Lexer<'a> {
         // two special-cased stub attributes never reach this point at
         // all - `skip_whitespace_and_comments` fully consumes them
         // itself before this check ever runs.
-        if self.starts_with("#[") {
+        if self.starts_with(b"#[") {
             self.pos += 2;
             return Token::AttributeStart;
         }
@@ -568,10 +575,10 @@ impl<'a> Lexer<'a> {
         if c == b'`' {
             return self.lex_backtick();
         }
-        if self.starts_with("<<<") {
+        if self.starts_with(b"<<<") {
             return self.lex_heredoc();
         }
-        if self.starts_with("/**") {
+        if self.starts_with(b"/**") {
             return self.lex_doc_comment();
         }
 
@@ -580,7 +587,7 @@ impl<'a> Lexer<'a> {
 
     fn lex_inline_html(&mut self) -> Token {
         // A leading `#!` line is skipped, as the CLI does, not inline HTML.
-        if self.pos == 0 && self.starts_with("#!") {
+        if self.pos == 0 && self.starts_with(b"#!") {
             while self.pos < self.src.len() && self.peek() != b'\n' {
                 self.pos += 1;
             }
@@ -589,7 +596,7 @@ impl<'a> Lexer<'a> {
         let start = self.pos;
         while self.pos < self.src.len()
             && !self.starts_with_ignore_case("<?php")
-            && !self.starts_with("<?=")
+            && !self.starts_with(b"<?=")
         {
             self.pos += 1;
         }
@@ -598,7 +605,7 @@ impl<'a> Lexer<'a> {
         if self.starts_with_ignore_case("<?php") {
             self.pos += 5;
             self.in_php = true;
-        } else if self.starts_with("<?=") {
+        } else if self.starts_with(b"<?=") {
             // The HTML before it is its own token; `<?=` is left for the
             // next call, which surfaces it as `echo`.
             if !html.is_empty() {
@@ -646,7 +653,7 @@ impl<'a> Lexer<'a> {
                     self.pos += 1;
                 }
                 b'#' => {
-                    if self.starts_with("#[") {
+                    if self.starts_with(b"#[") {
                         // An `#[Attribute(...)]` group is real code, not
                         // a comment. Breaking out of this whitespace/
                         // comment loop (without consuming `#[` itself)
@@ -664,7 +671,7 @@ impl<'a> Lexer<'a> {
                         let start = self.pos;
                         while self.pos < self.src.len()
                             && self.peek() != b'\n'
-                            && !self.starts_with("?>")
+                            && !self.starts_with(b"?>")
                         {
                             self.pos += 1;
                         }
@@ -675,7 +682,7 @@ impl<'a> Lexer<'a> {
                     let start = self.pos;
                     while self.pos < self.src.len()
                         && self.peek() != b'\n'
-                        && !self.starts_with("?>")
+                        && !self.starts_with(b"?>")
                     {
                         self.pos += 1;
                     }
@@ -686,11 +693,11 @@ impl<'a> Lexer<'a> {
                 // same way. Check that case first since it shares its
                 // middle `*` between the `/**`-looking open and the `*/`
                 // close.
-                b'/' if self.starts_with("/**") && self.peek_at(3) != b'/' => break,
+                b'/' if self.starts_with(b"/**") && self.peek_at(3) != b'/' => break,
                 b'/' if self.peek_at(1) == b'*' => {
                     let start = self.pos;
                     self.pos += 2;
-                    while self.pos < self.src.len() && !self.starts_with("*/") {
+                    while self.pos < self.src.len() && !self.starts_with(b"*/") {
                         self.pos += 1;
                     }
                     self.pos = (self.pos + 2).min(self.src.len());
@@ -845,7 +852,7 @@ impl<'a> Lexer<'a> {
     fn lex_doc_comment(&mut self) -> Token {
         let start = self.pos;
         self.pos += 3; // consume '/**'
-        while self.pos < self.src.len() && !self.starts_with("*/") {
+        while self.pos < self.src.len() && !self.starts_with(b"*/") {
             self.pos += 1;
         }
         self.pos = (self.pos + 2).min(self.src.len());
@@ -874,136 +881,136 @@ impl<'a> Lexer<'a> {
         // `<=>` must still be checked first under `b'<'`).
         match self.peek() {
             b'<' => {
-                if self.starts_with("<=>") {
+                if self.starts_with(b"<=>") {
                     op!(3, Token::Spaceship);
                 }
-                if self.starts_with("<<=") {
+                if self.starts_with(b"<<=") {
                     op!(3, Token::LtLtEquals);
                 }
-                if self.starts_with("<=") {
+                if self.starts_with(b"<=") {
                     op!(2, Token::LtEquals);
                 }
-                if self.starts_with("<<") {
+                if self.starts_with(b"<<") {
                     op!(2, Token::LtLt);
                 }
-                if self.starts_with("<>") {
+                if self.starts_with(b"<>") {
                     op!(2, Token::BangEquals);
                 }
             }
             b'=' => {
-                if self.starts_with("===") {
+                if self.starts_with(b"===") {
                     op!(3, Token::EqualsEqualsEquals);
                 }
-                if self.starts_with("==") {
+                if self.starts_with(b"==") {
                     op!(2, Token::EqualsEquals);
                 }
-                if self.starts_with("=>") {
+                if self.starts_with(b"=>") {
                     op!(2, Token::FatArrow);
                 }
             }
             b'!' => {
-                if self.starts_with("!==") {
+                if self.starts_with(b"!==") {
                     op!(3, Token::BangEqualsEquals);
                 }
-                if self.starts_with("!=") {
+                if self.starts_with(b"!=") {
                     op!(2, Token::BangEquals);
                 }
             }
             b'?' => {
-                if self.starts_with("?->") {
+                if self.starts_with(b"?->") {
                     op!(3, Token::NullsafeArrow);
                 }
-                if self.starts_with("??=") {
+                if self.starts_with(b"??=") {
                     op!(3, Token::QuestionQuestionEquals);
                 }
-                if self.starts_with("??") {
+                if self.starts_with(b"??") {
                     op!(2, Token::QuestionQuestion);
                 }
             }
             b'*' => {
-                if self.starts_with("**=") {
+                if self.starts_with(b"**=") {
                     op!(3, Token::StarStarEquals);
                 }
-                if self.starts_with("**") {
+                if self.starts_with(b"**") {
                     op!(2, Token::StarStar);
                 }
-                if self.starts_with("*=") {
+                if self.starts_with(b"*=") {
                     op!(2, Token::StarEquals);
                 }
             }
             b'.' => {
-                if self.starts_with("...") {
+                if self.starts_with(b"...") {
                     op!(3, Token::Ellipsis);
                 }
-                if self.starts_with(".=") {
+                if self.starts_with(b".=") {
                     op!(2, Token::DotEquals);
                 }
             }
             b'>' => {
-                if self.starts_with(">>=") {
+                if self.starts_with(b">>=") {
                     op!(3, Token::GtGtEquals);
                 }
-                if self.starts_with(">=") {
+                if self.starts_with(b">=") {
                     op!(2, Token::GtEquals);
                 }
-                if self.starts_with(">>") {
+                if self.starts_with(b">>") {
                     op!(2, Token::GtGt);
                 }
             }
             b'-' => {
-                if self.starts_with("->") {
+                if self.starts_with(b"->") {
                     op!(2, Token::Arrow);
                 }
-                if self.starts_with("-=") {
+                if self.starts_with(b"-=") {
                     op!(2, Token::MinusEquals);
                 }
-                if self.starts_with("--") {
+                if self.starts_with(b"--") {
                     op!(2, Token::Decrement);
                 }
             }
             b':' => {
-                if self.starts_with("::") {
+                if self.starts_with(b"::") {
                     op!(2, Token::DoubleColon);
                 }
             }
             b'+' => {
-                if self.starts_with("+=") {
+                if self.starts_with(b"+=") {
                     op!(2, Token::PlusEquals);
                 }
-                if self.starts_with("++") {
+                if self.starts_with(b"++") {
                     op!(2, Token::Increment);
                 }
             }
             b'/' => {
-                if self.starts_with("/=") {
+                if self.starts_with(b"/=") {
                     op!(2, Token::SlashEquals);
                 }
             }
             b'%' => {
-                if self.starts_with("%=") {
+                if self.starts_with(b"%=") {
                     op!(2, Token::PercentEquals);
                 }
             }
             b'&' => {
-                if self.starts_with("&=") {
+                if self.starts_with(b"&=") {
                     op!(2, Token::AmpEquals);
                 }
-                if self.starts_with("&&") {
+                if self.starts_with(b"&&") {
                     op!(2, Token::AmpAmp);
                 }
             }
             b'|' => {
-                if self.starts_with("|=") {
+                if self.starts_with(b"|=") {
                     op!(2, Token::PipeEquals);
                 }
-                if self.starts_with("||") {
+                if self.starts_with(b"||") {
                     op!(2, Token::PipePipe);
                 }
-                if self.starts_with("|>") {
+                if self.starts_with(b"|>") {
                     op!(2, Token::PipeGt);
                 }
             }
-            b'^' if self.starts_with("^=") => {
+            b'^' if self.starts_with(b"^=") => {
                 op!(2, Token::CaretEquals);
             }
             _ => {}

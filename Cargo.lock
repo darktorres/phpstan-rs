@@ -1653,6 +1653,7 @@ dependencies = [
  "arbitrary",
  "criterion",
  "hotpath",
+ "memchr",
  "rustc-hash 2.1.3",
  "serde",
  "stacker",
