@@ -152,3 +152,15 @@ fn the_stored_maps_and_sets_read_back_whole() {
         names_with_assert_tags
     );
 }
+
+#[test]
+fn a_conditional_type_survives_the_codec() {
+    use crate::registry::stub_cache::{decode, encode};
+    // Declared after the one variant that is not stored: the codec writes
+    // the variant's number.
+    let project = Project::new();
+    let ty = &project.registry().functions["iterator_to_array"].return_type;
+    assert!(ty.to_string().contains(" is true ? "), "got {ty}");
+    let back: types::Type = decode(&encode(ty).unwrap()).unwrap();
+    assert_eq!(&back, ty);
+}

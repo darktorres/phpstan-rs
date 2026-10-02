@@ -161,8 +161,20 @@ impl serde::Serialize for Name {
 
 impl<'de> serde::Deserialize<'de> for Name {
     fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Name, D::Error> {
-        let text = <std::borrow::Cow<'de, str>>::deserialize(deserializer)?;
-        Ok(Name::from(text))
+        struct Text;
+        impl serde::de::Visitor<'_> for Text {
+            type Value = Name;
+
+            fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                f.write_str("a name")
+            }
+
+            // Interned from the text where it lies, borrowed or not.
+            fn visit_str<E: serde::de::Error>(self, text: &str) -> Result<Name, E> {
+                Ok(Name::from(text))
+            }
+        }
+        deserializer.deserialize_str(Text)
     }
 }
 

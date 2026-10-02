@@ -1129,18 +1129,12 @@ impl StubIndex {
         for (records, section) in records.into_iter().zip(INDEX_RECORDS) {
             records.store(writer, section)?;
         }
-        let mut rest = Vec::new();
-        ciborium::ser::into_writer(self, &mut rest).map_err(|e| e.to_string())?;
-        writer.section("index:rest", &rest)
+        writer.section("index:rest", &crate::registry::stub_cache::encode(self)?)
     }
 
     fn load(reader: &Reader) -> Result<StubIndex, String> {
         let rest = reader.section("index:rest")?;
-        let mut index: StubIndex = ciborium::de::from_reader_with_recursion_limit(
-            &reader.buffer()[rest],
-            crate::registry::stub_cache::RECURSION_LIMIT,
-        )
-        .map_err(|e| e.to_string())?;
+        let mut index: StubIndex = crate::registry::stub_cache::decode(&reader.buffer()[rest])?;
         let [a, b, c, d, e, f] = INDEX_PACKED.map(|section| Packed::load(reader, section));
         index.dependents = a?;
         index.function_extensions = b?;

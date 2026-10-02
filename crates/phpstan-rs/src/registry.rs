@@ -635,9 +635,7 @@ impl Registry {
             raw.classes.store(writer, RAW_CLASSES)?;
             raw.functions.store(writer, RAW_FUNCTIONS)?;
         }
-        let mut rest = Vec::new();
-        ciborium::ser::into_writer(self, &mut rest).map_err(|e| e.to_string())?;
-        writer.section(REST, &rest)
+        writer.section(REST, &stub_cache::encode(self)?)
     }
 
     /// Whether every stored table, map and set of a registry read back is
@@ -672,11 +670,7 @@ impl Registry {
     /// The registry `store` wrote, its tables read in place.
     pub(crate) fn load(reader: &container::Reader) -> Result<Registry, String> {
         let rest = reader.section(REST)?;
-        let mut registry: Registry = ciborium::de::from_reader_with_recursion_limit(
-            &reader.buffer()[rest],
-            stub_cache::RECURSION_LIMIT,
-        )
-        .map_err(|e| e.to_string())?;
+        let mut registry: Registry = stub_cache::decode(&reader.buffer()[rest])?;
         registry.load_tables(reader)?;
         if reader.has_section(RAW_CLASSES) {
             registry.raw = Some(Box::new(RawDeclarations {

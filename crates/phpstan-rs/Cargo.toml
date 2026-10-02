@@ -14,7 +14,7 @@ sql.workspace = true
 stub-sources.workspace = true
 syntax.workspace = true
 types.workspace = true
-ciborium.workspace = true
+postcard.workspace = true
 arrayvec.workspace = true
 crc32fast.workspace = true
 clap = { version = "=4.6.7", features = ["derive"] }

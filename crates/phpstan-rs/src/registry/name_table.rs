@@ -766,8 +766,7 @@ pub(super) fn store_entries<V: serde::Serialize>(
     let mut names: Vec<&str> = Vec::with_capacity(rows.len());
     for (name, value) in rows {
         names.push(if fold { name.lower() } else { name.as_str() });
-        let mut encoded = Vec::new();
-        ciborium::ser::into_writer(value, &mut encoded).map_err(|e| e.to_string())?;
+        let encoded = super::stub_cache::encode(value)?;
         let name = writer.name(name.as_str())?;
         let entry = writer.entry(&encoded)?;
         for field in [name.offset, name.len, entry.offset, entry.len] {
@@ -887,8 +886,7 @@ impl<V> NameTable<V> {
 impl<V: serde::Serialize> serde::Serialize for Lazy<V> {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
         use serde::ser::Error;
-        let mut bytes = Vec::new();
-        ciborium::ser::into_writer(self.get(), &mut bytes).map_err(S::Error::custom)?;
+        let bytes = super::stub_cache::encode(self.get()).map_err(S::Error::custom)?;
         Bytes(bytes).serialize(serializer)
     }
 }
@@ -905,7 +903,7 @@ impl<'de, V: serde::de::DeserializeOwned> serde::Deserialize<'de> for Lazy<V> {
 
 /// One encoded entry, read back.
 fn decode_entry<V: serde::de::DeserializeOwned>(bytes: &[u8]) -> V {
-    ciborium::de::from_reader_with_recursion_limit(bytes, super::stub_cache::RECURSION_LIMIT)
+    super::stub_cache::decode(bytes)
         .unwrap_or_else(|e| panic!("a stored registry entry no longer decodes: {e}"))
 }
 

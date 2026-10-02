@@ -16,9 +16,17 @@ use super::container::{Reader, Unreadable, Writer};
 /// The key every cache file carries in its name.
 const KEY: &str = env!("PHPSTAN_RS_SOURCE_HASH");
 
-/// How deep a stored value may nest: types nest far deeper than the CBOR
-/// reader's default allows.
-pub(super) const RECURSION_LIMIT: usize = 1 << 16;
+/// `value` as the cache stores it: a compact encoding that does not
+/// describe itself, so what reads it back must be what wrote it. Types nest
+/// deeply, which `Type`'s own impls guard the stack for.
+pub(super) fn encode<T: serde::Serialize>(value: &T) -> Result<Vec<u8>, String> {
+    postcard::to_allocvec(value).map_err(|e| e.to_string())
+}
+
+/// What `encode` wrote.
+pub(super) fn decode<T: serde::de::DeserializeOwned>(bytes: &[u8]) -> Result<T, String> {
+    postcard::from_bytes(bytes).map_err(|e| e.to_string())
+}
 
 /// The cache directory: `PHPSTAN_RS_CACHE_DIR`, else `phpstan-rs` under
 /// `XDG_CACHE_HOME` or `~/.cache`; `None` when the cache is off.
@@ -90,10 +98,7 @@ pub(crate) fn load<T: serde::de::DeserializeOwned>(name: &str) -> Option<T> {
     let decoded = reader
         .section(VALUE)
         .map_err(|e| e.to_string())
-        .and_then(|range| {
-            ciborium::de::from_reader_with_recursion_limit(&reader.buffer()[range], RECURSION_LIMIT)
-                .map_err(|e| e.to_string())
-        });
+        .and_then(|range| decode(&reader.buffer()[range]));
     match decoded {
         Ok(value) => Some(value),
         Err(error) => {
@@ -110,10 +115,9 @@ pub(crate) fn load<T: serde::de::DeserializeOwned>(name: &str) -> Option<T> {
 
 /// Stores `value` under `name` for this build, as a file of one section.
 pub(crate) fn store<T: serde::Serialize>(name: &str, value: &T) {
-    let mut body = Vec::new();
-    if ciborium::ser::into_writer(value, &mut body).is_err() {
+    let Ok(body) = encode(value) else {
         return;
-    }
+    };
     let mut writer = Writer::new();
     if writer.section(VALUE, &body).is_ok() {
         store_container(name, writer);

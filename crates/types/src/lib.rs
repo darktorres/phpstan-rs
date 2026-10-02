@@ -300,9 +300,6 @@ pub(crate) enum Repr {
         class: Type,
         pattern: Name,
     },
-    // An extension's own payload (`crate::ExtensionTypeData`).
-    #[serde(skip)]
-    Extension(Arc<dyn ExtensionTypeData>),
     // `($subject is $target ? $if_true : $if_false)` - PHPDoc's
     // conditional-return-type syntax, lazily resolved once the real type
     // of `subject` is known. A consumer that can't resolve this variant
@@ -314,6 +311,13 @@ pub(crate) enum Repr {
         if_false: Type,
         negated: bool,
     },
+    // An extension's own payload (`crate::ExtensionTypeData`). Last, and
+    // skipped: serde numbers the variants after a skipped one differently
+    // when it writes and when it reads, which a format that writes the
+    // number (`postcard`) cannot survive, so no stored variant may follow
+    // it.
+    #[serde(skip)]
+    Extension(Arc<dyn ExtensionTypeData>),
 }
 
 /// What a conditional type (`(subject is target ? A : B)`) tests.
