@@ -17,22 +17,31 @@ use syntax::visit::any_expr_in_body;
 
 use super::Project;
 use diagnostics::{Diagnostic, DiagnosticBuilder};
-use syntax::declarations::Declared;
 
 const DOCTRINE_MAPPED: [&str; 3] = ["Entity", "Embeddable", "MappedSuperclass"];
 
 /// Every class, interface and trait `stmts` declares unconditionally, by
 /// its fully-qualified name. An enum is final and has no properties or
 /// subclasses.
-fn collect_classes<'a>(stmts: &'a [Stmt], out: &mut Vec<(String, &'a ClassDecl)>) {
-    syntax::declarations::for_each_declaration(stmts, |declaration, _| {
-        if let Declared::Class(c) = declaration.declared
-            && c.def.kind != ClassKind::Enum
-            && !declaration.conditional
-        {
-            out.push((declaration.name(), c));
-        }
-    });
+///
+/// A declaration is unconditional where the file runs it as it is read:
+/// at its top level, in a bare block, in the body of a `declare`. Nothing
+/// declared inside an expression, a function, a loop or a branch is, so
+/// these statements are all there is to look through - not every
+/// expression of every body, as `for_each_declaration` does.
+pub(super) fn collect_classes<'a>(stmts: &'a [Stmt], out: &mut Vec<(String, &'a ClassDecl)>) {
+    for stmt in stmts {
+        syntax::stack::guard(|| match &stmt.kind {
+            StmtKind::ClassDecl(c) if c.def.kind != ClassKind::Enum => {
+                out.push((c.fq_name().to_string(), c));
+            }
+            StmtKind::Block(inner)
+            | StmtKind::Declare {
+                body: Some(inner), ..
+            } => collect_classes(inner, out),
+            _ => {}
+        });
+    }
 }
 
 fn is_doctrine_mapped(c: &ClassDef, ctx_names: &[String]) -> bool {

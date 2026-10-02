@@ -100,3 +100,34 @@ fn the_one_walk_finds_what_the_five_walks_found() {
         }
     }
 }
+
+#[test]
+fn the_unconditional_classes_are_those_the_declaration_walk_finds() {
+    use syntax::ast::ClassKind;
+    use syntax::declarations::{Declared, for_each_declaration};
+    let interner = Arc::new(Interner::new());
+    let mut sources: Vec<&str> = SOURCES.to_vec();
+    sources.extend([
+        "<?php { class InBlock {} { class Deeper {} } } declare(ticks=1) { class InDeclare {} } class Top {}",
+        "<?php namespace N { class A {} } namespace M { class B {} enum E {} }",
+        "<?php if (true) { class Cond {} } else { class Other {} } while (0) { class InLoop {} } class Plain {}",
+        "<?php function f() { class InFn {} } $x = function () { class InClosure {} }; $o = new class {}; class Last {}",
+        "<?php foreach ([] as $i) { class InForeach {} } class Kept {} interface I {} trait T {}",
+    ]);
+    for (i, source) in sources.iter().enumerate() {
+        let parsed = syntax::parse(source.as_bytes(), &interner).expect("parses");
+        let mut by_visitor: Vec<String> = Vec::new();
+        for_each_declaration(&parsed.stmts, |declaration, _| {
+            if let Declared::Class(c) = declaration.declared
+                && c.def.kind != ClassKind::Enum
+                && !declaration.conditional
+            {
+                by_visitor.push(declaration.name());
+            }
+        });
+        let mut found = Vec::new();
+        super::super::class_shape::collect_classes(&parsed.stmts, &mut found);
+        let by_walk: Vec<String> = found.into_iter().map(|(name, _)| name).collect();
+        assert_eq!(by_walk, by_visitor, "source {i}");
+    }
+}
