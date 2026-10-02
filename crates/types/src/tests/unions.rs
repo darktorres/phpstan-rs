@@ -321,7 +321,7 @@ mod past_the_cap {
             .collect();
         let folded = Type::union_of(shapes);
         let shape = folded.as_array_shape().expect("one shape");
-        assert_eq!(shape.fields.len(), MAX_UNION_MEMBERS + 1);
-        assert!(shape.fields.iter().all(|f| f.optional));
+        assert_eq!(shape.fields().len(), MAX_UNION_MEMBERS + 1);
+        assert!(shape.fields().iter().all(|f| f.optional));
     }
 }

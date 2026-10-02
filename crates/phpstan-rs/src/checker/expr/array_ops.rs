@@ -108,7 +108,7 @@ impl<'a> Checker<'a> {
                 (key, general) => {
                     let (keys, values) = general.get_or_insert_with(|| {
                         shape
-                            .fields
+                            .fields()
                             .iter()
                             .map(|f| (f.key.to_type(), f.ty.clone()))
                             .unzip()
@@ -153,7 +153,7 @@ impl<'a> Checker<'a> {
             if item.spread {
                 if !degraded {
                     if let [inner] = value_ty.constant_arrays()[..] {
-                        for f in &inner.fields {
+                        for f in inner.fields() {
                             match Self::merge_shape_field(
                                 &mut shape,
                                 &mut next_index,
@@ -243,7 +243,7 @@ impl<'a> Checker<'a> {
         if !degraded {
             return Type::array_shape(shape);
         }
-        for field in shape.fields {
+        for field in shape.into_fields() {
             key_types.push(field.key.to_type());
             elem_types.push(field.ty);
         }

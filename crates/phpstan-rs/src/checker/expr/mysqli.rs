@@ -96,7 +96,7 @@ impl<'a> Checker<'a> {
         arg: Option<&Expr>,
     ) -> Option<Type> {
         let shape = row?.as_array_shape()?;
-        let fields = &shape.fields;
+        let fields = shape.fields();
         let assoc = || Type::array_shape(shape.clone());
         let numeric = || {
             Type::array_shape(Shape::sealed(

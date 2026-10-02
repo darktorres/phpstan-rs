@@ -68,9 +68,11 @@ fn refine_leaf(leaf: &Type, refined: Type) -> Type {
         return refined;
     }
     match leaf.as_array_shape() {
-        Some(shape) if shape.fields.len() == 2 => {
+        Some(shape) if shape.fields().len() == 2 => {
             let mut shape = shape.clone();
-            shape.fields[0].ty = refined;
+            if let Some(ty) = shape.field_type_at_mut(0) {
+                *ty = refined;
+            }
             Type::array_shape(shape)
         }
         _ => leaf.clone(),

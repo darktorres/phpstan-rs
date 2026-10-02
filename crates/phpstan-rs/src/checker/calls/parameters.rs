@@ -359,7 +359,7 @@ impl<'a> Checker<'a> {
         } else {
             shapes
                 .iter()
-                .map(|shape| shape.fields.len())
+                .map(|shape| shape.fields().len())
                 .min()
                 .unwrap_or(0)
         };
@@ -369,7 +369,7 @@ impl<'a> Checker<'a> {
             let mut common_key: Option<Option<&ShapeKey>> = None;
             let mut optional = false;
             for shape in &shapes {
-                let field = &shape.fields[j];
+                let field = &shape.fields()[j];
                 optional = field.optional;
                 value_ty = Some(match value_ty {
                     Some(t) => self.relation().union(t, field.ty.clone()),

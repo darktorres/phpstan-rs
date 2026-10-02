@@ -338,7 +338,7 @@ fn write_generic(f: &mut fmt::Formatter<'_>, name: &str, args: &[Type]) -> fmt::
 /// otherwise.
 fn write_shape(f: &mut fmt::Formatter<'_>, keyword: &str, shape: &Shape) -> fmt::Result {
     let mut parts: Vec<String> = shape
-        .fields
+        .fields()
         .iter()
         .map(|field| {
             let q = if field.optional { "?" } else { "" };

@@ -998,7 +998,7 @@ impl<'a> Checker<'a> {
 fn dbal_row_method_return_type(method: &str, row_type: Option<Type>) -> Option<Type> {
     let row_type = row_type?;
     let shape = row_type.as_array_shape()?;
-    let fields = &shape.fields;
+    let fields = shape.fields();
     let numeric_shape = || {
         Type::array_shape(Shape::sealed(
             fields

@@ -85,7 +85,7 @@ fn generalize_by_key_set_only_merges_the_matching_subset() {
         .iter()
         .filter(|m| {
             m.as_array_shape().is_some_and(|shape| {
-                shape.fields.len() == 1 && shape.fields[0].key.to_string().starts_with('y')
+                shape.fields().len() == 1 && shape.fields()[0].key.to_string().starts_with('y')
             })
         })
         .count();

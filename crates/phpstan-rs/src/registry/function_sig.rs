@@ -588,9 +588,7 @@ fn infer_const_type_with(
                 let mut exact = true;
                 for item in items {
                     let value_ty = infer_const_type_with(&item.value, class_const_ref);
-                    if !values.contains(&value_ty) {
-                        values.push(value_ty.clone());
-                    }
+                    values.push(value_ty.clone());
                     let key = if item.spread {
                         None
                     } else {
@@ -621,10 +619,23 @@ fn infer_const_type_with(
                 if exact {
                     Type::array_shape(shape)
                 } else {
-                    let value = match values.len() {
+                    // Only a shape that is not exact reads the values: they
+                    // are joined with each kind once, not found by looking
+                    // for each in those so far.
+                    let mut distinct: Vec<Type> = Vec::new();
+                    // A type's hash and equality read what it is, not the
+                    // key index a shape inside it may have made.
+                    #[allow(clippy::mutable_key_type)]
+                    let mut seen: rustc_hash::FxHashSet<Type> = rustc_hash::FxHashSet::default();
+                    for value in values {
+                        if seen.insert(value.clone()) {
+                            distinct.push(value);
+                        }
+                    }
+                    let value = match distinct.len() {
                         0 => Type::mixed(),
-                        1 => values.pop().expect("len checked"),
-                        _ => Type::union_of(values),
+                        1 => distinct.pop().expect("len checked"),
+                        _ => Type::union_of(distinct),
                     };
                     Type::array(Type::unknown_array_key(), value)
                 }

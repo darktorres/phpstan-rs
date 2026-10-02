@@ -665,10 +665,10 @@ fn constant_array_sizes(ty: &Type) -> Option<Vec<Count>> {
         .map(|member| {
             let shape = member.as_array_shape()?;
             let tail = usize::from(!shape.is_sealed());
-            let required = shape.fields.iter().filter(|f| !f.optional).count() + tail;
+            let required = shape.fields().iter().filter(|f| !f.optional).count() + tail;
             Some(Count {
                 min: required,
-                max: shape.fields.len() + tail,
+                max: shape.fields().len() + tail,
             })
         })
         .collect()

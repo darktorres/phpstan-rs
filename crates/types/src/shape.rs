@@ -178,13 +178,33 @@ impl ShapeField {
 /// types those other entries have.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct Shape {
-    pub fields: Vec<ShapeField>,
+    fields: Vec<ShapeField>,
     pub unsealed: Option<Box<(Type, Type)>>,
     /// The key an append would take, when it isn't the one the int keys
     /// give: after `unset($a[2])` on `[1, 2, 3]` it stays 3. Bookkeeping
     /// about how the array was built, not part of its type: equality and
     /// hashing ignore it.
     pub next_index: Option<NextArrayIndex>,
+    /// Where each key is in `fields`, for a shape with enough of them that
+    /// looking for one by comparing is slow. Made when first asked for,
+    /// kept in step by the methods that add a field, and not kept by a
+    /// copy: nothing but those methods can change the keys or their order.
+    #[serde(skip)]
+    positions: KeyPositions,
+}
+
+/// The fields a shape has before looking a key up by comparing gives way
+/// to a map.
+const INDEXED_FROM: usize = 16;
+
+/// `Shape::positions`.
+#[derive(Debug, Default)]
+struct KeyPositions(std::sync::OnceLock<rustc_hash::FxHashMap<ShapeKey, usize>>);
+
+impl Clone for KeyPositions {
+    fn clone(&self) -> KeyPositions {
+        KeyPositions::default()
+    }
 }
 
 impl PartialEq for Shape {
@@ -203,13 +223,23 @@ impl std::hash::Hash for Shape {
 }
 
 impl Shape {
-    /// A sealed shape of exactly `fields`.
-    pub fn sealed(fields: Vec<ShapeField>) -> Shape {
+    /// A shape of exactly these parts.
+    pub fn from_parts(
+        fields: Vec<ShapeField>,
+        unsealed: Option<Box<(Type, Type)>>,
+        next_index: Option<NextArrayIndex>,
+    ) -> Shape {
         Shape {
             fields,
-            unsealed: None,
-            next_index: None,
+            unsealed,
+            next_index,
+            positions: KeyPositions::default(),
         }
+    }
+
+    /// A sealed shape of exactly `fields`.
+    pub fn sealed(fields: Vec<ShapeField>) -> Shape {
+        Shape::from_parts(fields, None, None)
     }
 
     /// A sealed shape of `(name, type, optional)` fields, each name read
@@ -227,10 +257,30 @@ impl Shape {
 
     /// An unsealed shape (`...`) whose other entries are unknown.
     pub fn unsealed(fields: Vec<ShapeField>) -> Shape {
-        Shape {
+        Shape::from_parts(
             fields,
-            unsealed: Some(Box::new((Type::unknown_array_key(), Type::mixed()))),
-            next_index: None,
+            Some(Box::new((Type::unknown_array_key(), Type::mixed()))),
+            None,
+        )
+    }
+
+    /// The fields, in order.
+    pub fn fields(&self) -> &[ShapeField] {
+        &self.fields
+    }
+
+    /// The fields, in order, by value.
+    pub fn into_fields(self) -> Vec<ShapeField> {
+        self.fields
+    }
+
+    /// This shape with its other entries unknown, unless it is unsealed
+    /// already.
+    pub fn into_unsealed(self) -> Shape {
+        if self.is_sealed() {
+            Shape::unsealed(self.fields)
+        } else {
+            self
         }
     }
 
@@ -262,35 +312,96 @@ impl Shape {
         self.is_sealed() && self.fields.is_empty()
     }
 
+    /// Where `key` is in the fields.
+    fn position(&self, key: &ShapeKey) -> Option<usize> {
+        if self.fields.len() < INDEXED_FROM {
+            return self.fields.iter().position(|f| f.key == *key);
+        }
+        self.positions
+            .0
+            .get_or_init(|| {
+                self.fields
+                    .iter()
+                    .enumerate()
+                    .map(|(position, f)| (f.key.clone(), position))
+                    .collect()
+            })
+            .get(key)
+            .copied()
+    }
+
     pub fn field(&self, key: &ShapeKey) -> Option<&ShapeField> {
-        self.fields.iter().find(|f| f.key == *key)
+        self.position(key).map(|position| &self.fields[position])
+    }
+
+    /// Adds `field`, whose key the shape has no field of.
+    pub fn push(&mut self, field: ShapeField) {
+        debug_assert!(
+            self.position(&field.key).is_none(),
+            "{} is a field already",
+            field.key
+        );
+        if let Some(positions) = self.positions.0.get_mut() {
+            positions.insert(field.key.clone(), self.fields.len());
+        }
+        self.fields.push(field);
     }
 
     /// Sets `key`'s field, replacing one already there in place
     /// (last-one-wins, PHPStan's `ConstantArrayTypeBuilder::
     /// setOffsetValueType`).
     pub fn set(&mut self, field: ShapeField) {
-        match self.fields.iter_mut().find(|f| f.key == field.key) {
-            Some(existing) => *existing = field,
-            None => self.fields.push(field),
+        match self.position(&field.key) {
+            Some(position) => self.fields[position] = field,
+            None => self.push(field),
         }
+    }
+
+    /// Adds `field`, or when the shape has a field of its key, lets `merge`
+    /// fold `field` into that one in place.
+    pub fn merge_field(
+        &mut self,
+        field: ShapeField,
+        merge: impl FnOnce(&mut ShapeField, ShapeField),
+    ) {
+        match self.position(&field.key) {
+            Some(position) => merge(&mut self.fields[position], field),
+            None => self.push(field),
+        }
+    }
+
+    /// Lets `f` change each field's type and whether it is optional, in
+    /// place: the keys and their order stay as they are.
+    pub fn update_fields(&mut self, mut f: impl FnMut(&ShapeKey, &mut Type, &mut bool)) {
+        for field in &mut self.fields {
+            f(&field.key, &mut field.ty, &mut field.optional);
+        }
+    }
+
+    /// The type of the field at `position`, to change in place.
+    pub fn field_type_at_mut(&mut self, position: usize) -> Option<&mut Type> {
+        self.fields.get_mut(position).map(|field| &mut field.ty)
+    }
+
+    /// Keeps the fields `keep` is true of.
+    pub fn retain(&mut self, keep: impl FnMut(&ShapeField) -> bool) {
+        self.fields.retain(keep);
+        self.positions = KeyPositions::default();
     }
 
     /// The shape with `f` applied to each field's type and to the
     /// unsealed tail's value type.
     pub fn map_types(&self, f: &mut impl FnMut(&Type) -> Type) -> Shape {
-        Shape {
-            fields: self
-                .fields
+        Shape::from_parts(
+            self.fields
                 .iter()
                 .map(|field| ShapeField::new(field.key.clone(), f(&field.ty), field.optional))
                 .collect(),
-            unsealed: self
-                .unsealed
+            self.unsealed
                 .as_ref()
                 .map(|tail| Box::new((tail.0.clone(), f(&tail.1)))),
-            next_index: self.next_index,
-        }
+            self.next_index,
+        )
     }
 
     /// The fields as `(key text, type, optional)` tuples - tests compare

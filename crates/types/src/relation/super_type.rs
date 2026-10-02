@@ -261,7 +261,7 @@ impl Relation<'_> {
                 // can't hold keeps any value from being both.
                 (Repr::ArrayShape(shape), Repr::Array(k, v))
                 | (Repr::Array(k, v), Repr::ArrayShape(shape))
-                    if shape.fields.iter().any(|f| {
+                    if shape.fields().iter().any(|f| {
                         !f.optional
                             && (self.disjoint(k, &f.key.to_type()) || self.disjoint(v, &f.ty))
                     }) =>
@@ -320,7 +320,7 @@ impl Relation<'_> {
     /// unsealed.
     fn shape_super_type_of(&self, sup: &Shape, sub: &Shape) -> TrinaryLogic {
         let mut results = Vec::new();
-        for sup_field in &sup.fields {
+        for sup_field in sup.fields() {
             match sub.field(&sup_field.key) {
                 Some(sub_field) => {
                     let value = self.is_super_type_of(&sup_field.ty, &sub_field.ty);
@@ -340,7 +340,7 @@ impl Relation<'_> {
             }
         }
         if sup.is_sealed() {
-            for sub_field in &sub.fields {
+            for sub_field in sub.fields() {
                 if sup.field(&sub_field.key).is_none() {
                     results.push(if sub_field.optional {
                         TrinaryLogic::Maybe
@@ -458,7 +458,7 @@ fn accessory_refuses(kind: &AccessoryKind, sub: &Type) -> bool {
             AccessoryKind::NonEmptyArray if shape.is_empty_array() => return true,
             AccessoryKind::ArrayList
                 if shape
-                    .fields
+                    .fields()
                     .iter()
                     .any(|f| !f.optional && matches!(f.key, crate::ShapeKey::Str(_))) =>
             {

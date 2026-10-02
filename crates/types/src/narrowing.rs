@@ -373,7 +373,7 @@ impl Type {
                         if present {
                             shape.set(ShapeField::new(field.key.clone(), field.ty.clone(), false));
                         } else {
-                            shape.fields.retain(|f| f.key != field.key);
+                            shape.retain(|f| f.key != field.key);
                         }
                         Type::array_shape(shape)
                     }
@@ -654,14 +654,12 @@ impl Relation<'_> {
                     return Some(Type::array_shape(Shape::sealed(Vec::new())));
                 }
                 if let Some((shape, _)) = crate::union::shape_parts(member) {
-                    let required = shape.fields.iter().filter(|f| !f.optional).count() as i64;
+                    let required = shape.fields().iter().filter(|f| !f.optional).count() as i64;
                     let mut shape = shape.clone();
                     if shape.is_sealed() && hi == Some(required) {
-                        shape.fields.retain(|f| !f.optional);
-                    } else if shape.is_sealed() && lo == shape.fields.len() as i64 {
-                        for f in &mut shape.fields {
-                            f.optional = false;
-                        }
+                        shape.retain(|f| !f.optional);
+                    } else if shape.is_sealed() && lo == shape.fields().len() as i64 {
+                        shape.update_fields(|_, _, optional| *optional = false);
                     }
                     return Some(crate::union::shape_type(shape, lo >= 1));
                 }

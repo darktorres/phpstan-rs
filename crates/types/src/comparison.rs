@@ -373,10 +373,10 @@ impl Relation<'_> {
             return Outcomes::ALL;
         };
         let exact = |s: &Shape| {
-            s.fields
+            s.fields()
                 .iter()
                 .all(|f| !f.optional)
-                .then_some(s.fields.len())
+                .then_some(s.fields().len())
         };
         match (exact(sa), exact(sb)) {
             (Some(x), Some(y)) if x == y => {}
@@ -385,7 +385,7 @@ impl Relation<'_> {
         // Key by key in the left's order; a key the right lacks leaves them
         // uncomparable (`zend_hash_compare` without ordering).
         let mut out = Outcomes::NONE;
-        for field in &sa.fields {
+        for field in sa.fields() {
             let Some(other) = sb.field(&field.key) else {
                 return out.or(Outcomes::UNCOMPARABLE);
             };

@@ -98,7 +98,7 @@ impl Relation<'_> {
                 Repr::ArrayShape(shape) => {
                     // A field binds from the argument members that may
                     // have its key.
-                    for field in &shape.fields {
+                    for field in shape.fields() {
                         let arg = arg.with_key_presence(&field.key, true);
                         if !arg.is_never()
                             && let Some(arg_value) = arg.offset_value_type(Some(&field.key))

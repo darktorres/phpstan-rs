@@ -213,10 +213,10 @@ fn same_option(a: &Option<Type>, b: &Option<Type>) -> bool {
 }
 
 fn same_shape(a: &Shape, b: &Shape) -> bool {
-    a.fields.len() == b.fields.len()
-        && a.fields
+    a.fields().len() == b.fields().len()
+        && a.fields()
             .iter()
-            .zip(&b.fields)
+            .zip(b.fields())
             .all(|(x, y)| x.key == y.key && same(&x.ty, &y.ty) && x.optional == y.optional)
         && match (&a.unsealed, &b.unsealed) {
             (None, None) => true,
@@ -393,7 +393,7 @@ fn exact_hash(repr: &Repr) -> u64 {
         }
         Repr::ClassKindString(kind) => kind.hash(state),
         Repr::ArrayShape(shape) | Repr::ObjectShape(shape) => {
-            for field in &shape.fields {
+            for field in shape.fields() {
                 field.key.hash(state);
                 hash_type(&field.ty, state);
                 field.optional.hash(state);

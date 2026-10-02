@@ -451,7 +451,7 @@ fn common_string(members: Vec<Type>) -> Type {
 /// The shapes as one: a key some lack optional, values joined.
 fn one_shape(members: Vec<Type>) -> Type {
     match Type::new(Repr::Union(members.clone())).combined_shape() {
-        Some((shape, non_empty)) if shape.fields.len() <= crate::offsets::MAX_SHAPE_FIELDS => {
+        Some((shape, non_empty)) if shape.fields().len() <= crate::offsets::MAX_SHAPE_FIELDS => {
             shape_type(shape, non_empty)
         }
         _ => Type::new(Repr::Union(members)),
@@ -628,7 +628,8 @@ pub fn generalize_by_key_set(members: Vec<Type>) -> Vec<Type> {
         match m.into_repr() {
             Repr::ArrayShape(shape) => {
                 let shape = std::sync::Arc::unwrap_or_clone(shape);
-                let mut keys: Vec<ShapeKey> = shape.fields.iter().map(|f| f.key.clone()).collect();
+                let mut keys: Vec<ShapeKey> =
+                    shape.fields().iter().map(|f| f.key.clone()).collect();
                 keys.sort();
                 let key_set = (keys, shape.is_sealed());
                 match groups.iter_mut().find(|(k, _)| *k == key_set) {
@@ -645,7 +646,7 @@ pub fn generalize_by_key_set(members: Vec<Type>) -> Vec<Type> {
             continue;
         }
         let fields = variants[0]
-            .fields
+            .fields()
             .iter()
             .map(|first| {
                 let mut ty: Option<Type> = None;
@@ -666,11 +667,7 @@ pub fn generalize_by_key_set(members: Vec<Type>) -> Vec<Type> {
             .filter_map(|shape| shape.unsealed.as_deref().cloned())
             .reduce(|(ka, va), (kb, vb)| (Type::union(ka, kb), Type::union(va, vb)))
             .map(Box::new);
-        passthrough.push(Type::array_shape(Shape {
-            fields,
-            unsealed,
-            next_index: None,
-        }));
+        passthrough.push(Type::array_shape(Shape::from_parts(fields, unsealed, None)));
     }
     passthrough
 }
@@ -838,7 +835,7 @@ fn reduce_array_members(members: &mut Vec<Type>) {
             };
             let non_empty = *a_non_empty && *b_non_empty;
             let overlapping = a
-                .fields
+                .fields()
                 .iter()
                 .filter(|f| b.field(&f.key).is_some())
                 .count();
@@ -846,20 +843,20 @@ fn reduce_array_members(members: &mut Vec<Type>) {
                 continue;
             }
             let single_key_same_type = overlapping == 1
-                && a.fields.len() == 1
-                && b.fields.len() == 1
+                && a.fields().len() == 1
+                && b.fields().len() == 1
                 && !matches!(
-                    (Type::union(a.fields[0].ty.clone(), b.fields[0].ty.clone())).repr(),
+                    (Type::union(a.fields()[0].ty.clone(), b.fields()[0].ty.clone())).repr(),
                     Repr::Union(_)
                 );
             if single_key_same_type
-                || (overlapping == a.fields.len() && is_keys_superset(&relation, b, a))
+                || (overlapping == a.fields().len() && is_keys_superset(&relation, b, a))
             {
                 shapes[j] = Some((merge_shapes(b, a, true), non_empty));
                 shapes[i] = None;
                 break;
             }
-            if overlapping == b.fields.len() && is_keys_superset(&relation, a, b) {
+            if overlapping == b.fields().len() && is_keys_superset(&relation, a, b) {
                 shapes[i] = Some((merge_shapes(a, b, false), non_empty));
                 shapes[j] = None;
             }
@@ -867,8 +864,9 @@ fn reduce_array_members(members: &mut Vec<Type>) {
     }
     // Pairs the first pass can't reach: an empty shape, or one with an
     // unsealed tail or optional keys, absorbed into a shape covering it.
-    let candidate =
-        |s: &Shape| !s.is_sealed() || s.fields.is_empty() || s.fields.iter().any(|f| f.optional);
+    let candidate = |s: &Shape| {
+        !s.is_sealed() || s.fields().is_empty() || s.fields().iter().any(|f| f.optional)
+    };
     for i in 0..shapes.len() {
         for j in (i + 1)..shapes.len() {
             let (Some((a, a_non_empty)), Some((b, b_non_empty))) = (&shapes[i], &shapes[j]) else {
@@ -902,7 +900,7 @@ fn reduce_array_members(members: &mut Vec<Type>) {
 /// key.
 pub(crate) fn shape_parts(ty: &Type) -> Option<(&Shape, bool)> {
     match ty.repr() {
-        Repr::ArrayShape(shape) => Some((&**shape, shape.fields.iter().any(|f| !f.optional))),
+        Repr::ArrayShape(shape) => Some((&**shape, shape.fields().iter().any(|f| !f.optional))),
         Repr::Intersection(members) if members.len() == 2 => {
             let shape = members.iter().find_map(|m| match m.repr() {
                 Repr::ArrayShape(shape) => Some(&**shape),
@@ -921,13 +919,13 @@ pub(crate) fn shape_parts(ty: &Type) -> Option<(&Shape, bool)> {
 /// single key has it, and one with none is `never`.
 pub(crate) fn shape_type(mut shape: Shape, non_empty: bool) -> Type {
     if non_empty && shape.is_sealed() {
-        match shape.fields.as_mut_slice() {
-            [] => return Type::never(),
-            [only] => only.optional = false,
+        match shape.fields().len() {
+            0 => return Type::never(),
+            1 => shape.update_fields(|_, _, optional| *optional = false),
             _ => {}
         }
     }
-    let says_non_empty = shape.fields.iter().any(|f| !f.optional);
+    let says_non_empty = shape.fields().iter().any(|f| !f.optional);
     let ty = Type::array_shape(shape);
     if non_empty && !says_non_empty {
         crate::intersect_types(vec![ty, Type::accessory(AccessoryKind::NonEmptyArray)])
@@ -1018,8 +1016,8 @@ fn merge_general_arrays(members: &mut Vec<Type>) {
 }
 
 fn shape_as_general_array(shape: &Shape) -> Type {
-    let mut keys: Vec<Type> = shape.fields.iter().map(|f| f.key.to_type()).collect();
-    let mut values: Vec<Type> = shape.fields.iter().map(|f| f.ty.clone()).collect();
+    let mut keys: Vec<Type> = shape.fields().iter().map(|f| f.key.to_type()).collect();
+    let mut values: Vec<Type> = shape.fields().iter().map(|f| f.ty.clone()).collect();
     if let Some(tail) = shape.unsealed.as_deref() {
         keys.push(tail.0.clone());
         values.push(tail.1.clone());
@@ -1041,14 +1039,14 @@ fn shape_as_general_array(shape: &Shape) -> Type {
 /// shape whose keys are all optional; an unsealed tail absorbs the other
 /// side's required keys when it can hold them.
 fn is_keys_superset(relation: &crate::Relation, this: &Shape, other: &Shape) -> bool {
-    if other.fields.is_empty() && other.is_sealed() {
-        return this.fields.iter().all(|f| f.optional);
+    if other.fields().is_empty() && other.is_sealed() {
+        return this.fields().iter().all(|f| f.optional);
     }
     let tail_absorbs = |tail_owner: &Shape, fields: &Shape| {
         let Some(tail) = tail_owner.unsealed.as_deref() else {
             return false;
         };
-        fields.fields.iter().filter(|f| !f.optional).all(|f| {
+        fields.fields().iter().filter(|f| !f.optional).all(|f| {
             !relation.is_super_type_of(&tail.0, &f.key.to_type()).no()
                 && !relation.is_super_type_of(&tail.1, &f.ty).no()
         })
@@ -1068,15 +1066,15 @@ fn is_keys_superset(relation: &crate::Relation, this: &Shape, other: &Shape) -> 
 }
 
 fn legacy_is_keys_superset(relation: &crate::Relation, this: &Shape, other: &Shape) -> bool {
-    if this.fields.len() < other.fields.len() {
+    if this.fields().len() < other.fields().len() {
         return false;
     }
-    if other.fields.is_empty() {
-        return this.fields.is_empty();
+    if other.fields().is_empty() {
+        return this.fields().is_empty();
     }
     let mut fail_on_different_value =
-        this.fields.len() != other.fields.len() || this.fields.len() < 2;
-    for other_field in &other.fields {
+        this.fields().len() != other.fields().len() || this.fields().len() < 2;
+    for other_field in other.fields() {
         let Some(this_field) = this.field(&other_field.key) else {
             return false;
         };
@@ -1091,7 +1089,7 @@ fn legacy_is_keys_superset(relation: &crate::Relation, this: &Shape, other: &Sha
         }
         fail_on_different_value = true;
     }
-    this.fields
+    this.fields()
         .iter()
         .filter(|f| !f.optional && other.field(&f.key).is_none())
         .count()
@@ -1107,8 +1105,8 @@ fn merge_shapes(sa: &Shape, sb: &Shape, sb_first: bool) -> Shape {
     // value type.
     let rest_a = sa.unsealed.as_deref().map(|tail| tail.1.clone());
     let rest_b = sb.unsealed.as_deref().map(|tail| tail.1.clone());
-    let mut keys: Vec<&ShapeKey> = sa.fields.iter().map(|f| &f.key).collect();
-    for f in &sb.fields {
+    let mut keys: Vec<&ShapeKey> = sa.fields().iter().map(|f| &f.key).collect();
+    for f in sb.fields() {
         if !keys.contains(&&f.key) {
             keys.push(&f.key);
         }
@@ -1140,7 +1138,7 @@ fn merge_shapes(sa: &Shape, sb: &Shape, sb_first: bool) -> Shape {
             }
             (None, None) => unreachable!("key came from one of the two shapes"),
         };
-        merged.fields.push(field);
+        merged.push(field);
     }
     merged.unsealed = match (sa.unsealed.as_deref(), sb.unsealed.as_deref()) {
         (Some((ka, va)), Some((kb, vb))) => Some(Box::new((

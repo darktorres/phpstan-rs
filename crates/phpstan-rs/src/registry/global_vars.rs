@@ -123,7 +123,7 @@ impl SiteContribution {
         match self {
             SiteContribution::WholeValue(ty) => match ty.as_array_shape() {
                 Some(shape) => {
-                    for f in &shape.fields {
+                    for f in shape.fields() {
                         acc.add_shape_field(f.key.to_string(), f.ty.clone());
                     }
                 }
@@ -648,7 +648,7 @@ fn array_merge_self_fields(
         .clone();
     Some(
         shape
-            .fields
+            .into_fields()
             .into_iter()
             .map(|f| FieldContribution {
                 key: f.key.to_string(),

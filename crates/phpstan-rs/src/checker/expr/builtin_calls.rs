@@ -714,7 +714,7 @@ impl<'a> Checker<'a> {
                     if !shape.is_sealed() {
                         unseal(&mut flipped);
                     }
-                    for field in &shape.fields {
+                    for field in shape.fields() {
                         match ShapeKey::from_type(&field.ty) {
                             Some(key) => flipped.set(ShapeField::new(
                                 key,
@@ -773,7 +773,7 @@ impl<'a> Checker<'a> {
                                     continue;
                                 }
                                 if let Some(ty) = locals.get(&name) {
-                                    shape.fields.push(ShapeField::new(key, ty.clone(), false));
+                                    shape.push(ShapeField::new(key, ty.clone(), false));
                                 }
                             }
                         }
@@ -1071,7 +1071,7 @@ impl<'a> Checker<'a> {
                     })
                     && arg_types.iter().all(|t| match t.as_array_shape() {
                         Some(shape) => shape
-                            .fields
+                            .fields()
                             .iter()
                             .all(|f| matches!(f.key, ShapeKey::Str(_))),
                         // A plain array (`hasOffsetValue`-tracked or not)
@@ -1094,7 +1094,7 @@ impl<'a> Checker<'a> {
                     for arg_ty in &arg_types {
                         match arg_ty.as_array_shape() {
                             Some(inner) => {
-                                for f in &inner.fields {
+                                for f in inner.fields() {
                                     if Self::merge_shape_field(
                                         &mut merged,
                                         &mut next_index,
@@ -1124,9 +1124,9 @@ impl<'a> Checker<'a> {
                                 // change the *value*, never remove a key
                                 // array_merge never touches).
                                 let elem_ty = arg_ty.array_value_type().unwrap_or(Type::mixed());
-                                for f in merged.fields.iter_mut() {
-                                    f.ty = self.relation().union(f.ty.clone(), elem_ty.clone());
-                                }
+                                merged.update_fields(|_, ty, _| {
+                                    *ty = self.relation().union(ty.clone(), elem_ty.clone());
+                                });
                                 // Mark unsealed - the plain array may also
                                 // contribute keys this shape never had, of
                                 // its own key and value types.
@@ -1174,7 +1174,7 @@ impl<'a> Checker<'a> {
                     let mut next_index = types::NextArrayIndex::new(types::TrinaryLogic::Yes);
                     for arg_ty in &arg_types {
                         if let Some(inner) = arg_ty.as_array_shape() {
-                            for f in &inner.fields {
+                            for f in inner.fields() {
                                 if Self::merge_shape_field(
                                     &mut merged,
                                     &mut next_index,
@@ -1470,7 +1470,7 @@ impl<'a> Checker<'a> {
                     };
                     let mut keys = Vec::new();
                     let mut surely_found = false;
-                    for field in &shape.fields {
+                    for field in shape.fields() {
                         let verdict = equals(&field.ty);
                         if !verdict.no() {
                             keys.push(field.key.to_type());
@@ -2430,7 +2430,7 @@ fn compact_argument_names(e: &Expr) -> Option<Vec<String>> {
 /// already is.
 fn unseal(shape: &mut Shape) {
     if shape.is_sealed() {
-        *shape = Shape::unsealed(std::mem::take(&mut shape.fields));
+        *shape = Shape::unsealed(std::mem::replace(shape, Shape::sealed(Vec::new())).into_fields());
     }
 }
 
@@ -3538,9 +3538,9 @@ fn shape_end_key(arr_ty: &Type, from_start: bool) -> Option<Type> {
             return None;
         }
         let mut fields: Box<dyn Iterator<Item = &types::ShapeField>> = if from_start {
-            Box::new(shape.fields.iter())
+            Box::new(shape.fields().iter())
         } else {
-            Box::new(shape.fields.iter().rev())
+            Box::new(shape.fields().iter().rev())
         };
         let mut surely_non_empty = false;
         for field in &mut fields {
@@ -3619,11 +3619,11 @@ impl Checker<'_> {
     fn combined_arrays(&self, keys: &Type, values: &Type) -> Type {
         let (key_arrays, value_arrays) = (keys.constant_arrays(), values.constant_arrays());
         if let ([k], [v]) = (key_arrays.as_slice(), value_arrays.as_slice())
-            && k.fields.len() == v.fields.len()
-            && k.fields.iter().chain(&v.fields).all(|f| !f.optional)
+            && k.fields().len() == v.fields().len()
+            && k.fields().iter().chain(v.fields()).all(|f| !f.optional)
         {
             let mut shape = Shape::sealed(Vec::new());
-            let zipped = k.fields.iter().zip(&v.fields).map(|(kf, vf)| {
+            let zipped = k.fields().iter().zip(v.fields()).map(|(kf, vf)| {
                 ShapeKey::from_type(&kf.ty.to_string_array_key(self.registry))
                     .map(|key| ShapeField::new(key, vf.ty.clone(), false))
             });

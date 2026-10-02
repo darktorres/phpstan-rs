@@ -855,7 +855,7 @@ impl<'a> Checker<'a> {
                 _ => None,
             };
             let keys: Vec<types::ShapeKey> = subject_shape
-                .fields
+                .fields()
                 .iter()
                 .filter(|f| !f.optional)
                 .map(|f| f.key.clone())

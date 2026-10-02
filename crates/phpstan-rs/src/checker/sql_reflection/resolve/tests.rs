@@ -270,13 +270,13 @@ fn resolve_pure_ast_resolves_a_boolean_literal_as_bool_for_postgres_but_int_for_
     let Some(pg_fields) = pg.as_array_shape() else {
         panic!("expected an ArrayShape");
     };
-    assert_eq!(pg_fields.fields[0].ty, Type::bool());
+    assert_eq!(pg_fields.fields()[0].ty, Type::bool());
 
     let mysql = resolve_pure_ast("SELECT true", Some(SqlDriver::Mysql)).unwrap();
     let Some(mysql_fields) = mysql.as_array_shape() else {
         panic!("expected an ArrayShape");
     };
-    assert_eq!(mysql_fields.fields[0].ty, Type::int());
+    assert_eq!(mysql_fields.fields()[0].ty, Type::int());
 }
 
 #[test]

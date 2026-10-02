@@ -16,7 +16,7 @@ impl Shape {
             return false;
         }
         let mut seen_optional = false;
-        for (i, field) in self.fields.iter().enumerate() {
+        for (i, field) in self.fields().iter().enumerate() {
             if field.key != ShapeKey::Int(i as i64) {
                 return false;
             }
@@ -36,8 +36,8 @@ impl Shape {
     /// `array<int<0, max>, int>` and `array{a: int}` fits
     /// `array<'a'|'b', int>`.
     pub fn key_type(&self) -> Type {
-        let mut key_types: Vec<Type> = Vec::with_capacity(self.fields.len());
-        for field in &self.fields {
+        let mut key_types: Vec<Type> = Vec::with_capacity(self.fields().len());
+        for field in self.fields() {
             let kt = field.key.to_type();
             if !key_types.contains(&kt) {
                 key_types.push(kt);
@@ -158,7 +158,7 @@ impl Relation<'_> {
                     shape.field(key).is_some_and(|f| !f.optional)
                 }
                 (Repr::ArrayShape(shape), Repr::Accessory(AccessoryKind::NonEmptyArray)) => {
-                    shape.fields.iter().any(|f| !f.optional)
+                    shape.fields().iter().any(|f| !f.optional)
                 }
                 // An array with a known offset isn't empty.
                 (

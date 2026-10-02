@@ -285,7 +285,7 @@ impl<'a> Checker<'a> {
                     "psr3.placeholderMissingKey",
                 );
             }
-            for field in &shape.fields {
+            for field in shape.fields() {
                 let (key, value) = (field.key.to_string(), &field.ty);
                 if names.contains(&key.as_str()) && !self.converts_to_string(value) {
                     self.report(format!("Context value for placeholder {{{key}}} of logger method {method}() is {value}, which has no string form."),
@@ -302,7 +302,7 @@ impl<'a> Checker<'a> {
         let Some(shape) = context.as_array_shape() else {
             return;
         };
-        for field in &shape.fields {
+        for field in shape.fields() {
             let (key, value) = (field.key.to_string(), &field.ty);
             if key.is_empty() || key.parse::<i64>().is_ok() {
                 self.report(

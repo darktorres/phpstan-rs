@@ -63,7 +63,7 @@ impl<'a> Checker<'a> {
         let mut dead: Vec<(Type, bool)> = Vec::new();
         let mut any_possible_match = false;
         for shape in shapes {
-            for field in &shape.fields {
+            for field in shape.fields() {
                 let value = &field.ty;
                 if !can_never_match(self, value) {
                     any_possible_match = true;

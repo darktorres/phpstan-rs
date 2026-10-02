@@ -58,7 +58,7 @@ pub(crate) fn key_of(ty: &Type) -> Option<Type> {
         Repr::Array(key, _) => Some((*key).clone()),
         Repr::ArrayShape(shape) => Some(join(
             shape
-                .fields
+                .fields()
                 .iter()
                 .map(|f| f.key.to_type())
                 .chain(shape.unsealed.as_deref().map(|tail| tail.0.clone()))

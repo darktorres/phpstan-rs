@@ -185,7 +185,7 @@ pub(crate) fn for_each_repr_child<'t>(repr: &'t Repr, f: &mut impl FnMut(&'t Typ
             f(key);
         }
         Repr::ArrayShape(shape) | Repr::ObjectShape(shape) => {
-            for field in &shape.fields {
+            for field in shape.fields() {
                 f(&field.ty);
             }
             if let Some((key, value)) = shape.unsealed.as_deref() {
@@ -253,7 +253,7 @@ fn map_all(items: &[Type], f: &mut impl FnMut(&Type) -> Type) -> Option<Vec<Type
 fn map_shape(shape: &Shape, f: &mut impl FnMut(&Type) -> Type) -> Option<Shape> {
     let mut changed = false;
     let fields: Vec<ShapeField> = shape
-        .fields
+        .fields()
         .iter()
         .map(|field| {
             let ty = f(&field.ty);
@@ -266,11 +266,7 @@ fn map_shape(shape: &Shape, f: &mut impl FnMut(&Type) -> Type) -> Option<Shape> 
         changed |= !same(&nk, key) || !same(&nv, value);
         Box::new((nk, nv))
     });
-    changed.then(|| Shape {
-        fields,
-        unsealed,
-        next_index: shape.next_index,
-    })
+    changed.then(|| Shape::from_parts(fields, unsealed, shape.next_index))
 }
 
 /// A template with `f` applied to its bound and default; `None` when `f`

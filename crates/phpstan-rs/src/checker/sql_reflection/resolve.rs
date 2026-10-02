@@ -98,7 +98,7 @@ fn cross_reference_entity_fields(registry: &Registry, sql: &str, row_type: Type)
         return row_type;
     };
     let refined = fields
-        .fields
+        .fields()
         .iter()
         .map(|f| {
             let name = f.key.to_string();
@@ -120,11 +120,11 @@ fn cross_reference_entity_fields(registry: &Registry, sql: &str, row_type: Type)
             }
         })
         .collect();
-    Type::array_shape(Shape {
-        fields: refined,
-        unsealed: fields.unsealed.clone(),
-        next_index: fields.next_index,
-    })
+    Type::array_shape(Shape::from_parts(
+        refined,
+        fields.unsealed.clone(),
+        fields.next_index,
+    ))
 }
 
 /// The exact `single-table, no JOIN` scope `resolve_select_from_static_
@@ -336,8 +336,8 @@ fn refine_count_columns(sql: &str, row_type: Type) -> Type {
     };
     if let Some(positions) = count_column_positions(sql) {
         for i in positions {
-            if let Some(field) = fields.fields.get_mut(i) {
-                field.ty = Type::int_range(Some(0), None);
+            if let Some(ty) = fields.field_type_at_mut(i) {
+                *ty = Type::int_range(Some(0), None);
             }
         }
     }

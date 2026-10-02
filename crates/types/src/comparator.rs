@@ -158,23 +158,23 @@ impl Relation<'_> {
         let (Some((es, _)), Some((as_, _))) = (shape_parts(e), shape_parts(a)) else {
             return TrinaryLogic::Maybe;
         };
-        let constant = |s: &crate::Shape| s.is_sealed() && s.fields.iter().all(|f| !f.optional);
+        let constant = |s: &crate::Shape| s.is_sealed() && s.fields().iter().all(|f| !f.optional);
         if !constant(es) || !constant(as_) {
             return TrinaryLogic::Maybe;
         }
         // Every key on both sides, each value compared as a pair.
-        if es.fields.len() != as_.fields.len()
+        if es.fields().len() != as_.fields().len()
             || es
-                .fields
+                .fields()
                 .iter()
-                .any(|f| !as_.fields.iter().any(|g| g.key == f.key))
+                .any(|f| !as_.fields().iter().any(|g| g.key == f.key))
         {
             return TrinaryLogic::No;
         }
         let mut out = TrinaryLogic::Yes;
-        for f in &es.fields {
+        for f in es.fields() {
             let g = as_
-                .fields
+                .fields()
                 .iter()
                 .find(|g| g.key == f.key)
                 .expect("key sets are equal");

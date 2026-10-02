@@ -371,18 +371,18 @@ fn array_shape_with_an_unsealed_marker_still_parses_its_real_fields() {
     let shape = parse_type_string("array{items: int, ...<string, mixed>}");
     assert_eq!(
         shape,
-        Type::array_shape(crate::Shape {
-            fields: vec![crate::ShapeField::new(
+        Type::array_shape(crate::Shape::from_parts(
+            vec![crate::ShapeField::new(
                 crate::ShapeKey::from_name("items"),
                 Type::new(Repr::Int),
                 false
             )],
-            unsealed: Some(Box::new((
+            Some(Box::new((
                 Type::new(Repr::String),
                 Type::new(Repr::Mixed(false, None))
             ))),
-            next_index: None,
-        })
+            None,
+        ))
     );
     // A bare `...` (no generic args) is valid too.
     let shape2 = parse_type_string("array{items: int, ...}");

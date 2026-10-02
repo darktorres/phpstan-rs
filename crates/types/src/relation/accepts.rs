@@ -383,7 +383,7 @@ impl Relation<'_> {
                 // checking only whether every field's value type matched.
                 (Repr::ArrayShape(shape), Repr::Array(key, b)) => {
                     self.accepts_type(&shape.key_type(), key)
-                        && shape.fields.iter().all(|f| {
+                        && shape.fields().iter().all(|f| {
                             (!self.strict_mixed_arrays && matches!(f.ty.repr(), Repr::Mixed(..)))
                                 || self.accepts_type(&f.ty, b)
                         })
@@ -401,7 +401,7 @@ impl Relation<'_> {
                         // A key `sup` doesn't list must fit its unsealed
                         // tail; a sealed `sup` has none.
                         && sub
-                            .fields
+                            .fields()
                             .iter()
                             .filter(|f| sup.field(&f.key).is_none())
                             .all(|f| {
@@ -445,7 +445,7 @@ impl Relation<'_> {
                     .is_some_and(|f| !f.optional),
                 (Repr::Object(class, _), Repr::ObjectShape(shape)) => {
                     class == "stdClass"
-                        || shape.fields.iter().all(|f| {
+                        || shape.fields().iter().all(|f| {
                             match self.hierarchy.property_type(class, &f.key.to_string()) {
                                 Some(property_ty) => self.accepts_type(&property_ty, &f.ty),
                                 None => f.optional,
@@ -661,7 +661,7 @@ impl Relation<'_> {
     /// Every field `sup` lists is in `sub` - present for sure where
     /// `sup` requires it - with a type `sup` accepts.
     fn shape_accepts_fields(&self, sub: &Shape, sup: &Shape) -> bool {
-        sup.fields.iter().all(|f| match sub.field(&f.key) {
+        sup.fields().iter().all(|f| match sub.field(&f.key) {
             Some(sub_field) => {
                 (f.optional || !sub_field.optional) && self.accepts_type(&sub_field.ty, &f.ty)
             }
@@ -710,7 +710,7 @@ impl Relation<'_> {
                 ) else {
                     return false;
                 };
-                if shape.is_sealed() && shape.fields.len() != 2 {
+                if shape.is_sealed() && shape.fields().len() != 2 {
                     return false;
                 }
                 if method.ty.is_string().no()

@@ -293,7 +293,7 @@ impl Type {
             Repr::ArrayShape(shape) => {
                 shape.is_sealed()
                     && shape
-                        .fields
+                        .fields()
                         .iter()
                         .all(|f| !f.optional && f.ty.is_single_value())
             }
@@ -411,9 +411,12 @@ impl Type {
     pub fn widen_towards(&self, next: &Type) -> Type {
         if let (Some((before, before_non_empty)), Some((after, after_non_empty))) =
             (self.combined_shape(), next.combined_shape())
-            && before.fields.iter().all(|f| after.field(&f.key).is_some())
+            && before
+                .fields()
+                .iter()
+                .all(|f| after.field(&f.key).is_some())
             && after
-                .fields
+                .fields()
                 .iter()
                 .all(|f| before.field(&f.key).is_some() || matches!(f.key, ShapeKey::Str(_)))
         {
@@ -425,7 +428,7 @@ impl Type {
                 }
             };
             let fields = after
-                .fields
+                .fields()
                 .iter()
                 .map(|f| {
                     let old = before.field(&f.key).map_or(&f.ty, |old| &old.ty);
@@ -442,11 +445,7 @@ impl Type {
                 (None, None) => None,
             };
             return crate::union::shape_type(
-                Shape {
-                    fields,
-                    unsealed,
-                    next_index: after.next_index,
-                },
+                Shape::from_parts(fields, unsealed, after.next_index),
                 before_non_empty && after_non_empty,
             );
         }
@@ -505,32 +504,25 @@ impl Type {
                     .collect::<Option<_>>()?;
                 let non_empty = parts.iter().all(|(_, non_empty)| *non_empty);
                 let shapes: Vec<&Shape> = parts.into_iter().map(|(shape, _)| shape).collect();
-                let mut fields: Vec<ShapeField> = Vec::new();
+                let mut merged = Shape::sealed(Vec::new());
                 for shape in &shapes {
-                    for f in &shape.fields {
-                        match fields.iter_mut().find(|g| g.key == f.key) {
-                            Some(g) => {
-                                g.ty = Type::union(g.ty.clone(), f.ty.clone());
-                                g.optional |= f.optional;
-                            }
-                            None => fields.push(f.clone()),
-                        }
+                    for f in shape.fields() {
+                        merged.merge_field(f.clone(), |g, f| {
+                            g.ty = Type::union(g.ty.clone(), f.ty);
+                            g.optional |= f.optional;
+                        });
                     }
                 }
-                for f in &mut fields {
-                    f.optional |= shapes.iter().any(|s| s.field(&f.key).is_none());
-                }
+                merged.update_fields(|key, _, optional| {
+                    *optional |= shapes.iter().any(|s| s.field(key).is_none());
+                });
                 let unsealed = shapes
                     .iter()
                     .filter_map(|s| s.unsealed.as_deref().cloned())
                     .reduce(|(k1, v1), (k2, v2)| (Type::union(k1, k2), Type::union(v1, v2)))
                     .map(Box::new);
                 Some((
-                    Shape {
-                        fields,
-                        unsealed,
-                        next_index: None,
-                    },
+                    Shape::from_parts(merged.into_fields(), unsealed, None),
                     non_empty,
                 ))
             }
@@ -586,10 +578,10 @@ impl Type {
                     (key, value)
                 };
                 let mut members = vec![Type::array(key, value)];
-                if shape.is_list() && !shape.fields.is_empty() {
+                if shape.is_list() && !shape.fields().is_empty() {
                     members.push(Type::accessory(AccessoryKind::ArrayList));
                 }
-                if shape.fields.iter().any(|f| !f.optional) {
+                if shape.fields().iter().any(|f| !f.optional) {
                     members.push(Type::accessory(AccessoryKind::NonEmptyArray));
                 }
                 crate::intersect_types(members)
@@ -862,7 +854,7 @@ impl Type {
             Repr::Array(_, value) => Some((*value).clone()),
             Repr::ArrayShape(shape) => Some(
                 shape
-                    .fields
+                    .fields()
                     .iter()
                     .map(|f| f.ty.clone())
                     .chain(shape.unsealed.as_deref().map(|tail| tail.1.clone()))
@@ -1021,7 +1013,7 @@ impl Type {
             | Repr::HasMethod(_)
             | Repr::HasProperty(_) => Type::bool_literal(true),
             Repr::ArrayShape(shape) => {
-                if shape.fields.iter().any(|f| !f.optional) {
+                if shape.fields().iter().any(|f| !f.optional) {
                     Type::bool_literal(true)
                 } else if shape.is_empty_array() {
                     Type::bool_literal(false)
@@ -1114,8 +1106,8 @@ impl Type {
 /// `count_range` of one member that isn't a union.
 fn member_count_range(member: &Type) -> Option<(i64, Option<i64>)> {
     if let Some((shape, non_empty)) = crate::union::shape_parts(member) {
-        let required = shape.fields.iter().filter(|f| !f.optional).count() as i64;
-        let most = shape.is_sealed().then_some(shape.fields.len() as i64);
+        let required = shape.fields().iter().filter(|f| !f.optional).count() as i64;
+        let most = shape.is_sealed().then_some(shape.fields().len() as i64);
         return Some((required.max(i64::from(non_empty)), most));
     }
     match member.repr() {

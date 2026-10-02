@@ -572,7 +572,7 @@ impl Parser<'_> {
             let optional = self.eat("?");
             self.expect(":")?;
             let ty = self.union()?;
-            shape.fields.push(ShapeField::new(key, ty, optional));
+            shape.set(ShapeField::new(key, ty, optional));
             if self.eat("}") {
                 return Some(shape);
             }

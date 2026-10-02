@@ -269,8 +269,8 @@ impl Relation<'_> {
     /// dropped when optional, or held by the other's unsealed tail.
     /// `None` when no array is both.
     fn intersect_shapes(&self, a: &Shape, b: &Shape) -> Option<Shape> {
-        let mut keys: Vec<&ShapeKey> = a.fields.iter().map(|f| &f.key).collect();
-        for f in &b.fields {
+        let mut keys: Vec<&ShapeKey> = a.fields().iter().map(|f| &f.key).collect();
+        for f in b.fields() {
             if !keys.contains(&&f.key) {
                 keys.push(&f.key);
             }
@@ -304,11 +304,7 @@ impl Relation<'_> {
             ))),
             _ => None,
         };
-        Some(Shape {
-            fields,
-            unsealed,
-            next_index: None,
-        })
+        Some(Shape::from_parts(fields, unsealed, None))
     }
 
     /// `field`, from one shape, as the other shape `other` holds it: its
@@ -332,11 +328,11 @@ impl Relation<'_> {
     /// `shape` as an `array<key, value>` holds it. `None` when a required
     /// key can't be one of `key`.
     fn shape_within_array(&self, shape: &Shape, key: &Type, value: &Type) -> Option<Shape> {
-        let tail = Shape {
-            fields: Vec::new(),
-            unsealed: Some(Box::new((key.clone(), value.clone()))),
-            next_index: None,
-        };
+        let tail = Shape::from_parts(
+            Vec::new(),
+            Some(Box::new((key.clone(), value.clone()))),
+            None,
+        );
         self.intersect_shapes(shape, &tail)
     }
 
@@ -364,7 +360,7 @@ impl Relation<'_> {
                     None => unapplied.push(member),
                 },
                 Repr::Accessory(AccessoryKind::NonEmptyArray)
-                    if shape.is_sealed() && shape.fields.is_empty() =>
+                    if shape.is_sealed() && shape.fields().is_empty() =>
                 {
                     return None;
                 }
@@ -373,7 +369,7 @@ impl Relation<'_> {
                 // says so.
                 Repr::Accessory(AccessoryKind::ArrayList) => {
                     let list_keys_only = shape
-                        .fields
+                        .fields()
                         .iter()
                         .enumerate()
                         .all(|(i, f)| f.optional || f.key == crate::ShapeKey::Int(i as i64));

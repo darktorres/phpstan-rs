@@ -46,7 +46,7 @@ impl<'a> Checker<'a> {
             });
         }
         if let [shape] = ty.constant_arrays()[..] {
-            let [first, second] = shape.fields.as_slice() else {
+            let [first, second] = shape.fields() else {
                 return None;
             };
             let method = second.ty.string_literal_value()?.as_str()?;

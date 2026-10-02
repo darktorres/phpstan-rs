@@ -115,7 +115,7 @@ impl Type {
     pub fn unsealed_shapes(&self) -> Type {
         match self.repr() {
             Repr::ArrayShape(shape) if shape.is_sealed() => {
-                Type::array_shape(Shape::unsealed(shape.fields.clone()))
+                Type::array_shape(Shape::unsealed(shape.fields().to_vec()))
             }
             Repr::Union(members) => {
                 Type::union_of(members.iter().map(Type::unsealed_shapes).collect())
@@ -234,9 +234,9 @@ impl Type {
     pub fn filter_array_values(&self, keep: &dyn Fn(&Type) -> Type) -> Type {
         syntax::stack::guard(|| match self.repr() {
             Repr::Array(key, value) => Type::new(Repr::Array(key.clone(), keep(value))),
-            Repr::ArrayShape(shape) => Type::array_shape(Shape {
-                fields: shape
-                    .fields
+            Repr::ArrayShape(shape) => Type::array_shape(Shape::from_parts(
+                shape
+                    .fields()
                     .iter()
                     .filter_map(|field| {
                         let kept = keep(&field.ty);
@@ -251,9 +251,9 @@ impl Type {
                         ))
                     })
                     .collect(),
-                unsealed: shape.unsealed.clone(),
-                next_index: shape.next_index,
-            }),
+                shape.unsealed.clone(),
+                shape.next_index,
+            )),
             Repr::Union(members) => Type::union_of(
                 members
                     .iter()

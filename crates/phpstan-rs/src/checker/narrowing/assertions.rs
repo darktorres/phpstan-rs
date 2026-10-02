@@ -85,11 +85,11 @@ impl<'a> Checker<'a> {
         }
         let haystack_ty = self.infer_expr(haystack, locals);
         if let [shape] = haystack_ty.constant_arrays()[..]
-            && !shape.fields.is_empty()
-            && shape.fields.iter().all(|f| f.ty.is_single_value())
+            && !shape.fields().is_empty()
+            && shape.fields().iter().all(|f| f.ty.is_single_value())
         {
             let mut values: Vec<Type> = Vec::new();
-            for f in &shape.fields {
+            for f in shape.fields() {
                 if !values.contains(&f.ty) {
                     values.push(f.ty.clone());
                 }

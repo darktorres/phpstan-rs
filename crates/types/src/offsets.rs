@@ -16,7 +16,7 @@ impl Type {
                 if !shape.is_sealed() {
                     return TrinaryLogic::Maybe;
                 }
-                if shape.fields.is_empty() && !(offset.is_mixed() || offset.is_never()) {
+                if shape.fields().is_empty() && !(offset.is_mixed() || offset.is_never()) {
                     return TrinaryLogic::No;
                 }
                 let Some(key) = literal_key(offset) else {
@@ -357,7 +357,7 @@ impl Type {
                     if offset.is_none()
                         && track_literal_key
                         && shape.is_sealed()
-                        && shape.fields.len() < MAX_SHAPE_FIELDS
+                        && shape.fields().len() < MAX_SHAPE_FIELDS
                         && let Some(mut next) = shape.next_append_index()
                         && let AppendKey::Key(key) = next.take() =>
                 {
@@ -414,7 +414,7 @@ impl Type {
                     // a shape a required field keeps non-empty stays one;
                     // an all-optional one is the general array below.
                     None if let Some(written) = offset
-                        && shape.fields.iter().any(|f| !f.optional) =>
+                        && shape.fields().iter().any(|f| !f.optional) =>
                     {
                         Some(Type::array_shape(open_to_key(shape, written, value)))
                     }
@@ -596,13 +596,13 @@ impl Type {
                     // index back.
                     shape.next_index = shape.next_append_index();
                     match literal_keys.as_deref() {
-                        Some([only]) => shape.fields.retain(|f| f.key != *only),
+                        Some([only]) => shape.retain(|f| f.key != *only),
                         _ => {
-                            for field in &mut shape.fields {
-                                if may_name(&field.key) {
-                                    field.optional = true;
+                            shape.update_fields(|key, _, optional| {
+                                if may_name(key) {
+                                    *optional = true;
                                 }
-                            }
+                            });
                         }
                     }
                     Type::array_shape(shape)
@@ -698,14 +698,11 @@ fn open_to_key(shape: &Shape, written: &Type, value: Type) -> Shape {
     let written = written.write_key_type();
     let relation = crate::Relation::structural();
     let mut shape = Shape::clone(shape);
-    for field in &mut shape.fields {
-        if !relation
-            .is_super_type_of(&written, &field.key.to_type())
-            .no()
-        {
-            field.ty = Type::union(field.ty.clone(), value.clone());
+    shape.update_fields(|key, ty, _| {
+        if !relation.is_super_type_of(&written, &key.to_type()).no() {
+            *ty = Type::union(ty.clone(), value.clone());
         }
-    }
+    });
     shape.unsealed = Some(Box::new(match shape.unsealed.take() {
         Some(tail) => (Type::union(tail.0, written), Type::union(tail.1, value)),
         None => (written, value),
@@ -785,7 +782,7 @@ fn member_offset_read(member: &Type, offset: &Type) -> Option<(Option<Type>, Off
         .filter(|keys| !keys.is_empty());
     if let Some((shape, _)) = crate::union::shape_parts(member) {
         let Some(keys) = keys else {
-            if shape.is_sealed() && shape.fields.is_empty() {
+            if shape.is_sealed() && shape.fields().is_empty() {
                 return Some((None, Absent));
             }
             return Some((member.offset_value_type(None), Unknown));

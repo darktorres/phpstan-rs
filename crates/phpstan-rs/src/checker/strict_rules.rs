@@ -381,7 +381,7 @@ impl<'a> Checker<'a> {
             }
             left_tuples.iter().all(|l| {
                 right_tuples.iter().all(|r| {
-                    l.fields.len() == r.fields.len()
+                    l.fields().len() == r.fields().len()
                         && l.types()
                             .zip(r.types())
                             .all(|(a, b)| self.is_comparable_together(a, b))
@@ -854,7 +854,7 @@ enum Operand {
 
 /// A list with every key required.
 fn is_tuple(shape: &types::Shape) -> bool {
-    shape.is_list() && shape.fields.iter().all(|f| !f.optional)
+    shape.is_list() && shape.fields().iter().all(|f| !f.optional)
 }
 
 /// One variable assignment site, with the spans of the loops around it.
