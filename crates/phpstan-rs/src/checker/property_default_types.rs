@@ -22,7 +22,7 @@ impl<'a> Checker<'a> {
     /// whatever type `ty`/`set_ty` resolved to (its own `@var` tag, or
     /// `Mixed` with none).
     pub(crate) fn check_default_property_types(&mut self, fqn: &str, c: &ClassDef) {
-        let Some(info) = self.registry.classes.get(fqn) else {
+        let Some(info) = self.class_info(fqn) else {
             return;
         };
         for p in &c.properties {

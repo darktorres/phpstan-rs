@@ -42,7 +42,7 @@ impl<'a> Checker<'a> {
         class_name: &str,
         span: Span,
     ) {
-        let Some(info) = self.registry.classes.get(class_name) else {
+        let Some(info) = self.class_info(class_name) else {
             return;
         };
         if info.covariant_templates().is_empty() && info.contravariant_templates().is_empty() {
@@ -175,7 +175,7 @@ impl<'a> Checker<'a> {
     /// judged worth it for how rarely a property is both generic-
     /// template-typed and hits this specific violation.
     pub(crate) fn check_property_variances(&mut self, fqn: &str, c: &ClassDef) {
-        let Some(info) = self.registry.classes.get(fqn) else {
+        let Some(info) = self.class_info(fqn) else {
             return;
         };
         if info.covariant_templates().is_empty() && info.contravariant_templates().is_empty() {

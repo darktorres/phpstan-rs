@@ -8,7 +8,7 @@ use types::Type;
 
 impl<'a> Checker<'a> {
     pub(crate) fn check_method_overrides(&mut self, fqn: &str, c: &ClassDecl) {
-        let Some(info) = self.registry.classes.get(fqn) else {
+        let Some(info) = self.class_info(fqn) else {
             return;
         };
         // Redeclaring a native enum method is itself the error.
@@ -102,7 +102,7 @@ impl<'a> Checker<'a> {
         if syntax::ast::is_constructor_name(method_name) || *own_visibility == Visibility::Private {
             return;
         }
-        let Some(info) = self.registry.classes.get(fqn) else {
+        let Some(info) = self.class_info(fqn) else {
             return;
         };
         let Some(own_sig) = info.methods().get(method_name) else {
@@ -231,7 +231,7 @@ impl<'a> Checker<'a> {
                 );
             }
         }
-        let Some(info) = self.registry.classes.get(fqn) else {
+        let Some(info) = self.class_info(fqn) else {
             return;
         };
         let Some(own_sig) = info.methods().get(method_name) else {

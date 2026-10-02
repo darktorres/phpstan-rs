@@ -167,7 +167,7 @@ impl<'a> Checker<'a> {
     /// (`class Bad extends Collection<NotAShape> {}`) without ever
     /// showing up in a method signature.
     pub(crate) fn check_class_generic_bounds(&mut self, fqn: &str, c: &ClassDecl) {
-        let Some(info) = self.registry.classes.get(fqn) else {
+        let Some(info) = self.class_info(fqn) else {
             return;
         };
         // Each property gets its own real span (declaration order, not a
@@ -266,7 +266,7 @@ impl<'a> Checker<'a> {
         let Some(raw) = &c.doc_comment else {
             return;
         };
-        let Some(info) = self.registry.classes.get(fqn) else {
+        let Some(info) = self.class_info(fqn) else {
             return;
         };
         let block = docblock::parse(raw);
@@ -460,7 +460,7 @@ impl<'a> Checker<'a> {
     /// so the carve-out's gating condition can never be reached against
     /// this project's actual data.
     fn check_call_site_variance(&mut self, class: &str, args: &[Type], location: &str, span: Span) {
-        let Some(info) = self.registry.classes.get(class) else {
+        let Some(info) = self.class_info(class) else {
             return;
         };
         let kind = class_kind_identifier(&info.kind());

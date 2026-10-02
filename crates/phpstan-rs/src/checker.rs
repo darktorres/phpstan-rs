@@ -273,6 +273,8 @@ pub(crate) struct PassMark {
 /// get distinct keys, the same way real PHP tells them apart.
 pub struct Checker<'a> {
     pub(crate) registry: &'a Registry,
+    // The class the last `class_info` was asked for.
+    class_memo: std::cell::RefCell<(String, Option<&'a crate::registry::ClassReflection>)>,
     // What the checks are configured with - the defaults unless
     // `with_settings` supplies the project's.
     pub(crate) settings: &'a settings::CheckSettings,
@@ -1014,6 +1016,22 @@ impl<'a> Checker<'a> {
         self.settings.doctrine.then_some(self.registry)
     }
 
+    /// `registry.classes.get(name)`, remembered for the next ask for the
+    /// same name: a class is asked for by every check of it, one after
+    /// another.
+    pub(crate) fn class_info(&self, name: &str) -> Option<&'a crate::registry::ClassReflection> {
+        let mut memo = self.class_memo.borrow_mut();
+        if memo.0 == name && (memo.1.is_some() || !memo.0.is_empty()) {
+            return memo.1;
+        }
+        let registry: &'a Registry = self.registry;
+        let info = registry.classes.get(name);
+        memo.0.clear();
+        memo.0.push_str(name);
+        memo.1 = info;
+        info
+    }
+
     pub fn new(registry: &'a Registry) -> Self {
         static NO_SQL: std::sync::LazyLock<sql::context::SqlContext> =
             std::sync::LazyLock::new(Default::default);
@@ -1021,6 +1039,7 @@ impl<'a> Checker<'a> {
             std::sync::LazyLock::new(Default::default);
         Checker {
             registry,
+            class_memo: std::cell::RefCell::new((String::new(), None)),
             settings: &DEFAULT_SETTINGS,
             bodies: &crate::registry::NoBodies,
             sql: &NO_SQL,

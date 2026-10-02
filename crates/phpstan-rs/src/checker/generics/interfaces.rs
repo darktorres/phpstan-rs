@@ -120,7 +120,7 @@ impl<'a> Checker<'a> {
         if visited.contains(class) {
             return;
         }
-        let Some(info) = self.registry.classes.get(class) else {
+        let Some(info) = self.class_info(class) else {
             return;
         };
         let mut visited = visited.clone();
@@ -186,7 +186,7 @@ impl<'a> Checker<'a> {
         diagnostics: &mut Vec<(String, usize, Type, Type)>,
         visited: &FxHashSet<String>,
     ) {
-        let Some(info) = self.registry.classes.get(name) else {
+        let Some(info) = self.class_info(name) else {
             return;
         };
         if info.kind() == syntax::ast::ClassKind::Interface && !info.templates().is_empty() {

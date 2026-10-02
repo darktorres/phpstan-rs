@@ -28,7 +28,7 @@ impl<'a> Checker<'a> {
     /// (`Param::hooks`), reusing `check_get_hook`/`check_set_hook` via
     /// scalar `name`/`span`/`type_hint` arguments.
     pub(crate) fn check_property_hooks(&mut self, fqn: &str, c: &ClassDef) {
-        let Some(info) = self.registry.classes.get(fqn) else {
+        let Some(info) = self.class_info(fqn) else {
             return;
         };
         for p in &c.properties {
@@ -141,7 +141,7 @@ impl<'a> Checker<'a> {
         if visibility == Visibility::Private || hook_final {
             return true;
         }
-        let Some(info) = self.registry.classes.get(class) else {
+        let Some(info) = self.class_info(class) else {
             return true;
         };
         if info.is_final() || info.final_properties().contains(property) {

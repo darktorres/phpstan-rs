@@ -76,7 +76,7 @@ impl<'a> Checker<'a> {
         writers: Vec<Name>,
         c: &ClassDef,
     ) {
-        let Some(info) = self.registry.classes.get(fqn) else {
+        let Some(info) = self.class_info(fqn) else {
             return;
         };
         let properties: Vec<SiteProperty> = c

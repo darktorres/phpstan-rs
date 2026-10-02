@@ -44,7 +44,7 @@ impl<'a> Checker<'a> {
         is_anonymous: bool,
         span: Span,
     ) {
-        let Some(info) = self.registry.classes.get(registry_name) else {
+        let Some(info) = self.class_info(registry_name) else {
             return;
         };
         let kind = info.kind();
@@ -189,7 +189,7 @@ impl<'a> Checker<'a> {
     /// class `implements`-ing another class instead of an interface) is
     /// `check_inheritance_target_kinds`'.
     pub(crate) fn check_class_references_exist(&mut self, fqn: &str, span: Span) {
-        let Some(info) = self.registry.classes.get(fqn) else {
+        let Some(info) = self.class_info(fqn) else {
             return;
         };
         for parent in info.extends() {
@@ -239,7 +239,7 @@ impl<'a> Checker<'a> {
     /// a trait, invalid there) is deliberately not built - no analog
     /// exists anywhere else in this project for any typehint location.
     pub(crate) fn check_method_tag_types(&mut self, fqn: &str, span: Span) {
-        let Some(info) = self.registry.classes.get(fqn) else {
+        let Some(info) = self.class_info(fqn) else {
             return;
         };
         // `Registry::resolve_method_tags` drains `ClassReflection::method_tags`
@@ -364,7 +364,7 @@ impl<'a> Checker<'a> {
     /// `mixin.nonObject`/`mixin.trait` are deliberately not built, same
     /// scope as `check_method_tag_types`.
     pub(crate) fn check_mixin_types(&mut self, fqn: &str, span: Span) {
-        let Some(info) = self.registry.classes.get(fqn) else {
+        let Some(info) = self.class_info(fqn) else {
             return;
         };
         for mixin in info.mixins() {
@@ -595,7 +595,7 @@ impl<'a> Checker<'a> {
     /// Composer autoloading this registry may legitimately have no data
     /// for in a partial-analysis run.
     pub(crate) fn check_type_alias_types(&mut self, fqn: &str, span: Span) {
-        let Some(info) = self.registry.classes.get(fqn) else {
+        let Some(info) = self.class_info(fqn) else {
             return;
         };
         for (name, ty) in info.type_aliases() {
@@ -622,7 +622,7 @@ impl<'a> Checker<'a> {
     /// `insteadof` picked). Compares only pairs of different traits - a
     /// name declared by just one used trait is never a conflict.
     pub(crate) fn check_trait_conflicts(&mut self, fqn: &str, span: Span) {
-        let Some(info) = self.registry.classes.get(fqn) else {
+        let Some(info) = self.class_info(fqn) else {
             return;
         };
         if info.uses().len() < 2 {
@@ -1020,7 +1020,7 @@ impl<'a> Checker<'a> {
     /// (`classConstant.nativeType`/`.missingNativeType`) and a covariant
     /// `@var` type when both sides declare one (`classConstant.type`).
     pub(crate) fn check_constant_overrides(&mut self, fqn: &str, consts: &[ClassConst]) {
-        let Some(info) = self.registry.classes.get(fqn) else {
+        let Some(info) = self.class_info(fqn) else {
             return;
         };
         let interfaces = info.implements().clone();
@@ -1149,7 +1149,7 @@ impl<'a> Checker<'a> {
     /// `.missingNativeType`); against an immediately used trait it must
     /// also keep the same value (`classConstant.value`).
     pub(crate) fn check_trait_constant_conflicts(&mut self, fqn: &str, consts: &[ClassConst]) {
-        let Some(info) = self.registry.classes.get(fqn) else {
+        let Some(info) = self.class_info(fqn) else {
             return;
         };
         let immediate: Vec<Name> = info.uses().clone();
@@ -1297,7 +1297,7 @@ impl<'a> Checker<'a> {
         {
             return;
         }
-        let Some(info) = self.registry.classes.get(registry_name) else {
+        let Some(info) = self.class_info(registry_name) else {
             return;
         };
         if info.kind() != ClassKind::Class
@@ -1622,7 +1622,7 @@ impl<'a> Checker<'a> {
     /// `abstract`, and one that does is not itself required to be
     /// complete).
     pub(crate) fn check_class_completeness(&mut self, fqn: &str, span: Span) {
-        let Some(info) = self.registry.classes.get(fqn) else {
+        let Some(info) = self.class_info(fqn) else {
             return;
         };
         if info.kind() != ClassKind::Class && info.kind() != ClassKind::Enum {
@@ -1797,7 +1797,7 @@ impl<'a> Checker<'a> {
     /// both "extend" and "implement" here mean "be a subtype of," not
     /// "declare directly").
     pub(crate) fn check_require_tags(&mut self, fqn: &str, span: Span) {
-        let Some(info) = self.registry.classes.get(fqn) else {
+        let Some(info) = self.class_info(fqn) else {
             return;
         };
         // Real PHPStan registers both consuming rules for `InClassNode`
@@ -1874,7 +1874,7 @@ impl<'a> Checker<'a> {
     /// exhaustiveness over a sealed hierarchy), a separate, much larger
     /// feature this project doesn't attempt.
     pub(crate) fn check_sealed_hierarchy(&mut self, fqn: &str, span: Span) {
-        let Some(info) = self.registry.classes.get(fqn) else {
+        let Some(info) = self.class_info(fqn) else {
             return;
         };
         // Same `InClassNode`-only registration as `check_require_tags`
