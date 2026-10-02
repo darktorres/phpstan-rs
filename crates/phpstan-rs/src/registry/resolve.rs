@@ -134,7 +134,7 @@ impl Registry {
             FxHashSet<Name>,
         );
 
-        let class_names: Vec<Name> = self.scoped_class_names();
+        let class_names = self.scoped_class_names();
         let registry: &Registry = self;
         let additions: Vec<TraitAddition> = class_names
             .par_iter()
@@ -519,7 +519,7 @@ impl Registry {
     #[hotpath::measure]
     pub(crate) fn resolve_deferred_value_of(&mut self) {
         self.resolve_class_constant_references();
-        let class_names: Vec<Name> = self.scoped_class_names();
+        let class_names = self.scoped_class_names();
         let registry: &Registry = self;
         let resolved: Vec<(Name, ClassReflection)> = class_names
             .par_iter()
@@ -727,8 +727,8 @@ impl Registry {
                 }
             }
         }
-        for name in self.scoped_class_names() {
-            let Some(info) = self.classes.get_mut(&name) else {
+        for name in self.scoped_class_names().iter() {
+            let Some(info) = self.classes.get_mut(name) else {
                 continue;
             };
             for sig in info.consts.values_mut() {

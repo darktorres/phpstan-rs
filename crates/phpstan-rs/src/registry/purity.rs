@@ -111,7 +111,7 @@ impl Registry {
     #[allow(clippy::type_complexity)]
     fn classify_purity(&mut self, bodies: &dyn BodySource) -> PurityCandidates {
         let mut candidates = PurityCandidates::default();
-        let function_names: Vec<Name> = self.scoped_function_names();
+        let function_names = self.scoped_function_names();
         let registry: &Registry = self;
         let function_deps: Vec<(Name, Option<Vec<PurityDependency>>)> = function_names
             .par_iter()
@@ -134,7 +134,7 @@ impl Registry {
             }
         }
 
-        let class_names: Vec<Name> = self.scoped_class_names();
+        let class_names = self.scoped_class_names();
         let registry: &Registry = self;
         let method_deps: Vec<(Name, Name, Option<Vec<PurityDependency>>)> = class_names
             .par_iter()

@@ -273,6 +273,8 @@ pub struct Registry {
     // Which classes and functions the finishing passes resolve.
     #[serde(skip)]
     scope: scope::Scope,
+    #[serde(skip)]
+    scoped_names: scope::ScopedNames,
     // The PHP versions the project runs on: exactly the configured
     // `php_version`, else the range its composer.json declares. `None`
     // means neither says, and every version-gated rule stays silent. See

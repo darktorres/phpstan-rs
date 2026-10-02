@@ -96,6 +96,17 @@ pub struct NameTable<V> {
     // The base's names this table hides: replaced in `entries`, or
     // removed.
     hidden: FxHashSet<Folded>,
+    // Which set of names the table holds: a number no other table or
+    // state of one has, new at every change of the names (not of a
+    // value), kept by a clone. Two tables with one version hold the same
+    // names, spelled the same.
+    version: u64,
+}
+
+/// A number not given before.
+fn next_version() -> u64 {
+    static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+    NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
 }
 
 /// What decodes a stored entry.
@@ -356,11 +367,17 @@ impl<V> Default for NameTable<V> {
             entries: FxHashMap::default(),
             base: None,
             hidden: FxHashSet::default(),
+            version: next_version(),
         }
     }
 }
 
 impl<V> NameTable<V> {
+    /// The version of the names the table holds, see the field.
+    pub(crate) fn version(&self) -> u64 {
+        self.version
+    }
+
     /// The base's entry for `key` (a lowercased name), unless hidden.
     fn base_get(&self, key: &str) -> Option<(&Name, &V)> {
         let base = self.base.as_ref()?;
@@ -496,6 +513,7 @@ impl<V> NameTable<V> {
     pub(crate) fn detach(&mut self, name: &str) -> Option<Detached<V>> {
         with_function_key(name, move |key| {
             if let Some(value) = self.entries.remove(key) {
+                self.version = next_version();
                 return Some(Detached::Own(value));
             }
             if self.hidden.contains(key) {
@@ -505,6 +523,7 @@ impl<V> NameTable<V> {
             let i = base.find(key)?;
             let (declared, base) = (base.name(i).clone(), Arc::clone(base));
             self.hidden.insert(Folded(declared));
+            self.version = next_version();
             Some(Detached::Base(base, i))
         })
     }
@@ -538,6 +557,7 @@ impl<V: Clone> NameTable<V> {
         let name = name.into();
         self.forget(name.lower());
         self.entries.insert(Folded(name), value);
+        self.version = next_version();
     }
 
     /// `insert`, returning what `name` found before.
@@ -545,6 +565,7 @@ impl<V: Clone> NameTable<V> {
         let name = name.into();
         let old = self.take(name.lower());
         self.entries.insert(Folded(name), value);
+        self.version = next_version();
         old
     }
 
@@ -552,6 +573,7 @@ impl<V: Clone> NameTable<V> {
     /// whether there was anything. A base entry is hidden, not copied.
     fn forget(&mut self, key: &str) -> bool {
         if self.entries.remove(key).is_some() {
+            self.version = next_version();
             return true;
         }
         if self.hidden.contains(key) {
@@ -564,6 +586,7 @@ impl<V: Clone> NameTable<V> {
             return false;
         };
         self.hidden.insert(Folded(base.name(i).clone()));
+        self.version = next_version();
         true
     }
 
@@ -596,11 +619,13 @@ impl<V: Clone> NameTable<V> {
     pub fn take(&mut self, name: &str) -> Option<V> {
         with_function_key(name, move |key| {
             if let Some(value) = self.entries.remove(key) {
+                self.version = next_version();
                 return Some(value);
             }
             let (declared, value) = self.base_get(key)?;
             let (declared, value) = (declared.clone(), value.clone());
             self.hidden.insert(Folded(declared));
+            self.version = next_version();
             Some(value)
         })
     }
@@ -770,6 +795,7 @@ impl<V: serde::de::DeserializeOwned> NameTable<V> {
             entries: FxHashMap::default(),
             base: Some(Arc::new(load_base(reader, section, true)?)),
             hidden: FxHashSet::default(),
+            version: next_version(),
         })
     }
 }

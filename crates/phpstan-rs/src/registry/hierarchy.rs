@@ -65,7 +65,7 @@ impl Registry {
     /// class's result can invalidate another's.
     #[hotpath::measure]
     pub fn precompute_ancestor_names(&mut self) {
-        let class_names: Vec<Name> = self.scoped_class_names();
+        let class_names = self.scoped_class_names();
         let registry: &Registry = self;
         let ancestor_names: Vec<_> = class_names
             .par_iter()
@@ -91,9 +91,9 @@ impl Registry {
                 self.ancestor_names.insert(name, ancestors);
             }
         }
-        for name in class_names {
-            self.unrecord_parents(&name);
-            let Some(info) = self.classes.get(&name) else {
+        for name in class_names.iter() {
+            self.unrecord_parents(name);
+            let Some(info) = self.classes.get(name) else {
                 continue;
             };
             let supertypes: Vec<Name> = info
@@ -113,7 +113,8 @@ impl Registry {
                     .get_or_insert_with(used.clone(), FxHashSet::default)
                     .insert(name.clone());
             }
-            self.recorded_parents.insert(name, (supertypes, traits));
+            self.recorded_parents
+                .insert(name.clone(), (supertypes, traits));
         }
     }
 
@@ -339,7 +340,7 @@ impl Registry {
     /// automatically.
     #[hotpath::measure]
     pub fn precompute_member_owners(&mut self) {
-        let class_names: Vec<Name> = self.scoped_class_names();
+        let class_names = self.scoped_class_names();
         let registry: &Registry = self;
 
         let own_by_class: Vec<_> = class_names

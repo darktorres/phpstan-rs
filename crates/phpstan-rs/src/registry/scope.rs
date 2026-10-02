@@ -2,7 +2,7 @@
 //! all of them, or only those a change can have affected, every other
 //! entry being read as already resolved.
 
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use rustc_hash::FxHashSet;
 use syntax::name::Name;
@@ -15,6 +15,15 @@ use crate::registry::Registry;
 pub(crate) struct Scope {
     classes: Option<Arc<FxHashSet<String>>>,
     functions: Option<Arc<FxHashSet<String>>>,
+    // Which scope: `0` for every class and function, otherwise a number
+    // no other scope has, kept by a clone.
+    id: u64,
+}
+
+/// A number no scope has had.
+fn next_id() -> u64 {
+    static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+    NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
 }
 
 impl Scope {
@@ -35,6 +44,7 @@ impl Scope {
             functions: Some(Arc::new(
                 functions.into_iter().map(str::to_ascii_lowercase).collect(),
             )),
+            id: next_id(),
         }
     }
 
@@ -50,6 +60,7 @@ impl Scope {
         Scope {
             classes: Some(Arc::new(classes)),
             functions: Some(Arc::new(functions)),
+            id: next_id(),
         }
     }
 
@@ -85,6 +96,7 @@ impl Scope {
         Scope {
             classes: diff(&self.classes, &other.classes),
             functions: diff(&self.functions, &other.functions),
+            id: next_id(),
         }
     }
 
@@ -109,35 +121,104 @@ impl Scope {
     }
 }
 
-impl Registry {
-    /// The declared names of the classes in the passes' scope.
-    pub(crate) fn scoped_class_names(&self) -> Vec<Name> {
-        match self.scope.class_keys() {
-            None => self.classes.keys().cloned().collect(),
-            Some(keys) => keys
-                .iter()
-                .filter_map(|key| {
-                    self.classes
-                        .get_with_name(key)
-                        .map(|(name, _)| name.clone())
-                })
-                .collect(),
-        }
+/// The names `Registry::scoped_class_names` and `scoped_function_names`
+/// made last, with the scope and the table's version they are of.
+#[derive(Default)]
+pub(crate) struct ScopedNames {
+    classes: Mutex<Option<Made>>,
+    functions: Mutex<Option<Made>>,
+}
+
+type Made = (u64, u64, Arc<[Name]>);
+
+impl ScopedNames {
+    fn classes(
+        &self,
+        scope: &Scope,
+        version: u64,
+        make: impl FnOnce() -> Vec<Name>,
+    ) -> Arc<[Name]> {
+        Self::of(&self.classes, scope, version, make)
     }
 
-    /// The declared names of the functions in the passes' scope.
-    pub(crate) fn scoped_function_names(&self) -> Vec<Name> {
-        match self.scope.function_keys() {
-            None => self.functions.keys().cloned().collect(),
-            Some(keys) => keys
-                .iter()
-                .filter_map(|key| {
-                    self.functions
-                        .get_with_name(key)
-                        .map(|(name, _)| name.clone())
-                })
-                .collect(),
+    fn functions(
+        &self,
+        scope: &Scope,
+        version: u64,
+        make: impl FnOnce() -> Vec<Name>,
+    ) -> Arc<[Name]> {
+        Self::of(&self.functions, scope, version, make)
+    }
+
+    fn of(
+        slot: &Mutex<Option<Made>>,
+        scope: &Scope,
+        version: u64,
+        make: impl FnOnce() -> Vec<Name>,
+    ) -> Arc<[Name]> {
+        let mut slot = slot.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        if let Some((made_for, table, names)) = &*slot
+            && *made_for == scope.id
+            && *table == version
+        {
+            return Arc::clone(names);
         }
+        let names: Arc<[Name]> = make().into();
+        *slot = Some((scope.id, version, Arc::clone(&names)));
+        names
+    }
+}
+
+impl Clone for ScopedNames {
+    /// A clone makes its own names, from its own tables.
+    fn clone(&self) -> Self {
+        ScopedNames::default()
+    }
+}
+
+impl std::fmt::Debug for ScopedNames {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("ScopedNames")
+    }
+}
+
+impl Registry {
+    /// The declared names of the classes in the passes' scope. Made once
+    /// for as long as the scope and the class names stay as they are.
+    pub(crate) fn scoped_class_names(&self) -> Arc<[Name]> {
+        self.scoped_names
+            .classes(&self.scope, self.classes.version(), || {
+                match self.scope.class_keys() {
+                    None => self.classes.keys().cloned().collect(),
+                    Some(keys) => keys
+                        .iter()
+                        .filter_map(|key| {
+                            self.classes
+                                .get_with_name(key)
+                                .map(|(name, _)| name.clone())
+                        })
+                        .collect(),
+                }
+            })
+    }
+
+    /// The declared names of the functions in the passes' scope, made
+    /// once like the classes'.
+    pub(crate) fn scoped_function_names(&self) -> Arc<[Name]> {
+        self.scoped_names
+            .functions(&self.scope, self.functions.version(), || {
+                match self.scope.function_keys() {
+                    None => self.functions.keys().cloned().collect(),
+                    Some(keys) => keys
+                        .iter()
+                        .filter_map(|key| {
+                            self.functions
+                                .get_with_name(key)
+                                .map(|(name, _)| name.clone())
+                        })
+                        .collect(),
+                }
+            })
     }
 
     /// The classes in the passes' scope, with their declared names.
