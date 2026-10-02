@@ -23,6 +23,15 @@ pub fn parse_type_string(raw: &str) -> Type {
 /// is written fully qualified. A `|`/`&` mix needs parentheses (a DNF
 /// `(A&B)|null`), as PHPDoc requires.
 pub fn parse_written_type(raw: &str) -> Type {
+    // The same few thousand type texts are read hundreds of thousands of
+    // times (`@param int $x` and its kind, in every file): each is parsed
+    // once, and found after. A text's type depends on the text alone.
+    static WRITTEN: std::sync::LazyLock<syntax::memo::Memo<Type>> =
+        std::sync::LazyLock::new(|| syntax::memo::Memo::with_limits(2048, 1 << 20));
+    Type::clone(&WRITTEN.get(raw, parse_written_type_unmemoized))
+}
+
+pub(crate) fn parse_written_type_unmemoized(raw: &str) -> Type {
     syntax::stack::guard(|| {
         let mut s = raw.trim();
         let nullable = s.starts_with('?');

@@ -26,9 +26,9 @@ pub fn parse(raw: &str) -> PhpDocNode {
     parser::parse(raw)
 }
 
-fn shared() -> &'static crate::memo::Memo<PhpDocNode> {
-    static MEMO: std::sync::LazyLock<crate::memo::Memo<PhpDocNode>> =
-        std::sync::LazyLock::new(crate::memo::Memo::new);
+fn shared() -> &'static syntax::memo::Memo<PhpDocNode> {
+    static MEMO: std::sync::LazyLock<syntax::memo::Memo<PhpDocNode>> =
+        std::sync::LazyLock::new(syntax::memo::Memo::new);
     &MEMO
 }
 

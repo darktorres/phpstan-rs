@@ -291,9 +291,9 @@ pub struct PropertyTag {
     pub writable: bool,
 }
 
-fn shared() -> &'static crate::memo::Memo<DocBlock> {
-    static MEMO: std::sync::LazyLock<crate::memo::Memo<DocBlock>> =
-        std::sync::LazyLock::new(crate::memo::Memo::new);
+fn shared() -> &'static syntax::memo::Memo<DocBlock> {
+    static MEMO: std::sync::LazyLock<syntax::memo::Memo<DocBlock>> =
+        std::sync::LazyLock::new(syntax::memo::Memo::new);
     &MEMO
 }
 

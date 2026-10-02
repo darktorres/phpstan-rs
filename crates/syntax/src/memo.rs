@@ -1,10 +1,11 @@
-//! What parsing a doc comment gave, kept by the comment's text: the same
-//! doc comments are parsed again and again, by every check that reads one.
+//! What parsing a text gave, kept by the text: the same doc comments and
+//! the same written types are parsed again and again, by every check that
+//! reads one.
 //!
 //! The memo is bounded: a shard that outgrows its limits is emptied, so a
-//! session that reads many different comments does not grow it without
-//! end. It is sharded by the text's hash, so threads parsing different
-//! comments do not wait for one another.
+//! session that reads many different texts does not grow it without end.
+//! It is sharded by the text's hash, so threads parsing different texts do
+//! not wait for one another.
 
 use std::hash::{Hash, Hasher};
 use std::sync::{Arc, Mutex};
@@ -12,8 +13,8 @@ use std::sync::{Arc, Mutex};
 use rustc_hash::FxHashMap;
 
 const SHARDS: usize = 64;
-/// How many comments a shard holds before it is emptied, and how many
-/// bytes of their text.
+/// How many texts a shard holds before it is emptied, and how many bytes
+/// of them, unless the memo is made with limits of its own.
 const SHARD_ENTRIES: usize = 256;
 const SHARD_BYTES: usize = 256 * 1024;
 
@@ -36,8 +37,10 @@ impl<V> Default for Shard<V> {
 }
 
 /// A bounded, sharded memo of `parse` over text.
-pub(crate) struct Memo<V> {
+pub struct Memo<V> {
     shards: Box<[Mutex<Shard<V>>]>,
+    shard_entries: usize,
+    shard_bytes: usize,
 }
 
 /// How a memo has been asked so far.
@@ -48,15 +51,23 @@ pub struct MemoStats {
 }
 
 impl<V> Memo<V> {
-    pub(crate) fn new() -> Memo<V> {
+    pub fn new() -> Memo<V> {
+        Memo::with_limits(SHARD_ENTRIES, SHARD_BYTES)
+    }
+
+    /// A memo whose shards each hold `shard_entries` texts, and
+    /// `shard_bytes` bytes of them, before one is emptied.
+    pub fn with_limits(shard_entries: usize, shard_bytes: usize) -> Memo<V> {
         Memo {
             shards: (0..SHARDS).map(|_| Mutex::new(Shard::default())).collect(),
+            shard_entries,
+            shard_bytes,
         }
     }
 
     /// The value `parse` gives for `raw`: the one kept for that text, else
     /// the one made now, which is kept.
-    pub(crate) fn get(&self, raw: &str, parse: impl FnOnce(&str) -> V) -> Arc<V> {
+    pub fn get(&self, raw: &str, parse: impl FnOnce(&str) -> V) -> Arc<V> {
         let mut hasher = rustc_hash::FxHasher::default();
         raw.hash(&mut hasher);
         let shard = &self.shards[(hasher.finish() >> 20) as usize % SHARDS];
@@ -73,7 +84,7 @@ impl<V> Memo<V> {
         // the meantime has its value replaced, an equal one.
         let value = Arc::new(parse(raw));
         let mut shard = lock(shard);
-        if shard.entries.len() >= SHARD_ENTRIES || shard.bytes + raw.len() > SHARD_BYTES {
+        if shard.entries.len() >= self.shard_entries || shard.bytes + raw.len() > self.shard_bytes {
             shard.entries.clear();
             shard.bytes = 0;
         }
@@ -82,7 +93,7 @@ impl<V> Memo<V> {
         value
     }
 
-    pub(crate) fn stats(&self) -> MemoStats {
+    pub fn stats(&self) -> MemoStats {
         self.shards.iter().fold(MemoStats::default(), |sum, shard| {
             let shard = lock(shard);
             MemoStats {
@@ -90,6 +101,12 @@ impl<V> Memo<V> {
                 misses: sum.misses + shard.misses,
             }
         })
+    }
+}
+
+impl<V> Default for Memo<V> {
+    fn default() -> Memo<V> {
+        Memo::new()
     }
 }
 

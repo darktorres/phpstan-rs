@@ -903,3 +903,35 @@ fn a_display_with_an_unreadable_part_does_not_parse() {
         assert_eq!(crate::try_parse_displayed(display), None, "{display}");
     }
 }
+
+#[test]
+fn a_written_type_found_in_the_memo_is_the_one_parsed_afresh() {
+    use crate::parse::parse_written_type_unmemoized;
+    for text in [
+        "int",
+        " int ",
+        "?int",
+        "?mixed",
+        "int|string|null",
+        "array<string, list<Foo>>",
+        "array{a: int, b?: string, ...}",
+        "non-empty-string",
+        "Foo\\Bar&Baz",
+        "(Foo&Bar)|null",
+        "callable(int): string",
+        "\\Closure(): void",
+        "class-string<Foo>",
+        "int<0, 5>",
+        "'a'|'b'",
+        "Collection<covariant Foo>",
+        "self",
+        "static",
+        "not a type (",
+        "",
+    ] {
+        let fresh = parse_written_type_unmemoized(text);
+        // The first asks the parser, the second the memo.
+        assert_eq!(parse_written_type(text), fresh, "{text}");
+        assert_eq!(parse_written_type(text), fresh, "{text} again");
+    }
+}
