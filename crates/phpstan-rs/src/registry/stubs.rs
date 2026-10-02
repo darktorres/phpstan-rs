@@ -821,24 +821,33 @@ struct StubEntry<V> {
     value: crate::registry::Lazy<V>,
 }
 
-/// The classes (`true`) and functions declared in the stub files that
-/// reference `key` (a `deps::dependency_key`), each by its own dependency
-/// key.
-pub fn stub_dependents(key: &str) -> impl Iterator<Item = (bool, &'static str)> {
-    let index = stub_index();
-    index
+/// The stub files that reference `key` (a `deps::dependency_key`), by their
+/// number in the index.
+pub fn stub_dependent_files(key: &str) -> impl Iterator<Item = u32> {
+    stub_index()
         .dependents
         .get(key)
         .unwrap_or(&[])
         .as_chunks::<4>()
         .0
         .iter()
-        .flat_map(|file| {
-            index
-                .declared_keys_of(u32::from_le_bytes(*file) as usize)
-                .iter()
-                .map(|(is_class, key)| (*is_class, &**key))
-        })
+        .map(|file| u32::from_le_bytes(*file))
+}
+
+/// The classes (`true`) and functions stub file `file` declares, each by
+/// its own dependency key.
+pub fn stub_file_names(file: u32) -> impl Iterator<Item = (bool, &'static str)> {
+    stub_index()
+        .declared_keys_of(file as usize)
+        .iter()
+        .map(|(is_class, key)| (*is_class, &**key))
+}
+
+/// The classes (`true`) and functions declared in the stub files that
+/// reference `key` (a `deps::dependency_key`), each by its own dependency
+/// key.
+pub fn stub_dependents(key: &str) -> impl Iterator<Item = (bool, &'static str)> {
+    stub_dependent_files(key).flat_map(stub_file_names)
 }
 
 /// The names one stub file declares, each as a dependency key, with whether

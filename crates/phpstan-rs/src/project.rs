@@ -1083,6 +1083,7 @@ impl Project {
             .chain(changed.constants.keys().map(|c| deps::dependency_key(c)))
             .collect();
         let mut seen: FxHashSet<String> = FxHashSet::default();
+        let mut seen_stub_files: FxHashSet<u32> = FxHashSet::default();
         while let Some(key) = frontier.pop() {
             if !seen.insert(key.clone()) {
                 continue;
@@ -1114,8 +1115,15 @@ impl Project {
                     reached(name, false);
                 }
             }
-            for (is_class, name) in stubs::stub_dependents(&key) {
-                reached(name, is_class);
+            // A stub file is reached through every key it references;
+            // its names are walked the first time.
+            for file in stubs::stub_dependent_files(&key) {
+                if !seen_stub_files.insert(file) {
+                    continue;
+                }
+                for (is_class, name) in stubs::stub_file_names(file) {
+                    reached(name, is_class);
+                }
             }
         }
         Scope::of(
@@ -1717,6 +1725,7 @@ impl Project {
     fn affected_files(&self, changed: FxHashSet<String>) -> FxHashSet<PathBuf> {
         let mut affected = FxHashSet::default();
         let mut seen: FxHashSet<String> = FxHashSet::default();
+        let mut seen_stub_files: FxHashSet<u32> = FxHashSet::default();
         let mut frontier: Vec<String> = changed.into_iter().collect();
         // Puts the dependency key of `name` on the frontier unless it was
         // reached already; most names are, and then nothing is allocated.
@@ -1741,8 +1750,13 @@ impl Project {
                     reach(name, &seen, &mut frontier);
                 }
             }
-            for (_, name) in stubs::stub_dependents(&key) {
-                reach(name, &seen, &mut frontier);
+            for file in stubs::stub_dependent_files(&key) {
+                if !seen_stub_files.insert(file) {
+                    continue;
+                }
+                for (_, name) in stubs::stub_file_names(file) {
+                    reach(name, &seen, &mut frontier);
+                }
             }
         }
         affected
