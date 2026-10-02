@@ -698,24 +698,26 @@ impl Registry {
     /// changing), becomes `Mixed` - real PHP itself rejects such a cycle.
     fn resolve_class_constant_references(&mut self) {
         const MAX_ROUNDS: usize = 16;
+        // The classes with a deferred constant type, found by the first
+        // round: no later round gives another class one.
+        let mut with_deferred: Option<Vec<Name>> = None;
         for _ in 0..MAX_ROUNDS {
             let mut updates: Vec<(Name, Name, Type)> = Vec::new();
-            for (class_name, info) in self.scoped_classes() {
-                if !info.consts.values().any(|sig| sig.ty.contains_deferred()) {
-                    continue;
-                }
-                let own_consts = visible_class_consts(class_name, &self.classes);
-                for (const_name, sig) in &info.consts {
-                    if !sig.ty.contains_deferred() {
-                        continue;
+            match &with_deferred {
+                None => {
+                    let mut found = Vec::new();
+                    for (class_name, info) in self.scoped_classes() {
+                        if self.constant_reference_updates(class_name, info, &mut updates) {
+                            found.push(class_name.clone());
+                        }
                     }
-                    let step = resolve_deferred_value_of_in_type(
-                        bind_class_const_self(sig.ty.clone(), class_name, &own_consts),
-                        &self.classes,
-                        None,
-                    );
-                    if step != sig.ty {
-                        updates.push((class_name.clone(), const_name.clone(), step));
+                    with_deferred = Some(found);
+                }
+                Some(names) => {
+                    for class_name in names {
+                        if let Some(info) = self.classes.get(class_name) {
+                            self.constant_reference_updates(class_name, info, &mut updates);
+                        }
                     }
                 }
             }
@@ -732,7 +734,7 @@ impl Registry {
                 }
             }
         }
-        for name in self.scoped_class_names().iter() {
+        for name in with_deferred.iter().flatten() {
             let Some(info) = self.classes.get_mut(name) else {
                 continue;
             };
@@ -745,6 +747,35 @@ impl Registry {
                 }
             }
         }
+    }
+
+    /// One round of `resolve_class_constant_references` for a class: the
+    /// constants of `info` that change, pushed onto `updates`. Whether the
+    /// class has a deferred constant type at all.
+    fn constant_reference_updates(
+        &self,
+        class_name: &Name,
+        info: &ClassReflection,
+        updates: &mut Vec<(Name, Name, Type)>,
+    ) -> bool {
+        if !info.consts.values().any(|sig| sig.ty.contains_deferred()) {
+            return false;
+        }
+        let own_consts = visible_class_consts(class_name, &self.classes);
+        for (const_name, sig) in &info.consts {
+            if !sig.ty.contains_deferred() {
+                continue;
+            }
+            let step = resolve_deferred_value_of_in_type(
+                bind_class_const_self(sig.ty.clone(), class_name, &own_consts),
+                &self.classes,
+                None,
+            );
+            if step != sig.ty {
+                updates.push((class_name.clone(), const_name.clone(), step));
+            }
+        }
+        true
     }
 
     /// `@phpstan-import-type`'s deferred half - `ClassReflection::from_decl`
