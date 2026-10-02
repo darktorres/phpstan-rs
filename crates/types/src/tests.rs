@@ -10,6 +10,7 @@ mod intersections;
 mod keyword_hints;
 mod kinds;
 mod narrowing;
+mod node_flags;
 mod parsing;
 mod subtyping;
 mod subtyping_properties;

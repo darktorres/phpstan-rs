@@ -90,26 +90,56 @@ pub(crate) struct Node {
     // offset access, class constant), the type has anywhere in it
     // (`HAS_*`), so a binding or a resolution can leave a type without them
     // as it is.
-    pub(crate) flags: u8,
+    pub(crate) flags: u16,
 }
 
-pub(crate) const HAS_SELF: u8 = 1;
-pub(crate) const HAS_STATIC: u8 = 2;
-pub(crate) const HAS_PARENT: u8 = 4;
-pub(crate) const HAS_DEFERRED: u8 = 8;
+pub(crate) const HAS_SELF: u16 = 1;
+pub(crate) const HAS_STATIC: u16 = 2;
+pub(crate) const HAS_PARENT: u16 = 4;
+pub(crate) const HAS_DEFERRED: u16 = 8;
+// Taken by the flag for a class name that reads as a constant's.
+#[allow(dead_code)]
+const RESERVED_CONSTANT_NAME: u16 = 16;
+/// A string key refined as no decimal integer, in the key's own form: not
+/// something nested below it, so it is not passed up to a parent.
+pub(crate) const HAS_KEY_REFINEMENT: u16 = 32;
+pub(crate) const HAS_TEMPLATE_REF: u16 = 64;
+pub(crate) const HAS_LATE: u16 = 128;
+
+/// The flags a node passes up to the node it is a child of.
+const PASSED_UP: u16 = !HAS_KEY_REFINEMENT;
 
 /// The `HAS_*` flags of `repr`: its own, and its children's.
-pub(crate) fn reference_flags(repr: &Repr) -> u8 {
+pub(crate) fn reference_flags(repr: &Repr) -> u16 {
     let mut flags = match repr {
         Repr::SelfRef(_) => HAS_SELF,
         Repr::StaticRef(_) | Repr::This => HAS_STATIC,
         Repr::ParentRef => HAS_PARENT,
-        Repr::ValueOf(_) | Repr::KeyOf(_) | Repr::OffsetAccess(..) | Repr::ClassConstant { .. } => {
-            HAS_DEFERRED
-        }
+        Repr::ValueOf(_) | Repr::ClassConstant { .. } => HAS_DEFERRED,
+        Repr::KeyOf(_) | Repr::OffsetAccess(..) => HAS_DEFERRED | HAS_LATE,
+        Repr::TemplateParam(_)
+        | Repr::Conditional {
+            subject: ConditionalSubject::Template(_),
+            ..
+        } => HAS_TEMPLATE_REF,
         _ => 0,
     };
-    traverse::for_each_repr_child(repr, &mut |child| flags |= child.0.flags);
+    traverse::for_each_repr_child(repr, &mut |child| flags |= child.0.flags & PASSED_UP);
+    let refined = match repr {
+        Repr::Intersection(members) => members.iter().any(|m| {
+            matches!(
+                m.repr(),
+                Repr::Accessory(AccessoryKind::NonDecimalIntegerString)
+            )
+        }),
+        Repr::Union(members) | Repr::BenevolentUnion(members) => {
+            members.iter().any(|m| m.0.flags & HAS_KEY_REFINEMENT != 0)
+        }
+        _ => false,
+    };
+    if refined {
+        flags |= HAS_KEY_REFINEMENT;
+    }
     flags
 }
 
@@ -862,18 +892,7 @@ pub enum AccessoryKind {
 /// Whether a string member of `key` carries the non-decimal-int
 /// refinement.
 fn has_key_refinement(key: &Type) -> bool {
-    match key.repr() {
-        Repr::Intersection(members) => members.iter().any(|m| {
-            matches!(
-                m.repr(),
-                Repr::Accessory(AccessoryKind::NonDecimalIntegerString)
-            )
-        }),
-        Repr::Union(members) | Repr::BenevolentUnion(members) => {
-            members.iter().any(has_key_refinement)
-        }
-        _ => false,
-    }
+    key.0.flags & HAS_KEY_REFINEMENT != 0
 }
 
 /// `key` with the non-decimal-int refinement taken off its strings.

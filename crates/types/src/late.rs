@@ -2,7 +2,7 @@
 //! answer depends on a `T` that may be a template until a call binds it
 //! (PHPStan's `LateResolvableType`).
 
-use crate::{ConditionalSubject, Repr, ShapeKey, Type};
+use crate::{Repr, ShapeKey, Type};
 
 /// What resolving a class reference inside a type needs to know.
 pub trait ClassConstants {
@@ -131,14 +131,7 @@ impl Type {
     /// Whether this type names a template anywhere: a template parameter, or a
     /// conditional whose subject is one.
     pub fn references_template(&self) -> bool {
-        match self.repr() {
-            Repr::TemplateParam(_) => true,
-            Repr::Conditional {
-                subject: ConditionalSubject::Template(_),
-                ..
-            } => true,
-            _ => self.any_child(Type::references_template),
-        }
+        self.0.flags & crate::HAS_TEMPLATE_REF != 0
     }
 }
 
@@ -164,8 +157,7 @@ impl Type {
 impl Type {
     /// Whether this type holds a `key-of` or offset access anywhere.
     pub fn contains_late(&self) -> bool {
-        matches!(self.repr(), Repr::KeyOf(_) | Repr::OffsetAccess(..))
-            || self.any_child(Type::contains_late)
+        self.0.flags & crate::HAS_LATE != 0
     }
 }
 

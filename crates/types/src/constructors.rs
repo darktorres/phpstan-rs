@@ -333,9 +333,12 @@ impl Type {
     /// construction sites this marker belongs at, not every "no more
     /// precise key" site project-wide.
     pub fn benevolent_array_key() -> Type {
-        Type::new(Repr::BenevolentUnion(vec![
-            Type::constant(Constant::Int),
-            Type::constant(Constant::String),
-        ]))
+        static KEY: std::sync::LazyLock<Type> = std::sync::LazyLock::new(|| {
+            Type::new(Repr::BenevolentUnion(vec![
+                Type::constant(Constant::Int),
+                Type::constant(Constant::String),
+            ]))
+        });
+        KEY.clone()
     }
 }

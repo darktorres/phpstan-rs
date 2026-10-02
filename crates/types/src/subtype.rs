@@ -36,7 +36,7 @@ impl Shape {
     /// `array<int<0, max>, int>` and `array{a: int}` fits
     /// `array<'a'|'b', int>`.
     pub fn key_type(&self) -> Type {
-        let mut key_types: Vec<Type> = Vec::new();
+        let mut key_types: Vec<Type> = Vec::with_capacity(self.fields.len());
         for field in &self.fields {
             let kt = field.key.to_type();
             if !key_types.contains(&kt) {

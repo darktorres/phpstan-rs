@@ -125,9 +125,7 @@ impl Type {
 
     /// Whether a `parent` stands anywhere in this type unresolved.
     pub fn has_parent_ref(&self) -> bool {
-        let mut found = false;
-        self.walk_nested(&mut |t| found |= matches!(t.repr(), Repr::ParentRef));
-        found
+        self.0.flags & crate::HAS_PARENT != 0
     }
 
     /// `f` on this type and every type nested in it, outermost first.
