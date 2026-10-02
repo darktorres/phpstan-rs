@@ -60,6 +60,15 @@ pub enum PurityDependency {
     Method(Name, Name),
 }
 
+/// The functions and methods `classify_purity` found a body with
+/// dependencies for: the only ones a fixed point can mark pure, since every
+/// declaration in scope starts with no dependencies and none is pure.
+#[derive(Default)]
+struct PurityCandidates {
+    functions: Vec<Name>,
+    methods: Vec<(Name, Name)>,
+}
+
 impl Registry {
     /// Wired into `Registry::build` immediately after
     /// `resolve_deferred_value_of` (and into `Project`'s own incremental
@@ -70,8 +79,8 @@ impl Registry {
     /// `bodies`, found by its declaration's provenance.
     #[hotpath::measure]
     pub(crate) fn resolve_transitive_purity(&mut self, bodies: &dyn BodySource) {
-        self.classify_purity(bodies);
-        self.run_purity_fixed_point();
+        let candidates = self.classify_purity(bodies);
+        self.run_purity_fixed_point(&candidates);
         self.resolve_property_writes(bodies);
     }
 
@@ -100,7 +109,8 @@ impl Registry {
     /// its own fresh reborrow since the sequential apply loop in between
     /// needs `&mut self` again.
     #[allow(clippy::type_complexity)]
-    fn classify_purity(&mut self, bodies: &dyn BodySource) {
+    fn classify_purity(&mut self, bodies: &dyn BodySource) -> PurityCandidates {
+        let mut candidates = PurityCandidates::default();
         let function_names: Vec<Name> = self.scoped_function_names();
         let registry: &Registry = self;
         let function_deps: Vec<(Name, Option<Vec<PurityDependency>>)> = function_names
@@ -117,7 +127,11 @@ impl Registry {
             })
             .collect();
         for (name, deps) in function_deps {
+            let has_deps = deps.is_some();
             self.functions.get_mut(&name).unwrap().purity_dependencies = deps;
+            if has_deps {
+                candidates.functions.push(name);
+            }
         }
 
         let class_names: Vec<Name> = self.scoped_class_names();
@@ -126,27 +140,22 @@ impl Registry {
             .par_iter()
             .with_min_len(crate::registry::PASS_CHUNK)
             .flat_map(|class_name| {
-                let method_names: Vec<Name> = registry.classes[class_name]
-                    .methods
-                    .keys()
-                    .cloned()
-                    .collect();
                 let mut per_class = Vec::new();
-                for method_name in method_names {
-                    let sig = &registry.classes[class_name].methods[&method_name];
-                    if !purity_gate_passes(sig, syntax::ast::is_constructor_name(&method_name)) {
+                for (method_name, sig) in &registry.classes[class_name].methods {
+                    if !purity_gate_passes(sig, syntax::ast::is_constructor_name(method_name)) {
                         continue;
                     }
                     let Some(body) = bodies.body(&sig.provenance) else {
                         continue;
                     };
                     let deps = classify_body(body, Some(class_name), registry);
-                    per_class.push((class_name.clone(), method_name, deps));
+                    per_class.push((class_name.clone(), method_name.clone(), deps));
                 }
                 per_class
             })
             .collect();
         for (class_name, method_name, deps) in method_deps {
+            let has_deps = deps.is_some();
             self.classes
                 .get_mut(&class_name)
                 .unwrap()
@@ -154,7 +163,11 @@ impl Registry {
                 .get_mut(&method_name)
                 .unwrap()
                 .purity_dependencies = deps;
+            if has_deps {
+                candidates.methods.push((class_name, method_name));
+            }
         }
+        candidates
     }
 
     /// A plain, monotonic fixed point (bounded by declaration count, no
@@ -165,12 +178,10 @@ impl Registry {
     /// full pass makes no change. A dependency cycle with no external
     /// pure base case is correctly never marked pure, matching real
     /// PHPStan's own identical behavior for the same shape.
-    fn run_purity_fixed_point(&mut self) {
-        let function_names: Vec<Name> = self.scoped_function_names();
-        let class_names: Vec<Name> = self.scoped_class_names();
+    fn run_purity_fixed_point(&mut self, candidates: &PurityCandidates) {
         loop {
             let mut changed = false;
-            for name in &function_names {
+            for name in &candidates.functions {
                 let sig = &self.functions[name];
                 if sig.is_transitively_pure {
                     continue;
@@ -183,27 +194,23 @@ impl Registry {
                     changed = true;
                 }
             }
-            for class_name in &class_names {
-                let method_names: Vec<Name> =
-                    self.classes[class_name].methods.keys().cloned().collect();
-                for method_name in method_names {
-                    let sig = &self.classes[class_name].methods[&method_name];
-                    if sig.is_transitively_pure {
-                        continue;
-                    }
-                    let Some(deps) = &sig.purity_dependencies else {
-                        continue;
-                    };
-                    if deps.iter().all(|d| self.dependency_is_pure(d)) {
-                        self.classes
-                            .get_mut(class_name)
-                            .unwrap()
-                            .methods
-                            .get_mut(&method_name)
-                            .unwrap()
-                            .is_transitively_pure = true;
-                        changed = true;
-                    }
+            for (class_name, method_name) in &candidates.methods {
+                let sig = &self.classes[class_name].methods[method_name];
+                if sig.is_transitively_pure {
+                    continue;
+                }
+                let Some(deps) = &sig.purity_dependencies else {
+                    continue;
+                };
+                if deps.iter().all(|d| self.dependency_is_pure(d)) {
+                    self.classes
+                        .get_mut(class_name)
+                        .unwrap()
+                        .methods
+                        .get_mut(method_name)
+                        .unwrap()
+                        .is_transitively_pure = true;
+                    changed = true;
                 }
             }
             if !changed {
