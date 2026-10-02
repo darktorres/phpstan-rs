@@ -4,7 +4,10 @@
 
 mod accepts;
 mod kinds;
+mod memo;
 mod super_type;
+
+pub use memo::{RelationMemoScope, relation_memo_scope};
 
 use crate::{ClassHierarchy, TrinaryLogic};
 

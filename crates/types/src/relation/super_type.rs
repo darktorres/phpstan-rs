@@ -83,10 +83,9 @@ impl Relation<'_> {
         {
             return TrinaryLogic::No;
         }
-        if self.hierarchy.is_structural() {
-            return structural_memo::answer(sup, sub, || self.is_super_type_of_by_form(sup, sub));
-        }
-        self.is_super_type_of_by_form(sup, sub)
+        super::memo::answer(self.hierarchy, sup, sub, || {
+            self.is_super_type_of_by_form(sup, sub)
+        })
     }
 
     /// `is_super_type_of` read off the two types' forms, without the
@@ -586,48 +585,6 @@ fn scalars_disjoint(a: &Type, b: &Type) -> bool {
             },
         }
     })
-}
-
-/// The answers `Relation::structural()` has given, by the pair of types:
-/// the same pairs are asked again and again, by a union's absorption and
-/// its merge of shapes and by the comparison of their fields' values.
-mod structural_memo {
-    use std::cell::RefCell;
-
-    use rustc_hash::FxHashMap;
-
-    use crate::{TrinaryLogic, Type};
-
-    /// Past this many pairs a thread's memo is emptied.
-    const LIMIT: usize = 1 << 17;
-
-    /// The pair's nodes are held with the answer, which keeps their
-    /// addresses from being taken by other types while the entry stands.
-    type Entries = FxHashMap<(usize, usize), (Type, Type, TrinaryLogic)>;
-
-    thread_local! {
-        static ANSWERS: RefCell<Entries> = RefCell::new(FxHashMap::default());
-    }
-
-    pub(super) fn answer(
-        sup: &Type,
-        sub: &Type,
-        compute: impl FnOnce() -> TrinaryLogic,
-    ) -> TrinaryLogic {
-        let key = (sup.node_address(), sub.node_address());
-        if let Some(known) = ANSWERS.with(|a| a.borrow().get(&key).map(|e| e.2)) {
-            return known;
-        }
-        let answer = compute();
-        ANSWERS.with(|a| {
-            let mut entries = a.borrow_mut();
-            if entries.len() >= LIMIT {
-                entries.clear();
-            }
-            entries.insert(key, (sup.clone(), sub.clone(), answer));
-        });
-        answer
-    }
 }
 
 #[derive(PartialEq)]

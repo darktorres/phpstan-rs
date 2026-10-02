@@ -14,6 +14,7 @@ mod mentions;
 mod narrowing;
 mod node_flags;
 mod parsing;
+mod relation_memo;
 mod reserved_type_words;
 mod shape_index;
 mod shape_relation;

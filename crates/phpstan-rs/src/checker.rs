@@ -1468,6 +1468,9 @@ impl<'a> Checker<'a> {
 
     #[hotpath::measure]
     pub fn check_program(&mut self, program: &[Stmt]) {
+        // The registry is borrowed unchanged for the whole check, so what
+        // the relations over it answer for a pair of types stays true.
+        let _answers = types::relation_memo_scope(self.registry);
         self.current_function_assigned_variables =
             if self.settings.strict_rules.check_implicit_array_creation {
                 strict_rules::assigned_variables(program)
