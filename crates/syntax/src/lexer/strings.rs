@@ -258,7 +258,7 @@ impl<'a> Lexer<'a> {
                 while self.pos < self.src.len() && self.peek() != b'\'' {
                     self.pos += 1;
                 }
-                label = String::from_utf8_lossy(&self.src[start..self.pos]).into_owned();
+                label = super::lossy(&self.src[start..self.pos]).into_owned();
                 self.pos = (self.pos + 1).min(self.src.len());
                 nowdoc = true;
             }
@@ -268,7 +268,7 @@ impl<'a> Lexer<'a> {
                 while self.pos < self.src.len() && self.peek() != b'"' {
                     self.pos += 1;
                 }
-                label = String::from_utf8_lossy(&self.src[start..self.pos]).into_owned();
+                label = super::lossy(&self.src[start..self.pos]).into_owned();
                 self.pos = (self.pos + 1).min(self.src.len());
                 nowdoc = false;
             }
@@ -277,7 +277,7 @@ impl<'a> Lexer<'a> {
                 while is_ident_continue(self.peek()) {
                     self.pos += 1;
                 }
-                label = String::from_utf8_lossy(&self.src[start..self.pos]).into_owned();
+                label = super::lossy(&self.src[start..self.pos]).into_owned();
                 nowdoc = false;
             }
         }
@@ -556,12 +556,10 @@ impl<'a> Lexer<'a> {
                         name_end,
                         prop_start,
                     }) => {
-                        let name = self
-                            .interner
-                            .name(&String::from_utf8_lossy(&inner_bytes[1..name_end]));
+                        let name = self.interner.name(&super::lossy(&inner_bytes[1..name_end]));
                         let prop = self
                             .interner
-                            .name(&String::from_utf8_lossy(&inner_bytes[prop_start..]));
+                            .name(&super::lossy(&inner_bytes[prop_start..]));
                         let var_end = self.line_col_at(off(start + name_end));
                         let end = self.line_col_at(off(close_brace_pos));
                         parts.push(StringPart::PropertyAccess {
@@ -578,12 +576,11 @@ impl<'a> Lexer<'a> {
                         key_start,
                         key_end,
                     }) => {
-                        let key_text = String::from_utf8_lossy(&inner_bytes[key_start..key_end]);
+                        let key_text = super::lossy(&inner_bytes[key_start..key_end]);
                         match classify_index_key(&key_text, &self.interner) {
                             Some(key) => {
-                                let name = self
-                                    .interner
-                                    .name(&String::from_utf8_lossy(&inner_bytes[1..name_end]));
+                                let name =
+                                    self.interner.name(&super::lossy(&inner_bytes[1..name_end]));
                                 let var_end = self.line_col_at(off(start + name_end));
                                 let end = self.line_col_at(off(close_brace_pos));
                                 parts.push(StringPart::Index {
@@ -595,18 +592,16 @@ impl<'a> Lexer<'a> {
                                 });
                             }
                             None => {
-                                let inner = String::from_utf8_lossy(
-                                    &self.src[off(start)..off(close_brace_pos)],
-                                )
-                                .into_owned();
+                                let inner =
+                                    super::lossy(&self.src[off(start)..off(close_brace_pos)])
+                                        .into_owned();
                                 parts.push(StringPart::ComplexExpr(inner, base));
                             }
                         }
                     }
                     None => {
                         let inner =
-                            String::from_utf8_lossy(&self.src[off(start)..off(close_brace_pos)])
-                                .into_owned();
+                            super::lossy(&self.src[off(start)..off(close_brace_pos)]).into_owned();
                         parts.push(StringPart::ComplexExpr(inner, base));
                     }
                 }
@@ -635,7 +630,7 @@ impl<'a> Lexer<'a> {
                         i += 1;
                     }
                 }
-                let inner = String::from_utf8_lossy(&self.src[off(start)..off(i)]).into_owned();
+                let inner = super::lossy(&self.src[off(start)..off(i)]).into_owned();
                 i = (i + 1).min(bytes.len());
                 let name_len = inner.bytes().take_while(|&c| is_ident_continue(c)).count();
                 let starts_with_name = inner.bytes().next().is_some_and(is_ident_start);
@@ -663,9 +658,7 @@ impl<'a> Lexer<'a> {
                 while i < bytes.len() && is_ident_continue(bytes[i]) {
                     i += 1;
                 }
-                let name = self
-                    .interner
-                    .name(&String::from_utf8_lossy(&bytes[name_start..i]));
+                let name = self.interner.name(&super::lossy(&bytes[name_start..i]));
                 // Points at the `$` itself (one byte before `name_start`),
                 // matching where the reconstructed `${name}...` string below
                 // begins - precision within the reconstruction (distinguishing
@@ -689,9 +682,7 @@ impl<'a> Lexer<'a> {
                     while i < bytes.len() && is_ident_continue(bytes[i]) {
                         i += 1;
                     }
-                    let prop = self
-                        .interner
-                        .name(&String::from_utf8_lossy(&bytes[prop_start..i]));
+                    let prop = self.interner.name(&super::lossy(&bytes[prop_start..i]));
                     let end = self.line_col_at(off(i));
                     parts.push(StringPart::PropertyAccess {
                         var: name,
@@ -708,7 +699,7 @@ impl<'a> Lexer<'a> {
                     while i < bytes.len() && bytes[i] != b']' {
                         i += 1;
                     }
-                    let key = String::from_utf8_lossy(&bytes[key_start..i]).into_owned();
+                    let key = super::lossy(&bytes[key_start..i]).into_owned();
                     i = (i + 1).min(bytes.len());
                     match classify_index_key(&key, &self.interner) {
                         Some(key) => {

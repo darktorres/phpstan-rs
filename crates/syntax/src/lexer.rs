@@ -109,6 +109,16 @@ fn first_line_cursor(line_starts: &[usize], len: usize) -> (usize, Position, usi
     )
 }
 
+/// `String::from_utf8_lossy`, found by validating the bytes the way
+/// `str::from_utf8` does - several bytes at a time for the ASCII most of
+/// source is - and decoding lossily only for the rest.
+pub(crate) fn lossy(bytes: &[u8]) -> std::borrow::Cow<'_, str> {
+    match std::str::from_utf8(bytes) {
+        Ok(text) => std::borrow::Cow::Borrowed(text),
+        Err(_) => String::from_utf8_lossy(bytes),
+    }
+}
+
 /// A token, its span, and a keyword's original spelling.
 pub type SpannedToken = (Token, Span, Option<String>);
 
@@ -361,7 +371,7 @@ impl<'a> Lexer<'a> {
         let comments = std::mem::take(&mut self.comments)
             .into_iter()
             .map(|(start, end)| {
-                let text = String::from_utf8_lossy(&self.src[start..end]).into_owned();
+                let text = lossy(&self.src[start..end]).into_owned();
                 (self.line_col_at(start), text)
             })
             .collect();
@@ -554,11 +564,11 @@ impl<'a> Lexer<'a> {
                 self.pending_keyword_raw = if &self.src[span.clone()] == kw.as_str().as_bytes() {
                     None
                 } else {
-                    Some(String::from_utf8_lossy(&self.src[span]).into_owned())
+                    Some(lossy(&self.src[span]).into_owned())
                 };
                 return Token::Keyword(kw);
             }
-            let s = String::from_utf8_lossy(&self.src[span]);
+            let s = lossy(&self.src[span]);
             return Token::Identifier(self.interner.name(&s));
         }
 
@@ -600,7 +610,7 @@ impl<'a> Lexer<'a> {
         {
             self.pos += 1;
         }
-        let html = String::from_utf8_lossy(&self.src[start..self.pos]);
+        let html = lossy(&self.src[start..self.pos]);
 
         if self.starts_with_ignore_case("<?php") {
             self.pos += 5;
@@ -757,7 +767,7 @@ impl<'a> Lexer<'a> {
     fn lex_ident_raw(&mut self) -> std::borrow::Cow<'a, str> {
         let span = self.lex_ident_span();
         let src: &'a [u8] = self.src;
-        String::from_utf8_lossy(&src[span])
+        lossy(&src[span])
     }
 
     fn lex_number(&mut self) -> Token {
@@ -856,10 +866,7 @@ impl<'a> Lexer<'a> {
             self.pos += 1;
         }
         self.pos = (self.pos + 2).min(self.src.len());
-        Token::DocComment(
-            self.interner
-                .str(&String::from_utf8_lossy(&self.src[start..self.pos])),
-        )
+        Token::DocComment(self.interner.str(&lossy(&self.src[start..self.pos])))
     }
 
     fn lex_operator(&mut self) -> Token {
@@ -1149,6 +1156,43 @@ fn is_numeric_token(raw: &[u8]) -> bool {
 fn char_count(bytes: &[u8]) -> usize {
     match std::str::from_utf8(bytes) {
         Ok(text) => text.chars().count(),
-        Err(_) => String::from_utf8_lossy(bytes).chars().count(),
+        Err(_) => lossy(bytes).chars().count(),
+    }
+}
+
+#[cfg(test)]
+mod lossy_tests {
+    use super::lossy;
+
+    #[test]
+    fn lossy_is_from_utf8_lossy() {
+        let samples: [&[u8]; 9] = [
+            b"",
+            b"plain ascii",
+            "caf\u{e9} \u{10348} \u{4e2d}".as_bytes(),
+            b"cut \xe2\x82",
+            b"\xff\xfe",
+            b"a\xc0\xafb",
+            b"\xed\xa0\x80",
+            b"ok \xf0\x9f\x98\x80 then \xf0\x9f",
+            &[0x80; 5],
+        ];
+        for bytes in samples {
+            assert_eq!(
+                &*lossy(bytes),
+                &*String::from_utf8_lossy(bytes),
+                "{bytes:?}"
+            );
+        }
+        // Every byte, alone and after an ASCII letter and a lead byte.
+        for b in 0..=255u8 {
+            for bytes in [vec![b], vec![b'a', b], vec![0xe2, b], vec![0xf0, 0x9f, b]] {
+                assert_eq!(
+                    &*lossy(&bytes),
+                    &*String::from_utf8_lossy(&bytes),
+                    "{bytes:?}"
+                );
+            }
+        }
     }
 }
