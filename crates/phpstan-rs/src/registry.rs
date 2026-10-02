@@ -56,7 +56,10 @@ pub use name_map::{NameMap, NameSet};
 pub use name_table::NameTable;
 pub(crate) use name_table::{Detached, FoldedKey, Lazy};
 pub type FunctionTable = NameTable<FunctionReflection>;
-pub(crate) use index::{BuiltDecl, build_declarations, register_global_constant};
+pub(crate) use index::{
+    BuiltDecl, DeclKind, Keep, build_declarations, build_declarations_where,
+    register_global_constant,
+};
 pub(crate) use name_context::{collect_class_name_case_refs, resolve_names_in_type};
 pub(crate) use name_table::{folded_key, function_key, with_function_key};
 pub(crate) use property_writes::PropertyWrites;

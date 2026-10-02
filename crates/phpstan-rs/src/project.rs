@@ -13,7 +13,9 @@ use crate::ignore_comments;
 use crate::pest_config::PestConfig;
 use crate::registry::scope::Scope;
 use crate::registry::stubs;
-use crate::registry::{BodySource, BuiltDecl, FileBodies, Origin, Provenance, Registry};
+use crate::registry::{
+    BodySource, BuiltDecl, DeclKind, FileBodies, Keep, Origin, Provenance, Registry,
+};
 use diagnostics::{self, Diagnostic, DiagnosticBuilder};
 use syntax::ast::{Stmt, StmtKind};
 use syntax::declarations::Declared;
@@ -1345,19 +1347,15 @@ impl Project {
         sources.sort_by_key(|source| (source.0, source.1));
         for (analyzed, _, path, ast, is_pending) in sources {
             let origin = Origin::File(Arc::from(path));
-            for decl in crate::registry::build_declarations(ast, &origin) {
-                let rebuilt = match &decl {
-                    BuiltDecl::Class { name, .. } => {
-                        class_keys.contains(&name.to_ascii_lowercase())
-                    }
-                    BuiltDecl::Function { name, .. } => {
-                        function_keys.contains(&name.to_ascii_lowercase())
-                    }
-                    BuiltDecl::GlobalConst { name, .. } => constant_keys.contains(name.as_str()),
-                };
-                if !rebuilt && !is_pending {
-                    continue;
-                }
+            // Of a file already loaded, only the declarations being
+            // rebuilt are built; the pending file's all are.
+            let rebuilt = |kind: DeclKind, name: &str| match kind {
+                DeclKind::Class => class_keys.contains(&name.to_ascii_lowercase()),
+                DeclKind::Function => function_keys.contains(&name.to_ascii_lowercase()),
+                DeclKind::Constant => constant_keys.contains(name),
+            };
+            let keep: Option<Keep<'_>> = if is_pending { None } else { Some(&rebuilt) };
+            for decl in crate::registry::build_declarations_where(ast, &origin, keep) {
                 if let BuiltDecl::Class { name, .. } = &decl {
                     self.registry.record_phpstan_class_file(name, path);
                 }

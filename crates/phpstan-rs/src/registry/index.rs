@@ -573,12 +573,41 @@ impl Registry {
 /// it sits (`for_each_declaration`).
 #[hotpath::measure]
 pub(crate) fn build_declarations(stmts: &[Stmt], origin: &Origin) -> Vec<BuiltDecl> {
+    build_declarations_where(stmts, origin, None)
+}
+
+/// What `build_declarations_where` asks `keep` about.
+#[derive(Clone, Copy)]
+pub(crate) enum DeclKind {
+    Class,
+    Function,
+    Constant,
+}
+
+/// What decides which declarations `build_declarations_where` builds.
+pub(crate) type Keep<'a> = &'a dyn Fn(DeclKind, &str) -> bool;
+
+/// `build_declarations`, building only the declarations `keep` accepts,
+/// asked by kind and name before the declaration is built. Without a
+/// `keep` every declaration is built. With one, the anonymous classes are
+/// not: their names can never be a declared name's, which `keep` is
+/// about.
+pub(crate) fn build_declarations_where(
+    stmts: &[Stmt],
+    origin: &Origin,
+    keep: Option<Keep<'_>>,
+) -> Vec<BuiltDecl> {
     let mut out = Vec::new();
+    let kept = |kind: DeclKind, name: &str| keep.is_none_or(|keep| keep(kind, name));
     for_each_declaration(stmts, |declaration, ctx| {
         let conditional = declaration.conditional;
         match declaration.declared {
             Declared::Class(c) => {
-                let name = Name::from(&declaration.name());
+                let name = declaration.name();
+                if !kept(DeclKind::Class, &name) {
+                    return;
+                }
+                let name = Name::from(&name);
                 let mut info = ClassReflection::from_decl(c, ctx);
                 info.record_provenance(origin, &name, c.name.span, &MemberSpans::of_class(&c.def));
                 out.push(BuiltDecl::Class {
@@ -588,6 +617,9 @@ pub(crate) fn build_declarations(stmts: &[Stmt], origin: &Origin) -> Vec<BuiltDe
                 });
             }
             Declared::Function(f) => {
+                if keep.is_some() && !kept(DeclKind::Function, &declaration.name()) {
+                    return;
+                }
                 let mut sig = FunctionReflection::from_decl(
                     f,
                     ctx,
@@ -603,18 +635,27 @@ pub(crate) fn build_declarations(stmts: &[Stmt], origin: &Origin) -> Vec<BuiltDe
                     site: (f.name.span.start.line, f.name.span.start.col),
                 });
             }
-            Declared::Constant(c) => out.push(BuiltDecl::GlobalConst {
-                name: Name::from(&declaration.name()),
-                ty: infer_const_type(&c.value),
-            }),
+            Declared::Constant(c) => {
+                let name = declaration.name();
+                if kept(DeclKind::Constant, &name) {
+                    out.push(BuiltDecl::GlobalConst {
+                        name: Name::from(&name),
+                        ty: infer_const_type(&c.value),
+                    });
+                }
+            }
             Declared::Define { name, value } => {
-                if let Some((name, ty)) = define_constant(name, value) {
+                if let Some((name, ty)) = define_constant(name, value)
+                    && kept(DeclKind::Constant, name.as_str())
+                {
                     out.push(BuiltDecl::GlobalConst { name, ty });
                 }
             }
         }
     });
-    out.extend(crate::registry::anonymous_class_decls(stmts, origin));
+    if keep.is_none() {
+        out.extend(crate::registry::anonymous_class_decls(stmts, origin));
+    }
     out
 }
 
