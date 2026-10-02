@@ -2303,6 +2303,15 @@ fn run_pending_edits<W: Write>(
     }
 }
 
+/// A successful response carrying `result` as it is: `Response::new_ok`
+/// would serialize a value that already is JSON, copying all of it.
+fn ok_response(id: &RequestId, result: serde_json::Value) -> Message {
+    Message::Response(Response {
+        id: id.clone(),
+        response_result: Ok(result),
+    })
+}
+
 /// Registers `req.id` (with a fresh cancellation flag) before dispatch
 /// and writes the resulting response through `respond_unless_canceled`,
 /// so a `"$/cancelRequest"` arriving mid-dispatch (impossible today,
@@ -2473,7 +2482,7 @@ fn handle_request<W: Write>(server: &mut Server, writer: &mut W, req: Request) {
         }
         "shutdown" => {
             server.shutdown_received = true;
-            Message::Response(Response::new_ok(id.clone(), serde_json::Value::Null))
+            ok_response(&id, serde_json::Value::Null)
         }
         "textDocument/hover" => {
             let result = serde_json::from_value::<HoverParams>(req.params)
@@ -2486,7 +2495,7 @@ fn handle_request<W: Write>(server: &mut Server, writer: &mut W, req: Request) {
                 })
                 .map(|hover| serde_json::to_value(hover).unwrap_or(serde_json::Value::Null))
                 .unwrap_or(serde_json::Value::Null);
-            Message::Response(Response::new_ok(id.clone(), result))
+            ok_response(&id, result)
         }
         "textDocument/definition" => {
             let result = serde_json::from_value::<GotoDefinitionParams>(req.params)
@@ -2499,7 +2508,7 @@ fn handle_request<W: Write>(server: &mut Server, writer: &mut W, req: Request) {
                 })
                 .map(|loc| serde_json::to_value(loc).unwrap_or(serde_json::Value::Null))
                 .unwrap_or(serde_json::Value::Null);
-            Message::Response(Response::new_ok(id.clone(), result))
+            ok_response(&id, result)
         }
         "textDocument/typeDefinition" => {
             let result = serde_json::from_value::<GotoDefinitionParams>(req.params)
@@ -2512,7 +2521,7 @@ fn handle_request<W: Write>(server: &mut Server, writer: &mut W, req: Request) {
                 })
                 .map(|loc| serde_json::to_value(loc).unwrap_or(serde_json::Value::Null))
                 .unwrap_or(serde_json::Value::Null);
-            Message::Response(Response::new_ok(id.clone(), result))
+            ok_response(&id, result)
         }
         "textDocument/documentSymbol" => {
             let result = serde_json::from_value::<DocumentSymbolParams>(req.params)
@@ -2520,7 +2529,7 @@ fn handle_request<W: Write>(server: &mut Server, writer: &mut W, req: Request) {
                 .and_then(|params| server.document_symbol(&params.text_document.uri))
                 .map(|symbols| serde_json::to_value(symbols).unwrap_or(serde_json::Value::Null))
                 .unwrap_or(serde_json::Value::Null);
-            Message::Response(Response::new_ok(id.clone(), result))
+            ok_response(&id, result)
         }
         "textDocument/codeAction" => {
             let result = serde_json::from_value::<CodeActionParams>(req.params)
@@ -2545,7 +2554,7 @@ fn handle_request<W: Write>(server: &mut Server, writer: &mut W, req: Request) {
                 })
                 .map(|actions| serde_json::to_value(actions).unwrap_or(serde_json::Value::Null))
                 .unwrap_or(serde_json::Value::Null);
-            Message::Response(Response::new_ok(id.clone(), result))
+            ok_response(&id, result)
         }
         "workspace/symbol" => {
             let result = serde_json::from_value::<WorkspaceSymbolParams>(req.params)
@@ -2556,7 +2565,7 @@ fn handle_request<W: Write>(server: &mut Server, writer: &mut W, req: Request) {
                         .unwrap_or(serde_json::Value::Null)
                 })
                 .unwrap_or(serde_json::Value::Null);
-            Message::Response(Response::new_ok(id.clone(), result))
+            ok_response(&id, result)
         }
         "textDocument/completion" => {
             let result = serde_json::from_value::<CompletionParams>(req.params)
@@ -2569,7 +2578,7 @@ fn handle_request<W: Write>(server: &mut Server, writer: &mut W, req: Request) {
                 })
                 .map(|response| serde_json::to_value(response).unwrap_or(serde_json::Value::Null))
                 .unwrap_or(serde_json::Value::Null);
-            Message::Response(Response::new_ok(id.clone(), result))
+            ok_response(&id, result)
         }
         "textDocument/signatureHelp" => {
             let result = serde_json::from_value::<SignatureHelpParams>(req.params)
@@ -2582,7 +2591,7 @@ fn handle_request<W: Write>(server: &mut Server, writer: &mut W, req: Request) {
                 })
                 .map(|response| serde_json::to_value(response).unwrap_or(serde_json::Value::Null))
                 .unwrap_or(serde_json::Value::Null);
-            Message::Response(Response::new_ok(id.clone(), result))
+            ok_response(&id, result)
         }
         "textDocument/documentHighlight" => {
             let result = serde_json::from_value::<DocumentHighlightParams>(req.params)
@@ -2595,7 +2604,7 @@ fn handle_request<W: Write>(server: &mut Server, writer: &mut W, req: Request) {
                 })
                 .map(|response| serde_json::to_value(response).unwrap_or(serde_json::Value::Null))
                 .unwrap_or(serde_json::Value::Null);
-            Message::Response(Response::new_ok(id.clone(), result))
+            ok_response(&id, result)
         }
         "textDocument/semanticTokens/full" => {
             let result = serde_json::from_value::<lsp_types::SemanticTokensParams>(req.params)
@@ -2603,7 +2612,7 @@ fn handle_request<W: Write>(server: &mut Server, writer: &mut W, req: Request) {
                 .and_then(|params| server.semantic_tokens_full(&params.text_document.uri))
                 .map(|response| serde_json::to_value(response).unwrap_or(serde_json::Value::Null))
                 .unwrap_or(serde_json::Value::Null);
-            Message::Response(Response::new_ok(id.clone(), result))
+            ok_response(&id, result)
         }
         "textDocument/inlayHint" => {
             let result = serde_json::from_value::<InlayHintParams>(req.params)
@@ -2611,7 +2620,7 @@ fn handle_request<W: Write>(server: &mut Server, writer: &mut W, req: Request) {
                 .and_then(|params| server.inlay_hints(&params.text_document.uri, params.range))
                 .map(|response| serde_json::to_value(response).unwrap_or(serde_json::Value::Null))
                 .unwrap_or(serde_json::Value::Null);
-            Message::Response(Response::new_ok(id.clone(), result))
+            ok_response(&id, result)
         }
         "textDocument/references" => {
             let result = serde_json::from_value::<lsp_types::ReferenceParams>(req.params)
@@ -2625,7 +2634,7 @@ fn handle_request<W: Write>(server: &mut Server, writer: &mut W, req: Request) {
                 })
                 .map(|response| serde_json::to_value(response).unwrap_or(serde_json::Value::Null))
                 .unwrap_or(serde_json::Value::Null);
-            Message::Response(Response::new_ok(id.clone(), result))
+            ok_response(&id, result)
         }
         "textDocument/rename" => {
             let result = serde_json::from_value::<lsp_types::RenameParams>(req.params)
@@ -2639,7 +2648,7 @@ fn handle_request<W: Write>(server: &mut Server, writer: &mut W, req: Request) {
                 })
                 .map(|response| serde_json::to_value(response).unwrap_or(serde_json::Value::Null))
                 .unwrap_or(serde_json::Value::Null);
-            Message::Response(Response::new_ok(id.clone(), result))
+            ok_response(&id, result)
         }
         other => Message::Response(Response::new_err(
             id.clone(),
