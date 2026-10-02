@@ -822,8 +822,8 @@ struct StubEntry<V> {
 }
 
 /// The classes (`true`) and functions declared in the stub files that
-/// The classes (`true`) and functions declared in the stub files that
-/// reference `key` (a `deps::dependency_key`).
+/// reference `key` (a `deps::dependency_key`), each by its own dependency
+/// key.
 pub fn stub_dependents(key: &str) -> impl Iterator<Item = (bool, &'static str)> {
     let index = stub_index();
     index
@@ -834,26 +834,32 @@ pub fn stub_dependents(key: &str) -> impl Iterator<Item = (bool, &'static str)> 
         .0
         .iter()
         .flat_map(|file| {
-            DeclaredNames(
-                index
-                    .declared_by_file
-                    .get(u32::from_le_bytes(*file) as usize),
-            )
+            index
+                .declared_keys_of(u32::from_le_bytes(*file) as usize)
+                .iter()
+                .map(|(is_class, key)| (*is_class, &**key))
         })
 }
 
-/// The names in one record of `StubIndex::declared_by_file`.
-struct DeclaredNames(&'static [u8]);
+/// The names one stub file declares, each as a dependency key, with whether
+/// it is a class.
+type DeclaredKeys = Box<[(bool, Box<str>)]>;
 
-impl Iterator for DeclaredNames {
-    type Item = (bool, &'static str);
-
-    fn next(&mut self) -> Option<Self::Item> {
-        let (&is_class, rest) = self.0.split_first()?;
-        let length = u16::from_le_bytes([rest[0], rest[1]]) as usize;
-        let name = std::str::from_utf8(&rest[2..2 + length]).expect("a name stored as text");
-        self.0 = &rest[2 + length..];
-        Some((is_class == 1, name))
+impl StubIndex {
+    /// The names stub file `file` declares, as dependency keys, read from
+    /// the index the first time and kept.
+    fn declared_keys_of(&'static self, file: usize) -> &'static DeclaredKeys {
+        self.declared_keys[file].get_or_init(|| {
+            let mut names = self.declared_by_file.get(file);
+            let mut keys = Vec::new();
+            while let Some((&is_class, rest)) = names.split_first() {
+                let length = u16::from_le_bytes([rest[0], rest[1]]) as usize;
+                let key = std::str::from_utf8(&rest[2..2 + length]).expect("a name stored as text");
+                keys.push((is_class == 1, Box::from(key)));
+                names = &rest[2 + length..];
+            }
+            keys.into_boxed_slice()
+        })
     }
 }
 
@@ -1052,6 +1058,10 @@ struct StubIndex {
     // class), the name's length and the name, repeated.
     #[serde(skip)]
     declared_by_file: Records,
+    // Each record of `declared_by_file` read once as text, when first asked
+    // for.
+    #[serde(skip)]
+    declared_keys: Vec<std::sync::OnceLock<DeclaredKeys>>,
     // Lowercased name -> the phpstorm-stubs directory (extension) that
     // declares it, as a position in `extension_names`; PHPStan's own
     // classes aren't built-ins and aren't here.
@@ -1170,6 +1180,9 @@ impl StubIndex {
 
     /// The index with its extension names as the embedded strings they are.
     fn resolved(mut self) -> StubIndex {
+        self.declared_keys = (0..self.declared_by_file.len())
+            .map(|_| std::sync::OnceLock::new())
+            .collect();
         self.extensions = self
             .extension_names
             .iter()
@@ -1490,9 +1503,12 @@ fn build_generated_stub_data() -> (StubIndex, GeneratedStubData) {
     for declared in &declared_by_file {
         let mut record = Vec::new();
         for (is_class, name) in declared {
+            // What `stub_dependents` hands out: each name as the key a
+            // dependency on it is tracked under.
+            let key = name.trim_start_matches('\\').to_ascii_lowercase();
             record.push(u8::from(*is_class));
-            record.extend_from_slice(&(name.len() as u16).to_le_bytes());
-            record.extend_from_slice(name.as_bytes());
+            record.extend_from_slice(&(key.len() as u16).to_le_bytes());
+            record.extend_from_slice(key.as_bytes());
         }
         declared_records.push(&record);
     }
@@ -1507,6 +1523,7 @@ fn build_generated_stub_data() -> (StubIndex, GeneratedStubData) {
                 .collect(),
         ),
         declared_by_file: declared_records.finish(),
+        declared_keys: Vec::new(),
         function_extensions,
         class_extensions,
         extension_names,

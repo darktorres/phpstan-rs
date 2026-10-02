@@ -1,7 +1,7 @@
 //! The stub index the cache stores reads back whole, from the file's own
 //! buffer.
 
-use super::super::{Packed, Reader, Records, StubIndex, Writer, stub_index};
+use super::super::{Packed, Reader, Records, StubIndex, Writer, stub_dependents, stub_index};
 
 fn read_back() -> StubIndex {
     let mut writer = Writer::new();
@@ -115,4 +115,30 @@ fn the_stored_name_maps_answer_as_the_built_ones_do() {
         before.extension(&before.function_extensions, "strlen"),
         after.extension(&after.function_extensions, "strlen")
     );
+}
+
+#[test]
+fn stub_dependents_come_as_the_keys_dependencies_are_tracked_under() {
+    let index = stub_index();
+    let mut seen = 0;
+    for key in [
+        "exception",
+        "throwable",
+        "arrayaccess",
+        "iterator",
+        "strlen",
+    ] {
+        for (is_class, name) in stub_dependents(key) {
+            assert_eq!(name, name.to_ascii_lowercase(), "{name}");
+            assert!(!name.starts_with('\\'), "{name}");
+            let declared = if is_class {
+                &index.class_names
+            } else {
+                &index.function_names
+            };
+            assert!(declared.contains(name), "{name}");
+            seen += 1;
+        }
+    }
+    assert!(seen > 100, "only {seen} names depend on those keys");
 }

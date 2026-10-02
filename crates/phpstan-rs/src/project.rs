@@ -1718,25 +1718,32 @@ impl Project {
         let mut affected = FxHashSet::default();
         let mut seen: FxHashSet<String> = FxHashSet::default();
         let mut frontier: Vec<String> = changed.into_iter().collect();
+        // Puts the dependency key of `name` on the frontier unless it was
+        // reached already; most names are, and then nothing is allocated.
+        let reach = |name: &str, seen: &FxHashSet<String>, frontier: &mut Vec<String>| {
+            crate::registry::with_function_key(name.trim_start_matches('\\'), |key| {
+                if !seen.contains(key) {
+                    frontier.push(key.to_string());
+                }
+            });
+        };
         while let Some(key) = frontier.pop() {
-            if !seen.insert(key.clone()) {
+            if seen.contains(&key) {
                 continue;
             }
+            seen.insert(key.clone());
             affected.extend(self.dependents.get(&key).into_iter().flatten().cloned());
             for file in self.signature_dependents.get(&key).into_iter().flatten() {
                 let Some(state) = self.files.get(file) else {
                     continue;
                 };
-                frontier.extend(
-                    state
-                        .functions
-                        .iter()
-                        .chain(&state.classes)
-                        .map(|name| deps::dependency_key(name)),
-                );
+                for name in state.functions.iter().chain(&state.classes) {
+                    reach(name, &seen, &mut frontier);
+                }
             }
-            frontier
-                .extend(stubs::stub_dependents(&key).map(|(_, name)| deps::dependency_key(name)));
+            for (_, name) in stubs::stub_dependents(&key) {
+                reach(name, &seen, &mut frontier);
+            }
         }
         affected
     }
