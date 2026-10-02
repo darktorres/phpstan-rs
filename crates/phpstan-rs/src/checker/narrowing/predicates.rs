@@ -196,10 +196,12 @@ pub(crate) fn purge_stale_narrowing_for(locals: &mut Locals, key: &str) {
     // Only a key that isn't a plain variable's name can depend on another.
     if locals.may_have_member_narrowing() {
         let subscript = format!("[${key}]");
+        // What depends on `key` is not a real variable's name, so it is
+        // among the synthetic keys.
         let stale: Vec<String> = locals
-            .iter()
-            .filter(|(k, _)| k.as_str() != key && depends_on_with(k, key, &subscript))
-            .map(|(k, _)| k.clone())
+            .synthetic_keys()
+            .filter(|k| k.as_str() != key && depends_on_with(k, key, &subscript))
+            .cloned()
             .collect();
         for k in stale {
             locals.remove(&k);

@@ -28,6 +28,12 @@ use std::sync::atomic::{AtomicU64, Ordering};
 #[derive(Clone, Default)]
 pub(crate) struct Locals {
     types: LocalsMap,
+    // The keys of `types` that are not a real variable's name - a property
+    // chain or an index (`narrowing_key`). Only such a key can depend on
+    // another (`a->b` on `a`, `m[$k]` on `k`), so what a rebound key
+    // invalidates is among these few, not among every local. Kept by every
+    // method that adds or removes a key.
+    synthetic: KeySet,
     // Each variable's native type - what PHP itself guarantees, ignoring
     // PHPDoc - where known: a parameter's native hint, or the native type
     // of the expression last assigned to it. Absent means unknown
@@ -109,6 +115,34 @@ impl Locals {
         self.may_have_member_narrowing
     }
 
+    /// The keys that are not a real variable's name.
+    pub(crate) fn synthetic_keys(&self) -> impl Iterator<Item = &String> {
+        self.synthetic.iter()
+    }
+
+    /// Whether rebinding `key` would change anything: a key of the scope
+    /// depends on it (`narrowing::key_depends_on`, which `key` itself
+    /// satisfies), or a per-field, branch-implied or per-discriminant fact
+    /// is held. When it would not, `purge_stale_narrowing_for` does nothing
+    /// for any key.
+    pub(crate) fn has_state_to_forget(&self) -> bool {
+        !self.synthetic.is_empty()
+            || !self.container_field_facts.is_empty()
+            || !self.branch_implied_facts.is_empty()
+            || !self.discriminant_array_facts.is_empty()
+    }
+
+    /// Whether the scope has `key`, or a key that depends on it:
+    /// `narrowing::key_depends_on` for each key of the scope, found among
+    /// the synthetic ones, the only ones that can.
+    pub(crate) fn has_key_depending_on(&self, key: &str) -> bool {
+        self.types.contains_key(key)
+            || self
+                .synthetic
+                .iter()
+                .any(|k| narrowing::key_depends_on(k, key))
+    }
+
     /// Provenance-preserving update, for narrowing an existing binding
     /// (`instanceof`/null/array-shape checks) or a by-ref call's type
     /// widening (`sort($arr)`, `preg_match(..., $matches)`) - the value's
@@ -117,6 +151,7 @@ impl Locals {
         self.touch();
         if !narrowing::is_real_variable_key(&key) {
             self.may_have_member_narrowing = true;
+            self.synthetic.insert(key.clone());
         }
         self.types.insert(key, ty)
     }
@@ -147,6 +182,7 @@ impl Locals {
         self.container_field_facts.remove(&key);
         if !narrowing::is_real_variable_key(&key) {
             self.may_have_member_narrowing = true;
+            self.synthetic.insert(key.clone());
         }
         self.types.insert(key, ty)
     }
@@ -256,6 +292,7 @@ impl Locals {
         }
         if !narrowing::is_real_variable_key(&key) {
             self.may_have_member_narrowing = true;
+            self.synthetic.insert(key.clone());
         }
         self.types.insert(key, ty)
     }
@@ -268,6 +305,9 @@ impl Locals {
         self.touch();
         self.provenance.remove(key);
         self.native.remove(key);
+        if self.may_have_member_narrowing {
+            self.synthetic.remove(key);
+        }
         self.types.remove(key)
     }
 
@@ -304,6 +344,7 @@ impl Locals {
     pub(crate) fn fresh_scope(&self) -> Locals {
         Locals {
             types: LocalsMap::default(),
+            synthetic: KeySet::default(),
             native: LocalsMap::default(),
             provenance: ProvenanceMap::default(),
             guarded_functions: GuardedFunctionSet::default(),

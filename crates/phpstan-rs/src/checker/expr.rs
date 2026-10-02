@@ -183,6 +183,11 @@ impl<'a> Checker<'a> {
     /// object's. What is known about each object itself stays.
     fn forget_members_a_call_may_change(&self, e: &Expr, locals: &mut Locals) {
         use crate::registry::PropertyWrites;
+        // With no property chain, index, or fact about one in the scope,
+        // there is nothing a call could make stale, however much it writes.
+        if !locals.has_state_to_forget() {
+            return;
+        }
         let (receiver, args, writes) = match &e.kind {
             ExprKind::MethodCall(recv, method, args, _) => {
                 let recv_ty = self.infer_expr(recv, locals);
@@ -283,10 +288,7 @@ impl<'a> Checker<'a> {
             }));
         }
         for key in stale {
-            if locals
-                .iter()
-                .any(|(k, _)| crate::checker::narrowing::key_depends_on(k, &key))
-            {
+            if locals.has_key_depending_on(&key) {
                 purge_stale_narrowing_for(locals, &key);
             }
         }

@@ -34,6 +34,8 @@ type LocalsMap = imbl::GenericHashMap<
 // persistent-map-throughout convention the rest of this module follows.
 type ProvenanceSet =
     imbl::GenericHashSet<Span, rustc_hash::FxBuildHasher, imbl::shared_ptr::DefaultSharedPtr>;
+type KeySet =
+    imbl::GenericHashSet<String, rustc_hash::FxBuildHasher, imbl::shared_ptr::DefaultSharedPtr>;
 type ProvenanceMap = imbl::GenericHashMap<
     String,
     ProvenanceSet,
