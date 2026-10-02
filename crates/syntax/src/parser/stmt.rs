@@ -128,14 +128,14 @@ impl Parser {
                 let mut f = self.parse_function_decl()?;
                 f.doc_comment = doc;
                 f.attrs = attrs;
-                self.stmt(StmtKind::FunctionDecl(f), start)
+                self.stmt(StmtKind::FunctionDecl(Box::new(f)), start)
             }
             Token::Keyword(Keyword::Class)
             | Token::Keyword(Keyword::Interface)
             | Token::Keyword(Keyword::Trait) => {
                 let mut c = self.parse_class_decl()?;
                 c.def.attrs = attrs;
-                self.stmt(StmtKind::ClassDecl(c), start)
+                self.stmt(StmtKind::ClassDecl(Box::new(c)), start)
             }
             // `abstract`/`final`/`readonly` are only reserved as class
             // *modifiers* - each is also legal as an ordinary
@@ -150,7 +150,7 @@ impl Parser {
             {
                 let mut c = self.parse_class_decl()?;
                 c.def.attrs = attrs;
-                self.stmt(StmtKind::ClassDecl(c), start)
+                self.stmt(StmtKind::ClassDecl(Box::new(c)), start)
             }
             // Like abstract/final/readonly above, `enum` is only reserved
             // as a declaration keyword - `function enum() {}` and a bare
@@ -161,7 +161,7 @@ impl Parser {
             {
                 let mut e = self.parse_enum_decl()?;
                 e.def.attrs = attrs;
-                self.stmt(StmtKind::ClassDecl(e), start)
+                self.stmt(StmtKind::ClassDecl(Box::new(e)), start)
             }
             // `namespace\foo();` - a relative-name expression statement,
             // not a declaration (a real namespace declaration never

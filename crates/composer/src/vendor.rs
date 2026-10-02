@@ -145,7 +145,7 @@ fn parse_top_level_array(path: &Path) -> Option<Expr> {
 
 fn find_class_decl(stmts: &[Stmt]) -> Option<&ClassDecl> {
     stmts.iter().find_map(|s| match &s.kind {
-        StmtKind::ClassDecl(c) => Some(c),
+        StmtKind::ClassDecl(c) => Some(&**c),
         _ => None,
     })
 }

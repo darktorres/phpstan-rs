@@ -279,7 +279,7 @@ fn find_function_by_name<'a>(
             _ => None,
         }),
         None => stmts.iter().find_map(|stmt| match &stmt.kind {
-            StmtKind::FunctionDecl(f) if f.name.as_ref() == function_name => Some((f, false)),
+            StmtKind::FunctionDecl(f) if f.name.as_ref() == function_name => Some((&**f, false)),
             _ => None,
         }),
     }

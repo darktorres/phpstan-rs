@@ -90,9 +90,9 @@ pub enum StmtKind {
         body: Box<Stmt>,
     },
     Foreach {
-        subject: Expr,
-        key: Option<Expr>,
-        value: Expr,
+        subject: Box<Expr>,
+        key: Option<Box<Expr>>,
+        value: Box<Expr>,
         by_ref: bool,
         body: Box<Stmt>,
     },
@@ -108,8 +108,8 @@ pub enum StmtKind {
     Global(Vec<GlobalVar>),
     // `unset($a, $b[1], ...)`.
     Unset(Vec<Expr>),
-    FunctionDecl(FunctionDecl),
-    ClassDecl(ClassDecl),
+    FunctionDecl(Box<FunctionDecl>),
+    ClassDecl(Box<ClassDecl>),
     Namespace(String),
     // Every import a `use` statement brings in - a plain `use A, B;`
     // list and a group `use Foo\{A, B as C};` both expand to one

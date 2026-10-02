@@ -769,7 +769,7 @@ impl<'a> Checker<'a> {
                 body,
             } => self.check_foreach(
                 subject,
-                key,
+                key.as_deref(),
                 value,
                 *by_ref,
                 body,

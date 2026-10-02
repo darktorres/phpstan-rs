@@ -534,7 +534,7 @@ impl<'a> Checker<'a> {
     pub(crate) fn check_foreach(
         &mut self,
         subject: &Expr,
-        key: &Option<Expr>,
+        key: Option<&Expr>,
         value: &Expr,
         by_ref: bool,
         body: &Stmt,
@@ -648,7 +648,7 @@ impl<'a> Checker<'a> {
             _ => None,
         };
         let element_ty = annotated(value).unwrap_or(element_ty);
-        let key_ty = key.as_ref().and_then(annotated).unwrap_or(key_ty);
+        let key_ty = key.and_then(annotated).unwrap_or(key_ty);
         // See `converge_loop_body`'s own doc comment: `Foreach` gets
         // the same "may run zero times" merge with the pre-loop state
         // `While`/`For` already had, for every variable *except*

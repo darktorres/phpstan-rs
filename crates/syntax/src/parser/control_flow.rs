@@ -251,9 +251,9 @@ impl Parser {
         let body = self.parse_body(Keyword::EndForeach)?;
         Ok(self.stmt(
             StmtKind::Foreach {
-                subject,
-                key,
-                value,
+                subject: Box::new(subject),
+                key: key.map(Box::new),
+                value: Box::new(value),
                 by_ref,
                 body,
             },
