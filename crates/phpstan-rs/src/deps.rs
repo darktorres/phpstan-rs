@@ -16,26 +16,23 @@ use syntax::visit::{
 /// in a namespace yields both the namespaced and the global name, and the
 /// names in PHPDoc tags are taken from the tag text without parsing it.
 pub fn referenced_names(stmts: &[Stmt]) -> FxHashSet<String> {
-    let mut collector = Collector {
-        names: FxHashSet::default(),
-        ctx: NameContext::default(),
-        bodies: true,
-        templates: Vec::new(),
-    };
+    let mut collector = Collector::new(true, false);
     walk_stmts(&mut collector, stmts);
     collector.names
+}
+
+/// `referenced_names` and `declaration_referenced_names`, in one walk.
+pub fn both_referenced_names(stmts: &[Stmt]) -> (FxHashSet<String>, FxHashSet<String>) {
+    let mut collector = Collector::new(true, true);
+    walk_stmts(&mut collector, stmts);
+    (collector.names, collector.outside)
 }
 
 /// `referenced_names` without what only function and method bodies
 /// mention: the names a file's declarations can take their shape from
 /// (signatures, hierarchies, PHPDoc, constant values).
 pub fn declaration_referenced_names(stmts: &[Stmt]) -> FxHashSet<String> {
-    let mut collector = Collector {
-        names: FxHashSet::default(),
-        ctx: NameContext::default(),
-        bodies: false,
-        templates: Vec::new(),
-    };
+    let mut collector = Collector::new(false, false);
     walk_stmts(&mut collector, stmts);
     collector.names
 }
@@ -59,6 +56,13 @@ pub fn global_variable_key(name: &str) -> String {
 /// included).
 struct Collector {
     names: FxHashSet<String>,
+    // With `track_outside`, the names found anywhere but in a function or
+    // method body: what `declaration_referenced_names` finds, from the same
+    // walk.
+    outside: FxHashSet<String>,
+    track_outside: bool,
+    // How many function and method bodies the walk is inside.
+    body_depth: usize,
     ctx: NameContext,
     // Whether function and method bodies are walked.
     bodies: bool,
@@ -68,6 +72,26 @@ struct Collector {
 }
 
 impl Collector {
+    fn new(bodies: bool, track_outside: bool) -> Collector {
+        Collector {
+            names: FxHashSet::default(),
+            outside: FxHashSet::default(),
+            track_outside,
+            body_depth: 0,
+            ctx: NameContext::default(),
+            bodies,
+            templates: Vec::new(),
+        }
+    }
+
+    /// Records `key` as referenced.
+    fn add(&mut self, key: String) {
+        if self.track_outside && self.body_depth == 0 {
+            self.outside.insert(key.clone());
+        }
+        self.names.insert(key);
+    }
+
     /// The names a doc comment's tags mention, each resolved as a class
     /// and also taken as written (a constant-named type's global
     /// fallback). Only the types of a tag are read, not its description,
@@ -81,8 +105,9 @@ impl Collector {
                 if declared.contains(token) || self.templates.iter().any(|t| t.contains(token)) {
                     continue;
                 }
-                self.names.insert(dependency_key(&self.ctx.resolve(token)));
-                self.names.insert(dependency_key(token));
+                let resolved = dependency_key(&self.ctx.resolve(token));
+                self.add(resolved);
+                self.add(dependency_key(token));
             }
         }
     }
@@ -316,14 +341,15 @@ impl<'ast> Visitor<'ast> for Collector {
             StmtKind::Namespace(name) => self.ctx.set_namespace(name),
             StmtKind::Use(imports) => {
                 self.ctx.add_uses(imports);
-                self.names
-                    .extend(imports.iter().map(|import| dependency_key(&import.path)));
+                for import in imports {
+                    self.add(dependency_key(&import.path));
+                }
             }
-            StmtKind::Global(vars) => self.names.extend(
-                vars.iter()
-                    .filter_map(|v| v.name())
-                    .map(|n| global_variable_key(n)),
-            ),
+            StmtKind::Global(vars) => {
+                for name in vars.iter().filter_map(|v| v.name()) {
+                    self.add(global_variable_key(name));
+                }
+            }
             _ => {}
         }
         self.doc_names(stmt.doc_comment.as_deref());
@@ -334,7 +360,21 @@ impl<'ast> Visitor<'ast> for Collector {
         self.doc_names(function.doc_comment.as_deref());
         self.templates
             .push(Collector::templates_of(function.doc_comment.as_deref()));
-        if self.bodies {
+        if self.bodies && self.track_outside {
+            // The parts that are not the body count as outside it.
+            for attr in &function.attrs {
+                self.visit_attribute(attr);
+            }
+            for param in &function.params {
+                self.visit_param(param);
+            }
+            if let Some(hint) = &function.return_type {
+                self.visit_type_hint(hint);
+            }
+            self.body_depth += 1;
+            walk_stmts(self, function.body_stmts());
+            self.body_depth -= 1;
+        } else if self.bodies {
             walk_function_decl(self, function);
         } else {
             for attr in &function.attrs {
@@ -389,18 +429,18 @@ impl<'ast> Visitor<'ast> for Collector {
     fn visit_name(&mut self, name: &'ast QualifiedName) {
         match &name.resolved {
             ResolvedName::Exact(resolved) => {
-                self.names.insert(dependency_key(resolved));
+                self.add(dependency_key(resolved));
             }
             ResolvedName::WithGlobalFallback(resolved) => {
-                self.names.insert(dependency_key(resolved));
-                self.names.insert(dependency_key(&name.written));
+                self.add(dependency_key(resolved));
+                self.add(dependency_key(&name.written));
             }
             ResolvedName::Unresolved => {
                 if !["self", "parent", "static"]
                     .iter()
                     .any(|keyword| name.is_keyword(keyword))
                 {
-                    self.names.insert(dependency_key(&name.written));
+                    self.add(dependency_key(&name.written));
                 }
             }
         }

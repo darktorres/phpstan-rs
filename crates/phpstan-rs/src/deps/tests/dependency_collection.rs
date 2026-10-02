@@ -222,3 +222,33 @@ fn a_tags_description_and_the_templates_in_scope_are_not_references() {
         assert!(!names.contains(ignored), "{ignored} is not a reference");
     }
 }
+
+#[test]
+fn the_one_walk_for_both_sets_is_the_two_walks() {
+    let interner = std::sync::Arc::new(syntax::name::Interner::new());
+    let sources = [
+        "<?php",
+        "<?php use Lib\\Imported; global $g; class A extends B implements C { use T; }",
+        "<?php namespace N; /** @param Doc $d */ function f(Param $p, ?Other $o): Ret { new InBody(); helper(); return fn() => Closure::bar(); }",
+        "<?php namespace N; $f = function (Top $t) { new InTopClosure(); }; new TopLevel(); top_call();",
+        "<?php class K { #[Attr(Arg::X)] public function m(#[P] Typed $t = Dflt::V): Back { global $inner; return new InMethod; } public Prop $p = Init::C; const C = Other::D; }",
+        "<?php function a() { function nested() { new Deep(); } class InFn extends Base {} } class After {}",
+        "<?php enum E: int implements I { case A = Foo::X; public function f() { return Bar::baz(); } }",
+        "<?php interface I { public function m(Hint $h): Result; } trait T { public function t() { return Used::x(); } }",
+        "<?php /** @template T of Bound */ class G { /** @var list<Elem> */ public $xs; /** @return Ret */ public function m() { /** @var Inline $x */ $x = 1; } }",
+    ];
+    for (i, source) in sources.iter().enumerate() {
+        let parsed = syntax::parse(source.as_bytes(), &interner).expect("parses");
+        let (all, declarations) = super::super::both_referenced_names(&parsed.stmts);
+        assert_eq!(
+            all,
+            super::super::referenced_names(&parsed.stmts),
+            "all names of source {i}"
+        );
+        assert_eq!(
+            declarations,
+            super::super::declaration_referenced_names(&parsed.stmts),
+            "declaration names of source {i}"
+        );
+    }
+}

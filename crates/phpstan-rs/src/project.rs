@@ -2632,8 +2632,7 @@ pub fn parse_file(
         duplicate_fn_sites,
         duplicate_class_sites,
     } = file_declarations::collect(&ast, path, is_stub, &origin);
-    let references = deps::referenced_names(&ast);
-    let declaration_references = deps::declaration_referenced_names(&ast);
+    let (references, declaration_references) = deps::both_referenced_names(&ast);
     // The anonymous classes are the declarations built last, one per
     // `new class`, so the file's own walk need not be repeated for them.
     let anonymous_classes = built_decls
