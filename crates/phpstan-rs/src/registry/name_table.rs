@@ -106,12 +106,45 @@ pub(super) struct Base<V> {
 enum Keys {
     /// The records of a stored table in the file's buffer: each four
     /// little-endian `u32`s, the name's offset and length, then the
-    /// entry's.
+    /// entry's. `index` is a hash index over them: little-endian `u32`s, a
+    /// power of two of them, each the number of a record plus one, or zero
+    /// for a free place.
     Stored {
         buffer: Buffer,
         records: Range<usize>,
+        index: Range<usize>,
     },
     Built(Vec<Name>),
+}
+
+/// The hash a stored table's index files a name under: of its bytes, in
+/// lowercase when the table folds.
+fn hash_name(fold: bool, bytes: &[u8]) -> usize {
+    let mut hash: u64 = 0;
+    for &byte in bytes {
+        let byte = if fold {
+            byte.to_ascii_lowercase()
+        } else {
+            byte
+        };
+        hash = (hash.rotate_left(5) ^ u64::from(byte)).wrapping_mul(0x517c_c1b7_2722_0a95);
+    }
+    (hash ^ (hash >> 32)) as usize
+}
+
+/// Whether `text` is `key` once lowercased, for a key already lowercased.
+fn eq_text(fold: bool, text: &[u8], key: &[u8]) -> bool {
+    if fold {
+        text.len() == key.len() && cmp_folded(text, key) == Ordering::Equal
+    } else {
+        text == key
+    }
+}
+
+/// The places a stored table's index has for `records` entries: at least
+/// twice as many, a power of two, so a probe always ends at a free one.
+fn index_places(records: usize) -> usize {
+    (records * 2).next_power_of_two().max(2)
 }
 
 /// What a base keeps of one entry once it is read: the name as a `Name`,
@@ -144,7 +177,10 @@ impl Keys {
 
     /// The record `i` of a stored table: the ranges of its name and entry.
     fn record(&self, i: usize) -> (Range<usize>, Range<usize>) {
-        let Keys::Stored { buffer, records } = self else {
+        let Keys::Stored {
+            buffer, records, ..
+        } = self
+        else {
             unreachable!("only a stored table has records")
         };
         let at = records.start + i * RECORD_LEN;
@@ -228,6 +264,9 @@ impl<V> Base<V> {
     /// folds) is `key`.
     pub(super) fn find(&self, key: &str) -> Option<usize> {
         let key = key.as_bytes();
+        if let Keys::Stored { buffer, index, .. } = &self.keys {
+            return self.find_indexed(buffer, index, key);
+        }
         let (mut low, mut high) = (0, self.len());
         while low < high {
             let middle = low + (high - low) / 2;
@@ -238,6 +277,25 @@ impl<V> Base<V> {
             }
         }
         None
+    }
+
+    /// `find` through a stored table's hash index.
+    fn find_indexed(&self, buffer: &Buffer, index: &Range<usize>, key: &[u8]) -> Option<usize> {
+        let places = index.len() / 4;
+        let mask = places - 1;
+        let mut place = hash_name(self.fold, key) & mask;
+        loop {
+            let at = index.start + place * 4;
+            let entry = u32::from_le_bytes(buffer[at..at + 4].try_into().unwrap()) as usize;
+            if entry == 0 {
+                return None;
+            }
+            let i = entry - 1;
+            if i < self.len() && eq_text(self.fold, self.keys.bytes(i), key) {
+                return Some(i);
+            }
+            place = (place + 1) & mask;
+        }
     }
 
     /// The declared name of entry `i`.
@@ -661,7 +719,9 @@ pub(super) fn store_entries<V: serde::Serialize>(
         return Err(format!("{section} holds a name twice"));
     }
     let mut records = Vec::with_capacity(rows.len() * RECORD_LEN);
+    let mut names: Vec<&str> = Vec::with_capacity(rows.len());
     for (name, value) in rows {
+        names.push(name.as_str());
         let mut encoded = Vec::new();
         ciborium::ser::into_writer(value, &mut encoded).map_err(|e| e.to_string())?;
         let name = writer.name(name.as_str())?;
@@ -670,7 +730,18 @@ pub(super) fn store_entries<V: serde::Serialize>(
             records.extend_from_slice(&field.to_le_bytes());
         }
     }
-    writer.section(section, &records)
+    writer.section(section, &records)?;
+    let mut index = vec![0u32; index_places(names.len())];
+    let mask = index.len() - 1;
+    for (i, name) in names.iter().enumerate() {
+        let mut place = hash_name(fold, name.as_bytes()) & mask;
+        while index[place] != 0 {
+            place = (place + 1) & mask;
+        }
+        index[place] = i as u32 + 1;
+    }
+    let index: Vec<u8> = index.iter().flat_map(|entry| entry.to_le_bytes()).collect();
+    writer.section(&format!("{section}:index"), &index)
 }
 
 /// The base `store_entries` wrote as section `section`, read in place.
@@ -680,11 +751,19 @@ pub(super) fn load_base<V: serde::de::DeserializeOwned>(
     fold: bool,
 ) -> Result<Base<V>, String> {
     let records = reader.section(section)?;
+    let index = reader.section(&format!("{section}:index"))?;
     let buffer = reader.buffer().clone();
     if records.len() % RECORD_LEN != 0 {
         return Err(format!("{section} is cut in the middle of a record"));
     }
-    let keys = Keys::Stored { buffer, records };
+    if index.len() != index_places(records.len() / RECORD_LEN) * 4 {
+        return Err(format!("{section}'s index has the wrong size"));
+    }
+    let keys = Keys::Stored {
+        buffer,
+        records,
+        index,
+    };
     validate(&keys, section)?;
     let slots = (0..keys.len()).map(|_| Slot::default()).collect();
     Ok(Base {
@@ -726,6 +805,14 @@ impl<V> Base<V> {
             let (name, _) = self.keys.record(i);
             let text = std::str::from_utf8(&buffer[name])
                 .map_err(|_| format!("{section}'s name {i} is not text"))?;
+            let key = if self.fold {
+                text.to_ascii_lowercase()
+            } else {
+                text.to_string()
+            };
+            if self.find(&key) != Some(i) {
+                return Err(format!("{section}'s index does not find name {i}"));
+            }
             if let Some(before) = previous {
                 let order = if self.fold {
                     cmp_folded(before.as_bytes(), text.to_ascii_lowercase().as_bytes())
@@ -952,6 +1039,25 @@ mod tests {
     }
 
     #[test]
+    fn a_stored_table_of_many_names_finds_each_and_only_those() {
+        let names: Vec<String> = (0..3000)
+            .map(|i| format!("Vendor{}\\Package{}\\Class{i}", i % 17, i % 101))
+            .collect();
+        let entries: Vec<(&str, u32)> = names.iter().map(String::as_str).zip(0..).collect();
+        let reader = stored(&entries);
+        let table: NameTable<u32> = NameTable::load(&reader, "t").unwrap();
+        table.check_order("t").unwrap();
+        for (name, value) in &entries {
+            assert_eq!(table.get(&name.to_ascii_lowercase()), Some(value), "{name}");
+            assert_eq!(table.get(&name.to_ascii_uppercase()), Some(value), "{name}");
+        }
+        for i in 3000..3200 {
+            assert_eq!(table.get(&format!("Vendor0\\Package0\\Class{i}")), None);
+        }
+        assert_eq!(table.get(""), None);
+    }
+
+    #[test]
     fn freezing_keeps_what_a_table_holds() {
         let reader = stored(&[("One", 1), ("Two", 2)]);
         let mut table: NameTable<u32> = NameTable::load(&reader, "t").unwrap();
@@ -979,6 +1085,7 @@ mod tests {
             }
         }
         writer.section("t", &records).unwrap();
+        writer.section("t:index", &[0u8; 16]).unwrap();
         let reader = match Reader::new(writer.finish()) {
             Ok(reader) => reader,
             Err(_) => panic!("a written file reads"),
@@ -999,8 +1106,11 @@ mod tests {
         one.store(&mut writer, "one").unwrap();
         let written = writer.body_len();
         two.store(&mut writer, "two").unwrap();
-        // Two sets of records and one new entry; the names and the other
-        // entry are the ones already written.
-        assert_eq!(writer.body_len() - written, 2 * RECORD_LEN + 1);
+        // Records, their hash index and one new entry; the names and the
+        // other entry are the ones already written.
+        assert_eq!(
+            writer.body_len() - written,
+            2 * RECORD_LEN + index_places(2) * 4 + 1
+        );
     }
 }
