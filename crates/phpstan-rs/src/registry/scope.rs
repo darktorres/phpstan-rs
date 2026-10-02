@@ -32,6 +32,21 @@ impl Scope {
         }
     }
 
+    /// Only `classes` and `functions`, already lowercased as `of` does.
+    pub(crate) fn from_keys(classes: FxHashSet<String>, functions: FxHashSet<String>) -> Scope {
+        debug_assert!(
+            classes
+                .iter()
+                .chain(&functions)
+                .all(|key| !key.bytes().any(|b| b.is_ascii_uppercase())),
+            "a scope's keys are lowercased"
+        );
+        Scope {
+            classes: Some(classes),
+            functions: Some(functions),
+        }
+    }
+
     pub(crate) fn is_all(&self) -> bool {
         self.classes.is_none() && self.functions.is_none()
     }

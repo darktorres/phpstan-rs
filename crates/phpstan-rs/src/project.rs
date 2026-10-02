@@ -1126,10 +1126,7 @@ impl Project {
                 }
             }
         }
-        Scope::of(
-            classes.iter().map(String::as_str),
-            functions.iter().map(String::as_str),
-        )
+        Scope::from_keys(classes, functions)
     }
 
     /// Finalizes an initial batch of `load_file` calls (trait flattening).
