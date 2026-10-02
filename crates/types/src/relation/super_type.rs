@@ -41,6 +41,22 @@ impl Relation<'_> {
         if is_scalar_value(sup) && is_scalar_value(sub) {
             return TrinaryLogic::from_bool(sup == sub);
         }
+        // Plain `mixed` holds everything and `never` is held by everything.
+        if matches!(sup.repr(), Repr::Mixed(_, None)) || matches!(sub.repr(), Repr::Never) {
+            return TrinaryLogic::Yes;
+        }
+        // Two scalar families share no value.
+        if let (Some(a), Some(b)) = (scalar_family(sup), scalar_family(sub))
+            && a != b
+        {
+            return TrinaryLogic::No;
+        }
+        self.is_super_type_of_by_form(sup, sub)
+    }
+
+    /// `is_super_type_of` read off the two types' forms, without the
+    /// shortcuts that answer before it.
+    pub(crate) fn is_super_type_of_by_form(&self, sup: &Type, sub: &Type) -> TrinaryLogic {
         syntax::stack::guard(|| {
             match (sup.repr(), sub.repr()) {
                 (Repr::Error, _) => TrinaryLogic::Yes,
@@ -580,5 +596,79 @@ fn is_scalar_value(ty: &Type) -> bool {
         | Repr::EnumCase(..) => true,
         Repr::FloatLiteral(f) => !f.is_nan(),
         _ => false,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::ConditionalSubject;
+
+    fn samples() -> Vec<Type> {
+        let object = |name: &str| Type::object(name.into(), Vec::new());
+        vec![
+            Type::mixed(),
+            Type::explicit_mixed(),
+            Type::new(Repr::Mixed(false, Some(Type::int()))),
+            Type::never(),
+            Type::void(),
+            Type::error(),
+            Type::null(),
+            Type::bool(),
+            Type::bool_literal(true),
+            Type::bool_literal(false),
+            Type::int(),
+            Type::int_literal(3),
+            Type::int_range(Some(1), Some(5)),
+            Type::float(),
+            Type::string(),
+            Type::string_literal("a".into()),
+            Type::new(Repr::ClassString(object("Foo"))),
+            Type::array(Type::mixed(), Type::mixed()),
+            Type::array(Type::int(), Type::string()),
+            Type::list_of(Type::int()),
+            Type::array_shape(Shape::sealed(Vec::new())),
+            Type::object_without_class(),
+            object("Foo"),
+            object("Countable"),
+            Type::enum_case("Suit".into(), "Hearts".into()),
+            Type::resource(false),
+            Type::resource(true),
+            Type::callable(None),
+            Type::union_of(vec![Type::int(), Type::string()]),
+            Type::union_of(vec![Type::null(), object("Foo")]),
+            Type::new(Repr::Intersection(vec![
+                Type::string(),
+                Type::accessory(AccessoryKind::NonEmptyString),
+            ])),
+            Type::template_param(crate::TemplateParam::unbounded("T".to_string())),
+            Type::new(Repr::Conditional {
+                subject: ConditionalSubject::Template("T".into()),
+                target: Type::int(),
+                if_true: Type::string(),
+                if_false: Type::null(),
+                negated: false,
+            }),
+        ]
+    }
+
+    #[test]
+    fn the_shortcuts_answer_as_the_forms_do() {
+        let relation = Relation::structural();
+        let samples = samples();
+        for sup in &samples {
+            for sub in &samples {
+                let by_form = if is_scalar_value(sup) && is_scalar_value(sub) {
+                    TrinaryLogic::from_bool(sup == sub)
+                } else {
+                    relation.is_super_type_of_by_form(sup, sub)
+                };
+                assert_eq!(
+                    relation.is_super_type_of(sup, sub),
+                    by_form,
+                    "{sup} over {sub}"
+                );
+            }
+        }
     }
 }

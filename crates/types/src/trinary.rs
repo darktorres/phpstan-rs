@@ -60,18 +60,21 @@ impl TrinaryLogic {
     pub fn extreme_identity(results: impl Iterator<Item = TrinaryLogic>) -> TrinaryLogic {
         let mut seen_yes = false;
         let mut seen_no = false;
-        let mut seen_maybe = false;
         for r in results {
             match r {
                 TrinaryLogic::Yes => seen_yes = true,
                 TrinaryLogic::No => seen_no = true,
-                TrinaryLogic::Maybe => seen_maybe = true,
+                TrinaryLogic::Maybe => return TrinaryLogic::Maybe,
+            }
+            // Yes and No together are `Maybe` whatever else follows.
+            if seen_yes && seen_no {
+                return TrinaryLogic::Maybe;
             }
         }
-        match (seen_yes, seen_no, seen_maybe) {
-            (true, false, false) | (false, false, false) => TrinaryLogic::Yes,
-            (false, true, false) => TrinaryLogic::No,
-            _ => TrinaryLogic::Maybe,
+        if seen_no {
+            TrinaryLogic::No
+        } else {
+            TrinaryLogic::Yes
         }
     }
 
