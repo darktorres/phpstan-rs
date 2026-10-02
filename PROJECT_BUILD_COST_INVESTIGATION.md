@@ -1120,3 +1120,18 @@ purity` 7.8%, `flatten_traits` 6.7%, `end_declaration_changes` 5.6%,
   results registry-wide.
 - Fingerprinting classes instead of cloning them for `resolved_snapshot`:
   `ClassReflection` has no `Hash`, and encoding one costs about a clone.
+
+### 12.3 The lib suite after the workflow plan
+
+The same whole-suite callgrind run (`target/debug` lib test binary, all
+threads, `--quiet`) went from 69.2 G instructions (990 tests) to 31.4 G
+(1,000 tests) once the plan's items were in: shared constant nodes and node
+flags, the `Packed` hash index, key traits and word-wise name compares, one
+owner table with derived ancestor lookups, detach-based snapshots, a cached
+scoped-name list, the docblock memo, shared decodes, stub-file closures, and
+the test-side fixture and parse reuse.
+
+Not done, with reasons: `Shape::key_type` memo (an address-keyed memo is
+unsound), cached `is_*` results on the node (hit rate unmeasured), stub-data
+read in place, and the 40-arm docblock tag split. The empty-vector clone
+guard and the test-side parse memo are unmeasured on their own.
