@@ -1,5 +1,6 @@
 //! `Locals`' set of synthetic keys: what a rebound key invalidates is found
 //! among them, and is what looking through every local finds.
+use super::super::control_flow::merge_scopes;
 use super::super::narrowing::{key_depends_on, purge_stale_narrowing_for};
 use super::super::*;
 
@@ -123,5 +124,88 @@ fn has_key_depending_on_is_the_scan_of_every_local() {
     for key in KEYS.iter().chain(&["none", "a->", "m", "Foo::$baz"]) {
         let by_scan = locals.iter().any(|(k, _)| key_depends_on(k, key));
         assert_eq!(locals.has_key_depending_on(key), by_scan, "{key}");
+    }
+}
+
+/// The same scenario of writes, in a scope that tracks provenance (which
+/// joins key by key) or in one that does not (which joins by patching a
+/// copy of the then-scope).
+fn scenario(tracked: bool, seed: u64) -> (Locals, Locals) {
+    let mut state = seed;
+    let mut next = move |bound: u64| {
+        state = state
+            .wrapping_mul(6364136223846793005)
+            .wrapping_add(1442695040888963407);
+        (state >> 33) % bound
+    };
+    let types = [
+        Type::int(),
+        Type::string(),
+        Type::null(),
+        Type::bool(),
+        Type::mixed(),
+        Type::float(),
+    ];
+    let names = ["a", "b", "c", "d", "e", "this", "a->p", "b[0]", "c[$a]"];
+    let mut base = Locals::default();
+    base.set_track(tracked);
+    let write = |locals: &mut Locals, n: &mut dyn FnMut(u64) -> u64| {
+        let name = names[n(names.len() as u64) as usize].to_string();
+        match n(5) {
+            0 => {
+                locals.remove(&name);
+            }
+            1 => {
+                locals.set_native(&name, types[n(6) as usize].clone());
+            }
+            2 => locals.clear_native(&name),
+            _ => {
+                locals.insert(name, types[n(6) as usize].clone());
+            }
+        }
+    };
+    for _ in 0..next(8) {
+        write(&mut base, &mut next);
+    }
+    let (mut then, mut other) = (base.clone(), base);
+    for _ in 0..next(6) {
+        write(&mut then, &mut next);
+    }
+    for _ in 0..next(6) {
+        write(&mut other, &mut next);
+    }
+    (then, other)
+}
+
+#[test]
+fn the_join_that_patches_a_copy_is_the_join_key_by_key() {
+    let relation = types::Relation::structural();
+    let relation = &relation;
+    for seed in 0..3000u64 {
+        let (then_p, else_p) = scenario(false, seed);
+        let (then_t, else_t) = scenario(true, seed);
+        let patched = merge_scopes(relation, &then_p, &else_p);
+        let keyed = merge_scopes(relation, &then_t, &else_t);
+        assert_eq!(listed(&patched), listed(&keyed), "keys, seed {seed}");
+        for (key, ty) in keyed.iter() {
+            assert_eq!(patched.get(key), Some(ty), "{key}, seed {seed}");
+        }
+        let natives = |l: &Locals| {
+            let mut v: Vec<(String, Type)> =
+                l.natives().map(|(k, t)| (k.clone(), t.clone())).collect();
+            v.sort_by(|a, b| a.0.cmp(&b.0));
+            v
+        };
+        assert_eq!(natives(&patched), natives(&keyed), "natives, seed {seed}");
+        let synthetic = |l: &Locals| {
+            let mut v: Vec<String> = l.synthetic_keys().cloned().collect();
+            v.sort();
+            v
+        };
+        assert_eq!(
+            synthetic(&patched),
+            synthetic(&keyed),
+            "synthetic, seed {seed}"
+        );
     }
 }

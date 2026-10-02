@@ -115,6 +115,12 @@ impl Locals {
         self.may_have_member_narrowing
     }
 
+    /// Whether this scope tracks where each variable was declared (the
+    /// LSP's probe) - ordinary checking does not.
+    pub(crate) fn tracks_provenance(&self) -> bool {
+        self.track
+    }
+
     /// The keys that are not a real variable's name.
     pub(crate) fn synthetic_keys(&self) -> impl Iterator<Item = &String> {
         self.synthetic.iter()
@@ -305,6 +311,17 @@ impl Locals {
         self.touch();
         self.provenance.remove(key);
         self.native.remove(key);
+        if self.may_have_member_narrowing {
+            self.synthetic.remove(key);
+        }
+        self.types.remove(key)
+    }
+
+    /// `remove` for a scope that tracks no provenance, leaving the native
+    /// type of the key as it is.
+    pub(crate) fn remove_type(&mut self, key: &str) -> Option<Type> {
+        debug_assert!(!self.track);
+        self.touch();
         if self.may_have_member_narrowing {
             self.synthetic.remove(key);
         }

@@ -578,7 +578,20 @@ pub(crate) fn merge_scopes(
     then_locals: &Locals,
     else_locals: &Locals,
 ) -> Locals {
-    let mut merged = then_locals.fresh_scope();
+    // Two scopes with one version hold the same facts, so what joins them is
+    // either of them: a branch that wrote nothing joins as it was.
+    if then_locals.version() != 0 && then_locals.version() == else_locals.version() {
+        return then_locals.clone();
+    }
+    // Without provenance to join key by key, the join starts as a copy of
+    // the then-scope, which shares everything with it, and is changed only
+    // where the two differ: most keys are the same in both.
+    let patched = !then_locals.tracks_provenance();
+    let mut merged = if patched {
+        then_locals.clone()
+    } else {
+        then_locals.fresh_scope()
+    };
     merged.set_any_variable_may_exist(
         then_locals.any_variable_may_exist() || else_locals.any_variable_may_exist(),
     );
@@ -652,11 +665,20 @@ pub(crate) fn merge_scopes(
         .collect();
     // A native type survives only when both branches know one.
     for (key, then_native) in then_locals.natives() {
-        if let Some(else_native) = else_locals.native(key) {
-            merged.set_native(
-                key,
-                relation.union(then_native.clone(), else_native.clone()),
-            );
+        match else_locals.native(key) {
+            Some(else_native) => {
+                if patched {
+                    // `set_native` keeps no `mixed`, so what the copy holds
+                    // goes first.
+                    merged.clear_native(key);
+                }
+                merged.set_native(
+                    key,
+                    relation.union(then_native.clone(), else_native.clone()),
+                );
+            }
+            None if patched => merged.clear_native(key),
+            None => {}
         }
     }
     // Same "both branches inherited the identical, unchanged alias"
@@ -752,6 +774,23 @@ pub(crate) fn merge_scopes(
             Some(facts) => merged.branch_implied_facts_mut().insert(key.clone(), facts),
             None => merged.branch_implied_facts_mut().remove(key),
         };
+    }
+    if patched {
+        for (name, then_ty) in then_locals.iter() {
+            match else_locals.get(name) {
+                None => {
+                    merged.remove_type(name);
+                }
+                Some(else_ty) if else_ty == then_ty => {}
+                Some(else_ty) => {
+                    merged.insert(
+                        name.clone(),
+                        relation.union(then_ty.clone(), else_ty.clone()),
+                    );
+                }
+            }
+        }
+        return merged;
     }
     for (name, then_ty) in then_locals.iter() {
         if let Some(else_ty) = else_locals.get(name) {
