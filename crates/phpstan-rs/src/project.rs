@@ -35,6 +35,7 @@ mod duplicate_classes;
 pub(crate) mod duplicate_fn_sites;
 mod duplicate_functions;
 mod mock_hygiene;
+mod path_order;
 pub mod session;
 pub(crate) mod use_sites;
 mod whole_program;

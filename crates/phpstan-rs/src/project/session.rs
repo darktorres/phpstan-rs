@@ -627,12 +627,12 @@ impl Session {
         for dir in &self.dirs {
             self.collect_php_files(dir, &mut analyze_files);
         }
-        analyze_files.sort();
+        super::path_order::sort_paths(&mut analyze_files);
         let mut context_files: Vec<PathBuf> = self.scan_files.clone();
         for dir in &self.scan_dirs {
             self.collect_php_files(dir, &mut context_files);
         }
-        context_files.sort();
+        super::path_order::sort_paths(&mut context_files);
         context_files.dedup();
         if analyze_files.is_empty() {
             let dirs: Vec<String> = self.dirs.iter().map(|d| d.display().to_string()).collect();
