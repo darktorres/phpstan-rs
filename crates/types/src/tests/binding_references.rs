@@ -71,3 +71,26 @@ fn a_reference_in_a_template_bound_or_a_shape_is_found() {
     );
     assert!(same_node(&bounded.bind_static("Bar"), &bounded));
 }
+
+#[test]
+fn the_deferred_flag_is_the_recursive_definition() {
+    fn recursive(ty: &Type) -> bool {
+        matches!(
+            ty.repr(),
+            Repr::ValueOf(_) | Repr::KeyOf(_) | Repr::OffsetAccess(..) | Repr::ClassConstant { .. }
+        ) || ty.any_child(recursive)
+    }
+    let key_of = Type::new(Repr::KeyOf(Type::object("Foo".into(), Vec::new())));
+    let plain = Type::object("Foo".into(), Vec::new());
+    for ty in [
+        plain.clone(),
+        key_of.clone(),
+        nested(plain.clone()),
+        nested(key_of.clone()),
+        Type::array(Type::unknown_array_key(), key_of.clone()),
+        Type::union_of(vec![Type::int(), Type::new(Repr::ValueOf(plain.clone()))]),
+    ] {
+        assert_eq!(ty.contains_deferred(), recursive(&ty), "{ty}");
+    }
+    assert!(key_of.contains_deferred() && !plain.contains_deferred());
+}

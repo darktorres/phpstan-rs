@@ -141,10 +141,7 @@ impl Type {
     /// reference, left for the registry to resolve, stands anywhere in
     /// this type.
     pub fn contains_deferred(&self) -> bool {
-        matches!(
-            self.repr(),
-            Repr::ValueOf(_) | Repr::KeyOf(_) | Repr::OffsetAccess(..) | Repr::ClassConstant { .. }
-        ) || self.any_child(Type::contains_deferred)
+        self.0.flags & crate::HAS_DEFERRED != 0
     }
 
     /// The object shape this type is, or an intersection refines.

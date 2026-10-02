@@ -85,15 +85,18 @@ pub(crate) struct Node {
     pub(crate) repr: Repr,
     pub(crate) hash: u64,
     pub(crate) exact: u64,
-    // Which of `self`, `static` (or `$this`) and `parent` the type has
-    // anywhere in it (`HAS_*`), so a binding of them to a class can leave
-    // a type without them as it is.
+    // Which of `self`, `static` (or `$this`) and `parent`, and whether a
+    // reference left for the registry to resolve (`value-of`, `key-of`,
+    // offset access, class constant), the type has anywhere in it
+    // (`HAS_*`), so a binding or a resolution can leave a type without them
+    // as it is.
     pub(crate) flags: u8,
 }
 
 pub(crate) const HAS_SELF: u8 = 1;
 pub(crate) const HAS_STATIC: u8 = 2;
 pub(crate) const HAS_PARENT: u8 = 4;
+pub(crate) const HAS_DEFERRED: u8 = 8;
 
 /// The `HAS_*` flags of `repr`: its own, and its children's.
 pub(crate) fn reference_flags(repr: &Repr) -> u8 {
@@ -101,6 +104,9 @@ pub(crate) fn reference_flags(repr: &Repr) -> u8 {
         Repr::SelfRef(_) => HAS_SELF,
         Repr::StaticRef(_) | Repr::This => HAS_STATIC,
         Repr::ParentRef => HAS_PARENT,
+        Repr::ValueOf(_) | Repr::KeyOf(_) | Repr::OffsetAccess(..) | Repr::ClassConstant { .. } => {
+            HAS_DEFERRED
+        }
         _ => 0,
     };
     traverse::for_each_repr_child(repr, &mut |child| flags |= child.0.flags);
