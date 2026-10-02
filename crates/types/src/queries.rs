@@ -140,7 +140,19 @@ impl Type {
     /// `name` writes (`float`, `int`, `string`, `bool`, `array`, `mixed`,
     /// `object`, `callable`, `iterable`), or is an object of class `name`.
     pub fn mentions(&self, name: &str) -> bool {
-        let direct = match (name, self.repr()) {
+        self.mentions_directly(name) || self.any_child(|t| t.mentions(name))
+    }
+
+    /// `mentions` for each of `names`, in one walk: whether this type, or
+    /// one nested in it, is of the kind any of them writes.
+    pub fn mentions_any(&self, names: &[&str]) -> bool {
+        names.iter().any(|name| self.mentions_directly(name))
+            || self.any_child(|t| t.mentions_any(names))
+    }
+
+    /// `mentions` for this type's own form, not what is nested in it.
+    fn mentions_directly(&self, name: &str) -> bool {
+        match (name, self.repr()) {
             ("float", Repr::Float | Repr::FloatLiteral(_)) => true,
             ("int", Repr::Int | Repr::IntLiteral(_) | Repr::IntRange(..)) => true,
             (
@@ -158,8 +170,7 @@ impl Type {
             ("iterable", Repr::Object(n, _)) if n.eq_ignore_ascii_case("Traversable") => true,
             (class, Repr::Object(n, _)) => n.trim_start_matches('\\').eq_ignore_ascii_case(class),
             _ => false,
-        };
-        direct || self.any_child(|t| t.mentions(name))
+        }
     }
 
     /// The variance a generic argument is annotated with at its use site

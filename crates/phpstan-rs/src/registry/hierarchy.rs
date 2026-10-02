@@ -36,9 +36,9 @@ impl Registry {
     /// `instanceof`/`is_subclass_of` never recognizes). `class` itself
     /// is never included (matching `is_subclass_of`'s own separate
     /// `class == of` check).
-    fn class_extends_implements_closure(&self, class: &str) -> FxHashSet<Name> {
+    fn class_extends_implements_closure(&self, class: &Name) -> FxHashSet<Name> {
         let mut seen = FxHashSet::default();
-        let mut stack = vec![Name::from(class)];
+        let mut stack = vec![class.clone()];
         let mut result = FxHashSet::default();
         while let Some(current) = stack.pop() {
             if !seen.insert(current.clone()) {

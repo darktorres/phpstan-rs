@@ -254,11 +254,10 @@ const CODE_RUNNING_PARAMETER_TYPES: [&str; 11] = [
 /// A builtin writes no object's properties unless a parameter of it takes
 /// one of `CODE_RUNNING_PARAMETER_TYPES`.
 fn stub_verdict(sig: &FunctionReflection) -> PropertyWrites {
-    let runs_code = sig.params.iter().any(|p| {
-        CODE_RUNNING_PARAMETER_TYPES
-            .iter()
-            .any(|name| p.ty.mentions(name))
-    });
+    let runs_code = sig
+        .params
+        .iter()
+        .any(|p| p.ty.mentions_any(&CODE_RUNNING_PARAMETER_TYPES));
     if runs_code {
         PropertyWrites::Anything
     } else {

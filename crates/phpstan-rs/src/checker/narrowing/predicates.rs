@@ -193,13 +193,17 @@ pub(crate) fn is_real_variable_key(key: &str) -> bool {
 /// `std::collections::HashMap` on the underlying `imbl` persistent map,
 /// not `retain`.
 pub(crate) fn purge_stale_narrowing_for(locals: &mut Locals, key: &str) {
-    let stale: Vec<String> = locals
-        .iter()
-        .filter(|(k, _)| k.as_str() != key && key_depends_on(k, key))
-        .map(|(k, _)| k.clone())
-        .collect();
-    for k in stale {
-        locals.remove(&k);
+    // Only a key that isn't a plain variable's name can depend on another.
+    if locals.may_have_member_narrowing() {
+        let subscript = format!("[${key}]");
+        let stale: Vec<String> = locals
+            .iter()
+            .filter(|(k, _)| k.as_str() != key && depends_on_with(k, key, &subscript))
+            .map(|(k, _)| k.clone())
+            .collect();
+        for k in stale {
+            locals.remove(&k);
+        }
     }
     // `key`'s own per-field container facts (see `ContainerFieldFactsMap`'s
     // doc comment) are just as stale as a composite `narrowing_key` entry
@@ -228,7 +232,16 @@ pub(crate) fn key_depends_on(k: &str, key: &str) -> bool {
     k == key
         || k.strip_prefix(key)
             .is_some_and(|rest| rest.starts_with("->") || rest.starts_with('['))
-        || k.contains(&format!("[${key}]"))
+        || (k.contains('[') && k.contains(&format!("[${key}]")))
+}
+
+/// `key_depends_on` with `key`'s variable-subscript text, `[$key]`, built
+/// by the caller once for many keys.
+fn depends_on_with(k: &str, key: &str, subscript: &str) -> bool {
+    k == key
+        || k.strip_prefix(key)
+            .is_some_and(|rest| rest.starts_with("->") || rest.starts_with('['))
+        || k.contains(subscript)
 }
 
 /// Eagerly copies `source_container`'s own recorded per-field facts (see
