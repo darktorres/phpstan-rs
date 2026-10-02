@@ -37,19 +37,23 @@ impl Registry {
     /// is never included (matching `is_subclass_of`'s own separate
     /// `class == of` check).
     fn class_extends_implements_closure(&self, class: &Name) -> FxHashSet<Name> {
-        let mut seen = FxHashSet::default();
-        let mut stack = vec![class.clone()];
+        // The names walked are borrowed from the classes (or `class`), and
+        // one is copied only the first time it is found.
+        let mut seen: FxHashSet<&Name> = FxHashSet::default();
+        let mut stack: Vec<&Name> = vec![class];
         let mut result = FxHashSet::default();
         while let Some(current) = stack.pop() {
-            if !seen.insert(current.clone()) {
+            if !seen.insert(current) {
                 continue;
             }
-            let Some(info) = self.classes.get(&current) else {
+            let Some(info) = self.classes.get(current) else {
                 continue;
             };
             for parent in info.extends.iter().chain(info.implements.iter()) {
-                result.insert(parent.clone());
-                stack.push(parent.clone());
+                if !result.contains(parent) {
+                    result.insert(parent.clone());
+                }
+                stack.push(parent);
             }
         }
         result
@@ -208,14 +212,15 @@ impl Registry {
     /// `getInterfaces()`/`getTraits(true)` are both transitive the
     /// identical way.
     pub(crate) fn all_ancestor_names(&self, class: &str) -> FxHashSet<Name> {
-        let mut seen = FxHashSet::default();
-        let mut stack = vec![Name::from(class)];
+        let start = Name::from(class);
+        let mut seen: FxHashSet<&Name> = FxHashSet::default();
+        let mut stack: Vec<&Name> = vec![&start];
         let mut result = FxHashSet::default();
         while let Some(current) = stack.pop() {
-            if !seen.insert(current.clone()) {
+            if !seen.insert(current) {
                 continue;
             }
-            let Some(info) = self.classes.get(&current) else {
+            let Some(info) = self.classes.get(current) else {
                 continue;
             };
             for parent in info
@@ -224,8 +229,10 @@ impl Registry {
                 .chain(info.implements.iter())
                 .chain(info.uses.iter())
             {
-                result.insert(parent.clone());
-                stack.push(parent.clone());
+                if !result.contains(parent) {
+                    result.insert(parent.clone());
+                }
+                stack.push(parent);
             }
         }
         result
@@ -285,7 +292,7 @@ impl Registry {
     #[allow(clippy::type_complexity)]
     fn own_owner_names(
         &self,
-        class: &str,
+        class: &Name,
     ) -> (
         FxHashMap<Name, Name>,
         FxHashMap<Name, Name>,
@@ -294,14 +301,14 @@ impl Registry {
         let mut method_owner = FxHashMap::default();
         let mut property_owner = FxHashMap::default();
         let mut const_owner = FxHashMap::default();
-        let mut seen = FxHashSet::default();
-        let mut queue = VecDeque::new();
-        queue.push_back(Name::from(class));
+        let mut seen: FxHashSet<&Name> = FxHashSet::default();
+        let mut queue: VecDeque<&Name> = VecDeque::new();
+        queue.push_back(class);
         while let Some(current) = queue.pop_front() {
-            if !seen.insert(current.clone()) {
+            if !seen.insert(current) {
                 continue;
             }
-            let Some(info) = self.classes.get(&current) else {
+            let Some(info) = self.classes.get(current) else {
                 continue;
             };
             for name in info.methods.keys() {
@@ -320,7 +327,7 @@ impl Registry {
                 }
             }
             for parent in info.extends.iter().chain(info.implements.iter()) {
-                queue.push_back(parent.clone());
+                queue.push_back(parent);
             }
         }
         (method_owner, property_owner, const_owner)
