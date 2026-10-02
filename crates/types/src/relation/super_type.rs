@@ -21,6 +21,38 @@ impl Relation<'_> {
         }
     }
 
+    /// `disjoint(ty, &key.to_type())`, without making the key's type for
+    /// the key types that answer on their form alone: another scalar
+    /// family shares no value with the key, and a plain `int`, `string`,
+    /// `mixed` or union of the two holds the keys of its families.
+    fn key_disjoint(&self, ty: &Type, key: &crate::ShapeKey) -> bool {
+        let key_family = match key {
+            crate::ShapeKey::Int(_) => ScalarFamily::Int,
+            crate::ShapeKey::Str(_) => ScalarFamily::String,
+        };
+        let holds_family = |t: &Type| match t.repr() {
+            Repr::Int => key_family == ScalarFamily::Int,
+            Repr::String => key_family == ScalarFamily::String,
+            _ => false,
+        };
+        match ty.repr() {
+            Repr::Mixed(_, None) => false,
+            Repr::Union(members)
+                if members
+                    .iter()
+                    .all(|m| matches!(m.repr(), Repr::Int | Repr::String))
+                    && members.iter().any(holds_family) =>
+            {
+                false
+            }
+            _ => match scalar_family(ty) {
+                Some(family) if family != key_family => true,
+                _ if holds_family(ty) => false,
+                _ => self.disjoint(ty, &key.to_type()),
+            },
+        }
+    }
+
     /// Whether no value is both an `a` and a `b`: `is_super_type_of`
     /// answers no one way round or the other.
     pub fn disjoint(&self, a: &Type, b: &Type) -> bool {
@@ -267,8 +299,7 @@ impl Relation<'_> {
                 (Repr::ArrayShape(shape), Repr::Array(k, v))
                 | (Repr::Array(k, v), Repr::ArrayShape(shape))
                     if shape.fields().iter().any(|f| {
-                        !f.optional
-                            && (self.disjoint(k, &f.key.to_type()) || self.disjoint(v, &f.ty))
+                        !f.optional && (self.key_disjoint(k, &f.key) || self.disjoint(v, &f.ty))
                     }) =>
                 {
                     TrinaryLogic::No
@@ -328,8 +359,8 @@ impl Relation<'_> {
         // the keys, which cost no type comparison, come first and the first
         // `No` ends it.
         let mut verdict = TrinaryLogic::Yes;
-        for sup_field in sup.fields() {
-            if !sup_field.optional && sub.field(&sup_field.key).is_none() {
+        for (at, sup_field) in sup.fields().iter().enumerate() {
+            if !sup_field.optional && sub.field_near(&sup_field.key, at).is_none() {
                 if sub.is_sealed() {
                     return TrinaryLogic::No;
                 }
@@ -337,8 +368,8 @@ impl Relation<'_> {
             }
         }
         if sup.is_sealed() {
-            for sub_field in sub.fields() {
-                if sup.field(&sub_field.key).is_none() {
+            for (at, sub_field) in sub.fields().iter().enumerate() {
+                if sup.field_near(&sub_field.key, at).is_none() {
                     if !sub_field.optional {
                         return TrinaryLogic::No;
                     }
@@ -346,8 +377,8 @@ impl Relation<'_> {
                 }
             }
         }
-        for sup_field in sup.fields() {
-            let Some(sub_field) = sub.field(&sup_field.key) else {
+        for (at, sup_field) in sup.fields().iter().enumerate() {
+            let Some(sub_field) = sub.field_near(&sup_field.key, at) else {
                 continue;
             };
             match self.is_super_type_of(&sup_field.ty, &sub_field.ty) {
@@ -668,6 +699,34 @@ mod tests {
                     relation.is_super_type_of(sup, sub),
                     by_form,
                     "{sup} over {sub}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn a_key_is_disjoint_from_a_type_as_its_literal_type_is() {
+        let relation = Relation::structural();
+        let mut types = samples();
+        types.extend([
+            Type::int_range(None, Some(0)),
+            Type::union_of(vec![Type::int(), Type::null()]),
+            Type::union_of(vec![Type::string(), Type::float()]),
+            Type::int_literal(7),
+            Type::string_literal("k".into()),
+        ]);
+        let keys = [
+            crate::ShapeKey::Int(3),
+            crate::ShapeKey::Int(-1),
+            crate::ShapeKey::from_name("a"),
+            crate::ShapeKey::from_name("k"),
+        ];
+        for ty in &types {
+            for key in &keys {
+                assert_eq!(
+                    relation.key_disjoint(ty, key),
+                    relation.disjoint(ty, &key.to_type()),
+                    "{ty} and {key}"
                 );
             }
         }

@@ -358,6 +358,16 @@ impl Shape {
         self.position(key).map(|position| &self.fields[position])
     }
 
+    /// `field(key)`, for a key likely at `hint`: shapes built from the same
+    /// source list their keys in the same order, so the field at the
+    /// other shape's position is usually the one.
+    pub fn field_near(&self, key: &ShapeKey, hint: usize) -> Option<&ShapeField> {
+        match self.fields.get(hint) {
+            Some(field) if field.key == *key => Some(field),
+            _ => self.field(key),
+        }
+    }
+
     /// Adds `field`, whose key the shape has no field of.
     pub fn push(&mut self, field: ShapeField) {
         debug_assert!(

@@ -836,7 +836,8 @@ fn reduce_array_members(members: &mut Vec<Type>) {
             let overlapping = a
                 .fields()
                 .iter()
-                .filter(|f| b.field(&f.key).is_some())
+                .enumerate()
+                .filter(|(at, f)| b.field_near(&f.key, *at).is_some())
                 .count();
             if overlapping == 0 {
                 continue;
@@ -1037,7 +1038,7 @@ fn shape_as_general_array(shape: &Shape) -> Type {
 /// and at most one required key `other` lacks. An empty `other` fits a
 /// shape whose keys are all optional; an unsealed tail absorbs the other
 /// side's required keys when it can hold them.
-fn is_keys_superset(relation: &crate::Relation, this: &Shape, other: &Shape) -> bool {
+pub(crate) fn is_keys_superset(relation: &crate::Relation, this: &Shape, other: &Shape) -> bool {
     if other.fields().is_empty() && other.is_sealed() {
         return this.fields().iter().all(|f| f.optional);
     }
@@ -1071,28 +1072,43 @@ fn legacy_is_keys_superset(relation: &crate::Relation, this: &Shape, other: &Sha
     if other.fields().is_empty() {
         return this.fields().is_empty();
     }
-    let mut fail_on_different_value =
-        this.fields().len() != other.fields().len() || this.fields().len() < 2;
-    for other_field in other.fields() {
-        let Some(this_field) = this.field(&other_field.key) else {
-            return false;
-        };
-        if !relation
+    // The keys first, which cost no type comparison.
+    if other
+        .fields()
+        .iter()
+        .enumerate()
+        .any(|(at, f)| this.field_near(&f.key, at).is_none())
+    {
+        return false;
+    }
+    let lacking = this
+        .fields()
+        .iter()
+        .enumerate()
+        .filter(|(at, f)| !f.optional && other.field_near(&f.key, *at).is_none())
+        .count();
+    if lacking > 1 {
+        return false;
+    }
+    // At most one value of `other` disjoint from `this`'s, and none unless
+    // both have the same two or more keys.
+    let mut allowed_different =
+        usize::from(this.fields().len() == other.fields().len() && this.fields().len() >= 2);
+    for (at, other_field) in other.fields().iter().enumerate() {
+        let this_field = this
+            .field_near(&other_field.key, at)
+            .expect("every key of `other` is in `this`");
+        if relation
             .is_super_type_of(&other_field.ty, &this_field.ty)
             .no()
         {
-            continue;
+            if allowed_different == 0 {
+                return false;
+            }
+            allowed_different -= 1;
         }
-        if fail_on_different_value {
-            return false;
-        }
-        fail_on_different_value = true;
     }
-    this.fields()
-        .iter()
-        .filter(|f| !f.optional && other.field(&f.key).is_none())
-        .count()
-        <= 1
+    true
 }
 
 /// `sa` and `sb` as one shape, in `sa`'s key order: a key both have takes

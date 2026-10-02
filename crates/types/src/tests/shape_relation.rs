@@ -1,6 +1,6 @@
-//! `shape_super_type_of`, which settles keys before comparing values and
-//! stops at the first `No`, answers as the field-by-field comparison that
-//! collects every field's answer first.
+//! `shape_super_type_of` and `is_keys_superset`, which settle keys before
+//! comparing values and stop at the first answer that rules the relation
+//! out, answer as the comparisons that go field by field, in order, do.
 use super::super::*;
 
 /// Every field's answer collected, the weakest of them the result.
@@ -108,4 +108,81 @@ fn shapes_relate_as_the_collected_comparison_does() {
         assert_eq!(got, expected, "{sup:?} over {sub:?}");
     }
     assert!(yes > 100 && maybe > 100 && no > 100, "{yes} {maybe} {no}");
+}
+
+/// `is_keys_superset`, comparing each key's values as it finds the key.
+fn keys_superset_in_order(relation: &Relation, this: &Shape, other: &Shape) -> bool {
+    fn legacy(relation: &Relation, this: &Shape, other: &Shape) -> bool {
+        if this.fields().len() < other.fields().len() {
+            return false;
+        }
+        if other.fields().is_empty() {
+            return this.fields().is_empty();
+        }
+        let mut fail_on_different_value =
+            this.fields().len() != other.fields().len() || this.fields().len() < 2;
+        for other_field in other.fields() {
+            let Some(this_field) = this.field(&other_field.key) else {
+                return false;
+            };
+            if !relation
+                .is_super_type_of(&other_field.ty, &this_field.ty)
+                .no()
+            {
+                continue;
+            }
+            if fail_on_different_value {
+                return false;
+            }
+            fail_on_different_value = true;
+        }
+        this.fields()
+            .iter()
+            .filter(|f| !f.optional && other.field(&f.key).is_none())
+            .count()
+            <= 1
+    }
+    if other.fields().is_empty() && other.is_sealed() {
+        return this.fields().iter().all(|f| f.optional);
+    }
+    let tail_absorbs = |tail_owner: &Shape, fields: &Shape| {
+        let Some(tail) = tail_owner.unsealed.as_deref() else {
+            return false;
+        };
+        fields.fields().iter().filter(|f| !f.optional).all(|f| {
+            !relation.is_super_type_of(&tail.0, &f.key.to_type()).no()
+                && !relation.is_super_type_of(&tail.1, &f.ty).no()
+        })
+    };
+    match (this.is_sealed(), other.is_sealed()) {
+        (false, false) => {
+            legacy(relation, this, other) || tail_absorbs(this, other) || tail_absorbs(other, this)
+        }
+        (false, true) => legacy(relation, this, other) || tail_absorbs(this, other),
+        (true, false) => legacy(relation, this, other) || tail_absorbs(other, this),
+        (true, true) => legacy(relation, this, other),
+    }
+}
+
+#[test]
+fn keys_superset_answers_as_the_in_order_comparison_does() {
+    let relation = Relation::structural();
+    let mut rng = Lcg(0x1357_9BDF_0246_8ACE);
+    let (mut yes, mut no) = (0, 0);
+    for _ in 0..30_000 {
+        let this = shape(&mut rng, 1);
+        let other = shape(&mut rng, 1);
+        let expected = keys_superset_in_order(&relation, &this, &other);
+        if expected {
+            yes += 1;
+        } else {
+            no += 1;
+        }
+        assert_eq!(
+            crate::union::is_keys_superset(&relation, &this, &other),
+            expected,
+            "{this:?} over {other:?}"
+        );
+    }
+    assert!(yes > 200 && no > 200, "{yes} {no}");
 }
