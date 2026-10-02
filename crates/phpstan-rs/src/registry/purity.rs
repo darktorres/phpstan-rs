@@ -37,6 +37,7 @@
 
 use crate::registry::bodies::BodySource;
 use rayon::prelude::*;
+use rustc_hash::FxHashMap;
 use syntax::name::Name;
 
 use crate::registry::{FunctionReflection, Registry};
@@ -174,47 +175,96 @@ impl Registry {
     /// `MAX_PASSES` cap needed - this is a monotonically growing set
     /// over a finite graph, not approximating a possibly-nonconvergent
     /// narrowing fixed point): mark a declaration pure once every one of
-    /// its own dependencies is already marked pure, repeat until one
-    /// full pass makes no change. A dependency cycle with no external
-    /// pure base case is correctly never marked pure, matching real
-    /// PHPStan's own identical behavior for the same shape.
+    /// its own dependencies is marked pure. A dependency cycle with no
+    /// external pure base case is correctly never marked pure, matching
+    /// real PHPStan's own identical behavior for the same shape.
+    ///
+    /// Each candidate counts the dependencies of it that are not pure yet;
+    /// a candidate marked pure takes one off the count of every candidate
+    /// that depends on it, and one whose count reaches nothing is marked
+    /// in turn. A dependency that is not pure and is no candidate (nothing
+    /// will ever mark it) leaves its dependent's count above nothing for
+    /// good, as the passes over every candidate it replaces never
+    /// satisfied it either.
     fn run_purity_fixed_point(&mut self, candidates: &PurityCandidates) {
-        loop {
-            let mut changed = false;
-            for name in &candidates.functions {
-                let sig = &self.functions[name];
-                if sig.is_transitively_pure {
-                    continue;
-                }
-                let Some(deps) = &sig.purity_dependencies else {
-                    continue;
-                };
-                if deps.iter().all(|d| self.dependency_is_pure(d)) {
-                    self.functions.get_mut(name).unwrap().is_transitively_pure = true;
-                    changed = true;
+        let candidate_count = candidates.functions.len() + candidates.methods.len();
+        let signature = |index: usize| -> &FunctionReflection {
+            match index.checked_sub(candidates.functions.len()) {
+                None => &self.functions[&candidates.functions[index]],
+                Some(i) => {
+                    let (class, method) = &candidates.methods[i];
+                    &self.classes[class].methods[method]
                 }
             }
-            for (class_name, method_name) in &candidates.methods {
-                let sig = &self.classes[class_name].methods[method_name];
-                if sig.is_transitively_pure {
+        };
+        // Which candidate each signature is, found by address before any
+        // is changed.
+        let mut index_of: FxHashMap<*const FunctionReflection, usize> = FxHashMap::default();
+        for index in 0..candidate_count {
+            index_of.insert(std::ptr::from_ref(signature(index)), index);
+        }
+        let mut waiting = vec![0usize; candidate_count];
+        let mut dependents: Vec<Vec<usize>> = vec![Vec::new(); candidate_count];
+        let mut ready: Vec<usize> = Vec::new();
+        for (index, wait) in waiting.iter_mut().enumerate() {
+            let sig = signature(index);
+            if sig.is_transitively_pure {
+                continue;
+            }
+            let Some(deps) = &sig.purity_dependencies else {
+                continue;
+            };
+            let mut not_pure = 0;
+            for dep in deps {
+                if self.dependency_is_pure(dep) {
                     continue;
                 }
-                let Some(deps) = &sig.purity_dependencies else {
-                    continue;
+                not_pure += 1;
+                let target = match dep {
+                    PurityDependency::Function(name) => self.functions.get(name),
+                    PurityDependency::Method(class, method) => self
+                        .classes
+                        .get(class)
+                        .and_then(|info| info.methods.get(method)),
                 };
-                if deps.iter().all(|d| self.dependency_is_pure(d)) {
-                    self.classes
-                        .get_mut(class_name)
-                        .unwrap()
-                        .methods
-                        .get_mut(method_name)
+                if let Some(&target) = target.and_then(|sig| index_of.get(&std::ptr::from_ref(sig)))
+                {
+                    dependents[target].push(index);
+                }
+            }
+            *wait = not_pure;
+            if not_pure == 0 {
+                ready.push(index);
+            }
+        }
+        let mut pure: Vec<usize> = Vec::new();
+        while let Some(index) = ready.pop() {
+            pure.push(index);
+            for &dependent in &dependents[index] {
+                waiting[dependent] -= 1;
+                if waiting[dependent] == 0 {
+                    ready.push(dependent);
+                }
+            }
+        }
+        for index in pure {
+            match index.checked_sub(candidates.functions.len()) {
+                None => {
+                    self.functions
+                        .get_mut(&candidates.functions[index])
                         .unwrap()
                         .is_transitively_pure = true;
-                    changed = true;
                 }
-            }
-            if !changed {
-                break;
+                Some(i) => {
+                    let (class, method) = &candidates.methods[i];
+                    self.classes
+                        .get_mut(class)
+                        .unwrap()
+                        .methods
+                        .get_mut(method)
+                        .unwrap()
+                        .is_transitively_pure = true;
+                }
             }
         }
     }
