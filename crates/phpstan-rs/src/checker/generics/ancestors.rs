@@ -46,20 +46,140 @@ impl AncestorTag {
     }
 }
 
-/// The per-rule wording of one `GenericAncestorsCheck` run. `None` for a
-/// message the rule never reaches (its declaration can't have that kind
-/// of ancestor at all).
-struct AncestorMessages {
-    incompatible: String,
-    unresolvable: String,
-    no_names: String,
+/// Which rule runs a `GenericAncestorsCheck`, for which tag.
+#[derive(Clone, Copy)]
+enum Rule {
+    ClassExtends,
+    ClassImplements,
+    InterfaceExtends,
+    InterfaceImplements,
+    EnumExtends,
+    EnumImplements,
+    /// `UsedTraitsRule` on a declaration of this kind (`class`, `trait`...).
+    Use(&'static str),
+}
+
+/// The per-rule wording of one `GenericAncestorsCheck` run, written out
+/// when a message is reported. `None` for a message the rule never reaches
+/// (its declaration can't have that kind of ancestor at all).
+struct AncestorMessages<'a> {
+    rule: Rule,
+    fqn: &'a str,
+}
+
+impl<'a> AncestorMessages<'a> {
+    fn new(rule: Rule, fqn: &'a str) -> AncestorMessages<'a> {
+        AncestorMessages { rule, fqn }
+    }
+
+    /// The kind of declaration, as the messages name it.
+    fn word(&self) -> &'static str {
+        match self.rule {
+            Rule::ClassExtends | Rule::ClassImplements => "class",
+            Rule::InterfaceExtends | Rule::InterfaceImplements => "interface",
+            Rule::EnumExtends | Rule::EnumImplements => "enum",
+            Rule::Use(word) => word,
+        }
+    }
+
+    fn tag(&self) -> &'static str {
+        match self.rule {
+            Rule::ClassExtends | Rule::InterfaceExtends | Rule::EnumExtends => "extends",
+            Rule::ClassImplements | Rule::InterfaceImplements | Rule::EnumImplements => {
+                "implements"
+            }
+            Rule::Use(_) => "use",
+        }
+    }
+
+    /// "Class C": the declaration, the first word capitalized.
+    fn head(&self) -> String {
+        upper_first(&format!("{} {}", self.word(), self.fqn))
+    }
+
+    fn incompatible(&self) -> String {
+        format!(
+            "{} @{} tag contains incompatible type",
+            self.head(),
+            self.tag()
+        )
+    }
+
+    fn unresolvable(&self) -> String {
+        format!(
+            "{} @{} tag contains unresolvable type.",
+            self.head(),
+            self.tag()
+        )
+    }
+
+    fn no_names(&self) -> String {
+        let head = self.head();
+        match self.rule {
+            Rule::ClassExtends => {
+                format!("{head} has @extends tag, but does not extend any class.")
+            }
+            Rule::ClassImplements => {
+                format!("{head} has @implements tag, but does not implement any interface.")
+            }
+            Rule::InterfaceExtends => {
+                format!("{head} has @extends tag, but does not extend any interface.")
+            }
+            Rule::InterfaceImplements => format!(
+                "{head} has @implements tag, but can not implement any interface, must extend from it."
+            ),
+            Rule::EnumExtends => format!("{head} has @extends tag, but cannot extend anything."),
+            Rule::EnumImplements => {
+                format!("{head} has @implements tag, but does not implement any interface.")
+            }
+            Rule::Use(_) => format!("{head} has @use tag, but does not use any trait."),
+        }
+    }
+
     /// "The @extends tag of class C describes" and the rest after the
     /// named class: "but the class extends" and whether the real
     /// ancestors follow a colon (no final period) or not.
-    wrong_parent: Option<(String, String, bool)>,
+    fn wrong_parent(&self) -> Option<(String, String, bool)> {
+        let (word, fqn) = (self.word(), self.fqn);
+        let (verb, colon) = match self.rule {
+            Rule::ClassExtends => ("extends", false),
+            Rule::ClassImplements => ("implements", true),
+            Rule::InterfaceExtends => ("extends", true),
+            Rule::EnumImplements => ("implements", true),
+            Rule::Use(_) => ("uses", false),
+            Rule::InterfaceImplements | Rule::EnumExtends => return None,
+        };
+        Some((
+            format!("The @{} tag of {word} {fqn} describes", self.tag()),
+            format!("but the {word} {verb}"),
+            colon,
+        ))
+    }
+
+    /// Whether the rule asks for the tag of a generic ancestor.
+    fn can_miss_generics(&self) -> bool {
+        !matches!(self.rule, Rule::InterfaceImplements | Rule::EnumExtends)
+    }
+
     /// "... generic class X but does not specify its types: ".
-    missing_generics: Option<String>,
-    variance_context: Option<String>,
+    fn missing_generics(&self) -> Option<String> {
+        let head = self.head();
+        Some(match self.rule {
+            Rule::ClassExtends => format!("{head} extends generic class"),
+            Rule::ClassImplements => format!("{head} implements generic interface"),
+            Rule::InterfaceExtends => format!("{head} extends generic interface"),
+            Rule::EnumImplements => format!("{head} implements generic interface"),
+            Rule::Use(_) => format!("{head} uses generic trait"),
+            Rule::InterfaceImplements | Rule::EnumExtends => return None,
+        })
+    }
+
+    fn variance_context(&self) -> Option<String> {
+        match self.rule {
+            Rule::InterfaceImplements | Rule::EnumExtends => None,
+            _ => Some(format!("of {} {}", self.word(), self.fqn)),
+        }
+    }
 }
 
 /// `TypeProjectionHelper::describe` for a call-site variance
@@ -85,7 +205,7 @@ impl<'a> Checker<'a> {
                     .iter()
                     .map(|n| self.resolve_class_ref(n))
                     .collect();
-                let messages = class_messages(fqn, AncestorTag::Extends);
+                let messages = AncestorMessages::new(Rule::ClassExtends, fqn);
                 self.check_ancestor_tags(
                     fqn,
                     &templates,
@@ -95,7 +215,7 @@ impl<'a> Checker<'a> {
                     &messages,
                     c.span,
                 );
-                let messages = class_messages(fqn, AncestorTag::Implements);
+                let messages = AncestorMessages::new(Rule::ClassImplements, fqn);
                 self.check_ancestor_tags(
                     fqn,
                     &templates,
@@ -112,7 +232,7 @@ impl<'a> Checker<'a> {
                     .iter()
                     .map(|n| self.resolve_class_ref(n))
                     .collect();
-                let messages = interface_messages(fqn, AncestorTag::Extends);
+                let messages = AncestorMessages::new(Rule::InterfaceExtends, fqn);
                 self.check_ancestor_tags(
                     fqn,
                     &templates,
@@ -122,7 +242,7 @@ impl<'a> Checker<'a> {
                     &messages,
                     c.span,
                 );
-                let messages = interface_messages(fqn, AncestorTag::Implements);
+                let messages = AncestorMessages::new(Rule::InterfaceImplements, fqn);
                 self.check_ancestor_tags(
                     fqn,
                     &templates,
@@ -139,7 +259,7 @@ impl<'a> Checker<'a> {
                     .iter()
                     .map(|n| self.resolve_class_ref(n))
                     .collect();
-                let messages = enum_messages(fqn, AncestorTag::Extends);
+                let messages = AncestorMessages::new(Rule::EnumExtends, fqn);
                 self.check_ancestor_tags(
                     fqn,
                     &templates,
@@ -149,7 +269,7 @@ impl<'a> Checker<'a> {
                     &messages,
                     c.span,
                 );
-                let messages = enum_messages(fqn, AncestorTag::Implements);
+                let messages = AncestorMessages::new(Rule::EnumImplements, fqn);
                 self.check_ancestor_tags(
                     fqn,
                     &templates,
@@ -190,26 +310,14 @@ impl<'a> Checker<'a> {
         kind: ClassKind,
         trait_uses: &[TraitUse],
     ) {
-        let (type_description, description) = match kind {
-            ClassKind::Trait => ("trait", format!("trait {fqn}")),
-            other => {
-                let word = class_kind_identifier(&other);
-                (word, format!("{word} {fqn}"))
-            }
+        if trait_uses.is_empty() {
+            return;
+        }
+        let word = match kind {
+            ClassKind::Trait => "trait",
+            other => class_kind_identifier(&other),
         };
-        let upper = upper_first(&description);
-        let messages = AncestorMessages {
-            incompatible: format!("{upper} @use tag contains incompatible type"),
-            unresolvable: format!("{upper} @use tag contains unresolvable type."),
-            no_names: format!("{upper} has @use tag, but does not use any trait."),
-            wrong_parent: Some((
-                format!("The @use tag of {description} describes"),
-                format!("but the {type_description} uses"),
-                false,
-            )),
-            missing_generics: Some(format!("{upper} uses generic trait")),
-            variance_context: Some(format!("of {description}")),
-        };
+        let messages = AncestorMessages::new(Rule::Use(word), fqn);
         for trait_use in trait_uses {
             let names: Vec<String> = trait_use
                 .traits
@@ -237,22 +345,26 @@ impl<'a> Checker<'a> {
         doc: Option<&str>,
         tag: AncestorTag,
         names: &[String],
-        messages: &AncestorMessages,
+        messages: &AncestorMessages<'_>,
         span: Span,
     ) {
-        let label = fqn.to_string();
         let tag_types = match doc {
             Some(doc) if doc.contains(tag.word()) => {
                 self.ancestor_tag_types(fqn, templates, doc, tag)
             }
             _ => Vec::new(),
         };
-        let location = format!("PHPDoc tag @{}", tag.word());
+        // Only a tag's own types are reported against these.
+        let (label, location) = if tag_types.is_empty() {
+            (String::new(), String::new())
+        } else {
+            (fqn.to_string(), format!("PHPDoc tag @{}", tag.word()))
+        };
         let mut unused: Vec<&String> = names.iter().collect();
         for (node, ty) in &tag_types {
             let Some((class, args)) = ty.as_object() else {
                 self.report(
-                    format!("{} {ty}.", messages.incompatible),
+                    format!("{} {ty}.", messages.incompatible()),
                     span,
                     2,
                     "generics.notCompatible",
@@ -261,7 +373,7 @@ impl<'a> Checker<'a> {
             };
             if args.is_empty() {
                 self.report(
-                    format!("{} {ty}.", messages.incompatible),
+                    format!("{} {ty}.", messages.incompatible()),
                     span,
                     2,
                     "generics.notCompatible",
@@ -269,17 +381,17 @@ impl<'a> Checker<'a> {
                 continue;
             }
             let Some(position) = names.iter().position(|n| n.eq_ignore_ascii_case(class)) else {
-                match (&messages.wrong_parent, names.is_empty()) {
+                match (messages.wrong_parent(), names.is_empty()) {
                     (Some((prefix, rest, colon)), false) => {
                         let listed = names.join(", ");
-                        let message = if *colon {
+                        let message = if colon {
                             format!("{prefix} {class} {rest}: {listed}")
                         } else {
                             format!("{prefix} {class} {rest} {listed}.")
                         };
                         self.report(message, span, 2, "generics.wrongParent");
                     }
-                    _ => self.report(messages.no_names.clone(), span, 2, "generics.noParent"),
+                    _ => self.report(messages.no_names(), span, 2, "generics.noParent"),
                 }
                 continue;
             };
@@ -288,12 +400,7 @@ impl<'a> Checker<'a> {
             // half (never allowed here, see below).
             self.check_ancestor_generic_object(ty, &location, &label, span);
             if self.type_node_unresolvable(node, Some(fqn)) {
-                self.report(
-                    messages.unresolvable.clone(),
-                    span,
-                    2,
-                    "generics.unresolvable",
-                );
+                self.report(messages.unresolvable(), span, 2, "generics.unresolvable");
             }
             let referenced: Vec<String> = ty
                 .referenced_class_names()
@@ -322,7 +429,7 @@ impl<'a> Checker<'a> {
                     _ => {}
                 }
             }
-            if let Some(context) = &messages.variance_context {
+            if let Some(context) = messages.variance_context() {
                 let verb = match tag {
                     AncestorTag::Extends => "extended",
                     AncestorTag::Implements => "implemented",
@@ -361,7 +468,7 @@ impl<'a> Checker<'a> {
                 }
             }
         }
-        if let Some(missing) = &messages.missing_generics {
+        if messages.can_miss_generics() {
             for name in unused {
                 let Some((canonical, info)) = self.registry.lookup_class(name) else {
                     continue;
@@ -379,6 +486,7 @@ impl<'a> Checker<'a> {
                 if required != total {
                     list.push_str(&format!(" ({required}-{total} required)"));
                 }
+                let missing = messages.missing_generics().unwrap_or_default();
                 self.report(
                     format!("{missing} {canonical} but does not specify its types: {list}"),
                     span,
@@ -442,92 +550,5 @@ fn upper_first(s: &str) -> String {
     match chars.next() {
         Some(first) => first.to_uppercase().collect::<String>() + chars.as_str(),
         None => String::new(),
-    }
-}
-
-fn class_messages(fqn: &str, tag: AncestorTag) -> AncestorMessages {
-    match tag {
-        AncestorTag::Extends => AncestorMessages {
-            incompatible: format!("Class {fqn} @extends tag contains incompatible type"),
-            unresolvable: format!("Class {fqn} @extends tag contains unresolvable type."),
-            no_names: format!("Class {fqn} has @extends tag, but does not extend any class."),
-            wrong_parent: Some((
-                format!("The @extends tag of class {fqn} describes"),
-                "but the class extends".to_string(),
-                false,
-            )),
-            missing_generics: Some(format!("Class {fqn} extends generic class")),
-            variance_context: Some(format!("of class {fqn}")),
-        },
-        _ => AncestorMessages {
-            incompatible: format!("Class {fqn} @implements tag contains incompatible type"),
-            unresolvable: format!("Class {fqn} @implements tag contains unresolvable type."),
-            no_names: format!(
-                "Class {fqn} has @implements tag, but does not implement any interface."
-            ),
-            wrong_parent: Some((
-                format!("The @implements tag of class {fqn} describes"),
-                "but the class implements".to_string(),
-                true,
-            )),
-            missing_generics: Some(format!("Class {fqn} implements generic interface")),
-            variance_context: Some(format!("of class {fqn}")),
-        },
-    }
-}
-
-fn interface_messages(fqn: &str, tag: AncestorTag) -> AncestorMessages {
-    match tag {
-        AncestorTag::Extends => AncestorMessages {
-            incompatible: format!("Interface {fqn} @extends tag contains incompatible type"),
-            unresolvable: format!("Interface {fqn} @extends tag contains unresolvable type."),
-            no_names: format!(
-                "Interface {fqn} has @extends tag, but does not extend any interface."
-            ),
-            wrong_parent: Some((
-                format!("The @extends tag of interface {fqn} describes"),
-                "but the interface extends".to_string(),
-                true,
-            )),
-            missing_generics: Some(format!("Interface {fqn} extends generic interface")),
-            variance_context: Some(format!("of interface {fqn}")),
-        },
-        _ => AncestorMessages {
-            incompatible: format!("Interface {fqn} @implements tag contains incompatible type"),
-            unresolvable: format!("Interface {fqn} @implements tag contains unresolvable type."),
-            no_names: format!(
-                "Interface {fqn} has @implements tag, but can not implement any interface, must extend from it."
-            ),
-            wrong_parent: None,
-            missing_generics: None,
-            variance_context: None,
-        },
-    }
-}
-
-fn enum_messages(fqn: &str, tag: AncestorTag) -> AncestorMessages {
-    match tag {
-        AncestorTag::Extends => AncestorMessages {
-            incompatible: format!("Enum {fqn} @extends tag contains incompatible type"),
-            unresolvable: format!("Enum {fqn} @extends tag contains unresolvable type."),
-            no_names: format!("Enum {fqn} has @extends tag, but cannot extend anything."),
-            wrong_parent: None,
-            missing_generics: None,
-            variance_context: None,
-        },
-        _ => AncestorMessages {
-            incompatible: format!("Enum {fqn} @implements tag contains incompatible type"),
-            unresolvable: format!("Enum {fqn} @implements tag contains unresolvable type."),
-            no_names: format!(
-                "Enum {fqn} has @implements tag, but does not implement any interface."
-            ),
-            wrong_parent: Some((
-                format!("The @implements tag of enum {fqn} describes"),
-                "but the enum implements".to_string(),
-                true,
-            )),
-            missing_generics: Some(format!("Enum {fqn} implements generic interface")),
-            variance_context: Some(format!("of enum {fqn}")),
-        },
     }
 }
