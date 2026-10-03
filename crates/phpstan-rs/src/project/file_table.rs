@@ -43,6 +43,23 @@ impl<V> Default for FileTable<V> {
 }
 
 impl<V> FileTable<V> {
+    /// A table that has numbered `paths`, each by its first place in the
+    /// list, and the number each place got. Nothing is held yet.
+    pub(crate) fn with_paths<'a>(
+        paths: impl ExactSizeIterator<Item = &'a Path>,
+    ) -> (FileTable<V>, Vec<FileId>) {
+        let mut table = FileTable::default();
+        table.ids.reserve(paths.len());
+        table.slots.reserve(paths.len());
+        let numbers = paths.map(|path| table.id_for(path)).collect();
+        (table, numbers)
+    }
+
+    /// Whether any path has been numbered.
+    pub(crate) fn has_numbers(&self) -> bool {
+        !self.slots.is_empty()
+    }
+
     /// The number of files held.
     pub(crate) fn len(&self) -> usize {
         self.len
@@ -112,6 +129,11 @@ impl<V> FileTable<V> {
     /// Holds `value` for `path`, returning what it held for it.
     pub(crate) fn insert(&mut self, path: PathBuf, value: V) -> Option<V> {
         let id = self.id_for(&path);
+        self.insert_at(id, value)
+    }
+
+    /// Holds `value` for the file `id` numbers, returning what it held.
+    pub(crate) fn insert_at(&mut self, id: FileId, value: V) -> Option<V> {
         let previous = self.slots[id.index()].value.replace(value);
         if previous.is_none() {
             self.len += 1;
@@ -247,5 +269,27 @@ mod tests {
         // A number is not a file held.
         assert!(table.is_empty());
         assert!(table.get(Path::new("/x")).is_none());
+    }
+
+    #[test]
+    fn paths_numbered_ahead_keep_the_number_of_their_first_place() {
+        let paths = [
+            Path::new("/c"),
+            Path::new("/a"),
+            Path::new("/c"),
+            Path::new("/b"),
+        ];
+        let (mut table, numbers): (FileTable<u32>, _) = FileTable::with_paths(paths.into_iter());
+        assert_eq!(numbers[0], numbers[2]);
+        assert_ne!(numbers[0], numbers[1]);
+        assert_ne!(numbers[1], numbers[3]);
+        assert!(table.is_empty());
+        assert!(table.has_numbers());
+        for (path, id) in paths.iter().zip(&numbers) {
+            assert_eq!(table.path(*id), *path);
+        }
+        assert_eq!(table.insert_at(numbers[1], 7), None);
+        assert_eq!(table.get(Path::new("/a")), Some(&7));
+        assert_eq!(table.id_for(Path::new("/b")), numbers[3]);
     }
 }

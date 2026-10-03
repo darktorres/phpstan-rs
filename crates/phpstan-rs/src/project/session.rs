@@ -718,22 +718,37 @@ impl Session {
 
         let combined_files: Vec<&PathBuf> =
             context_files.iter().chain(analyze_files.iter()).collect();
-        let mut combined_parsed: Vec<Read> = pool.install(|| {
-            combined_files
-                .par_iter()
-                // The names a job meets are kept while it parses one file
-                // after another, and dropped with the load.
-                .map_init(syntax::name::NameCache::default, |names, p| {
-                    let mut read =
-                        self.read_and_parse_file(p, stub_files.contains(p.as_path()), names);
-                    if let Read::Loaded(file) = &mut read {
-                        project.index_use_sites(&mut file.parsed, &file.source);
-                        project.note_owner(&mut file.parsed, p);
-                    }
-                    read
-                })
-                .collect()
+        // The files are numbered while they parse.
+        let (mut combined_parsed, numbering): (Vec<Read>, _) = pool.install(|| {
+            rayon::join(
+                || {
+                    combined_files
+                        .par_iter()
+                        // The names a job meets are kept while it parses one
+                        // file after another, and dropped with the load.
+                        .map_init(syntax::name::NameCache::default, |names, p| {
+                            let mut read = self.read_and_parse_file(
+                                p,
+                                stub_files.contains(p.as_path()),
+                                names,
+                            );
+                            if let Read::Loaded(file) = &mut read {
+                                project.index_use_sites(&mut file.parsed, &file.source);
+                                project.note_owner(&mut file.parsed, p);
+                            }
+                            read
+                        })
+                        .collect()
+                },
+                || {
+                    super::file_table::FileTable::with_paths(
+                        combined_files.iter().map(|p| p.as_path()),
+                    )
+                },
+            )
         });
+        let numbers = project.number_files(numbering);
+        let (context_numbers, analyze_numbers) = numbers.split_at(context_files.len());
         let analyze_parsed = combined_parsed.split_off(context_files.len());
         let context_parsed = combined_parsed;
         project.expect_files(
@@ -762,12 +777,16 @@ impl Session {
         };
         let mut skipped_context = 0usize;
         let mut parse_failure_lines = Vec::new();
-        for (path, parsed) in context_files.iter().zip(context_parsed) {
+        for ((path, &id), parsed) in context_files
+            .iter()
+            .zip(context_numbers)
+            .zip(context_parsed)
+        {
             match parsed {
                 Read::Loaded(file) => {
                     let ReadFile { source, parsed, .. } = *file;
                     note_lex_warnings(path, &parsed);
-                    project.insert_parsed_file(path.clone(), parsed, source, false)
+                    project.insert_numbered_file(id, path, parsed, source, false)
                 }
                 Read::Unparsed(failure) => {
                     skipped_context += 1;
@@ -786,7 +805,12 @@ impl Session {
         let mut analyze_sizes: Vec<usize> = vec![0; analyze_files.len()];
         let mut skipped_analyze = 0usize;
         let mut parse_failures = Vec::new();
-        for (index, (path, parsed)) in analyze_files.iter().zip(analyze_parsed).enumerate() {
+        for (index, ((path, &id), parsed)) in analyze_files
+            .iter()
+            .zip(analyze_numbers)
+            .zip(analyze_parsed)
+            .enumerate()
+        {
             match parsed {
                 Read::Loaded(file) => {
                     let ReadFile {
@@ -796,7 +820,7 @@ impl Session {
                     } = *file;
                     note_lex_warnings(path, &parsed);
                     analyze_sizes[index] = len;
-                    project.insert_parsed_file(path.clone(), parsed, source, true)
+                    project.insert_numbered_file(id, path, parsed, source, true)
                 }
                 Read::Unparsed(failure) => {
                     skipped_analyze += 1;

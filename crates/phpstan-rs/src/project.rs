@@ -88,7 +88,7 @@ impl StubFileSet {
 /// registry and to `dependents` below - before re-indexing its new parse.
 /// That undo/redo pair is the difference between an incremental update and
 /// a full reload.
-struct FileState {
+pub(crate) struct FileState {
     ast: Vec<Stmt>,
     // The source's length in bytes: what checking the file costs, roughly.
     source_len: usize,
@@ -852,6 +852,37 @@ impl Project {
         source: String,
         analyzed: bool,
     ) {
+        let id = self.files.id_for(&path);
+        self.insert_numbered_file(id, &path, parsed, source, analyzed);
+    }
+
+    /// Numbers `paths` before any is inserted, which a caller can do while
+    /// it parses them. The number of each place in the list, for
+    /// `insert_numbered_file`.
+    pub(crate) fn number_files(
+        &mut self,
+        numbering: (file_table::FileTable<FileState>, Vec<FileId>),
+    ) -> Vec<FileId> {
+        let (table, numbers) = numbering;
+        if self.files.has_numbers() {
+            return numbers
+                .iter()
+                .map(|&id| self.files.id_for(table.path(id)))
+                .collect();
+        }
+        self.files = table;
+        numbers
+    }
+
+    /// `insert_parsed_file`, for the file `id` numbers `path` as.
+    pub(crate) fn insert_numbered_file(
+        &mut self,
+        id: FileId,
+        path: &Path,
+        parsed: ParsedFile,
+        source: String,
+        analyzed: bool,
+    ) {
         let ParsedFile {
             ast,
             lex_warnings: _,
@@ -878,26 +909,25 @@ impl Project {
         }
         let class_fn_refs = class_fn_refs.unwrap_or_else(|| self.class_fn_refs_of(&ast, &source));
         for (span, target) in class_fn_refs {
-            self.use_sites.insert(&path, target, span);
+            self.use_sites.insert(path, target, span);
         }
         // `record_phpstan_class_file` no-ops unless the name is
         // `PHPStan\*`-namespaced, so this is a zero-cost loop for every
         // ordinary corpus.
         for name in &classes {
-            self.registry.record_phpstan_class_file(name, &path);
+            self.registry.record_phpstan_class_file(name, path);
         }
         self.duplicate_fn_sites.merge(duplicate_fn_sites);
         self.duplicate_class_sites.merge(duplicate_class_sites);
-        let id = self.files.id_for(&path);
         self.files.bind_origin(id, &origin_path);
         register_references(&mut self.dependents, id, &references);
         register_references(&mut self.signature_dependents, id, &declaration_references);
-        let owner = owner.unwrap_or_else(|| self.packages.owner(&self.absolute_path(&path)));
+        let owner = owner.unwrap_or_else(|| self.packages.owner(&self.absolute_path(path)));
         self.globals_stale.insert(id);
         let load_order = self.next_load_order;
         self.next_load_order += 1;
-        self.files.insert(
-            path,
+        self.files.insert_at(
+            id,
             FileState {
                 ast,
                 source_len: source.len(),
