@@ -219,6 +219,10 @@ pub struct LexEnd {
 pub struct FileFacts {
     /// The file has an anonymous class (`new class`).
     pub has_anonymous_class: bool,
+    /// The file declares a class, function or constant in the body of a
+    /// closure or an anonymous class, which a walk of its statements alone
+    /// does not reach.
+    pub has_nested_declaration: bool,
     /// The bits of the `WatchList` the lexer was given for the spellings
     /// the file names: an identifier, a whole name or one segment of a
     /// qualified one, in any case.

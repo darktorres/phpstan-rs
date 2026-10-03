@@ -2822,6 +2822,7 @@ fn trait_line_ranges(ast: &[Stmt], line_index: &LineIndex) -> Vec<(u32, u32)> {
 /// it gates.
 static WATCHED: syntax::WatchList = syntax::WatchList(&[
     crate::stub_attributes::WATCH,
+    file_declarations::WATCH,
     checker::unused::REBIND_WATCH,
     checker::includes::WATCH,
 ]);
@@ -3023,7 +3024,7 @@ pub fn parse_file_with_names<'a>(
         duplicate_fn_sites,
         duplicate_class_sites,
         declared_classes,
-    } = file_declarations::collect(&ast, path, is_stub, &origin, facts.has_anonymous_class);
+    } = file_declarations::collect(&ast, path, is_stub, &origin, &facts);
     let (references, declaration_references) = file_references(&ast, references);
     // What a walk of the declarations finds.
     #[cfg(debug_assertions)]
@@ -3041,7 +3042,7 @@ pub fn parse_file_with_names<'a>(
             _ => None,
         })
         .collect();
-    let bodies = FileBodies::of(&ast);
+    let bodies = FileBodies::of_file(&ast, &facts);
     let global_facts = Arc::new(GlobalFacts::of(&ast));
     let pest_facts = PestFacts::of(path, &ast);
     Ok(ParsedFile {

@@ -60,6 +60,11 @@ pub struct Parser<'a> {
     pub(crate) long_arrays: rustc_hash::FxHashSet<NodeId>,
     // Whether the parse has built an anonymous class (`new class`).
     pub(crate) saw_anonymous_class: bool,
+    // How many closure and anonymous class bodies the parse is inside, and
+    // whether it has made a class, function or constant declaration in one:
+    // a declaration a walk of the statements does not reach.
+    pub(crate) nested_depth: std::cell::Cell<u32>,
+    pub(crate) saw_nested_declaration: std::cell::Cell<bool>,
     // The labels `goto` statements name, one entry per function-like body
     // being parsed, the file's own first.
     pub(crate) goto_scopes: Vec<GotoScope>,
@@ -196,6 +201,8 @@ impl<'a> Parser<'a> {
             pattern_only: Vec::new(),
             long_arrays: rustc_hash::FxHashSet::default(),
             saw_anonymous_class: false,
+            nested_depth: std::cell::Cell::new(0),
+            saw_nested_declaration: std::cell::Cell::new(false),
             goto_scopes: vec![GotoScope::default()],
         };
         parser.fill(LOOKAHEAD);
@@ -300,6 +307,12 @@ impl Parser<'_> {
     /// Whether the tree built so far has an anonymous class in it.
     pub fn saw_anonymous_class(&self) -> bool {
         self.saw_anonymous_class
+    }
+
+    /// Whether the tree built so far has a class, function or constant
+    /// declared in the body of a closure or an anonymous class.
+    pub fn saw_nested_declaration(&self) -> bool {
+        self.saw_nested_declaration.get()
     }
 
     /// The span of the token about to be read: the last one's when none
@@ -559,6 +572,14 @@ impl Parser<'_> {
                 }
             }
             _ => {}
+        }
+        if self.nested_depth.get() > 0
+            && matches!(
+                kind,
+                StmtKind::ClassDecl(_) | StmtKind::FunctionDecl(_) | StmtKind::GlobalConst(_)
+            )
+        {
+            self.saw_nested_declaration.set(true);
         }
         Stmt {
             id: self.node_id(),

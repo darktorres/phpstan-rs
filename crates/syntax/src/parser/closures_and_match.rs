@@ -49,7 +49,9 @@ impl Parser<'_> {
         };
 
         let depth = self.enter_goto_scope();
+        self.nested_depth.set(self.nested_depth.get() + 1);
         let body = self.parse_stmt_list_block();
+        self.nested_depth.set(self.nested_depth.get() - 1);
         let end = self.leave_goto_scope(depth);
         let body = body?;
 

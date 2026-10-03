@@ -75,9 +75,23 @@ pub enum GuardTerm<'a> {
 /// anything, so they exist whatever the return decides.
 pub fn for_each_declaration<'a>(
     stmts: &'a [Stmt],
+    f: impl FnMut(Declaration<'a>, &NameContext, &[GuardTerm<'a>]),
+) {
+    for_each_declaration_in(stmts, true, f);
+}
+
+/// `for_each_declaration`, which looks inside expressions only when
+/// `in_expressions`: for a `define()` call, and for a declaration in the
+/// body of a closure or an anonymous class. A file in which there is
+/// neither (`FileFacts`) has no declaration there to find, and its
+/// expressions need not be walked.
+pub fn for_each_declaration_in<'a>(
+    stmts: &'a [Stmt],
+    in_expressions: bool,
     mut f: impl FnMut(Declaration<'a>, &NameContext, &[GuardTerm<'a>]),
 ) {
     let mut walk = Declarations {
+        in_expressions,
         ctx: NameContext::default(),
         conditional: false,
         early: Vec::new(),
@@ -109,6 +123,7 @@ fn ends_in_return(stmt: &Stmt) -> bool {
 }
 
 struct Declarations<'a, 'f, F> {
+    in_expressions: bool,
     ctx: NameContext,
     conditional: bool,
     /// The negated conditions of the early returns passed so far.
@@ -211,6 +226,9 @@ impl<'a, F: FnMut(Declaration<'a>, &NameContext, &[GuardTerm<'a>])> Visitor<'a>
     }
 
     fn visit_expr(&mut self, e: &'a Expr) {
+        if !self.in_expressions {
+            return;
+        }
         if let Some((name, value)) = define_call(e) {
             self.found(Declared::Define { name, value }, e.span);
         }

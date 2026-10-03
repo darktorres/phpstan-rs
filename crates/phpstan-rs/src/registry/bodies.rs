@@ -61,12 +61,41 @@ pub struct FileBodies(FxHashMap<Span, Body>);
 
 impl FileBodies {
     pub fn of(stmts: &[Stmt]) -> FileBodies {
+        FileBodies::collect(stmts, true)
+    }
+
+    /// The bodies of a file whose facts are known: its expressions are
+    /// walked only when a body can be in one, in an anonymous class or a
+    /// closure.
+    pub fn of_file(stmts: &[Stmt], facts: &syntax::FileFacts) -> FileBodies {
+        let bodies = FileBodies::collect(
+            stmts,
+            facts.has_anonymous_class || facts.has_nested_declaration,
+        );
+        // What a walk of the expressions too finds.
+        #[cfg(debug_assertions)]
+        assert_eq!(
+            bodies.0.len(),
+            FileBodies::collect(stmts, true).0.len(),
+            "a file whose facts say it has no body in an expression has"
+        );
+        bodies
+    }
+
+    fn collect(stmts: &[Stmt], in_expressions: bool) -> FileBodies {
         struct Collect {
             bodies: FxHashMap<Span, Body>,
             // Whether the next function declaration visited is a method.
             method: bool,
+            in_expressions: bool,
         }
         impl<'ast> Visitor<'ast> for Collect {
+            fn visit_expr(&mut self, expr: &'ast syntax::ast::Expr) {
+                if self.in_expressions {
+                    visit::walk_expr(self, expr);
+                }
+            }
+
             fn visit_method_decl(&mut self, method: &'ast MethodDecl) {
                 self.method = true;
                 visit::walk_method_decl(self, method);
@@ -92,6 +121,7 @@ impl FileBodies {
         let mut collect = Collect {
             bodies: FxHashMap::default(),
             method: false,
+            in_expressions,
         };
         visit::walk_stmts(&mut collect, stmts);
         FileBodies(collect.bodies)

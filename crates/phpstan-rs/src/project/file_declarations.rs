@@ -10,8 +10,9 @@
 
 use std::path::Path;
 
+use syntax::FileFacts;
 use syntax::ast::Stmt;
-use syntax::declarations::{Declared, for_each_declaration};
+use syntax::declarations::{Declared, for_each_declaration_in};
 use syntax::name::Name;
 
 use super::declared_classes::DeclaredClass;
@@ -35,17 +36,35 @@ pub(super) struct FileDeclarations {
     pub(super) declared_classes: Vec<DeclaredClass>,
 }
 
+/// The bit of `FileFacts::mentions` a file naming `define`, in any case,
+/// however it imports it, has: the only call that declares a constant.
+pub(crate) const MENTIONS_DEFINE: u32 = 1 << 3;
+
+/// The spellings that set `MENTIONS_DEFINE`.
+pub(crate) const WATCH: &[(&str, u32)] = &[("define", MENTIONS_DEFINE)];
+
+/// Whether the declarations of a file can be inside its expressions: a
+/// `define()` call, or a declaration in the body of a closure or an
+/// anonymous class. If not, the walk for them leaves its expressions
+/// alone.
+pub(crate) fn declares_in_expressions(facts: &FileFacts) -> bool {
+    facts.mentions & MENTIONS_DEFINE != 0 || facts.has_nested_declaration
+}
+
 /// The declarations of `ast`, the file at `path`. `is_stub` is whether the
-/// file falls under a configured stub path. `has_anonymous_class` is
+/// file falls under a configured stub path. The facts of the file say
 /// whether it has an anonymous class, which is all its walk for them
-/// (`anonymous_class_decls`) can find.
+/// (`anonymous_class_decls`) can find, and whether its declarations can be
+/// inside expressions.
 pub(super) fn collect(
     ast: &[Stmt],
     path: &Path,
     is_stub: bool,
     origin: &Origin,
-    has_anonymous_class: bool,
+    facts: &FileFacts,
 ) -> FileDeclarations {
+    let has_anonymous_class = facts.has_anonymous_class;
+    let in_expressions = declares_in_expressions(facts);
     let mut found = FileDeclarations {
         functions: Vec::new(),
         classes: Vec::new(),
@@ -55,7 +74,7 @@ pub(super) fn collect(
         duplicate_class_sites: DuplicateClassSites::default(),
         declared_classes: Vec::new(),
     };
-    for_each_declaration(ast, |declaration, ctx, guards| {
+    for_each_declaration_in(ast, in_expressions, |declaration, ctx, guards| {
         let name = declaration.name();
         match declaration.declared {
             Declared::Function(f) => {
@@ -98,6 +117,17 @@ pub(super) fn collect(
     });
     if has_anonymous_class {
         found.built_decls.extend(anonymous_class_decls(ast, origin));
+    }
+    // What a walk of the expressions too finds.
+    #[cfg(debug_assertions)]
+    if !in_expressions {
+        let mut declared = 0;
+        syntax::declarations::for_each_declaration(ast, |_, _, _| declared += 1);
+        assert_eq!(
+            declared,
+            found.functions.len() + found.classes.len() + found.constants.len(),
+            "a file whose facts say it declares nothing in an expression does"
+        );
     }
     found
 }

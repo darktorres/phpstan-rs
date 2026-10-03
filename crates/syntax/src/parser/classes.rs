@@ -91,13 +91,16 @@ impl Parser<'_> {
             }
         }
 
+        self.nested_depth.set(self.nested_depth.get() + 1);
+        let body = self.parse_class_body(class_is_readonly);
+        self.nested_depth.set(self.nested_depth.get() - 1);
         let ClassBody {
             properties,
             methods,
             consts,
             trait_uses,
             enum_cases,
-        } = self.parse_class_body(class_is_readonly)?;
+        } = body?;
 
         let def = ClassDef {
             kind: ClassKind::Class,
