@@ -168,7 +168,7 @@ fn an_instanceof_check_against_an_api_class_is_still_flagged_as_an_assumption() 
 // `OldPhpParser4ClassRule` - all three gate on `class_implements_phpstan_
 // interface`, so every positive test below declares its enclosing class
 // as `implements \PHPStan\Rules\Rule` (a bare, undeclared interface
-// reference is enough: `class_implements_phpstan_interface` only needs
+// reference is enough: `Registry::class_has_phpstan_ancestry` only needs
 // the *name* to resolve into the `PHPStan\` namespace, not a real
 // registry entry for it - `Registry::all_ancestor_names` walks
 // `ClassReflection::implements`, populated straight from the raw, resolved

@@ -110,6 +110,44 @@ impl Registry {
         result
     }
 
+    /// Whether a name under `PHPStan\` stands among what `class` extends,
+    /// implements or uses, transitively, a trait's own `uses` included: what
+    /// `all_ancestor_names` collects, stopping at the first.
+    fn class_reaches_phpstan_name(&self, class: &Name) -> bool {
+        let mut seen: FxHashSet<&Name> = FxHashSet::default();
+        let mut stack: Vec<&Name> = vec![class];
+        while let Some(current) = stack.pop() {
+            if !seen.insert(current) {
+                continue;
+            }
+            let Some(info) = self.classes.get(current) else {
+                continue;
+            };
+            for parent in info
+                .extends
+                .iter()
+                .chain(info.implements.iter())
+                .chain(info.uses.iter())
+            {
+                if crate::registry::is_phpstan_namespace(parent) {
+                    return true;
+                }
+                stack.push(parent);
+            }
+        }
+        false
+    }
+
+    /// Whether `class` has a name under `PHPStan\` among what it extends,
+    /// implements or uses, transitively: the gate of the rules that read
+    /// the PHPStan API's use from a class that is part of an extension.
+    /// Known for the classes the passes have been over, which is every
+    /// class a project declares.
+    pub(crate) fn class_has_phpstan_ancestry(&self, class: &str) -> bool {
+        let class = self.lookup_class(class).map_or(class, |(k, _)| k);
+        self.phpstan_ancestry.contains_key(class)
+    }
+
     /// Rebuilds `self.ancestor_names` (see `is_subclass_of`) from
     /// scratch over every registered class - call this any time the
     /// class graph could have changed, so `is_subclass_of` can always
@@ -129,20 +167,38 @@ impl Registry {
                 (
                     name.clone(),
                     registry.class_extends_implements_closure(name),
+                    registry.class_reaches_phpstan_name(name),
                 )
             })
             .collect();
+        let with_phpstan_ancestry = |entries: &[(Name, FxHashSet<Name>, bool)]| {
+            entries
+                .iter()
+                .filter(|(_, _, reaches)| *reaches)
+                .map(|(name, ..)| (name.clone(), ()))
+                .collect::<NameTable<()>>()
+        };
         if self.scope.is_all() {
-            self.ancestor_names = ancestor_names.into_iter().collect();
+            self.phpstan_ancestry = with_phpstan_ancestry(&ancestor_names);
+            let ancestor_names = ancestor_names
+                .into_iter()
+                .map(|(name, ancestors, _)| (name, ancestors));
+            self.ancestor_names = ancestor_names.collect();
             self.subtype_children = NameTable::default();
             self.trait_users = NameTable::default();
             self.recorded_parents = NameTable::default();
         } else {
             for name in self.scoped_removed_class_keys() {
                 self.ancestor_names.remove(&name);
+                self.phpstan_ancestry.remove(&name);
                 self.unrecord_parents(&name);
             }
-            for (name, ancestors) in ancestor_names {
+            for (name, ancestors, reaches) in ancestor_names {
+                if reaches {
+                    self.phpstan_ancestry.insert(name.clone(), ());
+                } else {
+                    self.phpstan_ancestry.remove(&name);
+                }
                 self.ancestor_names.insert(name, ancestors);
             }
         }

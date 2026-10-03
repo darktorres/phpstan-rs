@@ -351,6 +351,11 @@ pub struct Registry {
     // have changed.
     #[serde(skip)]
     pub(crate) ancestor_names: NameTable<FxHashSet<Name>>,
+    // The classes, as declared, with a `PHPStan\` name anywhere among what
+    // they extend, implement or use, transitively: one answer for each, made
+    // with `ancestor_names` (`precompute_ancestor_names`).
+    #[serde(skip)]
+    pub(crate) phpstan_ancestry: NameTable<()>,
     // The reverse of each class's direct `extends`/`implements` edges, and
     // of its `uses`: a class-like's direct subtypes and direct trait users
     // (`precompute_ancestor_names`).
@@ -575,6 +580,7 @@ impl Registry {
         self.functions.freeze();
         self.built_in_stub_classes.freeze();
         self.ancestor_names.freeze();
+        self.phpstan_ancestry.freeze();
         self.subtype_children.freeze();
         self.trait_users.freeze();
         self.recorded_parents.freeze();

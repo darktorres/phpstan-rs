@@ -229,25 +229,6 @@ const INSTANCEOF_DEPRECATED_CLASSES: &[(&str, Option<&str>)] = &[
     ),
 ];
 
-/// Whether `fqn` transitively derives from, implements, or uses
-/// anything under the `PHPStan\` namespace at all -
-/// `RuntimeReflectionFunctionRule`/`RuntimeReflectionInstantiationRule`/
-/// `OldPhpParser4ClassRule`'s own shared gate (real PHPStan's own
-/// `$scope->getClassReflection()->getInterfaces()` walk, matched
-/// case-sensitively against `PHPStan\` the identical way those three
-/// rules already do). Reuses `Registry::all_ancestor_names` (already
-/// walks `extends`/`implements`/`uses` transitively) rather than a
-/// narrower "interfaces only" walk of its own - a real class or trait
-/// ancestor (not just an interface) is a looser condition than what real
-/// PHPStan's `getInterfaces()` checks, favoring false positives over
-/// false negatives, this project's usual leaning.
-pub(crate) fn class_implements_phpstan_interface(fqn: &str, registry: &Registry) -> bool {
-    registry
-        .all_ancestor_names(fqn)
-        .iter()
-        .any(|name| is_phpstan_namespace(name))
-}
-
 /// Direct port of `ApiRuleHelper::isPhpStanCode`
 /// (`vendor/phpstan-src/src/Rules/Api/ApiRuleHelper.php:19-48`).
 /// `is_phpstan_namespace` alone is exactly real PHPStan's own
@@ -410,7 +391,7 @@ impl<'a> Checker<'a> {
     /// reason - `check_expr`'s own `MethodCall` arm already has the real
     /// receiver class in hand. Unlike that check, gated on the *calling*
     /// class implementing a `PHPStan\*` interface
-    /// (`class_implements_phpstan_interface`), not the receiver's own
+    /// (`Registry::class_has_phpstan_ancestry`), not the receiver's own
     /// namespace - `$node` is typically a plain `PhpParser\Node` subtype,
     /// not itself `PHPStan\*`-namespaced, so `is_phpstan_namespace`
     /// would never fire here at all.
@@ -424,14 +405,14 @@ impl<'a> Checker<'a> {
         if !self.settings.phpstan_api {
             return;
         }
+        if !method.eq_ignore_ascii_case("getAttribute") {
+            return;
+        }
         if !self
             .current_class
             .as_deref()
-            .is_some_and(|c| class_implements_phpstan_interface(c, self.registry))
+            .is_some_and(|c| self.registry.class_has_phpstan_ancestry(c))
         {
-            return;
-        }
-        if !method.eq_ignore_ascii_case("getAttribute") {
             return;
         }
         if !self.registry.is_subclass_of(recv_class, "PhpParser\\Node") {
@@ -706,7 +687,7 @@ impl<'a> Walker<'a> {
         self.check_class_inheritance(class);
         let implements_phpstan = fqn
             .as_deref()
-            .is_some_and(|fqn| class_implements_phpstan_interface(fqn, self.registry));
+            .is_some_and(|fqn| self.registry.class_has_phpstan_ancestry(fqn));
         let previous_implements = std::mem::replace(
             &mut self.current_class_implements_phpstan_interface,
             implements_phpstan,
