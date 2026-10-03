@@ -5,7 +5,7 @@ use std::sync::Arc;
 
 use crate::ast::{GotoLabel, Stmt};
 use crate::lexer::{LexOutput, LexWarning, Lexer};
-use crate::name::Interner;
+use crate::name::{Interner, NameCache};
 use crate::parser::{ParseError, Parser};
 use crate::token::{Position, Token};
 
@@ -130,13 +130,26 @@ pub fn parse<'a>(
     source: impl Into<Source<'a>>,
     interner: &Arc<Interner>,
 ) -> Result<ParsedFile, ParseError> {
+    parse_with_names(source, interner, None)
+}
+
+/// `parse`, with the names the files of a load share: the cache is asked
+/// for a name before the interner is.
+pub fn parse_with_names<'a>(
+    source: impl Into<Source<'a>>,
+    interner: &Arc<Interner>,
+    names: Option<&mut NameCache>,
+) -> Result<ParsedFile, ParseError> {
+    let lexer = Lexer::from_source(source.into()).with_interner(interner);
+    let lexer = match names {
+        Some(cache) => lexer.with_name_cache(cache),
+        None => lexer,
+    };
     let LexOutput {
         lexed,
         comments: line_comments,
         warnings,
-    } = Lexer::from_source(source.into())
-        .with_interner(interner)
-        .lex();
+    } = lexer.lex();
     let mut comments: Vec<Comment> = line_comments
         .into_iter()
         .map(|(start, text)| Comment {
@@ -269,5 +282,36 @@ mod tests {
                 String::from_utf8_lossy(good)
             );
         }
+    }
+
+    #[test]
+    fn files_parsed_with_a_shared_name_cache_give_the_trees_and_names_they_give_without() {
+        let interner = Arc::new(Interner::new());
+        let first =
+            "<?php namespace App; class Foo { public function bar($baz) { return $baz->qux(); } }";
+        let second = "<?php namespace App; function f(Foo $baz) { return (new Foo)->bar($baz); }";
+        let mut cache = NameCache::default();
+        let shared: Vec<_> = [first, second]
+            .iter()
+            .map(|source| {
+                format!(
+                    "{:?}",
+                    parse_with_names(*source, &interner, Some(&mut cache))
+                        .unwrap()
+                        .stmts
+                )
+            })
+            .collect();
+        let alone: Vec<_> = [first, second]
+            .iter()
+            .map(|source| format!("{:?}", parse(*source, &interner).unwrap().stmts))
+            .collect();
+        assert_eq!(shared, alone);
+        // What the cache holds is what the interner gives.
+        for text in ["Foo", "bar", "baz", "qux"] {
+            let found = cache.find(text, crate::name::text_hash(text)).expect(text);
+            assert!(found.same_allocation(&interner.name(text)), "{text}");
+        }
+        assert!(!cache.is_empty());
     }
 }

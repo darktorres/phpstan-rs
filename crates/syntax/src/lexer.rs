@@ -1,6 +1,6 @@
 use std::borrow::Cow;
 
-use crate::name::{Interner, Name};
+use crate::name::{Interner, Name, NameCache};
 use crate::token::{Keyword, Position, Span, Token};
 use std::sync::Arc;
 
@@ -21,6 +21,9 @@ pub struct Lexer<'a> {
     // where the lexer was made: a name's or a comment's text is then a
     // slice of it, which needs no validation of its own.
     text: Option<&'a str>,
+    // The names the files of a load share, asked after `names` and before
+    // the interner.
+    shared_names: Option<&'a mut NameCache>,
     pos: usize,
     in_php: bool,
     // Byte offsets where each line begins (`line_starts[0]` is always 0) -
@@ -225,6 +228,7 @@ impl<'a> Lexer<'a> {
         Lexer {
             src: bytes,
             text,
+            shared_names: None,
             pos: 0,
             in_php,
             cursor: first_line_cursor(&line_starts, bytes.len()),
@@ -264,7 +268,17 @@ impl<'a> Lexer<'a> {
         {
             return name.clone();
         }
-        let name = self.interner.name_hashed(text, hash);
+        let name = match self.shared_names.as_deref_mut() {
+            Some(shared) => match shared.find(text, hash) {
+                Some(name) => name.clone(),
+                None => {
+                    let name = self.interner.name_hashed(text, hash);
+                    shared.insert(name.clone(), hash);
+                    name
+                }
+            },
+            None => self.interner.name_hashed(text, hash),
+        };
         self.names
             .insert_unique(hash, (hash, name.clone()), |(h, _)| *h);
         name
@@ -274,6 +288,14 @@ impl<'a> Lexer<'a> {
     pub fn with_interner(mut self, interner: &Arc<Interner>) -> Self {
         self.interner = Arc::clone(interner);
         self.names.clear();
+        self
+    }
+
+    /// Looks a name up in `cache` before it asks the interner, and adds the
+    /// ones it takes from the interner. The cache's names must be from the
+    /// interner the lexer uses.
+    pub fn with_name_cache(mut self, cache: &'a mut NameCache) -> Self {
+        self.shared_names = Some(cache);
         self
     }
 

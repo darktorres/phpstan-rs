@@ -1593,8 +1593,7 @@ impl Project {
         // *before* the very edit that introduced its own trigger) for as
         // long as the file kept failing to parse, not just for the one
         // request that happened to race a genuinely-invalid save.
-        let (ast, ignores, _, facts) =
-            parse_with_ignores(path, new_source.as_bytes(), &self.interner)?;
+        let (ast, ignores, _, facts) = parse_with_ignores(path, new_source, &self.interner, None)?;
         let previous = self.unindex_file(path);
         let (functions, classes) = declared_names(&ast);
         let constants = declared_constants(&ast);
@@ -2566,8 +2565,9 @@ fn parse_with_ignores<'a>(
     path: &Path,
     source: impl Into<syntax::Source<'a>>,
     interner: &Arc<Interner>,
+    names: Option<&mut syntax::name::NameCache>,
 ) -> Result<Parsed, ParseError> {
-    let parsed = syntax::parse(source, interner)?;
+    let parsed = syntax::parse_with_names(source, interner, names)?;
     let ignores = ignore_comments::scan_parsed(&parsed);
     let mut ast = parsed.stmts;
     // What the file does not name, or hold, there is nothing to find of by
@@ -2650,7 +2650,19 @@ pub fn parse_file<'a>(
     is_stub: bool,
     interner: &Arc<Interner>,
 ) -> Result<ParsedFile, ParseError> {
-    let (ast, ignores, lex_warnings, facts) = parse_with_ignores(path, source, interner)?;
+    parse_file_with_names(path, source, is_stub, interner, None)
+}
+
+/// `parse_file`, with the names the files of a load share: the cache is
+/// asked for a name before the interner is.
+pub fn parse_file_with_names<'a>(
+    path: &Path,
+    source: impl Into<syntax::Source<'a>>,
+    is_stub: bool,
+    interner: &Arc<Interner>,
+    names: Option<&mut syntax::name::NameCache>,
+) -> Result<ParsedFile, ParseError> {
+    let (ast, ignores, lex_warnings, facts) = parse_with_ignores(path, source, interner, names)?;
     let origin_path: Arc<Path> = Arc::from(path);
     let origin = Origin::File(Arc::clone(&origin_path));
     let file_declarations::FileDeclarations {

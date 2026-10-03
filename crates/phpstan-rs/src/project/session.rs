@@ -580,6 +580,7 @@ impl Session {
         path: &Path,
         is_stub: bool,
         interner: &Arc<Interner>,
+        names: &mut syntax::name::NameCache,
     ) -> Option<ReadFile> {
         let bytes = std::fs::read(self.root.join(path)).ok()?;
         // Whether the file is UTF-8 is settled here, once: the text is the
@@ -594,10 +595,10 @@ impl Session {
                 (len, Err(bytes))
             }
         };
-        let parsed = std::panic::catch_unwind(|| match &text {
-            Ok(text) => super::parse_file(path, text, is_stub, interner),
-            Err(bytes) => super::parse_file(path, bytes, is_stub, interner),
-        })
+        let parsed = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| match &text {
+            Ok(text) => super::parse_file_with_names(path, text, is_stub, interner, Some(names)),
+            Err(bytes) => super::parse_file_with_names(path, bytes, is_stub, interner, Some(names)),
+        }))
         .ok()?
         .ok()?;
         // The text of the file is kept only when the project keeps it.
@@ -659,9 +660,15 @@ impl Session {
         let mut combined_parsed: Vec<Option<ReadFile>> = pool.install(|| {
             combined_files
                 .par_iter()
-                .map(|p| {
-                    let mut read =
-                        self.read_and_parse_file(p, stub_files.contains(p.as_path()), &interner)?;
+                // The names a job meets are kept while it parses one file
+                // after another, and dropped with the load.
+                .map_init(syntax::name::NameCache::default, |names, p| {
+                    let mut read = self.read_and_parse_file(
+                        p,
+                        stub_files.contains(p.as_path()),
+                        &interner,
+                        names,
+                    )?;
                     project.index_use_sites(&mut read.parsed, &read.source);
                     Some(read)
                 })

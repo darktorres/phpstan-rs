@@ -157,7 +157,7 @@ fn leaving_out_the_walks_a_file_cannot_need_gives_the_tree_the_walks_gave() {
         crate::stub_attributes::apply_stub_attributes(&mut every);
         crate::registry::name_anonymous_classes(&mut every, &path.display().to_string());
         let (gated, _, _, gated_facts) =
-            parse_with_ignores(path, source.as_bytes(), &interner).expect("parses");
+            parse_with_ignores(path, *source, &interner, None).expect("parses");
         assert_eq!(gated_facts, facts, "facts of source {i}");
         assert_eq!(format!("{gated:?}"), format!("{every:?}"), "source {i}");
         // The anonymous classes' registry entries.

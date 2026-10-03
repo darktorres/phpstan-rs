@@ -389,6 +389,41 @@ impl Interner {
     }
 }
 
+/// Names a parallel load has met, held by the job that parses one file
+/// after another: an identifier recurs across the files of a project (a
+/// class, a method, a property, a variable), and a name found here is not
+/// asked of the interner, whose shards are locked. It holds its names, so
+/// they are not freed while it lives: it is made for a load and dropped
+/// with it, and for one interner, the one its names come from.
+#[derive(Default)]
+pub struct NameCache {
+    table: hashbrown::HashTable<(u64, Name)>,
+}
+
+impl NameCache {
+    /// The name for `text` if this cache holds it; `hash` is
+    /// `text_hash(text)`.
+    pub fn find(&self, text: &str, hash: u64) -> Option<&Name> {
+        self.table
+            .find(hash, |(h, name)| *h == hash && name.as_str() == text)
+            .map(|(_, name)| name)
+    }
+
+    /// Holds `name`, which this cache does not hold yet.
+    pub fn insert(&mut self, name: Name, hash: u64) {
+        self.table.insert_unique(hash, (hash, name), |(h, _)| *h);
+    }
+
+    /// How many names it holds.
+    pub fn len(&self) -> usize {
+        self.table.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.table.is_empty()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
