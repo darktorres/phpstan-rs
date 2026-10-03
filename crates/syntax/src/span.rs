@@ -286,6 +286,14 @@ impl LineIndex {
         }
     }
 
+    /// `offset_in`, for a position this source may not have: a line past the
+    /// last is the last, and a column past the end of its line is the end.
+    pub fn offset_in_clamped(&self, line: u32, column: u32, unit: Unit) -> u32 {
+        let line = line.min(self.lines() - 1);
+        let end = self.line_end(line + 1).unwrap_or(self.len);
+        self.offset_in(line, column, unit).unwrap_or(end)
+    }
+
     /// The offset of `at`, or none when its line is not in the source or
     /// its column is past the end of the line.
     pub fn offset(&self, at: LineCol) -> Option<u32> {

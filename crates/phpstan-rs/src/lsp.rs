@@ -1731,9 +1731,9 @@ impl Server {
         let live_index = LineIndex::new(text.as_bytes());
         let stale_index = self.project.line_index(&path)?;
         let cursor = completion::Cursor {
-            live: offset_from_lsp(&live_index, self.unit, position)?,
+            live: live_index.offset_in_clamped(position.line, position.character, self.unit),
             live_index: &live_index,
-            stale: offset_from_lsp(stale_index, self.unit, position)?,
+            stale: stale_index.offset_in_clamped(position.line, position.character, self.unit),
             stale_index,
         };
         match completion::build_member_probe(&text, &tokens, cursor, stmts, self.project.registry())
