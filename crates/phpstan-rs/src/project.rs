@@ -3022,8 +3022,16 @@ pub fn parse_file_with_names<'a>(
         built_decls,
         duplicate_fn_sites,
         duplicate_class_sites,
+        declared_classes,
     } = file_declarations::collect(&ast, path, is_stub, &origin, facts.has_anonymous_class);
     let (references, declaration_references) = file_references(&ast, references);
+    // What a walk of the declarations finds.
+    #[cfg(debug_assertions)]
+    assert_eq!(
+        format!("{declared_classes:?}"),
+        format!("{:?}", declared_classes::declared_classes(&ast)),
+        "the classes found alongside the declarations and by their own walk differ"
+    );
     // The anonymous classes are the declarations built last, one per
     // `new class`, so the file's own walk need not be repeated for them.
     let anonymous_classes = built_decls
@@ -3036,7 +3044,6 @@ pub fn parse_file_with_names<'a>(
     let bodies = FileBodies::of(&ast);
     let global_facts = Arc::new(GlobalFacts::of(&ast));
     let pest_facts = PestFacts::of(path, &ast);
-    let declared_classes = declared_classes(&ast);
     Ok(ParsedFile {
         ast: Some(ast),
         lex_warnings,

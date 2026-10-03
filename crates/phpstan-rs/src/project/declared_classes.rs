@@ -2,7 +2,7 @@
 //! checks read of their declarations; made once when the file is parsed, so
 //! the checks need not keep its tree.
 
-use syntax::ast::{Stmt, Visibility};
+use syntax::ast::{ClassDecl, Stmt, Visibility};
 use syntax::declarations::{Declared, for_each_declaration};
 use syntax::span::Span;
 use types::Name;
@@ -23,6 +23,41 @@ pub(crate) struct DeclaredClass {
     pub(crate) uses_traits: bool,
 }
 
+impl DeclaredClass {
+    /// The class `c`, declared by the statement at `span` under `name`.
+    pub(crate) fn of(name: String, span: Span, c: &ClassDecl) -> DeclaredClass {
+        DeclaredClass {
+            name,
+            name_span: c.name.span,
+            span,
+            attributes: c
+                .def
+                .attrs
+                .iter()
+                .map(|a| {
+                    a.name
+                        .resolved_class()
+                        .unwrap_or(&a.name.written)
+                        .to_string()
+                })
+                .collect(),
+            own_methods: c
+                .def
+                .methods
+                .iter()
+                .map(|m| m.function.name.name.clone())
+                .collect(),
+            public_methods: c
+                .def
+                .methods
+                .iter()
+                .filter(|m| m.visibility == Visibility::Public && !m.function.is_constructor())
+                .count(),
+            uses_traits: !c.def.trait_uses.is_empty(),
+        }
+    }
+}
+
 /// The classes `program` declares unconditionally.
 pub(crate) fn declared_classes(program: &[Stmt]) -> Vec<DeclaredClass> {
     let mut classes = Vec::new();
@@ -30,35 +65,7 @@ pub(crate) fn declared_classes(program: &[Stmt]) -> Vec<DeclaredClass> {
         if let Declared::Class(c) = declaration.declared
             && !declaration.conditional
         {
-            classes.push(DeclaredClass {
-                name: declaration.name(),
-                name_span: c.name.span,
-                span: declaration.span,
-                attributes: c
-                    .def
-                    .attrs
-                    .iter()
-                    .map(|a| {
-                        a.name
-                            .resolved_class()
-                            .unwrap_or(&a.name.written)
-                            .to_string()
-                    })
-                    .collect(),
-                own_methods: c
-                    .def
-                    .methods
-                    .iter()
-                    .map(|m| m.function.name.name.clone())
-                    .collect(),
-                public_methods: c
-                    .def
-                    .methods
-                    .iter()
-                    .filter(|m| m.visibility == Visibility::Public && !m.function.is_constructor())
-                    .count(),
-                uses_traits: !c.def.trait_uses.is_empty(),
-            });
+            classes.push(DeclaredClass::of(declaration.name(), declaration.span, c));
         }
     });
     classes

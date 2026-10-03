@@ -14,6 +14,7 @@ use syntax::ast::Stmt;
 use syntax::declarations::{Declared, for_each_declaration};
 use syntax::name::Name;
 
+use super::declared_classes::DeclaredClass;
 use super::duplicate_class_sites::DuplicateClassSites;
 use super::duplicate_fn_sites::DuplicateFunctionSites;
 use crate::registry::{BuiltDecl, Origin, anonymous_class_decls, built_declaration};
@@ -30,6 +31,8 @@ pub(super) struct FileDeclarations {
     pub(super) built_decls: Vec<BuiltDecl>,
     pub(super) duplicate_fn_sites: DuplicateFunctionSites,
     pub(super) duplicate_class_sites: DuplicateClassSites,
+    /// The classes it declares unconditionally.
+    pub(super) declared_classes: Vec<DeclaredClass>,
 }
 
 /// The declarations of `ast`, the file at `path`. `is_stub` is whether the
@@ -50,6 +53,7 @@ pub(super) fn collect(
         built_decls: Vec::new(),
         duplicate_fn_sites: DuplicateFunctionSites::default(),
         duplicate_class_sites: DuplicateClassSites::default(),
+        declared_classes: Vec::new(),
     };
     for_each_declaration(ast, |declaration, ctx, guards| {
         let name = declaration.name();
@@ -62,6 +66,11 @@ pub(super) fn collect(
             }
             Declared::Class(c) => {
                 if !declaration.conditional {
+                    found.declared_classes.push(DeclaredClass::of(
+                        name.clone(),
+                        declaration.span,
+                        c,
+                    ));
                     found.duplicate_class_sites.record(
                         name.clone(),
                         path,
