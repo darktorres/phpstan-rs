@@ -7,6 +7,7 @@ use crate::ast::{GotoLabel, Stmt};
 use crate::lexer::{IgnoreMark, LexOutput, LexWarning, Lexer};
 use crate::name::{Interner, NameCache};
 use crate::parser::{ParseError, Parser};
+use crate::span::LineIndex;
 use crate::token::Token;
 
 /// What is true of a file as a whole, found as it is lexed and parsed, so
@@ -59,6 +60,8 @@ pub struct ParsedFile {
     /// Every comment that holds `@phpstan-ignore`, doc comments included,
     /// in source order, with what the code next to it is.
     pub ignore_marks: Vec<IgnoreMark>,
+    /// The file's lines, for the positions of its offsets.
+    pub line_index: Arc<LineIndex>,
     /// What the lexer skipped over.
     pub warnings: Vec<LexWarning>,
     pub facts: FileFacts,
@@ -129,7 +132,12 @@ pub fn parse_with_names<'a>(
     interner: &Arc<Interner>,
     names: Option<&mut NameCache>,
 ) -> Result<ParsedFile, ParseError> {
-    let lexer = Lexer::from_source(source.into()).with_interner(interner);
+    let source = source.into();
+    let line_index = Arc::new(LineIndex::new(match source {
+        Source::Text(text) => text.as_bytes(),
+        Source::Bytes(bytes) => bytes,
+    }));
+    let lexer = Lexer::from_source(source).with_interner(interner);
     let lexer = match names {
         Some(cache) => lexer.with_name_cache(cache),
         None => lexer,
@@ -154,6 +162,7 @@ pub fn parse_with_names<'a>(
     Ok(ParsedFile {
         stmts,
         ignore_marks,
+        line_index,
         warnings,
         facts,
         goto_labels,

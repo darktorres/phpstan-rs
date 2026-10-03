@@ -14,8 +14,10 @@ pub mod parser;
 pub mod php_float;
 pub mod php_string;
 pub mod printer;
+pub mod span;
 pub mod stack;
 pub mod token;
 pub mod visit;
 
 pub use parse::{FileFacts, ParsedFile, Source, parse, parse_with_names};
+pub use span::LineIndex;
