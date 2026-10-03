@@ -1,0 +1,4 @@
+8:1-12:2 return.missing L0 | should return int but return statement is missing
+    non-ignorable
+8:12-8:24 missingType.iterableValue L6 | Function g() has parameter $items with no value type specified in iterable type array.
+    tip: See: https://phpstan.org/blog/solving-phpstan-no-value-type-specified-in-iterable-type

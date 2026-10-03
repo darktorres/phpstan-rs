@@ -1,8 +1,7 @@
 use crate::checker::{
-    ATTRIBUTE_TARGET_CLASS, ATTRIBUTE_TARGET_CLASS_CONSTANT, ATTRIBUTE_TARGET_PROPERTY,
-    BlockCompletion, Checker, Completion, Locals, generator_missing_return_type,
+    ATTRIBUTE_TARGET_CLASS, ATTRIBUTE_TARGET_CLASS_CONSTANT, ATTRIBUTE_TARGET_PROPERTY, BREAK_HERE,
+    BlockCompletion, CONTINUE_HERE, Checker, Completion, Locals, generator_missing_return_type,
     generator_template_param, is_truthy_literal, merge_scopes, purge_stale_narrowing_for,
-    stmt_contains_break,
 };
 use syntax::ast::*;
 use types::Name;
@@ -57,9 +56,21 @@ impl<'a> Checker<'a> {
         let mut reported_unreachable = false;
         let mut any_terminates = false;
         let mut last = Completion::FALLS_THROUGH;
+        // The jumps of the statements that can be reached: one after a
+        // statement that terminates is not, unless a `goto` can land on it.
+        let mut jumps = 0;
+        let mut reachable = true;
         for (i, stmt) in stmts.iter().enumerate() {
+            if matches!(&stmt.kind, StmtKind::Label(name) if self.current_function_goto_targets.iter().any(|l| l.name == name.name))
+            {
+                reachable = true;
+            }
             last = self.check_stmt(stmt, locals, declared_return, label);
             any_terminates |= last.terminates;
+            if reachable {
+                jumps |= last.jumps;
+                reachable = !last.terminates;
+            }
             self.compare_completion(stmt, locals, last);
             if !reported_unreachable
                 && last.terminates
@@ -83,6 +94,7 @@ impl<'a> Checker<'a> {
             completion: Completion {
                 terminates: any_terminates,
                 exits: last.exits,
+                jumps,
             },
             last,
         }
@@ -774,13 +786,27 @@ impl<'a> Checker<'a> {
             }
             StmtKind::While { cond, body } => {
                 self.check_while(cond, body, locals, declared_return, label);
+                let body = self.loop_body_completion;
                 completion = Completion {
-                    terminates: is_truthy_literal(cond) && !stmt_contains_break(body),
+                    // A loop whose condition is always true ends only by
+                    // a `break` of its own.
+                    terminates: is_truthy_literal(cond) && body.jumps & BREAK_HERE == 0,
                     exits: false,
+                    jumps: Completion::jumps_past_one_level(body.jumps),
                 };
             }
             StmtKind::DoWhile { body, cond } => {
-                self.check_do_while(body, cond, locals, declared_return, label)
+                self.check_do_while(body, cond, locals, declared_return, label);
+                let body = self.loop_body_completion;
+                completion = Completion {
+                    // Its body runs once: it ends the loop when it ends
+                    // without a `break` or `continue` of its own, or the
+                    // condition is always true and nothing breaks out.
+                    terminates: (body.terminates && body.jumps & (BREAK_HERE | CONTINUE_HERE) == 0)
+                        || (is_truthy_literal(cond) && body.jumps & BREAK_HERE == 0),
+                    exits: false,
+                    jumps: Completion::jumps_past_one_level(body.jumps),
+                };
             }
             StmtKind::For {
                 init,
@@ -789,10 +815,12 @@ impl<'a> Checker<'a> {
                 body,
             } => {
                 self.check_for(init, cond, step, body, locals, declared_return, label);
+                let body = self.loop_body_completion;
                 completion = Completion {
                     terminates: cond.last().is_none_or(is_truthy_literal)
-                        && !stmt_contains_break(body),
+                        && body.jumps & BREAK_HERE == 0,
                     exits: false,
+                    jumps: Completion::jumps_past_one_level(body.jumps),
                 };
             }
             StmtKind::Foreach {
@@ -801,17 +829,30 @@ impl<'a> Checker<'a> {
                 value,
                 by_ref,
                 body,
-            } => self.check_foreach(
-                subject,
-                key.as_deref(),
-                value,
-                *by_ref,
-                body,
-                locals,
-                declared_return,
-                label,
-                &inline_var,
-            ),
+            } => {
+                let at_least_once = self.check_foreach(
+                    subject,
+                    key.as_deref(),
+                    value,
+                    *by_ref,
+                    body,
+                    locals,
+                    declared_return,
+                    label,
+                    &inline_var,
+                );
+                let body = self.loop_body_completion;
+                completion = Completion {
+                    // An array that is not empty runs its body at least
+                    // once, and a body that ends every time, without a
+                    // `break` or `continue` of its own, ends the loop.
+                    terminates: at_least_once
+                        && body.terminates
+                        && body.jumps & (BREAK_HERE | CONTINUE_HERE) == 0,
+                    exits: false,
+                    jumps: Completion::jumps_past_one_level(body.jumps),
+                };
+            }
             StmtKind::Switch { subject, cases } => {
                 completion =
                     self.check_switch(subject, cases, stmt.span, locals, declared_return, label)
@@ -997,7 +1038,10 @@ impl<'a> Checker<'a> {
                 if let Some(idx) = self.loop_break_states.len().checked_sub(depth) {
                     self.loop_break_states[idx].push(locals.clone());
                 }
-                completion = Completion::TERMINATES;
+                completion = Completion {
+                    jumps: Completion::jump(false, level.unwrap_or(1)),
+                    ..Completion::TERMINATES
+                };
             }
             // The `continue` counterpart of `Break` just above - see
             // `loop_continue_states`'s doc comment on `Checker` for why
@@ -1011,10 +1055,13 @@ impl<'a> Checker<'a> {
                 }
                 // A `continue` of one level inside a `switch` is a `break`
                 // of it: the switch's own rules read it as that.
-                completion = if matches!(level, Some(n) if *n > 1) {
-                    Completion::EXITS
-                } else {
-                    Completion::TERMINATES
+                completion = Completion {
+                    jumps: Completion::jump(true, level.unwrap_or(1)),
+                    ..if matches!(level, Some(n) if *n > 1) {
+                        Completion::EXITS
+                    } else {
+                        Completion::TERMINATES
+                    }
                 };
             }
             // `ConstantAttributesRule` - a top-level (or nested,
@@ -1342,6 +1389,7 @@ impl<'a> Checker<'a> {
             Completion {
                 terminates: then_terminates && else_terminates,
                 exits: then_completion.exits && else_completion.exits,
+                jumps: then_completion.jumps | else_completion.jumps,
             }
         })
     }

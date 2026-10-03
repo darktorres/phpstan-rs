@@ -69,6 +69,7 @@ impl<'a> Checker<'a> {
         // How each case body's last statement completes, for the switch's
         // own completion.
         let mut case_lasts: Vec<Completion> = Vec::with_capacity(case_count);
+        let mut case_jumps = 0;
         // A bare `break;` written directly inside a case targets
         // this switch, not any enclosing loop - pushing a frame
         // here (discarded below, never read) only exists to
@@ -105,6 +106,7 @@ impl<'a> Checker<'a> {
             let last_stmt = case.body.last();
             let case_terminates = block.last.terminates;
             case_lasts.push(block.last);
+            case_jumps |= block.completion.jumps;
             if let Some(s) = last_stmt {
                 self.compare_completion(s, &case_locals, block.last);
             }
@@ -160,6 +162,8 @@ impl<'a> Checker<'a> {
         Completion {
             terminates,
             exits: false,
+            // A `break` or a `continue` of one level ends the switch.
+            jumps: Completion::jumps_past_one_level(case_jumps),
         }
     }
 }

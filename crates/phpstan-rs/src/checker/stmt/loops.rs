@@ -153,7 +153,7 @@ impl<'a> Checker<'a> {
                     );
                 }
                 this.apply_narrowing(cond, pass_locals, true);
-                this.check_stmt(body, pass_locals, declared_return, label);
+                this.check_loop_body(body, pass_locals, declared_return, label);
             },
         );
         self.loop_depth -= 1;
@@ -253,7 +253,7 @@ impl<'a> Checker<'a> {
                 if pass > 0 {
                     this.apply_narrowing(cond, pass_locals, true);
                 }
-                this.check_stmt(body, pass_locals, declared_return, label);
+                this.check_loop_body(body, pass_locals, declared_return, label);
             },
         );
         // A do-while's body always runs at least once - the converged
@@ -385,7 +385,7 @@ impl<'a> Checker<'a> {
                         }
                         this.check_expr(c, pass_locals, label);
                         this.apply_narrowing(c, pass_locals, true);
-                        this.check_stmt(body, pass_locals, declared_return, label);
+                        this.check_loop_body(body, pass_locals, declared_return, label);
                         // `step` runs after each body iteration, so
                         // it should see whatever the body just did,
                         // not the pre-loop state - and it runs on
@@ -439,7 +439,7 @@ impl<'a> Checker<'a> {
                     // `converge_loop_body`'s own doc comment.
                     LoopZeroIterations::Impossible,
                     |this, pass_locals, declared_return, label, _pass| {
-                        this.check_stmt(body, pass_locals, declared_return, label);
+                        this.check_loop_body(body, pass_locals, declared_return, label);
                         for e in step {
                             this.check_expr(e, pass_locals, label);
                         }
@@ -543,7 +543,7 @@ impl<'a> Checker<'a> {
         declared_return: Option<&Type>,
         label: &str,
         inline_var: &[(String, Type)],
-    ) {
+    ) -> bool {
         // A bare `$variable` subject that the body mutates in place via
         // a nested write keyed by its own loop variable (`foreach
         // ($items as $day => $data) { $items[$day]['derivative'] = ...;
@@ -557,6 +557,9 @@ impl<'a> Checker<'a> {
             _ => None,
         };
         let subject_ty = self.check_expr(subject, locals, label);
+        // Whether the body runs at least once: for an array that is not
+        // empty.
+        let at_least_once = subject_ty.is_non_empty_array().yes();
         // `DeadForeachRule` - skipped inside an enclosing loop, whose
         // earlier convergence passes can still see a not-yet-grown array.
         if self.loop_depth == 0 && subject_ty.is_empty_array().yes() {
@@ -784,7 +787,7 @@ impl<'a> Checker<'a> {
                 {
                     propagate_container_field_facts(pass_locals, value_name, subject_name);
                 }
-                this.check_stmt(body, pass_locals, declared_return, label);
+                this.check_loop_body(body, pass_locals, declared_return, label);
                 if let Some(Expr {
                     kind: ExprKind::Variable(key_name),
                     ..
@@ -913,5 +916,6 @@ impl<'a> Checker<'a> {
                 current_subject_ty.with_general_array_value(&widened_element_ty),
             );
         }
+        at_least_once
     }
 }

@@ -17,24 +17,51 @@ pub(crate) struct Completion {
     /// a `switch` asks of its last case: whether control can reach the code
     /// after the switch from it.
     pub(crate) exits: bool,
+    /// The `break` and `continue` statements whose jump leaves this
+    /// statement, by how many enclosing loops or switches beyond the
+    /// statement it goes: bit 2k is a `break` and bit 2k + 1 a `continue`
+    /// that is k levels beyond the innermost enclosing one, saturating at
+    /// 15. A `break` of this statement's own loop is bit 0.
+    pub(crate) jumps: u32,
 }
 
+/// The `break` and the `continue` of the innermost loop or switch.
+pub(crate) const BREAK_HERE: u32 = 1;
+pub(crate) const CONTINUE_HERE: u32 = 2;
+
 impl Completion {
+    /// The jump a `break` or `continue` of `levels` levels makes: bit 2k for
+    /// a `break` and 2k + 1 for a `continue`, k the levels past the first.
+    pub(crate) fn jump(is_continue: bool, levels: i64) -> u32 {
+        let k = u32::try_from(levels.clamp(1, 16) - 1).unwrap_or(0);
+        1 << (2 * k + u32::from(is_continue))
+    }
+
+    /// The jumps as seen from outside the loop or switch they are in: this
+    /// statement's own `break` and `continue` are gone, the rest go one level
+    /// less far.
+    pub(crate) fn jumps_past_one_level(jumps: u32) -> u32 {
+        jumps >> 2
+    }
+
     /// A statement that completes and lets control pass to the next.
     pub(crate) const FALLS_THROUGH: Completion = Completion {
         terminates: false,
         exits: false,
+        jumps: 0,
     };
     /// `return`, `throw`, a call that never returns, `continue 2`.
     pub(crate) const EXITS: Completion = Completion {
         terminates: true,
         exits: true,
+        jumps: 0,
     };
     /// `break`, `continue`: ends the path, and goes no further than the
     /// switch or loop it is in.
     pub(crate) const TERMINATES: Completion = Completion {
         terminates: true,
         exits: false,
+        jumps: 0,
     };
 }
 
@@ -50,6 +77,18 @@ pub(crate) struct BlockCompletion {
 }
 
 impl Checker<'_> {
+    /// Checks a loop's body and keeps how it completed, for the loop's own
+    /// completion: the last pass's is the one that stays.
+    pub(crate) fn check_loop_body(
+        &mut self,
+        body: &Stmt,
+        locals: &mut Locals,
+        declared_return: Option<&types::Type>,
+        label: &str,
+    ) {
+        self.loop_body_completion = self.check_stmt(body, locals, declared_return, label);
+    }
+
     /// Compares a statement's completion, built while it was checked, with
     /// what `always_terminates` and `exits_function_or_loop` say of it after:
     /// a difference is reported as `oracle.completion`. Only when the oracle

@@ -536,6 +536,8 @@ pub struct Checker<'a> {
     // (`PHPSTAN_RS_COMPLETION_ORACLE`): for testing a change to how
     // completion is found, which reports each difference.
     pub(crate) completion_oracle: bool,
+    // How the body of the loop last checked completed, by its last pass.
+    pub(crate) loop_body_completion: Completion,
     // Every variable assignment site in the current function body, for
     // `variable.implicitArray`; empty unless that check is enabled.
     pub(crate) current_function_assigned_variables: Vec<strict_rules::AssignedVariable>,
@@ -869,7 +871,7 @@ pub(crate) enum InferQuestion {
 
 mod access_attributes;
 mod completion;
-pub(crate) use completion::{BlockCompletion, Completion};
+pub(crate) use completion::{BREAK_HERE, BlockCompletion, CONTINUE_HERE, Completion};
 mod array_access;
 mod infer_cache;
 mod locals;
@@ -1118,6 +1120,7 @@ impl<'a> Checker<'a> {
             assigned_values: rustc_hash::FxHashMap::default(),
             terminating_assertions: rustc_hash::FxHashSet::default(),
             completion_oracle: std::env::var_os("PHPSTAN_RS_COMPLETION_ORACLE").is_some(),
+            loop_body_completion: Completion::FALLS_THROUGH,
             current_function_assigned_variables: Vec::new(),
             in_bare_statement_position: false,
             in_condition_position: false,
