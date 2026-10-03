@@ -154,7 +154,9 @@ improvements only (read: loops with no `break` end, so `return.missing` goes and
 docblock is inherited across case-different names; union member order).
 
 - Built after that validation, each with a debug-build oracle, not yet
-  validated together (O2, timing and callgrind are the validation to run):
+  validated together: tests and fixtures pass, O2 equals the baseline, callgrind
+  20.57 G Ir (from 25.14 G), warm 1.79 s with the file cache and 2.48 s
+  without:
   F3 member-level and map-level sharing; the C3 tail except step 6 (identity
   `Name` equality, one interner, `Borrow<str>` removed); C4's structured
   `LocalKey` with a dependents index; C1's exit and throw points and the

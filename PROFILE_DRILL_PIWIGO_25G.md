@@ -1,5 +1,32 @@
 # Callgrind drill-down of the 25.14 G Piwigo run, and what to change
 
+## Status (2026-10-03, `349e79cf`)
+
+Implemented on `master2`; `WORK_STACK.md` level 7 has the list. Measured on
+Piwigo, profiling build, file cache off: callgrind 20.57 G Ir (25.14 G in this
+document); warm wall 1.79 s with the per-file cache, 2.48 s without; the O2
+report equals the baseline's (2,792 files, 581 diagnostics); `cargo test
+--workspace` and the 3,829 fixtures pass.
+
+Not built:
+- P7 direct lowering and retiring the text grammar: `parse_written_type` is
+  0.18% inclusive in a sampling profile, so its saving is gone.
+- §12.10 (observers, record and replay): not started.
+- C3 step 6, C1 effects and yields as traversal products, `collect_throws`,
+  pull-parsing for the tag lexer.
+- P12 step 3 as written (declaration list from the parser) and the fusion of
+  `InitFlow` into the summary walk. Replaced by walks that skip a file's
+  expressions when its facts allow, and by the assigned properties joining
+  the summary walk.
+- Guards on `class_exists`-style tests: needs `@since`/`@removed` in the stub
+  index.
+
+Where the built form differs from the design: P12 step 2 records doc sites
+and enclosing-template extents in the parser, with the old collector kept as
+a debug oracle and a fallback for stub files; the context-tree drop is gated
+on `built_once`, and `Project::ast_of` has a 32-entry cache.
+
+
 Profile: `~/.cache/prs-profile/cl-final/cg.out-01..09` (all nine threads), binary `prs-final` built from `cff7bde1` (gate profile), command `check-project --config phpstan-rs.toml --format json` in `/home/torres/piwigo17-frozen`. Total **25,140,226,057 Ir**. Percentages below are of that total.
 
 HEAD (`7a3f3f99`) differs from the profiled binary in two hot paths: `c848318b` (a per-file memo of `lookup_method_with_owner`, by class and method as `String`s) and `d6bd5c5a` (the end of a doc comment found with `memmem`). Everything else since `cff7bde1` is the lazy-vendor work and its revert, and docs. Each proposal below was checked against the code at HEAD; where one of those two commits already covers part of a cost, the item says so.
