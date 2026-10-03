@@ -120,10 +120,26 @@ pub(super) fn property_assigned_anywhere_in_hierarchy(
             break;
         };
         let found = info.methods().values().any(|sig| {
-            checker.bodies.body(sig.provenance()).is_some_and(|body| {
+            let assigns = checker
+                .bodies
+                .summary(sig.provenance())
+                .is_some_and(|summary| {
+                    summary
+                        .assigned
+                        .as_ref()
+                        .is_some_and(|assigned| assigned.assigns(prop, &ancestor))
+                });
+            // The answer from the statements themselves, for the bodies at hand.
+            #[cfg(debug_assertions)]
+            if let Some(body) = checker.bodies.body(sig.provenance()) {
                 let self_vars = collect_self_instance_vars(body, &ancestor);
-                body_ever_assigns_property(body, prop, &self_vars)
-            })
+                assert_eq!(
+                    assigns,
+                    body_ever_assigns_property(body, prop, &self_vars),
+                    "the summary of a body and the body disagree on the properties it assigns"
+                );
+            }
+            assigns
         });
         if found {
             return true;

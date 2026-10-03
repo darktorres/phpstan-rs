@@ -340,8 +340,8 @@ impl Project {
                 };
                 let parent_does_something = self
                     .bodies()
-                    .body(parent_sig.provenance())
-                    .is_some_and(|b| !b.is_empty());
+                    .summary(parent_sig.provenance())
+                    .is_some_and(|summary| !summary.empty);
                 let call = format!("parent::{}()", f.name);
                 let body = f.body_stmts();
                 let found = contains_parent_call(body, &f.name);

@@ -8,6 +8,8 @@
 //!   impure occurs in it, and the calls whose own purity decides the rest.
 //! - Property writes (`registry::property_writes`): the writes the body
 //!   makes itself and the calls it inherits writes from.
+//! - Assigned properties (`checker::uninitialized`): the properties the body
+//!   assigns anywhere, on `$this` or on a variable it made an instance of.
 
 use rustc_hash::FxHashSet;
 use syntax::ast::*;
@@ -94,6 +96,10 @@ pub struct BodySummary {
     /// holds a construct that makes it impure whatever they are.
     pub(crate) purity: Option<Box<[PurityCall]>>,
     pub(crate) writes: WriteFacts,
+    /// Whether the body has no statements.
+    pub(crate) empty: bool,
+    /// The properties the body assigns, when it assigns any.
+    pub(crate) assigned: Option<Box<AssignedProperties>>,
 }
 
 impl BodySummary {
@@ -101,7 +107,125 @@ impl BodySummary {
     pub fn of(body: &[Stmt]) -> BodySummary {
         let mut walk = Summarizer::default();
         syntax::visit::walk_stmts(&mut walk, body);
-        walk.finish()
+        let mut summary = walk.finish();
+        summary.empty = body.is_empty();
+        summary.assigned = AssignedProperties::of(body);
+        summary
+    }
+}
+
+/// The properties a body assigns anywhere in its statements, however deeply
+/// nested and however conditional, outside closures: `$this->p = ...`,
+/// `$this->p ??= ...`, and the same on a local variable the body
+/// assigned a `new` expression.
+#[derive(Debug, Clone, Default)]
+pub(crate) struct AssignedProperties {
+    /// The properties assigned on `$this`.
+    on_this: Box<[Name]>,
+    /// The variable and the property assigned on it, for each assignment.
+    on_variables: Box<[(Name, Name)]>,
+    /// The variable and the class named by the `new` it was assigned (a
+    /// leading backslash trimmed; `self` and `static` as written).
+    new_instances: Box<[(Name, Name)]>,
+}
+
+impl AssignedProperties {
+    fn of(body: &[Stmt]) -> Option<Box<AssignedProperties>> {
+        let mut on_this = Vec::new();
+        let mut on_variables = Vec::new();
+        let mut new_instances = Vec::new();
+        for stmt in body {
+            syntax::visit::any_stmt_in_body(stmt, |s| {
+                let StmtKind::Expression(e) = &s.kind else {
+                    return false;
+                };
+                match &e.kind {
+                    ExprKind::Assign(lhs, rhs) => {
+                        if let ExprKind::Variable(v) = &lhs.kind
+                            && let Some(class) = new_instance_class(rhs)
+                        {
+                            new_instances.push((v.clone(), class));
+                        }
+                        record_property_assigned(lhs, &mut on_this, &mut on_variables);
+                    }
+                    ExprKind::AssignRef(lhs, _)
+                    | ExprKind::CompoundAssign(BinOp::Coalesce, lhs, _) => {
+                        record_property_assigned(lhs, &mut on_this, &mut on_variables);
+                    }
+                    _ => {}
+                }
+                false
+            });
+        }
+        if on_this.is_empty() && on_variables.is_empty() {
+            return None;
+        }
+        on_this.sort();
+        on_this.dedup();
+        on_variables.sort();
+        on_variables.dedup();
+        new_instances.sort();
+        new_instances.dedup();
+        Some(Box::new(AssignedProperties {
+            on_this: on_this.into_boxed_slice(),
+            on_variables: on_variables.into_boxed_slice(),
+            new_instances: new_instances.into_boxed_slice(),
+        }))
+    }
+
+    /// Whether the body assigns `prop` on `$this` or on a variable it made
+    /// an instance of `class_name` (or of `self` or `static`).
+    pub(crate) fn assigns(&self, prop: &str, class_name: &str) -> bool {
+        if self.on_this.iter().any(|name| **name == *prop) {
+            return true;
+        }
+        self.on_variables.iter().any(|(variable, assigned)| {
+            **assigned == *prop
+                && self
+                    .new_instances
+                    .iter()
+                    .any(|(v, class)| v == variable && is_self_instance_class(class, class_name))
+        })
+    }
+}
+
+/// The class a `new` names, at the end of a chain of assignments
+/// (`$a = $b->p = new C`).
+fn new_instance_class(e: &Expr) -> Option<Name> {
+    syntax::stack::guard(|| match &e.kind {
+        ExprKind::New(callee, _) => {
+            let ExprKind::Name(name) = &callee.kind else {
+                return None;
+            };
+            Some(Name::from(name.trim_start_matches('\\')))
+        }
+        ExprKind::Assign(_, rhs) => new_instance_class(rhs),
+        _ => None,
+    })
+}
+
+fn is_self_instance_class(class: &str, class_name: &str) -> bool {
+    class.eq_ignore_ascii_case("self")
+        || class.eq_ignore_ascii_case("static")
+        || class == class_name
+        || class.ends_with(&format!("\\{class_name}"))
+}
+
+fn record_property_assigned(
+    lhs: &Expr,
+    on_this: &mut Vec<Name>,
+    on_variables: &mut Vec<(Name, Name)>,
+) {
+    let ExprKind::PropertyAccess(base, property, _) = &lhs.kind else {
+        return;
+    };
+    let ExprKind::Variable(v) = &base.kind else {
+        return;
+    };
+    if **v == *"this" {
+        on_this.push(property.name.clone());
+    } else {
+        on_variables.push((v.clone(), property.name.clone()));
     }
 }
 
@@ -131,6 +255,8 @@ impl Summarizer {
                 anything: self.anything,
                 calls: self.calls.into_boxed_slice(),
             },
+            empty: false,
+            assigned: None,
         }
     }
 

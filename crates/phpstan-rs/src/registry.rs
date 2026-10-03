@@ -67,9 +67,10 @@ pub use shared::Shared;
 pub use summaries::BodySummary;
 pub type FunctionTable = NameTable<FunctionReflection>;
 pub(crate) use index::{
-    BuiltDecl, DeclKind, Keep, build_declarations, build_declarations_where, built_declaration,
-    register_global_constant,
+    BuiltDecl, DeclKind, build_declarations, built_declaration, register_global_constant,
 };
+#[cfg(debug_assertions)]
+pub(crate) use index::{Keep, build_declarations_where};
 pub(crate) use name_context::{collect_class_name_case_refs, resolve_names_in_type};
 pub(crate) use name_table::{folded_key, function_key, with_function_key};
 pub(crate) use property_writes::PropertyWrites;

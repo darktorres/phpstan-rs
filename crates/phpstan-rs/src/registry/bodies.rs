@@ -1,5 +1,7 @@
-//! Function and method bodies, kept with their file's AST rather than in
-//! the registry: a declaration's provenance finds its body.
+//! What is kept of function and method bodies, per file rather than in the
+//! registry: a declaration's provenance finds its body's summary and flow.
+//! The statements themselves are kept only in a debug build, which checks
+//! the summaries against them.
 
 use std::sync::Arc;
 
@@ -12,8 +14,9 @@ use crate::registry::{BodySummary, InitFlow, Provenance};
 
 /// Where the body of a function or method is found from its provenance.
 pub trait BodySource: Sync {
-    /// The body of the function or method declared where `provenance`
-    /// records, when its file is at hand.
+    /// The statements of the body of the function or method declared where
+    /// `provenance` records, when its file is at hand.
+    #[cfg(debug_assertions)]
     fn body(&self, provenance: &Provenance) -> Option<&Arc<Vec<Stmt>>>;
 
     /// What the passes read of that body.
@@ -27,6 +30,7 @@ pub trait BodySource: Sync {
 pub struct NoBodies;
 
 impl BodySource for NoBodies {
+    #[cfg(debug_assertions)]
     fn body(&self, _: &Provenance) -> Option<&Arc<Vec<Stmt>>> {
         None
     }
@@ -40,9 +44,10 @@ impl BodySource for NoBodies {
     }
 }
 
-/// One body: its statements, and what the passes read of them.
+/// One body: what the passes read of its statements.
 #[derive(Debug, Clone)]
 struct Body {
+    #[cfg(debug_assertions)]
     stmts: Arc<Vec<Stmt>>,
     summary: Arc<BodySummary>,
     /// A method's flow, which a call to it is followed through.
@@ -73,6 +78,7 @@ impl FileBodies {
                     self.bodies.insert(
                         function.name.span,
                         Body {
+                            #[cfg(debug_assertions)]
                             stmts: body.stmts.clone(),
                             summary: Arc::new(BodySummary::of(&body.stmts)),
                             flow: is_method
@@ -91,7 +97,8 @@ impl FileBodies {
         FileBodies(collect.bodies)
     }
 
-    /// The body of the declaration whose name is at `span`.
+    /// The statements of the body of the declaration whose name is at `span`.
+    #[cfg(debug_assertions)]
     pub fn get(&self, span: Span) -> Option<&Arc<Vec<Stmt>>> {
         self.0.get(&span).map(|body| &body.stmts)
     }
@@ -111,6 +118,7 @@ impl FileBodies {
 /// A single file's bodies answer for any declaration, whatever file it
 /// records: a registry built from one program.
 impl BodySource for FileBodies {
+    #[cfg(debug_assertions)]
     fn body(&self, provenance: &Provenance) -> Option<&Arc<Vec<Stmt>>> {
         self.get(provenance.declaration_span())
     }

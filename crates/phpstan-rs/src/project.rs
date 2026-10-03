@@ -16,8 +16,10 @@ use crate::pest_config::{PestConfig, PestFacts};
 use crate::registry::scope::Scope;
 use crate::registry::stubs;
 use crate::registry::{
-    BodySource, BuiltDecl, DeclKind, FileBodies, GlobalFacts, Keep, Origin, Provenance, Registry,
+    BodySource, BuiltDecl, DeclKind, FileBodies, GlobalFacts, Origin, Provenance, Registry,
 };
+#[cfg(debug_assertions)]
+use crate::registry::{Keep, build_declarations_where};
 use diagnostics::{self, Diagnostic, DiagnosticBuilder};
 use syntax::FileFacts;
 use syntax::ast::{Stmt, StmtKind};
@@ -146,6 +148,7 @@ pub(crate) struct FileState {
 
 /// The loaded files' function and method bodies, found by provenance.
 impl BodySource for file_table::FileTable<FileState> {
+    #[cfg(debug_assertions)]
     fn body(&self, provenance: &Provenance) -> Option<&Arc<Vec<Stmt>>> {
         self.get_by_origin(provenance.file()?)?
             .bodies
@@ -1508,8 +1511,7 @@ impl Project {
             if !is_pending && let Some(state) = self.files.get(path) {
                 let origin = Origin::File(Arc::from(path));
                 let keep: Keep<'_> = &rebuilt;
-                let built =
-                    crate::registry::build_declarations_where(&state.ast, &origin, Some(keep));
+                let built = build_declarations_where(&state.ast, &origin, Some(keep));
                 let kept: Vec<&BuiltDecl> = decls
                     .iter()
                     .filter(|decl| {
