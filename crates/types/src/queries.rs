@@ -1,5 +1,6 @@
 //! What a type is: the questions asked of a type from outside this crate.
 
+use crate::UnionAll as _;
 use std::sync::Arc;
 
 use crate::{
@@ -132,7 +133,7 @@ impl Type {
     /// constant's way (`looks_like_constant_name`) stands anywhere in this
     /// type: what a class-like name that is really a constant's can be.
     pub fn has_constant_looking_name(&self) -> bool {
-        self.0.flags & crate::HAS_CONSTANT_NAME != 0
+        self.0.flags() & crate::HAS_CONSTANT_NAME != 0
     }
 
     /// Which node this type is: the same number for equal types as long as
@@ -231,7 +232,7 @@ impl Type {
 
     /// Whether a `parent` stands anywhere in this type unresolved.
     pub fn has_parent_ref(&self) -> bool {
-        self.0.flags & crate::HAS_PARENT != 0
+        self.0.flags() & crate::HAS_PARENT != 0
     }
 
     /// `f` on this type and every type nested in it, outermost first.
@@ -319,7 +320,7 @@ impl Type {
     /// reference, left for the registry to resolve, stands anywhere in
     /// this type.
     pub fn contains_deferred(&self) -> bool {
-        self.0.flags & crate::HAS_DEFERRED != 0
+        self.0.flags() & crate::HAS_DEFERRED != 0
     }
 
     /// The object shape this type is, or an intersection refines.
@@ -608,10 +609,15 @@ impl Type {
                 merged.update_fields(|key, _, optional| {
                     *optional |= shapes.iter().any(|s| s.field(key).is_none());
                 });
-                let unsealed = shapes
+                let tails: (Vec<Type>, Vec<Type>) = shapes
                     .iter()
                     .filter_map(|s| s.unsealed.as_deref().cloned())
-                    .reduce(|(k1, v1), (k2, v2)| (Type::union(k1, k2), Type::union(v1, v2)))
+                    .unzip();
+                let unsealed = tails
+                    .0
+                    .into_iter()
+                    .union_all()
+                    .zip(tails.1.into_iter().union_all())
                     .map(Box::new);
                 Some((
                     Shape::from_parts(merged.into_fields(), unsealed, None),
@@ -681,7 +687,7 @@ impl Type {
             Repr::Union(members) | Repr::BenevolentUnion(members) => members
                 .iter()
                 .map(Type::generalize)
-                .reduce(Type::union)
+                .union_all()
                 .unwrap_or(Type::never()),
             Repr::Intersection(members) => crate::intersect_types(
                 members
@@ -778,10 +784,9 @@ impl Type {
     /// the first time. The answer depends on the node alone, so two threads
     /// asking at once find the same answer and set the same bits.
     fn cached_within(&self, index: usize, probe: impl FnOnce() -> &'static Type) -> TrinaryLogic {
-        use std::sync::atomic::Ordering::Relaxed;
         let shift = 2 * index;
         if crate::shortcuts_enabled() {
-            let known = (self.0.refined.load(Relaxed) >> shift) & 0b11;
+            let known = (self.0.answers() >> shift) & 0b11;
             if known != 0 {
                 return match known {
                     REFINED_NO => TrinaryLogic::No,
@@ -796,7 +801,7 @@ impl Type {
             TrinaryLogic::Maybe => REFINED_MAYBE,
             TrinaryLogic::Yes => REFINED_YES,
         };
-        self.0.refined.fetch_or(bits << shift, Relaxed);
+        self.0.remember(bits << shift);
         answer
     }
 
@@ -900,7 +905,7 @@ impl Type {
             Repr::Union(members) => members
                 .iter()
                 .map(|m| m.with_string_accessory(kind))
-                .reduce(Type::union)
+                .union_all()
                 .unwrap_or_else(Type::never),
             _ => self.clone(),
         })
@@ -982,7 +987,7 @@ impl Type {
                 .map(Type::array_value_type)
                 .collect::<Option<Vec<_>>>()?
                 .into_iter()
-                .reduce(Type::union),
+                .union_all(),
             Repr::TemplateParam(param) => param.bound.array_value_type(),
             _ => None,
         })
@@ -1012,7 +1017,7 @@ impl Type {
                     .map(Type::array_key_type)
                     .collect::<Option<Vec<_>>>()?
                     .into_iter()
-                    .reduce(Type::union),
+                    .union_all(),
                 Repr::TemplateParam(param) => param.bound.array_key_type(),
                 _ => None,
             }
@@ -1142,7 +1147,7 @@ impl Type {
             Repr::Union(members) | Repr::BenevolentUnion(members) => members
                 .iter()
                 .map(Type::to_boolean)
-                .reduce(Type::union)
+                .union_all()
                 .unwrap_or(Type::never()),
             Repr::Intersection(members) => {
                 crate::intersect_types(members.iter().map(Type::to_boolean).collect())

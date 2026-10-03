@@ -67,7 +67,7 @@ pub use shape::{AppendKey, NextArrayIndex, Shape, ShapeField, ShapeKey};
 pub use subtype::is_numeric_string_literal;
 pub use template_references::PositionVariance;
 pub use trinary::TrinaryLogic;
-pub use union::{MAX_UNION_MEMBERS, generalize_by_key_set};
+pub use union::{MAX_UNION_MEMBERS, UnionAll, generalize_by_key_set};
 
 /// A PHP type. What it is, what its values can be used as and how it
 /// relates to other types are asked through its methods; how it is
@@ -84,13 +84,13 @@ impl Type {
     /// somewhere in it. Without one, substituting and resolving give the
     /// same type back.
     pub fn needs_call_binding(&self) -> bool {
-        self.0.flags & (HAS_TEMPLATE_REF | HAS_LATE | HAS_DEFERRED | HAS_CONDITIONAL) != 0
+        self.0.flags() & (HAS_TEMPLATE_REF | HAS_LATE | HAS_DEFERRED | HAS_CONDITIONAL) != 0
     }
 
     /// Whether a conditional on a parameter stands anywhere in this type:
     /// what a call's arguments resolve.
     pub fn has_parameter_conditional(&self) -> bool {
-        self.0.flags & HAS_PARAM_CONDITIONAL != 0
+        self.0.flags() & HAS_PARAM_CONDITIONAL != 0
     }
 
     /// Where this type's node is: the same address is the same type.
@@ -106,19 +106,50 @@ pub(crate) struct Node {
     pub(crate) repr: Repr,
     pub(crate) hash: u64,
     pub(crate) exact: u64,
-    // Which of `self`, `static` (or `$this`) and `parent`, and whether a
-    // reference left for the registry to resolve (`value-of`, `key-of`,
-    // offset access, class constant), the type has anywhere in it
-    // (`HAS_*`), so a binding or a resolution can leave a type without them
-    // as it is.
-    pub(crate) flags: u16,
-    // What `Type::is_refined_string` answered for each of the ten kinds,
-    // and each structural predicate (`is_null`, `is_int`, `is_object`, ...)
-    // for the eleven probes after them, two bits apiece (zero: not asked,
-    // then no, maybe, yes), as asked: a node answers each question once,
-    // by the relation, and then by a load.
-    pub(crate) refined: std::sync::atomic::AtomicU64,
+    // Both words below in one, so a node is the size it was: the
+    // reference flags in the top 16 bits (`flags`), which are set when the
+    // node is made, and below them, two bits for each question the node
+    // has answered (`answers`).
+    state: std::sync::atomic::AtomicU64,
 }
+
+impl Node {
+    /// A node of `repr`, with its two hashes and its reference flags.
+    pub(crate) fn new(repr: Repr, hash: u64, exact: u64, flags: u16) -> Node {
+        Node {
+            repr,
+            hash,
+            exact,
+            state: std::sync::atomic::AtomicU64::new(u64::from(flags) << FLAGS_SHIFT),
+        }
+    }
+
+    /// Which of `self`, `static` (or `$this`) and `parent`, and whether a
+    /// reference left for the registry to resolve (`value-of`, `key-of`,
+    /// offset access, class constant), a conditional or an object, the type
+    /// has anywhere in it (`HAS_*`), so a binding or a resolution can leave
+    /// a type without them as it is.
+    pub(crate) fn flags(&self) -> u16 {
+        (self.state.load(std::sync::atomic::Ordering::Relaxed) >> FLAGS_SHIFT) as u16
+    }
+
+    /// What `Type::is_refined_string` and each structural predicate
+    /// (`is_null`, `is_int`, `is_object`, ...) answered, two bits apiece
+    /// (zero: not asked, then no, maybe, yes): a node answers each
+    /// question once, by the relation, and then by a load.
+    pub(crate) fn answers(&self) -> u64 {
+        self.state.load(std::sync::atomic::Ordering::Relaxed) & ANSWER_BITS
+    }
+
+    pub(crate) fn remember(&self, bits: u64) {
+        debug_assert!(bits & !ANSWER_BITS == 0);
+        self.state
+            .fetch_or(bits, std::sync::atomic::Ordering::Relaxed);
+    }
+}
+
+const FLAGS_SHIFT: u32 = 48;
+const ANSWER_BITS: u64 = (1 << FLAGS_SHIFT) - 1;
 
 pub(crate) const HAS_SELF: u16 = 1;
 pub(crate) const HAS_STATIC: u16 = 2;
@@ -218,7 +249,7 @@ pub(crate) fn reference_flags(repr: &Repr) -> u16 {
         } => HAS_CONDITIONAL | HAS_PARAM_CONDITIONAL,
         _ => 0,
     };
-    traverse::for_each_repr_child(repr, &mut |child| flags |= child.0.flags & PASSED_UP);
+    traverse::for_each_repr_child(repr, &mut |child| flags |= child.0.flags() & PASSED_UP);
     let refined = match repr {
         Repr::Intersection(members) => members.iter().any(|m| {
             matches!(
@@ -226,9 +257,9 @@ pub(crate) fn reference_flags(repr: &Repr) -> u16 {
                 Repr::Accessory(AccessoryKind::NonDecimalIntegerString)
             )
         }),
-        Repr::Union(members) | Repr::BenevolentUnion(members) => {
-            members.iter().any(|m| m.0.flags & HAS_KEY_REFINEMENT != 0)
-        }
+        Repr::Union(members) | Repr::BenevolentUnion(members) => members
+            .iter()
+            .any(|m| m.0.flags() & HAS_KEY_REFINEMENT != 0),
         _ => false,
     };
     if refined {
@@ -997,7 +1028,7 @@ pub enum AccessoryKind {
 /// Whether a string member of `key` carries the non-decimal-int
 /// refinement.
 fn has_key_refinement(key: &Type) -> bool {
-    key.0.flags & HAS_KEY_REFINEMENT != 0
+    key.0.flags() & HAS_KEY_REFINEMENT != 0
 }
 
 /// `key` with the non-decimal-int refinement taken off its strings.

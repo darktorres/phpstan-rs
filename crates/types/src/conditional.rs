@@ -33,7 +33,7 @@ impl Type {
         argument: &dyn Fn(&str) -> Option<&'a Type>,
         relation: &Relation,
     ) -> Type {
-        if self.0.flags & crate::HAS_CONDITIONAL == 0 && crate::shortcuts_enabled() {
+        if self.0.flags() & crate::HAS_CONDITIONAL == 0 && crate::shortcuts_enabled() {
             return self.clone();
         }
         syntax::stack::guard(|| match self.repr() {

@@ -1,6 +1,7 @@
 //! Types rewritten into related types: `static` bound, shapes unsealed,
 //! a value stepped by `++`/`--`.
 
+use crate::UnionAll as _;
 use std::sync::Arc;
 
 use crate::{
@@ -11,7 +12,7 @@ use crate::{
 impl Type {
     /// This type with `static` and `$this` as `class`, at any depth.
     pub fn bind_static(&self, class: &str) -> Type {
-        if self.0.flags & crate::HAS_STATIC == 0 {
+        if self.0.flags() & crate::HAS_STATIC == 0 {
             return self.clone();
         }
         syntax::stack::guard(|| match self.repr() {
@@ -26,12 +27,12 @@ impl Type {
 
     /// Whether `self`, `static` or `$this` stands anywhere in this type.
     pub fn mentions_self_or_static(&self) -> bool {
-        self.0.flags & (crate::HAS_SELF | crate::HAS_STATIC) != 0
+        self.0.flags() & (crate::HAS_SELF | crate::HAS_STATIC) != 0
     }
 
     /// This type with `self` as `class`, at any depth.
     pub fn bind_self(&self, class: &str) -> Type {
-        if self.0.flags & crate::HAS_SELF == 0 {
+        if self.0.flags() & crate::HAS_SELF == 0 {
             return self.clone();
         }
         syntax::stack::guard(|| match self.repr() {
@@ -45,7 +46,7 @@ impl Type {
 
     /// This type with `parent` as `class`, at any depth.
     pub fn bind_parent(&self, class: &str) -> Type {
-        if self.0.flags & crate::HAS_PARENT == 0 {
+        if self.0.flags() & crate::HAS_PARENT == 0 {
             return self.clone();
         }
         syntax::stack::guard(|| match self.repr() {
@@ -58,7 +59,7 @@ impl Type {
     /// replaced by that answer, generic arguments and all; every other
     /// type's children are walked.
     pub fn replace_objects(&self, replace: &mut dyn FnMut(&Name) -> Option<Type>) -> Type {
-        if self.0.flags & crate::HAS_OBJECT == 0 && crate::shortcuts_enabled() {
+        if self.0.flags() & crate::HAS_OBJECT == 0 && crate::shortcuts_enabled() {
             return self.clone();
         }
         syntax::stack::guard(|| {
@@ -77,7 +78,7 @@ impl Type {
     /// it is: its bound and default belong to the template's declaration,
     /// already named there.
     pub fn map_class_names(&self, rename: &mut dyn FnMut(&Name) -> Name) -> Type {
-        if self.0.flags & crate::HAS_OBJECT == 0 && crate::shortcuts_enabled() {
+        if self.0.flags() & crate::HAS_OBJECT == 0 && crate::shortcuts_enabled() {
             return self.clone();
         }
         syntax::stack::guard(|| match self.repr() {
@@ -183,7 +184,7 @@ impl Type {
             Repr::Union(members) | Repr::BenevolentUnion(members) => members
                 .iter()
                 .map(|m| m.step(by))
-                .reduce(Type::union)
+                .union_all()
                 .unwrap_or(Type::mixed()),
             // A numeric string steps as the number it is; any other string
             // stays a string - non-empty after `++`, unchanged by `--`
@@ -299,7 +300,7 @@ impl Type {
             Repr::Union(members) => members
                 .iter()
                 .map(Type::without_accessories)
-                .reduce(Type::union)
+                .union_all()
                 .unwrap_or(Type::mixed()),
             _ => self.clone(),
         }

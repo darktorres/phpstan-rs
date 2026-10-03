@@ -2,6 +2,7 @@
 //! answer depends on a `T` that may be a template until a call binds it
 //! (PHPStan's `LateResolvableType`).
 
+use crate::UnionAll as _;
 use crate::{Repr, ShapeKey, Type};
 
 /// What resolving a class reference inside a type needs to know.
@@ -131,7 +132,7 @@ impl Type {
     /// Whether this type names a template anywhere: a template parameter, or a
     /// conditional whose subject is one.
     pub fn references_template(&self) -> bool {
-        self.0.flags & crate::HAS_TEMPLATE_REF != 0
+        self.0.flags() & crate::HAS_TEMPLATE_REF != 0
     }
 }
 
@@ -157,7 +158,7 @@ impl Type {
 impl Type {
     /// Whether this type holds a `key-of` or offset access anywhere.
     pub fn contains_late(&self) -> bool {
-        self.0.flags & crate::HAS_LATE != 0
+        self.0.flags() & crate::HAS_LATE != 0
     }
 }
 
@@ -183,8 +184,5 @@ fn resolve_node(ty: &Type, operand: &dyn Fn(&Type) -> Type) -> Option<Type> {
 
 /// The union of `members`; `Never` for none.
 fn join(members: Vec<Type>) -> Type {
-    members
-        .into_iter()
-        .reduce(Type::union)
-        .unwrap_or(Type::never())
+    members.into_iter().union_all().unwrap_or(Type::never())
 }

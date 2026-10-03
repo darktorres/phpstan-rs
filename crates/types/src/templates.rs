@@ -438,7 +438,8 @@ pub(crate) fn substitute_with(
     relation: &Relation,
     prune: bool,
 ) -> Type {
-    if prune && ty.0.flags & (crate::HAS_TEMPLATE_REF | crate::HAS_LATE | crate::HAS_DEFERRED) == 0
+    if prune
+        && ty.0.flags() & (crate::HAS_TEMPLATE_REF | crate::HAS_LATE | crate::HAS_DEFERRED) == 0
     {
         return ty.clone();
     }

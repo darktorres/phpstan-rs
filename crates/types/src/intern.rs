@@ -305,13 +305,7 @@ fn insert_shared(form: Form<'_>, semantic_hash: fn(&Repr) -> u64, exact: u64) ->
     let repr = form.into_repr();
     let hash = semantic_hash(&repr);
     let flags = crate::reference_flags(&repr);
-    let node = Arc::new(Node {
-        repr,
-        hash,
-        exact,
-        flags,
-        refined: std::sync::atomic::AtomicU64::new(0),
-    });
+    let node = Arc::new(Node::new(repr, hash, exact, flags));
     shard
         .entries
         .entry(exact)
@@ -661,6 +655,7 @@ fn exact_hash(form: &ReprRef<'_>) -> u64 {
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]
 pub(crate) enum Operation {
     Union,
+    UnionMany,
     Without,
     Intersect,
 }

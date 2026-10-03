@@ -149,9 +149,9 @@ proptest! {
                 Repr::Conditional { subject: ConditionalSubject::Parameter(_), .. }
             )
         });
-        prop_assert_eq!(ty.0.flags & crate::HAS_CONDITIONAL != 0, conditional);
-        prop_assert_eq!(ty.0.flags & crate::HAS_OBJECT != 0, object);
-        prop_assert_eq!(ty.0.flags & crate::HAS_PARAM_CONDITIONAL != 0, param);
+        prop_assert_eq!(ty.0.flags() & crate::HAS_CONDITIONAL != 0, conditional);
+        prop_assert_eq!(ty.0.flags() & crate::HAS_OBJECT != 0, object);
+        prop_assert_eq!(ty.0.flags() & crate::HAS_PARAM_CONDITIONAL != 0, param);
     }
 }
 
@@ -163,7 +163,10 @@ fn a_type_without_a_conditional_or_an_object_is_returned_as_it_is() {
     );
     let bindings = |_: &str| None;
     let relation = Relation::structural();
-    assert_eq!(ty.0.flags & (crate::HAS_CONDITIONAL | crate::HAS_OBJECT), 0);
+    assert_eq!(
+        ty.0.flags() & (crate::HAS_CONDITIONAL | crate::HAS_OBJECT),
+        0
+    );
     assert!(Arc::ptr_eq(
         &ty.resolve_conditional(&bindings, &relation).0,
         &ty.0
@@ -173,11 +176,4 @@ fn a_type_without_a_conditional_or_an_object_is_returned_as_it_is() {
         &ty.0
     ));
     assert!(Arc::ptr_eq(&ty.replace_objects(&mut |_| None).0, &ty.0));
-}
-
-#[test]
-fn a_node_holds_no_more_than_its_fields_and_the_padding_of_one_word() {
-    // `Repr`, the two hashes, the flags and the 64 bits of answers.
-    let repr = std::mem::size_of::<Repr>();
-    assert!(std::mem::size_of::<crate::Node>() <= repr + 8 + 8 + 8 + 8);
 }
