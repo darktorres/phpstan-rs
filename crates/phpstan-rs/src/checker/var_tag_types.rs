@@ -152,7 +152,7 @@ impl<'a> Checker<'a> {
                     CastKind::Object | CastKind::Void => Type::mixed(),
                 },
                 ExprKind::New(..) => match self.infer_expr(e, locals).as_object() {
-                    Some((class, _)) => Type::object(class.clone(), Vec::new()),
+                    Some((class, _)) => Type::object_ref(class, &[]),
                     None => Type::mixed(),
                 },
                 ExprKind::Closure { .. } | ExprKind::ArrowFn { .. } => {

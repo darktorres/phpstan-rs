@@ -275,6 +275,13 @@ impl Type {
         Type(intern::intern(repr, semantic_hash))
     }
 
+    /// The type of the form `repr` borrows: the node that is there, or one
+    /// made from a copy of its parts. For the forms `ReprRef` borrows,
+    /// none of which is a constant or an array.
+    pub(crate) fn from_ref(repr: intern::ReprRef<'_>) -> Type {
+        Type(intern::intern_ref(repr, semantic_hash))
+    }
+
     /// The representation.
     pub(crate) fn repr(&self) -> &Repr {
         &self.0.repr

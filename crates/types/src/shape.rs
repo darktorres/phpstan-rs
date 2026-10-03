@@ -34,7 +34,7 @@ impl ShapeKey {
     pub fn to_type(&self) -> Type {
         match self {
             ShapeKey::Int(n) => Type::int_literal(*n),
-            ShapeKey::Str(s) => Type::string_literal(s.clone()),
+            ShapeKey::Str(s) => Type::string_literal_ref(s),
         }
     }
 

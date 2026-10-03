@@ -452,7 +452,7 @@ impl<'a> Checker<'a> {
                         // `null`.
                         if self.registry.is_subclass_of(class, "SimpleXMLElement") {
                             self.relation()
-                                .union(Type::object(class.clone(), Vec::new()), Type::null())
+                                .union(Type::object_ref(class, &[]), Type::null())
                         } else {
                             Type::mixed()
                         }

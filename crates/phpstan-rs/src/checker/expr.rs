@@ -4360,7 +4360,7 @@ impl<'a> Checker<'a> {
             ExprKind::Literal(lit) => match lit {
                 Literal::Int(n) => Type::int_literal(*n),
                 Literal::Float(f) => Type::float_literal(*f),
-                Literal::String(s) => Type::string_literal(s.clone()),
+                Literal::String(s) => Type::string_literal_ref(s),
                 Literal::Bool(true) => Type::bool_literal(true),
                 Literal::Bool(false) => Type::bool_literal(false),
                 Literal::Null => Type::null(),
@@ -4509,7 +4509,7 @@ impl<'a> Checker<'a> {
             ExprKind::Literal(lit) => match lit {
                 Literal::Int(n) => Type::int_literal(*n),
                 Literal::Float(f) => Type::float_literal(*f),
-                Literal::String(s) => Type::string_literal(s.clone()),
+                Literal::String(s) => Type::string_literal_ref(s),
                 Literal::Bool(true) => Type::bool_literal(true),
                 Literal::Bool(false) => Type::bool_literal(false),
                 Literal::Null => Type::null(),
@@ -6540,7 +6540,7 @@ impl<'a> Checker<'a> {
                 .values()
                 .filter_map(|c| c.ty().as_enum_case())
                 .filter(|(cls, _)| *cls == class_name)
-                .map(|(cls, case)| Type::enum_case(cls.clone(), case.clone()))
+                .map(|(cls, case)| Type::enum_case_ref(cls, case))
                 .collect();
             match cases.len() {
                 0 => ty.clone(),
@@ -6643,7 +6643,7 @@ fn anonymous_class_type(class: &AnonymousClass) -> Type {
     class
         .name
         .as_ref()
-        .map_or(Type::mixed(), |name| Type::object(name.clone(), Vec::new()))
+        .map_or(Type::mixed(), |name| Type::object_ref(name, &[]))
 }
 
 /// How a receiver failing at `level` is described: wholly a non-object at

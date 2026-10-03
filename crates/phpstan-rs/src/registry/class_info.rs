@@ -1869,7 +1869,7 @@ impl ClassReflection {
             .filter_map(|c| {
                 let v = c.value.as_ref()?;
                 let ty = match &v.kind {
-                    ExprKind::Literal(Literal::String(s)) => Type::string_literal(s.clone()),
+                    ExprKind::Literal(Literal::String(s)) => Type::string_literal_ref(s),
                     ExprKind::Literal(Literal::Int(n)) => Type::int_literal(*n),
                     _ => return None,
                 };

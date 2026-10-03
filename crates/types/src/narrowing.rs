@@ -228,13 +228,13 @@ impl Type {
                     if name == "Traversable"
                         && matches!(excluded.repr(), Repr::Object(excl, _) if excl == "IteratorAggregate") =>
                 {
-                    Type::object("Iterator".into(), args.clone())
+                    Type::object_ref(&"Iterator".into(), args)
                 }
                 Repr::Object(name, args)
                     if name == "Traversable"
                         && matches!(excluded.repr(), Repr::Object(excl, _) if excl == "Iterator") =>
                 {
-                    Type::object("IteratorAggregate".into(), args.clone())
+                    Type::object_ref(&"IteratorAggregate".into(), args)
                 }
                 // Plain `bool` is exactly the two-element set `{true, false}` -
                 // unlike the general "a type covering multiple distinct values

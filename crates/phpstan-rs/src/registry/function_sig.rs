@@ -546,7 +546,7 @@ fn infer_const_type_with(
         match &value.kind {
             ExprKind::Literal(Literal::Int(n)) => Type::int_literal(*n),
             ExprKind::Literal(Literal::Float(_)) => Type::float(),
-            ExprKind::Literal(Literal::String(s)) => Type::string_literal(s.clone()),
+            ExprKind::Literal(Literal::String(s)) => Type::string_literal_ref(s),
             ExprKind::Literal(Literal::Bool(true)) => Type::bool_literal(true),
             ExprKind::Literal(Literal::Bool(false)) => Type::bool_literal(false),
             ExprKind::Literal(Literal::Null) => Type::null(),

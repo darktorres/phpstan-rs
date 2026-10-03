@@ -1804,7 +1804,7 @@ impl<'a> Checker<'a> {
             "get_class" if args.len() == 1 => {
                 let object_ty = self.infer_expr(&args[0].value, locals);
                 if let Some((class, _)) = object_ty.as_object() {
-                    return Type::class_string(Type::object(class.clone(), Vec::new()));
+                    return Type::class_string(Type::object_ref(class, &[]));
                 }
             }
             // `get_called_class()`'s stub is unconditionally

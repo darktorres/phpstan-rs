@@ -348,7 +348,7 @@ impl<'a> Checker<'a> {
             .map(|m| {
                 if let Some(class) = m.class_string_class() {
                     exact = false;
-                    Some(Type::object(class.clone(), Vec::new()))
+                    Some(Type::object_ref(class, &[]))
                 } else {
                     let name = m.string_literal_value()?.as_str()?;
                     Some(Type::object(

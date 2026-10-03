@@ -4,7 +4,7 @@ use super::super::*;
 use crate::{Repr, without_shortcuts};
 use proptest::prelude::*;
 
-fn leaf() -> impl Strategy<Value = Type> {
+pub(super) fn leaf() -> impl Strategy<Value = Type> {
     prop_oneof![
         Just(Type::mixed()),
         Just(Type::never()),
@@ -25,7 +25,7 @@ fn leaf() -> impl Strategy<Value = Type> {
     ]
 }
 
-fn any_type() -> impl Strategy<Value = Type> {
+pub(super) fn any_type() -> impl Strategy<Value = Type> {
     leaf().prop_recursive(4, 40, 4, |inner| {
         prop_oneof![
             (inner.clone(), inner.clone()).prop_map(|(k, v)| Type::array(k, v)),

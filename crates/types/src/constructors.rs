@@ -90,9 +90,21 @@ impl Type {
         Type::new(Repr::StringLiteral(value))
     }
 
+    /// `string_literal` for a value held by the caller: nothing is copied
+    /// when the type exists.
+    pub fn string_literal_ref(value: &PhpString) -> Type {
+        Type::from_ref(crate::intern::ReprRef::StringLiteral(value))
+    }
+
     /// `class-string<inner>`.
     pub fn class_string(inner: Type) -> Type {
         Type::new(Repr::ClassString(inner))
+    }
+
+    /// `class_string` for an inner type held by the caller: nothing is
+    /// copied when the type exists.
+    pub fn class_string_ref(inner: &Type) -> Type {
+        Type::from_ref(crate::intern::ReprRef::ClassString(inner))
     }
 
     /// `interface-string`, `trait-string` or `enum-string`.
@@ -118,6 +130,12 @@ impl Type {
         Type::new(Repr::Object(class, args))
     }
 
+    /// `object` for a class and arguments held by the caller: nothing is
+    /// copied when the type exists.
+    pub fn object_ref(class: &Name, args: &[Type]) -> Type {
+        Type::from_ref(crate::intern::ReprRef::Object(class, args))
+    }
+
     /// `object`.
     pub fn object_without_class() -> Type {
         Type::constant(Constant::ObjectWithoutClass)
@@ -130,6 +148,12 @@ impl Type {
     /// The case `case` of the enum `class`.
     pub fn enum_case(class: Name, case: Name) -> Type {
         Type::new(Repr::EnumCase(class, case))
+    }
+
+    /// `enum_case` for a class and case held by the caller: nothing is
+    /// copied when the type exists.
+    pub fn enum_case_ref(class: &Name, case: &Name) -> Type {
+        Type::from_ref(crate::intern::ReprRef::EnumCase(class, case))
     }
 
     /// `callable`, or a callable with a known signature.

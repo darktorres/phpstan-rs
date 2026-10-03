@@ -656,7 +656,7 @@ impl Type {
             Repr::StringLiteral(_) => Type::string(),
             Repr::FloatLiteral(_) => Type::float(),
             Repr::True | Repr::False => Type::bool(),
-            Repr::EnumCase(class, _) => Type::object(class.clone(), Vec::new()),
+            Repr::EnumCase(class, _) => Type::object_ref(class, &[]),
             Repr::ArrayShape(shape) => {
                 let key = self
                     .array_key_type()

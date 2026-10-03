@@ -37,12 +37,108 @@ static TABLE: LazyLock<Vec<Mutex<Shard>>> = LazyLock::new(|| {
         .collect()
 });
 
-/// The node for `repr`: the existing one of its exact form, or a new one.
+/// The node for `repr`: the existing one of its exact form, or a new one
+/// made from `repr` itself.
 pub(crate) fn intern(repr: Repr, semantic_hash: fn(&Repr) -> u64) -> Arc<Node> {
     if let Some(constant) = Constant::of(&repr) {
         return constant.node(semantic_hash);
     }
-    insert(repr, semantic_hash)
+    insert(Form::Owned(repr), semantic_hash)
+}
+
+/// The node for the form `repr` borrows: the existing one, or, when there is
+/// none, a new one made from a copy of it. A form that is found is never
+/// built: its parts are not copied, nor dropped after.
+pub(crate) fn intern_ref(repr: ReprRef<'_>, semantic_hash: fn(&Repr) -> u64) -> Arc<Node> {
+    insert(Form::Borrowed(repr), semantic_hash)
+}
+
+/// A form of type being looked for or made: one that is owned, to be moved
+/// into the node if there is none, or one that borrows its parts.
+enum Form<'a> {
+    Owned(Repr),
+    Borrowed(ReprRef<'a>),
+}
+
+impl Form<'_> {
+    fn exact_hash(&self) -> u64 {
+        match self {
+            Form::Owned(repr) => exact_hash(&repr.as_ref()),
+            Form::Borrowed(repr) => exact_hash(repr),
+        }
+    }
+
+    fn is_form_of(&self, stored: &Repr) -> bool {
+        match self {
+            Form::Owned(repr) => exact_eq(stored, &repr.as_ref()),
+            Form::Borrowed(repr) => exact_eq(stored, repr),
+        }
+    }
+
+    fn into_repr(self) -> Repr {
+        match self {
+            Form::Owned(repr) => repr,
+            Form::Borrowed(repr) => repr.to_owned(),
+        }
+    }
+}
+
+/// A form of type with its parts borrowed, for the kinds a caller usually
+/// builds from parts it holds, and the owned form of every other. One
+/// definition of the exact hash and of exact equality serves both: an owned
+/// `Repr` is hashed and compared through its `ReprRef` (`Repr::as_ref`).
+#[derive(Clone, Copy)]
+pub(crate) enum ReprRef<'a> {
+    StringLiteral(&'a crate::PhpString),
+    Object(&'a crate::Name, &'a [Type]),
+    EnumCase(&'a crate::Name, &'a crate::Name),
+    ClassString(&'a Type),
+    Union(&'a [Type]),
+    BenevolentUnion(&'a [Type]),
+    Intersection(&'a [Type]),
+    /// Any other form, as it is owned.
+    Owned(&'a Repr),
+}
+
+impl Repr {
+    pub(crate) fn as_ref(&self) -> ReprRef<'_> {
+        match self {
+            Repr::StringLiteral(s) => ReprRef::StringLiteral(s),
+            Repr::Object(name, args) => ReprRef::Object(name, args),
+            Repr::EnumCase(class, case) => ReprRef::EnumCase(class, case),
+            Repr::ClassString(inner) => ReprRef::ClassString(inner),
+            Repr::Union(members) => ReprRef::Union(members),
+            Repr::BenevolentUnion(members) => ReprRef::BenevolentUnion(members),
+            Repr::Intersection(members) => ReprRef::Intersection(members),
+            other => ReprRef::Owned(other),
+        }
+    }
+}
+
+impl<'a> ReprRef<'a> {
+    /// The borrowed form an owned one has, when it has one: a `Repr` of a
+    /// borrowable kind is never looked for as `Owned`, so the exact hash and
+    /// exact equality have one case for each form.
+    fn canonical(self) -> ReprRef<'a> {
+        match self {
+            ReprRef::Owned(repr) => repr.as_ref(),
+            borrowed => borrowed,
+        }
+    }
+
+    /// The owned form, copying the parts.
+    pub(crate) fn to_owned(self) -> Repr {
+        match self {
+            ReprRef::StringLiteral(s) => Repr::StringLiteral(s.clone()),
+            ReprRef::Object(name, args) => Repr::Object(name.clone(), args.to_vec()),
+            ReprRef::EnumCase(class, case) => Repr::EnumCase(class.clone(), case.clone()),
+            ReprRef::ClassString(inner) => Repr::ClassString(inner.clone()),
+            ReprRef::Union(members) => Repr::Union(members.to_vec()),
+            ReprRef::BenevolentUnion(members) => Repr::BenevolentUnion(members.to_vec()),
+            ReprRef::Intersection(members) => Repr::Intersection(members.to_vec()),
+            ReprRef::Owned(repr) => repr.clone(),
+        }
+    }
 }
 
 /// A type with nothing in it (`int`, `null`, `mixed`, ...): its node is
@@ -149,7 +245,7 @@ impl Constant {
                 Constant::ParentRef,
                 Constant::This,
             ]
-            .map(|constant| insert(constant.repr(), semantic_hash))
+            .map(|constant| insert(Form::Owned(constant.repr()), semantic_hash))
         });
         nodes[self as usize].clone()
     }
@@ -169,13 +265,13 @@ thread_local! {
         std::cell::RefCell::new(vec![None; FRONT_SLOTS]);
 }
 
-fn insert(repr: Repr, semantic_hash: fn(&Repr) -> u64) -> Arc<Node> {
-    let exact = exact_hash(&repr);
+fn insert(form: Form<'_>, semantic_hash: fn(&Repr) -> u64) -> Arc<Node> {
+    let exact = form.exact_hash();
     let slot = (exact as usize) % FRONT_SLOTS;
     let near = FRONT.with(|front| {
         let front = front.borrow();
         match &front[slot] {
-            Some(node) if node.exact == exact && exact_eq(&node.repr, &repr) => {
+            Some(node) if node.exact == exact && form.is_form_of(&node.repr) => {
                 Some(Arc::clone(node))
             }
             _ => None,
@@ -184,12 +280,12 @@ fn insert(repr: Repr, semantic_hash: fn(&Repr) -> u64) -> Arc<Node> {
     if let Some(node) = near {
         return node;
     }
-    let node = insert_shared(repr, semantic_hash, exact);
+    let node = insert_shared(form, semantic_hash, exact);
     FRONT.with(|front| front.borrow_mut()[slot] = Some(Arc::clone(&node)));
     node
 }
 
-fn insert_shared(repr: Repr, semantic_hash: fn(&Repr) -> u64, exact: u64) -> Arc<Node> {
+fn insert_shared(form: Form<'_>, semantic_hash: fn(&Repr) -> u64, exact: u64) -> Arc<Node> {
     let shard = &TABLE[(exact as usize) % SHARDS];
     let mut shard = shard
         .lock()
@@ -199,13 +295,14 @@ fn insert_shared(repr: Repr, semantic_hash: fn(&Repr) -> u64, exact: u64) -> Arc
         // bucket where a node is added to it.
         for weak in bucket.iter() {
             if let Some(node) = weak.upgrade()
-                && exact_eq(&node.repr, &repr)
+                && form.is_form_of(&node.repr)
             {
                 return node;
             }
         }
         bucket.retain(|weak| weak.strong_count() > 0);
     }
+    let repr = form.into_repr();
     let hash = semantic_hash(&repr);
     let flags = crate::reference_flags(&repr);
     let node = Arc::new(Node {
@@ -288,8 +385,9 @@ fn same_callable(a: &CallableSig, b: &CallableSig) -> bool {
             .all(|(x, y)| same_template(x, y))
 }
 
-/// Whether `a` and `b` are the same exact form.
-fn exact_eq(a: &Repr, b: &Repr) -> bool {
+/// Whether `a` and `b` are the same exact form, for the forms that are not
+/// borrowed (`ReprRef`).
+fn exact_eq_owned(a: &Repr, b: &Repr) -> bool {
     match (a, b) {
         (Repr::Mixed(aw, a), Repr::Mixed(bw, b)) => aw == bw && same_option(a, b),
         (Repr::Error, Repr::Error)
@@ -306,18 +404,13 @@ fn exact_eq(a: &Repr, b: &Repr) -> bool {
         | (Repr::ParentRef, Repr::ParentRef)
         | (Repr::This, Repr::This) => true,
         (Repr::IntLiteral(a), Repr::IntLiteral(b)) => a == b,
-        (Repr::StringLiteral(a), Repr::StringLiteral(b)) => a == b,
         (Repr::Array(ak, av), Repr::Array(bk, bv))
         | (Repr::OffsetAccess(ak, av), Repr::OffsetAccess(bk, bv)) => same(ak, bk) && same(av, bv),
-        (Repr::ClassString(a), Repr::ClassString(b))
-        | (Repr::ValueOf(a), Repr::ValueOf(b))
-        | (Repr::KeyOf(a), Repr::KeyOf(b)) => same(a, b),
+        (Repr::ValueOf(a), Repr::ValueOf(b)) | (Repr::KeyOf(a), Repr::KeyOf(b)) => same(a, b),
         (Repr::ClassKindString(a), Repr::ClassKindString(b)) => a == b,
         (Repr::ArrayShape(a), Repr::ArrayShape(b))
         | (Repr::ObjectShape(a), Repr::ObjectShape(b)) => Arc::ptr_eq(a, b) || same_shape(a, b),
-        (Repr::Object(an, aa), Repr::Object(bn, ba)) => an == bn && same_all(aa, ba),
         (Repr::Resource { closed: a }, Repr::Resource { closed: b }) => a == b,
-        (Repr::EnumCase(ae, ac), Repr::EnumCase(be, bc)) => ae == be && ac == bc,
         (Repr::Callable(a), Repr::Callable(b)) => match (a, b) {
             (None, None) => true,
             (Some(a), Some(b)) => Arc::ptr_eq(a, b) || same_callable(a, b),
@@ -328,9 +421,6 @@ fn exact_eq(a: &Repr, b: &Repr) -> bool {
         }
         (Repr::TemplateParam(a), Repr::TemplateParam(b)) => same_template(a, b),
         (Repr::VarianceArg(av, a), Repr::VarianceArg(bv, b)) => av == bv && same(a, b),
-        (Repr::Union(a), Repr::Union(b))
-        | (Repr::BenevolentUnion(a), Repr::BenevolentUnion(b))
-        | (Repr::Intersection(a), Repr::Intersection(b)) => same_all(a, b),
         (Repr::IntRange(amin, amax), Repr::IntRange(bmin, bmax)) => amin == bmin && amax == bmax,
         (Repr::FloatLiteral(a), Repr::FloatLiteral(b)) => a.to_bits() == b.to_bits(),
         (Repr::Accessory(a), Repr::Accessory(b)) => a == b,
@@ -377,6 +467,26 @@ fn exact_eq(a: &Repr, b: &Repr) -> bool {
     }
 }
 
+/// Whether the node form `stored` is the exact form `form` borrows or owns.
+fn exact_eq(stored: &Repr, form: &ReprRef<'_>) -> bool {
+    match form.canonical() {
+        ReprRef::StringLiteral(b) => matches!(stored, Repr::StringLiteral(a) if a == b),
+        ReprRef::Object(bn, ba) => {
+            matches!(stored, Repr::Object(an, aa) if an == bn && same_all(aa, ba))
+        }
+        ReprRef::EnumCase(bc, bk) => {
+            matches!(stored, Repr::EnumCase(ac, ak) if ac == bc && ak == bk)
+        }
+        ReprRef::ClassString(b) => matches!(stored, Repr::ClassString(a) if same(a, b)),
+        ReprRef::Union(b) => matches!(stored, Repr::Union(a) if same_all(a, b)),
+        ReprRef::BenevolentUnion(b) => {
+            matches!(stored, Repr::BenevolentUnion(a) if same_all(a, b))
+        }
+        ReprRef::Intersection(b) => matches!(stored, Repr::Intersection(a) if same_all(a, b)),
+        ReprRef::Owned(b) => exact_eq_owned(stored, b),
+    }
+}
+
 fn hash_type(ty: &Type, state: &mut FxHasher) {
     state.write_u64(ty.0.exact);
 }
@@ -391,8 +501,9 @@ fn hash_template(tp: &TemplateParam, state: &mut FxHasher) {
     }
 }
 
-/// The hash of `repr`'s exact form, from its children's.
-fn exact_hash(repr: &Repr) -> u64 {
+/// The hash of the exact form `repr` is, for the forms that are not borrowed
+/// (`ReprRef`), from its children's.
+fn exact_hash_owned(repr: &Repr) -> u64 {
     let mut hasher = FxHasher::default();
     let state = &mut hasher;
     std::mem::discriminant(repr).hash(state);
@@ -417,14 +528,11 @@ fn exact_hash(repr: &Repr) -> u64 {
         | Repr::ParentRef
         | Repr::This => {}
         Repr::IntLiteral(n) => n.hash(state),
-        Repr::StringLiteral(s) => s.hash(state),
         Repr::Array(a, b) | Repr::OffsetAccess(a, b) => {
             hash_type(a, state);
             hash_type(b, state);
         }
-        Repr::ClassString(inner) | Repr::ValueOf(inner) | Repr::KeyOf(inner) => {
-            hash_type(inner, state)
-        }
+        Repr::ValueOf(inner) | Repr::KeyOf(inner) => hash_type(inner, state),
         Repr::ClassKindString(kind) => kind.hash(state),
         Repr::ArrayShape(shape) | Repr::ObjectShape(shape) => {
             for field in shape.fields() {
@@ -437,17 +545,7 @@ fn exact_hash(repr: &Repr) -> u64 {
                 hash_type(&tail.1, state);
             }
         }
-        Repr::Object(name, args) => {
-            name.hash(state);
-            for arg in args {
-                hash_type(arg, state);
-            }
-        }
         Repr::Resource { closed } => closed.hash(state),
-        Repr::EnumCase(class, case) => {
-            class.hash(state);
-            case.hash(state);
-        }
         Repr::Callable(sig) => {
             if let Some(sig) = sig {
                 for param in &sig.params {
@@ -460,11 +558,7 @@ fn exact_hash(repr: &Repr) -> u64 {
                 }
             }
         }
-        Repr::SelfRef(args)
-        | Repr::StaticRef(args)
-        | Repr::Union(args)
-        | Repr::BenevolentUnion(args)
-        | Repr::Intersection(args) => {
+        Repr::SelfRef(args) | Repr::StaticRef(args) => {
             for arg in args {
                 hash_type(arg, state);
             }
@@ -511,6 +605,54 @@ fn exact_hash(repr: &Repr) -> u64 {
             hash_type(if_false, state);
             negated.hash(state);
         }
+        // Borrowed forms: `exact_hash` hashes these through `ReprRef`.
+        Repr::StringLiteral(_)
+        | Repr::Object(..)
+        | Repr::EnumCase(..)
+        | Repr::ClassString(_)
+        | Repr::Union(_)
+        | Repr::BenevolentUnion(_)
+        | Repr::Intersection(_) => unreachable!("hashed as a ReprRef"),
+    }
+    hasher.finish()
+}
+
+/// The hash of an exact form, from its children's: the one definition, for
+/// a form owned and a form borrowed.
+fn exact_hash(form: &ReprRef<'_>) -> u64 {
+    let mut hasher = FxHasher::default();
+    let state = &mut hasher;
+    let members = |tag: u8, members: &[Type], state: &mut FxHasher| {
+        tag.hash(state);
+        for member in members {
+            hash_type(member, state);
+        }
+    };
+    match form.canonical() {
+        ReprRef::StringLiteral(s) => {
+            0xa0u8.hash(state);
+            s.hash(state);
+        }
+        ReprRef::Object(name, args) => {
+            0xa1u8.hash(state);
+            name.hash(state);
+            for arg in args {
+                hash_type(arg, state);
+            }
+        }
+        ReprRef::EnumCase(class, case) => {
+            0xa2u8.hash(state);
+            class.hash(state);
+            case.hash(state);
+        }
+        ReprRef::ClassString(inner) => {
+            0xa3u8.hash(state);
+            hash_type(inner, state);
+        }
+        ReprRef::Union(args) => members(0xa4, args, state),
+        ReprRef::BenevolentUnion(args) => members(0xa5, args, state),
+        ReprRef::Intersection(args) => members(0xa6, args, state),
+        ReprRef::Owned(repr) => return exact_hash_owned(repr),
     }
     hasher.finish()
 }
