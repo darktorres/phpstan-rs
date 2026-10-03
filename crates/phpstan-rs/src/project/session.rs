@@ -25,7 +25,7 @@ use crate::ext::disallowed_calls::DisallowedCallsSettings;
 use crate::ext::mockstan::MockstanSettings;
 use crate::ext::sql::SqlSettings;
 use crate::parent_calls::{self, ClassShapeSettings};
-use crate::registry::settings::ReflectionSettings;
+use crate::registry::settings::{LazyVendorContext, LazyVendorMode, ReflectionSettings};
 use crate::rules_settings::RulesSettings;
 use crate::{ext, ignore_errors};
 
@@ -101,6 +101,9 @@ pub struct Session {
     /// The vendor classes found by name, which `scan_dirs` and `scan_files`
     /// leave out.
     lazy: LazyContext,
+    /// Whether a vendor file's names count only where its declarations hold
+    /// them (`LazyVendorMode::Declarations`).
+    lazy_declarations_only: bool,
     stub_dirs: Vec<PathBuf>,
     level: u8,
     emission_order: bool,
@@ -386,7 +389,14 @@ impl Session {
 
         let mut scan_files = Vec::new();
         let mut lazy = LazyContext::default();
-        let lazy_vendor = reflection.lazy_vendor_context.unwrap_or(true);
+        let lazy_setting = reflection
+            .lazy_vendor_context
+            .unwrap_or(LazyVendorContext::Enabled(true));
+        let lazy_vendor = !matches!(lazy_setting, LazyVendorContext::Enabled(false));
+        let lazy_declarations_only = matches!(
+            lazy_setting,
+            LazyVendorContext::Mode(LazyVendorMode::Declarations)
+        );
         let mut phpstan_api_check_enabled = false;
         let mut composer_manifests = Vec::new();
         let absolute_root = std::fs::canonicalize(&root).unwrap_or_else(|_| root.clone());
@@ -509,6 +519,7 @@ impl Session {
             scan_dirs,
             scan_files,
             lazy,
+            lazy_declarations_only,
             stub_dirs,
             level,
             emission_order: overrides.emission_order,
@@ -720,13 +731,19 @@ impl Session {
                 // A vendor file's are read only where its declarations are,
                 // since its bodies are read by nothing that looks a class
                 // up by a name it holds.
+                let declarations_only = self.lazy_declarations_only;
                 let mut ask = |parsed: &ParsedFile, analyzed: bool| {
                     let strings = if analyzed {
                         &parsed.string_class_names
                     } else {
                         &parsed.declaration_string_class_names
                     };
-                    for key in parsed.references.iter().chain(strings) {
+                    let names = if analyzed || !declarations_only {
+                        &parsed.references
+                    } else {
+                        &parsed.declaration_references
+                    };
+                    for key in names.iter().chain(strings) {
                         if asked.insert(key.clone()) {
                             for file in self.lazy.find(key, &mut listings) {
                                 if loaded.insert(file.clone()) {

@@ -39,6 +39,14 @@ fn project(dir: &TempDir) {
         "<?php namespace Pkg\\Sub; class Other { public function o(): int { return 1; } }",
     );
     dir.write(
+        "vendor/pkg/src/Calc.php",
+        "<?php namespace Pkg; class Calc { public function total(): int { return (new Util())->one(); } }",
+    );
+    dir.write(
+        "vendor/pkg/src/Util.php",
+        "<?php namespace Pkg; class Util { public function one(): int { return 1; } }",
+    );
+    dir.write(
         "vendor/pkg/helpers.php",
         "<?php namespace Pkg; function helper(): int { return 1; }",
     );
@@ -59,6 +67,8 @@ class ComposerStaticInitTest
         'Pkg\\B' => __DIR__ . '/..' . '/pkg/src/B.php',
         'Pkg\\D' => __DIR__ . '/..' . '/pkg/src/D.php',
         'Pkg\\Unused' => __DIR__ . '/..' . '/pkg/src/Unused.php',
+        'Pkg\\Calc' => __DIR__ . '/..' . '/pkg/src/Calc.php',
+        'Pkg\\Util' => __DIR__ . '/..' . '/pkg/src/Util.php',
     );
 }
 "#,
@@ -74,15 +84,18 @@ $a->make()->dd(1);
 $o = new \Pkg\Sub\Other();
 $o->o(1);
 is_a($a, 'Pkg\\ByString');
+(new \Pkg\Calc())->total();
 "#,
     );
 }
 
 /// The diagnostics of the run and the number of context files it loaded.
-fn run(dir: &TempDir, lazy: bool) -> (Vec<(String, u32, String)>, usize) {
-    let config =
-        config::ConfigFile::parse(&format!("lazy_vendor_context = {lazy}\n"), &config_schema())
-            .unwrap();
+fn run(dir: &TempDir, setting: &str) -> (Vec<(String, u32, String)>, usize) {
+    let config = config::ConfigFile::parse(
+        &format!("lazy_vendor_context = {setting}\n"),
+        &config_schema(),
+    )
+    .unwrap();
     let overrides = Overrides {
         paths: vec!["app".into()],
         report_level: Some(u8::MAX),
@@ -119,8 +132,8 @@ fn run(dir: &TempDir, lazy: bool) -> (Vec<(String, u32, String)>, usize) {
 fn loading_by_name_reports_what_loading_every_file_reports() {
     let dir = TempDir::new("lazy_vendor");
     project(&dir);
-    let (eager, eager_loaded) = run(&dir, false);
-    let (lazy, lazy_loaded) = run(&dir, true);
+    let (eager, eager_loaded) = run(&dir, "false");
+    let (lazy, lazy_loaded) = run(&dir, "true");
     assert!(
         eager.len() >= 4,
         "the fixture reports what it is there to compare: {eager:?}"
@@ -131,8 +144,27 @@ fn loading_by_name_reports_what_loading_every_file_reports() {
     // string. `Pkg\ByString` is named by a string of the analysed file, and
     // `Pkg\Sub\Other` is found under its PSR-4 directory.
     assert_eq!(
-        eager_loaded, 8,
-        "A, B, D, Unused, Other, helpers, Hidden, ByString"
+        eager_loaded, 10,
+        "A, B, D, Unused, Other, helpers, Hidden, ByString, Calc, Util"
     );
-    assert_eq!(lazy_loaded, 6, "A, B, D, Other, helpers, ByString");
+    assert_eq!(
+        lazy_loaded, 8,
+        "A, B, D, Other, helpers, ByString, Calc, Util"
+    );
+}
+
+#[test]
+fn following_declarations_only_loads_what_the_declarations_name() {
+    let dir = TempDir::new("lazy_vendor_declarations");
+    project(&dir);
+    let (lazy, lazy_loaded) = run(&dir, "true");
+    let (declarations, declarations_loaded) = run(&dir, "\"declarations\"");
+    assert_eq!(declarations, lazy);
+    // `Pkg\D` and `Pkg\Util` are named only by the bodies of vendor
+    // methods.
+    assert_eq!(lazy_loaded, 8);
+    assert_eq!(
+        declarations_loaded, 6,
+        "A, B, Other, helpers, ByString, Calc"
+    );
 }
