@@ -4,11 +4,11 @@
 use std::sync::Arc;
 
 use rustc_hash::FxHashMap;
-use syntax::ast::{FunctionDecl, Stmt};
+use syntax::ast::{FunctionDecl, MethodDecl, Stmt};
 use syntax::span::Span;
 use syntax::visit::{self, Visitor};
 
-use crate::registry::{BodySummary, Provenance};
+use crate::registry::{BodySummary, InitFlow, Provenance};
 
 /// Where the body of a function or method is found from its provenance.
 pub trait BodySource: Sync {
@@ -18,6 +18,9 @@ pub trait BodySource: Sync {
 
     /// What the passes read of that body.
     fn summary(&self, provenance: &Provenance) -> Option<&Arc<BodySummary>>;
+
+    /// The flow of that body, when it is a method's.
+    fn init_flow(&self, provenance: &Provenance) -> Option<&Arc<InitFlow>>;
 }
 
 /// No bodies at all.
@@ -31,6 +34,10 @@ impl BodySource for NoBodies {
     fn summary(&self, _: &Provenance) -> Option<&Arc<BodySummary>> {
         None
     }
+
+    fn init_flow(&self, _: &Provenance) -> Option<&Arc<InitFlow>> {
+        None
+    }
 }
 
 /// One body: its statements, and what the passes read of them.
@@ -38,6 +45,8 @@ impl BodySource for NoBodies {
 struct Body {
     stmts: Arc<Vec<Stmt>>,
     summary: Arc<BodySummary>,
+    /// A method's flow, which a call to it is followed through.
+    flow: Option<Arc<InitFlow>>,
 }
 
 /// One file's function and method bodies, anonymous classes' included,
@@ -47,24 +56,38 @@ pub struct FileBodies(FxHashMap<Span, Body>);
 
 impl FileBodies {
     pub fn of(stmts: &[Stmt]) -> FileBodies {
-        struct Collect(FxHashMap<Span, Body>);
+        struct Collect {
+            bodies: FxHashMap<Span, Body>,
+            // Whether the next function declaration visited is a method.
+            method: bool,
+        }
         impl<'ast> Visitor<'ast> for Collect {
+            fn visit_method_decl(&mut self, method: &'ast MethodDecl) {
+                self.method = true;
+                visit::walk_method_decl(self, method);
+            }
+
             fn visit_function_decl(&mut self, function: &'ast FunctionDecl) {
+                let is_method = std::mem::take(&mut self.method);
                 if let Some(body) = &function.body {
-                    self.0.insert(
+                    self.bodies.insert(
                         function.name.span,
                         Body {
                             stmts: body.stmts.clone(),
                             summary: Arc::new(BodySummary::of(&body.stmts)),
+                            flow: is_method.then(|| Arc::new(InitFlow::of(&body.stmts))),
                         },
                     );
                 }
                 visit::walk_function_decl(self, function);
             }
         }
-        let mut collect = Collect(FxHashMap::default());
+        let mut collect = Collect {
+            bodies: FxHashMap::default(),
+            method: false,
+        };
         visit::walk_stmts(&mut collect, stmts);
-        FileBodies(collect.0)
+        FileBodies(collect.bodies)
     }
 
     /// The body of the declaration whose name is at `span`.
@@ -77,6 +100,11 @@ impl FileBodies {
     pub fn summary(&self, span: Span) -> Option<&Arc<BodySummary>> {
         self.0.get(&span).map(|body| &body.summary)
     }
+
+    /// The flow of the method whose name is at `span`.
+    pub fn init_flow(&self, span: Span) -> Option<&Arc<InitFlow>> {
+        self.0.get(&span)?.flow.as_ref()
+    }
 }
 
 /// A single file's bodies answer for any declaration, whatever file it
@@ -88,5 +116,9 @@ impl BodySource for FileBodies {
 
     fn summary(&self, provenance: &Provenance) -> Option<&Arc<BodySummary>> {
         self.summary(provenance.declaration_span())
+    }
+
+    fn init_flow(&self, provenance: &Provenance) -> Option<&Arc<InitFlow>> {
+        self.init_flow(provenance.declaration_span())
     }
 }

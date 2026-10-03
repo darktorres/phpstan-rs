@@ -148,6 +148,12 @@ impl BodySource for file_table::FileTable<FileState> {
             .bodies
             .summary(provenance.declaration_span())
     }
+
+    fn init_flow(&self, provenance: &Provenance) -> Option<&Arc<crate::registry::InitFlow>> {
+        self.get_by_origin(provenance.file()?)?
+            .bodies
+            .init_flow(provenance.declaration_span())
+    }
 }
 
 /// A multi-file PHP project: every loaded file's own parse tree, one
