@@ -153,19 +153,36 @@ improvements only (read: loops with no `break` end, so `return.missing` goes and
 `deadCode.unreachable` appears; an arrow function's body takes `xor`; a method's
 docblock is inherited across case-different names; union member order).
 
-- Not built, with the reason:
-  - F3 steps 1-2 (member-level and map-level `Arc` in `ClassReflection`): a
-    finishing pass writes through every member, so each shared member is
-    copied anyway; it needs the passes to write only on change first. Entry
-    level (`NameTable` values behind `Arc`, pointer-first `changed_since`) is done.
-  - P7 direct lowering (`phpdoc::lower`) and the retirement of the text
-    grammar, P11 byte lexer for tags, P12 steps 2-4 (references and the
-    declaration list from the parser, the fused walk), §12.10 (observers,
-    record and replay), C1 steps 5-6 (exit and throw tails, effects, shared
-    rules), §14 (summaries, persistent cache), the C3 tail (identity `Name`
-    equality, `Borrow<str>` removal), C4's structured `LocalKey`, `FileId`
-    pre-assignment on the workers, and guards on `class_exists`-style tests
-    (the stubs carry no per-version availability).
+- Built after that validation, each with a debug-build oracle, not yet
+  validated together (O2, timing and callgrind are the validation to run):
+  F3 member-level and map-level sharing; the C3 tail except step 6 (identity
+  `Name` equality, one interner, `Borrow<str>` removed); C4's structured
+  `LocalKey` with a dependents index; C1's exit and throw points and the
+  shared completion rules; the P11 byte lexer for tags; `FileId`
+  pre-assignment; §14 (body summaries for purity, property writes, assigned
+  properties and the uninitialized-property flow, declarations, Pest facts
+  and declared classes kept per file, context trees dropped in a batch run
+  and parsed again on demand, and the per-file cache under
+  `~/.cache/phpstan-rs/files/<build>/`, keyed by the file's bytes, path,
+  parse options and the build, checksummed, size-capped); P12 step 2 (the
+  parser records references and doc sites) and facts-gated declaration and
+  body walks.
+- Not built:
+  - P7 direct lowering and retiring the text grammar: a sampling profile of
+    Piwigo at this state puts `parse_written_type` at 0.18% inclusive and
+    `to_source_string` at 0.09%, so the saving the plan counted is gone (the
+    docblock, text and resolution memos).
+  - §12.10 (observers, record and replay): a rewrite of the checker's 335
+    rule entry points, family by family, each needing its O2 diff read; not
+    started.
+  - C3 step 6 (`String` keys to `Name` by module), C1's effects and yields
+    as traversal products, `collect_throws`, pull-parsing for the tag lexer.
+  - P12 step 3 as written (the declaration list from the parser: it cannot
+    hold references into a tree still being built) and the fusion of
+    `InitFlow` into the summary walk (its builder follows statement
+    structure and evaluation order).
+  - Guards on `class_exists`-style tests: the stubs carry no per-version
+    availability; it needs `@since`/`@removed` read into the stub index.
 - Behaviour changes to read in the O2 diff: the Pratt parser's rejection of
   nested unparenthesized ternaries and chained comparisons, `__halt_compiler`
   ending the lex, kind-exact dependency keys, a hyphenated non-keyword word in
