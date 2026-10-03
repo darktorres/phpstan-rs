@@ -2,7 +2,7 @@ use crate::registry::NameTable;
 use indexmap::IndexMap;
 use rayon::prelude::*;
 use rustc_hash::{FxHashMap, FxHashSet};
-use std::sync::OnceLock;
+use std::sync::{Arc, OnceLock};
 use syntax::name::{FoldedMap, Name};
 
 /// Each templated ancestor's template bindings, as seen from one class.
@@ -150,8 +150,8 @@ impl Registry {
         type TraitAddition = (
             Name,
             Vec<(Name, FunctionReflection)>,
-            Vec<(Name, PropertyReflection)>,
-            Vec<(Name, ConstantReflection)>,
+            Vec<(Name, Arc<PropertyReflection>)>,
+            Vec<(Name, Arc<ConstantReflection>)>,
             FxHashSet<Name>,
             FxHashSet<Name>,
         );
@@ -480,7 +480,7 @@ impl Registry {
     }
 
     fn inherit_property_hooks_one_pass(&mut self) -> bool {
-        let mut updates: Vec<(Name, Name, PropertyReflection)> = Vec::new();
+        let mut updates: Vec<(Name, Name, Arc<PropertyReflection>)> = Vec::new();
         for (class_name, info) in self.scoped_classes() {
             let Some(parent) = info.extends.first() else {
                 continue;
@@ -492,7 +492,7 @@ impl Registry {
                 if inherited.visibility == Visibility::Private {
                     continue;
                 }
-                let mut merged = own.clone();
+                let mut merged = PropertyReflection::clone(own);
                 if !own.has_get_hook && inherited.has_get_hook {
                     merged.has_get_hook = true;
                 }
@@ -506,7 +506,7 @@ impl Registry {
                     || merged.has_set_hook != own.has_set_hook
                     || merged.is_virtual != own.is_virtual
                 {
-                    updates.push((class_name.clone(), name.clone(), merged));
+                    updates.push((class_name.clone(), name.clone(), Arc::new(merged)));
                 }
             }
         }
@@ -635,7 +635,12 @@ impl Registry {
                 resolve(out, &Type::mixed(), &self.classes);
             }
         }
-        for prop in info.properties.values_mut() {
+        for prop in info
+            .properties
+            .values_mut()
+            .filter(|prop| property_has_deferred_type(prop))
+        {
+            let prop = Arc::make_mut(prop);
             if prop.ty.contains_deferred() {
                 let ty = bind_class_const_self(
                     std::mem::replace(&mut prop.ty, Type::mixed()),
@@ -666,7 +671,12 @@ impl Registry {
                 ));
             }
         }
-        for c in info.consts.values_mut() {
+        for c in info
+            .consts
+            .values_mut()
+            .filter(|c| c.ty.contains_deferred())
+        {
+            let c = Arc::make_mut(c);
             if c.ty.contains_deferred() {
                 let ty = bind_class_const_self(
                     std::mem::replace(&mut c.ty, Type::mixed()),
@@ -747,7 +757,7 @@ impl Registry {
                     .get_mut(&class_name)
                     .and_then(|info| info.consts.get_mut(&const_name))
                 {
-                    sig.ty = ty;
+                    Arc::make_mut(sig).ty = ty;
                 }
             }
         }
@@ -755,13 +765,14 @@ impl Registry {
             let Some(info) = self.classes.get_mut(name) else {
                 continue;
             };
-            for sig in info.consts.values_mut() {
-                if sig.ty.contains_deferred() {
-                    sig.ty = unresolved_class_const_to_mixed(std::mem::replace(
-                        &mut sig.ty,
-                        Type::mixed(),
-                    ));
-                }
+            for sig in info
+                .consts
+                .values_mut()
+                .filter(|sig| sig.ty.contains_deferred())
+            {
+                let sig = Arc::make_mut(sig);
+                sig.ty =
+                    unresolved_class_const_to_mixed(std::mem::replace(&mut sig.ty, Type::mixed()));
             }
         }
     }
@@ -883,6 +894,7 @@ impl Registry {
                 }
             }
             for prop in info.properties.values_mut() {
+                let prop = Arc::make_mut(prop);
                 let ty = std::mem::replace(&mut prop.ty, Type::mixed());
                 prop.ty = substitute_type_aliases(ty, &aliases);
                 if let Some(doc) = &mut prop.doc_ty {
@@ -893,6 +905,7 @@ impl Registry {
                 }
             }
             for c in info.consts.values_mut() {
+                let c = Arc::make_mut(c);
                 let ty = std::mem::replace(&mut c.ty, Type::mixed());
                 c.ty = substitute_type_aliases(ty, &aliases);
             }
@@ -923,7 +936,7 @@ impl Registry {
     #[hotpath::measure]
     pub(crate) fn resolve_deferred_mixins(&mut self) {
         let mut method_additions: Vec<(Name, Name, FunctionReflection)> = Vec::new();
-        let mut property_additions: Vec<(Name, Name, PropertyReflection)> = Vec::new();
+        let mut property_additions: Vec<(Name, Name, Arc<PropertyReflection>)> = Vec::new();
         for (class_name, info) in self.scoped_classes() {
             for mixin_fqn in &info.mixins {
                 let Some(mixin_info) = self.classes.get(mixin_fqn) else {
@@ -1439,6 +1452,14 @@ fn resolve_class_const_type(
     matching_class_const_type(&visible_class_consts(fqn, classes), pattern)
 }
 
+/// Whether any type `resolve_deferred_value_of` rewrites on `prop` contains
+/// a deferred sentinel.
+fn property_has_deferred_type(prop: &PropertyReflection) -> bool {
+    prop.ty.contains_deferred()
+        || prop.doc_ty.as_ref().is_some_and(Type::contains_deferred)
+        || prop.set_ty.as_ref().is_some_and(Type::contains_deferred)
+}
+
 /// Whether any type `resolve_deferred_value_of` rewrites on `sig` contains
 /// a deferred sentinel.
 fn function_has_deferred_type(sig: &FunctionReflection) -> bool {
@@ -1465,11 +1486,10 @@ fn class_has_deferred_type(info: &ClassReflection) -> bool {
             .iter()
             .chain(info.implements_args.values().flatten())
             .any(Type::contains_deferred)
-        || info.properties.values().any(|p| {
-            p.ty.contains_deferred()
-                || p.doc_ty.as_ref().is_some_and(Type::contains_deferred)
-                || p.set_ty.as_ref().is_some_and(Type::contains_deferred)
-        })
+        || info
+            .properties
+            .values()
+            .any(|p| property_has_deferred_type(p))
         || info.consts.values().any(|c| c.ty.contains_deferred())
         || info.template_bounds.values().any(Type::contains_deferred)
 }
@@ -1497,7 +1517,7 @@ fn visible_class_consts(
         for (const_name, sig) in &info.consts {
             consts
                 .entry(const_name.clone())
-                .or_insert_with(|| sig.clone());
+                .or_insert_with(|| ConstantReflection::clone(sig));
         }
         queue.extend(info.extends.iter().cloned());
         queue.extend(info.implements.iter().cloned());
@@ -1780,7 +1800,7 @@ impl Registry {
                 .get_mut(&class)
                 .and_then(|i| i.properties.get_mut(&name))
             {
-                prop.ty = ty;
+                Arc::make_mut(prop).ty = ty;
             }
         }
         for (class, name, param, ty) in fixes {
@@ -1967,6 +1987,7 @@ impl Registry {
                 .get_mut(&class)
                 .and_then(|i| i.properties.get_mut(&name))
             {
+                let prop = Arc::make_mut(prop);
                 if let Some(ty) = ty {
                     prop.ty = ty;
                 }

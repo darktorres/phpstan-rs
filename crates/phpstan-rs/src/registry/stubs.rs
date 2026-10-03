@@ -785,7 +785,7 @@ fn patch_phpstan_stub_classes(classes: &mut [(Name, ClassReflection)]) {
                     continue;
                 }
                 if let Some(sig) = info.properties.get_mut(prop) {
-                    sig.ty = stub_sig.ty.clone();
+                    std::sync::Arc::make_mut(sig).ty = stub_sig.ty.clone();
                 }
             }
         }

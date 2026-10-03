@@ -1,7 +1,6 @@
 use indexmap::IndexMap;
 use rustc_hash::{FxHashMap, FxHashSet};
 
-use crate::registry::Members;
 use crate::registry::function_sig::{
     DeclaredType, FunctionReflection, ParameterReflection, apply_implicit_nullable_default,
     build_template_params, build_type_aliases, declared_type, infer_class_const_type,
@@ -13,8 +12,10 @@ use crate::registry::name_context::{
 use crate::registry::provenance::{Origin, Provenance};
 use crate::registry::reflection_attribute::ReflectionAttribute;
 use crate::registry::type_node::parse_type_node;
+use crate::registry::{Members, Shared};
 use phpdoc::DocType;
 use phpdoc::docblock::{self, DocBlock};
+use std::sync::Arc;
 use syntax::ast::{ClassDecl, ClassDef, ClassKind, ExprKind, Literal, Visibility};
 use syntax::name::FoldedMap;
 use syntax::name_resolution::NameContext;
@@ -373,11 +374,11 @@ pub struct ClassReflection {
     // than once, keyed by its name's position: `methods` holds their
     // union.
     pub(in crate::registry) redeclared_methods: FxHashMap<u32, FunctionReflection>,
-    pub(in crate::registry) properties: FxHashMap<Name, PropertyReflection>,
+    pub(in crate::registry) properties: Shared<FxHashMap<Name, Arc<PropertyReflection>>>,
     // Declaration order is kept: a listing of constants (a `match`
     // remainder, a `Foo::X_*` wildcard) follows source order, as in real
     // PHPStan.
-    pub(in crate::registry) consts: IndexMap<Name, ConstantReflection>,
+    pub(in crate::registry) consts: Shared<IndexMap<Name, Arc<ConstantReflection>>>,
     pub(in crate::registry) uses: Vec<Name>,
     // Method names declared `abstract` in this class's own body (not
     // walked up the hierarchy - a completeness check needs to walk
@@ -627,11 +628,11 @@ impl ClassReflection {
         &self.redeclared_methods
     }
 
-    pub fn properties(&self) -> &FxHashMap<Name, PropertyReflection> {
+    pub fn properties(&self) -> &FxHashMap<Name, Arc<PropertyReflection>> {
         &self.properties
     }
 
-    pub fn consts(&self) -> &IndexMap<Name, ConstantReflection> {
+    pub fn consts(&self) -> &IndexMap<Name, Arc<ConstantReflection>> {
         &self.consts
     }
 
@@ -929,10 +930,10 @@ impl ClassReflection {
             sig.provenance = at(None);
         }
         for (name, sig) in self.properties.iter_mut() {
-            sig.provenance = at(spans.properties.get(name.as_ref()));
+            Arc::make_mut(sig).provenance = at(spans.properties.get(name.as_ref()));
         }
         for (name, sig) in self.consts.iter_mut() {
-            sig.provenance = at(spans.consts.get(name.as_ref()));
+            Arc::make_mut(sig).provenance = at(spans.consts.get(name.as_ref()));
         }
     }
 
@@ -1387,7 +1388,7 @@ impl ClassReflection {
         // does above - only when actually present, so a plain,
         // undocumented const keeps `infer_const_type`'s existing
         // inference.
-        let consts = c
+        let consts: IndexMap<Name, ConstantReflection> = c
             .consts
             .iter()
             .map(|cc| {
@@ -1617,8 +1618,14 @@ impl ClassReflection {
             implements,
             methods: methods.into_iter().collect(),
             redeclared_methods,
-            properties,
-            consts,
+            properties: properties
+                .into_iter()
+                .map(|(name, property)| (name, Arc::new(property)))
+                .collect(),
+            consts: consts
+                .into_iter()
+                .map(|(name, constant)| (name, Arc::new(constant)))
+                .collect(),
             uses: c.used_traits().map(class_ref).collect(),
             abstract_methods,
             static_methods,
@@ -1827,7 +1834,7 @@ impl ClassReflection {
         for case in &e.enum_cases {
             self.consts.insert(
                 Name::from(&case.name),
-                ConstantReflection {
+                Arc::new(ConstantReflection {
                     attributes: ReflectionAttribute::all(&case.attrs),
                     provenance: Provenance::default(),
                     ty: Type::enum_case(Name::from(fqn), Name::from(&*case.name)),
@@ -1841,7 +1848,7 @@ impl ClassReflection {
                     // reasoning as its always-`Visibility::Public` above.
                     is_internal: false,
                     deprecated: None,
-                },
+                }),
             );
         }
         // Cases and constants interleave in source; keep that order.
@@ -1889,7 +1896,7 @@ impl ClassReflection {
         // every real `$case->value` access.
         self.properties.insert(
             Name::from("name"),
-            PropertyReflection {
+            Arc::new(PropertyReflection {
                 attributes: Vec::new(),
                 provenance: Provenance::default(),
                 doc_ty: None,
@@ -1928,7 +1935,7 @@ impl ClassReflection {
                 // the case of.
                 case_refs: Vec::new(),
                 set_case_refs: Vec::new(),
-            },
+            }),
         );
         if let Some(backing) = &e.backing_type {
             // When every case's value is a bare literal (a case value
@@ -1954,7 +1961,7 @@ impl ClassReflection {
             };
             self.properties.insert(
                 Name::from("value"),
-                PropertyReflection {
+                Arc::new(PropertyReflection {
                     attributes: Vec::new(),
                     provenance: Provenance::default(),
                     doc_ty: None,
@@ -1989,7 +1996,7 @@ impl ClassReflection {
                     has_set_hook: false,
                     case_refs: Vec::new(),
                     set_case_refs: Vec::new(),
-                },
+                }),
             );
         }
 
