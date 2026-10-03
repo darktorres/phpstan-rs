@@ -143,7 +143,7 @@ fn a_standalone_check_judges_a_host_declared_before_its_trait() {
     )]);
     let file = project.files.get(Path::new("a.php")).unwrap();
     let mut checker = Checker::new(&project.registry).with_settings(&project.settings);
-    checker.check_program(&file.ast);
+    checker.check_program(file.ast());
     let found = checker.into_diagnostics();
     assert!(
         !found

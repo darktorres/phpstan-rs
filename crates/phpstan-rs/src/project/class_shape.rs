@@ -100,7 +100,7 @@ impl Project {
         files.sort_by(|a, b| a.0.cmp(b.0));
         for (path, file) in files {
             let mut classes = Vec::new();
-            collect_classes(&file.ast, &mut classes);
+            collect_classes(file.ast(), &mut classes);
             let mut found = Vec::new();
             for (fqn, c) in classes {
                 if closed_classes {

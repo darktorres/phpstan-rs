@@ -12,11 +12,11 @@
 //! statically-declared one.
 
 use crate::checker::NamedArgumentCallFacts;
+use crate::project::declared_classes::DeclaredClass;
 use crate::registry::Registry;
 use rustc_hash::{FxHashMap, FxHashSet};
 use std::path::PathBuf;
-use syntax::ast::{Stmt, Visibility};
-use syntax::declarations::{Declared, for_each_declaration};
+use syntax::ast::Visibility;
 use syntax::span::Span;
 use types::Name;
 
@@ -55,38 +55,6 @@ pub(crate) struct RenamedParameterOverride {
 }
 
 pub(crate) type RenamedParameterOverrideFacts = Vec<RenamedParameterOverride>;
-
-/// A class a file declares unconditionally, with what the check reads of
-/// its declaration; the rest it reads from the registry.
-#[derive(Debug, Clone)]
-pub(crate) struct DeclaredClass {
-    name: String,
-    /// The names of its own methods, in source order.
-    own_methods: Vec<Name>,
-    uses_traits: bool,
-}
-
-/// The classes `program` declares unconditionally.
-pub(crate) fn declared_classes(program: &[Stmt]) -> Vec<DeclaredClass> {
-    let mut classes = Vec::new();
-    for_each_declaration(program, |declaration, _, _| {
-        if let Declared::Class(c) = declaration.declared
-            && !declaration.conditional
-        {
-            classes.push(DeclaredClass {
-                name: declaration.name(),
-                own_methods: c
-                    .def
-                    .methods
-                    .iter()
-                    .map(|m| m.function.name.name.clone())
-                    .collect(),
-                uses_traits: !c.def.trait_uses.is_empty(),
-            });
-        }
-    });
-    classes
-}
 
 /// Every renamed-parameter override declared by a class `classes`
 /// declare unconditionally: each class's own methods in source order,

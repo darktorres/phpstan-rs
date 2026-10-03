@@ -16,54 +16,9 @@ use syntax::visit::{Visitor, walk_expr, walk_stmts};
 use types::Type;
 
 use super::Project;
+use super::declared_classes::DeclaredClass;
 use super::use_sites::{RefTarget, index_class_fn_refs_without_source};
 use diagnostics::{Diagnostic, DiagnosticBuilder};
-
-/// A class-like declaration's own facts the registry doesn't keep.
-struct Declared<'a> {
-    name_span: Span,
-    span: Span,
-    attributes: Vec<String>,
-    public_methods: Vec<&'a str>,
-}
-
-/// Every class-like `stmts` declares unconditionally, by its lowercased
-/// fully-qualified name.
-fn collect_declared<'a>(stmts: &'a [Stmt], out: &mut FxHashMap<String, Declared<'a>>) {
-    syntax::declarations::for_each_declaration(stmts, |declaration, _, _| {
-        let syntax::declarations::Declared::Class(c) = declaration.declared else {
-            return;
-        };
-        if declaration.conditional {
-            return;
-        }
-        out.insert(
-            declaration.name().to_ascii_lowercase(),
-            Declared {
-                name_span: c.name.span,
-                span: declaration.span,
-                attributes: c
-                    .def
-                    .attrs
-                    .iter()
-                    .map(|a| {
-                        a.name
-                            .resolved_class()
-                            .unwrap_or(&a.name.written)
-                            .to_string()
-                    })
-                    .collect(),
-                public_methods: c
-                    .def
-                    .methods
-                    .iter()
-                    .filter(|m| m.visibility == Visibility::Public && !m.function.is_constructor())
-                    .map(|m| m.function.name.as_ref())
-                    .collect(),
-            },
-        );
-    });
-}
 
 fn contains(outer: Span, inner: Span) -> bool {
     outer.start <= inner.start && inner.end <= outer.end
@@ -100,7 +55,7 @@ type Finding = (Span, String, &'static str);
 
 struct Context<'p> {
     project: &'p Project,
-    declared: FxHashMap<String, Declared<'p>>,
+    declared: FxHashMap<String, &'p DeclaredClass>,
     patterns: FxHashMap<String, NamePattern>,
 }
 
@@ -266,7 +221,9 @@ impl Project {
         }
         let mut declared = FxHashMap::default();
         for file in self.files.values() {
-            collect_declared(&file.ast, &mut declared);
+            for class in &file.declared_classes {
+                declared.insert(class.name.to_ascii_lowercase(), class);
+            }
         }
         let mut ctx = Context {
             project: self,
@@ -279,17 +236,19 @@ impl Project {
         analyzed.sort_by(|a, b| a.0.cmp(b.0));
         for (path, file) in analyzed {
             let mut classes = FxHashMap::default();
-            collect_declared(&file.ast, &mut classes);
+            for class in &file.declared_classes {
+                classes.insert(class.name.to_ascii_lowercase(), class);
+            }
             if classes.is_empty() {
                 continue;
             }
-            let refs = index_class_fn_refs_without_source(&file.ast);
+            let refs = index_class_fn_refs_without_source(file.ast());
             let mut constructed = FxHashSet::default();
-            new_class_spans(&file.ast, &mut constructed);
+            new_class_spans(file.ast(), &mut constructed);
             let mut class_names: Vec<&String> = classes.keys().collect();
             class_names.sort();
             for lower in class_names {
-                let decl = &classes[lower];
+                let decl = classes[lower];
                 let fqn = ctx.canonical(lower);
                 let dependencies = self.class_dependencies(&fqn, decl, &refs, &constructed);
                 for (index, rule) in rules.iter().enumerate() {
@@ -323,7 +282,7 @@ impl Project {
     fn class_dependencies(
         &self,
         fqn: &str,
-        decl: &Declared,
+        decl: &DeclaredClass,
         refs: &[(Span, RefTarget)],
         constructed: &FxHashSet<Span>,
     ) -> Vec<Dependency> {
@@ -392,7 +351,7 @@ impl Project {
         rule: &ArchitectureRule,
         rule_name: &str,
         fqn: &str,
-        decl: &Declared,
+        decl: &DeclaredClass,
         deps: &[Dependency],
     ) -> Vec<Finding> {
         let mut out = Vec::new();
@@ -612,13 +571,13 @@ impl Project {
                 );
             }
         }
-        if rule.should_have_only_one_public_method == Some(true) && decl.public_methods.len() != 1 {
+        if rule.should_have_only_one_public_method == Some(true) && decl.public_methods != 1 {
             report(
                 &mut out,
                 decl.name_span,
                 format!(
                     "Class {fqn} should have exactly one public method, but has {} (architecture rule \"{rule_name}\").",
-                    decl.public_methods.len()
+                    decl.public_methods
                 ),
                 "architecture.publicMethods",
             );

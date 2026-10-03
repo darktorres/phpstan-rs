@@ -373,7 +373,7 @@ impl Project {
                 out: Vec::new(),
                 origins: FxHashMap::default(),
             };
-            walk_stmts(&mut walker, &file.ast);
+            walk_stmts(&mut walker, file.ast());
             if !walker.out.is_empty() {
                 let mut found = walker.out;
                 found.sort_by_key(|d| (d.span.start.line, d.span.start.col));

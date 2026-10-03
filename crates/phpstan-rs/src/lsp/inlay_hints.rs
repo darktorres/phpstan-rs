@@ -25,7 +25,7 @@ pub(super) fn collect(
 ) -> Option<(Vec<(Span, Name)>, Vec<(Span, Type)>)> {
     let (mut checker, ast) = project.checker_for(path)?;
     checker.collect_inlay_hints = true;
-    checker.check_program(ast);
+    checker.check_program(&ast);
     Some((
         checker.inlay_param_name_hints,
         checker.inlay_local_type_hints,

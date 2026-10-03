@@ -2,7 +2,7 @@ use rayon::prelude::*;
 use rustc_hash::{FxHashMap, FxHashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use syntax::name::{NameMap, NameSet};
 
 use crate::checker::constant_resolver::ConstantResolver;
@@ -20,6 +20,7 @@ use crate::registry::{
 };
 #[cfg(debug_assertions)]
 use crate::registry::{Keep, build_declarations_where};
+use declared_classes::{DeclaredClass, declared_classes};
 use diagnostics::{self, Diagnostic, DiagnosticBuilder};
 use syntax::FileFacts;
 use syntax::ast::{Stmt, StmtKind};
@@ -29,12 +30,12 @@ use syntax::parser::ParseError;
 use syntax::span::{LineIndex, Span};
 use types::Name;
 use whole_program::renamed_named_arguments::NamedArgumentCallFactsWithPath;
-use whole_program::renamed_named_arguments::{DeclaredClass, declared_classes};
 
 mod architecture;
 mod banned;
 mod class_shape;
 mod composer_hygiene;
+pub(crate) mod declared_classes;
 pub(crate) mod duplicate_class_sites;
 mod duplicate_classes;
 pub(crate) mod duplicate_fn_sites;
@@ -92,7 +93,10 @@ impl StubFileSet {
 /// That undo/redo pair is the difference between an incremental update and
 /// a full reload.
 pub(crate) struct FileState {
-    ast: Vec<Stmt>,
+    // Its tree. An analysed file's is kept, as is any file's of a project
+    // that is not built once; a context file's of a batch run is not: what
+    // the passes and the checks read of it was taken when it was parsed.
+    kept_ast: Option<Vec<Stmt>>,
     // The source's length in bytes: what checking the file costs, roughly.
     source_len: usize,
     // Where the file came in the order files were loaded, which a rebuild of
@@ -144,6 +148,66 @@ pub(crate) struct FileState {
     facts: FileFacts,
     // Its lines, which the lines and columns of its spans are found by.
     line_index: Arc<LineIndex>,
+}
+
+/// A file's tree: the one it kept, or one parsed again.
+pub(crate) enum AstRef<'a> {
+    Kept(&'a [Stmt]),
+    Parsed(Arc<Vec<Stmt>>),
+}
+
+impl std::ops::Deref for AstRef<'_> {
+    type Target = [Stmt];
+
+    fn deref(&self) -> &[Stmt] {
+        match self {
+            AstRef::Kept(ast) => ast,
+            AstRef::Parsed(ast) => ast,
+        }
+    }
+}
+
+/// The trees of the context files most recently parsed again, which a pass
+/// that reads a few of them (the files that declare a class writing a
+/// private property) asks for more than once.
+#[derive(Default)]
+struct AstCache(std::collections::VecDeque<(PathBuf, Arc<Vec<Stmt>>)>);
+
+impl AstCache {
+    const CAPACITY: usize = 32;
+
+    fn get(&mut self, path: &Path) -> Option<Arc<Vec<Stmt>>> {
+        let at = self.0.iter().position(|(cached, _)| cached == path)?;
+        let entry = self.0.remove(at)?;
+        let ast = Arc::clone(&entry.1);
+        self.0.push_back(entry);
+        Some(ast)
+    }
+
+    fn insert(&mut self, path: PathBuf, ast: Arc<Vec<Stmt>>) {
+        if self.0.len() == Self::CAPACITY {
+            self.0.pop_front();
+        }
+        self.0.push_back((path, ast));
+    }
+}
+
+impl FileState {
+    /// The file's tree, for a reader of a file whose tree is kept: an
+    /// analysed file's. A test build asserts that no reader asks for the
+    /// tree of a file that has none.
+    fn ast(&self) -> &[Stmt] {
+        debug_assert!(
+            self.kept_ast.is_some(),
+            "a reader asked for the tree of a context file that dropped it"
+        );
+        self.kept_ast.as_deref().unwrap_or(&[])
+    }
+
+    /// The file's tree, when it is kept.
+    fn tree(&self) -> Option<&[Stmt]> {
+        self.kept_ast.as_deref()
+    }
 }
 
 /// The loaded files' function and method bodies, found by provenance.
@@ -267,6 +331,8 @@ pub struct Project {
     // only `textDocument/references`/`textDocument/rename` actually
     // need - see `ensure_member_index_built`'s own doc comment.
     member_index_built: bool,
+    // The trees of context files re-parsed on demand, the latest few.
+    ast_cache: Mutex<AstCache>,
     // Every real `Enum` class's own canonically-declared FQN that
     // `Checker::escaped_enums` (see its own doc comment) recorded for
     // some file - populated/queried alongside `use_sites`/`member_
@@ -562,6 +628,7 @@ impl Project {
             duplicate_class_sites: DuplicateClassSites::default(),
             use_sites: UseSiteIndex::default(),
             member_index_built: false,
+            ast_cache: Mutex::default(),
             escaped_enum_cases: FxHashSet::default(),
             escaped_member_classes: FxHashSet::default(),
         }
@@ -742,7 +809,7 @@ impl Project {
             if !report_unmatched {
                 continue;
             }
-            let trait_lines = trait_line_ranges(&file.ast, &file.line_index);
+            let trait_lines = trait_line_ranges(file.ast(), &file.line_index);
             let in_trait = |line: u32| trait_lines.iter().any(|(a, b)| (*a..=*b).contains(&line));
             let mut unmatched: Vec<Diagnostic> = Vec::new();
             let mut unmatched_line = |line: u32, message: String, identifier: &'static str| {
@@ -817,10 +884,38 @@ impl Project {
         self.files.get(path)?.source.as_deref()
     }
 
+    /// The tree of a loaded file: the one it kept, or, for a context file
+    /// of a batch run, one parsed from the file again.
+    pub(crate) fn ast_of(&self, path: &Path) -> Option<AstRef<'_>> {
+        let file = self.files.get(path)?;
+        if let Some(ast) = file.tree() {
+            return Some(AstRef::Kept(ast));
+        }
+        if let Some(ast) = self.ast_cache.lock().ok()?.get(path) {
+            return Some(AstRef::Parsed(ast));
+        }
+        let full = match &self.working_dir {
+            Some(root) => root.join(path),
+            None => path.to_path_buf(),
+        };
+        let bytes = std::fs::read(full).ok()?;
+        let parsed = match String::from_utf8(bytes) {
+            Ok(text) => parse_with_ignores(path, &text, None),
+            Err(error) => parse_with_ignores(path, &error.into_bytes(), None),
+        }
+        .ok()?;
+        let ast = Arc::new(parsed.ast);
+        self.ast_cache
+            .lock()
+            .ok()?
+            .insert(path.to_path_buf(), Arc::clone(&ast));
+        Some(AstRef::Parsed(ast))
+    }
+
     /// The AST of a currently-loaded file, if any - the position-walker's
     /// (`lsp::navigation`) own entry point.
     pub(crate) fn ast(&self, path: &Path) -> Option<&[Stmt]> {
-        Some(&self.files.get(path)?.ast)
+        self.files.get(path)?.tree()
     }
 
     /// Parses one file and indexes its declarations into the shared
@@ -959,7 +1054,7 @@ impl Project {
         self.files.insert_at(
             id,
             FileState {
-                ast,
+                kept_ast: (analyzed || !self.built_once).then_some(ast),
                 source_len: source.len(),
                 load_order,
                 mentions_phpstan: mentions_phpstan(&functions, &classes, &references),
@@ -1142,11 +1237,11 @@ impl Project {
         // What the files' trees build, which their kept declarations are.
         #[cfg(debug_assertions)]
         for (_, _, path, decls) in &sources {
-            if let Some(state) = self.files.get(path) {
-                let built = crate::registry::build_declarations(
-                    &state.ast,
-                    &Origin::File(Arc::from(*path)),
-                );
+            if let Some(state) = self.files.get(path)
+                && let Some(ast) = state.tree()
+            {
+                let built =
+                    crate::registry::build_declarations(ast, &Origin::File(Arc::from(*path)));
                 assert!(
                     built.iter().eq(decls.iter()),
                     "the declarations kept of {} are not those its tree builds",
@@ -1508,10 +1603,13 @@ impl Project {
             };
             // What the file's tree builds, which its kept declarations are.
             #[cfg(debug_assertions)]
-            if !is_pending && let Some(state) = self.files.get(path) {
+            if !is_pending
+                && let Some(state) = self.files.get(path)
+                && let Some(ast) = state.tree()
+            {
                 let origin = Origin::File(Arc::from(path));
                 let keep: Keep<'_> = &rebuilt;
-                let built = build_declarations_where(&state.ast, &origin, Some(keep));
+                let built = build_declarations_where(ast, &origin, Some(keep));
                 let kept: Vec<&BuiltDecl> = decls
                     .iter()
                     .filter(|decl| {
@@ -1570,7 +1668,7 @@ impl Project {
             && let Some(file) = self.files.get(path)
             && let Some(source) = &file.source
         {
-            for (span, target) in use_sites::index_class_fn_refs(&file.ast, source) {
+            for (span, target) in use_sites::index_class_fn_refs(file.ast(), source) {
                 self.use_sites.insert(path, target, span);
             }
         }
@@ -1607,7 +1705,7 @@ impl Project {
                         .par_iter()
                         .filter_map(|(path, file)| {
                             let source = file.source.as_ref()?;
-                            Some((path, use_sites::index_class_fn_refs(&file.ast, source)))
+                            Some((path, use_sites::index_class_fn_refs(file.ast(), source)))
                         })
                         .collect()
                 });
@@ -1779,7 +1877,7 @@ impl Project {
         self.files.insert(
             path.to_path_buf(),
             FileState {
-                ast,
+                kept_ast: Some(ast),
                 source_len: new_source.len(),
                 load_order,
                 mentions_phpstan: mentions_phpstan(&functions, &classes, &references),
@@ -2164,8 +2262,9 @@ impl Project {
     /// collection flags set first (e.g. `textDocument/inlayHint`'s
     /// `collect_inlay_hints`) rather than through `check_files`'
     /// fixed diagnostic pipeline. Mirrors `run_checker`'s setup exactly.
-    pub(crate) fn checker_for(&self, path: &Path) -> Option<(Checker<'_>, &[Stmt])> {
+    pub(crate) fn checker_for(&self, path: &Path) -> Option<(Checker<'_>, AstRef<'_>)> {
         let file = self.files.get(path)?;
+        let ast = self.ast_of(path)?;
         let mut checker = Checker::new(&self.registry)
             .with_sql(&self.sql)
             .with_settings(&self.settings)
@@ -2182,7 +2281,7 @@ impl Project {
         checker.set_include_guards_possible(
             file.facts.mentions & checker::includes::MENTIONS_GUARD != 0,
         );
-        Some((checker, &file.ast))
+        Some((checker, ast))
     }
 
     /// `textDocument/semanticTokens/full`'s own independent re-walk of
@@ -2196,7 +2295,7 @@ impl Project {
         let Some((mut checker, ast)) = self.checker_for(path) else {
             return Vec::new();
         };
-        checker.check_program(ast);
+        checker.check_program(&ast);
         checker.take_semantic_tokens()
     }
 
@@ -2211,9 +2310,9 @@ impl Project {
         checker.set_defer_property_type_checks(true);
         checker.set_collect_member_refs(collect_member_refs);
         checker.set_dump_types(dump_types);
-        checker.check_program(ast);
+        checker.check_program(&ast);
         if collect_member_refs {
-            checker.collect_default_and_const_value_member_refs(ast);
+            checker.collect_default_and_const_value_member_refs(&ast);
         }
         FileCheck {
             member_refs: checker.take_member_ref_sites(),
@@ -2264,7 +2363,7 @@ impl Project {
         diagnostics.sort_by_key(|d| (d.span.start.line, d.span.start.col));
         if self.settings.phpstan_api {
             diagnostics.extend(checker::phpstan_api::check_phpstan_api_usage(
-                &file.ast,
+                file.ast(),
                 &file.line_index,
                 &self.registry,
                 Some(self.package_name(path)),
