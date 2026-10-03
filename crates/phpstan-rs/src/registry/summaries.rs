@@ -111,7 +111,13 @@ impl BodySummary {
         syntax::visit::walk_stmts(&mut walk, body);
         let mut summary = walk.finish();
         summary.empty = body.is_empty();
-        summary.assigned = AssignedProperties::of(body);
+        // What a walk of the statements alone finds.
+        #[cfg(debug_assertions)]
+        assert_eq!(
+            summary.assigned,
+            AssignedProperties::of(body),
+            "the walk of a body and the walk of its statements disagree on the properties it assigns"
+        );
         summary
     }
 }
@@ -120,7 +126,7 @@ impl BodySummary {
 /// nested and however conditional, outside closures: `$this->p = ...`,
 /// `$this->p ??= ...`, and the same on a local variable the body
 /// assigned a `new` expression.
-#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, serde::Serialize, serde::Deserialize)]
 pub(crate) struct AssignedProperties {
     /// The properties assigned on `$this`.
     on_this: Box<[Name]>,
@@ -131,48 +137,66 @@ pub(crate) struct AssignedProperties {
     new_instances: Box<[(Name, Name)]>,
 }
 
+/// Collects what the expression statements of a body assign.
+#[derive(Default)]
+struct AssignedBuilder {
+    on_this: Vec<Name>,
+    on_variables: Vec<(Name, Name)>,
+    new_instances: Vec<(Name, Name)>,
+}
+
+impl AssignedBuilder {
+    /// The expression of a statement of the body, outside its closures.
+    fn statement(&mut self, e: &Expr) {
+        match &e.kind {
+            ExprKind::Assign(lhs, rhs) => {
+                if let ExprKind::Variable(v) = &lhs.kind
+                    && let Some(class) = new_instance_class(rhs)
+                {
+                    self.new_instances.push((v.clone(), class));
+                }
+                record_property_assigned(lhs, &mut self.on_this, &mut self.on_variables);
+            }
+            ExprKind::AssignRef(lhs, _) | ExprKind::CompoundAssign(BinOp::Coalesce, lhs, _) => {
+                record_property_assigned(lhs, &mut self.on_this, &mut self.on_variables);
+            }
+            _ => {}
+        }
+    }
+
+    fn finish(mut self) -> Option<Box<AssignedProperties>> {
+        if self.on_this.is_empty() && self.on_variables.is_empty() {
+            return None;
+        }
+        self.on_this.sort();
+        self.on_this.dedup();
+        self.on_variables.sort();
+        self.on_variables.dedup();
+        self.new_instances.sort();
+        self.new_instances.dedup();
+        Some(Box::new(AssignedProperties {
+            on_this: self.on_this.into_boxed_slice(),
+            on_variables: self.on_variables.into_boxed_slice(),
+            new_instances: self.new_instances.into_boxed_slice(),
+        }))
+    }
+}
+
 impl AssignedProperties {
+    /// What a walk of the statements of `body` alone finds: the reference
+    /// for what the one walk of the summary does.
+    #[cfg(debug_assertions)]
     fn of(body: &[Stmt]) -> Option<Box<AssignedProperties>> {
-        let mut on_this = Vec::new();
-        let mut on_variables = Vec::new();
-        let mut new_instances = Vec::new();
+        let mut builder = AssignedBuilder::default();
         for stmt in body {
             syntax::visit::any_stmt_in_body(stmt, |s| {
-                let StmtKind::Expression(e) = &s.kind else {
-                    return false;
-                };
-                match &e.kind {
-                    ExprKind::Assign(lhs, rhs) => {
-                        if let ExprKind::Variable(v) = &lhs.kind
-                            && let Some(class) = new_instance_class(rhs)
-                        {
-                            new_instances.push((v.clone(), class));
-                        }
-                        record_property_assigned(lhs, &mut on_this, &mut on_variables);
-                    }
-                    ExprKind::AssignRef(lhs, _)
-                    | ExprKind::CompoundAssign(BinOp::Coalesce, lhs, _) => {
-                        record_property_assigned(lhs, &mut on_this, &mut on_variables);
-                    }
-                    _ => {}
+                if let StmtKind::Expression(e) = &s.kind {
+                    builder.statement(e);
                 }
                 false
             });
         }
-        if on_this.is_empty() && on_variables.is_empty() {
-            return None;
-        }
-        on_this.sort();
-        on_this.dedup();
-        on_variables.sort();
-        on_variables.dedup();
-        new_instances.sort();
-        new_instances.dedup();
-        Some(Box::new(AssignedProperties {
-            on_this: on_this.into_boxed_slice(),
-            on_variables: on_variables.into_boxed_slice(),
-            new_instances: new_instances.into_boxed_slice(),
-        }))
+        builder.finish()
     }
 
     /// Whether the body assigns `prop` on `$this` or on a variable it made
@@ -243,6 +267,7 @@ struct Summarizer {
     writes_own_object: bool,
     anything: bool,
     calls: Vec<CallWrites>,
+    assigned: AssignedBuilder,
 }
 
 impl Summarizer {
@@ -258,7 +283,7 @@ impl Summarizer {
                 calls: self.calls.into_boxed_slice(),
             },
             empty: false,
-            assigned: None,
+            assigned: self.assigned.finish(),
         }
     }
 
@@ -378,6 +403,12 @@ impl<'ast> Visitor<'ast> for Summarizer {
                 _ => false,
             };
             self.impure_unless_in_closure(impure);
+            // A closure's statements are its own.
+            if self.closures == 0
+                && let StmtKind::Expression(e) = &stmt.kind
+            {
+                self.assigned.statement(e);
+            }
             match &stmt.kind {
                 StmtKind::Unset(targets) => {
                     for target in targets {
