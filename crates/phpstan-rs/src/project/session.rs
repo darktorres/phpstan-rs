@@ -582,28 +582,31 @@ impl Session {
         interner: &Arc<Interner>,
     ) -> Option<ReadFile> {
         let bytes = std::fs::read(self.root.join(path)).ok()?;
-        let parsed =
-            std::panic::catch_unwind(|| super::parse_file(path, &bytes, is_stub, interner))
-                .ok()?
-                .ok()?;
-        // The parse reads the bytes. The text of the file is made only when
-        // the project keeps it; what checking costs is told by its length
-        // as a lossy reading of it has, which is the bytes' own for a file
-        // that is UTF-8.
-        let (len, source) = match String::from_utf8(bytes) {
-            Ok(text) if self.settings.retain_source => (text.len(), text),
-            Ok(text) => (text.len(), String::new()),
+        // Whether the file is UTF-8 is settled here, once: the text is the
+        // bytes, moved, and the lexer takes it as it is. What checking
+        // costs is told by the length of the text as a lossy reading of the
+        // bytes has it, which is the bytes' own for a file that is UTF-8.
+        let (len, text) = match String::from_utf8(bytes) {
+            Ok(text) => (text.len(), Ok(text)),
             Err(error) => {
-                let text = String::from_utf8_lossy(error.as_bytes()).into_owned();
-                (
-                    text.len(),
-                    if self.settings.retain_source {
-                        text
-                    } else {
-                        String::new()
-                    },
-                )
+                let bytes = error.into_bytes();
+                let len = String::from_utf8_lossy(&bytes).len();
+                (len, Err(bytes))
             }
+        };
+        let parsed = std::panic::catch_unwind(|| match &text {
+            Ok(text) => super::parse_file(path, text, is_stub, interner),
+            Err(bytes) => super::parse_file(path, bytes, is_stub, interner),
+        })
+        .ok()?
+        .ok()?;
+        // The text of the file is kept only when the project keeps it.
+        let source = match text {
+            Ok(text) if self.settings.retain_source => text,
+            Err(bytes) if self.settings.retain_source => {
+                String::from_utf8_lossy(&bytes).into_owned()
+            }
+            _ => String::new(),
         };
         Some(ReadFile {
             len,

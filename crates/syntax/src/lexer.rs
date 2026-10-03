@@ -17,6 +17,10 @@ pub struct LexWarning {
 
 pub struct Lexer<'a> {
     src: &'a [u8],
+    // The source as text when it is valid UTF-8, which was settled once,
+    // where the lexer was made: a name's or a comment's text is then a
+    // slice of it, which needs no validation of its own.
+    text: Option<&'a str>,
     pos: usize,
     in_php: bool,
     // Byte offsets where each line begins (`line_starts[0]` is always 0) -
@@ -199,48 +203,36 @@ pub struct LexOutput {
 
 impl<'a> Lexer<'a> {
     pub fn new(src: &'a str) -> Self {
-        Lexer::from_bytes(src.as_bytes())
+        Lexer::build(src.as_bytes(), Some(src), false)
     }
 
     /// A file's source as its bytes, which need not be UTF-8: a string
-    /// literal keeps them as written.
+    /// literal keeps them as written. Whether they are valid UTF-8 is
+    /// settled here, once.
     pub fn from_bytes(bytes: &'a [u8]) -> Self {
-        let line_starts = compute_line_starts(bytes);
-        Lexer {
-            src: bytes,
-            pos: 0,
-            in_php: false,
-            cursor: first_line_cursor(&line_starts, bytes.len()),
-            line_starts,
-            last_token_start: 0,
-            line_marks: (0, vec![(0, Position { line: 1, col: 1 })]),
-            ascii: bytes.is_ascii(),
-            utf8: bytes.is_ascii() || std::str::from_utf8(bytes).is_ok(),
-            base: Position { line: 1, col: 1 },
-            pending_keyword_raw: None,
-            comments: Vec::new(),
-            warnings: Vec::new(),
-            interner: Arc::clone(Interner::global()),
-            names: hashbrown::HashTable::new(),
-        }
+        Lexer::build(bytes, std::str::from_utf8(bytes).ok(), false)
     }
 
     /// For re-lexing a fragment of PHP that is already known to be code,
     /// e.g. the inside of a `{$...}` string interpolation. Skips inline-HTML
     /// mode entirely.
     pub fn new_in_php(src: &'a str) -> Self {
-        let bytes = src.as_bytes();
+        Lexer::build(src.as_bytes(), Some(src), true)
+    }
+
+    fn build(bytes: &'a [u8], text: Option<&'a str>, in_php: bool) -> Self {
         let line_starts = compute_line_starts(bytes);
         Lexer {
             src: bytes,
+            text,
             pos: 0,
-            in_php: true,
+            in_php,
             cursor: first_line_cursor(&line_starts, bytes.len()),
             line_starts,
             last_token_start: 0,
             line_marks: (0, vec![(0, Position { line: 1, col: 1 })]),
-            ascii: bytes.is_ascii(),
-            utf8: bytes.is_ascii() || std::str::from_utf8(bytes).is_ok(),
+            ascii: text.is_some_and(str::is_ascii),
+            utf8: text.is_some(),
             base: Position { line: 1, col: 1 },
             pending_keyword_raw: None,
             comments: Vec::new(),
@@ -248,6 +240,19 @@ impl<'a> Lexer<'a> {
             interner: Arc::clone(Interner::global()),
             names: hashbrown::HashTable::new(),
         }
+    }
+
+    /// The source in `range` as text: a slice of the text when the source
+    /// is UTF-8, which a range of identifier bytes always is, and the
+    /// lossy reading of the bytes when it is not.
+    fn slice(&self, range: std::ops::Range<usize>) -> std::borrow::Cow<'a, str> {
+        if let Some(text) = self.text
+            && let Some(slice) = text.get(range.clone())
+        {
+            return std::borrow::Cow::Borrowed(slice);
+        }
+        let src: &'a [u8] = self.src;
+        lossy(&src[range])
     }
 
     /// The name for `text`: this lexer's own, or the interner's.
@@ -438,7 +443,7 @@ impl<'a> Lexer<'a> {
         let comments = std::mem::take(&mut self.comments)
             .into_iter()
             .map(|(start, end)| {
-                let text = lossy(&self.src[start..end]).into_owned();
+                let text = self.slice(start..end).into_owned();
                 (self.line_col_at(start), text)
             })
             .collect();
@@ -633,11 +638,11 @@ impl<'a> Lexer<'a> {
                 self.pending_keyword_raw = if &self.src[span.clone()] == kw.as_str().as_bytes() {
                     None
                 } else {
-                    Some(lossy(&self.src[span]).into_owned())
+                    Some(self.slice(span).into_owned())
                 };
                 return Token::Keyword(kw);
             }
-            let s = lossy(&self.src[span]);
+            let s = self.slice(span);
             return Token::Identifier(self.name(&s));
         }
 
@@ -843,8 +848,7 @@ impl<'a> Lexer<'a> {
 
     fn lex_ident_raw(&mut self) -> std::borrow::Cow<'a, str> {
         let span = self.lex_ident_span();
-        let src: &'a [u8] = self.src;
-        lossy(&src[span])
+        self.slice(span)
     }
 
     fn lex_number(&mut self) -> Token {
@@ -944,7 +948,7 @@ impl<'a> Lexer<'a> {
             Some(found) => self.pos + found + 2,
             None => self.src.len(),
         };
-        Token::DocComment(self.interner.str(&lossy(&self.src[start..self.pos])))
+        Token::DocComment(self.interner.str(&self.slice(start..self.pos)))
     }
 
     fn lex_operator(&mut self) -> Token {

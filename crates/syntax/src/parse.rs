@@ -77,13 +77,66 @@ pub struct ParsedFile {
     pub goto_labels: Box<[GotoLabel]>,
 }
 
+/// A file's source: text already known to be UTF-8, or bytes, which are
+/// checked once and read lossily where they are not.
+#[derive(Debug, Clone, Copy)]
+pub enum Source<'a> {
+    Text(&'a str),
+    Bytes(&'a [u8]),
+}
+
+impl<'a> From<&'a str> for Source<'a> {
+    fn from(text: &'a str) -> Self {
+        Source::Text(text)
+    }
+}
+
+impl<'a> From<&'a String> for Source<'a> {
+    fn from(text: &'a String) -> Self {
+        Source::Text(text)
+    }
+}
+
+impl<'a> From<&'a [u8]> for Source<'a> {
+    fn from(bytes: &'a [u8]) -> Self {
+        Source::Bytes(bytes)
+    }
+}
+
+impl<'a> From<&'a Vec<u8>> for Source<'a> {
+    fn from(bytes: &'a Vec<u8>) -> Self {
+        Source::Bytes(bytes)
+    }
+}
+
+impl<'a, const N: usize> From<&'a [u8; N]> for Source<'a> {
+    fn from(bytes: &'a [u8; N]) -> Self {
+        Source::Bytes(bytes)
+    }
+}
+
+impl<'a> Lexer<'a> {
+    /// A lexer over `source`: nothing is validated for text.
+    pub fn from_source(source: Source<'a>) -> Self {
+        match source {
+            Source::Text(text) => Lexer::new(text),
+            Source::Bytes(bytes) => Lexer::from_bytes(bytes),
+        }
+    }
+}
+
 /// Lexes and parses `source`, interning its names in `interner`.
-pub fn parse(source: &[u8], interner: &Arc<Interner>) -> Result<ParsedFile, ParseError> {
+pub fn parse<'a>(
+    source: impl Into<Source<'a>>,
+    interner: &Arc<Interner>,
+) -> Result<ParsedFile, ParseError> {
     let LexOutput {
         lexed,
         comments: line_comments,
         warnings,
-    } = Lexer::from_bytes(source).with_interner(interner).lex();
+    } = Lexer::from_source(source.into())
+        .with_interner(interner)
+        .lex();
     let mut comments: Vec<Comment> = line_comments
         .into_iter()
         .map(|(start, text)| Comment {

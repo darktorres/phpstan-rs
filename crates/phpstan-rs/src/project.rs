@@ -830,7 +830,7 @@ impl Project {
         // concept at all (that's a batch `check-project`-only config key,
         // wired through `read_and_parse_file` instead) and no way to
         // enable `check_duplicate_class_declarations` in the first place.
-        let parsed = parse_file(&path, source.as_bytes(), false, &self.interner)?;
+        let parsed = parse_file(&path, source, false, &self.interner)?;
         self.insert_parsed_file(path, parsed, source.to_string(), analyzed);
         Ok(())
     }
@@ -972,7 +972,7 @@ impl Project {
             let bytes = fs::read(path).ok()?;
             let source = String::from_utf8_lossy(&bytes).into_owned();
             Some(
-                parse_file(path, source.as_bytes(), false, &interner).map(|mut parsed| {
+                parse_file(path, source.as_str(), false, &interner).map(|mut parsed| {
                     this.index_use_sites(&mut parsed, &source);
                     (source, parsed)
                 }),
@@ -2562,9 +2562,9 @@ type Parsed = (
     FileFacts,
 );
 
-fn parse_with_ignores(
+fn parse_with_ignores<'a>(
     path: &Path,
-    source: &[u8],
+    source: impl Into<syntax::Source<'a>>,
     interner: &Arc<Interner>,
 ) -> Result<Parsed, ParseError> {
     let parsed = syntax::parse(source, interner)?;
@@ -2644,9 +2644,9 @@ pub struct ParsedFile {
 /// caller building many `ParsedFile`s concurrently passes a different
 /// `path` to each call with no coordination needed between them.
 #[hotpath::measure]
-pub fn parse_file(
+pub fn parse_file<'a>(
     path: &Path,
-    source: &[u8],
+    source: impl Into<syntax::Source<'a>>,
     is_stub: bool,
     interner: &Arc<Interner>,
 ) -> Result<ParsedFile, ParseError> {
