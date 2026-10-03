@@ -3812,6 +3812,7 @@ impl<'a> Checker<'a> {
                     std::mem::take(&mut self.current_function_has_unannotated_call);
                 let previous_explicit_throw_points =
                     std::mem::take(&mut self.current_function_explicit_throw_points);
+                let previous_exit_points = std::mem::take(&mut self.current_function_exit_points);
                 // The closure's own `return` statements belong to the
                 // closure, not the enclosing function's too-wide-return
                 // accumulator - saved/restored the same way, and read back
@@ -3900,6 +3901,7 @@ impl<'a> Checker<'a> {
                 self.try_throw_states = previous_try_throw_states;
                 self.current_function_has_unannotated_call = previous_unannotated_call;
                 self.current_function_explicit_throw_points = previous_explicit_throw_points;
+                self.current_function_exit_points = previous_exit_points;
                 self.current_function_goto_targets = previous_goto_targets;
                 self.current_function_assigned_variables = previous_assigned_variables;
                 self.current_function_by_ref_params = previous_by_ref_params;
@@ -4047,6 +4049,7 @@ impl<'a> Checker<'a> {
                     std::mem::take(&mut self.current_function_has_unannotated_call);
                 let previous_explicit_throw_points =
                     std::mem::take(&mut self.current_function_explicit_throw_points);
+                let previous_exit_points = std::mem::take(&mut self.current_function_exit_points);
                 // Same by-ref-parameter exemption as the `Closure` arm
                 // above - an arrow function's own implicit by-value
                 // capture (`arrow_locals` is a clone, not an alias) means
@@ -4069,6 +4072,7 @@ impl<'a> Checker<'a> {
                 self.try_throw_states = previous_try_throw_states;
                 self.current_function_has_unannotated_call = previous_unannotated_call;
                 self.current_function_explicit_throw_points = previous_explicit_throw_points;
+                self.current_function_exit_points = previous_exit_points;
                 self.current_function_by_ref_params = previous_by_ref_params;
                 self.current_function_by_ref_exit_snapshots = previous_by_ref_exit_snapshots;
                 self.current_function_by_ref_params_with_tag = previous_by_ref_params_with_tag;

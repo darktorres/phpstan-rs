@@ -1,7 +1,5 @@
 use crate::checker::keys::{KeyData, LocalKey};
 use crate::checker::{Checker, Discriminant, Locals};
-use syntax::ast::*;
-use syntax::visit::any_stmt_in_body;
 use types::{self, Relation, Type};
 
 mod boolean_conditions;
@@ -599,99 +597,4 @@ pub(crate) fn merge_scopes(
         }
     }
     merged
-}
-
-/// `OverwrittenExitPointByFinallyRule`: collects the
-/// concrete `return`/`throw`/`break`/`continue` statement(s) that make
-/// `stmt` genuinely exit - the same question `Completion::terminates` already
-/// answers as a bare `bool`, but naming *which* statement(s) so a
-/// `finally` block that also unconditionally exits can be reported as
-/// silently overwriting them (a well-known, real PHP gotcha - a
-/// `finally`'s own exit point always wins, even over an in-flight
-/// exception). Deliberately narrower than `Completion::terminates` itself:
-/// only recurses into `Block`/`If` (common enough in real code to name
-/// every contributing line for without guessing) - a `Switch`/`Try`/
-/// loop body can still make `Completion::terminates` return `true`, but this
-/// returns nothing for one rather than picking an arbitrary nested line,
-/// the same "don't guess" leniency this project applies elsewhere. An
-/// empty result here means "no diagnostic for this side," never a false
-/// positive - `Completion::terminates`'s own gate gets checked independently
-/// wherever this is called, so the two can never disagree about whether
-/// something is being overwritten, only about whether this can *name* it.
-pub(crate) fn collect_exit_point_statements(stmt: &Stmt) -> Vec<&Stmt> {
-    syntax::stack::guard(|| match &stmt.kind {
-        StmtKind::Return(_) | StmtKind::Throw(_) | StmtKind::Break(_) | StmtKind::Continue(_) => {
-            vec![stmt]
-        }
-        StmtKind::Block(stmts)
-        | StmtKind::Declare {
-            body: Some(stmts), ..
-        } => stmts
-            .last()
-            .map(collect_exit_point_statements)
-            .unwrap_or_default(),
-        StmtKind::If(if_stmt) => if_stmt
-            .bodies()
-            .flat_map(collect_exit_point_statements)
-            .collect(),
-        _ => Vec::new(),
-    })
-}
-
-/// `OverwrittenExitPointByFinallyRule`'s own `describeExitPoint` -
-/// matches its exact wording (`RuleErrorBuilder::message` interpolates
-/// this directly into "This %s is overwritten..."/"The overwriting %s
-/// is on this line.").
-pub(crate) fn exit_point_description(stmt: &Stmt) -> &'static str {
-    match &stmt.kind {
-        StmtKind::Return(_) => "return",
-        StmtKind::Throw(_) => "throw",
-        StmtKind::Break(_) => "break",
-        StmtKind::Continue(_) => "continue",
-        _ => "exit point",
-    }
-}
-
-/// Whether `stmt` contains a `break` anywhere in its own subtree,
-/// including inside a nested loop/switch that statement doesn't
-/// unqualified-`break` out of at all - deliberately conservative in the
-/// same direction `Completion::terminates`'s own `while (true)` case needs:
-/// treating any `break` found anywhere as "this loop might exit on its
-/// own" only ever causes a missed simplification, never a wrong
-/// termination conclusion, so there's no need to track which specific
-/// loop/switch a given `break`'s own level actually targets.
-///
-/// `checker/stmt.rs`'s own constant-condition checks
-/// (`literal_truthiness`'s callers) reuse this exact same conservatism
-/// for their own `while (true)`/`do {} while (true)`/`do {} while
-/// (false)` exclusions, real PHPStan's own
-/// `WhileLoopAlwaysTrueConditionRule`/`DoWhileLoopConstantConditionRule`
-/// breakless-detection.
-pub(crate) fn stmt_contains_break(stmt: &Stmt) -> bool {
-    any_stmt_in_body(stmt, |s| matches!(s.kind, StmtKind::Break(_)))
-}
-
-/// `while`/`do-while`'s own "always true" breakless detection needs more
-/// than just `stmt_contains_break`:
-/// `WhileLoopAlwaysTrueConditionRule`'s real suppression logic
-/// (`BreaklessWhileLoopNode::getExitPoints()`) treats any loop exit
-/// point that isn't a `break` or a bare/level-1 `continue` as
-/// disqualifying - not just a `continue` whose own level escapes past
-/// this loop, but a `return`/`throw` reachable inside the loop body at
-/// all (e.g. `while (true) { ...; continue 2; }` with no literal
-/// `break` anywhere, or `while (true) { ...; return; ... }`). Same
-/// maximally-conservative "anywhere in the subtree, not
-/// reachability-checked" traversal `stmt_contains_break` already uses
-/// (and for the identical reason: over-suppressing only ever misses a
-/// diagnostic, never fabricates one) - a `continue`/`return`/`throw`
-/// buried inside a nested `if`/`switch` still disqualifies, matching
-/// `getExitPoints()`'s own set of possible exits regardless of how deep
-/// the conditional nesting is.
-pub(crate) fn stmt_contains_escaping_exit(stmt: &Stmt) -> bool {
-    any_stmt_in_body(stmt, |s| {
-        matches!(
-            s.kind,
-            StmtKind::Continue(Some(2..)) | StmtKind::Return(_) | StmtKind::Throw(_)
-        )
-    })
 }

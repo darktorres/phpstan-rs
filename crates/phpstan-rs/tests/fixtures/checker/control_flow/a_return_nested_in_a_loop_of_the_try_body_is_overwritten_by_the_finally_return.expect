@@ -1,0 +1,4 @@
+2:12-2:23 missingType.iterableValue L6 | Function f() has parameter $rows with no value type specified in iterable type array.
+    tip: See: https://phpstan.org/blog/solving-phpstan-no-value-type-specified-in-iterable-type
+6:17-6:26 finally.exitPoint L4 | This return is overwritten by a different one in the finally block below.
+10:9-10:18 finally.exitPoint L4 | The overwriting return is on this line.

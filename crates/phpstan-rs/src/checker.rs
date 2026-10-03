@@ -240,6 +240,7 @@ pub(crate) struct PassMark {
     throw_points: usize,
     explicit_throw_points: usize,
     return_points: usize,
+    exit_points: usize,
     inlay_param_name_hints: usize,
     inlay_local_type_hints: usize,
 }
@@ -440,6 +441,11 @@ pub struct Checker<'a> {
     // `checker/throws/missing.rs`'s "missing checked exception" family,
     // opt-in via `ExtrasSettings::check_missing_checked_exceptions`.
     pub(crate) current_function_explicit_throw_points: Vec<(Type, Span)>,
+    /// The `return`, `throw`, `break` and `continue` statements of the
+    /// current function body whose path has left what the statement before
+    /// them was checked in, and not been taken by a loop or a switch: a
+    /// statement's own are the ones pushed while it was checked.
+    pub(crate) current_function_exit_points: Vec<ExitPoint>,
     // Every real return point recorded so far inside the enclosing body -
     // `StmtKind::Return(Some(e))`'s value type, `StmtKind::Return(None)`'s
     // implicit `void` (real PHPStan pushes `VoidType`, not `Null`,
@@ -880,7 +886,9 @@ pub(crate) struct StatementMethodCall {
 
 mod completion;
 mod labels;
-pub(crate) use completion::{BREAK_HERE, BlockCompletion, CONTINUE_HERE, Completion, GotoState};
+pub(crate) use completion::{
+    BREAK_HERE, BlockCompletion, CONTINUE_HERE, Completion, ExitKind, ExitPoint, GotoState,
+};
 pub(crate) use labels::{CalleeLabel, MemberKind, MemberLabel};
 mod array_access;
 mod infer_cache;
@@ -963,10 +971,9 @@ mod xml_wellformedness;
 pub(crate) use assignment::{literal_shape_key, literal_string_key, unassigned_variable_type};
 pub(crate) use calls::{CheckArgsCall, resolve_call_args};
 pub(crate) use control_flow::{
-    LoopZeroIterations, collect_exit_point_statements, exit_point_description,
-    generator_missing_return_type, generator_template_param,
-    is_constant_condition_family_identifier, is_truthy_literal, merge_scopes, stmt_contains_break,
-    stmt_contains_escaping_exit, type_allows_generator_return,
+    LoopZeroIterations, generator_missing_return_type, generator_template_param,
+    is_constant_condition_family_identifier, is_truthy_literal, merge_scopes,
+    type_allows_generator_return,
 };
 pub(crate) use duplicates::class_kind_identifier;
 pub(crate) use expr::{PregCall, preg_call, preg_result_outcome, preg_result_type};
@@ -1129,6 +1136,7 @@ impl<'a> Checker<'a> {
             implicit_calls: Vec::new(),
             current_function_has_unannotated_call: false,
             current_function_explicit_throw_points: Vec::new(),
+            current_function_exit_points: Vec::new(),
             current_function_return_points: Vec::new(),
             current_function_saw_explicit_return: false,
             current_function_by_ref_params: NameMap::default(),
@@ -1252,6 +1260,7 @@ impl<'a> Checker<'a> {
             throw_points: self.current_function_throw_points.len(),
             explicit_throw_points: self.current_function_explicit_throw_points.len(),
             return_points: self.current_function_return_points.len(),
+            exit_points: self.current_function_exit_points.len(),
             inlay_param_name_hints: self.inlay_param_name_hints.len(),
             inlay_local_type_hints: self.inlay_local_type_hints.len(),
         }
@@ -1275,6 +1284,7 @@ impl<'a> Checker<'a> {
             .truncate(mark.explicit_throw_points);
         self.current_function_return_points
             .truncate(mark.return_points);
+        self.current_function_exit_points.truncate(mark.exit_points);
         self.inlay_param_name_hints
             .truncate(mark.inlay_param_name_hints);
         self.inlay_local_type_hints

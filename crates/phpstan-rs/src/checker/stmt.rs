@@ -1,8 +1,9 @@
 use crate::checker::keys::LocalKey;
 use crate::checker::{
     ATTRIBUTE_TARGET_CLASS, ATTRIBUTE_TARGET_CLASS_CONSTANT, ATTRIBUTE_TARGET_PROPERTY, BREAK_HERE,
-    BlockCompletion, CONTINUE_HERE, Checker, Completion, Locals, generator_missing_return_type,
-    generator_template_param, is_truthy_literal, merge_scopes, purge_stale_narrowing_for_var,
+    BlockCompletion, CONTINUE_HERE, Checker, Completion, ExitKind, Locals,
+    generator_missing_return_type, generator_template_param, is_truthy_literal, merge_scopes,
+    purge_stale_narrowing_for_var,
 };
 use syntax::ast::*;
 use types::Name;
@@ -65,6 +66,12 @@ struct GotoRegion {
     first: usize,
     last: usize,
     labels: Vec<syntax::name::Name>,
+}
+
+/// How many loops or switches a `break` or `continue` names: one when it
+/// does not say.
+fn level_of(level: Option<i64>) -> u32 {
+    u32::try_from(level.unwrap_or(1).clamp(1, 16)).unwrap_or(1)
 }
 
 impl<'a> Checker<'a> {
@@ -162,7 +169,13 @@ impl<'a> Checker<'a> {
                 state.reachable = true;
                 state.ends_with = None;
             }
+            let (was_reachable, exits_before) =
+                (state.reachable, self.current_function_exit_points.len());
             state.last = self.check_stmt(stmt, locals, declared_return, label);
+            // What cannot be reached cannot be left by.
+            if !was_reachable {
+                self.current_function_exit_points.truncate(exits_before);
+            }
             let last = state.last;
             if state.reachable {
                 state.jumps |= last.jumps;
@@ -623,6 +636,7 @@ impl<'a> Checker<'a> {
         label: &str,
     ) -> Completion {
         let mut completion = Completion::FALLS_THROUGH;
+        let exits_from = self.current_function_exit_points.len();
         // Whether an expression statement's value was `never`, as it was
         // checked.
         let mut value_is_never = false;
@@ -1321,11 +1335,28 @@ impl<'a> Checker<'a> {
             }
         }
         match &stmt.kind {
-            StmtKind::Return(_) => completion = Completion::EXITS,
+            StmtKind::Return(_) => {
+                completion = Completion::EXITS;
+                self.push_exit_point(ExitKind::Return, stmt.span);
+            }
+            StmtKind::Throw(_) => self.push_exit_point(ExitKind::Throw, stmt.span),
+            StmtKind::Break(level) => {
+                self.push_exit_point(ExitKind::Break(level_of(*level)), stmt.span)
+            }
+            StmtKind::Continue(level) => {
+                self.push_exit_point(ExitKind::Continue(level_of(*level)), stmt.span)
+            }
             // An expression statement whose value is `never` (a call to a
             // function that never returns, `exit`), or an assertion that
             // can only fail: control does not pass it.
             StmtKind::Expression(_) if value_is_never => completion = Completion::EXITS,
+            // A loop or a switch takes the `break`s and `continue`s that
+            // name it.
+            StmtKind::While { .. }
+            | StmtKind::DoWhile { .. }
+            | StmtKind::For { .. }
+            | StmtKind::Foreach { .. }
+            | StmtKind::Switch { .. } => self.settle_exit_points(exits_from),
             _ => {}
         }
         completion

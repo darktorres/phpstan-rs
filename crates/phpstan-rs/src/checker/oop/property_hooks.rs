@@ -231,6 +231,7 @@ impl<'a> Checker<'a> {
             std::mem::take(&mut self.current_function_has_unannotated_call);
         let previous_explicit_throw_points =
             std::mem::take(&mut self.current_function_explicit_throw_points);
+        let previous_exit_points = std::mem::take(&mut self.current_function_exit_points);
         let previous_assigned_variables = match body {
             PropertyHookBody::Block(stmts) => self.enter_assigned_variables(stmts),
             _ => self.enter_assigned_variables(&[]),
@@ -324,6 +325,7 @@ impl<'a> Checker<'a> {
         self.try_throw_states = previous_try_throw_states;
         self.current_function_has_unannotated_call = previous_unannotated_call;
         self.current_function_explicit_throw_points = previous_explicit_throw_points;
+        self.current_function_exit_points = previous_exit_points;
         if let Some(previous) = previous_goto_targets {
             self.current_function_goto_targets = previous;
         }
@@ -529,6 +531,7 @@ impl<'a> Checker<'a> {
             std::mem::take(&mut self.current_function_has_unannotated_call);
         let previous_explicit_throw_points =
             std::mem::take(&mut self.current_function_explicit_throw_points);
+        let previous_exit_points = std::mem::take(&mut self.current_function_exit_points);
         let previous_assigned_variables = match body {
             PropertyHookBody::Block(stmts) => self.enter_assigned_variables(stmts),
             _ => self.enter_assigned_variables(&[]),
@@ -583,6 +586,7 @@ impl<'a> Checker<'a> {
         self.try_throw_states = previous_try_throw_states;
         self.current_function_has_unannotated_call = previous_unannotated_call;
         self.current_function_explicit_throw_points = previous_explicit_throw_points;
+        self.current_function_exit_points = previous_exit_points;
         if let Some(previous) = previous_goto_targets {
             self.current_function_goto_targets = previous;
         }

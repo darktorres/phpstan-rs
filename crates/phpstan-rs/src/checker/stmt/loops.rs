@@ -1,11 +1,12 @@
 use crate::checker::keys::KeyData;
+use crate::checker::{ExitKind, ExitPoint};
 use rustc_hash::FxHashMap;
 use std::rc::Rc;
 use types::UnionAll as _;
 
 use crate::checker::{
     Checker, Locals, LoopZeroIterations, count_call_operand, is_truthy_literal, merge_scopes,
-    propagate_container_field_facts, stmt_contains_break, stmt_contains_escaping_exit,
+    propagate_container_field_facts,
 };
 use syntax::ast::*;
 use syntax::visit::body_contains_yield;
@@ -73,10 +74,12 @@ impl<'a> Checker<'a> {
         // reproduces that for free, since every pass but the kept one
         // already has its diagnostics discarded via
         // `converge_loop_body`'s own `diagnostics.truncate`.
-        let skip_always_true = stmt_contains_break(body)
-            || stmt_contains_escaping_exit(body)
-            || body_contains_yield(std::slice::from_ref(body))
+        let skip_always_true = body_contains_yield(std::slice::from_ref(body))
             || declared_return.is_some_and(Type::is_never);
+        let exits_from = self.current_function_exit_points.len();
+        // Whether the kept pass found the condition always true; what the
+        // body lets the loop end by is known once it has been checked.
+        let mut condition_always_true = false;
         // On top of the above: moving the diagnostic-bearing condition
         // check into the convergence closure means it only runs against
         // per-pass *copies* of the entry (`pass_locals`), never mutating
@@ -136,21 +139,14 @@ impl<'a> Checker<'a> {
                 // the enclosing function is declared `: never` (already
                 // documents "this never returns" on its own, redundant
                 // to also flag the loop).
-                if this.inferred_constant_condition(cond, pass_locals) == Some(false) {
+                let constant = this.inferred_constant_condition(cond, pass_locals);
+                condition_always_true = constant == Some(true);
+                if constant == Some(false) {
                     this.report(
                         "While loop condition is always false.".to_string(),
                         cond.span,
                         4,
                         "while.alwaysFalse",
-                    );
-                } else if this.inferred_constant_condition(cond, pass_locals) == Some(true)
-                    && !skip_always_true
-                {
-                    this.report(
-                        "While loop condition is always true.".to_string(),
-                        cond.span,
-                        4,
-                        "while.alwaysTrue",
                     );
                 }
                 this.apply_narrowing(cond, pass_locals, true);
@@ -158,6 +154,19 @@ impl<'a> Checker<'a> {
             },
         );
         self.loop_depth -= 1;
+        if condition_always_true
+            && !skip_always_true
+            && !self.current_function_exit_points[exits_from..]
+                .iter()
+                .any(ExitPoint::lets_a_loop_end)
+        {
+            self.report(
+                "While loop condition is always true.".to_string(),
+                cond.span,
+                4,
+                "while.alwaysTrue",
+            );
+        }
         if is_truthy_literal(cond) {
             // The condition can never itself become false (a literal
             // `while (true)`/`while (1)`), so the *only* way to reach
@@ -240,6 +249,7 @@ impl<'a> Checker<'a> {
         // `Traversable`-minus-`Iterator` special case), correctly
         // re-narrowing to `IteratorAggregate` instead.
         let entry = locals.clone();
+        let exits_from = self.current_function_exit_points.len();
         self.loop_depth += 1;
         let (body_locals, break_states) = self.converge_loop_body(
             &entry,
@@ -291,8 +301,11 @@ impl<'a> Checker<'a> {
         // plus a yield check (no `declared_return: never` exclusion
         // here, unlike `While`'s - real PHPStan's rule doesn't have
         // one).
+        let breaks = self.current_function_exit_points[exits_from..]
+            .iter()
+            .any(|point| matches!(point.kind, ExitKind::Break(_)));
         if self.inferred_constant_condition(cond, locals) == Some(false) {
-            if !stmt_contains_break(body) {
+            if !breaks {
                 self.report(
                     "Do-while loop condition is always false.".to_string(),
                     cond.span,
@@ -301,8 +314,9 @@ impl<'a> Checker<'a> {
                 );
             }
         } else if self.inferred_constant_condition(cond, locals) == Some(true)
-            && !stmt_contains_break(body)
-            && !stmt_contains_escaping_exit(body)
+            && !self.current_function_exit_points[exits_from..]
+                .iter()
+                .any(ExitPoint::lets_a_loop_end)
             && !body_contains_yield(std::slice::from_ref(body))
         {
             self.report(

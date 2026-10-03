@@ -311,6 +311,7 @@ impl<'a> Checker<'a> {
                     std::mem::take(&mut self.current_function_has_unannotated_call);
                 let previous_explicit_throw_points =
                     std::mem::take(&mut self.current_function_explicit_throw_points);
+                let previous_exit_points = std::mem::take(&mut self.current_function_exit_points);
                 self.check_generator_return_type(declared_return.as_ref(), closure_expr.span);
                 // See `checker::expr`'s `ExprKind::Closure` arm's
                 // identical `converge_loop_body` fix and comment.
@@ -343,6 +344,7 @@ impl<'a> Checker<'a> {
                 self.try_throw_states = previous_try_throw_states;
                 self.current_function_has_unannotated_call = previous_unannotated_call;
                 self.current_function_explicit_throw_points = previous_explicit_throw_points;
+                self.current_function_exit_points = previous_exit_points;
                 self.current_function_goto_targets = previous_goto_targets;
                 self.current_function_assigned_variables = previous_assigned_variables;
                 self.check_unused_closure_uses(uses, body, closure_expr.span);

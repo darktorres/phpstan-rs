@@ -932,6 +932,7 @@ impl<'a> Checker<'a> {
             std::mem::take(&mut self.current_function_has_unannotated_call);
         let previous_explicit_throw_points =
             std::mem::take(&mut self.current_function_explicit_throw_points);
+        let previous_exit_points = std::mem::take(&mut self.current_function_exit_points);
         // See `Checker::current_function_return_points`'s doc comment -
         // reset/restored at the identical choke point as the throw-
         // tracking fields above.
@@ -1216,6 +1217,7 @@ impl<'a> Checker<'a> {
         self.try_throw_states = previous_try_throw_states;
         self.current_function_has_unannotated_call = previous_unannotated_call;
         self.current_function_explicit_throw_points = previous_explicit_throw_points;
+        self.current_function_exit_points = previous_exit_points;
         self.current_function_return_points = previous_return_points;
         self.current_function_saw_explicit_return = previous_saw_explicit_return;
         self.current_function_by_ref_params = previous_by_ref_params;
