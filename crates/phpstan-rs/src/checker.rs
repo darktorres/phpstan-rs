@@ -887,7 +887,7 @@ pub(crate) struct StatementMethodCall {
 mod completion;
 mod labels;
 pub(crate) use completion::{
-    BREAK_HERE, BlockCompletion, CONTINUE_HERE, Completion, ExitKind, ExitPoint, GotoState,
+    BREAK_HERE, BlockCompletion, CONTINUE_HERE, Completion, ExitKind, ExitPoint, GotoState, Reach,
 };
 pub(crate) use labels::{CalleeLabel, MemberKind, MemberLabel};
 mod array_access;

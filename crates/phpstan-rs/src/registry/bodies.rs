@@ -75,7 +75,8 @@ impl FileBodies {
                         Body {
                             stmts: body.stmts.clone(),
                             summary: Arc::new(BodySummary::of(&body.stmts)),
-                            flow: is_method.then(|| Arc::new(InitFlow::of(&body.stmts))),
+                            flow: is_method
+                                .then(|| Arc::new(InitFlow::of(&body.stmts, &body.goto_labels))),
                         },
                     );
                 }

@@ -104,9 +104,7 @@ impl<'a> Checker<'a> {
         let try_terminates = body_block.completion.terminates;
         // How the whole statement completes: the body's last statement and
         // every catch's last must terminate (`finally` runs before either).
-        let mut all_terminate = try_terminates;
-        let mut all_exit = body_block.completion.exits;
-        let mut jumps = body_block.completion.jumps;
+        let mut catch_completions: Vec<Completion> = Vec::with_capacity(catches.len());
         // `OverwrittenExitPointByFinallyRule`: gathers every statement the
         // try body and each catch clause leave by - if the `finally` block
         // below also always exits, every one of these gets silently
@@ -263,9 +261,7 @@ impl<'a> Checker<'a> {
                 self.check_catch_hygiene(c);
             }
             let catch_terminates = catch_block.completion.terminates;
-            all_terminate &= catch_terminates;
-            all_exit &= catch_block.completion.exits;
-            jumps |= catch_block.completion.jumps;
+            catch_completions.push(catch_block.completion);
             if !catch_terminates && catch_live {
                 end_states.push(catch_locals);
             }
@@ -276,7 +272,6 @@ impl<'a> Checker<'a> {
                 .skip(1)
                 .fold(first, |acc, s| merge_scopes(&self.relation(), &acc, &s));
         }
-        let mut finally_jumps = 0;
         let mut finally_completion: Option<Completion> = None;
         if let Some(f) = finally {
             // `finally`'s own body is checked against the widened
@@ -298,7 +293,6 @@ impl<'a> Checker<'a> {
             let mut finally_locals = finally_entry.clone();
             let finally_exits_from = self.current_function_exit_points.len();
             let finally_block = self.check_block(f, &mut finally_locals, declared_return, label);
-            finally_jumps = finally_block.completion.jumps;
             finally_completion = Some(finally_block.completion);
             for (key, ty) in finally_locals.iter() {
                 if finally_entry.get(key) != Some(ty) {
@@ -343,18 +337,11 @@ impl<'a> Checker<'a> {
         }
         // A `finally` that terminates ends the statement whatever the body
         // and the catches do.
-        match finally_completion {
-            Some(f) if f.terminates => Completion {
-                terminates: true,
-                exits: f.exits,
-                jumps: jumps | finally_jumps,
-            },
-            _ => Completion {
-                terminates: all_terminate,
-                exits: all_exit,
-                jumps: jumps | finally_jumps,
-            },
-        }
+        Completion::try_catch(
+            body_block.completion,
+            &catch_completions,
+            finally_completion,
+        )
     }
 
     pub(crate) fn check_throw(&mut self, e: &Expr, locals: &mut Locals, label: &str) {

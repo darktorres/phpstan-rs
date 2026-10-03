@@ -10,6 +10,7 @@
 //! A part of a body with no event in it is left out: it changes nothing the
 //! dataflow tracks.
 
+use crate::checker::{Completion, Reach, is_truthy_literal};
 use syntax::ast::*;
 use syntax::name::Name;
 use syntax::span::Span;
@@ -104,6 +105,10 @@ pub(crate) struct IfChain {
 pub(crate) struct Case {
     pub(crate) test: Box<[Event]>,
     pub(crate) body: Box<[Flow]>,
+    /// How the case's statements complete: whether control can pass from
+    /// the end of the body into the next case, and whether it leaves the
+    /// switch by a `break`.
+    pub(crate) completion: Completion,
 }
 
 /// The flow of one body.
@@ -113,10 +118,10 @@ pub struct InitFlow {
 }
 
 impl InitFlow {
-    /// The flow of the statements of one body.
-    pub fn of(body: &[Stmt]) -> InitFlow {
+    /// The flow of the statements of one body, whose `goto`s name `labels`.
+    pub fn of(body: &[Stmt], labels: &[GotoLabel]) -> InitFlow {
         InitFlow {
-            nodes: flow_of_stmts(body).into_boxed_slice(),
+            nodes: flow_of_stmts(body, labels).into_boxed_slice(),
         }
     }
 }
@@ -125,33 +130,106 @@ fn is_this(e: &Expr) -> bool {
     matches!(&e.kind, ExprKind::Variable(v) if **v == *"this")
 }
 
-/// A conservative, syntax-only check for whether a statement unconditionally
-/// exits the enclosing method: `Return`/`Throw`/`Break`/`Continue` directly,
-/// a block containing one anywhere, or an `if` with an `else` where every
-/// branch does. Used only to decide whether a branch's resulting state
-/// should be left out of a merge.
-fn stmt_terminates(stmt: &Stmt) -> bool {
+/// How a statement completes, as far as the syntax shows: the rules the
+/// checker applies, with what can be told without inferring a type - a
+/// literal condition, `return`, `throw`, `exit`, `break`, `continue`.
+/// `labels` are the labels the `goto`s of the body land on.
+fn completion_of(stmt: &Stmt, labels: &[GotoLabel]) -> Completion {
     syntax::stack::guard(|| match &stmt.kind {
-        StmtKind::Return(_) | StmtKind::Throw(_) | StmtKind::Break(_) | StmtKind::Continue(_) => {
-            true
+        StmtKind::Return(_) | StmtKind::Throw(_) => Completion::EXITS,
+        StmtKind::Break(level) => Completion::break_(level.unwrap_or(1)),
+        StmtKind::Continue(level) => Completion::continue_(level.unwrap_or(1)),
+        // Nothing after a `goto` is reached by falling through.
+        StmtKind::Goto(_) => Completion::TERMINATES,
+        StmtKind::Expression(e)
+            if matches!(e.peeled().kind, ExprKind::Exit(..) | ExprKind::Throw(_)) =>
+        {
+            Completion::EXITS
         }
         StmtKind::Block(stmts)
         | StmtKind::Declare {
             body: Some(stmts), ..
-        } => stmts.iter().any(stmt_terminates),
+        } => block_completion(stmts, labels),
         StmtKind::If(if_stmt) => {
-            if_stmt.else_branch.is_some() && if_stmt.bodies().all(stmt_terminates)
+            let otherwise = if_stmt
+                .else_branch
+                .as_deref()
+                .map_or(Completion::FALLS_THROUGH, |e| completion_of(e, labels));
+            let branches: Vec<(&Expr, &Stmt)> =
+                std::iter::once((&if_stmt.cond, &*if_stmt.then_branch))
+                    .chain(if_stmt.elseifs.iter().map(|e| (&e.cond, &*e.body)))
+                    .collect();
+            branches
+                .into_iter()
+                .rev()
+                .fold(otherwise, |rest, (cond, body)| {
+                    Completion::if_chain(completion_of(body, labels), rest, known_condition(cond))
+                })
         }
-        _ => false,
+        StmtKind::While { cond, body } => {
+            Completion::while_loop(is_truthy_literal(cond), completion_of(body, labels))
+        }
+        StmtKind::DoWhile { body, cond } => {
+            Completion::do_while(is_truthy_literal(cond), completion_of(body, labels))
+        }
+        StmtKind::For { cond, body, .. } => Completion::while_loop(
+            cond.last().is_none_or(is_truthy_literal),
+            completion_of(body, labels),
+        ),
+        StmtKind::Foreach { body, .. } => Completion::foreach(false, completion_of(body, labels)),
+        StmtKind::Switch { cases, .. } => {
+            let completions: Vec<(Completion, bool)> = cases
+                .iter()
+                .map(|case| (block_completion(&case.body, labels), case.body.is_empty()))
+                .collect();
+            Completion::switch(cases.iter().any(|c| c.test.is_none()), &completions)
+        }
+        StmtKind::Try {
+            body,
+            catches,
+            finally,
+        } => {
+            let catches: Vec<Completion> = catches
+                .iter()
+                .map(|c| block_completion(&c.body, labels))
+                .collect();
+            let finally = finally.as_ref().map(|f| block_completion(f, labels));
+            Completion::try_catch(block_completion(body, labels), &catches, finally)
+        }
+        _ => Completion::FALLS_THROUGH,
     })
+}
+
+/// The completion of a statement list: what follows a statement that
+/// terminates is unreachable until a label a `goto` lands on.
+fn block_completion(stmts: &[Stmt], labels: &[GotoLabel]) -> Completion {
+    let mut reach = Reach::default();
+    for stmt in stmts {
+        if matches!(&stmt.kind, StmtKind::Label(name) if labels.iter().any(|l| l.name == name.name))
+        {
+            reach.label();
+        }
+        reach.add(completion_of(stmt, labels));
+    }
+    reach.finish().completion
+}
+
+/// A condition that is a literal: always true, always false, or neither
+/// known.
+fn known_condition(cond: &Expr) -> Option<bool> {
+    match &cond.kind {
+        _ if is_truthy_literal(cond) => Some(true),
+        ExprKind::Literal(Literal::Bool(false)) | ExprKind::Literal(Literal::Int(0)) => Some(false),
+        _ => None,
+    }
 }
 
 /// The flow of a statement list: a nested block is part of it, and what has
 /// no event in it is not.
-fn flow_of_stmts(stmts: &[Stmt]) -> Vec<Flow> {
+fn flow_of_stmts(stmts: &[Stmt], labels: &[GotoLabel]) -> Vec<Flow> {
     let mut out = Vec::new();
     for stmt in stmts {
-        flow_of_stmt(stmt, &mut out);
+        flow_of_stmt(stmt, labels, &mut out);
     }
     out
 }
@@ -171,7 +249,7 @@ fn push_events(out: &mut Vec<Flow>, events: Vec<Event>) {
     }
 }
 
-fn flow_of_stmt(stmt: &Stmt, out: &mut Vec<Flow>) {
+fn flow_of_stmt(stmt: &Stmt, labels: &[GotoLabel], out: &mut Vec<Flow>) {
     syntax::stack::guard(|| match &stmt.kind {
         StmtKind::Expression(e) | StmtKind::Throw(e) => push_events(out, events_of_each([e])),
         StmtKind::Return(Some(e)) => push_events(out, events_of_each([e])),
@@ -185,7 +263,7 @@ fn flow_of_stmt(stmt: &Stmt, out: &mut Vec<Flow>) {
             body: Some(stmts), ..
         } => {
             for stmt in stmts {
-                flow_of_stmt(stmt, out);
+                flow_of_stmt(stmt, labels, out);
             }
         }
         StmtKind::Unset(targets) => {
@@ -206,18 +284,18 @@ fn flow_of_stmt(stmt: &Stmt, out: &mut Vec<Flow>) {
                 .chain(if_stmt.elseifs.iter().map(|e| (&e.cond, &*e.body)))
                 .map(|(cond, body)| {
                     let mut flow = Vec::new();
-                    flow_of_stmt(body, &mut flow);
+                    flow_of_stmt(body, labels, &mut flow);
                     IfBranch {
                         cond: events_of_each([cond]).into_boxed_slice(),
                         body: flow.into_boxed_slice(),
-                        terminates: stmt_terminates(body),
+                        terminates: completion_of(body, labels).terminates,
                     }
                 })
                 .collect();
             let else_body = if_stmt.else_branch.as_deref().map(|e| {
                 let mut flow = Vec::new();
-                flow_of_stmt(e, &mut flow);
-                (flow.into_boxed_slice(), stmt_terminates(e))
+                flow_of_stmt(e, labels, &mut flow);
+                (flow.into_boxed_slice(), completion_of(e, labels).terminates)
             });
             let silent = branches
                 .iter()
@@ -232,7 +310,7 @@ fn flow_of_stmt(stmt: &Stmt, out: &mut Vec<Flow>) {
         }
         StmtKind::While { cond, body } => {
             let cond = events_of_each([cond]);
-            let body = flow_of_stmts(std::slice::from_ref(body));
+            let body = flow_of_stmts(std::slice::from_ref(body), labels);
             if body.is_empty() {
                 push_events(out, cond);
             } else {
@@ -250,7 +328,7 @@ fn flow_of_stmt(stmt: &Stmt, out: &mut Vec<Flow>) {
         } => {
             let before = events_of_each(init.iter().chain(cond));
             let step = events_of_each(step);
-            let body = flow_of_stmts(std::slice::from_ref(body));
+            let body = flow_of_stmts(std::slice::from_ref(body), labels);
             if body.is_empty() && step.is_empty() {
                 push_events(out, before);
             } else {
@@ -263,7 +341,7 @@ fn flow_of_stmt(stmt: &Stmt, out: &mut Vec<Flow>) {
         }
         StmtKind::Foreach { subject, body, .. } => {
             let subject = events_of_each([&**subject]);
-            let body = flow_of_stmts(std::slice::from_ref(body));
+            let body = flow_of_stmts(std::slice::from_ref(body), labels);
             if body.is_empty() {
                 push_events(out, subject);
             } else {
@@ -274,7 +352,7 @@ fn flow_of_stmt(stmt: &Stmt, out: &mut Vec<Flow>) {
             }
         }
         StmtKind::DoWhile { body, cond } => {
-            let body = flow_of_stmts(std::slice::from_ref(body));
+            let body = flow_of_stmts(std::slice::from_ref(body), labels);
             let cond = events_of_each([cond]);
             out.extend(body);
             push_events(out, cond);
@@ -285,7 +363,8 @@ fn flow_of_stmt(stmt: &Stmt, out: &mut Vec<Flow>) {
                 .iter()
                 .map(|case| Case {
                     test: events_of_each(case.test.iter()).into_boxed_slice(),
-                    body: flow_of_stmts(&case.body).into_boxed_slice(),
+                    body: flow_of_stmts(&case.body, labels).into_boxed_slice(),
+                    completion: block_completion(&case.body, labels),
                 })
                 .collect();
             if cases
@@ -305,12 +384,12 @@ fn flow_of_stmt(stmt: &Stmt, out: &mut Vec<Flow>) {
             catches,
             finally,
         } => {
-            let body = flow_of_stmts(body);
+            let body = flow_of_stmts(body, labels);
             let catches: Vec<Box<[Flow]>> = catches
                 .iter()
-                .map(|c| flow_of_stmts(&c.body).into_boxed_slice())
+                .map(|c| flow_of_stmts(&c.body, labels).into_boxed_slice())
                 .collect();
-            let finally = finally.as_ref().map(|f| flow_of_stmts(f));
+            let finally = finally.as_ref().map(|f| flow_of_stmts(f, labels));
             if body.is_empty()
                 && catches.iter().all(|c| c.is_empty())
                 && finally.as_ref().is_none_or(Vec::is_empty)

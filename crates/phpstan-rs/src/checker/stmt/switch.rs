@@ -69,7 +69,6 @@ impl<'a> Checker<'a> {
         // How each case body's last statement completes, for the switch's
         // own completion.
         let mut case_lasts: Vec<Completion> = Vec::with_capacity(case_count);
-        let mut case_jumps = 0;
         // A bare `break;` written directly inside a case targets
         // this switch, not any enclosing loop - pushing a frame
         // here (discarded below, never read) only exists to
@@ -105,7 +104,6 @@ impl<'a> Checker<'a> {
             let block = self.check_block(&case.body, &mut case_locals, declared_return, label);
             let case_terminates = block.completion.terminates;
             case_lasts.push(block.completion);
-            case_jumps |= block.completion.jumps;
             if let Some(t) = &case.test {
                 self.apply_loose_equality_narrowing(subject, t, &mut narrowed_locals, false);
             }
@@ -135,29 +133,11 @@ impl<'a> Checker<'a> {
                 .skip(1)
                 .fold(first, |acc, s| merge_scopes(&self.relation(), &acc, &s));
         }
-        // A `switch` guarantees ending control flow only with a `default`
-        // and when every non-empty case body's last statement terminates by
-        // something other than a `break` (an empty body falls into the next
-        // non-empty one, and a trailing empty one falls out of the bottom).
-        let ends = |at: usize| {
-            !cases[at].body.is_empty()
-                && case_lasts[at].terminates
-                && case_lasts[at].jumps & (BREAK_HERE | CONTINUE_HERE) == 0
-        };
-        let terminates = cases.iter().any(|c| c.test.is_none())
-            && (0..case_count).all(|i| {
-                if !cases[i].body.is_empty() {
-                    return ends(i);
-                }
-                (i + 1..case_count)
-                    .find(|&later| !cases[later].body.is_empty())
-                    .is_some_and(ends)
-            });
-        Completion {
-            terminates,
-            exits: false,
-            // A `break` or a `continue` of one level ends the switch.
-            jumps: Completion::jumps_past_one_level(case_jumps),
-        }
+        let case_completions: Vec<(Completion, bool)> = case_lasts
+            .iter()
+            .zip(cases)
+            .map(|(completion, case)| (*completion, case.body.is_empty()))
+            .collect();
+        Completion::switch(cases.iter().any(|c| c.test.is_none()), &case_completions)
     }
 }
