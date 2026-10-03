@@ -391,6 +391,13 @@ impl<'ast> Visitor<'ast> for Collector {
                 }
                 walk_args(self, args);
             }
+            ExprKind::New(class, args) => {
+                match &class.kind {
+                    ExprKind::Name(name) => self.add_name(name, NameKind::Class),
+                    _ => self.visit_expr(class),
+                }
+                walk_args(self, args);
+            }
             _ => walk_expr(self, expr),
         }
     }
