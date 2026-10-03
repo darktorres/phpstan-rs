@@ -146,7 +146,10 @@ fn cmp_folded(text: &[u8], key: &[u8]) -> Ordering {
 /// base was made; the own entries' order is the hash map's.
 #[derive(Debug, Clone)]
 pub struct NameTable<V> {
-    entries: FoldedMap<V>,
+    // Each value behind an `Arc`: a clone of the table, and an entry moved
+    // between tables, shares the value, and a write copies it only while it
+    // is shared.
+    entries: FoldedMap<Arc<V>>,
     base: Option<Arc<Base<V>>>,
     // The base's names this table hides: replaced in `entries`, or
     // removed.
@@ -349,7 +352,18 @@ impl<V> Base<V> {
     }
 
     /// A base of `entries`, in memory.
-    pub(super) fn built(mut entries: Vec<(Name, V)>, fold: bool) -> Base<V> {
+    pub(super) fn built(entries: Vec<(Name, V)>, fold: bool) -> Base<V> {
+        Base::built_shared(
+            entries
+                .into_iter()
+                .map(|(name, value)| (name, Arc::new(value)))
+                .collect(),
+            fold,
+        )
+    }
+
+    /// A base of `entries`, in memory, sharing each value.
+    pub(super) fn built_shared(mut entries: Vec<(Name, Arc<V>)>, fold: bool) -> Base<V> {
         entries.sort_by(|a, b| {
             let key = if fold { b.0.lower() } else { b.0.as_str() };
             cmp_text(fold, a.0.as_str().as_bytes(), key.as_bytes())
@@ -360,7 +374,7 @@ impl<V> Base<V> {
             names.push(name);
             let slot = Slot::default();
             slot.value
-                .set(Arc::new(value))
+                .set(value)
                 .unwrap_or_else(|_| unreachable!("a new slot is empty"));
             slots.push(slot);
         }
@@ -453,6 +467,12 @@ impl<V> Base<V> {
 
     /// Entry `i`, decoded the first time it is read.
     pub(super) fn value(&self, i: usize) -> &V {
+        self.value_shared(i)
+    }
+
+    /// Entry `i` as the pointer the base holds it by, decoded the first time
+    /// it is read.
+    pub(super) fn value_shared(&self, i: usize) -> &Arc<V> {
         self.slots[i].value.get_or_init(|| {
             let decode = self
                 .decode
@@ -537,6 +557,7 @@ impl<V> NameTable<V> {
     pub fn get<K: TableKey + ?Sized>(&self, name: &K) -> Option<&V> {
         self.entries
             .get(name)
+            .map(|value| &**value)
             .or_else(|| self.base_get_by(name).map(|(_, value)| value))
     }
 
@@ -544,6 +565,7 @@ impl<V> NameTable<V> {
     pub fn get_with_name<K: TableKey + ?Sized>(&self, name: &K) -> Option<(&Name, &V)> {
         self.entries
             .get_key_value(name)
+            .map(|(name, value)| (name, &**value))
             .or_else(|| self.base_get_by(name))
     }
 
@@ -578,7 +600,7 @@ impl<V> NameTable<V> {
     /// The entries the table holds itself, not those it reads from its
     /// shared base.
     pub(crate) fn own_iter(&self) -> impl Iterator<Item = (&Name, &V)> {
-        self.entries.iter()
+        self.entries.iter().map(|(name, value)| (name, &**value))
     }
 
     pub fn len(&self) -> usize {
@@ -628,7 +650,7 @@ impl<V> NameTable<V> {
 /// An entry taken out of a table: the table's own value moved out, or a
 /// base's, which stays where it is in the base it is read from.
 pub(crate) enum Detached<V> {
-    Own(V),
+    Own(Arc<V>),
     Base(Arc<Base<V>>, usize),
 }
 
@@ -664,44 +686,46 @@ impl<V> NameTable<V> {
     }
 }
 
-impl<V: Clone> NameTable<V> {
-    /// Copies the base's entry for `key` into the table's own entries,
-    /// when it has a visible one.
+impl<V> NameTable<V> {
+    /// Shares the base's entry for `key` with the table's own entries, when
+    /// it has a visible one: no copy of the value is made.
     fn own(&mut self, key: &str) {
         if self.entries.contains_key(key) {
             return;
         }
-        if let Some((declared, value)) = self.base_get(key) {
-            let (declared, value) = (declared.clone(), value.clone());
+        if self.hidden.contains(key) {
+            return;
+        }
+        let Some(base) = &self.base else {
+            return;
+        };
+        if let Some(i) = base.find(key) {
+            let (declared, value) = (base.name(i).clone(), Arc::clone(base.value_shared(i)));
             self.hidden.insert(declared.clone());
             self.entries.insert(declared, value);
         }
     }
 
-    pub fn get_mut<K: TableKey + ?Sized>(&mut self, name: &K) -> Option<&mut V> {
-        name.with_key(move |key| {
-            self.own(key);
-            self.entries.get_mut(key)
+    /// The value `name` finds, shared.
+    pub(crate) fn get_shared<K: TableKey + ?Sized>(&self, name: &K) -> Option<Arc<V>> {
+        if let Some(value) = self.entries.get(name) {
+            return Some(Arc::clone(value));
+        }
+        name.with_key(|key| {
+            let base = self.base.as_ref()?;
+            if self.hidden.contains(key) {
+                return None;
+            }
+            base.find(key).map(|i| Arc::clone(base.value_shared(i)))
         })
     }
 
-    /// Stores `value` under `name`, which becomes the declared spelling,
-    /// replacing whatever `name` found before. What it replaces is not read:
-    /// `replace` hands it back.
-    pub fn insert(&mut self, name: impl Into<Name>, value: V) {
+    /// `insert`, sharing `value`.
+    pub(crate) fn insert_shared(&mut self, name: impl Into<Name>, value: Arc<V>) {
         let name = name.into();
         self.forget(name.lower());
         self.entries.insert(name, value);
         self.version = next_version();
-    }
-
-    /// `insert`, returning what `name` found before.
-    pub fn replace(&mut self, name: impl Into<Name>, value: V) -> Option<V> {
-        let name = name.into();
-        let old = self.take(name.lower());
-        self.entries.insert(name, value);
-        self.version = next_version();
-        old
     }
 
     /// Drops what `key` (a lowercased name) finds, without reading it:
@@ -723,6 +747,31 @@ impl<V: Clone> NameTable<V> {
         self.hidden.insert(base.name(i).clone());
         self.version = next_version();
         true
+    }
+}
+
+impl<V: Clone> NameTable<V> {
+    pub fn get_mut<K: TableKey + ?Sized>(&mut self, name: &K) -> Option<&mut V> {
+        name.with_key(move |key| {
+            self.own(key);
+            self.entries.get_mut(key).map(Arc::make_mut)
+        })
+    }
+
+    /// Stores `value` under `name`, which becomes the declared spelling,
+    /// replacing whatever `name` found before. What it replaces is not read:
+    /// `replace` hands it back.
+    pub fn insert(&mut self, name: impl Into<Name>, value: V) {
+        let name = name.into();
+        self.insert_shared(name, Arc::new(value));
+    }
+
+    /// `insert`, returning what `name` found before.
+    pub fn replace(&mut self, name: impl Into<Name>, value: V) -> Option<V> {
+        let name = name.into();
+        let old = self.take(name.lower());
+        self.insert_shared(name, Arc::new(value));
+        old
     }
 
     /// Stores `value` under `name` unless `name` already finds a value.
@@ -755,7 +804,7 @@ impl<V: Clone> NameTable<V> {
         name.with_key(move |key| {
             if let Some(value) = self.entries.remove(key) {
                 self.version = next_version();
-                return Some(value);
+                return Some(Arc::try_unwrap(value).unwrap_or_else(|shared| (*shared).clone()));
             }
             let (declared, value) = self.base_get(key)?;
             let (declared, value) = (declared.clone(), value.clone());
@@ -800,6 +849,7 @@ impl<V: Clone> NameTable<V> {
         self.entries
             .iter_mut()
             .filter(move |(name, _)| keys.is_none_or(|keys| keys.contains(name.lower())))
+            .map(|(name, value)| (name, Arc::make_mut(value)))
     }
 
     pub fn values_mut(&mut self) -> impl Iterator<Item = &mut V> {
@@ -815,18 +865,18 @@ impl<V: Clone> NameTable<V> {
             }
             return;
         }
-        let mut all: Vec<(Name, V)> = Vec::with_capacity(self.len());
+        let mut all: Vec<(Name, Arc<V>)> = Vec::with_capacity(self.len());
         if let Some(base) = self.base.take() {
             for i in 0..base.len() {
                 let name = base.name(i);
                 if !self.hidden.contains(name.lower()) {
-                    all.push((name.clone(), base.value(i).clone()));
+                    all.push((name.clone(), Arc::clone(base.value_shared(i))));
                 }
             }
         }
         all.extend(std::mem::take(&mut self.entries));
         self.hidden.clear();
-        self.base = Some(Arc::new(Base::built(all, true)));
+        self.base = Some(Arc::new(Base::built_shared(all, true)));
     }
 }
 
@@ -842,7 +892,7 @@ impl<V> std::ops::Index<&str> for NameTable<V> {
 /// `NameTable::iter`'s iterator: the table's own entries, then the base's
 /// it doesn't hide.
 pub struct Iter<'a, V> {
-    entries: syntax::name::FoldedIter<'a, V>,
+    entries: syntax::name::FoldedIter<'a, Arc<V>>,
     base: Option<(&'a Base<V>, Range<usize>)>,
     hidden: &'a FoldedSet,
 }
@@ -852,7 +902,7 @@ impl<'a, V> Iterator for Iter<'a, V> {
 
     fn next(&mut self) -> Option<Self::Item> {
         if let Some((key, value)) = self.entries.next() {
-            return Some((key, value));
+            return Some((key, &**value));
         }
         let (base, positions) = self.base.as_mut()?;
         let base: &'a Base<V> = base;
@@ -893,7 +943,12 @@ impl<V: Clone> IntoIterator for NameTable<V> {
                 }
             }
         }
-        all.extend(self.entries);
+        all.extend(self.entries.into_iter().map(|(name, value)| {
+            (
+                name,
+                Arc::try_unwrap(value).unwrap_or_else(|shared| (*shared).clone()),
+            )
+        }));
         all.into_iter()
     }
 }

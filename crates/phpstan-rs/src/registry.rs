@@ -122,8 +122,10 @@ fn reset_scoped<V: Clone>(
 ) -> Vec<Option<Detached<V>>> {
     let reset = |resolved: &mut NameTable<V>, key: &String| {
         let old = resolved.detach(&FoldedKey(key));
-        if let Some((name, value)) = raw.get_with_name(&FoldedKey(key)) {
-            resolved.insert(name.clone(), value.clone());
+        if let Some((name, _)) = raw.get_with_name(&FoldedKey(key))
+            && let Some(value) = raw.get_shared(&FoldedKey(key))
+        {
+            resolved.insert_shared(name.clone(), value);
         }
         old
     };
@@ -134,7 +136,7 @@ fn reset_scoped<V: Clone>(
             reset_count += 1;
             reset(resolved, key)
         } else {
-            resolved.get(&FoldedKey(key)).cloned().map(Detached::Own)
+            resolved.get_shared(&FoldedKey(key)).map(Detached::Own)
         });
     }
     // Scope keys the snapshot has none of, and every one without a snapshot.
@@ -146,6 +148,17 @@ fn reset_scoped<V: Clone>(
         }
     }
     before
+}
+
+/// Whether the resolved entry `now` differs from the one `before` took out:
+/// an entry no pass wrote is the very value it was, which is equal, and only
+/// a copy is compared field by field.
+fn differs<V: PartialEq>(now: Option<&V>, before: Option<&Detached<V>>) -> bool {
+    match (now, before) {
+        (Some(now), Some(before)) => !std::ptr::eq(now, before.get()) && now != before.get(),
+        (None, None) => false,
+        _ => true,
+    }
 }
 
 /// What `Registry::end_declaration_changes` returns.
@@ -624,14 +637,14 @@ impl Registry {
         let class_keys = before.class_keys.iter().flat_map(|keys| keys.iter());
         debug_assert_eq!(class_keys.clone().count(), before.classes.len());
         for (key, old) in class_keys.zip(&before.classes) {
-            if self.classes.get(&FoldedKey(key)) != old.as_ref().map(Detached::get) {
+            if differs(self.classes.get(&FoldedKey(key)), old.as_ref()) {
                 keys.insert(RefKey::class_text(key));
             }
         }
         let function_keys = before.function_keys.iter().flat_map(|keys| keys.iter());
         debug_assert_eq!(function_keys.clone().count(), before.functions.len());
         for (key, old) in function_keys.zip(&before.functions) {
-            if self.functions.get(&FoldedKey(key)) != old.as_ref().map(Detached::get) {
+            if differs(self.functions.get(&FoldedKey(key)), old.as_ref()) {
                 keys.insert(RefKey::function_text(key));
             }
         }
