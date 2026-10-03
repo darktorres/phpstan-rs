@@ -4,8 +4,8 @@ use syntax::name::Name;
 
 use crate::registry::name_context::{class_ref, resolve_names_in_type};
 use crate::registry::type_node::{mentions_mixed, parse_type_node};
+use phpdoc::DocType;
 use phpdoc::docblock::{self, DocBlock};
-use phpdoc::grammar::TypeNode;
 use syntax::ast::TypeHint;
 use syntax::ast::{ExprKind, FunctionDecl, StaticTarget, Visibility};
 use syntax::name_resolution::NameContext;
@@ -752,7 +752,7 @@ impl FunctionReflection {
                 .or_insert_with(|| tp.clone());
         }
 
-        let resolve_doc_type = |node: &TypeNode| {
+        let resolve_doc_type = |node: &DocType| {
             let ty = parse_type_node(node);
             let ty = mark_template_params(ty, &template_params);
             let ty = resolve_names_in_type(ty, ctx);
@@ -766,7 +766,7 @@ impl FunctionReflection {
                 // `/** @var T */` doubles as its docblock - only
                 // consulted when the outer method-level `@param` tag is
                 // absent.
-                let doc_ty: Option<TypeNode> = doc
+                let doc_ty: Option<DocType> = doc
                     .as_ref()
                     .and_then(|d| d.params.get(p.name.as_ref()))
                     .cloned()

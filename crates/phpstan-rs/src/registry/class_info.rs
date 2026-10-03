@@ -12,8 +12,8 @@ use crate::registry::name_context::{
 use crate::registry::provenance::{Origin, Provenance};
 use crate::registry::reflection_attribute::ReflectionAttribute;
 use crate::registry::type_node::parse_type_node;
+use phpdoc::DocType;
 use phpdoc::docblock::{self, DocBlock};
-use phpdoc::grammar::TypeNode;
 use syntax::ast::{ClassDecl, ClassDef, ClassKind, ExprKind, Literal, Visibility};
 use syntax::name::FoldedMap;
 use syntax::name_resolution::NameContext;
@@ -1200,7 +1200,7 @@ impl ClassReflection {
                 // elsewhere in the class), a completely different
                 // construction from the `ParameterReflection` `FunctionReflection::from_decl`
                 // builds for the same parameter.
-                let doc_ty: Option<TypeNode> = ctor_doc
+                let doc_ty: Option<DocType> = ctor_doc
                     .as_ref()
                     .and_then(|d| d.params.get(p.name.as_ref()))
                     .cloned()
@@ -1438,7 +1438,7 @@ impl ClassReflection {
         // making `check_cross_path_interface_conflicts`'s exact-equality
         // comparison see two "different" types where real PHPStan (which
         // always compares the expanded shape) sees an equivalent one.
-        let resolve_generic_tag = |raw: &TypeNode| -> Type {
+        let resolve_generic_tag = |raw: &DocType| -> Type {
             let ty = parse_type_node(raw);
             let ty = mark_template_params(ty, &template_params);
             let ty = resolve_names_in_type(ty, ctx);
@@ -1544,7 +1544,7 @@ impl ClassReflection {
         // flattened to the class names it names (`object_class_names`),
         // mirroring real PHPStan's `getObjectClassNames()` call sites
         // for these same three tags.
-        let resolve_tag_types = |raw: &[TypeNode]| -> Vec<Name> {
+        let resolve_tag_types = |raw: &[DocType]| -> Vec<Name> {
             raw.iter()
                 .flat_map(|text| {
                     let ty = resolve_names_in_type(parse_type_node(text), ctx);

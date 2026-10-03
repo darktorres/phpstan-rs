@@ -283,7 +283,34 @@ impl<'a> Checker<'a> {
     /// Every `@var` tag on a statement, resolved, in the
     /// `PhpDocNodeResolver::resolveVarTags` selection `var_tag_nodes`
     /// makes.
+    ///
+    /// Kept for the statement (its doc text's address) and the class and
+    /// method it is checked in: a statement is visited again for each
+    /// pass over a loop, and a trait's methods for each host, and what
+    /// the tags resolve to is the same for the same class and method.
     pub(crate) fn statement_var_tags(&self, doc: &str) -> Vec<(Option<String>, Type)> {
+        let key = (doc.as_ptr() as usize, doc.len());
+        if let Some(found) = self.var_tag_memo.borrow().get(&key).and_then(|entries| {
+            entries
+                .iter()
+                .find(|e| e.class == self.current_class && e.method == self.current_method)
+        }) {
+            return found.tags.clone();
+        }
+        let tags = self.resolve_statement_var_tags(doc);
+        self.var_tag_memo
+            .borrow_mut()
+            .entry(key)
+            .or_default()
+            .push(VarTagMemo {
+                class: self.current_class.clone(),
+                method: self.current_method.clone(),
+                tags: tags.clone(),
+            });
+        tags
+    }
+
+    fn resolve_statement_var_tags(&self, doc: &str) -> Vec<(Option<String>, Type)> {
         super::phpdoc_unresolvable::var_tag_nodes(doc)
             .iter()
             .map(|(name, node)| {
@@ -709,4 +736,11 @@ impl<'a> Checker<'a> {
                 .iter()
                 .any(|name| self.registry.is_subclass_of(name, "PHPStan\\Type\\Type"))
     }
+}
+
+/// A statement's resolved `@var` tags for one class and method.
+pub(crate) struct VarTagMemo {
+    class: Option<String>,
+    method: Option<String>,
+    tags: Vec<(Option<String>, Type)>,
 }

@@ -23,6 +23,7 @@
 use crate::checker::Checker;
 use crate::registry::FunctionReflection;
 use diagnostics::DiagnosticBuilder;
+use phpdoc::DocType;
 use phpdoc::docblock;
 use phpdoc::grammar::TypeNode;
 use syntax::ast::TypeHint;
@@ -123,7 +124,7 @@ pub(crate) fn class_kind_word(kind: ClassKind) -> &'static str {
 /// the two at the type level (`types::parse_type_string` doesn't carry
 /// that bit through, see its own doc comments on why), so the distinction
 /// is recovered here instead, straight from the declaration.
-fn is_explicit_mixed_text(native_hint: Option<&TypeHint>, doc_type: Option<&TypeNode>) -> bool {
+fn is_explicit_mixed_text(native_hint: Option<&TypeHint>, doc_type: Option<&DocType>) -> bool {
     let is_mixed_node = |node: &TypeNode| {
         let node = match node {
             TypeNode::Nullable(inner) => inner.as_ref(),
@@ -131,12 +132,13 @@ fn is_explicit_mixed_text(native_hint: Option<&TypeHint>, doc_type: Option<&Type
         };
         matches!(node, TypeNode::Identifier(name) if name.eq_ignore_ascii_case("mixed"))
     };
-    doc_type.is_some_and(is_mixed_node) || native_hint.is_some_and(TypeHint::is_mixed)
+    doc_type.map(DocType::node).is_some_and(is_mixed_node)
+        || native_hint.is_some_and(TypeHint::is_mixed)
 }
 
 /// Whether the native hint or the PHPDoc type spells out `mixed` anywhere,
 /// nested included. A native type can only be `mixed` as a whole.
-fn mentions_mixed(native_hint: Option<&TypeHint>, doc_type: Option<&TypeNode>) -> bool {
+fn mentions_mixed(native_hint: Option<&TypeHint>, doc_type: Option<&DocType>) -> bool {
     native_hint.is_some_and(TypeHint::is_mixed)
         || doc_type.is_some_and(crate::registry::mentions_mixed)
 }
@@ -148,7 +150,7 @@ fn mentions_mixed(native_hint: Option<&TypeHint>, doc_type: Option<&TypeNode>) -
 fn is_implicit_mixed(
     ty: &Type,
     native_hint: Option<&TypeHint>,
-    doc_type: Option<&TypeNode>,
+    doc_type: Option<&DocType>,
 ) -> bool {
     ty.is_implicit_mixed() && !is_explicit_mixed_text(native_hint, doc_type)
 }

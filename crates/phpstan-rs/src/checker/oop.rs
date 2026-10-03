@@ -307,7 +307,7 @@ impl<'a> Checker<'a> {
                     types::TemplateParam::unbounded(t.name.clone()),
                 );
             }
-            let resolve = |node: &phpdoc::grammar::TypeNode| {
+            let resolve = |node: &dyn phpdoc::WrittenType| {
                 let ty = crate::registry::mark_template_params(
                     crate::registry::parse_type_node(node),
                     &scope,

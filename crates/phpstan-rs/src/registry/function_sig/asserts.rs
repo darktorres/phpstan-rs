@@ -3,8 +3,8 @@ use syntax::name::Name;
 
 use crate::registry::name_context::{collect_class_name_case_refs, resolve_names_in_type};
 use crate::registry::type_node::parse_type_node;
+use phpdoc::DocType;
 use phpdoc::docblock;
-use phpdoc::grammar::TypeNode;
 use types::{self, TemplateParam, Type};
 
 use super::generics::mark_template_params;
@@ -60,7 +60,7 @@ pub struct AssertInfo {
     pub case_refs: Vec<(Name, Name)>,
     // The tag's type as written, for checks that need its parsed form
     // rather than the resolved `ty`.
-    pub written_ty: TypeNode,
+    pub written_ty: DocType,
 }
 
 /// Classifies `tag.target`'s own raw text into a real `AssertTarget` -

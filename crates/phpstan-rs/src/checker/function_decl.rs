@@ -364,7 +364,7 @@ impl<'a> Checker<'a> {
                 .iter()
                 .map(|n| (n.clone(), types::TemplateParam::unbounded(n.clone())))
                 .collect();
-            let resolve = |node: &phpdoc::grammar::TypeNode| -> Type {
+            let resolve = |node: &phpdoc::DocType| -> Type {
                 let ty = crate::registry::parse_type_node(node);
                 let ty = mark_template_params(ty, &shallow);
                 resolve_names_in_type(ty, &self.name_ctx)
@@ -560,7 +560,7 @@ impl<'a> Checker<'a> {
                 for p in &f.params {
                     // Same inline-`@var`-on-a-promoted-property fallback
                     // as `FunctionReflection::from_decl`'s param loop.
-                    let doc_ty: Option<phpdoc::grammar::TypeNode> = doc
+                    let doc_ty: Option<phpdoc::DocType> = doc
                         .as_ref()
                         .and_then(|d| d.params.get(p.name.as_ref()))
                         .cloned()

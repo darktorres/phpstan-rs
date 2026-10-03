@@ -1,15 +1,15 @@
 //! Resolution of a parsed PHPDoc type to the `Type` it denotes.
 
-use phpdoc::grammar::TypeNode;
+use phpdoc::WrittenType;
 use types::Type;
 
 /// The `Type` a PHPDoc type denotes as written: names still unresolved,
 /// template and alias references not yet marked.
-pub(crate) fn parse_type_node(node: &TypeNode) -> Type {
-    types::parse_written_type(&node.to_source_string())
+pub(crate) fn parse_type_node<T: WrittenType + ?Sized>(node: &T) -> Type {
+    node.written_type()
 }
 
 /// Whether a PHPDoc type spells out `mixed` anywhere, nested included.
-pub(crate) fn mentions_mixed(node: &TypeNode) -> bool {
-    types::text_mentions_mixed(&node.to_source_string())
+pub(crate) fn mentions_mixed<T: WrittenType + ?Sized>(node: &T) -> bool {
+    node.mentions_mixed()
 }

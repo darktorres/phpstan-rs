@@ -20,7 +20,7 @@ fn parses_a_return_type_and_a_typed_param() {
     assert_eq!(tag.return_type, Some(node("int")));
     assert_eq!(tag.name, "getX");
     assert_eq!(tag.params.len(), 1);
-    assert_eq!(tag.params[0].ty, Some(node("string")));
+    assert_eq!(tag.params[0].ty, Some(node("string").into_node()));
     assert_eq!(tag.params[0].name, "name");
     assert!(!tag.params[0].has_default);
 }
@@ -50,7 +50,10 @@ fn a_default_value_containing_a_top_level_comma_does_not_split_the_param_list() 
     let block = parse("/** @method array getList(array<string, mixed> $options = []) */");
     let tag = &block.method_tags[0];
     assert_eq!(tag.params.len(), 1);
-    assert_eq!(tag.params[0].ty, Some(node("array<string, mixed>")));
+    assert_eq!(
+        tag.params[0].ty,
+        Some(node("array<string, mixed>").into_node())
+    );
     assert_eq!(tag.params[0].name, "options");
     assert!(tag.params[0].has_default);
 }

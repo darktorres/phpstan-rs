@@ -13,6 +13,7 @@ hotpath.workspace = true
 rustc-hash.workspace = true
 serde.workspace = true
 syntax.workspace = true
+types.workspace = true
 
 [lints]
 workspace = true

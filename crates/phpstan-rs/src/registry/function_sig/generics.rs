@@ -3,8 +3,8 @@ use syntax::name::Name;
 
 use crate::registry::name_context::{collect_class_name_case_refs, resolve_names_in_type};
 use crate::registry::type_node::parse_type_node;
+use phpdoc::DocType;
 use phpdoc::docblock::DocBlock;
-use phpdoc::grammar::TypeNode;
 use syntax::name_resolution::NameContext;
 use types::{self, TemplateParam, Type};
 
@@ -163,7 +163,7 @@ pub(crate) fn build_template_params(
         .iter()
         .map(|n| (n.clone(), TemplateParam::unbounded(n.clone())))
         .collect();
-    let resolve = |node: &TypeNode| -> Type {
+    let resolve = |node: &DocType| -> Type {
         let ty = parse_type_node(node);
         let ty = mark_template_params(ty, &shallow);
         resolve_names_in_type(ty, ctx)

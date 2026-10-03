@@ -4,7 +4,10 @@
 
 #![cfg_attr(not(test), deny(clippy::print_stdout, clippy::print_stderr))]
 
+pub mod doc_type;
 pub mod docblock;
 pub mod grammar;
+
+pub use doc_type::{DocType, WrittenType};
 
 pub use syntax::memo::MemoStats;

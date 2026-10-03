@@ -8,7 +8,10 @@ mod templates_and_generics;
 mod type_aliases;
 mod unknown_tags;
 
-/// The node a type written as `source` parses to.
-fn node(source: &str) -> crate::grammar::TypeNode {
-    crate::grammar::parse_type_prefix(source).0.expect("a type")
+/// The type a type written as `source` parses to.
+fn node(source: &str) -> crate::DocType {
+    crate::grammar::parse_type_prefix(source)
+        .0
+        .expect("a type")
+        .into()
 }

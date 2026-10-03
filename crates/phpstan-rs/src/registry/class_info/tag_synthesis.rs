@@ -6,8 +6,8 @@ use crate::registry::function_sig::{
 };
 use crate::registry::name_context::{collect_class_name_case_refs, resolve_names_in_type};
 use crate::registry::type_node::parse_type_node;
+use phpdoc::WrittenType;
 use phpdoc::docblock;
-use phpdoc::grammar::TypeNode;
 use syntax::ast::Visibility;
 use syntax::name_resolution::NameContext;
 use types::{self, TemplateParam, Type};
@@ -40,7 +40,7 @@ pub(crate) fn method_tag_sig(
             template_params.insert(t.name.clone(), TemplateParam::unbounded(t.name.clone()));
         }
         let shallow = template_params.clone();
-        let resolve_bound = |node: &TypeNode| {
+        let resolve_bound = |node: &dyn WrittenType| {
             let ty = mark_template_params(parse_type_node(node), &shallow);
             resolve_names_in_type(ty, ctx)
         };
@@ -49,7 +49,7 @@ pub(crate) fn method_tag_sig(
                 t.name.clone(),
                 TemplateParam {
                     name: t.name.clone(),
-                    bound: Box::new(t.bound.as_ref().map_or(Type::mixed(), resolve_bound)),
+                    bound: Box::new(t.bound.as_ref().map_or(Type::mixed(), |b| resolve_bound(b))),
                     variance: types::Variance::Invariant,
                     scope: Some(tag.name.clone()),
                     default: t.default.as_ref().map(|d| Box::new(resolve_bound(d))),
@@ -59,7 +59,7 @@ pub(crate) fn method_tag_sig(
     }
     let template_params = &template_params;
     #[allow(clippy::type_complexity)]
-    let resolve = |node: &TypeNode| -> (Type, Vec<(Name, Name)>) {
+    let resolve = |node: &dyn WrittenType| -> (Type, Vec<(Name, Name)>) {
         let ty = parse_type_node(node);
         let ty = mark_template_params(ty, template_params);
         let mut case_refs = Vec::new();
@@ -69,7 +69,7 @@ pub(crate) fn method_tag_sig(
     let (return_type, return_case_refs) = tag
         .return_type
         .as_ref()
-        .map(resolve)
+        .map(|r| resolve(r))
         .unwrap_or((Type::mixed(), Vec::new()));
     let params = tag
         .params
@@ -77,7 +77,7 @@ pub(crate) fn method_tag_sig(
         .map(|p| {
             let (ty, case_refs) =
                 p.ty.as_ref()
-                    .map(resolve)
+                    .map(|t| resolve(t))
                     .unwrap_or((Type::mixed(), Vec::new()));
             ParameterReflection {
                 attributes: Vec::new(),

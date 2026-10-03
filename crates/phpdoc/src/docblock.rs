@@ -1,24 +1,25 @@
 use rustc_hash::{FxHashMap, FxHashSet};
 
+use crate::DocType;
 use crate::grammar::{
     self, CallableTemplate, MethodTagParam, PhpDocParseError, PhpDocTagValue, TypeNode,
 };
 
 /// A parsed subset of a `/** ... */` doc comment: just the tags this
 /// checker can use (`@param`, `@return`, `@var`, ...). Types are kept as
-/// the grammar's `TypeNode`s; resolving one to a `Type` is the
-/// registry's job, so this module doesn't depend on `types` at all.
+/// the grammar's `TypeNode`s, each with the `Type` it denotes as written
+/// (`DocType`); resolving its names is the registry's job.
 ///
 /// Deliberately does not parse conditional return types - those need
 /// real per-call-site type parameter binding, not just parsing.
 #[derive(Debug, Default, Clone, PartialEq)]
 pub struct DocBlock {
-    pub params: FxHashMap<String, TypeNode>,
+    pub params: FxHashMap<String, DocType>,
     // `@param-out Type $name` - the widened type a by-ref parameter's
     // value is guaranteed to hold once the function returns.
-    pub param_out: FxHashMap<String, TypeNode>,
-    pub return_type: Option<TypeNode>,
-    pub var_type: Option<TypeNode>,
+    pub param_out: FxHashMap<String, DocType>,
+    pub return_type: Option<DocType>,
+    pub var_type: Option<DocType>,
     // The `$name` half of `@var Type $name`, when present - used when an
     // inline `@var` (checker::stmt) names a variable other than the
     // statement's own single assignment target.
@@ -27,11 +28,11 @@ pub struct DocBlock {
     // see `registry::ClassReflection::templates`).
     pub templates: Vec<String>,
     // `@template T of Bound` - the bound text, when declared.
-    pub template_bounds: FxHashMap<String, TypeNode>,
+    pub template_bounds: FxHashMap<String, DocType>,
     // `@template T = Default` - the default-type text, used when an
     // "erased" reference leaves this name unbound instead of falling
     // back to `Mixed`.
-    pub template_defaults: FxHashMap<String, TypeNode>,
+    pub template_defaults: FxHashMap<String, DocType>,
     // `@template-covariant`/`@template-contravariant` - a name absent
     // from both stays invariant, this project's default.
     pub covariant_templates: FxHashSet<String>,
@@ -44,13 +45,13 @@ pub struct DocBlock {
     // `@extends Parent<Arg, ...>` - fixes the parent class's own
     // `@template` names. At most one is meaningful (a class has a single
     // native `extends`), so the last seen wins.
-    pub extends: Option<TypeNode>,
+    pub extends: Option<DocType>,
     // `@implements Iface<Arg, ...>` - a class can `implements` several
     // interfaces, so every tag is kept.
-    pub implements: Vec<TypeNode>,
+    pub implements: Vec<DocType>,
     // `@use Trait<Arg, ...>` - same idea, for a generic trait in this
     // class's own `use` statement(s).
-    pub uses: Vec<TypeNode>,
+    pub uses: Vec<DocType>,
     // `@property`/`@property-read`/`@property-write Type $name` - magic
     // properties, typically backed by `__get`/`__set`.
     pub properties: Vec<PropertyTag>,
@@ -114,7 +115,7 @@ pub struct DocBlock {
     // caller should be prepared for; every tag is kept and consumed as a
     // union. Resolved to a real `Type` (and validated as `Throwable`) at
     // registry-build time.
-    pub throws: Vec<TypeNode>,
+    pub throws: Vec<DocType>,
     // `@see Target[ description]` - kept exactly as written (a plain
     // symbol reference, a URL, or free text; distinguishing those is
     // `checker::check_doc_see_tag_targets`'s job, not parsing's - real
@@ -133,7 +134,7 @@ pub struct DocBlock {
     // `@phpstan-type Name TypeExpr` - a local type alias, referenced bare
     // from that same class's `@param`/`@return`/`@var` tags. Resolved
     // into a real `Type` at `ClassReflection::from_decl` time.
-    pub type_aliases: FxHashMap<String, TypeNode>,
+    pub type_aliases: FxHashMap<String, DocType>,
     // `@phpstan-import-type Name from Class [as Alias]` - imports another
     // class's own local alias. Resolved once
     // `Registry::resolve_deferred_type_imports` can see every class's
@@ -143,18 +144,18 @@ pub struct DocBlock {
     // `@phpstan-require-extends Type` - declared on a trait/interface,
     // requiring every using/implementing class to be a subtype of
     // `Type`. Checked by `checker::oop::check_require_tags`.
-    pub require_extends: Vec<TypeNode>,
+    pub require_extends: Vec<DocType>,
     // `@phpstan-require-implements Type` - a trait's sibling of
     // `require_extends`, requiring `implements` instead (real PHPStan
     // doesn't recognize this on an interface, which can't `implements`).
-    pub require_implements: Vec<TypeNode>,
+    pub require_implements: Vec<DocType>,
     // `@phpstan-sealed Type` - the *complete* list of types allowed to
     // directly `extends`/`implements` this one. Unlike
     // `require_extends`/`require_implements` (transitive, checked
     // against every consumer in the hierarchy), this is a one-level,
     // exact-name allowlist checked against every *immediate* child only
     // (`checker::oop::check_sealed_hierarchy`).
-    pub sealed: Vec<TypeNode>,
+    pub sealed: Vec<DocType>,
     // `@method [static] ReturnType methodName(Type $param = default, ...)`
     // - a virtual method with no real declaration (conventionally backed
     // by `__call`/`__callStatic`). Kept parsed, not raw text, since the
@@ -164,11 +165,11 @@ pub struct DocBlock {
     // available on this class too (conventionally forwarded via
     // `__call`/`__get`). Resolved at `Registry::resolve_deferred_mixins`
     // time (the target may not be indexed yet at `from_decl` time).
-    pub mixins: Vec<TypeNode>,
+    pub mixins: Vec<DocType>,
     // `@phpstan-self-out Type`/`@phpstan-this-out Type` (and the
     // `@psalm-` spellings): the type the receiver has after a call to
     // this method.
-    pub self_out: Option<TypeNode>,
+    pub self_out: Option<DocType>,
     // `@param-immediately-invoked-callable $name`/
     // `@param-later-invoked-callable $name` - merged into one map keyed
     // by parameter name, `true` for immediately-invoked. Declaration-time
@@ -181,7 +182,7 @@ pub struct DocBlock {
     // via `checker::calls::check_closure_literal_with_this_and_scope`,
     // the same mechanism `Closure::bind`/`->bindTo()` use - see
     // `registry::function_sig::ParameterReflection::closure_this_type`.
-    pub param_closure_this: FxHashMap<String, TypeNode>,
+    pub param_closure_this: FxHashMap<String, DocType>,
     // Every recoverable parse error `grammar` produced while
     // parsing this docblock's type expressions - real PHPStan's
     // `phpDoc.parseError`.
@@ -229,7 +230,7 @@ pub struct MethodTag {
     // syntax - `@method getX()` - resolved to `Mixed` at `ClassReflection::
     // from_decl` time, same as an omitted native return type anywhere
     // else in this project).
-    pub return_type: Option<TypeNode>,
+    pub return_type: Option<DocType>,
     pub name: String,
     /// `@method T name<T of Bound = Default>(...)`'s own templates.
     pub templates: Vec<CallableTemplate>,
@@ -247,7 +248,7 @@ pub struct AssertTag {
     /// `=Type`: the target is identical to a value of the type (a literal
     /// narrows to that literal), rather than of the type.
     pub equality: bool,
-    pub ty: TypeNode,
+    pub ty: DocType,
     pub target: String,
 }
 
@@ -276,7 +277,7 @@ fn parse_assert_tag(rest: &str) -> (Option<AssertTag>, Vec<PhpDocParseError>) {
         Some(AssertTag {
             negated,
             equality,
-            ty,
+            ty: ty.into(),
             target: target.to_string(),
         }),
         errors,
@@ -286,7 +287,7 @@ fn parse_assert_tag(rest: &str) -> (Option<AssertTag>, Vec<PhpDocParseError>) {
 #[derive(Debug, Clone, PartialEq)]
 pub struct PropertyTag {
     pub name: String,
-    pub ty: TypeNode,
+    pub ty: DocType,
     pub readable: bool,
     pub writable: bool,
 }
@@ -796,7 +797,7 @@ fn apply_tag(block: &mut DocBlock, tag: &str, rest: &str) {
                 } = value
                 {
                     if let Some(ty) = ty {
-                        block.params.insert(name.clone(), ty);
+                        block.params.insert(name.clone(), ty.into());
                     }
                     // Tokens reconstruct with a space between every one
                     // of them (`remaining_description`'s own doc
@@ -820,7 +821,7 @@ fn apply_tag(block: &mut DocBlock, tag: &str, rest: &str) {
                     ..
                 } = value
                 {
-                    block.param_out.insert(name, ty);
+                    block.param_out.insert(name, ty.into());
                 }
             }
             "return" => {
@@ -831,7 +832,7 @@ fn apply_tag(block: &mut DocBlock, tag: &str, rest: &str) {
                 let (value, errors) = grammar::parse_tag_rest_shared("return", rest);
                 block.parse_errors.extend(errors);
                 if let PhpDocTagValue::Type { ty: Some(ty), .. } = value {
-                    block.return_type = Some(ty);
+                    block.return_type = Some(ty.into());
                 }
             }
             "var" => {
@@ -839,7 +840,7 @@ fn apply_tag(block: &mut DocBlock, tag: &str, rest: &str) {
                 block.parse_errors.extend(errors);
                 if let PhpDocTagValue::TypedVar { ty, variable, .. } = value {
                     if let Some(ty) = ty {
-                        block.var_type = Some(ty);
+                        block.var_type = Some(ty.into());
                     }
                     if let Some(name) = variable {
                         block.var_name = Some(name);
@@ -873,7 +874,7 @@ fn apply_tag(block: &mut DocBlock, tag: &str, rest: &str) {
                         .next()
                         .and_then(extract_doc_var_name)
                 {
-                    block.param_closure_this.insert(name.to_string(), ty);
+                    block.param_closure_this.insert(name.to_string(), ty.into());
                 }
             }
             "property" | "property-read" | "property-write" => {
@@ -887,7 +888,7 @@ fn apply_tag(block: &mut DocBlock, tag: &str, rest: &str) {
                 {
                     block.properties.push(PropertyTag {
                         name,
-                        ty,
+                        ty: ty.into(),
                         readable: tag != "property-write",
                         writable: tag != "property-read",
                     });
@@ -907,10 +908,10 @@ fn apply_tag(block: &mut DocBlock, tag: &str, rest: &str) {
                         block.templates.push(name.clone());
                     }
                     if let Some(bound) = bound {
-                        block.template_bounds.insert(name.clone(), bound);
+                        block.template_bounds.insert(name.clone(), bound.into());
                     }
                     if let Some(default) = default {
-                        block.template_defaults.insert(name.clone(), default);
+                        block.template_defaults.insert(name.clone(), default.into());
                     }
                     match tag {
                         "template-covariant" => {
@@ -943,7 +944,7 @@ fn apply_tag(block: &mut DocBlock, tag: &str, rest: &str) {
                     && !name.is_empty()
                     && !is_blank(&ty)
                 {
-                    block.type_aliases.insert(name.to_string(), ty);
+                    block.type_aliases.insert(name.to_string(), ty.into());
                 }
             }
             "import-type" => {
@@ -988,7 +989,7 @@ fn apply_tag(block: &mut DocBlock, tag: &str, rest: &str) {
                 if let PhpDocTagValue::ExtendsLike { ty } = value
                     && !is_blank(&ty)
                 {
-                    block.extends = Some(ty);
+                    block.extends = Some(ty.into());
                 }
             }
             "implements" | "template-implements" => {
@@ -997,7 +998,7 @@ fn apply_tag(block: &mut DocBlock, tag: &str, rest: &str) {
                 if let PhpDocTagValue::ExtendsLike { ty } = value
                     && !is_blank(&ty)
                 {
-                    block.implements.push(ty);
+                    block.implements.push(ty.into());
                 }
             }
             // Real PHPStan-recognized synonym for `@use`, mirroring
@@ -1011,7 +1012,7 @@ fn apply_tag(block: &mut DocBlock, tag: &str, rest: &str) {
                 if let PhpDocTagValue::ExtendsLike { ty } = value
                     && !is_blank(&ty)
                 {
-                    block.uses.push(ty);
+                    block.uses.push(ty.into());
                 }
             }
             "require-extends" => {
@@ -1020,7 +1021,7 @@ fn apply_tag(block: &mut DocBlock, tag: &str, rest: &str) {
                 if let Some(ty) = ty
                     && !is_blank(&ty)
                 {
-                    block.require_extends.push(ty);
+                    block.require_extends.push(ty.into());
                 }
             }
             "require-implements" => {
@@ -1029,7 +1030,7 @@ fn apply_tag(block: &mut DocBlock, tag: &str, rest: &str) {
                 if let Some(ty) = ty
                     && !is_blank(&ty)
                 {
-                    block.require_implements.push(ty);
+                    block.require_implements.push(ty.into());
                 }
             }
             "sealed" => {
@@ -1038,7 +1039,7 @@ fn apply_tag(block: &mut DocBlock, tag: &str, rest: &str) {
                 if let Some(ty) = ty
                     && !is_blank(&ty)
                 {
-                    block.sealed.push(ty);
+                    block.sealed.push(ty.into());
                 }
             }
             "method" => {
@@ -1055,7 +1056,7 @@ fn apply_tag(block: &mut DocBlock, tag: &str, rest: &str) {
                 {
                     block.method_tags.push(MethodTag {
                         is_static,
-                        return_type,
+                        return_type: return_type.map(Into::into),
                         name,
                         templates,
                         params,
@@ -1066,7 +1067,7 @@ fn apply_tag(block: &mut DocBlock, tag: &str, rest: &str) {
                 let (ty, _remainder, errors) = grammar::parse_type_prefix_shared(rest);
                 block.parse_errors.extend(errors);
                 if let Some(ty) = ty {
-                    block.self_out = Some(ty);
+                    block.self_out = Some(ty.into());
                 }
             }
             "mixin" => {
@@ -1075,7 +1076,7 @@ fn apply_tag(block: &mut DocBlock, tag: &str, rest: &str) {
                 if let Some(ty) = ty
                     && !is_blank(&ty)
                 {
-                    block.mixins.push(ty);
+                    block.mixins.push(ty.into());
                 }
             }
             // See `DocBlock::api`/`api_do_not_implement`'s own
@@ -1136,7 +1137,7 @@ fn apply_tag(block: &mut DocBlock, tag: &str, rest: &str) {
                 let (value, errors) = grammar::parse_tag_rest_shared("throws", rest);
                 block.parse_errors.extend(errors);
                 if let PhpDocTagValue::Type { ty: Some(ty), .. } = value {
-                    block.throws.push(ty);
+                    block.throws.push(ty.into());
                 }
             }
             // Not routed through `grammar` at all - a `@see`

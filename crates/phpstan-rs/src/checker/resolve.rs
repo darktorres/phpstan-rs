@@ -79,7 +79,7 @@ impl<'a> Checker<'a> {
     }
 
     /// `resolve_type_hint` for a parsed PHPDoc type.
-    pub(crate) fn resolve_type_node(&self, node: &phpdoc::grammar::TypeNode) -> Type {
+    pub(crate) fn resolve_type_node<T: phpdoc::WrittenType + ?Sized>(&self, node: &T) -> Type {
         self.resolve_written_type(registry::parse_type_node(node)).0
     }
 

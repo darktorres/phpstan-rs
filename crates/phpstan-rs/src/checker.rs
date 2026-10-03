@@ -284,6 +284,9 @@ pub struct Checker<'a> {
     pub(crate) registry: &'a Registry,
     // The class the last `class_info` was asked for.
     class_memo: std::cell::RefCell<(String, Option<&'a crate::registry::ClassReflection>)>,
+    // Each statement's resolved `@var` tags, by the address and length of
+    // its doc text, for each class and method it was checked in.
+    var_tag_memo: std::cell::RefCell<FxHashMap<(usize, usize), Vec<var_tag_types::VarTagMemo>>>,
     // What `lookup_method_with_owner` found for each class and method it
     // was asked about, as they were asked.
     method_memo: std::cell::RefCell<MethodMemo<'a>>,
@@ -1111,6 +1114,7 @@ impl<'a> Checker<'a> {
         Checker {
             registry,
             class_memo: std::cell::RefCell::new((String::new(), None)),
+            var_tag_memo: std::cell::RefCell::new(FxHashMap::default()),
             method_memo: std::cell::RefCell::new(FxHashMap::default()),
             settings: &DEFAULT_SETTINGS,
             bodies: &crate::registry::NoBodies,

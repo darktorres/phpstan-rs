@@ -122,7 +122,8 @@ impl Registry {
                 case_refs: Vec::new(),
                 written_ty: grammar::parse_type_prefix(written)
                     .0
-                    .unwrap_or(TypeNode::Error),
+                    .unwrap_or(TypeNode::Error)
+                    .into(),
             };
             let list = match entry.when {
                 AssertWhen::Always => &mut sig.assert,

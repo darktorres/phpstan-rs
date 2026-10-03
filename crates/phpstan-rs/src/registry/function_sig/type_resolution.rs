@@ -4,7 +4,7 @@ use syntax::name::Name;
 use super::generics::mark_template_params;
 use crate::registry::name_context::{collect_class_name_case_refs, resolve_names_in_type};
 use crate::registry::type_node::parse_type_node;
-use phpdoc::grammar::TypeNode;
+use phpdoc::DocType;
 use syntax::ast::{Expr, ExprKind, Literal, NativeType, TypeHint, TypeHintKind};
 use syntax::name_resolution::NameContext;
 use types::{self, TemplateParam, Type};
@@ -54,7 +54,7 @@ pub(crate) struct DeclaredType {
 /// `native`: the PHPDoc type with `template_params` marked and its names
 /// resolved in `ctx`, reconciled with the native type.
 pub(crate) fn declared_type(
-    doc: Option<&TypeNode>,
+    doc: Option<&DocType>,
     native: Option<&TypeHint>,
     template_params: &FxHashMap<String, TemplateParam>,
     ctx: &NameContext,
