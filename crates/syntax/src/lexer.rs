@@ -525,64 +525,111 @@ impl<'a> Lexer<'a> {
             return Token::Eof;
         }
 
-        // What a token is is mostly settled by its first byte, and the
-        // tests that read more of the source are asked only where it fits.
-        let c = self.peek();
-
-        if c == b'?' && self.starts_with(b"?>") {
-            self.pos += 2;
-            // A single newline right after `?>` belongs to the tag.
-            if self.starts_with(b"\r\n") {
-                self.pos += 2;
-            } else if self.starts_with(b"\n") {
-                self.pos += 1;
+        // What a token is is settled by its first byte: one jump on its
+        // class, and the tests that read more of the source are asked only
+        // where the class fits. The rare forms are in functions of their
+        // own, off the hot path.
+        match BYTE_CLASS[usize::from(self.peek())] {
+            ByteClass::IdentStart => self.lex_word(),
+            ByteClass::Digit => self.lex_number(),
+            ByteClass::Dot => {
+                if self.peek_at(1).is_ascii_digit() {
+                    self.lex_number()
+                } else {
+                    self.lex_operator()
+                }
             }
-            // ?> implies a statement terminator in real PHP; the parser
-            // treats end-of-inline-html the same as a semicolon boundary.
-            self.in_php = false;
-            return Token::Semicolon;
+            ByteClass::Dollar => self.lex_dollar(),
+            ByteClass::Quote1 => self.lex_single_quoted(),
+            ByteClass::Quote2 => self.lex_double_quoted(),
+            ByteClass::Backtick => self.lex_backtick(),
+            ByteClass::Lt => {
+                if self.starts_with(b"<<<") {
+                    self.lex_heredoc()
+                } else {
+                    self.lex_operator()
+                }
+            }
+            ByteClass::Slash => {
+                if self.starts_with(b"/**") {
+                    self.lex_doc_comment()
+                } else {
+                    self.lex_operator()
+                }
+            }
+            ByteClass::Question => {
+                if self.starts_with(b"?>") {
+                    self.lex_close_tag()
+                } else {
+                    self.lex_operator()
+                }
+            }
+            ByteClass::Hash => {
+                // A general attribute group - `skip_whitespace_and_comments`
+                // deliberately leaves this un-consumed (see its own
+                // comment) so it reaches here as a real token instead of
+                // being skipped.
+                if self.starts_with(b"#[") {
+                    self.pos += 2;
+                    Token::AttributeStart
+                } else {
+                    self.lex_operator()
+                }
+            }
+            ByteClass::Operator => self.lex_operator(),
         }
+    }
 
-        // A general attribute group - `skip_whitespace_and_comments`
-        // deliberately leaves this un-consumed (see its own comment) so
-        // it reaches here as a real token instead of being skipped. The
-        // two special-cased stub attributes never reach this point at
-        // all - `skip_whitespace_and_comments` fully consumes them
-        // itself before this check ever runs.
-        if c == b'#' && self.starts_with(b"#[") {
+    /// `?>`: PHP mode ends, and the tag stands for a statement terminator.
+    #[cold]
+    fn lex_close_tag(&mut self) -> Token {
+        self.pos += 2;
+        // A single newline right after `?>` belongs to the tag.
+        if self.starts_with(b"\r\n") {
             self.pos += 2;
-            return Token::AttributeStart;
+        } else if self.starts_with(b"\n") {
+            self.pos += 1;
         }
+        // ?> implies a statement terminator in real PHP; the parser
+        // treats end-of-inline-html the same as a semicolon boundary.
+        self.in_php = false;
+        Token::Semicolon
+    }
 
-        if c == b'$' && (is_ident_start(self.peek_at(1))) {
+    /// A token that starts with `$`: a variable, `${expr}` (the older
+    /// "variable variable" syntax, where the variable's own name is
+    /// computed at runtime by evaluating expr, most commonly just
+    /// `${$name}`) or `$$name` (the brace-less form, equivalent to
+    /// `${$name}`; the inner `$name` becomes its own Variable token next).
+    fn lex_dollar(&mut self) -> Token {
+        let next = self.peek_at(1);
+        if is_ident_start(next) {
             self.pos += 1;
             let s = self.lex_ident_raw();
             return Token::Variable(self.name(&s));
         }
-
-        // `${expr}` - the older "variable variable" syntax, where the
-        // variable's own name is computed at runtime by evaluating expr
-        // (most commonly just `${$name}`, but any expression is legal).
-        if c == b'$' && self.peek_at(1) == b'{' {
-            self.pos += 2;
-            return Token::DollarBrace;
+        match next {
+            b'{' => {
+                self.pos += 2;
+                Token::DollarBrace
+            }
+            b'$' => {
+                self.pos += 1;
+                Token::Dollar
+            }
+            _ => self.lex_operator(),
         }
+    }
 
-        // `$$name` - the brace-less variable-variable form, equivalent to
-        // `${$name}`. Falls through here (not identifier-start, not `{`
-        // right after the first `$`) since the inner `$name` becomes its
-        // own Variable token next.
-        if c == b'$' && self.peek_at(1) == b'$' {
-            self.pos += 1;
-            return Token::Dollar;
-        }
-
-        // `b'...'` / `b"..."` / `b<<<...` - the legacy byte-string prefix
-        // (a no-op today; PHP 6's binary-vs-unicode string split never
-        // shipped, but the lexical grammar still accepts the prefix).
-        // Checked ahead of the generic identifier branch below, since a
-        // bare `b` would otherwise be lexed as its own single-letter
-        // identifier/constant reference, leaving the string dangling.
+    /// A token that starts with an identifier byte: a keyword or a name,
+    /// or the legacy byte-string prefix (`b'...'` / `b"..."` / `b<<<...`,
+    /// a no-op today: PHP 6's binary-vs-unicode string split never
+    /// shipped, but the lexical grammar still accepts the prefix), which
+    /// is checked ahead of the identifier since a bare `b` would
+    /// otherwise be lexed as its own single-letter name, leaving the
+    /// string dangling.
+    fn lex_word(&mut self) -> Token {
+        let c = self.peek();
         if (c == b'b' || c == b'B')
             && (matches!(self.peek_at(1), b'\'' | b'"')
                 || self.src[self.pos + 1..].starts_with(b"<<<"))
@@ -590,49 +637,23 @@ impl<'a> Lexer<'a> {
             self.pos += 1;
             return self.next_token();
         }
-
-        if is_ident_start(c) {
-            let span = self.lex_ident_span();
-            if let Some(kw) = Keyword::try_from_bytes(&self.src[span.clone()]) {
-                // Stash the raw source spelling out of band, but only
-                // when it actually differs from `kw`'s own canonical
-                // (always-lowercase) spelling - `take_name_segment`
-                // already falls back to `kw.as_str().to_string()` for a
-                // `None` here, so the overwhelmingly common
-                // canonically-spelled case (`class`, `function`,
-                // `public`, ...) needs no allocation at all.
-                self.pending_keyword_raw = if &self.src[span.clone()] == kw.as_str().as_bytes() {
-                    None
-                } else {
-                    Some(self.slice(span).into_owned())
-                };
-                return Token::Keyword(kw);
-            }
-            let s = self.slice(span);
-            return Token::Identifier(self.name(&s));
+        let span = self.lex_ident_span();
+        if let Some(kw) = Keyword::try_from_bytes(&self.src[span.clone()]) {
+            // Stash the raw source spelling out of band, but only when
+            // it actually differs from `kw`'s own canonical (always-
+            // lowercase) spelling - `take_name_segment` already falls
+            // back to `kw.as_str().to_string()` for a `None` here, so the
+            // overwhelmingly common canonically-spelled case (`class`,
+            // `function`, `public`, ...) needs no allocation at all.
+            self.pending_keyword_raw = if &self.src[span.clone()] == kw.as_str().as_bytes() {
+                None
+            } else {
+                Some(self.slice(span).into_owned())
+            };
+            return Token::Keyword(kw);
         }
-
-        if c.is_ascii_digit() || (c == b'.' && self.peek_at(1).is_ascii_digit()) {
-            return self.lex_number();
-        }
-
-        if c == b'\'' {
-            return self.lex_single_quoted();
-        }
-        if c == b'"' {
-            return self.lex_double_quoted();
-        }
-        if c == b'`' {
-            return self.lex_backtick();
-        }
-        if c == b'<' && self.starts_with(b"<<<") {
-            return self.lex_heredoc();
-        }
-        if c == b'/' && self.starts_with(b"/**") {
-            return self.lex_doc_comment();
-        }
-
-        self.lex_operator()
+        let s = self.slice(span);
+        Token::Identifier(self.name(&s))
     }
 
     fn lex_inline_html(&mut self) -> Token {
@@ -714,12 +735,7 @@ impl<'a> Lexer<'a> {
         loop {
             match self.peek() {
                 b' ' | b'\t' | b'\r' | b'\n' => {
-                    let rest = &self.src[self.pos..];
-                    let blanks = rest
-                        .iter()
-                        .position(|b| !matches!(b, b' ' | b'\t' | b'\r' | b'\n'))
-                        .unwrap_or(rest.len());
-                    self.pos += blanks;
+                    self.pos += class_run(&self.src[self.pos..], &BLANK);
                 }
                 b'#' => {
                     if self.starts_with(b"#[") {
@@ -801,11 +817,7 @@ impl<'a> Lexer<'a> {
     fn lex_ident_span(&mut self) -> std::ops::Range<usize> {
         let start = self.pos;
         let rest = &self.src[start.min(self.src.len())..];
-        let len = rest
-            .iter()
-            .position(|&b| !IDENT_CONTINUE[usize::from(b)])
-            .unwrap_or(rest.len());
-        self.pos = start + len;
+        self.pos = start + class_run(rest, &IDENT_CONTINUE);
         start..self.pos
     }
 
@@ -1133,6 +1145,82 @@ fn is_ident_start(c: u8) -> bool {
 
 fn is_ident_continue(c: u8) -> bool {
     IDENT_CONTINUE[usize::from(c)]
+}
+
+/// What a token's first byte says it is.
+#[derive(Clone, Copy)]
+enum ByteClass {
+    IdentStart,
+    Digit,
+    Dot,
+    Dollar,
+    Quote1,
+    Quote2,
+    Backtick,
+    Lt,
+    Slash,
+    Question,
+    Hash,
+    Operator,
+}
+
+const BYTE_CLASS: [ByteClass; 256] = byte_classes();
+
+const fn byte_classes() -> [ByteClass; 256] {
+    let mut table = [ByteClass::Operator; 256];
+    let mut b = 0;
+    while b < 256 {
+        let c = b as u8;
+        table[b] = if c == b'_' || c.is_ascii_alphabetic() || c >= 0x80 {
+            ByteClass::IdentStart
+        } else if c.is_ascii_digit() {
+            ByteClass::Digit
+        } else {
+            match c {
+                b'.' => ByteClass::Dot,
+                b'$' => ByteClass::Dollar,
+                b'\'' => ByteClass::Quote1,
+                b'"' => ByteClass::Quote2,
+                b'`' => ByteClass::Backtick,
+                b'<' => ByteClass::Lt,
+                b'/' => ByteClass::Slash,
+                b'?' => ByteClass::Question,
+                b'#' => ByteClass::Hash,
+                _ => ByteClass::Operator,
+            }
+        };
+        b += 1;
+    }
+    table
+}
+
+/// The whitespace bytes.
+const BLANK: [bool; 256] = {
+    let mut table = [false; 256];
+    table[b' ' as usize] = true;
+    table[b'\t' as usize] = true;
+    table[b'\r' as usize] = true;
+    table[b'\n' as usize] = true;
+    table
+};
+
+/// How many bytes at the start of `bytes` are in `class`: eight at a
+/// time while all eight are, then one at a time.
+fn class_run(bytes: &[u8], class: &[bool; 256]) -> usize {
+    let mut at = 0;
+    while let Some(chunk) = bytes.get(at..at + 8) {
+        let all = chunk
+            .iter()
+            .fold(true, |all, &b| all & class[usize::from(b)]);
+        if !all {
+            break;
+        }
+        at += 8;
+    }
+    at + bytes[at..]
+        .iter()
+        .take_while(|&&b| class[usize::from(b)])
+        .count()
 }
 
 /// The bytes an identifier can begin with, and those it can go on with.
