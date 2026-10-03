@@ -273,10 +273,19 @@ pub(crate) struct PassMark {
 /// file's `namespace`/`use` statements) before any registry key is read or
 /// written - two classes with the same short name in different namespaces
 /// get distinct keys, the same way real PHP tells them apart.
+/// The methods asked for, by class and then by method, as spelled.
+type MethodMemo<'a> = FxHashMap<
+    String,
+    FxHashMap<String, Option<(syntax::name::Name, &'a crate::registry::FunctionReflection)>>,
+>;
+
 pub struct Checker<'a> {
     pub(crate) registry: &'a Registry,
     // The class the last `class_info` was asked for.
     class_memo: std::cell::RefCell<(String, Option<&'a crate::registry::ClassReflection>)>,
+    // What `lookup_method_with_owner` found for each class and method it
+    // was asked about, as they were asked.
+    method_memo: std::cell::RefCell<MethodMemo<'a>>,
     // What the checks are configured with - the defaults unless
     // `with_settings` supplies the project's.
     pub(crate) settings: &'a settings::CheckSettings,
@@ -1044,6 +1053,33 @@ impl<'a> Checker<'a> {
         info
     }
 
+    /// `registry.lookup_method_with_owner`, remembered for each class and
+    /// method asked about: the registry does not change while a file is
+    /// checked, and the checks of it ask about the same few hundred
+    /// methods, 800,000 times in the scoped Piwigo run for 13,000 of them.
+    pub(crate) fn lookup_method_with_owner(
+        &self,
+        class: &str,
+        method: &str,
+    ) -> Option<(syntax::name::Name, &'a crate::registry::FunctionReflection)> {
+        if let Some(found) = self
+            .method_memo
+            .borrow()
+            .get(class)
+            .and_then(|methods| methods.get(method))
+        {
+            return found.clone();
+        }
+        let registry: &'a Registry = self.registry;
+        let found = registry.lookup_method_with_owner(class, method);
+        self.method_memo
+            .borrow_mut()
+            .entry(class.to_string())
+            .or_default()
+            .insert(method.to_string(), found.clone());
+        found
+    }
+
     pub fn new(registry: &'a Registry) -> Self {
         static NO_SQL: std::sync::LazyLock<sql::context::SqlContext> =
             std::sync::LazyLock::new(Default::default);
@@ -1052,6 +1088,7 @@ impl<'a> Checker<'a> {
         Checker {
             registry,
             class_memo: std::cell::RefCell::new((String::new(), None)),
+            method_memo: std::cell::RefCell::new(FxHashMap::default()),
             settings: &DEFAULT_SETTINGS,
             bodies: &crate::registry::NoBodies,
             sql: &NO_SQL,
@@ -1438,8 +1475,7 @@ impl<'a> Checker<'a> {
         let Some(class) = ty.first_object_class().cloned() else {
             return;
         };
-        let Some((owner, sig)) = self.registry.lookup_method_with_owner(&class, "__toString")
-        else {
+        let Some((owner, sig)) = self.lookup_method_with_owner(&class, "__toString") else {
             return;
         };
         self.check_internal_method_call(&owner, "__toString", sig, false, span);

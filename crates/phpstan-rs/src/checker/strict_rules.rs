@@ -701,7 +701,7 @@ impl<'a> Checker<'a> {
         let mut found: Option<(String, String)> = None;
         for member in ty.union_members().iter().filter(|m| !m.is_null().yes()) {
             let (class, _) = member.as_object()?;
-            let (owner, _) = self.registry.lookup_method_with_owner(class, method)?;
+            let (owner, _) = self.lookup_method_with_owner(class, method)?;
             let name = self
                 .registry
                 .lookup_method_canonical_name(class, method)

@@ -258,7 +258,7 @@ impl<'a> Checker<'a> {
     /// A method's native return type, `static` bound to `class` and
     /// `self` to the declaring class. `mixed` for a `@method` tag.
     fn native_method_return(&self, class: &str, method: &str) -> Type {
-        let Some((owner, sig)) = self.registry.lookup_method_with_owner(class, method) else {
+        let Some((owner, sig)) = self.lookup_method_with_owner(class, method) else {
             return Type::mixed();
         };
         if sig.is_magic() {

@@ -74,7 +74,7 @@ impl<'a> Checker<'a> {
                     .find_map(|m| self.find_method_owner(m, method));
             }
             let (class, _) = base_ty.as_object()?;
-            self.registry.lookup_method_with_owner(class, method)
+            self.lookup_method_with_owner(class, method)
         })
     }
 

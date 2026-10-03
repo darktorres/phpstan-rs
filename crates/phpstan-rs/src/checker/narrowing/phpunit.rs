@@ -98,7 +98,7 @@ impl<'a> Checker<'a> {
             }
             ExprKind::StaticCall(target, method, args) => {
                 let class = self.infer_static_target_class(target, locals)?;
-                let (owner, sig) = self.registry.lookup_method_with_owner(&class, method)?;
+                let (owner, sig) = self.lookup_method_with_owner(&class, method)?;
                 owner
                     .eq_ignore_ascii_case(ASSERT)
                     .then(|| (method.to_ascii_lowercase(), sig, args.as_slice()))

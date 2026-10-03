@@ -68,7 +68,7 @@ impl<'a> Checker<'a> {
             return self.resolve_callable_method(&class, method, format!("callable {ty}"));
         }
         let (class, _) = ty.as_object()?;
-        let (owner, sig) = self.registry.lookup_method_with_owner(class, "__invoke")?;
+        let (owner, sig) = self.lookup_method_with_owner(class, "__invoke")?;
         Some(NamedCallable {
             description: format!("callable {ty}"),
             sig,
@@ -88,7 +88,7 @@ impl<'a> Checker<'a> {
         }
         let class = class.trim_start_matches('\\');
         let (canonical, _) = self.registry.lookup_class(class)?;
-        let (owner, sig) = self.registry.lookup_method_with_owner(canonical, method)?;
+        let (owner, sig) = self.lookup_method_with_owner(canonical, method)?;
         Some(NamedCallable {
             description,
             sig,

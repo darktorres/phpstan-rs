@@ -194,7 +194,7 @@ impl<'a> Checker<'a> {
                 let writes = recv_ty
                     .as_object()
                     .and_then(|(class, _)| {
-                        let (owner, sig) = self.registry.lookup_method_with_owner(class, method)?;
+                        let (owner, sig) = self.lookup_method_with_owner(class, method)?;
                         crate::registry::is_non_overridable(
                             self.registry,
                             class,
@@ -215,7 +215,7 @@ impl<'a> Checker<'a> {
                         self.registry
                             .lookup_ancestor_method_with_owner(class, method)?
                     } else {
-                        self.registry.lookup_method_with_owner(class, method)?
+                        self.lookup_method_with_owner(class, method)?
                     };
                     let exact = !keyword("static")
                         || crate::registry::is_non_overridable(
@@ -259,7 +259,7 @@ impl<'a> Checker<'a> {
                         };
                         match target
                             .as_deref()
-                            .and_then(|t| self.registry.lookup_method_with_owner(t, "__construct"))
+                            .and_then(|t| self.lookup_method_with_owner(t, "__construct"))
                         {
                             Some((owner, _)) => {
                                 self.registry.method_property_writes(&owner, "__construct")
@@ -4230,7 +4230,7 @@ impl<'a> Checker<'a> {
                                 }
                                 self.report_builder(builder);
                             } else if let Some((owner, sig)) =
-                                self.registry.lookup_method_with_owner(class, method)
+                                self.lookup_method_with_owner(class, method)
                             {
                                 self.check_member_visibility(MemberVisibilityCheck {
                                     kind: "method",
@@ -4297,7 +4297,7 @@ impl<'a> Checker<'a> {
                                     "staticMethod.notFound",
                                 );
                             } else if let Some((owner, sig)) =
-                                self.registry.lookup_method_with_owner(&class, method)
+                                self.lookup_method_with_owner(&class, method)
                             {
                                 self.check_member_visibility(MemberVisibilityCheck {
                                     kind: "staticMethod",
@@ -4781,7 +4781,7 @@ impl<'a> Checker<'a> {
                 }
                 if self.collect_member_refs
                     && let Some(class) = self.infer_static_target_class(target, locals)
-                    && let Some((owner, _)) = self.registry.lookup_method_with_owner(&class, method)
+                    && let Some((owner, _)) = self.lookup_method_with_owner(&class, method)
                 {
                     self.record_member_ref(e.span, &owner, method);
                     // The `::cases()` escape hatch - see
@@ -5120,7 +5120,7 @@ impl<'a> Checker<'a> {
                         name,
                         ..
                     }) = &target
-                    && let Some((owner, _)) = self.registry.lookup_method_with_owner(class, name)
+                    && let Some((owner, _)) = self.lookup_method_with_owner(class, name)
                 {
                     self.record_member_ref(callback.span, &owner, name);
                 }
@@ -5662,7 +5662,7 @@ impl<'a> Checker<'a> {
         class: &str,
         method: &str,
     ) -> Option<(Name, std::borrow::Cow<'a, FunctionReflection>)> {
-        let (owner, sig) = self.registry.lookup_method_with_owner(class, method)?;
+        let (owner, sig) = self.lookup_method_with_owner(class, method)?;
         let sig = match &self.current_class {
             // Inside the calling class, its own templates stay templates:
             // `parent::` binds the parent's through the class's `@extends`.

@@ -68,7 +68,7 @@ impl<'a> Checker<'a> {
         let name = self
             .registry
             .lookup_method_canonical_name(class, "equals")?;
-        let (owner, sig) = self.registry.lookup_method_with_owner(class, "equals")?;
+        let (owner, sig) = self.lookup_method_with_owner(class, "equals")?;
         let is_static = self
             .registry
             .classes
