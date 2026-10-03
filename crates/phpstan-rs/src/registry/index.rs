@@ -104,10 +104,31 @@ impl Registry {
     /// entry the way two context-only declarations legitimately do.
     pub(crate) fn insert_built_decl(&mut self, decl: BuiltDecl, analyzed: bool) {
         self.record_assert_tagged_names(&decl);
-        match &decl {
-            BuiltDecl::Class { name, .. } => self.record_changed_class(name),
-            BuiltDecl::Function { name, .. } => self.record_changed_function(name),
-            BuiltDecl::GlobalConst { name, .. } => self.record_changed_constant(name),
+        // A name is changed when its entry is: a conditional declaration the
+        // existing entry outranks leaves the table as it was.
+        let leaves_entry = match &decl {
+            BuiltDecl::Class {
+                name,
+                conditional: true,
+                ..
+            } => !self.built_in_stub_classes.contains_key(name) && self.classes.contains_key(name),
+            BuiltDecl::Function {
+                name,
+                conditional: true,
+                sig,
+                ..
+            } => self
+                .functions
+                .get(name)
+                .is_some_and(|existing| !better_conditional_function_declaration(sig, existing)),
+            _ => false,
+        };
+        if !leaves_entry {
+            match &decl {
+                BuiltDecl::Class { name, .. } => self.record_changed_class(name),
+                BuiltDecl::Function { name, .. } => self.record_changed_function(name),
+                BuiltDecl::GlobalConst { name, .. } => self.record_changed_constant(name),
+            }
         }
         match decl {
             BuiltDecl::Class {
