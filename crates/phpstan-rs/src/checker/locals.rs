@@ -60,25 +60,18 @@ pub(crate) struct Locals {
     discriminant_array_facts: DiscriminantArrayFactsMap,
     // Monotonic: set `true` the first time any of `insert`/`declare`/
     // `insert_with_provenance` (the only three places `types` is ever
-    // written - see each one's own check below) inserts one of
-    // `narrowing_key`'s own synthetic property-chain/array-index keys,
-    // never reset back to `false` except by starting a fresh scope. Lets
-    // `check_expr`/`infer_expr`'s own "is this exact property/index/
-    // static-property chain narrowed?" probes (`PropertyAccess`/`Index`/
-    // `ClassConstFetch`/`StaticPropertyFetch`) skip building the synthetic lookup key entirely -
-    // two `String` allocations (`narrowing_key` itself, then the call
-    // site's own `format!`) - in the overwhelmingly common case where
-    // `locals` holds no such entry at all, without needing every one of
-    // `narrowing_key`'s ~30 call sites across `checker/narrowing*.rs`/
-    // `checker/assignment.rs` to individually remember to set a flag (a
-    // single missed site there would silently reintroduce a correctness
-    // bug - a narrowed value never read back - which is worse than the
-    // wasted allocation this exists to avoid). A stale `true` after the
-    // one narrowed entry is later purged just costs one skippable
-    // allocation, not a false negative - `merge_scopes`'s own `types`-
-    // merging loop (`checker/control_flow.rs`) already routes every
-    // surviving key through `insert_with_provenance`, so this needs no
-    // separate per-field merge line to stay correct across branch joins.
+    // written) inserts a key that is not a variable - a property chain, an
+    // index, a static property - and never reset back to `false` except by
+    // starting a fresh scope. Lets `check_expr`/`infer_expr`'s own "is this
+    // exact property/index/static-property chain narrowed?" probes
+    // (`PropertyAccess`/`Index`/`ClassConstFetch`/`StaticPropertyFetch`)
+    // skip looking the key up in the common case where `locals` holds no
+    // such entry at all. A stale `true` after the one narrowed entry is
+    // later purged just costs one skippable lookup, not a false negative:
+    // `merge_scopes`'s own `types`-merging loop (`checker/control_flow.rs`)
+    // routes every surviving key through `insert_with_provenance`, so this
+    // needs no separate per-field merge line to stay correct across branch
+    // joins.
     may_have_member_narrowing: bool,
     // Set once an `include`/`require`/`extract()`/`eval()` has run on
     // this path - any variable name may now be defined, with any value

@@ -68,7 +68,7 @@ type ReinitializedPropertySet =
 // to `name`'s own truthiness without any new type math: the stored `Expr`
 // is the original AST node, re-run through the exact dispatch a direct
 // `if (<rhsExpr>)` would use. `target_keys` (computed once at store time,
-// mirroring `narrowing_key`'s own string form - one entry per distinct
+// mirroring `key_of`'s own string form - one entry per distinct
 // subject a compound `&&`/`||` condition names, e.g. both `$isUserFound`
 // and `$email` for `! $isUserFound || $email === null || $email === ''`)
 // is what `Locals::declare` scans for to invalidate a stale alias whose
@@ -103,7 +103,7 @@ type ConditionAliasMap = imbl::GenericHashMap<
 // iteration rebinding its `foreach` variable is the common case.
 type BranchImpliedFacts = std::rc::Rc<Vec<(LocalKey, Type)>>;
 
-/// A narrowing subject (its `narrowing_key`) compared against one value:
+/// A narrowing subject (its `key_of`) compared against one value:
 /// what branch-implied facts are recorded under.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub(crate) struct Discriminant {
@@ -148,19 +148,19 @@ type QueryBuilderAliasMap = imbl::GenericHashMap<
 
 // Container variable name -> a fact about every element of that
 // container's own shape ("field name -> type"), not about one specific
-// key - `narrowing_key` (`checker/narrowing/predicates.rs`) has no
+// key - `key_of` (`checker/narrowing/predicates.rs`) has no
 // "any/every index" form of its own, which is the one thing this map
 // adds. Populated once, at a by-ref `foreach`'s own loop-exit
 // (`checker/stmt/loops.rs`), by harvesting the accepted pass's own
-// `narrowing_key`-format entries for the loop's value variable -
+// `key_of`-format entries for the loop's value variable -
 // `bind_assignment_target` (`checker/assignment.rs`) already keeps those
 // entries in sync on every assignment as a side effect of ordinary
 // checking, so this is a pure harvest, not a second, independent
 // analysis. Consumed by eagerly copying a container's entry onto a
-// *freshly bound* variable's own `narrowing_key` synthetic keys the
+// *freshly bound* variable's own `key_of` synthetic keys the
 // moment it's bound from that container via a dynamic-keyed read (a
 // `foreach` value, or a plain `$x = $container[$dyn];`) - the two
-// pre-existing `narrowing_key`-consulting Index-read fast paths in
+// pre-existing `key_of`-consulting Index-read fast paths in
 // `checker/expr.rs` then pick the copied facts up with no further code.
 // `Rc`-wrapped for the same O(1)-clone reason `BranchImpliedFactsMap`'s
 // own `Vec` is. `merge_scopes` *intersects* (keeps only when both sides

@@ -293,10 +293,10 @@ impl<'a> Checker<'a> {
     /// gets the value at its key.
     pub(crate) fn bind_assignment_target(&self, lhs: &Expr, ty: Type, locals: &mut Locals) {
         syntax::stack::guard(|| {
-            // Keep any existing `narrowing_key` entry for this exact
+            // Keep any existing `key_of` entry for this exact
             // property-chain/literal-index-chain expression in sync with a
             // real assignment - `apply_narrowing`'s synthetic key format is
-            // a separate slot in the same `Locals` map (see `narrowing_key`'s
+            // a separate slot in the same `Locals` map (see `key_of`'s
             // doc comment): without this, reassigning a property/element a
             // prior condition already narrowed would leave the old narrowed
             // value sitting under that key forever (`if ($this->entries ===
@@ -312,7 +312,7 @@ impl<'a> Checker<'a> {
                 // key (`"key->prop"`, `"key[lit]"`) or that used `key` as a
                 // variable subscript elsewhere (`"other[$key]"`) - real
                 // invalidation-on-reassignment, generalized over any
-                // `narrowing_key` shape (bare variable, property chain, or
+                // `key_of` shape (bare variable, property chain, or
                 // index chain), not just a bare variable.
                 purge_stale_narrowing_for(locals, key);
                 let stored = self.property_value_after_write(lhs, &ty, locals);
@@ -479,11 +479,11 @@ impl<'a> Checker<'a> {
                             // 'id'; $row[$key] = ...;`, or a `foreach` over a
                             // small literal array of key names) is just as
                             // resolvable per-field as a literal AST token is -
-                            // `narrowing_key(lhs)` at this function's own top
+                            // `key_of(lhs)` at this function's own top
                             // only recognizes the latter (producing this
                             // write's own `"row[$key]"` dollar-prefixed
                             // "current value" marker instead). Each resolved
-                            // literal key's own `narrowing_key`-format entry
+                            // literal key's own `key_of`-format entry
                             // is updated directly here, unioned with whatever
                             // the read side already had (a `foreach` over
                             // several literal keys hits this once per key,
@@ -494,7 +494,7 @@ impl<'a> Checker<'a> {
                             // ...; }`. Only fires for a genuinely non-literal
                             // index expression - a literal one (`$row['id']
                             // = ...`) is already covered by the top-of-
-                            // function `narrowing_key` block above.
+                            // function `key_of` block above.
                             if let Some(i) = idx.as_deref()
                                 && literal_string_key(i).is_none()
                                 && let Some(idx_ty) = idx_ty.as_ref()

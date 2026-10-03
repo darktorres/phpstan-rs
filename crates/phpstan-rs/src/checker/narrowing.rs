@@ -18,7 +18,7 @@ pub(crate) use predicates::{
 /// `count($x)`'s own operand-order detection for the count-comparison
 /// narrowing below - same shape as `int_comparison_operands`, but keyed
 /// on "is this side a single-argument `count(...)` call" rather than
-/// `narrowing_key` (a bare `count(...)` call isn't itself a narrowable
+/// `key_of` (a bare `count(...)` call isn't itself a narrowable
 /// key). Returns the call's own argument and whether `count(...)` was
 /// written on the left (`count($x) > 0`) or the right (`0 < count($x)`).
 pub(crate) fn count_call_operand<'e>(l: &'e Expr, r: &'e Expr) -> Option<(&'e Expr, bool)> {
@@ -159,7 +159,7 @@ fn condition_alias_shape(rhs: &Expr) -> bool {
 /// arbitrarily shaped (a call, a chained method,
 /// `instanceof`, a compound `&&`/`||`), and this only needs to answer
 /// "is this name referenced anywhere in it," not narrow/instanceof-specific
-/// shape recognition the way `narrowing_key`/`truthiness_discriminant_subject`
+/// shape recognition the way `key_of`/`truthiness_discriminant_subject`
 /// do elsewhere in this module.
 fn cond_references_variable(e: &Expr, name: &str) -> bool {
     syntax::visit::any_expr_in_scope(
@@ -174,8 +174,8 @@ fn cond_references_variable(e: &Expr, name: &str) -> bool {
 /// `(bool) $variable`, the corpus-confirmed shape), never an equality
 /// comparison: two equality comparisons against *different* literals
 /// (`$a === 1`/`$a === 2`) would otherwise wrongly collapse to "the
-/// same atom" under a naive `narrowing_key`-only comparison, since
-/// `narrowing_key` only ever identifies the *subject*, not the value
+/// same atom" under a naive `key_of`-only comparison, since
+/// `key_of` only ever identifies the *subject*, not the value
 /// compared against.
 fn disjunctive_syllogism_atom_key(e: &Expr, locals: &Locals) -> Option<LocalKey> {
     let e = e.peeled();
@@ -571,7 +571,7 @@ fn record_implied_facts(
 }
 
 /// The thing(s) a condition-alias-eligible `rhs` actually narrows -
-/// reuses `narrowing_key` exactly the way `apply_equality_narrowing`
+/// reuses `key_of` exactly the way `apply_equality_narrowing`
 /// already does for the identical operand-order-agnostic lookup. A
 /// compound `&&`/`||` tree collects every distinct subject named by any
 /// leaf, not just a single shared one (`! $isUserFound || $email ===
@@ -579,7 +579,7 @@ fn record_implied_facts(
 /// `Locals::declare` purges the whole alias when *any* of them is
 /// rebound, so tracking every real subject, not just one, is what keeps
 /// that invalidation sound. `None` for a shape `condition_alias_shape`
-/// accepted but whose own "narrowed thing" isn't `narrowing_key`-
+/// accepted but whose own "narrowed thing" isn't `key_of`-
 /// representable (most `Call`/`MethodCall` targets), or whose own `And`/
 /// `Or` tree has a leaf that itself resolves to no target at all - a
 /// real, disclosed leniency: such a condition simply never gets stored
@@ -884,7 +884,7 @@ impl<'a> Checker<'a> {
                 }
             }
             ExprKind::Call(callee, args) => {
-                // `narrowing_key`, not a bare `ExprKind::
+                // `key_of`, not a bare `ExprKind::
                 // Variable` match - without this, `is_string($arr['key'])`
                 // (or `empty($arr['key'])`) never narrowed `$arr['key']`
                 // at all, the array-index counterpart of the exact gap

@@ -5,7 +5,7 @@ use types::Type;
 
 /// The expression `current_narrowed_type`'s own
 /// fallback should actually infer from, when no prior narrowing entry
-/// exists yet. `narrowing_key`'s own unwrapping (`Grouping`, `Assign`,
+/// exists yet. `key_of`'s own unwrapping (`Grouping`, `Assign`,
 /// the literal-`null`-coalesce case below) picks a *key* based on the
 /// real underlying target, but inferring the type straight from the
 /// original (still-wrapped) expression is only safe for some of those

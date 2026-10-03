@@ -7,7 +7,7 @@ use syntax::name::Name;
 use types::Type;
 
 impl<'a> Checker<'a> {
-    /// The type to narrow *from* for a synthetic `narrowing_key` (a
+    /// The type to narrow *from* for a synthetic `key_of` (a
     /// property chain or literal-key array-index chain, never a bare
     /// variable) - `locals.get(key)` alone, defaulting to `mixed`
     /// when absent, is wrong for these: unlike a bare variable (already
@@ -24,7 +24,7 @@ impl<'a> Checker<'a> {
     /// it narrows from is the real `?int`, not a wrongly-defaulted
     /// `Mixed`. A bare variable already goes through `locals.get(name)`
     /// correctly (it's always present by the time a condition checks
-    /// it), so this only matters for non-`Variable` `narrowing_key`
+    /// it), so this only matters for non-`Variable` `key_of`
     /// shapes - but computing it uniformly via `expr`/`infer_expr` is
     /// correct for a bare variable too (`infer_expr` on a `Variable`
     /// just reads the same `locals` entry), so every `apply_narrowing`
@@ -145,7 +145,7 @@ impl<'a> Checker<'a> {
         locals: &mut Locals,
         matches_when_true: bool,
     ) {
-        // `narrowing_key` on each side, not a bare `ExprKind::
+        // `key_of` on each side, not a bare `ExprKind::
         // Variable` match - the same array-index gap the `Call` arm above
         // has, for the `$arr['key'] === null` idiom instead of an
         // `is_*()` predicate.
@@ -154,7 +154,7 @@ impl<'a> Checker<'a> {
             (None, Some(key)) => Some((key, r, self.infer_expr(l, locals))),
             (None, None) => None,
         };
-        // A nullsafe *method call* (`$a?->b()`) has no `narrowing_key`
+        // A nullsafe *method call* (`$a?->b()`) has no `key_of`
         // of its own at all (unlike a nullsafe property access, which
         // does) - `pair` above is `None` for it, so the nullsafe-
         // receiver implication below needs its own direct check against
@@ -228,7 +228,7 @@ impl<'a> Checker<'a> {
         // (`$x = $a?->b(); if ($x !== null)`) - the direct-testing form
         // (`if ($a?->b() !== null)`, with no intermediate variable) is
         // already handled above, before `pair`'s own early return, since
-        // a nullsafe *method* call has no `narrowing_key` of its own to
+        // a nullsafe *method* call has no `key_of` of its own to
         // reach `narrowed_expr` through. This replays through `key`'s
         // own `condition_aliases` entry, whose target was stored as the
         // *receiver*'s key already (`condition_alias_targets`'s own

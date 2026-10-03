@@ -777,7 +777,7 @@ impl<'a> Checker<'a> {
                 // `subject`'s own (dynamic-keyed) element - if `subject`
                 // already carries per-field facts from an earlier by-ref
                 // `foreach` over it, copy them onto `value`'s own
-                // `narrowing_key` synthetic keys right now, so the
+                // `key_of` synthetic keys right now, so the
                 // pre-existing "check the narrowed key first" Index-read
                 // fast path (`checker/expr.rs`) sees them for any read of
                 // `value[literalField]` inside this same loop body -

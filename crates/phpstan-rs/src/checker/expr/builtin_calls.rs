@@ -791,7 +791,7 @@ impl<'a> Checker<'a> {
             // whole-scope map every other purpose here already reads
             // (narrowing, unused-variable detection) - a new read path,
             // not new tracking. `is_real_variable_key` filters out
-            // `narrowing_key`'s own synthetic property-chain/array-index
+            // `key_of`'s own synthetic property-chain/array-index
             // keys, which share the same `Locals` map but were never a
             // real PHP variable `get_defined_vars()` could report.
             "mysqli_query" if args.len() >= 2 => {

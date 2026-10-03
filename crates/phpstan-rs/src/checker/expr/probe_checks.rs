@@ -625,7 +625,7 @@ impl<'a> Checker<'a> {
             return None;
         }
         // Deliberately plain `infer_expr` on the whole argument
-        // expression, not `narrowing_key`/`current_narrowed_type` (the
+        // expression, not `key_of`/`current_narrowed_type` (the
         // mechanism `apply_narrowing`'s own predicate dispatch above
         // uses) - that pair answers "what does the underlying container
         // *key* alone currently narrow to," which is the wrong question

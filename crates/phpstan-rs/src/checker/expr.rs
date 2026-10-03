@@ -1669,7 +1669,7 @@ impl<'a> Checker<'a> {
                 // bare variable's. `bind_assignment_target` is a strict
                 // superset of a plain `locals.declare` call for the
                 // `Variable` case (identical rebind, plus the general
-                // `narrowing_key` purge every other assignment gets) and
+                // `key_of` purge every other assignment gets) and
                 // a safe no-op for any `inner` shape it doesn't specially
                 // handle (including `PropertyAccess` - a property's read
                 // type is always its declared type, never a locally-
@@ -2086,7 +2086,7 @@ impl<'a> Checker<'a> {
                 // per-field facts onto `lhs`'s own synthetic keys the
                 // same way. A *literal*-key read (`literal_string_key(idx)`
                 // is `Some`) already gets its own, more precise answer
-                // from the ordinary `narrowing_key` fast path, so this is
+                // from the ordinary `key_of` fast path, so this is
                 // deliberately gated to the dynamic-key case only.
                 if let ExprKind::Variable(target_name) = &lhs.kind
                     && let ExprKind::Index(base, Some(idx)) = &rhs.peeled().kind
@@ -2318,7 +2318,7 @@ impl<'a> Checker<'a> {
                         // re-derive the type from the base's declared/
                         // inferred shape, discarding whatever
                         // `apply_narrowing` had written under this exact
-                        // `narrowing_key`. A bare `return $x['k'];` right
+                        // `key_of`. A bare `return $x['k'];` right
                         // after narrowing `$x['k']` would otherwise see
                         // the un-narrowed type.
                         if locals.may_have_member_narrowing()
@@ -4451,7 +4451,7 @@ impl<'a> Checker<'a> {
             // type says may be missing reads `V|null` (`offset_read_type`).
             ExprKind::Index(base, Some(idx)) => {
                 // The narrowed key first: `apply_narrowing` writes a
-                // narrowed type under `narrowing_key`'s `"base[key]"`
+                // narrowed type under `key_of`'s `"base[key]"`
                 // (e.g. after `is_string($info['code'])`).
                 if locals.may_have_member_narrowing()
                     && let Some(key) = locals.find_key(e)
@@ -5537,7 +5537,7 @@ impl<'a> Checker<'a> {
 /// matching this codebase's "assume it might be defined" philosophy
 /// elsewhere (`predefine_byref_or_unknown_args`).
 ///
-/// Narrowing-derived synthetic keys (`narrowing_key`'s own
+/// Narrowing-derived synthetic keys (`key_of`'s own
 /// `"base->prop"`/`"base[key]"` shapes) must **not** be merged this way,
 /// even though they're just as "new" by the same test - they're
 /// conditional on the right operand actually having run (true only when
