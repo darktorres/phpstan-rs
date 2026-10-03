@@ -160,3 +160,33 @@ fn a_conditional_type_survives_the_codec() {
     let back: types::Type = decode(&encode(ty).unwrap()).unwrap();
     assert_eq!(&back, ty);
 }
+
+#[test]
+fn a_stored_classs_methods_are_decoded_when_read() {
+    use crate::registry::Members;
+    use crate::registry::function_sig::FunctionReflection;
+    use crate::registry::stub_cache::{decode, encode};
+
+    let project = Project::new();
+    let (_, exception) = project
+        .registry()
+        .lookup_class("Exception")
+        .expect("a stub class");
+    let count = exception.methods().len();
+    assert!(count > 3);
+
+    let back: Members<FunctionReflection> =
+        decode(&encode(exception.methods()).expect("encodes")).expect("decodes");
+    assert_eq!(back.len(), count);
+    assert_eq!(back.encoded_count(), count, "nothing is read yet");
+
+    let message = back.get("getmessage").expect("a method");
+    assert_eq!(Some(message), exception.methods().get("getMessage"));
+    assert_eq!(back.encoded_count(), count - 1, "one method was read");
+
+    // Storing what was not read again keeps it as it was.
+    let again: Members<FunctionReflection> =
+        decode(&encode(&back).expect("encodes")).expect("decodes");
+    assert_eq!(again.encoded_count(), count);
+    assert_eq!(again, *exception.methods());
+}

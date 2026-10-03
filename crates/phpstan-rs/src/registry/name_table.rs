@@ -506,6 +506,24 @@ impl<V: Clone> Clone for Lazy<V> {
 }
 
 impl<V> Lazy<V> {
+    /// The value, decoded first when it is not yet.
+    pub(crate) fn get_mut(&mut self) -> &mut V {
+        self.get();
+        self.value.get_mut().expect("just decoded")
+    }
+
+    /// The value, decoded first when it is not yet.
+    pub(crate) fn into_inner(self) -> V {
+        self.get();
+        self.value.into_inner().expect("just decoded")
+    }
+
+    /// Whether the value is still the bytes it was read from.
+    #[cfg(test)]
+    pub(crate) fn is_encoded(&self) -> bool {
+        self.value.get().is_none() && self.encoded.is_some()
+    }
+
     pub(crate) fn get(&self) -> &V {
         self.value.get_or_init(|| {
             let (bytes, decode) = self
@@ -1150,10 +1168,22 @@ impl<V> NameTable<V> {
     }
 }
 
+impl<V: PartialEq> PartialEq for Lazy<V> {
+    fn eq(&self, other: &Lazy<V>) -> bool {
+        std::ptr::eq(self, other) || self.get() == other.get()
+    }
+}
+
 /// A lazy value serializes encoded on its own.
 impl<V: serde::Serialize> serde::Serialize for Lazy<V> {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
         use serde::ser::Error;
+        // A value not read since it was stored is written as it was.
+        if self.value.get().is_none()
+            && let Some((bytes, _)) = &self.encoded
+        {
+            return serializer.serialize_bytes(bytes);
+        }
         let bytes = super::stub_cache::encode(self.get()).map_err(S::Error::custom)?;
         Bytes(bytes).serialize(serializer)
     }

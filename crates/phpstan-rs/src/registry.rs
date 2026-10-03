@@ -18,6 +18,7 @@ mod global_vars;
 mod guard;
 mod hierarchy;
 mod index;
+mod members;
 mod name_context;
 mod name_map;
 mod name_table;
@@ -53,6 +54,7 @@ pub(crate) use function_sig::{DeclaredType, declared_type};
 pub(crate) use function_sig::{
     build_template_params, infer_const_type, mark_template_params, substitute_type_aliases,
 };
+pub use members::Members;
 pub use name_map::{NameMap, NameSet};
 pub use name_table::NameTable;
 pub(crate) use name_table::{Detached, FoldedKey, Lazy};

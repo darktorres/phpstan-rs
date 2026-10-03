@@ -1,6 +1,7 @@
 use indexmap::IndexMap;
 use rustc_hash::{FxHashMap, FxHashSet};
 
+use crate::registry::Members;
 use crate::registry::function_sig::{
     DeclaredType, FunctionReflection, ParameterReflection, apply_implicit_nullable_default,
     build_template_params, build_type_aliases, declared_type, infer_class_const_type,
@@ -367,7 +368,7 @@ pub struct ClassReflection {
     pub(in crate::registry) is_immutable: bool,
     pub(in crate::registry) extends: Vec<Name>,
     pub(in crate::registry) implements: Vec<Name>,
-    pub(in crate::registry) methods: FoldedMap<FunctionReflection>,
+    pub(in crate::registry) methods: Members<FunctionReflection>,
     // The own signature of each method whose name the body declares more
     // than once, keyed by its name's position: `methods` holds their
     // union.
@@ -618,7 +619,7 @@ impl ClassReflection {
         &self.implements
     }
 
-    pub fn methods(&self) -> &FoldedMap<FunctionReflection> {
+    pub fn methods(&self) -> &Members<FunctionReflection> {
         &self.methods
     }
 
@@ -1614,7 +1615,7 @@ impl ClassReflection {
             is_readonly: c.is_readonly,
             extends: c.extends.iter().map(class_ref).collect(),
             implements,
-            methods,
+            methods: methods.into_iter().collect(),
             redeclared_methods,
             properties,
             consts,
