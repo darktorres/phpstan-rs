@@ -15,6 +15,7 @@ use crate::registry::type_node::parse_type_node;
 use phpdoc::docblock::{self, DocBlock};
 use phpdoc::grammar::TypeNode;
 use syntax::ast::{ClassDecl, ClassDef, ClassKind, ExprKind, Literal, Visibility};
+use syntax::name::FoldedMap;
 use syntax::name_resolution::NameContext;
 use syntax::token::Span;
 use types::{self, AccessoryKind, Name, TemplateParam, Type};
@@ -366,7 +367,7 @@ pub struct ClassReflection {
     pub(in crate::registry) is_immutable: bool,
     pub(in crate::registry) extends: Vec<Name>,
     pub(in crate::registry) implements: Vec<Name>,
-    pub(in crate::registry) methods: FxHashMap<Name, FunctionReflection>,
+    pub(in crate::registry) methods: FoldedMap<FunctionReflection>,
     // The own signature of each method whose name the body declares more
     // than once, keyed by its name's position: `methods` holds their
     // union.
@@ -617,7 +618,7 @@ impl ClassReflection {
         &self.implements
     }
 
-    pub fn methods(&self) -> &FxHashMap<Name, FunctionReflection> {
+    pub fn methods(&self) -> &FoldedMap<FunctionReflection> {
         &self.methods
     }
 
@@ -826,19 +827,20 @@ pub struct ResolvedTypeImport {
 fn collect_merged_methods(
     methods: Vec<(Name, (u32, u32), FunctionReflection)>,
 ) -> (
-    FxHashMap<Name, FunctionReflection>,
+    FoldedMap<FunctionReflection>,
     FxHashMap<(u32, u32), FunctionReflection>,
 ) {
+    // PHP's method names ignore case: a name declared twice is one method.
     let mut counts: FxHashMap<&str, usize> = FxHashMap::default();
     for (name, _, _) in &methods {
-        *counts.entry(name.as_ref()).or_default() += 1;
+        *counts.entry(name.lower()).or_default() += 1;
     }
     let redeclared: FxHashMap<(u32, u32), FunctionReflection> = methods
         .iter()
-        .filter(|(name, _, _)| counts[name.as_ref()] > 1)
+        .filter(|(name, _, _)| counts[name.lower()] > 1)
         .map(|(_, site, sig)| (*site, sig.clone()))
         .collect();
-    let mut out: FxHashMap<Name, FunctionReflection> = FxHashMap::default();
+    let mut out: FoldedMap<FunctionReflection> = FoldedMap::default();
     for (name, _, sig) in methods {
         match out.remove(&name) {
             Some(existing) => {

@@ -651,7 +651,7 @@ impl<'a> Checker<'a> {
                     }
                 }
             }
-            for (method_name, sig) in trait_info.methods() {
+            for (method_name, sig) in trait_info.methods().iter() {
                 if info.resolved_trait_conflicts().contains(method_name) {
                     continue;
                 }

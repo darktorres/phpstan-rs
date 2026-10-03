@@ -142,7 +142,7 @@ impl Registry {
             .with_min_len(crate::registry::PASS_CHUNK)
             .flat_map(|class_name| {
                 let mut per_class = Vec::new();
-                for (method_name, sig) in &registry.classes[class_name].methods {
+                for (method_name, sig) in registry.classes[class_name].methods.iter() {
                     if !purity_gate_passes(sig, syntax::ast::is_constructor_name(method_name)) {
                         continue;
                     }
@@ -193,7 +193,10 @@ impl Registry {
                 None => &self.functions[&candidates.functions[index]],
                 Some(i) => {
                     let (class, method) = &candidates.methods[i];
-                    &self.classes[class].methods[method]
+                    self.classes[class]
+                        .methods
+                        .get(method)
+                        .expect("a candidate method is declared")
                 }
             }
         };

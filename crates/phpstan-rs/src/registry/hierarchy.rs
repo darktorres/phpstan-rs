@@ -1,6 +1,6 @@
-use rustc_hash::{FxHashMap, FxHashSet};
+use rustc_hash::FxHashSet;
 use std::collections::VecDeque;
-use syntax::name::Name;
+use syntax::name::{FoldedMap, Name, NameMap};
 
 use rayon::prelude::*;
 
@@ -19,9 +19,11 @@ use types::Type;
 /// other two.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub(crate) struct ClassOwners {
-    pub(crate) methods: Lazy<FxHashMap<Name, Name>>,
-    pub(crate) properties: Lazy<FxHashMap<Name, Name>>,
-    pub(crate) consts: Lazy<FxHashMap<Name, Name>>,
+    // Method names ignore case, as PHP's do: one entry for each, by the
+    // spelling of the most derived class that declares it.
+    pub(crate) methods: Lazy<FoldedMap<Name>>,
+    pub(crate) properties: Lazy<NameMap<Name>>,
+    pub(crate) consts: Lazy<NameMap<Name>>,
 }
 
 impl PartialEq for ClassOwners {
@@ -37,7 +39,7 @@ impl Registry {
     pub(crate) fn method_owners<K: TableKey + ?Sized>(
         &self,
         class: &K,
-    ) -> Option<&FxHashMap<Name, Name>> {
+    ) -> Option<&FoldedMap<Name>> {
         self.member_owners
             .get(class)
             .map(|owners| owners.methods.get())
@@ -47,17 +49,14 @@ impl Registry {
     pub(crate) fn property_owners<K: TableKey + ?Sized>(
         &self,
         class: &K,
-    ) -> Option<&FxHashMap<Name, Name>> {
+    ) -> Option<&NameMap<Name>> {
         self.member_owners
             .get(class)
             .map(|owners| owners.properties.get())
     }
 
     /// The owners of `class`'s constant names.
-    pub(crate) fn const_owners<K: TableKey + ?Sized>(
-        &self,
-        class: &K,
-    ) -> Option<&FxHashMap<Name, Name>> {
+    pub(crate) fn const_owners<K: TableKey + ?Sized>(&self, class: &K) -> Option<&NameMap<Name>> {
         self.member_owners
             .get(class)
             .map(|owners| owners.consts.get())
@@ -408,17 +407,10 @@ impl Registry {
     /// allocating a String key on a name a closer ancestor already
     /// claimed.
     #[allow(clippy::type_complexity)]
-    fn own_owner_names(
-        &self,
-        class: &Name,
-    ) -> (
-        FxHashMap<Name, Name>,
-        FxHashMap<Name, Name>,
-        FxHashMap<Name, Name>,
-    ) {
-        let mut method_owner = FxHashMap::default();
-        let mut property_owner = FxHashMap::default();
-        let mut const_owner = FxHashMap::default();
+    fn own_owner_names(&self, class: &Name) -> (FoldedMap<Name>, NameMap<Name>, NameMap<Name>) {
+        let mut method_owner = FoldedMap::default();
+        let mut property_owner = NameMap::default();
+        let mut const_owner = NameMap::default();
         let mut seen: FxHashSet<&Name> = FxHashSet::default();
         let mut queue: VecDeque<&Name> = VecDeque::new();
         queue.push_back(class);
@@ -570,35 +562,19 @@ impl Registry {
     }
 
     pub fn lookup_method(&self, class: &str, method: &str) -> Option<&FunctionReflection> {
-        let owners = self.method_owners(class)?;
-        if let Some(owner) = owners.get(method) {
-            return self.classes.get(owner)?.methods.get(method);
-        }
-        // Real PHP resolves method calls case-insensitively, the same
-        // as class/function names - `method_owner_by_class` is keyed by
-        // exact declared spelling (see `find_case_mismatched_ancestor_
-        // method`'s own doc comment), so a mismatched-case call needs
-        // this same fallback `lookup_class`/`lookup_function` already
-        // have, or `$obj->DoStuff()` calling a real `doStuff()` would
-        // wrongly read as undefined.
-        let (name, owner) = owners
-            .iter()
-            .find(|(name, _)| name.eq_ignore_ascii_case(method))?;
-        self.classes.get(owner)?.methods.get(name.as_ref())
+        // Real PHP resolves method calls case-insensitively, the same as
+        // class and function names: the owners hold one entry for each
+        // method, by the most derived declaration's spelling.
+        let (declared, owner) = self.method_owners(class)?.get_key_value(method)?;
+        self.classes.get(owner)?.methods.get(declared)
     }
 
     /// The real declared spelling `lookup_method`/`lookup_method_with_
     /// owner` would resolve `method` to, for comparing against the
     /// as-written call-site text.
     pub(crate) fn lookup_method_canonical_name(&self, class: &str, method: &str) -> Option<&str> {
-        let owners = self.method_owners(class)?;
-        if let Some((name, _)) = owners.get_key_value(method) {
-            return Some(name.as_ref());
-        }
-        owners
-            .keys()
-            .find(|name| name.eq_ignore_ascii_case(method))
-            .map(|s| s.as_ref())
+        let (name, _) = self.method_owners(class)?.get_key_value(method)?;
+        Some(name.as_ref())
     }
 
     /// Every method name callable on `class` (own + inherited), for
@@ -628,19 +604,18 @@ impl Registry {
             .flat_map(|m| m.keys().map(|s| s.as_ref()))
     }
 
-    /// `method_owner_by_class[class]` is keyed by exact declared
-    /// spelling, so two case-insensitively-equal but distinctly-spelled
-    /// names both survive as separate keys - reading that back out here
-    /// finds a same-name-different-casing override with no extra walk.
+    /// The spelling an ancestor of `class` declares `method` with, when it
+    /// differs from `method`'s: each parent's owners name a method by the
+    /// spelling of the most derived declaration in its ancestry.
     pub(crate) fn find_case_mismatched_ancestor_method(
         &self,
         class: &str,
         method: &str,
     ) -> Option<(Name, Name)> {
-        let owners = self.method_owners(class)?;
-        owners.iter().find_map(|(name, owner)| {
-            (name.eq_ignore_ascii_case(method) && name.as_ref() != method)
-                .then(|| (owner.clone(), name.clone()))
+        let info = self.classes.get(class)?;
+        self.parent_method_owner_maps(info).find_map(|owners| {
+            let (name, owner) = owners.get_key_value(method)?;
+            (name.as_ref() != method).then(|| (owner.clone(), name.clone()))
         })
     }
 
@@ -656,17 +631,9 @@ impl Registry {
         class: &str,
         method: &str,
     ) -> Option<(Name, &FunctionReflection)> {
-        let owners = self.method_owners(class)?;
-        if let Some(owner) = owners.get(method) {
-            let sig = self.classes.get(owner)?.methods.get(method)?;
-            return Some((owner.clone(), sig));
-        }
-        // See `lookup_method`'s own identical case-insensitive fallback
-        // doc comment.
-        let (name, owner) = owners
-            .iter()
-            .find(|(name, _)| name.eq_ignore_ascii_case(method))?;
-        let sig = self.classes.get(owner)?.methods.get(name.as_ref())?;
+        // See `lookup_method`.
+        let (declared, owner) = self.method_owners(class)?.get_key_value(method)?;
+        let sig = self.classes.get(owner)?.methods.get(declared)?;
         Some((owner.clone(), sig))
     }
 
@@ -680,7 +647,7 @@ impl Registry {
     pub(crate) fn parent_method_owner_maps<'a: 'i, 'i>(
         &'a self,
         info: &'i ClassReflection,
-    ) -> impl Iterator<Item = &'a FxHashMap<Name, Name>> + 'i {
+    ) -> impl Iterator<Item = &'a FoldedMap<Name>> + 'i {
         info.extends
             .iter()
             .chain(info.implements.iter())

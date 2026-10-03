@@ -1,6 +1,2 @@
-3:17-3:47 method.nameCase L4 | Method X::foo() overrides X::FOO() with different letter casing
-    fix: Use FOO => "FOO"
 4:17-4:47 class.duplicateMethod L0 | Cannot redeclare method X::FOO().
     non-ignorable
-4:17-4:47 method.nameCase L4 | Method X::FOO() overrides X::foo() with different letter casing
-    fix: Use foo => "foo"

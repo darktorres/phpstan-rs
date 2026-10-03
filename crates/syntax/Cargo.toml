@@ -23,6 +23,7 @@ fuzzing = ["dep:arbitrary"]
 
 [dev-dependencies]
 criterion.workspace = true
+serde_json.workspace = true
 
 [[bench]]
 name = "lex_parse"

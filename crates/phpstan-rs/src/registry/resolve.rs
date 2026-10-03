@@ -3,7 +3,7 @@ use indexmap::IndexMap;
 use rayon::prelude::*;
 use rustc_hash::{FxHashMap, FxHashSet};
 use std::sync::OnceLock;
-use syntax::name::Name;
+use syntax::name::{FoldedMap, Name};
 
 /// Each templated ancestor's template bindings, as seen from one class.
 type AncestorBindings = FxHashMap<Name, FxHashMap<String, Type>>;
@@ -169,7 +169,7 @@ impl Registry {
                 let mut static_from_traits: FxHashSet<Name> = FxHashSet::default();
                 for trait_name in uses {
                     if let Some(trait_info) = registry.classes.get(trait_name) {
-                        for (name, sig) in &trait_info.methods {
+                        for (name, sig) in trait_info.methods.iter() {
                             if own_method_names.contains_key(name) {
                                 continue;
                             }
@@ -254,10 +254,7 @@ impl Registry {
         {
             if let Some(info) = self.classes.get_mut(&class_name) {
                 for (name, sig) in methods {
-                    if let std::collections::hash_map::Entry::Vacant(slot) =
-                        info.methods.entry(name)
-                    {
-                        slot.insert(sig);
+                    if info.methods.insert_if_absent(name, sig) {
                         changed = true;
                     }
                 }
@@ -318,13 +315,8 @@ impl Registry {
             .with_min_len(crate::registry::PASS_CHUNK)
             .for_each(|info| {
                 for (name, sig, is_static) in std::mem::take(&mut info.method_tags) {
-                    if let std::collections::hash_map::Entry::Vacant(slot) =
-                        info.methods.entry(name.clone())
-                    {
-                        slot.insert(sig);
-                        if is_static {
-                            info.static_methods.insert(name);
-                        }
+                    if info.methods.insert_if_absent(name.clone(), sig) && is_static {
+                        info.static_methods.insert(name);
                     }
                 }
             });
@@ -912,7 +904,7 @@ impl Registry {
                 let Some(mixin_info) = self.classes.get(mixin_fqn) else {
                     continue;
                 };
-                for (name, sig) in &mixin_info.methods {
+                for (name, sig) in mixin_info.methods.iter() {
                     if sig.visibility == Visibility::Public && !info.methods.contains_key(name) {
                         method_additions.push((class_name.clone(), name.clone(), sig.clone()));
                     }
@@ -926,7 +918,7 @@ impl Registry {
         }
         for (class_name, name, sig) in method_additions {
             if let Some(info) = self.classes.get_mut(&class_name) {
-                info.methods.entry(name).or_insert(sig);
+                info.methods.insert_if_absent(name, sig);
             }
         }
         for (class_name, name, sig) in property_additions {
@@ -1116,9 +1108,9 @@ impl Registry {
                 // per class and only when a method needs it: the maps of
                 // its parents' methods to their owners, and the owners
                 // already found (a class's methods mostly share a few).
-                let mut parent_maps: Option<Vec<&FxHashMap<Name, Name>>> = None;
+                let mut parent_maps: Option<Vec<&FoldedMap<Name>>> = None;
                 let mut owner_classes: Vec<(&Name, &ClassReflection)> = Vec::new();
-                for (method_name, sig) in &info.methods {
+                for (method_name, sig) in info.methods.iter() {
                     let needs_param = sig.params.iter().any(|p| !p.has_own_doc);
                     let needs_return = !sig.return_has_own_doc;
                     if !needs_param && !needs_return {

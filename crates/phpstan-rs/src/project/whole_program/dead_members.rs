@@ -217,7 +217,7 @@ pub(crate) fn find_dead_members(
                 .is_empty()
         };
 
-        for (name, sig) in info.methods() {
+        for (name, sig) in info.methods().iter() {
             if !is_visible(&sig.visibility())
                 || sig.is_magic()
                 || is_implicitly_invoked_method(name)

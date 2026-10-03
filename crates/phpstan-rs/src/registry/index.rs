@@ -404,7 +404,7 @@ impl Registry {
                 }
             }
             BuiltDecl::Class { info, .. } => {
-                for (method_name, sig) in &info.methods {
+                for (method_name, sig) in info.methods.iter() {
                     if !sig.assert.is_empty() {
                         self.names_with_assert_tags.insert(method_name.clone());
                     }

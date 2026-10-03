@@ -26,6 +26,9 @@ struct NameData {
     /// `folded_hash` of the text, made once: what a table keyed by the
     /// name ignoring case files it under.
     folded_hash: u64,
+    /// `text_hash` of the text, made once: what a map keyed by the name,
+    /// case-sensitively, files it under.
+    hash: u64,
 }
 
 /// An interned name; see the module documentation.
@@ -33,14 +36,21 @@ struct NameData {
 pub struct Name(Arc<NameData>);
 
 impl Name {
-    fn new(text: &str) -> Name {
+    /// A name of `text`, whose `text_hash` the caller has made.
+    fn new_hashed(text: &str, hash: u64) -> Name {
         let lower = text.to_ascii_lowercase();
         let lower = (lower != text).then(|| lower.into_boxed_str());
         Name(Arc::new(NameData {
             text: text.into(),
             lower,
             folded_hash: folded_hash(text.as_bytes()),
+            hash,
         }))
+    }
+
+    /// `text_hash` of the name's text, made when the name was.
+    pub fn text_hash(&self) -> u64 {
+        self.0.hash
     }
 
     /// `folded_hash` of the name's text, made when the name was.
@@ -347,6 +357,265 @@ impl Default for Interner {
     }
 }
 
+/// What a [`NameMap`] is looked up by: a name, or text.
+pub trait NameKey {
+    /// `text_hash` of the key's text.
+    fn key_hash(&self) -> u64;
+    /// Whether the key's text is that of `stored`.
+    fn is_key_of(&self, stored: &Name) -> bool;
+}
+
+impl NameKey for Name {
+    fn key_hash(&self) -> u64 {
+        self.0.hash
+    }
+    fn is_key_of(&self, stored: &Name) -> bool {
+        Arc::ptr_eq(&self.0, &stored.0) || self.0.text == stored.0.text
+    }
+}
+
+impl NameKey for str {
+    fn key_hash(&self) -> u64 {
+        text_hash(self)
+    }
+    fn is_key_of(&self, stored: &Name) -> bool {
+        *self == *stored.0.text
+    }
+}
+
+impl NameKey for String {
+    fn key_hash(&self) -> u64 {
+        text_hash(self)
+    }
+    fn is_key_of(&self, stored: &Name) -> bool {
+        **self == *stored.0.text
+    }
+}
+
+impl<T: NameKey + ?Sized> NameKey for &T {
+    fn key_hash(&self) -> u64 {
+        (**self).key_hash()
+    }
+    fn is_key_of(&self, stored: &Name) -> bool {
+        (**self).is_key_of(stored)
+    }
+}
+
+/// Values by a name, as written: a lookup by a `Name` reads the hash it
+/// holds, and one by text hashes the text.
+#[derive(Clone)]
+pub struct NameMap<V> {
+    table: hashbrown::HashTable<(Name, V)>,
+}
+
+impl<V> Default for NameMap<V> {
+    fn default() -> Self {
+        NameMap {
+            table: hashbrown::HashTable::new(),
+        }
+    }
+}
+
+impl<V: fmt::Debug> fmt::Debug for NameMap<V> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_map().entries(self.iter()).finish()
+    }
+}
+
+impl<V> NameMap<V> {
+    pub fn len(&self) -> usize {
+        self.table.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.table.is_empty()
+    }
+
+    pub fn clear(&mut self) {
+        self.table.clear();
+    }
+
+    pub fn get_key_value<K: NameKey + ?Sized>(&self, key: &K) -> Option<(&Name, &V)> {
+        self.table
+            .find(key.key_hash(), |(name, _)| key.is_key_of(name))
+            .map(|(name, value)| (name, value))
+    }
+
+    pub fn get<K: NameKey + ?Sized>(&self, key: &K) -> Option<&V> {
+        self.get_key_value(key).map(|(_, value)| value)
+    }
+
+    pub fn get_mut<K: NameKey + ?Sized>(&mut self, key: &K) -> Option<&mut V> {
+        self.table
+            .find_mut(key.key_hash(), |(name, _)| key.is_key_of(name))
+            .map(|(_, value)| value)
+    }
+
+    pub fn contains_key<K: NameKey + ?Sized>(&self, key: &K) -> bool {
+        self.get_key_value(key).is_some()
+    }
+
+    /// Holds `value` by `name`, returning what the name held.
+    pub fn insert(&mut self, name: Name, value: V) -> Option<V> {
+        let hash = name.0.hash;
+        if let Some(entry) = self.table.find_mut(hash, |(held, _)| name.is_key_of(held)) {
+            return Some(std::mem::replace(&mut entry.1, value));
+        }
+        self.table
+            .insert_unique(hash, (name, value), |(held, _)| held.0.hash);
+        None
+    }
+
+    /// The value `name` finds, first holding `make()` by it when there is
+    /// none.
+    pub fn get_or_insert_with(&mut self, name: Name, make: impl FnOnce() -> V) -> &mut V {
+        let hash = name.0.hash;
+        if self
+            .table
+            .find(hash, |(held, _)| name.is_key_of(held))
+            .is_none()
+        {
+            self.table
+                .insert_unique(hash, (name.clone(), make()), |(held, _)| held.0.hash);
+        }
+        self.table
+            .find_mut(hash, |(held, _)| name.is_key_of(held))
+            .map(|(_, value)| value)
+            .expect("just found or inserted")
+    }
+
+    pub fn remove_entry<K: NameKey + ?Sized>(&mut self, key: &K) -> Option<(Name, V)> {
+        match self
+            .table
+            .find_entry(key.key_hash(), |(name, _)| key.is_key_of(name))
+        {
+            Ok(entry) => Some(entry.remove().0),
+            Err(_) => None,
+        }
+    }
+
+    pub fn remove<K: NameKey + ?Sized>(&mut self, key: &K) -> Option<V> {
+        self.remove_entry(key).map(|(_, value)| value)
+    }
+
+    pub fn iter(&self) -> NameMapIter<'_, V> {
+        NameMapIter(self.table.iter())
+    }
+
+    pub fn iter_mut(&mut self) -> impl Iterator<Item = (&Name, &mut V)> {
+        self.table.iter_mut().map(|(name, value)| (&*name, value))
+    }
+
+    pub fn keys(&self) -> impl Iterator<Item = &Name> {
+        self.table.iter().map(|(name, _)| name)
+    }
+
+    pub fn values(&self) -> impl Iterator<Item = &V> {
+        self.table.iter().map(|(_, value)| value)
+    }
+
+    pub fn values_mut(&mut self) -> impl Iterator<Item = &mut V> {
+        self.table.iter_mut().map(|(_, value)| value)
+    }
+
+    /// Keeps the entries `keep` answers yes for.
+    pub fn retain(&mut self, mut keep: impl FnMut(&Name, &mut V) -> bool) {
+        self.table.retain(|(name, value)| keep(name, value));
+    }
+}
+
+/// A [`NameMap`]'s entries, by reference.
+pub struct NameMapIter<'a, V>(hashbrown::hash_table::Iter<'a, (Name, V)>);
+
+impl<'a, V> Iterator for NameMapIter<'a, V> {
+    type Item = (&'a Name, &'a V);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.0.next().map(|(name, value)| (name, value))
+    }
+}
+
+impl<'a, V> IntoIterator for &'a NameMap<V> {
+    type Item = (&'a Name, &'a V);
+    type IntoIter = NameMapIter<'a, V>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.iter()
+    }
+}
+
+impl<V> IntoIterator for NameMap<V> {
+    type Item = (Name, V);
+    type IntoIter = hashbrown::hash_table::IntoIter<(Name, V)>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.table.into_iter()
+    }
+}
+
+impl<V> FromIterator<(Name, V)> for NameMap<V> {
+    fn from_iter<I: IntoIterator<Item = (Name, V)>>(iter: I) -> Self {
+        let mut map = NameMap::default();
+        for (name, value) in iter {
+            map.insert(name, value);
+        }
+        map
+    }
+}
+
+impl<V> Extend<(Name, V)> for NameMap<V> {
+    fn extend<I: IntoIterator<Item = (Name, V)>>(&mut self, iter: I) {
+        for (name, value) in iter {
+            self.insert(name, value);
+        }
+    }
+}
+
+impl<V: PartialEq> PartialEq for NameMap<V> {
+    fn eq(&self, other: &NameMap<V>) -> bool {
+        self.len() == other.len()
+            && self
+                .iter()
+                .all(|(name, value)| other.get(name).is_some_and(|v| v == value))
+    }
+}
+
+impl<V: serde::Serialize> serde::Serialize for NameMap<V> {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        use serde::ser::SerializeMap;
+        let mut map = serializer.serialize_map(Some(self.len()))?;
+        for (name, value) in self.iter() {
+            map.serialize_entry(name, value)?;
+        }
+        map.end()
+    }
+}
+
+impl<'de, V: serde::Deserialize<'de>> serde::Deserialize<'de> for NameMap<V> {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        struct Entries<V>(std::marker::PhantomData<V>);
+        impl<'de, V: serde::Deserialize<'de>> serde::de::Visitor<'de> for Entries<V> {
+            type Value = NameMap<V>;
+
+            fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                f.write_str("a map by name")
+            }
+
+            fn visit_map<A: serde::de::MapAccess<'de>>(
+                self,
+                mut map: A,
+            ) -> Result<Self::Value, A::Error> {
+                let mut out = NameMap::default();
+                while let Some((name, value)) = map.next_entry::<Name, V>()? {
+                    out.insert(name, value);
+                }
+                Ok(out)
+            }
+        }
+        deserializer.deserialize_map(Entries(std::marker::PhantomData))
+    }
+}
+
 /// The high bit of each byte of `word` that is an ASCII capital: in each
 /// byte's low seven bits, the high bit of `+ 0x3f` says `>= 'A'` and that of
 /// `+ 0x25` says `> 'Z'`; a byte with its own high bit set is not ASCII.
@@ -535,6 +804,22 @@ impl<V> FoldedMap<V> {
         None
     }
 
+    /// Holds `value` by `name` unless a spelling of it in any case is held:
+    /// whether it was held.
+    pub fn insert_if_absent(&mut self, name: Name, value: V) -> bool {
+        let hash = Self::hash_of(&name);
+        if self
+            .table
+            .find(hash, |(held, _)| name.eq_ignore_case(held))
+            .is_some()
+        {
+            return false;
+        }
+        self.table
+            .insert_unique(hash, (name, value), |(held, _)| Self::hash_of(held));
+        true
+    }
+
     /// Removes the entry `key` finds and returns it.
     pub fn remove_entry<K: FoldKey + ?Sized>(&mut self, key: &K) -> Option<(Name, V)> {
         match self
@@ -564,6 +849,109 @@ impl<V> FoldedMap<V> {
 
     pub fn values_mut(&mut self) -> impl Iterator<Item = &mut V> {
         self.table.iter_mut().map(|(_, value)| value)
+    }
+
+    pub fn values(&self) -> impl Iterator<Item = &V> {
+        self.table.iter().map(|(_, value)| value)
+    }
+
+    /// The value `key` finds, first holding `make()` by `name` when there
+    /// is none.
+    pub fn get_or_insert_with(&mut self, name: Name, make: impl FnOnce() -> V) -> &mut V {
+        let hash = Self::hash_of(&name);
+        let found = self
+            .table
+            .find(hash, |(held, _)| name.eq_ignore_case(held))
+            .is_some();
+        if !found {
+            self.table
+                .insert_unique(hash, (name.clone(), make()), |(held, _)| {
+                    Self::hash_of(held)
+                });
+        }
+        self.table
+            .find_mut(hash, |(held, _)| name.eq_ignore_case(held))
+            .map(|(_, value)| value)
+            .expect("just found or inserted")
+    }
+
+    /// Keeps the entries `keep` answers yes for.
+    pub fn retain(&mut self, mut keep: impl FnMut(&Name, &mut V) -> bool) {
+        self.table.retain(|(name, value)| keep(name, value));
+    }
+}
+
+impl<V: PartialEq> PartialEq for FoldedMap<V> {
+    /// The same names, spelled the same, holding equal values.
+    fn eq(&self, other: &FoldedMap<V>) -> bool {
+        self.len() == other.len()
+            && self.iter().all(|(name, value)| {
+                other
+                    .get_key_value(name)
+                    .is_some_and(|(held, v)| held.as_str() == name.as_str() && v == value)
+            })
+    }
+}
+
+impl<V> std::ops::Index<&str> for FoldedMap<V> {
+    type Output = V;
+
+    fn index(&self, name: &str) -> &V {
+        self.get(name)
+            .unwrap_or_else(|| panic!("no entry for {name}"))
+    }
+}
+
+impl<'a, V> IntoIterator for &'a FoldedMap<V> {
+    type Item = (&'a Name, &'a V);
+    type IntoIter = FoldedIter<'a, V>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.iter()
+    }
+}
+
+impl<V> Extend<(Name, V)> for FoldedMap<V> {
+    fn extend<I: IntoIterator<Item = (Name, V)>>(&mut self, iter: I) {
+        for (name, value) in iter {
+            self.insert(name, value);
+        }
+    }
+}
+
+impl<V: serde::Serialize> serde::Serialize for FoldedMap<V> {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        use serde::ser::SerializeMap;
+        let mut map = serializer.serialize_map(Some(self.len()))?;
+        for (name, value) in self.iter() {
+            map.serialize_entry(name, value)?;
+        }
+        map.end()
+    }
+}
+
+impl<'de, V: serde::Deserialize<'de>> serde::Deserialize<'de> for FoldedMap<V> {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        struct Entries<V>(std::marker::PhantomData<V>);
+        impl<'de, V: serde::Deserialize<'de>> serde::de::Visitor<'de> for Entries<V> {
+            type Value = FoldedMap<V>;
+
+            fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                f.write_str("a map by name")
+            }
+
+            fn visit_map<A: serde::de::MapAccess<'de>>(
+                self,
+                mut map: A,
+            ) -> Result<Self::Value, A::Error> {
+                let mut out = FoldedMap::default();
+                while let Some((name, value)) = map.next_entry::<Name, V>()? {
+                    out.insert(name, value);
+                }
+                Ok(out)
+            }
+        }
+        deserializer.deserialize_map(Entries(std::marker::PhantomData))
     }
 }
 
@@ -689,11 +1077,11 @@ impl Interner {
 
     /// `name`, for a caller that has made `text_hash(text)` already.
     pub fn name_hashed(&self, text: &str, hash: u64) -> Name {
-        Name(
-            self.shard(hash)
-                .names
-                .get_or_insert(hash, |n| &*n.text == text, || Name::new(text).0),
-        )
+        Name(self.shard(hash).names.get_or_insert(
+            hash,
+            |n| &*n.text == text,
+            || Name::new_hashed(text, hash).0,
+        ))
     }
 }
 
@@ -798,6 +1186,42 @@ mod tests {
         let mut wanted: Vec<(String, usize)> = model.values().cloned().collect();
         wanted.sort();
         assert_eq!(held, wanted);
+    }
+
+    #[test]
+    fn a_name_map_is_a_map_by_the_exact_text() {
+        let texts = random_texts(4000, 0x1357_9bdf);
+        let mut map: NameMap<usize> = NameMap::default();
+        let mut model: std::collections::BTreeMap<String, usize> = Default::default();
+        for (i, text) in texts.iter().enumerate() {
+            let before = map.insert(Interner::global().name(text), i);
+            assert_eq!(before, model.insert(text.clone(), i), "{text}");
+            if i % 5 == 0 {
+                let gone = &texts[i / 3];
+                assert_eq!(map.remove(gone.as_str()), model.remove(gone), "{gone}");
+            }
+        }
+        assert_eq!(map.len(), model.len());
+        for text in &texts {
+            assert_eq!(map.get(text.as_str()), model.get(text), "{text}");
+            assert_eq!(
+                map.get(&Interner::global().name(text)),
+                model.get(text),
+                "{text}"
+            );
+            // Another spelling is another key.
+            let other = text.to_ascii_uppercase();
+            assert_eq!(
+                map.contains_key(other.as_str()),
+                model.contains_key(&other),
+                "{other}"
+            );
+        }
+        *map.get_or_insert_with(Interner::global().name("fresh"), || 1) += 1;
+        assert_eq!(map.get("fresh"), Some(&2));
+        let json = serde_json::to_string(&map).expect("serializes");
+        let back: NameMap<usize> = serde_json::from_str(&json).expect("reads back");
+        assert!(back == map);
     }
 
     #[test]

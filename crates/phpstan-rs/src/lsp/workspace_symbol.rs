@@ -70,7 +70,7 @@ pub(super) fn workspace_symbols<'a>(project: &'a Project, query: &str) -> Vec<Ma
                 .declaring_class()
                 .is_some_and(|c| c.eq_ignore_ascii_case(fqn))
         };
-        for (name, sig) in info.methods() {
+        for (name, sig) in info.methods().iter() {
             if declared_here(sig.provenance()) {
                 push(
                     name,
