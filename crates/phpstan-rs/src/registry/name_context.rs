@@ -11,7 +11,34 @@ pub(crate) fn class_ref(name: &syntax::ast::QualifiedName) -> Name {
 /// `ty`, a type as written (`types::parse_written_type`), with every
 /// class name resolved as `ctx` resolves it.
 pub(crate) fn resolve_names_in_type(ty: Type, ctx: &NameContext) -> Type {
-    ty.map_class_names(&mut |name| ctx.resolve(name).into())
+    if !ty.has_class_names() {
+        return ty;
+    }
+    // The same type is resolved in the same context again and again: by
+    // each declaration of a file that writes it. What it resolves to is a
+    // function of the type and the context's namespace and imports.
+    thread_local! {
+        static RESOLVED: std::cell::RefCell<rustc_hash::FxHashMap<(Type, u64), Type>> =
+            std::cell::RefCell::new(rustc_hash::FxHashMap::default());
+    }
+    const LIMIT: usize = 1 << 16;
+    let version = ctx.version();
+    if version != 0
+        && let Some(done) = RESOLVED.with(|memo| memo.borrow().get(&(ty.clone(), version)).cloned())
+    {
+        return done;
+    }
+    let resolved = ty.map_class_names(&mut |name| ctx.resolve(name).into());
+    if version != 0 {
+        RESOLVED.with(|memo| {
+            let mut memo = memo.borrow_mut();
+            if memo.len() >= LIMIT {
+                memo.clear();
+            }
+            memo.insert((ty, version), resolved.clone());
+        });
+    }
+    resolved
 }
 
 /// Each class name `resolve_names_in_type` resolves in `ty`, as

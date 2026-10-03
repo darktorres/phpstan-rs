@@ -77,6 +77,12 @@ impl Type {
     /// templates' bounds and defaults. A template placeholder is kept as
     /// it is: its bound and default belong to the template's declaration,
     /// already named there.
+    /// Whether the type has a class name to map: what `map_class_names`
+    /// would change nothing without.
+    pub fn has_class_names(&self) -> bool {
+        self.0.flags() & crate::HAS_OBJECT != 0 || !crate::shortcuts_enabled()
+    }
+
     pub fn map_class_names(&self, rename: &mut dyn FnMut(&Name) -> Name) -> Type {
         if self.0.flags() & crate::HAS_OBJECT == 0 && crate::shortcuts_enabled() {
             return self.clone();

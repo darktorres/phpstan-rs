@@ -153,6 +153,10 @@ fn strip_namespace_relative_prefix(name: &str) -> Option<&str> {
 /// the two halves of this registry would disagree with each other.
 #[derive(Debug, Clone, Default)]
 pub struct NameContext {
+    // Which namespace and imports the context holds: a number no other
+    // state of any context has, new at each change, kept by a clone, `0`
+    // for none. Two contexts with one version resolve every name alike.
+    version: u64,
     namespace: String,
     // (which of PHP's three `use`-namespaces, short name or `as Alias`)
     // -> the full path it was imported from. Each namespace is its own
@@ -202,6 +206,12 @@ pub fn context_at(stmts: &[Stmt], pos: u32) -> NameContext {
     at
 }
 
+/// A version number not given before.
+fn next_version() -> u64 {
+    static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+    NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+}
+
 impl NameContext {
     /// Enters a (possibly new) namespace - real `use` imports are scoped
     /// to the namespace block they appear in, so a fresh one clears
@@ -212,6 +222,12 @@ impl NameContext {
     pub fn set_namespace(&mut self, name: &str) {
         self.namespace = strip_leading_backslash(name);
         self.use_map.clear();
+        self.version = next_version();
+    }
+
+    /// Which namespace and imports this context holds, see the field.
+    pub fn version(&self) -> u64 {
+        self.version
     }
 
     /// The current file's own namespace, empty for the global
@@ -280,6 +296,9 @@ impl NameContext {
     /// names resolve case-insensitively and are stored lowercased;
     /// constant names are case-sensitive and stored as written.
     pub fn add_uses(&mut self, imports: &[UseImport]) {
+        if !imports.is_empty() {
+            self.version = next_version();
+        }
         for import in imports {
             // The name an import is known by: its alias, or the last
             // segment of what it imports.

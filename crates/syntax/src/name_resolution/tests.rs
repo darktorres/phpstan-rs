@@ -342,3 +342,20 @@ fn the_import_table_answers_as_the_table_of_owned_strings_did() {
     assert!(table.contains(UseKind::Class, &long));
     assert!(!table.contains(UseKind::Const, &long.to_ascii_lowercase()));
 }
+
+#[test]
+fn a_context_has_a_version_for_what_it_resolves_by() {
+    let stmts = parse("<?php namespace A; use B\\C; use D\\E;");
+    let mut seen = Vec::new();
+    for_each_in_context(&stmts, |_, ctx| seen.push(ctx.version()));
+    // The namespace and each `use` is a state of its own.
+    assert_eq!(seen.len(), 3);
+    assert!(seen[0] != 0 && seen[0] != seen[1] && seen[1] != seen[2]);
+    // A copy resolves as the original does, and says so.
+    let mut ctx = context_at(&stmts, u32::MAX);
+    let copy = ctx.clone();
+    assert_eq!(ctx.version(), copy.version());
+    ctx.set_namespace("A");
+    assert_ne!(ctx.version(), copy.version());
+    assert_eq!(NameContext::default().version(), 0);
+}
