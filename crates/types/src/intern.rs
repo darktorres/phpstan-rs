@@ -213,7 +213,7 @@ fn insert_shared(repr: Repr, semantic_hash: fn(&Repr) -> u64, exact: u64) -> Arc
         hash,
         exact,
         flags,
-        refined: std::sync::atomic::AtomicU32::new(0),
+        refined: std::sync::atomic::AtomicU64::new(0),
     });
     shard
         .entries

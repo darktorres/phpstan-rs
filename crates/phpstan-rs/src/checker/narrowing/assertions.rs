@@ -399,7 +399,7 @@ impl<'a> Checker<'a> {
         locals: &mut Locals,
     ) {
         let resolved = crate::checker::resolve_call_args(args, sig.params());
-        let (bindings, _) = self.call_template_bindings(sig, &resolved, locals);
+        let bindings = self.call_template_bindings(sig, &resolved, locals);
         for info in infos {
             let Some((key, current)) =
                 self.assert_target_key_and_current(&info.target, sig, recv, &resolved, locals)

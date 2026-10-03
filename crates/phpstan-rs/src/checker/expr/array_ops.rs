@@ -471,13 +471,30 @@ impl<'a> Checker<'a> {
         resolved: &[Option<&Expr>],
         locals: &Locals,
     ) -> Type {
-        let (bindings, param_bindings) = self.call_template_bindings(sig, resolved, locals);
+        // Without a template reference, a late reference or a conditional,
+        // nothing a binding says changes the return type: none is made.
+        let return_type = sig.return_type();
+        if !return_type.needs_call_binding() {
+            return return_type.clone();
+        }
+        let conditional = return_type.has_parameter_conditional();
+        let (bindings, arguments) = self.call_bindings(sig, resolved, locals, conditional);
         // The call's own templates (scoped to this function or method,
         // not to a class) that no argument inferred resolve to their
         // bounds; a class template left unbound here belongs to an
         // erased receiver and stays `Mixed`.
-        let substituted = self.substitute_call_templates(sig.return_type(), &bindings);
-        substituted.resolve_conditional(&param_bindings, &self.relation())
+        let substituted = self.substitute_call_templates(return_type, &bindings);
+        // A parameter is found by its name, the last of that name as a
+        // table keyed by name would hold it.
+        let params = sig.params();
+        let argument = |name: &str| {
+            params
+                .iter()
+                .rposition(|p| p.name().as_str() == name)
+                .and_then(|i| arguments.get(i))
+                .and_then(Option::as_ref)
+        };
+        substituted.resolve_conditional(&argument, &self.relation())
     }
 
     /// `ty` with a call's template bindings substituted, its own templates
@@ -496,32 +513,41 @@ impl<'a> Checker<'a> {
     }
 
     /// What a call binds `sig`'s templates to from its arguments
-    /// (`resolved`, in parameter order), and each parameter to its
-    /// argument's type (an omitted one's default) for conditional types.
+    /// (`resolved`, in parameter order).
     pub(crate) fn call_template_bindings(
         &self,
         sig: &FunctionReflection,
         resolved: &[Option<&Expr>],
         locals: &Locals,
-    ) -> (TemplateBindings, rustc_hash::FxHashMap<String, Type>) {
+    ) -> TemplateBindings {
+        self.call_bindings(sig, resolved, locals, false).0
+    }
+
+    /// What a call binds `sig`'s templates to from its arguments, and, when
+    /// `with_arguments`, the type passed for each parameter (an omitted
+    /// one's default) for the conditional types that name it.
+    fn call_bindings(
+        &self,
+        sig: &FunctionReflection,
+        resolved: &[Option<&Expr>],
+        locals: &Locals,
+        with_arguments: bool,
+    ) -> (TemplateBindings, Vec<Option<Type>>) {
         let mut bindings: TemplateBindings = TemplateBindings::default();
-        // One entry for each parameter at most: the table is made once, at
-        // its size.
-        let mut param_bindings: rustc_hash::FxHashMap<String, Type> =
-            rustc_hash::FxHashMap::with_capacity_and_hasher(sig.params().len(), Default::default());
+        let mut arguments: Vec<Option<Type>> = Vec::new();
         for (param, slot) in sig.params().iter().zip(resolved.iter()) {
             let Some(arg) = slot else {
                 // An omitted argument's conditional-return subject is its
                 // default value, as in real PHPStan.
-                if let Some(default_ty) = &param.default_ty() {
-                    param_bindings.insert(param.name().to_string(), default_ty.clone());
+                if with_arguments {
+                    arguments.push(param.default_ty().clone());
                 }
                 continue;
             };
             let arg_ty = self.infer_expr(arg, locals);
             // Same literal-class-string promotion as
             // the `ExprKind::New` constructor-binding arm - only for
-            // template binding, never for `param_bindings` (which feeds
+            // template binding, never for the arguments (which feed
             // `resolve_conditional`'s `$x is T` checks and must see the
             // argument's real, unpromoted type).
             let promoted = param.ty().promote_class_string_literals(&arg_ty, &|s| {
@@ -529,9 +555,11 @@ impl<'a> Checker<'a> {
             });
             self.relation()
                 .infer_template_bindings(param.ty(), &promoted, &mut bindings);
-            param_bindings.insert(param.name().to_string(), arg_ty);
+            if with_arguments {
+                arguments.push(Some(arg_ty));
+            }
         }
-        (bindings, param_bindings)
+        (bindings, arguments)
     }
 
     /// `Suit::from(1)`/`Suit::tryFrom(1)` called with a literal

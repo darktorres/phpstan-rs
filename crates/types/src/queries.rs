@@ -34,9 +34,50 @@ static PROBES: std::sync::LazyLock<Probes> = std::sync::LazyLock::new(|| Probes 
 
 /// The two bits a node keeps for an answer of `is_refined_string`; zero is
 /// not asked yet.
-const REFINED_NO: u32 = 1;
-const REFINED_MAYBE: u32 = 2;
-const REFINED_YES: u32 = 3;
+const REFINED_NO: u64 = 1;
+const REFINED_MAYBE: u64 = 2;
+const REFINED_YES: u64 = 3;
+
+/// The structural predicates a node answers once, in the bits after the
+/// ten refined-string kinds'.
+#[derive(Clone, Copy)]
+enum Structural {
+    Null,
+    True,
+    False,
+    Bool,
+    Int,
+    Float,
+    String,
+    Array,
+    Object,
+    Scalar,
+    List,
+}
+
+const STRUCTURAL_FIRST: usize = 10;
+
+impl Structural {
+    fn probe(self) -> &'static Type {
+        static STRUCTURAL_PROBES: std::sync::LazyLock<[Type; 11]> =
+            std::sync::LazyLock::new(|| {
+                [
+                    Type::null(),
+                    Type::bool_literal(true),
+                    Type::bool_literal(false),
+                    Type::bool(),
+                    Type::int(),
+                    Type::float(),
+                    Type::string(),
+                    PROBES.array.clone(),
+                    Type::object_without_class(),
+                    PROBES.scalar.clone(),
+                    PROBES.list.clone(),
+                ]
+            });
+        &STRUCTURAL_PROBES[self as usize]
+    }
+}
 
 /// Where `kind` is among the probes, and in a node's `refined` bits.
 fn refined_index(kind: AccessoryKind) -> usize {
@@ -732,39 +773,70 @@ impl Type {
         Relation::structural().is_super_type_of(of, self)
     }
 
+    /// What `is_within(probe)` answers, from the two bits the node keeps at
+    /// `index` once it has been asked, and by the relation, which sets them,
+    /// the first time. The answer depends on the node alone, so two threads
+    /// asking at once find the same answer and set the same bits.
+    fn cached_within(&self, index: usize, probe: impl FnOnce() -> &'static Type) -> TrinaryLogic {
+        use std::sync::atomic::Ordering::Relaxed;
+        let shift = 2 * index;
+        if crate::shortcuts_enabled() {
+            let known = (self.0.refined.load(Relaxed) >> shift) & 0b11;
+            if known != 0 {
+                return match known {
+                    REFINED_NO => TrinaryLogic::No,
+                    REFINED_MAYBE => TrinaryLogic::Maybe,
+                    _ => TrinaryLogic::Yes,
+                };
+            }
+        }
+        let answer = self.is_within(probe());
+        let bits = match answer {
+            TrinaryLogic::No => REFINED_NO,
+            TrinaryLogic::Maybe => REFINED_MAYBE,
+            TrinaryLogic::Yes => REFINED_YES,
+        };
+        self.0.refined.fetch_or(bits << shift, Relaxed);
+        answer
+    }
+
+    fn structural(&self, which: Structural) -> TrinaryLogic {
+        self.cached_within(STRUCTURAL_FIRST + which as usize, || which.probe())
+    }
+
     /// PHPStan's `isNull()`.
     pub fn is_null(&self) -> TrinaryLogic {
-        self.is_within(&Type::null())
+        self.structural(Structural::Null)
     }
 
     /// PHPStan's `isTrue()`.
     pub fn is_true(&self) -> TrinaryLogic {
-        self.is_within(&Type::bool_literal(true))
+        self.structural(Structural::True)
     }
 
     /// PHPStan's `isFalse()`.
     pub fn is_false(&self) -> TrinaryLogic {
-        self.is_within(&Type::bool_literal(false))
+        self.structural(Structural::False)
     }
 
     /// PHPStan's `isBoolean()`.
     pub fn is_bool(&self) -> TrinaryLogic {
-        self.is_within(&Type::bool())
+        self.structural(Structural::Bool)
     }
 
     /// PHPStan's `isInteger()`.
     pub fn is_int(&self) -> TrinaryLogic {
-        self.is_within(&Type::int())
+        self.structural(Structural::Int)
     }
 
     /// PHPStan's `isFloat()`.
     pub fn is_float(&self) -> TrinaryLogic {
-        self.is_within(&Type::float())
+        self.structural(Structural::Float)
     }
 
     /// PHPStan's `isString()`.
     pub fn is_string(&self) -> TrinaryLogic {
-        self.is_within(&Type::string())
+        self.structural(Structural::String)
     }
 
     /// PHPStan's `isNumericString()`.
@@ -776,27 +848,7 @@ impl Type {
     /// `isNonEmptyString()`, `isNonFalsyString()`, `isLiteralString()`,
     /// `isLowercaseString()`, `isUppercaseString()`, `isNumericString()`.
     pub fn is_refined_string(&self, kind: AccessoryKind) -> TrinaryLogic {
-        use std::sync::atomic::Ordering::Relaxed;
-        // The answer depends on the node alone, so it is asked of the
-        // relation once and read back after: two threads asking at once
-        // find the same answer and set the same bits.
-        let shift = 2 * refined_index(kind);
-        let known = (self.0.refined.load(Relaxed) >> shift) & 0b11;
-        if known != 0 {
-            return match known {
-                REFINED_NO => TrinaryLogic::No,
-                REFINED_MAYBE => TrinaryLogic::Maybe,
-                _ => TrinaryLogic::Yes,
-            };
-        }
-        let answer = self.is_within(refined_string_probe(kind));
-        let bits = match answer {
-            TrinaryLogic::No => REFINED_NO,
-            TrinaryLogic::Maybe => REFINED_MAYBE,
-            TrinaryLogic::Yes => REFINED_YES,
-        };
-        self.0.refined.fetch_or(bits << shift, Relaxed);
-        answer
+        self.cached_within(refined_index(kind), || refined_string_probe(kind))
     }
 
     /// This type with its strings refined by `kind`: a `string`, bare or
@@ -867,12 +919,12 @@ impl Type {
 
     /// PHPStan's `isArray()`.
     pub fn is_array(&self) -> TrinaryLogic {
-        self.is_within(&PROBES.array)
+        self.structural(Structural::Array)
     }
 
     /// PHPStan's `isObject()`.
     pub fn is_object(&self) -> TrinaryLogic {
-        self.is_within(&Type::object_without_class())
+        self.structural(Structural::Object)
     }
 
     /// Whether every value is a resource that is open (`closed` false) or
@@ -883,12 +935,12 @@ impl Type {
 
     /// PHPStan's `isScalar()`: a `bool`, `int`, `float` or `string`.
     pub fn is_scalar(&self) -> TrinaryLogic {
-        self.is_within(&PROBES.scalar)
+        self.structural(Structural::Scalar)
     }
 
     /// PHPStan's `isList()`.
     pub fn is_list(&self) -> TrinaryLogic {
-        self.is_within(&PROBES.list)
+        self.structural(Structural::List)
     }
 
     /// How many elements this array may hold, as the least and the most

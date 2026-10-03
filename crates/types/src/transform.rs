@@ -58,6 +58,9 @@ impl Type {
     /// replaced by that answer, generic arguments and all; every other
     /// type's children are walked.
     pub fn replace_objects(&self, replace: &mut dyn FnMut(&Name) -> Option<Type>) -> Type {
+        if self.0.flags & crate::HAS_OBJECT == 0 && crate::shortcuts_enabled() {
+            return self.clone();
+        }
         syntax::stack::guard(|| {
             if let Repr::Object(name, _) = self.repr()
                 && let Some(replacement) = replace(name)
@@ -74,6 +77,9 @@ impl Type {
     /// it is: its bound and default belong to the template's declaration,
     /// already named there.
     pub fn map_class_names(&self, rename: &mut dyn FnMut(&Name) -> Name) -> Type {
+        if self.0.flags & crate::HAS_OBJECT == 0 && crate::shortcuts_enabled() {
+            return self.clone();
+        }
         syntax::stack::guard(|| match self.repr() {
             Repr::TemplateParam(_) => self.clone(),
             Repr::Object(name, args) => Type::object(

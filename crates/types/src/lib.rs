@@ -79,6 +79,20 @@ pub use union::{MAX_UNION_MEMBERS, generalize_by_key_set};
 pub struct Type(Arc<Node>);
 
 impl Type {
+    /// Whether a call's bindings can change this type: it has a template
+    /// reference, a reference left for the registry, or a conditional
+    /// somewhere in it. Without one, substituting and resolving give the
+    /// same type back.
+    pub fn needs_call_binding(&self) -> bool {
+        self.0.flags & (HAS_TEMPLATE_REF | HAS_LATE | HAS_DEFERRED | HAS_CONDITIONAL) != 0
+    }
+
+    /// Whether a conditional on a parameter stands anywhere in this type:
+    /// what a call's arguments resolve.
+    pub fn has_parameter_conditional(&self) -> bool {
+        self.0.flags & HAS_PARAM_CONDITIONAL != 0
+    }
+
     /// Where this type's node is: the same address is the same type.
     pub(crate) fn node_address(&self) -> usize {
         Arc::as_ptr(&self.0) as usize
@@ -99,9 +113,11 @@ pub(crate) struct Node {
     // as it is.
     pub(crate) flags: u16,
     // What `Type::is_refined_string` answered for each of the ten kinds,
-    // two bits apiece (`REFINED_ASKED` set, then the answer), as asked: a
-    // node answers each question once, by the relation, and then by a load.
-    pub(crate) refined: std::sync::atomic::AtomicU32,
+    // and each structural predicate (`is_null`, `is_int`, `is_object`, ...)
+    // for the eleven probes after them, two bits apiece (zero: not asked,
+    // then no, maybe, yes), as asked: a node answers each question once,
+    // by the relation, and then by a load.
+    pub(crate) refined: std::sync::atomic::AtomicU64,
 }
 
 pub(crate) const HAS_SELF: u16 = 1;
@@ -116,6 +132,42 @@ pub(crate) const HAS_CONSTANT_NAME: u16 = 16;
 pub(crate) const HAS_KEY_REFINEMENT: u16 = 32;
 pub(crate) const HAS_TEMPLATE_REF: u16 = 64;
 pub(crate) const HAS_LATE: u16 = 128;
+/// A conditional of either subject, which `resolve_conditional` rewrites.
+pub(crate) const HAS_CONDITIONAL: u16 = 256;
+/// An object, the only node `map_class_names` and `replace_objects` rewrite,
+/// or a callable with templates of its own, whose rebinding
+/// `map_class_names` redoes.
+pub(crate) const HAS_OBJECT: u16 = 512;
+/// A conditional on a parameter, which a call's arguments resolve.
+pub(crate) const HAS_PARAM_CONDITIONAL: u16 = 1024;
+
+#[cfg(test)]
+thread_local! {
+    static SHORTCUTS_OFF: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+/// Whether the early exits on a node's flags and the answers a node keeps
+/// are used. Always, outside a test that turns them off to compare.
+#[cfg(not(test))]
+#[inline(always)]
+pub(crate) const fn shortcuts_enabled() -> bool {
+    true
+}
+
+#[cfg(test)]
+pub(crate) fn shortcuts_enabled() -> bool {
+    !SHORTCUTS_OFF.with(std::cell::Cell::get)
+}
+
+/// Runs `f` with every shortcut off, on this thread: each early exit on a
+/// flag and each kept answer falls through to the computation it stands for.
+#[cfg(test)]
+pub(crate) fn without_shortcuts<R>(f: impl FnOnce() -> R) -> R {
+    SHORTCUTS_OFF.with(|off| off.set(true));
+    let result = f();
+    SHORTCUTS_OFF.with(|off| off.set(false));
+    result
+}
 
 /// Whether the last segment of the class-like `name` is spelled the way a
 /// constant is: an upper-case letter or `_`, then upper-case letters,
@@ -150,14 +202,20 @@ pub(crate) fn reference_flags(repr: &Repr) -> u16 {
         Repr::ValueOf(_) | Repr::ClassConstant { .. } => HAS_DEFERRED,
         Repr::KeyOf(_) | Repr::OffsetAccess(..) => HAS_DEFERRED | HAS_LATE,
         Repr::Object(name, args) if args.is_empty() && looks_like_constant_name(name) => {
-            HAS_CONSTANT_NAME
+            HAS_CONSTANT_NAME | HAS_OBJECT
         }
+        Repr::Object(..) => HAS_OBJECT,
+        Repr::Callable(Some(sig)) if !sig.templates.is_empty() => HAS_OBJECT,
         Repr::EnumCase(class, _) if looks_like_constant_name(class) => HAS_CONSTANT_NAME,
-        Repr::TemplateParam(_)
-        | Repr::Conditional {
+        Repr::TemplateParam(_) => HAS_TEMPLATE_REF,
+        Repr::Conditional {
             subject: ConditionalSubject::Template(_),
             ..
-        } => HAS_TEMPLATE_REF,
+        } => HAS_TEMPLATE_REF | HAS_CONDITIONAL,
+        Repr::Conditional {
+            subject: ConditionalSubject::Parameter(_),
+            ..
+        } => HAS_CONDITIONAL | HAS_PARAM_CONDITIONAL,
         _ => 0,
     };
     traverse::for_each_repr_child(repr, &mut |child| flags |= child.0.flags & PASSED_UP);
