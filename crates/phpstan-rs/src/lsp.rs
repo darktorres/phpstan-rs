@@ -1281,7 +1281,7 @@ impl Server {
     fn semantic_tokens_full(&self, uri: &Uri) -> Option<lsp_types::SemanticTokensResult> {
         let path = uri_to_path(uri)?;
         let tokens = self.project.semantic_tokens_for_file(&path);
-        let index = self.project.line_index(&path)?;
+        let index = self.positions(&path)?;
         Some(lsp_types::SemanticTokensResult::Tokens(
             lsp_types::SemanticTokens {
                 result_id: None,

@@ -7,8 +7,9 @@
 
 use lsp_types::{SemanticToken, SemanticTokenModifier, SemanticTokenType, SemanticTokensLegend};
 
+use super::protocol::Positions;
 use crate::checker::semantic_tokens::{UsageSemanticToken, UsageTokenKind};
-use syntax::span::{LineIndex, Range};
+use syntax::span::Range;
 
 const DEPRECATED_BIT: u32 = 1 << 0;
 const INTERNAL_BIT: u32 = 1 << 1;
@@ -49,7 +50,11 @@ fn token_type_index(kind: UsageTokenKind) -> u32 {
 /// `delta_line`/`delta_start` is relative to the previous token's own
 /// start (0 for the very first token; `delta_start` resets to an
 /// absolute column whenever `delta_line` is nonzero, per the LSP spec).
-pub(super) fn encode(tokens: Vec<UsageSemanticToken>, index: &LineIndex) -> Vec<SemanticToken> {
+pub(super) fn encode(
+    tokens: Vec<UsageSemanticToken>,
+    positions: Positions<'_>,
+) -> Vec<SemanticToken> {
+    let index = positions.index;
     let mut tokens: Vec<(Range, UsageSemanticToken)> = tokens
         .into_iter()
         .map(|token| (index.range(token.span), token))
@@ -71,7 +76,7 @@ pub(super) fn encode(tokens: Vec<UsageSemanticToken>, index: &LineIndex) -> Vec<
     let mut prev_start = 0u32;
     for (i, (range, token)) in tokens.iter().enumerate() {
         let line = range.start.line.saturating_sub(1);
-        let start = range.start.col.saturating_sub(1);
+        let start = index.column(token.span.start, positions.unit);
         let (delta_line, delta_start) = if i == 0 {
             (line, start)
         } else if line == prev_line {
@@ -89,7 +94,9 @@ pub(super) fn encode(tokens: Vec<UsageSemanticToken>, index: &LineIndex) -> Vec<
         result.push(SemanticToken {
             delta_line,
             delta_start,
-            length: range.end.col.saturating_sub(range.start.col),
+            length: index
+                .column(token.span.end, positions.unit)
+                .saturating_sub(start),
             token_type: token_type_index(token.kind),
             token_modifiers_bitset: bitset,
         });
