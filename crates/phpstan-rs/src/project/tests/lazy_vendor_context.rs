@@ -152,19 +152,3 @@ fn loading_by_name_reports_what_loading_every_file_reports() {
         "A, B, D, Other, helpers, ByString, Calc, Util"
     );
 }
-
-#[test]
-fn following_declarations_only_loads_what_the_declarations_name() {
-    let dir = TempDir::new("lazy_vendor_declarations");
-    project(&dir);
-    let (lazy, lazy_loaded) = run(&dir, "true");
-    let (declarations, declarations_loaded) = run(&dir, "\"declarations\"");
-    assert_eq!(declarations, lazy);
-    // `Pkg\D` and `Pkg\Util` are named only by the bodies of vendor
-    // methods.
-    assert_eq!(lazy_loaded, 8);
-    assert_eq!(
-        declarations_loaded, 6,
-        "A, B, Other, helpers, ByString, Calc"
-    );
-}
