@@ -134,6 +134,35 @@ this branch with master's subject line, one row each. 86 open, 1 skipped.
 The ledger also lists what `master2` changed that those commits meet (stored
 types need serde and `PartialEq`, passes must run in scope, `project.rs`).
 
+### 7. The 25 G Piwigo profile — `PROFILE_DRILL_PIWIGO_25G.md` (implemented without validation)
+
+All of Part II's commits that could be written were, gate-only (`scratchpad/gate.sh`:
+format and clippy, no tests); none of the end-of-work checks has run: the full
+`cargo test --workspace`, the fixtures (`--test fixtures`), the Piwigo O2
+checksum (`6e5fa444…`), the O1 front-end dumps (a new baseline: `ParsedFile`
+changed), callgrind and `hyperfine`. Run those first, from the commit before
+`e1e54c29`, and bisect any difference.
+
+- Not built, with the reason:
+  - F3 steps 1-2 (member-level and map-level `Arc` in `ClassReflection`): a
+    finishing pass writes through every member, so each shared member is
+    copied anyway; it needs the passes to write only on change first. Entry
+    level (`NameTable` values behind `Arc`, pointer-first `changed_since`) is done.
+  - P7 direct lowering (`phpdoc::lower`) and the retirement of the text
+    grammar, P11 byte lexer for tags, P12 steps 2-4 (references and the
+    declaration list from the parser, the fused walk), §12.10 (observers,
+    record and replay), C1 steps 5-6 (exit and throw tails, effects, shared
+    rules), §14 (summaries, persistent cache), the C3 tail (identity `Name`
+    equality, `Borrow<str>` removal), C4's structured `LocalKey`, `FileId`
+    pre-assignment on the workers, and guards on `class_exists`-style tests
+    (the stubs carry no per-version availability).
+- Behaviour changes to read in the O2 diff: the Pratt parser's rejection of
+  nested unparenthesized ternaries and chained comparisons, `__halt_compiler`
+  ending the lex, kind-exact dependency keys, a hyphenated non-keyword word in
+  a docblock being no class name, declarations ruled out by the configured PHP
+  versions not being indexed, and UTF-16/UTF-8 columns in the language server.
+- Two tests of `syntax::span` were wrong and are fixed; expect a few more.
+
 ## Documents with no place in the stack
 
 Standalone research and plans; none blocks anything:
