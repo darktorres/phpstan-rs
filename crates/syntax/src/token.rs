@@ -99,103 +99,127 @@ pub enum Keyword {
     EndSwitch,
 }
 
+/// Every keyword with its spelling.
+const KEYWORDS: [(&str, Keyword); 62] = {
+    use Keyword::*;
+    [
+        ("function", Function),
+        ("class", Class),
+        ("interface", Interface),
+        ("trait", Trait),
+        ("enum", Enum),
+        ("extends", Extends),
+        ("implements", Implements),
+        ("public", Public),
+        ("private", Private),
+        ("protected", Protected),
+        ("static", Static),
+        ("const", Const),
+        ("final", Final),
+        ("abstract", Abstract),
+        ("readonly", Readonly),
+        ("if", If),
+        ("elseif", ElseIf),
+        ("else", Else),
+        ("while", While),
+        ("do", Do),
+        ("for", For),
+        ("foreach", Foreach),
+        ("as", As),
+        ("switch", Switch),
+        ("case", Case),
+        ("default", Default),
+        ("break", Break),
+        ("continue", Continue),
+        ("return", Return),
+        ("echo", Echo),
+        ("print", Print),
+        ("new", New),
+        ("clone", Clone),
+        ("instanceof", Instanceof),
+        ("true", True),
+        ("false", False),
+        ("null", Null),
+        ("namespace", Namespace),
+        ("use", Use),
+        ("global", Global),
+        ("try", Try),
+        ("catch", Catch),
+        ("finally", Finally),
+        ("throw", Throw),
+        ("array", Array),
+        ("list", List),
+        ("fn", Fn),
+        ("match", Match),
+        ("and", And),
+        ("or", Or),
+        ("xor", Xor),
+        ("include", Include),
+        ("include_once", IncludeOnce),
+        ("require", Require),
+        ("require_once", RequireOnce),
+        ("yield", Yield),
+        ("goto", Goto),
+        ("endif", EndIf),
+        ("endwhile", EndWhile),
+        ("endfor", EndFor),
+        ("endforeach", EndForeach),
+        ("endswitch", EndSwitch),
+    ]
+};
+
+/// Where a keyword of this length, first byte and last byte is in
+/// `KEYWORD_SLOTS`: the bytes are folded to lower case by `| 0x20`, which
+/// leaves a lower-case letter as it is, so a keyword in any case has its
+/// lower-case spelling's slot. The constants were chosen so that no two of
+/// the keywords share a slot, which `KEYWORD_SLOTS` is made to assert.
+const fn keyword_slot(len: usize, first: u8, last: u8) -> usize {
+    (len + (first | 0x20) as usize * 35 + (last | 0x20) as usize * 29) & 255
+}
+
+/// For each slot, the index in `KEYWORDS` plus one of the keyword that has
+/// it, or 0.
+static KEYWORD_SLOTS: [u8; 256] = {
+    let mut slots = [0u8; 256];
+    let mut i = 0;
+    while i < KEYWORDS.len() {
+        let bytes = KEYWORDS[i].0.as_bytes();
+        let slot = keyword_slot(bytes.len(), bytes[0], bytes[bytes.len() - 1]);
+        assert!(slots[slot] == 0, "two keywords share a slot");
+        slots[slot] = i as u8 + 1;
+        i += 1;
+    }
+    slots
+};
+
 impl Keyword {
-    /// No real PHP keyword this table recognizes is longer than this
-    /// (the longest, "require_once"/"include_once", is 12 bytes) - an
-    /// identifier longer than this bound can never match, so `try_from_
-    /// bytes` bails out before ever touching it, and every identifier
-    /// short enough to possibly match gets lowercased into a stack
-    /// buffer instead of a heap allocation, since this runs on every
-    /// identifier-shaped token the lexer produces, keyword or not.
-    /// Operates on raw bytes (not `&str`) specifically so `Lexer::
-    /// next_token`'s identifier branch can check "is this a keyword"
-    /// *before* ever allocating the owned `String` an ordinary
-    /// `Token::Identifier` needs - a real second, wasted allocation
-    /// otherwise, since a matched keyword never keeps that string at all.
+    /// No keyword is longer than this (the longest, "require_once" and
+    /// "include_once", is 12 bytes): a longer identifier is none.
     const MAX_KEYWORD_LEN: usize = 16;
 
     pub fn try_from_str(s: &str) -> Option<Keyword> {
         Self::try_from_bytes(s.as_bytes())
     }
 
+    /// The keyword `bytes` spells in any mix of cases, if one: a slot of
+    /// `KEYWORD_SLOTS` found from the length and the first and last bytes,
+    /// and one comparison with that slot's spelling, without a copy.
+    /// `bytes` is a raw identifier-shaped byte span (`is_ident_continue`
+    /// accepts any byte `>= 0x80`), so it may hold what is not UTF-8: a
+    /// keyword is pure ASCII, so such a span matches none, which is its
+    /// answer, with nothing to validate.
+    #[inline]
     pub fn try_from_bytes(bytes: &[u8]) -> Option<Keyword> {
-        use Keyword::*;
+        let (&first, &last) = (bytes.first()?, bytes.last()?);
         if bytes.len() > Self::MAX_KEYWORD_LEN {
             return None;
         }
-        let mut buf = [0u8; Self::MAX_KEYWORD_LEN];
-        for (dst, src) in buf.iter_mut().zip(bytes) {
-            *dst = src.to_ascii_lowercase();
-        }
-        // `bytes` is a raw identifier-shaped byte span (`is_ident_continue`
-        // accepts any byte `>= 0x80`), so it may hold what is not UTF-8. A
-        // keyword is pure ASCII: matched as bytes, such a span matches no
-        // keyword, which is the answer for it, with nothing to validate.
-        Some(match &buf[..bytes.len()] {
-            b"function" => Function,
-            b"class" => Class,
-            b"interface" => Interface,
-            b"trait" => Trait,
-            b"enum" => Enum,
-            b"extends" => Extends,
-            b"implements" => Implements,
-            b"public" => Public,
-            b"private" => Private,
-            b"protected" => Protected,
-            b"static" => Static,
-            b"const" => Const,
-            b"final" => Final,
-            b"abstract" => Abstract,
-            b"readonly" => Readonly,
-            b"if" => If,
-            b"elseif" => ElseIf,
-            b"else" => Else,
-            b"while" => While,
-            b"do" => Do,
-            b"for" => For,
-            b"foreach" => Foreach,
-            b"as" => As,
-            b"switch" => Switch,
-            b"case" => Case,
-            b"default" => Default,
-            b"break" => Break,
-            b"continue" => Continue,
-            b"return" => Return,
-            b"echo" => Echo,
-            b"print" => Print,
-            b"new" => New,
-            b"clone" => Clone,
-            b"instanceof" => Instanceof,
-            b"true" => True,
-            b"false" => False,
-            b"null" => Null,
-            b"namespace" => Namespace,
-            b"use" => Use,
-            b"global" => Global,
-            b"try" => Try,
-            b"catch" => Catch,
-            b"finally" => Finally,
-            b"throw" => Throw,
-            b"array" => Array,
-            b"and" => And,
-            b"or" => Or,
-            b"xor" => Xor,
-            b"include" => Include,
-            b"include_once" => IncludeOnce,
-            b"require" => Require,
-            b"require_once" => RequireOnce,
-            b"yield" => Yield,
-            b"list" => List,
-            b"fn" => Fn,
-            b"match" => Match,
-            b"endif" => EndIf,
-            b"endwhile" => EndWhile,
-            b"endfor" => EndFor,
-            b"endforeach" => EndForeach,
-            b"endswitch" => EndSwitch,
-            b"goto" => Goto,
-            _ => return None,
-        })
+        let slot = KEYWORD_SLOTS[keyword_slot(bytes.len(), first, last)];
+        let (spelling, keyword) = KEYWORDS.get(usize::from(slot).checked_sub(1)?)?;
+        spelling
+            .as_bytes()
+            .eq_ignore_ascii_case(bytes)
+            .then(|| keyword.clone())
     }
 
     /// The inverse of `try_from_str` - needed because most of these keywords
@@ -519,5 +543,90 @@ mod keyword_lookup_tests {
         assert_eq!(Keyword::try_from_bytes(b"cl\xffss"), None);
         assert_eq!(Keyword::try_from_bytes(&[0xe9; 3]), None);
         assert_eq!(Keyword::try_from_bytes(&[b'a'; 200]), None);
+    }
+}
+
+#[cfg(test)]
+mod keyword_tests {
+    use super::*;
+
+    /// What a keyword is, by comparing the bytes with every spelling.
+    fn by_comparison(bytes: &[u8]) -> Option<Keyword> {
+        KEYWORDS
+            .iter()
+            .find(|(spelling, _)| spelling.as_bytes().eq_ignore_ascii_case(bytes))
+            .map(|(_, keyword)| keyword.clone())
+    }
+
+    #[test]
+    fn every_keyword_is_found_in_any_mix_of_cases_and_by_its_own_spelling() {
+        for (spelling, keyword) in &KEYWORDS {
+            assert_eq!(keyword.as_str(), *spelling);
+            let bytes = spelling.as_bytes();
+            for mask in 0u32..(1 << bytes.len().min(12)) {
+                let mixed: Vec<u8> = bytes
+                    .iter()
+                    .enumerate()
+                    .map(|(i, b)| {
+                        if mask >> i & 1 == 1 {
+                            b.to_ascii_uppercase()
+                        } else {
+                            *b
+                        }
+                    })
+                    .collect();
+                assert_eq!(
+                    Keyword::try_from_bytes(&mixed).as_ref(),
+                    Some(keyword),
+                    "{mixed:?}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn the_keywords_are_each_in_a_slot_of_their_own() {
+        assert_eq!(
+            KEYWORD_SLOTS.iter().filter(|&&slot| slot != 0).count(),
+            KEYWORDS.len()
+        );
+    }
+
+    #[test]
+    fn a_span_that_is_not_a_keyword_is_none_as_the_comparison_says() {
+        let mut state = 0x9e37_79b9_7f4a_7c15_u64;
+        let mut next = move || {
+            state ^= state << 13;
+            state ^= state >> 7;
+            state ^= state << 17;
+            state
+        };
+        let alphabet = b"abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ_0123456789\x80\xff";
+        for _ in 0..200_000 {
+            let len = next() as usize % 15;
+            let mut bytes: Vec<u8> = (0..len)
+                .map(|_| alphabet[next() as usize % alphabet.len()])
+                .collect();
+            // Near misses of a keyword too: one byte changed.
+            if next() % 2 == 0 {
+                let (spelling, _) = &KEYWORDS[next() as usize % KEYWORDS.len()];
+                bytes = spelling.as_bytes().to_vec();
+                let at = next() as usize % bytes.len();
+                bytes[at] = alphabet[next() as usize % alphabet.len()];
+            }
+            assert_eq!(
+                Keyword::try_from_bytes(&bytes),
+                by_comparison(&bytes),
+                "{bytes:?}"
+            );
+        }
+        for bytes in [
+            &b""[..],
+            b"functions",
+            b"requireonce",
+            b"a_very_long_identifier_name",
+        ] {
+            assert_eq!(Keyword::try_from_bytes(bytes), by_comparison(bytes));
+        }
     }
 }
