@@ -60,7 +60,7 @@ pub(crate) fn run_demo(file: Option<&Path>) {
     };
 
     let parsed = syntax::parse(&source, Interner::global()).unwrap();
-    println!("-- {} comments --", parsed.comments.len());
+    println!("-- {} ignore marks --", parsed.ignore_marks.len());
     let program = parsed.stmts;
 
     println!("-- {} top-level statements --", program.len());

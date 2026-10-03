@@ -9,8 +9,6 @@
 
 use rustc_hash::{FxHashMap, FxHashSet};
 
-use syntax::token::Position;
-
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub(crate) struct IgnoreComments {
     /// Lines every diagnostic on which is suppressed.
@@ -29,79 +27,53 @@ pub(crate) fn scan(source: &str) -> IgnoreComments {
     scan_parsed(&parsed)
 }
 
-enum Event<'t> {
-    Code(u32),
-    Comment {
-        text: &'t str,
-        line: u32,
-        is_doc: bool,
-    },
+/// A comment waiting for the code after it.
+struct Pending<'t> {
+    text: &'t str,
+    /// The offset of the marker in the text.
+    marker: usize,
+    /// The line the lines of an error in its list count from.
+    error_base: i64,
+    /// Its last line.
+    last_line: u32,
+    /// The line and offset of the first token after it, when there is one.
+    next_code: Option<(u32, usize)>,
 }
 
-/// Whether `text` holds `@phpstan-ignore`, which every marker begins with.
-fn has_ignore_marker(text: &str) -> bool {
-    static FINDER: std::sync::LazyLock<memchr::memmem::Finder<'static>> =
-        std::sync::LazyLock::new(|| memchr::memmem::Finder::new(b"@phpstan-ignore"));
-    FINDER.find(text.as_bytes()).is_some()
-}
-
-fn position_key(p: Position) -> (u32, u32) {
-    (p.line, p.col)
-}
-
-/// The scan over a parsed file's comments. A pending comment waits for
-/// the next code, and a comment after code on its line belongs to that
-/// line, so each line's first code token is all of the code it needs.
-pub(crate) fn scan_parsed(parsed: &syntax::ParsedFile) -> IgnoreComments {
-    let mut events: Vec<((u32, u32), Event)> =
-        Vec::with_capacity(parsed.code_line_starts.len() + parsed.comments.len());
-    for start in &parsed.code_line_starts {
-        events.push((position_key(*start), Event::Code(start.line)));
-    }
-    for comment in &parsed.comments {
-        events.push((
-            position_key(comment.start),
-            Event::Comment {
-                text: &comment.text,
-                line: comment.start.line,
-                is_doc: comment.is_doc,
-            },
-        ));
-    }
-    events.sort_by_key(|(key, _)| *key);
-
-    let mut out = IgnoreComments::default();
-    let mut previous_code_line: Option<u32> = None;
-    // (comment text, marker offset, error base line, comment's last line)
-    let mut pending: Option<(&str, usize, i64, u32)> = None;
-    for (_, event) in &events {
-        let (text, mut line, is_doc) = match event {
-            Event::Code(line) => {
-                if let Some((text, marker, error_base, pending_line)) = pending.take() {
-                    match parse_identifiers(text, marker) {
-                        Err((error_line, message)) => {
-                            out.push_error(error_base + error_line, message);
-                            continue;
-                        }
-                        Ok(ids) => {
-                            let target = if *line != pending_line + 1 {
-                                pending_line
-                            } else {
-                                *line
-                            };
-                            out.identifiers.entry(target).or_default().extend(ids);
-                        }
-                    }
-                }
-                previous_code_line = Some(*line);
-                continue;
+impl Pending<'_> {
+    /// Applies the comment: to the line after it when code starts there,
+    /// else to its own last line.
+    fn settle(self, out: &mut IgnoreComments) {
+        match parse_identifiers(self.text, self.marker) {
+            Err((error_line, message)) => out.push_error(self.error_base + error_line, message),
+            Ok(ids) => {
+                let target = match self.next_code {
+                    Some((line, _)) if line == self.last_line + 1 => line,
+                    _ => self.last_line,
+                };
+                out.identifiers.entry(target).or_default().extend(ids);
             }
-            Event::Comment { text, line, is_doc } => (*text, *line, *is_doc),
-        };
-        // Every marker begins with this, so a comment without it has none.
-        if !has_ignore_marker(text) {
-            continue;
         }
+    }
+}
+
+/// The scan over a parsed file's marks. A pending mark waits for the next
+/// code, and a mark after code on its line belongs to that line; the lexer
+/// found for each what lies next to it.
+pub(crate) fn scan_parsed(parsed: &syntax::ParsedFile) -> IgnoreComments {
+    let mut out = IgnoreComments::default();
+    let mut pending: Option<Pending> = None;
+    for mark in &parsed.ignore_marks {
+        // The code that settles a pending mark came before this one when
+        // the lexer found it before this one's start.
+        if pending
+            .as_ref()
+            .is_some_and(|p| p.next_code.is_some_and(|(_, start)| start < mark.start))
+            && let Some(settled) = pending.take()
+        {
+            settled.settle(&mut out);
+        }
+        let (text, mut line, is_doc) = (&*mark.text, mark.line, mark.is_doc);
         let is_next_line = text.contains("@phpstan-ignore-next-line");
         let is_current_line = text.contains("@phpstan-ignore-line");
         if is_doc {
@@ -138,7 +110,7 @@ pub(crate) fn scan_parsed(parsed: &syntax::ParsedFile) -> IgnoreComments {
             continue;
         };
         let marker_line = newlines(&text[..marker]) as i64 - 1;
-        if previous_code_line == Some(line) {
+        if mark.code_before_on_line {
             match parse_identifiers(text, marker) {
                 Ok(ids) => out.identifiers.entry(line).or_default().extend(ids),
                 Err((error_line, message)) => {
@@ -147,14 +119,16 @@ pub(crate) fn scan_parsed(parsed: &syntax::ParsedFile) -> IgnoreComments {
             }
             continue;
         }
-        let last_line = line + newlines(text);
-        pending = Some((text, marker, line as i64 + marker_line, last_line));
+        pending = Some(Pending {
+            text,
+            marker,
+            error_base: line as i64 + marker_line,
+            last_line: line + newlines(text),
+            next_code: mark.next_code,
+        });
     }
-    if let Some((text, marker, error_base, pending_line)) = pending {
-        match parse_identifiers(text, marker) {
-            Ok(ids) => out.identifiers.entry(pending_line).or_default().extend(ids),
-            Err((error_line, message)) => out.push_error(error_base + error_line, message),
-        }
+    if let Some(pending) = pending {
+        pending.settle(&mut out);
     }
     out
 }

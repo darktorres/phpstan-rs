@@ -69,9 +69,19 @@ pub struct Lexer<'a> {
     // it's lexed. `tokenize_with_spans` reads this right after each
     // `next_token()` call, exactly like `last_token_start` above.
     pending_keyword_raw: Option<String>,
+    // Whether the byte ranges of every `//`, `#` and `/* */` comment are
+    // kept in `comments`, for the readers that paint or list them.
+    keep_comments: bool,
     // Byte ranges of every `//`, `#` and `/* */` comment skipped so far
-    // (doc comments are tokens of their own).
+    // (doc comments are tokens of their own), when `keep_comments`.
     comments: Vec<(usize, usize)>,
+    // The comments holding `@phpstan-ignore`, doc comments included, in
+    // source order.
+    ignore_marks: Vec<IgnoreMark>,
+    // The start of the latest token that is code, a comment's neighbour.
+    last_code_start: Option<usize>,
+    // The first of `ignore_marks` whose next code token is not yet known.
+    unsettled_marks: usize,
     warnings: Vec<LexWarning>,
     // What identifiers, variables and other token text are interned into.
     interner: Arc<Interner>,
@@ -80,6 +90,33 @@ pub struct Lexer<'a> {
     // without the interner's lock. Held for as long as the lexer is, so
     // the names it returns are those the interner holds for the text.
     names: hashbrown::HashTable<(u64, Name)>,
+}
+
+/// A comment that holds `@phpstan-ignore`, which every inline suppression
+/// begins with, and what lies next to it in the code: all the scan of
+/// suppressions reads of the file's comments and tokens.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct IgnoreMark {
+    /// The comment as written.
+    pub text: Box<str>,
+    /// Where it starts, as a byte offset.
+    pub start: usize,
+    /// The line it starts on.
+    pub line: u32,
+    /// A `/** ... */` doc comment.
+    pub is_doc: bool,
+    /// A token starts before it on its first line.
+    pub code_before_on_line: bool,
+    /// The line and byte offset of the first token after it, which is the
+    /// first token of its line when no token starts before it on its own.
+    pub next_code: Option<(u32, usize)>,
+}
+
+/// Whether `text` holds `@phpstan-ignore`, which every marker begins with.
+fn has_ignore_marker(text: &[u8]) -> bool {
+    static FINDER: std::sync::LazyLock<memchr::memmem::Finder<'static>> =
+        std::sync::LazyLock::new(|| memchr::memmem::Finder::new(b"@phpstan-ignore"));
+    FINDER.find(text).is_some()
 }
 
 /// Where the `/* */` comment starting at `at` ends: past its `*/`, which
@@ -199,8 +236,11 @@ impl Lexed {
 /// `Lexer::lex`'s result.
 pub struct LexOutput {
     pub lexed: Lexed,
-    /// Every non-doc comment: its start and its text.
+    /// Every non-doc comment: its start and its text, for a lexer that
+    /// keeps them (`tokenize_with_comments`).
     pub comments: Vec<(Position, String)>,
+    /// The comments that hold `@phpstan-ignore`.
+    pub ignore_marks: Vec<IgnoreMark>,
     pub warnings: Vec<LexWarning>,
 }
 
@@ -239,7 +279,11 @@ impl<'a> Lexer<'a> {
             utf8: text.is_some(),
             base: Position { line: 1, col: 1 },
             pending_keyword_raw: None,
+            keep_comments: false,
             comments: Vec::new(),
+            ignore_marks: Vec::new(),
+            last_code_start: None,
+            unsettled_marks: 0,
             warnings: Vec::new(),
             interner: Arc::clone(Interner::global()),
             names: hashbrown::HashTable::new(),
@@ -447,12 +491,14 @@ impl<'a> Lexer<'a> {
     /// `tokenize_with_spans`, plus every non-doc comment as its start
     /// position and source text, and the warnings for what was skipped.
     pub fn tokenize_with_comments(
-        self,
+        mut self,
     ) -> (Vec<SpannedToken>, Vec<(Position, String)>, Vec<LexWarning>) {
+        self.keep_comments = true;
         let LexOutput {
             lexed,
             comments,
             warnings,
+            ..
         } = self.lex();
         (lexed.into_spanned(), comments, warnings)
     }
@@ -472,8 +518,50 @@ impl<'a> Lexer<'a> {
         LexOutput {
             lexed,
             comments,
+            ignore_marks: std::mem::take(&mut self.ignore_marks),
             warnings: self.warnings,
         }
+    }
+
+    /// Notes the comment at `start` holding the text `text`.
+    fn mark_ignore(&mut self, start: usize, text: &str, is_doc: bool) {
+        let line = self
+            .base
+            .line
+            .saturating_add(self.line_idx_at(start) as u32);
+        let code_before_on_line = self.last_code_start.is_some_and(|code| {
+            self.base.line.saturating_add(self.line_idx_at(code) as u32) == line
+        });
+        self.ignore_marks.push(IgnoreMark {
+            text: text.into(),
+            start,
+            line,
+            is_doc,
+            code_before_on_line,
+            next_code: None,
+        });
+    }
+
+    /// A comment skipped between two tokens: kept when asked, and noted
+    /// when it holds `@phpstan-ignore`.
+    fn skipped_comment(&mut self, start: usize, end: usize) {
+        if self.keep_comments {
+            self.comments.push((start, end));
+        }
+        if has_ignore_marker(&self.src[start..end]) {
+            let text = self.slice(start..end);
+            self.mark_ignore(start, &text, false);
+        }
+    }
+
+    /// The code token at `start`, on `line`, is the next one after each
+    /// comment noted since the one before it, and the latest code.
+    fn settle_marks(&mut self, line: u32, start: usize) {
+        for mark in &mut self.ignore_marks[self.unsettled_marks..] {
+            mark.next_code = Some((line, start));
+        }
+        self.unsettled_marks = self.ignore_marks.len();
+        self.last_code_start = Some(start);
     }
 
     fn run(&mut self) -> Vec<(Token, Span, Option<String>)> {
@@ -502,6 +590,9 @@ impl<'a> Lexer<'a> {
                 end: self.line_col_at(self.pos),
             };
             if let Token::DocComment(text) = token {
+                if has_ignore_marker(text.as_bytes()) {
+                    self.mark_ignore(self.last_token_start, &text, true);
+                }
                 docs.push(LexedDoc {
                     before: tokens.len(),
                     text,
@@ -510,6 +601,9 @@ impl<'a> Lexer<'a> {
                 continue;
             }
             let done = matches!(token, Token::Eof);
+            if !done {
+                self.settle_marks(span.start.line, self.last_token_start);
+            }
             if let Some(raw) = raw {
                 keyword_raw.push((tokens.len(), raw));
             }
@@ -795,13 +889,13 @@ impl<'a> Lexer<'a> {
                     } else {
                         let start = self.pos;
                         self.pos = self.line_comment_end();
-                        self.comments.push((start, self.pos));
+                        self.skipped_comment(start, self.pos);
                     }
                 }
                 b'/' if self.peek_at(1) == b'/' => {
                     let start = self.pos;
                     self.pos = self.line_comment_end();
-                    self.comments.push((start, self.pos));
+                    self.skipped_comment(start, self.pos);
                 }
                 // `/**/` (empty) is conventionally just a regular comment,
                 // not a doc comment - PHP's own tokenizer draws the line the
@@ -812,7 +906,7 @@ impl<'a> Lexer<'a> {
                 b'/' if self.peek_at(1) == b'*' => {
                     let start = self.pos;
                     self.pos = block_comment_end(self.src, self.pos);
-                    self.comments.push((start, self.pos));
+                    self.skipped_comment(start, self.pos);
                 }
                 _ => break,
             }

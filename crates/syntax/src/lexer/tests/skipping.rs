@@ -59,6 +59,7 @@ fn skipping_blanks_and_comments_stops_where_going_byte_by_byte_does() {
         for start in 0..=src.len() {
             let mut lexer = Lexer::from_bytes(&src);
             lexer.in_php = true;
+            lexer.keep_comments = true;
             lexer.pos = start;
             lexer.skip_whitespace_and_comments();
             let (pos, comments) = byte_by_byte(&src, start);

@@ -4,19 +4,10 @@
 use std::sync::Arc;
 
 use crate::ast::{GotoLabel, Stmt};
-use crate::lexer::{LexOutput, LexWarning, Lexer};
+use crate::lexer::{IgnoreMark, LexOutput, LexWarning, Lexer};
 use crate::name::{Interner, NameCache};
 use crate::parser::{ParseError, Parser};
-use crate::token::{Position, Token};
-
-/// A comment as written.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Comment {
-    pub start: Position,
-    pub text: String,
-    /// A `/** ... */` doc comment.
-    pub is_doc: bool,
-}
+use crate::token::Token;
 
 /// What is true of a file as a whole, found as it is lexed and parsed, so
 /// that a walk over its tree that can only find something in a file where
@@ -65,11 +56,9 @@ impl FileFacts {
 #[derive(Debug)]
 pub struct ParsedFile {
     pub stmts: Vec<Stmt>,
-    /// Every comment, doc comments included, in source order.
-    pub comments: Vec<Comment>,
-    /// Where each line holding code (anything but a comment) has its
-    /// first token, in source order.
-    pub code_line_starts: Vec<Position>,
+    /// Every comment that holds `@phpstan-ignore`, doc comments included,
+    /// in source order, with what the code next to it is.
+    pub ignore_marks: Vec<IgnoreMark>,
     /// What the lexer skipped over.
     pub warnings: Vec<LexWarning>,
     pub facts: FileFacts,
@@ -147,35 +136,10 @@ pub fn parse_with_names<'a>(
     };
     let LexOutput {
         lexed,
-        comments: line_comments,
+        ignore_marks,
         warnings,
+        ..
     } = lexer.lex();
-    let mut comments: Vec<Comment> = line_comments
-        .into_iter()
-        .map(|(start, text)| Comment {
-            start,
-            text,
-            is_doc: false,
-        })
-        .collect();
-    comments.extend(lexed.docs.iter().map(|doc| Comment {
-        start: doc.span.start,
-        text: doc.text.to_string(),
-        is_doc: true,
-    }));
-    let mut code_line_starts: Vec<Position> = Vec::new();
-    for (token, span) in lexed.tokens.iter().zip(&lexed.spans) {
-        if matches!(token, Token::Eof) {
-            continue;
-        }
-        if code_line_starts
-            .last()
-            .is_none_or(|last| last.line != span.start.line)
-        {
-            code_line_starts.push(span.start);
-        }
-    }
-    comments.sort_by_key(|c| (c.start.line, c.start.col));
     if let Some(error) = warnings.iter().find(|w| w.is_error) {
         return Err(ParseError {
             message: error.message.clone(),
@@ -189,8 +153,7 @@ pub fn parse_with_names<'a>(
     let goto_labels = parser.file_goto_labels();
     Ok(ParsedFile {
         stmts,
-        comments,
-        code_line_starts,
+        ignore_marks,
         warnings,
         facts,
         goto_labels,
