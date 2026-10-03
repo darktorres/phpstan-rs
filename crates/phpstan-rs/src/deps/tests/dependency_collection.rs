@@ -171,11 +171,11 @@ fn a_keyword_in_a_phpdoc_type_is_not_a_name() {
         );
     }
     assert!(names.contains("app\\kept"));
-    // A class is still a class: `Closure`, and both halves of a name that
-    // only looks hyphenated.
+    // A class is still a class: `Closure`. A hyphenated word that is no
+    // keyword is no class name: PHP has none with a hyphen in it.
     assert!(names.contains("app\\closure"));
-    assert!(names.contains("app\\other"));
-    assert!(names.contains("app\\thing"));
+    assert!(!names.contains("app\\other"));
+    assert!(!names.contains("app\\thing"));
 }
 
 #[test]
@@ -301,8 +301,6 @@ fn doc_names_are_each_comments_types_less_the_templates_in_scope() {
         "app\\out",
         "app\\free",
         "app\\result",
-        "app\\hyphen",
-        "app\\name",
         // As written too, for a constant-named type's global fallback.
         "bound",
         "base",
@@ -314,8 +312,6 @@ fn doc_names_are_each_comments_types_less_the_templates_in_scope() {
         "out",
         "free",
         "result",
-        "hyphen",
-        "name",
     ];
     for name in expected {
         assert!(names.contains(name), "{name} is collected");
@@ -329,6 +325,9 @@ fn doc_names_are_each_comments_types_less_the_templates_in_scope() {
         "app\\f",
         "app\\ignored",
         "ignored",
+        // A hyphenated word that is no keyword is no class name.
+        "app\\hyphen",
+        "app\\name",
         "app\\non",
         "app\\empty",
         "app\\positive",

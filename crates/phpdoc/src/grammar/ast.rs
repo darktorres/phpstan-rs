@@ -199,6 +199,98 @@ impl TypeNode {
         }
     }
 
+    /// Calls `f` with each name in the type that can be a class's, as it
+    /// is written: the names of the types it holds, a generic's own, a
+    /// class constant's class and the class a `Closure(...)` is, not the
+    /// words a written type is read from (`int`, `array`, `self`, ...) nor
+    /// the subject of a conditional.
+    pub fn for_each_class_name(&self, f: &mut dyn FnMut(&str)) {
+        fn name(text: &str, f: &mut dyn FnMut(&str)) {
+            let text = text.trim_end_matches('\\');
+            if !text.trim_start_matches('\\').is_empty() && !types::is_reserved_type_word(text) {
+                f(text);
+            }
+        }
+        match self {
+            TypeNode::Identifier(text) => name(text, f),
+            TypeNode::Nullable(inner)
+            | TypeNode::VarianceArg(_, inner)
+            | TypeNode::ArrayOf(inner)
+            | TypeNode::Paren(inner) => inner.for_each_class_name(f),
+            TypeNode::Union(members) | TypeNode::Intersection(members) => {
+                for member in members {
+                    member.for_each_class_name(f);
+                }
+            }
+            TypeNode::Generic(head, args) => {
+                name(head, f);
+                for arg in args {
+                    arg.for_each_class_name(f);
+                }
+            }
+            TypeNode::OffsetAccess(base, offset) => {
+                base.for_each_class_name(f);
+                offset.for_each_class_name(f);
+            }
+            TypeNode::ArrayShape {
+                keyword,
+                fields,
+                unsealed_type,
+                ..
+            } => {
+                name(keyword, f);
+                for field in fields {
+                    field.ty.for_each_class_name(f);
+                }
+                if let Some((key, value)) = unsealed_type {
+                    if let Some(key) = key {
+                        key.for_each_class_name(f);
+                    }
+                    value.for_each_class_name(f);
+                }
+            }
+            TypeNode::Callable {
+                keyword,
+                templates,
+                params,
+                return_type,
+            } => {
+                name(keyword, f);
+                for template in templates {
+                    for bound in [&template.bound, &template.lower, &template.default]
+                        .into_iter()
+                        .flatten()
+                    {
+                        bound.for_each_class_name(f);
+                    }
+                }
+                for param in params {
+                    param.ty.for_each_class_name(f);
+                }
+                if let Some(return_type) = return_type {
+                    return_type.for_each_class_name(f);
+                }
+            }
+            TypeNode::ConstFetch { class, .. } => name(class, f),
+            TypeNode::Conditional {
+                target,
+                if_true,
+                if_false,
+                ..
+            } => {
+                target.for_each_class_name(f);
+                if_true.for_each_class_name(f);
+                if_false.for_each_class_name(f);
+            }
+            TypeNode::Wildcard
+            | TypeNode::IntRange(..)
+            | TypeNode::IntLiteral(_)
+            | TypeNode::FloatLiteral(_)
+            | TypeNode::StringLiteral(_)
+            | TypeNode::Error => {}
+        }
+    }
+
     /// Re-stringifies a parsed node back into PHPStan type-expression
     /// syntax - not necessarily byte-identical to whatever text originally
     /// produced it (whitespace is normalized, a string literal's own

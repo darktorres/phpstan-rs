@@ -204,24 +204,24 @@ struct Collector {
 /// declaration, and the names in the types of their tags do not depend on
 /// where they are read.
 struct DocNames {
-    /// The name-shaped tokens of every tag's types, in order.
+    /// The names its tags' types can make a class's, as written.
     tokens: Vec<String>,
     /// The template parameters its `@template` tags declare.
     declared: FxHashSet<String>,
 }
 
-/// `doc`'s `DocNames`.
+/// `doc`'s `DocNames`: what its docblock holds.
 fn doc_names_of(doc: &str) -> std::sync::Arc<DocNames> {
     static MEMO: std::sync::LazyLock<syntax::memo::Memo<DocNames>> =
         std::sync::LazyLock::new(|| syntax::memo::Memo::with_limits(1024, 256 * 1024));
     MEMO.get(doc, |doc| {
-        let tags = doc_tags(doc);
-        let declared = declared_templates(&tags);
+        let block = phpdoc::docblock::parse_shared(doc);
         let mut tokens = Vec::new();
-        for (tag, rest) in &tags {
-            tokens.extend(tag_type_tokens(tag, rest).into_iter().map(str::to_string));
+        block.for_each_class_name(&mut |name| tokens.push(name.to_string()));
+        DocNames {
+            tokens,
+            declared: block.templates.iter().cloned().collect(),
         }
-        DocNames { tokens, declared }
     })
 }
 
@@ -273,226 +273,6 @@ impl Collector {
     fn templates_of(doc: Option<&str>) -> Option<std::sync::Arc<DocNames>> {
         doc.map(doc_names_of)
     }
-}
-
-/// A doc comment's tags: each tag's name (without its `@`) and what
-/// follows it on its line.
-fn doc_tags(doc: &str) -> Vec<(&str, &str)> {
-    doc.lines()
-        .filter_map(|line| {
-            // A tag starts with an `@`; a line with none has no tag.
-            if !line.contains('@') {
-                return None;
-            }
-            let line = line
-                .trim_start()
-                .trim_start_matches("/**")
-                .trim_start_matches('*')
-                .trim_start();
-            let tag = line.strip_prefix('@')?;
-            let end = tag
-                .find(|c: char| c.is_whitespace() || c == '(')
-                .unwrap_or(tag.len());
-            Some((&tag[..end], &tag[end..]))
-        })
-        .collect()
-}
-
-/// A tag's name without a `phpstan-` or `psalm-` prefix.
-fn tag_base(tag: &str) -> &str {
-    tag.strip_prefix("phpstan-")
-        .or_else(|| tag.strip_prefix("psalm-"))
-        .unwrap_or(tag)
-}
-
-/// The names `@template` tags declare.
-fn declared_templates(tags: &[(&str, &str)]) -> FxHashSet<String> {
-    tags.iter()
-        .filter(|(tag, _)| {
-            matches!(
-                tag_base(tag),
-                "template" | "template-covariant" | "template-contravariant"
-            )
-        })
-        .filter_map(|(_, rest)| rest.split_whitespace().next())
-        .map(str::to_string)
-        .collect()
-}
-
-/// The name-shaped tokens in the types of one tag. A tag whose grammar is
-/// known is read only where it holds types; one that isn't is read whole.
-fn tag_type_tokens<'a>(tag: &str, rest: &'a str) -> Vec<&'a str> {
-    let mut types: Vec<&'a str> = Vec::new();
-    match tag_base(tag) {
-        "param"
-        | "param-out"
-        | "param-immediately-invoked-callable"
-        | "param-later-invoked-callable"
-        | "param-closure-this"
-        | "return"
-        | "throws"
-        | "property"
-        | "property-read"
-        | "property-write"
-        | "mixin"
-        | "extends"
-        | "implements"
-        | "use"
-        | "template-extends"
-        | "template-implements"
-        | "template-use"
-        | "this"
-        | "self-out"
-        | "if-this-is"
-        | "assert"
-        | "assert-if-true"
-        | "assert-if-false" => {
-            types.push(type_head(rest).0);
-        }
-        "var" => {
-            let (head, after) = type_head(rest);
-            types.push(head);
-            // `@var $x Type`
-            let after = after.trim_start();
-            if after.starts_with('$') {
-                let after = after.trim_start_matches(|c: char| !c.is_whitespace());
-                types.push(type_head(after).0);
-            }
-        }
-        "template" | "template-covariant" | "template-contravariant" => {
-            let mut words = rest.trim_start();
-            words = words.trim_start_matches(|c: char| !c.is_whitespace());
-            loop {
-                let trimmed = words.trim_start();
-                let Some(after) = ["of ", "as ", "super ", "= "]
-                    .iter()
-                    .find_map(|keyword| trimmed.strip_prefix(keyword))
-                else {
-                    break;
-                };
-                let (head, remainder) = type_head(after);
-                types.push(head);
-                words = remainder;
-            }
-        }
-        "type" => {
-            if let Some((_, definition)) = rest.split_once('=') {
-                types.push(type_head(definition).0);
-            }
-        }
-        "import-type" => {
-            if let Some((_, from)) = rest.split_once(" from ") {
-                types.push(type_head(from).0);
-            }
-        }
-        "deprecated" | "see" | "link" | "author" | "since" | "version" | "internal" | "todo"
-        | "example" | "copyright" | "license" | "package" | "subpackage" | "category" | "api"
-        | "inheritdoc" | "covers" => {}
-        _ => types.push(rest),
-    }
-    types.into_iter().flat_map(name_tokens).collect()
-}
-
-/// The type expression starting `text` and what follows it: up to the
-/// first space outside brackets, unless it continues (`|`, `&`, `:`).
-fn type_head(text: &str) -> (&str, &str) {
-    let text = text.trim_start();
-    let mut depth = 0usize;
-    let mut quote: Option<char> = None;
-    let mut end = text.len();
-    for (i, c) in text.char_indices() {
-        match (quote, c) {
-            (Some(q), c) if c == q => quote = None,
-            (Some(_), _) => {}
-            (None, '\'' | '"') => quote = Some(c),
-            (None, '<' | '(' | '[' | '{') => depth += 1,
-            (None, '>' | ')' | ']' | '}') => depth = depth.saturating_sub(1),
-            (None, c) if c.is_whitespace() && depth == 0 => {
-                let before = text[..i].chars().next_back();
-                let after = text[i..].trim_start().chars().next();
-                let continues =
-                    matches!(before, Some('|' | '&' | ':')) || matches!(after, Some('|' | '&'));
-                if !continues {
-                    end = i;
-                    break;
-                }
-            }
-            _ => {}
-        }
-    }
-    (&text[..end], &text[end..])
-}
-
-/// The name-shaped tokens of `text`: runs of identifier characters and
-/// `\` starting with a letter, `_` or `\`, not preceded by `$`.
-fn name_tokens(text: &str) -> impl Iterator<Item = &str> {
-    let is_name_char =
-        |c: char| c.is_ascii_alphanumeric() || c == '_' || c == '\\' || !c.is_ascii();
-    let mut tokens = Vec::new();
-    let mut start = None;
-    let mut prev = ' ';
-    // Where the hyphenated type keyword being passed over ends.
-    let mut skip_until = 0;
-    for (i, c) in text.char_indices() {
-        if i < skip_until {
-            prev = c;
-            continue;
-        }
-        match start {
-            Some(_) if is_name_char(c) => {}
-            Some(s) => {
-                tokens.push((&text[s..i], &text[i..]));
-                start = None;
-            }
-            None if is_name_char(c) && !c.is_ascii_digit() && prev != '$' => {
-                // `non-empty-string` is one keyword, not the names `non`,
-                // `empty` and `string`.
-                let end = hyphenated_end(text, i, is_name_char);
-                if text[i..end].contains('-') && types::is_reserved_type_word(&text[i..end]) {
-                    skip_until = end;
-                } else {
-                    start = Some(i);
-                }
-            }
-            None => {}
-        }
-        prev = c;
-    }
-    if let Some(s) = start {
-        tokens.push((&text[s..], ""));
-    }
-    tokens
-        .into_iter()
-        // An array shape's key (`array{a: int}`), not a class; `Foo::BAR`
-        // is a class.
-        .filter(|(_, after)| {
-            let after = after.trim_start();
-            !((after.starts_with(':') && !after.starts_with("::")) || after.starts_with("?:"))
-        })
-        .map(|(token, _)| token.trim_end_matches('\\'))
-        .filter(|t| !t.trim_start_matches('\\').is_empty())
-        // `int`, `string`, `array` and the other words a type is read from
-        // are never a class: nothing declared can change what they name.
-        .filter(|t| !types::is_reserved_type_word(t))
-}
-
-/// Where the run of name characters and hyphens joining them (a hyphen
-/// between two letters) that starts at `start` ends.
-fn hyphenated_end(text: &str, start: usize, is_name_char: impl Fn(char) -> bool) -> usize {
-    let mut chars = text[start..].char_indices().peekable();
-    let mut end = start;
-    while let Some((offset, c)) = chars.next() {
-        let joins = is_name_char(c)
-            || (c == '-'
-                && chars
-                    .peek()
-                    .is_some_and(|(_, next)| next.is_ascii_alphabetic()));
-        if !joins {
-            break;
-        }
-        end = start + offset + c.len_utf8();
-    }
-    end
 }
 
 impl<'ast> Visitor<'ast> for Collector {

@@ -508,6 +508,84 @@ fn tag_block(tag: &str, rest: &str) -> std::sync::Arc<DocBlock> {
 }
 
 impl DocBlock {
+    /// Calls `f` with each name a tag of the block can make a class's, as
+    /// it is written: the names in its types, `@method` signatures
+    /// included, and the class an `@phpstan-import-type` reads from.
+    pub fn for_each_class_name(&self, f: &mut dyn FnMut(&str)) {
+        let DocBlock {
+            params,
+            param_out,
+            return_type,
+            var_type,
+            template_bounds,
+            template_defaults,
+            extends,
+            implements,
+            uses,
+            properties,
+            throws,
+            assert_if_true,
+            assert_if_false,
+            assert,
+            type_aliases,
+            type_imports,
+            require_extends,
+            require_implements,
+            sealed,
+            method_tags,
+            mixins,
+            self_out,
+            param_closure_this,
+            ..
+        } = self;
+        for ty in params
+            .values()
+            .chain(param_out.values())
+            .chain(template_bounds.values())
+            .chain(template_defaults.values())
+            .chain(type_aliases.values())
+            .chain(param_closure_this.values())
+            .chain(return_type)
+            .chain(var_type)
+            .chain(extends)
+            .chain(implements)
+            .chain(uses)
+            .chain(throws)
+            .chain(require_extends)
+            .chain(require_implements)
+            .chain(sealed)
+            .chain(mixins)
+            .chain(self_out)
+        {
+            ty.node().for_each_class_name(f);
+        }
+        for tag in properties {
+            tag.ty.node().for_each_class_name(f);
+        }
+        for tag in assert_if_true.iter().chain(assert_if_false).chain(assert) {
+            tag.ty.node().for_each_class_name(f);
+        }
+        for tag in method_tags {
+            if let Some(ty) = &tag.return_type {
+                ty.node().for_each_class_name(f);
+            }
+            for param in tag.params.iter().filter_map(|p| p.ty.as_ref()) {
+                param.for_each_class_name(f);
+            }
+            for template in &tag.templates {
+                for bound in [&template.bound, &template.lower, &template.default]
+                    .into_iter()
+                    .flatten()
+                {
+                    bound.for_each_class_name(f);
+                }
+            }
+        }
+        for import in type_imports {
+            f(&import.from);
+        }
+    }
+
     /// Folds one tag's own scratch block (`apply_tag_recording_errors`)
     /// into `self` with exactly the semantics `apply_tag` would have had
     /// applying the tag to `self` directly: a single-valued field is
