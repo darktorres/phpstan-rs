@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use crate::ast::*;
-use crate::lexer::{Lexed, LexedDoc};
+use crate::lexer::{LexEnd, Lexed, LexedDoc, Lexer, Tok};
 use crate::name::{Interner, Name};
 use crate::span::{LineIndex, Span};
 use crate::token::{Keyword, Token};
@@ -21,39 +21,22 @@ impl std::fmt::Display for ParseError {
 
 impl std::error::Error for ParseError {}
 
-pub struct Parser {
-    pub(crate) tokens: Vec<Token>,
-    // Parallel to `tokens` (same length, same indices) - `spans[i]` is
-    // `tokens[i]`'s own source span. Kept separate rather than zipped
-    // into one `Vec<(Token, Span)>` so every existing `self.tokens[...]`
-    // access throughout this file (there are many) keeps working
-    // unchanged.
-    pub(crate) spans: Vec<Span>,
-    // The original spelling of the keyword `tokens[index]` is, for each
-    // keyword spelled other than in lower case, by index, ascending. Lets
-    // `take_name_segment` recover a keyword-shaped identifier's true
-    // declared-name case without touching `Token`'s own shape or any of
-    // its ~167 existing match/construct sites.
-    pub(crate) keyword_raw: Vec<(usize, String)>,
+pub struct Parser<'a> {
+    // Where the tokens come from: the lexer, as the parser asks for them,
+    // or a list already made.
+    supply: Supply<'a>,
+    // The tokens not yet consumed, the current one first: the parser looks
+    // a few tokens ahead and never back, so these are all of the file it
+    // holds. Filled to `LOOKAHEAD` tokens past the current one whenever
+    // the supply has them, so `peek_at` is a read and not a pull.
+    pub(crate) ahead: std::collections::VecDeque<Tok>,
+    // Whether `Token::Eof` is queued: the supply has no more.
+    eof_queued: bool,
+    // How many tokens have been consumed.
     pub(crate) pos: usize,
-    // A doc comment's raw text, keyed by the index (in `tokens`, after
-    // filtering) of the token it immediately precedes. Built once up front
-    // so the rest of the parser never has to know DocComment tokens
-    // existed - only the specific call sites that attach one to a
-    // declaration look here. `Arc<str>`, not `String`: carries the
-    // lexer's own interned `Token::DocComment` value through unchanged -
-    // converting to `String` here and back to `Arc<str>` at the AST
-    // fields that ultimately store it would be a pure wash.
-    pub(crate) doc_comments: rustc_hash::FxHashMap<usize, Arc<str>>,
-    // Each `doc_comments` entry's own start line, same keys.
-    pub(crate) doc_comment_lines: rustc_hash::FxHashMap<usize, u32>,
-    // Where several doc comments directly precede one token, all of them
-    // folded into one comment, same keys. A statement reads every one
-    // (real PHPStan's `getComments()`); a declaration only its last
-    // (`getDocComment()`, `doc_comments` above).
-    pub(crate) doc_comments_all: rustc_hash::FxHashMap<usize, Arc<str>>,
-    // Where the (first) doc comment in `doc_comments` starts, same keys.
-    pub(crate) doc_comment_starts: rustc_hash::FxHashMap<usize, u32>,
+    // Where the last consumed token ended, and its span.
+    pub(crate) last_end: u32,
+    pub(crate) last_span: Span,
     // The file's lines, which the parser asks about the lines tokens and
     // doc comments are on.
     pub(crate) line_index: Arc<LineIndex>,
@@ -73,6 +56,24 @@ pub struct Parser {
     // The labels `goto` statements name, one entry per function-like body
     // being parsed, the file's own first.
     pub(crate) goto_scopes: Vec<GotoScope>,
+}
+
+/// How many tokens past the current one the parser holds.
+pub(crate) const LOOKAHEAD: usize = 8;
+
+/// A parser's tokens: lexed as it reads, or made before.
+enum Supply<'a> {
+    Lexer(Box<Lexer<'a>>),
+    List(std::vec::IntoIter<Tok>),
+}
+
+impl Supply<'_> {
+    fn next(&mut self) -> Option<Tok> {
+        match self {
+            Supply::Lexer(lexer) => Some(lexer.next_tok()),
+            Supply::List(tokens) => tokens.next(),
+        }
+    }
 }
 
 /// The labels seen and the `goto` targets met so far in one function-like
@@ -97,20 +98,22 @@ mod stmt;
 mod tokens;
 mod type_hints;
 
-/// Where a class member's parse began: its first token and how many
-/// members of each kind existed before it.
+/// Where a class member's parse began: where its first token or the doc
+/// comment before it starts, where the token before it ended, and how
+/// many members of each kind existed before it.
 #[derive(Clone, Copy)]
 pub(crate) struct MemberStart {
-    pub(crate) first_token: usize,
+    pub(crate) start: u32,
+    pub(crate) previous_end: Option<u32>,
     pub(crate) properties: usize,
     pub(crate) methods: usize,
     pub(crate) consts: usize,
 }
 
-impl Parser {
+impl<'a> Parser<'a> {
     /// A parser of spanned tokens, doc comments among them as tokens of
     /// their own (the list `Lexer::tokenize_with_spans` makes).
-    pub fn new(tokens: Vec<(Token, Span, Option<String>)>) -> Self {
+    pub fn new(tokens: Vec<(Token, Span, Option<String>)>) -> Parser<'static> {
         let mut lexed = Lexed {
             tokens: Vec::with_capacity(tokens.len()),
             spans: Vec::with_capacity(tokens.len()),
@@ -137,54 +140,27 @@ impl Parser {
         Parser::from_lexed(lexed)
     }
 
-    /// A parser of what the lexer found, which it reads in place: the
-    /// vectors are the parser's own.
-    pub fn from_lexed(lexed: Lexed) -> Self {
-        let Lexed {
-            tokens,
-            spans,
-            keyword_raw,
-            docs,
-            line_index,
-        } = lexed;
-        let mut doc_comments = rustc_hash::FxHashMap::default();
-        let mut doc_comment_lines = rustc_hash::FxHashMap::default();
-        let mut doc_comments_all = rustc_hash::FxHashMap::default();
-        let mut doc_comment_starts = rustc_hash::FxHashMap::default();
-        // The doc comments before one token are one group: the last is the
-        // token's doc comment, the first says where and on which line it
-        // starts, and several fold into one for a statement to read.
-        let mut group_start = 0;
-        while group_start < docs.len() {
-            let before = docs[group_start].before;
-            let group_end = group_start
-                + docs[group_start..]
-                    .iter()
-                    .take_while(|doc| doc.before == before)
-                    .count();
-            let group = &docs[group_start..group_end];
-            let first_start = group[0].span.start;
-            doc_comments.insert(before, Arc::clone(&group[group.len() - 1].text));
-            doc_comment_lines.insert(before, line_index.line(first_start));
-            doc_comment_starts.insert(before, first_start);
-            if group.len() > 1 {
-                let lines: Vec<(Arc<str>, u32)> = group
-                    .iter()
-                    .map(|doc| (Arc::clone(&doc.text), line_index.line(doc.span.start)))
-                    .collect();
-                doc_comments_all.insert(before, fold_doc_comments(&lines));
-            }
-            group_start = group_end;
-        }
-        Parser {
-            tokens,
-            spans,
-            keyword_raw,
+    /// A parser of what the lexer found.
+    pub fn from_lexed(lexed: Lexed) -> Parser<'static> {
+        let (tokens, line_index) = lexed.into_toks();
+        Parser::with_supply(Supply::List(tokens.into_iter()), line_index)
+    }
+
+    /// A parser that lexes as it reads: the tokens past the few it looks
+    /// at are not lexed until they are needed.
+    pub fn from_lexer(lexer: Lexer<'a>) -> Parser<'a> {
+        let line_index = lexer.line_index();
+        Parser::with_supply(Supply::Lexer(Box::new(lexer)), line_index)
+    }
+
+    fn with_supply(supply: Supply<'a>, line_index: Arc<LineIndex>) -> Parser<'a> {
+        let mut parser = Parser {
+            supply,
+            ahead: std::collections::VecDeque::with_capacity(LOOKAHEAD + 2),
+            eof_queued: false,
             pos: 0,
-            doc_comments,
-            doc_comment_lines,
-            doc_comments_all,
-            doc_comment_starts,
+            last_end: 0,
+            last_span: Span::default(),
             line_index,
             next_node_id: std::cell::Cell::new(0),
             interner: Arc::clone(Interner::global()),
@@ -192,9 +168,46 @@ impl Parser {
             long_arrays: rustc_hash::FxHashSet::default(),
             saw_anonymous_class: false,
             goto_scopes: vec![GotoScope::default()],
+        };
+        parser.fill(LOOKAHEAD);
+        parser
+    }
+
+    /// Queues tokens until the current one and `count` more are held, or
+    /// the supply has no more.
+    pub(crate) fn fill(&mut self, count: usize) {
+        while !self.eof_queued && self.ahead.len() <= count {
+            let Some(tok) = self.supply.next() else {
+                self.eof_queued = true;
+                break;
+            };
+            self.eof_queued = matches!(tok.token, Token::Eof);
+            self.ahead.push_back(tok);
         }
     }
 
+    /// Takes the current token off the front, and queues one more.
+    pub(crate) fn pop(&mut self) -> Option<Tok> {
+        let tok = self.ahead.pop_front()?;
+        self.pos += 1;
+        self.last_end = tok.span.end;
+        self.last_span = tok.span;
+        self.fill(LOOKAHEAD);
+        Some(tok)
+    }
+
+    /// The lexer's own record of the file once the parse is over: the rest
+    /// of the file is lexed, so that what it found in the part the parse
+    /// did not reach is there too. None for a parser of a list of tokens.
+    pub fn into_lex_end(self) -> Option<LexEnd> {
+        match self.supply {
+            Supply::Lexer(lexer) => Some(lexer.finish()),
+            Supply::List(_) => None,
+        }
+    }
+}
+
+impl Parser<'_> {
     /// Opens the scope of a function-like body; give the result to
     /// `leave_goto_scope` when it ends.
     pub(crate) fn enter_goto_scope(&mut self) -> usize {
@@ -247,13 +260,10 @@ impl Parser {
         self.saw_anonymous_class
     }
 
-    /// The span of the token about to be read.
+    /// The span of the token about to be read: the last one's when none
+    /// is left.
     pub(crate) fn current_span(&self) -> Span {
-        self.spans
-            .get(self.pos)
-            .or_else(|| self.spans.last())
-            .copied()
-            .unwrap_or_default()
+        self.ahead.front().map_or(self.last_span, |tok| tok.span)
     }
 
     /// The position a `Stmt`/`Expr` about to be parsed starts at - call
@@ -262,28 +272,51 @@ impl Parser {
     /// (`__halt_compiler()` jumps there), as `peek()` and `skip()` also
     /// allow.
     pub(crate) fn current_pos(&self) -> u32 {
-        self.spans
-            .get(self.pos)
-            .or_else(|| self.spans.last())
-            .map(|s| s.start)
-            .unwrap_or_default()
+        self.current_span().start
     }
 
-    /// What deleting a class member removes, for a member whose first
-    /// token (after any doc comment) was `first_token` and whose last is
-    /// the token just consumed: whole lines when nothing else shares
-    /// them, else from its start up to the next token.
-    pub(crate) fn member_removal_span(&self, first_token: usize) -> Span {
-        let start = self
-            .doc_comment_starts
-            .get(&first_token)
-            .copied()
-            .or_else(|| self.spans.get(first_token).map(|s| s.start))
-            .unwrap_or_default();
-        let previous_line = first_token
-            .checked_sub(1)
-            .and_then(|i| self.spans.get(i))
-            .map_or(0, |s| self.line_index.line(s.end));
+    /// Where a class member about to be parsed begins.
+    pub(crate) fn member_start(
+        &self,
+        properties: usize,
+        methods: usize,
+        consts: usize,
+    ) -> MemberStart {
+        let first = self.ahead.front();
+        MemberStart {
+            start: first
+                .and_then(|tok| tok.docs.as_ref()?.first_start)
+                .unwrap_or_else(|| self.current_pos()),
+            previous_end: (self.pos > 0).then_some(self.last_end),
+            properties,
+            methods,
+            consts,
+        }
+    }
+
+    /// Stops the parse where it is: the rest of the file is not read, as
+    /// for `__halt_compiler()`, after which PHP reads no more code.
+    pub(crate) fn skip_to_eof(&mut self) {
+        self.ahead.clear();
+        self.eof_queued = true;
+        let eof = match &mut self.supply {
+            Supply::Lexer(lexer) => lexer.skip_to_end(),
+            Supply::List(tokens) => tokens.last().map_or(self.last_span, |tok| tok.span),
+        };
+        self.pos += 1;
+        self.last_span = eof;
+        self.last_end = eof.end;
+    }
+
+    /// What deleting a class member removes, for a member that began as
+    /// `member` says and whose last token is the one just consumed: whole
+    /// lines when nothing else shares them, else from its start up to the
+    /// next token.
+    pub(crate) fn member_removal_span(&self, member: MemberStart) -> Span {
+        let start = member.start;
+        let previous_line = member
+            .previous_end
+            .map_or(0, |end| self.line_index.line(end));
         let end = self.previous_end();
         let next = self.current_pos();
         let (start_line, end_line) = (self.line_index.line(start), self.line_index.line(end));
@@ -311,7 +344,7 @@ impl Parser {
             methods.len() - start.methods,
             consts.len() - start.consts,
         );
-        let span = Some(self.member_removal_span(start.first_token));
+        let span = Some(self.member_removal_span(start));
         match added {
             (1, 0, 0) => properties[start.properties].removal_span = span,
             (0, 1, 0) => methods[start.methods].removal_span = span,
@@ -324,12 +357,7 @@ impl Parser {
     /// returning a `Stmt`/`Expr` to close out its span. Same defensive
     /// fallback as `current_pos` for the same reason.
     pub(crate) fn previous_end(&self) -> u32 {
-        self.pos
-            .checked_sub(1)
-            .and_then(|i| self.spans.get(i))
-            .or_else(|| self.spans.last())
-            .map(|s| s.end)
-            .unwrap_or_default()
+        self.last_end
     }
 
     /// Interns names into `interner` rather than the global one.
@@ -389,7 +417,7 @@ impl Parser {
     /// Consumes any doc comment immediately preceding the current position -
     /// call this before advancing past the first token of a declaration.
     pub(crate) fn take_doc_comment(&mut self) -> Option<Arc<str>> {
-        self.doc_comments.remove(&self.pos)
+        self.ahead.front_mut()?.docs.as_mut()?.last.take()
     }
 
     #[hotpath::measure]
@@ -440,13 +468,3 @@ impl Parser {
 
 #[cfg(test)]
 mod tests;
-
-/// Several consecutive `/** ... */` comments as one: each one's body, in
-/// order, inside a single pair of delimiters.
-fn fold_doc_comments(docs: &[(Arc<str>, u32)]) -> Arc<str> {
-    let bodies: Vec<&str> = docs
-        .iter()
-        .map(|(d, _)| d.trim().trim_start_matches("/**").trim_end_matches("*/"))
-        .collect();
-    Arc::from(format!("/**{}\n*/", bodies.join("\n")).as_str())
-}

@@ -3,7 +3,7 @@ use crate::parser::{ParseError, Parser};
 use crate::span::Span;
 use crate::token::{Keyword, Token};
 
-impl Parser {
+impl Parser<'_> {
     // ---- expressions (precedence climbing) ----
 
     pub fn parse_expression(&mut self) -> Result<Expr, ParseError> {

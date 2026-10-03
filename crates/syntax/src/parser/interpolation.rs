@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use crate::ast::*;
 use crate::lexer::Lexer;
 use crate::parser::{ParseError, Parser};
@@ -5,7 +7,7 @@ use crate::php_string::PhpString;
 use crate::span::Span;
 use crate::token::{SimpleIndexKey, StringPart};
 
-impl Parser {
+impl Parser<'_> {
     /// `base` is where the whole string starts. Each part keeps its own
     /// span; a `ComplexExpr` fragment is re-lexed where it sits in the
     /// file, so an error inside `"{$obj->prop}"` points at its real
@@ -31,10 +33,9 @@ impl Parser {
                 StringPart::ComplexExpr(src, frag_base) => {
                     // Lexed where it sits in the file, so every span in
                     // the fragment is already the real one.
-                    let tokens = Lexer::fragment(&src, frag_base)
-                        .with_interner(&self.interner)
-                        .tokenize_with_spans();
-                    let mut sub = Parser::new(tokens).with_interner(&self.interner);
+                    let lexer = Lexer::fragment(&src, frag_base).with_interner(&self.interner);
+                    let mut sub = Parser::from_lexer(lexer).with_interner(&self.interner);
+                    sub.line_index = Arc::clone(&self.line_index);
                     sub.next_node_id.set(self.next_node_id.get());
                     let parsed = sub.parse_expression()?;
                     sub.check_pattern_only()?;

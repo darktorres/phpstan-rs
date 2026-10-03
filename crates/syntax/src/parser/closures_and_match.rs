@@ -3,7 +3,7 @@ use crate::parser::{ParseError, Parser};
 use crate::span::Span;
 use crate::token::{Keyword, Token};
 
-impl Parser {
+impl Parser<'_> {
     pub(crate) fn parse_closure_like(&mut self, is_static: bool) -> Result<Expr, ParseError> {
         if self.check(&Token::Keyword(Keyword::Fn)) {
             self.parse_arrow_fn(is_static)

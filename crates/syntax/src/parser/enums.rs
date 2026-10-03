@@ -3,7 +3,7 @@ use crate::parser::{ParseError, Parser};
 use crate::span::Span;
 use crate::token::{Keyword, Token};
 
-impl Parser {
+impl Parser<'_> {
     /// An enum case after its `case` keyword: `Name [= value];`.
     pub(crate) fn parse_enum_case_rest(
         &mut self,

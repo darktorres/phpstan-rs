@@ -64,6 +64,8 @@ pub struct Lexer<'a> {
     last_code_start: Option<usize>,
     // The first of `ignore_marks` whose next code token is not yet known.
     unsettled_marks: usize,
+    // What the tokens lexed so far say of the file.
+    facts: FileFacts,
     warnings: Vec<LexWarning>,
     // What identifiers, variables and other token text are interned into.
     interner: Arc<Interner>,
@@ -167,6 +169,82 @@ pub struct Lexed {
     pub line_index: Arc<LineIndex>,
 }
 
+/// A token with what the parser reads along with it.
+#[derive(Debug, Clone)]
+pub struct Tok {
+    pub token: Token,
+    pub span: Span,
+    /// The doc comments right before it.
+    pub docs: Option<Box<DocGroup>>,
+    /// A keyword's spelling when it is not in lower case.
+    pub raw_keyword: Option<Box<str>>,
+}
+
+/// The doc comments right before a token: the last, which is the token's
+/// doc comment, and the several folded into one when there are several.
+#[derive(Debug, Clone)]
+pub struct DocGroup {
+    /// The last doc comment, until the declaration it belongs to takes it.
+    pub last: Option<Arc<str>>,
+    /// All of them as one, when there are more than one.
+    pub folded: Option<Arc<str>>,
+    /// Where the first starts; none for a group made of a doc comment
+    /// moved from before attributes.
+    pub first_start: Option<u32>,
+}
+
+/// Several consecutive `/** ... */` comments as one: each one's body, in
+/// order, inside a single pair of delimiters.
+fn fold_doc_comments<'t>(docs: impl Iterator<Item = &'t Arc<str>>) -> Arc<str> {
+    let bodies: Vec<&str> = docs
+        .map(|d| d.trim().trim_start_matches("/**").trim_end_matches("*/"))
+        .collect();
+    Arc::from(format!("/**{}\n*/", bodies.join("\n")).as_str())
+}
+
+/// What the lexer knows of a file once it has lexed all of it.
+pub struct LexEnd {
+    pub ignore_marks: Vec<IgnoreMark>,
+    pub warnings: Vec<LexWarning>,
+    pub facts: FileFacts,
+    pub line_index: Arc<LineIndex>,
+}
+
+/// What is true of a file as a whole, found as it is lexed and parsed, so
+/// that a walk over its tree that can only find something in a file where
+/// the fact holds can be left out of the others.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct FileFacts {
+    /// The file has an anonymous class (`new class`).
+    pub has_anonymous_class: bool,
+    /// The file names `bind`, `bindTo` or `call`, in any case: a closure
+    /// rebind (`Closure::bind`, `->bindTo()`, `->call()`) needs one of
+    /// them.
+    pub mentions_closure_rebind: bool,
+    /// The file names one of the attributes the stub readers act on
+    /// (`PhpStormStubsElementAvailable`, `LanguageLevelTypeAware`,
+    /// `PhpVersionAware`), in any case, however it imports them.
+    pub mentions_stub_attribute: bool,
+}
+
+impl FileFacts {
+    /// Notes an identifier of the file: a whole name, or one segment of a
+    /// qualified one.
+    fn note_name(&mut self, name: &str) {
+        let is_one_of = |names: &[&str]| {
+            names
+                .iter()
+                .any(|n| name.len() == n.len() && name.eq_ignore_ascii_case(n))
+        };
+        self.mentions_closure_rebind |= is_one_of(&["bind", "call", "bindto"]);
+        self.mentions_stub_attribute |= is_one_of(&[
+            "PhpVersionAware",
+            "LanguageLevelTypeAware",
+            "PhpStormStubsElementAvailable",
+        ]);
+    }
+}
+
 /// A doc comment, and the token it comes before.
 pub struct LexedDoc {
     /// The index in `Lexed::tokens` of the next token.
@@ -176,6 +254,50 @@ pub struct LexedDoc {
 }
 
 impl Lexed {
+    /// The tokens the way the lexer hands them out one at a time: each
+    /// with the doc comments before it and its keyword's spelling.
+    pub fn into_toks(self) -> (Vec<Tok>, Arc<LineIndex>) {
+        let Lexed {
+            tokens,
+            spans,
+            keyword_raw,
+            docs,
+            line_index,
+        } = self;
+        let mut out: Vec<Tok> = Vec::with_capacity(tokens.len());
+        let mut docs = docs.into_iter().peekable();
+        let mut raws = keyword_raw.into_iter().peekable();
+        for (index, (token, span)) in tokens.into_iter().zip(spans).enumerate() {
+            let mut group: Vec<(Arc<str>, u32)> = Vec::new();
+            while let Some(doc) = docs.next_if(|doc| doc.before == index) {
+                group.push((doc.text, doc.span.start));
+            }
+            let docs = match group.as_slice() {
+                [] => None,
+                [(text, start)] => Some(Box::new(DocGroup {
+                    last: Some(Arc::clone(text)),
+                    folded: None,
+                    first_start: Some(*start),
+                })),
+                several => Some(Box::new(DocGroup {
+                    last: Some(Arc::clone(&several[several.len() - 1].0)),
+                    folded: Some(fold_doc_comments(several.iter().map(|(text, _)| text))),
+                    first_start: Some(several[0].1),
+                })),
+            };
+            let raw_keyword = raws
+                .next_if(|(i, _)| *i == index)
+                .map(|(_, raw)| raw.into_boxed_str());
+            out.push(Tok {
+                token,
+                span,
+                docs,
+                raw_keyword,
+            });
+        }
+        (out, line_index)
+    }
+
     /// The tokens as the spanned list the lexer made before the parser read
     /// the vectors of `Lexed`: a doc comment a token of its own, before the
     /// token it precedes, and every keyword with its spelling or none.
@@ -251,6 +373,7 @@ impl<'a> Lexer<'a> {
             ignore_marks: Vec::new(),
             last_code_start: None,
             unsettled_marks: 0,
+            facts: FileFacts::default(),
             warnings: Vec::new(),
             interner: Arc::clone(Interner::global()),
             names: hashbrown::HashTable::new(),
@@ -408,12 +531,96 @@ impl<'a> Lexer<'a> {
     /// The code token at `start`, on `line`, is the next one after each
     /// comment noted since the one before it, and the latest code.
     fn settle_marks(&mut self, start: usize) {
-        let line = self.line_index.line(self.offset(start));
-        for mark in &mut self.ignore_marks[self.unsettled_marks..] {
-            mark.next_code = Some((line, start));
+        if self.unsettled_marks < self.ignore_marks.len() {
+            let line = self.line_index.line(self.offset(start));
+            for mark in &mut self.ignore_marks[self.unsettled_marks..] {
+                mark.next_code = Some((line, start));
+            }
+            self.unsettled_marks = self.ignore_marks.len();
         }
-        self.unsettled_marks = self.ignore_marks.len();
         self.last_code_start = Some(start);
+    }
+
+    /// The next token, a doc comment among them, with its span and, for a
+    /// keyword spelled other than in lower case, its spelling. A comment
+    /// that holds `@phpstan-ignore` is noted, and so are the names the
+    /// file's facts hold.
+    fn next_raw(&mut self) -> (Token, Span, Option<String>) {
+        let token = self.next_token();
+        let raw = self.pending_keyword_raw.take();
+        let span = self.span(self.last_token_start, self.pos);
+        match &token {
+            Token::DocComment(text) => {
+                if has_ignore_marker(text.as_bytes()) {
+                    self.mark_ignore(self.last_token_start, text, true);
+                }
+            }
+            Token::Eof => {}
+            other => {
+                self.settle_marks(self.last_token_start);
+                if let Token::Identifier(name) = other {
+                    self.facts.note_name(name);
+                }
+            }
+        }
+        (token, span, raw)
+    }
+
+    /// The next token that is not a doc comment, with the doc comments
+    /// right before it, which a declaration or a statement reads. Past
+    /// the end it is `Token::Eof` again.
+    pub fn next_tok(&mut self) -> Tok {
+        let mut docs: Vec<(Arc<str>, u32)> = Vec::new();
+        loop {
+            let (token, span, raw_keyword) = self.next_raw();
+            if let Token::DocComment(text) = token {
+                docs.push((text, span.start));
+                continue;
+            }
+            let docs = match docs.as_slice() {
+                [] => None,
+                [(text, start)] => Some(Box::new(DocGroup {
+                    last: Some(Arc::clone(text)),
+                    folded: None,
+                    first_start: Some(*start),
+                })),
+                several => Some(Box::new(DocGroup {
+                    last: Some(Arc::clone(&several[several.len() - 1].0)),
+                    folded: Some(fold_doc_comments(several.iter().map(|(text, _)| text))),
+                    first_start: Some(several[0].1),
+                })),
+            };
+            return Tok {
+                token,
+                span,
+                docs,
+                raw_keyword: raw_keyword.map(String::into_boxed_str),
+            };
+        }
+    }
+
+    /// The lines of the file being lexed.
+    pub fn line_index(&self) -> Arc<LineIndex> {
+        Arc::clone(&self.line_index)
+    }
+
+    /// Moves to the end of the source without lexing the rest, and
+    /// returns the span the end of the file has.
+    pub fn skip_to_end(&mut self) -> Span {
+        self.pos = self.src.len();
+        self.last_token_start = self.pos;
+        self.span(self.pos, self.pos)
+    }
+
+    /// Lexes what is left, which the lexer's own record of the file holds.
+    pub fn finish(mut self) -> LexEnd {
+        while !matches!(self.next_tok().token, Token::Eof) {}
+        LexEnd {
+            ignore_marks: std::mem::take(&mut self.ignore_marks),
+            warnings: std::mem::take(&mut self.warnings),
+            facts: self.facts,
+            line_index: Arc::clone(&self.line_index),
+        }
     }
 
     fn run(&mut self) -> Vec<(Token, Span, Option<String>)> {
@@ -435,13 +642,8 @@ impl<'a> Lexer<'a> {
         let mut keyword_raw: Vec<(usize, String)> = Vec::new();
         let mut docs: Vec<LexedDoc> = Vec::new();
         loop {
-            let token = self.next_token();
-            let raw = self.pending_keyword_raw.take();
-            let span = self.span(self.last_token_start, self.pos);
+            let (token, span, raw) = self.next_raw();
             if let Token::DocComment(text) = token {
-                if has_ignore_marker(text.as_bytes()) {
-                    self.mark_ignore(self.last_token_start, &text, true);
-                }
                 docs.push(LexedDoc {
                     before: tokens.len(),
                     text,
@@ -450,9 +652,6 @@ impl<'a> Lexer<'a> {
                 continue;
             }
             let done = matches!(token, Token::Eof);
-            if !done {
-                self.settle_marks(self.last_token_start);
-            }
             if let Some(raw) = raw {
                 keyword_raw.push((tokens.len(), raw));
             }

@@ -13,7 +13,7 @@ pub(crate) struct ClassBody {
     pub enum_cases: Vec<EnumCase>,
 }
 
-impl Parser {
+impl Parser<'_> {
     // ---- classes ----
 
     /// True when, starting right after `new`, the upcoming tokens are
@@ -147,12 +147,7 @@ impl Parser {
             if let Some(member) = pending_member.take() {
                 self.finish_member(member, &mut properties, &mut methods, &mut consts);
             }
-            pending_member = Some(crate::parser::MemberStart {
-                first_token: self.pos,
-                properties: properties.len(),
-                methods: methods.len(),
-                consts: consts.len(),
-            });
+            pending_member = Some(self.member_start(properties.len(), methods.len(), consts.len()));
             let member_start = self.current_pos();
             // `#[Attr]` groups precede everything else about a member
             // (even its visibility/`static`/... modifiers) - parsed
@@ -534,12 +529,7 @@ impl Parser {
                         "parse error: expected class/interface/trait, found {:?}",
                         other
                     ),
-                    span: self
-                        .pos
-                        .checked_sub(1)
-                        .and_then(|i| self.spans.get(i))
-                        .copied()
-                        .unwrap_or_default(),
+                    span: self.last_span,
                 });
             }
         };

@@ -4,54 +4,11 @@
 use std::sync::Arc;
 
 use crate::ast::{GotoLabel, Stmt};
-use crate::lexer::{IgnoreMark, LexOutput, LexWarning, Lexer};
+pub use crate::lexer::FileFacts;
+use crate::lexer::{IgnoreMark, LexEnd, LexWarning, Lexer};
 use crate::name::{Interner, NameCache};
 use crate::parser::{ParseError, Parser};
 use crate::span::LineIndex;
-use crate::token::Token;
-
-/// What is true of a file as a whole, found as it is lexed and parsed, so
-/// that a walk over its tree that can only find something in a file where
-/// the fact holds can be left out of the others.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub struct FileFacts {
-    /// The file has an anonymous class (`new class`).
-    pub has_anonymous_class: bool,
-    /// The file names `bind`, `bindTo` or `call`, in any case: a closure
-    /// rebind (`Closure::bind`, `->bindTo()`, `->call()`) needs one of
-    /// them.
-    pub mentions_closure_rebind: bool,
-    /// The file names one of the attributes the stub readers act on
-    /// (`PhpStormStubsElementAvailable`, `LanguageLevelTypeAware`,
-    /// `PhpVersionAware`), in any case, however it imports them.
-    pub mentions_stub_attribute: bool,
-}
-
-impl FileFacts {
-    /// The facts a token list gives: what the file names. An identifier
-    /// is a whole name, or one segment of a qualified one.
-    fn of_tokens(tokens: &[Token]) -> FileFacts {
-        let mut facts = FileFacts::default();
-        for token in tokens {
-            let Token::Identifier(name) = token else {
-                continue;
-            };
-            let name = name.as_str();
-            let is_one_of = |names: &[&str]| {
-                names
-                    .iter()
-                    .any(|n| name.len() == n.len() && name.eq_ignore_ascii_case(n))
-            };
-            facts.mentions_closure_rebind |= is_one_of(&["bind", "call", "bindto"]);
-            facts.mentions_stub_attribute |= is_one_of(&[
-                "PhpVersionAware",
-                "LanguageLevelTypeAware",
-                "PhpStormStubsElementAvailable",
-            ]);
-        }
-        facts
-    }
-}
 
 /// A parsed file.
 #[derive(Debug)]
@@ -137,24 +94,29 @@ pub fn parse_with_names<'a>(
         Some(cache) => lexer.with_name_cache(cache),
         None => lexer,
     };
-    let LexOutput {
-        lexed,
+    let mut parser = Parser::from_lexer(lexer).with_interner(interner);
+    let parsed = parser.parse_program();
+    let has_anonymous_class = parser.saw_anonymous_class();
+    let goto_labels = parser.file_goto_labels();
+    // The rest of the file is lexed even when the parse failed: a lexer
+    // error anywhere in the file is the file's error, before a syntax
+    // error found in the part the parse read.
+    let LexEnd {
         ignore_marks,
         warnings,
-        ..
-    } = lexer.lex();
+        mut facts,
+        line_index,
+    } = parser
+        .into_lex_end()
+        .expect("a parser of a lexer ends with the lexer's record");
     if let Some(error) = warnings.iter().find(|w| w.is_error) {
         return Err(ParseError {
             message: error.message.clone(),
             span: error.span,
         });
     }
-    let line_index = Arc::clone(&lexed.line_index);
-    let mut facts = FileFacts::of_tokens(&lexed.tokens);
-    let mut parser = Parser::from_lexed(lexed).with_interner(interner);
-    let stmts = parser.parse_program()?;
-    facts.has_anonymous_class = parser.saw_anonymous_class();
-    let goto_labels = parser.file_goto_labels();
+    let stmts = parsed?;
+    facts.has_anonymous_class = has_anonymous_class;
     Ok(ParsedFile {
         stmts,
         ignore_marks,

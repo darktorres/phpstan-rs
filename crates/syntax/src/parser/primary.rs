@@ -3,7 +3,7 @@ use crate::parser::{ParseError, Parser};
 use crate::span::Span;
 use crate::token::{Keyword, Token};
 
-impl Parser {
+impl Parser<'_> {
     pub(crate) fn parse_array_items(
         &mut self,
         close: &Token,
@@ -608,7 +608,7 @@ impl Parser {
                     let operands = args.into_iter().map(|a| a.value).collect();
                     self.expr(ExprKind::Isset(operands), start)
                 } else if name.eq_ignore_ascii_case("empty") && self.check(&Token::LParen) {
-                    let paren = self.spans.get(self.pos).copied().unwrap_or_default();
+                    let paren = self.current_span();
                     let (args, _) = self.parse_args()?;
                     let Some(operand) = args.into_iter().next() else {
                         return Err(ParseError {
@@ -618,7 +618,7 @@ impl Parser {
                     };
                     self.expr(ExprKind::Empty(Box::new(operand.value)), start)
                 } else if name.eq_ignore_ascii_case("eval") && self.check(&Token::LParen) {
-                    let paren = self.spans.get(self.pos).copied().unwrap_or_default();
+                    let paren = self.current_span();
                     let (args, _) = self.parse_args()?;
                     let Some(code) = args.into_iter().next() else {
                         return Err(ParseError {
@@ -637,7 +637,7 @@ impl Parser {
                         "parse error: unexpected token in expression: {:?} at {}",
                         other, self.pos
                     ),
-                    span: self.spans.get(self.pos).copied().unwrap_or_default(),
+                    span: self.current_span(),
                 });
             }
         })

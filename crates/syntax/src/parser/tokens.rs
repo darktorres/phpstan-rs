@@ -1,19 +1,22 @@
 use crate::ast::{Attribute, Ident, QualifiedName};
+use crate::lexer::{DocGroup, Tok};
 use crate::name::Name;
 use crate::parser::{ParseError, Parser};
 use crate::span::Span;
 use crate::token::{Keyword, Token};
 
-impl Parser {
+impl Parser<'_> {
     // ---- token stream helpers ----
 
     #[inline]
     pub(crate) fn peek(&self) -> &Token {
-        self.tokens.get(self.pos).unwrap_or(&Token::Eof)
+        self.ahead.front().map_or(&Token::Eof, |tok| &tok.token)
     }
 
+    /// The token `offset` places past the current one, for an `offset` of
+    /// at most `LOOKAHEAD`: `Token::Eof` past the end of the file.
     pub(crate) fn peek_at(&self, offset: usize) -> &Token {
-        self.tokens.get(self.pos + offset).unwrap_or(&Token::Eof)
+        self.ahead.get(offset).map_or(&Token::Eof, |tok| &tok.token)
     }
 
     /// Scans forward (without consuming) through any of `abstract`/
@@ -65,7 +68,7 @@ impl Parser {
     /// used to tell PHP 8.5's two-argument `clone(obj, overrides)` form
     /// apart from a plain `clone(expr)` (the classic unary form, spelled
     /// with parens around its operand).
-    pub(crate) fn clone_call_has_top_level_comma(&self) -> bool {
+    pub(crate) fn clone_call_has_top_level_comma(&mut self) -> bool {
         // A named argument (`clone(object: $x)`) or a leading spread
         // (`clone(...$args)`, as opposed to the bare `clone(...)`
         // first-class-callable shape already ruled out by the caller)
@@ -83,6 +86,7 @@ impl Parser {
         let mut depth = 0i32;
         let mut offset = 0usize;
         loop {
+            self.fill(offset);
             match self.peek_at(offset) {
                 Token::LParen => depth += 1,
                 Token::RParen => {
@@ -106,26 +110,12 @@ impl Parser {
     /// Advances past the current token without materializing it; a
     /// caller that needs the token moves it out with `take_token()`.
     pub(crate) fn skip(&mut self) {
-        if self.pos < self.tokens.len() {
-            self.pos += 1;
-        }
+        self.pop();
     }
 
-    /// Moves the current token out via `mem::replace` (leaving an inert
-    /// `Token::Eof` placeholder behind) instead of cloning it.
-    /// Bounds-guarded like `skip()`, falling back to EOF rather than
-    /// panicking on an out-of-range index. Sound to leave a placeholder behind: the only place
-    /// `self.tokens` is ever indexed by something other than `self.pos`
-    /// (`control_flow.rs`'s `elseif`-rewrite backtrack) unconditionally
-    /// overwrites that slot before it's ever read again.
+    /// Moves the current token out, falling back to EOF past the end.
     pub(crate) fn take_token(&mut self) -> Token {
-        if self.pos < self.tokens.len() {
-            let t = std::mem::replace(&mut self.tokens[self.pos], Token::Eof);
-            self.pos += 1;
-            t
-        } else {
-            Token::Eof
-        }
+        self.pop().map_or(Token::Eof, |tok| tok.token)
     }
 
     /// Whether the next token is `t`. Most checks find another kind of
@@ -154,7 +144,7 @@ impl Parser {
                     self.peek(),
                     self.pos
                 ),
-                span: self.spans.get(self.pos).copied().unwrap_or_default(),
+                span: self.current_span(),
             });
         }
         Ok(())
@@ -181,7 +171,7 @@ impl Parser {
                 let message = format!("parse error: expected identifier, found {:?}", other);
                 Err(ParseError {
                     message,
-                    span: self.spans.get(self.pos).copied().unwrap_or_default(),
+                    span: self.current_span(),
                 })
             }
         }
@@ -212,7 +202,7 @@ impl Parser {
     }
 
     pub(crate) fn expect_variable(&mut self) -> Result<Name, ParseError> {
-        let span = self.spans.get(self.pos).copied().unwrap_or_default();
+        let span = self.current_span();
         match self.take_token() {
             Token::Variable(s) => Ok(s),
             other => Err(ParseError {
@@ -250,8 +240,12 @@ impl Parser {
                 Some(part)
             }
             Token::Keyword(_) => {
-                let idx = self.pos;
-                let Token::Keyword(kw) = self.take_token() else {
+                let Some(Tok {
+                    token: Token::Keyword(kw),
+                    raw_keyword,
+                    ..
+                }) = self.pop()
+                else {
                     unreachable!()
                 };
                 // A real vendored class can be literally named the same
@@ -260,13 +254,10 @@ impl Parser {
                 // canonical (always-lowercase) form only if it's somehow
                 // missing (shouldn't happen for a real lexer-produced
                 // token stream).
-                let raw = self
-                    .keyword_raw
-                    .binary_search_by_key(&idx, |(index, _)| *index)
-                    .ok()
-                    .map(|at| self.keyword_raw[at].1.clone())
-                    .unwrap_or_else(|| kw.as_str().to_string());
-                Some(self.interner.name(&raw))
+                Some(
+                    self.interner
+                        .name(raw_keyword.as_deref().unwrap_or_else(|| kw.as_str())),
+                )
             }
             _ => None,
         }
@@ -406,10 +397,21 @@ impl Parser {
         if !self.check(&Token::AttributeStart) {
             return Ok(Vec::new());
         }
-        let doc = self.doc_comments.remove(&self.pos);
+        let doc = self.take_doc_comment();
         let attrs = self.parse_attributes()?;
-        if let Some(doc) = doc {
-            self.doc_comments.insert(self.pos, doc);
+        if let Some(doc) = doc
+            && let Some(front) = self.ahead.front_mut()
+        {
+            front
+                .docs
+                .get_or_insert_with(|| {
+                    Box::new(DocGroup {
+                        last: None,
+                        folded: None,
+                        first_start: None,
+                    })
+                })
+                .last = Some(doc);
         }
         Ok(attrs)
     }

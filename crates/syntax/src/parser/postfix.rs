@@ -5,7 +5,7 @@ use crate::parser::{ParseError, Parser};
 use crate::span::Span;
 use crate::token::Token;
 
-impl Parser {
+impl Parser<'_> {
     pub(crate) fn parse_postfix_from_primary(&mut self) -> Result<Expr, ParseError> {
         let primary = self.parse_primary()?;
         self.parse_postfix(primary)
@@ -77,7 +77,7 @@ impl Parser {
                                     "parse error: expected property/method name, found {:?}",
                                     other
                                 ),
-                                span: self.spans.get(self.pos).copied().unwrap_or_default(),
+                                span: self.current_span(),
                             });
                         }
                     };
@@ -166,7 +166,7 @@ impl Parser {
                                     "parse error: expected static member, found {:?}",
                                     other
                                 ),
-                                span: self.spans.get(self.pos).copied().unwrap_or_default(),
+                                span: self.current_span(),
                             });
                         }
                     };

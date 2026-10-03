@@ -3,7 +3,7 @@ use crate::parser::{ParseError, Parser};
 use crate::span::Span;
 use crate::token::{Keyword, Token};
 
-impl Parser {
+impl Parser<'_> {
     /// PHP 8.4 property hooks body: `{ get => expr; set(Type $value) { .. }
     /// }`, or the abstract/interface form (`{ get; set; }`) with no bodies
     /// at all. `get`/`set` aren't keywords (they're semi-reserved words

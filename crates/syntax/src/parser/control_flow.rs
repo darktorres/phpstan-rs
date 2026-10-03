@@ -3,7 +3,7 @@ use crate::parser::{ParseError, Parser};
 use crate::span::Span;
 use crate::token::{Keyword, Token};
 
-impl Parser {
+impl Parser<'_> {
     pub(crate) fn parse_block(&mut self) -> Result<Stmt, ParseError> {
         let start = self.current_pos();
         let stmts = self.parse_stmt_list_block()?;

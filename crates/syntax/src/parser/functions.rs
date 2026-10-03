@@ -3,7 +3,7 @@ use crate::parser::{ParseError, Parser};
 use crate::span::Span;
 use crate::token::{Keyword, Token};
 
-impl Parser {
+impl Parser<'_> {
     // ---- functions / params ----
 
     pub(crate) fn parse_params(&mut self) -> Result<Vec<Param>, ParseError> {

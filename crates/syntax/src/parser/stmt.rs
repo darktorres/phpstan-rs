@@ -4,7 +4,7 @@ use crate::parser::{ParseError, Parser};
 use crate::span::Span;
 use crate::token::{Keyword, Token};
 
-impl Parser {
+impl Parser<'_> {
     // ---- statements ----
 
     pub(crate) fn parse_statement(&mut self) -> Result<Stmt, ParseError> {
@@ -28,12 +28,14 @@ impl Parser {
         // that's also a declaration (e.g. a function) consuming its own
         // doc comment for its own `@param`/`@return` tags further down is
         // unaffected, since the peek doesn't remove the map entry.
-        let leading_doc_comment = self
-            .doc_comments_all
-            .get(&self.pos)
-            .or_else(|| self.doc_comments.get(&self.pos))
-            .cloned();
-        let leading_doc_line = self.doc_comment_lines.get(&self.pos).copied();
+        let (leading_doc_comment, leading_doc_line) =
+            match self.ahead.front().and_then(|tok| tok.docs.as_deref()) {
+                Some(group) => (
+                    group.folded.as_ref().or(group.last.as_ref()).cloned(),
+                    group.first_start.map(|start| self.line_index.line(start)),
+                ),
+                None => (None, None),
+            };
         let mut stmt = match self.peek() {
             Token::InlineHtml(_) => {
                 let Token::InlineHtml(s) = self.take_token() else {
@@ -393,7 +395,7 @@ impl Parser {
                 if s.eq_ignore_ascii_case("__halt_compiler")
                     && matches!(self.peek_at(1), Token::LParen) =>
             {
-                self.pos = self.tokens.len();
+                self.skip_to_eof();
                 self.stmt(StmtKind::Block(Vec::new()), start)
             }
             Token::Keyword(Keyword::Goto) => {
