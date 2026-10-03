@@ -95,10 +95,10 @@ struct FileState {
     // Where the file came in the order files were loaded, which a rebuild of
     // a name declared in several of them follows; an edited file keeps it.
     load_order: u64,
-    functions: Vec<String>,
-    classes: Vec<String>,
+    functions: Vec<Name>,
+    classes: Vec<Name>,
     // The global constants it declares (`const`, `define()`).
-    constants: Vec<String>,
+    constants: Vec<Name>,
     // Whether it declares or references a `PHPStan\` name.
     mentions_phpstan: bool,
     references: FxHashSet<String>,
@@ -109,7 +109,7 @@ struct FileState {
     // (the AST carries no comment text).
     ignores: ignore_comments::IgnoreComments,
     // The registry names of the file's anonymous classes.
-    anonymous_classes: Vec<String>,
+    anonymous_classes: Vec<Name>,
     // This file's own raw source text, kept only when
     // `Project::retain_source` is on (see that field's own doc comment) -
     // `None` for every ordinary `check-project` batch run, which never
@@ -1034,9 +1034,9 @@ impl Project {
         let names = stubs::phpstan_stub_names();
         self.rebuild_declarations(
             &DeclaredNames {
-                functions: names.functions,
-                classes: names.classes,
-                constants: names.constants,
+                functions: names.functions.into_iter().map(Name::from).collect(),
+                classes: names.classes.into_iter().map(Name::from).collect(),
+                constants: names.constants.into_iter().map(Name::from).collect(),
             },
             None,
         );
@@ -1326,7 +1326,7 @@ impl Project {
         self.begin_declaration_changes();
         let id = self.files.id_of(path)?;
         let old = self.files.remove(path)?;
-        let classes: Vec<String> = old
+        let classes: Vec<Name> = old
             .classes
             .iter()
             .chain(&old.anonymous_classes)
@@ -1377,7 +1377,7 @@ impl Project {
             .iter()
             .map(|n| n.to_ascii_lowercase())
             .collect();
-        let constant_keys: FxHashSet<&str> = names.constants.iter().map(String::as_str).collect();
+        let constant_keys: FxHashSet<&str> = names.constants.iter().map(Name::as_str).collect();
         let with_phpstan = self.registry.phpstan_stubs_loaded;
         for name in &constant_keys {
             self.registry.remove_global_constant(name);
@@ -2658,9 +2658,9 @@ pub struct ParsedFile {
     ast: Vec<Stmt>,
     // What the lexer skipped over (see `ParsedFile::lex_warnings`).
     lex_warnings: Vec<LexWarning>,
-    functions: Vec<String>,
-    classes: Vec<String>,
-    constants: Vec<String>,
+    functions: Vec<Name>,
+    classes: Vec<Name>,
+    constants: Vec<Name>,
     references: FxHashSet<String>,
     declaration_references: FxHashSet<String>,
     ignores: ignore_comments::IgnoreComments,
@@ -2684,7 +2684,7 @@ pub struct ParsedFile {
     // takes one now.
     duplicate_fn_sites: DuplicateFunctionSites,
     // The registry names of the file's anonymous classes.
-    anonymous_classes: Vec<String>,
+    anonymous_classes: Vec<Name>,
     // The class-like counterpart to `duplicate_fn_sites` above, built the
     // same way and for the same reason - `parse_file`'s own `is_stub`
     // parameter is baked into every `ClassDeclSite` here (see that
@@ -2756,7 +2756,7 @@ pub fn parse_file_with_names<'a>(
     let anonymous_classes = built_decls
         .iter()
         .filter_map(|decl| match decl {
-            BuiltDecl::Class { name, info, .. } if info.is_anonymous() => Some(name.to_string()),
+            BuiltDecl::Class { name, info, .. } if info.is_anonymous() => Some(name.clone()),
             _ => None,
         })
         .collect();
@@ -2784,14 +2784,14 @@ pub fn parse_file_with_names<'a>(
 }
 
 /// The registry names of the anonymous classes in `ast`.
-fn anonymous_class_names(ast: &[Stmt]) -> Vec<String> {
-    struct Names(Vec<String>);
+fn anonymous_class_names(ast: &[Stmt]) -> Vec<Name> {
+    struct Names(Vec<Name>);
     impl<'a> syntax::visit::Visitor<'a> for Names {
         fn visit_expr(&mut self, expr: &'a syntax::ast::Expr) {
             if let syntax::ast::ExprKind::NewAnonymousClass(class) = &expr.kind
                 && let Some(name) = &class.name
             {
-                self.0.push(name.to_string());
+                self.0.push(name.clone());
             }
             syntax::visit::walk_expr(self, expr);
         }
@@ -2882,18 +2882,14 @@ pub fn collect_php_files_excluding(
 struct UnindexedFile {
     analyzed: bool,
     load_order: u64,
-    functions: Vec<String>,
-    classes: Vec<String>,
-    constants: Vec<String>,
+    functions: Vec<Name>,
+    classes: Vec<Name>,
+    constants: Vec<Name>,
 }
 
 /// Whether a file declaring `functions` and `classes` and referencing
 /// `references` (`deps::dependency_key`s) names anything in `PHPStan\`.
-fn mentions_phpstan(
-    functions: &[String],
-    classes: &[String],
-    references: &FxHashSet<String>,
-) -> bool {
+fn mentions_phpstan(functions: &[Name], classes: &[Name], references: &FxHashSet<String>) -> bool {
     let is_phpstan = |key: &str| key.starts_with("phpstan\\");
     references.iter().any(|r| is_phpstan(r))
         || functions
@@ -2905,18 +2901,18 @@ fn mentions_phpstan(
 /// Names a file declares, by kind.
 #[derive(Default)]
 struct DeclaredNames {
-    functions: Vec<String>,
-    classes: Vec<String>,
-    constants: Vec<String>,
+    functions: Vec<Name>,
+    classes: Vec<Name>,
+    constants: Vec<Name>,
 }
 
 /// The global constants one file's parse tree declares, by the names
 /// `Registry::global_constants` holds them under.
-fn declared_constants(stmts: &[Stmt]) -> Vec<String> {
+fn declared_constants(stmts: &[Stmt]) -> Vec<Name> {
     let mut constants = Vec::new();
     syntax::declarations::for_each_declaration(stmts, |declaration, _| {
         if let Declared::Constant(_) | Declared::Define { .. } = declaration.declared {
-            constants.push(declaration.name().trim_start_matches('\\').to_string());
+            constants.push(Name::from(declaration.name().trim_start_matches('\\')));
         }
     });
     constants
@@ -2929,13 +2925,13 @@ fn declared_constants(stmts: &[Stmt]) -> Vec<String> {
 /// Walks the declarations `registry::build_declarations` builds entries
 /// from, so an incremental update's removal step finds every key the
 /// registry holds.
-pub(crate) fn declared_names(stmts: &[Stmt]) -> (Vec<String>, Vec<String>) {
+pub(crate) fn declared_names(stmts: &[Stmt]) -> (Vec<Name>, Vec<Name>) {
     let mut functions = Vec::new();
     let mut classes = Vec::new();
     syntax::declarations::for_each_declaration(stmts, |declaration, _| {
         match declaration.declared {
-            Declared::Function(_) => functions.push(declaration.name()),
-            Declared::Class(_) => classes.push(declaration.name()),
+            Declared::Function(_) => functions.push(Name::from(declaration.name())),
+            Declared::Class(_) => classes.push(Name::from(declaration.name())),
             Declared::Constant(_) | Declared::Define { .. } => {}
         }
     });

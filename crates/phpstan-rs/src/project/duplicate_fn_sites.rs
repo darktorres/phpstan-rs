@@ -4,6 +4,7 @@ use rustc_hash::FxHashMap;
 
 use syntax::ast::{FunctionDecl, Stmt, TypeHint};
 use syntax::declarations::Declared;
+use syntax::name::Name;
 use syntax::span::Span;
 
 /// One `function` declaration's own site, name-keyed the same way
@@ -71,12 +72,12 @@ impl DuplicateFunctionSites {
     /// `.remove()` - one function name here can legitimately have sites in several
     /// different files at once, so removing `path`'s own contribution
     /// must leave every other file's site(s) for that same name intact.
-    pub(crate) fn remove_declarations(&mut self, path: &Path, removed_functions: &[String]) {
+    pub(crate) fn remove_declarations(&mut self, path: &Path, removed_functions: &[Name]) {
         for name in removed_functions {
-            if let Some(sites) = self.sites.get_mut(name) {
+            if let Some(sites) = self.sites.get_mut(name.as_str()) {
                 sites.retain(|s| s.path != path);
                 if sites.is_empty() {
-                    self.sites.remove(name);
+                    self.sites.remove(name.as_str());
                 }
             }
         }

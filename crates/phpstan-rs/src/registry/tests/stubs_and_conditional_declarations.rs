@@ -128,7 +128,7 @@ fn re_indexing_an_unconditional_class_after_removal_does_not_panic() {
     let mut r = Registry::build(&program);
     assert!(r.classes["X"].methods.contains_key("original"));
 
-    r.remove_declarations(&[], &["X".to_string()]);
+    r.remove_declarations(&[], &["X".into()]);
     assert!(!r.classes.contains_key("X"));
 
     r.index(&program, &Origin::Unknown, false);
@@ -198,7 +198,7 @@ fn re_indexing_an_unconditional_function_after_removal_does_not_panic() {
     let mut r = Registry::build(&program);
     assert_eq!(r.functions["f"].params[0].ty, Type::int());
 
-    r.remove_declarations(&["f".to_string()], &[]);
+    r.remove_declarations(&["f".into()], &[]);
     assert!(!r.functions.contains_key("f"));
 
     r.index(&program, &Origin::Unknown, false);

@@ -12,6 +12,7 @@ use std::path::Path;
 
 use syntax::ast::Stmt;
 use syntax::declarations::{Declared, for_each_declaration};
+use syntax::name::Name;
 
 use super::duplicate_class_sites::DuplicateClassSites;
 use super::duplicate_fn_sites::DuplicateFunctionSites;
@@ -19,11 +20,11 @@ use crate::registry::{BuiltDecl, Origin, anonymous_class_decls, built_declaratio
 
 /// `collect`'s result.
 pub(super) struct FileDeclarations {
-    pub(super) functions: Vec<String>,
-    pub(super) classes: Vec<String>,
+    pub(super) functions: Vec<Name>,
+    pub(super) classes: Vec<Name>,
     /// The global constants (`const`, `define()`), as
     /// `Registry::global_constants` holds them.
-    pub(super) constants: Vec<String>,
+    pub(super) constants: Vec<Name>,
     /// In walk order, then the anonymous classes, as `build_declarations`
     /// returns them.
     pub(super) built_decls: Vec<BuiltDecl>,
@@ -57,7 +58,7 @@ pub(super) fn collect(
                 if !declaration.conditional {
                     found.duplicate_fn_sites.record(name.clone(), path, f);
                 }
-                found.functions.push(name);
+                found.functions.push(Name::from(name));
             }
             Declared::Class(c) => {
                 if !declaration.conditional {
@@ -69,12 +70,12 @@ pub(super) fn collect(
                         is_stub,
                     );
                 }
-                found.classes.push(name);
+                found.classes.push(Name::from(name));
             }
             Declared::Constant(_) | Declared::Define { .. } => {
                 found
                     .constants
-                    .push(name.trim_start_matches('\\').to_string());
+                    .push(Name::from(name.trim_start_matches('\\')));
             }
         }
         built_declaration(declaration, ctx, origin, None, &mut found.built_decls);

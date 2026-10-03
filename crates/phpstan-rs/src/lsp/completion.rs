@@ -630,7 +630,7 @@ pub(super) fn enumerate_bare(
     if let Some(current_ast) = project.ast(path) {
         let (functions, classes) = project::declared_names(current_ast);
         for fqn in functions.iter().chain(&classes) {
-            if seen.insert(fqn.clone()) {
+            if seen.insert(fqn.to_string()) {
                 let (insert_text, edit) = resolve_import(current_stmts, index, &ctx, fqn);
                 let kind = if classes.contains(fqn) {
                     CompletionItemKind::CLASS

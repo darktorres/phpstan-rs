@@ -427,7 +427,7 @@ impl Registry {
     /// requirement would refuse to load both - a real limit on how many
     /// "same file, different builds" scenarios this can represent, not a
     /// namespace-modeling gap.
-    pub(crate) fn remove_declarations(&mut self, functions: &[String], classes: &[String]) {
+    pub(crate) fn remove_declarations(&mut self, functions: &[Name], classes: &[Name]) {
         for name in functions {
             self.record_changed_function(name);
             self.functions.remove(name.as_str());

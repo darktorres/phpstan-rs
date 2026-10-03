@@ -4,6 +4,7 @@ use rustc_hash::FxHashMap;
 
 use syntax::ast::{ClassKind, Stmt};
 use syntax::declarations::Declared;
+use syntax::name::Name;
 use syntax::span::Span;
 
 /// One class-like (`class`/`interface`/`trait`/`enum`) declaration's own
@@ -71,12 +72,12 @@ impl DuplicateClassSites {
 
     /// Mirrors `DuplicateFunctionSites::remove_declarations`'s own shape
     /// exactly.
-    pub(crate) fn remove_declarations(&mut self, path: &Path, removed_classes: &[String]) {
+    pub(crate) fn remove_declarations(&mut self, path: &Path, removed_classes: &[Name]) {
         for name in removed_classes {
-            if let Some(sites) = self.sites.get_mut(name) {
+            if let Some(sites) = self.sites.get_mut(name.as_str()) {
                 sites.retain(|s| s.path != path);
                 if sites.is_empty() {
-                    self.sites.remove(name);
+                    self.sites.remove(name.as_str());
                 }
             }
         }
