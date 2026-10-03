@@ -9,8 +9,10 @@ use types::{PhpVersion, PhpVersions};
 fn index(src: &str, versions: Option<PhpVersions>) -> Registry {
     let tokens = Lexer::new(src).tokenize_with_spans();
     let program = Parser::new(tokens).parse_program().unwrap();
-    let mut registry = Registry::default();
-    registry.php_versions = versions;
+    let mut registry = Registry {
+        php_versions: versions,
+        ..Registry::default()
+    };
     registry.index(&program, &Origin::Unknown, false);
     registry
 }
