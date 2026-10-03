@@ -40,6 +40,7 @@ use rayon::prelude::*;
 use rustc_hash::FxHashMap;
 use syntax::name::Name;
 
+use crate::registry::summaries::PurityCall;
 use crate::registry::{FunctionReflection, Registry};
 use syntax::ast::*;
 use syntax::span::Span;
@@ -122,8 +123,7 @@ impl Registry {
                 if !purity_gate_passes(sig, false) {
                     return None;
                 }
-                let body = bodies.body(&sig.provenance)?;
-                let deps = classify_body(body, None, registry);
+                let deps = classify_summary(bodies, &sig.provenance, None, registry)?;
                 Some((name.clone(), deps))
             })
             .collect();
@@ -146,10 +146,11 @@ impl Registry {
                     if !purity_gate_passes(sig, syntax::ast::is_constructor_name(method_name)) {
                         continue;
                     }
-                    let Some(body) = bodies.body(&sig.provenance) else {
+                    let Some(deps) =
+                        classify_summary(bodies, &sig.provenance, Some(class_name), registry)
+                    else {
                         continue;
                     };
-                    let deps = classify_body(body, Some(class_name), registry);
                     per_class.push((class_name.clone(), method_name.clone(), deps));
                 }
                 per_class
@@ -335,6 +336,75 @@ fn purity_gate_passes(sig: &FunctionReflection, is_constructor: bool) -> bool {
     true
 }
 
+/// The dependency list of the body the provenance finds, from what the
+/// passes read of it (`Some(deps)`, possibly empty) or `None` when a call
+/// does not resolve or a construct makes it impure; the outer `None` when
+/// the body is not at hand. Resolving the body's calls in the order it made
+/// them stops at the first that does not.
+fn classify_summary(
+    bodies: &dyn BodySource,
+    provenance: &crate::registry::Provenance,
+    declaring_class: Option<&str>,
+    registry: &Registry,
+) -> Option<Option<Vec<PurityDependency>>> {
+    let summary = bodies.summary(provenance)?;
+    let deps = summary
+        .purity
+        .as_deref()
+        .and_then(|calls| resolve_purity_calls(calls, declaring_class, registry));
+    // The answer from the statements themselves, for the bodies at hand.
+    #[cfg(debug_assertions)]
+    if let Some(body) = bodies.body(provenance) {
+        assert_eq!(
+            deps,
+            classify_body(body, declaring_class, registry),
+            "the summary of a body and the body disagree on its purity"
+        );
+    }
+    Some(deps)
+}
+
+/// The dependencies of a body whose calls are `calls`, or `None` when one
+/// does not resolve. `declaring_class` is `None` for a plain function, `Some`
+/// for a method or constructor.
+fn resolve_purity_calls(
+    calls: &[PurityCall],
+    declaring_class: Option<&str>,
+    registry: &Registry,
+) -> Option<Vec<PurityDependency>> {
+    let mut deps = Vec::new();
+    for call in calls {
+        let unresolved = match call {
+            PurityCall::Function(name) => match registry.resolve_function(name) {
+                Some((resolved, _)) => {
+                    let declared = registry
+                        .lookup_function_with_name(resolved)
+                        .map_or(resolved, |(declared, _)| declared);
+                    deps.push(PurityDependency::Function(Name::from(declared)));
+                    false
+                }
+                None => true,
+            },
+            PurityCall::ThisMethod(name) => declaring_class
+                .is_none_or(|class| resolve_this_method_call(class, name, registry, &mut deps)),
+            PurityCall::Static(target, name) => match declaring_class {
+                Some(class) => resolve_static_call(class, target, name, registry, &mut deps),
+                None => true,
+            },
+            PurityCall::New(name) => match new_target_class(name, declaring_class) {
+                Some(target) => resolve_new(&target, registry, &mut deps),
+                None => true,
+            },
+        };
+        if unresolved {
+            return None;
+        }
+    }
+    deps.sort();
+    deps.dedup();
+    Some(deps)
+}
+
 /// Walks a declaration's own body once, returning its dependency list
 /// (`Some(deps)`, possibly empty) or `None` the moment any disqualifying
 /// construct or unresolvable call is found - matches real PHPStan's own
@@ -343,6 +413,7 @@ fn purity_gate_passes(sig: &FunctionReflection, is_constructor: bool) -> bool {
 /// `declaring_class` is `None` for a plain top-level function, `Some`
 /// for a method/constructor - needed to resolve `$this->`/`self::`/
 /// `static::`/`parent::`/`new self()`/`new static()`.
+#[cfg(debug_assertions)]
 fn classify_body(
     body: &[Stmt],
     declaring_class: Option<&str>,
@@ -378,6 +449,7 @@ fn new_target_class(name: &QualifiedName, declaring_class: Option<&str>) -> Opti
 /// arrow function or class defined in the body doesn't run by being
 /// defined, so none is entered (an anonymous class's constructor
 /// arguments are).
+#[cfg(debug_assertions)]
 struct Disqualifier<'r> {
     declaring_class: Option<&'r str>,
     registry: &'r Registry,
@@ -385,6 +457,7 @@ struct Disqualifier<'r> {
     found: bool,
 }
 
+#[cfg(debug_assertions)]
 impl<'ast> Visitor<'ast> for Disqualifier<'_> {
     fn visit_function_decl(&mut self, _: &'ast FunctionDecl) {}
 

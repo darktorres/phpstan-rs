@@ -139,6 +139,12 @@ impl BodySource for file_table::FileTable<FileState> {
             .bodies
             .get(provenance.declaration_span())
     }
+
+    fn summary(&self, provenance: &Provenance) -> Option<&Arc<crate::registry::BodySummary>> {
+        self.get_by_origin(provenance.file()?)?
+            .bodies
+            .summary(provenance.declaration_span())
+    }
 }
 
 /// A multi-file PHP project: every loaded file's own parse tree, one

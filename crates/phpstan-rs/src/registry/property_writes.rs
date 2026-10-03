@@ -20,11 +20,10 @@
 
 use rayon::prelude::*;
 use rustc_hash::{FxHashMap, FxHashSet};
-use syntax::ast::*;
 use syntax::name::Name;
-use syntax::visit::{Visitor, walk_expr, walk_stmt, walk_stmts};
 
 use crate::registry::bodies::BodySource;
+use crate::registry::summaries::{CallWrites, Callee, PropertyOf, Receiver, WriteFacts};
 use crate::registry::{FunctionReflection, Registry, is_non_overridable};
 use types::Type;
 
@@ -206,7 +205,7 @@ enum Need {
 }
 
 /// One body's own property writes and the calls it inherits writes from.
-#[derive(Debug, Default, Clone)]
+#[derive(Debug, Default, Clone, PartialEq)]
 pub(in crate::registry) struct Classification {
     writes_own_object: bool,
     deps: Vec<(DeclKey, Need)>,
@@ -256,10 +255,9 @@ impl Registry {
             .with_min_len(crate::registry::PASS_CHUNK)
             .filter(|(_, sig)| !sig.is_stub)
             .map(|(name, sig)| {
-                let body = bodies.body(&sig.provenance);
                 (
                     function_key(name),
-                    body.and_then(|body| classify(body, None, sig, registry)),
+                    classify_summary(bodies, None, sig, registry),
                 )
             })
             .collect();
@@ -268,10 +266,9 @@ impl Registry {
                 .par_iter()
                 .with_min_len(crate::registry::PASS_CHUNK)
                 .map(|(class, method, sig)| {
-                    let body = bodies.body(&sig.provenance);
                     (
                         method_key(class, method),
-                        body.and_then(|body| classify(body, Some(class), sig, registry)),
+                        classify_summary(bodies, Some(class), sig, registry),
                     )
                 }),
         );
@@ -413,326 +410,543 @@ fn stub_verdict(sig: &FunctionReflection) -> PropertyWrites {
     })
 }
 
-/// `body`'s classification, or `None` when it may write any object's
-/// properties whatever it calls. `class` is the declaring class of a
-/// method, `sig` its signature.
-fn classify(
-    body: &[Stmt],
+/// The classification of the body of `sig`, from what the passes read of
+/// it, or `None` when it may write any object's properties whatever it
+/// calls, or when the body is not at hand. `class` is the declaring class of
+/// a method.
+fn classify_summary(
+    bodies: &dyn BodySource,
     class: Option<&Name>,
     sig: &FunctionReflection,
     registry: &Registry,
 ) -> Option<Classification> {
-    let mut reassigned = Reassigned::default();
-    walk_stmts(&mut reassigned, body);
+    let summary = bodies.summary(&sig.provenance)?;
+    let classification = classify_facts(&summary.writes, class, sig, registry);
+    // The answer from the statements themselves, for the bodies at hand.
+    #[cfg(debug_assertions)]
+    if let Some(body) = bodies.body(&sig.provenance) {
+        assert_eq!(
+            classification,
+            reference::classify(body, class, sig, registry),
+            "the summary of a body and the body disagree on its property writes"
+        );
+    }
+    classification
+}
+
+/// The classification of a body that makes the calls `facts` lists.
+fn classify_facts(
+    facts: &WriteFacts,
+    class: Option<&Name>,
+    sig: &FunctionReflection,
+    registry: &Registry,
+) -> Option<Classification> {
+    if facts.anything {
+        return None;
+    }
     let params: FxHashMap<&str, &Type> = sig
         .params
         .iter()
-        .filter(|p| !p.by_ref && !reassigned.0.contains(p.name.as_ref()))
+        .filter(|p| !p.by_ref && !facts.reassigned.iter().any(|name| name == p.name.as_ref()))
         .map(|p| (p.name.as_ref(), &p.ty))
         .collect();
-    let mut scan = Scan {
+    let mut resolve = Resolve {
         class: class.map(|c| c.as_ref()),
         registry,
         params,
-        classification: Classification::default(),
-        anything: false,
+        classification: Classification {
+            writes_own_object: facts.writes_own_object,
+            deps: Vec::new(),
+        },
     };
-    walk_stmts(&mut scan, body);
-    (!scan.anything).then_some(scan.classification)
+    for call in &facts.calls {
+        resolve.call(call)?;
+    }
+    Some(resolve.classification)
 }
 
-/// The variables a body assigns, whose declared types then no longer
-/// hold.
-#[derive(Default)]
-struct Reassigned(FxHashSet<String>);
-
-impl<'ast> Visitor<'ast> for Reassigned {
-    fn visit_expr(&mut self, e: &'ast Expr) {
-        if let ExprKind::Assign(lhs, _)
-        | ExprKind::AssignRef(lhs, _)
-        | ExprKind::CompoundAssign(_, lhs, _) = &e.kind
-        {
-            collect_assigned_variables(lhs, &mut self.0);
-        }
-        walk_expr(self, e);
-    }
-
-    fn visit_stmt(&mut self, stmt: &'ast Stmt) {
-        if let StmtKind::Foreach { key, value, .. } = &stmt.kind {
-            for target in key.iter().chain([value]) {
-                collect_assigned_variables(target, &mut self.0);
-            }
-        }
-        walk_stmt(self, stmt);
-    }
-}
-
-fn collect_assigned_variables(target: &Expr, out: &mut FxHashSet<String>) {
-    match &target.kind {
-        ExprKind::Variable(name) => {
-            out.insert(name.to_string());
-        }
-        ExprKind::Destructure(items, _) => {
-            for item in items {
-                if let Some(target) = &item.target {
-                    collect_assigned_variables(target, out);
-                }
-            }
-        }
-        _ => {}
-    }
-}
-
-struct Scan<'r> {
+/// Looks the calls of a body up in the registry, one by one.
+struct Resolve<'r> {
     class: Option<&'r str>,
     registry: &'r Registry,
     params: FxHashMap<&'r str, &'r Type>,
     classification: Classification,
-    anything: bool,
 }
 
-/// Whose property a write to `target` writes: `Some(true)` its own
-/// `$this`'s, `Some(false)` another object's, `None` no property's.
-fn property_target_owner(target: &Expr) -> Option<bool> {
-    match &target.peeled().kind {
-        ExprKind::PropertyAccess(base, _, _) | ExprKind::DynamicPropertyAccess(base, _, _) => {
-            Some(matches!(&base.peeled().kind, ExprKind::Variable(v) if **v == *"this"))
-        }
-        ExprKind::Index(base, _) => property_target_owner(base),
-        _ => None,
-    }
-}
-
-impl Scan<'_> {
-    fn write(&mut self, target: &Expr) {
-        match target.peeled().kind {
-            ExprKind::Destructure(ref items, _) => {
-                for item in items {
-                    if let Some(target) = &item.target {
-                        self.write(target);
-                    }
-                }
-            }
-            _ => match property_target_owner(target) {
-                Some(true) => self.classification.writes_own_object = true,
-                Some(false) => self.anything = true,
-                None => {}
-            },
-        }
-    }
-
-    fn depend(&mut self, key: DeclKey, need: Need) {
-        self.classification.deps.push((key, need));
-    }
-
-    /// The class a receiver expression holds, by its declared type:
-    /// `$this`, a property of `$this`, or a parameter never reassigned.
-    fn receiver_class(&self, recv: &Expr) -> Option<String> {
-        let ty = match &recv.peeled().kind {
-            ExprKind::Variable(v) if **v == *"this" => return self.class.map(str::to_string),
-            ExprKind::Variable(v) => (*self.params.get(v.as_ref())?).clone(),
-            ExprKind::PropertyAccess(base, prop, _) if matches!(&base.peeled().kind, ExprKind::Variable(v) if **v == *"this") => {
-                self.registry
-                    .lookup_property(self.class?, prop.as_ref())?
-                    .ty()
-                    .clone()
-            }
-            _ => return None,
+impl Resolve<'_> {
+    /// The class a receiver holds, by its declared type: `$this`, a
+    /// property of `$this`, or a parameter never reassigned.
+    fn receiver_class(&self, receiver: &Receiver) -> Option<String> {
+        let ty = match receiver {
+            Receiver::This => return self.class.map(str::to_string),
+            Receiver::Variable(v) => (*self.params.get(v.as_ref())?).clone(),
+            Receiver::ThisProperty(prop) => self
+                .registry
+                .lookup_property(self.class?, prop.as_ref())?
+                .ty()
+                .clone(),
         };
         let (class, _) = ty.as_object()?;
         Some(class.to_string())
     }
 
-    /// The declaration `$recv->method()` surely reaches.
-    fn resolve_method_call(&self, recv: &Expr, method: &str) -> Option<(String, bool)> {
-        let class = self.receiver_class(recv)?;
-        let (owner, sig) = self.registry.lookup_method_with_owner(&class, method)?;
-        if !is_non_overridable(self.registry, &class, &owner, method, sig) {
-            return None;
-        }
-        let on_this = matches!(&recv.peeled().kind, ExprKind::Variable(v) if **v == *"this");
-        Some((owner.to_string(), on_this))
-    }
-
-    /// The by-reference parameters `sig` passes a property to among
-    /// `args`: each a property write.
-    fn by_ref_property_args(&mut self, sig: Option<&FunctionReflection>, args: &[Arg]) {
-        for (i, arg) in args.iter().enumerate() {
+    /// The by-reference parameters `sig` passes a property to among the
+    /// arguments that are properties: each a property write. `None` when
+    /// one writes another object's.
+    fn by_ref_properties(
+        &mut self,
+        sig: Option<&FunctionReflection>,
+        properties: &[(u32, PropertyOf)],
+    ) -> Option<()> {
+        for (at, whose) in properties {
             let by_ref = match sig {
                 Some(sig) => sig
                     .params
-                    .get(i)
+                    .get(*at as usize)
                     .or_else(|| sig.params.last().filter(|p| p.variadic))
                     .is_some_and(|p| p.by_ref),
                 None => true,
             };
             if by_ref {
-                self.write(&arg.value);
+                match whose {
+                    PropertyOf::This => self.classification.writes_own_object = true,
+                    PropertyOf::Other => return None,
+                }
             }
         }
+        Some(())
+    }
+
+    /// `None` when the call may write any object's properties.
+    fn call(&mut self, call: &CallWrites) -> Option<()> {
+        let registry = self.registry;
+        let class = self.class;
+        match &call.callee {
+            Callee::Function(name) => {
+                let (resolved, sig) = registry.resolve_function(name)?;
+                self.by_ref_properties(Some(sig), &call.properties)?;
+                let declared = registry
+                    .lookup_function_with_name(resolved)
+                    .map_or(resolved, |(declared, _)| declared);
+                self.classification
+                    .deps
+                    .push((function_key(declared), Need::Nothing));
+            }
+            Callee::Method { receiver, method } => {
+                let receiver_class = self.receiver_class(receiver)?;
+                let (owner, sig) = registry.lookup_method_with_owner(&receiver_class, method)?;
+                if !is_non_overridable(registry, &receiver_class, &owner, method, sig) {
+                    return None;
+                }
+                let sig = registry.lookup_method(&owner, method);
+                self.by_ref_properties(sig, &call.properties)?;
+                let need = if matches!(receiver, Receiver::This) {
+                    Need::SameAsCaller
+                } else {
+                    Need::Nothing
+                };
+                self.classification
+                    .deps
+                    .push((method_key(&owner, method), need));
+            }
+            Callee::Static(name, method) => {
+                let resolved = match class {
+                    Some(class) if name.is_keyword("parent") => registry
+                        .lookup_ancestor_method_with_owner(class, method)
+                        .map(|(owner, sig)| (owner.to_string(), sig, true)),
+                    Some(class) if name.is_keyword("self") || name.is_keyword("static") => registry
+                        .lookup_method_with_owner(class, method)
+                        .filter(|(owner, sig)| {
+                            name.is_keyword("self")
+                                || is_non_overridable(registry, class, owner, method, sig)
+                        })
+                        .map(|(owner, sig)| (owner.to_string(), sig, true)),
+                    _ => name.resolved_class().and_then(|class| {
+                        registry
+                            .lookup_method_with_owner(class, method)
+                            .map(|(owner, sig)| (owner.to_string(), sig, false))
+                    }),
+                };
+                let (owner, sig, forwards_this) = resolved?;
+                self.by_ref_properties(Some(sig), &call.properties)?;
+                let is_static = registry.classes.get(owner.as_str()).is_some_and(|info| {
+                    info.static_methods()
+                        .iter()
+                        .any(|m| m.eq_ignore_ascii_case(method))
+                });
+                let need = if forwards_this && !is_static {
+                    Need::SameAsCaller
+                } else {
+                    Need::Nothing
+                };
+                self.classification
+                    .deps
+                    .push((method_key(&owner, method), need));
+            }
+            Callee::New(name) => {
+                let target = if name.is_keyword("self") || name.is_keyword("static") {
+                    class.map(str::to_string)
+                } else {
+                    name.resolved_class().map(str::to_string)
+                };
+                let (owner, _) = registry.lookup_class(target.as_deref()?)?;
+                if let Some((ctor_owner, sig)) =
+                    registry.lookup_method_with_owner(owner, "__construct")
+                {
+                    self.by_ref_properties(Some(sig), &call.properties)?;
+                    self.classification
+                        .deps
+                        .push((method_key(&ctor_owner, "__construct"), Need::OwnObject));
+                }
+            }
+            Callee::Anonymous(name) => {
+                if let Some((owner, sig)) = name.as_ref().and_then(|name| {
+                    registry.lookup_method_with_owner(name.as_ref(), "__construct")
+                }) {
+                    self.by_ref_properties(Some(sig), &call.properties)?;
+                    self.classification
+                        .deps
+                        .push((method_key(&owner, "__construct"), Need::OwnObject));
+                }
+            }
+        }
+        Some(())
     }
 }
 
-impl<'ast> Visitor<'ast> for Scan<'_> {
-    fn visit_function_decl(&mut self, _: &'ast FunctionDecl) {}
+/// The statements' own answer, which the summary of a body has to agree
+/// with.
+#[cfg(debug_assertions)]
+mod reference {
+    use super::*;
+    use rustc_hash::FxHashSet;
+    use syntax::ast::*;
+    use syntax::visit::{Visitor, walk_expr, walk_stmt, walk_stmts};
 
-    fn visit_class_def(&mut self, _: &'ast ClassDef) {}
-
-    fn visit_stmt(&mut self, stmt: &'ast Stmt) {
-        if self.anything {
-            return;
-        }
-        syntax::stack::guard(|| {
-            match &stmt.kind {
-                StmtKind::Unset(targets) => {
-                    for target in targets {
-                        self.write(target);
-                    }
-                }
-                StmtKind::Foreach {
-                    subject,
-                    value,
-                    by_ref,
-                    ..
-                } => {
-                    self.write(value);
-                    if *by_ref {
-                        self.write(subject);
-                    }
-                }
-                _ => {}
-            }
-            walk_stmt(self, stmt);
-        })
+    /// `body`'s classification, from its statements, as it was before it was
+    /// read from a summary: what the summary has to agree with.
+    pub(super) fn classify(
+        body: &[Stmt],
+        class: Option<&Name>,
+        sig: &FunctionReflection,
+        registry: &Registry,
+    ) -> Option<Classification> {
+        let mut reassigned = Reassigned::default();
+        walk_stmts(&mut reassigned, body);
+        let params: FxHashMap<&str, &Type> = sig
+            .params
+            .iter()
+            .filter(|p| !p.by_ref && !reassigned.0.contains(p.name.as_ref()))
+            .map(|p| (p.name.as_ref(), &p.ty))
+            .collect();
+        let mut scan = Scan {
+            class: class.map(|c| c.as_ref()),
+            registry,
+            params,
+            classification: Classification::default(),
+            anything: false,
+        };
+        walk_stmts(&mut scan, body);
+        (!scan.anything).then_some(scan.classification)
     }
 
-    fn visit_expr(&mut self, e: &'ast Expr) {
-        if self.anything {
-            return;
+    /// The variables a body assigns, whose declared types then no longer
+    /// hold.
+    #[derive(Default)]
+    struct Reassigned(FxHashSet<String>);
+
+    impl<'ast> Visitor<'ast> for Reassigned {
+        fn visit_expr(&mut self, e: &'ast Expr) {
+            if let ExprKind::Assign(lhs, _)
+            | ExprKind::AssignRef(lhs, _)
+            | ExprKind::CompoundAssign(_, lhs, _) = &e.kind
+            {
+                collect_assigned_variables(lhs, &mut self.0);
+            }
+            walk_expr(self, e);
         }
-        syntax::stack::guard(|| {
-            let registry = self.registry;
-            match &e.kind {
-                ExprKind::Assign(lhs, _) | ExprKind::CompoundAssign(_, lhs, _) => self.write(lhs),
-                ExprKind::AssignRef(lhs, rhs) => {
-                    self.write(lhs);
-                    self.write(rhs);
+
+        fn visit_stmt(&mut self, stmt: &'ast Stmt) {
+            if let StmtKind::Foreach { key, value, .. } = &stmt.kind {
+                for target in key.iter().chain([value]) {
+                    collect_assigned_variables(target, &mut self.0);
                 }
-                ExprKind::Unary(
-                    UnaryOp::PreInc | UnaryOp::PreDec | UnaryOp::PostInc | UnaryOp::PostDec,
-                    target,
-                ) => self.write(target),
-                ExprKind::Eval(_) | ExprKind::Include(..) => self.anything = true,
-                ExprKind::Call(callee, args) => match &callee.kind {
-                    ExprKind::Name(name) => match registry.resolve_function(name) {
-                        Some((resolved, sig)) => {
-                            self.by_ref_property_args(Some(sig), args);
-                            let declared = registry
-                                .lookup_function_with_name(resolved)
-                                .map_or(resolved, |(declared, _)| declared);
-                            self.depend(function_key(declared), Need::Nothing);
+            }
+            walk_stmt(self, stmt);
+        }
+    }
+
+    fn collect_assigned_variables(target: &Expr, out: &mut FxHashSet<String>) {
+        match &target.kind {
+            ExprKind::Variable(name) => {
+                out.insert(name.to_string());
+            }
+            ExprKind::Destructure(items, _) => {
+                for item in items {
+                    if let Some(target) = &item.target {
+                        collect_assigned_variables(target, out);
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+
+    struct Scan<'r> {
+        class: Option<&'r str>,
+        registry: &'r Registry,
+        params: FxHashMap<&'r str, &'r Type>,
+        classification: Classification,
+        anything: bool,
+    }
+
+    /// Whose property a write to `target` writes: `Some(true)` its own
+    /// `$this`'s, `Some(false)` another object's, `None` no property's.
+    fn property_target_owner(target: &Expr) -> Option<bool> {
+        match &target.peeled().kind {
+            ExprKind::PropertyAccess(base, _, _) | ExprKind::DynamicPropertyAccess(base, _, _) => {
+                Some(matches!(&base.peeled().kind, ExprKind::Variable(v) if **v == *"this"))
+            }
+            ExprKind::Index(base, _) => property_target_owner(base),
+            _ => None,
+        }
+    }
+
+    impl Scan<'_> {
+        fn write(&mut self, target: &Expr) {
+            match target.peeled().kind {
+                ExprKind::Destructure(ref items, _) => {
+                    for item in items {
+                        if let Some(target) = &item.target {
+                            self.write(target);
                         }
-                        None => self.anything = true,
-                    },
-                    _ => self.anything = true,
+                    }
+                }
+                _ => match property_target_owner(target) {
+                    Some(true) => self.classification.writes_own_object = true,
+                    Some(false) => self.anything = true,
+                    None => {}
                 },
-                ExprKind::MethodCall(recv, method, args, _) => {
-                    match self.resolve_method_call(recv, method) {
-                        Some((owner, on_this)) => {
-                            let sig = registry.lookup_method(&owner, method);
-                            self.by_ref_property_args(sig, args);
-                            let need = if on_this {
-                                Need::SameAsCaller
-                            } else {
-                                Need::Nothing
-                            };
-                            self.depend(method_key(&owner, method), need);
+            }
+        }
+
+        fn depend(&mut self, key: DeclKey, need: Need) {
+            self.classification.deps.push((key, need));
+        }
+
+        /// The class a receiver expression holds, by its declared type:
+        /// `$this`, a property of `$this`, or a parameter never reassigned.
+        fn receiver_class(&self, recv: &Expr) -> Option<String> {
+            let ty = match &recv.peeled().kind {
+                ExprKind::Variable(v) if **v == *"this" => return self.class.map(str::to_string),
+                ExprKind::Variable(v) => (*self.params.get(v.as_ref())?).clone(),
+                ExprKind::PropertyAccess(base, prop, _) if matches!(&base.peeled().kind, ExprKind::Variable(v) if **v == *"this") => {
+                    self.registry
+                        .lookup_property(self.class?, prop.as_ref())?
+                        .ty()
+                        .clone()
+                }
+                _ => return None,
+            };
+            let (class, _) = ty.as_object()?;
+            Some(class.to_string())
+        }
+
+        /// The declaration `$recv->method()` surely reaches.
+        fn resolve_method_call(&self, recv: &Expr, method: &str) -> Option<(String, bool)> {
+            let class = self.receiver_class(recv)?;
+            let (owner, sig) = self.registry.lookup_method_with_owner(&class, method)?;
+            if !is_non_overridable(self.registry, &class, &owner, method, sig) {
+                return None;
+            }
+            let on_this = matches!(&recv.peeled().kind, ExprKind::Variable(v) if **v == *"this");
+            Some((owner.to_string(), on_this))
+        }
+
+        /// The by-reference parameters `sig` passes a property to among
+        /// `args`: each a property write.
+        fn by_ref_property_args(&mut self, sig: Option<&FunctionReflection>, args: &[Arg]) {
+            for (i, arg) in args.iter().enumerate() {
+                let by_ref = match sig {
+                    Some(sig) => sig
+                        .params
+                        .get(i)
+                        .or_else(|| sig.params.last().filter(|p| p.variadic))
+                        .is_some_and(|p| p.by_ref),
+                    None => true,
+                };
+                if by_ref {
+                    self.write(&arg.value);
+                }
+            }
+        }
+    }
+
+    impl<'ast> Visitor<'ast> for Scan<'_> {
+        fn visit_function_decl(&mut self, _: &'ast FunctionDecl) {}
+
+        fn visit_class_def(&mut self, _: &'ast ClassDef) {}
+
+        fn visit_stmt(&mut self, stmt: &'ast Stmt) {
+            if self.anything {
+                return;
+            }
+            syntax::stack::guard(|| {
+                match &stmt.kind {
+                    StmtKind::Unset(targets) => {
+                        for target in targets {
+                            self.write(target);
                         }
-                        None => self.anything = true,
                     }
-                }
-                ExprKind::StaticCall(target, method, args) => {
-                    let resolved = match (self.class, target.as_name()) {
-                        (Some(class), Some(name)) if name.is_keyword("parent") => registry
-                            .lookup_ancestor_method_with_owner(class, method)
-                            .map(|(owner, sig)| (owner.to_string(), sig, true)),
-                        (Some(class), Some(name))
-                            if name.is_keyword("self") || name.is_keyword("static") =>
-                        {
-                            registry
-                                .lookup_method_with_owner(class, method)
-                                .filter(|(owner, sig)| {
-                                    name.is_keyword("self")
-                                        || is_non_overridable(registry, class, owner, method, sig)
-                                })
-                                .map(|(owner, sig)| (owner.to_string(), sig, true))
+                    StmtKind::Foreach {
+                        subject,
+                        value,
+                        by_ref,
+                        ..
+                    } => {
+                        self.write(value);
+                        if *by_ref {
+                            self.write(subject);
                         }
-                        (_, Some(name)) => name.resolved_class().and_then(|class| {
-                            registry
-                                .lookup_method_with_owner(class, method)
-                                .map(|(owner, sig)| (owner.to_string(), sig, false))
-                        }),
-                        _ => None,
-                    };
-                    match resolved {
-                        Some((owner, sig, forwards_this)) => {
-                            self.by_ref_property_args(Some(sig), args);
-                            let is_static =
-                                registry.classes.get(owner.as_str()).is_some_and(|info| {
-                                    info.static_methods()
-                                        .iter()
-                                        .any(|m| m.eq_ignore_ascii_case(method))
-                                });
-                            let need = if forwards_this && !is_static {
-                                Need::SameAsCaller
-                            } else {
-                                Need::Nothing
-                            };
-                            self.depend(method_key(&owner, method), need);
-                        }
-                        None => self.anything = true,
                     }
+                    _ => {}
                 }
-                ExprKind::DynamicMethodCall(..) | ExprKind::DynamicStaticCall(..) => {
-                    self.anything = true;
-                }
-                ExprKind::New(callee, args) => match &callee.kind {
-                    ExprKind::Name(name) => {
-                        let target = if name.is_keyword("self") || name.is_keyword("static") {
-                            self.class.map(str::to_string)
-                        } else {
-                            name.resolved_class().map(str::to_string)
-                        };
-                        match target.as_deref().and_then(|t| registry.lookup_class(t)) {
-                            Some((owner, _)) => {
-                                if let Some((ctor_owner, sig)) =
-                                    registry.lookup_method_with_owner(owner, "__construct")
-                                {
-                                    self.by_ref_property_args(Some(sig), args);
-                                    self.depend(
-                                        method_key(&ctor_owner, "__construct"),
-                                        Need::OwnObject,
-                                    );
-                                }
+                walk_stmt(self, stmt);
+            })
+        }
+
+        fn visit_expr(&mut self, e: &'ast Expr) {
+            if self.anything {
+                return;
+            }
+            syntax::stack::guard(|| {
+                let registry = self.registry;
+                match &e.kind {
+                    ExprKind::Assign(lhs, _) | ExprKind::CompoundAssign(_, lhs, _) => {
+                        self.write(lhs)
+                    }
+                    ExprKind::AssignRef(lhs, rhs) => {
+                        self.write(lhs);
+                        self.write(rhs);
+                    }
+                    ExprKind::Unary(
+                        UnaryOp::PreInc | UnaryOp::PreDec | UnaryOp::PostInc | UnaryOp::PostDec,
+                        target,
+                    ) => self.write(target),
+                    ExprKind::Eval(_) | ExprKind::Include(..) => self.anything = true,
+                    ExprKind::Call(callee, args) => match &callee.kind {
+                        ExprKind::Name(name) => match registry.resolve_function(name) {
+                            Some((resolved, sig)) => {
+                                self.by_ref_property_args(Some(sig), args);
+                                let declared = registry
+                                    .lookup_function_with_name(resolved)
+                                    .map_or(resolved, |(declared, _)| declared);
+                                self.depend(function_key(declared), Need::Nothing);
+                            }
+                            None => self.anything = true,
+                        },
+                        _ => self.anything = true,
+                    },
+                    ExprKind::MethodCall(recv, method, args, _) => {
+                        match self.resolve_method_call(recv, method) {
+                            Some((owner, on_this)) => {
+                                let sig = registry.lookup_method(&owner, method);
+                                self.by_ref_property_args(sig, args);
+                                let need = if on_this {
+                                    Need::SameAsCaller
+                                } else {
+                                    Need::Nothing
+                                };
+                                self.depend(method_key(&owner, method), need);
                             }
                             None => self.anything = true,
                         }
                     }
-                    _ => self.anything = true,
-                },
-                ExprKind::NewAnonymousClass(class) => {
-                    if let Some((owner, sig)) = class.name.as_ref().and_then(|name| {
-                        registry.lookup_method_with_owner(name.as_ref(), "__construct")
-                    }) {
-                        self.by_ref_property_args(Some(sig), &class.args);
-                        self.depend(method_key(&owner, "__construct"), Need::OwnObject);
+                    ExprKind::StaticCall(target, method, args) => {
+                        let resolved = match (self.class, target.as_name()) {
+                            (Some(class), Some(name)) if name.is_keyword("parent") => registry
+                                .lookup_ancestor_method_with_owner(class, method)
+                                .map(|(owner, sig)| (owner.to_string(), sig, true)),
+                            (Some(class), Some(name))
+                                if name.is_keyword("self") || name.is_keyword("static") =>
+                            {
+                                registry
+                                    .lookup_method_with_owner(class, method)
+                                    .filter(|(owner, sig)| {
+                                        name.is_keyword("self")
+                                            || is_non_overridable(
+                                                registry, class, owner, method, sig,
+                                            )
+                                    })
+                                    .map(|(owner, sig)| (owner.to_string(), sig, true))
+                            }
+                            (_, Some(name)) => name.resolved_class().and_then(|class| {
+                                registry
+                                    .lookup_method_with_owner(class, method)
+                                    .map(|(owner, sig)| (owner.to_string(), sig, false))
+                            }),
+                            _ => None,
+                        };
+                        match resolved {
+                            Some((owner, sig, forwards_this)) => {
+                                self.by_ref_property_args(Some(sig), args);
+                                let is_static =
+                                    registry.classes.get(owner.as_str()).is_some_and(|info| {
+                                        info.static_methods()
+                                            .iter()
+                                            .any(|m| m.eq_ignore_ascii_case(method))
+                                    });
+                                let need = if forwards_this && !is_static {
+                                    Need::SameAsCaller
+                                } else {
+                                    Need::Nothing
+                                };
+                                self.depend(method_key(&owner, method), need);
+                            }
+                            None => self.anything = true,
+                        }
                     }
+                    ExprKind::DynamicMethodCall(..) | ExprKind::DynamicStaticCall(..) => {
+                        self.anything = true;
+                    }
+                    ExprKind::New(callee, args) => match &callee.kind {
+                        ExprKind::Name(name) => {
+                            let target = if name.is_keyword("self") || name.is_keyword("static") {
+                                self.class.map(str::to_string)
+                            } else {
+                                name.resolved_class().map(str::to_string)
+                            };
+                            match target.as_deref().and_then(|t| registry.lookup_class(t)) {
+                                Some((owner, _)) => {
+                                    if let Some((ctor_owner, sig)) =
+                                        registry.lookup_method_with_owner(owner, "__construct")
+                                    {
+                                        self.by_ref_property_args(Some(sig), args);
+                                        self.depend(
+                                            method_key(&ctor_owner, "__construct"),
+                                            Need::OwnObject,
+                                        );
+                                    }
+                                }
+                                None => self.anything = true,
+                            }
+                        }
+                        _ => self.anything = true,
+                    },
+                    ExprKind::NewAnonymousClass(class) => {
+                        if let Some((owner, sig)) = class.name.as_ref().and_then(|name| {
+                            registry.lookup_method_with_owner(name.as_ref(), "__construct")
+                        }) {
+                            self.by_ref_property_args(Some(sig), &class.args);
+                            self.depend(method_key(&owner, "__construct"), Need::OwnObject);
+                        }
+                    }
+                    _ => {}
                 }
-                _ => {}
-            }
-            if !self.anything {
-                walk_expr(self, e);
-            }
-        })
+                if !self.anything {
+                    walk_expr(self, e);
+                }
+            })
+        }
     }
 }
