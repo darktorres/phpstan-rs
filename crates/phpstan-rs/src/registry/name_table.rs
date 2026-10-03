@@ -844,6 +844,18 @@ impl<V: Clone> NameTable<V> {
         &'a mut self,
         keys: Option<&'a FxHashSet<String>>,
     ) -> impl Iterator<Item = (&'a Name, &'a mut V)> + 'a {
+        self.iter_mut_scoped_where(keys, |_| true)
+    }
+
+    /// `iter_mut_scoped`, for the values `needs` accepts. A value it
+    /// rejects is not made unique: it stays shared with the tables that
+    /// hold it too, which is what lets a pass that rewrites a few
+    /// declarations leave the rest as they were built.
+    pub fn iter_mut_scoped_where<'a>(
+        &'a mut self,
+        keys: Option<&'a FxHashSet<String>>,
+        needs: impl Fn(&V) -> bool + 'a,
+    ) -> impl Iterator<Item = (&'a Name, &'a mut V)> + 'a {
         match keys {
             Some(keys) => {
                 for key in keys {
@@ -866,7 +878,9 @@ impl<V: Clone> NameTable<V> {
         }
         self.entries
             .iter_mut()
-            .filter(move |(name, _)| keys.is_none_or(|keys| keys.contains(name.lower())))
+            .filter(move |(name, value)| {
+                keys.is_none_or(|keys| keys.contains(name.lower())) && needs(value)
+            })
             .map(|(name, value)| (name, Arc::make_mut(value)))
     }
 

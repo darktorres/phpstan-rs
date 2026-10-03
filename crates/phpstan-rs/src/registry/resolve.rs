@@ -55,9 +55,31 @@ impl Registry {
                 *name = canonical.clone();
             }
         };
+        let differs = |name: &Name| {
+            declared
+                .get(name)
+                .is_some_and(|canonical| canonical.as_ref() != name.as_ref())
+        };
+        let names_a_differing_case = |info: &ClassReflection| {
+            info.extends
+                .iter()
+                .chain(&info.implements)
+                .chain(&info.uses)
+                .chain(&info.mixins)
+                .any(differs)
+                || info
+                    .trait_aliases
+                    .iter()
+                    .filter_map(|alias| alias.trait_name.as_ref())
+                    .any(differs)
+                || info
+                    .type_imports
+                    .iter()
+                    .any(|import| differs(&import.source_class_fqn))
+        };
         let scope = &self.scope;
         self.classes
-            .iter_mut_scoped(scope.class_keys())
+            .iter_mut_scoped_where(scope.class_keys(), names_a_differing_case)
             .map(|(_, info)| info)
             .collect::<Vec<_>>()
             .into_par_iter()
@@ -308,7 +330,7 @@ impl Registry {
     pub(crate) fn resolve_method_tags(&mut self) {
         let scope = &self.scope;
         self.classes
-            .iter_mut_scoped(scope.class_keys())
+            .iter_mut_scoped_where(scope.class_keys(), |info| !info.method_tags.is_empty())
             .map(|(_, info)| info)
             .collect::<Vec<_>>()
             .into_par_iter()
@@ -537,7 +559,10 @@ impl Registry {
             }
         };
         let scope = &self.scope;
-        for (_, sig) in self.functions.iter_mut_scoped(scope.function_keys()) {
+        for (_, sig) in self
+            .functions
+            .iter_mut_scoped_where(scope.function_keys(), function_has_deferred_type)
+        {
             for param in &mut sig.params {
                 resolve(&mut param.ty, &param.ty_native, &self.classes);
                 let native = param.ty_native.clone();
@@ -1414,27 +1439,32 @@ fn resolve_class_const_type(
     matching_class_const_type(&visible_class_consts(fqn, classes), pattern)
 }
 
+/// Whether any type `resolve_deferred_value_of` rewrites on `sig` contains
+/// a deferred sentinel.
+fn function_has_deferred_type(sig: &FunctionReflection) -> bool {
+    sig.return_type.contains_deferred()
+        || [&sig.return_doc_ty, &sig.self_out]
+            .into_iter()
+            .flatten()
+            .any(Type::contains_deferred)
+        || sig.params.iter().any(|p| {
+            p.ty.contains_deferred()
+                || [&p.doc_ty, &p.out_ty, &p.closure_this_type]
+                    .into_iter()
+                    .flatten()
+                    .any(Type::contains_deferred)
+        })
+}
+
 /// Whether any type `resolve_deferred_value_of` rewrites on `info`
 /// contains a deferred sentinel - lets that pass skip a class outright.
 fn class_has_deferred_type(info: &ClassReflection) -> bool {
-    info.methods.values().any(|sig| {
-        sig.return_type.contains_deferred()
-            || [&sig.return_doc_ty, &sig.self_out]
-                .into_iter()
-                .flatten()
-                .any(Type::contains_deferred)
-            || sig.params.iter().any(|p| {
-                p.ty.contains_deferred()
-                    || [&p.doc_ty, &p.out_ty, &p.closure_this_type]
-                        .into_iter()
-                        .flatten()
-                        .any(Type::contains_deferred)
-            })
-    }) || info
-        .extends_args
-        .iter()
-        .chain(info.implements_args.values().flatten())
-        .any(Type::contains_deferred)
+    info.methods.values().any(function_has_deferred_type)
+        || info
+            .extends_args
+            .iter()
+            .chain(info.implements_args.values().flatten())
+            .any(Type::contains_deferred)
         || info.properties.values().any(|p| {
             p.ty.contains_deferred()
                 || p.doc_ty.as_ref().is_some_and(Type::contains_deferred)
