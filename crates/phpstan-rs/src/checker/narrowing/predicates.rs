@@ -67,14 +67,13 @@ pub(crate) fn purge_stale_narrowing_for(locals: &mut Locals, key: LocalKey) {
     // separate call at each one.
     locals.container_field_facts_mut().remove(&key);
     locals.purge_branch_implied_facts_depending_on(key);
-    // Same reasoning for `key`'s own per-discriminant accumulator facts
-    // (see `DiscriminantArrayFactsMap`'s doc comment) - a wholesale
-    // rebind (or an unrecognized by-ref pass) starts `key`'s own value
-    // over from scratch, so any accumulated per-branch history recorded
-    // for it is stale too.
-    locals
-        .discriminant_array_facts_mut()
-        .retain(|(container, _, _), _| *container != key);
+    // Same reasoning for the members `key` was proved to have and for its
+    // own per-discriminant accumulator facts (see
+    // `DiscriminantArrayFactsMap`'s doc comment) - a wholesale rebind (or
+    // an unrecognized by-ref pass) starts `key`'s own value over from
+    // scratch, so any accumulated per-branch history recorded for it is
+    // stale too.
+    locals.purge_member_facts_about(key);
 }
 
 /// `purge_stale_narrowing_for`, for the variable `name`.

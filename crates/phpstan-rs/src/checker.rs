@@ -1271,7 +1271,10 @@ impl<'a> Checker<'a> {
     /// Drops what every record gained since `mark`.
     /// An empty scope of this checker's, made by its table of keys.
     pub(crate) fn new_locals(&self) -> Locals {
-        Locals::new(std::rc::Rc::clone(&self.keys))
+        Locals::new(
+            std::rc::Rc::clone(&self.keys),
+            self.current_class.as_deref(),
+        )
     }
 
     pub(crate) fn rewind_to(&mut self, mark: PassMark) {

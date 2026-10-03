@@ -4894,10 +4894,7 @@ impl<'a> Checker<'a> {
                 if locals.may_have_member_narrowing()
                     && let Some(class_name) = target.as_name()
                     && let Some(narrowed) = locals
-                        .find(&KeyData::StaticProp {
-                            class: class_name.written.clone(),
-                            prop: prop_name.name.clone(),
-                        })
+                        .find(&locals.static_prop_data(class_name, &prop_name.name))
                         .and_then(|key| locals.get(key))
                 {
                     return narrowed.clone();
@@ -6159,10 +6156,7 @@ impl<'a> Checker<'a> {
         if is_property
             && locals.may_have_member_narrowing()
             && let Some(narrowed) = locals
-                .find(&KeyData::StaticProp {
-                    class: class_name.written.clone(),
-                    prop: Name::from(member),
-                })
+                .find(&locals.static_prop_data(class_name, &Name::from(member)))
                 .and_then(|key| locals.get(key))
         {
             return narrowed.clone();

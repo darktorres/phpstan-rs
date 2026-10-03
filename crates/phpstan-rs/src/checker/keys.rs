@@ -25,7 +25,7 @@ use syntax::name::{Name, text_hash};
 pub(crate) struct LocalKey(u32);
 
 /// What a [`LocalKey`] is.
-#[derive(Clone, PartialEq, Eq, Debug)]
+#[derive(Clone, Debug)]
 pub(crate) enum KeyData {
     /// `$name`.
     Var(Name),
@@ -35,13 +35,58 @@ pub(crate) enum KeyData {
     Index { base: LocalKey, key: Name },
     /// `base[$subscript]`: `subscript` is a variable.
     VarIndex { base: LocalKey, subscript: LocalKey },
-    /// `class::$prop`, the class as written.
+    /// `class::$prop`. `class` is the class the name refers to - `self`
+    /// is the class the scope belongs to - or `static` or `parent`, which
+    /// stay what they are written as. A class is the same class in any
+    /// case.
     StaticProp { class: Name, prop: Name },
     /// Whether the key's value is truthy.
     Truthy(LocalKey),
     /// Whether the key is set.
     Isset(LocalKey),
 }
+
+impl PartialEq for KeyData {
+    fn eq(&self, other: &KeyData) -> bool {
+        match (self, other) {
+            (KeyData::Var(a), KeyData::Var(b)) => a == b,
+            (
+                KeyData::Prop { base, prop },
+                KeyData::Prop {
+                    base: other_base,
+                    prop: other_prop,
+                },
+            ) => base == other_base && prop == other_prop,
+            (
+                KeyData::Index { base, key },
+                KeyData::Index {
+                    base: other_base,
+                    key: other_key,
+                },
+            ) => base == other_base && key == other_key,
+            (
+                KeyData::VarIndex { base, subscript },
+                KeyData::VarIndex {
+                    base: other_base,
+                    subscript: other_subscript,
+                },
+            ) => base == other_base && subscript == other_subscript,
+            (
+                KeyData::StaticProp { class, prop },
+                KeyData::StaticProp {
+                    class: other_class,
+                    prop: other_prop,
+                },
+            ) => class.eq_ignore_case(other_class) && prop == other_prop,
+            (KeyData::Truthy(a), KeyData::Truthy(b)) | (KeyData::Isset(a), KeyData::Isset(b)) => {
+                a == b
+            }
+            _ => false,
+        }
+    }
+}
+
+impl Eq for KeyData {}
 
 impl Hash for KeyData {
     fn hash<H: Hasher>(&self, state: &mut H) {
@@ -68,7 +113,7 @@ impl Hash for KeyData {
             }
             KeyData::StaticProp { class, prop } => {
                 state.write_u8(4);
-                state.write_u64(class.text_hash());
+                state.write_u64(class.folded_hash());
                 state.write_u64(prop.text_hash());
             }
             KeyData::Truthy(key) => {
@@ -261,35 +306,35 @@ impl KeyTable {
     /// a variable, a property chain rooted in one, an array-index chain by
     /// literals or variables, a static property; looking through
     /// parentheses, an assignment (the key of its target) and `?? null`.
-    pub(crate) fn key_of(&mut self, e: &Expr) -> Option<LocalKey> {
-        self.resolve(e)
+    pub(crate) fn key_of(&mut self, e: &Expr, class: Option<&Name>) -> Option<LocalKey> {
+        self.resolve(e, class)
     }
 
     /// `key_of`, when the key has been made: a read never makes one.
-    pub(crate) fn find_key(&self, e: &Expr) -> Option<LocalKey> {
-        self.find_expr(e)
+    pub(crate) fn find_key(&self, e: &Expr, class: Option<&Name>) -> Option<LocalKey> {
+        self.find_expr(e, class)
     }
 
-    fn resolve(&mut self, e: &Expr) -> Option<LocalKey> {
+    fn resolve(&mut self, e: &Expr, class: Option<&Name>) -> Option<LocalKey> {
         syntax::stack::guard(|| {
             let e = e.peeled();
             match &e.kind {
                 ExprKind::Variable(name) => Some(self.var(name)),
                 ExprKind::PropertyAccess(base, prop, _) => {
-                    let base = self.resolve(base)?;
+                    let base = self.resolve(base, class)?;
                     Some(self.intern(KeyData::Prop {
                         base,
                         prop: prop.name.clone(),
                     }))
                 }
-                ExprKind::StaticPropertyFetch(StaticTarget::Name(class), prop) => {
+                ExprKind::StaticPropertyFetch(StaticTarget::Name(name), prop) => {
                     Some(self.intern(KeyData::StaticProp {
-                        class: class.written.clone(),
+                        class: static_class(name, class),
                         prop: prop.name.clone(),
                     }))
                 }
                 ExprKind::Index(base, Some(index)) => {
-                    let base = self.resolve(base)?;
+                    let base = self.resolve(base, class)?;
                     match crate::checker::literal_string_key(index) {
                         Some(text) => Some(self.intern(KeyData::Index {
                             base,
@@ -305,38 +350,38 @@ impl KeyTable {
                     }
                 }
                 ExprKind::Assign(target, _) | ExprKind::AssignRef(target, _) => {
-                    self.resolve(target)
+                    self.resolve(target, class)
                 }
                 ExprKind::Binary(BinOp::Coalesce, lhs, rhs)
                     if matches!(&rhs.kind, ExprKind::Literal(Literal::Null)) =>
                 {
-                    self.resolve(lhs)
+                    self.resolve(lhs, class)
                 }
                 _ => None,
             }
         })
     }
 
-    fn find_expr(&self, e: &Expr) -> Option<LocalKey> {
+    fn find_expr(&self, e: &Expr, class: Option<&Name>) -> Option<LocalKey> {
         syntax::stack::guard(|| {
             let e = e.peeled();
             match &e.kind {
                 ExprKind::Variable(name) => self.find_var(name),
                 ExprKind::PropertyAccess(base, prop, _) => {
-                    let base = self.find_expr(base)?;
+                    let base = self.find_expr(base, class)?;
                     self.find(&KeyData::Prop {
                         base,
                         prop: prop.name.clone(),
                     })
                 }
-                ExprKind::StaticPropertyFetch(StaticTarget::Name(class), prop) => {
+                ExprKind::StaticPropertyFetch(StaticTarget::Name(name), prop) => {
                     self.find(&KeyData::StaticProp {
-                        class: class.written.clone(),
+                        class: static_class(name, class),
                         prop: prop.name.clone(),
                     })
                 }
                 ExprKind::Index(base, Some(index)) => {
-                    let base = self.find_expr(base)?;
+                    let base = self.find_expr(base, class)?;
                     match crate::checker::literal_string_key(index) {
                         Some(text) => self.find(&KeyData::Index {
                             base,
@@ -352,16 +397,32 @@ impl KeyTable {
                     }
                 }
                 ExprKind::Assign(target, _) | ExprKind::AssignRef(target, _) => {
-                    self.find_expr(target)
+                    self.find_expr(target, class)
                 }
                 ExprKind::Binary(BinOp::Coalesce, lhs, rhs)
                     if matches!(&rhs.kind, ExprKind::Literal(Literal::Null)) =>
                 {
-                    self.find_expr(lhs)
+                    self.find_expr(lhs, class)
                 }
                 _ => None,
             }
         })
+    }
+}
+
+/// The class a static property's `name` refers to: `self` is `scope`'s
+/// class, `static` and `parent` stay what they are, a name is its
+/// resolution.
+pub(super) fn static_class(name: &syntax::ast::QualifiedName, scope: Option<&Name>) -> Name {
+    if name.is_keyword("self") {
+        return scope.cloned().unwrap_or_else(|| name.written.clone());
+    }
+    if name.is_keyword("static") || name.is_keyword("parent") {
+        return Name::from(name.written.to_ascii_lowercase());
+    }
+    match name.resolved_class() {
+        Some(class) => Name::from(class),
+        None => name.written.clone(),
     }
 }
 
@@ -379,7 +440,11 @@ mod tests {
                 formatted(base).map(|base_key| format!("{base_key}->{prop}"))
             }
             ExprKind::StaticPropertyFetch(StaticTarget::Name(class_name), name) => {
-                Some(format!("{class_name}::${name}"))
+                let class = match class_name.resolved_class() {
+                    Some(resolved) => resolved.to_string(),
+                    None => class_name.to_string(),
+                };
+                Some(format!("{class}::${name}"))
             }
             ExprKind::Index(base, Some(idx)) => {
                 let base_key = formatted(base)?;
@@ -423,9 +488,9 @@ mod tests {
         let mut seen = 0;
         syntax::visit::any_expr_in_body(&parsed.stmts, |e| {
             let by_text = formatted(e);
-            let made = table.key_of(e);
+            let made = table.key_of(e, None);
             assert_eq!(made.map(|k| table.render(k)), by_text);
-            assert_eq!(table.find_key(e), made, "{by_text:?}");
+            assert_eq!(table.find_key(e, None), made, "{by_text:?}");
             seen += usize::from(made.is_some());
             false
         });
@@ -506,5 +571,68 @@ mod tests {
             key: "[$a]".into(),
         });
         assert!(!table.depends_on(literal, a));
+    }
+
+    #[test]
+    fn a_static_property_is_the_same_key_in_any_case_of_its_class() {
+        let mut table = KeyTable::default();
+        let a = table.intern(KeyData::StaticProp {
+            class: "App\\Foo".into(),
+            prop: "p".into(),
+        });
+        let b = table.intern(KeyData::StaticProp {
+            class: "app\\foo".into(),
+            prop: "p".into(),
+        });
+        assert_eq!(a, b);
+        // A property name is exact.
+        let c = table.intern(KeyData::StaticProp {
+            class: "App\\Foo".into(),
+            prop: "P".into(),
+        });
+        assert_ne!(a, c);
+    }
+
+    #[test]
+    fn self_names_the_class_of_the_scope_and_static_stays_late() {
+        use syntax::ast::QualifiedName;
+        let scope = Name::from("Foo");
+        let named = |written: &str| {
+            let mut name = QualifiedName::new(written, syntax::span::Span::default());
+            name.resolved = syntax::ast::ResolvedName::Exact(Name::from("Foo"));
+            name
+        };
+        let keyword = |written: &str| QualifiedName::new(written, syntax::span::Span::default());
+        let (this, foo) = (
+            static_class(&keyword("self"), Some(&scope)),
+            static_class(&named("Foo"), Some(&scope)),
+        );
+        assert!(this.eq_ignore_case(&foo));
+        let late = static_class(&keyword("static"), Some(&scope));
+        let parent = static_class(&keyword("PARENT"), Some(&scope));
+        assert!(!late.eq_ignore_case(&foo));
+        assert!(!late.eq_ignore_case(&parent));
+        assert_eq!(parent, Name::from("parent"));
+    }
+
+    #[test]
+    fn two_literal_subscripts_are_two_keys_where_one_text_was_both() {
+        // `$a['k][j']` and `$a['k']['j']` both formatted as `a[k][j]`.
+        let mut table = KeyTable::default();
+        let a = table.var("a");
+        let one = table.intern(KeyData::Index {
+            base: a,
+            key: "k][j".into(),
+        });
+        let k = table.intern(KeyData::Index {
+            base: a,
+            key: "k".into(),
+        });
+        let two = table.intern(KeyData::Index {
+            base: k,
+            key: "j".into(),
+        });
+        assert_eq!(table.render(one), table.render(two));
+        assert_ne!(one, two);
     }
 }

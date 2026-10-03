@@ -30,6 +30,8 @@ use std::sync::atomic::{AtomicU64, Ordering};
 pub(crate) struct Locals {
     // The table of the keys this scope and every scope forked from it use.
     keys: super::keys::KeyTableRef,
+    // The class this scope's code belongs to, which `self::$p` names.
+    class: Option<syntax::name::Name>,
     types: LocalsMap,
     // The keys of `types` that are not a real variable - a property
     // chain or an index (`KeyTable::key_of`). Only such a key can depend on
@@ -101,16 +103,17 @@ static NEXT_VERSION: AtomicU64 = AtomicU64::new(1);
 impl Default for Locals {
     /// A scope with a table of its own.
     fn default() -> Locals {
-        Locals::new(KeyTableRef::default())
+        Locals::new(KeyTableRef::default(), None)
     }
 }
 
 impl Locals {
     /// An empty scope whose keys `keys` makes: one table serves every scope
     /// of a checker, so a key from one is a key in the others.
-    pub(crate) fn new(keys: KeyTableRef) -> Locals {
+    pub(crate) fn new(keys: KeyTableRef, class: Option<&str>) -> Locals {
         Locals {
             keys,
+            class: class.map(syntax::name::Name::from),
             types: LocalsMap::default(),
             synthetic: KeySet::default(),
             native: LocalsMap::default(),
@@ -151,12 +154,25 @@ impl Locals {
     /// The key of the expression `e` narrows, made when it has not been
     /// (`KeyTable::key_of`).
     pub(crate) fn key_of(&self, e: &Expr) -> Option<LocalKey> {
-        self.keys.borrow_mut().key_of(e)
+        self.keys.borrow_mut().key_of(e, self.class.as_ref())
     }
 
     /// `key_of`, when the key has been made: a read never makes one.
     pub(crate) fn find_key(&self, e: &Expr) -> Option<LocalKey> {
-        self.keys.borrow().find_key(e)
+        self.keys.borrow().find_key(e, self.class.as_ref())
+    }
+
+    /// The static property `prop` of the class `name` refers to, from this
+    /// scope: what `KeyTable::key_of` makes of `name::$prop`.
+    pub(crate) fn static_prop_data(
+        &self,
+        name: &syntax::ast::QualifiedName,
+        prop: &syntax::name::Name,
+    ) -> KeyData {
+        KeyData::StaticProp {
+            class: super::keys::static_class(name, self.class.as_ref()),
+            prop: prop.clone(),
+        }
     }
 
     /// The key of `data`, made when it has not been.
@@ -327,8 +343,24 @@ impl Locals {
         // through `insert`, not `declare` (see `predefine_byref_or_
         // unknown_args`), so that call site purges this map itself too.
         self.container_field_facts.remove(&key);
+        self.purge_member_facts_about(key);
         self.note_synthetic(key);
         self.types.insert(key, ty)
+    }
+
+    /// Forgets what is recorded about `key` as a receiver or a
+    /// discriminant: the members a `method_exists`/`property_exists` test
+    /// proved it has, and the per-branch array facts recorded under it as
+    /// the subject (or the container) of a test. Once it holds another
+    /// value, none of that is known.
+    pub(crate) fn purge_member_facts_about(&mut self, key: LocalKey) {
+        self.touch();
+        self.guarded_methods
+            .retain(|(receiver, _)| *receiver != key);
+        self.guarded_properties
+            .retain(|(receiver, _)| *receiver != key);
+        self.discriminant_array_facts
+            .retain(|(container, subject, _), _| *container != key && *subject != key);
     }
 
     /// `declare` for the variable `name`.
@@ -521,6 +553,7 @@ impl Locals {
     pub(crate) fn fresh_scope(&self) -> Locals {
         Locals {
             keys: std::rc::Rc::clone(&self.keys),
+            class: self.class.clone(),
             types: LocalsMap::default(),
             synthetic: KeySet::default(),
             native: LocalsMap::default(),

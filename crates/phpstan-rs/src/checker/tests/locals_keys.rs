@@ -169,6 +169,27 @@ fn the_synthetic_keys_are_the_keys_that_are_not_a_variables_name() {
 }
 
 #[test]
+fn rebinding_a_receiver_forgets_the_members_it_was_proved_to_have() {
+    let mut locals = locals_with(&["o", "p", "flag"]);
+    let (o, p, flag) = (key(&locals, "o"), key(&locals, "p"), key(&locals, "flag"));
+    locals.guarded_methods_mut().insert((o, "m".to_string()));
+    locals.guarded_properties_mut().insert((o, "x".to_string()));
+    locals.guarded_methods_mut().insert((p, "m".to_string()));
+    locals
+        .discriminant_array_facts_mut()
+        .insert((p, flag, true), Type::int());
+    locals.declare(o, Type::object("Other".into(), Vec::new()), Span::default());
+    assert!(!locals.guarded_methods().contains(&(o, "m".to_string())));
+    assert!(!locals.guarded_properties().contains(&(o, "x".to_string())));
+    // Another receiver's stay, and so do facts about another subject.
+    assert!(locals.guarded_methods().contains(&(p, "m".to_string())));
+    assert_eq!(locals.discriminant_array_facts().len(), 1);
+    // A fact is about its subject too.
+    locals.declare(flag, Type::bool(), Span::default());
+    assert!(locals.discriminant_array_facts().is_empty());
+}
+
+#[test]
 fn a_scope_with_no_synthetic_key_and_no_fact_has_nothing_to_forget() {
     let mut locals = locals_with(&["a", "b", "this"]);
     assert!(!locals.has_state_to_forget());
