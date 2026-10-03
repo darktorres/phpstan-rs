@@ -1,5 +1,6 @@
 use rustc_hash::FxHashSet;
 use std::collections::VecDeque;
+use syntax::name::NameSet;
 use syntax::name::{FoldedMap, Name, NameMap};
 
 use rayon::prelude::*;
@@ -86,12 +87,12 @@ impl Registry {
     /// `instanceof`/`is_subclass_of` never recognizes). `class` itself
     /// is never included (matching `is_subclass_of`'s own separate
     /// `class == of` check).
-    fn class_extends_implements_closure(&self, class: &Name) -> FxHashSet<Name> {
+    fn class_extends_implements_closure(&self, class: &Name) -> NameSet {
         // The names walked are borrowed from the classes (or `class`), and
         // one is copied only the first time it is found.
         let mut seen: FxHashSet<&Name> = FxHashSet::default();
         let mut stack: Vec<&Name> = vec![class];
-        let mut result = FxHashSet::default();
+        let mut result = NameSet::default();
         while let Some(current) = stack.pop() {
             if !seen.insert(current) {
                 continue;
@@ -170,7 +171,7 @@ impl Registry {
                 )
             })
             .collect();
-        let with_phpstan_ancestry = |entries: &[(Name, FxHashSet<Name>, bool)]| {
+        let with_phpstan_ancestry = |entries: &[(Name, NameSet, bool)]| {
             entries
                 .iter()
                 .filter(|(_, _, reaches)| *reaches)
@@ -228,12 +229,12 @@ impl Registry {
             self.unrecord_parents(name);
             for parent in &supertypes {
                 self.subtype_children
-                    .get_or_insert_with(parent.clone(), FxHashSet::default)
+                    .get_or_insert_with(parent.clone(), NameSet::default)
                     .insert(name.clone());
             }
             for used in &traits {
                 self.trait_users
-                    .get_or_insert_with(used.clone(), FxHashSet::default)
+                    .get_or_insert_with(used.clone(), NameSet::default)
                     .insert(name.clone());
             }
             self.recorded_parents
@@ -328,11 +329,11 @@ impl Registry {
     /// Needed by `checker::oop::check_require_tags`: real PHPStan's
     /// `getInterfaces()`/`getTraits(true)` are both transitive the
     /// identical way.
-    pub(crate) fn all_ancestor_names(&self, class: &str) -> FxHashSet<Name> {
+    pub(crate) fn all_ancestor_names(&self, class: &str) -> NameSet {
         let start = Name::from(class);
         let mut seen: FxHashSet<&Name> = FxHashSet::default();
         let mut stack: Vec<&Name> = vec![&start];
-        let mut result = FxHashSet::default();
+        let mut result = NameSet::default();
         while let Some(current) = stack.pop() {
             if !seen.insert(current) {
                 continue;

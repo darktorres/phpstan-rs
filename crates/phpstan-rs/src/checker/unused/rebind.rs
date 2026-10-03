@@ -1,4 +1,4 @@
-use rustc_hash::FxHashSet;
+use syntax::name::NameSet;
 use types::Name;
 
 use syntax::ast::*;
@@ -29,11 +29,11 @@ pub(crate) const WATCH: &[(&str, u32)] = &[
 /// resolve without real type inference. A rebind is `Closure::bind()`,
 /// `->bindTo()`, or `->call()` on a closure (a literal, or a variable
 /// assigned one), whose scope is its object's class.
-pub(crate) fn scan_program_for_rebind_targets(program: &[Stmt]) -> (FxHashSet<Name>, bool) {
+pub(crate) fn scan_program_for_rebind_targets(program: &[Stmt]) -> (NameSet, bool) {
     let mut closures = ClosureVariables::default();
     walk_stmts(&mut closures, program);
     let mut rebinds = Rebinds {
-        targets: FxHashSet::default(),
+        targets: NameSet::default(),
         escape_all: false,
         closure_variables: closures.0,
     };
@@ -43,7 +43,7 @@ pub(crate) fn scan_program_for_rebind_targets(program: &[Stmt]) -> (FxHashSet<Na
 
 /// Every variable name some assignment gives a closure.
 #[derive(Default)]
-struct ClosureVariables(FxHashSet<Name>);
+struct ClosureVariables(NameSet);
 
 impl<'ast> Visitor<'ast> for ClosureVariables {
     fn visit_expr(&mut self, expr: &'ast Expr) {
@@ -66,9 +66,9 @@ fn is_closure_expr(e: &Expr) -> bool {
 }
 
 struct Rebinds {
-    targets: FxHashSet<Name>,
+    targets: NameSet,
     escape_all: bool,
-    closure_variables: FxHashSet<Name>,
+    closure_variables: NameSet,
 }
 
 impl<'ast> Visitor<'ast> for Rebinds {
@@ -111,11 +111,7 @@ impl<'ast> Visitor<'ast> for Rebinds {
         walk_expr(self, expr);
     }
 }
-fn record_rebind_scope(
-    scope_arg: Option<&Arg>,
-    targets: &mut FxHashSet<Name>,
-    escape_all: &mut bool,
-) {
+fn record_rebind_scope(scope_arg: Option<&Arg>, targets: &mut NameSet, escape_all: &mut bool) {
     match scope_arg.map(|a| &a.value.kind) {
         Some(ExprKind::ClassNameFetch(StaticTarget::Name(class_name)))
             if let Some(class) = class_name.resolved_class() =>

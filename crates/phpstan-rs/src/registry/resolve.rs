@@ -1,12 +1,12 @@
 use crate::registry::NameTable;
-use indexmap::IndexMap;
 use rayon::prelude::*;
 use rustc_hash::{FxHashMap, FxHashSet};
 use std::sync::{Arc, OnceLock};
 use syntax::name::{FoldedMap, Name};
+use syntax::name::{NameMap, NameSet, OrderedNameMap};
 
 /// Each templated ancestor's template bindings, as seen from one class.
-type AncestorBindings = FxHashMap<Name, FxHashMap<String, Type>>;
+type AncestorBindings = NameMap<FxHashMap<String, Type>>;
 
 use crate::registry::Registry;
 use crate::registry::{
@@ -152,8 +152,8 @@ impl Registry {
             Vec<(Name, FunctionReflection)>,
             Vec<(Name, Arc<PropertyReflection>)>,
             Vec<(Name, Arc<ConstantReflection>)>,
-            FxHashSet<Name>,
-            FxHashSet<Name>,
+            NameSet,
+            NameSet,
         );
 
         let class_names = self.scoped_class_names();
@@ -180,7 +180,7 @@ impl Registry {
                 let mut methods = Vec::new();
                 let mut properties = Vec::new();
                 let mut consts = Vec::new();
-                let mut abstract_from_traits: FxHashSet<Name> = FxHashSet::default();
+                let mut abstract_from_traits: NameSet = NameSet::default();
                 // `static_methods` needs the identical trait-flattening
                 // treatment `abstract_from_traits` gets below - without
                 // it, a using class's own `static_methods` set would
@@ -188,7 +188,7 @@ impl Registry {
                 // doesn't also redeclare itself, even though that
                 // method's (correctly flattened-in) `FunctionReflection` is
                 // right there in `info.methods`.
-                let mut static_from_traits: FxHashSet<Name> = FxHashSet::default();
+                let mut static_from_traits: NameSet = NameSet::default();
                 for trait_name in uses {
                     if let Some(trait_info) = registry.classes.get(trait_name) {
                         for (name, sig) in trait_info.methods.iter() {
@@ -281,16 +281,14 @@ impl Registry {
                     }
                 }
                 for (name, sig) in properties {
-                    if let std::collections::hash_map::Entry::Vacant(slot) =
-                        info.properties.entry(name)
-                    {
-                        slot.insert(sig);
+                    if !info.properties.contains_key(&name) {
+                        info.properties.insert(name, sig);
                         changed = true;
                     }
                 }
                 for (name, sig) in consts {
-                    if let indexmap::map::Entry::Vacant(slot) = info.consts.entry(name) {
-                        slot.insert(sig);
+                    if !info.consts.contains_key(&name) {
+                        info.consts.insert(name, sig);
                         changed = true;
                     }
                 }
@@ -857,7 +855,7 @@ impl Registry {
         if classes_with_imports.is_empty() {
             return;
         }
-        let mut by_class: FxHashMap<Name, FxHashMap<Name, Type>> = FxHashMap::default();
+        let mut by_class: NameMap<NameMap<Type>> = NameMap::default();
         for (class_name, local_key, ty) in resolved {
             by_class
                 .entry(class_name)
@@ -1044,7 +1042,7 @@ impl Registry {
     pub(crate) fn template_param_scopes_all_safe_to_backfill<'b>(
         ty: &Type,
         method_name: &str,
-        ancestor_bindings: &dyn Fn() -> &'b FxHashMap<Name, FxHashMap<String, Type>>,
+        ancestor_bindings: &dyn Fn() -> &'b NameMap<FxHashMap<String, Type>>,
     ) -> bool {
         ty.nested_templates().iter().all(|tp| {
             tp.scope.as_deref() == Some(method_name)
@@ -1502,9 +1500,9 @@ fn class_has_deferred_type(info: &ClassReflection) -> bool {
 fn visible_class_consts(
     fqn: &str,
     classes: &NameTable<ClassReflection>,
-) -> IndexMap<Name, ConstantReflection> {
-    let mut consts: IndexMap<Name, ConstantReflection> = IndexMap::new();
-    let mut seen: FxHashSet<Name> = FxHashSet::default();
+) -> OrderedNameMap<ConstantReflection> {
+    let mut consts: OrderedNameMap<ConstantReflection> = OrderedNameMap::default();
+    let mut seen: NameSet = NameSet::default();
     let mut queue: std::collections::VecDeque<Name> = std::collections::VecDeque::new();
     queue.push_back(Name::from(fqn));
     while let Some(name) = queue.pop_front() {
@@ -1515,9 +1513,9 @@ fn visible_class_consts(
             continue;
         };
         for (const_name, sig) in &info.consts {
-            consts
-                .entry(const_name.clone())
-                .or_insert_with(|| ConstantReflection::clone(sig));
+            if !consts.contains_key(const_name) {
+                consts.insert(const_name.clone(), ConstantReflection::clone(sig));
+            }
         }
         queue.extend(info.extends.iter().cloned());
         queue.extend(info.implements.iter().cloned());
@@ -1529,7 +1527,7 @@ fn visible_class_consts(
 /// see `resolve_class_const_type`.
 // Declared types are joined while the class hierarchy is being built.
 #[allow(clippy::disallowed_methods)]
-fn matching_class_const_type(consts: &IndexMap<Name, ConstantReflection>, pattern: &str) -> Type {
+fn matching_class_const_type(consts: &OrderedNameMap<ConstantReflection>, pattern: &str) -> Type {
     let names: Vec<&Name> = consts
         .keys()
         .filter(|name| glob_matches(pattern, name))
@@ -1578,7 +1576,7 @@ fn glob_matches(pattern: &str, name: &str) -> bool {
 fn bind_class_const_self(
     ty: Type,
     class: &str,
-    own_consts: &IndexMap<Name, ConstantReflection>,
+    own_consts: &OrderedNameMap<ConstantReflection>,
 ) -> Type {
     bind_class_const_self_at(ty, class, own_consts, 0)
 }
@@ -1590,7 +1588,7 @@ fn bind_class_const_self(
 fn bind_class_const_self_at(
     ty: Type,
     class: &str,
-    own_consts: &IndexMap<Name, ConstantReflection>,
+    own_consts: &OrderedNameMap<ConstantReflection>,
     depth: usize,
 ) -> Type {
     syntax::stack::guard(|| {

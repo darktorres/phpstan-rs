@@ -11,6 +11,7 @@ use crate::registry::{
 use diagnostics::DiagnosticBuilder;
 use phpdoc::docblock;
 use syntax::ast::*;
+use syntax::name::NameMap;
 use syntax::span::Span;
 use types::Name;
 use types::php_version::PhpFeature;
@@ -227,7 +228,7 @@ impl<'a> Checker<'a> {
             f,
             &self.name_ctx,
             &rustc_hash::FxHashMap::default(),
-            &rustc_hash::FxHashMap::default(),
+            &NameMap::default(),
             syntax::ast::Visibility::Public,
         );
         Some(self.registry.finalize_standalone_sig(fresh))
@@ -369,12 +370,12 @@ impl<'a> Checker<'a> {
                 resolve_names_in_type(ty, &self.name_ctx)
             };
             let templates: Vec<Name> = doc.templates.iter().map(Name::from).collect();
-            let bounds: rustc_hash::FxHashMap<Name, Type> = doc
+            let bounds: syntax::name::NameMap<Type> = doc
                 .template_bounds
                 .iter()
                 .map(|(k, v)| (Name::from(k), resolve(v)))
                 .collect();
-            let defaults: rustc_hash::FxHashMap<Name, Type> = doc
+            let defaults: syntax::name::NameMap<Type> = doc
                 .template_defaults
                 .iter()
                 .map(|(k, v)| (Name::from(k), resolve(v)))

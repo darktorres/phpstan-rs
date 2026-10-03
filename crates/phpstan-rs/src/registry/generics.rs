@@ -1,5 +1,5 @@
 use rustc_hash::{FxHashMap, FxHashSet};
-use syntax::name::Name;
+use syntax::name::NameMap;
 
 use crate::registry::Registry;
 use types::{self, Type, Variance};
@@ -170,7 +170,7 @@ impl Registry {
     /// the (at least two) paths reads the signature next.
     pub(crate) fn substitute_class_scoped_ancestor_templates<'b>(
         ty: &Type,
-        ancestor_bindings: &dyn Fn() -> &'b FxHashMap<Name, FxHashMap<String, Type>>,
+        ancestor_bindings: &dyn Fn() -> &'b NameMap<FxHashMap<String, Type>>,
     ) -> Type {
         // The bindings are asked for at the first template that has a
         // scope, not before: most types hold no template.

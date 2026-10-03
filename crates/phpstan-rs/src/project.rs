@@ -3,6 +3,7 @@ use rustc_hash::{FxHashMap, FxHashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use syntax::name::{NameMap, NameSet};
 
 use crate::checker::constant_resolver::ConstantResolver;
 use crate::checker::rule_level_helper::RuleLevelHelper;
@@ -318,7 +319,7 @@ impl FileCheck {
             escaped_member_classes: FxHashSet::default(),
             named_argument_calls: FxHashMap::default(),
             type_dump: Vec::new(),
-            property_assign_facts: FxHashMap::default(),
+            property_assign_facts: NameMap::default(),
             property_type_sites: Vec::new(),
         }
     }
@@ -1980,7 +1981,7 @@ impl Project {
         checks: &mut [(PathBuf, CheckOutcome)],
         pool: Option<&rayon::ThreadPool>,
     ) {
-        let mut writers: FxHashSet<Name> = FxHashSet::default();
+        let mut writers: NameSet = NameSet::default();
         for (_, outcome) in checks.iter() {
             if let Ok(check) = outcome {
                 for site in &check.property_type_sites {
@@ -1991,7 +1992,7 @@ impl Project {
         if writers.is_empty() {
             return;
         }
-        let mut scopes: FxHashSet<Name> = FxHashSet::default();
+        let mut scopes: NameSet = NameSet::default();
         let mut stack: Vec<Name> = writers.iter().cloned().collect();
         while let Some(class) = stack.pop() {
             if let Some(info) = self.registry.classes.get(class.as_ref()) {
@@ -2030,7 +2031,7 @@ impl Project {
             }
         }
         sources.sort_by(|a, b| a.0.cmp(b.0));
-        let mut merged: PropertyAssignFacts = FxHashMap::default();
+        let mut merged: PropertyAssignFacts = NameMap::default();
         for (_, facts) in sources {
             for (class, props) in facts {
                 if !writers.contains(&class) {

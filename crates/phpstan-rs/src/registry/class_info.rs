@@ -1,5 +1,4 @@
-use indexmap::IndexMap;
-use rustc_hash::{FxHashMap, FxHashSet};
+use rustc_hash::FxHashMap;
 
 use crate::registry::function_sig::{
     DeclaredType, FunctionReflection, ParameterReflection, apply_implicit_nullable_default,
@@ -17,7 +16,7 @@ use phpdoc::DocType;
 use phpdoc::docblock::{self, DocBlock};
 use std::sync::Arc;
 use syntax::ast::{ClassDecl, ClassDef, ClassKind, ExprKind, Literal, Visibility};
-use syntax::name::FoldedMap;
+use syntax::name::{FoldedMap, NameMap, NameSet, OrderedNameMap};
 use syntax::name_resolution::NameContext;
 use syntax::span::Span;
 use types::{self, AccessoryKind, Name, TemplateParam, Type};
@@ -374,31 +373,31 @@ pub struct ClassReflection {
     // than once, keyed by its name's position: `methods` holds their
     // union.
     pub(in crate::registry) redeclared_methods: FxHashMap<u32, FunctionReflection>,
-    pub(in crate::registry) properties: Shared<FxHashMap<Name, Arc<PropertyReflection>>>,
+    pub(in crate::registry) properties: Shared<NameMap<Arc<PropertyReflection>>>,
     // Declaration order is kept: a listing of constants (a `match`
     // remainder, a `Foo::X_*` wildcard) follows source order, as in real
     // PHPStan.
-    pub(in crate::registry) consts: Shared<IndexMap<Name, Arc<ConstantReflection>>>,
+    pub(in crate::registry) consts: Shared<OrderedNameMap<Arc<ConstantReflection>>>,
     pub(in crate::registry) uses: Vec<Name>,
     // Method names declared `abstract` in this class's own body (not
     // walked up the hierarchy - a completeness check needs to walk
     // `extends`/`implements` itself and consult each ancestor's own set).
-    pub(in crate::registry) abstract_methods: FxHashSet<Name>,
+    pub(in crate::registry) abstract_methods: NameSet,
     // Method names declared `final` in this class's own body.
-    pub(in crate::registry) final_methods: FxHashSet<Name>,
+    pub(in crate::registry) final_methods: NameSet,
     // Method names declared `static` in this class's own body - same
     // "not walked up the hierarchy" shape as `abstract_methods`/
     // `final_methods` above, used by `check_one_method_override`'s
     // `method.nonStatic`/`method.static` check, mirroring real PHPStan's
     // `OverridingMethodRule`: an override must match its ancestor's
     // static-ness exactly, either direction.
-    pub(in crate::registry) static_methods: FxHashSet<Name>,
+    pub(in crate::registry) static_methods: NameSet,
     // Property names declared `final` in this class's own body (PHP 8.4) -
     // same "not walked up the hierarchy" shape as `final_methods` above;
     // `Registry::find_final_ancestor_property` does that walk. Real PHP
     // fatals overriding a `final` property in a subclass exactly like a
     // `final` method.
-    pub(in crate::registry) final_properties: FxHashSet<Name>,
+    pub(in crate::registry) final_properties: NameSet,
     // `@final`'s docblock-only siblings to `final_methods`/
     // `final_properties` above - real PHP never enforces this convention
     // (no engine-level guarantee backs it, unlike the native keyword), so
@@ -406,8 +405,8 @@ pub struct ClassReflection {
     // (`Registry::find_final_ancestor_method`/
     // `find_final_ancestor_property`, real keyword taking priority when
     // both somehow apply on the same ancestor).
-    pub(in crate::registry) final_methods_by_phpdoc: FxHashSet<Name>,
-    pub(in crate::registry) final_properties_by_phpdoc: FxHashSet<Name>,
+    pub(in crate::registry) final_methods_by_phpdoc: NameSet,
+    pub(in crate::registry) final_properties_by_phpdoc: NameSet,
     // `use A, B { B::hello as helloB; }` - each entry's `trait_name` (when
     // present) is already resolved to the same fully-qualified name
     // `uses` itself is keyed under, so `flatten_traits` can look it up in
@@ -418,7 +417,7 @@ pub struct ClassReflection {
     // these as already addressed by the class author, even for
     // `insteadof` (whose actual trait-selection this project doesn't
     // otherwise model).
-    pub(in crate::registry) resolved_trait_conflicts: FxHashSet<Name>,
+    pub(in crate::registry) resolved_trait_conflicts: NameSet,
     // This class's own `@template T` names, in declaration order - order
     // matters, since a generic reference (`Collection<User>`) binds its
     // type arguments to these positionally (`checker::
@@ -440,7 +439,7 @@ pub struct ClassReflection {
     // `@implements Iface<Arg, ...>` tag applies to (a class can implement
     // more than one at once) - the key is resolved to the same
     // fully-qualified name `implements` itself uses, so the two agree.
-    pub(in crate::registry) implements_args: FxHashMap<Name, Vec<Type>>,
+    pub(in crate::registry) implements_args: NameMap<Vec<Type>>,
     // Same idea again, but for a generic trait named in an `@use
     // Trait<Arg, ...>` tag - keyed the same way as `implements_args`.
     // Unlike `extends`/`implements`, which are both written on the
@@ -449,12 +448,12 @@ pub struct ClassReflection {
     // TemplateTypeTrait<ObjectType> */` sits right above `use
     // TemplateTypeTrait;`, not the class's separate `/** @api */`
     // docblock above it) - see `TraitUse::doc_comment`.
-    pub(in crate::registry) uses_args: FxHashMap<Name, Vec<Type>>,
+    pub(in crate::registry) uses_args: NameMap<Vec<Type>>,
     // `@template T of Bound` - the resolved bound for whichever of
     // `templates` above declared one. Checked by
     // `checker::check_generic_bounds` wherever this class is referenced
     // with concrete type arguments (`Collection<Foo>`).
-    pub(in crate::registry) template_bounds: FxHashMap<Name, Type>,
+    pub(in crate::registry) template_bounds: NameMap<Type>,
     // `@template T = Default` - the resolved default for whichever of
     // `templates` above declared one, mirroring `template_bounds`'s
     // shape/construction exactly. A generic reference supplying fewer
@@ -462,12 +461,12 @@ pub struct ClassReflection {
     // (`check_generic_reference_arity`, `checker/generics.rs`) for a
     // template name absent from this map - one with a default is
     // legitimately optional to supply.
-    pub(in crate::registry) template_defaults: FxHashMap<Name, Type>,
+    pub(in crate::registry) template_defaults: NameMap<Type>,
     // Names from `templates` above additionally declared
     // `@template-covariant`/`@template-contravariant` - a name absent
     // from both stays invariant.
-    pub(in crate::registry) covariant_templates: FxHashSet<Name>,
-    pub(in crate::registry) contravariant_templates: FxHashSet<Name>,
+    pub(in crate::registry) covariant_templates: NameSet,
+    pub(in crate::registry) contravariant_templates: NameSet,
     // This class/interface/trait's own docblock carries `@api` (or,
     // equivalently, `@api-do-not-implement`, which implies it - see
     // `DocBlock::api`'s doc comment). Consulted only by
@@ -513,7 +512,7 @@ pub struct ClassReflection {
     // `->value` union-of-literals property type applies) - empty for a
     // non-enum, an unbacked enum, or a backed enum with any non-literal
     // case value (a case naming a class constant).
-    pub(in crate::registry) enum_case_values: FxHashMap<Name, Type>,
+    pub(in crate::registry) enum_case_values: NameMap<Type>,
     // This class's own `@phpstan-type Name TypeExpr` local alias table
     // (`function_sig::build_type_aliases`), keyed by each alias's own
     // resolved FQN - already spliced into every member's `ty` at
@@ -522,7 +521,7 @@ pub struct ClassReflection {
     // check-time `@var` resolution path, which needs the same table to
     // expand a local variable annotated `/** @var Name $x */` inside one
     // of this class's method bodies. Empty for a class with no such tags.
-    pub(in crate::registry) type_aliases: FxHashMap<Name, Type>,
+    pub(in crate::registry) type_aliases: NameMap<Type>,
     // `ParameterReflection::case_refs`'s `@phpstan-type` equivalent - keyed the
     // same way `type_aliases` itself is (the alias's resolved local
     // name), `(raw, resolved)` pairs for every class-name reference the
@@ -530,7 +529,7 @@ pub struct ClassReflection {
     // elsewhere - that's this same mechanism at whatever
     // `@param`/`@return`/property tag actually uses the alias, via its
     // own `case_refs`).
-    pub(in crate::registry) type_alias_case_refs: FxHashMap<Name, Vec<(Name, Name)>>,
+    pub(in crate::registry) type_alias_case_refs: NameMap<Vec<(Name, Name)>>,
     // This class's own `@phpstan-import-type` tags, name-resolved
     // (`from` to the source class's FQN, the imported name to the local
     // key this class's members already reference it by) but not yet
@@ -566,7 +565,7 @@ pub struct ClassReflection {
     /// Each method's, keyed by lowercased method name (only methods that
     /// have any).
     pub(in crate::registry) method_access:
-        FxHashMap<Name, crate::registry::access_attributes::AccessAttributes>,
+        NameMap<crate::registry::access_attributes::AccessAttributes>,
     // `@mixin Type` - resolved FQNs, same shape/flattening as the three
     // above. Not yet looked up in the target's own `methods`/`properties`
     // (may not be indexed yet) - `Registry::resolve_deferred_mixins`,
@@ -628,11 +627,11 @@ impl ClassReflection {
         &self.redeclared_methods
     }
 
-    pub fn properties(&self) -> &FxHashMap<Name, Arc<PropertyReflection>> {
+    pub fn properties(&self) -> &NameMap<Arc<PropertyReflection>> {
         &self.properties
     }
 
-    pub fn consts(&self) -> &IndexMap<Name, Arc<ConstantReflection>> {
+    pub fn consts(&self) -> &OrderedNameMap<Arc<ConstantReflection>> {
         &self.consts
     }
 
@@ -640,27 +639,27 @@ impl ClassReflection {
         &self.uses
     }
 
-    pub fn abstract_methods(&self) -> &FxHashSet<Name> {
+    pub fn abstract_methods(&self) -> &NameSet {
         &self.abstract_methods
     }
 
-    pub fn final_methods(&self) -> &FxHashSet<Name> {
+    pub fn final_methods(&self) -> &NameSet {
         &self.final_methods
     }
 
-    pub fn static_methods(&self) -> &FxHashSet<Name> {
+    pub fn static_methods(&self) -> &NameSet {
         &self.static_methods
     }
 
-    pub fn final_properties(&self) -> &FxHashSet<Name> {
+    pub fn final_properties(&self) -> &NameSet {
         &self.final_properties
     }
 
-    pub fn final_methods_by_phpdoc(&self) -> &FxHashSet<Name> {
+    pub fn final_methods_by_phpdoc(&self) -> &NameSet {
         &self.final_methods_by_phpdoc
     }
 
-    pub fn final_properties_by_phpdoc(&self) -> &FxHashSet<Name> {
+    pub fn final_properties_by_phpdoc(&self) -> &NameSet {
         &self.final_properties_by_phpdoc
     }
 
@@ -668,7 +667,7 @@ impl ClassReflection {
         &self.trait_aliases
     }
 
-    pub fn resolved_trait_conflicts(&self) -> &FxHashSet<Name> {
+    pub fn resolved_trait_conflicts(&self) -> &NameSet {
         &self.resolved_trait_conflicts
     }
 
@@ -680,27 +679,27 @@ impl ClassReflection {
         &self.extends_args
     }
 
-    pub fn implements_args(&self) -> &FxHashMap<Name, Vec<Type>> {
+    pub fn implements_args(&self) -> &NameMap<Vec<Type>> {
         &self.implements_args
     }
 
-    pub fn uses_args(&self) -> &FxHashMap<Name, Vec<Type>> {
+    pub fn uses_args(&self) -> &NameMap<Vec<Type>> {
         &self.uses_args
     }
 
-    pub fn template_bounds(&self) -> &FxHashMap<Name, Type> {
+    pub fn template_bounds(&self) -> &NameMap<Type> {
         &self.template_bounds
     }
 
-    pub fn template_defaults(&self) -> &FxHashMap<Name, Type> {
+    pub fn template_defaults(&self) -> &NameMap<Type> {
         &self.template_defaults
     }
 
-    pub fn covariant_templates(&self) -> &FxHashSet<Name> {
+    pub fn covariant_templates(&self) -> &NameSet {
         &self.covariant_templates
     }
 
-    pub fn contravariant_templates(&self) -> &FxHashSet<Name> {
+    pub fn contravariant_templates(&self) -> &NameSet {
         &self.contravariant_templates
     }
 
@@ -732,16 +731,16 @@ impl ClassReflection {
         &self.attributes
     }
 
-    pub fn enum_case_values(&self) -> &FxHashMap<Name, Type> {
+    pub fn enum_case_values(&self) -> &NameMap<Type> {
         &self.enum_case_values
     }
 
-    pub fn type_aliases(&self) -> &FxHashMap<Name, Type> {
+    pub fn type_aliases(&self) -> &NameMap<Type> {
         &self.type_aliases
     }
 
     #[allow(clippy::type_complexity)]
-    pub fn type_alias_case_refs(&self) -> &FxHashMap<Name, Vec<(Name, Name)>> {
+    pub fn type_alias_case_refs(&self) -> &NameMap<Vec<(Name, Name)>> {
         &self.type_alias_case_refs
     }
 
@@ -773,9 +772,7 @@ impl ClassReflection {
         &self.access
     }
 
-    pub fn method_access(
-        &self,
-    ) -> &FxHashMap<Name, crate::registry::access_attributes::AccessAttributes> {
+    pub fn method_access(&self) -> &NameMap<crate::registry::access_attributes::AccessAttributes> {
         &self.method_access
     }
 
@@ -1000,10 +997,10 @@ impl ClassReflection {
         // set across 5 separate iterations.
         let mut methods_vec: Vec<(Name, u32, FunctionReflection)> =
             Vec::with_capacity(c.methods.len());
-        let mut abstract_methods: FxHashSet<Name> = FxHashSet::default();
-        let mut final_methods: FxHashSet<Name> = FxHashSet::default();
-        let mut static_methods: FxHashSet<Name> = FxHashSet::default();
-        let mut final_methods_by_phpdoc: FxHashSet<Name> = FxHashSet::default();
+        let mut abstract_methods: NameSet = NameSet::default();
+        let mut final_methods: NameSet = NameSet::default();
+        let mut static_methods: NameSet = NameSet::default();
+        let mut final_methods_by_phpdoc: NameSet = NameSet::default();
         for m in &c.methods {
             let name = Name::from(&m.function.name);
             if m.is_abstract {
@@ -1052,7 +1049,7 @@ impl ClassReflection {
         // above applies, one member kind over - a private property
         // (final or not) is never part of a subclass's overridable
         // surface either.
-        let mut final_properties: FxHashSet<Name> = c
+        let mut final_properties: NameSet = c
             .properties
             .iter()
             .filter(|p| p.is_final && p.visibility != Visibility::Private)
@@ -1079,7 +1076,7 @@ impl ClassReflection {
 
         // `@final`'s docblock-only sibling to `final_properties` above -
         // same private-is-not-overridable exemption.
-        let mut final_properties_by_phpdoc: FxHashSet<Name> = c
+        let mut final_properties_by_phpdoc: NameSet = c
             .properties
             .iter()
             .filter(|p| {
@@ -1108,7 +1105,7 @@ impl ClassReflection {
             );
         }
 
-        let mut properties: FxHashMap<Name, PropertyReflection> = c
+        let mut properties: NameMap<PropertyReflection> = c
             .properties
             .iter()
             .map(|p| {
@@ -1388,7 +1385,7 @@ impl ClassReflection {
         // does above - only when actually present, so a plain,
         // undocumented const keeps `infer_const_type`'s existing
         // inference.
-        let consts: IndexMap<Name, ConstantReflection> = c
+        let consts: OrderedNameMap<ConstantReflection> = c
             .consts
             .iter()
             .map(|cc| {
@@ -1456,7 +1453,7 @@ impl ClassReflection {
                     .unwrap_or_default()
             })
             .unwrap_or_default();
-        let implements_args: FxHashMap<Name, Vec<Type>> = class_doc
+        let implements_args: NameMap<Vec<Type>> = class_doc
             .iter()
             .flat_map(|d| &d.implements)
             .filter_map(|raw| class_and_args(&resolve_generic_tag(raw)))
@@ -1464,7 +1461,7 @@ impl ClassReflection {
         // `@use Trait<Arg, ...>` - unlike `extends`/`implements`, lives
         // on the `use` statement's own doc comment, not `c.doc_comment`
         // (`class_doc` above) - see `ClassReflection::uses_args`'s doc comment.
-        let uses_args: FxHashMap<Name, Vec<Type>> = c
+        let uses_args: NameMap<Vec<Type>> = c
             .trait_uses
             .iter()
             .filter_map(|u| u.doc_comment.as_deref())
@@ -1472,7 +1469,7 @@ impl ClassReflection {
             .flat_map(|d| d.uses.clone())
             .filter_map(|raw| class_and_args(&resolve_generic_tag(&raw)))
             .collect();
-        let template_bounds: FxHashMap<Name, Type> = class_doc
+        let template_bounds: NameMap<Type> = class_doc
             .as_ref()
             .map(|d| {
                 d.template_bounds
@@ -1481,7 +1478,7 @@ impl ClassReflection {
                     .collect()
             })
             .unwrap_or_default();
-        let template_defaults: FxHashMap<Name, Type> = class_doc
+        let template_defaults: NameMap<Type> = class_doc
             .as_ref()
             .map(|d| {
                 d.template_defaults
@@ -1490,11 +1487,11 @@ impl ClassReflection {
                     .collect()
             })
             .unwrap_or_default();
-        let covariant_templates: FxHashSet<Name> = class_doc
+        let covariant_templates: NameSet = class_doc
             .as_ref()
             .map(|d| d.covariant_templates.iter().map(Name::from).collect())
             .unwrap_or_default();
-        let contravariant_templates: FxHashSet<Name> = class_doc
+        let contravariant_templates: NameSet = class_doc
             .as_ref()
             .map(|d| d.contravariant_templates.iter().map(Name::from).collect())
             .unwrap_or_default();
@@ -1658,7 +1655,7 @@ impl ClassReflection {
             deprecated,
             attribute_targets,
             attributes: ReflectionAttribute::all(&c.attrs),
-            enum_case_values: FxHashMap::default(),
+            enum_case_values: NameMap::default(),
             type_aliases,
             type_alias_case_refs,
             type_imports,

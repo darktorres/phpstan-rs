@@ -1,5 +1,6 @@
 use rustc_hash::FxHashMap;
 use syntax::name::Name;
+use syntax::name::NameMap;
 
 use crate::registry::Registry;
 use crate::registry::class_info::MemberSpans;
@@ -710,7 +711,7 @@ pub(crate) fn built_declaration(
                 f,
                 ctx,
                 &FxHashMap::default(),
-                &FxHashMap::default(),
+                &NameMap::default(),
                 Visibility::Public,
             );
             sig.provenance = Provenance::new(origin.clone(), f.name.span);
@@ -859,7 +860,7 @@ pub(crate) trait ConstantTable {
     fn set_constant(&mut self, name: Name, ty: Type);
 }
 
-impl ConstantTable for FxHashMap<Name, Type> {
+impl ConstantTable for NameMap<Type> {
     fn constant(&self, name: &str) -> Option<&Type> {
         self.get(name)
     }

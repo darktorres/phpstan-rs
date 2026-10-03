@@ -420,7 +420,7 @@ impl<'ast> Visitor<'ast> for Walker<'_> {
                 .registry
                 .classes
                 .get(fqn.as_str())
-                .and_then(|i| i.consts().get(c.name.as_ref()))
+                .and_then(|i| i.consts().get(&c.name.name))
                 .and_then(|k| k.native_ty().as_ref())
         {
             let native = native.clone();

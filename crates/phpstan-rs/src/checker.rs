@@ -1,5 +1,6 @@
 use rustc_hash::{FxHashMap, FxHashSet};
 use std::cell::{Cell, RefCell};
+use syntax::name::{NameMap, NameSet};
 use types::Name;
 
 use crate::pest_config;
@@ -225,7 +226,7 @@ pub(crate) type TemplateBindings = rustc_hash::FxHashMap<String, Type>;
 /// (declaring class fqn, property name) - see `Checker::
 /// property_assign_facts`' own doc comment. Both keys are `Name`s; `Name: Borrow<str>` keeps every
 /// `&str` lookup/`.get()` call site unchanged.
-pub(crate) type PropertyAssignFacts = FxHashMap<Name, FxHashMap<Name, Vec<Type>>>;
+pub(crate) type PropertyAssignFacts = NameMap<NameMap<Vec<Type>>>;
 
 /// How long each record a checking pass appends to was when the pass
 /// began (`Checker::pass_mark`), so a pass whose results are discarded -
@@ -462,7 +463,7 @@ pub struct Checker<'a> {
     // function/method/closure (native type, or `@param-out` when the tag
     // supplies one - see `ParameterReflection::out_ty`'s doc comment), set/restored
     // at the same choke point as `current_declared_return_type`.
-    pub(crate) current_function_by_ref_params: rustc_hash::FxHashMap<Name, Type>,
+    pub(crate) current_function_by_ref_params: syntax::name::NameMap<Type>,
     // Every by-ref parameter's own `locals`-tracked type, snapshotted at
     // each real execution-end point of the enclosing body (an explicit
     // `return`, with or without a value, and the implicit falls-off-the-
@@ -480,7 +481,7 @@ pub struct Checker<'a> {
     // ever actually observe by the time the function returns. Consumed
     // by `check_by_ref_execution_end`/`check_by_ref_too_wide`
     // (`checker/by_ref_params.rs`).
-    pub(crate) current_function_by_ref_exit_snapshots: rustc_hash::FxHashMap<Name, Vec<Type>>,
+    pub(crate) current_function_by_ref_exit_snapshots: syntax::name::NameMap<Vec<Type>>,
     // The subset of `current_function_by_ref_params` that actually
     // declares a real `@param-out` tag (its own resolved out-type, not
     // just a native-type fallback) - real `ParameterOutExecutionEndTypeRule`
@@ -488,7 +489,7 @@ pub struct Checker<'a> {
     // with no `@param-out` tag, unlike the tag-independent direct-
     // assignment rule (`check_by_ref_value`) which happily falls back to
     // the native type. Consulted by `check_by_ref_execution_end` only.
-    pub(crate) current_function_by_ref_params_with_tag: rustc_hash::FxHashMap<Name, Type>,
+    pub(crate) current_function_by_ref_params_with_tag: syntax::name::NameMap<Type>,
     // Every name `record_by_ref_exit_snapshot` should snapshot at each
     // real execution-end point - a superset of `current_function_by_ref_
     // params`'s own keys (kept as a separate set, not folded into that
@@ -506,7 +507,7 @@ pub struct Checker<'a> {
     // body happened to fall off the end at - which, for the common
     // `if (cond) { $x[] = ...; return ...; } return ...;` guard-clause
     // shape, is never the branch that actually mutated `$x` at all.
-    pub(crate) current_function_byref_snapshot_names: rustc_hash::FxHashSet<Name>,
+    pub(crate) current_function_byref_snapshot_names: syntax::name::NameSet,
     // Set for the duration of one function/method/closure body to every
     // label a `goto` names anywhere in it, as the parser recorded them
     // (not scope-aware: a `goto` is only said to reach a label of its own
@@ -590,7 +591,7 @@ pub struct Checker<'a> {
     // unioned (not overridden - a property-name set has no "most specific
     // wins" precedence) with whatever file-local `beforeEach(...)` calls
     // `check_program` itself finds. Defaults empty.
-    pub(crate) pest_hook_properties: FxHashSet<Name>,
+    pub(crate) pest_hook_properties: NameSet,
     // The lines of the file being checked, which a diagnostic's span is
     // turned into a line and column by.
     pub(crate) line_index: Arc<LineIndex>,
@@ -724,7 +725,7 @@ pub struct Checker<'a> {
     // this shape too). Accumulated across the whole file rather than
     // reset per function/closure - a stale entry only costs a missed
     // diagnostic on an unrelated later local sharing the same name.
-    pub(crate) static_var_names: FxHashSet<Name>,
+    pub(crate) static_var_names: NameSet,
     // Every class named as the resolved `$scope` of a `Closure::
     // bind(...)`/`->bindTo(...)` call anywhere in the file being checked
     // (`unused::scan_program_for_rebind_targets`, built once per
@@ -737,7 +738,7 @@ pub struct Checker<'a> {
     // every class's private-member check for the whole file than risk a
     // false "unused" report on a member a rebound closure actually
     // reaches.
-    pub(crate) rebind_target_classes: FxHashSet<Name>,
+    pub(crate) rebind_target_classes: NameSet,
     // Whether the file names anything a closure rebind needs (`bind`,
     // `bindTo`, `call`); when it does not, no walk of it finds one.
     pub(crate) closure_rebind_possible: bool,
@@ -1135,10 +1136,10 @@ impl<'a> Checker<'a> {
             current_function_explicit_throw_points: Vec::new(),
             current_function_return_points: Vec::new(),
             current_function_saw_explicit_return: false,
-            current_function_by_ref_params: rustc_hash::FxHashMap::default(),
-            current_function_by_ref_exit_snapshots: rustc_hash::FxHashMap::default(),
-            current_function_by_ref_params_with_tag: rustc_hash::FxHashMap::default(),
-            current_function_byref_snapshot_names: rustc_hash::FxHashSet::default(),
+            current_function_by_ref_params: NameMap::default(),
+            current_function_by_ref_exit_snapshots: NameMap::default(),
+            current_function_by_ref_params_with_tag: NameMap::default(),
+            current_function_byref_snapshot_names: NameSet::default(),
             current_function_goto_targets: GotoState::default(),
             assigned_values: rustc_hash::FxHashMap::default(),
             terminating_assertions: rustc_hash::FxHashSet::default(),
@@ -1150,7 +1151,7 @@ impl<'a> Checker<'a> {
             in_condition_position: false,
             in_exempt_last_condition: false,
             pest_this_type: Type::mixed(),
-            pest_hook_properties: FxHashSet::default(),
+            pest_hook_properties: NameSet::default(),
             line_index: Arc::default(),
             current_file: None,
             current_file_absolute: None,
@@ -1161,7 +1162,7 @@ impl<'a> Checker<'a> {
             enum_chain_tails: FxHashSet::default(),
             constant_facts: Default::default(),
             by_ref_empty_dim_args: Default::default(),
-            property_assign_facts: FxHashMap::default(),
+            property_assign_facts: NameMap::default(),
             named_argument_call_facts: FxHashMap::default(),
             property_type_sites: Vec::new(),
             defer_property_type_checks: false,
@@ -1171,8 +1172,8 @@ impl<'a> Checker<'a> {
             loop_depth: 0,
             in_range_index_writes: Vec::new(),
             active_discriminant: Vec::new(),
-            static_var_names: FxHashSet::default(),
-            rebind_target_classes: FxHashSet::default(),
+            static_var_names: NameSet::default(),
+            rebind_target_classes: NameSet::default(),
             closure_rebind_possible: true,
             include_guards_possible: true,
             rebind_escape_all: false,
@@ -1562,7 +1563,7 @@ impl<'a> Checker<'a> {
         let (rebind_targets, rebind_escape_all) = if self.closure_rebind_possible {
             unused::scan_program_for_rebind_targets(program)
         } else {
-            (FxHashSet::default(), false)
+            (NameSet::default(), false)
         };
         self.rebind_target_classes = rebind_targets;
         self.rebind_escape_all = rebind_escape_all;

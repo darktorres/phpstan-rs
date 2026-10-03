@@ -53,19 +53,19 @@ impl RefKey {
 
     /// `class` for a text, which the key holds without sharing it.
     pub fn class_text(text: &str) -> RefKey {
-        RefKey::Class(Name::detached(text.trim_start_matches('\\')))
+        RefKey::Class(Name::from(text.trim_start_matches('\\')))
     }
 
     pub fn function_text(text: &str) -> RefKey {
-        RefKey::Function(Name::detached(text.trim_start_matches('\\')))
+        RefKey::Function(Name::from(text.trim_start_matches('\\')))
     }
 
     pub fn constant_text(text: &str) -> RefKey {
-        RefKey::Constant(Name::detached(text.trim_start_matches('\\')))
+        RefKey::Constant(Name::from(text.trim_start_matches('\\')))
     }
 
     pub fn global_variable(name: &str) -> RefKey {
-        RefKey::GlobalVar(Name::detached(name))
+        RefKey::GlobalVar(Name::from(name))
     }
 
     /// The name the key holds.
@@ -100,7 +100,7 @@ impl RefKey {
 /// `name` without a leading `\`.
 fn without_backslash(name: &Name) -> Name {
     match name.strip_prefix('\\') {
-        Some(rest) => Name::detached(rest.trim_start_matches('\\')),
+        Some(rest) => Name::from(rest.trim_start_matches('\\')),
         None => name.clone(),
     }
 }

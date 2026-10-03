@@ -1,6 +1,7 @@
 use crate::registry::reflection_attribute::ReflectionAttribute;
 use rustc_hash::FxHashMap;
 use syntax::name::Name;
+use syntax::name::NameMap;
 
 use crate::registry::name_context::{class_ref, resolve_names_in_type};
 use crate::registry::type_node::{mentions_mixed, parse_type_node};
@@ -737,7 +738,7 @@ impl FunctionReflection {
         f: &FunctionDecl,
         ctx: &NameContext,
         class_templates: &FxHashMap<String, TemplateParam>,
-        class_type_aliases: &FxHashMap<Name, Type>,
+        class_type_aliases: &NameMap<Type>,
         visibility: Visibility,
     ) -> FunctionReflection {
         let doc: Option<std::sync::Arc<DocBlock>> =
@@ -1110,7 +1111,7 @@ impl FunctionReflection {
 /// shifted.
 fn dedup_versioned_params(params: Vec<ParameterReflection>) -> Vec<ParameterReflection> {
     let mut order: Vec<Name> = Vec::new();
-    let mut by_name: FxHashMap<Name, ParameterReflection> = FxHashMap::default();
+    let mut by_name: NameMap<ParameterReflection> = NameMap::default();
     for p in params {
         if !by_name.contains_key(&p.name) {
             order.push(p.name.clone());

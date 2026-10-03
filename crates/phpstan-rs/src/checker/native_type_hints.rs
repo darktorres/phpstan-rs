@@ -153,7 +153,7 @@ impl<'a> Checker<'a> {
                 .registry
                 .classes
                 .get(fqn)
-                .and_then(|info| info.consts().get(constant.name.as_ref()))
+                .and_then(|info| info.consts().get(&constant.name.name))
             else {
                 continue;
             };
@@ -169,14 +169,12 @@ impl<'a> Checker<'a> {
             let suggested_ty = self.suggested_type(&suggested, Some(fqn));
             let redeclared_incompatibly = self.registry.subclasses(fqn).iter().any(|name| {
                 self.registry.classes.get(name).is_some_and(|info| {
-                    info.consts()
-                        .get(constant.name.as_ref())
-                        .is_some_and(|child| {
-                            child.native_ty().as_ref().is_none_or(|child_ty| {
-                                self.registry.is_super_type_of(&suggested_ty, child_ty)
-                                    != TrinaryLogic::Yes
-                            })
+                    info.consts().get(&constant.name.name).is_some_and(|child| {
+                        child.native_ty().as_ref().is_none_or(|child_ty| {
+                            self.registry.is_super_type_of(&suggested_ty, child_ty)
+                                != TrinaryLogic::Yes
                         })
+                    })
                 })
             });
             if redeclared_incompatibly {

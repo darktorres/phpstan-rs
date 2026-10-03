@@ -1,4 +1,4 @@
-use rustc_hash::FxHashSet;
+use syntax::name::NameSet;
 use types::Name;
 
 use syntax::ast::*;
@@ -20,11 +20,11 @@ use syntax::visit::{Visitor, walk_expr, walk_property_hooks, walk_stmts};
 /// a member that dynamic code actually does reach.
 #[derive(Default)]
 pub(crate) struct MemberUsage {
-    pub(crate) consts: FxHashSet<Name>,
+    pub(crate) consts: NameSet,
     /// Lowercased (`method_key`).
-    pub(crate) methods: FxHashSet<Name>,
-    pub(crate) reads: FxHashSet<Name>,
-    pub(crate) writes: FxHashSet<Name>,
+    pub(crate) methods: NameSet,
+    pub(crate) reads: NameSet,
+    pub(crate) writes: NameSet,
     pub(crate) escaped: bool,
     /// Local variable names, scoped to the one function/hook body
     /// currently being scanned, syntactically proven (never via real type
@@ -37,7 +37,7 @@ pub(crate) struct MemberUsage {
     /// class-wide, so the caller (`check_unused_private_members`) clears
     /// this before each function/hook body's own scan rather than letting
     /// it accumulate across bodies.
-    pub(crate) aliases: FxHashSet<Name>,
+    pub(crate) aliases: NameSet,
 }
 
 /// Whether `class_ref` (the class name half of a `Foo::bar`/`self::bar`/

@@ -1,5 +1,6 @@
 use rustc_hash::FxHashMap;
 use syntax::name::Name;
+use syntax::name::NameMap;
 
 use crate::registry::name_context::{collect_class_name_case_refs, resolve_names_in_type};
 use crate::registry::type_node::parse_type_node;
@@ -22,7 +23,7 @@ use types::{self, TemplateParam, Type};
 /// re-resolving *its own* values further - each entry is inserted once,
 /// already fully resolved, and never touched by `resolve_names_in_type`
 /// again after that.
-pub(crate) fn substitute_type_aliases(ty: Type, aliases: &FxHashMap<Name, Type>) -> Type {
+pub(crate) fn substitute_type_aliases(ty: Type, aliases: &NameMap<Type>) -> Type {
     ty.replace_objects(&mut |name| aliases.get(name.as_str()).cloned())
 }
 
@@ -49,18 +50,18 @@ pub(crate) fn substitute_type_aliases(ty: Type, aliases: &FxHashMap<Name, Type>)
 /// aliases' own values - a sibling alias reference inside this one's RHS
 /// isn't itself a class-name reference to case-check (it's resolved
 /// separately, when *that* alias's own entry is built).
-pub(crate) type TypeAliasCaseRefs = FxHashMap<Name, Vec<(Name, Name)>>;
+pub(crate) type TypeAliasCaseRefs = NameMap<Vec<(Name, Name)>>;
 
 pub(crate) fn build_type_aliases(
     class_doc: Option<&DocBlock>,
     template_params: &FxHashMap<String, TemplateParam>,
     ctx: &NameContext,
-) -> (FxHashMap<Name, Type>, TypeAliasCaseRefs) {
+) -> (NameMap<Type>, TypeAliasCaseRefs) {
     let Some(class_doc) = class_doc else {
-        return (FxHashMap::default(), FxHashMap::default());
+        return (NameMap::default(), NameMap::default());
     };
-    let mut case_refs: TypeAliasCaseRefs = FxHashMap::default();
-    let raw: FxHashMap<Name, Type> = class_doc
+    let mut case_refs: TypeAliasCaseRefs = NameMap::default();
+    let raw: NameMap<Type> = class_doc
         .type_aliases
         .iter()
         .map(|(name, node)| {
@@ -74,7 +75,7 @@ pub(crate) fn build_type_aliases(
             (resolved_name, ty)
         })
         .collect();
-    let mut aliases = FxHashMap::default();
+    let mut aliases = NameMap::default();
     let mut visiting = Vec::new();
     for name in raw.keys() {
         expand_type_alias(name, &raw, &mut aliases, &mut visiting);
@@ -87,8 +88,8 @@ pub(crate) fn build_type_aliases(
 /// `mixed` there.
 fn expand_type_alias(
     name: &Name,
-    raw: &FxHashMap<Name, Type>,
-    done: &mut FxHashMap<Name, Type>,
+    raw: &NameMap<Type>,
+    done: &mut NameMap<Type>,
     visiting: &mut Vec<Name>,
 ) -> Type {
     if let Some(ty) = done.get(name) {
@@ -98,7 +99,14 @@ fn expand_type_alias(
         return Type::mixed();
     }
     visiting.push(name.clone());
-    let expanded = expand_alias_uses(raw[name].clone(), raw, done, visiting);
+    let expanded = expand_alias_uses(
+        raw.get(name)
+            .expect("an alias is looked up where it is declared")
+            .clone(),
+        raw,
+        done,
+        visiting,
+    );
     visiting.pop();
     done.insert(name.clone(), expanded.clone());
     expanded
@@ -106,8 +114,8 @@ fn expand_type_alias(
 
 fn expand_alias_uses(
     ty: Type,
-    raw: &FxHashMap<Name, Type>,
-    done: &mut FxHashMap<Name, Type>,
+    raw: &NameMap<Type>,
+    done: &mut NameMap<Type>,
     visiting: &mut Vec<Name>,
 ) -> Type {
     ty.replace_objects(&mut |name| {

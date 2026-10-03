@@ -3,7 +3,6 @@
 //! `NameTable` - over a shared base read in place from the stored file -
 //! but a name is found only by its own spelling.
 
-use rustc_hash::{FxHashMap, FxHashSet};
 use std::ops::Range;
 use std::sync::Arc;
 use syntax::name::Name;
@@ -20,18 +19,18 @@ use super::name_table::{Base, load_base, store_entries};
 /// order of their names.
 #[derive(Debug, Clone)]
 pub struct NameMap<V> {
-    entries: FxHashMap<Name, V>,
+    entries: syntax::name::NameMap<V>,
     base: Option<Arc<Base<V>>>,
     // The base's names this map hides: replaced in `entries`, or removed.
-    hidden: FxHashSet<Name>,
+    hidden: syntax::name::NameSet,
 }
 
 impl<V> Default for NameMap<V> {
     fn default() -> Self {
         NameMap {
-            entries: FxHashMap::default(),
+            entries: Default::default(),
             base: None,
-            hidden: FxHashSet::default(),
+            hidden: Default::default(),
         }
     }
 }
@@ -192,9 +191,9 @@ impl<V> std::ops::Index<&str> for NameMap<V> {
 
 /// `NameMap::iter`'s iterator.
 pub struct Iter<'a, V> {
-    entries: std::collections::hash_map::Iter<'a, Name, V>,
+    entries: syntax::name::NameMapIter<'a, V>,
     base: Option<(&'a Base<V>, Range<usize>)>,
-    hidden: &'a FxHashSet<Name>,
+    hidden: &'a syntax::name::NameSet,
 }
 
 impl<'a, V> Iterator for Iter<'a, V> {
@@ -276,9 +275,9 @@ impl<V: serde::de::DeserializeOwned + Send + Sync + 'static> NameMap<V> {
     /// The map `store` wrote as section `section`: a base read in place.
     pub(super) fn load(reader: &Reader, section: &str) -> Result<NameMap<V>, String> {
         Ok(NameMap {
-            entries: FxHashMap::default(),
+            entries: Default::default(),
             base: Some(Arc::new(load_base(reader, section, false)?)),
-            hidden: FxHashSet::default(),
+            hidden: Default::default(),
         })
     }
 }

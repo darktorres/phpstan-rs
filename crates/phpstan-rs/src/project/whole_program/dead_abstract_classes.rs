@@ -29,12 +29,11 @@
 //! always true.
 
 use crate::registry::Registry;
-use rustc_hash::FxHashSet;
 use syntax::ast::ClassKind;
-use types::Name;
+use syntax::name::NameSet;
 
 pub(crate) fn find_dead_abstract_classes(registry: &Registry) -> Vec<String> {
-    let mut has_concrete_descendant: FxHashSet<Name> = FxHashSet::default();
+    let mut has_concrete_descendant: NameSet = NameSet::default();
     for (fqn, info) in &registry.classes {
         // Only a real, instantiable class counts as a witness - an
         // abstract subclass, an interface, or a trait proves nothing

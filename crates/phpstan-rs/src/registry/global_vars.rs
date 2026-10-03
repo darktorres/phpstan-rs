@@ -21,6 +21,7 @@
 //! graph is resolved.
 
 use std::path::Path;
+use syntax::name::{NameMap, NameSet};
 
 use rayon::prelude::*;
 use rustc_hash::{FxHashMap, FxHashSet};
@@ -242,7 +243,7 @@ impl Registry {
             .collect();
         let global_scope_files = resolve_global_scope_files(files, &include_sites);
 
-        let mut accumulators: FxHashMap<Name, GlobalAccumulator> = FxHashMap::default();
+        let mut accumulators: NameMap<GlobalAccumulator> = NameMap::default();
         for (id, ..) in files {
             for site in &self.global_sites[id].sites {
                 if let Some(gate) = &site.gate
@@ -375,7 +376,7 @@ fn resolve_include_target_suffix(expr: &Expr) -> Option<String> {
 /// applied later), regardless of any `global $x;` (file top level is
 /// already, potentially, the real global scope).
 fn walk_top_level<'a>(stmts: &'a [Stmt], file_ctx: &FileCtx<'a>, out: &mut WalkOutput) {
-    let empty = FxHashSet::default();
+    let empty = NameSet::default();
     walk_scope(stmts, file_ctx, true, &empty, out);
 }
 
@@ -394,8 +395,8 @@ fn walk_function_body<'a>(stmts: &'a [Stmt], file_ctx: &FileCtx<'a>, out: &mut W
 
 /// Every name a `global` statement in this body imports. A nested
 /// function, class or closure needs its own `global`, so none is entered.
-fn collect_global_names(stmts: &[Stmt]) -> FxHashSet<Name> {
-    let mut out = FxHashSet::default();
+fn collect_global_names(stmts: &[Stmt]) -> NameSet {
+    let mut out = NameSet::default();
     for stmt in stmts {
         any_stmt_in_body(stmt, |s| {
             if let StmtKind::Global(names) = &s.kind {
@@ -413,7 +414,7 @@ fn walk_scope<'a>(
     stmts: &'a [Stmt],
     file_ctx: &FileCtx<'a>,
     top_level: bool,
-    global_names: &FxHashSet<Name>,
+    global_names: &NameSet,
     out: &mut WalkOutput,
 ) {
     let mut scope = Scope {
@@ -432,7 +433,7 @@ fn walk_scope<'a>(
 struct Scope<'r, 'a> {
     file_ctx: &'r FileCtx<'a>,
     top_level: bool,
-    global_names: &'r FxHashSet<Name>,
+    global_names: &'r NameSet,
     out: &'r mut WalkOutput,
 }
 
@@ -496,7 +497,7 @@ fn handle_top_expr_statement<'a>(
     e: &'a Expr,
     file_ctx: &FileCtx<'a>,
     top_level: bool,
-    global_names: &FxHashSet<Name>,
+    global_names: &NameSet,
     out: &mut WalkOutput,
 ) {
     let is_site = |name: &str| top_level || global_names.contains(name);

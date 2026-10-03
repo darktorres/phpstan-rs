@@ -197,7 +197,7 @@ impl<'a> Checker<'a> {
                     .filter(|t| !info.template_defaults().contains_key(*t))
                     .count();
                 if required > 0 {
-                    let mut list = info.templates().join(", ");
+                    let mut list = syntax::name::join(info.templates(), ", ");
                     if required != total {
                         list.push_str(&format!(" ({required}-{total} required)"));
                     }
@@ -345,7 +345,7 @@ impl<'a> Checker<'a> {
                 .registry
                 .classes
                 .get(fqn)
-                .and_then(|info| info.consts().get(c.name.as_ref()))
+                .and_then(|info| info.consts().get(&c.name.name))
                 .map(|cs| cs.ty().clone())
             else {
                 continue;

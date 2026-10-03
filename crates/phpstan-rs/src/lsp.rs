@@ -930,10 +930,16 @@ impl Server {
                 };
                 let mut text = format!("{kind} {fqn}");
                 if !info.extends().is_empty() {
-                    text.push_str(&format!(" extends {}", info.extends().join(", ")));
+                    text.push_str(&format!(
+                        " extends {}",
+                        syntax::name::join(info.extends(), ", ")
+                    ));
                 }
                 if !info.implements().is_empty() {
-                    text.push_str(&format!(" implements {}", info.implements().join(", ")));
+                    text.push_str(&format!(
+                        " implements {}",
+                        syntax::name::join(info.implements(), ", ")
+                    ));
                 }
                 Some(text)
             }

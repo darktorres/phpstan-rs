@@ -43,6 +43,7 @@
 use super::container::{Reader, Writer};
 use super::packed::{Packed, Records, RecordsBuilder};
 use syntax::name::Name;
+use syntax::name::NameMap;
 
 use rayon::prelude::*;
 
@@ -1454,8 +1455,8 @@ fn build_generated_stub_data() -> (StubIndex, GeneratedStubData) {
     let mut functions = Vec::new();
     let mut seen_classes = rustc_hash::FxHashSet::default();
     let mut classes = Vec::new();
-    let mut merged_constants: rustc_hash::FxHashMap<Name, Type> = rustc_hash::FxHashMap::default();
-    let mut builtin_constants: rustc_hash::FxHashMap<Name, Type> = rustc_hash::FxHashMap::default();
+    let mut merged_constants: syntax::name::NameMap<Type> = syntax::name::NameMap::default();
+    let mut builtin_constants: syntax::name::NameMap<Type> = NameMap::default();
     let mut function_extensions = rustc_hash::FxHashMap::default();
     let mut class_extensions = rustc_hash::FxHashMap::default();
     let builtins = PHPSTORM_STUBS_SOURCES

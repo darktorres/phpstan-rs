@@ -174,7 +174,7 @@ pub(crate) struct ResolvedSnapshot {
     function_keys: Option<Arc<FxHashSet<String>>>,
     functions: Vec<Option<Detached<FunctionReflection>>>,
     property_writes: FxHashMap<property_writes::DeclKey, PropertyWrites>,
-    global_variables: FxHashMap<Name, Type>,
+    global_variables: syntax::name::NameMap<Type>,
 }
 
 /// The sections a stored registry is in: one per table, the declarations as
@@ -248,7 +248,7 @@ pub struct Registry {
     // `Mixed`-valued one) means "no assignment site found or resolved" -
     // callers should treat a missing key the same as they already treat
     // `Mixed`.
-    pub global_variables: FxHashMap<Name, Type>,
+    pub global_variables: syntax::name::NameMap<Type>,
     // The one narrow crack in this struct's "path-agnostic" contract
     // (see `project/decl_locations.rs` for why `ClassReflection`/`Registry`
     // are otherwise path-agnostic) - needed to port real
@@ -368,7 +368,7 @@ pub struct Registry {
     // (`registry/hierarchy.rs`). Rebuilt whenever the class graph could
     // have changed.
     #[serde(skip)]
-    pub(crate) ancestor_names: NameTable<FxHashSet<Name>>,
+    pub(crate) ancestor_names: NameTable<syntax::name::NameSet>,
     // The classes, as declared, with a `PHPStan\` name anywhere among what
     // they extend, implement or use, transitively: one answer for each, made
     // with `ancestor_names` (`precompute_ancestor_names`).
@@ -378,9 +378,9 @@ pub struct Registry {
     // of its `uses`: a class-like's direct subtypes and direct trait users
     // (`precompute_ancestor_names`).
     #[serde(skip)]
-    pub(crate) subtype_children: NameTable<FxHashSet<Name>>,
+    pub(crate) subtype_children: NameTable<syntax::name::NameSet>,
     #[serde(skip)]
-    pub(crate) trait_users: NameTable<FxHashSet<Name>>,
+    pub(crate) trait_users: NameTable<syntax::name::NameSet>,
     // Each class's direct supertypes and used traits as those two indexes
     // record them, to take it out of them again.
     #[serde(skip)]
@@ -842,9 +842,9 @@ impl Registry {
 #[derive(Debug, Default, Clone)]
 struct DoctrineEntityIndex {
     /// The first class mapped to each table.
-    by_table: FxHashMap<Name, Name>,
+    by_table: syntax::name::NameMap<Name>,
     /// Every class naming each repository class.
-    by_repository: FxHashMap<Name, Vec<Name>>,
+    by_repository: syntax::name::NameMap<Vec<Name>>,
 }
 
 #[cfg(test)]

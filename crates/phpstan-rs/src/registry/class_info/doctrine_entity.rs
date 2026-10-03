@@ -21,6 +21,7 @@
 
 use rustc_hash::FxHashMap;
 use syntax::name::Name;
+use syntax::name::NameMap;
 
 use syntax::ast::{
     ArrayItem, Attribute, ClassDef, Expr, ExprKind, Literal, QualifiedName, StaticTarget,
@@ -59,8 +60,8 @@ pub struct DoctrineEntity {
     /// keyed by property name, association properties included too
     /// (their "field type" is the association's own declared type,
     /// consulted only via `associations` below in practice).
-    pub fields: FxHashMap<Name, Type>,
-    pub associations: FxHashMap<Name, DoctrineAssociation>,
+    pub fields: NameMap<Type>,
+    pub associations: NameMap<DoctrineAssociation>,
     /// `#[ORM\Table(name: '...')]`'s own argument - `None` when absent
     /// (real Doctrine would then fall back to its own default naming
     /// strategy, generally the bare class name, which this project
@@ -80,7 +81,7 @@ pub struct DoctrineEntity {
     /// `associations` - a raw SQL column is never itself another
     /// entity's own object identity, so there's nothing this cross-
     /// reference would need an association's own column name for.
-    pub column_names: FxHashMap<Name, Name>,
+    pub column_names: NameMap<Name>,
     /// `#[ORM\Entity(repositoryClass: ...)]`'s own argument, if present -
     /// resolved to a fully-qualified class name.
     pub repository_class: Option<Name>,
@@ -198,7 +199,7 @@ fn association_target_from_native_type(ty: &Type) -> Option<String> {
 /// own.
 pub(crate) fn compute_doctrine_entity(
     c: &ClassDef,
-    properties: &FxHashMap<Name, PropertyReflection>,
+    properties: &NameMap<PropertyReflection>,
 ) -> Option<DoctrineEntity> {
     let entity_attr = find_orm_attribute(&c.attrs, "Entity")?;
     let repository_class = class_const_arg(entity_attr, "repositoryClass").map(class_ref);
@@ -227,9 +228,9 @@ pub(crate) fn compute_doctrine_entity(
     }
 
     let mut id_fields: Vec<Name> = Vec::new();
-    let mut fields: FxHashMap<Name, Type> = FxHashMap::default();
-    let mut column_names: FxHashMap<Name, Name> = FxHashMap::default();
-    let mut associations: FxHashMap<Name, DoctrineAssociation> = FxHashMap::default();
+    let mut fields: NameMap<Type> = NameMap::default();
+    let mut column_names: NameMap<Name> = NameMap::default();
+    let mut associations: NameMap<DoctrineAssociation> = NameMap::default();
     for (name, attrs) in &attrs_by_property {
         let Some(sig) = properties.get(*name) else {
             continue;

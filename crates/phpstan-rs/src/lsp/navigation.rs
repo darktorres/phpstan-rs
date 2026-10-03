@@ -32,11 +32,11 @@
 //! approximation of it - see `Checker::probe_var_provenance`'s own doc
 //! comment in `checker.rs` for the full design.
 
+use syntax::name::NameSet;
 use types::Name;
 
 use crate::project::Project;
 use crate::registry::Registry;
-use rustc_hash::FxHashSet;
 use std::path::Path;
 use syntax::ast::*;
 use syntax::span::Span;
@@ -219,17 +219,14 @@ enum ScopeFrame {
     /// `use (...)` list belongs to the closure's own scope (`id`); a
     /// name that IS in `transparent` is a real capture of an outer
     /// variable, so resolution keeps walking outward past this frame.
-    Closure {
-        id: u32,
-        transparent: FxHashSet<Name>,
-    },
+    Closure { id: u32, transparent: NameSet },
     /// An arrow function's implicit-capture-by-value boundary: PHP's
     /// `fn() => ...` auto-captures every outer variable it reads BY
     /// VALUE, so (unlike `Closure`) there is no explicit capture list to
     /// consult - only its own declared parameters (`owns`) belong to a
     /// genuinely new scope; every other name resolves as the SAME
     /// variable as whatever it refers to outside the arrow function.
-    ArrowFn { id: u32, owns: FxHashSet<Name> },
+    ArrowFn { id: u32, owns: NameSet },
 }
 
 struct Walker<'a> {

@@ -7,7 +7,7 @@
 //! directives (`DeclareStrictTypesRule`, plus block-mode `strict_types`
 //! and unknown directives).
 
-use rustc_hash::{FxHashMap, FxHashSet};
+use syntax::name::{NameMap, NameSet};
 
 use crate::checker::Checker;
 use diagnostics::DiagnosticBuilder;
@@ -33,7 +33,7 @@ struct Scope {
     frames: Vec<(FrameKind, usize)>,
     finallies: Vec<usize>,
     next_id: usize,
-    labels: FxHashMap<Name, Placement>,
+    labels: NameMap<Placement>,
     duplicate_labels: Vec<(Name, Span)>,
     gotos: Vec<(Name, Placement)>,
     jumps: Vec<(&'static str, Span, String)>,
@@ -173,7 +173,7 @@ impl<'a> Checker<'a> {
                 "label.duplicate",
             );
         }
-        let mut used: FxHashSet<Name> = FxHashSet::default();
+        let mut used: NameSet = NameSet::default();
         for (name, goto) in &scope.gotos {
             let Some(target) = scope.labels.get(name) else {
                 self.report_keyword(

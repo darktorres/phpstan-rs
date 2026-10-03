@@ -48,14 +48,6 @@ impl Name {
         }))
     }
 
-    /// A name of `text` that no interner holds: equal to the interned
-    /// name of the same text, but not shared with it. For a value that is
-    /// compared and hashed as a name and does not outlive its use, which
-    /// has no need of the interner's lock.
-    pub fn detached(text: &str) -> Name {
-        Name::new_hashed(text, text_hash(text))
-    }
-
     /// `text_hash` of the name's text, made when the name was.
     pub fn text_hash(&self) -> u64 {
         self.0.hash
@@ -85,7 +77,7 @@ impl Name {
     /// Equal ignoring ASCII case, as PHP compares class, function and
     /// method names.
     pub fn eq_ignore_case(&self, other: &Name) -> bool {
-        Arc::ptr_eq(&self.0, &other.0) || self.lower() == other.lower()
+        self == other || self.lower() == other.lower()
     }
 }
 
@@ -98,8 +90,17 @@ impl std::ops::Deref for Name {
 }
 
 impl PartialEq for Name {
+    /// Identity: the interner makes one allocation of a text for as long as
+    /// any name of it lives, and nothing else makes names.
     fn eq(&self, other: &Name) -> bool {
-        Arc::ptr_eq(&self.0, &other.0) || self.0.text == other.0.text
+        let same = Arc::ptr_eq(&self.0, &other.0);
+        debug_assert_eq!(
+            same,
+            self.0.text == other.0.text,
+            "two allocations of the name {:?}",
+            self.0.text
+        );
+        same
     }
 }
 
@@ -162,13 +163,7 @@ impl AsRef<str> for Name {
 
 impl Hash for Name {
     fn hash<H: Hasher>(&self, state: &mut H) {
-        self.0.text.hash(state);
-    }
-}
-
-impl std::borrow::Borrow<str> for Name {
-    fn borrow(&self) -> &str {
-        &self.0.text
+        state.write_u64(self.0.hash);
     }
 }
 
@@ -370,7 +365,7 @@ impl NameKey for Name {
         self.0.hash
     }
     fn is_key_of(&self, stored: &Name) -> bool {
-        Arc::ptr_eq(&self.0, &stored.0) || self.0.text == stored.0.text
+        self == stored
     }
 }
 
@@ -524,6 +519,249 @@ impl<V> NameMap<V> {
     }
 }
 
+/// Values by a name, as written, in the order their names were first
+/// inserted: a name inserted again keeps its place.
+#[derive(Clone)]
+pub struct OrderedNameMap<V> {
+    entries: Vec<(Name, V)>,
+    /// Positions in `entries`, filed by each name's own hash.
+    index: hashbrown::HashTable<u32>,
+}
+
+impl<V> Default for OrderedNameMap<V> {
+    fn default() -> Self {
+        OrderedNameMap {
+            entries: Vec::new(),
+            index: hashbrown::HashTable::new(),
+        }
+    }
+}
+
+impl<V: fmt::Debug> fmt::Debug for OrderedNameMap<V> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_map()
+            .entries(self.entries.iter().map(|(name, value)| (name, value)))
+            .finish()
+    }
+}
+
+impl<V> OrderedNameMap<V> {
+    pub fn len(&self) -> usize {
+        self.entries.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.entries.is_empty()
+    }
+
+    fn position<K: NameKey + ?Sized>(&self, key: &K) -> Option<usize> {
+        self.index
+            .find(key.key_hash(), |&at| {
+                key.is_key_of(&self.entries[at as usize].0)
+            })
+            .map(|&at| at as usize)
+    }
+
+    pub fn get<K: NameKey + ?Sized>(&self, key: &K) -> Option<&V> {
+        self.position(key).map(|at| &self.entries[at].1)
+    }
+
+    pub fn get_mut<K: NameKey + ?Sized>(&mut self, key: &K) -> Option<&mut V> {
+        self.position(key).map(|at| &mut self.entries[at].1)
+    }
+
+    pub fn contains_key<K: NameKey + ?Sized>(&self, key: &K) -> bool {
+        self.position(key).is_some()
+    }
+
+    /// Holds `value` by `name`, returning what the name held; a name held
+    /// already keeps its place.
+    pub fn insert(&mut self, name: Name, value: V) -> Option<V> {
+        if let Some(at) = self.position(&name) {
+            return Some(std::mem::replace(&mut self.entries[at].1, value));
+        }
+        self.push(name, value);
+        None
+    }
+
+    fn push(&mut self, name: Name, value: V) {
+        let at = u32::try_from(self.entries.len()).expect("fewer than 2^32 entries");
+        let entries = &self.entries;
+        self.index
+            .insert_unique(name.0.hash, at, |&held| entries[held as usize].0.0.hash);
+        self.entries.push((name, value));
+    }
+
+    /// The value `name` finds, first holding `make()` by it when there is
+    /// none.
+    pub fn get_or_insert_with(&mut self, name: Name, make: impl FnOnce() -> V) -> &mut V {
+        let at = match self.position(&name) {
+            Some(at) => at,
+            None => {
+                self.push(name, make());
+                self.entries.len() - 1
+            }
+        };
+        &mut self.entries[at].1
+    }
+
+    /// Every entry, in order.
+    pub fn iter(&self) -> impl DoubleEndedIterator<Item = (&Name, &V)> {
+        self.entries.iter().map(|(name, value)| (name, value))
+    }
+
+    pub fn iter_mut(&mut self) -> impl DoubleEndedIterator<Item = (&Name, &mut V)> {
+        self.entries.iter_mut().map(|(name, value)| (&*name, value))
+    }
+
+    pub fn keys(&self) -> impl DoubleEndedIterator<Item = &Name> {
+        self.entries.iter().map(|(name, _)| name)
+    }
+
+    pub fn values(&self) -> impl DoubleEndedIterator<Item = &V> {
+        self.entries.iter().map(|(_, value)| value)
+    }
+
+    pub fn values_mut(&mut self) -> impl DoubleEndedIterator<Item = &mut V> {
+        self.entries.iter_mut().map(|(_, value)| value)
+    }
+
+    /// Puts the entries in the order of the keys `key` makes of them.
+    pub fn sort_by_cached_key<K: Ord>(&mut self, mut key: impl FnMut(&Name, &V) -> K) {
+        self.entries
+            .sort_by_cached_key(|(name, value)| key(name, value));
+        self.reindex();
+    }
+
+    fn reindex(&mut self) {
+        self.index.clear();
+        let entries = &self.entries;
+        for (at, (name, _)) in entries.iter().enumerate() {
+            self.index.insert_unique(name.0.hash, at as u32, |&held| {
+                entries[held as usize].0.0.hash
+            });
+        }
+    }
+}
+
+impl<V> std::ops::Index<&str> for OrderedNameMap<V> {
+    type Output = V;
+
+    fn index(&self, name: &str) -> &V {
+        self.get(name).unwrap_or_else(|| panic!("no {name}"))
+    }
+}
+
+impl<'a, V> IntoIterator for &'a OrderedNameMap<V> {
+    type Item = (&'a Name, &'a V);
+    type IntoIter = Box<dyn DoubleEndedIterator<Item = (&'a Name, &'a V)> + 'a>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        Box::new(self.iter())
+    }
+}
+
+impl<V> IntoIterator for OrderedNameMap<V> {
+    type Item = (Name, V);
+    type IntoIter = std::vec::IntoIter<(Name, V)>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.entries.into_iter()
+    }
+}
+
+impl<V> FromIterator<(Name, V)> for OrderedNameMap<V> {
+    fn from_iter<I: IntoIterator<Item = (Name, V)>>(iter: I) -> Self {
+        let mut map = OrderedNameMap::default();
+        map.extend(iter);
+        map
+    }
+}
+
+impl<V> Extend<(Name, V)> for OrderedNameMap<V> {
+    fn extend<I: IntoIterator<Item = (Name, V)>>(&mut self, iter: I) {
+        for (name, value) in iter {
+            self.insert(name, value);
+        }
+    }
+}
+
+impl<V: PartialEq> PartialEq for OrderedNameMap<V> {
+    fn eq(&self, other: &OrderedNameMap<V>) -> bool {
+        self.entries == other.entries
+    }
+}
+
+impl<V: serde::Serialize> serde::Serialize for OrderedNameMap<V> {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.collect_map(self.iter())
+    }
+}
+
+impl<'de, V: serde::Deserialize<'de>> serde::Deserialize<'de> for OrderedNameMap<V> {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        struct Entries<V>(std::marker::PhantomData<V>);
+        impl<'de, V: serde::Deserialize<'de>> serde::de::Visitor<'de> for Entries<V> {
+            type Value = OrderedNameMap<V>;
+
+            fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                f.write_str("a map by name")
+            }
+
+            fn visit_map<A: serde::de::MapAccess<'de>>(
+                self,
+                mut map: A,
+            ) -> Result<Self::Value, A::Error> {
+                let mut out = OrderedNameMap::default();
+                while let Some((name, value)) = map.next_entry::<Name, V>()? {
+                    out.insert(name, value);
+                }
+                Ok(out)
+            }
+        }
+        deserializer.deserialize_map(Entries(std::marker::PhantomData))
+    }
+}
+
+impl<V> std::ops::Index<&str> for NameMap<V> {
+    type Output = V;
+
+    fn index(&self, name: &str) -> &V {
+        self.get(name).unwrap_or_else(|| panic!("no {name}"))
+    }
+}
+
+/// The place in a [`NameMap`] a name finds or would be given.
+pub struct NameEntry<'a, V> {
+    map: &'a mut NameMap<V>,
+    name: Name,
+}
+
+impl<'a, V> NameEntry<'a, V> {
+    /// The value, first holding `make()` by the name when there is none.
+    pub fn or_insert_with(self, make: impl FnOnce() -> V) -> &'a mut V {
+        self.map.get_or_insert_with(self.name, make)
+    }
+
+    pub fn or_insert(self, value: V) -> &'a mut V {
+        self.or_insert_with(|| value)
+    }
+
+    pub fn or_default(self) -> &'a mut V
+    where
+        V: Default,
+    {
+        self.or_insert_with(V::default)
+    }
+}
+
+impl<V> NameMap<V> {
+    /// The place `name` finds or would be given.
+    pub fn entry(&mut self, name: Name) -> NameEntry<'_, V> {
+        NameEntry { map: self, name }
+    }
+}
+
 /// A [`NameMap`]'s entries, by reference.
 pub struct NameMapIter<'a, V>(hashbrown::hash_table::Iter<'a, (Name, V)>);
 
@@ -613,6 +851,111 @@ impl<'de, V: serde::Deserialize<'de>> serde::Deserialize<'de> for NameMap<V> {
             }
         }
         deserializer.deserialize_map(Entries(std::marker::PhantomData))
+    }
+}
+
+/// Names, as written, as a set: a lookup by a `Name` reads the hash it
+/// holds, and one by text hashes the text.
+#[derive(Clone, Default)]
+pub struct NameSet(NameMap<()>);
+
+impl NameSet {
+    pub fn len(&self) -> usize {
+        self.0.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+
+    pub fn clear(&mut self) {
+        self.0.clear();
+    }
+
+    pub fn contains<K: NameKey + ?Sized>(&self, key: &K) -> bool {
+        self.0.contains_key(key)
+    }
+
+    pub fn get<K: NameKey + ?Sized>(&self, key: &K) -> Option<&Name> {
+        self.0.get_key_value(key).map(|(name, _)| name)
+    }
+
+    /// Whether `name` was not in the set.
+    pub fn insert(&mut self, name: Name) -> bool {
+        self.0.insert(name, ()).is_none()
+    }
+
+    pub fn remove<K: NameKey + ?Sized>(&mut self, key: &K) -> bool {
+        self.0.remove(key).is_some()
+    }
+
+    pub fn iter(&self) -> impl Iterator<Item = &Name> {
+        self.0.keys()
+    }
+
+    /// Keeps the names `keep` answers yes for.
+    pub fn retain(&mut self, mut keep: impl FnMut(&Name) -> bool) {
+        self.0.retain(|name, _| keep(name));
+    }
+}
+
+impl fmt::Debug for NameSet {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_set().entries(self.iter()).finish()
+    }
+}
+
+impl PartialEq for NameSet {
+    fn eq(&self, other: &NameSet) -> bool {
+        self.0 == other.0
+    }
+}
+
+impl<'a> IntoIterator for &'a NameSet {
+    type Item = &'a Name;
+    type IntoIter = Box<dyn Iterator<Item = &'a Name> + 'a>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        Box::new(self.iter())
+    }
+}
+
+impl IntoIterator for NameSet {
+    type Item = Name;
+    type IntoIter = Box<dyn Iterator<Item = Name>>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        Box::new(self.0.into_iter().map(|(name, ())| name))
+    }
+}
+
+impl FromIterator<Name> for NameSet {
+    fn from_iter<I: IntoIterator<Item = Name>>(iter: I) -> Self {
+        let mut set = NameSet::default();
+        set.extend(iter);
+        set
+    }
+}
+
+impl Extend<Name> for NameSet {
+    fn extend<I: IntoIterator<Item = Name>>(&mut self, iter: I) {
+        for name in iter {
+            self.insert(name);
+        }
+    }
+}
+
+impl serde::Serialize for NameSet {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.collect_seq(self.iter())
+    }
+}
+
+impl<'de> serde::Deserialize<'de> for NameSet {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        Ok(Vec::<Name>::deserialize(deserializer)?
+            .into_iter()
+            .collect())
     }
 }
 
@@ -1053,6 +1396,18 @@ impl FromIterator<Name> for FoldedSet {
         }
         set
     }
+}
+
+/// `names` joined by `separator`.
+pub fn join(names: &[Name], separator: &str) -> String {
+    let mut text = String::new();
+    for (i, name) in names.iter().enumerate() {
+        if i > 0 {
+            text.push_str(separator);
+        }
+        text.push_str(name);
+    }
+    text
 }
 
 /// The hash an [`Interner`] files `text` under.

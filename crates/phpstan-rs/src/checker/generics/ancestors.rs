@@ -484,7 +484,7 @@ impl<'a> Checker<'a> {
                 if required == 0 {
                     continue;
                 }
-                let mut list = info.templates().join(", ");
+                let mut list = syntax::name::join(info.templates(), ", ");
                 if required != total {
                     list.push_str(&format!(" ({required}-{total} required)"));
                 }

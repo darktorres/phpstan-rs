@@ -1,4 +1,4 @@
-use rustc_hash::FxHashSet;
+use syntax::name::NameSet;
 use types::Name;
 
 use syntax::ast::*;
@@ -16,7 +16,7 @@ use syntax::visit::{Visitor, walk_expr, walk_stmts};
 /// ever being read again is a subtler bug than an unused-parameter check
 /// is meant to catch.
 pub(crate) enum VarUsage {
-    Names(FxHashSet<Name>),
+    Names(NameSet),
     /// Something that reads variables by a name this walk can't resolve
     /// statically was seen anywhere in the body - `func_get_args()`,
     /// `compact(...)` with a non-literal argument, `get_defined_vars()`,
@@ -42,7 +42,7 @@ impl VarUsage {
 
 pub(crate) fn collect_var_usage(stmts: &[Stmt]) -> VarUsage {
     let mut vars = Vars {
-        names: FxHashSet::default(),
+        names: NameSet::default(),
         escaped: false,
     };
     walk_stmts(&mut vars, stmts);
@@ -66,7 +66,7 @@ fn is_call_to(callee: &Expr, target: &str) -> bool {
 /// class declaration has its own scope and is not entered; an anonymous
 /// class's constructor arguments run in this one.
 struct Vars {
-    names: FxHashSet<Name>,
+    names: NameSet,
     escaped: bool,
 }
 
@@ -131,7 +131,7 @@ impl<'ast> Visitor<'ast> for Vars {
 /// spread, ...) has no static name to resolve here, so it escalates to the
 /// same blanket "everything is used" fallback as `func_get_args()`/
 /// `get_defined_vars()` rather than risk a false "unused" report.
-fn collect_compact_names(e: &Expr, names: &mut FxHashSet<Name>, escaped: &mut bool) {
+fn collect_compact_names(e: &Expr, names: &mut NameSet, escaped: &mut bool) {
     syntax::stack::guard(|| match &e.kind {
         ExprKind::Literal(Literal::String(s)) => {
             names.insert(Name::from(&*s.to_str_lossy()));

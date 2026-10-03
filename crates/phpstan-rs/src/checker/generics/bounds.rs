@@ -1,4 +1,4 @@
-use rustc_hash::FxHashMap;
+use syntax::name::NameMap;
 use types::Name;
 
 use crate::checker::{
@@ -534,9 +534,9 @@ impl<'a> Checker<'a> {
     pub(crate) fn check_template_declaration_validity(
         &mut self,
         templates: &[Name],
-        bounds: &FxHashMap<Name, Type>,
-        defaults: &FxHashMap<Name, Type>,
-        type_aliases: &FxHashMap<Name, Type>,
+        bounds: &NameMap<Type>,
+        defaults: &NameMap<Type>,
+        type_aliases: &NameMap<Type>,
         subject: TemplateSubject<'_>,
         span: Span,
     ) {
