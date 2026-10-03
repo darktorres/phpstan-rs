@@ -991,7 +991,6 @@ pub(crate) use oop::{
 pub(crate) use operators::binop_sigil;
 pub(crate) use property_type_too_wide::{PropertyTypeSite, check_too_wide_property_types};
 pub(crate) use semantic_tokens::UsageTokenKind;
-pub(crate) use throws::{body_contains_explicit_throw, expr_contains_explicit_throw};
 #[cfg(test)]
 pub(crate) use types::generalize_by_key_set;
 

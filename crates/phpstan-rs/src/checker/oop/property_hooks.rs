@@ -1,7 +1,5 @@
 use crate::checker::GotoState;
-use crate::checker::{
-    ATTRIBUTE_TARGET_METHOD, Checker, body_contains_explicit_throw, expr_contains_explicit_throw,
-};
+use crate::checker::{ATTRIBUTE_TARGET_METHOD, Checker};
 use crate::registry::{self, PropertyReflection, resolve_names_in_type};
 use diagnostics::DiagnosticBuilder;
 use phpdoc::docblock;
@@ -172,24 +170,6 @@ impl<'a> Checker<'a> {
         let throws = self.resolve_hook_throws(doc);
         if let Some(throws) = &throws {
             self.check_throws_tag_validity(throws, span);
-            // `ThrowsVoidPropertyHookWithExplicitThrowPointRule`, same
-            // simplified wording as `check_function_with_ancestor_hint`.
-            if throws.is_void() {
-                let throw_span = match body {
-                    PropertyHookBody::Arrow(e) => expr_contains_explicit_throw(e),
-                    PropertyHookBody::Block(stmts) => body_contains_explicit_throw(stmts),
-                    PropertyHookBody::Abstract => None,
-                };
-                if let Some(throw_span) = throw_span {
-                    self.report(format!(
-                            "Get hook for property {fqn}::${name} throws exception but the PHPDoc contains @throws void."
-                        ),
-                        throw_span,
-                        3,
-                        "throws.void",
-                    );
-                }
-            }
         }
         // An abstract hook has no body - read/write checks don't apply;
         // see `check_property_hook_override` for the ones that do.
@@ -319,6 +299,19 @@ impl<'a> Checker<'a> {
             self.check_too_wide_throw_type(throws, &subject, span);
         }
         self.check_missing_checked_exceptions(throws.as_ref(), &subject);
+        // `ThrowsVoidPropertyHookWithExplicitThrowPointRule`, same
+        // simplified wording as `check_function_with_ancestor_hint`.
+        if throws.as_ref().is_some_and(|throws| throws.is_void())
+            && let Some(throw_span) = self.first_explicit_throw()
+        {
+            self.report(format!(
+                    "Get hook for property {fqn}::${name} throws exception but the PHPDoc contains @throws void."
+                ),
+                throw_span,
+                3,
+                "throws.void",
+            );
+        }
         self.current_function_is_generator = previous_generator_flag;
         self.current_declared_return_type = previous_declared_return_type;
         self.current_function_throw_points = previous_throw_points;
@@ -356,22 +349,6 @@ impl<'a> Checker<'a> {
         let throws = self.resolve_hook_throws(doc);
         if let Some(throws) = &throws {
             self.check_throws_tag_validity(throws, span);
-            if throws.is_void() {
-                let throw_span = match body {
-                    PropertyHookBody::Arrow(e) => expr_contains_explicit_throw(e),
-                    PropertyHookBody::Block(stmts) => body_contains_explicit_throw(stmts),
-                    PropertyHookBody::Abstract => None,
-                };
-                if let Some(throw_span) = throw_span {
-                    self.report(format!(
-                            "Set hook for property {fqn}::${name} throws exception but the PHPDoc contains @throws void."
-                        ),
-                        throw_span,
-                        3,
-                        "throws.void",
-                    );
-                }
-            }
         }
         // An abstract hook has no body - only the assign check is
         // skipped; native-type/class-existence checks on the parameter
@@ -579,6 +556,17 @@ impl<'a> Checker<'a> {
         }
         if !matches!(body, PropertyHookBody::Abstract) {
             self.check_missing_checked_exceptions(throws.as_ref(), &subject);
+            if throws.as_ref().is_some_and(|throws| throws.is_void())
+                && let Some(throw_span) = self.first_explicit_throw()
+            {
+                self.report(format!(
+                        "Set hook for property {fqn}::${name} throws exception but the PHPDoc contains @throws void."
+                    ),
+                    throw_span,
+                    3,
+                    "throws.void",
+                );
+            }
         }
         self.current_function_is_generator = previous_generator_flag;
         self.current_declared_return_type = previous_declared_return_type;

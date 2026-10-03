@@ -70,6 +70,9 @@ impl Completion {
 pub(crate) enum ExitKind {
     Return,
     Throw,
+    /// A `throw` that is an expression (`$x ?? throw new E()`), which no
+    /// statement is left by.
+    ThrowExpr,
     /// A `break` of this many levels.
     Break(u32),
     /// A `continue` of this many levels.
@@ -91,14 +94,14 @@ impl ExitPoint {
     /// lets a loop whose condition is true end otherwise than by the
     /// condition.
     pub(crate) fn lets_a_loop_end(&self) -> bool {
-        !matches!(self.kind, ExitKind::Continue(1))
+        !matches!(self.kind, ExitKind::Continue(1) | ExitKind::ThrowExpr)
     }
 
     /// The statement as a message names it.
     pub(crate) fn describe(&self) -> &'static str {
         match self.kind {
             ExitKind::Return => "return",
-            ExitKind::Throw => "throw",
+            ExitKind::Throw | ExitKind::ThrowExpr => "throw",
             ExitKind::Break(_) => "break",
             ExitKind::Continue(_) => "continue",
         }
@@ -140,6 +143,25 @@ pub(crate) struct BlockCompletion {
 }
 
 impl Checker<'_> {
+    /// Where the current function body first throws, by a statement or an
+    /// expression, once it has been checked.
+    pub(crate) fn first_explicit_throw(&self) -> Option<syntax::span::Span> {
+        self.current_function_exit_points
+            .iter()
+            .find(|point| matches!(point.kind, ExitKind::Throw | ExitKind::ThrowExpr))
+            .map(|point| point.span)
+    }
+
+    /// The statements the path leaves by since `from`: not a `throw`
+    /// that is an expression.
+    pub(crate) fn statement_exit_points(&self, from: usize) -> Vec<ExitPoint> {
+        self.current_function_exit_points[from..]
+            .iter()
+            .filter(|point| point.kind != ExitKind::ThrowExpr)
+            .copied()
+            .collect()
+    }
+
     /// Notes that the path through `span` leaves by `kind`.
     pub(crate) fn push_exit_point(&mut self, kind: ExitKind, span: syntax::span::Span) {
         self.current_function_exit_points
@@ -160,7 +182,7 @@ impl Checker<'_> {
                 }
                 ExitKind::Break(levels) => Some(ExitKind::Break(levels - 1)),
                 ExitKind::Continue(levels) => Some(ExitKind::Continue(levels - 1)),
-                ExitKind::Return | ExitKind::Throw => None,
+                ExitKind::Return | ExitKind::Throw | ExitKind::ThrowExpr => None,
             };
             if let Some(kind) = one_level_less {
                 self.current_function_exit_points[at].kind = kind;

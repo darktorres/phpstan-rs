@@ -20,60 +20,12 @@
 
 use crate::checker::Checker;
 use crate::registry::{FunctionReflection, Registry};
-use syntax::ast::{ClassDef, Expr, ExprKind, FunctionDecl, Stmt, StmtKind};
 use syntax::span::Span;
-use syntax::visit::{Visitor, walk_expr_in_scope, walk_stmt, walk_stmts};
 use types::Type;
 
 mod dynamic;
 mod missing;
 mod too_wide;
-
-/// The first `throw` in `stmts`' own body. A `throw` inside a nested
-/// closure, arrow function, anonymous class or declaration belongs to
-/// that, not to this body.
-pub(crate) fn body_contains_explicit_throw(stmts: &[Stmt]) -> Option<Span> {
-    let mut first = FirstThrow(None);
-    walk_stmts(&mut first, stmts);
-    first.0
-}
-
-/// `body_contains_explicit_throw` for an arrow-form hook body, which is a
-/// single expression.
-pub(crate) fn expr_contains_explicit_throw(e: &Expr) -> Option<Span> {
-    let mut first = FirstThrow(None);
-    first.visit_expr(e);
-    first.0
-}
-
-struct FirstThrow(Option<Span>);
-
-impl<'ast> Visitor<'ast> for FirstThrow {
-    fn visit_stmt(&mut self, stmt: &'ast Stmt) {
-        if self.0.is_some() {
-            return;
-        }
-        if let StmtKind::Throw(_) = stmt.kind {
-            self.0 = Some(stmt.span);
-            return;
-        }
-        walk_stmt(self, stmt);
-    }
-
-    fn visit_expr(&mut self, e: &'ast Expr) {
-        if self.0.is_some() {
-            return;
-        }
-        if let ExprKind::Throw(_) = e.kind {
-            self.0 = Some(e.span);
-            return;
-        }
-        walk_expr_in_scope(self, e);
-    }
-
-    fn visit_function_decl(&mut self, _: &'ast FunctionDecl) {}
-    fn visit_class_def(&mut self, _: &'ast ClassDef) {}
-}
 
 impl<'a> Checker<'a> {
     /// Records one call's contribution to `current_function_throw_points`/

@@ -113,8 +113,7 @@ impl<'a> Checker<'a> {
         // discarded at runtime (real PHP's own well-known gotcha: a
         // `finally`'s own `return`/`throw`/`break`/`continue` always
         // wins, even over an in-flight exception).
-        let mut try_catch_exit_points: Vec<ExitPoint> =
-            self.current_function_exit_points[body_exits_from..].to_vec();
+        let mut try_catch_exit_points: Vec<ExitPoint> = self.statement_exit_points(body_exits_from);
         // Every reachable state after the whole try/catch - the
         // try body's own full-completion state, plus each catch
         // clause's own ending state, matching every other
@@ -259,8 +258,7 @@ impl<'a> Checker<'a> {
             }
             let catch_exits_from = self.current_function_exit_points.len();
             let catch_block = self.check_block(&c.body, &mut catch_locals, declared_return, label);
-            try_catch_exit_points
-                .extend_from_slice(&self.current_function_exit_points[catch_exits_from..]);
+            try_catch_exit_points.extend(self.statement_exit_points(catch_exits_from));
             if self.settings.extras.check_exception_hygiene {
                 self.check_catch_hygiene(c);
             }
@@ -317,8 +315,7 @@ impl<'a> Checker<'a> {
             // `OverwrittenExitPointByFinallyRule`'s own
             // `count($node->getTryCatchExitPoints()) === 0` early
             // return exactly.
-            let finally_exit_points: Vec<ExitPoint> =
-                self.current_function_exit_points[finally_exits_from..].to_vec();
+            let finally_exit_points = self.statement_exit_points(finally_exits_from);
             if !try_catch_exit_points.is_empty()
                 && !finally_exit_points.is_empty()
                 && finally_block.completion.terminates

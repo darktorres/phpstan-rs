@@ -1,0 +1,1 @@
+4:18-4:43 throws.void L3 | Function f() throws exception but the PHPDoc contains @throws void.

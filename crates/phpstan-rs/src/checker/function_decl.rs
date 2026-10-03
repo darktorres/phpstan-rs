@@ -1,9 +1,8 @@
 use crate::checker::GotoState;
 use crate::checker::{
     ATTRIBUTE_TARGET_FUNCTION, ATTRIBUTE_TARGET_METHOD, ATTRIBUTE_TARGET_PARAMETER,
-    ATTRIBUTE_TARGET_PROPERTY, Checker, Locals, body_contains_explicit_throw,
-    generator_missing_return_type, is_constant_condition_family_identifier,
-    type_allows_generator_return,
+    ATTRIBUTE_TARGET_PROPERTY, Checker, Locals, generator_missing_return_type,
+    is_constant_condition_family_identifier, type_allows_generator_return,
 };
 use crate::registry::{
     self, ClassReflection, FunctionReflection, mark_template_params, resolve_names_in_type,
@@ -738,28 +737,6 @@ impl<'a> Checker<'a> {
             && let Some(throws) = sig.throws()
         {
             self.check_throws_tag_validity(throws, f.span);
-            // Mirrors real PHPStan's
-            // `ThrowsVoidFunctionWithExplicitThrowPointRule`/
-            // `ThrowsVoidMethodWithExplicitThrowPointRule` - needs no
-            // opt-in flag: only ever fires when the docblock itself
-            // explicitly claims "never throws," directly contradicted by
-            // a real `throw` sitting right there in the body.
-            if throws.is_void()
-                && let Some(throw_span) = body_contains_explicit_throw(f.body_stmts())
-            {
-                let kind_word = if class_name.is_some() {
-                    "Method"
-                } else {
-                    "Function"
-                };
-                self.report(format!(
-                        "{kind_word} {label}() throws exception but the PHPDoc contains @throws void."
-                    ),
-                    throw_span,
-                    3,
-                    "throws.void",
-                );
-            }
         }
 
         // `check_function` is the single choke point every function-
@@ -1158,6 +1135,28 @@ impl<'a> Checker<'a> {
                 }
             }
             self.check_missing_checked_exceptions(throws_tag, &subject);
+            // Mirrors real PHPStan's
+            // `ThrowsVoidFunctionWithExplicitThrowPointRule`/
+            // `ThrowsVoidMethodWithExplicitThrowPointRule` - needs no
+            // opt-in flag: only ever fires when the docblock itself
+            // explicitly claims "never throws," directly contradicted by
+            // a real `throw` sitting right there in the body.
+            if throws_tag.is_some_and(|throws| throws.is_void())
+                && let Some(throw_span) = self.first_explicit_throw()
+            {
+                let kind_word = if class_name.is_some() {
+                    "Method"
+                } else {
+                    "Function"
+                };
+                self.report(format!(
+                        "{kind_word} {label}() throws exception but the PHPDoc contains @throws void."
+                    ),
+                    throw_span,
+                    3,
+                    "throws.void",
+                );
+            }
 
             // Same "has a real body at all" gate, same choke point as
             // the throw-type check above.

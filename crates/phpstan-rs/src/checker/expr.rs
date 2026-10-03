@@ -1,3 +1,4 @@
+use crate::checker::ExitKind;
 use crate::checker::GotoState;
 use crate::checker::InferQuestion;
 use crate::checker::calls::parameters::Callee;
@@ -1887,6 +1888,7 @@ impl<'a> Checker<'a> {
                 self.current_function_explicit_throw_points
                     .push((inner_ty.clone(), inner.span));
                 self.current_function_throw_points.push(inner_ty);
+                self.push_exit_point(ExitKind::ThrowExpr, e.span);
                 Type::never()
             }
             ExprKind::YieldFrom(inner) => {
