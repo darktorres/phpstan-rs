@@ -22,12 +22,7 @@ use types::Type;
 /// mutation of whichever clone diverges. `rustc_hash::FxBuildHasher` as the
 /// hasher, since `imbl::HashMap` is generic over it the same way
 /// `std::collections::HashMap` is.
-type LocalsMap = imbl::GenericHashMap<
-    String,
-    Type,
-    rustc_hash::FxBuildHasher,
-    imbl::shared_ptr::DefaultSharedPtr,
->;
+type LocalsMap = imbl::GenericOrdMap<String, Type, imbl::shared_ptr::DefaultSharedPtr>;
 
 // `imbl::HashSet` mirrors `imbl::HashMap`'s O(1)-clone design (see
 // `LocalsMap`'s doc comment) - not load-bearing here (a per-variable span
@@ -37,12 +32,7 @@ type ProvenanceSet =
     imbl::GenericHashSet<Span, rustc_hash::FxBuildHasher, imbl::shared_ptr::DefaultSharedPtr>;
 type KeySet =
     imbl::GenericHashSet<String, rustc_hash::FxBuildHasher, imbl::shared_ptr::DefaultSharedPtr>;
-type ProvenanceMap = imbl::GenericHashMap<
-    String,
-    ProvenanceSet,
-    rustc_hash::FxBuildHasher,
-    imbl::shared_ptr::DefaultSharedPtr,
->;
+type ProvenanceMap = imbl::GenericOrdMap<String, ProvenanceSet, imbl::shared_ptr::DefaultSharedPtr>;
 
 // Lowercased, bare `function_exists('foo')`-guarded function names proven
 // guarded on this exact control-flow path. `Locals`-scoped, not a `Checker`

@@ -782,17 +782,17 @@ pub(crate) fn merge_scopes(
         };
     }
     if patched {
-        for (name, then_ty) in then_locals.iter() {
-            match else_locals.get(name) {
-                None => {
+        // Only the bindings the two scopes differ in change the copy: one
+        // only the then-scope holds is dropped, one both hold with another
+        // type is joined; one only the else-scope holds is not in it.
+        for item in then_locals.types_diff(else_locals) {
+            match item {
+                imbl::ordmap::DiffItem::Add(..) => {}
+                imbl::ordmap::DiffItem::Remove(name, _) => {
                     merged.remove_type(name);
                 }
-                Some(else_ty) if else_ty == then_ty => {}
-                Some(else_ty) => {
-                    merged.insert(
-                        name.clone(),
-                        relation.union(then_ty.clone(), else_ty.clone()),
-                    );
+                imbl::ordmap::DiffItem::Update { old, new } => {
+                    merged.insert(old.0.clone(), relation.union(old.1.clone(), new.1.clone()));
                 }
             }
         }

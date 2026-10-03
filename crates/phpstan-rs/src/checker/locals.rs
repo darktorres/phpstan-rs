@@ -332,6 +332,16 @@ impl Locals {
         self.types.iter()
     }
 
+    /// The bindings that differ between this scope and `other`, in key
+    /// order. Subtrees the two share are skipped, so what it visits is
+    /// about what changed, not what is held.
+    pub(crate) fn types_diff<'a>(
+        &'a self,
+        other: &'a Locals,
+    ) -> imbl::ordmap::DiffIter<'a, 'a, String, Type, imbl::shared_ptr::DefaultSharedPtr> {
+        self.types.diff(&other.types)
+    }
+
     /// Records `key`'s native type, right after the `declare` binding it.
     /// `mixed` records nothing.
     pub(crate) fn set_native(&mut self, key: &str, ty: Type) {
@@ -413,7 +423,7 @@ impl PartialEq for Locals {
     /// left is used as a bounded approximation, still capped at
     /// `MAX_PASSES`.
     fn eq(&self, other: &Self) -> bool {
-        self.types == other.types
+        self.types.ptr_eq(&other.types) || self.types_diff(other).next().is_none()
     }
 }
 

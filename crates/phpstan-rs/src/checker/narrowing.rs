@@ -433,7 +433,18 @@ impl<'a> Checker<'a> {
         let primary_subject = self.primary_discriminant(cond, before, branch_true);
         let mut subjects: Vec<(String, Type)> = primary_subject.into_iter().collect();
         let mut flag_subjects: Vec<(String, Type)> = Vec::new();
-        for (name, after_ty) in after.iter() {
+        // Each loop below acts only on a binding this branch added or
+        // changed: an unchanged one is no proxy, was already narrowed
+        // before, or already excluded null.
+        let changed: Vec<(String, Type)> = before
+            .types_diff(after)
+            .filter_map(|item| match item {
+                imbl::ordmap::DiffItem::Add(name, ty) => Some((name.clone(), ty.clone())),
+                imbl::ordmap::DiffItem::Update { new, .. } => Some((new.0.clone(), new.1.clone())),
+                imbl::ordmap::DiffItem::Remove(..) => None,
+            })
+            .collect();
+        for (name, after_ty) in &changed {
             let is_flag_proxy = after_ty.bool_literal_value().is_some();
             // A variable that became a concrete `Object` type specifically
             // within this branch is `instanceof`'s own proxy discriminant
@@ -477,7 +488,7 @@ impl<'a> Checker<'a> {
         // including the ones `cond` tests.
         let mut narrowed: Vec<(String, Type)> = Vec::new();
         if !flag_subjects.is_empty() {
-            for (name, after_ty) in after.iter() {
+            for (name, after_ty) in &changed {
                 if !is_real_variable_key(name)
                     || subjects.iter().any(|(k, _)| k == name)
                     || after_ty.is_never()
@@ -498,7 +509,7 @@ impl<'a> Checker<'a> {
         }
         record_implied_facts(&self.relation(), after, &flag_subjects, &narrowed);
         let mut implied: Vec<(String, Type)> = Vec::new();
-        for (name, after_ty) in after.iter() {
+        for (name, after_ty) in &changed {
             if subjects.iter().any(|(k, _)| k == name) {
                 continue;
             }
