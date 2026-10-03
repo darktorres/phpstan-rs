@@ -1,3 +1,4 @@
+use crate::checker::InferQuestion;
 use crate::checker::calls::parameters::Callee;
 use crate::checker::resolve::receiver_class;
 use crate::checker::suggest;
@@ -8,7 +9,6 @@ use crate::checker::{
     literal_string_key, merge_scopes, narrowing_key, propagate_container_field_facts,
     purge_stale_narrowing_for, resolve_call_args, unassigned_variable_type,
 };
-use crate::checker::{InferKey, InferQuestion};
 use crate::pest_config;
 use crate::registry::FunctionReflection;
 use diagnostics::DiagnosticBuilder;
@@ -4471,11 +4471,7 @@ impl<'a> Checker<'a> {
     /// the next.
     fn close_infer_scope(&self) {
         let mut cache = self.infer_cache.borrow_mut().take().unwrap_or_default();
-        if cache.capacity() > crate::checker::INFER_SPARE_CAPACITY {
-            cache = Default::default();
-        } else {
-            cache.clear();
-        }
+        cache.clear();
         *self.infer_spare.borrow_mut() = cache;
     }
 
@@ -4491,18 +4487,19 @@ impl<'a> Checker<'a> {
         if e.id == NodeId::SYNTHETIC || self.infer_cache.borrow().is_none() {
             return syntax::stack::guard(answer);
         }
-        let key = InferKey {
-            expr: std::ptr::from_ref(e) as usize,
-            id: e.id,
-            version: locals.version(),
-            question,
-        };
-        if let Some(ty) = self.infer_cache.borrow().as_ref().and_then(|c| c.get(&key)) {
+        let addr = std::ptr::from_ref(e) as usize;
+        let version = locals.version();
+        if let Some(ty) = self
+            .infer_cache
+            .borrow()
+            .as_ref()
+            .and_then(|c| c.get(addr, e.id, version, question))
+        {
             return ty.clone();
         }
         let ty = syntax::stack::guard(answer);
         if let Some(cache) = self.infer_cache.borrow_mut().as_mut() {
-            cache.insert(key, ty.clone());
+            cache.insert(addr, e.id, version, question, ty.clone());
         }
         ty
     }

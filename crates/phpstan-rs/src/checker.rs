@@ -839,32 +839,19 @@ pub struct Checker<'a> {
     // one. `None` unless enabled.
     type_dump: Option<std::collections::BTreeMap<(u32, u32, String), String>>,
     // The types `infer_expr` found while one outermost `check_expr` runs,
-    // by expression (its address and id) and scope version: checking a
+    // by expression (its address and id) and scope version, in a slot for
+    // each node (`infer_cache.rs`): checking a
     // nested expression infers each operand again at every level above
     // it, which without this is quadratic in the nesting depth. `None`
     // outside an expression check, where the checker's own state may
     // move on between two inferences.
     infer_cache: RefCell<Option<InferCache>>,
-    // The emptied map of the last outermost expression check, kept for the
+    // The emptied cache of the last outermost expression check, kept for the
     // next one so its table is not built and grown again.
     infer_spare: RefCell<InferCache>,
 }
 
-type InferCache = FxHashMap<InferKey, Type>;
-
-/// The most entries an emptied infer cache keeps room for: one very large
-/// expression does not leave its table to every later one.
-const INFER_SPARE_CAPACITY: usize = 4096;
-
-/// What `infer_cache` holds an answer to: one question about one
-/// expression (its address and id) in one scope version.
-#[derive(Clone, Copy, PartialEq, Eq, Hash)]
-pub(crate) struct InferKey {
-    expr: usize,
-    id: NodeId,
-    version: u64,
-    question: InferQuestion,
-}
+use infer_cache::InferCache;
 
 /// A question `infer_cache` answers.
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]
@@ -877,6 +864,7 @@ pub(crate) enum InferQuestion {
 
 mod access_attributes;
 mod array_access;
+mod infer_cache;
 mod locals;
 pub(crate) use locals::Locals;
 mod assignment;
