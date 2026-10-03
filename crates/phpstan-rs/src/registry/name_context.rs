@@ -16,15 +16,23 @@ pub(crate) fn resolve_names_in_type(ty: Type, ctx: &NameContext) -> Type {
     }
     // The same type is resolved in the same context again and again: by
     // each declaration of a file that writes it. What it resolves to is a
-    // function of the type and the context's namespace and imports.
+    // function of the type as written, the case of its class names
+    // included, and the context's namespace and imports. So a type is
+    // found by its node, which the entry holds, and not by equality, which
+    // ignores that case.
     thread_local! {
-        static RESOLVED: std::cell::RefCell<rustc_hash::FxHashMap<(Type, u64), Type>> =
+        static RESOLVED: std::cell::RefCell<rustc_hash::FxHashMap<(usize, u64), (Type, Type)>> =
             std::cell::RefCell::new(rustc_hash::FxHashMap::default());
     }
     const LIMIT: usize = 1 << 16;
     let version = ctx.version();
     if version != 0
-        && let Some(done) = RESOLVED.with(|memo| memo.borrow().get(&(ty.clone(), version)).cloned())
+        && let Some(done) = RESOLVED.with(|memo| {
+            memo.borrow()
+                .get(&(ty.node_addr(), version))
+                .filter(|(input, _)| input.is_same_node(&ty))
+                .map(|(_, resolved)| resolved.clone())
+        })
     {
         return done;
     }
@@ -35,7 +43,7 @@ pub(crate) fn resolve_names_in_type(ty: Type, ctx: &NameContext) -> Type {
             if memo.len() >= LIMIT {
                 memo.clear();
             }
-            memo.insert((ty, version), resolved.clone());
+            memo.insert((ty.node_addr(), version), (ty, resolved.clone()));
         });
     }
     resolved

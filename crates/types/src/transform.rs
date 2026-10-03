@@ -77,6 +77,17 @@ impl Type {
     /// templates' bounds and defaults. A template placeholder is kept as
     /// it is: its bound and default belong to the template's declaration,
     /// already named there.
+    /// Whether `other` is this very node: not merely the same type, which
+    /// ignores the case of a class name.
+    pub fn is_same_node(&self, other: &Type) -> bool {
+        std::sync::Arc::ptr_eq(&self.0, &other.0)
+    }
+
+    /// The address of the node, which names it while it is held.
+    pub fn node_addr(&self) -> usize {
+        std::sync::Arc::as_ptr(&self.0) as usize
+    }
+
     /// Whether the type has a class name to map: what `map_class_names`
     /// would change nothing without.
     pub fn has_class_names(&self) -> bool {

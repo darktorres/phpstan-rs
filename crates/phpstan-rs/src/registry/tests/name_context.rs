@@ -84,3 +84,17 @@ fn recurses_through_a_variance_annotation() {
     collect_class_name_case_refs(&ty, &ctx, &mut out);
     assert_eq!(out, vec![(Name::from("Foo"), Name::from("App\\Foo"))]);
 }
+
+#[test]
+fn a_resolved_type_keeps_the_case_its_class_was_written_in() {
+    use crate::registry::resolve_names_in_type;
+    use syntax::name_resolution::NameContext;
+    let mut ctx = NameContext::default();
+    ctx.set_namespace("N");
+    // Types of one class under two spellings are equal; what resolving
+    // them gives is not, and neither answer stands for the other.
+    let a = resolve_names_in_type(types::parse_written_type("\\StdClass"), &ctx);
+    let b = resolve_names_in_type(types::parse_written_type("\\stdClass"), &ctx);
+    assert_eq!(a.to_string(), "StdClass");
+    assert_eq!(b.to_string(), "stdClass");
+}
