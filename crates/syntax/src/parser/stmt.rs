@@ -399,6 +399,7 @@ impl Parser {
                 self.skip();
                 let name = self.expect_ident_spanned()?;
                 self.expect_semicolon()?;
+                self.note_goto(&name.name);
                 self.stmt(StmtKind::Goto(name), start)
             }
             // `label:` - a goto target. Unambiguous at statement position:
@@ -408,6 +409,7 @@ impl Parser {
             Token::Identifier(_) if matches!(self.peek_at(1), Token::Colon) => {
                 let name = self.take_ident().unwrap();
                 self.skip();
+                self.note_label(&name.name);
                 self.stmt(StmtKind::Label(name), start)
             }
             _ => {

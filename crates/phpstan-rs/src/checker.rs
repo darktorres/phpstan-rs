@@ -514,13 +514,14 @@ pub struct Checker<'a> {
     // shape, is never the branch that actually mutated `$x` at all.
     pub(crate) current_function_byref_snapshot_names: rustc_hash::FxHashSet<Name>,
     // Set for the duration of one function/method/closure body to every
-    // label name `goto`-targeted anywhere in it (see
-    // `collect_goto_targets`'s doc comment for the real corpus false
-    // positive this exists for) - consulted by `check_block`'s
+    // label a `goto` names anywhere in it, as the parser recorded them
+    // (not scope-aware: a `goto` is only said to reach a label of its own
+    // function, so a labeled statement after a terminating one is not
+    // reported unreachable) - consulted by `check_block`'s
     // `deadCode.unreachable` check, which has no direct access to the
     // enclosing function's body to answer "could a `goto` reach this
     // labeled statement" itself.
-    pub(crate) current_function_goto_targets: rustc_hash::FxHashSet<syntax::name::Name>,
+    pub(crate) current_function_goto_targets: Box<[syntax::ast::GotoLabel]>,
     /// Each assignment's value type (and native type, for a variable
     /// target) as last checked, by the assignment's span: a condition
     /// narrowed after the check binds these, not its right side re-read
@@ -954,8 +955,8 @@ mod xml_wellformedness;
 pub(crate) use assignment::{literal_shape_key, literal_string_key, unassigned_variable_type};
 pub(crate) use calls::{CheckArgsCall, resolve_call_args};
 pub(crate) use control_flow::{
-    LoopZeroIterations, collect_exit_point_statements, collect_goto_targets,
-    exit_point_description, generator_missing_return_type, generator_template_param,
+    LoopZeroIterations, collect_exit_point_statements, exit_point_description,
+    generator_missing_return_type, generator_template_param,
     is_constant_condition_family_identifier, is_switch_break_equivalent, is_truthy_literal,
     merge_scopes, stmt_contains_break, stmt_contains_escaping_exit, type_allows_generator_return,
 };
@@ -1118,7 +1119,7 @@ impl<'a> Checker<'a> {
             current_function_by_ref_exit_snapshots: rustc_hash::FxHashMap::default(),
             current_function_by_ref_params_with_tag: rustc_hash::FxHashMap::default(),
             current_function_byref_snapshot_names: rustc_hash::FxHashSet::default(),
-            current_function_goto_targets: rustc_hash::FxHashSet::default(),
+            current_function_goto_targets: Box::default(),
             assigned_values: rustc_hash::FxHashMap::default(),
             terminating_assertions: rustc_hash::FxHashSet::default(),
             current_function_assigned_variables: Vec::new(),

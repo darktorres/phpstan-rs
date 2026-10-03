@@ -1,6 +1,6 @@
 use crate::checker::{
     ATTRIBUTE_TARGET_FUNCTION, ATTRIBUTE_TARGET_METHOD, ATTRIBUTE_TARGET_PARAMETER,
-    ATTRIBUTE_TARGET_PROPERTY, Checker, Locals, body_contains_explicit_throw, collect_goto_targets,
+    ATTRIBUTE_TARGET_PROPERTY, Checker, Locals, body_contains_explicit_throw,
     generator_missing_return_type, is_constant_condition_family_identifier,
     type_allows_generator_return,
 };
@@ -927,7 +927,10 @@ impl<'a> Checker<'a> {
         self.current_declared_throws_type = sig.and_then(|s| s.throws().clone());
         let previous_goto_targets = std::mem::replace(
             &mut self.current_function_goto_targets,
-            collect_goto_targets(f.body_stmts()),
+            f.body
+                .as_ref()
+                .map(|b| b.goto_labels.clone())
+                .unwrap_or_default(),
         );
         let previous_terminating_assertions = std::mem::take(&mut self.terminating_assertions);
         let previous_assigned_variables = self.enter_assigned_variables(f.body_stmts());

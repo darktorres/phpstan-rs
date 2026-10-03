@@ -4,10 +4,9 @@ use crate::checker::suggest;
 use crate::checker::{
     ATTRIBUTE_TARGET_CLASS_CONSTANT, ATTRIBUTE_TARGET_FUNCTION, ATTRIBUTE_TARGET_PROPERTY,
     CheckArgsCall, Checker, Locals, LoopZeroIterations, MemberVisibilityCheck, TemplateBindings,
-    UsageTokenKind, binop_sigil, collect_goto_targets, generator_template_param,
-    is_real_variable_key, literal_string_key, merge_scopes, narrowing_key,
-    propagate_container_field_facts, purge_stale_narrowing_for, resolve_call_args,
-    unassigned_variable_type,
+    UsageTokenKind, binop_sigil, generator_template_param, is_real_variable_key,
+    literal_string_key, merge_scopes, narrowing_key, propagate_container_field_facts,
+    purge_stale_narrowing_for, resolve_call_args, unassigned_variable_type,
 };
 use crate::checker::{InferKey, InferQuestion};
 use crate::pest_config;
@@ -3510,6 +3509,7 @@ impl<'a> Checker<'a> {
                     params,
                     uses,
                     body,
+                    goto_labels,
                     is_static,
                     return_type,
                     attrs,
@@ -3737,10 +3737,8 @@ impl<'a> Checker<'a> {
                 // `current_function_*` field already cleared just below
                 // for this same arm.
                 let previous_declared_throws_type = self.current_declared_throws_type.take();
-                let previous_goto_targets = std::mem::replace(
-                    &mut self.current_function_goto_targets,
-                    collect_goto_targets(body),
-                );
+                let previous_goto_targets =
+                    std::mem::replace(&mut self.current_function_goto_targets, goto_labels.clone());
                 let previous_assigned_variables = self.enter_assigned_variables(body);
                 // Real PHPStan exempts an anonymous function entirely
                 // from both by-ref-parameter rules (`isInAnonymousFunction()`

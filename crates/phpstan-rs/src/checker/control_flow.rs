@@ -909,32 +909,3 @@ pub(crate) fn stmt_contains_escaping_exit(stmt: &Stmt) -> bool {
         )
     })
 }
-
-/// Every label name targeted by a `goto` anywhere in `stmts`' own
-/// subtree - the same maximally-conservative "anywhere, not scope-
-/// aware" traversal `stmt_contains_break` already uses, for the
-/// identical reason: real PHP does constrain which labels a given
-/// `goto` may legally reach (it can't jump into a loop/switch/try from
-/// outside it), but this project has no goto/label CFG at all, so
-/// recovering which `goto` can reach which specific label isn't
-/// attempted; only "is this label a real jump target from somewhere in
-/// this function" matters here, and getting that wrong in the
-/// conservative direction only ever suppresses a diagnostic, never
-/// fabricates one. Computed once per function/closure body (see
-/// `Checker::current_function_goto_targets`'s own doc comment) and
-/// consulted by `check_block`'s own `deadCode.unreachable` check: a
-/// labeled statement immediately following one that "always terminates"
-/// isn't unreachable at all if some earlier `goto` in the same function
-/// can jump straight to it.
-pub(crate) fn collect_goto_targets(stmts: &[Stmt]) -> rustc_hash::FxHashSet<syntax::name::Name> {
-    let mut targets = rustc_hash::FxHashSet::default();
-    for stmt in stmts {
-        any_stmt_in_body(stmt, |s| {
-            if let StmtKind::Goto(name) = &s.kind {
-                targets.insert(name.name.clone());
-            }
-            false
-        });
-    }
-    targets
-}

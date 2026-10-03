@@ -1,10 +1,9 @@
-//! Parsing a whole file: lexing, parsing, name resolution and the
-//! parse-time annotations, with what the lexer found besides the tree.
+//! Parsing a whole file: lexing, parsing and name resolution, with what the
+//! lexer found besides the tree.
 
 use std::sync::Arc;
 
-use crate::annotations::{Annotations, annotate};
-use crate::ast::Stmt;
+use crate::ast::{GotoLabel, Stmt};
 use crate::lexer::{LexOutput, LexWarning, Lexer};
 use crate::name::Interner;
 use crate::parser::{ParseError, Parser};
@@ -73,8 +72,9 @@ pub struct ParsedFile {
     pub code_line_starts: Vec<Position>,
     /// What the lexer skipped over.
     pub warnings: Vec<LexWarning>,
-    pub annotations: Annotations,
     pub facts: FileFacts,
+    /// The labels the file's own top-level `goto`s name.
+    pub goto_labels: Box<[GotoLabel]>,
 }
 
 /// Lexes and parses `source`, interning its names in `interner`.
@@ -120,14 +120,14 @@ pub fn parse(source: &[u8], interner: &Arc<Interner>) -> Result<ParsedFile, Pars
     let mut parser = Parser::from_lexed(lexed).with_interner(interner);
     let stmts = parser.parse_program()?;
     facts.has_anonymous_class = parser.saw_anonymous_class();
-    let annotations = annotate(&stmts);
+    let goto_labels = parser.file_goto_labels();
     Ok(ParsedFile {
         stmts,
         comments,
         code_line_starts,
         warnings,
-        annotations,
         facts,
+        goto_labels,
     })
 }
 

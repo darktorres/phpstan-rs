@@ -66,6 +66,17 @@ pub struct Parser {
     pub(crate) long_arrays: rustc_hash::FxHashSet<NodeId>,
     // Whether the parse has built an anonymous class (`new class`).
     pub(crate) saw_anonymous_class: bool,
+    // The labels `goto` statements name, one entry per function-like body
+    // being parsed, the file's own first.
+    pub(crate) goto_scopes: Vec<GotoScope>,
+}
+
+/// The labels seen and the `goto` targets met so far in one function-like
+/// body.
+#[derive(Default)]
+pub(crate) struct GotoScope {
+    labels: Vec<crate::name::Name>,
+    targets: Vec<GotoLabel>,
 }
 
 mod classes;
@@ -173,6 +184,54 @@ impl Parser {
             pattern_only: Vec::new(),
             long_arrays: rustc_hash::FxHashSet::default(),
             saw_anonymous_class: false,
+            goto_scopes: vec![GotoScope::default()],
+        }
+    }
+
+    /// Opens the scope of a function-like body; give the result to
+    /// `leave_goto_scope` when it ends.
+    pub(crate) fn enter_goto_scope(&mut self) -> usize {
+        self.goto_scopes.push(GotoScope::default());
+        self.goto_scopes.len()
+    }
+
+    /// Closes the scope `enter_goto_scope` opened, and returns its labels.
+    /// A body that failed to parse leaves its scope behind; this drops it.
+    pub(crate) fn leave_goto_scope(&mut self, depth: usize) -> Box<[GotoLabel]> {
+        self.goto_scopes.truncate(depth);
+        self.goto_scopes
+            .pop()
+            .map(|scope| scope.targets.into_boxed_slice())
+            .unwrap_or_default()
+    }
+
+    /// A label statement in the body being parsed.
+    pub(crate) fn note_label(&mut self, name: &crate::name::Name) {
+        if let Some(scope) = self.goto_scopes.last_mut() {
+            scope.labels.push(name.clone());
+        }
+    }
+
+    /// A `goto` statement in the body being parsed.
+    pub(crate) fn note_goto(&mut self, name: &crate::name::Name) {
+        let Some(scope) = self.goto_scopes.last_mut() else {
+            return;
+        };
+        let backward = scope.labels.contains(name);
+        match scope.targets.iter_mut().find(|t| t.name == *name) {
+            Some(target) => target.backward |= backward,
+            None => scope.targets.push(GotoLabel {
+                name: name.clone(),
+                backward,
+            }),
+        }
+    }
+
+    /// The labels the file's own top-level `goto`s name.
+    pub fn file_goto_labels(&mut self) -> Box<[GotoLabel]> {
+        match self.goto_scopes.first_mut() {
+            Some(scope) => std::mem::take(&mut scope.targets).into_boxed_slice(),
+            None => Box::default(),
         }
     }
 

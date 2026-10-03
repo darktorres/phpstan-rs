@@ -1,6 +1,4 @@
-use crate::checker::{
-    Checker, Locals, LoopZeroIterations, collect_goto_targets, purge_stale_narrowing_for,
-};
+use crate::checker::{Checker, Locals, LoopZeroIterations, purge_stale_narrowing_for};
 use diagnostics::DiagnosticBuilder;
 use syntax::ast::*;
 use syntax::visit::body_contains_yield;
@@ -170,6 +168,7 @@ impl<'a> Checker<'a> {
                     params,
                     uses,
                     body,
+                    goto_labels,
                     is_static,
                     return_type,
                     ..
@@ -296,10 +295,8 @@ impl<'a> Checker<'a> {
                         Some(c) => self.resolve_pseudo(t, c),
                         None => t.clone(),
                     });
-                let previous_goto_targets = std::mem::replace(
-                    &mut self.current_function_goto_targets,
-                    collect_goto_targets(body),
-                );
+                let previous_goto_targets =
+                    std::mem::replace(&mut self.current_function_goto_targets, goto_labels.clone());
                 let previous_assigned_variables = self.enter_assigned_variables(body);
                 // See `checker/expr.rs`'s `Closure` arm's identical comment.
                 let previous_throw_points = std::mem::take(&mut self.current_function_throw_points);

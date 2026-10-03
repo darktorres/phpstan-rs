@@ -154,9 +154,13 @@ impl Parser {
             None
         } else {
             let open = self.current_span();
+            let depth = self.enter_goto_scope();
+            let stmts = self.parse_stmt_list_block();
+            let goto_labels = self.leave_goto_scope(depth);
             Some(FunctionBody {
                 open,
-                stmts: std::sync::Arc::new(self.parse_stmt_list_block()?),
+                stmts: std::sync::Arc::new(stmts?),
+                goto_labels,
             })
         };
         Ok(FunctionDecl {

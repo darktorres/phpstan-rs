@@ -47,13 +47,17 @@ impl Parser {
             None
         };
 
-        let body = self.parse_stmt_list_block()?;
+        let depth = self.enter_goto_scope();
+        let body = self.parse_stmt_list_block();
+        let goto_labels = self.leave_goto_scope(depth);
+        let body = body?;
 
         Ok(self.expr(
             ExprKind::Closure(Box::new(ClosureExpr {
                 params,
                 uses,
                 body,
+                goto_labels,
                 is_static,
                 by_ref,
                 return_type,

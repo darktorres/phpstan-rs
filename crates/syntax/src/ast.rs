@@ -234,12 +234,23 @@ pub struct Param {
     pub span: Span,
 }
 
+/// A label some `goto` of a function body names. `backward` is set when a
+/// `goto` that comes after the label in the source jumps to it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GotoLabel {
+    pub name: crate::name::Name,
+    pub backward: bool,
+}
+
 /// A function's `{ ... }` body.
 #[derive(Debug, Clone)]
 pub struct FunctionBody {
     // The opening `{`.
     pub open: Span,
     pub stmts: Arc<Vec<Stmt>>,
+    // The labels its `goto`s name, outside nested functions and classes;
+    // empty for nearly every body.
+    pub goto_labels: Box<[GotoLabel]>,
 }
 
 #[derive(Debug, Clone)]
@@ -378,6 +389,8 @@ impl PropertyHooks {
 #[derive(Debug, Clone)]
 pub struct PropertyHook {
     pub body: PropertyHookBody,
+    // The labels the body's `goto`s name; see `FunctionBody`.
+    pub goto_labels: Box<[GotoLabel]>,
     // `&get`: the hook returns its value by reference.
     pub by_ref: bool,
     // `set(Type $value)`: the one parameter PHP allows there; `None` when
@@ -1344,6 +1357,8 @@ pub struct ClosureExpr {
     pub params: Vec<Param>,
     pub uses: Vec<ClosureUse>,
     pub body: Vec<Stmt>,
+    // The labels the body's `goto`s name; see `FunctionBody`.
+    pub goto_labels: Box<[GotoLabel]>,
     pub is_static: bool,
     pub by_ref: bool,
     // Boxed: keeps `Expr` small, since expression parsing recurses.

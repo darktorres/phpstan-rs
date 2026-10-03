@@ -82,12 +82,16 @@ impl Parser {
                 None
             };
 
+            let mut goto_labels: Box<[GotoLabel]> = Box::default();
             let body = if self.eat(&Token::FatArrow) {
                 let e = self.parse_expression()?;
                 self.expect_semicolon()?;
                 PropertyHookBody::Arrow(e)
             } else if self.check(&Token::LBrace) {
-                PropertyHookBody::Block(self.parse_stmt_list_block()?)
+                let depth = self.enter_goto_scope();
+                let stmts = self.parse_stmt_list_block();
+                goto_labels = self.leave_goto_scope(depth);
+                PropertyHookBody::Block(stmts?)
             } else {
                 // Abstract form: `get;` / `set;`, no body at all - a
                 // hook that's declared but has no body, unambiguously
@@ -100,6 +104,7 @@ impl Parser {
 
             let hook = PropertyHook {
                 body,
+                goto_labels,
                 by_ref: hook_by_ref,
                 param,
                 attrs: hook_attrs,

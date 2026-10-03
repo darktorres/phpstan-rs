@@ -361,6 +361,7 @@ fn build_probe_scope(
             let body = cloned.body.get_or_insert_with(|| FunctionBody {
                 open: f.span,
                 stmts: std::sync::Arc::new(Vec::new()),
+                goto_labels: Box::default(),
             });
             let body = std::sync::Arc::make_mut(&mut body.stmts);
             body.retain(|s| s.span.end.line < cut_line);
