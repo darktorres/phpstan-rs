@@ -84,7 +84,7 @@ impl Parser<'_> {
             None
         };
         self.expect(&Token::FatArrow)?;
-        let body = self.parse_assignment()?;
+        let body = self.parse_expression()?;
         Ok(self.expr(
             ExprKind::ArrowFn(Box::new(ArrowFnExpr {
                 params,

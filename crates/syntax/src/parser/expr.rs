@@ -3,60 +3,322 @@ use crate::parser::{ParseError, Parser};
 use crate::span::Span;
 use crate::token::{Keyword, Token};
 
+/// Binding powers, loosest first, following `zend_language_parser.y`.
+/// Left-associative operators bind their right operand one above their
+/// own, right-associative ones at their own.
+pub(crate) mod bp {
+    pub(crate) const LOWEST: u8 = 0;
+    pub(crate) const OR: u8 = 2;
+    pub(crate) const XOR: u8 = 4;
+    pub(crate) const AND: u8 = 6;
+    pub(crate) const TERNARY: u8 = 10;
+    pub(crate) const COALESCE: u8 = 12;
+    pub(crate) const BOOL_OR: u8 = 14;
+    pub(crate) const BOOL_AND: u8 = 16;
+    pub(crate) const BIT_OR: u8 = 18;
+    pub(crate) const BIT_XOR: u8 = 20;
+    pub(crate) const BIT_AND: u8 = 22;
+    pub(crate) const EQUALITY: u8 = 24;
+    pub(crate) const RELATIONAL: u8 = 26;
+    pub(crate) const PIPE: u8 = 28;
+    pub(crate) const CONCAT: u8 = 30;
+    pub(crate) const SHIFT: u8 = 32;
+    pub(crate) const ADD: u8 = 34;
+    pub(crate) const MUL: u8 = 36;
+    pub(crate) const INSTANCEOF: u8 = 40;
+    pub(crate) const UNARY: u8 = 42;
+    pub(crate) const POW: u8 = 44;
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Assoc {
+    Left,
+    Right,
+    None,
+}
+
+/// What an operator between two operands builds.
+#[derive(Clone, Copy)]
+enum Infix {
+    Binary(BinOp),
+    Instanceof,
+    Ternary,
+}
+
 impl Parser<'_> {
-    // ---- expressions (precedence climbing) ----
+    // ---- expressions (binding power, by PHP's precedence table) ----
 
     pub fn parse_expression(&mut self) -> Result<Expr, ParseError> {
-        self.parse_low_precedence_or()
+        self.parse_expr_bp(bp::LOWEST)
     }
 
-    // `and`/`or`/`xor` bind looser than assignment - the classic PHP
-    // gotcha where `$a = $b or $c;` parses as `($a = $b) or $c;`, not
-    // `$a = ($b or $c);`, unlike `&&`/`||`. Each tier only recurses into
-    // the next-tighter one, bottoming out at parse_assignment (the
-    // existing top of the &&/||/ternary/etc chain), so the classic form
-    // is unaffected and only these three keywords get the looser binding.
-    pub(crate) fn parse_low_precedence_or(&mut self) -> Result<Expr, ParseError> {
-        let start = self.current_pos();
-        let mut lhs = self.parse_low_precedence_xor()?;
-        while self.eat(&Token::Keyword(Keyword::Or)) {
-            let rhs = self.parse_low_precedence_xor()?;
-            lhs = self.expr(
-                ExprKind::Binary(BinOp::LogicalOr, Box::new(lhs), Box::new(rhs)),
-                start,
-            );
-        }
-        Ok(lhs)
-    }
-
-    pub(crate) fn parse_low_precedence_xor(&mut self) -> Result<Expr, ParseError> {
-        let start = self.current_pos();
-        let mut lhs = self.parse_low_precedence_and()?;
-        while self.eat(&Token::Keyword(Keyword::Xor)) {
-            let rhs = self.parse_low_precedence_and()?;
-            lhs = self.expr(
-                ExprKind::Binary(BinOp::LogicalXor, Box::new(lhs), Box::new(rhs)),
-                start,
-            );
-        }
-        Ok(lhs)
-    }
-
-    pub(crate) fn parse_low_precedence_and(&mut self) -> Result<Expr, ParseError> {
-        let start = self.current_pos();
-        let mut lhs = self.parse_assignment()?;
-        while self.eat(&Token::Keyword(Keyword::And)) {
-            let rhs = self.parse_assignment()?;
-            lhs = self.expr(
-                ExprKind::Binary(BinOp::LogicalAnd, Box::new(lhs), Box::new(rhs)),
-                start,
-            );
-        }
-        Ok(lhs)
-    }
-
+    /// An expression without the low-precedence `and`/`or`/`xor`: what an
+    /// assignment's right side, a `print` operand and a ternary's branches
+    /// are.
     pub(crate) fn parse_assignment(&mut self) -> Result<Expr, ParseError> {
-        crate::stack::guard(|| self.parse_ternary())
+        self.parse_expr_bp(bp::TERNARY)
+    }
+
+    pub(crate) fn parse_ternary(&mut self) -> Result<Expr, ParseError> {
+        self.parse_expr_bp(bp::TERNARY)
+    }
+
+    /// A prefix operator's operand and what binds tighter: `clone`'s
+    /// operand, an `instanceof` target.
+    pub(crate) fn parse_unary(&mut self) -> Result<Expr, ParseError> {
+        self.parse_expr_bp(bp::UNARY)
+    }
+
+    /// The operators of binding power `min` or tighter around one operand,
+    /// by `bp`'s levels. One stack guard for each expression nested in
+    /// another, where each operand used to pass three.
+    pub(crate) fn parse_expr_bp(&mut self, min: u8) -> Result<Expr, ParseError> {
+        crate::stack::guard(|| self.parse_expr_bp_inner(min))
+    }
+
+    fn parse_expr_bp_inner(&mut self, min: u8) -> Result<Expr, ParseError> {
+        let start = self.current_pos();
+        let mut lhs = self.parse_prefix(start)?;
+        // The level of the non-associative operator just applied: another
+        // of the same level is a syntax error.
+        let mut applied_non_associative: Option<u8> = None;
+        while let Some((power, assoc, infix)) = self.infix() {
+            if power < min {
+                break;
+            }
+            if assoc == Assoc::None && applied_non_associative == Some(power) {
+                return Err(ParseError {
+                    message: format!("syntax error, unexpected token \"{:?}\"", self.peek()),
+                    span: self.current_span(),
+                });
+            }
+            lhs = match infix {
+                Infix::Binary(op) => {
+                    self.skip();
+                    let next = if assoc == Assoc::Right {
+                        power
+                    } else {
+                        power + 1
+                    };
+                    let rhs = self.parse_expr_bp(next)?;
+                    self.expr(ExprKind::Binary(op, Box::new(lhs), Box::new(rhs)), start)
+                }
+                Infix::Instanceof => {
+                    self.skip();
+                    // The right-hand side is usually a static class name,
+                    // but PHP also allows an arbitrary expression there
+                    // (`$x instanceof $className`, `$x instanceof ('std' .
+                    // $class)`) for a runtime-determined class.
+                    let target = if matches!(self.peek(), Token::Variable(_) | Token::LParen) {
+                        InstanceofTarget::Expr(Box::new(self.parse_unary()?))
+                    } else {
+                        InstanceofTarget::Name(self.parse_name_reference())
+                    };
+                    self.expr(ExprKind::Instanceof(Box::new(lhs), target), start)
+                }
+                Infix::Ternary => self.parse_ternary_rest(lhs, start)?,
+            };
+            applied_non_associative = (assoc == Assoc::None).then_some(power);
+        }
+        Ok(lhs)
+    }
+
+    /// The `? ... : ...` or `?: ...` after `cond`, the current token being
+    /// the `?`. A ternary is left-associative, and PHP refuses to compile
+    /// one that is the condition of another unless both are short
+    /// (`$a ?: $b ?: $c`).
+    fn parse_ternary_rest(&mut self, cond: Expr, start: u32) -> Result<Expr, ParseError> {
+        let short = matches!(self.peek_at(1), Token::Colon);
+        if let ExprKind::Ternary(_, then, _) = &cond.kind
+            && !(then.is_none() && short)
+        {
+            return Err(ParseError {
+                message: "Unparenthesized `a ? b : c ? d : e` is not supported; use either `(a ? b : c) ? d : e` or `a ? b : (c ? d : e)`".to_string(),
+                span: self.current_span(),
+            });
+        }
+        self.skip(); // ?
+        if short {
+            self.skip(); // :
+            let else_branch = self.parse_expr_bp(bp::TERNARY + 1)?;
+            return Ok(self.expr(
+                ExprKind::Ternary(Box::new(cond), None, Box::new(else_branch)),
+                start,
+            ));
+        }
+        let then_branch = self.parse_expr_bp(bp::LOWEST)?;
+        self.expect(&Token::Colon)?;
+        let else_branch = self.parse_expr_bp(bp::TERNARY + 1)?;
+        Ok(self.expr(
+            ExprKind::Ternary(
+                Box::new(cond),
+                Some(Box::new(then_branch)),
+                Box::new(else_branch),
+            ),
+            start,
+        ))
+    }
+
+    /// What the next token is as an operator between two operands: its
+    /// binding power, associativity and kind; none for a token that is
+    /// not one. Binary operators, loosest first: `|>` (PHP 8.5's pipe:
+    /// `$value |> callable` is `callable($value)`) was checked against a
+    /// real PHP 8.5 build: tighter than relational, looser than shift,
+    /// concat and additive; `.` is looser than `<<`/`>>` and `+`/`-` since
+    /// PHP 8, so `"a" . $x + 1` is `"a" . ($x + 1)`.
+    fn infix(&self) -> Option<(u8, Assoc, Infix)> {
+        use Assoc::{Left, None as NonAssoc, Right};
+        use Infix::Binary;
+        Some(match self.peek() {
+            Token::Keyword(Keyword::Or) => (bp::OR, Left, Binary(BinOp::LogicalOr)),
+            Token::Keyword(Keyword::Xor) => (bp::XOR, Left, Binary(BinOp::LogicalXor)),
+            Token::Keyword(Keyword::And) => (bp::AND, Left, Binary(BinOp::LogicalAnd)),
+            Token::Question => (bp::TERNARY, Left, Infix::Ternary),
+            Token::QuestionQuestion => (bp::COALESCE, Right, Binary(BinOp::Coalesce)),
+            Token::PipePipe => (bp::BOOL_OR, Left, Binary(BinOp::Or)),
+            Token::AmpAmp => (bp::BOOL_AND, Left, Binary(BinOp::And)),
+            Token::Pipe => (bp::BIT_OR, Left, Binary(BinOp::BitOr)),
+            Token::Caret => (bp::BIT_XOR, Left, Binary(BinOp::BitXor)),
+            Token::Amp => (bp::BIT_AND, Left, Binary(BinOp::BitAnd)),
+            Token::EqualsEquals => (bp::EQUALITY, NonAssoc, Binary(BinOp::Eq)),
+            Token::EqualsEqualsEquals => (bp::EQUALITY, NonAssoc, Binary(BinOp::Identical)),
+            Token::BangEquals => (bp::EQUALITY, NonAssoc, Binary(BinOp::NotEq)),
+            Token::BangEqualsEquals => (bp::EQUALITY, NonAssoc, Binary(BinOp::NotIdentical)),
+            Token::Spaceship => (bp::EQUALITY, NonAssoc, Binary(BinOp::Spaceship)),
+            Token::Lt => (bp::RELATIONAL, NonAssoc, Binary(BinOp::Lt)),
+            Token::Gt => (bp::RELATIONAL, NonAssoc, Binary(BinOp::Gt)),
+            Token::LtEquals => (bp::RELATIONAL, NonAssoc, Binary(BinOp::LtEq)),
+            Token::GtEquals => (bp::RELATIONAL, NonAssoc, Binary(BinOp::GtEq)),
+            Token::PipeGt => (bp::PIPE, Left, Binary(BinOp::Pipe)),
+            Token::Dot => (bp::CONCAT, Left, Binary(BinOp::Concat)),
+            Token::LtLt => (bp::SHIFT, Left, Binary(BinOp::Shl)),
+            Token::GtGt => (bp::SHIFT, Left, Binary(BinOp::Shr)),
+            Token::Plus => (bp::ADD, Left, Binary(BinOp::Add)),
+            Token::Minus => (bp::ADD, Left, Binary(BinOp::Sub)),
+            Token::Star => (bp::MUL, Left, Binary(BinOp::Mul)),
+            Token::Slash => (bp::MUL, Left, Binary(BinOp::Div)),
+            Token::Percent => (bp::MUL, Left, Binary(BinOp::Mod)),
+            Token::Keyword(Keyword::Instanceof) => (bp::INSTANCEOF, Left, Infix::Instanceof),
+            Token::StarStar => (bp::POW, Right, Binary(BinOp::Pow)),
+            _ => return None,
+        })
+    }
+
+    /// Whether the current token can be the first of an expression: it is
+    /// not a closer, a separator, an operator that takes a left operand
+    /// only, or a keyword that continues a statement.
+    pub(crate) fn can_begin_expression(&self) -> bool {
+        !matches!(
+            self.peek(),
+            Token::Semicolon
+                | Token::RParen
+                | Token::RBracket
+                | Token::RBrace
+                | Token::Comma
+                | Token::Colon
+                | Token::DoubleColon
+                | Token::Arrow
+                | Token::NullsafeArrow
+                | Token::FatArrow
+                | Token::Question
+                | Token::QuestionQuestion
+                | Token::QuestionQuestionEquals
+                | Token::Dot
+                | Token::DotEquals
+                | Token::Star
+                | Token::StarStar
+                | Token::Slash
+                | Token::Percent
+                | Token::Equals
+                | Token::PlusEquals
+                | Token::MinusEquals
+                | Token::StarEquals
+                | Token::StarStarEquals
+                | Token::SlashEquals
+                | Token::PercentEquals
+                | Token::AmpEquals
+                | Token::PipeEquals
+                | Token::CaretEquals
+                | Token::LtLtEquals
+                | Token::GtGtEquals
+                | Token::EqualsEquals
+                | Token::EqualsEqualsEquals
+                | Token::BangEquals
+                | Token::BangEqualsEquals
+                | Token::Lt
+                | Token::Gt
+                | Token::LtEquals
+                | Token::GtEquals
+                | Token::Spaceship
+                | Token::AmpAmp
+                | Token::PipePipe
+                | Token::Amp
+                | Token::Pipe
+                | Token::Caret
+                | Token::LtLt
+                | Token::GtGt
+                | Token::PipeGt
+                | Token::Ellipsis
+                | Token::Eof
+                | Token::Keyword(
+                    Keyword::And
+                        | Keyword::Or
+                        | Keyword::Xor
+                        | Keyword::Instanceof
+                        | Keyword::As
+                        | Keyword::Else
+                        | Keyword::ElseIf
+                        | Keyword::Extends
+                        | Keyword::Implements
+                        | Keyword::Catch
+                        | Keyword::Finally
+                        | Keyword::Case
+                        | Keyword::EndIf
+                        | Keyword::EndWhile
+                        | Keyword::EndFor
+                        | Keyword::EndForeach
+                        | Keyword::EndSwitch
+                )
+        )
+    }
+
+    /// A prefix operator and its operand, or the operand alone. `!` takes
+    /// what `instanceof` binds tighter than (`!$x instanceof Y` is
+    /// `!($x instanceof Y)`: `apply_narrowing`'s `Unary(Not, Instanceof)`
+    /// pattern depends on it), and the other prefix operators take their
+    /// operand with `**` (`-$a ** 2` is `-($a ** 2)`).
+    fn parse_prefix(&mut self, start: u32) -> Result<Expr, ParseError> {
+        if let Some(spelling) = self.try_parse_cast() {
+            let operand = self.parse_expr_bp(bp::UNARY)?;
+            return Ok(self.expr(ExprKind::Cast(spelling, Box::new(operand)), start));
+        }
+        let op = match self.peek() {
+            Token::Bang => {
+                self.skip();
+                let operand = self.parse_expr_bp(bp::INSTANCEOF)?;
+                return Ok(self.expr(ExprKind::Unary(UnaryOp::Not, Box::new(operand)), start));
+            }
+            Token::Minus => UnaryOp::Neg,
+            Token::Plus => UnaryOp::Plus,
+            Token::Tilde => UnaryOp::BitNot,
+            Token::Increment => UnaryOp::PreInc,
+            Token::Decrement => UnaryOp::PreDec,
+            Token::At => {
+                self.skip();
+                let operand = self.parse_expr_bp(bp::UNARY)?;
+                return Ok(self.expr(ExprKind::ErrorSuppress(Box::new(operand)), start));
+            }
+            _ => {
+                // An operand: a primary with its postfix chain, taking an
+                // assignment to its right where PHP's grammar has
+                // `variable '=' expr`, wherever an operand may stand.
+                let operand = self.parse_postfix_from_primary()?;
+                return self.parse_assignment_tail(operand, start);
+            }
+        };
+        self.skip();
+        let operand = self.parse_expr_bp(bp::UNARY)?;
+        Ok(self.expr(ExprKind::Unary(op, Box::new(operand)), start))
     }
 
     /// An assignment whose target is the operand just parsed. PHP's grammar
@@ -257,171 +519,6 @@ impl Parser<'_> {
         }
     }
 
-    pub(crate) fn parse_ternary(&mut self) -> Result<Expr, ParseError> {
-        let start = self.current_pos();
-        let cond = self.parse_coalesce()?;
-        if self.eat(&Token::Question) {
-            if self.eat(&Token::Colon) {
-                let else_branch = self.parse_assignment()?;
-                return Ok(self.expr(
-                    ExprKind::Ternary(Box::new(cond), None, Box::new(else_branch)),
-                    start,
-                ));
-            }
-            let then_branch = self.parse_assignment()?;
-            self.expect(&Token::Colon)?;
-            let else_branch = self.parse_assignment()?;
-            return Ok(self.expr(
-                ExprKind::Ternary(
-                    Box::new(cond),
-                    Some(Box::new(then_branch)),
-                    Box::new(else_branch),
-                ),
-                start,
-            ));
-        }
-        Ok(cond)
-    }
-
-    pub(crate) fn parse_coalesce(&mut self) -> Result<Expr, ParseError> {
-        crate::stack::guard(|| self.parse_coalesce_inner())
-    }
-
-    fn parse_coalesce_inner(&mut self) -> Result<Expr, ParseError> {
-        let start = self.current_pos();
-        let lhs = self.parse_logical_or()?;
-        if self.eat(&Token::QuestionQuestion) {
-            let rhs = self.parse_coalesce()?;
-            return Ok(self.expr(
-                ExprKind::Binary(BinOp::Coalesce, Box::new(lhs), Box::new(rhs)),
-                start,
-            ));
-        }
-        Ok(lhs)
-    }
-
-    /// The binary operators from `||` down to `*`, each left-associative,
-    /// by precedence, loosest first. `|>` (PHP 8.5's pipe: `$value |>
-    /// callable` is `callable($value)`) was checked against a real PHP 8.5
-    /// build: tighter than relational, looser than shift, concat and
-    /// additive; `.` is looser than `<<`/`>>` and `+`/`-` since PHP 8, so
-    /// `"a" . $x + 1` is `"a" . ($x + 1)`.
-    fn binary_operator(&self) -> Option<(u8, BinOp)> {
-        Some(match self.peek() {
-            Token::PipePipe => (1, BinOp::Or),
-            Token::AmpAmp => (2, BinOp::And),
-            Token::Pipe => (3, BinOp::BitOr),
-            Token::Caret => (4, BinOp::BitXor),
-            Token::Amp => (5, BinOp::BitAnd),
-            Token::EqualsEquals => (6, BinOp::Eq),
-            Token::EqualsEqualsEquals => (6, BinOp::Identical),
-            Token::BangEquals => (6, BinOp::NotEq),
-            Token::BangEqualsEquals => (6, BinOp::NotIdentical),
-            Token::Spaceship => (6, BinOp::Spaceship),
-            Token::Lt => (7, BinOp::Lt),
-            Token::Gt => (7, BinOp::Gt),
-            Token::LtEquals => (7, BinOp::LtEq),
-            Token::GtEquals => (7, BinOp::GtEq),
-            Token::PipeGt => (8, BinOp::Pipe),
-            Token::Dot => (9, BinOp::Concat),
-            Token::LtLt => (10, BinOp::Shl),
-            Token::GtGt => (10, BinOp::Shr),
-            Token::Plus => (11, BinOp::Add),
-            Token::Minus => (11, BinOp::Sub),
-            Token::Star => (12, BinOp::Mul),
-            Token::Slash => (12, BinOp::Div),
-            Token::Percent => (12, BinOp::Mod),
-            _ => return None,
-        })
-    }
-
-    pub(crate) fn parse_logical_or(&mut self) -> Result<Expr, ParseError> {
-        self.parse_binary(1)
-    }
-
-    /// The operands joined by binary operators of precedence `min` or
-    /// tighter.
-    fn parse_binary(&mut self, min: u8) -> Result<Expr, ParseError> {
-        let start = self.current_pos();
-        let mut lhs = self.parse_not()?;
-        while let Some((precedence, op)) = self.binary_operator() {
-            if precedence < min {
-                break;
-            }
-            self.skip();
-            let rhs = self.parse_binary(precedence + 1)?;
-            lhs = self.expr(ExprKind::Binary(op, Box::new(lhs), Box::new(rhs)), start);
-        }
-        Ok(lhs)
-    }
-
-    /// `!` binds *looser* than `instanceof` in real PHP's own precedence
-    /// table (`!$x instanceof Y` means `!($x instanceof Y)`, not
-    /// `(!$x) instanceof Y`) - kept as its own production, separate from
-    /// the tighter-than-instanceof level `~`/casts/`++`/`--`/`@` share in
-    /// `parse_unary_inner`. `apply_narrowing`'s `Unary(Not, Instanceof)`
-    /// pattern depends on this: `if (! $x instanceof Y) { ... }` only
-    /// narrows `$x` when the parse produces `Unary(Not, Instanceof($x,
-    /// Y))`, not `Instanceof(Unary(Not, $x), Y)`.
-    pub(crate) fn parse_not(&mut self) -> Result<Expr, ParseError> {
-        let start = self.current_pos();
-        if self.eat(&Token::Bang) {
-            let operand = crate::stack::guard(|| self.parse_not())?;
-            return Ok(self.expr(ExprKind::Unary(UnaryOp::Not, Box::new(operand)), start));
-        }
-        self.parse_instanceof()
-    }
-
-    pub(crate) fn parse_instanceof(&mut self) -> Result<Expr, ParseError> {
-        let start = self.current_pos();
-        let lhs = self.parse_unary()?;
-        if self.eat(&Token::Keyword(Keyword::Instanceof)) {
-            // The right-hand side is usually a static class name, but PHP
-            // also allows an arbitrary expression there (`$x instanceof
-            // $className`, `$x instanceof ('std' . $class)`) for a
-            // runtime-determined class.
-            let target = if matches!(self.peek(), Token::Variable(_) | Token::LParen) {
-                InstanceofTarget::Expr(Box::new(self.parse_unary()?))
-            } else {
-                InstanceofTarget::Name(self.parse_name_reference())
-            };
-            return Ok(self.expr(ExprKind::Instanceof(Box::new(lhs), target), start));
-        }
-        Ok(lhs)
-    }
-
-    pub(crate) fn parse_unary(&mut self) -> Result<Expr, ParseError> {
-        crate::stack::guard(|| self.parse_unary_inner())
-    }
-
-    fn parse_unary_inner(&mut self) -> Result<Expr, ParseError> {
-        let start = self.current_pos();
-        if let Some(spelling) = self.try_parse_cast() {
-            let operand = self.parse_unary()?;
-            return Ok(self.expr(ExprKind::Cast(spelling, Box::new(operand)), start));
-        }
-
-        let op = match self.peek() {
-            Token::Bang => Some(UnaryOp::Not),
-            Token::Minus => Some(UnaryOp::Neg),
-            Token::Plus => Some(UnaryOp::Plus),
-            Token::Tilde => Some(UnaryOp::BitNot),
-            Token::Increment => Some(UnaryOp::PreInc),
-            Token::Decrement => Some(UnaryOp::PreDec),
-            _ => None,
-        };
-        if let Some(op) = op {
-            self.skip();
-            let operand = self.parse_unary()?;
-            return Ok(self.expr(ExprKind::Unary(op, Box::new(operand)), start));
-        }
-        if self.eat(&Token::At) {
-            let operand = self.parse_unary()?;
-            return Ok(self.expr(ExprKind::ErrorSuppress(Box::new(operand)), start));
-        }
-        self.parse_pow()
-    }
-
     /// `(int)`, `(string)`, etc: a cast is only distinguishable from a
     /// parenthesized expression by 3-token lookahead - `(`, a known cast
     /// keyword, `)` - with nothing else it could be.
@@ -445,19 +542,5 @@ impl Parser<'_> {
         self.skip(); // type identifier
         self.skip(); // )
         Some(spelling)
-    }
-
-    pub(crate) fn parse_pow(&mut self) -> Result<Expr, ParseError> {
-        let start = self.current_pos();
-        let lhs = self.parse_postfix_from_primary()?;
-        let lhs = self.parse_assignment_tail(lhs, start)?;
-        if self.eat(&Token::StarStar) {
-            let rhs = self.parse_unary()?; // right-assoc, binds through unary
-            return Ok(self.expr(
-                ExprKind::Binary(BinOp::Pow, Box::new(lhs), Box::new(rhs)),
-                start,
-            ));
-        }
-        Ok(lhs)
     }
 }

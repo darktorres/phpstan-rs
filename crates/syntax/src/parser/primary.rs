@@ -378,13 +378,11 @@ impl Parser<'_> {
             // throw new X()`, an arrow function body, ...) - a bare `throw
             // expr;` statement is intercepted earlier, in parse_statement,
             // so this is only reached when throw appears nested inside
-            // another expression. Handled here in parse_primary, the
-            // lowest level, rather than parse_assignment, because `??`'s
-            // RHS (and others) recurse directly into a tighter tier and
-            // never pass back through parse_assignment on the way down.
+            // another expression. Its operand is the whole expression to
+            // its right, `or` included, as PHP's grammar has it.
             Token::Keyword(Keyword::Throw) => {
                 self.skip();
-                let inner = self.parse_assignment()?;
+                let inner = self.parse_expression()?;
                 self.expr(ExprKind::Throw(Box::new(inner)), start)
             }
             // `yield`/`yield from` - makes the enclosing function a
@@ -397,50 +395,14 @@ impl Parser<'_> {
                     let inner = self.parse_assignment()?;
                     return Ok(self.expr(ExprKind::YieldFrom(Box::new(inner)), start));
                 }
-                // A bare `yield` (no value) - whatever follows can't start
-                // an expression (a closer, `:`, `?`, a binary operator), so
-                // don't try to parse one; the caller
-                // (already unwinding back up the precedence chain from
-                // this primary position) picks up a token like `*` as an
-                // ordinary binary operator applied to the bare yield, e.g.
-                // `yield * -1` parses as `(yield) * (-1)`. `+`/`-` are
-                // deliberately not listed here - unlike `*`, they *can*
-                // start an expression (a unary-prefixed value), so
-                // `yield +1` is `yield` of `+1`, not a bare yield followed
-                // by unary `+1`.
-                if matches!(
-                    self.peek(),
-                    Token::Semicolon
-                        | Token::RParen
-                        | Token::RBracket
-                        | Token::RBrace
-                        | Token::Comma
-                        | Token::Colon
-                        | Token::Question
-                        | Token::QuestionQuestion
-                        | Token::FatArrow
-                        | Token::Star
-                        | Token::StarStar
-                        | Token::Slash
-                        | Token::Percent
-                        | Token::Dot
-                        | Token::EqualsEquals
-                        | Token::EqualsEqualsEquals
-                        | Token::BangEquals
-                        | Token::BangEqualsEquals
-                        | Token::Lt
-                        | Token::Gt
-                        | Token::LtEquals
-                        | Token::GtEquals
-                        | Token::Spaceship
-                        | Token::AmpAmp
-                        | Token::PipePipe
-                        | Token::Pipe
-                        | Token::Caret
-                        | Token::LtLt
-                        | Token::GtGt
-                        | Token::Eof
-                ) {
+                // A bare `yield` (no value): whatever follows can't start an
+                // expression (a closer, `:`, `?`, a binary operator), so
+                // don't try to parse one; the loop over the operators
+                // picks up a token like `*` as an ordinary binary operator
+                // applied to the bare yield, e.g. `yield * -1` parses as
+                // `(yield) * (-1)`. `+`/`-` *can* start an expression (a
+                // unary-prefixed value), so `yield +1` is `yield` of `+1`.
+                if !self.can_begin_expression() {
                     return Ok(self.expr(ExprKind::Yield(None, None), start));
                 }
                 let first = self.parse_ternary()?;
@@ -467,7 +429,7 @@ impl Parser<'_> {
                     _ => IncludeKind::RequireOnce,
                 };
                 self.skip();
-                let e = self.parse_assignment()?;
+                let e = self.parse_expression()?;
                 self.expr(ExprKind::Include(kind, Box::new(e)), start)
             }
             Token::Keyword(Keyword::Static)
