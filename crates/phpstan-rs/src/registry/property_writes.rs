@@ -56,19 +56,138 @@ impl PartialEq for StubWrites {
     }
 }
 
-/// A declaration, keyed case-insensitively: `(class, method)` for a
-/// method, `(None, function)` for a function.
-pub(in crate::registry) type DeclKey = (Option<String>, String);
+/// A declaration, keyed case-insensitively: its class and method for a
+/// method, its name alone for a function. The names are held lowercased, and
+/// a declaration is found by names in any case without making them again.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub(crate) struct DeclKey {
+    pub(in crate::registry) class: Option<String>,
+    pub(in crate::registry) member: String,
+}
+
+/// What a `DeclKey` is looked up by: the class and member as written.
+struct DeclRef<'a> {
+    class: Option<&'a str>,
+    member: &'a str,
+}
+
+/// The two ways of naming a declaration, which hash and compare alike.
+trait DeclQuery {
+    fn class(&self) -> Option<&str>;
+    fn member(&self) -> &str;
+}
+
+impl DeclQuery for DeclKey {
+    fn class(&self) -> Option<&str> {
+        self.class.as_deref()
+    }
+
+    fn member(&self) -> &str {
+        &self.member
+    }
+}
+
+impl DeclQuery for DeclRef<'_> {
+    fn class(&self) -> Option<&str> {
+        self.class
+    }
+
+    fn member(&self) -> &str {
+        self.member
+    }
+}
+
+impl std::hash::Hash for dyn DeclQuery + '_ {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        let fold = |text: &str, state: &mut H| {
+            for byte in text.bytes() {
+                state.write_u8(byte.to_ascii_lowercase());
+            }
+            state.write_u8(0xff);
+        };
+        match self.class() {
+            Some(class) => {
+                state.write_u8(1);
+                fold(class, state);
+            }
+            None => state.write_u8(0),
+        }
+        fold(self.member(), state);
+    }
+}
+
+impl PartialEq for dyn DeclQuery + '_ {
+    fn eq(&self, other: &Self) -> bool {
+        self.member().eq_ignore_ascii_case(other.member())
+            && match (self.class(), other.class()) {
+                (Some(a), Some(b)) => a.eq_ignore_ascii_case(b),
+                (None, None) => true,
+                _ => false,
+            }
+    }
+}
+
+impl Eq for dyn DeclQuery + '_ {}
+
+impl std::hash::Hash for DeclKey {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        (self as &dyn DeclQuery).hash(state);
+    }
+}
+
+impl PartialEq for DeclKey {
+    fn eq(&self, other: &DeclKey) -> bool {
+        (self as &dyn DeclQuery) == (other as &dyn DeclQuery)
+    }
+}
+
+impl Eq for DeclKey {}
+
+impl<'a> std::borrow::Borrow<dyn DeclQuery + 'a> for DeclKey {
+    fn borrow(&self) -> &(dyn DeclQuery + 'a) {
+        self
+    }
+}
 
 fn function_key(name: &str) -> DeclKey {
-    (None, name.to_ascii_lowercase())
+    DeclKey {
+        class: None,
+        member: name.to_ascii_lowercase(),
+    }
 }
 
 fn method_key(class: &str, method: &str) -> DeclKey {
-    (
-        Some(class.to_ascii_lowercase()),
-        method.to_ascii_lowercase(),
-    )
+    DeclKey {
+        class: Some(class.to_ascii_lowercase()),
+        member: method.to_ascii_lowercase(),
+    }
+}
+
+/// The verdict of the function `name` among `verdicts`, with no copy of
+/// the name made.
+fn function_verdict(
+    verdicts: &FxHashMap<DeclKey, PropertyWrites>,
+    name: &str,
+) -> Option<PropertyWrites> {
+    let query = DeclRef {
+        class: None,
+        member: name,
+    };
+    verdicts.get(&query as &dyn DeclQuery).copied()
+}
+
+/// The verdict of `class`'s `method` among `verdicts`, with no copy of
+/// either name made.
+fn method_verdict(
+    verdicts: &FxHashMap<DeclKey, PropertyWrites>,
+    class: &str,
+    method: &str,
+) -> Option<PropertyWrites> {
+    let query = DeclRef {
+        class: Some(class),
+        member: method,
+    };
+    verdicts.get(&query as &dyn DeclQuery).copied()
 }
 
 /// What a called declaration's verdict must be for the caller to keep
@@ -102,9 +221,9 @@ impl Registry {
         // keep the classification of their unchanged bodies.
         let scope = std::mem::take(&mut self.scope);
         self.property_write_classes
-            .retain(|(class, name), _| match class {
+            .retain(|key, _| match &key.class {
                 Some(class) => !scope.has_class(class),
-                None => !scope.has_function(name),
+                None => !scope.has_function(&key.member),
             });
         // A shared base holds only built-in stubs, which have no body.
         let functions: Vec<(&Name, &FunctionReflection)> = match scope.function_keys() {
@@ -226,9 +345,9 @@ impl Registry {
         if let Some(verdict) = verdicts.get(dep) {
             return *verdict;
         }
-        let sig = match &dep.0 {
-            Some(class) => self.lookup_method(class, &dep.1),
-            None => self.functions.get(dep.1.as_str()),
+        let sig = match &dep.class {
+            Some(class) => self.lookup_method(class, &dep.member),
+            None => self.functions.get(dep.member.as_str()),
         };
         match sig {
             Some(sig) if sig.is_stub => stub_verdict(sig),
@@ -240,11 +359,9 @@ impl Registry {
     pub(crate) fn function_property_writes(&self, name: &str) -> PropertyWrites {
         match self.functions.get(name) {
             Some(sig) if sig.is_stub => stub_verdict(sig),
-            Some(_) => self
-                .property_writes
-                .get(&function_key(name))
-                .copied()
-                .unwrap_or(PropertyWrites::Anything),
+            Some(_) => {
+                function_verdict(&self.property_writes, name).unwrap_or(PropertyWrites::Anything)
+            }
             None => PropertyWrites::Anything,
         }
     }
@@ -254,10 +371,7 @@ impl Registry {
     pub(crate) fn method_property_writes(&self, owner: &str, method: &str) -> PropertyWrites {
         match self.lookup_method(owner, method) {
             Some(sig) if sig.is_stub => stub_verdict(sig),
-            Some(_) => self
-                .property_writes
-                .get(&method_key(owner, method))
-                .copied()
+            Some(_) => method_verdict(&self.property_writes, owner, method)
                 .unwrap_or(PropertyWrites::Anything),
             None => PropertyWrites::Anything,
         }

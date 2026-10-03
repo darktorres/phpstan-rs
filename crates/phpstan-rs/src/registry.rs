@@ -171,7 +171,7 @@ pub(crate) struct ResolvedSnapshot {
     classes: Vec<Option<Detached<ClassReflection>>>,
     function_keys: Option<Arc<FxHashSet<String>>>,
     functions: Vec<Option<Detached<FunctionReflection>>>,
-    property_writes: FxHashMap<(Option<String>, String), PropertyWrites>,
+    property_writes: FxHashMap<property_writes::DeclKey, PropertyWrites>,
     global_variables: FxHashMap<Name, Type>,
 }
 
@@ -390,7 +390,7 @@ pub struct Registry {
     pub(crate) member_owners: NameTable<hierarchy::ClassOwners>,
     // Whose properties each function and method with a body may write
     // (`registry::property_writes`), keyed by lowercased (class, name).
-    pub(crate) property_writes: FxHashMap<(Option<String>, String), PropertyWrites>,
+    pub(crate) property_writes: FxHashMap<property_writes::DeclKey, PropertyWrites>,
     // What each file's walk for global variables found, kept for the files
     // a later finish doesn't walk again (`infer_global_variables_of`).
     #[serde(skip)]
@@ -399,7 +399,7 @@ pub struct Registry {
     // declarations a later finish doesn't classify again.
     #[serde(skip)]
     property_write_classes:
-        FxHashMap<(Option<String>, String), Option<property_writes::Classification>>,
+        FxHashMap<property_writes::DeclKey, Option<property_writes::Classification>>,
 }
 
 impl Registry {
@@ -660,10 +660,10 @@ impl Registry {
             .keys()
             .chain(self.property_writes.keys())
             .filter(|key| before.property_writes.get(*key) != self.property_writes.get(*key));
-        for (class, function) in decls {
-            keys.insert(match class {
+        for key in decls {
+            keys.insert(match &key.class {
                 Some(class) => RefKey::class_text(class),
-                None => RefKey::function_text(function),
+                None => RefKey::function_text(&key.member),
             });
         }
         keys
