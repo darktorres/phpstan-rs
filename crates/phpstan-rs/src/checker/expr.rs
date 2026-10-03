@@ -3812,6 +3812,7 @@ impl<'a> Checker<'a> {
                 // having-run" merge the by-ref-`use` handling below used
                 // to do by hand, so `closure_locals` already comes back
                 // correctly converged for that too.
+                let mut body_terminates = false;
                 let (converged, _) = self.converge_loop_body(
                     &closure_locals,
                     declared_return.as_ref(),
@@ -3825,7 +3826,10 @@ impl<'a> Checker<'a> {
                         // the same way only its diagnostics survive.
                         this.current_function_return_points.clear();
                         this.current_function_saw_explicit_return = false;
-                        this.check_block(body, pass_locals, declared_return, label);
+                        body_terminates = this
+                            .check_block(body, pass_locals, declared_return, label)
+                            .completion
+                            .terminates;
                     },
                 );
                 closure_locals = converged;
@@ -3838,9 +3842,8 @@ impl<'a> Checker<'a> {
                     previous_saw_explicit_return,
                 );
                 let closure_is_generator = self.current_function_is_generator;
-                let closure_falls_off_end = !body
-                    .iter()
-                    .any(|s| self.always_terminates(s, &closure_locals));
+                self.compare_body_completion(body, &closure_locals, e.span, body_terminates);
+                let closure_falls_off_end = !body_terminates;
                 // One final snapshot from the fully-converged post-body
                 // state - covers both "falls off the end with no
                 // explicit return" and "never actually invoked"
@@ -3852,10 +3855,9 @@ impl<'a> Checker<'a> {
                 // there).
                 self.record_by_ref_exit_snapshot(&closure_locals);
                 self.check_closure_missing_return(
-                    body,
+                    body_terminates,
                     return_type.is_some(),
                     declared_return.as_ref(),
-                    &closure_locals,
                     e.span,
                 );
                 // Captured before the restore below overwrites the live

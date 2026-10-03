@@ -990,12 +990,15 @@ impl<'a> Checker<'a> {
         // as any nested `{ ... }` block is - it just needs to be routed
         // through the one place that check lives.
         let previous_implicit_calls = std::mem::take(&mut self.implicit_calls);
-        self.check_block(
-            f.body_stmts(),
-            &mut locals,
-            declared_return.as_ref(),
-            &label,
-        );
+        let body_terminates = self
+            .check_block(
+                f.body_stmts(),
+                &mut locals,
+                declared_return.as_ref(),
+                &label,
+            )
+            .completion
+            .terminates;
         let implicit_calls = std::mem::replace(&mut self.implicit_calls, previous_implicit_calls);
         // Judged after the body, which finds the offsets that are calls.
         self.check_purity_impure_points(f, sig, class_name.is_some(), &label, &implicit_calls);
@@ -1041,10 +1044,8 @@ impl<'a> Checker<'a> {
         // the only shape where PHP's implicit-`null`-return is the real,
         // uncommitted fact). Never for a generator, same reasoning as
         // both `Return` arms in `stmt.rs`.
-        let body_falls_off_end = !f
-            .body_stmts()
-            .iter()
-            .any(|s| self.always_terminates(s, &locals));
+        self.compare_body_completion(f.body_stmts(), &locals, f.span, body_terminates);
+        let body_falls_off_end = !body_terminates;
         if body_falls_off_end {
             self.record_by_ref_exit_snapshot(&locals);
         }
@@ -1546,10 +1547,9 @@ impl<'a> Checker<'a> {
     /// restored.
     pub(crate) fn check_closure_missing_return(
         &mut self,
-        body: &[Stmt],
+        body_terminates: bool,
         has_native_return: bool,
         declared_return: Option<&Type>,
-        locals: &Locals,
         span: Span,
     ) {
         if !has_native_return || self.current_function_is_generator {
@@ -1558,7 +1558,7 @@ impl<'a> Checker<'a> {
         let Some(expected) = declared_return else {
             return;
         };
-        if body.iter().any(|s| self.always_terminates(s, locals)) {
+        if body_terminates {
             return;
         }
         let expected = match &self.current_class {

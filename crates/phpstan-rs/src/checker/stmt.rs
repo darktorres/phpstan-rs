@@ -1,7 +1,8 @@
 use crate::checker::{
-    ATTRIBUTE_TARGET_CLASS, ATTRIBUTE_TARGET_CLASS_CONSTANT, ATTRIBUTE_TARGET_PROPERTY, Checker,
-    Locals, generator_missing_return_type, generator_template_param, merge_scopes,
-    purge_stale_narrowing_for,
+    ATTRIBUTE_TARGET_CLASS, ATTRIBUTE_TARGET_CLASS_CONSTANT, ATTRIBUTE_TARGET_PROPERTY,
+    BlockCompletion, Checker, Completion, Locals, generator_missing_return_type,
+    generator_template_param, is_truthy_literal, merge_scopes, purge_stale_narrowing_for,
+    stmt_contains_break,
 };
 use syntax::ast::*;
 use types::Name;
@@ -37,7 +38,7 @@ impl<'a> Checker<'a> {
         locals: &mut Locals,
         declared_return: Option<&Type>,
         label: &str,
-    ) {
+    ) -> BlockCompletion {
         // `UnreachableStatementRule`: relies on `converge_loop_body`'s
         // fixed-point loop-body convergence so a variable reassigned
         // inside a loop doesn't keep its pre-loop-entry type for the
@@ -54,10 +55,14 @@ impl<'a> Checker<'a> {
         // early here would silently drop real, unrelated diagnostics
         // sitting in a since-dead branch.
         let mut reported_unreachable = false;
+        let mut any_terminates = false;
+        let mut last = Completion::FALLS_THROUGH;
         for (i, stmt) in stmts.iter().enumerate() {
-            self.check_stmt(stmt, locals, declared_return, label);
+            last = self.check_stmt(stmt, locals, declared_return, label);
+            any_terminates |= last.terminates;
+            self.compare_completion(stmt, locals, last);
             if !reported_unreachable
-                && self.always_terminates(stmt, locals)
+                && last.terminates
                 && let Some(next) = stmts.get(i + 1)
                 // A labeled statement `goto`-targeted somewhere else in
                 // this same function is a real jump target, not dead
@@ -74,6 +79,13 @@ impl<'a> Checker<'a> {
                 reported_unreachable = true;
             }
         }
+        BlockCompletion {
+            completion: Completion {
+                terminates: any_terminates,
+                exits: last.exits,
+            },
+            last,
+        }
     }
 
     /// Thin wrapper over `check_stmt_impl` - see `check_expr`'s own
@@ -85,7 +97,7 @@ impl<'a> Checker<'a> {
         locals: &mut Locals,
         declared_return: Option<&Type>,
         label: &str,
-    ) {
+    ) -> Completion {
         syntax::stack::guard(|| {
             if self.settings.shipmonk.check_enum_exhaustiveness {
                 self.check_strict_statement_idioms(stmt, locals);
@@ -98,13 +110,15 @@ impl<'a> Checker<'a> {
             {
                 self.check_strict_rules_statement(stmt, locals);
             }
-            crate::checker::profiling::measure_outermost!("checker::check_stmt", {
-                self.check_stmt_impl(stmt, locals, declared_return, label)
-            });
+            let completion =
+                crate::checker::profiling::measure_outermost!("checker::check_stmt", {
+                    self.check_stmt_impl(stmt, locals, declared_return, label)
+                });
             self.record_type_dump(stmt, locals);
             if !self.external_rules.is_empty() {
                 self.dispatch_stmt_rules(stmt, locals);
             }
+            completion
         })
     }
 
@@ -402,7 +416,11 @@ impl<'a> Checker<'a> {
         locals: &mut Locals,
         declared_return: Option<&Type>,
         label: &str,
-    ) {
+    ) -> Completion {
+        let mut completion = Completion::FALLS_THROUGH;
+        // Whether an expression statement's value was `never`, as it was
+        // checked.
+        let mut value_is_never = false;
         self.check_statement_doc_tag_values(stmt);
         self.check_statement_var_tags_resolvable(stmt);
         let names_ok = self.check_statement_var_tag_names(stmt, locals, label);
@@ -433,6 +451,7 @@ impl<'a> Checker<'a> {
             StmtKind::Expression(e) => {
                 self.in_bare_statement_position = true;
                 let ty = self.check_expr(e, locals, label);
+                value_is_never = ty.is_never();
                 if self.collect_inlay_hints
                     && let ExprKind::Assign(lhs, _) | ExprKind::AssignRef(lhs, _) = &e.kind
                     && let ExprKind::Variable(name) = &lhs.kind
@@ -734,13 +753,17 @@ impl<'a> Checker<'a> {
             StmtKind::Block(stmts)
             | StmtKind::Declare {
                 body: Some(stmts), ..
-            } => self.check_block(stmts, locals, declared_return, label),
+            } => {
+                completion = self
+                    .check_block(stmts, locals, declared_return, label)
+                    .completion
+            }
             StmtKind::If(if_stmt) => {
                 let branches: Vec<(&Expr, &Stmt)> =
                     std::iter::once((&if_stmt.cond, &*if_stmt.then_branch))
                         .chain(if_stmt.elseifs.iter().map(|e| (&e.cond, &*e.body)))
                         .collect();
-                self.check_if(
+                completion = self.check_if(
                     &branches,
                     if_stmt.else_branch.as_deref(),
                     locals,
@@ -750,7 +773,11 @@ impl<'a> Checker<'a> {
                 );
             }
             StmtKind::While { cond, body } => {
-                self.check_while(cond, body, locals, declared_return, label)
+                self.check_while(cond, body, locals, declared_return, label);
+                completion = Completion {
+                    terminates: is_truthy_literal(cond) && !stmt_contains_break(body),
+                    exits: false,
+                };
             }
             StmtKind::DoWhile { body, cond } => {
                 self.check_do_while(body, cond, locals, declared_return, label)
@@ -760,7 +787,14 @@ impl<'a> Checker<'a> {
                 cond,
                 step,
                 body,
-            } => self.check_for(init, cond, step, body, locals, declared_return, label),
+            } => {
+                self.check_for(init, cond, step, body, locals, declared_return, label);
+                completion = Completion {
+                    terminates: cond.last().is_none_or(is_truthy_literal)
+                        && !stmt_contains_break(body),
+                    exits: false,
+                };
+            }
             StmtKind::Foreach {
                 subject,
                 key,
@@ -779,14 +813,20 @@ impl<'a> Checker<'a> {
                 &inline_var,
             ),
             StmtKind::Switch { subject, cases } => {
-                self.check_switch(subject, cases, stmt.span, locals, declared_return, label)
+                completion =
+                    self.check_switch(subject, cases, stmt.span, locals, declared_return, label)
             }
             StmtKind::Try {
                 body,
                 catches,
                 finally,
-            } => self.check_try(body, catches, finally, locals, declared_return, label),
-            StmtKind::Throw(e) => self.check_throw(e, locals, label),
+            } => {
+                completion = self.check_try(body, catches, finally, locals, declared_return, label)
+            }
+            StmtKind::Throw(e) => {
+                self.check_throw(e, locals, label);
+                completion = Completion::EXITS;
+            }
             StmtKind::Unset(targets) => {
                 for target in targets {
                     self.check_unset_target(target, locals, label);
@@ -957,6 +997,7 @@ impl<'a> Checker<'a> {
                 if let Some(idx) = self.loop_break_states.len().checked_sub(depth) {
                     self.loop_break_states[idx].push(locals.clone());
                 }
+                completion = Completion::TERMINATES;
             }
             // The `continue` counterpart of `Break` just above - see
             // `loop_continue_states`'s doc comment on `Checker` for why
@@ -968,6 +1009,13 @@ impl<'a> Checker<'a> {
                 if let Some(idx) = self.loop_continue_states.len().checked_sub(depth) {
                     self.loop_continue_states[idx].push(locals.clone());
                 }
+                // A `continue` of one level inside a `switch` is a `break`
+                // of it: the switch's own rules read it as that.
+                completion = if matches!(level, Some(n) if *n > 1) {
+                    Completion::EXITS
+                } else {
+                    Completion::TERMINATES
+                };
             }
             // `ConstantAttributesRule` - a top-level (or nested,
             // conditionally-declared) `const` statement's own `#[Attr]`
@@ -1024,6 +1072,19 @@ impl<'a> Checker<'a> {
                 locals.insert(name, ty);
             }
         }
+        match &stmt.kind {
+            StmtKind::Return(_) => completion = Completion::EXITS,
+            // An expression statement whose value is `never` (a call to a
+            // function that never returns, `exit`), or an assertion that
+            // can only fail: control does not pass it.
+            StmtKind::Expression(_)
+                if self.terminating_assertions.contains(&stmt.span) || value_is_never =>
+            {
+                completion = Completion::EXITS
+            }
+            _ => {}
+        }
+        completion
     }
 
     /// A bare `@phpstan-assert Type $target` on this call's own
@@ -1104,10 +1165,10 @@ impl<'a> Checker<'a> {
         declared_return: Option<&Type>,
         label: &str,
         is_elseif: bool,
-    ) {
+    ) -> Completion {
         syntax::stack::guard(|| {
             let [(cond, then_branch), rest @ ..] = branches else {
-                return;
+                return Completion::FALLS_THROUGH;
             };
             let (cond, then_branch) = (*cond, *then_branch);
             let is_last_without_else = rest.is_empty() && else_branch.is_none();
@@ -1193,7 +1254,8 @@ impl<'a> Checker<'a> {
             if let Some(subject) = &discriminant_subject {
                 self.active_discriminant.push((subject.clone(), true));
             }
-            self.check_stmt(then_branch, &mut then_locals, declared_return, label);
+            let then_completion =
+                self.check_stmt(then_branch, &mut then_locals, declared_return, label);
             if discriminant_subject.is_some() {
                 self.active_discriminant.pop();
             }
@@ -1213,7 +1275,9 @@ impl<'a> Checker<'a> {
             if let Some(subject) = &discriminant_subject {
                 self.active_discriminant.push((subject.clone(), false));
             }
-            if !rest.is_empty() {
+            // How the rest of the chain, or the `else`, completes; a chain with
+            // no `else` falls through.
+            let else_completion = if !rest.is_empty() {
                 self.check_if(
                     rest,
                     else_branch,
@@ -1221,10 +1285,12 @@ impl<'a> Checker<'a> {
                     declared_return,
                     label,
                     true,
-                );
+                )
             } else if let Some(e) = else_branch {
-                self.check_stmt(e, &mut else_locals, declared_return, label);
-            }
+                self.check_stmt(e, &mut else_locals, declared_return, label)
+            } else {
+                Completion::FALLS_THROUGH
+            };
             if discriminant_subject.is_some() {
                 self.active_discriminant.pop();
             }
@@ -1237,12 +1303,22 @@ impl<'a> Checker<'a> {
             // propagate past the if. Without this, the terminated branch's
             // narrowing (here, "$x is null") would incorrectly leak into the
             // code after the guard.
-            let then_terminates = self.always_terminates(then_branch, &then_locals);
-            let else_terminates = else_branch
-                .is_some_and(|e| self.always_terminates(e, &else_locals))
-                && rest
-                    .iter()
-                    .all(|(_, body)| self.always_terminates(body, &else_locals));
+            let then_terminates = then_completion.terminates;
+            let else_terminates = else_completion.terminates;
+            if self.completion_oracle {
+                let old_then = self.always_terminates(then_branch, &then_locals);
+                let old_else = else_branch.is_some_and(|e| self.always_terminates(e, &else_locals))
+                    && rest
+                        .iter()
+                        .all(|(_, body)| self.always_terminates(body, &else_locals));
+                self.note_completion_difference(
+                    then_branch.span,
+                    "if branch",
+                    old_then,
+                    then_terminates,
+                );
+                self.note_completion_difference(cond.span, "else chain", old_else, else_terminates);
+            }
 
             *locals = match (then_terminates, else_terminates) {
                 (true, false) => else_locals,
@@ -1261,6 +1337,12 @@ impl<'a> Checker<'a> {
                     merged
                 }
             };
+            // The chain terminates when every branch does, an `else` among
+            // them: `exits` when every branch exits.
+            Completion {
+                terminates: then_terminates && else_terminates,
+                exits: then_completion.exits && else_completion.exits,
+            }
         })
     }
 

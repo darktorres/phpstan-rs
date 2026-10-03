@@ -1,4 +1,4 @@
-use crate::checker::{Checker, Locals, is_switch_break_equivalent, merge_scopes};
+use crate::checker::{Checker, Completion, Locals, is_switch_break_equivalent, merge_scopes};
 use syntax::ast::*;
 use types::Type;
 
@@ -11,7 +11,7 @@ impl<'a> Checker<'a> {
         locals: &mut Locals,
         declared_return: Option<&Type>,
         label: &str,
-    ) {
+    ) -> Completion {
         self.check_expr(subject, locals, label);
         if self.settings.extras.check_switch_missing_default
             && !cases.iter().any(|c| c.test.is_none())
@@ -66,6 +66,9 @@ impl<'a> Checker<'a> {
             exit_states.push(locals.clone());
         }
         let case_count = cases.len();
+        // How each case body's last statement completes, for the switch's
+        // own completion.
+        let mut case_lasts: Vec<Completion> = Vec::with_capacity(case_count);
         // A bare `break;` written directly inside a case targets
         // this switch, not any enclosing loop - pushing a frame
         // here (discarded below, never read) only exists to
@@ -98,17 +101,20 @@ impl<'a> Checker<'a> {
             } else {
                 merge_scopes(&self.relation(), &running, &direct)
             };
-            self.check_block(&case.body, &mut case_locals, declared_return, label);
+            let block = self.check_block(&case.body, &mut case_locals, declared_return, label);
             let last_stmt = case.body.last();
-            let case_terminates =
-                last_stmt.is_some_and(|s| self.always_terminates(s, &case_locals));
+            let case_terminates = block.last.terminates;
+            case_lasts.push(block.last);
+            if let Some(s) = last_stmt {
+                self.compare_completion(s, &case_locals, block.last);
+            }
             if let Some(t) = &case.test {
                 self.apply_loose_equality_narrowing(subject, t, &mut narrowed_locals, false);
             }
             let is_last = i + 1 == case_count;
             let reaches_after_switch = match last_stmt {
                 Some(s) if is_switch_break_equivalent(s) => true,
-                Some(s) => is_last && !self.exits_function_or_loop(s, &case_locals),
+                Some(_) => is_last && !block.last.exits,
                 None => is_last,
             };
             if reaches_after_switch {
@@ -131,6 +137,29 @@ impl<'a> Checker<'a> {
                 .into_iter()
                 .skip(1)
                 .fold(first, |acc, s| merge_scopes(&self.relation(), &acc, &s));
+        }
+        // A `switch` guarantees ending control flow only with a `default`
+        // and when every non-empty case body's last statement terminates by
+        // something other than a `break` (an empty body falls into the next
+        // non-empty one, and a trailing empty one falls out of the bottom).
+        let ends = |at: usize| {
+            cases[at]
+                .body
+                .last()
+                .is_some_and(|s| !is_switch_break_equivalent(s) && case_lasts[at].terminates)
+        };
+        let terminates = cases.iter().any(|c| c.test.is_none())
+            && (0..case_count).all(|i| {
+                if !cases[i].body.is_empty() {
+                    return ends(i);
+                }
+                (i + 1..case_count)
+                    .find(|&later| !cases[later].body.is_empty())
+                    .is_some_and(ends)
+            });
+        Completion {
+            terminates,
+            exits: false,
         }
     }
 }

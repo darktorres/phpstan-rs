@@ -271,11 +271,15 @@ impl<'a> Checker<'a> {
                 }
             }
             PropertyHookBody::Block(stmts) => {
-                self.check_block(stmts, &mut locals, declared_return.as_ref(), &label);
+                let body_terminates = self
+                    .check_block(stmts, &mut locals, declared_return.as_ref(), &label)
+                    .completion
+                    .terminates;
+                self.compare_body_completion(stmts, &locals, span, body_terminates);
                 // Same fall-off-the-end completeness check `check_function`
                 // performs - real PHPStan runs `MissingReturnRule` against
                 // a hook the same as any other function-like node.
-                if !stmts.iter().any(|s| self.always_terminates(s, &locals))
+                if !body_terminates
                     && !self.current_function_is_generator
                     && let Some(level) = crate::checker::function_decl::missing_return_level(
                         prop_sig.ty(),

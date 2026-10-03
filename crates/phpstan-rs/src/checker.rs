@@ -531,6 +531,11 @@ pub struct Checker<'a> {
     /// a variable to `never`: the assertion fails there, so they end
     /// control flow (`always_terminates`).
     pub(crate) terminating_assertions: rustc_hash::FxHashSet<Span>,
+    // Whether a statement's completion is compared with what
+    // `always_terminates` and `exits_function_or_loop` say of it
+    // (`PHPSTAN_RS_COMPLETION_ORACLE`): for testing a change to how
+    // completion is found, which reports each difference.
+    pub(crate) completion_oracle: bool,
     // Every variable assignment site in the current function body, for
     // `variable.implicitArray`; empty unless that check is enabled.
     pub(crate) current_function_assigned_variables: Vec<strict_rules::AssignedVariable>,
@@ -863,6 +868,8 @@ pub(crate) enum InferQuestion {
 }
 
 mod access_attributes;
+mod completion;
+pub(crate) use completion::{BlockCompletion, Completion};
 mod array_access;
 mod infer_cache;
 mod locals;
@@ -1110,6 +1117,7 @@ impl<'a> Checker<'a> {
             current_function_goto_targets: Box::default(),
             assigned_values: rustc_hash::FxHashMap::default(),
             terminating_assertions: rustc_hash::FxHashSet::default(),
+            completion_oracle: std::env::var_os("PHPSTAN_RS_COMPLETION_ORACLE").is_some(),
             current_function_assigned_variables: Vec::new(),
             in_bare_statement_position: false,
             in_condition_position: false,
@@ -1736,7 +1744,9 @@ impl<'a> Checker<'a> {
                 // Top-level script statements share one scope across the
                 // whole file, so the extract()/eval() guard spans the
                 // entire loop rather than resetting per statement.
-                _ => self.check_stmt(stmt, &mut top_locals, None, "<main>"),
+                _ => {
+                    self.check_stmt(stmt, &mut top_locals, None, "<main>");
+                }
             }
         }
         if self.saw_dynamic_var_construct {

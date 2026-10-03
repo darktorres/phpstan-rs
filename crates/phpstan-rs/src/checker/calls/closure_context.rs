@@ -308,6 +308,7 @@ impl<'a> Checker<'a> {
                 self.check_generator_return_type(declared_return.as_ref(), closure_expr.span);
                 // See `checker::expr`'s `ExprKind::Closure` arm's
                 // identical `converge_loop_body` fix and comment.
+                let mut body_terminates = false;
                 let (converged, _) = self.converge_loop_body(
                     &closure_locals,
                     declared_return.as_ref(),
@@ -317,15 +318,23 @@ impl<'a> Checker<'a> {
                         subject_key: None,
                     },
                     |this, pass_locals, declared_return, label, _pass| {
-                        this.check_block(body, pass_locals, declared_return, label);
+                        body_terminates = this
+                            .check_block(body, pass_locals, declared_return, label)
+                            .completion
+                            .terminates;
                     },
                 );
                 closure_locals = converged;
-                self.check_closure_missing_return(
+                self.compare_body_completion(
                     body,
+                    &closure_locals,
+                    closure_expr.span,
+                    body_terminates,
+                );
+                self.check_closure_missing_return(
+                    body_terminates,
                     return_type.is_some(),
                     declared_return.as_ref(),
-                    &closure_locals,
                     closure_expr.span,
                 );
                 self.current_function_is_generator = previous_generator_flag;
