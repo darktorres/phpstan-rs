@@ -531,13 +531,12 @@ impl<'a> Checker<'a> {
     ) -> Type {
         // A method a known class surely lacks is reported where it's
         // called, so the call is the error type from there on.
-        if recv_ty
-            .as_object()
-            .is_some_and(|(class, _)| self.registry.classes.contains_key(class.as_str()))
-            && self.member_confirmed_missing(recv_ty, |c| {
-                self.registry.lookup_method(c, method).is_some()
-                    || self.registry.lookup_method(c, "__call").is_some()
-            })
+        // The method, then `__call`; only when both are missing is the
+        // class itself looked up, to tell a known class from an unknown one.
+        if let Some((class, _)) = recv_ty.as_object()
+            && self.lookup_method_with_owner(class, method).is_none()
+            && self.lookup_method_with_owner(class, "__call").is_none()
+            && self.registry.classes.contains_key(class.as_str())
         {
             return Type::error();
         }
