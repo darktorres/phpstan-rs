@@ -751,6 +751,10 @@ pub struct Checker<'a> {
     // Whether the file names anything a closure rebind needs (`bind`,
     // `bindTo`, `call`); when it does not, no walk of it finds one.
     pub(crate) closure_rebind_possible: bool,
+    // Whether the file names a function that tests a path or sets the
+    // include path, which is what its include guards are found by; true
+    // until said otherwise.
+    pub(crate) include_guards_possible: bool,
     pub(crate) rebind_escape_all: bool,
     // The LSP's one-off "what type is this instance receiver" probe.
     // `probe_span` is the exact `Span` of the receiver `Expr` the caller
@@ -919,7 +923,7 @@ mod generics;
 mod global_constants;
 mod imports;
 mod impossible_instanceof;
-mod includes;
+pub(crate) mod includes;
 mod ini_directives;
 mod instantiation;
 pub mod rule_level_helper;
@@ -963,7 +967,7 @@ mod throws;
 mod type_declarations;
 mod uninitialized;
 mod uninitialized_dataflow;
-mod unused;
+pub(crate) mod unused;
 mod var_tag_types;
 mod visibility;
 mod whitespace;
@@ -1180,6 +1184,7 @@ impl<'a> Checker<'a> {
             static_var_names: FxHashSet::default(),
             rebind_target_classes: FxHashSet::default(),
             closure_rebind_possible: true,
+            include_guards_possible: true,
             rebind_escape_all: false,
             probe_span: Cell::new(None),
             probe_hit: RefCell::new(None),
@@ -1528,10 +1533,16 @@ impl<'a> Checker<'a> {
     }
 
     /// Whether the file being checked names what a closure rebind needs
-    /// (`syntax::FileFacts::mentions_closure_rebind`); true until said
+    /// (`unused::WATCH`'s bit in `syntax::FileFacts::mentions`); true until said
     /// otherwise.
     pub fn set_closure_rebind_possible(&mut self, possible: bool) {
         self.closure_rebind_possible = possible;
+    }
+
+    /// Whether the file being checked names what its include guards are
+    /// found by (`includes::WATCH`); true until said otherwise.
+    pub fn set_include_guards_possible(&mut self, possible: bool) {
+        self.include_guards_possible = possible;
     }
 
     #[hotpath::measure]
@@ -1545,8 +1556,11 @@ impl<'a> Checker<'a> {
         self.constant_facts = global_constants::constant_facts(program);
         if self.current_file.is_some() {
             self.include_constant_initializers = includes::file_constant_initializers(program);
-            (self.include_guarded_paths, self.include_path_dirs) =
-                self.collect_include_guards(program);
+            (self.include_guarded_paths, self.include_path_dirs) = if self.include_guards_possible {
+                self.collect_include_guards(program)
+            } else {
+                (FxHashSet::default(), includes::default_include_dirs())
+            };
         }
         self.check_declare_directives(program);
         self.check_file_whitespace(program);

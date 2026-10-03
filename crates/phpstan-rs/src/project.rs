@@ -2057,7 +2057,12 @@ impl Project {
         checker.set_current_file(path);
         checker.set_current_file_absolute(self.absolute_path(path));
         checker.set_working_dir(self.working_dir.clone());
-        checker.set_closure_rebind_possible(file.facts.mentions_closure_rebind);
+        checker.set_closure_rebind_possible(
+            file.facts.mentions & checker::unused::MENTIONS_REBIND != 0,
+        );
+        checker.set_include_guards_possible(
+            file.facts.mentions & checker::includes::MENTIONS_GUARD != 0,
+        );
         Some((checker, &file.ast))
     }
 
@@ -2585,6 +2590,14 @@ fn trait_line_ranges(ast: &[Stmt], line_index: &LineIndex) -> Vec<(u32, u32)> {
     ranges
 }
 
+/// The spellings a file's facts note, each list with the bits of the walk
+/// it gates.
+static WATCHED: syntax::WatchList = syntax::WatchList(&[
+    crate::stub_attributes::WATCH,
+    checker::unused::REBIND_WATCH,
+    checker::includes::WATCH,
+]);
+
 /// A file parsed, with its inline ignore comments.
 struct Parsed {
     ast: Vec<Stmt>,
@@ -2600,12 +2613,12 @@ fn parse_with_ignores<'a>(
     interner: &Arc<Interner>,
     names: Option<&mut syntax::name::NameCache>,
 ) -> Result<Parsed, ParseError> {
-    let parsed = syntax::parse_with_names(source, interner, names)?;
+    let parsed = syntax::parse_watching(source, interner, names, Some(&WATCHED))?;
     let ignores = ignore_comments::scan_parsed(&parsed);
     let mut ast = parsed.stmts;
     // What the file does not name, or hold, there is nothing to find of by
     // walking it.
-    if parsed.facts.mentions_stub_attribute {
+    if parsed.facts.mentions & crate::stub_attributes::MENTIONS != 0 {
         crate::stub_attributes::apply_stub_attributes(&mut ast);
     }
     if parsed.facts.has_anonymous_class {

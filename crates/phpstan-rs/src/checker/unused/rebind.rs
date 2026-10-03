@@ -9,6 +9,17 @@ use syntax::visit::{Visitor, walk_expr, walk_stmts};
 // rebind_target_classes`'s own doc comment)
 // ---------------------------------------------------------------------
 
+/// The bit of `FileFacts::mentions` a file that names `bind`, `bindTo` or
+/// `call` has: a closure rebind needs one of them.
+pub(crate) const MENTIONS_REBIND: u32 = 1 << 1;
+
+/// The spellings that set `MENTIONS_REBIND`.
+pub(crate) const WATCH: &[(&str, u32)] = &[
+    ("bind", MENTIONS_REBIND),
+    ("bindto", MENTIONS_REBIND),
+    ("call", MENTIONS_REBIND),
+];
+
 /// A whole-program pre-pass that sees into every function, class and
 /// closure, since a `Closure::bind` call reaching
 /// into class `Foo`'s private members can appear in a completely

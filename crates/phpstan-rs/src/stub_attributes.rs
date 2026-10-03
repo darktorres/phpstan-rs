@@ -160,6 +160,17 @@ fn return_overrides(attrs: &[Attribute]) -> Vec<String> {
         .collect()
 }
 
+/// The bit of `FileFacts::mentions` a file naming one of the stub
+/// attributes, in any case, however it imports them, has.
+pub(crate) const MENTIONS: u32 = 1 << 0;
+
+/// The spellings that set `MENTIONS`.
+pub(crate) const WATCH: &[(&str, u32)] = &[
+    ("phpversionaware", MENTIONS),
+    ("languageleveltypeaware", MENTIONS),
+    ("phpstormstubselementavailable", MENTIONS),
+];
+
 /// Applies and removes the version attributes in a parsed file, then
 /// resolves the names of any type it added.
 pub(crate) fn apply_stub_attributes(stmts: &mut Vec<Stmt>) {

@@ -5,7 +5,7 @@ use std::sync::Arc;
 
 use crate::ast::{GotoLabel, Stmt};
 pub use crate::lexer::FileFacts;
-use crate::lexer::{IgnoreMark, LexEnd, LexWarning, Lexer};
+use crate::lexer::{IgnoreMark, LexEnd, LexWarning, Lexer, WatchList};
 use crate::name::{Interner, NameCache};
 use crate::parser::{ParseError, Parser};
 use crate::span::LineIndex;
@@ -89,7 +89,22 @@ pub fn parse_with_names<'a>(
     interner: &Arc<Interner>,
     names: Option<&mut NameCache>,
 ) -> Result<ParsedFile, ParseError> {
+    parse_watching(source, interner, names, None)
+}
+
+/// `parse_with_names`, noting in the file's facts which of the spellings
+/// of `watch` the file names.
+pub fn parse_watching<'a>(
+    source: impl Into<Source<'a>>,
+    interner: &Arc<Interner>,
+    names: Option<&mut NameCache>,
+    watch: Option<&'static WatchList>,
+) -> Result<ParsedFile, ParseError> {
     let lexer = Lexer::from_source(source.into()).with_interner(interner);
+    let lexer = match watch {
+        Some(watch) => lexer.watching(watch),
+        None => lexer,
+    };
     let lexer = match names {
         Some(cache) => lexer.with_name_cache(cache),
         None => lexer,

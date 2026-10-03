@@ -17,6 +17,23 @@ use syntax::ast::*;
 use syntax::span::Span;
 use syntax::visit::{Visitor, walk_expr, walk_stmt, walk_stmts};
 
+/// The bit of `FileFacts::mentions` a file that names a function that
+/// tests a path, or sets the include path, has: only such a file has a
+/// guard to find.
+pub(crate) const MENTIONS_GUARD: u32 = 1 << 2;
+
+/// The spellings that set `MENTIONS_GUARD`.
+pub(crate) const WATCH: &[(&str, u32)] = &[
+    ("file_exists", MENTIONS_GUARD),
+    ("is_file", MENTIONS_GUARD),
+    ("is_readable", MENTIONS_GUARD),
+    ("is_writable", MENTIONS_GUARD),
+    ("is_writeable", MENTIONS_GUARD),
+    ("is_executable", MENTIONS_GUARD),
+    ("set_include_path", MENTIONS_GUARD),
+    ("ini_set", MENTIONS_GUARD),
+];
+
 const GUARD_FUNCTIONS: [&str; 6] = [
     "file_exists",
     "is_file",
@@ -329,10 +346,7 @@ impl<'a> Checker<'a> {
     ) -> (FxHashSet<String>, Vec<String>) {
         let locals = Locals::default();
         let mut guarded = FxHashSet::default();
-        let mut include_dirs: Vec<String> = DEFAULT_INCLUDE_PATH
-            .split(':')
-            .map(str::to_string)
-            .collect();
+        let mut include_dirs = default_include_dirs();
         let mut on_call = |call: IncludeCall| match call {
             IncludeCall::Guard(arg) => {
                 if let Some(paths) = self.resolve_include_paths(arg, &locals) {
@@ -358,6 +372,14 @@ impl<'a> Checker<'a> {
     }
 }
 
+/// The `include_path` directories before the file sets any.
+pub(crate) fn default_include_dirs() -> Vec<String> {
+    DEFAULT_INCLUDE_PATH
+        .split(':')
+        .map(str::to_string)
+        .collect()
+}
+
 enum IncludeCall<'e> {
     Guard(&'e Expr),
     SetIncludePath(&'e Expr),
@@ -374,15 +396,18 @@ impl<'ast> Visitor<'ast> for GuardArgs<'_> {
             if let ExprKind::Call(callee, args) = &e.kind
                 && let Some(name) = callee_name(callee)
             {
-                let name = name.to_ascii_lowercase();
-                match (name.as_str(), args.as_slice()) {
-                    (n, [arg, ..]) if GUARD_FUNCTIONS.contains(&n) => {
+                let is = |wanted: &str| name.eq_ignore_ascii_case(wanted);
+                match args.as_slice() {
+                    [arg, ..] if GUARD_FUNCTIONS.iter().any(|f| is(f)) => {
                         (self.0)(IncludeCall::Guard(&arg.value))
                     }
-                    ("set_include_path", [arg]) => {
+                    [arg] if is("set_include_path") => {
                         (self.0)(IncludeCall::SetIncludePath(&arg.value))
                     }
-                    ("ini_set", [key, value]) if matches!(&key.value.kind, ExprKind::Literal(Literal::String(k)) if *k == "include_path") => {
+                    [key, value]
+                        if is("ini_set")
+                            && matches!(&key.value.kind, ExprKind::Literal(Literal::String(k)) if *k == "include_path") =>
+                    {
                         (self.0)(IncludeCall::SetIncludePath(&value.value))
                     }
                     _ => {}

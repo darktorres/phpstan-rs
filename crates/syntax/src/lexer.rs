@@ -73,7 +73,9 @@ pub struct Lexer<'a> {
     // repeats its identifiers and variables, and a repeat is found here
     // without the interner's lock. Held for as long as the lexer is, so
     // the names it returns are those the interner holds for the text.
-    names: hashbrown::HashTable<(u64, Name)>,
+    names: hashbrown::HashTable<(u64, Name, u32)>,
+    // The spellings whose mention the file's facts hold.
+    watch: Option<&'static WatchList>,
 }
 
 /// A comment that holds `@phpstan-ignore`, which every inline suppression
@@ -217,31 +219,30 @@ pub struct LexEnd {
 pub struct FileFacts {
     /// The file has an anonymous class (`new class`).
     pub has_anonymous_class: bool,
-    /// The file names `bind`, `bindTo` or `call`, in any case: a closure
-    /// rebind (`Closure::bind`, `->bindTo()`, `->call()`) needs one of
-    /// them.
-    pub mentions_closure_rebind: bool,
-    /// The file names one of the attributes the stub readers act on
-    /// (`PhpStormStubsElementAvailable`, `LanguageLevelTypeAware`,
-    /// `PhpVersionAware`), in any case, however it imports them.
-    pub mentions_stub_attribute: bool,
+    /// The bits of the `WatchList` the lexer was given for the spellings
+    /// the file names: an identifier, a whole name or one segment of a
+    /// qualified one, in any case.
+    pub mentions: u32,
 }
 
-impl FileFacts {
-    /// Notes an identifier of the file: a whole name, or one segment of a
-    /// qualified one.
-    fn note_name(&mut self, name: &str) {
-        let is_one_of = |names: &[&str]| {
-            names
-                .iter()
-                .any(|n| name.len() == n.len() && name.eq_ignore_ascii_case(n))
-        };
-        self.mentions_closure_rebind |= is_one_of(&["bind", "call", "bindto"]);
-        self.mentions_stub_attribute |= is_one_of(&[
-            "PhpVersionAware",
-            "LanguageLevelTypeAware",
-            "PhpStormStubsElementAvailable",
-        ]);
+/// The identifier spellings a caller wants to know a file names, each
+/// with the bit it sets in `FileFacts::mentions`: the lists of the walks
+/// that can find something only in a file that names one of them, each
+/// list with its own bits. The spellings are in lower case.
+pub struct WatchList(pub &'static [&'static [(&'static str, u32)]]);
+
+impl WatchList {
+    /// The bits of the spellings equal to `text` in any case.
+    fn bits(&self, text: &str) -> u32 {
+        let mut bits = 0;
+        for list in self.0 {
+            for &(spelling, bit) in *list {
+                if spelling.len() == text.len() && spelling.eq_ignore_ascii_case(text) {
+                    bits |= bit;
+                }
+            }
+        }
+        bits
     }
 }
 
@@ -377,6 +378,7 @@ impl<'a> Lexer<'a> {
             warnings: Vec::new(),
             interner: Arc::clone(Interner::global()),
             names: hashbrown::HashTable::new(),
+            watch: None,
         }
     }
 
@@ -395,12 +397,25 @@ impl<'a> Lexer<'a> {
 
     /// The name for `text`: this lexer's own, or the interner's.
     fn name(&mut self, text: &str) -> Name {
+        self.name_and_bits(text).0
+    }
+
+    /// The name of an identifier: its watched bits go in the facts. They
+    /// are found when the spelling is first met in the file, which is far
+    /// less often than a token.
+    fn identifier_name(&mut self, text: &str) -> Name {
+        let (name, bits) = self.name_and_bits(text);
+        self.facts.mentions |= bits;
+        name
+    }
+
+    fn name_and_bits(&mut self, text: &str) -> (Name, u32) {
         let hash = crate::name::text_hash(text);
-        if let Some((_, name)) = self
+        if let Some((_, name, bits)) = self
             .names
-            .find(hash, |(h, name)| *h == hash && name.as_str() == text)
+            .find(hash, |(h, name, _)| *h == hash && name.as_str() == text)
         {
-            return name.clone();
+            return (name.clone(), *bits);
         }
         let name = match self.shared_names.as_deref_mut() {
             Some(shared) => match shared.find(text, hash) {
@@ -413,9 +428,16 @@ impl<'a> Lexer<'a> {
             },
             None => self.interner.name_hashed(text, hash),
         };
+        let bits = self.watch.map_or(0, |watch| watch.bits(text));
         self.names
-            .insert_unique(hash, (hash, name.clone()), |(h, _)| *h);
-        name
+            .insert_unique(hash, (hash, name.clone(), bits), |(h, _, _)| *h);
+        (name, bits)
+    }
+
+    /// Notes the spellings of `watch` in the facts of the file.
+    pub fn watching(mut self, watch: &'static WatchList) -> Self {
+        self.watch = Some(watch);
+        self
     }
 
     /// Interns token text into `interner` rather than the global one.
@@ -556,12 +578,7 @@ impl<'a> Lexer<'a> {
                 }
             }
             Token::Eof => {}
-            other => {
-                self.settle_marks(self.last_token_start);
-                if let Token::Identifier(name) = other {
-                    self.facts.note_name(name);
-                }
-            }
+            _ => self.settle_marks(self.last_token_start),
         }
         (token, span, raw)
     }
@@ -852,7 +869,7 @@ impl<'a> Lexer<'a> {
             return Token::Keyword(kw);
         }
         let s = self.slice(span);
-        Token::Identifier(self.name(&s))
+        Token::Identifier(self.identifier_name(&s))
     }
 
     fn lex_inline_html(&mut self) -> Token {

@@ -148,7 +148,8 @@ fn leaving_out_the_walks_a_file_cannot_need_gives_the_tree_the_walks_gave() {
     ];
     for (i, source) in sources.iter().enumerate() {
         let path = Path::new("/p/file.php");
-        let parsed = syntax::parse(source.as_bytes(), &interner).expect("parses");
+        let parsed = syntax::parse_watching(source.as_bytes(), &interner, None, Some(&WATCHED))
+            .expect("parses");
         let facts = parsed.facts;
         // What the walks give with nothing left out.
         let mut every = syntax::parse(source.as_bytes(), &interner)
@@ -181,26 +182,47 @@ fn leaving_out_the_walks_a_file_cannot_need_gives_the_tree_the_walks_gave() {
 #[test]
 fn what_a_file_names_is_found_among_its_identifiers() {
     let interner = Arc::clone(Interner::global());
-    let facts = |source: &str| syntax::parse(source.as_bytes(), &interner).unwrap().facts;
+    let facts = |source: &str| {
+        syntax::parse_watching(source.as_bytes(), &interner, None, Some(&WATCHED))
+            .unwrap()
+            .facts
+    };
+    let rebind =
+        |source: &str| facts(source).mentions & crate::checker::unused::MENTIONS_REBIND != 0;
+    let stub_attribute =
+        |source: &str| facts(source).mentions & crate::stub_attributes::MENTIONS != 0;
+    let guard =
+        |source: &str| facts(source).mentions & crate::checker::includes::MENTIONS_GUARD != 0;
     assert_eq!(facts("<?php class A {}"), syntax::FileFacts::default());
     assert!(facts("<?php $f = new class {};").has_anonymous_class);
     assert!(facts("<?php $f = new #[A] class {};").has_anonymous_class);
     assert!(!facts("<?php $f = new Foo(); class Bar {}").has_anonymous_class);
-    for rebind in [
+    for source in [
         "<?php Closure::bind($f, null, A::class);",
         "<?php $f->bindTo($o);",
         "<?php $f->BINDTO($o);",
         "<?php $f->call($o);",
     ] {
-        assert!(facts(rebind).mentions_closure_rebind, "{rebind}");
+        assert!(rebind(source), "{source}");
     }
-    assert!(!facts("<?php $f->bound($o); $g->called();").mentions_closure_rebind);
+    assert!(!rebind("<?php $f->bound($o); $g->called();"));
+    // A variable of the same spelling names nothing.
+    assert!(!rebind("<?php $bind = 1; $call = 2;"));
     for attribute in [
         "<?php use X\\PhpVersionAware; ",
         "<?php #[\\X\\LanguageLevelTypeAware([])] function f() {}",
         "<?php use X\\PhpStormStubsElementAvailable as Y;",
     ] {
-        assert!(facts(attribute).mentions_stub_attribute, "{attribute}");
+        assert!(stub_attribute(attribute), "{attribute}");
     }
-    assert!(!facts("<?php #[Other] function f() {}").mentions_stub_attribute);
+    assert!(!stub_attribute("<?php #[Other] function f() {}"));
+    for source in [
+        "<?php if (file_exists($p)) {}",
+        "<?php if (IS_READABLE($p)) {}",
+        "<?php set_include_path('/x');",
+        "<?php ini_set('include_path', '/x');",
+    ] {
+        assert!(guard(source), "{source}");
+    }
+    assert!(!guard("<?php echo 1;"));
 }
