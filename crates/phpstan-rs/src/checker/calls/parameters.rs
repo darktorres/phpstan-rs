@@ -3,7 +3,7 @@
 //! methods, static methods, constructors, attributes, callables) runs
 //! with its own wording of the callee.
 
-use rustc_hash::{FxHashMap, FxHashSet};
+use rustc_hash::FxHashSet;
 
 use crate::checker::calls::{contains_nullsafe_access, is_valid_byref_argument_expr};
 use crate::checker::{Checker, Locals};
@@ -418,8 +418,6 @@ impl<'a> Checker<'a> {
         let params = sig.params();
         let variadic = params.last().is_some_and(|p| p.variadic());
         let natively_variadic = params.iter().any(|p| p.variadic());
-        let by_name: FxHashMap<&str, &ParameterReflection> =
-            params.iter().map(|p| (p.name().as_ref(), p)).collect();
         let mut unused: Vec<&ParameterReflection> =
             params.iter().filter(|p| !p.variadic()).collect();
         let mut variadic_names: FxHashSet<&str> = FxHashSet::default();
@@ -440,7 +438,9 @@ impl<'a> Checker<'a> {
                 },
                 Some(name) => {
                     named_occurred = true;
-                    match by_name.get(name.as_str()) {
+                    // The last parameter of the name, as a table keyed by
+                    // name would hold it.
+                    match params.iter().rfind(|p| p.name().as_str() == name.as_str()) {
                         Some(p) => p,
                         None => {
                             if !natively_variadic || is_builtin {
