@@ -313,14 +313,21 @@ impl<'a> Checker<'a> {
     /// gave.
     pub(crate) fn widen_towards_entry(&self, pass_entry: &Locals, next_entry: &mut Locals) {
         let relation = self.relation();
-        let changing: Vec<(String, Type)> = next_entry
-            .iter()
-            .filter(|(name, ty)| match pass_entry.get(name.as_str()) {
-                Some(before) => before != *ty && !relation.is_super_type_of(before, ty).yes(),
+        // A binding the pass did not change stays; only an added or changed
+        // one can widen.
+        let changing: Vec<(String, Type)> = pass_entry
+            .types_diff(next_entry)
+            .filter_map(|item| match item {
+                imbl::ordmap::DiffItem::Add(name, ty) => Some((name, None, ty)),
+                imbl::ordmap::DiffItem::Update { old, new } => Some((new.0, Some(old.1), new.1)),
+                imbl::ordmap::DiffItem::Remove(..) => None,
+            })
+            .filter(|(_, before, ty)| match before {
+                Some(before) => !relation.is_super_type_of(before, ty).yes(),
                 None => true,
             })
-            .map(|(name, ty)| {
-                let widened = match pass_entry.get(name.as_str()) {
+            .map(|(name, before, ty)| {
+                let widened = match before {
                     Some(before) => before.widen_towards(ty),
                     None => ty.generalize(),
                 };
