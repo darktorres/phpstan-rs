@@ -149,39 +149,53 @@ fn is_number_token(text: &str) -> bool {
 impl<'a> Lexer<'a> {
     pub(crate) fn lex_single_quoted(&mut self) -> Token {
         self.pos += 1; // opening '
-        // Batches contiguous non-escape byte runs via `push_str` +
-        // `from_utf8_lossy` instead of pushing one byte at a time (which
-        // would also silently corrupt any multi-byte UTF-8 character in
-        // the literal - `b as char` reinterprets each raw byte as its own
-        // Latin-1 codepoint). `from_utf8_lossy`, not `.unwrap()`: real
-        // PHP source can contain non-UTF-8 bytes, matching every other
-        // byte-range conversion already in this file.
-        //
-        // No `with_capacity` hint here (unlike `scan_interpolated`'s
-        // `literal` buffer, which sizes to its own already-extracted
-        // run's length): the only cheap upper bound available at this
-        // point is `self.src.len() - self.pos`, the size of the entire
-        // rest of the file rather than of this one string, which can
-        // blow up peak memory on a large file with many short early
-        // literals. Finding the string's real length upfront would need
-        // its own pre-scan, not worth it for what's normally a short
-        // literal - let `String::new()` grow via ordinary amortized
-        // doubling.
-        let mut s = Vec::new();
-        let mut run_start = self.pos;
-        while self.pos < self.src.len() && self.peek() != b'\'' {
-            if self.peek() == b'\\' && (self.peek_at(1) == b'\'' || self.peek_at(1) == b'\\') {
-                s.extend_from_slice(&self.src[run_start..self.pos]);
-                s.push(self.peek_at(1));
-                self.pos += 2;
-                run_start = self.pos;
-            } else {
-                self.pos += 1;
+        let start = self.pos.min(self.src.len());
+        // The closing quote is found first, noting whether an escape
+        // (`\'` or `\\`) comes before it; any other backslash is itself.
+        let mut end = start;
+        let mut escaped = false;
+        loop {
+            match memchr::memchr2(b'\'', b'\\', &self.src[end..]) {
+                None => {
+                    end = self.src.len();
+                    break;
+                }
+                Some(offset) => {
+                    let at = end + offset;
+                    if self.src[at] == b'\'' {
+                        end = at;
+                        break;
+                    }
+                    if matches!(self.src.get(at + 1), Some(b'\'' | b'\\')) {
+                        escaped = true;
+                        end = at + 2;
+                    } else {
+                        end = at + 1;
+                    }
+                }
             }
         }
-        s.extend_from_slice(&self.src[run_start..self.pos]);
-        self.pos += 1; // closing '
-        Token::StringLit(PhpString::from(s))
+        let raw = &self.src[start..end];
+        let string = if escaped {
+            // The length is known: the unescaped string is no longer.
+            let mut bytes = Vec::with_capacity(raw.len());
+            let mut i = 0;
+            while i < raw.len() {
+                if raw[i] == b'\\' && matches!(raw.get(i + 1), Some(b'\'' | b'\\')) {
+                    bytes.push(raw[i + 1]);
+                    i += 2;
+                } else {
+                    bytes.push(raw[i]);
+                    i += 1;
+                }
+            }
+            PhpString::from(bytes)
+        } else {
+            // Most literals: the source's bytes, copied once.
+            PhpString::from_bytes(raw)
+        };
+        self.pos = end + 1; // closing '
+        Token::StringLit(string)
     }
 
     pub(crate) fn lex_double_quoted(&mut self) -> Token {

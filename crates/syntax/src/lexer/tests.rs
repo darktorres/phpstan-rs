@@ -5,4 +5,5 @@ mod invalid_utf8;
 mod numbers;
 mod positions;
 mod positions_and_spans;
+mod single_quoted;
 mod skipping;
