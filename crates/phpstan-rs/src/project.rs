@@ -1128,9 +1128,10 @@ impl Project {
     /// or anywhere - transitively, in a loaded file or a built-in stub
     /// file.
     fn finishing_scopes(&self, changed: &crate::registry::ChangedNames) -> (Scope, Scope) {
-        (
-            self.closure_scope(changed, &self.signature_dependents),
-            self.closure_scope(changed, &self.dependents),
+        // The two walks read the project alike and share nothing.
+        rayon::join(
+            || self.closure_scope(changed, &self.signature_dependents),
+            || self.closure_scope(changed, &self.dependents),
         )
     }
 
