@@ -9,15 +9,12 @@
 //! rolling the LSP/JSON-RPC layer specifically stopped being the more
 //! consistent choice once those were already dependencies.
 //!
-//! `diagnostics::Diagnostic` carries a real `Span`, converted here to LSP's
-//! 0-indexed line/character convention. The `location` symbolic
-//! label (e.g. `"ClassName::methodName"`) is still folded into the
-//! message text rather than dropped - LSP has no field for it. Known
-//! remaining imprecision: LSP wants UTF-16 code-unit columns, and this
-//! project's `Span` counts UTF-8 characters - an acceptable approximation
-//! for now (both agree for any line without astral-plane characters, the
-//! overwhelming majority of real PHP source), not a correctness bug worth
-//! blocking on.
+//! `diagnostics::Diagnostic` carries a line and column range, converted
+//! here to LSP's 0-indexed line/character convention with the file's line
+//! index, the character counted in the unit `initialize` agreed on (UTF-16
+//! code units, or bytes when the client offers UTF-8). The `location`
+//! symbolic label (e.g. `"ClassName::methodName"`) is still folded into
+//! the message text rather than dropped - LSP has no field for it.
 
 use rustc_hash::FxHashMap;
 use std::io::{self, Write};
@@ -52,7 +49,7 @@ use crate::project::{Project, ProjectSettings};
 use crate::registry::{FunctionReflection, format_signature, param_label};
 use crate::{baseline, ignore_errors};
 use syntax::ast::ClassKind;
-use syntax::span::{LineIndex, Span};
+use syntax::span::{LineIndex, Span, Unit};
 use types::Type;
 
 mod completion;
@@ -70,9 +67,9 @@ mod workspace_symbol;
 #[cfg(test)]
 use protocol::percent_decode;
 use protocol::{
-    diagnostic_fix_to_code_action, from_lsp_position, log_message_notification, path_to_uri,
-    progress_notification, publish_diagnostics_notification, pump_messages, ranges_overlap,
-    span_to_lsp_range, to_lsp_range, to_request_id, uri_to_path, write_message,
+    Positions, diagnostic_fix_to_code_action, log_message_notification, offset_from_lsp,
+    path_to_uri, progress_notification, publish_diagnostics_notification, pump_messages,
+    range_to_lsp, ranges_overlap, to_request_id, uri_to_path, write_message,
 };
 
 /// Resolves a receiver's own (possibly multi-class) type down to every
@@ -175,6 +172,9 @@ struct Server {
     // expression's own text from. See `completion`'s own module doc
     // comment for the full mechanism this feeds.
     latest_text: FxHashMap<PathBuf, String>,
+    // What a column of a position counts: UTF-16 code units unless the
+    // client offered UTF-8 and `initialize` agreed to it.
+    unit: Unit,
     // Set once a real `shutdown` request has been handled - `run_loop`'s
     // own `exit` arm consults this to pick the LSP spec's mandated
     // process exit code (0 if `shutdown` preceded `exit`, 1 otherwise).
@@ -300,6 +300,7 @@ impl Server {
             open_uris: FxHashMap::default(),
             last_diagnostics: FxHashMap::default(),
             latest_text: FxHashMap::default(),
+            unit: Unit::default(),
             shutdown_received: false,
             pending_requests: lsp_server::ReqQueue::default(),
             // `Incoming<I>` has no public constructor or `Default` impl
@@ -586,10 +587,11 @@ impl Server {
             .map(Path::to_path_buf)
             .collect();
 
+        let unit = self.unit;
         let mut messages: Vec<Message> = paths
             .iter()
             .filter_map(|p| self.open_uris.remove(p))
-            .map(|(uri, _version)| publish_diagnostics_notification(uri, None, &[]))
+            .map(|(uri, _version)| publish_diagnostics_notification(uri, None, &[], None, unit))
             .collect();
         for p in &paths {
             self.last_diagnostics.remove(p);
@@ -647,6 +649,28 @@ impl Server {
             .unwrap_or_else(|| (path_to_uri(path), None))
     }
 
+    /// The `publishDiagnostics` notification of `diags`, found in `path`,
+    /// with the columns of the file's lines in the negotiated unit.
+    fn diagnostics_message(
+        &self,
+        path: &Path,
+        uri: Uri,
+        version: Option<i32>,
+        diags: &[diagnostics::Diagnostic],
+    ) -> Message {
+        let index = self.project.line_index(path).map(|index| &**index);
+        publish_diagnostics_notification(uri, version, diags, index, self.unit)
+    }
+
+    /// The lines of the loaded file `path` with the unit of this session's
+    /// columns.
+    fn positions(&self, path: &Path) -> Option<Positions<'_>> {
+        Some(Positions {
+            index: self.project.line_index(path)?,
+            unit: self.unit,
+        })
+    }
+
     /// Publishes a `textDocument/publishDiagnostics` notification for
     /// every analyzed file with findings - without this, a freshly opened
     /// workspace shows an empty Problems panel until each affected file
@@ -660,7 +684,7 @@ impl Server {
             .filter(|(_, diags)| !diags.is_empty())
             .map(|(p, diags)| {
                 let (uri, version) = self.uri_and_version_for(&p);
-                publish_diagnostics_notification(uri, version, &diags)
+                self.diagnostics_message(&p, uri, version, &diags)
             })
             .collect()
     }
@@ -675,18 +699,21 @@ impl Server {
     /// showing squiggles", not "stop the language server".
     fn republish_known_files(&mut self) -> Vec<Message> {
         if !self.enabled {
+            let unit = self.unit;
             return self
                 .open_uris
                 .values()
                 .cloned()
-                .map(|(uri, version)| publish_diagnostics_notification(uri, version, &[]))
+                .map(|(uri, version)| {
+                    publish_diagnostics_notification(uri, version, &[], None, unit)
+                })
                 .collect();
         }
         self.check_all_analyzed_paths()
             .into_iter()
             .map(|(p, diags)| {
                 let (uri, version) = self.uri_and_version_for(&p);
-                publish_diagnostics_notification(uri, version, &diags)
+                self.diagnostics_message(&p, uri, version, &diags)
             })
             .collect()
     }
@@ -863,8 +890,9 @@ impl Server {
             .into_iter()
             .map(|(p, diags)| {
                 let (dep_uri, dep_version) = self.uri_and_version_for(&p);
-                self.last_diagnostics.insert(p, diags.clone());
-                publish_diagnostics_notification(dep_uri, dep_version, &diags)
+                let message = self.diagnostics_message(&p, dep_uri, dep_version, &diags);
+                self.last_diagnostics.insert(p, diags);
+                message
             })
             .collect()
     }
@@ -1238,7 +1266,7 @@ impl Server {
     fn document_symbol(&self, uri: &Uri) -> Option<DocumentSymbolResponse> {
         let path = uri_to_path(uri)?;
         let stmts = self.project.ast(&path)?;
-        let index = self.project.line_index(&path)?;
+        let index = self.positions(&path)?;
         Some(DocumentSymbolResponse::Nested(
             document_symbol::document_symbols(stmts, index),
         ))
@@ -1569,12 +1597,8 @@ impl Server {
                 (params, locals)
             }
         };
-        let hints = inlay_hints::filter_to_range(
-            &cached.0,
-            &cached.1,
-            range,
-            self.project.line_index(&path)?,
-        );
+        let hints =
+            inlay_hints::filter_to_range(&cached.0, &cached.1, range, self.positions(&path)?);
         (!hints.is_empty()).then_some(hints)
     }
 
@@ -1707,9 +1731,9 @@ impl Server {
         let live_index = LineIndex::new(text.as_bytes());
         let stale_index = self.project.line_index(&path)?;
         let cursor = completion::Cursor {
-            live: live_index.offset(from_lsp_position(position))?,
+            live: offset_from_lsp(&live_index, self.unit, position)?,
             live_index: &live_index,
-            stale: stale_index.offset(from_lsp_position(position))?,
+            stale: offset_from_lsp(stale_index, self.unit, position)?,
             stale_index,
         };
         match completion::build_member_probe(&text, &tokens, cursor, stmts, self.project.registry())
@@ -1749,6 +1773,7 @@ impl Server {
                 &path,
                 stmts,
                 cursor.stale,
+                self.unit,
             ))),
         }
     }
@@ -1770,12 +1795,18 @@ impl Server {
         }
         let diagnostics = self.last_diagnostics.get(&path)?;
         let source = self.project.source(&path);
-        let index = self.project.line_index(&path)?;
+        let positions = self.positions(&path)?;
         Some(
             diagnostics
                 .iter()
-                .filter(|d| d.fix.is_some() && ranges_overlap(to_lsp_range(d.span), range))
-                .filter_map(|d| diagnostic_fix_to_code_action(uri, d, source, index))
+                .filter(|d| {
+                    d.fix.is_some()
+                        && ranges_overlap(
+                            range_to_lsp(Some(positions.index), positions.unit, d.span),
+                            range,
+                        )
+                })
+                .filter_map(|d| diagnostic_fix_to_code_action(uri, d, source, positions))
                 .collect(),
         )
     }
@@ -1790,9 +1821,7 @@ impl Server {
 
     /// The byte offset of `position` in the loaded file `path`.
     fn offset_at(&self, path: &Path, position: LspPosition) -> Option<u32> {
-        self.project
-            .line_index(path)?
-            .offset(from_lsp_position(position))
+        offset_from_lsp(self.project.line_index(path)?, self.unit, position)
     }
 
     /// The LSP range of `span` in the loaded file `path`; empty when the
@@ -1800,7 +1829,13 @@ impl Server {
     fn lsp_range(&self, path: &Path, span: Span) -> LspRange {
         self.project
             .line_index(path)
-            .map_or_else(LspRange::default, |index| span_to_lsp_range(index, span))
+            .map_or_else(LspRange::default, |index| {
+                Positions {
+                    index,
+                    unit: self.unit,
+                }
+                .range(span)
+            })
     }
 
     /// Sends a server-initiated JSON-RPC request and registers its id
@@ -2390,17 +2425,10 @@ fn handle_request<W: Write>(server: &mut Server, writer: &mut W, req: Request) {
                                 .into_iter()
                                 .collect(),
                         };
-                    // A real vscode-languageclient is expected to
-                    // advertise general.positionEncodings. This server's
-                    // own Span already counts UTF-8 characters (see this
-                    // module's top-of-file doc comment), so echoing
-                    // "utf-8" back when the client offers it makes that
-                    // existing counting exactly correct - whenever it's
-                    // offered at all, not only when it's the client's
-                    // top preference, since utf-8 is the only encoding
-                    // this server actually implements. Absent an offer,
-                    // the spec's utf-16 default applies and today's
-                    // approximation is unchanged.
+                    // A client that offers general.positionEncodings with
+                    // "utf-8" gets it: columns are then bytes, which the
+                    // line index counts. Otherwise the spec's UTF-16
+                    // default applies, counted in code units.
                     let position_encoding = params
                         .capabilities
                         .general
@@ -2443,6 +2471,11 @@ fn handle_request<W: Write>(server: &mut Server, writer: &mut W, req: Request) {
                     )
                 }
                 None => (Vec::new(), None, None, false, false),
+            };
+            server.unit = if position_encoding.is_some() {
+                Unit::Utf8
+            } else {
+                Unit::Utf16
             };
             server.supports_configuration_pull = supports_configuration_pull;
             server.supports_watched_files = supports_watched_files;

@@ -50,12 +50,12 @@ use crate::registry::Registry;
 use syntax::ast::{
     ClassKind, Expr, ExprKind, FunctionBody, FunctionDecl, NodeId, Stmt, StmtKind, Visibility,
 };
-use syntax::span::{LineIndex, Span};
+use syntax::span::{LineIndex, Span, Unit};
 use syntax::token::{Keyword, Token};
 use types::Type;
 
 use super::navigation::ProbeScope;
-use super::protocol::span_to_lsp_range;
+use super::protocol::Positions;
 use syntax::name_resolution::{NameContext, context_at};
 
 /// The synthetic local `Locals`/the checker never sees a real declaration
@@ -538,7 +538,7 @@ fn find_use_insertion_point(stmts: &[Stmt]) -> Option<u32> {
 /// importing over an unrelated existing name.
 fn resolve_import(
     stmts: &[Stmt],
-    index: &LineIndex,
+    index: Positions<'_>,
     ctx: &NameContext,
     fqn: &str,
 ) -> (String, Option<TextEdit>) {
@@ -558,7 +558,7 @@ fn resolve_import(
             (
                 short.to_string(),
                 Some(TextEdit {
-                    range: span_to_lsp_range(index, insert_span),
+                    range: index.range(insert_span),
                     new_text: {
                         let mut text = String::with_capacity(fqn.len() + 6);
                         text.push_str("\nuse ");
@@ -585,12 +585,14 @@ pub(super) fn enumerate_bare(
     path: &Path,
     current_stmts: &[Stmt],
     cursor: u32,
+    unit: Unit,
 ) -> Vec<CompletionItem> {
     let ctx = context_at(current_stmts, cursor);
     let registry = project.registry();
     let Some(index) = project.line_index(path) else {
         return Vec::new();
     };
+    let index = Positions { index, unit };
     let mut seen: FxHashSet<String> = FxHashSet::default();
     let mut items = Vec::new();
 

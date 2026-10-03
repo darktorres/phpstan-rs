@@ -13,10 +13,10 @@ use types::Name;
 use lsp_types::{InlayHint, InlayHintKind, InlayHintLabel, Range as LspRange};
 
 use crate::project::Project;
-use syntax::span::{LineIndex, Span};
+use syntax::span::Span;
 use types::Type;
 
-use super::protocol::to_lsp_position;
+use super::protocol::Positions;
 
 #[allow(clippy::type_complexity)]
 pub(super) fn collect(
@@ -36,11 +36,11 @@ pub(super) fn filter_to_range(
     param_hints: &[(Span, Name)],
     local_hints: &[(Span, Type)],
     range: LspRange,
-    index: &LineIndex,
+    index: Positions<'_>,
 ) -> Vec<InlayHint> {
     let mut hints = Vec::new();
     for (span, name) in param_hints {
-        let position = to_lsp_position(index.line_col(span.start));
+        let position = index.position(span.start);
         if position < range.start || position > range.end {
             continue;
         }
@@ -56,7 +56,7 @@ pub(super) fn filter_to_range(
         });
     }
     for (span, ty) in local_hints {
-        let position = to_lsp_position(index.line_col(span.end));
+        let position = index.position(span.end);
         if position < range.start || position > range.end {
             continue;
         }

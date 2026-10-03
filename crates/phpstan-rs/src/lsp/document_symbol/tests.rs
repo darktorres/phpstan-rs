@@ -1,3 +1,4 @@
+use super::super::protocol::Positions;
 use super::document_symbols;
 use lsp_types::SymbolKind;
 use syntax::lexer::Lexer;
@@ -11,7 +12,10 @@ fn parse(src: &str) -> Vec<syntax::ast::Stmt> {
 #[test]
 fn a_top_level_function_becomes_a_function_symbol() {
     let stmts = parse("<?php function foo() {}");
-    let symbols = document_symbols(&stmts, &syntax::span::LineIndex::default());
+    let symbols = document_symbols(
+        &stmts,
+        Positions::utf16(&syntax::span::LineIndex::default()),
+    );
     assert_eq!(symbols.len(), 1);
     assert_eq!(symbols[0].name, "foo");
     assert_eq!(symbols[0].kind, SymbolKind::FUNCTION);
@@ -29,7 +33,10 @@ fn a_class_nests_its_methods_properties_and_consts() {
         }
         "#,
     );
-    let symbols = document_symbols(&stmts, &syntax::span::LineIndex::default());
+    let symbols = document_symbols(
+        &stmts,
+        Positions::utf16(&syntax::span::LineIndex::default()),
+    );
     assert_eq!(symbols.len(), 1);
     assert_eq!(symbols[0].name, "Foo");
     assert_eq!(symbols[0].kind, SymbolKind::CLASS);
@@ -44,7 +51,10 @@ fn a_class_nests_its_methods_properties_and_consts() {
 #[test]
 fn an_interface_reports_the_interface_kind() {
     let stmts = parse("<?php interface Foo { public function m(): void; }");
-    let symbols = document_symbols(&stmts, &syntax::span::LineIndex::default());
+    let symbols = document_symbols(
+        &stmts,
+        Positions::utf16(&syntax::span::LineIndex::default()),
+    );
     assert_eq!(symbols[0].kind, SymbolKind::INTERFACE);
 }
 
@@ -58,7 +68,10 @@ fn an_enum_nests_its_cases() {
         }
         "#,
     );
-    let symbols = document_symbols(&stmts, &syntax::span::LineIndex::default());
+    let symbols = document_symbols(
+        &stmts,
+        Positions::utf16(&syntax::span::LineIndex::default()),
+    );
     assert_eq!(symbols[0].kind, SymbolKind::ENUM);
     let children = symbols[0].children.as_ref().unwrap();
     let names: Vec<&str> = children.iter().map(|c| c.name.as_str()).collect();
@@ -75,7 +88,10 @@ fn a_declaration_inside_a_top_level_if_is_still_reported() {
         }
         "#,
     );
-    let symbols = document_symbols(&stmts, &syntax::span::LineIndex::default());
+    let symbols = document_symbols(
+        &stmts,
+        Positions::utf16(&syntax::span::LineIndex::default()),
+    );
     assert_eq!(symbols.len(), 1);
     assert_eq!(symbols[0].name, "foo");
 }

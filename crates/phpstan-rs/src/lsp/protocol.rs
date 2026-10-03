@@ -12,7 +12,7 @@ use lsp_types::{
 };
 
 use diagnostics::{Diagnostic, diagnostic_order};
-use syntax::span::{LineCol, LineIndex, Range, Span};
+use syntax::span::{LineCol, LineIndex, Range, Span, Unit};
 
 /// The outcome of trying to read one framed LSP message. `Eof` (a clean
 /// transport disconnection) and `Disconnected` (a real I/O failure
@@ -236,13 +236,17 @@ fn percent_encode_path(s: &str) -> String {
 /// `Diagnostic::level`'s own doc comment (checker.rs) for the tier
 /// semantics this mirrors (low number = more certain/severe, not a
 /// per-finding confidence score).
-pub(crate) fn to_lsp_diagnostic(d: &Diagnostic) -> LspDiagnostic {
+pub(crate) fn to_lsp_diagnostic(
+    d: &Diagnostic,
+    index: Option<&LineIndex>,
+    unit: Unit,
+) -> LspDiagnostic {
     let message = match d.tip_text() {
         Some(tip) => format!("{}\n💡 {tip}", d.message),
         None => d.message.clone(),
     };
     LspDiagnostic {
-        range: to_lsp_range(d.span),
+        range: range_to_lsp(index, unit, d.span),
         severity: Some(level_to_severity(d.level)),
         code: Some(NumberOrString::String(d.identifier.to_string())),
         source: Some("phpstan-rs".to_string()),
@@ -269,31 +273,67 @@ pub(crate) fn level_to_severity(level: u8) -> DiagnosticSeverity {
     }
 }
 
-/// `Range`'s 1-indexed line/col becomes LSP's 0-indexed line/character -
-/// shared by every diagnostic/hover/definition response this server
-/// sends, so the same approximation (this project's own columns count
-/// UTF-8 characters; LSP wants UTF-16 code units - see this module's own
-/// doc comment) is made exactly once.
-pub(crate) fn to_lsp_range(range: Range) -> LspRange {
-    LspRange {
-        start: to_lsp_position(range.start),
-        end: to_lsp_position(range.end),
+/// A file's lines and the unit its columns are counted in: what turns a
+/// byte offset into an LSP position.
+#[derive(Clone, Copy)]
+pub(crate) struct Positions<'a> {
+    pub(crate) index: &'a LineIndex,
+    pub(crate) unit: Unit,
+}
+
+impl<'a> Positions<'a> {
+    /// `index`'s columns in UTF-16 code units, the protocol's default.
+    #[cfg(test)]
+    pub(crate) fn utf16(index: &'a LineIndex) -> Positions<'a> {
+        Positions {
+            index,
+            unit: Unit::Utf16,
+        }
+    }
+
+    pub(crate) fn position(self, offset: u32) -> LspPosition {
+        lsp_position(self.index, self.unit, offset)
+    }
+
+    pub(crate) fn range(self, span: Span) -> LspRange {
+        span_to_lsp_range(self.index, self.unit, span)
     }
 }
 
-/// `to_lsp_range` of the lines and columns `span` has in the file whose
-/// lines `index` holds.
-pub(crate) fn span_to_lsp_range(index: &LineIndex, span: Span) -> LspRange {
-    to_lsp_range(index.range(span))
+/// The LSP position of `offset` in the file whose lines `index` holds, its
+/// character counted in the `unit` the client and server agreed on.
+pub(crate) fn lsp_position(index: &LineIndex, unit: Unit, offset: u32) -> LspPosition {
+    LspPosition {
+        line: index.line(offset) - 1,
+        character: index.column(offset, unit),
+    }
 }
 
-/// The single-position half of `to_lsp_range` - see its own doc comment
-/// for the 1-indexed-vs-0-indexed/UTF-8-vs-UTF-16 caveats, which apply
-/// identically here.
-pub(crate) fn to_lsp_position(pos: LineCol) -> LspPosition {
-    LspPosition {
-        line: pos.line.saturating_sub(1),
-        character: pos.col.saturating_sub(1),
+/// The LSP range of the lines and columns `span` has in the file whose
+/// lines `index` holds.
+pub(crate) fn span_to_lsp_range(index: &LineIndex, unit: Unit, span: Span) -> LspRange {
+    LspRange {
+        start: lsp_position(index, unit, span.start),
+        end: lsp_position(index, unit, span.end),
+    }
+}
+
+/// The LSP range of a diagnostic's `range`, whose columns count
+/// characters. With the file's `index` the columns are recounted in
+/// `unit`; without one (the file is not loaded) the characters stand.
+pub(crate) fn range_to_lsp(index: Option<&LineIndex>, unit: Unit, range: Range) -> LspRange {
+    let position = |at: LineCol| match index
+        .and_then(|index| index.offset(at).map(|offset| (index, offset)))
+    {
+        Some((index, offset)) => lsp_position(index, unit, offset),
+        None => LspPosition {
+            line: at.line.saturating_sub(1),
+            character: at.col.saturating_sub(1),
+        },
+    };
+    LspRange {
+        start: position(range.start),
+        end: position(range.end),
     }
 }
 
@@ -318,7 +358,7 @@ pub(crate) fn diagnostic_fix_to_code_action(
     uri: &Uri,
     d: &Diagnostic,
     source: Option<&str>,
-    index: &LineIndex,
+    positions: Positions<'_>,
 ) -> Option<CodeActionOrCommand> {
     let fix = d.fix.as_ref()?;
     let span = match source {
@@ -329,13 +369,17 @@ pub(crate) fn diagnostic_fix_to_code_action(
     Some(CodeActionOrCommand::CodeAction(CodeAction {
         title: fix.description.clone(),
         kind: Some(CodeActionKind::QUICKFIX),
-        diagnostics: Some(vec![to_lsp_diagnostic(d)]),
+        diagnostics: Some(vec![to_lsp_diagnostic(
+            d,
+            Some(positions.index),
+            positions.unit,
+        )]),
         edit: Some(WorkspaceEdit {
             changes: Some(
                 [(
                     uri.clone(),
                     vec![TextEdit {
-                        range: span_to_lsp_range(index, span),
+                        range: positions.range(span),
                         new_text: fix.replacement.clone(),
                     }],
                 )]
@@ -349,21 +393,18 @@ pub(crate) fn diagnostic_fix_to_code_action(
     }))
 }
 
-/// The inverse of `to_lsp_range`'s own position half - a request's cursor
-/// position, converted from LSP's 0-indexed/UTF-16 convention to this
-/// project's own 1-indexed/UTF-8-character one. Same accepted
-/// approximation, just applied in the other direction.
-pub(crate) fn from_lsp_position(pos: LspPosition) -> LineCol {
-    LineCol {
-        line: pos.line + 1,
-        col: pos.character + 1,
-    }
+/// The byte offset of a request's cursor `position` in the file whose
+/// lines `index` holds, its character counted in `unit`.
+pub(crate) fn offset_from_lsp(index: &LineIndex, unit: Unit, position: LspPosition) -> Option<u32> {
+    index.offset_in(position.line, position.character, unit)
 }
 
 pub(crate) fn publish_diagnostics_notification(
     uri: Uri,
     version: Option<i32>,
     diagnostics: &[Diagnostic],
+    index: Option<&LineIndex>,
+    unit: Unit,
 ) -> Message {
     let mut ordered: Vec<&Diagnostic> = diagnostics.iter().collect();
     ordered.sort_by(|a, b| diagnostic_order(a, b));
@@ -371,7 +412,10 @@ pub(crate) fn publish_diagnostics_notification(
         "textDocument/publishDiagnostics".to_string(),
         PublishDiagnosticsParams {
             uri,
-            diagnostics: ordered.into_iter().map(to_lsp_diagnostic).collect(),
+            diagnostics: ordered
+                .into_iter()
+                .map(|d| to_lsp_diagnostic(d, index, unit))
+                .collect(),
             version,
         },
     ))

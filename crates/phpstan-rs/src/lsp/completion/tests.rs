@@ -10,7 +10,7 @@ use super::*;
 fn resolve_import_at_end(stmts: &[Stmt], fqn: &str) -> (String, Option<TextEdit>) {
     resolve_import(
         stmts,
-        &LineIndex::default(),
+        Positions::utf16(&LineIndex::default()),
         &context_at(stmts, u32::MAX),
         fqn,
     )

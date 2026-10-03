@@ -46,7 +46,7 @@ fn diagnostic_with_fix_becomes_a_quickfix_code_action() {
         .build(&index());
 
     let Some(CodeActionOrCommand::CodeAction(action)) =
-        diagnostic_fix_to_code_action(&uri, &diag, None, &index())
+        diagnostic_fix_to_code_action(&uri, &diag, None, Positions::utf16(&index()))
     else {
         panic!("expected a CodeAction for a diagnostic with a fix");
     };
@@ -76,7 +76,7 @@ fn diagnostic_without_fix_yields_no_code_action() {
     let uri = path_to_uri(Path::new("/tmp/a.php"));
     let diag = DiagnosticBuilder::new("msg".to_string(), dummy_span(), 5, "some.identifier")
         .build(&index());
-    assert!(diagnostic_fix_to_code_action(&uri, &diag, None, &index()).is_none());
+    assert!(diagnostic_fix_to_code_action(&uri, &diag, None, Positions::utf16(&index())).is_none());
 }
 
 #[test]

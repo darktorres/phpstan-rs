@@ -1381,3 +1381,43 @@ fn initialize_diagnostics_push_survives_one_workspace_file_failing_to_parse() {
         "got: {diags:?}"
     );
 }
+
+#[test]
+fn a_position_counts_the_unit_the_session_agreed_on() {
+    use super::super::protocol::{offset_from_lsp, range_to_lsp, span_to_lsp_range};
+    use syntax::span::{LineCol, LineIndex, Range, Span, Unit};
+    // `é` is two bytes and one UTF-16 unit, `😀` four bytes and two units.
+    let source = "<?php $é = '😀'; $x;";
+    let index = LineIndex::new(source.as_bytes());
+    let x = source.find("$x").unwrap() as u32;
+    let span = Span::new(x, x + 2);
+    let chars_before = source[..x as usize].chars().count() as u32;
+
+    let utf16 = span_to_lsp_range(&index, Unit::Utf16, span);
+    assert_eq!(utf16.start.character, chars_before + 1);
+    let utf8 = span_to_lsp_range(&index, Unit::Utf8, span);
+    assert_eq!(utf8.start.character, x);
+
+    // A diagnostic's range counts characters; the session's unit recounts it.
+    let range = Range {
+        start: LineCol {
+            line: 1,
+            col: chars_before + 1,
+        },
+        end: LineCol {
+            line: 1,
+            col: chars_before + 3,
+        },
+    };
+    assert_eq!(range_to_lsp(Some(&index), Unit::Utf16, range), utf16);
+    assert_eq!(range_to_lsp(Some(&index), Unit::Utf8, range), utf8);
+    // With no file loaded the characters stand.
+    assert_eq!(
+        range_to_lsp(None, Unit::Utf8, range).start.character,
+        chars_before
+    );
+
+    // And a cursor position goes back to the same offset.
+    assert_eq!(offset_from_lsp(&index, Unit::Utf16, utf16.start), Some(x));
+    assert_eq!(offset_from_lsp(&index, Unit::Utf8, utf8.start), Some(x));
+}

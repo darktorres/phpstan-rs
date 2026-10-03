@@ -6,11 +6,11 @@
 use lsp_types::{DocumentSymbol, SymbolKind};
 
 use syntax::ast::{ClassDecl, ClassKind, FunctionDecl, MethodDecl, Stmt, StmtKind};
-use syntax::span::{LineIndex, Span};
+use syntax::span::Span;
 
-use super::protocol::span_to_lsp_range;
+use super::protocol::Positions;
 
-pub(super) fn document_symbols(stmts: &[Stmt], index: &LineIndex) -> Vec<DocumentSymbol> {
+pub(super) fn document_symbols(stmts: &[Stmt], index: Positions<'_>) -> Vec<DocumentSymbol> {
     syntax::stack::guard(|| {
         let mut symbols = Vec::new();
         for stmt in stmts {
@@ -45,7 +45,7 @@ fn symbol(
     range: Span,
     selection_range: Span,
     children: Vec<DocumentSymbol>,
-    index: &LineIndex,
+    index: Positions<'_>,
 ) -> DocumentSymbol {
     DocumentSymbol {
         name,
@@ -53,8 +53,8 @@ fn symbol(
         kind,
         tags: None,
         deprecated: None,
-        range: span_to_lsp_range(index, range),
-        selection_range: span_to_lsp_range(index, selection_range),
+        range: index.range(range),
+        selection_range: index.range(selection_range),
         children: if children.is_empty() {
             None
         } else {
@@ -63,7 +63,7 @@ fn symbol(
     }
 }
 
-fn function_symbol(f: &FunctionDecl, kind: SymbolKind, index: &LineIndex) -> DocumentSymbol {
+fn function_symbol(f: &FunctionDecl, kind: SymbolKind, index: Positions<'_>) -> DocumentSymbol {
     symbol(
         f.name.to_string(),
         kind,
@@ -74,7 +74,7 @@ fn function_symbol(f: &FunctionDecl, kind: SymbolKind, index: &LineIndex) -> Doc
     )
 }
 
-fn method_symbol(m: &MethodDecl, index: &LineIndex) -> DocumentSymbol {
+fn method_symbol(m: &MethodDecl, index: Positions<'_>) -> DocumentSymbol {
     symbol(
         m.function.name.to_string(),
         SymbolKind::METHOD,
@@ -98,7 +98,7 @@ pub(super) fn class_kind_symbol_kind(kind: ClassKind) -> SymbolKind {
     }
 }
 
-fn class_symbol(c: &ClassDecl, index: &LineIndex) -> DocumentSymbol {
+fn class_symbol(c: &ClassDecl, index: Positions<'_>) -> DocumentSymbol {
     let kind = class_kind_symbol_kind(c.def.kind);
     let mut children: Vec<DocumentSymbol> = c
         .def
@@ -137,7 +137,7 @@ fn class_symbol(c: &ClassDecl, index: &LineIndex) -> DocumentSymbol {
     )
 }
 
-fn const_symbol(cst: &syntax::ast::ClassConst, index: &LineIndex) -> DocumentSymbol {
+fn const_symbol(cst: &syntax::ast::ClassConst, index: Positions<'_>) -> DocumentSymbol {
     symbol(
         cst.name.to_string(),
         SymbolKind::CONSTANT,
