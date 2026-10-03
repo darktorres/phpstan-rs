@@ -26,7 +26,6 @@ use rustc_hash::FxHashMap;
 use std::path::{Path, PathBuf};
 
 use syntax::ast::{BinOp, ClassDecl, Expr, ExprKind, Literal, Stmt, StmtKind};
-use syntax::name::Interner;
 
 #[derive(Debug, Default, Clone, PartialEq)]
 pub struct VendorContext {
@@ -157,9 +156,7 @@ fn find_class_decl(stmts: &[Stmt]) -> Option<&ClassDecl> {
 /// gives that for free, no `catch_unwind` needed.
 fn parse_generated_file(path: &Path) -> Option<Vec<Stmt>> {
     let bytes = std::fs::read(path).ok()?;
-    syntax::parse(&bytes, Interner::global())
-        .ok()
-        .map(|parsed| parsed.stmts)
+    syntax::parse(&bytes).ok().map(|parsed| parsed.stmts)
 }
 
 /// What a directory entry is, as its directory's listing says it:

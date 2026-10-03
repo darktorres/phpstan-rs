@@ -6,7 +6,7 @@ use std::sync::Arc;
 use crate::ast::{GotoLabel, Stmt};
 pub use crate::lexer::FileFacts;
 use crate::lexer::{IgnoreMark, LexEnd, LexWarning, Lexer, WatchList};
-use crate::name::{Interner, NameCache};
+use crate::name::NameCache;
 use crate::parser::{ParseError, Parser};
 use crate::span::LineIndex;
 
@@ -74,33 +74,28 @@ impl<'a> Lexer<'a> {
     }
 }
 
-/// Lexes and parses `source`, interning its names in `interner`.
-pub fn parse<'a>(
-    source: impl Into<Source<'a>>,
-    interner: &Arc<Interner>,
-) -> Result<ParsedFile, ParseError> {
-    parse_with_names(source, interner, None)
+/// Lexes and parses `source`, interning its names.
+pub fn parse<'a>(source: impl Into<Source<'a>>) -> Result<ParsedFile, ParseError> {
+    parse_with_names(source, None)
 }
 
 /// `parse`, with the names the files of a load share: the cache is asked
 /// for a name before the interner is.
 pub fn parse_with_names<'a>(
     source: impl Into<Source<'a>>,
-    interner: &Arc<Interner>,
     names: Option<&mut NameCache>,
 ) -> Result<ParsedFile, ParseError> {
-    parse_watching(source, interner, names, None)
+    parse_watching(source, names, None)
 }
 
 /// `parse_with_names`, noting in the file's facts which of the spellings
 /// of `watch` the file names.
 pub fn parse_watching<'a>(
     source: impl Into<Source<'a>>,
-    interner: &Arc<Interner>,
     names: Option<&mut NameCache>,
     watch: Option<&'static WatchList>,
 ) -> Result<ParsedFile, ParseError> {
-    let lexer = Lexer::from_source(source.into()).with_interner(interner);
+    let lexer = Lexer::from_source(source.into());
     let lexer = match watch {
         Some(watch) => lexer.watching(watch),
         None => lexer,
@@ -109,7 +104,7 @@ pub fn parse_watching<'a>(
         Some(cache) => lexer.with_name_cache(cache),
         None => lexer,
     };
-    let mut parser = Parser::from_lexer(lexer).with_interner(interner);
+    let mut parser = Parser::from_lexer(lexer);
     let parsed = parser.parse_program();
     let has_anonymous_class = parser.saw_anonymous_class();
     let goto_labels = parser.file_goto_labels();
@@ -148,15 +143,13 @@ mod tests {
 
     #[test]
     fn a_leading_zero_literal_with_an_8_or_9_is_a_parse_error() {
-        let interner = Arc::clone(Interner::global());
-        let error = parse(b"<?php $x = 08;", &interner).unwrap_err();
+        let error = parse(b"<?php $x = 08;").unwrap_err();
         assert_eq!(error.message, "Invalid numeric literal");
-        assert!(parse(b"<?php $x = 07; $y = 09.5;", &interner).is_ok());
+        assert!(parse(b"<?php $x = 07; $y = 09.5;").is_ok());
     }
 
     #[test]
     fn a_number_or_escape_php_cant_read_whole_is_a_parse_error() {
-        let interner = Arc::clone(Interner::global());
         for bad in [
             &b"<?php $x = 1e;"[..],
             b"<?php $x = 1e+;",
@@ -201,11 +194,7 @@ mod tests {
             b"<?php foreach ($x as array($a)) {}",
             b"<?php $s = \"{$x[, ]}\";",
         ] {
-            assert!(
-                parse(bad, &interner).is_err(),
-                "{}",
-                String::from_utf8_lossy(bad)
-            );
+            assert!(parse(bad).is_err(), "{}", String::from_utf8_lossy(bad));
         }
         for good in [
             &b"<?php $x = 1_000.5_5e1_0;"[..],
@@ -221,17 +210,12 @@ mod tests {
             b"<?php foreach ($x as [$a, [, $b]]) {} foreach ($x as $k => list($a)) {}",
             b"<?php foreach ($x as [&$a]) {} foreach ($x as &$v) {}",
         ] {
-            assert!(
-                parse(good, &interner).is_ok(),
-                "{}",
-                String::from_utf8_lossy(good)
-            );
+            assert!(parse(good).is_ok(), "{}", String::from_utf8_lossy(good));
         }
     }
 
     #[test]
     fn files_parsed_with_a_shared_name_cache_give_the_trees_and_names_they_give_without() {
-        let interner = Arc::clone(Interner::global());
         let first =
             "<?php namespace App; class Foo { public function bar($baz) { return $baz->qux(); } }";
         let second = "<?php namespace App; function f(Foo $baz) { return (new Foo)->bar($baz); }";
@@ -241,18 +225,17 @@ mod tests {
             .map(|source| {
                 format!(
                     "{:?}",
-                    parse_with_names(*source, &interner, Some(&mut cache))
-                        .unwrap()
-                        .stmts
+                    parse_with_names(*source, Some(&mut cache)).unwrap().stmts
                 )
             })
             .collect();
         let alone: Vec<_> = [first, second]
             .iter()
-            .map(|source| format!("{:?}", parse(*source, &interner).unwrap().stmts))
+            .map(|source| format!("{:?}", parse(*source).unwrap().stmts))
             .collect();
         assert_eq!(shared, alone);
         // What the cache holds is what the interner gives.
+        let interner = crate::name::Interner::global();
         for text in ["Foo", "bar", "baz", "qux"] {
             let found = cache.find(text, crate::name::text_hash(text)).expect(text);
             assert!(found.same_allocation(&interner.name(text)), "{text}");

@@ -22,8 +22,7 @@ pub(crate) struct IgnoreComments {
 /// Parses `source` and scans its comments.
 #[cfg(test)]
 pub(crate) fn scan(source: &str) -> IgnoreComments {
-    let parsed = syntax::parse(source.as_bytes(), syntax::name::Interner::global())
-        .expect("the source parses");
+    let parsed = syntax::parse(source.as_bytes()).expect("the source parses");
     scan_parsed(&parsed)
 }
 

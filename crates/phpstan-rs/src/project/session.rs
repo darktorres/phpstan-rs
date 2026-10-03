@@ -10,7 +10,6 @@ use rustc_hash::{FxHashMap, FxHashSet};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use syntax::name::Interner;
 use syntax::span::Span;
 
 use rayon::prelude::*;
@@ -618,7 +617,6 @@ impl Session {
         &self,
         path: &Path,
         is_stub: bool,
-        interner: &Arc<Interner>,
         names: &mut syntax::name::NameCache,
     ) -> Read {
         let Ok(bytes) = std::fs::read(self.root.join(path)) else {
@@ -637,8 +635,8 @@ impl Session {
             }
         };
         let Ok(parsed) = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| match &text {
-            Ok(text) => super::parse_file_with_names(path, text, is_stub, interner, Some(names)),
-            Err(bytes) => super::parse_file_with_names(path, bytes, is_stub, interner, Some(names)),
+            Ok(text) => super::parse_file_with_names(path, text, is_stub, Some(names)),
+            Err(bytes) => super::parse_file_with_names(path, bytes, is_stub, Some(names)),
         })) else {
             return Read::Unread;
         };
@@ -708,7 +706,6 @@ impl Session {
         }
 
         let mut project = Project::new();
-        let interner = Arc::clone(project.interner());
         self.configure(&mut project);
 
         let pool = &self.pool;
@@ -727,12 +724,8 @@ impl Session {
                 // The names a job meets are kept while it parses one file
                 // after another, and dropped with the load.
                 .map_init(syntax::name::NameCache::default, |names, p| {
-                    let mut read = self.read_and_parse_file(
-                        p,
-                        stub_files.contains(p.as_path()),
-                        &interner,
-                        names,
-                    );
+                    let mut read =
+                        self.read_and_parse_file(p, stub_files.contains(p.as_path()), names);
                     if let Read::Loaded(file) = &mut read {
                         project.index_use_sites(&mut file.parsed, &file.source);
                         project.note_owner(&mut file.parsed, p);

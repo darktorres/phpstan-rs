@@ -9,7 +9,6 @@ use std::fmt::Write as _;
 use syntax::ast::{
     Arg, Attribute, ClassKind, Expr, ExprKind, Literal, ResolvedName, Stmt, StmtKind,
 };
-use syntax::name::Interner;
 
 /// One embedded corpus: its tag in the index, and each file's path, source
 /// and (for phpstorm-stubs) extension.
@@ -34,7 +33,7 @@ pub(crate) fn generate(corpora: &[Corpus]) -> String {
     let mut entries: BTreeMap<(&'static str, String), Entry> = BTreeMap::new();
     for corpus in corpora {
         for (path, source, extension) in &corpus.files {
-            let Ok(parsed) = syntax::parse(source.as_bytes(), Interner::global()) else {
+            let Ok(parsed) = syntax::parse(source.as_bytes()) else {
                 continue;
             };
             let stmts = parsed.stmts;

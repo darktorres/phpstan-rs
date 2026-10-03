@@ -32,11 +32,10 @@ fn summary(decl: &BuiltDecl) -> (u8, String, bool) {
 
 #[test]
 fn the_one_walk_finds_what_the_five_walks_found() {
-    let interner = Arc::clone(Interner::global());
     for (i, source) in SOURCES.iter().enumerate() {
         for is_stub in [false, true] {
             let path = Path::new("/p/file.php");
-            let parsed = parse_file(path, source.as_bytes(), is_stub, &interner)
+            let parsed = parse_file(path, source.as_bytes(), is_stub)
                 .unwrap_or_else(|_| panic!("source {i} parses"));
             let (functions, classes) = declared_names(&parsed.ast);
             assert_eq!(parsed.functions, functions, "functions of source {i}");
@@ -105,7 +104,6 @@ fn the_one_walk_finds_what_the_five_walks_found() {
 fn the_unconditional_classes_are_those_the_declaration_walk_finds() {
     use syntax::ast::ClassKind;
     use syntax::declarations::{Declared, for_each_declaration};
-    let interner = Arc::clone(Interner::global());
     let mut sources: Vec<&str> = SOURCES.to_vec();
     sources.extend([
         "<?php { class InBlock {} { class Deeper {} } } declare(ticks=1) { class InDeclare {} } class Top {}",
@@ -115,7 +113,7 @@ fn the_unconditional_classes_are_those_the_declaration_walk_finds() {
         "<?php foreach ([] as $i) { class InForeach {} } class Kept {} interface I {} trait T {}",
     ]);
     for (i, source) in sources.iter().enumerate() {
-        let parsed = syntax::parse(source.as_bytes(), &interner).expect("parses");
+        let parsed = syntax::parse(source.as_bytes()).expect("parses");
         let mut by_visitor: Vec<String> = Vec::new();
         for_each_declaration(&parsed.stmts, |declaration, _, _| {
             if let Declared::Class(c) = declaration.declared
@@ -134,7 +132,6 @@ fn the_unconditional_classes_are_those_the_declaration_walk_finds() {
 
 #[test]
 fn leaving_out_the_walks_a_file_cannot_need_gives_the_tree_the_walks_gave() {
-    let interner = Arc::clone(Interner::global());
     let sources = [
         "<?php class A { public function m() {} }",
         "<?php $o = new class { public function m() {} }; $p = new class {};",
@@ -148,13 +145,11 @@ fn leaving_out_the_walks_a_file_cannot_need_gives_the_tree_the_walks_gave() {
     ];
     for (i, source) in sources.iter().enumerate() {
         let path = Path::new("/p/file.php");
-        let parsed = syntax::parse_watching(source.as_bytes(), &interner, None, Some(&WATCHED))
-            .expect("parses");
+        let parsed =
+            syntax::parse_watching(source.as_bytes(), None, Some(&WATCHED)).expect("parses");
         let facts = parsed.facts;
         // What the walks give with nothing left out.
-        let mut every = syntax::parse(source.as_bytes(), &interner)
-            .expect("parses")
-            .stmts;
+        let mut every = syntax::parse(source.as_bytes()).expect("parses").stmts;
         crate::stub_attributes::apply_stub_attributes(&mut every);
         crate::registry::name_anonymous_classes(
             &mut every,
@@ -165,7 +160,7 @@ fn leaving_out_the_walks_a_file_cannot_need_gives_the_tree_the_walks_gave() {
             ast: gated,
             facts: gated_facts,
             ..
-        } = parse_with_ignores(path, *source, &interner, None).expect("parses");
+        } = parse_with_ignores(path, *source, None).expect("parses");
         assert_eq!(gated_facts, facts, "facts of source {i}");
         assert_eq!(format!("{gated:?}"), format!("{every:?}"), "source {i}");
         // The anonymous classes' registry entries.
@@ -181,9 +176,8 @@ fn leaving_out_the_walks_a_file_cannot_need_gives_the_tree_the_walks_gave() {
 
 #[test]
 fn what_a_file_names_is_found_among_its_identifiers() {
-    let interner = Arc::clone(Interner::global());
     let facts = |source: &str| {
-        syntax::parse_watching(source.as_bytes(), &interner, None, Some(&WATCHED))
+        syntax::parse_watching(source.as_bytes(), None, Some(&WATCHED))
             .unwrap()
             .facts
     };

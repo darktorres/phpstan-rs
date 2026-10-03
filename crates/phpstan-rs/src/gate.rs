@@ -292,7 +292,6 @@ type ParsedScopeFile = (Vec<Stmt>, Arc<syntax::span::LineIndex>);
 /// `template_scope_at` over files read and parsed once each.
 pub struct TemplateScopes<'r> {
     registry: &'r Registry,
-    interner: Arc<syntax::name::Interner>,
     files: FxHashMap<PathBuf, Option<ParsedScopeFile>>,
 }
 
@@ -300,7 +299,6 @@ impl<'r> TemplateScopes<'r> {
     pub fn new(registry: &'r Registry) -> TemplateScopes<'r> {
         TemplateScopes {
             registry,
-            interner: Arc::clone(syntax::name::Interner::global()),
             files: FxHashMap::default(),
         }
     }
@@ -308,10 +306,9 @@ impl<'r> TemplateScopes<'r> {
     /// The templates in scope at `line`:`col` of `path`; none when the
     /// file can't be read or parsed.
     pub fn at(&mut self, path: &Path, line: u32, col: u32) -> TemplateScope {
-        let interner = &self.interner;
         let stmts = self.files.entry(path.to_path_buf()).or_insert_with(|| {
             let source = std::fs::read(path).ok()?;
-            syntax::parse(&source, interner)
+            syntax::parse(&source)
                 .ok()
                 .map(|parsed| (parsed.stmts, parsed.line_index))
         });
@@ -350,8 +347,7 @@ function free(): void {
 ";
 
     fn scope_at(line: u32) -> TemplateScope {
-        let interner = Arc::clone(syntax::name::Interner::global());
-        let parsed = syntax::parse(SOURCE.as_bytes(), &interner).unwrap();
+        let parsed = syntax::parse(SOURCE.as_bytes()).unwrap();
         let registry = Registry::build(&parsed.stmts);
         let at = parsed
             .line_index

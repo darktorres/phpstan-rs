@@ -33,8 +33,8 @@ impl Parser<'_> {
                 StringPart::ComplexExpr(src, frag_base) => {
                     // Lexed where it sits in the file, so every span in
                     // the fragment is already the real one.
-                    let lexer = Lexer::fragment(&src, frag_base).with_interner(&self.interner);
-                    let mut sub = Parser::from_lexer(lexer).with_interner(&self.interner);
+                    let lexer = Lexer::fragment(&src, frag_base);
+                    let mut sub = Parser::from_lexer(lexer);
                     sub.line_index = Arc::clone(&self.line_index);
                     // The fragment's names are read in the namespace and
                     // imports where it sits.

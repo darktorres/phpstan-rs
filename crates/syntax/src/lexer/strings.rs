@@ -585,7 +585,7 @@ impl<'a> Lexer<'a> {
                         key_end,
                     }) => {
                         let key_text = super::lossy(&inner_bytes[key_start..key_end]);
-                        match classify_index_key(&key_text, &self.interner) {
+                        match classify_index_key(&key_text, self.interner) {
                             Some(key) => {
                                 let name =
                                     self.interner.name(&super::lossy(&inner_bytes[1..name_end]));
@@ -709,7 +709,7 @@ impl<'a> Lexer<'a> {
                     }
                     let key = super::lossy(&bytes[key_start..i]).into_owned();
                     i = (i + 1).min(bytes.len());
-                    match classify_index_key(&key, &self.interner) {
+                    match classify_index_key(&key, self.interner) {
                         Some(key) => {
                             let end = self.offset(off(i));
                             parts.push(StringPart::Index {

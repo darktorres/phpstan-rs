@@ -49,7 +49,6 @@ use rayon::prelude::*;
 use crate::registry::{
     ClassReflection, FunctionReflection, Origin, Registry, register_global_constant,
 };
-use syntax::name::Interner;
 use types::{self, AccessoryKind, Shape, TemplateParam, Type};
 
 use stub_sources::{
@@ -734,7 +733,7 @@ fn patch_spl_iterator_templates(classes: &mut [(Name, ClassReflection)]) {
 /// names, since the type may refer to them.
 fn patch_phpstan_stub_classes(classes: &mut [(Name, ClassReflection)]) {
     for source in PHPSTAN_STUB_SOURCES {
-        let Ok(parsed) = syntax::parse(source.as_bytes(), Interner::global()) else {
+        let Ok(parsed) = syntax::parse(source.as_bytes()) else {
             continue;
         };
         let mut program = parsed.stmts;
@@ -1376,7 +1375,7 @@ struct StubFileDeclarations {
 
 /// Parses and indexes one embedded stub file, from `origin`.
 fn index_stub_file(source: &str, origin: &Origin) -> StubFileDeclarations {
-    let mut program = syntax::parse(source.as_bytes(), Interner::global())
+    let mut program = syntax::parse(source.as_bytes())
         .expect("vendored phpstorm-stubs source failed to parse")
         .stmts;
     crate::stub_attributes::apply_stub_attributes(&mut program);

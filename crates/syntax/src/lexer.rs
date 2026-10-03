@@ -68,7 +68,7 @@ pub struct Lexer<'a> {
     facts: FileFacts,
     warnings: Vec<LexWarning>,
     // What identifiers, variables and other token text are interned into.
-    interner: Arc<Interner>,
+    interner: &'static Interner,
     // The names this lexer has interned, by their text's hash: a file
     // repeats its identifiers and variables, and a repeat is found here
     // without the interner's lock. Held for as long as the lexer is, so
@@ -376,7 +376,7 @@ impl<'a> Lexer<'a> {
             unsettled_marks: 0,
             facts: FileFacts::default(),
             warnings: Vec::new(),
-            interner: Arc::clone(Interner::global()),
+            interner: Interner::global(),
             names: hashbrown::HashTable::new(),
             watch: None,
         }
@@ -443,13 +443,6 @@ impl<'a> Lexer<'a> {
     /// Notes the spellings of `watch` in the facts of the file.
     pub fn watching(mut self, watch: &'static WatchList) -> Self {
         self.watch = Some(watch);
-        self
-    }
-
-    /// Interns token text into `interner` rather than the global one.
-    pub fn with_interner(mut self, interner: &Arc<Interner>) -> Self {
-        self.interner = Arc::clone(interner);
-        self.names.clear();
         self
     }
 

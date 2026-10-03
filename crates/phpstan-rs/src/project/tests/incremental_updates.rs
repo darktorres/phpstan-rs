@@ -1064,7 +1064,6 @@ fn assert_edits_match_fresh_loads(
     // function of its path and text, and a fresh load takes a copy of it. A
     // text that does not parse is ignored, as `load_analyzed_file`'s error
     // is.
-    let interner = std::sync::Arc::clone(syntax::name::Interner::global());
     let parsed: std::cell::RefCell<
         rustc_hash::FxHashMap<(String, String), Option<crate::project::ParsedFile>>,
     > = Default::default();
@@ -1077,13 +1076,7 @@ fn assert_edits_match_fresh_loads(
                     .borrow_mut()
                     .entry((path.clone(), source.clone()))
                     .or_insert_with(|| {
-                        crate::project::parse_file(
-                            Path::new(path),
-                            source.as_bytes(),
-                            false,
-                            &interner,
-                        )
-                        .ok()
+                        crate::project::parse_file(Path::new(path), source.as_bytes(), false).ok()
                     })
                     .clone()
             })
@@ -1309,13 +1302,11 @@ fn a_batch_load_equals_a_load_file_by_file() {
     }
     one_by_one.finish_loading();
     let mut batch = Project::new();
-    let interner = std::sync::Arc::clone(syntax::name::Interner::global());
     let files: Vec<crate::project::ParsedFile> = paths
         .iter()
         .zip(sources)
         .map(|(path, source)| {
-            crate::project::parse_file(Path::new(path), source.as_bytes(), false, &interner)
-                .expect("parses")
+            crate::project::parse_file(Path::new(path), source.as_bytes(), false).expect("parses")
         })
         .collect();
     batch.expect_files(files.iter());

@@ -2,10 +2,8 @@
 //! file are the ones a source-order walk of that body finds.
 use rustc_hash::FxHashSet;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
 
 use crate::ast::*;
-use crate::name::Interner;
 use crate::visit::{Visitor, any_stmt_in_body, walk_expr, walk_function_decl, walk_stmt};
 
 /// What a walk of `stmts` in source order says: every label a `goto` names,
@@ -95,8 +93,8 @@ impl<'ast> Visitor<'ast> for Check {
     }
 }
 
-fn check_source(source: &[u8], interner: &Arc<Interner>, check: &mut Check, what: &Path) {
-    let Ok(parsed) = crate::parse::parse(source, interner) else {
+fn check_source(source: &[u8], check: &mut Check, what: &Path) {
+    let Ok(parsed) = crate::parse::parse(source) else {
         return;
     };
     check.compare(
@@ -125,7 +123,6 @@ fn php_files(dir: &Path, out: &mut Vec<PathBuf>) {
 
 #[test]
 fn the_labels_of_a_body_are_those_of_a_source_order_walk() {
-    let interner = Arc::clone(Interner::global());
     let mut check = Check::default();
     let sources = [
         "<?php goto a; b: echo 1; a: goto b; function f() { x: goto x; goto y; y: } \
@@ -136,12 +133,7 @@ fn the_labels_of_a_body_are_those_of_a_source_order_walk() {
         "<?php function h() { $f = function () { goto in; }; goto in; in: }",
     ];
     for (i, source) in sources.iter().enumerate() {
-        check_source(
-            source.as_bytes(),
-            &interner,
-            &mut check,
-            Path::new(&format!("src{i}")),
-        );
+        check_source(source.as_bytes(), &mut check, Path::new(&format!("src{i}")));
     }
     assert!(check.mismatches.is_empty(), "{:#?}", check.mismatches);
     assert!(
@@ -158,11 +150,10 @@ fn the_labels_agree_over_the_fixtures_and_the_vendor_tree() {
     php_files(&root.join("crates/phpstan-rs/tests/fixtures"), &mut files);
     php_files(&root.join("vendor/phpstan-src/src"), &mut files);
     php_files(&root.join("vendor/symfony/src"), &mut files);
-    let interner = Arc::clone(Interner::global());
     let mut check = Check::default();
     for path in &files {
         if let Ok(source) = std::fs::read(path) {
-            check_source(&source, &interner, &mut check, path);
+            check_source(&source, &mut check, path);
         }
     }
     assert!(check.mismatches.is_empty(), "{:#?}", check.mismatches);

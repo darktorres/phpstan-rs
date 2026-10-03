@@ -11,10 +11,8 @@
 
 use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
 
 use syntax::lexer::Lexer;
-use syntax::name::Interner;
 
 fn php_files(dir: &Path, out: &mut Vec<PathBuf>) {
     let Ok(entries) = std::fs::read_dir(dir) else {
@@ -44,8 +42,7 @@ pub(crate) fn dump(source: &[u8]) -> String {
     for warning in &warnings {
         let _ = writeln!(text, "warning {warning:?}");
     }
-    let interner = Arc::clone(Interner::global());
-    match syntax::parse(source, &interner) {
+    match syntax::parse(source) {
         Ok(parsed) => {
             let _ = writeln!(text, "parsed {parsed:?}");
         }

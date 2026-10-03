@@ -3,7 +3,6 @@ use std::path::PathBuf;
 
 use phpstan_rs::project;
 use rayon::prelude::*;
-use syntax::name::Interner;
 
 /// `phpstan-rs check <file-or-dir>...` - parse every .php file under the
 /// given paths in a single process (no per-file fork/exec), split across
@@ -52,7 +51,7 @@ pub(crate) fn check_chunk(chunk: &[PathBuf]) -> Vec<(PathBuf, String)> {
             }
         };
         let result = std::panic::catch_unwind(|| {
-            let parsed = syntax::parse(&bytes, Interner::global())?;
+            let parsed = syntax::parse(&bytes)?;
             for w in &parsed.warnings {
                 eprintln!(
                     "warning: {}:{}:{}: {}",

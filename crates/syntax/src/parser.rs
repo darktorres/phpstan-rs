@@ -47,7 +47,7 @@ pub struct Parser<'a> {
     // The id the next node built gets - see `NodeId`.
     pub(crate) next_node_id: std::cell::Cell<u32>,
     // What names in the tree are interned into.
-    pub(crate) interner: Arc<Interner>,
+    pub(crate) interner: &'static Interner,
     // Errors that stand unless the node they're keyed by turns out to be
     // part of a destructuring target: a skipped array slot (`[, $b]`) and
     // a `list(...)`. Which it is is only known once the outermost `[...]`
@@ -188,7 +188,7 @@ impl<'a> Parser<'a> {
             last_span: Span::default(),
             line_index,
             next_node_id: std::cell::Cell::new(0),
-            interner: Arc::clone(Interner::global()),
+            interner: Interner::global(),
             pattern_only: Vec::new(),
             long_arrays: rustc_hash::FxHashSet::default(),
             saw_anonymous_class: false,
@@ -396,12 +396,6 @@ impl Parser<'_> {
     /// fallback as `current_pos` for the same reason.
     pub(crate) fn previous_end(&self) -> u32 {
         self.last_end
-    }
-
-    /// Interns names into `interner` rather than the global one.
-    pub fn with_interner(mut self, interner: &Arc<Interner>) -> Self {
-        self.interner = Arc::clone(interner);
-        self
     }
 
     /// How a name just parsed is read, by what follows it: a call's callee

@@ -22,7 +22,6 @@ use syntax::FileFacts;
 use syntax::ast::{Stmt, StmtKind};
 use syntax::declarations::Declared;
 use syntax::lexer::LexWarning;
-use syntax::name::Interner;
 use syntax::parser::ParseError;
 use syntax::span::{LineIndex, Span};
 use types::Name;
@@ -154,9 +153,6 @@ impl BodySource for file_table::FileTable<FileState> {
 /// and registry entries are untouched.
 pub struct Project {
     files: file_table::FileTable<FileState>,
-    // What the names in this project's parsed files are interned into,
-    // freed with the project.
-    interner: Arc<Interner>,
     dependents: FxHashMap<deps::RefKey, FxHashSet<FileId>>,
     // `dependents` for the names files' declarations themselves mention
     // (`deps::declaration_referenced_names`).
@@ -436,12 +432,6 @@ pub struct ProjectSettings {
 }
 
 impl Project {
-    /// What this project's names are interned into; a file parsed for it
-    /// elsewhere (`parse_file`) should use it too.
-    pub fn interner(&self) -> &Arc<Interner> {
-        &self.interner
-    }
-
     /// A project holding the built-in stubs, resolved: a clone of a
     /// registry resolved once per process, sharing its tables.
     pub fn new() -> Self {
@@ -523,7 +513,6 @@ impl Project {
     fn with_registry(registry: Registry) -> Self {
         Project {
             files: file_table::FileTable::default(),
-            interner: Arc::clone(Interner::global()),
             dependents: FxHashMap::default(),
             signature_dependents: FxHashMap::default(),
             registry,
@@ -839,7 +828,7 @@ impl Project {
         // concept at all (that's a batch `check-project`-only config key,
         // wired through `read_and_parse_file` instead) and no way to
         // enable `check_duplicate_class_declarations` in the first place.
-        let parsed = parse_file(&path, source, false, &self.interner)?;
+        let parsed = parse_file(&path, source, false)?;
         self.insert_parsed_file(path, parsed, source.to_string(), analyzed);
         Ok(())
     }
@@ -985,18 +974,15 @@ impl Project {
         files: &[(PathBuf, bool)],
         pool: Option<&rayon::ThreadPool>,
     ) -> Vec<(PathBuf, ParseError)> {
-        let interner = Arc::clone(&self.interner);
         let this = &*self;
         let parsed = map_on_pool(pool, files, |(path, _)| {
             let bytes = fs::read(path).ok()?;
             let source = String::from_utf8_lossy(&bytes).into_owned();
-            Some(
-                parse_file(path, source.as_str(), false, &interner).map(|mut parsed| {
-                    this.index_use_sites(&mut parsed, &source);
-                    this.note_owner(&mut parsed, path);
-                    (source, parsed)
-                }),
-            )
+            Some(parse_file(path, source.as_str(), false).map(|mut parsed| {
+                this.index_use_sites(&mut parsed, &source);
+                this.note_owner(&mut parsed, path);
+                (source, parsed)
+            }))
         });
         self.expect_files(parsed.iter().filter_map(|p| match p {
             Some(Ok((_, parsed))) => Some(parsed),
@@ -1635,7 +1621,7 @@ impl Project {
             facts,
             line_index,
             ..
-        } = parse_with_ignores(path, new_source, &self.interner, None)?;
+        } = parse_with_ignores(path, new_source, None)?;
         let previous = self.unindex_file(path);
         let (functions, classes) = declared_names(&ast);
         let constants = declared_constants(&ast);
@@ -2644,10 +2630,9 @@ struct Parsed {
 fn parse_with_ignores<'a>(
     path: &Path,
     source: impl Into<syntax::Source<'a>>,
-    interner: &Arc<Interner>,
     names: Option<&mut syntax::name::NameCache>,
 ) -> Result<Parsed, ParseError> {
-    let parsed = syntax::parse_watching(source, interner, names, Some(&WATCHED))?;
+    let parsed = syntax::parse_watching(source, names, Some(&WATCHED))?;
     let ignores = ignore_comments::scan_parsed(&parsed);
     let mut ast = parsed.stmts;
     // What the file does not name, or hold, there is nothing to find of by
@@ -2744,9 +2729,8 @@ pub fn parse_file<'a>(
     path: &Path,
     source: impl Into<syntax::Source<'a>>,
     is_stub: bool,
-    interner: &Arc<Interner>,
 ) -> Result<ParsedFile, ParseError> {
-    parse_file_with_names(path, source, is_stub, interner, None)
+    parse_file_with_names(path, source, is_stub, None)
 }
 
 /// `parse_file`, with the names the files of a load share: the cache is
@@ -2755,7 +2739,6 @@ pub fn parse_file_with_names<'a>(
     path: &Path,
     source: impl Into<syntax::Source<'a>>,
     is_stub: bool,
-    interner: &Arc<Interner>,
     names: Option<&mut syntax::name::NameCache>,
 ) -> Result<ParsedFile, ParseError> {
     let Parsed {
@@ -2764,7 +2747,7 @@ pub fn parse_file_with_names<'a>(
         warnings: lex_warnings,
         facts,
         line_index,
-    } = parse_with_ignores(path, source, interner, names)?;
+    } = parse_with_ignores(path, source, names)?;
     let origin_path: Arc<Path> = Arc::from(path);
     let origin = Origin::File(Arc::clone(&origin_path));
     let file_declarations::FileDeclarations {

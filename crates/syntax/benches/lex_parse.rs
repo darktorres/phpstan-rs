@@ -6,7 +6,6 @@ use std::path::{Path, PathBuf};
 
 use criterion::{Criterion, criterion_group, criterion_main};
 use syntax::lexer::Lexer;
-use syntax::name::Interner;
 
 fn php_files(dir: &Path, out: &mut Vec<PathBuf>) {
     let Ok(entries) = std::fs::read_dir(dir) else {
@@ -50,7 +49,7 @@ fn bench(c: &mut Criterion) {
     c.bench_function("lex and parse phpstorm-stubs", |b| {
         b.iter(|| {
             for source in &sources {
-                let _ = std::hint::black_box(syntax::parse(source.as_bytes(), Interner::global()));
+                let _ = std::hint::black_box(syntax::parse(source.as_bytes()));
             }
         })
     });

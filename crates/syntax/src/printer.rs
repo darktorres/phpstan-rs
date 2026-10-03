@@ -577,10 +577,9 @@ fn write_expr_unguarded(out: &mut String, e: &Expr) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::name::Interner;
 
     fn printed(src: &str) -> String {
-        let program = crate::parse(format!("<?php {src};").as_bytes(), Interner::global())
+        let program = crate::parse(format!("<?php {src};").as_bytes())
             .unwrap()
             .stmts;
         let [stmt] = program.as_slice() else {

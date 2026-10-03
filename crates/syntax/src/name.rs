@@ -357,14 +357,6 @@ pub struct Interner {
     shards: [Mutex<Shard>; SHARDS],
 }
 
-impl Default for Interner {
-    fn default() -> Self {
-        Interner {
-            shards: std::array::from_fn(|_| Mutex::new(Shard::default())),
-        }
-    }
-}
-
 /// What a [`NameMap`] is looked up by: a name, or text.
 pub trait NameKey {
     /// `text_hash` of the key's text.
@@ -1072,12 +1064,14 @@ pub fn text_hash(text: &str) -> u64 {
 
 impl Interner {
     fn new() -> Interner {
-        Interner::default()
+        Interner {
+            shards: std::array::from_fn(|_| Mutex::new(Shard::default())),
+        }
     }
 
-    /// The process-wide interner, for callers without one of their own.
-    pub fn global() -> &'static Arc<Interner> {
-        static GLOBAL: LazyLock<Arc<Interner>> = LazyLock::new(|| Arc::new(Interner::new()));
+    /// The process-wide interner, the only one there is.
+    pub fn global() -> &'static Interner {
+        static GLOBAL: LazyLock<Interner> = LazyLock::new(Interner::new);
         &GLOBAL
     }
 

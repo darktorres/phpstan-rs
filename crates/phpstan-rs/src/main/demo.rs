@@ -6,7 +6,6 @@ use checker::Checker;
 use phpstan_rs::registry::stubs;
 use phpstan_rs::{checker, output, registry};
 use registry::{Registry, format_signature};
-use syntax::name::Interner;
 
 const SAMPLE: &str = r#"<?php
 
@@ -59,7 +58,7 @@ pub(crate) fn run_demo(file: Option<&Path>) {
         SAMPLE.as_bytes().to_vec()
     };
 
-    let parsed = syntax::parse(&source, Interner::global()).unwrap();
+    let parsed = syntax::parse(&source).unwrap();
     println!("-- {} ignore marks --", parsed.ignore_marks.len());
     let program = parsed.stmts;
 

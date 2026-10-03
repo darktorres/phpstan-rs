@@ -107,10 +107,8 @@ fn identifier_bytes_are_those_the_character_classes_name() {
 
 #[test]
 fn a_name_the_lexer_repeats_is_the_one_the_interner_holds() {
-    let interner = Arc::clone(Interner::global());
-    let tokens = Lexer::new_in_php("<?php $a = foo($a, foo);")
-        .with_interner(&interner)
-        .tokenize();
+    let interner = Interner::global();
+    let tokens = Lexer::new_in_php("<?php $a = foo($a, foo);").tokenize();
     let names: Vec<&Name> = tokens
         .iter()
         .filter_map(|t| match t {
@@ -127,7 +125,7 @@ fn a_name_the_lexer_repeats_is_the_one_the_interner_holds() {
         assert!(first(text).same_allocation(&held));
     }
     // Another lexer, while these are alive, finds the same names.
-    let again = Lexer::new_in_php("$a").with_interner(&interner).tokenize();
+    let again = Lexer::new_in_php("$a").tokenize();
     let Token::Variable(n) = &again[0] else {
         panic!("a variable")
     };
