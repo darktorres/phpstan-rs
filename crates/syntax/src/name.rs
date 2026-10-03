@@ -633,21 +633,39 @@ fn lowered(word: u64) -> u64 {
     word | (ascii_capitals(word) >> 2)
 }
 
+/// `word` with the bit `0x20` set in every byte: a capital and its
+/// lowercase form become one byte, as do a few other pairs that no name has
+/// two of (`\` and `|`, `@` and a backquote). For hashing, where two names
+/// that are one ignoring case must hash alike and the rest need only
+/// mostly differ.
+const fn with_case_bit(word: u64) -> u64 {
+    word | 0x2020_2020_2020_2020
+}
+
+/// The last eight bytes of `text` (at least eight long) as a word.
+fn last_word(text: &[u8]) -> u64 {
+    let (_, tail) = text.split_at(text.len() - 8);
+    u64::from_le_bytes(tail.try_into().expect("eight bytes"))
+}
+
 /// The hash of `text` ASCII-lowercased, eight bytes at a time and without
 /// building the lowercase text: the hash a name files itself under in a
 /// table that ignores case, so a name in any case finds the same place.
 pub fn folded_hash(text: &[u8]) -> u64 {
     const K: u64 = 0x517c_c1b7_2722_0a95;
     let mix = |hash: u64, word: u64| (hash.rotate_left(5) ^ word).wrapping_mul(K);
-    let (words, rest) = text.as_chunks::<8>();
     let mut hash = mix(0, text.len() as u64);
-    for word in words {
-        hash = mix(hash, lowered(u64::from_le_bytes(*word)));
-    }
-    if !rest.is_empty() {
-        let mut last = [0u8; 8];
-        last[..rest.len()].copy_from_slice(rest);
-        hash = mix(hash, lowered(u64::from_le_bytes(last)));
+    if text.len() >= 8 {
+        let (words, _) = text.as_chunks::<8>();
+        for word in words {
+            hash = mix(hash, with_case_bit(u64::from_le_bytes(*word)));
+        }
+        // The bytes past the last whole word, with some of it again.
+        hash = mix(hash, with_case_bit(last_word(text)));
+    } else if !text.is_empty() {
+        let mut word = [0u8; 8];
+        word[..text.len()].copy_from_slice(text);
+        hash = mix(hash, with_case_bit(u64::from_le_bytes(word)));
     }
     hash ^ (hash >> 32)
 }
@@ -658,16 +676,19 @@ pub fn eq_lowercased(text: &[u8], key: &[u8]) -> bool {
     if text.len() != key.len() {
         return false;
     }
-    let (text_words, text_rest) = text.as_chunks::<8>();
-    let (key_words, key_rest) = key.as_chunks::<8>();
-    for (text, key) in text_words.iter().zip(key_words) {
-        if lowered(u64::from_le_bytes(*text)) != u64::from_le_bytes(*key) {
-            return false;
+    if text.len() >= 8 {
+        let (text_words, _) = text.as_chunks::<8>();
+        let (key_words, _) = key.as_chunks::<8>();
+        for (text, key) in text_words.iter().zip(key_words) {
+            if lowered(u64::from_le_bytes(*text)) != u64::from_le_bytes(*key) {
+                return false;
+            }
         }
+        // The bytes past the last whole word, with some of it again.
+        return lowered(last_word(text)) == last_word(key);
     }
-    text_rest
-        .iter()
-        .zip(key_rest)
+    text.iter()
+        .zip(key)
         .all(|(text, key)| text.to_ascii_lowercase() == *key)
 }
 
