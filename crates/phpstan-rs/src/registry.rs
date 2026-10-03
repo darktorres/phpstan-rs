@@ -30,6 +30,7 @@ pub mod reflection_attribute;
 mod relation;
 mod resolve;
 pub(crate) mod scope;
+mod shared;
 mod stub_cache;
 pub(crate) use stub_cache::{
     load as load_cached, load_container, store as store_cached, store_container,
@@ -58,6 +59,7 @@ pub use members::Members;
 pub use name_map::{NameMap, NameSet};
 pub use name_table::NameTable;
 pub(crate) use name_table::{Detached, FoldedKey, Lazy};
+pub use shared::Shared;
 pub type FunctionTable = NameTable<FunctionReflection>;
 pub(crate) use index::{
     BuiltDecl, DeclKind, Keep, build_declarations, build_declarations_where, built_declaration,
