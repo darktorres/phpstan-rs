@@ -44,39 +44,38 @@ pub(crate) enum PhpDocToken {
 }
 
 pub(crate) struct Lexer<'a> {
-    chars: Vec<char>,
+    src: &'a str,
+    /// The byte offset of the next character in `src`.
     pos: usize,
-    // The byte offset of `chars[pos]` in the text.
-    byte: u32,
-    _src: &'a str,
 }
 
 impl<'a> Lexer<'a> {
     pub(crate) fn new(src: &'a str) -> Self {
-        Lexer {
-            chars: src.chars().collect(),
-            pos: 0,
-            byte: 0,
-            _src: src,
-        }
+        Lexer { src, pos: 0 }
     }
 
     fn peek(&self) -> Option<char> {
-        self.chars.get(self.pos).copied()
+        match self.src.as_bytes().get(self.pos)? {
+            byte if byte.is_ascii() => Some(*byte as char),
+            _ => self.src[self.pos..].chars().next(),
+        }
     }
 
+    /// The character `offset` characters on from the next.
     fn peek_at(&self, offset: usize) -> Option<char> {
-        self.chars.get(self.pos + offset).copied()
+        match offset {
+            0 => self.peek(),
+            _ => self.src[self.pos..].chars().nth(offset),
+        }
     }
 
     fn position(&self) -> u32 {
-        self.byte
+        self.pos as u32
     }
 
     fn advance(&mut self) -> Option<char> {
         let c = self.peek()?;
-        self.pos += 1;
-        self.byte += c.len_utf8() as u32;
+        self.pos += c.len_utf8();
         Some(c)
     }
 
@@ -112,42 +111,43 @@ impl<'a> Lexer<'a> {
     /// negative-literal minus (`-1`) both correctly *not* absorbed into
     /// the identifier.
     fn lex_identifier(&mut self) -> String {
-        let mut s = String::new();
+        let start = self.pos;
         loop {
             while matches!(self.peek(), Some(c) if c.is_alphanumeric() || c == '_' || c == '\\') {
-                s.push(self.advance().unwrap());
+                self.advance();
             }
             if self.peek() == Some('-')
                 && matches!(self.peek_at(1), Some(c) if c.is_alphabetic() || c == '_')
             {
-                s.push(self.advance().unwrap());
+                self.advance();
                 continue;
             }
             break;
         }
-        s
+        self.src[start..self.pos].to_string()
     }
 
     fn lex_number(&mut self) -> PhpDocToken {
-        let mut s = String::new();
+        let start = self.pos;
         if self.peek() == Some('-') {
-            s.push(self.advance().unwrap());
+            self.advance();
         }
         while matches!(self.peek(), Some(c) if c.is_ascii_digit()) {
-            s.push(self.advance().unwrap());
+            self.advance();
         }
         let mut is_float = false;
         if self.peek() == Some('.') && matches!(self.peek_at(1), Some(c) if c.is_ascii_digit()) {
             is_float = true;
-            s.push(self.advance().unwrap());
+            self.advance();
             while matches!(self.peek(), Some(c) if c.is_ascii_digit()) {
-                s.push(self.advance().unwrap());
+                self.advance();
             }
         }
+        let text = &self.src[start..self.pos];
         if is_float {
-            PhpDocToken::FloatLiteral(s.parse().unwrap_or(0.0))
+            PhpDocToken::FloatLiteral(text.parse().unwrap_or(0.0))
         } else {
-            PhpDocToken::IntLiteral(s.parse().unwrap_or(0))
+            PhpDocToken::IntLiteral(text.parse().unwrap_or(0))
         }
     }
 
