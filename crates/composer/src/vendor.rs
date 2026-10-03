@@ -162,17 +162,34 @@ fn parse_generated_file(path: &Path) -> Option<Vec<Stmt>> {
         .map(|parsed| parsed.stmts)
 }
 
+/// What a directory entry is, as its directory's listing says it:
+/// without following a link.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum EntryKind {
+    Link,
+    Other,
+}
+
+/// A directory that was listed: its canonical form, and its entries by
+/// name.
+struct Listed {
+    canonical: PathBuf,
+    entries: FxHashMap<Vec<u8>, EntryKind>,
+}
+
 /// Resolves a generated autoloader's path expressions against its vendor,
 /// base and generated directories.
 struct Resolver<'p> {
     vendor_dir: &'p Path,
     base_dir: &'p Path,
     generated_dir: &'p Path,
-    // Each directory's canonical form, found once: autoload entries share
-    // a few thousand directories among tens of thousands of files. Keyed by
-    // the directory's text as written, which hashes as bytes - a `Path`
-    // hashes component by component.
-    canonical_dirs: FxHashMap<Vec<u8>, Option<PathBuf>>,
+    // Each directory's listing, made once: autoload entries share a few
+    // thousand directories among tens of thousands of files, and a listing
+    // tells whether an entry exists and whether it is a link, which a
+    // `stat` of each file would. Keyed by the directory's text as written,
+    // which hashes as bytes - a `Path` hashes component by component. None
+    // for a directory that has no canonical form or cannot be listed.
+    listings: FxHashMap<Vec<u8>, Option<Listed>>,
 }
 
 impl<'p> Resolver<'p> {
@@ -181,7 +198,7 @@ impl<'p> Resolver<'p> {
             vendor_dir,
             base_dir,
             generated_dir,
-            canonical_dirs: FxHashMap::default(),
+            listings: FxHashMap::default(),
         }
     }
 
@@ -219,44 +236,110 @@ impl<'p> Resolver<'p> {
     /// which must never be silently treated as vendor context.
     fn path(&mut self, expr: &Expr) -> Option<PathBuf> {
         let raw = eval_concat(expr, self.vendor_dir, self.base_dir, self.generated_dir)?;
+        let raw = path_of(&raw);
         // Containment is decided on the path as written, not its canonical
         // form: a path-repository package is a `vendor/<name>` symlink to a
         // directory outside `vendor/`, and still belongs to vendor context.
-        let resolved = self.canonical(&raw)?;
+        let resolved = self.canonical(raw)?;
         if resolved.starts_with(self.vendor_dir) {
             return Some(resolved);
         }
-        let lexical = lexically_normalized(Path::new(&raw));
+        let lexical = lexically_normalized(raw);
         let vendor_as_written = lexically_normalized(&self.generated_dir.join(".."));
         (lexical.starts_with(self.vendor_dir) || lexical.starts_with(&vendor_as_written))
             .then_some(lexical)
     }
 
     /// `std::fs::canonicalize(path)`, through its directory's canonical
-    /// form when the entry itself isn't a link.
-    fn canonical(&mut self, text: &str) -> Option<PathBuf> {
-        let path = Path::new(text);
-        let entry = std::fs::symlink_metadata(path).ok()?;
+    /// form when the entry itself isn't a link, and none for an entry its
+    /// directory does not list.
+    fn canonical(&mut self, path: &Path) -> Option<PathBuf> {
         let (Some(dir), Some(name)) = (path.parent(), path.file_name()) else {
             return std::fs::canonicalize(path).ok();
         };
-        if entry.file_type().is_symlink() || dir.as_os_str().is_empty() {
+        if dir.as_os_str().is_empty() {
             return std::fs::canonicalize(path).ok();
         }
-        // The directory by the text before the file name: `Path::parent`
-        // is that text without its trailing separators, so it is found by
-        // bytes, and a directory spelled twice (`a//b`, `a/b`) is found
-        // under either, as a canonical form that is the same.
-        let dir_text = dir.as_os_str().as_encoded_bytes();
-        let canonical = match self.canonical_dirs.get(dir_text) {
-            Some(found) => found,
-            None => self
-                .canonical_dirs
-                .entry(dir_text.to_vec())
-                .or_insert_with(|| std::fs::canonicalize(dir).ok()),
+        let Some(listed) = self.listed(dir) else {
+            // A directory that can't be listed (no permission to read it
+            // but to pass through it) is still resolved as the system does.
+            return std::fs::canonicalize(path).ok();
         };
-        Some(canonical.as_ref()?.join(name))
+        match listed.entries.get(name.as_encoded_bytes()) {
+            None => None,
+            Some(EntryKind::Link) => std::fs::canonicalize(path).ok(),
+            Some(EntryKind::Other) => Some(listed.canonical.join(name)),
+        }
     }
+
+    /// The listing of `dir`, found once. A directory is listed under the
+    /// text it is written as, which is found by its bytes: one spelled
+    /// twice (`a//b`, `a/b`) is listed under either, with a canonical form
+    /// that is the same.
+    fn listed(&mut self, dir: &Path) -> Option<&Listed> {
+        let key = dir.as_os_str().as_encoded_bytes();
+        if !self.listings.contains_key(key) {
+            let listed = self.list(dir);
+            self.listings.insert(key.to_vec(), listed);
+        }
+        self.listings.get(key)?.as_ref()
+    }
+
+    fn list(&mut self, dir: &Path) -> Option<Listed> {
+        let canonical = self.canonical_dir(dir)?;
+        let mut entries = FxHashMap::default();
+        for entry in std::fs::read_dir(dir).ok()? {
+            let entry = entry.ok()?;
+            let kind = match entry.file_type() {
+                Ok(kind) if kind.is_symlink() => EntryKind::Link,
+                // A type the system does not give is a link until a
+                // `canonicalize` says otherwise.
+                Err(_) => EntryKind::Link,
+                Ok(_) => EntryKind::Other,
+            };
+            entries.insert(entry.file_name().as_encoded_bytes().to_vec(), kind);
+        }
+        Some(Listed { canonical, entries })
+    }
+
+    /// The canonical form of `dir`: its parent's, joined with its name,
+    /// unless the parent lists it as a link, which is the one case that
+    /// needs the system to follow it.
+    fn canonical_dir(&mut self, dir: &Path) -> Option<PathBuf> {
+        let Some(parent) = dir.parent() else {
+            // The root.
+            return std::fs::canonicalize(dir).ok();
+        };
+        if parent.as_os_str().is_empty() {
+            return std::fs::canonicalize(dir).ok();
+        }
+        let Some(name) = dir.file_name() else {
+            // Ends in `..`: the parent of what precedes it, as the system
+            // reads it.
+            return std::fs::canonicalize(dir).ok();
+        };
+        let Some(parent_listed) = self.listed(parent) else {
+            return std::fs::canonicalize(dir).ok();
+        };
+        match parent_listed.entries.get(name.as_encoded_bytes()) {
+            None => None,
+            Some(EntryKind::Link) => std::fs::canonicalize(dir).ok(),
+            Some(EntryKind::Other) => Some(parent_listed.canonical.join(name)),
+        }
+    }
+}
+
+/// The path `bytes` spell.
+#[cfg(unix)]
+fn path_of(bytes: &[u8]) -> &Path {
+    use std::os::unix::ffi::OsStrExt;
+    Path::new(std::ffi::OsStr::from_bytes(bytes))
+}
+
+/// The path `bytes` spell, read lossily where they are not UTF-8.
+#[cfg(not(unix))]
+fn path_of(bytes: &[u8]) -> &Path {
+    Path::new(std::str::from_utf8(bytes).unwrap_or_default())
 }
 
 /// `path` with `.` and `..` components folded away, without resolving
@@ -277,37 +360,32 @@ fn lexically_normalized(path: &Path) -> PathBuf {
     out
 }
 
-/// Recursively builds the literal string a generated autoloader file's
-/// path expression evaluates to. Required because real generated code
-/// chains multiple concatenations (`__DIR__ . '/..' . '/pkg/path'`), not
-/// a flat two-operand shape.
+/// Recursively builds the bytes of the literal string a generated
+/// autoloader file's path expression evaluates to. Required because real
+/// generated code chains multiple concatenations (`__DIR__ . '/..' .
+/// '/pkg/path'`), not a flat two-operand shape.
 fn eval_concat(
     expr: &Expr,
     vendor_dir: &Path,
     base_dir: &Path,
     generated_dir: &Path,
-) -> Option<String> {
+) -> Option<Vec<u8>> {
+    let bytes_of = |dir: &Path| dir.as_os_str().as_encoded_bytes().to_vec();
     syntax::stack::guard(|| {
         let expr = expr.peeled();
         match &expr.kind {
-            ExprKind::Literal(Literal::String(s)) => Some(s.to_string()),
+            ExprKind::Literal(Literal::String(s)) => Some(s.as_bytes().to_vec()),
             // The directory containing the generated file itself, i.e.
             // `vendor/composer/` - `autoload_static.php` concatenates `/..`
             // or `/../..` onto this to reach `vendor/` or the project root.
-            ExprKind::Name(n) if n == "__DIR__" => {
-                Some(generated_dir.to_string_lossy().into_owned())
-            }
+            ExprKind::Name(n) if n == "__DIR__" => Some(bytes_of(generated_dir)),
             // Only appears in the separate, non-static autoload_*.php files.
-            ExprKind::Variable(n) if **n == *"vendorDir" => {
-                Some(vendor_dir.to_string_lossy().into_owned())
-            }
-            ExprKind::Variable(n) if **n == *"baseDir" => {
-                Some(base_dir.to_string_lossy().into_owned())
-            }
+            ExprKind::Variable(n) if **n == *"vendorDir" => Some(bytes_of(vendor_dir)),
+            ExprKind::Variable(n) if **n == *"baseDir" => Some(bytes_of(base_dir)),
             ExprKind::Binary(BinOp::Concat, lhs, rhs) => {
                 let mut left = eval_concat(lhs, vendor_dir, base_dir, generated_dir)?;
                 let right = eval_concat(rhs, vendor_dir, base_dir, generated_dir)?;
-                left.push_str(&right);
+                left.extend_from_slice(&right);
                 Some(left)
             }
             _ => None,

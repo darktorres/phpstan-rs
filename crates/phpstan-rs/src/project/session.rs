@@ -98,6 +98,11 @@ pub struct Session {
     dirs: Vec<PathBuf>,
     scan_dirs: Vec<PathBuf>,
     scan_files: Vec<PathBuf>,
+    /// The vendor files and directories of the composer roots, still being
+    /// found while the analysed files are listed, and the packages
+    /// promoted to analysed paths, which are left out of them.
+    vendors: Vec<composer::PendingVendor>,
+    promoted: Vec<PathBuf>,
     stub_dirs: Vec<PathBuf>,
     level: u8,
     emission_order: bool,
@@ -400,7 +405,9 @@ impl Session {
         };
         scan_dirs.extend(stub_dirs.iter().cloned());
 
-        let mut scan_files = Vec::new();
+        let mut scan_files: Vec<PathBuf> = Vec::new();
+        let mut vendors = Vec::new();
+        let mut promoted: Vec<PathBuf> = Vec::new();
         let mut phpstan_api_check_enabled = false;
         let mut composer_manifests = Vec::new();
         let absolute_root = std::fs::canonicalize(&root).unwrap_or_else(|_| root.clone());
@@ -409,7 +416,6 @@ impl Session {
         let mut dirs = dirs;
         if !no_composer {
             let canonical_root = absolute_root.clone();
-            let mut promoted: Vec<PathBuf> = Vec::new();
             for composer_root in composer_roots(&dirs, &canonical_root) {
                 // The root itself keeps its own spelling (`.` for the CLI),
                 // so the manifest's paths compare against analysed paths
@@ -424,8 +430,7 @@ impl Session {
                     composer_php_versions = declared_php_versions(&package);
                     root_manifest = package.manifest.clone();
                 }
-                scan_dirs.extend(package.vendor.dirs.iter().cloned());
-                scan_files.extend(package.vendor.files.iter().cloned());
+                vendors.push(package.vendor.clone());
                 phpstan_api_check_enabled |= package.requires_phpstan();
                 if let Some(manifest) = package.manifest {
                     promoted.extend(
@@ -447,7 +452,7 @@ impl Session {
                 };
                 scan_dirs.retain(|d| !is_promoted(d));
                 scan_files.retain(|f| !is_promoted(f));
-                dirs.extend(promoted);
+                dirs.extend(promoted.iter().cloned());
             }
         }
 
@@ -494,6 +499,8 @@ impl Session {
             dirs,
             scan_dirs,
             scan_files,
+            vendors,
+            promoted,
             stub_dirs,
             level,
             emission_order: overrides.emission_order,
@@ -580,6 +587,18 @@ impl Session {
     /// Every `.php` file under `dir` (or `dir` itself), spelled as `dir`
     /// joined with its path below it - the same spelling the command line
     /// gave - while the walk itself happens under the root.
+    /// Whether `path` (relative to the root) is in a package promoted to an
+    /// analysed path.
+    fn is_promoted(&self, path: &Path) -> bool {
+        if self.promoted.is_empty() {
+            return false;
+        }
+        let path = self.root.join(path);
+        self.promoted
+            .iter()
+            .any(|dir| composer::manifest::path_starts_with(&path, dir))
+    }
+
     fn collect_php_files(&self, dir: &Path, out: &mut Vec<PathBuf>) {
         let walked = self.root.join(dir);
         let mut found = Vec::new();
@@ -669,8 +688,16 @@ impl Session {
             self.collect_php_files(dir, &mut analyze_files);
         }
         composer::path_order::sort_paths(&mut analyze_files);
+        // The vendor context was being found while the analysed files were
+        // listed.
+        let mut scan_dirs = self.scan_dirs.clone();
         let mut context_files: Vec<PathBuf> = self.scan_files.clone();
-        for dir in &self.scan_dirs {
+        for vendor in &self.vendors {
+            let found = vendor.get();
+            scan_dirs.extend(found.dirs.iter().filter(|d| !self.is_promoted(d)).cloned());
+            context_files.extend(found.files.iter().filter(|f| !self.is_promoted(f)).cloned());
+        }
+        for dir in &scan_dirs {
             self.collect_php_files(dir, &mut context_files);
         }
         composer::path_order::sort_paths(&mut context_files);

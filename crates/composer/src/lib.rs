@@ -13,6 +13,7 @@ pub mod vendor;
 use rustc_hash::FxHashMap;
 use std::ffi::OsString;
 use std::path::{Component, Path, PathBuf};
+use std::sync::{Arc, Mutex, OnceLock};
 
 use manifest::{ComposerManifest, lexically_normalized};
 use vendor::VendorContext;
@@ -23,8 +24,68 @@ pub struct PackageContext {
     /// `composer.json` and `installed.json`; `None` without a readable,
     /// parseable `composer.json`.
     pub manifest: Option<ComposerManifest>,
-    /// The vendor files and directories loaded for context.
-    pub vendor: VendorContext,
+    /// The vendor files and directories loaded for context, found while
+    /// the caller reads on (`vendor()` waits for them).
+    pub vendor: PendingVendor,
+}
+
+/// The vendor context of a project, discovered on a thread of its own: the
+/// generated autoload files are parsed while the caller goes on to what
+/// does not depend on them, and the first to ask for them waits.
+#[derive(Clone, Default)]
+pub struct PendingVendor(Arc<PendingVendorInner>);
+
+#[derive(Default)]
+struct PendingVendorInner {
+    found: OnceLock<VendorContext>,
+    thread: Mutex<Option<std::thread::JoinHandle<VendorContext>>>,
+}
+
+impl PendingVendor {
+    /// Starts discovering the vendor context of the project at `root`.
+    pub fn spawn(root: PathBuf) -> PendingVendor {
+        let thread = std::thread::spawn(move || vendor::discover_vendor_context(&root));
+        PendingVendor(Arc::new(PendingVendorInner {
+            found: OnceLock::new(),
+            thread: Mutex::new(Some(thread)),
+        }))
+    }
+
+    /// The vendor context, once discovery has ended: empty when it
+    /// failed.
+    pub fn get(&self) -> &VendorContext {
+        self.0.found.get_or_init(|| {
+            let thread = self
+                .0
+                .thread
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                .take();
+            thread
+                .and_then(|thread| thread.join().ok())
+                .unwrap_or_default()
+        })
+    }
+}
+
+impl From<VendorContext> for PendingVendor {
+    fn from(context: VendorContext) -> PendingVendor {
+        let found = OnceLock::new();
+        let _ = found.set(context);
+        PendingVendor(Arc::new(PendingVendorInner {
+            found,
+            thread: Mutex::new(None),
+        }))
+    }
+}
+
+impl std::fmt::Debug for PendingVendor {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self.0.found.get() {
+            Some(found) => found.fmt(f),
+            None => f.write_str("PendingVendor(..)"),
+        }
+    }
 }
 
 impl PackageContext {
@@ -34,7 +95,7 @@ impl PackageContext {
     pub fn load(root: &Path, spelled_root: &Path) -> PackageContext {
         PackageContext {
             manifest: ComposerManifest::load(spelled_root, root),
-            vendor: vendor::discover_vendor_context(root),
+            vendor: PendingVendor::spawn(root.to_path_buf()),
         }
     }
 

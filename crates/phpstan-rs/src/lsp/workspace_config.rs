@@ -165,7 +165,7 @@ pub(crate) fn resolve(
         .map(types::PhpVersions::exactly)
         .or_else(|| crate::project::session::declared_php_versions(&package));
     let packages = composer::PackageIndex::new(package.manifest.into_iter().collect());
-    let vendor_context = package.vendor;
+    let vendor_context = package.vendor.get().clone();
 
     let analyze_paths: Vec<PathBuf> = session
         .paths
