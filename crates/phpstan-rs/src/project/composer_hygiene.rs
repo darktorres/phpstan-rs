@@ -779,7 +779,7 @@ fn check_platform_php(manifest: &ComposerManifest, diagnostics: &mut Vec<Diagnos
 /// Every class-like `stmts` declares unconditionally, with its name's
 /// span.
 fn collect_declared_classes(stmts: &[Stmt], out: &mut Vec<(String, Span)>) {
-    syntax::declarations::for_each_declaration(stmts, |declaration, _| {
+    syntax::declarations::for_each_declaration(stmts, |declaration, _, _| {
         if let Declared::Class(c) = declaration.declared
             && !declaration.conditional
         {

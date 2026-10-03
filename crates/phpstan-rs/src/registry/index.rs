@@ -3,12 +3,13 @@ use syntax::name::Name;
 
 use crate::registry::Registry;
 use crate::registry::class_info::MemberSpans;
+use crate::registry::guard::{Guard, GuardExpr};
 use crate::registry::provenance::{Origin, Provenance};
 use crate::registry::{
     ClassReflection, FunctionReflection, folded_key, function_key, infer_const_type,
 };
 use syntax::ast::{Expr, Stmt, Visibility};
-use syntax::declarations::{Declaration, Declared, for_each_declaration};
+use syntax::declarations::{Declaration, Declared, GuardTerm, for_each_declaration};
 use syntax::name_resolution::NameContext;
 use syntax::php_string::PhpString;
 use types::Type;
@@ -25,19 +26,46 @@ pub(crate) enum BuiltDecl {
     Class {
         name: Name,
         conditional: bool,
+        guard: Option<GuardExpr>,
         info: Box<ClassReflection>,
     },
     Function {
         name: Name,
         conditional: bool,
+        guard: Option<GuardExpr>,
         sig: Box<FunctionReflection>,
         // The declaration's name position, as a byte offset.
         site: u32,
     },
     GlobalConst {
         name: Name,
+        guard: Option<GuardExpr>,
         ty: Type,
     },
+}
+
+impl BuiltDecl {
+    /// Whether the declaration's guard holds on `versions`: `Maybe` for
+    /// one with no guard to read.
+    fn guard_on(&self, versions: Option<types::PhpVersions>) -> Guard {
+        let guard = match self {
+            BuiltDecl::Class { guard, .. }
+            | BuiltDecl::Function { guard, .. }
+            | BuiltDecl::GlobalConst { guard, .. } => guard,
+        };
+        guard.as_ref().map_or(Guard::Maybe, |g| g.on(versions))
+    }
+
+    /// The declaration as one that always runs.
+    fn made_unconditional(mut self) -> BuiltDecl {
+        match &mut self {
+            BuiltDecl::Class { conditional, .. } | BuiltDecl::Function { conditional, .. } => {
+                *conditional = false;
+            }
+            BuiltDecl::GlobalConst { .. } => {}
+        }
+        self
+    }
 }
 
 impl Registry {
@@ -103,6 +131,14 @@ impl Registry {
     /// collision outright, never merge with a pre-existing context/stub
     /// entry the way two context-only declarations legitimately do.
     pub(crate) fn insert_built_decl(&mut self, decl: BuiltDecl, analyzed: bool) {
+        // A guard the configured PHP versions rule out is a declaration that
+        // never runs: it changes nothing, and is not a change. One they
+        // always satisfy declares as if it stood unguarded.
+        let decl = match decl.guard_on(self.php_versions) {
+            Guard::Never => return,
+            Guard::Always => decl.made_unconditional(),
+            Guard::Maybe => decl,
+        };
         self.record_assert_tagged_names(&decl);
         // A name is changed when its entry is: a conditional declaration the
         // existing entry outranks leaves the table as it was.
@@ -135,6 +171,7 @@ impl Registry {
                 name,
                 conditional,
                 info: new_info,
+                ..
             } => {
                 let new_info = *new_info;
                 if conditional && self.built_in_stub_classes.contains_key(&name) {
@@ -309,6 +346,7 @@ impl Registry {
                 conditional,
                 sig: new_sig,
                 site,
+                ..
             } => {
                 let new_sig = *new_sig;
                 if conditional {
@@ -393,7 +431,7 @@ impl Registry {
                     self.functions.insert(name, new_sig);
                 }
             }
-            BuiltDecl::GlobalConst { name, ty } => {
+            BuiltDecl::GlobalConst { name, ty, .. } => {
                 register_global_constant(&mut self.global_constants, name, ty);
             }
         }
@@ -621,8 +659,8 @@ pub(crate) fn build_declarations_where(
     keep: Option<Keep<'_>>,
 ) -> Vec<BuiltDecl> {
     let mut out = Vec::new();
-    for_each_declaration(stmts, |declaration, ctx| {
-        built_declaration(declaration, ctx, origin, keep, &mut out);
+    for_each_declaration(stmts, |declaration, ctx, guards| {
+        built_declaration(declaration, ctx, guards, origin, keep, &mut out);
     });
     if keep.is_none() {
         out.extend(crate::registry::anonymous_class_decls(stmts, origin));
@@ -632,16 +670,22 @@ pub(crate) fn build_declarations_where(
 
 /// The declaration `declaration` builds into, pushed on `out`: nothing
 /// when `keep` refuses its kind and name. `ctx` is the name context in
-/// effect where it sits.
+/// effect where it sits and `guards` the terms that guard it.
 pub(crate) fn built_declaration(
     declaration: Declaration<'_>,
     ctx: &NameContext,
+    guards: &[GuardTerm<'_>],
     origin: &Origin,
     keep: Option<Keep<'_>>,
     out: &mut Vec<BuiltDecl>,
 ) {
     let kept = |kind: DeclKind, name: &str| keep.is_none_or(|keep| keep(kind, name));
     let conditional = declaration.conditional;
+    let guard = if conditional {
+        GuardExpr::of_terms(guards)
+    } else {
+        None
+    };
     match declaration.declared {
         Declared::Class(c) => {
             let name = declaration.name();
@@ -654,6 +698,7 @@ pub(crate) fn built_declaration(
             out.push(BuiltDecl::Class {
                 name,
                 conditional,
+                guard,
                 info: Box::new(info),
             });
         }
@@ -672,6 +717,7 @@ pub(crate) fn built_declaration(
             out.push(BuiltDecl::Function {
                 name: Name::from(&declaration.name()),
                 conditional,
+                guard,
                 sig: Box::new(sig),
                 site: f.name.span.start,
             });
@@ -681,6 +727,7 @@ pub(crate) fn built_declaration(
             if kept(DeclKind::Constant, &name) {
                 out.push(BuiltDecl::GlobalConst {
                     name: Name::from(&name),
+                    guard,
                     ty: infer_const_type(&c.value),
                 });
             }
@@ -689,7 +736,7 @@ pub(crate) fn built_declaration(
             if let Some((name, ty)) = define_constant(name, value)
                 && kept(DeclKind::Constant, name.as_str())
             {
-                out.push(BuiltDecl::GlobalConst { name, ty });
+                out.push(BuiltDecl::GlobalConst { name, guard, ty });
             }
         }
     }

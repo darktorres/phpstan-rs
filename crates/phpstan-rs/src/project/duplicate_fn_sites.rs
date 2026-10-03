@@ -46,7 +46,7 @@ impl DuplicateFunctionSites {
     /// from literal real-PHPStan behavior, matching this project's own
     /// "favor false negatives over false positives" precedent.
     pub(crate) fn index(&mut self, stmts: &[Stmt], path: &Path) {
-        syntax::declarations::for_each_declaration(stmts, |declaration, _| {
+        syntax::declarations::for_each_declaration(stmts, |declaration, _, _| {
             if let Declared::Function(f) = declaration.declared
                 && !declaration.conditional
             {

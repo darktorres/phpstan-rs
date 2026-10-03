@@ -15,6 +15,7 @@ mod container;
 mod function_sig;
 mod generics;
 mod global_vars;
+mod guard;
 mod hierarchy;
 mod index;
 mod name_context;

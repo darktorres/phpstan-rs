@@ -45,7 +45,7 @@ impl DuplicateClassSites {
     /// Foo::class)) { class Foo {} }`). `is_stub` is the file's
     /// provenance.
     pub(crate) fn index(&mut self, stmts: &[Stmt], path: &Path, is_stub: bool) {
-        syntax::declarations::for_each_declaration(stmts, |declaration, _| {
+        syntax::declarations::for_each_declaration(stmts, |declaration, _, _| {
             if let Declared::Class(c) = declaration.declared
                 && !declaration.conditional
             {

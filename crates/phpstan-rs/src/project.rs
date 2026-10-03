@@ -2936,7 +2936,7 @@ struct DeclaredNames {
 /// `Registry::global_constants` holds them under.
 fn declared_constants(stmts: &[Stmt]) -> Vec<Name> {
     let mut constants = Vec::new();
-    syntax::declarations::for_each_declaration(stmts, |declaration, _| {
+    syntax::declarations::for_each_declaration(stmts, |declaration, _, _| {
         if let Declared::Constant(_) | Declared::Define { .. } = declaration.declared {
             constants.push(Name::from(declaration.name().trim_start_matches('\\')));
         }
@@ -2954,7 +2954,7 @@ fn declared_constants(stmts: &[Stmt]) -> Vec<Name> {
 pub(crate) fn declared_names(stmts: &[Stmt]) -> (Vec<Name>, Vec<Name>) {
     let mut functions = Vec::new();
     let mut classes = Vec::new();
-    syntax::declarations::for_each_declaration(stmts, |declaration, _| {
+    syntax::declarations::for_each_declaration(stmts, |declaration, _, _| {
         match declaration.declared {
             Declared::Function(_) => functions.push(Name::from(declaration.name())),
             Declared::Class(_) => classes.push(Name::from(declaration.name())),

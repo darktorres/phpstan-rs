@@ -117,7 +117,7 @@ fn the_unconditional_classes_are_those_the_declaration_walk_finds() {
     for (i, source) in sources.iter().enumerate() {
         let parsed = syntax::parse(source.as_bytes(), &interner).expect("parses");
         let mut by_visitor: Vec<String> = Vec::new();
-        for_each_declaration(&parsed.stmts, |declaration, _| {
+        for_each_declaration(&parsed.stmts, |declaration, _, _| {
             if let Declared::Class(c) = declaration.declared
                 && c.def.kind != ClassKind::Enum
                 && !declaration.conditional

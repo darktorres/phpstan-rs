@@ -30,7 +30,7 @@ struct Declared<'a> {
 /// Every class-like `stmts` declares unconditionally, by its lowercased
 /// fully-qualified name.
 fn collect_declared<'a>(stmts: &'a [Stmt], out: &mut FxHashMap<String, Declared<'a>>) {
-    syntax::declarations::for_each_declaration(stmts, |declaration, _| {
+    syntax::declarations::for_each_declaration(stmts, |declaration, _, _| {
         let syntax::declarations::Declared::Class(c) = declaration.declared else {
             return;
         };

@@ -5,9 +5,7 @@ use crate::ast::*;
 use crate::name_resolution::NameContext;
 use crate::php_string::PhpString;
 use crate::span::Span;
-use crate::visit::{
-    Visitor, walk_class_decl, walk_expr, walk_function_decl, walk_stmt, walk_stmts,
-};
+use crate::visit::{Visitor, walk_class_decl, walk_expr, walk_function_decl, walk_stmt};
 
 /// What a declaration declares.
 #[derive(Clone, Copy)]
@@ -52,46 +50,137 @@ impl Declaration<'_> {
     }
 }
 
+/// One thing that must hold for a conditional declaration to run, outermost
+/// first.
+#[derive(Clone, Copy)]
+pub enum GuardTerm<'a> {
+    /// An `if` or `elseif` condition, taken as it stands or - for a later
+    /// branch of the chain, an `else`, or the code after an
+    /// `if (c) { return; }` - negated.
+    Condition { expr: &'a Expr, negated: bool },
+    /// A loop, `switch`, `try`, function, class or expression the
+    /// declaration is nested in: running code that decides nothing a reader
+    /// of the terms could know.
+    Opaque,
+}
+
 /// Calls `f` with every declaration in `stmts`, in source order, with the
-/// name context in effect where it sits: namespaces and imports aren't
-/// scoped to blocks or functions.
+/// name context in effect where it sits - namespaces and imports aren't
+/// scoped to blocks or functions - and the terms that guard it, empty for
+/// an unconditional one.
+///
+/// An `if (c) { return …; }` without an `else` at the top of the file
+/// guards, with `!c`, every declaration nested after it. It guards no
+/// declaration at the top level: PHP declares those before running
+/// anything, so they exist whatever the return decides.
 pub fn for_each_declaration<'a>(
     stmts: &'a [Stmt],
-    mut f: impl FnMut(Declaration<'a>, &NameContext),
+    mut f: impl FnMut(Declaration<'a>, &NameContext, &[GuardTerm<'a>]),
 ) {
     let mut walk = Declarations {
         ctx: NameContext::default(),
         conditional: false,
+        early: Vec::new(),
+        guards: Vec::new(),
         f: &mut f,
     };
-    walk_stmts(&mut walk, stmts);
+    for stmt in stmts {
+        walk.visit_stmt(stmt);
+        if let StmtKind::If(if_stmt) = &stmt.kind
+            && if_stmt.elseifs.is_empty()
+            && if_stmt.else_branch.is_none()
+            && ends_in_return(&if_stmt.then_branch)
+        {
+            walk.early.push(GuardTerm::Condition {
+                expr: &if_stmt.cond,
+                negated: true,
+            });
+        }
+    }
 }
 
-struct Declarations<'f, F> {
+/// Whether `stmt` is a `return`, or a block whose last statement is one.
+fn ends_in_return(stmt: &Stmt) -> bool {
+    match &stmt.kind {
+        StmtKind::Return(_) => true,
+        StmtKind::Block(stmts) => stmts.last().is_some_and(ends_in_return),
+        _ => false,
+    }
+}
+
+struct Declarations<'a, 'f, F> {
     ctx: NameContext,
     conditional: bool,
+    /// The negated conditions of the early returns passed so far.
+    early: Vec<GuardTerm<'a>>,
+    /// The terms of the branches and bodies being walked.
+    guards: Vec<GuardTerm<'a>>,
     f: &'f mut F,
 }
 
-impl<'a, F: FnMut(Declaration<'a>, &NameContext)> Declarations<'_, F> {
+impl<'a, F: FnMut(Declaration<'a>, &NameContext, &[GuardTerm<'a>])> Declarations<'a, '_, F> {
     fn found(&mut self, declared: Declared<'a>, span: Span) {
         let declaration = Declaration {
             declared,
             span,
             conditional: self.conditional,
         };
-        (self.f)(declaration, &self.ctx);
+        if self.conditional && !self.early.is_empty() {
+            let guards: Vec<GuardTerm<'a>> =
+                self.early.iter().chain(&self.guards).copied().collect();
+            (self.f)(declaration, &self.ctx, &guards);
+        } else {
+            (self.f)(declaration, &self.ctx, &self.guards);
+        }
     }
 
-    /// Walks with every declaration found conditional.
+    /// Walks with every declaration found conditional, on what `walk`
+    /// does not say.
     fn conditionally(&mut self, walk: impl FnOnce(&mut Self)) {
+        self.guarded(GuardTerm::Opaque, walk);
+    }
+
+    /// Walks with every declaration found conditional, under `term`.
+    fn guarded(&mut self, term: GuardTerm<'a>, walk: impl FnOnce(&mut Self)) {
+        self.guards.push(term);
         let was = std::mem::replace(&mut self.conditional, true);
         walk(self);
+        self.conditional = was;
+        self.guards.pop();
+    }
+
+    /// Walks the `if` chain: each branch's body under its own condition
+    /// and the negation of every one before it.
+    fn if_chain(&mut self, if_stmt: &'a IfStmt) {
+        let was = std::mem::replace(&mut self.conditional, true);
+        let mark = self.guards.len();
+        let mut branches: Vec<(&'a Expr, &'a Stmt)> = vec![(&if_stmt.cond, &if_stmt.then_branch)];
+        branches.extend(if_stmt.elseifs.iter().map(|e| (&e.cond, &*e.body)));
+        for (expr, body) in branches {
+            self.visit_expr(expr);
+            self.guards.push(GuardTerm::Condition {
+                expr,
+                negated: false,
+            });
+            self.visit_stmt(body);
+            self.guards.pop();
+            // Every later branch runs only when this one's condition failed.
+            self.guards.push(GuardTerm::Condition {
+                expr,
+                negated: true,
+            });
+        }
+        if let Some(else_branch) = &if_stmt.else_branch {
+            self.visit_stmt(else_branch);
+        }
+        self.guards.truncate(mark);
         self.conditional = was;
     }
 }
 
-impl<'a, F: FnMut(Declaration<'a>, &NameContext)> Visitor<'a> for Declarations<'_, F> {
+impl<'a, F: FnMut(Declaration<'a>, &NameContext, &[GuardTerm<'a>])> Visitor<'a>
+    for Declarations<'a, '_, F>
+{
     fn visit_stmt(&mut self, stmt: &'a Stmt) {
         crate::stack::guard(|| match &stmt.kind {
             StmtKind::Namespace(name) => self.ctx.set_namespace(name),
@@ -110,8 +199,8 @@ impl<'a, F: FnMut(Declaration<'a>, &NameContext)> Visitor<'a> for Declarations<'
                 }
                 walk_stmt(self, stmt);
             }
-            StmtKind::If(_)
-            | StmtKind::While { .. }
+            StmtKind::If(if_stmt) => self.if_chain(if_stmt),
+            StmtKind::While { .. }
             | StmtKind::DoWhile { .. }
             | StmtKind::For { .. }
             | StmtKind::Foreach { .. }

@@ -51,7 +51,7 @@ pub(super) fn collect(
         duplicate_fn_sites: DuplicateFunctionSites::default(),
         duplicate_class_sites: DuplicateClassSites::default(),
     };
-    for_each_declaration(ast, |declaration, ctx| {
+    for_each_declaration(ast, |declaration, ctx, guards| {
         let name = declaration.name();
         match declaration.declared {
             Declared::Function(f) => {
@@ -78,7 +78,14 @@ pub(super) fn collect(
                     .push(Name::from(name.trim_start_matches('\\')));
             }
         }
-        built_declaration(declaration, ctx, origin, None, &mut found.built_decls);
+        built_declaration(
+            declaration,
+            ctx,
+            guards,
+            origin,
+            None,
+            &mut found.built_decls,
+        );
     });
     if has_anonymous_class {
         found.built_decls.extend(anonymous_class_decls(ast, origin));

@@ -86,6 +86,7 @@ pub(crate) fn anonymous_class_decls(stmts: &[Stmt], origin: &Origin) -> Vec<Buil
             decls.push(BuiltDecl::Class {
                 name: name.clone(),
                 conditional: false,
+                guard: None,
                 info: Box::new(info),
             });
         }

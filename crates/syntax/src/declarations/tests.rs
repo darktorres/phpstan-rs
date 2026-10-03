@@ -8,7 +8,7 @@ fn declarations(src: &str) -> Vec<(String, bool)> {
         .parse_program()
         .expect("parses");
     let mut out = Vec::new();
-    for_each_declaration(&stmts, |declaration, _| {
+    for_each_declaration(&stmts, |declaration, _, _| {
         out.push((declaration.name(), declaration.conditional));
     });
     out

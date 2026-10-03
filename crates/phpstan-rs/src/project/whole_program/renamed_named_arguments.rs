@@ -66,7 +66,7 @@ pub(crate) fn renamed_parameter_overrides<'p>(
 ) -> RenamedParameterOverrideFacts {
     let mut overrides = Vec::new();
     for program in programs {
-        for_each_declaration(program, |declaration, _| {
+        for_each_declaration(program, |declaration, _, _| {
             if let Declared::Class(c) = declaration.declared
                 && !declaration.conditional
             {
