@@ -56,6 +56,7 @@ pub(crate) use function_sig::{DeclaredType, declared_type};
 pub(crate) use function_sig::{
     build_template_params, infer_const_type, mark_template_params, substitute_type_aliases,
 };
+pub use global_vars::GlobalFacts;
 pub use members::Members;
 pub use name_map::{NameMap, NameSet};
 pub use name_table::NameTable;
@@ -501,7 +502,7 @@ impl Registry {
         registry.infer_global_variables(&[(
             crate::file_id::FileId::new(0),
             std::path::Path::new("<flattened>"),
-            program,
+            &GlobalFacts::of(program),
         )]);
         registry
     }

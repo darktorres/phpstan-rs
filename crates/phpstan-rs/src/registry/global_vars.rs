@@ -167,20 +167,124 @@ pub(in crate::registry) struct FileSites {
     include_sites: Vec<IncludeSite>,
 }
 
-/// Per-file, per-scope walk state that doesn't change as the walk
-/// descends into nested scopes.
-struct FileCtx<'a> {
-    registry: &'a Registry,
-    id: FileId,
+/// An assigned value, as far as its type can be said before the registry
+/// is looked at: what `resolve_value` turns into a `Type`.
+#[derive(Debug, Clone)]
+enum StaticValue {
+    /// A type that needs no declaration to tell.
+    Known(Type),
+    /// An array literal's literal-keyed entries.
+    Array(Vec<(String, StaticValue)>),
+    /// The return type of a function called by name.
+    Call(QualifiedName),
+    /// The return type of a method called on a named class.
+    StaticCall(Option<Name>, Name),
+    /// The type of a class constant.
+    ClassConst(Option<Name>, Name),
+    /// The return type of a method called on the value.
+    MethodCall(Box<StaticValue>, Name),
 }
 
-/// Accumulates every site/include-site found across the whole walk,
-/// threaded through by `&mut` rather than returned, since both
-/// collections grow independently at arbitrary points in the recursion.
-#[derive(Default)]
-struct WalkOutput {
-    sites: Vec<StagedSite>,
+/// What a site contributes, before the registry is looked at.
+#[derive(Debug, Clone)]
+enum ContributionFact {
+    /// `mixed`, whole.
+    Mixed,
+    Whole(StaticValue),
+    /// `$name = array_merge($name, <second>);`, which folds the keys of
+    /// `second` in when it is an array shape, and is `whole` otherwise.
+    ArrayMerge {
+        callee: QualifiedName,
+        second: StaticValue,
+        whole: StaticValue,
+    },
+    Field(String, StaticValue),
+    /// A field of unknown value.
+    FieldMixed(String),
+}
+
+#[derive(Debug, Clone)]
+struct SiteFact {
+    /// A file's own top level, whose include-graph gate is the file's.
+    top_level: bool,
+    name: Name,
+    contribution: ContributionFact,
+}
+
+/// What a file assigns to the variables that are globals where they are
+/// assigned, and the includes it makes, in the form the file wrote them:
+/// made by one walk of the file, and resolved against the registry by
+/// `infer_global_variables_of`.
+#[derive(Debug, Clone, Default)]
+pub struct GlobalFacts {
+    sites: Vec<SiteFact>,
     include_sites: Vec<IncludeSite>,
+}
+
+impl GlobalFacts {
+    /// The facts of the statements of one file.
+    pub fn of(stmts: &[Stmt]) -> GlobalFacts {
+        let mut facts = GlobalFacts::default();
+        walk_top_level(stmts, &mut facts);
+        facts
+    }
+
+    /// The sites with what they assign, as `registry` says it is.
+    fn resolve(&self, id: FileId, registry: &Registry) -> FileSites {
+        FileSites {
+            sites: self
+                .sites
+                .iter()
+                .map(|site| StagedSite {
+                    gate: site.top_level.then_some(id),
+                    name: site.name.clone(),
+                    contribution: site.contribution.resolve(registry),
+                })
+                .collect(),
+            include_sites: self.include_sites.clone(),
+        }
+    }
+}
+
+impl ContributionFact {
+    fn resolve(&self, registry: &Registry) -> SiteContribution {
+        match self {
+            ContributionFact::Mixed => SiteContribution::WholeValue(Type::mixed()),
+            ContributionFact::Whole(value) => {
+                SiteContribution::WholeValue(resolve_value(value, registry))
+            }
+            ContributionFact::ArrayMerge {
+                callee,
+                second,
+                whole,
+            } => {
+                let shape = registry
+                    .called_function_name(callee)
+                    .eq_ignore_ascii_case("array_merge")
+                    .then(|| resolve_value(second, registry))
+                    .and_then(|ty| ty.as_array_shape().cloned());
+                match shape {
+                    Some(shape) => SiteContribution::ShapeFields(
+                        shape
+                            .into_fields()
+                            .into_iter()
+                            .map(|f| FieldContribution {
+                                key: f.key.to_string(),
+                                ty: f.ty,
+                            })
+                            .collect(),
+                    ),
+                    None => SiteContribution::WholeValue(resolve_value(whole, registry)),
+                }
+            }
+            ContributionFact::Field(key, value) => {
+                SiteContribution::ShapeField(key.clone(), resolve_value(value, registry))
+            }
+            ContributionFact::FieldMixed(key) => {
+                SiteContribution::ShapeField(key.clone(), Type::mixed())
+            }
+        }
+    }
 }
 
 impl Registry {
@@ -191,7 +295,7 @@ impl Registry {
     /// points `precompute_member_owners`/`precompute_ancestor_names`
     /// already run at in all three places, since every function/class this
     /// pass's own resolver depends on must already be indexed.
-    pub(crate) fn infer_global_variables(&mut self, files: &[(FileId, &Path, &[Stmt])]) {
+    pub(crate) fn infer_global_variables(&mut self, files: &[(FileId, &Path, &GlobalFacts)]) {
         self.global_sites.clear();
         self.infer_global_variables_of(files, &FxHashSet::default());
     }
@@ -201,7 +305,7 @@ impl Registry {
     /// of its last walk.
     pub(crate) fn infer_global_variables_of(
         &mut self,
-        files: &[(FileId, &Path, &[Stmt])],
+        files: &[(FileId, &Path, &GlobalFacts)],
         stale: &FxHashSet<FileId>,
     ) {
         let loaded: FxHashSet<FileId> = files.iter().map(|(id, ..)| *id).collect();
@@ -217,18 +321,7 @@ impl Registry {
         let walked: Vec<(FileId, FileSites)> = files
             .par_iter()
             .filter(|(id, ..)| !registry.global_sites.contains_key(id))
-            .map(|(id, _, stmts)| {
-                let file_ctx = FileCtx { registry, id: *id };
-                let mut out = WalkOutput::default();
-                walk_top_level(stmts, &file_ctx, &mut out);
-                (
-                    *id,
-                    FileSites {
-                        sites: out.sites,
-                        include_sites: out.include_sites,
-                    },
-                )
-            })
+            .map(|(id, _, facts)| (*id, facts.resolve(*id, registry)))
             .collect();
         self.global_sites.extend(walked);
 
@@ -273,7 +366,7 @@ impl Registry {
 /// file whose only resolved incoming edges are all from inside a function
 /// body is excluded.
 fn resolve_global_scope_files(
-    files: &[(FileId, &Path, &[Stmt])],
+    files: &[(FileId, &Path, &GlobalFacts)],
     include_sites: &[(FileId, &IncludeSite)],
 ) -> FxHashSet<FileId> {
     // Each file's path with `/` separators, grouped by file name: an
@@ -375,9 +468,9 @@ fn resolve_include_target_suffix(expr: &Expr) -> Option<String> {
 /// is staged as a top-level site (gated by the include-graph result
 /// applied later), regardless of any `global $x;` (file top level is
 /// already, potentially, the real global scope).
-fn walk_top_level<'a>(stmts: &'a [Stmt], file_ctx: &FileCtx<'a>, out: &mut WalkOutput) {
+fn walk_top_level(stmts: &[Stmt], out: &mut GlobalFacts) {
     let empty = NameSet::default();
-    walk_scope(stmts, file_ctx, true, &empty, out);
+    walk_scope(stmts, true, &empty, out);
 }
 
 /// Walks one function/method/closure body - `global_names` is the
@@ -386,11 +479,11 @@ fn walk_top_level<'a>(stmts: &'a [Stmt], file_ctx: &FileCtx<'a>, out: &mut WalkO
 /// binds `$x` for the rest of the whole body regardless of which branch
 /// it textually appears in - no need to track this incrementally through
 /// the walk with per-branch cloning). Every site found here is
-/// unconditional (`gate: None`) - a function body's own scope isn't
-/// subject to the include-graph check the way file top level is.
-fn walk_function_body<'a>(stmts: &'a [Stmt], file_ctx: &FileCtx<'a>, out: &mut WalkOutput) {
+/// unconditional - a function body's own scope isn't subject to the
+/// include-graph check the way file top level is.
+fn walk_function_body(stmts: &[Stmt], out: &mut GlobalFacts) {
     let global_names = collect_global_names(stmts);
-    walk_scope(stmts, file_ctx, false, &global_names, out);
+    walk_scope(stmts, false, &global_names, out);
 }
 
 /// Every name a `global` statement in this body imports. A nested
@@ -410,15 +503,8 @@ fn collect_global_names(stmts: &[Stmt]) -> NameSet {
     out
 }
 
-fn walk_scope<'a>(
-    stmts: &'a [Stmt],
-    file_ctx: &FileCtx<'a>,
-    top_level: bool,
-    global_names: &NameSet,
-    out: &mut WalkOutput,
-) {
+fn walk_scope(stmts: &[Stmt], top_level: bool, global_names: &NameSet, out: &mut GlobalFacts) {
     let mut scope = Scope {
-        file_ctx,
         top_level,
         global_names,
         out,
@@ -430,34 +516,27 @@ fn walk_scope<'a>(
 
 /// One scope's walk: a nested function, method or closure body is walked
 /// as its own scope, and the include sites are recorded on the way.
-struct Scope<'r, 'a> {
-    file_ctx: &'r FileCtx<'a>,
+struct Scope<'r> {
     top_level: bool,
     global_names: &'r NameSet,
-    out: &'r mut WalkOutput,
+    out: &'r mut GlobalFacts,
 }
 
-impl<'a> Visitor<'a> for Scope<'_, 'a> {
+impl<'a> Visitor<'a> for Scope<'_> {
     fn visit_stmt(&mut self, stmt: &'a Stmt) {
         match &stmt.kind {
             StmtKind::FunctionDecl(f) => {
-                walk_function_body(f.body_stmts(), self.file_ctx, self.out);
+                walk_function_body(f.body_stmts(), self.out);
                 return;
             }
             StmtKind::ClassDecl(c) => {
                 for method in &c.def.methods {
-                    walk_function_body(method.function.body_stmts(), self.file_ctx, self.out);
+                    walk_function_body(method.function.body_stmts(), self.out);
                 }
                 return;
             }
             StmtKind::Expression(e) => {
-                handle_top_expr_statement(
-                    e,
-                    self.file_ctx,
-                    self.top_level,
-                    self.global_names,
-                    self.out,
-                );
+                handle_top_expr_statement(e, self.top_level, self.global_names, self.out);
             }
             _ => {}
         }
@@ -468,12 +547,12 @@ impl<'a> Visitor<'a> for Scope<'_, 'a> {
         match &expr.kind {
             ExprKind::Closure(closure) => {
                 let syntax::ast::ClosureExpr { body, .. } = &**closure;
-                walk_function_body(body, self.file_ctx, self.out);
+                walk_function_body(body, self.out);
                 return;
             }
             ExprKind::NewAnonymousClass(class) => {
                 for method in &class.def.methods {
-                    walk_function_body(method.function.body_stmts(), self.file_ctx, self.out);
+                    walk_function_body(method.function.body_stmts(), self.out);
                 }
                 return;
             }
@@ -493,51 +572,47 @@ impl<'a> Visitor<'a> for Scope<'_, 'a> {
 /// here (at file top level, or imported with `global`): records it as a
 /// site of that global, gated on the file being included when at top
 /// level. A compound assignment only widens the variable.
-fn handle_top_expr_statement<'a>(
-    e: &'a Expr,
-    file_ctx: &FileCtx<'a>,
+fn handle_top_expr_statement(
+    e: &Expr,
     top_level: bool,
     global_names: &NameSet,
-    out: &mut WalkOutput,
+    out: &mut GlobalFacts,
 ) {
     let is_site = |name: &str| top_level || global_names.contains(name);
-    let gate = || top_level.then_some(file_ctx.id);
 
     match &e.kind {
         ExprKind::Assign(lhs, rhs) | ExprKind::AssignRef(lhs, rhs) => {
-            handle_assignment_target(lhs, rhs, file_ctx, &is_site, &gate, out, false);
+            handle_assignment_target(lhs, rhs, &is_site, top_level, out, false);
         }
         ExprKind::CompoundAssign(BinOp::Coalesce, lhs, rhs) => {
-            handle_assignment_target(lhs, rhs, file_ctx, &is_site, &gate, out, false);
+            handle_assignment_target(lhs, rhs, &is_site, top_level, out, false);
         }
         ExprKind::CompoundAssign(_, lhs, rhs) => {
-            handle_assignment_target(lhs, rhs, file_ctx, &is_site, &gate, out, true);
+            handle_assignment_target(lhs, rhs, &is_site, top_level, out, true);
         }
         _ => {}
     }
 }
 
-#[allow(clippy::too_many_arguments)]
-fn handle_assignment_target<'a>(
+fn handle_assignment_target(
     lhs: &Expr,
     rhs: &Expr,
-    file_ctx: &FileCtx<'a>,
     is_site: &dyn Fn(&str) -> bool,
-    gate: &dyn Fn() -> Option<FileId>,
-    out: &mut WalkOutput,
+    top_level: bool,
+    out: &mut GlobalFacts,
     force_mixed: bool,
 ) {
     match &lhs.peeled().kind {
         ExprKind::Variable(name) if is_site(name) => {
             let contribution = if force_mixed {
-                SiteContribution::WholeValue(Type::mixed())
-            } else if let Some(fields) = array_merge_self_fields(name, rhs, file_ctx.registry) {
-                SiteContribution::ShapeFields(fields)
+                ContributionFact::Mixed
+            } else if let Some(merge) = array_merge_self(name, rhs) {
+                merge
             } else {
-                SiteContribution::WholeValue(resolve_static_expr_type(rhs, file_ctx.registry))
+                ContributionFact::Whole(static_value(rhs))
             };
-            out.sites.push(StagedSite {
-                gate: gate(),
+            out.sites.push(SiteFact {
+                top_level,
                 name: name.clone(),
                 contribution,
             });
@@ -550,15 +625,15 @@ fn handle_assignment_target<'a>(
             {
                 // `$name[<key>] = <rhs>;` - a direct, single-level write:
                 // the field's own value is `<rhs>`'s real resolved type.
-                let ty = if force_mixed {
-                    Type::mixed()
+                let contribution = if force_mixed {
+                    ContributionFact::FieldMixed(key_str)
                 } else {
-                    resolve_static_expr_type(rhs, file_ctx.registry)
+                    ContributionFact::Field(key_str, static_value(rhs))
                 };
-                out.sites.push(StagedSite {
-                    gate: gate(),
+                out.sites.push(SiteFact {
+                    top_level,
                     name: name.clone(),
-                    contribution: SiteContribution::ShapeField(key_str, ty),
+                    contribution,
                 });
             } else if let Some((name, key_str)) = root_variable_and_first_key(lhs)
                 && is_site(name)
@@ -573,10 +648,10 @@ fn handle_assignment_target<'a>(
                 // `isset.offset` on `$switch_lang['language']` reads
                 // elsewhere before this arm existed (confirmed via a
                 // piwigo16 corpus diff, not hypothesized).
-                out.sites.push(StagedSite {
-                    gate: gate(),
+                out.sites.push(SiteFact {
+                    top_level,
                     name: name.clone(),
-                    contribution: SiteContribution::ShapeField(key_str, Type::mixed()),
+                    contribution: ContributionFact::FieldMixed(key_str),
                 });
             }
         }
@@ -616,24 +691,16 @@ fn root_variable_and_first_key(expr: &Expr) -> Option<(&Name, String)> {
 /// `$name = array_merge($name, <rhs>);` - real PHP folds `<rhs>`'s own
 /// keys into `$name`, so if `<rhs>` resolves to an array-shaped type,
 /// merge its fields in rather than discarding them. `None` for anything
-/// else (not this exact self-referencing shape, or `<rhs>` didn't resolve
-/// to anything array-shaped) - the caller falls back to its own ordinary
-/// whole-value handling in that case.
-fn array_merge_self_fields(
-    name: &Name,
-    rhs: &Expr,
-    registry: &Registry,
-) -> Option<Vec<FieldContribution>> {
+/// else (not this exact self-referencing shape) - the caller falls back to
+/// its own ordinary whole-value handling in that case.
+fn array_merge_self(name: &Name, rhs: &Expr) -> Option<ContributionFact> {
     let ExprKind::Call(callee, args) = &rhs.peeled().kind else {
         return None;
     };
     let ExprKind::Name(callee_name) = &callee.peeled().kind else {
         return None;
     };
-    let is_array_merge = registry
-        .called_function_name(callee_name)
-        .eq_ignore_ascii_case("array_merge");
-    if !is_array_merge || args.len() != 2 {
+    if args.len() != 2 {
         return None;
     }
     let ExprKind::Variable(first_name) = &args[0].value.peeled().kind else {
@@ -642,19 +709,11 @@ fn array_merge_self_fields(
     if first_name != name {
         return None;
     }
-    let shape = resolve_static_expr_type(&args[1].value, registry)
-        .as_array_shape()?
-        .clone();
-    Some(
-        shape
-            .into_fields()
-            .into_iter()
-            .map(|f| FieldContribution {
-                key: f.key.to_string(),
-                ty: f.ty,
-            })
-            .collect(),
-    )
+    Some(ContributionFact::ArrayMerge {
+        callee: callee_name.clone(),
+        second: static_value(&args[1].value),
+        whole: static_value(rhs),
+    })
 }
 
 fn literal_string_key(expr: &Expr) -> Option<String> {
@@ -665,19 +724,19 @@ fn literal_string_key(expr: &Expr) -> Option<String> {
     }
 }
 
-/// Resolves a self-contained expression to a `Type`, using only registry
-/// lookups - no `Checker`/`Locals`, neither exists yet at this point in
-/// the pipeline.
-fn resolve_static_expr_type(expr: &Expr, registry: &Registry) -> Type {
+/// An assigned expression as far as its type can be said without the
+/// registry: the types of calls, class constants and methods are looked up
+/// when the facts are resolved.
+fn static_value(expr: &Expr) -> StaticValue {
     syntax::stack::guard(|| {
         let expr = expr.peeled();
         match &expr.kind {
-            ExprKind::New(callee, _args) => match &callee.peeled().kind {
+            ExprKind::New(callee, _args) => StaticValue::Known(match &callee.peeled().kind {
                 ExprKind::Name(name) => name
                     .resolved_class()
                     .map_or(Type::mixed(), |class| Type::object(class.into(), vec![])),
                 _ => Type::mixed(),
-            },
+            }),
             ExprKind::ArrayLiteral(items) => {
                 let mut fields = Vec::new();
                 for item in items {
@@ -687,40 +746,62 @@ fn resolve_static_expr_type(expr: &Expr, registry: &Registry) -> Type {
                     let Some(key) = literal_string_key(key_expr) else {
                         continue;
                     };
-                    let ty = resolve_static_expr_type(&item.value, registry);
-                    fields.push((key, ty, false));
+                    fields.push((key, static_value(&item.value)));
                 }
-                Type::array_shape(Shape::from_named(fields))
+                StaticValue::Array(fields)
             }
-            ExprKind::Call(callee, _args) => {
-                let ExprKind::Name(name) = &callee.peeled().kind else {
-                    return Type::mixed();
-                };
-                registry
-                    .resolve_function(name)
-                    .map(|(_, sig)| sig.return_type.clone())
-                    .unwrap_or(Type::mixed())
+            ExprKind::Call(callee, _args) => match &callee.peeled().kind {
+                ExprKind::Name(name) => StaticValue::Call(name.clone()),
+                _ => StaticValue::Known(Type::mixed()),
+            },
+            ExprKind::StaticCall(target, method, _args) => match target.as_name() {
+                Some(name) => StaticValue::StaticCall(
+                    name.resolved_class().map(Name::from),
+                    method.name.clone(),
+                ),
+                None => StaticValue::Known(Type::mixed()),
+            },
+            ExprKind::ClassConstFetch(StaticTarget::Name(class), name) => {
+                StaticValue::ClassConst(class.resolved_class().map(Name::from), name.name.clone())
             }
-            ExprKind::StaticCall(target, method, _args) => target
-                .as_name()
-                .and_then(QualifiedName::resolved_class)
-                .and_then(|class| registry.lookup_method(class, method))
-                .map(|sig| sig.return_type.clone())
-                .unwrap_or(Type::mixed()),
-            ExprKind::ClassConstFetch(StaticTarget::Name(class), name) => class
-                .resolved_class()
-                .and_then(|class| registry.lookup_const(class, name))
-                .map(|c| c.ty.clone())
-                .unwrap_or(Type::mixed()),
             ExprKind::MethodCall(recv, method, _args, _) => {
-                let recv_ty = resolve_static_expr_type(recv, registry);
-                recv_ty
-                    .as_object()
-                    .and_then(|(class, _)| registry.lookup_method(class, method))
-                    .map(|sig| sig.return_type.clone())
-                    .unwrap_or(Type::mixed())
+                StaticValue::MethodCall(Box::new(static_value(recv)), method.name.clone())
             }
-            _ => infer_const_type(expr),
+            _ => StaticValue::Known(infer_const_type(expr)),
         }
     })
+}
+
+/// The type of an assigned value, using only registry lookups - no
+/// `Checker`/`Locals`, neither exists yet at this point in the pipeline.
+fn resolve_value(value: &StaticValue, registry: &Registry) -> Type {
+    match value {
+        StaticValue::Known(ty) => ty.clone(),
+        StaticValue::Array(items) => {
+            let fields = items
+                .iter()
+                .map(|(key, value)| (key.clone(), resolve_value(value, registry), false))
+                .collect::<Vec<_>>();
+            Type::array_shape(Shape::from_named(fields))
+        }
+        StaticValue::Call(name) => registry
+            .resolve_function(name)
+            .map(|(_, sig)| sig.return_type.clone())
+            .unwrap_or(Type::mixed()),
+        StaticValue::StaticCall(class, method) => class
+            .as_ref()
+            .and_then(|class| registry.lookup_method(class, method))
+            .map(|sig| sig.return_type.clone())
+            .unwrap_or(Type::mixed()),
+        StaticValue::ClassConst(class, name) => class
+            .as_ref()
+            .and_then(|class| registry.lookup_const(class, name))
+            .map(|c| c.ty.clone())
+            .unwrap_or(Type::mixed()),
+        StaticValue::MethodCall(recv, method) => resolve_value(recv, registry)
+            .as_object()
+            .and_then(|(class, _)| registry.lookup_method(class, method))
+            .map(|sig| sig.return_type.clone())
+            .unwrap_or(Type::mixed()),
+    }
 }

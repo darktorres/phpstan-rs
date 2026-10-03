@@ -16,7 +16,7 @@ use crate::pest_config::PestConfig;
 use crate::registry::scope::Scope;
 use crate::registry::stubs;
 use crate::registry::{
-    BodySource, BuiltDecl, DeclKind, FileBodies, Keep, Origin, Provenance, Registry,
+    BodySource, BuiltDecl, DeclKind, FileBodies, GlobalFacts, Keep, Origin, Provenance, Registry,
 };
 use diagnostics::{self, Diagnostic, DiagnosticBuilder};
 use syntax::FileFacts;
@@ -126,6 +126,9 @@ pub(crate) struct FileState {
     // Its function and method bodies, which the declarations' provenance
     // finds.
     bodies: FileBodies,
+    // What it assigns to globals, before the registry says what the values
+    // are.
+    global_facts: Arc<GlobalFacts>,
     // What is true of the file as a whole (`syntax::FileFacts`).
     facts: FileFacts,
     // Its lines, which the lines and columns of its spans are found by.
@@ -903,6 +906,7 @@ impl Project {
             duplicate_fn_sites,
             duplicate_class_sites,
             bodies,
+            global_facts,
             origin_path,
             facts,
             line_index,
@@ -950,6 +954,7 @@ impl Project {
                 analyzed,
                 owner,
                 bodies,
+                global_facts,
                 facts,
                 line_index,
             },
@@ -1330,10 +1335,10 @@ impl Project {
         let mut walk = AffectedWalk::default();
         self.walk_affected(&mut walk, changed_keys.iter().cloned());
         stale.extend(walk.affected.iter().cloned());
-        let files: Vec<(FileId, &Path, &[Stmt])> = self
+        let files: Vec<(FileId, &Path, &GlobalFacts)> = self
             .files
             .iter_with_ids()
-            .map(|(id, p, f)| (id, p.as_path(), f.ast.as_slice()))
+            .map(|(id, p, f)| (id, p.as_path(), &*f.global_facts))
             .collect();
         self.registry.infer_global_variables_of(&files, &stale);
         self.registry.set_scope(Scope::all());
@@ -1714,6 +1719,7 @@ impl Project {
         // which has no `stub_paths` concept.
         self.duplicate_class_sites.index(&ast, path, false);
         let bodies = FileBodies::of(&ast);
+        let global_facts = Arc::new(GlobalFacts::of(&ast));
         let id = self.files.id_for(path);
         register_references(&mut self.dependents, id, &references);
         register_references(&mut self.signature_dependents, id, &declaration_references);
@@ -1736,6 +1742,7 @@ impl Project {
                 analyzed,
                 owner: self.packages.owner(&self.absolute_path(path)),
                 bodies,
+                global_facts,
                 facts,
                 line_index,
             },
@@ -2738,6 +2745,8 @@ pub struct ParsedFile {
     // field's own doc comment for why it's needed at all).
     duplicate_class_sites: DuplicateClassSites,
     bodies: FileBodies,
+    // What it assigns to globals.
+    global_facts: Arc<GlobalFacts>,
     // The path the file's declarations name it by.
     origin_path: Arc<Path>,
     // What is true of the file as a whole (`syntax::FileFacts`).
@@ -2806,6 +2815,7 @@ pub fn parse_file_with_names<'a>(
         })
         .collect();
     let bodies = FileBodies::of(&ast);
+    let global_facts = Arc::new(GlobalFacts::of(&ast));
     Ok(ParsedFile {
         ast,
         lex_warnings,
@@ -2820,6 +2830,7 @@ pub fn parse_file_with_names<'a>(
         duplicate_class_sites,
         ignores,
         bodies,
+        global_facts,
         origin_path,
         facts,
         line_index,

@@ -27,14 +27,16 @@ fn build_with_files(sources: &[(&str, &str)]) -> Registry {
         .collect();
     let combined: Vec<Stmt> = parsed.iter().flat_map(|(_, p)| p.clone()).collect();
     let mut registry = Registry::build(&combined);
-    let files: Vec<(crate::file_id::FileId, &Path, &[Stmt])> = parsed
+    let facts: Vec<GlobalFacts> = parsed.iter().map(|(_, p)| GlobalFacts::of(p)).collect();
+    let files: Vec<(crate::file_id::FileId, &Path, &GlobalFacts)> = parsed
         .iter()
+        .zip(&facts)
         .enumerate()
-        .map(|(i, (path, p))| {
+        .map(|(i, ((path, _), facts))| {
             (
                 crate::file_id::FileId::new(i),
                 Path::new(path.as_str()),
-                p.as_slice(),
+                facts,
             )
         })
         .collect();
