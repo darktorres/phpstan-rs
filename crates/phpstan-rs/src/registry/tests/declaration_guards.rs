@@ -133,3 +133,14 @@ fn a_declaration_that_changes_nothing_is_not_a_change() {
     assert!(changed.classes.is_empty());
     assert!(changed.functions.is_empty());
 }
+
+#[test]
+fn a_class_declared_under_a_false_literal_is_indexed() {
+    // A package's way to declare a class for the tools that read its
+    // source (`class_alias` makes it at run time).
+    let src = "<?php namespace P; if (false) { class Aliased {} }";
+    for versions in [None, from(8, 0)] {
+        let r = index(src, versions);
+        assert!(r.lookup_class("P\\Aliased").is_some());
+    }
+}

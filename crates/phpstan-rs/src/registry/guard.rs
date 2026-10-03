@@ -63,9 +63,10 @@ impl Compare {
 /// A declaration's guard, as the condition it is nested under says it.
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) enum GuardExpr {
-    /// Nothing known: a loop, a `function_exists()` test, any other code.
+    /// Nothing known: a loop, a `function_exists()` test, any other code -
+    /// `if (false)` too, which is how a package declares a class for the
+    /// tools that read its source and never for PHP to run.
     Opaque,
-    Literal(bool),
     /// `PHP_VERSION_ID <op> n`.
     VersionId(Compare, u32),
     Not(Box<GuardExpr>),
@@ -123,7 +124,6 @@ impl GuardExpr {
     /// What `expr`, an `if` condition, says about the versions.
     fn of_condition(expr: &Expr) -> GuardExpr {
         match &expr.kind {
-            ExprKind::Literal(Literal::Bool(value)) => GuardExpr::Literal(*value),
             ExprKind::Unary(UnaryOp::Not, inner) => {
                 GuardExpr::Not(Box::new(GuardExpr::of_condition(inner)))
             }
@@ -159,8 +159,6 @@ impl GuardExpr {
     pub(crate) fn on(&self, versions: Option<PhpVersions>) -> Guard {
         match self {
             GuardExpr::Opaque => Guard::Maybe,
-            GuardExpr::Literal(true) => Guard::Always,
-            GuardExpr::Literal(false) => Guard::Never,
             GuardExpr::VersionId(compare, n) => versions.map_or(Guard::Maybe, |versions| {
                 // The ids a version runs as: its first release to its
                 // last patch.
