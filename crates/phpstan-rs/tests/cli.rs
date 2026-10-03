@@ -1090,8 +1090,11 @@ fn check_project_survives_a_file_that_crashes_the_parser() {
     );
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(stdout.contains("undefined variable"), "got: {stdout}");
+    // The file that does not parse is reported as a `parse.error`, and
+    // counted among the files with findings.
+    assert!(stdout.contains("(parse.error)"), "got: {stdout}");
     assert!(
-        stdout.contains("1 file(s) checked, 1 diagnostic(s)"),
+        stdout.contains("1 file(s) checked, 2 diagnostic(s)"),
         "got: {stdout}"
     );
     assert!(

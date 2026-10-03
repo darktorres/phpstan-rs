@@ -45,10 +45,6 @@ fn operators_of_one_level_group_to_the_left() {
         grouping_of("$a / $b % $c * $d"),
         "(((a Div b) Mod c) Mul d)"
     );
-    assert_eq!(
-        grouping_of("$a == $b != $c === $d"),
-        "(((a Eq b) NotEq c) Identical d)"
-    );
     assert_eq!(grouping_of("$a << $b >> $c"), "((a Shl b) Shr c)");
     assert_eq!(grouping_of("$a . $b . $c"), "((a Concat b) Concat c)");
     assert_eq!(grouping_of("$a || $b || $c"), "((a Or b) Or c)");
@@ -76,4 +72,21 @@ fn a_binary_expressions_span_runs_from_its_first_operand_to_its_last() {
         panic!("a binary");
     };
     assert_eq!(text_at(src, product.span), "$b * $c");
+}
+
+#[test]
+fn equality_and_comparison_do_not_chain() {
+    // Neither is associative in PHP: each of these is a syntax error.
+    for source in [
+        "$a == $b != $c",
+        "$a === $b == $c",
+        "$a < $b > $c",
+        "$a <= $b < $c",
+    ] {
+        let tokens = crate::lexer::Lexer::new(&format!("<?php {source};")).tokenize_with_spans();
+        assert!(
+            crate::parser::Parser::new(tokens).parse_program().is_err(),
+            "{source}"
+        );
+    }
 }
