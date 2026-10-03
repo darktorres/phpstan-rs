@@ -255,7 +255,7 @@ pub(crate) struct PassMark {
 /// `if`/`while` fork `locals` into per-branch copies (narrowed via
 /// `apply_narrowing` on the condition) and merge them back at the join
 /// point (`merge_scopes`), accounting for a branch that unconditionally
-/// terminates (`always_terminates`) so a guard clause's narrowing survives
+/// terminates (`Completion::terminates`) so a guard clause's narrowing survives
 /// past the `if`. Everything else (`for`/`foreach`/`switch`/`try`) still
 /// shares one mutable scope with no forking or narrowing - a real but
 /// bounded gap, not a soundness issue, since no narrowing ever happens
@@ -523,15 +523,6 @@ pub struct Checker<'a> {
     /// narrowed after the check binds these, not its right side re-read
     /// once the target already holds the new value.
     pub(crate) assigned_values: rustc_hash::FxHashMap<Span, (Type, Option<Type>)>,
-    /// Statements in the current function body whose assertion narrowed
-    /// a variable to `never`: the assertion fails there, so they end
-    /// control flow (`always_terminates`).
-    pub(crate) terminating_assertions: rustc_hash::FxHashSet<Span>,
-    // Whether a statement's completion is compared with what
-    // `always_terminates` and `exits_function_or_loop` say of it
-    // (`PHPSTAN_RS_COMPLETION_ORACLE`): for testing a change to how
-    // completion is found, which reports each difference.
-    pub(crate) completion_oracle: bool,
     // How the body of the loop last checked completed, by its last pass.
     pub(crate) loop_body_completion: Completion,
     // The method call that is a whole statement, as its own check resolved
@@ -648,7 +639,7 @@ pub struct Checker<'a> {
     // `DoWhile` each fold every collected state into what flows past the
     // loop once its body is done being checked (a real `break` inside an
     // `if` was otherwise silently discarded from post-loop state
-    // entirely - `always_terminates` correctly treats it as "doesn't
+    // entirely - `Completion::terminates` correctly treats it as "doesn't
     // fall through to the next statement in this block", but nothing
     // separately captured it for the *enclosing loop's* own exit state,
     // the same two-question split `Switch`'s own pre-existing
@@ -1146,8 +1137,6 @@ impl<'a> Checker<'a> {
             current_function_byref_snapshot_names: NameSet::default(),
             current_function_goto_targets: GotoState::default(),
             assigned_values: rustc_hash::FxHashMap::default(),
-            terminating_assertions: rustc_hash::FxHashSet::default(),
-            completion_oracle: std::env::var_os("PHPSTAN_RS_COMPLETION_ORACLE").is_some(),
             loop_body_completion: Completion::FALLS_THROUGH,
             statement_method_call: None,
             current_function_assigned_variables: Vec::new(),

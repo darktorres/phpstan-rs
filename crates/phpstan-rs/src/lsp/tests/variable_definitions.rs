@@ -412,7 +412,7 @@ fn definition_on_a_variable_read_after_a_guard_clause_excludes_the_terminated_br
     // The real payoff of routing through the checker's own flow-sensitive
     // analysis instead of a hand-rolled approximation: the `else` branch
     // here always `return`s, so real PHPStan-matching termination-pruning
-    // (`always_terminates`, `checker/stmt.rs`'s own `If` handling)
+    // (`Completion::terminates`, `checker/stmt.rs`'s own `If` handling)
     // excludes its own `$x = 2` from ever reaching the merge point at
     // all - only `$x = 1` is a live candidate, a plain `Scalar`, not an
     // over-cautious `Array` offering an alternative that could never

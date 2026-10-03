@@ -323,14 +323,14 @@ fn walk_stmts(
 }
 
 /// A conservative, syntax-only check (no type inference, unlike the main
-/// checker's `always_terminates`) for whether a statement unconditionally
+/// checker's `Completion::terminates`) for whether a statement unconditionally
 /// exits the enclosing method - `Return`/`Throw`/`Break`/`Continue`
 /// directly, a `Block` containing one anywhere (not just as its last
 /// statement), or an `If` where both branches do (a bare `if` with no
 /// `else` can never qualify - the "condition false" path always falls
 /// through). Used only to decide whether a branch's resulting state
 /// should be excluded from a merge. Narrower than a full
-/// `always_terminates` (no `never`-returning-call detection, no
+/// `Completion::terminates` (no `never`-returning-call detection, no
 /// `Switch`/`Try` exhaustiveness, since either needs a real
 /// `Locals`/`infer_expr` this standalone module doesn't have) - errs
 /// safe (could only miss a real finding downstream, never invent a false

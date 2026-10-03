@@ -103,13 +103,9 @@ impl<'a> Checker<'a> {
                 merge_scopes(&self.relation(), &running, &direct)
             };
             let block = self.check_block(&case.body, &mut case_locals, declared_return, label);
-            let last_stmt = case.body.last();
             let case_terminates = block.completion.terminates;
             case_lasts.push(block.completion);
             case_jumps |= block.completion.jumps;
-            if let Some(s) = last_stmt {
-                self.compare_completion(s, &case_locals, block.last);
-            }
             if let Some(t) = &case.test {
                 self.apply_loose_equality_narrowing(subject, t, &mut narrowed_locals, false);
             }
@@ -131,7 +127,7 @@ impl<'a> Checker<'a> {
         // If no path reaches past the switch (every case
         // return/throw/continues, and a `default:` exists), the
         // code after it is dead - leave `locals` alone rather
-        // than guess, the same shape `always_terminates`'s own
+        // than guess, the same shape `Completion::terminates`'s own
         // `Switch` arm independently recognizes.
         if let Some(first) = exit_states.first().cloned() {
             *locals = exit_states

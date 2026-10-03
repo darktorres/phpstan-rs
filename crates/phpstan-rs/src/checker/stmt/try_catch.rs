@@ -102,9 +102,6 @@ impl<'a> Checker<'a> {
         }
         let try_end_locals = locals.clone();
         let try_terminates = body_block.completion.terminates;
-        if let Some(s) = body.last() {
-            self.compare_completion(s, &try_end_locals, body_block.last);
-        }
         // How the whole statement completes: the body's last statement and
         // every catch's last must terminate (`finally` runs before either).
         let mut all_terminate = try_terminates;
@@ -119,7 +116,7 @@ impl<'a> Checker<'a> {
         // wins, even over an in-flight exception). See
         // `collect_exit_point_statements`'s doc comment for why this
         // only names the common `Block`/`If`-nested shapes rather than
-        // every construct `always_terminates` itself recognizes.
+        // every construct `Completion::terminates` itself recognizes.
         let mut try_catch_exit_points: Vec<&Stmt> = Vec::new();
         if try_terminates && let Some(s) = body.last() {
             try_catch_exit_points.extend(collect_exit_point_statements(s));
@@ -274,9 +271,6 @@ impl<'a> Checker<'a> {
             all_terminate &= catch_terminates;
             all_exit &= catch_block.completion.exits;
             jumps |= catch_block.completion.jumps;
-            if let Some(s) = c.body.last() {
-                self.compare_completion(s, &catch_locals, catch_block.last);
-            }
             if catch_terminates {
                 if let Some(s) = c.body.last() {
                     try_catch_exit_points.extend(collect_exit_point_statements(s));
@@ -329,9 +323,6 @@ impl<'a> Checker<'a> {
             // `OverwrittenExitPointByFinallyRule`'s own
             // `count($node->getTryCatchExitPoints()) === 0` early
             // return exactly.
-            if let Some(last) = f.last() {
-                self.compare_completion(last, locals, finally_block.last);
-            }
             if !try_catch_exit_points.is_empty()
                 && let Some(last) = f.last()
                 && finally_block.last.terminates

@@ -924,7 +924,6 @@ impl<'a> Checker<'a> {
                 .map(|b| GotoState::new(b.goto_labels.clone()))
                 .unwrap_or_default(),
         );
-        let previous_terminating_assertions = std::mem::take(&mut self.terminating_assertions);
         let previous_assigned_variables = self.enter_assigned_variables(f.body_stmts());
         // See `Checker::current_function_throw_points`'s doc comment.
         let previous_throw_points = std::mem::take(&mut self.current_function_throw_points);
@@ -998,7 +997,7 @@ impl<'a> Checker<'a> {
         // A function that falls off the end of its body with no `return`
         // at all implicitly returns `null` too - equally a real mismatch
         // against a non-nullable, non-void, non-mixed declared return
-        // type: `always_terminates` (already used for guard-clause
+        // type: `Completion::terminates` (already used for guard-clause
         // narrowing) answers "does this statement definitely end control
         // flow" - a `false` here means this function's body doesn't
         // guarantee returning anything. A real generator is exempt:
@@ -1009,7 +1008,7 @@ impl<'a> Checker<'a> {
         // return type. Not just `f.body.last()`: a statement anywhere in
         // the body unconditionally terminating is equally sound proof
         // the function never falls off the end, the same reasoning
-        // `always_terminates`'s `Block` arm uses for a nested `{ ... }` -
+        // `Completion::terminates`'s `Block` arm uses for a nested `{ ... }` -
         // `f.body` just isn't itself one `Stmt`, so it needs the same
         // check spelled out here directly. A generator stays exempt from
         // this whole check unless its declared `Generator<TKey, TValue,
@@ -1036,7 +1035,6 @@ impl<'a> Checker<'a> {
         // the only shape where PHP's implicit-`null`-return is the real,
         // uncommitted fact). Never for a generator, same reasoning as
         // both `Return` arms in `stmt.rs`.
-        self.compare_body_completion(f.body_stmts(), &locals, f.span, body_terminates);
         let body_falls_off_end = !body_terminates;
         if body_falls_off_end {
             self.record_by_ref_exit_snapshot(&locals);
@@ -1224,7 +1222,6 @@ impl<'a> Checker<'a> {
         self.current_function_by_ref_exit_snapshots = previous_by_ref_exit_snapshots;
         self.current_function_by_ref_params_with_tag = previous_by_ref_params_with_tag;
         self.current_function_goto_targets = previous_goto_targets;
-        self.terminating_assertions = previous_terminating_assertions;
         self.current_function_assigned_variables = previous_assigned_variables;
 
         self.current_class = previous_class;

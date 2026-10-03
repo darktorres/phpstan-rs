@@ -274,7 +274,6 @@ impl<'a> Checker<'a> {
                     .check_block(stmts, &mut locals, declared_return.as_ref(), &label)
                     .completion
                     .terminates;
-                self.compare_body_completion(stmts, &locals, span, body_terminates);
                 // Same fall-off-the-end completeness check `check_function`
                 // performs - real PHPStan runs `MissingReturnRule` against
                 // a hook the same as any other function-like node.

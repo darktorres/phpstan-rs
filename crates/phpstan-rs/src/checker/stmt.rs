@@ -171,7 +171,6 @@ impl<'a> Checker<'a> {
                     state.reachable = false;
                 }
             }
-            self.compare_completion(stmt, locals, last);
             if !state.reported_unreachable
                 && last.terminates
                 && let Some(next) = stmts.get(i + 1)
@@ -733,7 +732,7 @@ impl<'a> Checker<'a> {
                     .iter()
                     .any(|k| locals.get(*k).is_some_and(Type::is_never))
                 {
-                    self.terminating_assertions.insert(stmt.span);
+                    value_is_never = true;
                 }
                 // A bare `$cond || neverReturningCall();` statement -
                 // PHP's classic "guard or die" idiom
@@ -1326,11 +1325,7 @@ impl<'a> Checker<'a> {
             // An expression statement whose value is `never` (a call to a
             // function that never returns, `exit`), or an assertion that
             // can only fail: control does not pass it.
-            StmtKind::Expression(_)
-                if self.terminating_assertions.contains(&stmt.span) || value_is_never =>
-            {
-                completion = Completion::EXITS
-            }
+            StmtKind::Expression(_) if value_is_never => completion = Completion::EXITS,
             _ => {}
         }
         completion
@@ -1555,20 +1550,6 @@ impl<'a> Checker<'a> {
             // code after the guard.
             let then_terminates = then_completion.terminates;
             let else_terminates = else_completion.terminates;
-            if self.completion_oracle {
-                let old_then = self.always_terminates(then_branch, &then_locals);
-                let old_else = else_branch.is_some_and(|e| self.always_terminates(e, &else_locals))
-                    && rest
-                        .iter()
-                        .all(|(_, body)| self.always_terminates(body, &else_locals));
-                self.note_completion_difference(
-                    then_branch.span,
-                    "if branch",
-                    old_then,
-                    then_terminates,
-                );
-                self.note_completion_difference(cond.span, "else chain", old_else, else_terminates);
-            }
 
             *locals = match (then_terminates, else_terminates) {
                 (true, false) => else_locals,

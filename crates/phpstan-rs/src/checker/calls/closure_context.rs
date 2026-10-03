@@ -331,12 +331,6 @@ impl<'a> Checker<'a> {
                     },
                 );
                 closure_locals = converged;
-                self.compare_body_completion(
-                    body,
-                    &closure_locals,
-                    closure_expr.span,
-                    body_terminates,
-                );
                 self.check_closure_missing_return(
                     body_terminates,
                     return_type.is_some(),

@@ -12,50 +12,6 @@ pub(crate) use generators::{
     generator_missing_return_type, generator_template_param, type_allows_generator_return,
 };
 
-/// Whether `stmt` merely exits a `switch` itself rather than the whole
-/// enclosing function/loop - real PHP's own well-known `continue`-
-/// inside-`switch` gotcha: a `switch` counts as one level for `break`/
-/// `continue` purposes, so a bare `continue;`/`continue 1;` written
-/// directly in a case is exactly `break`-equivalent (falls through to
-/// after the switch, doesn't restart any enclosing loop). Only a level
-/// that explicitly escapes past the switch (`continue 2;` or higher)
-/// counts as a real exit. Shared by `always_terminates`'s own `Switch`
-/// arm and `Checker::exits_function_or_loop` - both independently need
-/// the identical "is this case's own last statement break-equivalent"
-/// question, and getting it wrong the same way in only one of the two
-/// would leave the other producing a different, inconsistent answer for
-/// the exact same case.
-///
-/// Recurses through `Block`/`If` (a case whose own last statement is
-/// `if ($c) { continue; } else { continue; }` unconditionally exits the
-/// switch too, on every branch, the same as a bare `continue;` would) -
-/// the identical shape `always_terminates`'s own recursion already has,
-/// for the identical reason. A genuinely *mixed* branch - one side
-/// break-equivalent, the other diverging a different way entirely (a
-/// `: never`-returning call, `return`, `throw`) - is a real, disclosed
-/// residual gap: `exits_function_or_loop`'s own recursion correctly
-/// judges that shape (verified directly), but `always_terminates`'s own
-/// separate, much more broadly-used recursion has no way to thread "this
-/// specific `Continue` is switch-scoped" through an arbitrary nesting
-/// depth without risking wrongly loosening its own unrelated, function-
-/// level "does this exit for real" question elsewhere (guard-clause
-/// detection, `deadCode.unreachable`'s own non-switch callers) - not
-/// attempted here, narrower and more corner-case than the shapes above.
-pub(crate) fn is_switch_break_equivalent(stmt: &Stmt) -> bool {
-    syntax::stack::guard(|| match &stmt.kind {
-        StmtKind::Break(_) => true,
-        StmtKind::Continue(level) => level.is_none() || *level == Some(1),
-        StmtKind::Block(stmts)
-        | StmtKind::Declare {
-            body: Some(stmts), ..
-        } => stmts.last().is_some_and(is_switch_break_equivalent),
-        StmtKind::If(if_stmt) => {
-            if_stmt.else_branch.is_some() && if_stmt.bodies().all(is_switch_break_equivalent)
-        }
-        _ => false,
-    })
-}
-
 /// `converge_loop_body`'s own "could this loop have run zero times"
 /// parameter.
 pub(crate) enum LoopZeroIterations<'a> {
@@ -83,195 +39,6 @@ pub(crate) enum LoopZeroIterations<'a> {
 }
 
 impl<'a> Checker<'a> {
-    /// The classic guard clause (`if ($x === null) { return; }`, or the
-    /// less obvious `if (! $x instanceof Foo) { $this->fatalError(...); }`)
-    /// depends on recognizing a branch that never falls through, so its
-    /// (narrowed) scope doesn't incorrectly leak past the `if`. A bare
-    /// call expression counts too, not just `return`/`throw`/`break`/
-    /// `continue`, when its own return type is `never` - a real, common
-    /// pattern (`private function fatalError(string $msg): never`) that a
-    /// purely syntactic check would miss entirely.
-    pub(crate) fn always_terminates(&self, stmt: &Stmt, locals: &Locals) -> bool {
-        syntax::stack::guard(|| {
-            match &stmt.kind {
-                StmtKind::Return(_)
-                | StmtKind::Throw(_)
-                | StmtKind::Break(_)
-                | StmtKind::Continue(_) => true,
-                StmtKind::Expression(e) => {
-                    self.terminating_assertions.contains(&stmt.span)
-                        || self.infer_expr(e, locals).is_never()
-                }
-                // Any statement in the block unconditionally terminating,
-                // not just the last one, is sound proof the whole block
-                // does - once reached, execution never falls through to
-                // whatever (if anything) comes after it, dead code or not.
-                // `deadCode.unreachable` (`check_block`) is this arm's
-                // mirror image: it's the one that actually names that dead
-                // code, while this arm just needs to know it exists.
-                StmtKind::Block(stmts)
-                | StmtKind::Declare {
-                    body: Some(stmts), ..
-                } => stmts.iter().any(|s| self.always_terminates(s, locals)),
-                StmtKind::If(if_stmt) => {
-                    if_stmt.else_branch.is_some()
-                        && if_stmt.bodies().all(|b| self.always_terminates(b, locals))
-                }
-                // A `switch` guarantees ending control flow only when there's
-                // a `default` (otherwise the subject might match nothing and
-                // fall straight through, doing nothing) and every non-empty
-                // case body genuinely terminates - not just `break`s, which
-                // only exits the switch itself and falls through to whatever
-                // follows it, not out of the enclosing function. An empty
-                // body (`case a: case b: ...`, a pure fallthrough label) is
-                // skipped rather than required to independently terminate -
-                // only the eventual non-empty body it falls into needs to.
-                // An empty case with no later non-empty case to fall into at
-                // all (`case A: case B: default:` as the switch's own last,
-                // entirely-empty tail, a common "explicitly do nothing for
-                // these" idiom) must not be treated as vacuously fine - that
-                // trailing-empty path actually just falls out the bottom,
-                // same as if there were no `default` label there at all.
-                StmtKind::Switch { cases, .. } => {
-                    cases.iter().any(|c| c.test.is_none())
-                        && cases.iter().enumerate().all(|(i, c)| {
-                            if !c.body.is_empty() {
-                                return c.body.last().is_some_and(|s| {
-                                    !is_switch_break_equivalent(s)
-                                        && self.always_terminates(s, locals)
-                                });
-                            }
-                            cases[i + 1..]
-                                .iter()
-                                .find(|later| !later.body.is_empty())
-                                .is_some_and(|later| {
-                                    later.body.last().is_some_and(|s| {
-                                        !is_switch_break_equivalent(s)
-                                            && self.always_terminates(s, locals)
-                                    })
-                                })
-                        })
-                }
-                // A `try` guarantees ending control flow when its own body
-                // does (whether by returning normally or by throwing - an
-                // uncaught throw propagates out of the function just as
-                // surely as a caught one returns from a catch block) *and*
-                // every one of its `catch` clauses also does. An empty
-                // `catches` list (a bare `try { ... } finally { ... }`)
-                // vacuously satisfies the second half - nothing can catch and
-                // fail to terminate if nothing catches at all. `finally`
-                // itself doesn't need to independently terminate for this
-                // question - it always runs before whatever the try/catch
-                // already decided.
-                StmtKind::Try { body, catches, .. } => {
-                    body.last()
-                        .is_some_and(|s| self.always_terminates(s, locals))
-                        && catches.iter().all(|c| {
-                            c.body
-                                .last()
-                                .is_some_and(|s| self.always_terminates(s, locals))
-                        })
-                }
-                // `while (true) { ...; if (...) { return $x; } }` (a
-                // find-a-free-key retry loop) must not be flagged as
-                // possibly falling off the function's own end - a literal
-                // `true`/non-zero condition never lets the loop exit by
-                // itself, so the only way past it at all is whatever
-                // `return`/`throw` inside its body runs, exactly what
-                // `always_terminates` already exists to recognize for every
-                // other construct. Deliberately conservative about `break`:
-                // any `Break` statement anywhere in the body - even one that
-                // actually targets a different, nested loop/switch - counts
-                // as "this loop might exit on its own," never wrongly
-                // concluding termination.
-                StmtKind::While { cond, body } => {
-                    is_truthy_literal(cond) && !stmt_contains_break(body)
-                }
-                // Same idiom, `for`'s own real spelling: `for ($i = 0; true;
-                // $i++) { ... }` (a redirect-following retry loop) - a `for`
-                // with no condition at all (`for (;;)`) is PHP's own "no
-                // condition means always true," same real semantics as an
-                // explicit truthy literal.
-                StmtKind::For { cond, body, .. } => {
-                    cond.last().is_none_or(is_truthy_literal) && !stmt_contains_break(body)
-                }
-                _ => false,
-            }
-        })
-    }
-
-    /// Whether `stmt` exits the whole enclosing function or loop
-    /// (`return`/`throw`/`continue`, or a nested construct that
-    /// guarantees one of those) rather than merely exiting a `switch`
-    /// itself (`break`, or not transferring control at all). Distinct
-    /// from `always_terminates`'s own notion of "doesn't fall through to
-    /// the next case" (which correctly treats `break` as terminating
-    /// *that* question) - a switch's own post-switch scope merge needs
-    /// this different distinction instead: a case ending in `break`
-    /// still reaches the code after the switch, one ending in
-    /// `return`/`throw`/`continue` never does.
-    pub(crate) fn exits_function_or_loop(&self, stmt: &Stmt, locals: &Locals) -> bool {
-        syntax::stack::guard(|| {
-            match &stmt.kind {
-                StmtKind::Return(_) | StmtKind::Throw(_) => true,
-                // Real PHP's own well-known `continue`-inside-`switch` gotcha:
-                // a `switch` counts as one level for `break`/`continue`
-                // purposes, so a bare `continue;`/`continue 1;` written
-                // directly in a case (this function's own recursion never
-                // descends into a nested loop's body at all - there's no
-                // `While`/`For`/`Foreach`/`DoWhile`/`Switch` arm below, so any
-                // `Continue` this function actually reaches is guaranteed to
-                // be switch-scoped, not further-loop-scoped) is exactly
-                // `break`-equivalent: it exits the switch, not any enclosing
-                // loop, so code after the switch *is* reached. Only a level
-                // that explicitly escapes past the switch (`continue 2;` or
-                // higher) still counts as exiting.
-                StmtKind::Continue(level) => matches!(level, Some(n) if *n > 1),
-                StmtKind::Break(_) => false,
-                StmtKind::Expression(e) => {
-                    self.terminating_assertions.contains(&stmt.span)
-                        || self.infer_expr(e, locals).is_never()
-                }
-                StmtKind::Block(stmts)
-                | StmtKind::Declare {
-                    body: Some(stmts), ..
-                } => stmts
-                    .last()
-                    .is_some_and(|s| self.exits_function_or_loop(s, locals)),
-                StmtKind::If(if_stmt) => {
-                    if_stmt.else_branch.is_some()
-                        && if_stmt
-                            .bodies()
-                            .all(|b| self.exits_function_or_loop(b, locals))
-                }
-                // A `try`/`catch` introduces no new `break`/`continue` scope
-                // of its own (a bare `continue;` inside a `try` still
-                // targets whatever loop/switch already enclosed the `try`,
-                // exactly as if the `try` weren't there), so recursing the
-                // identical way `always_terminates`'s own `Try` arm does -
-                // just through `exits_function_or_loop` instead - is sound
-                // with no extra level-counting to get right. A nested
-                // `Switch` as a case's own last statement is deliberately
-                // still not handled here: a nested switch does introduce a
-                // new level for `break`/`continue` purposes, so correctly
-                // answering "does this nested switch exit the outer
-                // function/loop" would need the nested switch's own
-                // `continue N` levels reinterpreted one level shallower
-                // before recursing.
-                StmtKind::Try { body, catches, .. } => {
-                    body.last()
-                        .is_some_and(|s| self.exits_function_or_loop(s, locals))
-                        && catches.iter().all(|c| {
-                            c.body
-                                .last()
-                                .is_some_and(|s| self.exits_function_or_loop(s, locals))
-                        })
-                }
-                _ => false,
-            }
-        })
-    }
-
     /// Fixed-point convergence for a loop body (`While`/`DoWhile`/`For`/
     /// `Foreach` in `checker/stmt.rs`) - without this, a variable
     /// reassigned inside the loop body keeps its pre-loop-entry type for
@@ -836,19 +603,19 @@ pub(crate) fn merge_scopes(
 
 /// `OverwrittenExitPointByFinallyRule`: collects the
 /// concrete `return`/`throw`/`break`/`continue` statement(s) that make
-/// `stmt` genuinely exit - the same question `always_terminates` already
+/// `stmt` genuinely exit - the same question `Completion::terminates` already
 /// answers as a bare `bool`, but naming *which* statement(s) so a
 /// `finally` block that also unconditionally exits can be reported as
 /// silently overwriting them (a well-known, real PHP gotcha - a
 /// `finally`'s own exit point always wins, even over an in-flight
-/// exception). Deliberately narrower than `always_terminates` itself:
+/// exception). Deliberately narrower than `Completion::terminates` itself:
 /// only recurses into `Block`/`If` (common enough in real code to name
 /// every contributing line for without guessing) - a `Switch`/`Try`/
-/// loop body can still make `always_terminates` return `true`, but this
+/// loop body can still make `Completion::terminates` return `true`, but this
 /// returns nothing for one rather than picking an arbitrary nested line,
 /// the same "don't guess" leniency this project applies elsewhere. An
 /// empty result here means "no diagnostic for this side," never a false
-/// positive - `always_terminates`'s own gate gets checked independently
+/// positive - `Completion::terminates`'s own gate gets checked independently
 /// wherever this is called, so the two can never disagree about whether
 /// something is being overwritten, only about whether this can *name* it.
 pub(crate) fn collect_exit_point_statements(stmt: &Stmt) -> Vec<&Stmt> {
@@ -888,7 +655,7 @@ pub(crate) fn exit_point_description(stmt: &Stmt) -> &'static str {
 /// Whether `stmt` contains a `break` anywhere in its own subtree,
 /// including inside a nested loop/switch that statement doesn't
 /// unqualified-`break` out of at all - deliberately conservative in the
-/// same direction `always_terminates`'s own `while (true)` case needs:
+/// same direction `Completion::terminates`'s own `while (true)` case needs:
 /// treating any `break` found anywhere as "this loop might exit on its
 /// own" only ever causes a missed simplification, never a wrong
 /// termination conclusion, so there's no need to track which specific

@@ -165,7 +165,7 @@ impl<'a> Checker<'a> {
             // body - neither the "may run zero times" merge below nor
             // the "reaching here means cond went false" narrowing after
             // it applies. `is_truthy_literal` is the same check
-            // `always_terminates`'s own `While` arm uses one level up.
+            // `Completion::terminates`'s own `While` arm uses one level up.
             // Must fold every `break`-reached state together instead of
             // merging against the pre-loop `locals` (which the
             // unconditional zero-iteration merge below would otherwise
@@ -662,7 +662,7 @@ impl<'a> Checker<'a> {
         // variable keeps its post-body shape untouched, rather than
         // being widened back with the stale pre-loop one.
         // `loop_break_states` captures every `break`-reached state for
-        // the loop's exit state, since `always_terminates` only stops a
+        // the loop's exit state, since `Completion::terminates` only stops a
         // break-ending branch from leaking into the *rest of its own
         // block*.
         //

@@ -10,7 +10,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 /// `probe_var_provenance` - reaching-definitions info computed by riding
 /// along the checker's own flow-sensitive traversal (branch merging via
 /// `merge_scopes`, loop convergence via `converge_loop_body`, termination-
-/// pruning via `always_terminates`) rather than a second, independent
+/// pruning via `Completion::terminates`) rather than a second, independent
 /// approximation. `types`/`provenance` are separate fields, not one field
 /// carrying `(Type, ProvenanceSet)` pairs, since `Type` is pattern-matched
 /// at hundreds of call sites throughout this module and a wrapper tuple

@@ -3867,7 +3867,6 @@ impl<'a> Checker<'a> {
                     previous_saw_explicit_return,
                 );
                 let closure_is_generator = self.current_function_is_generator;
-                self.compare_body_completion(body, &closure_locals, e.span, body_terminates);
                 let closure_falls_off_end = !body_terminates;
                 // One final snapshot from the fully-converged post-body
                 // state - covers both "falls off the end with no
@@ -5305,7 +5304,7 @@ impl<'a> Checker<'a> {
         // generic `_ => r_ty` fallback below would make the whole
         // expression, and by extension any `$x = ... ?? throw ...;`
         // assignment statement built from it, infer as `never`
-        // itself, which `always_terminates`'s `StmtKind::Expression` case
+        // itself, which `Completion::terminates`'s `StmtKind::Expression` case
         // then reads as "this plain assignment statement always ends
         // control flow," wrongly marking every statement after it
         // unreachable. The real semantics: reaching anything past this
