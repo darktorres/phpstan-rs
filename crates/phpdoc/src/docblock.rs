@@ -386,10 +386,11 @@ pub fn parse(raw: &str) -> DocBlock {
             if foreign_tag_has_invalid_type(canonical, rest) {
                 continue;
             }
+            let scratch = tag_block(canonical, rest);
             if canonical.starts_with("assert") {
-                apply_tag(&mut foreign_asserts[asserts], canonical, rest);
+                foreign_asserts[asserts].merge_from(&scratch);
             } else {
-                apply_tag(&mut block, canonical, rest);
+                block.merge_from(&scratch);
             }
         }
     }
@@ -445,7 +446,7 @@ pub fn parse(raw: &str) -> DocBlock {
 /// A tag real PHPStan parses and finds invalid is an `InvalidTagValueNode`
 /// there - it contributes nothing, not whatever a recovering parser could
 /// salvage from it (`@return array(width, height)` gives no return type,
-/// not `array`). So the tag is applied to a scratch block first and only
+/// not `array`). So the tag is read as a block of its own first and only
 /// merged in when it parsed cleanly; its errors are kept either way.
 fn apply_tag_recording_errors(block: &mut DocBlock, written: &str, tag: &str, rest: &str) {
     // A tag phpdoc-parser has no dedicated parser for, whose value opens
@@ -468,25 +469,42 @@ fn apply_tag_recording_errors(block: &mut DocBlock, written: &str, tag: &str, re
     }
     let parsed_by_phpstan =
         written.starts_with("phpstan-") || PLAIN_TAGS_PHPSTAN_PARSES.contains(&tag);
+    let scratch = tag_block(tag, rest);
     // A tag real PHPStan reads as no more than a generic one is never
-    // dropped for its errors, so it is applied to the block as it is,
-    // which is what merging its scratch block would have done.
-    if !parsed_by_phpstan {
-        apply_tag(block, tag, rest);
-        return;
-    }
-    let mut scratch = DocBlock::default();
-    apply_tag(&mut scratch, tag, rest);
-    if let Some(first) = scratch.parse_errors.first() {
+    // dropped for its errors, so it is applied to the block as it is.
+    if parsed_by_phpstan && let Some(first) = scratch.parse_errors.first() {
         block.invalid_tag_values.push(InvalidTagValue {
             tag: written.to_string(),
             value: rest.to_string(),
             message: first.message.clone(),
         });
-        block.parse_errors.append(&mut scratch.parse_errors);
+        block
+            .parse_errors
+            .extend(scratch.parse_errors.iter().cloned());
         return;
     }
-    block.merge_from(scratch);
+    block.merge_from(&scratch);
+}
+
+/// What one tag adds to a block, as the block of only that tag: the same
+/// tag (`@return void`, `@param string $name`, `@throws \Exception`)
+/// recurs in thousands of docblocks, and what it says depends on its
+/// name and text alone, so it is read once for each distinct one and
+/// applied to each block by `DocBlock::merge_from`.
+fn tag_block(tag: &str, rest: &str) -> std::sync::Arc<DocBlock> {
+    static MEMO: std::sync::LazyLock<syntax::memo::Memo<DocBlock>> =
+        std::sync::LazyLock::new(|| syntax::memo::Memo::with_limits(2048, 1 << 20));
+    let key = format!("{tag}\u{1}{rest}");
+    MEMO.get(&key, |key| {
+        let mut parts = key.splitn(2, '\u{1}');
+        let (tag, rest) = (
+            parts.next().unwrap_or_default(),
+            parts.next().unwrap_or_default(),
+        );
+        let mut scratch = DocBlock::default();
+        apply_tag(&mut scratch, tag, rest);
+        scratch
+    })
 }
 
 impl DocBlock {
@@ -497,7 +515,7 @@ impl DocBlock {
     /// a list is appended (templates deduplicated by name), a flag is
     /// OR-ed. Destructured exhaustively so a new `DocBlock` field is a
     /// compile error here until it's handled.
-    fn merge_from(&mut self, other: DocBlock) {
+    fn merge_from(&mut self, other: &DocBlock) {
         let DocBlock {
             params,
             param_out,
@@ -545,33 +563,39 @@ impl DocBlock {
             parse_errors,
             invalid_tag_values,
         } = other;
-        self.params.extend(params);
-        self.param_out.extend(param_out);
+        let extend_map = |into: &mut FxHashMap<String, DocType>,
+                          from: &FxHashMap<String, DocType>| {
+            into.extend(from.iter().map(|(k, v)| (k.clone(), v.clone())));
+        };
+        extend_map(&mut self.params, params);
+        extend_map(&mut self.param_out, param_out);
         if return_type.is_some() {
-            self.return_type = return_type;
+            self.return_type.clone_from(return_type);
         }
         if var_type.is_some() {
-            self.var_type = var_type;
+            self.var_type.clone_from(var_type);
         }
         if var_name.is_some() {
-            self.var_name = var_name;
+            self.var_name.clone_from(var_name);
         }
         for name in templates {
-            if !self.templates.contains(&name) {
-                self.templates.push(name);
+            if !self.templates.contains(name) {
+                self.templates.push(name.clone());
             }
         }
-        self.template_bounds.extend(template_bounds);
-        self.template_defaults.extend(template_defaults);
-        self.covariant_templates.extend(covariant_templates);
-        self.contravariant_templates.extend(contravariant_templates);
-        self.optional_params.extend(optional_params);
+        extend_map(&mut self.template_bounds, template_bounds);
+        extend_map(&mut self.template_defaults, template_defaults);
+        self.covariant_templates
+            .extend(covariant_templates.iter().cloned());
+        self.contravariant_templates
+            .extend(contravariant_templates.iter().cloned());
+        self.optional_params.extend(optional_params.iter().cloned());
         if extends.is_some() {
-            self.extends = extends;
+            self.extends.clone_from(extends);
         }
-        self.implements.extend(implements);
-        self.uses.extend(uses);
-        self.properties.extend(properties);
+        self.implements.extend(implements.iter().cloned());
+        self.uses.extend(uses.iter().cloned());
+        self.properties.extend(properties.iter().cloned());
         self.api |= api;
         self.api_do_not_implement |= api_do_not_implement;
         self.always_read |= always_read;
@@ -585,28 +609,33 @@ impl DocBlock {
         self.pure |= pure;
         self.impure |= impure;
         if deprecated.is_some() {
-            self.deprecated = deprecated;
+            self.deprecated.clone_from(deprecated);
         }
-        self.throws.extend(throws);
-        self.see.extend(see);
-        self.assert_if_true.extend(assert_if_true);
-        self.assert_if_false.extend(assert_if_false);
-        self.assert.extend(assert);
-        self.type_aliases.extend(type_aliases);
-        self.type_imports.extend(type_imports);
-        self.require_extends.extend(require_extends);
-        self.require_implements.extend(require_implements);
-        self.sealed.extend(sealed);
-        self.method_tags.extend(method_tags);
-        self.mixins.extend(mixins);
+        self.throws.extend(throws.iter().cloned());
+        self.see.extend(see.iter().cloned());
+        self.assert_if_true.extend(assert_if_true.iter().cloned());
+        self.assert_if_false.extend(assert_if_false.iter().cloned());
+        self.assert.extend(assert.iter().cloned());
+        extend_map(&mut self.type_aliases, type_aliases);
+        self.type_imports.extend(type_imports.iter().cloned());
+        self.require_extends.extend(require_extends.iter().cloned());
+        self.require_implements
+            .extend(require_implements.iter().cloned());
+        self.sealed.extend(sealed.iter().cloned());
+        self.method_tags.extend(method_tags.iter().cloned());
+        self.mixins.extend(mixins.iter().cloned());
         if self_out.is_some() {
-            self.self_out = self_out;
+            self.self_out.clone_from(self_out);
         }
-        self.param_immediately_invoked_callable
-            .extend(param_immediately_invoked_callable);
-        self.param_closure_this.extend(param_closure_this);
-        self.parse_errors.extend(parse_errors);
-        self.invalid_tag_values.extend(invalid_tag_values);
+        self.param_immediately_invoked_callable.extend(
+            param_immediately_invoked_callable
+                .iter()
+                .map(|(k, v)| (k.clone(), *v)),
+        );
+        extend_map(&mut self.param_closure_this, param_closure_this);
+        self.parse_errors.extend(parse_errors.iter().cloned());
+        self.invalid_tag_values
+            .extend(invalid_tag_values.iter().cloned());
     }
 }
 
