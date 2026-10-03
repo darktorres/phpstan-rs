@@ -304,7 +304,14 @@ fn report(
             println!("{summary}");
         }
         OutputFormat::Json => {
-            println!("{}", output::render_json(&results, checked));
+            use std::io::Write as _;
+            let mut stdout = std::io::BufWriter::new(std::io::stdout().lock());
+            let written = output::write_json(&mut stdout, &results, checked)
+                .and_then(|()| writeln!(stdout))
+                .and_then(|()| stdout.flush());
+            if let Err(e) = written {
+                eprintln!("failed to write the JSON report: {e}");
+            }
         }
         OutputFormat::Checkstyle => {
             print!("{}", output::render_checkstyle(&results));

@@ -22,7 +22,6 @@
 //! the message text there instead so neither piece of context is lost.
 
 use rustc_hash::FxHashMap;
-use std::collections::BTreeMap;
 use std::path::PathBuf;
 
 use diagnostics::Diagnostic;
@@ -89,10 +88,42 @@ struct JsonMessage<'a> {
     tip: Option<String>,
 }
 
-#[derive(Serialize)]
-struct JsonFile<'a> {
-    diagnostics: usize,
-    messages: Vec<JsonMessage<'a>>,
+/// One file's entry: its diagnostics, counted and listed without being
+/// copied into a structure first.
+struct JsonFile<'a>(&'a [Diagnostic]);
+
+impl Serialize for JsonFile<'_> {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        use serde::ser::SerializeStruct as _;
+        let mut file = serializer.serialize_struct("JsonFile", 2)?;
+        file.serialize_field("diagnostics", &self.0.len())?;
+        file.serialize_field("messages", &JsonMessages(self.0))?;
+        file.end()
+    }
+}
+
+struct JsonMessages<'a>(&'a [Diagnostic]);
+
+impl Serialize for JsonMessages<'_> {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.collect_seq(self.0.iter().map(|d| JsonMessage {
+            message: &d.message,
+            line: d.span.start.line,
+            column: d.span.start.col,
+            level: d.level,
+            identifier: &d.identifier,
+            tip: d.tip_text(),
+        }))
+    }
+}
+
+/// The files with diagnostics, by their display path in its order.
+struct JsonFiles<'a>(Vec<(String, &'a [Diagnostic])>);
+
+impl Serialize for JsonFiles<'_> {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.collect_map(self.0.iter().map(|(path, found)| (path, JsonFile(found))))
+    }
 }
 
 #[derive(Serialize)]
@@ -104,7 +135,7 @@ struct JsonTotals {
 #[derive(Serialize)]
 struct JsonReport<'a> {
     totals: JsonTotals,
-    files: BTreeMap<String, JsonFile<'a>>,
+    files: JsonFiles<'a>,
 }
 
 /// Renders `results` (already level-/baseline-filtered) as JSON: a
@@ -124,45 +155,37 @@ struct JsonReport<'a> {
 /// files_checked` remains the one place the full checked-file count is
 /// recorded.
 pub fn render_json(results: &FxHashMap<PathBuf, Vec<Diagnostic>>, files_checked: usize) -> String {
-    let mut paths: Vec<&PathBuf> = results.keys().collect();
-    paths.sort();
+    let mut out = Vec::new();
+    write_json(&mut out, results, files_checked).expect("a vector takes every write");
+    String::from_utf8(out).expect("JSON is UTF-8")
+}
 
+/// `render_json`, written to `out` as it is made.
+pub fn write_json(
+    out: &mut impl std::io::Write,
+    results: &FxHashMap<PathBuf, Vec<Diagnostic>>,
+    files_checked: usize,
+) -> std::io::Result<()> {
     let mut total_diagnostics = 0usize;
-    let mut files = BTreeMap::new();
-    for path in paths {
-        let diagnostics = &results[path];
-        if diagnostics.is_empty() {
-            continue;
-        }
-        total_diagnostics += diagnostics.len();
-        let messages = diagnostics
-            .iter()
-            .map(|d| JsonMessage {
-                message: &d.message,
-                line: d.span.start.line,
-                column: d.span.start.col,
-                level: d.level,
-                identifier: &d.identifier,
-                tip: d.tip_text(),
-            })
-            .collect();
-        files.insert(
-            path.display().to_string(),
-            JsonFile {
-                diagnostics: diagnostics.len(),
-                messages,
-            },
-        );
-    }
-
+    let mut files: Vec<(String, &[Diagnostic])> = results
+        .iter()
+        .filter(|(_, diagnostics)| !diagnostics.is_empty())
+        .map(|(path, diagnostics)| {
+            total_diagnostics += diagnostics.len();
+            (path.display().to_string(), diagnostics.as_slice())
+        })
+        .collect();
+    // In the order of the display text, which is not always the paths': a
+    // path that is not UTF-8 is shown lossily.
+    files.sort_by(|a, b| a.0.cmp(&b.0));
     let report = JsonReport {
         totals: JsonTotals {
             files_checked,
             diagnostics: total_diagnostics,
         },
-        files,
+        files: JsonFiles(files),
     };
-    serde_json::to_string_pretty(&report).expect("JsonReport is always representable as JSON")
+    serde_json::to_writer_pretty(out, &report).map_err(std::io::Error::from)
 }
 
 /// Renders `results` as a Checkstyle-XML report: one `<file>` per analyzed

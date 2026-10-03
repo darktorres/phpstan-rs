@@ -27,9 +27,25 @@ fn key(path: &Path) -> Vec<u8> {
     key
 }
 
-/// `paths.sort()`, stable, without comparing component walks.
+/// How many runs of paths already in order `sort_paths` merges instead of
+/// making a key for each path.
+const MERGED_RUNS: usize = 16;
+
+/// `paths.sort()`, stable, without comparing component walks more than it
+/// needs to: a list that is already in order, or is a few lists in order
+/// one after the other (a walk of each directory, with its entries in
+/// order, gives one), is merged by the paths themselves, and any other is
+/// sorted by a key made once for each.
 pub fn sort_paths(paths: &mut [PathBuf]) {
-    paths.sort_by_cached_key(|path| key(path));
+    let descents = paths.windows(2).filter(|pair| pair[1] < pair[0]).count();
+    if descents == 0 {
+        return;
+    }
+    if descents < MERGED_RUNS {
+        paths.sort();
+    } else {
+        paths.sort_by_cached_key(|path| key(path));
+    }
 }
 
 #[cfg(test)]

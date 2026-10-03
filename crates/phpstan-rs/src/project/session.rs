@@ -584,9 +584,6 @@ impl Session {
         project.apply_settings(self.settings.clone());
     }
 
-    /// Every `.php` file under `dir` (or `dir` itself), spelled as `dir`
-    /// joined with its path below it - the same spelling the command line
-    /// gave - while the walk itself happens under the root.
     /// Whether `path` (relative to the root) is in a package promoted to an
     /// analysed path.
     fn is_promoted(&self, path: &Path) -> bool {
@@ -599,6 +596,9 @@ impl Session {
             .any(|dir| composer::manifest::path_starts_with(&path, dir))
     }
 
+    /// Every `.php` file under `dir` (or `dir` itself), spelled as `dir`
+    /// joined with its path below it - the same spelling the command line
+    /// gave - while the walk itself happens under the root.
     fn collect_php_files(&self, dir: &Path, out: &mut Vec<PathBuf>) {
         let walked = self.root.join(dir);
         let mut found = Vec::new();
@@ -735,6 +735,7 @@ impl Session {
                     );
                     if let Read::Loaded(file) = &mut read {
                         project.index_use_sites(&mut file.parsed, &file.source);
+                        project.note_owner(&mut file.parsed, p);
                     }
                     read
                 })
@@ -788,11 +789,11 @@ impl Session {
                 Read::Unread => skipped_context += 1,
             }
         }
-        let mut analyze_sizes: FxHashMap<PathBuf, usize> =
-            FxHashMap::with_capacity_and_hasher(analyze_files.len(), Default::default());
+        // How long each analysed file is, by its place in `analyze_files`.
+        let mut analyze_sizes: Vec<usize> = vec![0; analyze_files.len()];
         let mut skipped_analyze = 0usize;
         let mut parse_failures = Vec::new();
-        for (path, parsed) in analyze_files.iter().zip(analyze_parsed) {
+        for (index, (path, parsed)) in analyze_files.iter().zip(analyze_parsed).enumerate() {
             match parsed {
                 Read::Loaded(file) => {
                     let ReadFile {
@@ -801,7 +802,7 @@ impl Session {
                         parsed,
                     } = *file;
                     note_lex_warnings(path, &parsed);
-                    analyze_sizes.insert(path.clone(), len);
+                    analyze_sizes[index] = len;
                     project.insert_parsed_file(path.clone(), parsed, source, true)
                 }
                 Read::Unparsed(failure) => {
@@ -814,10 +815,14 @@ impl Session {
         lex_warnings.extend(parse_failure_lines);
         project.finish_loading();
 
-        // Largest files first, so the longest checks don't start last.
-        let mut analyze_files_by_size = analyze_files.clone();
-        analyze_files_by_size
-            .sort_by_key(|path| std::cmp::Reverse(analyze_sizes.get(path).copied().unwrap_or(0)));
+        // Largest files first, so the longest checks don't start last; of
+        // equal ones, the first listed first.
+        let mut by_size: Vec<usize> = (0..analyze_files.len()).collect();
+        by_size.sort_by_key(|&index| std::cmp::Reverse(analyze_sizes[index]));
+        let analyze_files_by_size = by_size
+            .into_iter()
+            .map(|index| analyze_files[index].clone())
+            .collect();
         Ok(Loaded {
             project,
             analyze_files_by_size,

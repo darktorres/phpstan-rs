@@ -880,6 +880,7 @@ impl Project {
             facts,
             line_index,
             class_fn_refs,
+            owner,
         } = parsed;
         self.begin_declaration_changes();
         for decl in built_decls {
@@ -901,7 +902,7 @@ impl Project {
         self.files.bind_origin(id, &origin_path);
         register_references(&mut self.dependents, id, &references);
         register_references(&mut self.signature_dependents, id, &declaration_references);
-        let owner = self.packages.owner(&self.absolute_path(&path));
+        let owner = owner.unwrap_or_else(|| self.packages.owner(&self.absolute_path(&path)));
         self.globals_stale.insert(id);
         let load_order = self.next_load_order;
         self.next_load_order += 1;
@@ -968,6 +969,13 @@ impl Project {
         parsed.class_fn_refs = Some(self.class_fn_refs_of(&parsed.ast, source));
     }
 
+    /// Finds the composer package `parsed`, the file at `path`, belongs to
+    /// ahead of `insert_parsed_file`, so a caller parsing many files in
+    /// parallel does the path work there too.
+    pub(crate) fn note_owner(&self, parsed: &mut ParsedFile, path: &Path) {
+        parsed.owner = Some(self.packages.owner(&self.absolute_path(path)));
+    }
+
     /// Reads, parses and indexes `files` in parallel on `pool`, then
     /// inserts them in order - context and analyzed alike (`analyzed`
     /// as `load_analyzed_file`'s). A file that can't be read is skipped;
@@ -985,6 +993,7 @@ impl Project {
             Some(
                 parse_file(path, source.as_str(), false, &interner).map(|mut parsed| {
                     this.index_use_sites(&mut parsed, &source);
+                    this.note_owner(&mut parsed, path);
                     (source, parsed)
                 }),
             )
@@ -2692,6 +2701,10 @@ pub struct ParsedFile {
     // parse (`Project::index_use_sites`); `insert_parsed_file` indexes
     // them itself otherwise.
     class_fn_refs: Option<Vec<(Span, use_sites::RefTarget)>>,
+    // The composer package that owns the file, when found alongside the
+    // parse (`Project::note_owner`); `insert_parsed_file` finds it itself
+    // otherwise.
+    owner: Option<Option<composer::PackageOwner>>,
 }
 
 /// Computes a `ParsedFile` from `source` - see that type's own doc
@@ -2766,6 +2779,7 @@ pub fn parse_file_with_names<'a>(
         facts,
         line_index,
         class_fn_refs: None,
+        owner: None,
     })
 }
 
@@ -2850,8 +2864,14 @@ pub fn collect_php_files_excluding(
         let Ok(entries) = fs::read_dir(path) else {
             return;
         };
-        for entry in entries.flatten() {
-            collect_php_files_excluding(&entry.path(), excluded_dir_names, out);
+        // Each directory's entries by name before the walk goes into them,
+        // so the files come in the order paths compare in: a name is
+        // before the longer ones it begins, and what is in a directory is
+        // before what comes after the directory's name.
+        let mut entries: Vec<_> = entries.flatten().map(|entry| entry.file_name()).collect();
+        entries.sort_unstable_by(|a, b| a.as_encoded_bytes().cmp(b.as_encoded_bytes()));
+        for entry in entries {
+            collect_php_files_excluding(&path.join(entry), excluded_dir_names, out);
         }
     } else if path.extension().is_some_and(|e| e == "php") {
         out.push(path.to_path_buf());
