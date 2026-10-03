@@ -33,56 +33,107 @@ impl crate::Relation<'_> {
         union_types_impl(a, b, Some(self.hierarchy))
     }
 
-    /// The union of `members`, as `union` joins them.
+    /// The union of `members`, in one normalization, with the class
+    /// hierarchy past the member cap.
     pub fn union_of(&self, members: Vec<Type>) -> Type {
-        members
-            .into_iter()
-            .reduce(|a, b| self.union(a, b))
-            .unwrap_or_else(Type::never)
+        let width: usize = members.iter().map(|m| m.union_members().len()).sum();
+        if width <= MAX_UNION_MEMBERS {
+            return union_many(members, None);
+        }
+        union_types_many(members, Some(self.hierarchy))
+    }
+}
+
+/// What an iterator of types is joined to: the union of all of them in one
+/// normalization, or `None` for none. Where a `reduce` of the binary union
+/// stood, with the same answer for one or two types.
+pub trait UnionAll: Iterator<Item = Type> + Sized {
+    /// The union of the types, as `Type::union_of` joins them.
+    fn union_all(self) -> Option<Type> {
+        let members: Vec<Type> = self.collect();
+        (!members.is_empty()).then(|| union_many(members, None))
+    }
+
+    /// The union of the types, as `Relation::union_of` joins them.
+    fn union_all_with(self, relation: &crate::Relation<'_>) -> Option<Type> {
+        let members: Vec<Type> = self.collect();
+        (!members.is_empty()).then(|| relation.union_of(members))
+    }
+}
+
+impl<I: Iterator<Item = Type>> UnionAll for I {}
+
+/// The union of `members`: none is `never`, one is itself, two are joined
+/// as `Type::union` does, and more in one normalization, remembered by the
+/// list of members.
+pub(crate) fn union_many(members: Vec<Type>, hierarchy: Option<&dyn ClassHierarchy>) -> Type {
+    match members.len() {
+        0 => Type::never(),
+        1 => members.into_iter().next().expect("one member"),
+        2 if hierarchy.is_none() => {
+            let mut members = members.into_iter();
+            let (a, b) = (members.next().expect("two"), members.next().expect("two"));
+            a.union(b)
+        }
+        _ if hierarchy.is_none() => {
+            let arguments = members.clone();
+            crate::intern::memoized_many(crate::intern::Operation::UnionMany, &arguments, || {
+                union_types_many(members, None)
+            })
+        }
+        _ => union_types_many(members, hierarchy),
     }
 }
 
 fn union_types_impl(a: Type, b: Type, hierarchy: Option<&dyn ClassHierarchy>) -> Type {
+    union_types_many(vec![a, b], hierarchy)
+}
+
+/// The union of `operands` in one normalization: the members of every
+/// union operand and every other operand, in order of first occurrence,
+/// then each rule over all of them once.
+fn union_types_many(operands: Vec<Type>, hierarchy: Option<&dyn ClassHierarchy>) -> Type {
     syntax::stack::guard(|| {
         // `never` has no values to add.
-        if a == Type::never() {
-            return b;
-        }
-        if b == Type::never() {
-            return a;
-        }
-        if a == b {
-            return a;
+        let mut operands: Vec<Type> = operands
+            .into_iter()
+            .filter(|t| *t != Type::never())
+            .collect();
+        match operands.len() {
+            0 => return Type::never(),
+            1 => return operands.pop().expect("one operand"),
+            2 if operands[0] == operands[1] => return operands.swap_remove(0),
+            _ => {}
         }
         // An error absorbs everything, as a `mixed` does.
-        if matches!(a.repr(), Repr::Error) || matches!(b.repr(), Repr::Error) {
+        if operands.iter().any(|t| matches!(t.repr(), Repr::Error)) {
             return Type::error();
         }
         // A `mixed` absorbs everything, and stays explicit when either side
         // wrote it.
-        if let Some(mixed) = union_with_mixed(&[&a, &b]) {
+        if let Some(mixed) = union_with_mixed(&operands.iter().collect::<Vec<_>>()) {
             return mixed;
         }
-        if let Some(merged) = merge_has_offset_value_pair(&a, &b) {
+        if let [a, b] = operands.as_slice()
+            && let Some(merged) = merge_has_offset_value_pair(a, b)
+        {
             return merged;
         }
-        let mut members = Vec::new();
-        match a.into_repr() {
-            Repr::Union(m) => members.extend(m),
-            other => members.push(Type::new(other)),
-        }
-        match b.into_repr() {
-            Repr::Union(m) => {
-                for x in m {
-                    if !members.contains(&x) {
-                        members.push(x);
+        let mut members: Vec<Type> = Vec::new();
+        for operand in operands {
+            match operand.into_repr() {
+                Repr::Union(inner) => {
+                    for member in inner {
+                        if !members.contains(&member) {
+                            members.push(member);
+                        }
                     }
                 }
-            }
-            other => {
-                let other = Type::new(other);
-                if !members.contains(&other) {
-                    members.push(other);
+                other => {
+                    let other = Type::new(other);
+                    if !members.contains(&other) {
+                        members.push(other);
+                    }
                 }
             }
         }
@@ -601,7 +652,7 @@ fn common_supertype(classes: &[(crate::Name, Vec<Type>)], hierarchy: &dyn ClassH
                                 .cloned()
                                 .unwrap_or_else(Type::mixed)
                         })
-                        .reduce(Type::union)
+                        .union_all()
                         .unwrap_or_else(Type::mixed)
                 })
                 .collect();
@@ -699,10 +750,15 @@ pub fn generalize_by_key_set(members: Vec<Type>) -> Vec<Type> {
                 ShapeField::new(first.key.clone(), ty.unwrap(), optional)
             })
             .collect();
-        let unsealed = variants
+        let tails: (Vec<Type>, Vec<Type>) = variants
             .iter()
             .filter_map(|shape| shape.unsealed.as_deref().cloned())
-            .reduce(|(ka, va), (kb, vb)| (Type::union(ka, kb), Type::union(va, vb)))
+            .unzip();
+        let unsealed = tails
+            .0
+            .into_iter()
+            .union_all()
+            .zip(tails.1.into_iter().union_all())
             .map(Box::new);
         passthrough.push(Type::array_shape(Shape::from_parts(fields, unsealed, None)));
     }
@@ -1089,12 +1145,9 @@ fn merge_general_arrays(members: &mut Vec<Type>) {
     });
     let key = keys
         .into_iter()
-        .reduce(Type::union)
+        .union_all()
         .unwrap_or_else(Type::unknown_array_key);
-    let value = values
-        .into_iter()
-        .reduce(Type::union)
-        .unwrap_or_else(Type::mixed);
+    let value = values.into_iter().union_all().unwrap_or_else(Type::mixed);
     let mut parts = vec![Type::array(key, value)];
     if list {
         parts.push(Type::accessory(AccessoryKind::ArrayList));
@@ -1114,10 +1167,7 @@ fn shape_as_general_array(shape: &Shape) -> Type {
         keys.push(tail.0.clone());
         values.push(tail.1.clone());
     }
-    match (
-        keys.into_iter().reduce(Type::union),
-        values.into_iter().reduce(Type::union),
-    ) {
+    match (keys.into_iter().union_all(), values.into_iter().union_all()) {
         (Some(key), Some(value)) => Type::array(key, value),
         _ => Type::never(),
     }

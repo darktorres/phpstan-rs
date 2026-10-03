@@ -23,6 +23,7 @@ mod shortcuts;
 mod subtyping;
 mod subtyping_properties;
 mod templates_and_substitution;
+mod union_many;
 mod unions;
 
 /// The structural relation's subtype answer: `sub` is provably a `sup`

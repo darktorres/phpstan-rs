@@ -6,6 +6,7 @@ use crate::checker::{Checker, Locals, resolve_call_args};
 use crate::registry::{FunctionReflection, PropertyReflection};
 use syntax::ast::*;
 use types::Name;
+use types::UnionAll as _;
 
 use types::{self, Shape, ShapeField, ShapeKey, Type};
 
@@ -414,7 +415,7 @@ impl<'a> Checker<'a> {
                     .iter()
                     .map(|m| self.declared_property_type(m, prop))
                     .filter(|ty| !ty.is_mixed())
-                    .reduce(|a, b| self.relation().union(a, b))
+                    .union_all_with(&self.relation())
                     .unwrap_or(Type::mixed());
             }
             if let Some((fqn, case)) = base_ty.as_enum_case() {
@@ -621,7 +622,7 @@ impl<'a> Checker<'a> {
                     .iter()
                     .map(|m| self.declared_method_return_type(recv, m, method, args, locals))
                     .filter(|ty| !ty.is_mixed())
-                    .reduce(|a, b| self.relation().union(a, b))
+                    .union_all_with(&self.relation())
                     .unwrap_or(Type::mixed());
             }
             Type::mixed()

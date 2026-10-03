@@ -3,6 +3,7 @@ use crate::checker::{Checker, Locals, TemplateBindings};
 use crate::registry::FunctionReflection;
 use syntax::ast::*;
 use syntax::token::Span;
+use types::UnionAll as _;
 
 use types::{
     self, AccessoryKind, AppendKey, NextArrayIndex, Shape, ShapeField, ShapeKey, TrinaryLogic, Type,
@@ -252,12 +253,12 @@ impl<'a> Checker<'a> {
         } else {
             key_types
                 .into_iter()
-                .reduce(|a, b| self.relation().union(a, b))
+                .union_all_with(&self.relation())
                 .unwrap_or_else(Type::unknown_array_key)
         };
         let elem_ty = elem_types
             .into_iter()
-            .reduce(|a, b| self.relation().union(a, b))
+            .union_all_with(&self.relation())
             .unwrap_or(Type::mixed());
         let mut members = vec![Type::array(key_ty, elem_ty)];
         if list_safe {
@@ -752,11 +753,11 @@ fn general_array_literal_type(
 ) -> Type {
     let key = keys
         .into_iter()
-        .reduce(|a, b| relation.union(a, b))
+        .union_all_with(relation)
         .unwrap_or_else(Type::unknown_array_key);
     let value = values
         .into_iter()
-        .reduce(|a, b| relation.union(a, b))
+        .union_all_with(relation)
         .unwrap_or_else(Type::mixed);
     Type::intersection_of(vec![
         Type::array(key, value),

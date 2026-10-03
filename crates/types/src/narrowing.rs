@@ -2,6 +2,7 @@
 //! from an excluded one, by key presence, by truthiness, and the array
 //! and integer refinements comparisons and counts prove.
 
+use crate::UnionAll as _;
 use crate::{AccessoryKind, PhpString, Relation, Repr, Shape, ShapeField, ShapeKey, Type};
 
 impl Relation<'_> {
@@ -557,10 +558,7 @@ impl Type {
         if !relation.is_super_type_of(self, &simple_xml).no() {
             falsy.push(simple_xml);
         }
-        falsy
-            .into_iter()
-            .reduce(Type::union)
-            .unwrap_or_else(Type::never)
+        falsy.into_iter().union_all().unwrap_or_else(Type::never)
     }
 }
 
@@ -579,10 +577,7 @@ fn without_zero(min: Option<i64>, max: Option<i64>) -> Type {
     if above {
         parts.push(Type::int_range(Some(1), max));
     }
-    parts
-        .into_iter()
-        .reduce(Type::union)
-        .unwrap_or_else(Type::never)
+    parts.into_iter().union_all().unwrap_or_else(Type::never)
 }
 
 impl Type {

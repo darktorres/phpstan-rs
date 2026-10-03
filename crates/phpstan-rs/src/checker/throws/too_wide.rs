@@ -19,6 +19,7 @@ use crate::checker::Checker;
 use syntax::ast::Visibility;
 use syntax::token::Span;
 use types::Type;
+use types::UnionAll as _;
 
 impl<'a> Checker<'a> {
     /// A `private` method, a method on a `final` class, or a method
@@ -79,7 +80,7 @@ impl<'a> Checker<'a> {
             .current_function_throw_points
             .iter()
             .cloned()
-            .reduce(|a, b| self.relation().union(a, b));
+            .union_all_with(&self.relation());
         let members: Vec<Type> = throws.union_members().to_vec();
         for declared in members {
             // Calling `accepts(actual, &declared)` directly would be

@@ -35,6 +35,7 @@
 use crate::checker::Checker;
 use syntax::ast::{BinOp, Expr, ExprKind, UnaryOp};
 use syntax::token::Span;
+use types::UnionAll as _;
 use types::{ArithmeticOp, OrderingOp, Type};
 
 impl<'a> Checker<'a> {
@@ -97,7 +98,7 @@ impl<'a> Checker<'a> {
                     m.to_bitwise_not()
                 }
             })
-            .reduce(|a, b| self.relation().union(a, b))
+            .union_all_with(&self.relation())
             .unwrap_or_else(Type::never)
     }
 

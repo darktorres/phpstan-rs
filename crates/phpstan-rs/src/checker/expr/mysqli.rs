@@ -5,6 +5,7 @@
 
 use crate::checker::{Checker, Locals};
 use syntax::ast::*;
+use types::UnionAll as _;
 
 use types::{Shape, ShapeField, ShapeKey, Type, parse_type_string};
 
@@ -40,7 +41,7 @@ fn widen_for_text_protocol(ty: &Type) -> Type {
                 m.clone()
             }
         })
-        .reduce(Type::union)
+        .union_all()
         .unwrap_or(Type::never())
 }
 

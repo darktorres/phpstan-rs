@@ -16,6 +16,7 @@ use crate::checker::Checker;
 use syntax::ast::Visibility;
 use syntax::token::Span;
 use types::Type;
+use types::UnionAll as _;
 
 impl<'a> Checker<'a> {
     /// Mirrors `should_check_too_wide_method_throw_type`'s gate exactly
@@ -78,7 +79,7 @@ impl<'a> Checker<'a> {
             .current_function_return_points
             .iter()
             .cloned()
-            .reduce(|a, b| self.relation().union(a, b));
+            .union_all_with(&self.relation());
         let Some(actual) = actual else {
             return;
         };

@@ -1,5 +1,6 @@
 use rustc_hash::FxHashMap;
 use types::Name;
+use types::UnionAll as _;
 
 use crate::checker::{Checker, Locals, purge_stale_narrowing_for};
 use crate::registry::{FunctionReflection, ParameterReflection};
@@ -211,7 +212,7 @@ impl<'a> Checker<'a> {
                             let pushed_ty = args[1..]
                                 .iter()
                                 .map(|a| self.infer_expr(&a.value, locals))
-                                .reduce(|a, b| self.relation().union(a, b));
+                                .union_all_with(&self.relation());
                             let combined_elem = match pushed_ty {
                                 Some(pushed_ty) => self.relation().union(elem_ty, pushed_ty),
                                 None => elem_ty,

@@ -2,6 +2,7 @@
 //! array member folded into one array or shape, and a member dropped when
 //! another member is within it.
 
+use crate::UnionAll as _;
 use crate::{AccessoryKind, Relation, Repr, Shape, ShapeField, ShapeKey, Type};
 
 /// The intersection of `members`, with no class knowledge. `list<int>&
@@ -48,7 +49,7 @@ impl Relation<'_> {
                         members.push(alternative);
                         self.intersect(members)
                     })
-                    .reduce(|a, b| self.union(a, b))
+                    .union_all_with(self)
                     .unwrap_or_else(Type::never);
             }
             let mut array: Option<(Type, Type)> = None;
@@ -232,7 +233,7 @@ impl Relation<'_> {
         }
         kept.sort_by_key(|m| *m == Type::null());
         kept.into_iter()
-            .reduce(|a, b| self.union(a, b))
+            .union_all_with(self)
             .unwrap_or_else(|| native.clone())
     }
 

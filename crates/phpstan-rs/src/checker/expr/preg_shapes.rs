@@ -1,6 +1,7 @@
 use crate::regex_groups;
 use syntax::ast::*;
 use types::PhpString;
+use types::UnionAll as _;
 
 use types::{AccessoryKind, Shape, Type};
 
@@ -34,7 +35,7 @@ fn group_leaf_type(leaf: &Type, group: &regex_groups::RegexCaptureGroup) -> Type
         let literal_ty = values
             .iter()
             .map(|v| Type::string_literal(v.as_str().into()))
-            .reduce(Type::union)
+            .union_all()
             .expect("literal_values is never Some(empty) by construction");
         return refine_leaf(leaf, literal_ty);
     }
@@ -325,7 +326,7 @@ pub(super) fn build_matched_shape(
         }
         return variants
             .into_iter()
-            .reduce(Type::union)
+            .union_all()
             .expect("branches is non-empty: at least one top-level group exists");
     }
 

@@ -2,6 +2,7 @@
 //! `IntegerRangeType` operations and `InitializerExprTypeResolver`'s
 //! arithmetic, and the outcome of comparing ranges and literals.
 
+use crate::UnionAll as _;
 use crate::{AccessoryKind, PhpString, Repr, TrinaryLogic, Type};
 
 /// Applies `op` to two bounds, distinguishing a genuine `i64` overflow
@@ -726,7 +727,7 @@ fn fold_float_constants(op: ArithmeticOp, lt: &Type, rt: &Type) -> Option<Type> 
         ls.iter()
             .flat_map(|&a| rs.iter().filter_map(move |&b| apply(a, b)))
             .map(Number::into_type)
-            .reduce(Type::union)
+            .union_all()
             .unwrap_or_else(Type::never),
     )
 }
@@ -798,7 +799,7 @@ fn string_bitwise(op: ArithmeticOp, l: &Type, r: &Type) -> Type {
                     Type::string_literal(PhpString::from(apply(a.as_bytes(), b.as_bytes())))
                 })
             })
-            .reduce(Type::union)
+            .union_all()
             .unwrap_or_else(Type::never);
     }
     let non_empty = |t: &Type| t.is_refined_string(AccessoryKind::NonEmptyString).yes();

@@ -5,6 +5,7 @@
 
 use rustc_hash::{FxHashMap, FxHashSet};
 use types::Name;
+use types::UnionAll as _;
 
 use crate::checker::Checker;
 use crate::doctrine_functions::DoctrineFunctionKind;
@@ -146,7 +147,7 @@ fn entity_row_type(checker: &Checker, entity: &str) -> Type {
             subclasses
                 .into_iter()
                 .map(|class| Type::object(class.into(), Vec::new()))
-                .reduce(|a, b| checker.relation().union(a, b))
+                .union_all_with(&checker.relation())
                 .unwrap_or_else(|| Type::object(entity.into(), Vec::new()))
         }
         _ => Type::object(entity.into(), Vec::new()),
@@ -224,7 +225,7 @@ fn select_item_type(checker: &Checker, aliases: &AliasMap, item: &SelectItem) ->
             // before accepting `END`), so this always has a first
             // element to reduce from.
             arm_types
-                .reduce(|a, b| checker.relation().union(a, b))
+                .union_all_with(&checker.relation())
                 .unwrap_or(Type::mixed())
         }
         // Real Doctrine constructs the named class from the query's own

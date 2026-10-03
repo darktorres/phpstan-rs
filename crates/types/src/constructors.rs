@@ -190,10 +190,7 @@ impl Type {
     /// The union of `members`: nested unions flattened, members another
     /// covers absorbed; `never` for none.
     pub fn union_of(members: Vec<Type>) -> Type {
-        members
-            .into_iter()
-            .reduce(Type::union)
-            .unwrap_or_else(Type::never)
+        crate::union::union_many(members, None)
     }
 
     /// The union of `members`, benevolent: a value checked against it

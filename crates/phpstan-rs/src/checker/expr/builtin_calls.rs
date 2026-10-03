@@ -6,6 +6,7 @@ use crate::registry::{FunctionReflection, Registry};
 use syntax::ast::*;
 use syntax::token::Span;
 use types::PhpString;
+use types::UnionAll as _;
 use types::{self, AccessoryKind, Relation, Shape, ShapeField, ShapeKey, Type};
 
 use super::{is_false_literal, is_true_literal};
@@ -446,7 +447,7 @@ impl<'a> Checker<'a> {
                 if !arg_types.iter().any(|t| t.is_array().yes()) {
                     return arg_types
                         .into_iter()
-                        .reduce(|a, b| self.relation().union(a, b))
+                        .union_all_with(&self.relation())
                         .unwrap_or(Type::mixed());
                 }
             }
@@ -1267,7 +1268,7 @@ impl<'a> Checker<'a> {
                 if all_known_array_like {
                     let elem_ty = elem_types
                         .into_iter()
-                        .reduce(|a, b| self.relation().union(a, b))
+                        .union_all_with(&self.relation())
                         .unwrap_or(Type::mixed());
                     let key_ty = match (key_could_be_int, key_could_be_string) {
                         (true, false) => Type::int(),
@@ -2143,7 +2144,7 @@ impl<'a> Checker<'a> {
         {
             return folded
                 .into_iter()
-                .reduce(|a, b| self.relation().union(a, b))
+                .union_all_with(&self.relation())
                 .unwrap_or_else(Type::never);
         }
 
@@ -2947,7 +2948,7 @@ fn gettype_result(ty: &Type) -> Option<Type> {
         .map(|m| gettype_string_for(m).map(|s| Type::string_literal(s.into())))
         .collect::<Option<Vec<_>>>()?
         .into_iter()
-        .reduce(Type::union)
+        .union_all()
 }
 
 /// Whether `s` is exactly one Unicode scalar value - `idate()`'s format

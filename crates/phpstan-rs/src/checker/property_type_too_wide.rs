@@ -20,6 +20,7 @@ use crate::checker::{Checker, PropertyAssignFacts};
 use diagnostics::{Diagnostic, DiagnosticBuilder};
 use syntax::ast::{ClassDef, Expr, ExprKind, Literal, Visibility};
 use syntax::token::Span;
+use types::UnionAll as _;
 use types::{Name, Relation, Type};
 
 /// A class-like's private properties declared with a union type, waiting
@@ -139,7 +140,7 @@ pub(crate) fn check_too_wide_property_types(
                 .filter_map(|writer| facts.get(writer.as_ref())?.get(p.name.as_ref()))
                 .flatten()
                 .cloned()
-                .reduce(|a, b| relation.union(a, b));
+                .union_all_with(relation);
             let Some(actual) = assigned else {
                 continue;
             };

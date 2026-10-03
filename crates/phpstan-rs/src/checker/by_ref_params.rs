@@ -13,6 +13,7 @@
 
 use crate::checker::Checker;
 use syntax::ast::{Expr, ExprKind, Visibility};
+use types::UnionAll as _;
 use types::{Name, Type};
 
 /// Same shape as the identically-named private helper in
@@ -150,11 +151,7 @@ impl<'a> Checker<'a> {
             let Some(snapshots) = self.current_function_by_ref_exit_snapshots.get(&name) else {
                 continue;
             };
-            let Some(actual) = snapshots
-                .iter()
-                .cloned()
-                .reduce(|a, b| self.relation().union(a, b))
-            else {
+            let Some(actual) = snapshots.iter().cloned().union_all_with(&self.relation()) else {
                 continue;
             };
             if self.rule_level_accepts(&declared, &actual).yes() {
@@ -192,11 +189,7 @@ impl<'a> Checker<'a> {
             let Some(snapshots) = self.current_function_by_ref_exit_snapshots.get(&name) else {
                 continue;
             };
-            let Some(actual) = snapshots
-                .iter()
-                .cloned()
-                .reduce(|a, b| self.relation().union(a, b))
-            else {
+            let Some(actual) = snapshots.iter().cloned().union_all_with(&self.relation()) else {
                 continue;
             };
             if actual.is_mixed() {

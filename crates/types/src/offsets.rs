@@ -1,6 +1,7 @@
 //! Array offsets: whether a type has one, and the type after writing one
 //! (PHPStan's `hasOffsetValueType()`/`setOffsetValueType()`).
 
+use crate::UnionAll as _;
 use crate::{AccessoryKind, AppendKey, Repr, Shape, ShapeField, ShapeKey, TrinaryLogic, Type};
 
 /// The most fields an append grows a shape to; past it, the array is
@@ -86,7 +87,7 @@ impl Type {
                 .map(|key| self.offset_value_type(Some(key)))
                 .collect::<Option<Vec<_>>>()?
                 .into_iter()
-                .reduce(Type::union),
+                .union_all(),
             _ => self.offset_value_type(None),
         }
     }
@@ -322,7 +323,7 @@ impl Type {
                     };
                     values.push(value);
                 }
-                values.into_iter().reduce(Type::union)
+                values.into_iter().union_all()
             }
             Repr::TemplateParam(param) => param.bound.offset_value_type(key),
             _ => None,
@@ -465,7 +466,7 @@ impl Type {
                             track_literal_key,
                         )?);
                     }
-                    updated.into_iter().reduce(Type::union)
+                    updated.into_iter().union_all()
                 }
                 // A container carrying `hasOffsetValue` members from earlier
                 // literal writes accumulates them.
@@ -629,7 +630,7 @@ impl Type {
                 Repr::Union(members) => members
                     .iter()
                     .map(|m| m.unset_offset(offset))
-                    .reduce(Type::union)
+                    .union_all()
                     .unwrap_or_else(|| self.clone()),
                 Repr::BenevolentUnion(members) => Type::benevolent_union_of(
                     members.iter().map(|m| m.unset_offset(offset)).collect(),

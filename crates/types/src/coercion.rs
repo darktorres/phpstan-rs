@@ -6,6 +6,7 @@
 //! (PHPStan's `ObjectType::toInteger()`/`toFloat()`/`toString()`) and in
 //! `ArrayTypeTrait`'s always-`ErrorType` `toString()`.
 
+use crate::UnionAll as _;
 use crate::{AccessoryKind, ClassHierarchy, PhpString, Repr, Type, format_php_float};
 
 /// The built-in classes PHPStan's `ObjectType::toInteger()`/`toFloat()`
@@ -216,7 +217,7 @@ impl Type {
             Repr::Union(members) => members
                 .iter()
                 .map(Type::to_array_key)
-                .reduce(Type::union)
+                .union_all()
                 .unwrap_or(Type::never()),
             Repr::BenevolentUnion(members) => {
                 Type::benevolent_union_of(members.iter().map(Type::to_array_key).collect())
@@ -276,7 +277,7 @@ impl Type {
             Repr::Union(members) => members
                 .iter()
                 .map(Type::to_absolute_number)
-                .reduce(Type::union)
+                .union_all()
                 .unwrap_or_else(|| self.clone()),
             Repr::Int | Repr::Float => self.clone(),
             _ => Type::new(Repr::Union(vec![Type::int(), Type::float()])),
@@ -298,7 +299,7 @@ impl Type {
             Repr::Union(members) | Repr::BenevolentUnion(members) => members
                 .iter()
                 .map(Type::to_bitwise_not)
-                .reduce(Type::union)
+                .union_all()
                 .unwrap_or_else(Type::never),
             Repr::TemplateParam(param) => param.bound.to_bitwise_not(),
             Repr::Mixed(..) => Type::union(Type::int(), Type::string()),
@@ -338,5 +339,5 @@ fn castable(hierarchy: &dyn ClassHierarchy, name: &str, classes: &[&str]) -> boo
 /// every member illegal - is illegal.
 fn union_coercion(members: &[Type], f: impl Fn(&Type) -> Option<Type>) -> Option<Type> {
     let legal: Vec<Type> = members.iter().filter_map(f).collect();
-    legal.into_iter().reduce(Type::union)
+    legal.into_iter().union_all()
 }

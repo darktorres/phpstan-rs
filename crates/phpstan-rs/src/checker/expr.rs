@@ -16,6 +16,7 @@ use syntax::ast::*;
 use syntax::token::Span;
 use syntax::visit::{body_contains_yield, expr_contains_yield};
 use types::Name;
+use types::UnionAll as _;
 use types::{self, Type};
 
 mod array_ops;
@@ -2843,7 +2844,7 @@ impl<'a> Checker<'a> {
                         })
                         .collect::<Vec<_>>()
                         .into_iter()
-                        .reduce(|a, b| self.relation().union(a, b))
+                        .union_all_with(&self.relation())
                         .unwrap_or(Type::mixed()),
                     (_, Some(Some(class))) => {
                         if self.collect_member_refs {
@@ -3501,7 +3502,7 @@ impl<'a> Checker<'a> {
                 // others).
                 result_types
                     .into_iter()
-                    .reduce(|a, b| self.relation().union(a, b))
+                    .union_all_with(&self.relation())
                     .unwrap_or(Type::never())
             }
             ExprKind::Closure(closure) => {
@@ -3909,10 +3910,7 @@ impl<'a> Checker<'a> {
                     let mutated = closure_byref_exit_snapshots
                         .get(&u.name.name)
                         .and_then(|snapshots| {
-                            snapshots
-                                .iter()
-                                .cloned()
-                                .reduce(|a, b| self.relation().union(a, b))
+                            snapshots.iter().cloned().union_all_with(&self.relation())
                         })
                         .unwrap_or_else(|| {
                             closure_locals
@@ -4591,7 +4589,7 @@ impl<'a> Checker<'a> {
                 // dedup-then-union construction.
                 result_types
                     .into_iter()
-                    .reduce(|a, b| self.relation().union(a, b))
+                    .union_all_with(&self.relation())
                     .unwrap_or(Type::never())
             }
             // A throw expression never actually produces a value - Never
@@ -4843,7 +4841,7 @@ impl<'a> Checker<'a> {
                     .into_iter()
                     .flatten()
                     .map(|member| self.infer_expr(&constant_fetch(target, member, e.span), locals))
-                    .reduce(|a, b| self.relation().union(a, b))
+                    .union_all_with(&self.relation())
                     .unwrap_or(Type::mixed())
             }
             ExprKind::ClassNameFetch(target) => {

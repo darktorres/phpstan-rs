@@ -1,3 +1,4 @@
+use crate::UnionAll as _;
 use crate::{
     AccessoryKind, CallableParam, CallableSig, Relation, Repr, Shape, ShapeKey, Type, Variance,
 };
@@ -91,7 +92,7 @@ impl Shape {
             .iter()
             .map(|f| f.ty.clone())
             .chain(self.unsealed.as_deref().map(|tail| tail.1.clone()))
-            .reduce(Type::union)
+            .union_all()
             .unwrap_or(Type::never())
     }
 

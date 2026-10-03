@@ -1,5 +1,6 @@
 use rustc_hash::FxHashMap;
 use std::rc::Rc;
+use types::UnionAll as _;
 
 use crate::checker::{
     Checker, Locals, LoopZeroIterations, count_call_operand, is_truthy_literal, merge_scopes,
@@ -480,11 +481,11 @@ impl<'a> Checker<'a> {
                 }
                 return Some((
                     keys.into_iter()
-                        .reduce(|a, b| self.relation().union(a, b))
+                        .union_all_with(&self.relation())
                         .unwrap_or(Type::mixed()),
                     values
                         .into_iter()
-                        .reduce(|a, b| self.relation().union(a, b))
+                        .union_all_with(&self.relation())
                         .unwrap_or(Type::mixed()),
                 ));
             }
