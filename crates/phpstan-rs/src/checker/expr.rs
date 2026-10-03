@@ -16,7 +16,6 @@ use crate::registry::FunctionReflection;
 use diagnostics::DiagnosticBuilder;
 use syntax::ast::*;
 use syntax::span::Span;
-use syntax::visit::{body_contains_yield, expr_contains_yield};
 use types::Name;
 use types::UnionAll as _;
 use types::{self, Type};
@@ -3521,6 +3520,7 @@ impl<'a> Checker<'a> {
                     uses,
                     body,
                     goto_labels,
+                    is_generator,
                     is_static,
                     return_type,
                     attrs,
@@ -3614,7 +3614,7 @@ impl<'a> Checker<'a> {
                     let ty = if u.by_ref { ty.unsealed_shapes() } else { ty };
                     closure_locals.insert_with_provenance(u.name.to_string(), ty, provenance);
                 }
-                if !is_static && let Some(this_ty) = locals.get("this") {
+                if !*is_static && let Some(this_ty) = locals.get("this") {
                     closure_locals.insert("this".to_string(), this_ty.clone());
                 }
                 // `record_branch_implied_facts`'s own facts don't
@@ -3734,7 +3734,7 @@ impl<'a> Checker<'a> {
                 // check_block never routes through check_function at
                 // all.
                 let previous_generator_flag = self.current_function_is_generator;
-                self.current_function_is_generator = body_contains_yield(body);
+                self.current_function_is_generator = *is_generator;
                 let previous_declared_return_type = self.current_declared_return_type.take();
                 self.current_declared_return_type =
                     declared_return.as_ref().map(|t| match &self.current_class {
@@ -3971,6 +3971,7 @@ impl<'a> Checker<'a> {
                 let syntax::ast::ArrowFnExpr {
                     params,
                     body,
+                    is_generator,
                     return_type,
                     attrs,
                     ..
@@ -4010,16 +4011,13 @@ impl<'a> Checker<'a> {
                     arrow_locals.declare(p.name.to_string(), ty, p.name.span);
                     arrow_locals.set_native(&p.name, self.closure_param_native(p));
                 }
-                // An arrow function's body is a single expression, not
-                // a `Vec<Stmt>` `body_contains_yield` can walk -
-                // `expr_contains_yield` is that same walk's expression-
-                // only counterpart. Same save/set/restore
+                // Same save/set/restore
                 // `check_function`/the Closure literal arms do: without
                 // this, checking a generator arrow function here would
                 // leak the flag into whatever comes after it in the
                 // enclosing scope's checking pass.
                 let previous_generator_flag = self.current_function_is_generator;
-                self.current_function_is_generator = expr_contains_yield(body);
+                self.current_function_is_generator = *is_generator;
                 let declared_return = return_type
                     .as_deref()
                     .map(|_| self.resolve_type_hint(return_type.as_deref()));
@@ -4122,7 +4120,7 @@ impl<'a> Checker<'a> {
                 self.closure_literal_type(
                     params,
                     return_type.as_deref(),
-                    (!expr_contains_yield(body)).then(|| body_ty.clone()),
+                    (!*is_generator).then(|| body_ty.clone()),
                     None,
                 )
             }
@@ -4548,14 +4546,10 @@ impl<'a> Checker<'a> {
             ExprKind::Closure(closure) => {
                 let syntax::ast::ClosureExpr {
                     params,
-                    uses,
-                    body,
-                    is_static,
                     return_type,
                     ..
                 } = &**closure;
-                let inferred = self
-                    .closure_syntactic_return_type(params, uses, body, *is_static, locals, None);
+                let inferred = self.closure_syntactic_return_type(closure, locals, None);
                 self.closure_literal_type(params, return_type.as_deref(), inferred, None)
             }
             ExprKind::ArrowFn(arrow) => {
@@ -4563,9 +4557,11 @@ impl<'a> Checker<'a> {
                     params,
                     return_type,
                     body,
+                    is_generator,
                     ..
                 } = &**arrow;
-                let inferred = self.arrow_fn_inferred_return(params, body, locals, None);
+                let inferred =
+                    self.arrow_fn_inferred_return(params, body, *is_generator, locals, None);
                 self.closure_literal_type(params, return_type.as_deref(), inferred, None)
             }
             ExprKind::Match { subject, arms } => {
@@ -5837,14 +5833,19 @@ impl<'a> Checker<'a> {
     /// precise where a return depends on a guard.
     fn closure_syntactic_return_type(
         &self,
-        params: &[Param],
-        uses: &[ClosureUse],
-        body: &[Stmt],
-        is_static: bool,
+        closure: &syntax::ast::ClosureExpr,
         locals: &Locals,
         overrides: Option<&[Type]>,
     ) -> Option<Type> {
-        if body_contains_yield(body) {
+        let syntax::ast::ClosureExpr {
+            params,
+            uses,
+            body,
+            is_generator,
+            is_static,
+            ..
+        } = closure;
+        if *is_generator {
             return None;
         }
         let mut scope = locals.closure_scope();
@@ -5907,10 +5908,11 @@ impl<'a> Checker<'a> {
         &self,
         params: &[Param],
         body: &Expr,
+        is_generator: bool,
         locals: &Locals,
         overrides: Option<&[Type]>,
     ) -> Option<Type> {
-        if expr_contains_yield(body) {
+        if is_generator {
             return None;
         }
         let mut arrow_locals = locals.clone();
@@ -5962,10 +5964,16 @@ impl<'a> Checker<'a> {
                     params,
                     return_type,
                     body,
+                    is_generator,
                     ..
                 } = &**arrow;
-                let inferred =
-                    self.arrow_fn_inferred_return(params, body, locals, Some(&overrides));
+                let inferred = self.arrow_fn_inferred_return(
+                    params,
+                    body,
+                    *is_generator,
+                    locals,
+                    Some(&overrides),
+                );
                 Some(self.closure_literal_type(
                     params,
                     return_type.as_deref(),
@@ -5976,20 +5984,11 @@ impl<'a> Checker<'a> {
             ExprKind::Closure(closure) => {
                 let syntax::ast::ClosureExpr {
                     params,
-                    uses,
-                    body,
-                    is_static,
                     return_type,
                     ..
                 } = &**closure;
-                let inferred = self.closure_syntactic_return_type(
-                    params,
-                    uses,
-                    body,
-                    *is_static,
-                    locals,
-                    Some(&overrides),
-                );
+                let inferred =
+                    self.closure_syntactic_return_type(closure, locals, Some(&overrides));
                 Some(self.closure_literal_type(
                     params,
                     return_type.as_deref(),

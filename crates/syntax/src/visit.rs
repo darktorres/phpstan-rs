@@ -755,18 +755,12 @@ pub fn for_each_child_stmt<'ast>(stmt: &'ast Stmt, mut f: impl FnMut(&'ast Stmt)
     });
 }
 
-/// Whether a function, method or closure body contains a `yield` or
-/// `yield from`, making it a generator. A `yield` inside a nested
-/// closure, arrow function, class or function belongs to that scope.
+/// Whether a statement list contains a `yield` or `yield from` of the
+/// function it is in, outside the closures, arrow functions, classes and
+/// functions nested in it. A function-like's own answer is its
+/// `is_generator`, found as it was parsed; this is for a loop's body.
 pub fn body_contains_yield(stmts: &[Stmt]) -> bool {
     any_expr_in_body(stmts, |e| {
-        matches!(e.kind, ExprKind::Yield(..) | ExprKind::YieldFrom(_))
-    })
-}
-
-/// `body_contains_yield` for an arrow function's expression body.
-pub fn expr_contains_yield(expr: &Expr) -> bool {
-    any_expr_in_scope(expr, |e| {
         matches!(e.kind, ExprKind::Yield(..) | ExprKind::YieldFrom(_))
     })
 }

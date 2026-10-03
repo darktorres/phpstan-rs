@@ -2,7 +2,6 @@ use crate::checker::GotoState;
 use crate::checker::{Checker, Locals, LoopZeroIterations, purge_stale_narrowing_for};
 use diagnostics::DiagnosticBuilder;
 use syntax::ast::*;
-use syntax::visit::body_contains_yield;
 use types::Type;
 
 impl<'a> Checker<'a> {
@@ -170,6 +169,7 @@ impl<'a> Checker<'a> {
                     uses,
                     body,
                     goto_labels,
+                    is_generator,
                     is_static,
                     return_type,
                     ..
@@ -289,7 +289,7 @@ impl<'a> Checker<'a> {
                     );
                 }
                 let previous_generator_flag = self.current_function_is_generator;
-                self.current_function_is_generator = body_contains_yield(body);
+                self.current_function_is_generator = *is_generator;
                 let previous_declared_return_type = self.current_declared_return_type.take();
                 self.current_declared_return_type =
                     declared_return.as_ref().map(|t| match &self.current_class {

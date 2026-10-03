@@ -82,6 +82,17 @@ impl Supply<'_> {
 pub(crate) struct GotoScope {
     labels: Vec<crate::name::Name>,
     targets: Vec<GotoLabel>,
+    // Whether the body has a `yield` of its own.
+    is_generator: bool,
+}
+
+/// What a function-like body's parse found about the body as a whole.
+pub(crate) struct ScopeEnd {
+    /// The labels its `goto`s name.
+    pub(crate) goto_labels: Box<[GotoLabel]>,
+    /// Whether it is a generator: a `yield` or `yield from` in it, outside
+    /// the functions and classes nested in it.
+    pub(crate) is_generator: bool,
 }
 
 mod classes;
@@ -217,12 +228,25 @@ impl Parser<'_> {
 
     /// Closes the scope `enter_goto_scope` opened, and returns its labels.
     /// A body that failed to parse leaves its scope behind; this drops it.
-    pub(crate) fn leave_goto_scope(&mut self, depth: usize) -> Box<[GotoLabel]> {
+    pub(crate) fn leave_goto_scope(&mut self, depth: usize) -> ScopeEnd {
         self.goto_scopes.truncate(depth);
-        self.goto_scopes
-            .pop()
-            .map(|scope| scope.targets.into_boxed_slice())
-            .unwrap_or_default()
+        match self.goto_scopes.pop() {
+            Some(scope) => ScopeEnd {
+                goto_labels: scope.targets.into_boxed_slice(),
+                is_generator: scope.is_generator,
+            },
+            None => ScopeEnd {
+                goto_labels: Box::default(),
+                is_generator: false,
+            },
+        }
+    }
+
+    /// A `yield` or `yield from` in the body being parsed.
+    pub(crate) fn note_yield(&mut self) {
+        if let Some(scope) = self.goto_scopes.last_mut() {
+            scope.is_generator = true;
+        }
     }
 
     /// A label statement in the body being parsed.

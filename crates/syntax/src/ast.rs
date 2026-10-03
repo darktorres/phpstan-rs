@@ -251,6 +251,9 @@ pub struct FunctionBody {
     // The labels its `goto`s name, outside nested functions and classes;
     // empty for nearly every body.
     pub goto_labels: Box<[GotoLabel]>,
+    // Whether it has a `yield` or `yield from` of its own, outside nested
+    // functions and classes: the function is a generator.
+    pub is_generator: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -295,6 +298,12 @@ impl FunctionDecl {
     /// name.
     pub fn fq_name(&self) -> &str {
         self.namespaced_name.as_deref().unwrap_or(&self.name)
+    }
+
+    /// Whether the body has a `yield` of its own: the function is a
+    /// generator.
+    pub fn is_generator(&self) -> bool {
+        self.body.as_ref().is_some_and(|body| body.is_generator)
     }
 
     /// Whether this is a `__construct` method (PHP names are
@@ -391,6 +400,8 @@ pub struct PropertyHook {
     pub body: PropertyHookBody,
     // The labels the body's `goto`s name; see `FunctionBody`.
     pub goto_labels: Box<[GotoLabel]>,
+    // Whether the body is a generator; see `FunctionBody`.
+    pub is_generator: bool,
     // `&get`: the hook returns its value by reference.
     pub by_ref: bool,
     // `set(Type $value)`: the one parameter PHP allows there; `None` when
@@ -1359,6 +1370,8 @@ pub struct ClosureExpr {
     pub body: Vec<Stmt>,
     // The labels the body's `goto`s name; see `FunctionBody`.
     pub goto_labels: Box<[GotoLabel]>,
+    // Whether the body is a generator; see `FunctionBody`.
+    pub is_generator: bool,
     pub is_static: bool,
     pub by_ref: bool,
     // Boxed: keeps `Expr` small, since expression parsing recurses.
@@ -1373,6 +1386,8 @@ pub struct ClosureExpr {
 pub struct ArrowFnExpr {
     pub params: Vec<Param>,
     pub body: Box<Expr>,
+    // Whether the body is a generator; see `FunctionBody`.
+    pub is_generator: bool,
     pub is_static: bool,
     // `fn &() => ...` - returns by reference.
     pub by_ref: bool,

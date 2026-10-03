@@ -84,14 +84,20 @@ impl Parser<'_> {
             };
 
             let mut goto_labels: Box<[GotoLabel]> = Box::default();
+            let mut is_generator = false;
             let body = if self.eat(&Token::FatArrow) {
-                let e = self.parse_expression()?;
+                let depth = self.enter_goto_scope();
+                let e = self.parse_expression();
+                is_generator = self.leave_goto_scope(depth).is_generator;
+                let e = e?;
                 self.expect_semicolon()?;
                 PropertyHookBody::Arrow(e)
             } else if self.check(&Token::LBrace) {
                 let depth = self.enter_goto_scope();
                 let stmts = self.parse_stmt_list_block();
-                goto_labels = self.leave_goto_scope(depth);
+                let end = self.leave_goto_scope(depth);
+                goto_labels = end.goto_labels;
+                is_generator = end.is_generator;
                 PropertyHookBody::Block(stmts?)
             } else {
                 // Abstract form: `get;` / `set;`, no body at all - a
@@ -106,6 +112,7 @@ impl Parser<'_> {
             let hook = PropertyHook {
                 body,
                 goto_labels,
+                is_generator,
                 by_ref: hook_by_ref,
                 param,
                 attrs: hook_attrs,

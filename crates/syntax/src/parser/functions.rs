@@ -157,11 +157,12 @@ impl Parser<'_> {
             let open = self.current_span();
             let depth = self.enter_goto_scope();
             let stmts = self.parse_stmt_list_block();
-            let goto_labels = self.leave_goto_scope(depth);
+            let end = self.leave_goto_scope(depth);
             Some(FunctionBody {
                 open,
                 stmts: std::sync::Arc::new(stmts?),
-                goto_labels,
+                goto_labels: end.goto_labels,
+                is_generator: end.is_generator,
             })
         };
         Ok(FunctionDecl {

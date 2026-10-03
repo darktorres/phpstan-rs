@@ -389,6 +389,7 @@ impl Parser<'_> {
             // generator.
             Token::Keyword(Keyword::Yield) => {
                 self.skip();
+                self.note_yield();
                 if matches!(self.peek(), Token::Identifier(name) if name.eq_ignore_ascii_case("from"))
                 {
                     self.skip();

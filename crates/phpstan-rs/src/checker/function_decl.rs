@@ -12,7 +12,6 @@ use diagnostics::DiagnosticBuilder;
 use phpdoc::docblock;
 use syntax::ast::*;
 use syntax::span::Span;
-use syntax::visit::body_contains_yield;
 use types::Name;
 use types::php_version::PhpFeature;
 use types::{self, Type};
@@ -908,7 +907,7 @@ impl<'a> Checker<'a> {
         let previous_dynamic_flag = self.saw_dynamic_var_construct;
         self.saw_dynamic_var_construct = false;
         let previous_generator_flag = self.current_function_is_generator;
-        self.current_function_is_generator = body_contains_yield(f.body_stmts());
+        self.current_function_is_generator = f.is_generator();
         let previous_declared_return_type = self.current_declared_return_type.take();
         self.current_declared_return_type =
             declared_return.as_ref().map(|t| match &self.current_class {

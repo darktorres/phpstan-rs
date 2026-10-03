@@ -50,7 +50,7 @@ impl Parser<'_> {
 
         let depth = self.enter_goto_scope();
         let body = self.parse_stmt_list_block();
-        let goto_labels = self.leave_goto_scope(depth);
+        let end = self.leave_goto_scope(depth);
         let body = body?;
 
         Ok(self.expr(
@@ -58,7 +58,8 @@ impl Parser<'_> {
                 params,
                 uses,
                 body,
-                goto_labels,
+                goto_labels: end.goto_labels,
+                is_generator: end.is_generator,
                 is_static,
                 by_ref,
                 return_type,
@@ -84,11 +85,15 @@ impl Parser<'_> {
             None
         };
         self.expect(&Token::FatArrow)?;
-        let body = self.parse_expression()?;
+        let depth = self.enter_goto_scope();
+        let body = self.parse_expression();
+        let end = self.leave_goto_scope(depth);
+        let body = body?;
         Ok(self.expr(
             ExprKind::ArrowFn(Box::new(ArrowFnExpr {
                 params,
                 body: Box::new(body),
+                is_generator: end.is_generator,
                 is_static,
                 by_ref,
                 return_type,

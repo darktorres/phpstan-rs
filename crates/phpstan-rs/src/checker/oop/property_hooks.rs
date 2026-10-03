@@ -8,7 +8,6 @@ use diagnostics::DiagnosticBuilder;
 use phpdoc::docblock;
 use syntax::ast::*;
 use syntax::span::Span;
-use syntax::visit::{body_contains_yield, expr_contains_yield};
 
 use types::{self, Type};
 
@@ -238,12 +237,12 @@ impl<'a> Checker<'a> {
             _ => self.enter_assigned_variables(&[]),
         };
         let previous_goto_targets = match body {
-            PropertyHookBody::Arrow(e) => {
-                self.current_function_is_generator = expr_contains_yield(e);
+            PropertyHookBody::Arrow(_) => {
+                self.current_function_is_generator = hook.is_generator;
                 None
             }
-            PropertyHookBody::Block(stmts) => {
-                self.current_function_is_generator = body_contains_yield(stmts);
+            PropertyHookBody::Block(_) => {
+                self.current_function_is_generator = hook.is_generator;
                 Some(std::mem::replace(
                     &mut self.current_function_goto_targets,
                     GotoState::new(hook.goto_labels.clone()),
@@ -537,12 +536,12 @@ impl<'a> Checker<'a> {
             _ => self.enter_assigned_variables(&[]),
         };
         let previous_goto_targets = match body {
-            PropertyHookBody::Arrow(e) => {
-                self.current_function_is_generator = expr_contains_yield(e);
+            PropertyHookBody::Arrow(_) => {
+                self.current_function_is_generator = hook.is_generator;
                 None
             }
-            PropertyHookBody::Block(stmts) => {
-                self.current_function_is_generator = body_contains_yield(stmts);
+            PropertyHookBody::Block(_) => {
+                self.current_function_is_generator = hook.is_generator;
                 Some(std::mem::replace(
                     &mut self.current_function_goto_targets,
                     GotoState::new(hook.goto_labels.clone()),
