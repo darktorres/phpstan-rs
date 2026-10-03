@@ -7,11 +7,11 @@
 //! `==`. Identical text interned by one [`Interner`] shares one
 //! allocation, and a `Name` is one pointer wide.
 //!
-//! An interner holds what it interned weakly: text nothing uses any more
+//! The interner holds what it interned weakly: text nothing uses any more
 //! is freed, so a long-running session doesn't accumulate the names of
-//! code it no longer holds. A `Project` owns its interner;
-//! [`Interner::global`] serves everything without one (the embedded
-//! stubs, tests).
+//! code it no longer holds. There is one, [`Interner::global`]: names made
+//! by two interners could be equal text and different allocations, which
+//! an identity comparison cannot allow.
 
 use std::fmt;
 use std::hash::{Hash, Hasher};
@@ -346,7 +346,7 @@ pub fn text_hash(text: &str) -> u64 {
 }
 
 impl Interner {
-    pub fn new() -> Interner {
+    fn new() -> Interner {
         Interner::default()
     }
 
@@ -427,6 +427,29 @@ impl NameCache {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn concurrent_interning_of_one_text_is_one_allocation() {
+        let held: Vec<Name> = std::thread::scope(|scope| {
+            let workers: Vec<_> = (0..8)
+                .map(|_| {
+                    scope.spawn(|| {
+                        (0..200)
+                            .map(|i| Interner::global().name(&format!("Concurrent\\Name{}", i % 7)))
+                            .collect::<Vec<_>>()
+                    })
+                })
+                .collect();
+            workers
+                .into_iter()
+                .flat_map(|w| w.join().expect("interning thread"))
+                .collect()
+        });
+        for name in &held {
+            let again = Interner::global().name(name.as_str());
+            assert!(name.same_allocation(&again), "{name}");
+        }
+    }
 
     #[test]
     fn identical_text_shares_one_allocation() {

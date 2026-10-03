@@ -225,7 +225,7 @@ fn a_tags_description_and_the_templates_in_scope_are_not_references() {
 
 #[test]
 fn the_one_walk_for_both_sets_is_the_two_walks() {
-    let interner = std::sync::Arc::new(syntax::name::Interner::new());
+    let interner = std::sync::Arc::clone(syntax::name::Interner::global());
     let sources = [
         "<?php",
         "<?php use Lib\\Imported; global $g; class A extends B implements C { use T; }",

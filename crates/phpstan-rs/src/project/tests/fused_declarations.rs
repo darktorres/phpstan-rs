@@ -32,7 +32,7 @@ fn summary(decl: &BuiltDecl) -> (u8, String, bool) {
 
 #[test]
 fn the_one_walk_finds_what_the_five_walks_found() {
-    let interner = Arc::new(Interner::new());
+    let interner = Arc::clone(Interner::global());
     for (i, source) in SOURCES.iter().enumerate() {
         for is_stub in [false, true] {
             let path = Path::new("/p/file.php");
@@ -105,7 +105,7 @@ fn the_one_walk_finds_what_the_five_walks_found() {
 fn the_unconditional_classes_are_those_the_declaration_walk_finds() {
     use syntax::ast::ClassKind;
     use syntax::declarations::{Declared, for_each_declaration};
-    let interner = Arc::new(Interner::new());
+    let interner = Arc::clone(Interner::global());
     let mut sources: Vec<&str> = SOURCES.to_vec();
     sources.extend([
         "<?php { class InBlock {} { class Deeper {} } } declare(ticks=1) { class InDeclare {} } class Top {}",
@@ -134,7 +134,7 @@ fn the_unconditional_classes_are_those_the_declaration_walk_finds() {
 
 #[test]
 fn leaving_out_the_walks_a_file_cannot_need_gives_the_tree_the_walks_gave() {
-    let interner = Arc::new(Interner::new());
+    let interner = Arc::clone(Interner::global());
     let sources = [
         "<?php class A { public function m() {} }",
         "<?php $o = new class { public function m() {} }; $p = new class {};",
@@ -173,7 +173,7 @@ fn leaving_out_the_walks_a_file_cannot_need_gives_the_tree_the_walks_gave() {
 
 #[test]
 fn what_a_file_names_is_found_among_its_identifiers() {
-    let interner = Arc::new(Interner::new());
+    let interner = Arc::clone(Interner::global());
     let facts = |source: &str| syntax::parse(source.as_bytes(), &interner).unwrap().facts;
     assert_eq!(facts("<?php class A {}"), syntax::FileFacts::default());
     assert!(facts("<?php $f = new class {};").has_anonymous_class);

@@ -303,7 +303,7 @@ impl<'r> TemplateScopes<'r> {
     pub fn new(registry: &'r Registry) -> TemplateScopes<'r> {
         TemplateScopes {
             registry,
-            interner: Arc::new(syntax::name::Interner::new()),
+            interner: Arc::clone(syntax::name::Interner::global()),
             files: FxHashMap::default(),
         }
     }
@@ -350,7 +350,7 @@ function free(): void {
 ";
 
     fn scope_at(line: u32) -> TemplateScope {
-        let interner = Arc::new(syntax::name::Interner::new());
+        let interner = Arc::clone(syntax::name::Interner::global());
         let parsed = syntax::parse(SOURCE.as_bytes(), &interner).unwrap();
         let registry = Registry::build(&parsed.stmts);
         template_scope_at(&registry, &parsed.stmts, line, 9)

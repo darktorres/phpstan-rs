@@ -521,7 +521,7 @@ impl Project {
     fn with_registry(registry: Registry) -> Self {
         Project {
             files: file_table::FileTable::default(),
-            interner: Arc::new(Interner::new()),
+            interner: Arc::clone(Interner::global()),
             dependents: FxHashMap::default(),
             signature_dependents: FxHashMap::default(),
             registry,

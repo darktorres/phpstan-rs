@@ -125,7 +125,7 @@ fn php_files(dir: &Path, out: &mut Vec<PathBuf>) {
 
 #[test]
 fn the_labels_of_a_body_are_those_of_a_source_order_walk() {
-    let interner = Arc::new(Interner::new());
+    let interner = Arc::clone(Interner::global());
     let mut check = Check::default();
     let sources = [
         "<?php goto a; b: echo 1; a: goto b; function f() { x: goto x; goto y; y: } \
@@ -158,7 +158,7 @@ fn the_labels_agree_over_the_fixtures_and_the_vendor_tree() {
     php_files(&root.join("crates/phpstan-rs/tests/fixtures"), &mut files);
     php_files(&root.join("vendor/phpstan-src/src"), &mut files);
     php_files(&root.join("vendor/symfony/src"), &mut files);
-    let interner = Arc::new(Interner::new());
+    let interner = Arc::clone(Interner::global());
     let mut check = Check::default();
     for path in &files {
         if let Ok(source) = std::fs::read(path) {

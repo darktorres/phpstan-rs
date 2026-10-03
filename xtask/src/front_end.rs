@@ -44,7 +44,7 @@ pub(crate) fn dump(source: &[u8]) -> String {
     for warning in &warnings {
         let _ = writeln!(text, "warning {warning:?}");
     }
-    let interner = Arc::new(Interner::new());
+    let interner = Arc::clone(Interner::global());
     match syntax::parse(source, &interner) {
         Ok(parsed) => {
             let _ = writeln!(text, "parsed {parsed:?}");

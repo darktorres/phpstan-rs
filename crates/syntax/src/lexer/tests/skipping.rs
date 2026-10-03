@@ -106,7 +106,7 @@ fn identifier_bytes_are_those_the_character_classes_name() {
 
 #[test]
 fn a_name_the_lexer_repeats_is_the_one_the_interner_holds() {
-    let interner = Arc::new(Interner::new());
+    let interner = Arc::clone(Interner::global());
     let tokens = Lexer::new_in_php("<?php $a = foo($a, foo);")
         .with_interner(&interner)
         .tokenize();

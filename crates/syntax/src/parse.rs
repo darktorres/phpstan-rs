@@ -203,7 +203,7 @@ mod tests {
 
     #[test]
     fn a_leading_zero_literal_with_an_8_or_9_is_a_parse_error() {
-        let interner = Arc::new(Interner::new());
+        let interner = Arc::clone(Interner::global());
         let error = parse(b"<?php $x = 08;", &interner).unwrap_err();
         assert_eq!(error.message, "Invalid numeric literal");
         assert!(parse(b"<?php $x = 07; $y = 09.5;", &interner).is_ok());
@@ -211,7 +211,7 @@ mod tests {
 
     #[test]
     fn a_number_or_escape_php_cant_read_whole_is_a_parse_error() {
-        let interner = Arc::new(Interner::new());
+        let interner = Arc::clone(Interner::global());
         for bad in [
             &b"<?php $x = 1e;"[..],
             b"<?php $x = 1e+;",
@@ -286,7 +286,7 @@ mod tests {
 
     #[test]
     fn files_parsed_with_a_shared_name_cache_give_the_trees_and_names_they_give_without() {
-        let interner = Arc::new(Interner::new());
+        let interner = Arc::clone(Interner::global());
         let first =
             "<?php namespace App; class Foo { public function bar($baz) { return $baz->qux(); } }";
         let second = "<?php namespace App; function f(Foo $baz) { return (new Foo)->bar($baz); }";

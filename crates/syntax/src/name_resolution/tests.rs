@@ -245,7 +245,7 @@ fn the_import_table_answers_as_the_table_of_owned_strings_did() {
             UseKind::Class | UseKind::Function => (kind, name.to_ascii_lowercase()),
         }
     }
-    let interner = Interner::new();
+    let interner = Interner::global();
     let paths = [
         "Foo\\Bar",
         "Foo\\BAR",
