@@ -129,6 +129,9 @@ pub(crate) struct FileState {
     // What it assigns to globals, before the registry says what the values
     // are.
     global_facts: Arc<GlobalFacts>,
+    // Its declarations as built, which the registry's are rebuilt from when
+    // a name they declare changes.
+    built_decls: Vec<BuiltDecl>,
     // What is true of the file as a whole (`syntax::FileFacts`).
     facts: FileFacts,
     // Its lines, which the lines and columns of its spans are found by.
@@ -920,8 +923,8 @@ impl Project {
             owner,
         } = parsed;
         self.begin_declaration_changes();
-        for decl in built_decls {
-            self.registry.insert_built_decl(decl, analyzed);
+        for decl in &built_decls {
+            self.registry.insert_built_decl(decl.clone(), analyzed);
         }
         let class_fn_refs = class_fn_refs.unwrap_or_else(|| self.class_fn_refs_of(&ast, &source));
         for (span, target) in class_fn_refs {
@@ -961,6 +964,7 @@ impl Project {
                 owner,
                 bodies,
                 global_facts,
+                built_decls,
                 facts,
                 line_index,
             },
@@ -1109,7 +1113,7 @@ impl Project {
     fn switch_to_phpstan_base(&mut self) {
         self.registry.switch_base(Project::phpstan_base().clone());
         self.begin_declaration_changes();
-        let mut sources: Vec<(bool, u64, &Path, &[Stmt])> = self
+        let mut sources: Vec<(bool, u64, &Path, &[BuiltDecl])> = self
             .files
             .iter()
             .map(|(path, state)| {
@@ -1117,27 +1121,32 @@ impl Project {
                     state.analyzed,
                     state.load_order,
                     path.as_path(),
-                    state.ast.as_slice(),
+                    state.built_decls.as_slice(),
                 )
             })
             .collect();
         sources.sort_by_key(|source| (source.0, source.1));
-        // Each file's declarations are built on their own, as when the
-        // file was parsed; only their insertion is in order.
-        let built: Vec<Vec<BuiltDecl>> = worker_pool().install(|| {
-            sources
-                .par_iter()
-                .map(|(_, _, path, ast)| {
-                    crate::registry::build_declarations(ast, &Origin::File(Arc::from(*path)))
-                })
-                .collect()
-        });
-        for ((analyzed, _, path, _), decls) in sources.into_iter().zip(built) {
+        // What the files' trees build, which their kept declarations are.
+        #[cfg(debug_assertions)]
+        for (_, _, path, decls) in &sources {
+            if let Some(state) = self.files.get(path) {
+                let built = crate::registry::build_declarations(
+                    &state.ast,
+                    &Origin::File(Arc::from(*path)),
+                );
+                assert!(
+                    built.iter().eq(decls.iter()),
+                    "the declarations kept of {} are not those its tree builds",
+                    path.display()
+                );
+            }
+        }
+        for (analyzed, _, path, decls) in sources {
             for decl in decls {
-                if let BuiltDecl::Class { name, .. } = &decl {
+                if let BuiltDecl::Class { name, .. } = decl {
                     self.registry.record_phpstan_class_file(name, path);
                 }
-                self.registry.insert_built_decl(decl, analyzed);
+                self.registry.insert_built_decl(decl.clone(), analyzed);
             }
         }
     }
@@ -1412,7 +1421,7 @@ impl Project {
     fn rebuild_declarations(
         &mut self,
         names: &DeclaredNames,
-        pending: Option<(&Path, &[Stmt], bool, u64)>,
+        pending: Option<(&Path, &[BuiltDecl], bool, u64)>,
     ) {
         self.begin_declaration_changes();
         self.registry
@@ -1458,7 +1467,7 @@ impl Project {
                     .iter()
                     .any(|n| constant_keys.contains(n.as_str()))
         };
-        let mut sources: Vec<(bool, u64, &Path, &[Stmt], bool)> = self
+        let mut sources: Vec<(bool, u64, &Path, &[BuiltDecl], bool)> = self
             .files
             .iter()
             .filter(|(_, state)| declares_one(state))
@@ -1467,30 +1476,52 @@ impl Project {
                     state.analyzed,
                     state.load_order,
                     path.as_path(),
-                    state.ast.as_slice(),
+                    state.built_decls.as_slice(),
                     false,
                 )
             })
             .collect();
-        if let Some((path, ast, analyzed, load_order)) = pending {
-            sources.push((analyzed, load_order, path, ast, true));
+        if let Some((path, decls, analyzed, load_order)) = pending {
+            sources.push((analyzed, load_order, path, decls, true));
         }
         sources.sort_by_key(|source| (source.0, source.1));
-        for (analyzed, _, path, ast, is_pending) in sources {
-            let origin = Origin::File(Arc::from(path));
+        for (analyzed, _, path, decls, is_pending) in sources {
             // Of a file already loaded, only the declarations being
-            // rebuilt are built; the pending file's all are.
+            // rebuilt are inserted again; the pending file's all are.
             let rebuilt = |kind: DeclKind, name: &str| match kind {
                 DeclKind::Class => class_keys.contains(&name.to_ascii_lowercase()),
                 DeclKind::Function => function_keys.contains(&name.to_ascii_lowercase()),
                 DeclKind::Constant => constant_keys.contains(name),
             };
-            let keep: Option<Keep<'_>> = if is_pending { None } else { Some(&rebuilt) };
-            for decl in crate::registry::build_declarations_where(ast, &origin, keep) {
-                if let BuiltDecl::Class { name, .. } = &decl {
+            // What the file's tree builds, which its kept declarations are.
+            #[cfg(debug_assertions)]
+            if !is_pending && let Some(state) = self.files.get(path) {
+                let origin = Origin::File(Arc::from(path));
+                let keep: Keep<'_> = &rebuilt;
+                let built =
+                    crate::registry::build_declarations_where(&state.ast, &origin, Some(keep));
+                let kept: Vec<&BuiltDecl> = decls
+                    .iter()
+                    .filter(|decl| {
+                        let (kind, name) = decl.kind_and_name();
+                        rebuilt(kind, name)
+                    })
+                    .collect();
+                assert!(
+                    built.iter().eq(kept.iter().copied()),
+                    "the declarations kept of {} are not those its tree builds",
+                    path.display()
+                );
+            }
+            for decl in decls {
+                let (kind, name) = decl.kind_and_name();
+                if !is_pending && !rebuilt(kind, name) {
+                    continue;
+                }
+                if let BuiltDecl::Class { name, .. } = decl {
                     self.registry.record_phpstan_class_file(name, path);
                 }
-                self.registry.insert_built_decl(decl, analyzed);
+                self.registry.insert_built_decl(decl.clone(), analyzed);
             }
         }
     }
@@ -1713,7 +1744,8 @@ impl Project {
             rebuilt.classes.extend(previous.classes);
             rebuilt.constants.extend(previous.constants);
         }
-        self.rebuild_declarations(&rebuilt, Some((path, &ast, analyzed, load_order)));
+        let built_decls = crate::registry::build_declarations(&ast, &Origin::File(Arc::from(path)));
+        self.rebuild_declarations(&rebuilt, Some((path, &built_decls, analyzed, load_order)));
         let anonymous_classes = if facts.has_anonymous_class {
             anonymous_class_names(&ast)
         } else {
@@ -1749,6 +1781,7 @@ impl Project {
                 owner: self.packages.owner(&self.absolute_path(path)),
                 bodies,
                 global_facts,
+                built_decls,
                 facts,
                 line_index,
             },

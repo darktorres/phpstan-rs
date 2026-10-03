@@ -87,7 +87,7 @@ pub(crate) fn anonymous_class_decls(stmts: &[Stmt], origin: &Origin) -> Vec<Buil
                 name: name.clone(),
                 conditional: false,
                 guard: None,
-                info: Box::new(info),
+                info: std::sync::Arc::new(info),
             });
         }
     });

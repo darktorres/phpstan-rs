@@ -1,4 +1,5 @@
 use rustc_hash::FxHashMap;
+use std::sync::Arc;
 use syntax::name::Name;
 use syntax::name::NameMap;
 
@@ -22,19 +23,19 @@ use types::Type;
 /// to be consumed one at a time, in order, by `insert_built_decl`. See
 /// `build_declarations`'s own doc comment for why this exists as a
 /// wholly separate step from the insertion logic below.
-#[cfg_attr(test, derive(Clone))]
+#[derive(Clone, PartialEq)]
 pub(crate) enum BuiltDecl {
     Class {
         name: Name,
         conditional: bool,
         guard: Option<GuardExpr>,
-        info: Box<ClassReflection>,
+        info: Arc<ClassReflection>,
     },
     Function {
         name: Name,
         conditional: bool,
         guard: Option<GuardExpr>,
-        sig: Box<FunctionReflection>,
+        sig: Arc<FunctionReflection>,
         // The declaration's name position, as a byte offset.
         site: u32,
     },
@@ -46,6 +47,15 @@ pub(crate) enum BuiltDecl {
 }
 
 impl BuiltDecl {
+    /// What the declaration declares: its kind and name.
+    pub(crate) fn kind_and_name(&self) -> (DeclKind, &str) {
+        match self {
+            BuiltDecl::Class { name, .. } => (DeclKind::Class, name),
+            BuiltDecl::Function { name, .. } => (DeclKind::Function, name),
+            BuiltDecl::GlobalConst { name, .. } => (DeclKind::Constant, name),
+        }
+    }
+
     /// Whether the declaration's guard holds on `versions`: `Maybe` for
     /// one with no guard to read.
     fn guard_on(&self, versions: Option<types::PhpVersions>) -> Guard {
@@ -174,7 +184,6 @@ impl Registry {
                 info: new_info,
                 ..
             } => {
-                let new_info = *new_info;
                 if conditional && self.built_in_stub_classes.contains_key(&name) {
                     // A plain `or_insert_with` no-op (the shape every
                     // other conditional case below uses) fully discards
@@ -232,7 +241,7 @@ impl Registry {
                             existing.trait_aliases.clone(),
                             existing.implements_args.clone(),
                         );
-                        let mut merged = new_info.merge(existing);
+                        let mut merged = Arc::unwrap_or_clone(new_info).merge(existing);
                         merged.extends = extends;
                         merged.implements = implements;
                         merged.uses = uses;
@@ -242,10 +251,12 @@ impl Registry {
                         merged.implements_args = implements_args;
                         self.classes.insert(name, merged);
                     } else {
-                        self.classes.insert(name, new_info);
+                        self.classes.insert_shared(name, new_info);
                     }
                 } else if conditional {
-                    self.classes.get_or_insert_with(name, || new_info);
+                    if !self.classes.contains_key(&name) {
+                        self.classes.insert_shared(name, new_info);
+                    }
                 } else if self.unconditionally_declared_classes.contains(&name) {
                     // A second unconditional declaration of the same
                     // name - real, not always a mistake. Mirrors
@@ -266,7 +277,7 @@ impl Registry {
                         // vendor/stub entry of the same name, not merge
                         // with it the way two context-only declarations
                         // legitimately do above.
-                        self.classes.insert(name, new_info);
+                        self.classes.insert_shared(name, new_info);
                     } else if self.built_in_stub_classes.contains_key(&name) {
                         // The one exception to the rule just above: a
                         // *built-in* stub name (`ArrayIterator`, ...)
@@ -315,7 +326,7 @@ impl Registry {
                             existing.trait_aliases.clone(),
                             existing.implements_args.clone(),
                         );
-                        let mut merged = existing.merge(new_info);
+                        let mut merged = existing.merge(Arc::unwrap_or_clone(new_info));
                         merged.extends = extends;
                         merged.implements = implements;
                         merged.uses = uses;
@@ -329,7 +340,8 @@ impl Registry {
                                 .classes
                                 .take(&name)
                                 .expect("name is in unconditionally_declared_classes, so it must already be indexed");
-                        self.classes.insert(name, existing.merge(new_info));
+                        self.classes
+                            .insert(name, existing.merge(Arc::unwrap_or_clone(new_info)));
                     }
                 } else {
                     // The *first* unconditional declaration of this
@@ -339,7 +351,7 @@ impl Registry {
                     // keep a guarded fallback's own members alongside
                     // the real class's.
                     self.unconditionally_declared_classes.insert(name.clone());
-                    self.classes.insert(name, new_info);
+                    self.classes.insert_shared(name, new_info);
                 }
             }
             BuiltDecl::Function {
@@ -349,7 +361,6 @@ impl Registry {
                 site,
                 ..
             } => {
-                let new_sig = *new_sig;
                 if conditional {
                     // Gated on arity and not losing any type precision
                     // the existing slot already had (see
@@ -392,7 +403,7 @@ impl Registry {
                                 .remove(function_key(&name).as_ref());
                             self.function_decl_sites
                                 .insert(folded_key(&name), Some(site));
-                            self.functions.insert(name, new_sig);
+                            self.functions.insert_shared(name, new_sig);
                         }
                     }
                 } else if self
@@ -421,7 +432,8 @@ impl Registry {
                             "name is in unconditionally_declared_functions, so it must already be indexed",
                         );
                     self.function_decl_sites.insert(folded_key(&name), None);
-                    self.functions.insert(name, existing.merge(new_sig));
+                    self.functions
+                        .insert(name, existing.merge(Arc::unwrap_or_clone(new_sig)));
                 } else {
                     self.stub_provided_functions
                         .remove(function_key(&name).as_ref());
@@ -429,7 +441,7 @@ impl Registry {
                         .insert(folded_key(&name));
                     self.function_decl_sites
                         .insert(folded_key(&name), Some(site));
-                    self.functions.insert(name, new_sig);
+                    self.functions.insert_shared(name, new_sig);
                 }
             }
             BuiltDecl::GlobalConst { name, ty, .. } => {
@@ -700,7 +712,7 @@ pub(crate) fn built_declaration(
                 name,
                 conditional,
                 guard,
-                info: Box::new(info),
+                info: Arc::new(info),
             });
         }
         Declared::Function(f) => {
@@ -719,7 +731,7 @@ pub(crate) fn built_declaration(
                 name: Name::from(&declaration.name()),
                 conditional,
                 guard,
-                sig: Box::new(sig),
+                sig: Arc::new(sig),
                 site: f.name.span.start,
             });
         }
