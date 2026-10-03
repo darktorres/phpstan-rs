@@ -1,3 +1,4 @@
+use crate::checker::GotoState;
 use crate::checker::{
     ATTRIBUTE_TARGET_FUNCTION, ATTRIBUTE_TARGET_METHOD, ATTRIBUTE_TARGET_PARAMETER,
     ATTRIBUTE_TARGET_PROPERTY, Checker, Locals, body_contains_explicit_throw,
@@ -929,7 +930,7 @@ impl<'a> Checker<'a> {
             &mut self.current_function_goto_targets,
             f.body
                 .as_ref()
-                .map(|b| b.goto_labels.clone())
+                .map(|b| GotoState::new(b.goto_labels.clone()))
                 .unwrap_or_default(),
         );
         let previous_terminating_assertions = std::mem::take(&mut self.terminating_assertions);

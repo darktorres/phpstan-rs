@@ -30,6 +30,39 @@ mod new_exception_discarded;
 mod switch;
 mod try_catch;
 
+/// What a block has found of its statements so far.
+#[derive(Clone)]
+struct BlockState {
+    reported_unreachable: bool,
+    /// The first statement that terminates in the last stretch of the block
+    /// that can be reached: a label a `goto` lands on starts one.
+    ends_with: Option<Completion>,
+    last: Completion,
+    /// The jumps of the statements that can be reached: one after a
+    /// statement that terminates is not, unless a `goto` can land on it.
+    jumps: u32,
+    reachable: bool,
+}
+
+impl Default for BlockState {
+    fn default() -> Self {
+        BlockState {
+            reported_unreachable: false,
+            ends_with: None,
+            last: Completion::FALLS_THROUGH,
+            jumps: 0,
+            reachable: true,
+        }
+    }
+}
+
+/// A stretch of a statement list that a backward `goto` loops.
+struct GotoRegion {
+    first: usize,
+    last: usize,
+    labels: Vec<syntax::name::Name>,
+}
+
 impl<'a> Checker<'a> {
     pub(crate) fn check_block(
         &mut self,
@@ -38,6 +71,50 @@ impl<'a> Checker<'a> {
         declared_return: Option<&Type>,
         label: &str,
     ) -> BlockCompletion {
+        let mut state = BlockState::default();
+        let regions = self.goto_regions(stmts);
+        let mut next = 0;
+        for region in regions {
+            self.check_stmt_range(
+                stmts,
+                next..region.first,
+                locals,
+                declared_return,
+                label,
+                &mut state,
+            );
+            self.check_goto_region(stmts, &region, locals, declared_return, label, &mut state);
+            next = region.last + 1;
+        }
+        self.check_stmt_range(
+            stmts,
+            next..stmts.len(),
+            locals,
+            declared_return,
+            label,
+            &mut state,
+        );
+        BlockCompletion {
+            completion: Completion {
+                terminates: state.ends_with.is_some(),
+                exits: state.ends_with.is_some_and(|c| c.exits),
+                jumps: state.jumps,
+            },
+            last: state.last,
+        }
+    }
+
+    /// The statements `stmts[range]` in order, with what a block finds as it
+    /// goes in `state`.
+    fn check_stmt_range(
+        &mut self,
+        stmts: &[Stmt],
+        range: std::ops::Range<usize>,
+        locals: &mut Locals,
+        declared_return: Option<&Type>,
+        label: &str,
+        state: &mut BlockState,
+    ) {
         // `UnreachableStatementRule`: relies on `converge_loop_body`'s
         // fixed-point loop-body convergence so a variable reassigned
         // inside a loop doesn't keep its pre-loop-entry type for the
@@ -53,38 +130,52 @@ impl<'a> Checker<'a> {
         // `UnreachableStatementNode` for every other rule, and stopping
         // early here would silently drop real, unrelated diagnostics
         // sitting in a since-dead branch.
-        let mut reported_unreachable = false;
-        // The first statement that terminates in the last stretch of the
-        // block that can be reached: a label a `goto` lands on starts one.
-        let mut ends_with: Option<Completion> = None;
-        let mut last = Completion::FALLS_THROUGH;
-        // The jumps of the statements that can be reached: one after a
-        // statement that terminates is not, unless a `goto` can land on it.
-        let mut jumps = 0;
-        let mut reachable = true;
-        for (i, stmt) in stmts.iter().enumerate() {
-            if matches!(&stmt.kind, StmtKind::Label(name) if self.current_function_goto_targets.iter().any(|l| l.name == name.name))
+        for i in range {
+            let stmt = &stmts[i];
+            if let StmtKind::Label(name) = &stmt.kind
+                && self.current_function_goto_targets.is_target(&name.name)
             {
-                reachable = true;
-                ends_with = None;
+                // The scope at a label is what every path that reaches it
+                // gives: the one falling through to it, if that is
+                // reachable, and the scope of each `goto` that jumped to it.
+                let points = &mut self.current_function_goto_targets.points;
+                let landing: Vec<Locals> = points
+                    .iter()
+                    .filter(|(to, _)| *to == name.name)
+                    .map(|(_, scope)| scope.clone())
+                    .collect();
+                points.retain(|(to, _)| *to != name.name);
+                let mut scopes = landing.into_iter();
+                if let Some(first) = scopes.next() {
+                    let merged =
+                        scopes.fold(first, |acc, s| merge_scopes(&self.relation(), &acc, &s));
+                    *locals = if state.reachable {
+                        merge_scopes(&self.relation(), locals, &merged)
+                    } else {
+                        merged
+                    };
+                }
+                state.reachable = true;
+                state.ends_with = None;
             }
-            last = self.check_stmt(stmt, locals, declared_return, label);
-            if reachable {
-                jumps |= last.jumps;
+            state.last = self.check_stmt(stmt, locals, declared_return, label);
+            let last = state.last;
+            if state.reachable {
+                state.jumps |= last.jumps;
                 if last.terminates {
-                    ends_with = Some(last);
-                    reachable = false;
+                    state.ends_with = Some(last);
+                    state.reachable = false;
                 }
             }
             self.compare_completion(stmt, locals, last);
-            if !reported_unreachable
+            if !state.reported_unreachable
                 && last.terminates
                 && let Some(next) = stmts.get(i + 1)
                 // A labeled statement `goto`-targeted somewhere else in
                 // this same function is a real jump target, not dead
                 // code, whatever the statement immediately before it
                 // does - see `Checker::current_function_goto_targets`'s.
-                && !matches!(&next.kind, StmtKind::Label(name) if self.current_function_goto_targets.iter().any(|l| l.name == name.name))
+                && !matches!(&next.kind, StmtKind::Label(name) if self.current_function_goto_targets.is_target(&name.name))
             {
                 self.report(
                     "Unreachable statement - code above always terminates.".to_string(),
@@ -92,16 +183,110 @@ impl<'a> Checker<'a> {
                     4,
                     "deadCode.unreachable",
                 );
-                reported_unreachable = true;
+                state.reported_unreachable = true;
             }
         }
-        BlockCompletion {
-            completion: Completion {
-                terminates: ends_with.is_some(),
-                exits: ends_with.is_some_and(|c| c.exits),
-                jumps,
-            },
-            last,
+    }
+
+    /// The stretches of `stmts` a `goto` that jumps back makes a loop of: from
+    /// the first statement holding the label to the last holding a `goto` to
+    /// it, where both are in this list and not in one statement of it (the
+    /// list inside that statement has the stretch then). Overlapping
+    /// stretches are one.
+    fn goto_regions(&self, stmts: &[Stmt]) -> Vec<GotoRegion> {
+        let labels = &self.current_function_goto_targets.labels;
+        if !labels.iter().any(|l| l.backward) {
+            return Vec::new();
+        }
+        let holds = |stmt: &Stmt, is_label: bool, name: &syntax::name::Name| {
+            syntax::visit::any_stmt_in_body(stmt, |s| match &s.kind {
+                StmtKind::Label(n) => is_label && n.name == *name,
+                StmtKind::Goto(n) => !is_label && n.name == *name,
+                _ => false,
+            })
+        };
+        let mut regions: Vec<GotoRegion> = Vec::new();
+        for label in labels.iter().filter(|l| l.backward) {
+            let Some(first) = stmts.iter().position(|s| holds(s, true, &label.name)) else {
+                continue;
+            };
+            let Some(last) = stmts.iter().rposition(|s| holds(s, false, &label.name)) else {
+                continue;
+            };
+            if first >= last {
+                continue;
+            }
+            regions.push(GotoRegion {
+                first,
+                last,
+                labels: vec![label.name.clone()],
+            });
+        }
+        regions.sort_by_key(|r| r.first);
+        let mut merged: Vec<GotoRegion> = Vec::new();
+        for region in regions {
+            match merged.last_mut() {
+                Some(previous) if region.first <= previous.last => {
+                    previous.last = previous.last.max(region.last);
+                    previous.labels.extend(region.labels);
+                }
+                _ => merged.push(region),
+            }
+        }
+        merged
+    }
+
+    /// A stretch of statements a backward `goto` makes a loop of, run until
+    /// the scope at its start stops changing: each pass starts from the scope
+    /// before the stretch joined with the scope of each `goto` that jumped
+    /// back, and only the last pass's findings stay.
+    fn check_goto_region(
+        &mut self,
+        stmts: &[Stmt],
+        region: &GotoRegion,
+        locals: &mut Locals,
+        declared_return: Option<&Type>,
+        label: &str,
+        state: &mut BlockState,
+    ) {
+        const MAX_PASSES: usize = 3;
+        let entry = locals.clone();
+        let state_before = state.clone();
+        let mut pass_entry = entry.clone();
+        for pass in 0..MAX_PASSES {
+            let mark = self.pass_mark();
+            let mut pass_locals = pass_entry.clone();
+            let mut pass_state = state_before.clone();
+            self.check_stmt_range(
+                stmts,
+                region.first..region.last + 1,
+                &mut pass_locals,
+                declared_return,
+                label,
+                &mut pass_state,
+            );
+            // The scopes the `goto`s of the stretch jumped back with.
+            let points = &mut self.current_function_goto_targets.points;
+            let back: Vec<Locals> = points
+                .iter()
+                .filter(|(to, _)| region.labels.contains(to))
+                .map(|(_, scope)| scope.clone())
+                .collect();
+            points.retain(|(to, _)| !region.labels.contains(to));
+            let mut next_entry = entry.clone();
+            for scope in &back {
+                next_entry = merge_scopes(&self.relation(), &next_entry, scope);
+            }
+            if pass >= 1 && next_entry != pass_entry {
+                self.widen_towards_entry(&pass_entry, &mut next_entry);
+            }
+            if next_entry == pass_entry || pass + 1 == MAX_PASSES {
+                *locals = pass_locals;
+                *state = pass_state;
+                return;
+            }
+            self.rewind_to(mark);
+            pass_entry = next_entry;
         }
     }
 
@@ -872,6 +1057,14 @@ impl<'a> Checker<'a> {
             StmtKind::Throw(e) => {
                 self.check_throw(e, locals, label);
                 completion = Completion::EXITS;
+            }
+            // Nothing after a `goto` is reached by falling through. It lands
+            // at its label with the scope it left from.
+            StmtKind::Goto(name) => {
+                self.current_function_goto_targets
+                    .points
+                    .push((name.name.clone(), locals.clone()));
+                completion = Completion::TERMINATES;
             }
             StmtKind::Unset(targets) => {
                 for target in targets {

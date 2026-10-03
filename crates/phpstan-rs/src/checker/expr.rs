@@ -1,3 +1,4 @@
+use crate::checker::GotoState;
 use crate::checker::InferQuestion;
 use crate::checker::calls::parameters::Callee;
 use crate::checker::resolve::receiver_class;
@@ -3738,8 +3739,10 @@ impl<'a> Checker<'a> {
                 // `current_function_*` field already cleared just below
                 // for this same arm.
                 let previous_declared_throws_type = self.current_declared_throws_type.take();
-                let previous_goto_targets =
-                    std::mem::replace(&mut self.current_function_goto_targets, goto_labels.clone());
+                let previous_goto_targets = std::mem::replace(
+                    &mut self.current_function_goto_targets,
+                    GotoState::new(goto_labels.clone()),
+                );
                 let previous_assigned_variables = self.enter_assigned_variables(body);
                 // Real PHPStan exempts an anonymous function entirely
                 // from both by-ref-parameter rules (`isInAnonymousFunction()`

@@ -305,6 +305,33 @@ impl<'a> Checker<'a> {
     /// below never reflects it), so convergence would wrongly conclude
     /// "nothing changed" after a single pass and keep that pass's own
     /// diagnostics - computed against the stale, pre-reassignment entry.
+    /// A variable still changing from one pass of a loop to the next
+    /// (a counter, a string built up, an array grown key by key) is widened
+    /// so the next pass can converge: an int only on the side it is moving,
+    /// anything else to its general type. Only a growing value widens; one
+    /// that shrank back inside an earlier widening narrows to what the pass
+    /// gave.
+    pub(crate) fn widen_towards_entry(&self, pass_entry: &Locals, next_entry: &mut Locals) {
+        let relation = self.relation();
+        let changing: Vec<(String, Type)> = next_entry
+            .iter()
+            .filter(|(name, ty)| match pass_entry.get(name.as_str()) {
+                Some(before) => before != *ty && !relation.is_super_type_of(before, ty).yes(),
+                None => true,
+            })
+            .map(|(name, ty)| {
+                let widened = match pass_entry.get(name.as_str()) {
+                    Some(before) => before.widen_towards(ty),
+                    None => ty.generalize(),
+                };
+                (name.clone(), widened)
+            })
+            .collect();
+        for (name, ty) in changing {
+            next_entry.insert(name, ty);
+        }
+    }
+
     pub(crate) fn converge_loop_body(
         &mut self,
         entry: &Locals,
@@ -348,28 +375,7 @@ impl<'a> Checker<'a> {
                 next_entry = merge_scopes(&self.relation(), &next_entry, state);
             }
             if pass >= WIDEN_FROM_PASS && next_entry != pass_entry {
-                // Only a growing value widens; one that shrank back inside
-                // an earlier widening narrows to what the pass gave.
-                let relation = self.relation();
-                let changing: Vec<(String, Type)> = next_entry
-                    .iter()
-                    .filter(|(name, ty)| match pass_entry.get(name.as_str()) {
-                        Some(before) => {
-                            before != *ty && !relation.is_super_type_of(before, ty).yes()
-                        }
-                        None => true,
-                    })
-                    .map(|(name, ty)| {
-                        let widened = match pass_entry.get(name.as_str()) {
-                            Some(before) => before.widen_towards(ty),
-                            None => ty.generalize(),
-                        };
-                        (name.clone(), widened)
-                    })
-                    .collect();
-                for (name, ty) in changing {
-                    next_entry.insert(name, ty);
-                }
+                self.widen_towards_entry(&pass_entry, &mut next_entry);
             }
             if next_entry == pass_entry || is_last_allowed_pass {
                 // The kept pass's own `body_locals`, returned to the

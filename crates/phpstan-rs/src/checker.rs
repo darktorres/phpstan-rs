@@ -521,7 +521,7 @@ pub struct Checker<'a> {
     // `deadCode.unreachable` check, which has no direct access to the
     // enclosing function's body to answer "could a `goto` reach this
     // labeled statement" itself.
-    pub(crate) current_function_goto_targets: Box<[syntax::ast::GotoLabel]>,
+    pub(crate) current_function_goto_targets: GotoState,
     /// Each assignment's value type (and native type, for a variable
     /// target) as last checked, by the assignment's span: a condition
     /// narrowed after the check binds these, not its right side re-read
@@ -871,7 +871,7 @@ pub(crate) enum InferQuestion {
 
 mod access_attributes;
 mod completion;
-pub(crate) use completion::{BREAK_HERE, BlockCompletion, CONTINUE_HERE, Completion};
+pub(crate) use completion::{BREAK_HERE, BlockCompletion, CONTINUE_HERE, Completion, GotoState};
 mod array_access;
 mod infer_cache;
 mod locals;
@@ -1116,7 +1116,7 @@ impl<'a> Checker<'a> {
             current_function_by_ref_exit_snapshots: rustc_hash::FxHashMap::default(),
             current_function_by_ref_params_with_tag: rustc_hash::FxHashMap::default(),
             current_function_byref_snapshot_names: rustc_hash::FxHashSet::default(),
-            current_function_goto_targets: Box::default(),
+            current_function_goto_targets: GotoState::default(),
             assigned_values: rustc_hash::FxHashMap::default(),
             terminating_assertions: rustc_hash::FxHashSet::default(),
             completion_oracle: std::env::var_os("PHPSTAN_RS_COMPLETION_ORACLE").is_some(),

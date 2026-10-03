@@ -2,6 +2,7 @@
     tip: See: https://phpstan.org/blog/solving-phpstan-no-value-type-specified-in-iterable-type
 3:17-3:30 goto.labelUndefined L0 | Goto to undefined label 'nowhere'.
     non-ignorable
+4:17-4:29 deadCode.unreachable L4 | Unreachable statement - code above always terminates.
 4:17-4:29 goto.intoLoop L0 | Goto to label 'inside' jumps into a loop or switch statement.
     non-ignorable
 10:17-10:24 label.unused L4 | Label 'unused' is unused.

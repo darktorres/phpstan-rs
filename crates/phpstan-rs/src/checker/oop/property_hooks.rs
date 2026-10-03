@@ -1,3 +1,4 @@
+use crate::checker::GotoState;
 use crate::checker::{
     ATTRIBUTE_TARGET_METHOD, Checker, Locals, body_contains_explicit_throw,
     expr_contains_explicit_throw,
@@ -245,7 +246,7 @@ impl<'a> Checker<'a> {
                 self.current_function_is_generator = body_contains_yield(stmts);
                 Some(std::mem::replace(
                     &mut self.current_function_goto_targets,
-                    hook.goto_labels.clone(),
+                    GotoState::new(hook.goto_labels.clone()),
                 ))
             }
             // No real body at all - nothing to scan for yield/goto.
@@ -544,7 +545,7 @@ impl<'a> Checker<'a> {
                 self.current_function_is_generator = body_contains_yield(stmts);
                 Some(std::mem::replace(
                     &mut self.current_function_goto_targets,
-                    hook.goto_labels.clone(),
+                    GotoState::new(hook.goto_labels.clone()),
                 ))
             }
             PropertyHookBody::Abstract => {

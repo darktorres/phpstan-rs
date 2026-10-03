@@ -65,6 +65,29 @@ impl Completion {
     };
 }
 
+/// The `goto`s of the function body being checked: the labels they name,
+/// and each one that has been checked and not yet landed, with the scope it
+/// jumped from, for the label to merge.
+#[derive(Default)]
+pub(crate) struct GotoState {
+    pub(crate) labels: Box<[syntax::ast::GotoLabel]>,
+    pub(crate) points: Vec<(syntax::name::Name, Locals)>,
+}
+
+impl GotoState {
+    pub(crate) fn new(labels: Box<[syntax::ast::GotoLabel]>) -> GotoState {
+        GotoState {
+            labels,
+            points: Vec::new(),
+        }
+    }
+
+    /// Whether some `goto` of the body names `label`.
+    pub(crate) fn is_target(&self, label: &syntax::name::Name) -> bool {
+        self.labels.iter().any(|l| l.name == *label)
+    }
+}
+
 /// What checking a list of statements found: how the list as a whole
 /// completes, and how its last statement does.
 #[derive(Clone, Copy, Default, PartialEq, Eq, Debug)]
