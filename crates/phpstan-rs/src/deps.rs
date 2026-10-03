@@ -40,6 +40,8 @@ pub struct ReferencedNames {
     /// string refers to is looked up by the checks that read it, though
     /// no name in the file says so.
     pub strings: FxHashSet<String>,
+    /// Those of `strings` outside function and method bodies.
+    pub declaration_strings: FxHashSet<String>,
 }
 
 /// `both_referenced_names`, with the strings that name classes.
@@ -51,6 +53,7 @@ pub fn all_referenced_names(stmts: &[Stmt]) -> ReferencedNames {
         names: collector.names,
         outside: collector.outside,
         strings: collector.strings.unwrap_or_default(),
+        declaration_strings: collector.declaration_strings,
     }
 }
 
@@ -115,8 +118,10 @@ struct Collector {
     // innermost last: their template parameters are names that are not
     // classes.
     templates: Vec<Option<std::sync::Arc<DocNames>>>,
-    // With `Some`, the namespaced class names the file's strings hold.
+    // With `Some`, the namespaced class names the file's strings hold, and
+    // with `track_outside`, those outside function and method bodies.
     strings: Option<FxHashSet<String>>,
+    declaration_strings: FxHashSet<String>,
 }
 
 /// What a doc comment's text alone gives the collector, kept by the text:
@@ -156,6 +161,7 @@ impl Collector {
             bodies,
             templates: Vec::new(),
             strings: None,
+            declaration_strings: FxHashSet::default(),
         }
     }
 
@@ -423,7 +429,11 @@ impl<'ast> Visitor<'ast> for Collector {
             && let Some(text) = text.as_str()
             && let Some(name) = namespaced_class_string(text)
         {
-            strings.insert(dependency_key(name));
+            let key = dependency_key(name);
+            if self.track_outside && self.body_depth == 0 {
+                self.declaration_strings.insert(key.clone());
+            }
+            strings.insert(key);
         }
         syntax::visit::walk_expr(self, expr);
     }

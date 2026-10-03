@@ -716,8 +716,17 @@ impl Session {
             let mut analyzed_scanned = false;
             loop {
                 let mut wanted: Vec<PathBuf> = Vec::new();
-                let mut ask = |parsed: &ParsedFile| {
-                    for key in parsed.references.iter().chain(&parsed.string_class_names) {
+                // An analysed file's strings can be looked up by its checks.
+                // A vendor file's are read only where its declarations are,
+                // since its bodies are read by nothing that looks a class
+                // up by a name it holds.
+                let mut ask = |parsed: &ParsedFile, analyzed: bool| {
+                    let strings = if analyzed {
+                        &parsed.string_class_names
+                    } else {
+                        &parsed.declaration_string_class_names
+                    };
+                    for key in parsed.references.iter().chain(strings) {
                         if asked.insert(key.clone()) {
                             for file in self.lazy.find(key, &mut listings) {
                                 if loaded.insert(file.clone()) {
@@ -729,13 +738,13 @@ impl Session {
                 };
                 if !analyzed_scanned {
                     for read in analyze_parsed.iter().flatten() {
-                        ask(&read.parsed);
+                        ask(&read.parsed, true);
                     }
                     analyzed_scanned = true;
                 }
                 for (_, read) in &context[scan_from..] {
                     if let Some(read) = read {
-                        ask(&read.parsed);
+                        ask(&read.parsed, false);
                     }
                 }
                 scan_from = context.len();

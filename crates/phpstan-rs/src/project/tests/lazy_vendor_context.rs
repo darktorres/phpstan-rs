@@ -16,7 +16,15 @@ fn project(dir: &TempDir) {
     );
     dir.write(
         "vendor/pkg/src/B.php",
-        "<?php namespace Pkg; class B { public function make() { return new D(); } }",
+        "<?php namespace Pkg; class B { public function make() { return new D(); } public function by() { return 'Pkg\\Hidden'; } }",
+    );
+    dir.write(
+        "vendor/pkg/src/Hidden.php",
+        "<?php namespace Pkg; class Hidden { public function h(): int { return 1; } }",
+    );
+    dir.write(
+        "vendor/pkg/src/ByString.php",
+        "<?php namespace Pkg; class ByString { public function s(): int { return 1; } }",
     );
     dir.write(
         "vendor/pkg/src/D.php",
@@ -65,6 +73,7 @@ $a->make()->dd(1);
 \Pkg\helper(1);
 $o = new \Pkg\Sub\Other();
 $o->o(1);
+is_a($a, 'Pkg\\ByString');
 "#,
     );
 }
@@ -117,9 +126,13 @@ fn loading_by_name_reports_what_loading_every_file_reports() {
         "the fixture reports what it is there to compare: {eager:?}"
     );
     assert_eq!(lazy, eager);
-    // Every vendor file but the class map's `Pkg\Unused`, which nothing
-    // names, and the PSR-4 `Pkg\Sub\Other`, which a name finds under its
-    // directory.
-    assert_eq!(eager_loaded, 6, "A, B, D, Unused, Other, helpers");
-    assert_eq!(lazy_loaded, 5, "A, B, D, Other, helpers");
+    // Every vendor file but `Pkg\Unused`, which nothing names, and
+    // `Pkg\Hidden`, which only the body of a vendor method holds as a
+    // string. `Pkg\ByString` is named by a string of the analysed file, and
+    // `Pkg\Sub\Other` is found under its PSR-4 directory.
+    assert_eq!(
+        eager_loaded, 8,
+        "A, B, D, Unused, Other, helpers, Hidden, ByString"
+    );
+    assert_eq!(lazy_loaded, 6, "A, B, D, Other, helpers, ByString");
 }

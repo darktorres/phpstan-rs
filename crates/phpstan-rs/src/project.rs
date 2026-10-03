@@ -863,6 +863,7 @@ impl Project {
             references,
             declaration_references,
             string_class_names: _,
+            declaration_string_class_names: _,
             ignores,
             built_decls,
             anonymous_classes,
@@ -2602,6 +2603,8 @@ pub struct ParsedFile {
     declaration_references: FxHashSet<String>,
     // The namespaced class names its strings hold (`deps::ReferencedNames`).
     string_class_names: FxHashSet<String>,
+    // Those outside function and method bodies.
+    declaration_string_class_names: FxHashSet<String>,
     ignores: ignore_comments::IgnoreComments,
     // This file's own declarations, already built into
     // registry-independent `ClassReflection`/`FunctionReflection`/`Type` values (see
@@ -2669,6 +2672,7 @@ pub fn parse_file(
         names: references,
         outside: declaration_references,
         strings: string_class_names,
+        declaration_strings: declaration_string_class_names,
     } = deps::all_referenced_names(&ast);
     // The anonymous classes are the declarations built last, one per
     // `new class`, so the file's own walk need not be repeated for them.
@@ -2689,6 +2693,7 @@ pub fn parse_file(
         references,
         declaration_references,
         string_class_names,
+        declaration_string_class_names,
         built_decls,
         anonymous_classes,
         duplicate_fn_sites,
