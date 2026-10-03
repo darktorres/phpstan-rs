@@ -40,6 +40,7 @@ pub(crate) mod duplicate_class_sites;
 mod duplicate_classes;
 pub(crate) mod duplicate_fn_sites;
 mod duplicate_functions;
+mod file_cache;
 mod file_declarations;
 mod file_table;
 mod mock_hygiene;
@@ -1032,7 +1033,14 @@ impl Project {
         for decl in &built_decls {
             self.registry.insert_built_decl(decl.clone(), analyzed);
         }
-        let class_fn_refs = class_fn_refs.unwrap_or_else(|| self.class_fn_refs_of(&ast, &source));
+        debug_assert!(
+            ast.is_some() || (!analyzed && self.built_once),
+            "a file whose tree is needed was read back from the cache"
+        );
+        let class_fn_refs = class_fn_refs.unwrap_or_else(|| {
+            ast.as_deref()
+                .map_or_else(Vec::new, |ast| self.class_fn_refs_of(ast, &source))
+        });
         for (span, target) in class_fn_refs {
             self.use_sites.insert(path, target, span);
         }
@@ -1054,7 +1062,7 @@ impl Project {
         self.files.insert_at(
             id,
             FileState {
-                kept_ast: (analyzed || !self.built_once).then_some(ast),
+                kept_ast: ast.filter(|_| analyzed || !self.built_once),
                 source_len: source.len(),
                 load_order,
                 mentions_phpstan: mentions_phpstan(&functions, &classes, &references),
@@ -1115,7 +1123,9 @@ impl Project {
     /// Indexes `parsed`'s use sites ahead of `insert_parsed_file`, so a
     /// caller parsing many files in parallel indexes them there too.
     pub(crate) fn index_use_sites(&self, parsed: &mut ParsedFile, source: &str) {
-        parsed.class_fn_refs = Some(self.class_fn_refs_of(&parsed.ast, source));
+        if let Some(ast) = &parsed.ast {
+            parsed.class_fn_refs = Some(self.class_fn_refs_of(ast, source));
+        }
     }
 
     /// Finds the composer package `parsed`, the file at `path`, belongs to
@@ -2863,7 +2873,9 @@ fn parse_with_ignores<'a>(
 /// collision-resolution policy needs (see that method's own doc comment).
 #[cfg_attr(test, derive(Clone))]
 pub struct ParsedFile {
-    ast: Vec<Stmt>,
+    // The tree; none for a file read back from the per-file cache, which
+    // keeps what its tree gave and not the tree.
+    ast: Option<Vec<Stmt>>,
     // What the lexer skipped over (see `ParsedFile::lex_warnings`).
     lex_warnings: Vec<LexWarning>,
     functions: Vec<Name>,
@@ -2977,7 +2989,7 @@ pub fn parse_file_with_names<'a>(
     let pest_facts = PestFacts::of(path, &ast);
     let declared_classes = declared_classes(&ast);
     Ok(ParsedFile {
-        ast,
+        ast: Some(ast),
         lex_warnings,
         functions,
         classes,

@@ -33,6 +33,7 @@ mod resolve;
 pub(crate) mod scope;
 mod shared;
 mod stub_cache;
+pub(crate) use stub_cache::cache_dir;
 mod summaries;
 pub(crate) use stub_cache::{
     load as load_cached, load_container, store as store_cached, store_container,

@@ -7,7 +7,7 @@ use syntax::ast::Stmt;
 use super::{Checker, Locals};
 
 /// What checking a statement found of how it ends.
-#[derive(Clone, Copy, Default, PartialEq, Eq, Debug)]
+#[derive(Clone, Copy, Default, PartialEq, Eq, Debug, serde::Serialize, serde::Deserialize)]
 pub(crate) struct Completion {
     /// No path through the statement reaches the statement after it.
     pub(crate) terminates: bool,

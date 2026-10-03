@@ -29,6 +29,7 @@ use crate::registry::settings::ReflectionSettings;
 use crate::rules_settings::RulesSettings;
 use crate::{ext, ignore_errors};
 
+use super::file_cache;
 use super::whole_program::renamed_named_arguments::merge_named_argument_calls;
 use super::{ParsedFile, Project, ProjectSettings};
 use diagnostics::{self, Diagnostic, DiagnosticBuilder};
@@ -271,6 +272,9 @@ struct ReadFile {
     len: usize,
     source: String,
     parsed: ParsedFile,
+    /// Where the parse is stored once it is complete, for a file that was
+    /// not read back from the per-file cache.
+    cache_key: Option<file_cache::Key>,
 }
 
 /// A file that was not loaded because it does not parse, where, and why.
@@ -613,15 +617,35 @@ impl Session {
         );
     }
 
+    /// `cacheable` is whether the file may be read from and stored in the
+    /// per-file cache, which a context file may; `index_use_sites` is
+    /// whether its use sites are indexed with its parse.
     fn read_and_parse_file(
         &self,
         path: &Path,
         is_stub: bool,
         names: &mut syntax::name::NameCache,
+        cacheable: bool,
+        index_use_sites: bool,
     ) -> Read {
         let Ok(bytes) = std::fs::read(self.root.join(path)) else {
             return Read::Unread;
         };
+        let cache_key = if cacheable {
+            file_cache::key(&bytes, path, is_stub, index_use_sites)
+        } else {
+            None
+        };
+        if let Some(key) = &cache_key
+            && let Some(cached) = file_cache::load(key)
+        {
+            return Read::Loaded(Box::new(ReadFile {
+                len: cached.len,
+                source: String::new(),
+                parsed: cached.into_parsed(path),
+                cache_key: None,
+            }));
+        }
         // Whether the file is UTF-8 is settled here, once: the text is the
         // bytes, moved, and the lexer takes it as it is. What checking
         // costs is told by the length of the text as a lossy reading of the
@@ -667,6 +691,7 @@ impl Session {
             len,
             source,
             parsed,
+            cache_key,
         }))
     }
 
@@ -716,6 +741,7 @@ impl Session {
         }
         let stub_files: FxHashSet<PathBuf> = stub_files_vec.into_iter().collect();
 
+        let index_use_sites = project.check_settings().rules.check_dead_code;
         let combined_files: Vec<&PathBuf> =
             context_files.iter().chain(analyze_files.iter()).collect();
         // The files are numbered while they parse.
@@ -724,17 +750,27 @@ impl Session {
                 || {
                     combined_files
                         .par_iter()
+                        .enumerate()
                         // The names a job meets are kept while it parses one
                         // file after another, and dropped with the load.
-                        .map_init(syntax::name::NameCache::default, |names, p| {
+                        .map_init(syntax::name::NameCache::default, |names, (index, p)| {
                             let mut read = self.read_and_parse_file(
                                 p,
                                 stub_files.contains(p.as_path()),
                                 names,
+                                // The context files come first.
+                                index < context_files.len(),
+                                index_use_sites,
                             );
                             if let Read::Loaded(file) = &mut read {
                                 project.index_use_sites(&mut file.parsed, &file.source);
                                 project.note_owner(&mut file.parsed, p);
+                                if let Some(key) = file.cache_key.take() {
+                                    file_cache::store(
+                                        &key,
+                                        &file_cache::CachedFile::of(&file.parsed, file.len),
+                                    );
+                                }
                             }
                             read
                         })
@@ -747,6 +783,7 @@ impl Session {
                 },
             )
         });
+        file_cache::trim();
         let numbers = project.number_files(numbering);
         let (context_numbers, analyze_numbers) = numbers.split_at(context_files.len());
         let analyze_parsed = combined_parsed.split_off(context_files.len());
@@ -817,6 +854,7 @@ impl Session {
                         len,
                         source,
                         parsed,
+                        cache_key: _,
                     } = *file;
                     note_lex_warnings(path, &parsed);
                     analyze_sizes[index] = len;

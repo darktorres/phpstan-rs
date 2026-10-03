@@ -217,7 +217,7 @@ pub struct PestConfig {
 }
 
 /// What one `Pest.php` file binds, read from its tree when it is parsed.
-#[derive(Debug, Default, Clone)]
+#[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize)]
 pub struct PestFacts {
     bindings: Vec<(PathBuf, Vec<String>)>,
     hook_properties: Vec<(PathBuf, Vec<String>)>,

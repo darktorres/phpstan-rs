@@ -37,25 +37,26 @@ fn the_one_walk_finds_what_the_five_walks_found() {
             let path = Path::new("/p/file.php");
             let parsed = parse_file(path, source.as_bytes(), is_stub)
                 .unwrap_or_else(|_| panic!("source {i} parses"));
-            let (functions, classes) = declared_names(&parsed.ast);
+            let (functions, classes) = declared_names(parsed.ast.as_deref().unwrap());
             assert_eq!(parsed.functions, functions, "functions of source {i}");
             assert_eq!(parsed.classes, classes, "classes of source {i}");
             assert_eq!(
                 parsed.constants,
-                declared_constants(&parsed.ast),
+                declared_constants(parsed.ast.as_deref().unwrap()),
                 "constants of source {i}"
             );
             let origin = Origin::File(Arc::from(path));
-            let built = crate::registry::build_declarations(&parsed.ast, &origin);
+            let built =
+                crate::registry::build_declarations(parsed.ast.as_deref().unwrap(), &origin);
             assert_eq!(
                 parsed.built_decls.iter().map(summary).collect::<Vec<_>>(),
                 built.iter().map(summary).collect::<Vec<_>>(),
                 "built declarations of source {i}"
             );
             let mut fn_sites = DuplicateFunctionSites::default();
-            fn_sites.index(&parsed.ast, path);
+            fn_sites.index(parsed.ast.as_deref().unwrap(), path);
             let mut class_sites = DuplicateClassSites::default();
-            class_sites.index(&parsed.ast, path, is_stub);
+            class_sites.index(parsed.ast.as_deref().unwrap(), path, is_stub);
             let fns = |sites: &DuplicateFunctionSites| {
                 let mut v: Vec<_> = sites
                     .iter()

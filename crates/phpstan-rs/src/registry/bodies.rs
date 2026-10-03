@@ -48,7 +48,7 @@ impl BodySource for NoBodies {
 #[derive(Debug, Clone)]
 struct Body {
     #[cfg(debug_assertions)]
-    stmts: Arc<Vec<Stmt>>,
+    stmts: Option<Arc<Vec<Stmt>>>,
     summary: Arc<BodySummary>,
     /// A method's flow, which a call to it is followed through.
     flow: Option<Arc<InitFlow>>,
@@ -79,7 +79,7 @@ impl FileBodies {
                         function.name.span,
                         Body {
                             #[cfg(debug_assertions)]
-                            stmts: body.stmts.clone(),
+                            stmts: Some(body.stmts.clone()),
                             summary: Arc::new(BodySummary::of(&body.stmts)),
                             flow: is_method
                                 .then(|| Arc::new(InitFlow::of(&body.stmts, &body.goto_labels))),
@@ -100,7 +100,7 @@ impl FileBodies {
     /// The statements of the body of the declaration whose name is at `span`.
     #[cfg(debug_assertions)]
     pub fn get(&self, span: Span) -> Option<&Arc<Vec<Stmt>>> {
-        self.0.get(&span).map(|body| &body.stmts)
+        self.0.get(&span)?.stmts.as_ref()
     }
 
     /// What the passes read of the body of the declaration whose name is at
@@ -112,6 +112,43 @@ impl FileBodies {
     /// The flow of the method whose name is at `span`.
     pub fn init_flow(&self, span: Span) -> Option<&Arc<InitFlow>> {
         self.0.get(&span)?.flow.as_ref()
+    }
+}
+
+/// A file's bodies as stored: by the span of the declaration's name, in
+/// that order, without the statements.
+impl serde::Serialize for FileBodies {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        let mut bodies: Vec<(&Span, &Body)> = self.0.iter().collect();
+        bodies.sort_by_key(|(span, _)| (span.start, span.end));
+        serializer.collect_seq(
+            bodies
+                .into_iter()
+                .map(|(span, body)| (span, &body.summary, &body.flow)),
+        )
+    }
+}
+
+impl<'de> serde::Deserialize<'de> for FileBodies {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<FileBodies, D::Error> {
+        let bodies: Vec<(Span, Arc<BodySummary>, Option<Arc<InitFlow>>)> =
+            serde::Deserialize::deserialize(deserializer)?;
+        Ok(FileBodies(
+            bodies
+                .into_iter()
+                .map(|(span, summary, flow)| {
+                    (
+                        span,
+                        Body {
+                            #[cfg(debug_assertions)]
+                            stmts: None,
+                            summary,
+                            flow,
+                        },
+                    )
+                })
+                .collect(),
+        ))
     }
 }
 

@@ -100,7 +100,7 @@ pub enum Unit {
 ///
 /// A column counts characters from the start of the line, and a run of
 /// invalid bytes a lossy reading replaces counts as one.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct LineIndex {
     /// The offset each line begins at; the first is 0.
     line_starts: Box<[u32]>,

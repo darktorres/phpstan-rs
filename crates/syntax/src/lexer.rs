@@ -9,7 +9,7 @@ mod strings;
 
 /// Something the lexer skipped over, or (`is_error`) something PHP
 /// refuses to parse, such as `08` ("Invalid numeric literal").
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct LexWarning {
     pub span: Span,
     pub message: String,
@@ -215,7 +215,7 @@ pub struct LexEnd {
 /// What is true of a file as a whole, found as it is lexed and parsed, so
 /// that a walk over its tree that can only find something in a file where
 /// the fact holds can be left out of the others.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct FileFacts {
     /// The file has an anonymous class (`new class`).
     pub has_anonymous_class: bool,

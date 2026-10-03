@@ -11,7 +11,7 @@ use syntax::declarations::GuardTerm;
 use types::PhpVersions;
 
 /// A comparison a guard makes of `PHP_VERSION_ID`.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub(crate) enum Compare {
     Lt,
     Le,
@@ -61,7 +61,7 @@ impl Compare {
 }
 
 /// A declaration's guard, as the condition it is nested under says it.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub(crate) enum GuardExpr {
     /// Nothing known: a loop, a `function_exists()` test, any other code -
     /// `if (false)` too, which is how a package declares a class for the

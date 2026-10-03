@@ -39,7 +39,7 @@ use syntax::visit::{Visitor, walk_catch_clause, walk_class_def, walk_expr, walk_
 /// this item's own edge-case notes: local-variable rename/references is
 /// explicitly out of v1 scope, always answered via a `None` short-circuit
 /// before this index is ever consulted).
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub(crate) enum RefTarget {
     Class(String),
     Function(String),

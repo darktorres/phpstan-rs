@@ -16,7 +16,7 @@ use syntax::span::Span;
 /// override for a real corpus-vendored stub file, e.g. `Imagick.stub.
 /// php`, must never itself be flagged, and must never count toward
 /// flagging the real declaration it's overriding).
-#[cfg_attr(test, derive(Clone))]
+#[derive(Clone, serde::Serialize, serde::Deserialize)]
 pub(crate) struct ClassDeclSite {
     pub(crate) path: PathBuf,
     pub(crate) span: Span,
@@ -31,8 +31,7 @@ pub(crate) struct ClassDeclSite {
 /// `DuplicateFunctionSites`, which has no such gate - see that field's own
 /// doc comment for why this one needs it and the function-side precedent
 /// didn't).
-#[derive(Default)]
-#[cfg_attr(test, derive(Clone))]
+#[derive(Default, serde::Serialize, serde::Deserialize, Clone)]
 pub(crate) struct DuplicateClassSites {
     sites: FxHashMap<String, Vec<ClassDeclSite>>,
 }

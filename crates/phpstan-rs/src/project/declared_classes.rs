@@ -8,7 +8,7 @@ use syntax::span::Span;
 use types::Name;
 
 /// A class a file declares unconditionally.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub(crate) struct DeclaredClass {
     /// Its fully-qualified name, as the registry has it.
     pub(crate) name: String,

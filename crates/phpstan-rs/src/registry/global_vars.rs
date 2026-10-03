@@ -154,7 +154,7 @@ pub(in crate::registry) struct StagedSite {
 
 /// One raw `include`-shaped call site found anywhere in the corpus, with
 /// the literal path suffix its target names, if it names one.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 struct IncludeSite {
     top_level: bool,
     suffix: Option<String>,
@@ -169,7 +169,7 @@ pub(in crate::registry) struct FileSites {
 
 /// An assigned value, as far as its type can be said before the registry
 /// is looked at: what `resolve_value` turns into a `Type`.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 enum StaticValue {
     /// A type that needs no declaration to tell.
     Known(Type),
@@ -186,7 +186,7 @@ enum StaticValue {
 }
 
 /// What a site contributes, before the registry is looked at.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 enum ContributionFact {
     /// `mixed`, whole.
     Mixed,
@@ -203,7 +203,7 @@ enum ContributionFact {
     FieldMixed(String),
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 struct SiteFact {
     /// A file's own top level, whose include-graph gate is the file's.
     top_level: bool,
@@ -215,7 +215,7 @@ struct SiteFact {
 /// assigned, and the includes it makes, in the form the file wrote them:
 /// made by one walk of the file, and resolved against the registry by
 /// `infer_global_variables_of`.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
 pub struct GlobalFacts {
     sites: Vec<SiteFact>,
     include_sites: Vec<IncludeSite>,

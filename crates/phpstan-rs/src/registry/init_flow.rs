@@ -17,7 +17,7 @@ use syntax::span::Span;
 use syntax::visit::for_each_child_expr;
 
 /// One thing a body does that the dataflow follows.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub(crate) enum Event {
     /// A read of `$this->prop`, which is a premature one when the property
     /// is not initialized yet.
@@ -32,13 +32,13 @@ pub(crate) enum Event {
 }
 
 /// A call into another method of the same object or class.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub(crate) struct Call {
     pub(crate) receiver: CallReceiver,
     pub(crate) name: Name,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub(crate) enum CallReceiver {
     /// `$this->name()`, or the end of a chain `$this->a()->b()->name()`:
     /// the names of the calls before it, which each have to return `self`
@@ -53,7 +53,7 @@ pub(crate) enum CallReceiver {
 }
 
 /// One part of a body, in the order it runs.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub(crate) enum Flow {
     Events(Box<[Event]>),
     /// An `if`, its `elseif`s and its `else`.
@@ -88,20 +88,20 @@ pub(crate) enum Flow {
 /// A condition and what it guards, with whether the body unconditionally
 /// leaves the method: a branch that does not vote on what is true after
 /// the chain.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub(crate) struct IfBranch {
     pub(crate) cond: Box<[Event]>,
     pub(crate) body: Box<[Flow]>,
     pub(crate) terminates: bool,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub(crate) struct IfChain {
     pub(crate) branches: Box<[IfBranch]>,
     pub(crate) else_body: Option<(Box<[Flow]>, bool)>,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub(crate) struct Case {
     pub(crate) test: Box<[Event]>,
     pub(crate) body: Box<[Flow]>,
@@ -112,7 +112,7 @@ pub(crate) struct Case {
 }
 
 /// The flow of one body.
-#[derive(Debug, Clone, Default, PartialEq)]
+#[derive(Debug, Clone, Default, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct InitFlow {
     pub(crate) nodes: Box<[Flow]>,
 }

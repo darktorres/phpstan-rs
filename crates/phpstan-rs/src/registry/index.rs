@@ -23,7 +23,7 @@ use types::Type;
 /// to be consumed one at a time, in order, by `insert_built_decl`. See
 /// `build_declarations`'s own doc comment for why this exists as a
 /// wholly separate step from the insertion logic below.
-#[derive(Clone, PartialEq)]
+#[derive(Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub(crate) enum BuiltDecl {
     Class {
         name: Name,

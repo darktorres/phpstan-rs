@@ -17,7 +17,7 @@ use syntax::name::Name;
 use syntax::visit::{Visitor, walk_class_def, walk_expr, walk_function_decl, walk_stmt};
 
 /// A call a body's purity is conditional on, in the form the body wrote it.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub(crate) enum PurityCall {
     /// A function called by name.
     Function(QualifiedName),
@@ -32,7 +32,9 @@ pub(crate) enum PurityCall {
 
 /// Whose property an argument is, when the argument is a property of an
 /// object (or of several, destructured).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, serde::Serialize, serde::Deserialize,
+)]
 pub(crate) enum PropertyOf {
     /// Of the body's own `$this`.
     This,
@@ -41,7 +43,7 @@ pub(crate) enum PropertyOf {
 }
 
 /// The object a method is called on, as far as the body shows it.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub(crate) enum Receiver {
     /// `$this`.
     This,
@@ -52,7 +54,7 @@ pub(crate) enum Receiver {
 }
 
 /// What a call is to.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub(crate) enum Callee {
     Function(QualifiedName),
     Method {
@@ -68,14 +70,14 @@ pub(crate) enum Callee {
 
 /// A call in a body, with the positions of its arguments that are
 /// properties: a by-reference parameter at one of them writes it.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub(crate) struct CallWrites {
     pub(crate) callee: Callee,
     pub(crate) properties: Box<[(u32, PropertyOf)]>,
 }
 
 /// What a body writes, before any declaration is looked up.
-#[derive(Debug, Default, Clone)]
+#[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize)]
 pub(crate) struct WriteFacts {
     /// The variables the body assigns, which a declared type of a parameter
     /// then no longer describes.
@@ -90,7 +92,7 @@ pub(crate) struct WriteFacts {
 }
 
 /// A body, read by the passes.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct BodySummary {
     /// The calls the body's purity is conditional on, or `None` when the body
     /// holds a construct that makes it impure whatever they are.
@@ -118,7 +120,7 @@ impl BodySummary {
 /// nested and however conditional, outside closures: `$this->p = ...`,
 /// `$this->p ??= ...`, and the same on a local variable the body
 /// assigned a `new` expression.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
 pub(crate) struct AssignedProperties {
     /// The properties assigned on `$this`.
     on_this: Box<[Name]>,

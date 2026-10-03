@@ -29,7 +29,7 @@ pub fn global_variable_key(name: &str) -> String {
 /// the equality PHP gives it: class and function names ignore case, a
 /// constant's namespace does and its own name does not, a variable's name
 /// is exact. A name holds the hashes it was made with.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub enum RefKey {
     Class(Name),
     Function(Name),

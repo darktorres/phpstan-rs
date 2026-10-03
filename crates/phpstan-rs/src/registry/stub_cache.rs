@@ -30,7 +30,7 @@ pub(super) fn decode<T: serde::de::DeserializeOwned>(bytes: &[u8]) -> Result<T, 
 
 /// The cache directory: `PHPSTAN_RS_CACHE_DIR`, else `phpstan-rs` under
 /// `XDG_CACHE_HOME` or `~/.cache`; `None` when the cache is off.
-fn cache_dir() -> Option<PathBuf> {
+pub(crate) fn cache_dir() -> Option<PathBuf> {
     if std::env::var_os("PHPSTAN_RS_NO_STUB_CACHE").is_some() {
         return None;
     }
