@@ -11,6 +11,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use syntax::name::Interner;
+use syntax::span::Span;
 
 use rayon::prelude::*;
 
@@ -31,7 +32,7 @@ use crate::{ext, ignore_errors};
 
 use super::whole_program::renamed_named_arguments::merge_named_argument_calls;
 use super::{ParsedFile, Project, ProjectSettings};
-use diagnostics::{self, Diagnostic};
+use diagnostics::{self, Diagnostic, DiagnosticBuilder};
 
 /// The level reported when neither the command line nor the config sets
 /// one: every level this project's diagnostics are tagged with.
@@ -119,7 +120,10 @@ pub struct Loaded {
     skipped_analyze: usize,
     skipped_context: usize,
     context_loaded: usize,
-    /// What the lexer skipped over in the loaded files, one line each.
+    /// The analysed files that do not parse, which are reported.
+    parse_failures: Vec<(PathBuf, ParseFailure)>,
+    /// What the lexer skipped over in the loaded files, and the context
+    /// files that do not parse, one line each.
     pub lex_warnings: Vec<String>,
 }
 
@@ -263,6 +267,22 @@ struct ReadFile {
     len: usize,
     source: String,
     parsed: ParsedFile,
+}
+
+/// A file that was not loaded because it does not parse, where, and why.
+struct ParseFailure {
+    line: u32,
+    col: u32,
+    message: String,
+}
+
+/// What reading a file came to.
+enum Read {
+    Loaded(Box<ReadFile>),
+    /// The text is not PHP.
+    Unparsed(ParseFailure),
+    /// The file could not be read, or the parser failed internally.
+    Unread,
 }
 
 impl Session {
@@ -581,8 +601,10 @@ impl Session {
         is_stub: bool,
         interner: &Arc<Interner>,
         names: &mut syntax::name::NameCache,
-    ) -> Option<ReadFile> {
-        let bytes = std::fs::read(self.root.join(path)).ok()?;
+    ) -> Read {
+        let Ok(bytes) = std::fs::read(self.root.join(path)) else {
+            return Read::Unread;
+        };
         // Whether the file is UTF-8 is settled here, once: the text is the
         // bytes, moved, and the lexer takes it as it is. What checking
         // costs is told by the length of the text as a lossy reading of the
@@ -595,12 +617,27 @@ impl Session {
                 (len, Err(bytes))
             }
         };
-        let parsed = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| match &text {
+        let Ok(parsed) = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| match &text {
             Ok(text) => super::parse_file_with_names(path, text, is_stub, interner, Some(names)),
             Err(bytes) => super::parse_file_with_names(path, bytes, is_stub, interner, Some(names)),
-        }))
-        .ok()?
-        .ok()?;
+        })) else {
+            return Read::Unread;
+        };
+        let parsed = match parsed {
+            Ok(parsed) => parsed,
+            Err(error) => {
+                let bytes = match &text {
+                    Ok(text) => text.as_bytes(),
+                    Err(bytes) => bytes,
+                };
+                let at = syntax::LineIndex::new(bytes).line_col(error.span.start);
+                return Read::Unparsed(ParseFailure {
+                    line: at.line,
+                    col: at.col,
+                    message: error.message,
+                });
+            }
+        };
         // The text of the file is kept only when the project keeps it.
         let source = match text {
             Ok(text) if self.settings.retain_source => text,
@@ -609,11 +646,11 @@ impl Session {
             }
             _ => String::new(),
         };
-        Some(ReadFile {
+        Read::Loaded(Box::new(ReadFile {
             len,
             source,
             parsed,
-        })
+        }))
     }
 
     /// Loads and checks every analysed file, with the `--dump-types`
@@ -657,7 +694,7 @@ impl Session {
 
         let combined_files: Vec<&PathBuf> =
             context_files.iter().chain(analyze_files.iter()).collect();
-        let mut combined_parsed: Vec<Option<ReadFile>> = pool.install(|| {
+        let mut combined_parsed: Vec<Read> = pool.install(|| {
             combined_files
                 .par_iter()
                 // The names a job meets are kept while it parses one file
@@ -668,9 +705,11 @@ impl Session {
                         stub_files.contains(p.as_path()),
                         &interner,
                         names,
-                    )?;
-                    project.index_use_sites(&mut read.parsed, &read.source);
-                    Some(read)
+                    );
+                    if let Read::Loaded(file) = &mut read {
+                        project.index_use_sites(&mut file.parsed, &file.source);
+                    }
+                    read
                 })
                 .collect()
         });
@@ -680,7 +719,10 @@ impl Session {
             context_parsed
                 .iter()
                 .chain(&analyze_parsed)
-                .filter_map(|read| read.as_ref().map(|read| &read.parsed)),
+                .filter_map(|read| match read {
+                    Read::Loaded(file) => Some(&file.parsed),
+                    _ => None,
+                }),
         );
 
         // Context files first, so an analysed file's declaration wins a
@@ -698,32 +740,51 @@ impl Session {
             }));
         };
         let mut skipped_context = 0usize;
+        let mut parse_failure_lines = Vec::new();
         for (path, parsed) in context_files.iter().zip(context_parsed) {
             match parsed {
-                Some(ReadFile { source, parsed, .. }) => {
+                Read::Loaded(file) => {
+                    let ReadFile { source, parsed, .. } = *file;
                     note_lex_warnings(path, &parsed);
                     project.insert_parsed_file(path.clone(), parsed, source, false)
                 }
-                None => skipped_context += 1,
+                Read::Unparsed(failure) => {
+                    skipped_context += 1;
+                    parse_failure_lines.push(format!(
+                        "warning: {}:{}:{}: {}",
+                        path.display(),
+                        failure.line,
+                        failure.col,
+                        failure.message
+                    ));
+                }
+                Read::Unread => skipped_context += 1,
             }
         }
         let mut analyze_sizes: FxHashMap<PathBuf, usize> =
             FxHashMap::with_capacity_and_hasher(analyze_files.len(), Default::default());
         let mut skipped_analyze = 0usize;
+        let mut parse_failures = Vec::new();
         for (path, parsed) in analyze_files.iter().zip(analyze_parsed) {
             match parsed {
-                Some(ReadFile {
-                    len,
-                    source,
-                    parsed,
-                }) => {
+                Read::Loaded(file) => {
+                    let ReadFile {
+                        len,
+                        source,
+                        parsed,
+                    } = *file;
                     note_lex_warnings(path, &parsed);
                     analyze_sizes.insert(path.clone(), len);
                     project.insert_parsed_file(path.clone(), parsed, source, true)
                 }
-                None => skipped_analyze += 1,
+                Read::Unparsed(failure) => {
+                    skipped_analyze += 1;
+                    parse_failures.push((path.clone(), failure));
+                }
+                Read::Unread => skipped_analyze += 1,
             }
         }
+        lex_warnings.extend(parse_failure_lines);
         project.finish_loading();
 
         // Largest files first, so the longest checks don't start last.
@@ -736,6 +797,7 @@ impl Session {
             skipped_analyze,
             skipped_context,
             context_loaded: context_files.len() - skipped_context,
+            parse_failures,
             lex_warnings,
         })
     }
@@ -749,6 +811,7 @@ impl Session {
             skipped_analyze,
             skipped_context,
             context_loaded,
+            parse_failures,
             lex_warnings,
         } = loaded;
 
@@ -802,6 +865,19 @@ impl Session {
             project.mark_member_index_built();
         }
 
+        // A file that does not parse is reported where it fails: PHP
+        // refuses to run it.
+        for (path, failure) in parse_failures {
+            let at = syntax::span::LineCol {
+                line: failure.line,
+                col: failure.col,
+            };
+            results.entry(path).or_default().push(
+                DiagnosticBuilder::new(failure.message, Span::default(), 0, "parse.error")
+                    .non_ignorable()
+                    .build_at(syntax::span::Range { start: at, end: at }),
+            );
+        }
         let mut extend = |found: FxHashMap<PathBuf, Vec<Diagnostic>>| {
             for (path, diags) in found {
                 results.entry(path).or_default().extend(diags);
