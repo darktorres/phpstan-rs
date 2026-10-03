@@ -1816,6 +1816,7 @@ impl Project {
         // request that happened to race a genuinely-invalid save.
         let Parsed {
             ast,
+            references,
             ignores,
             facts,
             line_index,
@@ -1824,8 +1825,7 @@ impl Project {
         let previous = self.unindex_file(path);
         let (functions, classes) = declared_names(&ast);
         let constants = declared_constants(&ast);
-        let references = deps::referenced_names(&ast);
-        let declaration_references = deps::declaration_referenced_names(&ast);
+        let (references, declaration_references) = file_references(&ast, references);
 
         // A file `update_file` has already seen keeps its own recorded
         // `analyzed` flag (an edit doesn't change what kind of file it
@@ -2826,9 +2826,57 @@ static WATCHED: syntax::WatchList = syntax::WatchList(&[
     checker::includes::WATCH,
 ]);
 
+/// What the tree `ast` refers to, and what its declarations do: from what
+/// the parse recorded, or by walking the tree when a pass changed it after.
+fn file_references(
+    ast: &[Stmt],
+    recorded: Option<syntax::references::FileReferences>,
+) -> (FxHashSet<deps::RefKey>, FxHashSet<deps::RefKey>) {
+    let Some(recorded) = recorded else {
+        return deps::both_referenced_names(ast);
+    };
+    let found = deps::recorded_references(recorded);
+    // What a walk of the tree finds.
+    #[cfg(debug_assertions)]
+    {
+        let walked = deps::both_referenced_names(ast);
+        assert!(
+            found.0 == walked.0,
+            "the references the parse recorded and the walk finds differ: {:?}",
+            symmetric_difference(&found.0, &walked.0)
+        );
+        assert!(
+            found.1 == walked.1,
+            "the declaration references the parse recorded and the walk finds differ: {:?}",
+            symmetric_difference(&found.1, &walked.1)
+        );
+        let declared = deps::declaration_referenced_names(ast);
+        assert!(
+            found.1 == declared,
+            "the declaration references the parse recorded and the declarations' walk finds differ: {:?}",
+            symmetric_difference(&found.1, &declared)
+        );
+    }
+    found
+}
+
+#[cfg(debug_assertions)]
+fn symmetric_difference(
+    a: &FxHashSet<deps::RefKey>,
+    b: &FxHashSet<deps::RefKey>,
+) -> (Vec<deps::RefKey>, Vec<deps::RefKey>) {
+    (
+        a.difference(b).cloned().collect(),
+        b.difference(a).cloned().collect(),
+    )
+}
+
 /// A file parsed, with its inline ignore comments.
 struct Parsed {
     ast: Vec<Stmt>,
+    // What the tree refers to, as the parse recorded it; none when a pass
+    // changed the tree after.
+    references: Option<syntax::references::FileReferences>,
     ignores: ignore_comments::IgnoreComments,
     warnings: Vec<LexWarning>,
     facts: FileFacts,
@@ -2845,9 +2893,8 @@ fn parse_with_ignores<'a>(
     let mut ast = parsed.stmts;
     // What the file does not name, or hold, there is nothing to find of by
     // walking it.
-    if parsed.facts.mentions & crate::stub_attributes::MENTIONS != 0 {
-        crate::stub_attributes::apply_stub_attributes(&mut ast);
-    }
+    let changed = parsed.facts.mentions & crate::stub_attributes::MENTIONS != 0
+        && crate::stub_attributes::apply_stub_attributes(&mut ast);
     if parsed.facts.has_anonymous_class {
         crate::registry::name_anonymous_classes(
             &mut ast,
@@ -2857,6 +2904,7 @@ fn parse_with_ignores<'a>(
     }
     Ok(Parsed {
         ast,
+        references: (!changed).then_some(parsed.references),
         ignores,
         warnings: parsed.warnings,
         facts: parsed.facts,
@@ -2959,6 +3007,7 @@ pub fn parse_file_with_names<'a>(
 ) -> Result<ParsedFile, ParseError> {
     let Parsed {
         ast,
+        references,
         ignores,
         warnings: lex_warnings,
         facts,
@@ -2974,7 +3023,7 @@ pub fn parse_file_with_names<'a>(
         duplicate_fn_sites,
         duplicate_class_sites,
     } = file_declarations::collect(&ast, path, is_stub, &origin, facts.has_anonymous_class);
-    let (references, declaration_references) = deps::both_referenced_names(&ast);
+    let (references, declaration_references) = file_references(&ast, references);
     // The anonymous classes are the declarations built last, one per
     // `new class`, so the file's own walk need not be repeated for them.
     let anonymous_classes = built_decls

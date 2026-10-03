@@ -29,6 +29,9 @@ pub struct Parser<'a> {
     // The namespace and imports in effect where the parser is, which each
     // name it makes is resolved by, in the order PHP applies them.
     pub(crate) ctx: std::cell::RefCell<crate::name_resolution::NameContext>,
+    // What the file refers to: the names as they are resolved, and the doc
+    // comments with the names in effect where they are.
+    pub(crate) recorder: std::cell::RefCell<crate::references::Recorder>,
     // The tokens not yet consumed, the current one first: the parser looks
     // a few tokens ahead and never back, so these are all of the file it
     // holds. Filled to `LOOKAHEAD` tokens past the current one whenever
@@ -181,6 +184,7 @@ impl<'a> Parser<'a> {
         let mut parser = Parser {
             supply: std::cell::RefCell::new(supply),
             ctx: std::cell::RefCell::default(),
+            recorder: std::cell::RefCell::default(),
             ahead: std::collections::VecDeque::with_capacity(LOOKAHEAD + 2),
             eof_queued: false,
             pos: 0,
@@ -425,6 +429,19 @@ impl Parser<'_> {
         span: Span,
         kind: NameKind,
     ) -> QualifiedName {
+        let name = self.unrecorded_name(written, span, kind);
+        self.recorder.borrow_mut().name(&name, kind);
+        name
+    }
+
+    /// `qualified_name`, for a name that is not yet known to be one the
+    /// tree refers to: `record_name` records it when it is.
+    pub(crate) fn unrecorded_name(
+        &self,
+        written: Name,
+        span: Span,
+        kind: NameKind,
+    ) -> QualifiedName {
         let resolution = {
             let ctx = self.ctx.borrow();
             match kind {
@@ -445,6 +462,42 @@ impl Parser<'_> {
             resolved,
             span,
         }
+    }
+
+    /// Records a name made by `unrecorded_name` as a reference of `kind`.
+    pub(crate) fn record_name(&self, name: &QualifiedName, kind: NameKind) {
+        self.recorder.borrow_mut().name(name, kind);
+    }
+
+    /// What the file refers to, once it is parsed.
+    pub fn take_references(&mut self) -> crate::references::FileReferences {
+        std::mem::take(self.recorder.get_mut()).into_references()
+    }
+
+    /// Records `doc`, the doc comment of the node that starts at `pos`.
+    pub(crate) fn note_doc(&self, doc: &Option<Arc<str>>, pos: u32) {
+        if doc.is_some() {
+            self.recorder.borrow_mut().doc(doc, pos, &self.ctx.borrow());
+        }
+    }
+
+    /// Records the doc comment of a function or method, and what it
+    /// encloses.
+    pub(crate) fn note_function(&self, function: &FunctionDecl) {
+        self.note_doc(&function.doc_comment, function.span.start);
+        self.recorder.borrow_mut().frame(
+            &function.doc_comment,
+            function.span.start,
+            function.span.end,
+        );
+    }
+
+    /// Records the doc comment of a class-like, and what it encloses.
+    pub(crate) fn note_class(&self, def: &ClassDef) {
+        self.note_doc(&def.doc_comment, def.span.start);
+        self.recorder
+            .borrow_mut()
+            .frame(&def.doc_comment, def.span.start, def.span.end);
     }
 
     /// The name a resolution gave: the one written when it is that.
@@ -480,7 +533,19 @@ impl Parser<'_> {
         // file in this order.
         match &mut kind {
             StmtKind::Namespace(name) => self.ctx.borrow_mut().set_namespace(name),
-            StmtKind::Use(imports) => self.ctx.borrow_mut().add_uses(imports),
+            StmtKind::Use(imports) => {
+                self.ctx.borrow_mut().add_uses(imports);
+                let mut recorder = self.recorder.borrow_mut();
+                for import in imports.iter() {
+                    recorder.import(import.kind, &import.path);
+                }
+            }
+            StmtKind::Global(vars) => {
+                let mut recorder = self.recorder.borrow_mut();
+                for name in vars.iter().filter_map(|v| v.name()) {
+                    recorder.global_variable(name);
+                }
+            }
             StmtKind::FunctionDecl(f) => {
                 f.namespaced_name = Some(self.ctx.borrow().declared_name(&f.name).into());
             }

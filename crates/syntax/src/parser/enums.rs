@@ -71,30 +71,32 @@ impl Parser<'_> {
             enum_cases,
         } = self.parse_class_body(false)?;
 
+        let def = ClassDef {
+            kind: ClassKind::Enum,
+            backing_type,
+            extends: Vec::new(),
+            implements,
+            is_abstract: false,
+            // An enum is implicitly final.
+            is_final: true,
+            is_readonly: false,
+            properties,
+            enum_cases,
+            methods,
+            consts,
+            trait_uses,
+            doc_comment,
+            // Overwritten by `parse_statement`, the only caller that saw
+            // any leading `#[Attr]` groups - see `ClassDecl.attrs`'s
+            // identical note in `parse_class_decl`.
+            attrs: Vec::new(),
+            span: self.span_from(start),
+        };
+        self.note_class(&def);
         Ok(ClassDecl {
             namespaced_name: name.name.as_str().into(),
             name,
-            def: ClassDef {
-                kind: ClassKind::Enum,
-                backing_type,
-                extends: Vec::new(),
-                implements,
-                is_abstract: false,
-                // An enum is implicitly final.
-                is_final: true,
-                is_readonly: false,
-                properties,
-                enum_cases,
-                methods,
-                consts,
-                trait_uses,
-                doc_comment,
-                // Overwritten by `parse_statement`, the only caller that saw
-                // any leading `#[Attr]` groups - see `ClassDecl.attrs`'s
-                // identical note in `parse_class_decl`.
-                attrs: Vec::new(),
-                span: self.span_from(start),
-            },
+            def,
         })
     }
 }

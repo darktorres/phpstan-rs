@@ -109,6 +109,7 @@ impl Parser<'_> {
             } else {
                 None
             };
+            self.note_doc(&doc_comment, param_start);
             params.push(Param {
                 name: Ident {
                     name,
@@ -156,7 +157,9 @@ impl Parser<'_> {
         } else {
             let open = self.current_span();
             let depth = self.enter_goto_scope();
+            self.recorder.borrow_mut().enter_body();
             let stmts = self.parse_stmt_list_block();
+            self.recorder.borrow_mut().leave_body();
             let end = self.leave_goto_scope(depth);
             Some(FunctionBody {
                 open,

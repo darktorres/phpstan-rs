@@ -3,6 +3,7 @@ use rustc_hash::FxHashSet;
 use syntax::ast::*;
 use syntax::name::Name;
 use syntax::name_resolution::NameContext;
+pub use syntax::references::RefKey;
 use syntax::visit::{
     Visitor, walk_args, walk_class_const, walk_class_def, walk_expr, walk_function_decl,
     walk_param, walk_property_decl, walk_property_hooks, walk_stmt, walk_stmts,
@@ -23,131 +24,6 @@ pub fn global_variable_key(name: &str) -> String {
     format!("${name}")
 }
 
-/// What a reference in a file is to, which a change to it makes the file
-/// stale for: a class or an interface or a trait or an enum, a function, a
-/// global constant, or a global variable (`global $name;`). Each kind has
-/// the equality PHP gives it: class and function names ignore case, a
-/// constant's namespace does and its own name does not, a variable's name
-/// is exact. A name holds the hashes it was made with.
-#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
-pub enum RefKey {
-    Class(Name),
-    Function(Name),
-    Constant(Name),
-    GlobalVar(Name),
-}
-
-impl RefKey {
-    /// The class `name` (with or without its leading `\`) names.
-    pub fn class(name: &Name) -> RefKey {
-        RefKey::Class(without_backslash(name))
-    }
-
-    pub fn function(name: &Name) -> RefKey {
-        RefKey::Function(without_backslash(name))
-    }
-
-    pub fn constant(name: &Name) -> RefKey {
-        RefKey::Constant(without_backslash(name))
-    }
-
-    /// `class` for a text, which the key holds without sharing it.
-    pub fn class_text(text: &str) -> RefKey {
-        RefKey::Class(Name::from(text.trim_start_matches('\\')))
-    }
-
-    pub fn function_text(text: &str) -> RefKey {
-        RefKey::Function(Name::from(text.trim_start_matches('\\')))
-    }
-
-    pub fn constant_text(text: &str) -> RefKey {
-        RefKey::Constant(Name::from(text.trim_start_matches('\\')))
-    }
-
-    pub fn global_variable(name: &str) -> RefKey {
-        RefKey::GlobalVar(Name::from(name))
-    }
-
-    /// The name the key holds.
-    pub fn name(&self) -> &Name {
-        match self {
-            RefKey::Class(name)
-            | RefKey::Function(name)
-            | RefKey::Constant(name)
-            | RefKey::GlobalVar(name) => name,
-        }
-    }
-
-    /// The name the built-in stubs' own references to it are keyed by: in
-    /// lower case, whatever the kind. A variable is in none of them.
-    pub fn stub_key(&self) -> Option<&str> {
-        match self {
-            RefKey::GlobalVar(_) => None,
-            other => Some(other.name().lower()),
-        }
-    }
-
-    fn tag(&self) -> u8 {
-        match self {
-            RefKey::Class(_) => 0,
-            RefKey::Function(_) => 1,
-            RefKey::Constant(_) => 2,
-            RefKey::GlobalVar(_) => 3,
-        }
-    }
-}
-
-/// `name` without a leading `\`.
-fn without_backslash(name: &Name) -> Name {
-    match name.strip_prefix('\\') {
-        Some(rest) => Name::from(rest.trim_start_matches('\\')),
-        None => name.clone(),
-    }
-}
-
-/// A constant name's namespace and its own name, which the first is
-/// compared ignoring case and the second as written.
-fn constant_parts(name: &str) -> (&str, &str) {
-    match name.rfind('\\') {
-        Some(at) => (&name[..at], &name[at + 1..]),
-        None => ("", name),
-    }
-}
-
-impl PartialEq for RefKey {
-    fn eq(&self, other: &RefKey) -> bool {
-        match (self, other) {
-            (RefKey::Class(a), RefKey::Class(b)) | (RefKey::Function(a), RefKey::Function(b)) => {
-                a.eq_ignore_case(b)
-            }
-            (RefKey::Constant(a), RefKey::Constant(b)) => {
-                let ((a_namespace, a_name), (b_namespace, b_name)) =
-                    (constant_parts(a), constant_parts(b));
-                a_name == b_name && a_namespace.eq_ignore_ascii_case(b_namespace)
-            }
-            (RefKey::GlobalVar(a), RefKey::GlobalVar(b)) => a == b,
-            _ => false,
-        }
-    }
-}
-
-impl Eq for RefKey {}
-
-impl std::hash::Hash for RefKey {
-    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        state.write_u8(self.tag());
-        match self {
-            RefKey::Class(name) | RefKey::Function(name) => state.write_u64(name.folded_hash()),
-            RefKey::Constant(name) => {
-                let (namespace, own) = constant_parts(name);
-                state.write_u64(syntax::name::folded_hash(namespace.as_bytes()));
-                state.write_u64(syntax::name::text_hash(own));
-            }
-            RefKey::GlobalVar(name) => state.write_u64(name.text_hash()),
-        }
-    }
-}
-
 /// Every class, function and constant one file's parse tree could
 /// reference, as the keys of what each is - used purely to decide which
 /// files might need re-checking when a declaration changes. Missing a
@@ -160,6 +36,60 @@ pub fn referenced_names(stmts: &[Stmt]) -> FxHashSet<RefKey> {
     let mut collector = Collector::new(true, false);
     walk_stmts(&mut collector, stmts);
     collector.names
+}
+
+/// What a file refers to, read from what its parse recorded: every name,
+/// and those outside the bodies of functions and methods. The names in doc
+/// comments are read from the comments the parser recorded with the names in
+/// effect where each is, with the templates its enclosing functions and
+/// classes declare left out.
+pub fn recorded_references(
+    references: syntax::references::FileReferences,
+) -> (FxHashSet<RefKey>, FxHashSet<RefKey>) {
+    let syntax::references::FileReferences {
+        mut names,
+        mut outside,
+        doc_sites,
+        doc_frames,
+    } = references;
+    let mut sites: Vec<&syntax::references::DocSite> = doc_sites.iter().collect();
+    sites.sort_by_key(|site| site.pos);
+    let mut frames: Vec<&syntax::references::DocFrame> = doc_frames.iter().collect();
+    frames.sort_by_key(|frame| frame.start);
+    let mut frames = frames.into_iter().peekable();
+    // The frames the site being read is within, outermost first.
+    let mut enclosing: Vec<&syntax::references::DocFrame> = Vec::new();
+    for site in sites {
+        while let Some(frame) = frames.next_if(|frame| frame.start < site.pos) {
+            while enclosing.last().is_some_and(|last| last.end <= frame.start) {
+                enclosing.pop();
+            }
+            enclosing.push(frame);
+        }
+        while enclosing.last().is_some_and(|last| last.end <= site.pos) {
+            enclosing.pop();
+        }
+        let parsed = doc_names_of(&site.doc);
+        for token in &parsed.tokens {
+            if parsed.declared.contains(token)
+                || enclosing
+                    .iter()
+                    .any(|frame| doc_names_of(&frame.doc).declared.contains(token))
+            {
+                continue;
+            }
+            for key in [
+                RefKey::class_text(&site.scope.resolve(token)),
+                RefKey::class_text(token),
+            ] {
+                if site.outside {
+                    outside.insert(key.clone());
+                }
+                names.insert(key);
+            }
+        }
+    }
+    (names, outside)
 }
 
 /// `referenced_names` and `declaration_referenced_names`, in one walk.

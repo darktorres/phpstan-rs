@@ -301,6 +301,14 @@ impl Parser<'_> {
         self.qualified_name(name, self.span_from(start), NameKind::Class)
     }
 
+    /// `parse_name_reference`, for a name that is only known to be a
+    /// reference by what follows it: `record_name` records it then.
+    pub(crate) fn parse_unrecorded_name_reference(&mut self) -> QualifiedName {
+        let start = self.current_pos();
+        let name = self.parse_qualified_name();
+        self.unrecorded_name(name, self.span_from(start), NameKind::Class)
+    }
+
     /// `parse_qualified_name`, plus the span it occupied, for a name that
     /// isn't a reference (a `use` import's path).
     pub(crate) fn parse_qualified_name_spanned(&mut self) -> (Name, Span) {

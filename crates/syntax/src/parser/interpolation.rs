@@ -40,6 +40,7 @@ impl Parser<'_> {
                     // imports where it sits.
                     *sub.ctx.borrow_mut() = self.ctx.borrow().clone();
                     sub.next_node_id.set(self.next_node_id.get());
+                    *sub.recorder.borrow_mut() = self.recorder.borrow().fork();
                     let parsed = sub.parse_expression()?;
                     sub.check_pattern_only()?;
                     // `{$x = 1}`: PHP's grammar takes a variable there, not
@@ -62,6 +63,7 @@ impl Parser<'_> {
                         });
                     }
                     self.next_node_id.set(sub.next_node_id.get());
+                    self.recorder.borrow_mut().absorb(sub.take_references());
                     exprs.push(parsed);
                 }
                 // `$var->prop`/`$var[key]` simple syntax - built directly

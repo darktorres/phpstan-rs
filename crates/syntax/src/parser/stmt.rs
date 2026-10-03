@@ -131,6 +131,7 @@ impl Parser<'_> {
                 let mut f = self.parse_function_decl()?;
                 f.doc_comment = doc;
                 f.attrs = attrs;
+                self.note_function(&f);
                 self.stmt(StmtKind::FunctionDecl(Box::new(f)), start)
             }
             Token::Keyword(Keyword::Class)
@@ -421,6 +422,16 @@ impl Parser<'_> {
                 self.stmt(StmtKind::Expression(e), start)
             }
         };
+        // A declaration's own doc comment is recorded with the declaration; a
+        // different one before it is the statement's.
+        let declaration_doc = match &stmt.kind {
+            StmtKind::FunctionDecl(function) => Some(function.doc_comment.as_deref()),
+            StmtKind::ClassDecl(class) => Some(class.def.doc_comment.as_deref()),
+            _ => None,
+        };
+        if declaration_doc != Some(leading_doc_comment.as_deref()) {
+            self.note_doc(&leading_doc_comment, stmt.span.start);
+        }
         stmt.doc_comment = leading_doc_comment;
         stmt.doc_line = leading_doc_line;
         Ok(stmt)

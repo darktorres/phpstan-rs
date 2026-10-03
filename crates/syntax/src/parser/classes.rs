@@ -1,6 +1,6 @@
 use crate::ast::*;
 use crate::name::Name;
-use crate::parser::{ParseError, Parser};
+use crate::parser::{NameKind, ParseError, Parser};
 use crate::span::Span;
 use crate::token::{Keyword, Token};
 
@@ -175,6 +175,7 @@ impl Parser<'_> {
                     self.expect_semicolon()?;
                     TraitAdaptations::default()
                 };
+                self.note_doc(&doc, member_start);
                 trait_uses.push(TraitUse {
                     traits,
                     doc_comment: doc,
@@ -285,6 +286,7 @@ impl Parser<'_> {
                     };
                     self.expect(&Token::Equals)?;
                     let value = self.parse_expression()?;
+                    self.note_doc(&doc, member_start);
                     consts.push(ClassConst {
                         namespaced_name: None,
                         removal_span: None,
@@ -315,6 +317,7 @@ impl Parser<'_> {
                 let mut function = self.parse_function_decl()?;
                 function.doc_comment = doc;
                 function.attrs = attrs;
+                self.note_function(&function);
                 // PHP 8.2 `readonly class Foo { function __construct(public
                 // int $x) {} }` - shorthand for every property being
                 // readonly, promoted constructor properties included
@@ -365,6 +368,7 @@ impl Parser<'_> {
                 // its own `}`, so no expect_semicolon() afterwards.
                 if self.check(&Token::LBrace) {
                     let hooks = self.parse_property_hooks()?;
+                    self.note_doc(&doc, member_start);
                     properties.push(PropertyDecl {
                         removal_span: None,
                         name: Ident {
@@ -389,6 +393,7 @@ impl Parser<'_> {
                     });
                     break;
                 }
+                self.note_doc(&doc, member_start);
                 properties.push(PropertyDecl {
                     removal_span: None,
                     name: Ident {
@@ -438,20 +443,26 @@ impl Parser<'_> {
         let mut out = TraitAdaptations::default();
         self.expect(&Token::LBrace)?;
         while !self.check(&Token::RBrace) && !self.at_eof() {
-            let first = self.parse_name_reference();
+            // A bare name here is a method's, and no reference.
+            let first = self.parse_unrecorded_name_reference();
             let (trait_name, method): (Option<QualifiedName>, Name) =
                 if self.eat(&Token::DoubleColon) {
+                    self.record_name(&first, NameKind::Class);
                     (Some(first), self.expect_ident()?)
                 } else {
                     (None, first.written)
                 };
             if matches!(self.peek(), Token::Identifier(s) if s.eq_ignore_ascii_case("insteadof")) {
                 self.skip();
-                let mut instead_of = vec![self.parse_name_reference()];
+                let mut instead_of = vec![self.parse_unrecorded_name_reference()];
                 while self.eat(&Token::Comma) {
-                    instead_of.push(self.parse_name_reference());
+                    instead_of.push(self.parse_unrecorded_name_reference());
                 }
+                // The names stand only with a trait to take the method from.
                 if let Some(trait_name) = trait_name {
+                    for name in &instead_of {
+                        self.record_name(name, NameKind::Class);
+                    }
                     out.precedences.push(TraitPrecedence {
                         trait_name,
                         method,
@@ -563,31 +574,33 @@ impl Parser<'_> {
             enum_cases,
         } = self.parse_class_body(class_is_readonly)?;
 
+        let def = ClassDef {
+            kind,
+            backing_type: None,
+            extends,
+            implements,
+            is_abstract,
+            is_final,
+            is_readonly: class_is_readonly,
+            properties,
+            methods,
+            consts,
+            trait_uses,
+            enum_cases,
+            doc_comment,
+            // Overwritten by `parse_statement`, the only caller that
+            // actually saw any leading `#[Attr]` groups (both of this
+            // function's own call sites are reached only after
+            // `parse_statement` already consumed and stashed them) - see
+            // its own `Token::Keyword(Keyword::Class | ...)` handling.
+            attrs: Vec::new(),
+            span: self.span_from(start),
+        };
+        self.note_class(&def);
         Ok(ClassDecl {
             namespaced_name: name.name.as_str().into(),
             name,
-            def: ClassDef {
-                kind,
-                backing_type: None,
-                extends,
-                implements,
-                is_abstract,
-                is_final,
-                is_readonly: class_is_readonly,
-                properties,
-                methods,
-                consts,
-                trait_uses,
-                enum_cases,
-                doc_comment,
-                // Overwritten by `parse_statement`, the only caller that
-                // actually saw any leading `#[Attr]` groups (both of this
-                // function's own call sites are reached only after
-                // `parse_statement` already consumed and stashed them) - see
-                // its own `Token::Keyword(Keyword::Class | ...)` handling.
-                attrs: Vec::new(),
-                span: self.span_from(start),
-            },
+            def,
         })
     }
 }

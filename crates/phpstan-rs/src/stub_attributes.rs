@@ -172,10 +172,10 @@ pub(crate) const WATCH: &[(&str, u32)] = &[
 ];
 
 /// Applies and removes the version attributes in a parsed file, then
-/// resolves the names of any type it added.
-pub(crate) fn apply_stub_attributes(stmts: &mut Vec<Stmt>) {
+/// resolves the names of any type it added. Whether the tree changed.
+pub(crate) fn apply_stub_attributes(stmts: &mut Vec<Stmt>) -> bool {
     if !mentions_stub_attributes(stmts) {
-        return;
+        return false;
     }
     let mut pass = Pass;
     pass.retain_stmts(stmts);
@@ -183,6 +183,7 @@ pub(crate) fn apply_stub_attributes(stmts: &mut Vec<Stmt>) {
         pass.visit_stmt(stmt);
     }
     syntax::name_resolution::resolve_names(stmts);
+    true
 }
 
 /// Whether any attribute in the file is one of the two.

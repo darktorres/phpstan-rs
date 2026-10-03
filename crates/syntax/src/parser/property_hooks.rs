@@ -126,6 +126,13 @@ impl Parser<'_> {
             }
         }
         self.expect(&Token::RBrace)?;
-        Ok(PropertyHooks { get, set })
+        let hooks = PropertyHooks { get, set };
+        // The hooks that stand, as a later `get` or `set` replaces an
+        // earlier one.
+        let pos = self.previous_end();
+        for hook in hooks.iter() {
+            self.note_doc(&hook.doc, pos);
+        }
+        Ok(hooks)
     }
 }

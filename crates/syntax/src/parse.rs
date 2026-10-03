@@ -8,6 +8,7 @@ pub use crate::lexer::FileFacts;
 use crate::lexer::{IgnoreMark, LexEnd, LexWarning, Lexer, WatchList};
 use crate::name::NameCache;
 use crate::parser::{ParseError, Parser};
+use crate::references::FileReferences;
 use crate::span::LineIndex;
 
 /// A parsed file.
@@ -24,6 +25,8 @@ pub struct ParsedFile {
     pub facts: FileFacts,
     /// The labels the file's own top-level `goto`s name.
     pub goto_labels: Box<[GotoLabel]>,
+    /// What the file refers to.
+    pub references: FileReferences,
 }
 
 /// A file's source: text already known to be UTF-8, or bytes, which are
@@ -108,6 +111,7 @@ pub fn parse_watching<'a>(
     let parsed = parser.parse_program();
     let has_anonymous_class = parser.saw_anonymous_class();
     let goto_labels = parser.file_goto_labels();
+    let references = parser.take_references();
     // The rest of the file is lexed even when the parse failed: a lexer
     // error anywhere in the file is the file's error, before a syntax
     // error found in the part the parse read.
@@ -134,6 +138,7 @@ pub fn parse_watching<'a>(
         warnings,
         facts,
         goto_labels,
+        references,
     })
 }
 
