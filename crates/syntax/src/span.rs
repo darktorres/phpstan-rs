@@ -85,6 +85,15 @@ pub struct Range {
     pub end: LineCol,
 }
 
+/// What a column of a line counts, as an editor protocol agrees it: bytes
+/// of UTF-8, or code units of UTF-16.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+pub enum Unit {
+    Utf8,
+    #[default]
+    Utf16,
+}
+
 /// The lines of a file, and the characters on them, found from its bytes
 /// once: a position is made from a byte offset when someone asks for it,
 /// so the lexer and parser carry offsets.
@@ -101,6 +110,9 @@ pub struct LineIndex {
     /// (or run of invalid bytes), the offset it ends at and the bytes
     /// beyond one for each character up to there.
     surplus: Box<[(u32, u32)]>,
+    /// The offset each four-byte character starts at, which UTF-16 spends
+    /// two code units on.
+    astral: Box<[u32]>,
 }
 
 impl Default for LineIndex {
@@ -117,6 +129,7 @@ impl LineIndex {
         line_starts.push(0);
         line_starts.extend(memchr::memchr_iter(b'\n', src).map(|i| i as u32 + 1));
         let mut surplus = Vec::new();
+        let mut astral = Vec::new();
         if !src.is_ascii() {
             let mut base = 0usize;
             let mut total = 0u32;
@@ -130,6 +143,9 @@ impl LineIndex {
                         0xE0.. => 3,
                         _ => 2,
                     };
+                    if width == 4 {
+                        astral.push((base + at) as u32);
+                    }
                     from = at + width;
                     total += width as u32 - 1;
                     surplus.push(((base + from) as u32, total));
@@ -146,6 +162,7 @@ impl LineIndex {
             line_starts: line_starts.into_boxed_slice(),
             len: src.len() as u32,
             surplus: surplus.into_boxed_slice(),
+            astral: astral.into_boxed_slice(),
         }
     }
 
@@ -212,6 +229,63 @@ impl LineIndex {
         }
     }
 
+    /// The 0-based column of `offset` on its line, counted in `unit`.
+    pub fn column(&self, offset: u32, unit: Unit) -> u32 {
+        let offset = offset.min(self.len);
+        let start = self.line_starts[self.line_index(offset)];
+        match unit {
+            Unit::Utf8 => offset - start,
+            Unit::Utf16 => {
+                let characters = self.line_col(offset).col - 1;
+                characters + self.astral_between(start, offset)
+            }
+        }
+    }
+
+    /// How many four-byte characters start in `from..to`.
+    fn astral_between(&self, from: u32, to: u32) -> u32 {
+        let below = |offset: u32| self.astral.partition_point(|&at| at < offset);
+        (below(to) - below(from)) as u32
+    }
+
+    /// The offset of the 0-based `line` and the column `column` counts in
+    /// `unit`, or none when the line is not in the source or the column is
+    /// past the end of the line. A UTF-16 column inside a character that
+    /// takes two units is the character's start.
+    pub fn offset_in(&self, line: u32, column: u32, unit: Unit) -> Option<u32> {
+        let start = self.line_start(line.checked_add(1)?)?;
+        let end = self.line_end(line + 1)?;
+        match unit {
+            Unit::Utf8 => {
+                let offset = start.checked_add(column)?;
+                (offset <= end).then_some(offset)
+            }
+            Unit::Utf16 => {
+                let first = self.astral.partition_point(|&at| at < start);
+                let mut extra = 0;
+                for (k, &at) in self.astral[first..].iter().enumerate() {
+                    if at >= end {
+                        break;
+                    }
+                    // Where the character starts, in UTF-16 units.
+                    let units = self.line_col(at).col - 1 + k as u32;
+                    if column >= units + 2 {
+                        extra = k as u32 + 1;
+                    } else {
+                        if column == units + 1 {
+                            extra = k as u32 + 1;
+                        }
+                        break;
+                    }
+                }
+                self.offset(LineCol {
+                    line: line + 1,
+                    col: column.checked_sub(extra)? + 1,
+                })
+            }
+        }
+    }
+
     /// The offset of `at`, or none when its line is not in the source or
     /// its column is past the end of the line.
     pub fn offset(&self, at: LineCol) -> Option<u32> {
@@ -249,13 +323,14 @@ mod tests {
         assert_eq!(index.line_col(5), at(1, 6));
         assert_eq!(index.line_col(6), at(2, 1));
         assert_eq!(index.line_col(13), at(2, 8));
-        assert_eq!(index.line_col(15), at(3, 1));
-        assert_eq!(index.line_col(16), at(4, 1));
+        assert_eq!(index.line_col(14), at(3, 1));
+        assert_eq!(index.line_col(15), at(4, 1));
         assert_eq!(index.line_col(99), at(4, 4));
-        assert_eq!(index.line(14), 2);
-        assert_eq!(index.line_start(4), Some(16));
+        assert_eq!(index.line(13), 2);
+        assert_eq!(index.line(14), 3);
+        assert_eq!(index.line_start(4), Some(15));
         assert_eq!(index.line_end(2), Some(13));
-        assert_eq!(index.line_end(4), Some(19));
+        assert_eq!(index.line_end(4), Some(18));
         assert_eq!(index.line_start(5), None);
         assert_eq!(index.line_start(0), None);
     }
@@ -278,8 +353,8 @@ mod tests {
             assert_eq!(index.line_col(offset), position, "{offset}");
             assert_eq!(index.offset(position), Some(offset), "{position:?}");
         }
-        assert_eq!(index.offset(at(1, 7)), Some(11));
-        assert_eq!(index.offset(at(1, 8)), None);
+        assert_eq!(index.offset(at(1, 6)), Some(11));
+        assert_eq!(index.offset(at(1, 7)), None);
         assert_eq!(index.offset(at(3, 1)), None);
     }
 
@@ -295,5 +370,35 @@ mod tests {
         assert_eq!(index.line_col(4), at(1, 5));
         assert_eq!(index.line_col(6), at(1, 6));
         assert_eq!(index.line_col(7), at(1, 7));
+    }
+
+    #[test]
+    fn a_column_counts_bytes_or_utf16_units() {
+        // `é` is two bytes and one unit, `日` three and one, `😀` four and two.
+        let source = "a\u{e9}\u{65e5}\u{1f600}b\nc\u{1f600}d".as_bytes();
+        let index = LineIndex::new(source);
+        let offsets: Vec<(u32, u32, u32)> = vec![
+            // (offset, utf8 column, utf16 column)
+            (0, 0, 0),
+            (1, 1, 1),
+            (3, 3, 2),
+            (6, 6, 3),
+            (10, 10, 5),
+            (11, 11, 6),
+        ];
+        for (offset, utf8, utf16) in offsets {
+            assert_eq!(index.column(offset, Unit::Utf8), utf8, "{offset}");
+            assert_eq!(index.column(offset, Unit::Utf16), utf16, "{offset}");
+            assert_eq!(index.offset_in(0, utf8, Unit::Utf8), Some(offset));
+            assert_eq!(index.offset_in(0, utf16, Unit::Utf16), Some(offset));
+        }
+        // The second line starts after the line feed at 11.
+        assert_eq!(index.column(17, Unit::Utf16), 3);
+        assert_eq!(index.offset_in(1, 3, Unit::Utf16), Some(17));
+        assert_eq!(index.column(17, Unit::Utf8), 5);
+        // Inside a surrogate pair is the start of the character.
+        assert_eq!(index.offset_in(0, 4, Unit::Utf16), Some(6));
+        assert_eq!(index.offset_in(0, 7, Unit::Utf16), None);
+        assert_eq!(index.offset_in(2, 0, Unit::Utf16), None);
     }
 }
