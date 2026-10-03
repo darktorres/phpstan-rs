@@ -1,6 +1,6 @@
 use rustc_hash::FxHashSet;
 
-use crate::checker::{CheckArgsCall, Checker, Locals, class_type_word};
+use crate::checker::{CalleeLabel, CheckArgsCall, Checker, Locals, class_type_word};
 use crate::registry::{is_allow_dynamic_properties_attribute_name, is_deprecated_attribute_name};
 use diagnostics::DiagnosticBuilder;
 use syntax::ast::*;
@@ -112,7 +112,7 @@ impl<'a> Checker<'a> {
                 self.check_expr(&a.value, &mut locals, label);
             }
             self.check_args(CheckArgsCall {
-                callee_label: &format!("{canonical}::__construct"),
+                callee_label: CalleeLabel::Constructor(&canonical),
                 callee: crate::checker::calls::parameters::Callee::AttributeConstructor(&canonical),
                 sig: ctor_sig,
                 args: &attr.args,

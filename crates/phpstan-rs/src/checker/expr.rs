@@ -5,10 +5,11 @@ use crate::checker::resolve::receiver_class;
 use crate::checker::suggest;
 use crate::checker::{
     ATTRIBUTE_TARGET_CLASS_CONSTANT, ATTRIBUTE_TARGET_FUNCTION, ATTRIBUTE_TARGET_PROPERTY,
-    CheckArgsCall, Checker, Locals, LoopZeroIterations, MemberVisibilityCheck, TemplateBindings,
-    UsageTokenKind, binop_sigil, generator_template_param, is_real_variable_key,
-    literal_string_key, merge_scopes, narrowing_key, propagate_container_field_facts,
-    purge_stale_narrowing_for, resolve_call_args, unassigned_variable_type,
+    CalleeLabel, CheckArgsCall, Checker, Locals, LoopZeroIterations, MemberKind, MemberLabel,
+    MemberVisibilityCheck, TemplateBindings, UsageTokenKind, binop_sigil, generator_template_param,
+    is_real_variable_key, literal_string_key, merge_scopes, narrowing_key,
+    propagate_container_field_facts, purge_stale_narrowing_for, resolve_call_args,
+    unassigned_variable_type,
 };
 use crate::pest_config;
 use crate::registry::FunctionReflection;
@@ -869,7 +870,7 @@ impl<'a> Checker<'a> {
                             .lookup_function_with_name(name)
                             .map_or_else(|| name.to_string(), |(n, _)| n.to_string());
                         self.check_args(CheckArgsCall {
-                            callee_label: name,
+                            callee_label: CalleeLabel::Text(name),
                             callee: Callee::Function(&declared),
                             sig,
                             args,
@@ -1241,6 +1242,13 @@ impl<'a> Checker<'a> {
                 // owned, already-substituted signature straight out of
                 // `receiver`'s tuple, no second clone/substitution here.
                 let receiver = self.find_method_receiver(&recv_ty, method);
+                if is_bare_statement && let Some((_, _, owner, _)) = &receiver {
+                    self.statement_method_call = Some(crate::checker::StatementMethodCall {
+                        id: e.id,
+                        owner: owner.clone(),
+                        receiver: recv_ty.clone(),
+                    });
+                }
                 let sig = receiver
                     .as_ref()
                     .map(|(_, _, _, sig)| std::borrow::Borrow::borrow(sig));
@@ -1365,11 +1373,12 @@ impl<'a> Checker<'a> {
                         // consistent with each other - no separate
                         // re-lookup needed.
                         self.check_member_visibility(MemberVisibilityCheck {
-                            kind: "method",
-                            owner,
-                            member_name: method,
+                            member: MemberLabel {
+                                kind: MemberKind::Method,
+                                owner,
+                                name: method,
+                            },
                             visibility: &sig.visibility(),
-                            describe: &format!("method {owner}::{method}()"),
                             span: e.span,
                         });
                         self.check_internal_method_call(owner, method, sig, false, e.span);
@@ -1415,10 +1424,9 @@ impl<'a> Checker<'a> {
                         // See the identical comment on the plain-function
                         // Call arm above - `check_args` is spread-aware,
                         // so it's always worth calling.
-                        let qualified = format!("{class}::{method}");
                         let declared = self.registry.declared_method_name(owner, method);
                         self.check_args(CheckArgsCall {
-                            callee_label: &qualified,
+                            callee_label: CalleeLabel::Method { class, method },
                             callee: Callee::Method {
                                 class: owner,
                                 name: &declared,
@@ -1819,7 +1827,7 @@ impl<'a> Checker<'a> {
                     let name = kind.as_str();
                     if let Some(sig) = self.registry.lookup_function(name) {
                         self.check_args(CheckArgsCall {
-                            callee_label: name,
+                            callee_label: CalleeLabel::Text(name),
                             callee: Callee::Function(name),
                             sig,
                             args,
@@ -2473,7 +2481,7 @@ impl<'a> Checker<'a> {
                             // function Call arm above - `check_args` is
                             // spread-aware, so it's always worth calling.
                             self.check_args(CheckArgsCall {
-                                callee_label: &format!("{class}::__construct"),
+                                callee_label: CalleeLabel::Constructor(class),
                                 callee: Callee::Constructor(class),
                                 sig,
                                 args,
@@ -2685,11 +2693,12 @@ impl<'a> Checker<'a> {
                     if let Some(sig) = sig {
                         if let Some((owner, _)) = &sig_with_owner {
                             self.check_member_visibility(MemberVisibilityCheck {
-                                kind: "staticMethod",
-                                owner,
-                                member_name: method,
+                                member: MemberLabel {
+                                    kind: MemberKind::StaticMethod,
+                                    owner,
+                                    name: method,
+                                },
                                 visibility: &sig.visibility(),
-                                describe: &format!("static method {owner}::{method}()"),
                                 span: e.span,
                             });
                             self.check_internal_method_call(owner, method, sig, true, e.span);
@@ -2729,7 +2738,6 @@ impl<'a> Checker<'a> {
                         // See the identical comment on the plain-
                         // function Call arm above - `check_args` is
                         // spread-aware, so it's always worth calling.
-                        let qualified = format!("{class}::{method}");
                         let owner = sig_with_owner
                             .as_ref()
                             .map_or_else(|| class.to_string(), |(o, _)| o.to_string());
@@ -2740,7 +2748,7 @@ impl<'a> Checker<'a> {
                             .get(owner.as_str())
                             .is_some_and(|info| info.static_methods().contains(declared.as_str()));
                         self.check_args(CheckArgsCall {
-                            callee_label: &qualified,
+                            callee_label: CalleeLabel::Method { class, method },
                             callee: Callee::StaticMethod {
                                 class: &owner,
                                 name: &declared,
@@ -3025,11 +3033,12 @@ impl<'a> Checker<'a> {
                 let owner_and_sig = self.find_property_owner(&base_ty.without(&Type::null()), prop);
                 if let Some((owner, p)) = owner_and_sig {
                     self.check_member_visibility(MemberVisibilityCheck {
-                        kind: "property",
-                        owner: &owner,
-                        member_name: prop,
+                        member: MemberLabel {
+                            kind: MemberKind::Property,
+                            owner: &owner,
+                            name: prop,
+                        },
                         visibility: &p.visibility(),
-                        describe: &format!("property {owner}::${prop}"),
                         span: e.span,
                     });
                     if !p.is_readable()
@@ -4234,11 +4243,12 @@ impl<'a> Checker<'a> {
                                 self.lookup_method_with_owner(class, method)
                             {
                                 self.check_member_visibility(MemberVisibilityCheck {
-                                    kind: "method",
-                                    owner: &owner,
-                                    member_name: method,
+                                    member: MemberLabel {
+                                        kind: MemberKind::Method,
+                                        owner: &owner,
+                                        name: method,
+                                    },
                                     visibility: &sig.visibility(),
-                                    describe: &format!("method {owner}::{method}()"),
                                     span: e.span,
                                 });
                                 self.check_internal_method_call(&owner, method, sig, false, e.span);
@@ -4301,11 +4311,12 @@ impl<'a> Checker<'a> {
                                 self.lookup_method_with_owner(&class, method)
                             {
                                 self.check_member_visibility(MemberVisibilityCheck {
-                                    kind: "staticMethod",
-                                    owner: &owner,
-                                    member_name: method,
+                                    member: MemberLabel {
+                                        kind: MemberKind::StaticMethod,
+                                        owner: &owner,
+                                        name: method,
+                                    },
                                     visibility: &sig.visibility(),
-                                    describe: &format!("static method {owner}::{method}()"),
                                     span: e.span,
                                 });
                                 self.check_internal_method_call(&owner, method, sig, true, e.span);
@@ -6222,11 +6233,12 @@ impl<'a> Checker<'a> {
                 // access private property" is a real fatal error
                 // either way).
                 self.check_member_visibility(MemberVisibilityCheck {
-                    kind: "staticProperty",
-                    owner,
-                    member_name: prop_name,
+                    member: MemberLabel {
+                        kind: MemberKind::StaticProperty,
+                        owner,
+                        name: prop_name,
+                    },
                     visibility: &sig.visibility(),
-                    describe: &format!("static property {owner}::${prop_name}"),
                     span: e.span,
                 });
                 // Mirrors real PHPStan's
@@ -6269,11 +6281,12 @@ impl<'a> Checker<'a> {
                 );
                 self.record_member_ref(e.span, owner, member);
                 self.check_member_visibility(MemberVisibilityCheck {
-                    kind: "classConstant",
-                    owner,
-                    member_name: member,
+                    member: MemberLabel {
+                        kind: MemberKind::Constant,
+                        owner,
+                        name: member,
+                    },
                     visibility: &cs.visibility(),
-                    describe: &format!("constant {owner}::{member}"),
                     span: e.span,
                 });
                 // Mirrors real PHPStan's

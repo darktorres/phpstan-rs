@@ -5,7 +5,7 @@
 //! isn't modeled), `method.private`/`method.protected`, and
 //! `staticMethod.private`/`staticMethod.protected`.
 
-use crate::checker::Checker;
+use crate::checker::{Checker, MemberLabel};
 use syntax::ast::{Expr, ExprKind, Literal, Visibility};
 use syntax::token::Span;
 
@@ -14,11 +14,8 @@ use syntax::token::Span;
 /// field bundle is clearer at each call site anyway (mirrors this
 /// project's own `CheckArgsCall` precedent, `calls.rs`).
 pub(crate) struct MemberVisibilityCheck<'a> {
-    pub(crate) kind: &'a str,
-    pub(crate) owner: &'a str,
-    pub(crate) member_name: &'a str,
+    pub(crate) member: MemberLabel<'a>,
     pub(crate) visibility: &'a Visibility,
-    pub(crate) describe: &'a str,
     pub(crate) span: Span,
 }
 
@@ -106,13 +103,12 @@ impl<'a> Checker<'a> {
     /// site can call this unconditionally without its own `if` guard.
     pub(crate) fn check_member_visibility(&mut self, check: MemberVisibilityCheck) {
         let MemberVisibilityCheck {
-            kind,
-            owner,
-            member_name,
+            member,
             visibility,
-            describe,
             span,
         } = check;
+        let (owner, member_name) = (member.owner, member.name);
+        let kind = member.kind.identifier_prefix();
         let word = match visibility {
             Visibility::Public => return,
             Visibility::Private => "private",
@@ -122,7 +118,7 @@ impl<'a> Checker<'a> {
             return;
         }
         self.report(
-            format!("access to {word} {describe}"),
+            format!("access to {word} {member}"),
             span,
             0,
             format!("{kind}.{word}"),

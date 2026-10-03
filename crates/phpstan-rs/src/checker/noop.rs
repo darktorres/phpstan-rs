@@ -259,8 +259,22 @@ impl<'a> Checker<'a> {
                 )
             }
             ExprKind::MethodCall(recv, method, _, _) => {
-                let recv_ty = self.infer_expr(recv, locals);
-                let Some((owner, sig)) = self.find_method_owner(&recv_ty, method) else {
+                // The callee and receiver the call's own check resolved,
+                // when it did.
+                let resolved = self
+                    .statement_method_call
+                    .as_ref()
+                    .filter(|call| call.id == e.id)
+                    .map(|call| (call.owner.clone(), call.receiver.clone()))
+                    .and_then(|(owner, recv_ty)| {
+                        let (_, sig) = self.lookup_method_with_owner(&owner, method)?;
+                        Some((owner, sig, recv_ty))
+                    });
+                let Some((owner, sig, recv_ty)) = resolved.or_else(|| {
+                    let recv_ty = self.infer_expr(recv, locals);
+                    let (owner, sig) = self.find_method_owner(&recv_ty, method)?;
+                    Some((owner, sig, recv_ty))
+                }) else {
                     return;
                 };
                 if !sig.is_transitively_pure() {

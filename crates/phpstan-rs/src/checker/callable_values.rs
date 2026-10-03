@@ -6,7 +6,7 @@
 //! method the calling scope can't see.
 
 use crate::checker::calls::CheckArgsCall;
-use crate::checker::{Checker, Locals};
+use crate::checker::{CalleeLabel, Checker, Locals};
 use crate::registry::FunctionReflection;
 use syntax::ast::{Arg, Visibility};
 use syntax::token::Span;
@@ -126,7 +126,7 @@ impl<'a> Checker<'a> {
             );
         }
         self.check_args(CheckArgsCall {
-            callee_label: &named.description,
+            callee_label: CalleeLabel::Text(&named.description),
             callee: crate::checker::calls::parameters::Callee::Callable(&named.description),
             sig: named.sig,
             args,

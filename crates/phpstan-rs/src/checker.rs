@@ -538,6 +538,10 @@ pub struct Checker<'a> {
     pub(crate) completion_oracle: bool,
     // How the body of the loop last checked completed, by its last pass.
     pub(crate) loop_body_completion: Completion,
+    // The method call that is a whole statement, as its own check resolved
+    // it: the statement's rules read it and do not infer the receiver or
+    // find the method again.
+    pub(crate) statement_method_call: Option<StatementMethodCall>,
     // Every variable assignment site in the current function body, for
     // `variable.implicitArray`; empty unless that check is enabled.
     pub(crate) current_function_assigned_variables: Vec<strict_rules::AssignedVariable>,
@@ -870,8 +874,19 @@ pub(crate) enum InferQuestion {
 }
 
 mod access_attributes;
+/// A method call statement's callee as the check of the call resolved it.
+pub(crate) struct StatementMethodCall {
+    pub(crate) id: syntax::ast::NodeId,
+    /// The class that declares the method.
+    pub(crate) owner: syntax::name::Name,
+    /// The receiver's type before the call.
+    pub(crate) receiver: Type,
+}
+
 mod completion;
+mod labels;
 pub(crate) use completion::{BREAK_HERE, BlockCompletion, CONTINUE_HERE, Completion, GotoState};
+pub(crate) use labels::{CalleeLabel, MemberKind, MemberLabel};
 mod array_access;
 mod infer_cache;
 mod locals;
@@ -1121,6 +1136,7 @@ impl<'a> Checker<'a> {
             terminating_assertions: rustc_hash::FxHashSet::default(),
             completion_oracle: std::env::var_os("PHPSTAN_RS_COMPLETION_ORACLE").is_some(),
             loop_body_completion: Completion::FALLS_THROUGH,
+            statement_method_call: None,
             current_function_assigned_variables: Vec::new(),
             in_bare_statement_position: false,
             in_condition_position: false,

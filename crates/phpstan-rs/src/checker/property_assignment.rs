@@ -1,4 +1,6 @@
-use crate::checker::{Checker, Locals, MemberVisibilityCheck, UsageTokenKind};
+use crate::checker::{
+    Checker, Locals, MemberKind, MemberLabel, MemberVisibilityCheck, UsageTokenKind,
+};
 use syntax::ast::*;
 use types::Name;
 use types::php_version::PhpFeature;
@@ -90,11 +92,12 @@ impl<'a> Checker<'a> {
             );
         } else {
             self.check_member_visibility(MemberVisibilityCheck {
-                kind: "property",
-                owner: &owner,
-                member_name: prop,
+                member: MemberLabel {
+                    kind: MemberKind::Property,
+                    owner: &owner,
+                    name: prop,
+                },
                 visibility: &write_visibility,
-                describe: &format!("property {owner}::${prop}"),
                 span: lhs.span,
             });
         }

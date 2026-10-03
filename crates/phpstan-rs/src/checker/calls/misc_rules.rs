@@ -1,4 +1,5 @@
 use crate::checker::{Checker, Locals};
+use crate::registry::FunctionReflection;
 use diagnostics::DiagnosticBuilder;
 use syntax::ast::*;
 use syntax::token::Span;
@@ -27,7 +28,10 @@ impl<'a> Checker<'a> {
     /// not flagged at all, the safe (false-negative, never false-
     /// positive) direction to skip in.
     pub(crate) fn check_no_discard_statement(&mut self, e: &Expr, locals: &Locals) {
-        let (sig, callee_desc, identifier) = match &e.kind {
+        // The callee's description is formatted only for a call that is
+        // reported: the attribute is tested first, on the call statements
+        // that mostly have none.
+        match &e.kind {
             ExprKind::Call(callee, _) => {
                 let ExprKind::Name(name) = &callee.kind else {
                     return;
@@ -35,22 +39,38 @@ impl<'a> Checker<'a> {
                 let Some((resolved_name, sig)) = self.registry.resolve_function(name) else {
                     return;
                 };
-                (
-                    sig,
-                    format!("{resolved_name}()"),
-                    "function.resultDiscarded",
-                )
+                if self.discards_result_flagged(sig) {
+                    self.report_discarded(
+                        format!("{resolved_name}()"),
+                        e.span,
+                        "function.resultDiscarded",
+                    );
+                }
             }
             ExprKind::MethodCall(recv, method, _, _) => {
-                let recv_ty = self.infer_expr(recv, locals).without(&Type::null());
-                let Some((owner, sig)) = self.find_method_owner(&recv_ty, method) else {
+                // The callee the call's own check resolved, when it did.
+                let resolved = self
+                    .statement_method_call
+                    .as_ref()
+                    .filter(|call| call.id == e.id)
+                    .map(|call| call.owner.clone())
+                    .and_then(|owner| {
+                        let (_, sig) = self.lookup_method_with_owner(&owner, method)?;
+                        Some((owner, sig))
+                    });
+                let Some((owner, sig)) = resolved.or_else(|| {
+                    let recv_ty = self.infer_expr(recv, locals).without(&Type::null());
+                    self.find_method_owner(&recv_ty, method)
+                }) else {
                     return;
                 };
-                (
-                    sig,
-                    format!("{owner}::{method}()"),
-                    "method.resultDiscarded",
-                )
+                if self.discards_result_flagged(sig) {
+                    self.report_discarded(
+                        format!("{owner}::{method}()"),
+                        e.span,
+                        "method.resultDiscarded",
+                    );
+                }
             }
             ExprKind::StaticCall(target, method, _) => {
                 let Some(class) = target
@@ -62,21 +82,33 @@ impl<'a> Checker<'a> {
                 let Some(sig) = self.registry.lookup_method(&class, method) else {
                     return;
                 };
-                (
-                    sig,
-                    format!("{class}::{method}()"),
-                    "staticMethod.resultDiscarded",
-                )
+                if self.discards_result_flagged(sig) {
+                    self.report_discarded(
+                        format!("{class}::{method}()"),
+                        e.span,
+                        "staticMethod.resultDiscarded",
+                    );
+                }
             }
-            _ => return,
-        };
-        if !sig.no_discard() && !(sig.must_use_result() && self.settings.language_extensions) {
-            return;
+            _ => {}
         }
+    }
+
+    /// Whether `sig` marks its result as one not to discard.
+    fn discards_result_flagged(&self, sig: &FunctionReflection) -> bool {
+        sig.no_discard() || (sig.must_use_result() && self.settings.language_extensions)
+    }
+
+    fn report_discarded(
+        &mut self,
+        callee: String,
+        span: syntax::token::Span,
+        identifier: &'static str,
+    ) {
         self.report_builder(
             DiagnosticBuilder::new(
-                format!("Call to {callee_desc} on a separate line discards its return value."),
-                e.span,
+                format!("Call to {callee} on a separate line discards its return value."),
+                span,
                 0,
                 identifier,
             )

@@ -2,7 +2,7 @@ use rustc_hash::FxHashMap;
 use types::Name;
 use types::UnionAll as _;
 
-use crate::checker::{Checker, Locals, purge_stale_narrowing_for};
+use crate::checker::{CalleeLabel, Checker, Locals, purge_stale_narrowing_for};
 use crate::registry::{FunctionReflection, ParameterReflection};
 use syntax::ast::*;
 use syntax::token::Span;
@@ -17,7 +17,7 @@ pub(crate) mod parameters;
 /// messages; `callee_label` in this project's own (boolean-trap and
 /// swapped-argument) ones. `label` is the enclosing function or method.
 pub(crate) struct CheckArgsCall<'a> {
-    pub(crate) callee_label: &'a str,
+    pub(crate) callee_label: CalleeLabel<'a>,
     pub(crate) callee: parameters::Callee<'a>,
     pub(crate) sig: &'a FunctionReflection,
     pub(crate) args: &'a [Arg],
@@ -488,7 +488,7 @@ impl<'a> Checker<'a> {
     /// positional distinction this check depends on.
     fn check_boolean_trap_arguments(
         &mut self,
-        callee_label: &str,
+        callee_label: CalleeLabel<'_>,
         sig: &FunctionReflection,
         args: &[Arg],
         defining_class: Option<&str>,
@@ -536,7 +536,7 @@ impl<'a> Checker<'a> {
     /// partial match, to keep the false-positive rate low.
     fn check_swapped_argument_names(
         &mut self,
-        callee_label: &str,
+        callee_label: CalleeLabel<'_>,
         sig: &FunctionReflection,
         args: &[Arg],
         defining_class: Option<&str>,
@@ -749,7 +749,7 @@ impl<'a> Checker<'a> {
             let callee_args = &args[1..];
             self.maybe_record_param_name_hints(Some(&sig), callee_args);
             self.check_args(CheckArgsCall {
-                callee_label: "callable passed to call_user_func()",
+                callee_label: CalleeLabel::Text("callable passed to call_user_func()"),
                 callee: parameters::Callee::Callable("callable passed to call_user_func()"),
                 sig: &sig,
                 args: callee_args,
@@ -782,7 +782,7 @@ impl<'a> Checker<'a> {
                 .collect();
             self.maybe_record_param_name_hints(Some(&sig), &synthesized);
             self.check_args(CheckArgsCall {
-                callee_label: "callable passed to call_user_func_array()",
+                callee_label: CalleeLabel::Text("callable passed to call_user_func_array()"),
                 callee: parameters::Callee::Callable("callable passed to call_user_func_array()"),
                 sig: &sig,
                 args: &synthesized,
