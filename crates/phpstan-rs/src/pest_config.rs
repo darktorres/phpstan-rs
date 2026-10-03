@@ -216,63 +216,83 @@ pub struct PestConfig {
     hook_properties: Vec<(PathBuf, Vec<String>)>,
 }
 
-impl PestConfig {
-    /// Built once from every currently-loaded file named `Pest.php`,
-    /// reusing each one's already-parsed AST - no re-parsing needed.
-    pub fn build<'a>(pest_files: impl Iterator<Item = (&'a Path, &'a [Stmt])>) -> PestConfig {
+/// What one `Pest.php` file binds, read from its tree when it is parsed.
+#[derive(Debug, Default, Clone)]
+pub struct PestFacts {
+    bindings: Vec<(PathBuf, Vec<String>)>,
+    hook_properties: Vec<(PathBuf, Vec<String>)>,
+}
+
+impl PestFacts {
+    /// The bindings of the file `path` with the tree `ast`; `None` for a
+    /// file not named `Pest.php`.
+    pub fn of(path: &Path, ast: &[Stmt]) -> Option<PestFacts> {
+        if path.file_name().and_then(|n| n.to_str()) != Some("Pest.php") {
+            return None;
+        }
+        let dir = path.parent()?;
         let mut bindings = Vec::new();
         let mut hook_properties = Vec::new();
-        for (path, ast) in pest_files {
-            if path.file_name().and_then(|n| n.to_str()) != Some("Pest.php") {
-                continue;
-            }
-            let Some(dir) = path.parent() else {
+        for stmt in ast {
+            let StmtKind::Expression(e) = &stmt.kind else {
                 continue;
             };
-            for stmt in ast {
-                let StmtKind::Expression(e) = &stmt.kind else {
+            let ExprKind::MethodCall(inner, method, in_args, _) = &e.peeled().kind else {
+                continue;
+            };
+            if **method != *"in" {
+                continue;
+            }
+            let mut chain_props = FxHashSet::default();
+            let Some(uses_args) = walk_uses_chain(inner, &mut chain_props) else {
+                continue;
+            };
+            let class_names = class_names_from_uses_call(uses_args);
+            // A bare `uses()->beforeEach(...)->in(...)` (no class
+            // argument to `uses()` at all - confirmed real, not
+            // hypothetical: `tests/Pest.php`'s own `uses()->
+            // beforeEach(...)->afterEach(...)->in('Unit')`) still has
+            // real hook properties worth recording even though there's
+            // no class binding to go with them - only skip when
+            // *neither* is worth recording.
+            if class_names.is_empty() && chain_props.is_empty() {
+                continue;
+            }
+            let chain_props: Vec<String> = chain_props.into_iter().collect();
+            for in_arg in in_args {
+                let Some(target) = literal_string_value(&in_arg.value) else {
                     continue;
                 };
-                let ExprKind::MethodCall(inner, method, in_args, _) = &e.peeled().kind else {
-                    continue;
+                let target_path = Path::new(target.as_ref());
+                let prefix = if target_path.is_absolute() {
+                    target_path.to_path_buf()
+                } else {
+                    dir.join(target_path)
                 };
-                if **method != *"in" {
-                    continue;
+                if !class_names.is_empty() {
+                    bindings.push((prefix.clone(), class_names.clone()));
                 }
-                let mut chain_props = FxHashSet::default();
-                let Some(uses_args) = walk_uses_chain(inner, &mut chain_props) else {
-                    continue;
-                };
-                let class_names = class_names_from_uses_call(uses_args);
-                // A bare `uses()->beforeEach(...)->in(...)` (no class
-                // argument to `uses()` at all - confirmed real, not
-                // hypothetical: `tests/Pest.php`'s own `uses()->
-                // beforeEach(...)->afterEach(...)->in('Unit')`) still has
-                // real hook properties worth recording even though there's
-                // no class binding to go with them - only skip when
-                // *neither* is worth recording.
-                if class_names.is_empty() && chain_props.is_empty() {
-                    continue;
-                }
-                let chain_props: Vec<String> = chain_props.into_iter().collect();
-                for in_arg in in_args {
-                    let Some(target) = literal_string_value(&in_arg.value) else {
-                        continue;
-                    };
-                    let target_path = Path::new(target.as_ref());
-                    let prefix = if target_path.is_absolute() {
-                        target_path.to_path_buf()
-                    } else {
-                        dir.join(target_path)
-                    };
-                    if !class_names.is_empty() {
-                        bindings.push((prefix.clone(), class_names.clone()));
-                    }
-                    if !chain_props.is_empty() {
-                        hook_properties.push((prefix, chain_props.clone()));
-                    }
+                if !chain_props.is_empty() {
+                    hook_properties.push((prefix, chain_props.clone()));
                 }
             }
+        }
+        Some(PestFacts {
+            bindings,
+            hook_properties,
+        })
+    }
+}
+
+impl PestConfig {
+    /// Built from the facts of every currently-loaded file named
+    /// `Pest.php`.
+    pub fn build<'a>(pest_files: impl Iterator<Item = &'a PestFacts>) -> PestConfig {
+        let mut bindings = Vec::new();
+        let mut hook_properties = Vec::new();
+        for facts in pest_files {
+            bindings.extend(facts.bindings.iter().cloned());
+            hook_properties.extend(facts.hook_properties.iter().cloned());
         }
         PestConfig {
             bindings,

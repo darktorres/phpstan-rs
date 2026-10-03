@@ -12,7 +12,7 @@ use crate::checker::{self, Checker, PropertyAssignFacts};
 use crate::deps;
 use crate::file_id::{FileId, FileIdSet};
 use crate::ignore_comments;
-use crate::pest_config::PestConfig;
+use crate::pest_config::{PestConfig, PestFacts};
 use crate::registry::scope::Scope;
 use crate::registry::stubs;
 use crate::registry::{
@@ -27,6 +27,7 @@ use syntax::parser::ParseError;
 use syntax::span::{LineIndex, Span};
 use types::Name;
 use whole_program::renamed_named_arguments::NamedArgumentCallFactsWithPath;
+use whole_program::renamed_named_arguments::{DeclaredClass, declared_classes};
 
 mod architecture;
 mod banned;
@@ -132,6 +133,11 @@ pub(crate) struct FileState {
     // Its declarations as built, which the registry's are rebuilt from when
     // a name they declare changes.
     built_decls: Vec<BuiltDecl>,
+    // What it binds, when it is a `Pest.php`.
+    pest_facts: Option<PestFacts>,
+    // The classes it declares unconditionally, as the renamed-argument
+    // check reads them.
+    declared_classes: Vec<DeclaredClass>,
     // What is true of the file as a whole (`syntax::FileFacts`).
     facts: FileFacts,
     // Its lines, which the lines and columns of its spans are found by.
@@ -663,7 +669,7 @@ impl Project {
         self.pest_config = PestConfig::build(
             self.files
                 .iter()
-                .map(|(path, state)| (path.as_path(), state.ast.as_slice())),
+                .filter_map(|(_, state)| state.pest_facts.as_ref()),
         );
     }
 
@@ -916,6 +922,8 @@ impl Project {
             duplicate_class_sites,
             bodies,
             global_facts,
+            pest_facts,
+            declared_classes,
             origin_path,
             facts,
             line_index,
@@ -965,6 +973,8 @@ impl Project {
                 bodies,
                 global_facts,
                 built_decls,
+                pest_facts,
+                declared_classes,
                 facts,
                 line_index,
             },
@@ -1758,6 +1768,8 @@ impl Project {
         self.duplicate_class_sites.index(&ast, path, false);
         let bodies = FileBodies::of(&ast);
         let global_facts = Arc::new(GlobalFacts::of(&ast));
+        let pest_facts = PestFacts::of(path, &ast);
+        let declared_classes = declared_classes(&ast);
         let id = self.files.id_for(path);
         register_references(&mut self.dependents, id, &references);
         register_references(&mut self.signature_dependents, id, &declaration_references);
@@ -1782,6 +1794,8 @@ impl Project {
                 bodies,
                 global_facts,
                 built_decls,
+                pest_facts,
+                declared_classes,
                 facts,
                 line_index,
             },
@@ -2606,15 +2620,15 @@ impl Project {
         }
 
         if self.settings.rules.check_renamed_named_arguments {
-            let mut programs: Vec<(&PathBuf, &[Stmt])> = self
+            let mut programs: Vec<(&PathBuf, &[DeclaredClass])> = self
                 .files
                 .iter()
-                .map(|(path, file)| (path, file.ast.as_slice()))
+                .map(|(path, file)| (path, file.declared_classes.as_slice()))
                 .collect();
             programs.sort_by(|a, b| a.0.cmp(b.0));
             let overrides = whole_program::renamed_named_arguments::renamed_parameter_overrides(
                 &self.registry,
-                programs.into_iter().map(|(_, ast)| ast),
+                programs.into_iter().flat_map(|(_, classes)| classes),
             );
             let collisions =
                 whole_program::renamed_named_arguments::find_renamed_named_argument_collisions(
@@ -2767,6 +2781,10 @@ pub struct ParsedFile {
     // AST node into a ClassReflection/FunctionReflection" work runs here, in
     // parallel, rather than in the sequential insert loop.
     built_decls: Vec<crate::registry::BuiltDecl>,
+    // What the file binds, when it is a `Pest.php`.
+    pest_facts: Option<PestFacts>,
+    // The classes the file declares unconditionally.
+    declared_classes: Vec<DeclaredClass>,
     // This file's own top-level function declaration sites, already
     // built (see `DuplicateFunctionSites::merge`'s own doc comment) -
     // `insert_parsed_file` merges these into the project-wide table
@@ -2855,6 +2873,8 @@ pub fn parse_file_with_names<'a>(
         .collect();
     let bodies = FileBodies::of(&ast);
     let global_facts = Arc::new(GlobalFacts::of(&ast));
+    let pest_facts = PestFacts::of(path, &ast);
+    let declared_classes = declared_classes(&ast);
     Ok(ParsedFile {
         ast,
         lex_warnings,
@@ -2870,6 +2890,8 @@ pub fn parse_file_with_names<'a>(
         ignores,
         bodies,
         global_facts,
+        pest_facts,
+        declared_classes,
         origin_path,
         facts,
         line_index,

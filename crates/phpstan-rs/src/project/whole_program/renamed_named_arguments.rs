@@ -15,7 +15,7 @@ use crate::checker::NamedArgumentCallFacts;
 use crate::registry::Registry;
 use rustc_hash::{FxHashMap, FxHashSet};
 use std::path::PathBuf;
-use syntax::ast::{ClassDef, Stmt, Visibility};
+use syntax::ast::{Stmt, Visibility};
 use syntax::declarations::{Declared, for_each_declaration};
 use syntax::span::Span;
 use types::Name;
@@ -56,44 +56,70 @@ pub(crate) struct RenamedParameterOverride {
 
 pub(crate) type RenamedParameterOverrideFacts = Vec<RenamedParameterOverride>;
 
-/// Every renamed-parameter override declared by a class `programs`
+/// A class a file declares unconditionally, with what the check reads of
+/// its declaration; the rest it reads from the registry.
+#[derive(Debug, Clone)]
+pub(crate) struct DeclaredClass {
+    name: String,
+    /// The names of its own methods, in source order.
+    own_methods: Vec<Name>,
+    uses_traits: bool,
+}
+
+/// The classes `program` declares unconditionally.
+pub(crate) fn declared_classes(program: &[Stmt]) -> Vec<DeclaredClass> {
+    let mut classes = Vec::new();
+    for_each_declaration(program, |declaration, _, _| {
+        if let Declared::Class(c) = declaration.declared
+            && !declaration.conditional
+        {
+            classes.push(DeclaredClass {
+                name: declaration.name(),
+                own_methods: c
+                    .def
+                    .methods
+                    .iter()
+                    .map(|m| m.function.name.name.clone())
+                    .collect(),
+                uses_traits: !c.def.trait_uses.is_empty(),
+            });
+        }
+    });
+    classes
+}
+
+/// Every renamed-parameter override declared by a class `classes`
 /// declare unconditionally: each class's own methods in source order,
 /// then the methods it takes from used traits (sorted, skipping
 /// `__construct`, its own and abstract ones).
 pub(crate) fn renamed_parameter_overrides<'p>(
     registry: &Registry,
-    programs: impl IntoIterator<Item = &'p [Stmt]>,
+    classes: impl IntoIterator<Item = &'p DeclaredClass>,
 ) -> RenamedParameterOverrideFacts {
     let mut overrides = Vec::new();
-    for program in programs {
-        for_each_declaration(program, |declaration, _, _| {
-            if let Declared::Class(c) = declaration.declared
-                && !declaration.conditional
-            {
-                class_overrides(registry, &declaration.name(), &c.def, &mut overrides);
-            }
-        });
+    for class in classes {
+        class_overrides(registry, class, &mut overrides);
     }
     overrides
 }
 
 fn class_overrides(
     registry: &Registry,
-    fqn: &str,
-    c: &ClassDef,
+    class: &DeclaredClass,
     out: &mut RenamedParameterOverrideFacts,
 ) {
-    for m in &c.methods {
-        method_overrides(registry, fqn, &m.function.name, out);
+    let fqn = class.name.as_str();
+    for method in &class.own_methods {
+        method_overrides(registry, fqn, method, out);
     }
-    if c.trait_uses.is_empty() {
+    if !class.uses_traits {
         return;
     }
     let Some(info) = registry.classes.get(fqn) else {
         return;
     };
     let own_method_names: FxHashSet<&str> =
-        c.methods.iter().map(|m| m.function.name.as_ref()).collect();
+        class.own_methods.iter().map(|name| name.as_ref()).collect();
     let mut trait_method_names: Vec<Name> = info
         .methods()
         .keys()
