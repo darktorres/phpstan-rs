@@ -29,7 +29,6 @@ use crate::registry::settings::ReflectionSettings;
 use crate::rules_settings::RulesSettings;
 use crate::{ext, ignore_errors};
 
-use super::lazy_context::{LazyContext, Listings};
 use super::whole_program::renamed_named_arguments::merge_named_argument_calls;
 use super::{ParsedFile, Project, ProjectSettings};
 use diagnostics::{self, Diagnostic};
@@ -98,9 +97,6 @@ pub struct Session {
     dirs: Vec<PathBuf>,
     scan_dirs: Vec<PathBuf>,
     scan_files: Vec<PathBuf>,
-    /// The vendor classes found by name, which `scan_dirs` and `scan_files`
-    /// leave out.
-    lazy: LazyContext,
     stub_dirs: Vec<PathBuf>,
     level: u8,
     emission_order: bool,
@@ -385,8 +381,6 @@ impl Session {
         scan_dirs.extend(stub_dirs.iter().cloned());
 
         let mut scan_files = Vec::new();
-        let mut lazy = LazyContext::default();
-        let lazy_vendor = reflection.lazy_vendor_context.unwrap_or(false);
         let mut phpstan_api_check_enabled = false;
         let mut composer_manifests = Vec::new();
         let absolute_root = std::fs::canonicalize(&root).unwrap_or_else(|_| root.clone());
@@ -410,35 +404,8 @@ impl Session {
                     composer_php_versions = declared_php_versions(&package);
                     root_manifest = package.manifest.clone();
                 }
-                if lazy_vendor {
-                    // What the autoloader finds by name is loaded when a
-                    // name asks for it; the rest, as before.
-                    let autoload = &package.vendor.autoload;
-                    let named_files: FxHashSet<&PathBuf> =
-                        autoload.class_map.iter().map(|(_, file)| file).collect();
-                    let named_dirs: FxHashSet<&PathBuf> =
-                        autoload.psr4.iter().map(|(_, dir)| dir).collect();
-                    scan_dirs.extend(
-                        package
-                            .vendor
-                            .dirs
-                            .iter()
-                            .filter(|dir| !named_dirs.contains(dir))
-                            .cloned(),
-                    );
-                    scan_files.extend(
-                        package
-                            .vendor
-                            .files
-                            .iter()
-                            .filter(|file| !named_files.contains(file))
-                            .cloned(),
-                    );
-                    lazy.extend(&package.vendor.autoload);
-                } else {
-                    scan_dirs.extend(package.vendor.dirs.iter().cloned());
-                    scan_files.extend(package.vendor.files.iter().cloned());
-                }
+                scan_dirs.extend(package.vendor.dirs.iter().cloned());
+                scan_files.extend(package.vendor.files.iter().cloned());
                 phpstan_api_check_enabled |= package.requires_phpstan();
                 if let Some(manifest) = package.manifest {
                     promoted.extend(
@@ -460,7 +427,6 @@ impl Session {
                 };
                 scan_dirs.retain(|d| !is_promoted(d));
                 scan_files.retain(|f| !is_promoted(f));
-                lazy.retain(|path| !is_promoted(path));
                 dirs.extend(promoted);
             }
         }
@@ -508,7 +474,6 @@ impl Session {
             dirs,
             scan_dirs,
             scan_files,
-            lazy,
             stub_dirs,
             level,
             emission_order: overrides.emission_order,
@@ -701,86 +666,11 @@ impl Session {
         });
         let analyze_parsed = combined_parsed.split_off(context_files.len());
         let context_parsed = combined_parsed;
-        // The vendor classes the loaded files name, and those the files
-        // loaded for them name, parsed round by round; then, with the rest,
-        // in the order the path of each puts it.
-        let mut context: Vec<(PathBuf, Option<ReadFile>)> =
-            context_files.iter().cloned().zip(context_parsed).collect();
-        if !self.lazy.is_empty() {
-            let mut loaded: FxHashSet<PathBuf> = context_files.iter().cloned().collect();
-            let mut asked: FxHashSet<String> = FxHashSet::default();
-            let mut listings = Listings::default();
-            let mut scan_from = 0;
-            // The files whose names have not been asked about yet: the
-            // analysed files first, then each round's.
-            let mut analyzed_scanned = false;
-            loop {
-                let mut wanted: Vec<PathBuf> = Vec::new();
-                // An analysed file's strings can be looked up by its checks.
-                // A vendor file's are read only where its declarations are,
-                // since its bodies are read by nothing that looks a class
-                // up by a name it holds.
-                let mut ask = |parsed: &ParsedFile, analyzed: bool| {
-                    let strings = if analyzed {
-                        &parsed.string_class_names
-                    } else {
-                        &parsed.declaration_string_class_names
-                    };
-                    for key in parsed.references.iter().chain(strings) {
-                        if asked.insert(key.clone()) {
-                            for file in self.lazy.find(key, &mut listings) {
-                                if loaded.insert(file.clone()) {
-                                    wanted.push(file);
-                                }
-                            }
-                        }
-                    }
-                };
-                if !analyzed_scanned {
-                    for read in analyze_parsed.iter().flatten() {
-                        ask(&read.parsed, true);
-                    }
-                    analyzed_scanned = true;
-                }
-                for (_, read) in &context[scan_from..] {
-                    if let Some(read) = read {
-                        ask(&read.parsed, false);
-                    }
-                }
-                scan_from = context.len();
-                if wanted.is_empty() {
-                    break;
-                }
-                composer::path_order::sort_paths(&mut wanted);
-                let round: Vec<Option<ReadFile>> = pool.install(|| {
-                    wanted
-                        .par_iter()
-                        .map(|p| {
-                            let mut read = self.read_and_parse_file(
-                                p,
-                                stub_files.contains(p.as_path()),
-                                &interner,
-                            )?;
-                            project.index_use_sites(&mut read.parsed, &read.source);
-                            Some(read)
-                        })
-                        .collect()
-                });
-                context.extend(wanted.into_iter().zip(round));
-            }
-            // The order the files of the whole run would have been loaded
-            // in, which a name declared in several of them resolves by.
-            composer::path_order::sort_by_path(&mut context);
-        }
         project.expect_files(
-            context
+            context_parsed
                 .iter()
-                .filter_map(|(_, read)| read.as_ref().map(|read| &read.parsed))
-                .chain(
-                    analyze_parsed
-                        .iter()
-                        .filter_map(|read| read.as_ref().map(|read| &read.parsed)),
-                ),
+                .chain(&analyze_parsed)
+                .filter_map(|read| read.as_ref().map(|read| &read.parsed)),
         );
 
         // Context files first, so an analysed file's declaration wins a
@@ -798,12 +688,11 @@ impl Session {
             }));
         };
         let mut skipped_context = 0usize;
-        let context_total = context.len();
-        for (path, parsed) in context {
+        for (path, parsed) in context_files.iter().zip(context_parsed) {
             match parsed {
                 Some(ReadFile { source, parsed, .. }) => {
-                    note_lex_warnings(&path, &parsed);
-                    project.insert_parsed_file(path, parsed, source, false)
+                    note_lex_warnings(path, &parsed);
+                    project.insert_parsed_file(path.clone(), parsed, source, false)
                 }
                 None => skipped_context += 1,
             }
@@ -836,7 +725,7 @@ impl Session {
             analyze_files_by_size,
             skipped_analyze,
             skipped_context,
-            context_loaded: context_total - skipped_context,
+            context_loaded: context_files.len() - skipped_context,
             lex_warnings,
         })
     }

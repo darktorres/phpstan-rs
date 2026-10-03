@@ -38,7 +38,6 @@ pub(crate) mod duplicate_fn_sites;
 mod duplicate_functions;
 mod file_declarations;
 mod file_table;
-mod lazy_context;
 mod mock_hygiene;
 pub mod session;
 pub(crate) mod use_sites;
@@ -862,8 +861,6 @@ impl Project {
             constants,
             references,
             declaration_references,
-            string_class_names: _,
-            declaration_string_class_names: _,
             ignores,
             built_decls,
             anonymous_classes,
@@ -2601,10 +2598,6 @@ pub struct ParsedFile {
     constants: Vec<String>,
     references: FxHashSet<String>,
     declaration_references: FxHashSet<String>,
-    // The namespaced class names its strings hold (`deps::ReferencedNames`).
-    string_class_names: FxHashSet<String>,
-    // Those outside function and method bodies.
-    declaration_string_class_names: FxHashSet<String>,
     ignores: ignore_comments::IgnoreComments,
     // This file's own declarations, already built into
     // registry-independent `ClassReflection`/`FunctionReflection`/`Type` values (see
@@ -2668,12 +2661,7 @@ pub fn parse_file(
         duplicate_fn_sites,
         duplicate_class_sites,
     } = file_declarations::collect(&ast, path, is_stub, &origin, facts.has_anonymous_class);
-    let deps::ReferencedNames {
-        names: references,
-        outside: declaration_references,
-        strings: string_class_names,
-        declaration_strings: declaration_string_class_names,
-    } = deps::all_referenced_names(&ast);
+    let (references, declaration_references) = deps::both_referenced_names(&ast);
     // The anonymous classes are the declarations built last, one per
     // `new class`, so the file's own walk need not be repeated for them.
     let anonymous_classes = built_decls
@@ -2692,8 +2680,6 @@ pub fn parse_file(
         constants,
         references,
         declaration_references,
-        string_class_names,
-        declaration_string_class_names,
         built_decls,
         anonymous_classes,
         duplicate_fn_sites,

@@ -28,35 +28,6 @@ pub fn both_referenced_names(stmts: &[Stmt]) -> (FxHashSet<String>, FxHashSet<St
     (collector.names, collector.outside)
 }
 
-/// What one walk of a file finds: the names it references, those outside
-/// function and method bodies, and the class-name-shaped strings it holds.
-pub struct ReferencedNames {
-    /// `referenced_names`.
-    pub names: FxHashSet<String>,
-    /// `declaration_referenced_names`.
-    pub outside: FxHashSet<String>,
-    /// The `dependency_key` of each string literal that names a class by
-    /// its namespaced name (`'Acme\\Foo'`, `'Acme\\Foo::bar'`): a class a
-    /// string refers to is looked up by the checks that read it, though
-    /// no name in the file says so.
-    pub strings: FxHashSet<String>,
-    /// Those of `strings` outside function and method bodies.
-    pub declaration_strings: FxHashSet<String>,
-}
-
-/// `both_referenced_names`, with the strings that name classes.
-pub fn all_referenced_names(stmts: &[Stmt]) -> ReferencedNames {
-    let mut collector = Collector::new(true, true);
-    collector.strings = Some(FxHashSet::default());
-    walk_stmts(&mut collector, stmts);
-    ReferencedNames {
-        names: collector.names,
-        outside: collector.outside,
-        strings: collector.strings.unwrap_or_default(),
-        declaration_strings: collector.declaration_strings,
-    }
-}
-
 /// `referenced_names` without what only function and method bodies
 /// mention: the names a file's declarations can take their shape from
 /// (signatures, hierarchies, PHPDoc, constant values).
@@ -64,25 +35,6 @@ pub fn declaration_referenced_names(stmts: &[Stmt]) -> FxHashSet<String> {
     let mut collector = Collector::new(false, false);
     walk_stmts(&mut collector, stmts);
     collector.names
-}
-
-/// The class a string names by a namespaced name, `Acme\\Foo` of
-/// `'Acme\\Foo'` and of `'Acme\\Foo::bar'`: made of name characters and
-/// separators, with at least one backslash inside it.
-fn namespaced_class_string(text: &str) -> Option<&str> {
-    if text.len() > 200 || !text.contains('\\') {
-        return None;
-    }
-    let class = text.split("::").next().unwrap_or(text);
-    let name = class.trim_start_matches('\\');
-    let well_formed = !name.is_empty()
-        && name.split('\\').all(|part| {
-            !part.is_empty()
-                && part
-                    .bytes()
-                    .all(|b| b == b'_' || b.is_ascii_alphanumeric() || b >= 0x80)
-        });
-    (well_formed && name.contains('\\')).then_some(name)
 }
 
 /// The key a declaration's or reference's fully-qualified name (with or
@@ -118,10 +70,6 @@ struct Collector {
     // innermost last: their template parameters are names that are not
     // classes.
     templates: Vec<Option<std::sync::Arc<DocNames>>>,
-    // With `Some`, the namespaced class names the file's strings hold, and
-    // with `track_outside`, those outside function and method bodies.
-    strings: Option<FxHashSet<String>>,
-    declaration_strings: FxHashSet<String>,
 }
 
 /// What a doc comment's text alone gives the collector, kept by the text:
@@ -160,8 +108,6 @@ impl Collector {
             ctx: NameContext::default(),
             bodies,
             templates: Vec::new(),
-            strings: None,
-            declaration_strings: FxHashSet::default(),
         }
     }
 
@@ -423,21 +369,6 @@ fn hyphenated_end(text: &str, start: usize, is_name_char: impl Fn(char) -> bool)
 }
 
 impl<'ast> Visitor<'ast> for Collector {
-    fn visit_expr(&mut self, expr: &'ast Expr) {
-        if let (Some(strings), ExprKind::Literal(Literal::String(text))) =
-            (&mut self.strings, &expr.kind)
-            && let Some(text) = text.as_str()
-            && let Some(name) = namespaced_class_string(text)
-        {
-            let key = dependency_key(name);
-            if self.track_outside && self.body_depth == 0 {
-                self.declaration_strings.insert(key.clone());
-            }
-            strings.insert(key);
-        }
-        syntax::visit::walk_expr(self, expr);
-    }
-
     fn visit_stmt(&mut self, stmt: &'ast Stmt) {
         match &stmt.kind {
             StmtKind::Namespace(name) => self.ctx.set_namespace(name),

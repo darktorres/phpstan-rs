@@ -32,11 +32,6 @@ pub fn sort_paths(paths: &mut [PathBuf]) {
     paths.sort_by_cached_key(|path| key(path));
 }
 
-/// `sort_paths` for items each with its path: stable, by the path's key.
-pub fn sort_by_path<T>(items: &mut [(PathBuf, T)]) {
-    items.sort_by_cached_key(|(path, _)| key(path));
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

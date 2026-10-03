@@ -57,10 +57,8 @@ return array(
     let ctx = discover_vendor_context(dir.path());
     let foo = std::fs::canonicalize(dir.path().join("vendor/acme/lib/Foo.php")).unwrap();
     let src_dir = std::fs::canonicalize(dir.path().join("vendor/acme/lib/src")).unwrap();
-    assert_eq!(ctx.files, vec![foo.clone()]);
-    assert_eq!(ctx.dirs, vec![src_dir.clone()]);
-    assert_eq!(ctx.autoload.class_map, vec![("Acme\\Foo".to_string(), foo)]);
-    assert_eq!(ctx.autoload.psr4, vec![("Acme\\".to_string(), src_dir)]);
+    assert_eq!(ctx.files, vec![foo]);
+    assert_eq!(ctx.dirs, vec![src_dir]);
 }
 
 // Real code that constructs Composer's own bootstrap loader directly
@@ -150,15 +148,6 @@ class ComposerStaticInitTest
     // The vendor-rooted entries resolve.
     assert!(ctx.files.contains(&foo), "got: {:?}", ctx.files);
     assert!(ctx.dirs.contains(&acme_dir), "got: {:?}", ctx.dirs);
-    // And are kept with the names their entries are keyed by.
-    assert_eq!(
-        ctx.autoload.class_map,
-        vec![("Acme\\Foo".to_string(), foo.clone())]
-    );
-    assert_eq!(
-        ctx.autoload.psr4,
-        vec![("Acme\\".to_string(), acme_dir.clone())]
-    );
 
     // The `__DIR__ . '/../..'`-rooted (first-party, `app/`) entries
     // must be dropped by the vendor-only filter.
