@@ -134,14 +134,24 @@ this branch with master's subject line, one row each. 86 open, 1 skipped.
 The ledger also lists what `master2` changed that those commits meet (stored
 types need serde and `PartialEq`, passes must run in scope, `project.rs`).
 
-### 7. The 25 G Piwigo profile — `PROFILE_DRILL_PIWIGO_25G.md` (implemented without validation)
+### 7. The 25 G Piwigo profile — `PROFILE_DRILL_PIWIGO_25G.md` (implemented, validated at `1892b477`)
 
-All of Part II's commits that could be written were, gate-only (`scratchpad/gate.sh`:
-format and clippy, no tests); none of the end-of-work checks has run: the full
-`cargo test --workspace`, the fixtures (`--test fixtures`), the Piwigo O2
-checksum (`6e5fa444…`), the O1 front-end dumps (a new baseline: `ParsedFile`
-changed), callgrind and `hyperfine`. Run those first, from the commit before
-`e1e54c29`, and bisect any difference.
+Validated: `cargo test --workspace` and the fixtures (3,818) pass; the Piwigo
+O2 checksum equals the baseline's (`6e5fa444…`, from `7a3f3f99`); both binaries
+parse all 17,393 vendor files with no parse error; `hyperfine` on Piwigo,
+alternating, warm, load average 6-7: 2.46 s to 2.20 s wall (user 10.2 s to
+8.4 s). Not run: callgrind (about 25 G Ir under valgrind) and the O1
+front-end dumps (the dump hashes the whole `ParsedFile`, which changed, so no
+baseline compares).
+
+Validation found and fixed: a `new` class counted as a constant in the
+dependency walk; a completion cursor past the end of a stale line; `if
+(false)` declarations treated as never run; the resolution memo answering a
+type written `\stdClass` with the one written `\StdClass`; and two wrong
+tests of mine. The vendor-tree report differs from the baseline's in
+improvements only (read: loops with no `break` end, so `return.missing` goes and
+`deadCode.unreachable` appears; an arrow function's body takes `xor`; a method's
+docblock is inherited across case-different names; union member order).
 
 - Not built, with the reason:
   - F3 steps 1-2 (member-level and map-level `Arc` in `ClassReflection`): a
