@@ -130,7 +130,8 @@ impl<'a> Checker<'a> {
             return;
         };
         if looks_like_query_builder_chain(rhs) {
-            locals.set_query_builder_alias(name.to_string(), std::rc::Rc::new(rhs.clone()));
+            let alias = locals.var_key(name);
+            locals.set_query_builder_alias(alias, std::rc::Rc::new(rhs.clone()));
         }
     }
 
@@ -169,7 +170,9 @@ impl<'a> Checker<'a> {
                 // claimed. Substitutes the stored assignment expression
                 // and keeps walking - `$qb2 = $qb;` chains of aliases
                 // resolve the same way, one substitution at a time.
-                ExprKind::Variable(name) => match locals.query_builder_aliases().get(name.as_ref())
+                ExprKind::Variable(name) => match locals
+                    .find_var(name)
+                    .and_then(|alias| locals.query_builder_aliases().get(&alias))
                 {
                     Some(rhs) => cursor = Cursor::Owned(rhs.clone()),
                     None => break,

@@ -1,7 +1,7 @@
 use rustc_hash::FxHashMap;
 use types::Name;
 
-use crate::checker::{Checker, Locals, class_kind_identifier};
+use crate::checker::{Checker, class_kind_identifier};
 use crate::registry::{
     FunctionReflection, PropertyReflection, collect_class_name_case_refs, resolve_names_in_type,
 };
@@ -888,7 +888,7 @@ impl<'a> Checker<'a> {
                 .filter(|(owner, sig)| owner.as_ref() == fqn && sig.has_phpdoc_type())
                 .map(|(_, sig)| sig.ty().clone());
             if phpdoc_ty.is_none() && c.type_hint.is_none() {
-                let value_ty = self.infer_expr(&c.value, &Locals::default());
+                let value_ty = self.infer_expr(&c.value, &self.new_locals());
                 self.check_configured_constant_value(
                     Some(fqn),
                     &c.name,
@@ -899,7 +899,7 @@ impl<'a> Checker<'a> {
                 continue;
             }
             if let Some(phpdoc_ty) = &phpdoc_ty {
-                let value_ty = self.infer_expr(&c.value, &Locals::default());
+                let value_ty = self.infer_expr(&c.value, &self.new_locals());
                 if !value_ty.is_mixed() {
                     self.check_constant_phpdoc_value(
                         fqn,
@@ -917,7 +917,7 @@ impl<'a> Checker<'a> {
                 continue;
             };
             let declared_ty = self.resolve_type_hint(Some(raw_hint));
-            let value_ty = self.infer_expr(&c.value, &Locals::default());
+            let value_ty = self.infer_expr(&c.value, &self.new_locals());
             // `mixed` here almost always means "this checker
             // couldn't resolve it" (an unrecognized global constant,
             // e.g. `DEBUG_BACKTRACE_IGNORE_ARGS`, a real PHP builtin,
@@ -1191,7 +1191,7 @@ impl<'a> Checker<'a> {
                     own_native.as_ref(),
                 );
                 if immediate.contains(trait_fqn) {
-                    let own_value = self.infer_expr(&cc.value, &Locals::default());
+                    let own_value = self.infer_expr(&cc.value, &self.new_locals());
                     if !own_value.is_mixed() && own_value != *trait_const.value_ty() {
                         self.report_builder(
                             DiagnosticBuilder::new(format!(

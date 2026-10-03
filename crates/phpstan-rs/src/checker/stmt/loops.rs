@@ -1,3 +1,4 @@
+use crate::checker::keys::KeyData;
 use rustc_hash::FxHashMap;
 use std::rc::Rc;
 use types::UnionAll as _;
@@ -785,7 +786,9 @@ impl<'a> Checker<'a> {
                 if let ExprKind::Variable(value_name) = &value.kind
                     && let ExprKind::Variable(subject_name) = &subject.kind
                 {
-                    propagate_container_field_facts(pass_locals, value_name, subject_name);
+                    let value_key = pass_locals.var_key(value_name);
+                    let subject_key = pass_locals.var_key(subject_name);
+                    propagate_container_field_facts(pass_locals, value_key, subject_key);
                 }
                 this.check_loop_body(body, pass_locals, declared_return, label);
                 if let Some(Expr {
@@ -793,20 +796,28 @@ impl<'a> Checker<'a> {
                     ..
                 }) = key
                 {
-                    let suffix = format!("[${key_name}]");
                     let continues = this.loop_continue_states.last();
+                    let subscript = pass_locals.var_key(key_name);
+                    // The variables the body wrote at the loop's key:
+                    // `$base[$key]`, `base` a variable.
                     last_written_at_key = pass_locals
-                        .iter()
-                        .filter_map(|(k, _)| k.strip_suffix(suffix.as_str()))
-                        .filter(|base| base.chars().all(|c| c.is_alphanumeric() || c == '_'))
-                        .filter(|base| {
-                            let marker = format!("{base}{suffix}");
+                        .synthetic_keys()
+                        .filter_map(|&k| match pass_locals.data(k) {
+                            KeyData::VarIndex { base, subscript: s } if s == subscript => {
+                                match pass_locals.data(base) {
+                                    KeyData::Var(name) => Some((k, name)),
+                                    _ => None,
+                                }
+                            }
+                            _ => None,
+                        })
+                        .filter(|(k, _)| {
                             continues
                                 .into_iter()
                                 .flatten()
-                                .all(|state| state.contains_key(&marker))
+                                .all(|state| state.contains_key(*k))
                         })
-                        .map(str::to_string)
+                        .map(|(_, name)| name.to_string())
                         .collect();
                     last_pass_breaks = this
                         .loop_break_states
@@ -816,13 +827,13 @@ impl<'a> Checker<'a> {
                 if let ExprKind::Variable(value_name) = &value.kind {
                     // The value as each way through the body leaves it: its
                     // end, and every `continue`.
-                    last_value_ty = std::iter::once(pass_locals.get(value_name).cloned())
+                    last_value_ty = std::iter::once(pass_locals.get_var(value_name).cloned())
                         .chain(
                             this.loop_continue_states
                                 .last()
                                 .into_iter()
                                 .flatten()
-                                .map(|state| state.get(value_name).cloned()),
+                                .map(|state| state.get_var(value_name).cloned()),
                         )
                         .collect::<Option<Vec<Type>>>()
                         .map(|m| this.relation().union_of(m));
@@ -830,13 +841,14 @@ impl<'a> Checker<'a> {
                         .loop_break_states
                         .last()
                         .is_none_or(|states| !states.is_empty());
-                    let prefix = format!("{value_name}[");
+                    let value_key = pass_locals.var_key(value_name);
                     last_field_facts = pass_locals
                         .iter()
-                        .filter_map(|(k, v)| {
-                            k.strip_prefix(&prefix)
-                                .and_then(|rest| rest.strip_suffix(']'))
-                                .map(|field| (field.to_string(), v.clone()))
+                        .filter_map(|(k, v)| match pass_locals.data(k) {
+                            KeyData::Index { base, key } if base == value_key => {
+                                Some((key.to_string(), v.clone()))
+                            }
+                            _ => None,
                         })
                         .collect();
                 }
@@ -868,14 +880,14 @@ impl<'a> Checker<'a> {
                 if Some(name.as_str()) == subject_name {
                     continue;
                 }
-                let Some(current) = locals.get(name).cloned() else {
+                let Some(current) = locals.get_var(name).cloned() else {
                     continue;
                 };
                 let written = keys
                     .iter()
                     .fold(current, |ty, key| ty.with_key_presence(key, true));
                 if !written.is_never() {
-                    locals.insert(name.clone(), written);
+                    locals.insert_var(name, written);
                 }
             }
         }
@@ -892,7 +904,7 @@ impl<'a> Checker<'a> {
             && let ExprKind::Variable(subject_name) = &subject.kind
             && let Some(old_element_ty) = subject_ty.array_value_type()
             && let Some(final_value_ty) = last_value_ty
-            && let Some(current_subject_ty) = locals.get(subject_name).cloned()
+            && let Some(current_subject_ty) = locals.get_var(subject_name).cloned()
         {
             let widened_element_ty = if last_pass_breaks {
                 self.relation().union(old_element_ty, final_value_ty)
@@ -908,11 +920,12 @@ impl<'a> Checker<'a> {
             // so a later read through a *differently-named* variable
             // bound from it (a plain `$x = $container[$dyn];`, or a
             // later, non-by-ref `foreach`) can still find it.
+            let subject_key = locals.var_key(subject_name);
             locals
                 .container_field_facts_mut()
-                .insert(subject_name.to_string(), Rc::new(last_field_facts));
+                .insert(subject_key, Rc::new(last_field_facts));
             locals.insert(
-                subject_name.to_string(),
+                subject_key,
                 current_subject_ty.with_general_array_value(&widened_element_ty),
             );
         }

@@ -200,7 +200,7 @@ impl<'a> Checker<'a> {
         syntax::stack::guard(|| {
             if let Some(init) = self.file_constant_initializer(e) {
                 return (depth < MAX_CONSTANT_DEPTH)
-                    .then(|| self.resolve_paths_at(init, &Locals::default(), depth + 1))
+                    .then(|| self.resolve_paths_at(init, &self.new_locals(), depth + 1))
                     .flatten();
             }
             let e = e.peeled();
@@ -344,7 +344,7 @@ impl<'a> Checker<'a> {
         &self,
         program: &[Stmt],
     ) -> (FxHashSet<String>, Vec<String>) {
-        let locals = Locals::default();
+        let locals = self.new_locals();
         let mut guarded = FxHashSet::default();
         let mut include_dirs = default_include_dirs();
         let mut on_call = |call: IncludeCall| match call {

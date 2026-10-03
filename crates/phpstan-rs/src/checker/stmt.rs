@@ -1,7 +1,8 @@
+use crate::checker::keys::LocalKey;
 use crate::checker::{
     ATTRIBUTE_TARGET_CLASS, ATTRIBUTE_TARGET_CLASS_CONSTANT, ATTRIBUTE_TARGET_PROPERTY, BREAK_HERE,
     BlockCompletion, CONTINUE_HERE, Checker, Completion, Locals, generator_missing_return_type,
-    generator_template_param, is_truthy_literal, merge_scopes, purge_stale_narrowing_for,
+    generator_template_param, is_truthy_literal, merge_scopes, purge_stale_narrowing_for_var,
 };
 use syntax::ast::*;
 use types::Name;
@@ -17,10 +18,13 @@ fn reconstructed_discriminant_return_types(e: &Expr, locals: &Locals) -> Vec<Typ
     let ExprKind::Variable(name) = &e.kind else {
         return Vec::new();
     };
+    let Some(container_key) = locals.find_var(name) else {
+        return Vec::new();
+    };
     locals
         .discriminant_array_facts()
         .iter()
-        .filter(|((container, _, _), _)| container.as_str() == name.as_ref())
+        .filter(|((container, _, _), _)| *container == container_key)
         .map(|(_, ty)| ty.clone())
         .collect()
 }
@@ -383,7 +387,7 @@ impl<'a> Checker<'a> {
         // top-level scope.
         let top_level = label == "<main>";
         let defined = |name: &str| {
-            locals.contains_key(name)
+            locals.contains_var(name)
                 || matches!(
                     name,
                     "GLOBALS"
@@ -646,8 +650,8 @@ impl<'a> Checker<'a> {
             if assigned.contains(name) {
                 continue;
             }
-            purge_stale_narrowing_for(locals, name);
-            locals.insert(name.clone(), ty.clone());
+            purge_stale_narrowing_for_var(locals, name);
+            locals.insert_var(&name.clone(), ty.clone());
         }
         match &stmt.kind {
             StmtKind::Expression(e) => {
@@ -696,7 +700,7 @@ impl<'a> Checker<'a> {
                 // doc comment has the "which chain position is actually
                 // safe" reasoning.
                 // A variable an assertion narrows to `never` fails it.
-                let inhabited: Vec<String> = if matches!(
+                let inhabited: Vec<LocalKey> = if matches!(
                     e.kind,
                     ExprKind::Call(..) | ExprKind::MethodCall(..) | ExprKind::StaticCall(..)
                 ) || bare_assert_condition(e).is_some()
@@ -704,7 +708,7 @@ impl<'a> Checker<'a> {
                     locals
                         .iter()
                         .filter(|(_, t)| !t.is_never())
-                        .map(|(k, _)| k.clone())
+                        .map(|(k, _)| k)
                         .collect()
                 } else {
                     Vec::new()
@@ -727,7 +731,7 @@ impl<'a> Checker<'a> {
                 self.apply_bare_statement_assert_narrowing(e, locals);
                 if inhabited
                     .iter()
-                    .any(|k| locals.get(k).is_some_and(Type::is_never))
+                    .any(|k| locals.get(*k).is_some_and(Type::is_never))
                 {
                     self.terminating_assertions.insert(stmt.span);
                 }
@@ -1107,7 +1111,7 @@ impl<'a> Checker<'a> {
                     // when it doesn't. `.declare` unconditionally
                     // overwrites, so it's only called when there's
                     // nothing here yet to overwrite.
-                    if !locals.contains_key(name) {
+                    if !locals.contains_var(name) {
                         let ty = self
                             .registry
                             .global_variables
@@ -1115,7 +1119,7 @@ impl<'a> Checker<'a> {
                             .cloned()
                             .unwrap_or(Type::mixed());
                         self.probe_hit_at(stmt.span, &ty);
-                        locals.declare(name.to_string(), ty, name.span);
+                        locals.declare_var(name, ty, name.span);
                     }
                 }
             }
@@ -1139,9 +1143,9 @@ impl<'a> Checker<'a> {
                         .as_ref()
                         .map(|e| static_variable_type(&self.check_expr(e, locals, label)))
                         .unwrap_or(Type::mixed());
-                    purge_stale_narrowing_for(locals, name);
+                    purge_stale_narrowing_for_var(locals, name);
                     self.probe_hit_at(stmt.span, &ty);
-                    locals.declare(name.to_string(), ty, name.span);
+                    locals.declare_var(name, ty, name.span);
                     self.static_var_names.insert(name.name.clone());
                 }
             }
@@ -1313,8 +1317,8 @@ impl<'a> Checker<'a> {
         let defined = statement_defined_variable_names(&stmt.kind);
         for (name, ty) in inline_var {
             if defined.contains(&name) {
-                purge_stale_narrowing_for(locals, &name);
-                locals.insert(name, ty);
+                purge_stale_narrowing_for_var(locals, &name);
+                locals.insert_var(&name, ty);
             }
         }
         match &stmt.kind {
@@ -1492,13 +1496,13 @@ impl<'a> Checker<'a> {
             // "narrow correctly first" precedent for a new fact-tracking
             // trigger.
             let discriminant_subject = match &cond.peeled().kind {
-                ExprKind::Variable(name) => Some(name.to_string()),
+                ExprKind::Variable(name) => Some(locals.var_key(name)),
                 _ => None,
             };
             let mut then_locals = locals.clone();
             self.apply_narrowing(cond, &mut then_locals, true);
             if let Some(subject) = &discriminant_subject {
-                self.active_discriminant.push((subject.clone(), true));
+                self.active_discriminant.push((*subject, true));
             }
             let then_completion =
                 self.check_stmt(then_branch, &mut then_locals, declared_return, label);
@@ -1519,7 +1523,7 @@ impl<'a> Checker<'a> {
             // other alias.
             self.record_if_body_flag_alias(cond, then_branch, &mut then_locals, &mut else_locals);
             if let Some(subject) = &discriminant_subject {
-                self.active_discriminant.push((subject.clone(), false));
+                self.active_discriminant.push((*subject, false));
             }
             // How the rest of the chain, or the `else`, completes; a chain with
             // no `else` falls through.

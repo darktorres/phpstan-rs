@@ -1,4 +1,5 @@
-use crate::checker::{Checker, Locals, literal_string_key};
+use crate::checker::keys::{KeyData, LocalKey};
+use crate::checker::{Checker, Locals};
 use syntax::ast::*;
 use types::Type;
 
@@ -32,191 +33,39 @@ pub(crate) fn narrowing_infer_target(e: &Expr) -> &Expr {
     })
 }
 
-/// A stable string key for the small set of expressions this checker can
-/// narrow: a bare local variable, a property-access chain rooted in one
-/// (`$a->b->c`), or a literal-key array-index chain rooted in one
-/// (`$a['k1']['k2']`, `$a->b['k']`, any mix of the two). Lets `locals`
-/// (otherwise keyed by plain variable name) also carry narrowed
-/// property-chain/array-index types, reusing the exact same map rather
-/// than a second, parallel one - safe because every synthetic key this
-/// produces contains a character (`-` from `->`, or `[`/`]`) that can
-/// never appear in a real PHP variable name (see `is_real_variable_key`,
-/// the discriminator this invariant exists to support), so the key
-/// spaces can't collide.
-///
-/// Without the `PropertyAccess` case, `apply_narrowing`'s `instanceof`
-/// handling could only ever narrow a bare variable - `$arg->value
-/// instanceof Variable && $arg->value->name` (a common AST-visitor
-/// idiom - narrow a property, then read a property only the
-/// narrowed-to subtype has) would have no way to remember that
-/// narrowing, so the second half would be checked against
-/// `$arg->value`'s un-narrowed declared type.
-///
-/// The identical gap applies to a literal array-index chain instead of
-/// a property chain: `is_string($lang_info['jquery_code'])` must narrow
-/// `$lang_info['jquery_code']` too, or a later read of the same
-/// expression sees its un-narrowed, wider declared/inferred type. A
-/// dynamic key (`$a[$k]`) can't be narrowed this way - the same key at another
-/// point in the code isn't guaranteed to be the same runtime index - so
-/// only a literal key participates, matching `literal_string_key`'s own
-/// existing use for the analogous shape-growing case in
-/// `bind_assignment_target`.
-pub(crate) fn narrowing_key(e: &Expr) -> Option<String> {
-    syntax::stack::guard(|| {
-        let e = e.peeled();
-        match &e.kind {
-            // No prefix - `locals` is keyed by bare variable name everywhere
-            // else in this checker (`ExprKind::Variable(name) => locals.get(name)`),
-            // and this has to produce the exact same key for a bare variable
-            // to stay a drop-in replacement at the Instanceof-narrowing call
-            // site.
-            ExprKind::Variable(name) => Some(name.to_string()),
-            ExprKind::PropertyAccess(base, prop, _) => {
-                narrowing_key(base).map(|base_key| format!("{base_key}->{prop}"))
-            }
-            // A static property (`self::$adminSessionCookies !== null`)
-            // needs a narrowing key too, not just an instance property's
-            // `->` chain. Scoped to a real static property specifically
-            // (the parser's own `$`-prefixed `member` encoding,
-            // distinguishing it from a class constant or `Foo::class`) -
-            // both this arm and the generic write-side purge-and-update in
-            // `bind_assignment_target` key off `narrowing_key` uniformly,
-            // so a later `self::$prop = ...` correctly invalidates/replaces
-            // this same entry with no additional wiring needed.
-            ExprKind::StaticPropertyFetch(StaticTarget::Name(class_name), name) => {
-                Some(format!("{class_name}::${name}"))
-            }
-            ExprKind::Index(base, Some(idx)) => {
-                let base_key = narrowing_key(base)?;
-                match literal_string_key(idx) {
-                    Some(key) => Some(format!("{base_key}[{key}]")),
-                    // `is_string($this->mirror[$key])`
-                    // where `$key` is a variable, not a literal - a `$`-
-                    // prefixed marker distinguishes "keyed by this variable's
-                    // current value" from a literal key's own text (which
-                    // `is_real_variable_key` already treats as synthetic
-                    // either way, so this can't be mistaken for a real bare-
-                    // variable key). Only sound alongside real invalidation
-                    // of this entry whenever `subscript_name` is reassigned -
-                    // see `purge_stale_narrowing_for`, wired in everywhere a
-                    // bare variable's value can change.
-                    None => match &idx.kind {
-                        ExprKind::Variable(subscript_name) => {
-                            Some(format!("{base_key}[${subscript_name}]"))
-                        }
-                        _ => None,
-                    },
-                }
-            }
-            // `is_string($result = expr)` - an assignment nested
-            // inside the narrowed expression itself, the common "assign-then-
-            // check" idiom. An assignment's own runtime value is exactly
-            // what ends up stored under its left-hand side, so whatever gets
-            // checked here is equally true of `lhs`'s own key afterward -
-            // narrowing key can borrow the underlying variable/property/index
-            // key without needing its own dedicated storage.
-            ExprKind::Assign(lhs, _) | ExprKind::AssignRef(lhs, _) => narrowing_key(lhs),
-            // `($file = readdir($dir)) !== false` - the
-            // "assign-then-check" idiom above, but wrapped in parens, which
-            // real PHP requires for the statement's own top-level shape
-            // (`$file = readdir($dir) !== false` would parse as `$file =
-            // (readdir($dir) !== false)` instead - `=` binds looser than
-            // `!==` there). Without this, `Assign`'s own arm above never
-            // gets a chance to run for the single most common shape it
-            // exists to cover. The comparison-operand position specifically
-            // (`false !== $file = readdir($dir)`, no parens, no assignment
-            // at the very top of the statement) doesn't need this arm at
-            // all - `parse_assignment_tail` already builds the right
-            // `Assign` node directly as the comparison's own operand - but
-            // plenty of real code still writes the parens out of habit, so
-            // both arms stay.
-            // `is_int($decoded['status'] ?? null)` - a
-            // common defensive-coding idiom (json_decode results,
-            // `$_SERVER`/`$_GET` reads, ...). Scoped to a literal `null`
-            // fallback specifically, not any coalesce: `is_int($x['k'] ??
-            // null)` being true can only happen if `$x['k']` itself was
-            // already `int` (the fallback `null` would fail `is_int`
-            // otherwise, so `null` specifically can never be the reason the
-            // predicate passed) - but `is_int($x['k'] ?? 0)` gives no such
-            // guarantee, since `$x['k']` being absent/`null` would still make
-            // the whole expression `is_int`-true via the fallback `0`,
-            // wrongly narrowing `$x['k']` itself away from a real possibility
-            // (`null`) it could still hold.
-            ExprKind::Binary(BinOp::Coalesce, lhs, rhs)
-                if matches!(&rhs.kind, ExprKind::Literal(Literal::Null)) =>
-            {
-                narrowing_key(lhs)
-            }
-            _ => None,
-        }
-    })
-}
-
-/// Whether `key` (as found in a `Locals` map) could be a real PHP
-/// variable name, as opposed to one of `narrowing_key`'s own synthetic
-/// property-chain/array-index keys - real PHP variable names are
-/// restricted to `[A-Za-z_][A-Za-z0-9_]*`, so any other character (`-`
-/// from `->`, `[`, `]`, ...) proves a key is synthetic, regardless of
-/// which of `narrowing_key`'s own formats produced it. A shared,
-/// character-class-based check rather than hunting for one specific
-/// separator (`contains('-')`, say) - robust against `narrowing_key`
-/// gaining a third synthetic shape later without every caller needing
-/// its own update to keep excluding it correctly.
-pub(crate) fn is_real_variable_key(key: &str) -> bool {
-    // A byte of a character past ASCII is none of the classes, as the
-    // character is not.
-    let mut bytes = key.bytes();
-    bytes
-        .next()
-        .is_some_and(|b| b.is_ascii_alphabetic() || b == b'_')
-        && bytes.all(|b| b.is_ascii_alphanumeric() || b == b'_')
-}
-
 /// Drops every `locals` entry that depended on `key`'s pre-reassignment
 /// identity - either because `key` was itself the root a *deeper*
-/// synthetic key was built from (`"key->prop"`, `"key[lit]"` - covers
-/// both a bare-variable root and a full chain root, e.g. reassigning
-/// `$foo->bar` invalidates a stale `"foo->bar->baz"`), or because `key`
-/// (when it's a bare variable name) was used as a *variable subscript*
-/// inside a different chain entirely (`"other[$key]"`, `narrowing_key`'s
-/// own new key shape - never matches for a non-bare-variable `key`,
-/// since a subscript marker only ever wraps a plain variable name).
+/// synthetic key was built from (`key->prop`, `key[lit]` - covers both a
+/// bare-variable root and a full chain root, e.g. reassigning `$foo->bar`
+/// invalidates a stale `foo->bar->baz`), or because `key` (when it's a
+/// variable) was used as a *variable subscript* inside a different chain
+/// entirely (`other[$key]`). What depends on a key is what the key table
+/// recorded was built on it.
 ///
-/// Without this, nothing invalidates a stale
-/// composite-key entry when a variable it depends on changes - not just
-/// for a variable-subscript key, but for any composite key at all
-/// (reassigning `$foo` would leave a stale `"foo->bar"` sitting in
-/// `locals` forever). Called from every real call site that can give a
-/// bare variable, property chain, or index chain a new value.
-///
-/// Iterates and removes by key rather than a `retain` call - `Locals`'s
-/// own doc comment (`checker.rs`) only documents `insert`/`remove`/
-/// `entry`/`get`/`contains_key`/`iter` as verified-compatible with
-/// `std::collections::HashMap` on the underlying `imbl` persistent map,
-/// not `retain`.
-pub(crate) fn purge_stale_narrowing_for(locals: &mut Locals, key: &str) {
-    // Only a key that isn't a plain variable's name can depend on another.
+/// Without this, nothing invalidates a stale composite-key entry when a
+/// variable it depends on changes - not just for a variable-subscript key,
+/// but for any composite key at all (reassigning `$foo` would leave a stale
+/// `foo->bar` sitting in `locals` forever). Called from every real call
+/// site that can give a bare variable, property chain, or index chain a new
+/// value.
+pub(crate) fn purge_stale_narrowing_for(locals: &mut Locals, key: LocalKey) {
+    // Only a key that isn't a variable can depend on another.
     if locals.may_have_member_narrowing() {
-        let subscript = format!("[${key}]");
-        // What depends on `key` is not a real variable's name, so it is
-        // among the synthetic keys.
-        let stale: Vec<String> = locals
-            .synthetic_keys()
-            .filter(|k| k.as_str() != key && depends_on_with(k, key, &subscript))
-            .cloned()
-            .collect();
-        for k in stale {
-            locals.remove(&k);
+        let dependents = locals.keys().borrow().all_dependents(key);
+        for dependent in dependents {
+            if locals.is_synthetic(dependent) {
+                locals.remove(dependent);
+            }
         }
     }
     // `key`'s own per-field container facts (see `ContainerFieldFactsMap`'s
-    // doc comment) are just as stale as a composite `narrowing_key` entry
-    // rooted at `key` the moment `key` itself is genuinely rebound - this
-    // is already called at every real call site that can give a bare
-    // variable a new value outside `Locals::declare` (which purges it
-    // itself), so riding along here covers all of them uniformly rather
-    // than needing its own separate call at each one.
-    locals.container_field_facts_mut().remove(key);
+    // doc comment) are just as stale as a composite key rooted at `key` the
+    // moment `key` itself is genuinely rebound - this is already called at
+    // every real call site that can give a bare variable a new value
+    // outside `Locals::declare` (which purges it itself), so riding along
+    // here covers all of them uniformly rather than needing its own
+    // separate call at each one.
+    locals.container_field_facts_mut().remove(&key);
     locals.purge_branch_implied_facts_depending_on(key);
     // Same reasoning for `key`'s own per-discriminant accumulator facts
     // (see `DiscriminantArrayFactsMap`'s doc comment) - a wholesale
@@ -225,52 +74,42 @@ pub(crate) fn purge_stale_narrowing_for(locals: &mut Locals, key: &str) {
     // for it is stale too.
     locals
         .discriminant_array_facts_mut()
-        .retain(|(container, _, _), _| container != key);
+        .retain(|(container, _, _), _| *container != key);
 }
 
-/// Whether narrowing key `k` names `key` itself, a chain rooted at it
-/// (`"key->prop"`, `"key[lit]"`), or a chain using `key` as a variable
-/// subscript (`"other[$key]"`) - i.e. whether `k`'s value can change
-/// when `key` is rebound.
-pub(crate) fn key_depends_on(k: &str, key: &str) -> bool {
-    k == key
-        || k.strip_prefix(key)
-            .is_some_and(|rest| rest.starts_with("->") || rest.starts_with('['))
-        || (k.contains('[') && k.contains(&format!("[${key}]")))
-}
-
-/// `key_depends_on` with `key`'s variable-subscript text, `[$key]`, built
-/// by the caller once for many keys.
-fn depends_on_with(k: &str, key: &str, subscript: &str) -> bool {
-    k == key
-        || k.strip_prefix(key)
-            .is_some_and(|rest| rest.starts_with("->") || rest.starts_with('['))
-        || k.contains(subscript)
+/// `purge_stale_narrowing_for`, for the variable `name`.
+pub(crate) fn purge_stale_narrowing_for_var(locals: &mut Locals, name: &str) {
+    let key = locals.var_key(name);
+    purge_stale_narrowing_for(locals, key);
 }
 
 /// Eagerly copies `source_container`'s own recorded per-field facts (see
-/// `ContainerFieldFactsMap`'s doc comment) onto `target_name`'s own
-/// `narrowing_key` synthetic keys, the moment `target_name` is bound from
-/// a dynamic-keyed read of `source_container` (a `foreach` value, or a
-/// plain `$x = $container[$dyn];`) - the two pre-existing `narrowing_key`-
-/// consulting Index-read fast paths (`checker/expr.rs`'s `check_expr`/
-/// `infer_expr`) then pick them up with no further code needed at the
-/// read site itself. A no-op when `source_container` has no recorded
-/// facts (the overwhelmingly common case).
+/// `ContainerFieldFactsMap`'s doc comment) onto the index keys of `target`,
+/// the moment `target` is bound from a dynamic-keyed read of
+/// `source_container` (a `foreach` value, or a plain
+/// `$x = $container[$dyn];`): the two pre-existing key-consulting
+/// Index-read fast paths (`checker/expr.rs`'s `check_expr`/`infer_expr`)
+/// then pick them up with no further code needed at the read site itself.
+/// A no-op when `source_container` has no recorded facts (the overwhelmingly
+/// common case).
 pub(crate) fn propagate_container_field_facts(
     locals: &mut Locals,
-    target_name: &str,
-    source_container: &str,
+    target: LocalKey,
+    source_container: LocalKey,
 ) {
     let Some(facts) = locals
         .container_field_facts()
-        .get(source_container)
+        .get(&source_container)
         .cloned()
     else {
         return;
     };
     for (field, ty) in facts.iter() {
-        locals.insert(format!("{target_name}[{field}]"), ty.clone());
+        let key = locals.intern(KeyData::Index {
+            base: target,
+            key: field.as_str().into(),
+        });
+        locals.insert(key, ty.clone());
     }
 }
 
@@ -338,7 +177,7 @@ impl<'a> Checker<'a> {
         &self,
         cond: &'e Expr,
         locals: &Locals,
-    ) -> Option<(String, Type, &'e Expr)> {
+    ) -> Option<(LocalKey, Type, &'e Expr)> {
         syntax::stack::guard(|| {
             let cond = cond.peeled();
             match &cond.kind {
@@ -352,7 +191,7 @@ impl<'a> Checker<'a> {
                     else {
                         return None;
                     };
-                    let key = narrowing_key(&single_arg.value)?;
+                    let key = locals.key_of(&single_arg.value)?;
                     let target_ty = narrowing_type_for_predicate(name.trim_start_matches('\\'))?;
                     Some((key, target_ty, &single_arg.value))
                 }
@@ -364,7 +203,7 @@ impl<'a> Checker<'a> {
                 // to, same as the single-condition `ExprKind::Instanceof` arm
                 // above already requires.
                 ExprKind::Instanceof(inner, InstanceofTarget::Name(class_name)) => {
-                    let key = narrowing_key(inner)?;
+                    let key = locals.key_of(inner)?;
                     let target_ty = self.resolve_name_expr(class_name);
                     Some((key, target_ty, &**inner))
                 }
@@ -377,7 +216,7 @@ impl<'a> Checker<'a> {
                 // it - an unresolvable value proves nothing about which
                 // member the union should include.
                 ExprKind::Binary(BinOp::Identical | BinOp::Eq, l, r) => {
-                    let (key, narrowed_expr, target_ty) = match (narrowing_key(l), narrowing_key(r))
+                    let (key, narrowed_expr, target_ty) = match (locals.key_of(l), locals.key_of(r))
                     {
                         (Some(key), _) => (key, l, self.infer_expr(r, locals)),
                         (None, Some(key)) => (key, r, self.infer_expr(l, locals)),
@@ -407,7 +246,7 @@ impl<'a> Checker<'a> {
         &self,
         cond: &'e Expr,
         locals: &Locals,
-    ) -> Option<(String, Type, &'e Expr)> {
+    ) -> Option<(LocalKey, Type, &'e Expr)> {
         let cond = cond.peeled();
         syntax::stack::guard(|| match &cond.kind {
             ExprKind::Binary(BinOp::And | BinOp::LogicalAnd, l, r) => {

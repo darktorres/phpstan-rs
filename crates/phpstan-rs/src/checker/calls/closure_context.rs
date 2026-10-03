@@ -1,5 +1,5 @@
 use crate::checker::GotoState;
-use crate::checker::{Checker, Locals, LoopZeroIterations, purge_stale_narrowing_for};
+use crate::checker::{Checker, Locals, LoopZeroIterations, purge_stale_narrowing_for_var};
 use diagnostics::DiagnosticBuilder;
 use syntax::ast::*;
 use types::Type;
@@ -38,7 +38,7 @@ impl<'a> Checker<'a> {
         scope_class: Option<String>,
     ) {
         let mut seeded = locals.clone();
-        seeded.insert("this".to_string(), this_ty);
+        seeded.insert_var("this", this_ty);
         if let Some(scope) = scope_class {
             let previous_class = self.current_class.replace(scope);
             self.check_expr(closure_expr, &mut seeded, label);
@@ -50,15 +50,15 @@ impl<'a> Checker<'a> {
             return;
         };
         for u in closure.uses.iter().filter(|u| u.by_ref) {
-            let Some(ty) = seeded.get(&u.name).cloned() else {
+            let Some(ty) = seeded.get_var(&u.name).cloned() else {
                 continue;
             };
-            purge_stale_narrowing_for(locals, &u.name);
-            if locals.contains_key(&u.name) {
-                locals.insert(u.name.to_string(), ty);
-                locals.clear_native(&u.name);
+            purge_stale_narrowing_for_var(locals, &u.name);
+            if locals.contains_var(&u.name) {
+                locals.insert_var(&u.name, ty);
+                locals.clear_native_var(&u.name);
             } else {
-                locals.declare(u.name.to_string(), ty, u.name.span);
+                locals.declare_var(&u.name, ty, u.name.span);
             }
         }
     }
@@ -124,8 +124,8 @@ impl<'a> Checker<'a> {
                         "parameter.trait",
                     );
                     self.check_type_class_name_case(&case_refs, p.span);
-                    arrow_locals.declare(p.name.to_string(), ty, p.name.span);
-                    arrow_locals.set_native(&p.name, self.closure_param_native(p));
+                    arrow_locals.declare_var(&p.name, ty, p.name.span);
+                    arrow_locals.set_native_var(&p.name, self.closure_param_native(p));
                 }
                 let body_ty = self.check_expr(body, &mut arrow_locals, label);
                 if return_type.is_some() {
@@ -221,7 +221,7 @@ impl<'a> Checker<'a> {
                             )
                             .non_ignorable(),
                         );
-                    } else if !u.by_ref && !locals.contains_key(&u.name) {
+                    } else if !u.by_ref && !locals.contains_var(&u.name) {
                         self.report(
                             format!("undefined variable ${}", u.name),
                             u.name.span,
@@ -229,17 +229,20 @@ impl<'a> Checker<'a> {
                             "variable.undefined",
                         );
                     }
-                    let ty = locals.get(&u.name).cloned().unwrap_or(Type::mixed());
-                    let provenance = locals.get_provenance(&u.name).cloned().unwrap_or_default();
+                    let ty = locals.get_var(&u.name).cloned().unwrap_or(Type::mixed());
+                    let provenance = locals
+                        .get_provenance_var(&u.name)
+                        .cloned()
+                        .unwrap_or_default();
                     if self.probe_span.get() == Some(u.name.span) {
                         *self.probe_var_provenance.borrow_mut() =
                             Some(provenance.iter().copied().collect());
                     }
                     let ty = if u.by_ref { ty.unsealed_shapes() } else { ty };
-                    closure_locals.insert_with_provenance(u.name.to_string(), ty, provenance);
+                    closure_locals.insert_with_provenance_var(&u.name, ty, provenance);
                 }
-                if !*is_static && let Some(this_ty) = locals.get("this") {
-                    closure_locals.insert("this".to_string(), this_ty.clone());
+                if !*is_static && let Some(this_ty) = locals.get_var("this") {
+                    closure_locals.insert_var("this", this_ty.clone());
                 }
                 let closure_label = format!("{label} (closure)");
                 for (p, override_ty) in params.iter().zip(param_overrides) {
@@ -260,8 +263,8 @@ impl<'a> Checker<'a> {
                         "parameter.trait",
                     );
                     self.check_type_class_name_case(&case_refs, p.span);
-                    closure_locals.declare(p.name.to_string(), ty, p.name.span);
-                    closure_locals.set_native(&p.name, self.closure_param_native(p));
+                    closure_locals.declare_var(&p.name, ty, p.name.span);
+                    closure_locals.set_native_var(&p.name, self.closure_param_native(p));
                 }
                 let (declared_return_ty, declared_return_case_refs) =
                     self.resolve_type_hint_with_case_refs(return_type.as_deref());
@@ -358,21 +361,21 @@ impl<'a> Checker<'a> {
                     // identical fix's own comment at `checker::expr`'s
                     // `ExprKind::Closure` arm.
                     let mutated = closure_locals
-                        .get(&u.name)
+                        .get_var(&u.name)
                         .cloned()
                         .unwrap_or(Type::mixed());
-                    if !locals.contains_key(&u.name) {
+                    if !locals.contains_var(&u.name) {
                         // See the identical fix's own comment at
                         // `checker::expr`'s `ExprKind::Closure` arm.
-                        locals.declare(u.name.to_string(), mutated, u.name.span);
+                        locals.declare_var(&u.name, mutated, u.name.span);
                         if self.probe_span.get() == Some(u.name.span) {
                             *self.probe_var_provenance.borrow_mut() =
                                 Some([u.name.span].into_iter().collect());
                         }
                     } else {
-                        locals.insert(u.name.to_string(), mutated);
+                        locals.insert_var(&u.name, mutated);
                         // The closure may write anything to it.
-                        locals.clear_native(&u.name);
+                        locals.clear_native_var(&u.name);
                     }
                 }
                 true

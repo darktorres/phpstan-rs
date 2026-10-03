@@ -1,7 +1,9 @@
 use crate::checker::Discriminant;
-use crate::checker::narrowing::predicates::{narrowing_infer_target, narrowing_key};
+use crate::checker::keys::{KeyData, LocalKey};
+use crate::checker::narrowing::predicates::narrowing_infer_target;
 use crate::checker::{Checker, Locals};
 use syntax::ast::*;
+use syntax::name::Name;
 use types::Type;
 
 impl<'a> Checker<'a> {
@@ -42,7 +44,7 @@ impl<'a> Checker<'a> {
     pub(crate) fn current_narrowed_type<'l>(
         &self,
         expr: &Expr,
-        key: &str,
+        key: LocalKey,
         locals: &'l Locals,
     ) -> std::borrow::Cow<'l, Type> {
         match locals.get(key) {
@@ -147,7 +149,7 @@ impl<'a> Checker<'a> {
         // Variable` match - the same array-index gap the `Call` arm above
         // has, for the `$arr['key'] === null` idiom instead of an
         // `is_*()` predicate.
-        let pair = match (narrowing_key(l), narrowing_key(r)) {
+        let pair = match (locals.key_of(l), locals.key_of(r)) {
             (Some(key), _) => Some((key, l, self.infer_expr(r, locals))),
             (None, Some(key)) => Some((key, r, self.infer_expr(l, locals))),
             (None, None) => None,
@@ -165,9 +167,9 @@ impl<'a> Checker<'a> {
                 _ => None,
             };
             if let Some(receiver) = nullsafe_side
-                && let Some(receiver_key) = narrowing_key(receiver)
+                && let Some(receiver_key) = locals.key_of(receiver)
             {
-                let current = self.current_narrowed_type(receiver, &receiver_key, locals);
+                let current = self.current_narrowed_type(receiver, receiver_key, locals);
                 locals.insert(receiver_key, current.without(&Type::null()));
             }
         }
@@ -177,7 +179,7 @@ impl<'a> Checker<'a> {
         if target_ty.is_mixed() {
             return;
         }
-        let current = self.current_narrowed_type(narrowed_expr, &key, locals);
+        let current = self.current_narrowed_type(narrowed_expr, key, locals);
         let current_is_bool = current.is_bool().yes();
         // `Type::without` is only sound when `excluded`
         // represents one specific, already-proven value (`Null`,
@@ -208,15 +210,16 @@ impl<'a> Checker<'a> {
         // the program - replay those facts too, not just `key`'s own
         // ordinary narrowing above.
         if matches_when_true {
-            let mut keys = vec![Discriminant::new(&key, &target_ty)];
+            let mut keys = vec![Discriminant::new(key, &target_ty)];
             // A bool `=== true`/`false` is its truthiness.
             if target_ty.bool_literal_value().is_some() && current_is_bool {
-                keys.push(Discriminant::new(&format!("truthy({key})"), &target_ty));
+                let truthy = locals.intern(KeyData::Truthy(key));
+                keys.push(Discriminant::new(truthy, &target_ty));
             }
             for discriminant in keys {
                 if let Some(implied) = locals.branch_implied_facts().get(&discriminant).cloned() {
                     for (implied_key, implied_ty) in implied.iter() {
-                        locals.insert(implied_key.clone(), implied_ty.clone());
+                        locals.insert(*implied_key, implied_ty.clone());
                     }
                 }
             }
@@ -237,17 +240,17 @@ impl<'a> Checker<'a> {
             && let Some(receiver) = super::nullsafe_receiver(&alias_expr)
             && let [alias_target] = alias_targets.as_slice()
         {
-            let current = self.current_narrowed_type(receiver, alias_target, locals);
-            locals.insert(alias_target.clone(), current.without(&Type::null()));
+            let current = self.current_narrowed_type(receiver, *alias_target, locals);
+            locals.insert(*alias_target, current.without(&Type::null()));
         }
         locals.insert(key, narrowed);
         // With keys on both sides, the right one narrows against the left.
-        if narrowing_key(l).is_some()
-            && let Some(r_key) = narrowing_key(r)
+        if locals.key_of(l).is_some()
+            && let Some(r_key) = locals.key_of(r)
         {
             let l_ty = self.infer_expr(l, locals);
             if !l_ty.is_mixed() {
-                let current = self.current_narrowed_type(r, &r_key, locals);
+                let current = self.current_narrowed_type(r, r_key, locals);
                 let narrowed = if matches_when_true {
                     self.relation().narrow(&current, &l_ty)
                 } else if l_ty.is_single_value() {
@@ -270,14 +273,14 @@ impl<'a> Checker<'a> {
         equal: bool,
     ) {
         for (side, other) in [(l, r), (r, l)] {
-            let Some(key) = narrowing_key(side) else {
+            let Some(key) = locals.key_of(side) else {
                 continue;
             };
             let other_ty = self.infer_expr(other, locals);
             if other_ty.is_mixed() {
                 continue;
             }
-            let current = self.current_narrowed_type(side, &key, locals);
+            let current = self.current_narrowed_type(side, key, locals);
             let narrowed = self.relation().narrow_loose(
                 &current,
                 &other_ty,
@@ -308,14 +311,14 @@ impl<'a> Checker<'a> {
         };
         let version = self.comparison_php_version();
         for (side, other, side_op) in [(l, r, op), (r, l, mirrored)] {
-            let Some(key) = narrowing_key(side) else {
+            let Some(key) = locals.key_of(side) else {
                 continue;
             };
             let other_ty = self.infer_expr(other, locals);
             if other_ty.is_mixed() {
                 continue;
             }
-            let current = self.current_narrowed_type(side, &key, locals);
+            let current = self.current_narrowed_type(side, key, locals);
             let narrowed = self
                 .relation()
                 .narrow_ordering(&current, side_op, &other_ty, holds, version);
@@ -441,20 +444,20 @@ impl<'a> Checker<'a> {
         recv: Option<&Expr>,
         resolved: &[Option<&Expr>],
         locals: &'l Locals,
-    ) -> Option<(String, std::borrow::Cow<'l, Type>)> {
+    ) -> Option<(LocalKey, std::borrow::Cow<'l, Type>)> {
         use crate::registry::AssertTarget;
         match target {
             AssertTarget::Param(name) => {
                 let idx = sig.params().iter().position(|p| p.name() == name)?;
                 let arg = (*resolved.get(idx)?)?;
-                let key = narrowing_key(arg)?;
-                let current = self.current_narrowed_type(arg, &key, locals);
+                let key = locals.key_of(arg)?;
+                let current = self.current_narrowed_type(arg, key, locals);
                 Some((key, current))
             }
             AssertTarget::ThisSelf => {
                 let recv = recv?;
-                let key = narrowing_key(recv)?;
-                let current = self.current_narrowed_type(recv, &key, locals);
+                let key = locals.key_of(recv)?;
+                let current = self.current_narrowed_type(recv, key, locals);
                 Some((key, current))
             }
             // Neither carries a real narrowing target at all - see
@@ -462,9 +465,12 @@ impl<'a> Checker<'a> {
             AssertTarget::NotFound(_) | AssertTarget::Unknown(_) => None,
             AssertTarget::ThisProp(prop) => {
                 let recv = recv?;
-                let base_key = narrowing_key(recv)?;
-                let key = format!("{base_key}->{prop}");
-                let current = match locals.get(&key) {
+                let base = locals.key_of(recv)?;
+                let key = locals.intern(KeyData::Prop {
+                    base,
+                    prop: Name::from(prop),
+                });
+                let current = match locals.get(key) {
                     Some(t) => std::borrow::Cow::Borrowed(t),
                     // `property_access_type` (`checker/expr.rs`, shared
                     // with `ExprKind::PropertyAccess`) recurses through

@@ -1,4 +1,4 @@
-use crate::checker::narrowing::predicates::{narrowing_key, narrowing_type_for_predicate};
+use crate::checker::narrowing::predicates::narrowing_type_for_predicate;
 use crate::checker::{Checker, Locals, PregCall, resolve_call_args};
 use crate::registry::FunctionReflection;
 use syntax::ast::*;
@@ -378,12 +378,12 @@ impl<'a> Checker<'a> {
 
     /// Narrows `value` by `check` having held (`holds`) or failed.
     fn apply_check(&self, value: &Expr, check: &Check<'_>, holds: bool, locals: &mut Locals) {
-        let key = narrowing_key(value);
+        let key = locals.key_of(value);
         let narrow_value = |locals: &mut Locals, f: &dyn Fn(&Type) -> Option<Type>| {
-            if let Some(key) = &key {
+            if let Some(key) = key {
                 let current = self.current_narrowed_type(value, key, locals);
                 if let Some(narrowed) = f(&current) {
-                    locals.insert(key.clone(), narrowed);
+                    locals.insert(key, narrowed);
                 }
             }
         };
@@ -494,7 +494,7 @@ impl<'a> Checker<'a> {
             }
             // One part held: each part's narrowing of the value, joined.
             Check::Or(parts) => {
-                let Some(key) = &key else {
+                let Some(key) = key else {
                     return;
                 };
                 let mut joined: Vec<Type> = Vec::new();
@@ -503,7 +503,7 @@ impl<'a> Checker<'a> {
                     self.apply_check(value, part, true, &mut branch);
                     joined.push(self.current_narrowed_type(value, key, &branch).into_owned());
                 }
-                locals.insert(key.clone(), self.relation().union_of(joined));
+                locals.insert(key, self.relation().union_of(joined));
             }
             // A failed `And`, and the string and property checks failing,
             // say nothing narrowable.

@@ -128,7 +128,7 @@ impl<'s, 'r> Scope<'s, 'r> {
     /// own `Scope::hasVariableType()->no()` case), not the same as
     /// `Some(mixed)`.
     pub fn local_type(&self, name: &str) -> Option<&Type> {
-        self.locals.get(name)
+        self.locals.get_var(name)
     }
 
     /// Whether `function_exists($name)` (case-insensitively) has proven
@@ -144,17 +144,21 @@ impl<'s, 'r> Scope<'s, 'r> {
     /// variable name (`"x"` for `$x`), matching how this checker's own
     /// narrowing engine keys this fact.
     pub fn is_method_guarded(&self, receiver_var: &str, method: &str) -> bool {
-        self.locals
-            .guarded_methods()
-            .contains(&(receiver_var.to_string(), method.to_string()))
+        self.locals.find_var(receiver_var).is_some_and(|receiver| {
+            self.locals
+                .guarded_methods()
+                .contains(&(receiver, method.to_string()))
+        })
     }
 
     /// See `is_method_guarded`'s own doc comment - the
     /// `property_exists()` sibling.
     pub fn is_property_guarded(&self, receiver_var: &str, property: &str) -> bool {
-        self.locals
-            .guarded_properties()
-            .contains(&(receiver_var.to_string(), property.to_string()))
+        self.locals.find_var(receiver_var).is_some_and(|receiver| {
+            self.locals
+                .guarded_properties()
+                .contains(&(receiver, property.to_string()))
+        })
     }
 }
 

@@ -1,6 +1,5 @@
 use crate::checker::{
-    Checker, Locals, is_real_variable_key, literal_shape_key, narrowing_type_for_predicate,
-    resolve_call_args,
+    Checker, Locals, literal_shape_key, narrowing_type_for_predicate, resolve_call_args,
 };
 use crate::registry::{FunctionReflection, Registry};
 use syntax::ast::*;
@@ -773,7 +772,7 @@ impl<'a> Checker<'a> {
                                 if shape.field(&key).is_some() {
                                     continue;
                                 }
-                                if let Some(ty) = locals.get(&name) {
+                                if let Some(ty) = locals.get_var(&name) {
                                     shape.push(ShapeField::new(key, ty.clone(), false));
                                 }
                             }
@@ -821,10 +820,13 @@ impl<'a> Checker<'a> {
                 if locals.any_variable_may_exist() {
                     return Type::array(Type::string(), Type::mixed());
                 }
-                let fields: Vec<ShapeField> = locals
-                    .iter()
-                    .filter(|(name, _)| is_real_variable_key(name))
-                    .map(|(name, ty)| ShapeField::new(ShapeKey::from_name(name), ty.clone(), false))
+                let mut variables = locals.variables();
+                variables.sort_by(|a, b| a.0.cmp(&b.0));
+                let fields: Vec<ShapeField> = variables
+                    .into_iter()
+                    .map(|(name, ty)| {
+                        ShapeField::new(ShapeKey::from_name(&name), ty.clone(), false)
+                    })
                     .collect();
                 return Type::array_shape(Shape::sealed(fields));
             }

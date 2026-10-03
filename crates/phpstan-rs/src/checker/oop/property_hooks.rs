@@ -1,7 +1,6 @@
 use crate::checker::GotoState;
 use crate::checker::{
-    ATTRIBUTE_TARGET_METHOD, Checker, Locals, body_contains_explicit_throw,
-    expr_contains_explicit_throw,
+    ATTRIBUTE_TARGET_METHOD, Checker, body_contains_explicit_throw, expr_contains_explicit_throw,
 };
 use crate::registry::{self, PropertyReflection, resolve_names_in_type};
 use diagnostics::DiagnosticBuilder;
@@ -216,8 +215,8 @@ impl<'a> Checker<'a> {
 
         let previous_class = self.current_class.take();
         self.current_class = Some(fqn.to_string());
-        let mut locals = Locals::default();
-        locals.insert("this".to_string(), Type::object(fqn.into(), Vec::new()));
+        let mut locals = self.new_locals();
+        locals.insert_var("this", Type::object(fqn.into(), Vec::new()));
         let declared_return = Some(prop_sig.ty().clone());
         let previous_generator_flag = self.current_function_is_generator;
         let previous_declared_return_type = std::mem::replace(
@@ -507,8 +506,8 @@ impl<'a> Checker<'a> {
 
         let previous_class = self.current_class.take();
         self.current_class = Some(fqn.to_string());
-        let mut locals = Locals::default();
-        locals.insert("this".to_string(), Type::object(fqn.into(), Vec::new()));
+        let mut locals = self.new_locals();
+        locals.insert_var("this", Type::object(fqn.into(), Vec::new()));
         let param_name = param
             .map(|p| p.name.name.clone())
             .unwrap_or_else(|| "value".into());
@@ -517,7 +516,7 @@ impl<'a> Checker<'a> {
             .set_ty()
             .clone()
             .unwrap_or_else(|| prop_sig.ty().clone());
-        locals.declare(param_name.to_string(), value_ty, param_span);
+        locals.declare_var(&param_name, value_ty, param_span);
         let declared_return = Some(Type::void());
         let previous_generator_flag = self.current_function_is_generator;
         let previous_declared_return_type = std::mem::replace(

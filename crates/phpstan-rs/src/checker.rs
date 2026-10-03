@@ -6,6 +6,7 @@ use types::Name;
 use crate::pest_config;
 use crate::registry::Registry;
 use diagnostics::{Diagnostic, DiagnosticBuilder};
+use keys::{KeyData, LocalKey};
 use std::sync::Arc;
 use syntax::ast::*;
 use syntax::name_resolution::NameContext;
@@ -23,7 +24,7 @@ use types::Type;
 /// mutation of whichever clone diverges. `rustc_hash::FxBuildHasher` as the
 /// hasher, since `imbl::HashMap` is generic over it the same way
 /// `std::collections::HashMap` is.
-type LocalsMap = imbl::GenericOrdMap<String, Type, imbl::shared_ptr::DefaultSharedPtr>;
+type LocalsMap = imbl::GenericOrdMap<LocalKey, Type, imbl::shared_ptr::DefaultSharedPtr>;
 
 // `imbl::HashSet` mirrors `imbl::HashMap`'s O(1)-clone design (see
 // `LocalsMap`'s doc comment) - not load-bearing here (a per-variable span
@@ -31,9 +32,9 @@ type LocalsMap = imbl::GenericOrdMap<String, Type, imbl::shared_ptr::DefaultShar
 // persistent-map-throughout convention the rest of this module follows.
 type ProvenanceSet =
     imbl::GenericHashSet<Span, rustc_hash::FxBuildHasher, imbl::shared_ptr::DefaultSharedPtr>;
-type KeySet =
-    imbl::GenericHashSet<String, rustc_hash::FxBuildHasher, imbl::shared_ptr::DefaultSharedPtr>;
-type ProvenanceMap = imbl::GenericOrdMap<String, ProvenanceSet, imbl::shared_ptr::DefaultSharedPtr>;
+type KeySet = imbl::GenericOrdSet<LocalKey, imbl::shared_ptr::DefaultSharedPtr>;
+type ProvenanceMap =
+    imbl::GenericOrdMap<LocalKey, ProvenanceSet, imbl::shared_ptr::DefaultSharedPtr>;
 
 // Lowercased, bare `function_exists('foo')`-guarded function names proven
 // guarded on this exact control-flow path. `Locals`-scoped, not a `Checker`
@@ -48,7 +49,7 @@ type GuardedFunctionSet =
 // branch on this exact control-flow path - same Locals-scoped, O(1)-clone
 // design as `GuardedFunctionSet`.
 type GuardedMemberSet = imbl::GenericHashSet<
-    (String, String),
+    (LocalKey, String),
     rustc_hash::FxBuildHasher,
     imbl::shared_ptr::DefaultSharedPtr,
 >;
@@ -77,8 +78,8 @@ type ReinitializedPropertySet =
 // replaced or purged, so `Rc::ptr_eq` is a correct, cheap "did both
 // branches inherit this unchanged" merge test (see `merge_scopes`).
 type ConditionAliasMap = imbl::GenericHashMap<
-    String,
-    (Vec<String>, std::rc::Rc<Expr>),
+    LocalKey,
+    (Vec<LocalKey>, std::rc::Rc<Expr>),
     rustc_hash::FxBuildHasher,
     imbl::shared_ptr::DefaultSharedPtr,
 >;
@@ -100,20 +101,20 @@ type ConditionAliasMap = imbl::GenericHashMap<
 // entry, and rebinding an implied variable drops that pair
 // (`Locals::purge_branch_implied_facts_depending_on`). A loop's next
 // iteration rebinding its `foreach` variable is the common case.
-type BranchImpliedFacts = std::rc::Rc<Vec<(String, Type)>>;
+type BranchImpliedFacts = std::rc::Rc<Vec<(LocalKey, Type)>>;
 
 /// A narrowing subject (its `narrowing_key`) compared against one value:
 /// what branch-implied facts are recorded under.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub(crate) struct Discriminant {
-    pub(crate) subject: String,
+    pub(crate) subject: LocalKey,
     pub(crate) value: Type,
 }
 
 impl Discriminant {
-    pub(crate) fn new(subject: &str, value: &Type) -> Discriminant {
+    pub(crate) fn new(subject: LocalKey, value: &Type) -> Discriminant {
         Discriminant {
-            subject: subject.to_string(),
+            subject,
             value: value.clone(),
         }
     }
@@ -139,7 +140,7 @@ type BranchImpliedFactsMap = imbl::GenericHashMap<
 // the whole invalidation story. Simpler value type than `ConditionAliasMap`
 // for the same reason - just the expression, no accompanying target list.
 type QueryBuilderAliasMap = imbl::GenericHashMap<
-    String,
+    LocalKey,
     std::rc::Rc<Expr>,
     rustc_hash::FxBuildHasher,
     imbl::shared_ptr::DefaultSharedPtr,
@@ -169,7 +170,7 @@ type QueryBuilderAliasMap = imbl::GenericHashMap<
 // side of a merge must not resurrect it - either branch might be the one
 // that actually ran.
 type ContainerFieldFactsMap = imbl::GenericHashMap<
-    String,
+    LocalKey,
     std::rc::Rc<FxHashMap<String, Type>>,
     rustc_hash::FxBuildHasher,
     imbl::shared_ptr::DefaultSharedPtr,
@@ -207,7 +208,7 @@ type ContainerFieldFactsMap = imbl::GenericHashMap<
 // never had a reason to touch it," not "invalidated," so it must survive
 // the merge, not be dropped.
 type DiscriminantArrayFactsMap = imbl::GenericHashMap<
-    (String, String, bool),
+    (LocalKey, LocalKey, bool),
     Type,
     rustc_hash::FxBuildHasher,
     imbl::shared_ptr::DefaultSharedPtr,
@@ -224,8 +225,8 @@ pub(crate) type TemplateBindings = rustc_hash::FxHashMap<String, Type>;
 
 /// A private property's every discovered assigned type, keyed by
 /// (declaring class fqn, property name) - see `Checker::
-/// property_assign_facts`' own doc comment. Both keys are `Name`s; `Name: Borrow<str>` keeps every
-/// `&str` lookup/`.get()` call site unchanged.
+/// property_assign_facts`' own doc comment. Both maps are by `Name`, found by a
+/// `Name` or by text.
 pub(crate) type PropertyAssignFacts = NameMap<NameMap<Vec<Type>>>;
 
 /// How long each record a checking pass appends to was when the pass
@@ -715,7 +716,9 @@ pub struct Checker<'a> {
     // single `Option`, so a nested `if` inside a branch (a different
     // subject) doesn't clobber the outer one - though only the
     // innermost, most specific entry is ever actually consulted (`.last()`).
-    pub(crate) active_discriminant: Vec<(String, bool)>,
+    pub(crate) active_discriminant: Vec<(LocalKey, bool)>,
+    // The keys of every scope of this file's check: see `keys::KeyTable`.
+    keys: keys::KeyTableRef,
     // Every variable name seen bound via `static $x = ...;` anywhere in
     // the file being checked. A `static` local can carry a value left
     // over from an earlier call - the same "this single forward pass
@@ -890,6 +893,7 @@ pub(crate) use completion::{BREAK_HERE, BlockCompletion, CONTINUE_HERE, Completi
 pub(crate) use labels::{CalleeLabel, MemberKind, MemberLabel};
 mod array_access;
 mod infer_cache;
+mod keys;
 mod locals;
 pub(crate) use locals::Locals;
 mod assignment;
@@ -979,8 +983,8 @@ pub(crate) use internal_usage::class_type_word;
 pub(crate) use missing_typehint::{ITERABLE_GENERIC_CLASS_NAMES, class_kind_word};
 pub(crate) use named_argument_renames::NamedArgumentCallFacts;
 pub(crate) use narrowing::{
-    count_call_operand, is_real_variable_key, narrowing_key, narrowing_type_for_predicate,
-    propagate_container_field_facts, purge_stale_narrowing_for,
+    count_call_operand, narrowing_type_for_predicate, propagate_container_field_facts,
+    purge_stale_narrowing_for, purge_stale_narrowing_for_var,
 };
 pub(crate) use oop::{
     ATTRIBUTE_TARGET_CLASS, ATTRIBUTE_TARGET_CLASS_CONSTANT, ATTRIBUTE_TARGET_FUNCTION,
@@ -1172,6 +1176,7 @@ impl<'a> Checker<'a> {
             loop_depth: 0,
             in_range_index_writes: Vec::new(),
             active_discriminant: Vec::new(),
+            keys: keys::KeyTableRef::default(),
             static_var_names: NameSet::default(),
             rebind_target_classes: NameSet::default(),
             closure_rebind_possible: true,
@@ -1264,6 +1269,11 @@ impl<'a> Checker<'a> {
     }
 
     /// Drops what every record gained since `mark`.
+    /// An empty scope of this checker's, made by its table of keys.
+    pub(crate) fn new_locals(&self) -> Locals {
+        Locals::new(std::rc::Rc::clone(&self.keys))
+    }
+
     pub(crate) fn rewind_to(&mut self, mark: PassMark) {
         self.diagnostics.truncate(mark.diagnostics);
         self.semantic_tokens.truncate(mark.semantic_tokens);
@@ -1299,15 +1309,18 @@ impl<'a> Checker<'a> {
         let Some(dump) = self.type_dump.as_mut() else {
             return;
         };
-        let mut vars: Vec<(&String, &Type)> = locals.iter().collect();
-        vars.sort_by(|a, b| a.0.cmp(b.0));
+        let mut vars: Vec<(String, LocalKey, &Type)> = locals
+            .iter()
+            .map(|(key, ty)| (locals.render(key), key, ty))
+            .collect();
+        vars.sort_by(|a, b| a.0.cmp(&b.0));
         let mut line = String::new();
-        for (name, ty) in vars {
+        for (name, key, ty) in vars {
             if !line.is_empty() {
                 line.push_str("; ");
             }
             line.push_str(&format!("{name}: {ty}"));
-            if let Some(native) = locals.native(name) {
+            if let Some(native) = locals.native(key) {
                 line.push_str(&format!(" (native {native})"));
             }
         }
@@ -1586,7 +1599,7 @@ impl<'a> Checker<'a> {
                 .map(|p| Name::from(&p)),
         );
 
-        let mut top_locals: Locals = Locals::default();
+        let mut top_locals: Locals = self.new_locals();
         top_locals.set_track(self.probe_span.get().is_some());
         let diagnostics_before = self.diagnostics.len();
         // `self.name_ctx` is tracked *positionally* here: real PHP only

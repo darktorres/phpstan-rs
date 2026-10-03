@@ -1,15 +1,15 @@
 use crate::checker::GotoState;
 use crate::checker::InferQuestion;
 use crate::checker::calls::parameters::Callee;
+use crate::checker::keys::{KeyData, LocalKey};
 use crate::checker::resolve::receiver_class;
 use crate::checker::suggest;
 use crate::checker::{
     ATTRIBUTE_TARGET_CLASS_CONSTANT, ATTRIBUTE_TARGET_FUNCTION, ATTRIBUTE_TARGET_PROPERTY,
     CalleeLabel, CheckArgsCall, Checker, Locals, LoopZeroIterations, MemberKind, MemberLabel,
     MemberVisibilityCheck, TemplateBindings, UsageTokenKind, binop_sigil, generator_template_param,
-    is_real_variable_key, literal_string_key, merge_scopes, narrowing_key,
-    propagate_container_field_facts, purge_stale_narrowing_for, resolve_call_args,
-    unassigned_variable_type,
+    literal_string_key, merge_scopes, propagate_container_field_facts, purge_stale_narrowing_for,
+    purge_stale_narrowing_for_var, resolve_call_args, unassigned_variable_type,
 };
 use crate::pest_config;
 use crate::registry::FunctionReflection;
@@ -206,7 +206,7 @@ impl<'a> Checker<'a> {
                         .then(|| self.registry.method_property_writes(&owner, method))
                     })
                     .unwrap_or(PropertyWrites::Anything);
-                (narrowing_key(recv), args, writes)
+                (locals.key_of(recv), args, writes)
             }
             ExprKind::StaticCall(target, method, args) => {
                 let class = self.infer_static_target_class(target, locals);
@@ -236,7 +236,7 @@ impl<'a> Checker<'a> {
                     Some((owner, true)) => self.registry.method_property_writes(&owner, method),
                     _ => PropertyWrites::Anything,
                 };
-                (forwards_this.then(|| "this".to_string()), args, writes)
+                (forwards_this.then(|| locals.var_key("this")), args, writes)
             }
             ExprKind::Call(callee, args) => {
                 let writes = match &callee.kind {
@@ -274,13 +274,13 @@ impl<'a> Checker<'a> {
             }
             _ => return,
         };
-        let mut stale: Vec<String> = Vec::new();
+        let mut stale: Vec<LocalKey> = Vec::new();
         if writes > PropertyWrites::Nothing {
             stale.extend(receiver);
         }
         if writes == PropertyWrites::Anything {
             stale.extend(args.iter().filter_map(|arg| {
-                let key = narrowing_key(&arg.value)?;
+                let key = locals.key_of(&arg.value)?;
                 self.infer_expr(&arg.value, locals)
                     .union_members()
                     .iter()
@@ -289,8 +289,8 @@ impl<'a> Checker<'a> {
             }));
         }
         for key in stale {
-            if locals.has_key_depending_on(&key) {
-                purge_stale_narrowing_for(locals, &key);
+            if locals.has_key_depending_on(key) {
+                purge_stale_narrowing_for(locals, key);
             }
         }
     }
@@ -1036,14 +1036,14 @@ impl<'a> Checker<'a> {
                     && let Some(shape) = self.preg_matches_type(&call, outcome, locals)
                 {
                     if let ExprKind::Variable(matches_name) = &matches_arg.kind {
-                        purge_stale_narrowing_for(locals, matches_name);
+                        purge_stale_narrowing_for_var(locals, matches_name);
                         // `$matches` is often first bound by this call.
-                        if locals.contains_key(matches_name) {
-                            locals.insert(matches_name.to_string(), shape);
+                        if locals.contains_var(matches_name) {
+                            locals.insert_var(matches_name, shape);
                         } else {
-                            locals.declare(matches_name.to_string(), shape, matches_arg.span);
+                            locals.declare_var(matches_name, shape, matches_arg.span);
                         }
-                    } else if narrowing_key(matches_arg).is_some() {
+                    } else if locals.key_of(matches_arg).is_some() {
                         self.bind_assignment_target(matches_arg, shape, locals);
                     }
                 }
@@ -1063,11 +1063,11 @@ impl<'a> Checker<'a> {
                     && let ExprKind::Variable(pipes_name) = &pipes_arg.kind
                 {
                     let shape = Type::array(Type::int(), Type::resource(false));
-                    purge_stale_narrowing_for(locals, pipes_name);
-                    if locals.contains_key(pipes_name) {
-                        locals.insert(pipes_name.to_string(), shape);
+                    purge_stale_narrowing_for_var(locals, pipes_name);
+                    if locals.contains_var(pipes_name) {
+                        locals.insert_var(pipes_name, shape);
                     } else {
-                        locals.declare(pipes_name.to_string(), shape, pipes_arg.span);
+                        locals.declare_var(pipes_name, shape, pipes_arg.span);
                     }
                 }
                 // Reuses the `resolved_name`/`sig` already resolved above
@@ -1340,9 +1340,9 @@ impl<'a> Checker<'a> {
                         && matches!(
                             &recv.peeled().kind,
                             ExprKind::Variable(name)
-                                if locals
+                                if locals.find_var(name).is_some_and(|receiver| locals
                                     .guarded_methods()
-                                    .contains(&(name.to_string(), method.to_string()))
+                                    .contains(&(receiver, method.to_string())))
                         );
                     if !method_exists_guarded
                         && self.registry.classes.contains_key(class.as_str())
@@ -1626,7 +1626,7 @@ impl<'a> Checker<'a> {
                 }
             }
             ExprKind::Variable(name) => {
-                if !locals.contains_key(name) && !is_superglobal(name) {
+                if !locals.contains_var(name) && !is_superglobal(name) {
                     self.report(
                         format!("undefined variable ${name}"),
                         e.span,
@@ -1639,11 +1639,11 @@ impl<'a> Checker<'a> {
                 // `probe_hit` uses.
                 if self.probe_span.get() == Some(e.span) {
                     *self.probe_var_provenance.borrow_mut() = locals
-                        .get_provenance(name)
+                        .get_provenance_var(name)
                         .map(|p| p.iter().copied().collect());
                 }
                 let ty = locals
-                    .get(name)
+                    .get_var(name)
                     .cloned()
                     .unwrap_or_else(|| unassigned_variable_type(name));
                 // A read's inferred type, for hover - see
@@ -2072,7 +2072,7 @@ impl<'a> Checker<'a> {
                 );
                 self.bind_assignment_target(lhs, rhs_ty.clone(), locals);
                 if let Some((name, native)) = native {
-                    locals.set_native(&name, native);
+                    locals.set_native_var(&name, native);
                 }
                 self.record_condition_alias(lhs, rhs, locals);
                 self.record_query_builder_alias(lhs, rhs, locals);
@@ -2093,7 +2093,9 @@ impl<'a> Checker<'a> {
                     && let ExprKind::Variable(container_name) = &base.peeled().kind
                     && literal_string_key(idx).is_none()
                 {
-                    propagate_container_field_facts(locals, target_name, container_name);
+                    let target = locals.var_key(target_name);
+                    let container = locals.var_key(container_name);
+                    propagate_container_field_facts(locals, target, container);
                 }
                 rhs_ty
             }
@@ -2166,7 +2168,7 @@ impl<'a> Checker<'a> {
                 };
                 self.bind_assignment_target(lhs, ty, locals);
                 if let Some((name, native)) = native {
-                    locals.set_native(&name, native);
+                    locals.set_native_var(&name, native);
                 }
                 Type::mixed()
             }
@@ -2256,9 +2258,9 @@ impl<'a> Checker<'a> {
                     // when it doesn't exist.
                     if item.by_ref
                         && let ExprKind::Variable(name) = &item.value.kind
-                        && !locals.contains_key(name)
+                        && !locals.contains_var(name)
                     {
-                        locals.declare(name.to_string(), Type::null(), item.value.span);
+                        locals.declare_var(name, Type::null(), item.value.span);
                     }
                     let value_ty = self.check_expr(&item.value, locals, label);
                     // `arrayUnpacking.nonIterable` - `[...$x]` where
@@ -2320,8 +2322,8 @@ impl<'a> Checker<'a> {
                         // after narrowing `$x['k']` would otherwise see
                         // the un-narrowed type.
                         if locals.may_have_member_narrowing()
-                            && let Some(key) = narrowing_key(e)
-                            && let Some(narrowed) = locals.get(&key)
+                            && let Some(key) = locals.find_key(e)
+                            && let Some(narrowed) = locals.get(key)
                         {
                             return narrowed.clone();
                         }
@@ -2965,9 +2967,9 @@ impl<'a> Checker<'a> {
                     && matches!(
                         &base.kind,
                         ExprKind::Variable(name)
-                            if locals
+                            if locals.find_var(name).is_some_and(|receiver| locals
                                 .guarded_properties()
-                                .contains(&(name.to_string(), prop.to_string()))
+                                .contains(&(receiver, prop.to_string())))
                     );
                 // `property.nonObject` - same reasoning and nullsafe
                 // handling as `method.nonObject` above, checked first so
@@ -3063,8 +3065,13 @@ impl<'a> Checker<'a> {
                     self.record_member_ref(e.span, &owner, prop);
                 }
                 if locals.may_have_member_narrowing()
-                    && let Some(base_key) = narrowing_key(base)
-                    && let Some(narrowed) = locals.get(&format!("{base_key}->{prop}"))
+                    && let Some(base_key) = locals.find_key(base)
+                    && let Some(narrowed) = locals
+                        .find(&KeyData::Prop {
+                            base: base_key,
+                            prop: prop.name.clone(),
+                        })
+                        .and_then(|key| locals.get(key))
                 {
                     return narrowed.clone();
                 }
@@ -3583,7 +3590,7 @@ impl<'a> Checker<'a> {
                             )
                             .non_ignorable(),
                         );
-                    } else if !u.by_ref && !locals.contains_key(&u.name) {
+                    } else if !u.by_ref && !locals.contains_var(&u.name) {
                         self.report(
                             format!("undefined variable ${}", u.name),
                             u.name.span,
@@ -3591,11 +3598,14 @@ impl<'a> Checker<'a> {
                             "variable.undefined",
                         );
                     }
-                    let ty = locals.get(&u.name).cloned().unwrap_or(Type::mixed());
+                    let ty = locals.get_var(&u.name).cloned().unwrap_or(Type::mixed());
                     // A captured variable's real declaration is wherever
                     // the outer scope already says it is - copied across,
                     // not fabricated fresh at this `use (...)` clause.
-                    let provenance = locals.get_provenance(&u.name).cloned().unwrap_or_default();
+                    let provenance = locals
+                        .get_provenance_var(&u.name)
+                        .cloned()
+                        .unwrap_or_default();
                     // The `use (...)` clause's capture token is itself a
                     // real reference to the outer `$x` - same probe hook
                     // `ExprKind::Variable` has.
@@ -3612,10 +3622,10 @@ impl<'a> Checker<'a> {
                     // anything else holding the reference before the
                     // closure runs.
                     let ty = if u.by_ref { ty.unsealed_shapes() } else { ty };
-                    closure_locals.insert_with_provenance(u.name.to_string(), ty, provenance);
+                    closure_locals.insert_with_provenance_var(&u.name, ty, provenance);
                 }
-                if !*is_static && let Some(this_ty) = locals.get("this") {
-                    closure_locals.insert("this".to_string(), this_ty.clone());
+                if !*is_static && let Some(this_ty) = locals.get_var("this") {
+                    closure_locals.insert_var("this", this_ty.clone());
                 }
                 // `record_branch_implied_facts`'s own facts don't
                 // otherwise survive into a closure body at all -
@@ -3637,9 +3647,12 @@ impl<'a> Checker<'a> {
                 let captured_names: rustc_hash::FxHashSet<&str> =
                     uses.iter().map(|u| u.name.as_ref()).collect();
                 for (key, implied) in locals.branch_implied_facts().iter() {
-                    let filtered: Vec<(String, Type)> = implied
+                    let filtered: Vec<(LocalKey, Type)> = implied
                         .iter()
-                        .filter(|(name, _)| captured_names.contains(name.as_str()))
+                        .filter(|(name, _)| match locals.data(*name) {
+                            KeyData::Var(variable) => captured_names.contains(variable.as_str()),
+                            _ => false,
+                        })
                         .cloned()
                         .collect();
                     if !filtered.is_empty() {
@@ -3676,8 +3689,8 @@ impl<'a> Checker<'a> {
                     } else {
                         ty
                     };
-                    closure_locals.declare(p.name.to_string(), ty, p.name.span);
-                    closure_locals.set_native(&p.name, self.closure_param_native(p));
+                    closure_locals.declare_var(&p.name, ty, p.name.span);
+                    closure_locals.set_native_var(&p.name, self.closure_param_native(p));
                 }
                 let (declared_return_ty, declared_return_case_refs) =
                     self.resolve_type_hint_with_case_refs(return_type.as_deref());
@@ -3928,18 +3941,18 @@ impl<'a> Checker<'a> {
                         })
                         .unwrap_or_else(|| {
                             closure_locals
-                                .get(&u.name)
+                                .get_var(&u.name)
                                 .cloned()
                                 .unwrap_or(Type::mixed())
                         });
-                    if !locals.contains_key(&u.name) {
+                    if !locals.contains_var(&u.name) {
                         // Real PHP auto-vivifies `$x` in the outer/
                         // declaring scope the moment `use (&$x)` captures
                         // an as-yet-undefined variable - the same by-ref-
                         // argument auto-vivification this project models
                         // in `predefine_byref_or_unknown_args`, now given
                         // a real, navigable declaration site.
-                        locals.declare(u.name.to_string(), mutated, u.name.span);
+                        locals.declare_var(&u.name, mutated, u.name.span);
                         // `locals.declare` above is this variable's only
                         // provenance site in this case (it didn't exist
                         // in the outer scope before), so the probe hook
@@ -3952,9 +3965,9 @@ impl<'a> Checker<'a> {
                                 Some([u.name.span].into_iter().collect());
                         }
                     } else {
-                        locals.insert(u.name.to_string(), mutated);
+                        locals.insert_var(&u.name, mutated);
                         // The closure may write anything to it.
-                        locals.clear_native(&u.name);
+                        locals.clear_native_var(&u.name);
                     }
                 }
                 let inferred_return = (!closure_is_generator).then(|| {
@@ -4008,8 +4021,8 @@ impl<'a> Checker<'a> {
                     } else {
                         ty
                     };
-                    arrow_locals.declare(p.name.to_string(), ty, p.name.span);
-                    arrow_locals.set_native(&p.name, self.closure_param_native(p));
+                    arrow_locals.declare_var(&p.name, ty, p.name.span);
+                    arrow_locals.set_native_var(&p.name, self.closure_param_native(p));
                 }
                 // Same save/set/restore
                 // `check_function`/the Closure literal arms do: without
@@ -4419,8 +4432,13 @@ impl<'a> Checker<'a> {
             }
             ExprKind::PropertyAccess(base, prop, _) => {
                 if locals.may_have_member_narrowing()
-                    && let Some(base_key) = narrowing_key(base)
-                    && let Some(narrowed) = locals.get(&format!("{base_key}->{prop}"))
+                    && let Some(base_key) = locals.find_key(base)
+                    && let Some(narrowed) = locals
+                        .find(&KeyData::Prop {
+                            base: base_key,
+                            prop: prop.name.clone(),
+                        })
+                        .and_then(|key| locals.get(key))
                 {
                     return narrowed.clone();
                 }
@@ -4436,8 +4454,8 @@ impl<'a> Checker<'a> {
                 // narrowed type under `narrowing_key`'s `"base[key]"`
                 // (e.g. after `is_string($info['code'])`).
                 if locals.may_have_member_narrowing()
-                    && let Some(key) = narrowing_key(e)
-                    && let Some(narrowed) = locals.get(&key)
+                    && let Some(key) = locals.find_key(e)
+                    && let Some(narrowed) = locals.get(key)
                 {
                     return narrowed.clone();
                 }
@@ -4527,7 +4545,7 @@ impl<'a> Checker<'a> {
                 Literal::Null => Type::null(),
             },
             ExprKind::Variable(name) => locals
-                .get(name)
+                .get_var(name)
                 .cloned()
                 .unwrap_or_else(|| unassigned_variable_type(name)),
             ExprKind::Grouping(inner)
@@ -4875,7 +4893,12 @@ impl<'a> Checker<'a> {
                 // its own declared type.
                 if locals.may_have_member_narrowing()
                     && let Some(class_name) = target.as_name()
-                    && let Some(narrowed) = locals.get(&format!("{class_name}::${prop_name}"))
+                    && let Some(narrowed) = locals
+                        .find(&KeyData::StaticProp {
+                            class: class_name.written.clone(),
+                            prop: prop_name.name.clone(),
+                        })
+                        .and_then(|key| locals.get(key))
                 {
                     return narrowed.clone();
                 }
@@ -5046,7 +5069,7 @@ impl<'a> Checker<'a> {
                 }
                 let mut arrow_locals = locals.clone();
                 for (p, ty) in params.iter().zip(param_overrides) {
-                    arrow_locals.insert(p.name.to_string(), ty.clone());
+                    arrow_locals.insert_var(&p.name, ty.clone());
                 }
                 let inferred = self.infer_expr(body, &arrow_locals);
                 Some(self.prefer_inferred_over_declared_return(return_type.as_deref(), inferred))
@@ -5067,14 +5090,14 @@ impl<'a> Checker<'a> {
                 }
                 let mut closure_locals: Locals = locals.closure_scope();
                 for u in uses {
-                    let ty = locals.get(&u.name).cloned().unwrap_or(Type::mixed());
-                    closure_locals.insert(u.name.to_string(), ty);
+                    let ty = locals.get_var(&u.name).cloned().unwrap_or(Type::mixed());
+                    closure_locals.insert_var(&u.name, ty);
                 }
-                if !*is_static && let Some(this_ty) = locals.get("this") {
-                    closure_locals.insert("this".to_string(), this_ty.clone());
+                if !*is_static && let Some(this_ty) = locals.get_var("this") {
+                    closure_locals.insert_var("this", this_ty.clone());
                 }
                 for (p, ty) in params.iter().zip(param_overrides) {
-                    closure_locals.insert(p.name.to_string(), ty.clone());
+                    closure_locals.insert_var(&p.name, ty.clone());
                 }
                 // Only the common single-implicit-return-statement body
                 // shape is handled (mirrors check_offset_existence's
@@ -5192,7 +5215,7 @@ impl<'a> Checker<'a> {
     fn collect_member_ref_defaults_params(&mut self, params: &[Param]) {
         for p in params {
             if let Some(d) = &p.default {
-                self.infer_expr(d, &Locals::default());
+                self.infer_expr(d, &self.new_locals());
             }
         }
     }
@@ -5218,11 +5241,11 @@ impl<'a> Checker<'a> {
             StmtKind::ClassDecl(c) => {
                 for p in &c.def.properties {
                     if let Some(d) = &p.default {
-                        self.infer_expr(d, &Locals::default());
+                        self.infer_expr(d, &self.new_locals());
                     }
                 }
                 for cst in &c.def.consts {
-                    self.infer_expr(&cst.value, &Locals::default());
+                    self.infer_expr(&cst.value, &self.new_locals());
                 }
                 for m in &c.def.methods {
                     self.collect_member_ref_defaults_function(&m.function);
@@ -5526,20 +5549,20 @@ impl<'a> Checker<'a> {
 /// then/else split even runs, contaminating the `else` branch (where the
 /// condition was false, so `$arg->value` is not known to be a
 /// `Variable`) and anything after the whole `if` statement.
-/// `is_real_variable_key` is exactly the discriminator that excludes
+/// `Locals::is_real_variable` is exactly the discriminator that excludes
 /// them, and composes correctly for a chained `A and B and C`
 /// (left-associative `And(And(A,B),C)`): the inner node's own filtered
 /// merge already lands B's new plain-variable defs in the outer node's
 /// real `locals` before the outer node clones it for `C`.
 fn merge_new_variable_definitions(locals: &mut Locals, narrowed: &Locals) {
     for (key, ty) in narrowed.iter() {
-        if is_real_variable_key(key) && !locals.contains_key(key) {
+        if narrowed.is_real_variable(key) && !locals.contains_key(key) {
             // `key`'s real declaration (a by-ref out-param, or a plain
             // assignment) already recorded its true provenance inside
             // `narrowed` when it happened - carried across unchanged
             // here, not fabricated fresh at this merge point.
             let provenance = narrowed.get_provenance(key).cloned().unwrap_or_default();
-            locals.insert_with_provenance(key.clone(), ty.clone(), provenance);
+            locals.insert_with_provenance(key, ty.clone(), provenance);
         }
     }
 }
@@ -5629,7 +5652,7 @@ impl<'a> Checker<'a> {
         let Some(out) = sig.self_out() else {
             return;
         };
-        let Some(key) = narrowing_key(recv) else {
+        let Some(key) = locals.key_of(recv) else {
             return;
         };
         let as_return = sig.with_return_type(out.clone());
@@ -5850,12 +5873,12 @@ impl<'a> Checker<'a> {
         }
         let mut scope = locals.closure_scope();
         for u in uses {
-            if let Some(ty) = locals.get(&u.name) {
-                scope.insert(u.name.to_string(), ty.clone());
+            if let Some(ty) = locals.get_var(&u.name) {
+                scope.insert_var(&u.name, ty.clone());
             }
         }
-        if !is_static && let Some(this_ty) = locals.get("this") {
-            scope.insert("this".to_string(), this_ty.clone());
+        if !is_static && let Some(this_ty) = locals.get_var("this") {
+            scope.insert_var("this", this_ty.clone());
         }
         for (i, p) in params.iter().enumerate() {
             let ty = self.closure_param_type(p, i, overrides);
@@ -5864,7 +5887,7 @@ impl<'a> Checker<'a> {
             } else {
                 ty
             };
-            scope.insert(p.name.to_string(), ty);
+            scope.insert_var(&p.name, ty);
         }
         // Every `return` in the body, last first.
         struct Returns<'ast>(Vec<&'ast Stmt>);
@@ -5923,7 +5946,7 @@ impl<'a> Checker<'a> {
             } else {
                 ty
             };
-            arrow_locals.insert(p.name.to_string(), ty);
+            arrow_locals.insert_var(&p.name, ty);
         }
         Some(self.infer_expr(body, &arrow_locals))
     }
@@ -6135,7 +6158,12 @@ impl<'a> Checker<'a> {
         // check/registry lookup below.
         if is_property
             && locals.may_have_member_narrowing()
-            && let Some(narrowed) = locals.get(&format!("{class_name}::${member}"))
+            && let Some(narrowed) = locals
+                .find(&KeyData::StaticProp {
+                    class: class_name.written.clone(),
+                    prop: Name::from(member),
+                })
+                .and_then(|key| locals.get(key))
         {
             return narrowed.clone();
         }

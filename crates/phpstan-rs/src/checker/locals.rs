@@ -1,5 +1,6 @@
 //! A checked scope's variables and the facts recorded about them.
 
+use super::keys::KeyTableRef;
 use super::*;
 use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -25,11 +26,13 @@ use std::sync::atomic::{AtomicU64, Ordering};
 /// `provenance`, like `types`, is backed by `imbl::HashMap` so cloning a
 /// `Locals` stays two O(1) pointer bumps rather than reintroducing a deep
 /// clone.
-#[derive(Clone, Default)]
+#[derive(Clone)]
 pub(crate) struct Locals {
+    // The table of the keys this scope and every scope forked from it use.
+    keys: super::keys::KeyTableRef,
     types: LocalsMap,
-    // The keys of `types` that are not a real variable's name - a property
-    // chain or an index (`narrowing_key`). Only such a key can depend on
+    // The keys of `types` that are not a real variable - a property
+    // chain or an index (`KeyTable::key_of`). Only such a key can depend on
     // another (`a->b` on `a`, `m[$k]` on `k`), so what a rebound key
     // invalidates is among these few, not among every local. Kept by every
     // method that adds or removes a key.
@@ -101,13 +104,110 @@ pub(crate) struct Locals {
 
 static NEXT_VERSION: AtomicU64 = AtomicU64::new(1);
 
+#[cfg(test)]
+impl Default for Locals {
+    /// A scope with a table of its own.
+    fn default() -> Locals {
+        Locals::new(KeyTableRef::default())
+    }
+}
+
 impl Locals {
-    pub(crate) fn get(&self, key: &str) -> Option<&Type> {
-        self.types.get(key)
+    /// An empty scope whose keys `keys` makes: one table serves every scope
+    /// of a checker, so a key from one is a key in the others.
+    pub(crate) fn new(keys: KeyTableRef) -> Locals {
+        Locals {
+            keys,
+            types: LocalsMap::default(),
+            synthetic: KeySet::default(),
+            native: LocalsMap::default(),
+            provenance: ProvenanceMap::default(),
+            guarded_functions: GuardedFunctionSet::default(),
+            guarded_constants: GuardedFunctionSet::default(),
+            guarded_classes: GuardedFunctionSet::default(),
+            guarded_methods: GuardedMemberSet::default(),
+            guarded_properties: GuardedMemberSet::default(),
+            clone_reinitialized: ReinitializedPropertySet::default(),
+            condition_aliases: ConditionAliasMap::default(),
+            branch_implied_facts: BranchImpliedFactsMap::default(),
+            query_builder_aliases: QueryBuilderAliasMap::default(),
+            container_field_facts: ContainerFieldFactsMap::default(),
+            discriminant_array_facts: DiscriminantArrayFactsMap::default(),
+            may_have_member_narrowing: false,
+            any_variable_may_exist: false,
+            track: false,
+            version: 0,
+        }
     }
 
-    pub(crate) fn contains_key(&self, key: &str) -> bool {
-        self.types.contains_key(key)
+    /// The table the keys of this scope are made by.
+    pub(crate) fn keys(&self) -> &super::keys::KeyTableRef {
+        &self.keys
+    }
+
+    /// The key of the variable `name`, made when it has not been.
+    pub(crate) fn var_key(&self, name: &str) -> LocalKey {
+        self.keys.borrow_mut().var(name)
+    }
+
+    /// The key of the variable `name` when it has been made.
+    pub(crate) fn find_var(&self, name: &str) -> Option<LocalKey> {
+        self.keys.borrow().find_var(name)
+    }
+
+    /// The key of the expression `e` narrows, made when it has not been
+    /// (`KeyTable::key_of`).
+    pub(crate) fn key_of(&self, e: &Expr) -> Option<LocalKey> {
+        self.keys.borrow_mut().key_of(e)
+    }
+
+    /// `key_of`, when the key has been made: a read never makes one.
+    pub(crate) fn find_key(&self, e: &Expr) -> Option<LocalKey> {
+        self.keys.borrow().find_key(e)
+    }
+
+    /// The key of `data`, made when it has not been.
+    pub(crate) fn intern(&self, data: KeyData) -> LocalKey {
+        self.keys.borrow_mut().intern(data)
+    }
+
+    /// The key of `data` when it has been made.
+    pub(crate) fn find(&self, data: &KeyData) -> Option<LocalKey> {
+        self.keys.borrow().find(data)
+    }
+
+    /// What `key` is.
+    pub(crate) fn data(&self, key: LocalKey) -> KeyData {
+        self.keys.borrow().data(key).clone()
+    }
+
+    /// `key` as text: `a`, `a->b`, `a[k]`, `a[$k]`, `Foo::$p`.
+    pub(crate) fn render(&self, key: LocalKey) -> String {
+        self.keys.borrow().render(key)
+    }
+
+    /// Whether `key` is a variable, not a property, an index or a test.
+    pub(crate) fn is_real_variable(&self, key: LocalKey) -> bool {
+        self.keys.borrow().is_real_variable(key)
+    }
+
+    pub(crate) fn get(&self, key: LocalKey) -> Option<&Type> {
+        self.types.get(&key)
+    }
+
+    /// The type of the variable `name`.
+    pub(crate) fn get_var(&self, name: &str) -> Option<&Type> {
+        self.types.get(&self.find_var(name)?)
+    }
+
+    pub(crate) fn contains_key(&self, key: LocalKey) -> bool {
+        self.types.contains_key(&key)
+    }
+
+    /// Whether the variable `name` has a type.
+    pub(crate) fn contains_var(&self, name: &str) -> bool {
+        self.find_var(name)
+            .is_some_and(|key| self.types.contains_key(&key))
     }
 
     /// See `may_have_member_narrowing`'s own doc comment.
@@ -121,13 +221,18 @@ impl Locals {
         self.track
     }
 
-    /// The keys that are not a real variable's name.
-    pub(crate) fn synthetic_keys(&self) -> impl Iterator<Item = &String> {
+    /// Whether `key` is held and is not a variable.
+    pub(crate) fn is_synthetic(&self, key: LocalKey) -> bool {
+        self.synthetic.contains(&key)
+    }
+
+    /// The keys that are not a real variable.
+    pub(crate) fn synthetic_keys(&self) -> impl Iterator<Item = &LocalKey> {
         self.synthetic.iter()
     }
 
     /// Whether rebinding `key` would change anything: a key of the scope
-    /// depends on it (`narrowing::key_depends_on`, which `key` itself
+    /// depends on it (`KeyTable::depends_on`, which `key` itself
     /// satisfies), or a per-field, branch-implied or per-discriminant fact
     /// is held. When it would not, `purge_stale_narrowing_for` does nothing
     /// for any key.
@@ -138,28 +243,71 @@ impl Locals {
             || !self.discriminant_array_facts.is_empty()
     }
 
-    /// Whether the scope has `key`, or a key that depends on it:
-    /// `narrowing::key_depends_on` for each key of the scope, found among
-    /// the synthetic ones, the only ones that can.
-    pub(crate) fn has_key_depending_on(&self, key: &str) -> bool {
-        self.types.contains_key(key)
-            || self
-                .synthetic
-                .iter()
-                .any(|k| narrowing::key_depends_on(k, key))
+    /// Whether the scope has `key`, or a key that depends on it: found
+    /// among the synthetic ones, the only ones that can.
+    pub(crate) fn has_key_depending_on(&self, key: LocalKey) -> bool {
+        self.types.contains_key(&key) || {
+            let keys = self.keys.borrow();
+            self.synthetic.iter().any(|&k| keys.depends_on(k, key))
+        }
     }
 
     /// Provenance-preserving update, for narrowing an existing binding
     /// (`instanceof`/null/array-shape checks) or a by-ref call's type
     /// widening (`sort($arr)`, `preg_match(..., $matches)`) - the value's
     /// declaration site doesn't move just because its known type changed.
-    pub(crate) fn insert(&mut self, key: String, ty: Type) -> Option<Type> {
+    pub(crate) fn insert(&mut self, key: LocalKey, ty: Type) -> Option<Type> {
         self.touch();
-        if !narrowing::is_real_variable_key(&key) {
-            self.may_have_member_narrowing = true;
-            self.synthetic.insert(key.clone());
-        }
+        self.note_synthetic(key);
         self.types.insert(key, ty)
+    }
+
+    /// `insert` for the variable `name`.
+    pub(crate) fn insert_var(&mut self, name: &str, ty: Type) -> Option<Type> {
+        let key = self.var_key(name);
+        self.insert(key, ty)
+    }
+
+    /// Records `key` as synthetic when it is not a variable.
+    fn note_synthetic(&mut self, key: LocalKey) {
+        if !self.is_real_variable(key) {
+            self.may_have_member_narrowing = true;
+            self.synthetic.insert(key);
+        }
+    }
+
+    /// `insert_with_provenance` for the variable `name`.
+    pub(crate) fn insert_with_provenance_var(
+        &mut self,
+        name: &str,
+        ty: Type,
+        provenance: ProvenanceSet,
+    ) -> Option<Type> {
+        let key = self.var_key(name);
+        self.insert_with_provenance(key, ty, provenance)
+    }
+
+    /// `native` of the variable `name`.
+    pub(crate) fn native_var(&self, name: &str) -> Option<&Type> {
+        self.native.get(&self.find_var(name)?)
+    }
+
+    /// `set_native` for the variable `name`.
+    pub(crate) fn set_native_var(&mut self, name: &str, ty: Type) {
+        let key = self.var_key(name);
+        self.set_native(key, ty);
+    }
+
+    /// `clear_native` for the variable `name`.
+    pub(crate) fn clear_native_var(&mut self, name: &str) {
+        if let Some(key) = self.find_var(name) {
+            self.clear_native(key);
+        }
+    }
+
+    /// `get_provenance` of the variable `name`.
+    pub(crate) fn get_provenance_var(&self, name: &str) -> Option<&ProvenanceSet> {
+        self.provenance.get(&self.find_var(name)?)
     }
 
     /// The one real new-declaration primitive - used only at a genuine
@@ -167,16 +315,16 @@ impl Locals {
     /// binding, `static $x`, closure `use (...)`, `$x++`/`$x--`). Replaces
     /// `key`'s provenance with a fresh singleton `{span}`, since a rebind
     /// makes anything tracked before it a dead candidate.
-    pub(crate) fn declare(&mut self, key: String, ty: Type, span: Span) -> Option<Type> {
+    pub(crate) fn declare(&mut self, key: LocalKey, ty: Type, span: Span) -> Option<Type> {
         self.touch();
         self.native.remove(&key);
         if self.track {
             let mut set = ProvenanceSet::default();
             set.insert(span);
-            self.provenance.insert(key.clone(), set);
+            self.provenance.insert(key, set);
         }
-        self.purge_condition_aliases_targeting(&key);
-        self.purge_branch_implied_facts_depending_on(&key);
+        self.purge_condition_aliases_targeting(key);
+        self.purge_branch_implied_facts_depending_on(key);
         self.query_builder_aliases.remove(&key);
         // A container rebound wholesale invalidates every per-field fact
         // recorded about its old value - see `ContainerFieldFactsMap`'s
@@ -186,23 +334,26 @@ impl Locals {
         // through `insert`, not `declare` (see `predefine_byref_or_
         // unknown_args`), so that call site purges this map itself too.
         self.container_field_facts.remove(&key);
-        if !narrowing::is_real_variable_key(&key) {
-            self.may_have_member_narrowing = true;
-            self.synthetic.insert(key.clone());
-        }
+        self.note_synthetic(key);
         self.types.insert(key, ty)
+    }
+
+    /// `declare` for the variable `name`.
+    pub(crate) fn declare_var(&mut self, name: &str, ty: Type, span: Span) -> Option<Type> {
+        let key = self.var_key(name);
+        self.declare(key, ty, span)
     }
 
     /// The store half of the condition-alias mechanism - see
     /// `ConditionAliasMap`'s doc comment. `target_keys` are `condition`'s
-    /// own narrowing targets (e.g. `["x"]` for `$x instanceof Foo`, or
-    /// `["isUserFound", "email"]` for a compound condition naming both),
+    /// own narrowing targets (e.g. `[x]` for `$x instanceof Foo`, or
+    /// `[isUserFound, email]` for a compound condition naming both),
     /// computed by the caller (`Checker::record_condition_alias`) via
     /// `condition_alias_targets`.
     pub(crate) fn set_condition_alias(
         &mut self,
-        name: String,
-        target_keys: Vec<String>,
+        name: LocalKey,
+        target_keys: Vec<LocalKey>,
         condition: std::rc::Rc<Expr>,
     ) {
         self.touch();
@@ -212,7 +363,7 @@ impl Locals {
 
     /// The store half of `QueryBuilderAliasMap`'s own mechanism - see its
     /// doc comment.
-    pub(crate) fn set_query_builder_alias(&mut self, name: String, rhs: std::rc::Rc<Expr>) {
+    pub(crate) fn set_query_builder_alias(&mut self, name: LocalKey, rhs: std::rc::Rc<Expr>) {
         self.touch();
         self.query_builder_aliases.insert(name, rhs);
     }
@@ -224,46 +375,43 @@ impl Locals {
     /// record_condition_alias` re-inserts a fresh alias for `key` right
     /// after, when the new RHS qualifies, so a genuine re-alias isn't lost
     /// - only ever a stale one.
-    fn purge_condition_aliases_targeting(&mut self, key: &str) {
+    fn purge_condition_aliases_targeting(&mut self, key: LocalKey) {
         self.touch();
-        self.condition_aliases.remove(key);
+        self.condition_aliases.remove(&key);
         self.condition_aliases
-            .retain(|_, (targets, _)| !targets.iter().any(|t| t == key));
+            .retain(|_, (targets, _)| !targets.contains(&key));
     }
 
     /// Drops every branch-implied fact that no longer holds once `key`
-    /// (a variable or `narrowing_key` chain) gets a new value - see
+    /// (a variable or a key built on one) gets a new value - see
     /// `BranchImpliedFactsMap`.
-    pub(crate) fn purge_branch_implied_facts_depending_on(&mut self, key: &str) {
+    pub(crate) fn purge_branch_implied_facts_depending_on(&mut self, key: LocalKey) {
         self.touch();
         if self.branch_implied_facts.is_empty() {
             return;
         }
-        let depends = |k: &str| narrowing::key_depends_on(k, key);
         let mut changed: Vec<(Discriminant, Option<BranchImpliedFacts>)> = Vec::new();
-        // A truthiness or `isset` subject wraps the key it tests.
-        let tested = |subject: &str| -> String {
-            ["truthy(", "isset("]
-                .iter()
-                .find_map(|prefix| subject.strip_prefix(prefix)?.strip_suffix(')'))
-                .unwrap_or(subject)
-                .to_string()
-        };
-        for (fact_key, implied) in self.branch_implied_facts.iter() {
-            if depends(&tested(&fact_key.subject)) {
-                changed.push((fact_key.clone(), None));
-                continue;
-            }
-            if implied.iter().any(|(var, _)| depends(var)) {
-                let kept: Vec<(String, Type)> = implied
-                    .iter()
-                    .filter(|(var, _)| !depends(var))
-                    .cloned()
-                    .collect();
-                changed.push((
-                    fact_key.clone(),
-                    (!kept.is_empty()).then(|| std::rc::Rc::new(kept)),
-                ));
+        {
+            let keys = self.keys.borrow();
+            let depends = |k: LocalKey| keys.depends_on(k, key);
+            for (fact_key, implied) in self.branch_implied_facts.iter() {
+                // A truthiness or `isset` subject depends on the key it
+                // tests.
+                if depends(fact_key.subject) {
+                    changed.push((fact_key.clone(), None));
+                    continue;
+                }
+                if implied.iter().any(|(var, _)| depends(*var)) {
+                    let kept: Vec<(LocalKey, Type)> = implied
+                        .iter()
+                        .filter(|(var, _)| !depends(*var))
+                        .cloned()
+                        .collect();
+                    changed.push((
+                        fact_key.clone(),
+                        (!kept.is_empty()).then(|| std::rc::Rc::new(kept)),
+                    ));
+                }
             }
         }
         for (fact_key, replacement) in changed {
@@ -288,48 +436,57 @@ impl Locals {
     /// already-known origin).
     pub(crate) fn insert_with_provenance(
         &mut self,
-        key: String,
+        key: LocalKey,
         ty: Type,
         provenance: ProvenanceSet,
     ) -> Option<Type> {
         self.touch();
         if self.track && !provenance.is_empty() {
-            self.provenance.insert(key.clone(), provenance);
+            self.provenance.insert(key, provenance);
         }
-        if !narrowing::is_real_variable_key(&key) {
-            self.may_have_member_narrowing = true;
-            self.synthetic.insert(key.clone());
-        }
+        self.note_synthetic(key);
         self.types.insert(key, ty)
     }
 
-    pub(crate) fn get_provenance(&self, key: &str) -> Option<&ProvenanceSet> {
-        self.provenance.get(key)
+    pub(crate) fn get_provenance(&self, key: LocalKey) -> Option<&ProvenanceSet> {
+        self.provenance.get(&key)
     }
 
-    pub(crate) fn remove(&mut self, key: &str) -> Option<Type> {
+    pub(crate) fn remove(&mut self, key: LocalKey) -> Option<Type> {
         self.touch();
-        self.provenance.remove(key);
-        self.native.remove(key);
+        self.provenance.remove(&key);
+        self.native.remove(&key);
         if self.may_have_member_narrowing {
-            self.synthetic.remove(key);
+            self.synthetic.remove(&key);
         }
-        self.types.remove(key)
+        self.types.remove(&key)
     }
 
     /// `remove` for a scope that tracks no provenance, leaving the native
     /// type of the key as it is.
-    pub(crate) fn remove_type(&mut self, key: &str) -> Option<Type> {
+    pub(crate) fn remove_type(&mut self, key: LocalKey) -> Option<Type> {
         debug_assert!(!self.track);
         self.touch();
         if self.may_have_member_narrowing {
-            self.synthetic.remove(key);
+            self.synthetic.remove(&key);
         }
-        self.types.remove(key)
+        self.types.remove(&key)
     }
 
-    pub(crate) fn iter(&self) -> impl Iterator<Item = (&String, &Type)> {
-        self.types.iter()
+    pub(crate) fn iter(&self) -> impl Iterator<Item = (LocalKey, &Type)> {
+        self.types.iter().map(|(key, ty)| (*key, ty))
+    }
+
+    /// The variables of the scope, by name, with their types.
+    pub(crate) fn variables(&self) -> Vec<(syntax::name::Name, &Type)> {
+        let keys = self.keys.borrow();
+        self.types
+            .iter()
+            .filter_map(|(key, ty)| match keys.data(*key) {
+                KeyData::Var(name) => Some((name.clone(), ty)),
+                _ => None,
+            })
+            .collect()
     }
 
     /// The bindings that differ between this scope and `other`, in key
@@ -338,30 +495,30 @@ impl Locals {
     pub(crate) fn types_diff<'a>(
         &'a self,
         other: &'a Locals,
-    ) -> imbl::ordmap::DiffIter<'a, 'a, String, Type, imbl::shared_ptr::DefaultSharedPtr> {
+    ) -> imbl::ordmap::DiffIter<'a, 'a, LocalKey, Type, imbl::shared_ptr::DefaultSharedPtr> {
         self.types.diff(&other.types)
     }
 
     /// Records `key`'s native type, right after the `declare` binding it.
     /// `mixed` records nothing.
-    pub(crate) fn set_native(&mut self, key: &str, ty: Type) {
+    pub(crate) fn set_native(&mut self, key: LocalKey, ty: Type) {
         self.touch();
         if !ty.is_mixed() {
-            self.native.insert(key.to_string(), ty);
+            self.native.insert(key, ty);
         }
     }
 
-    pub(crate) fn clear_native(&mut self, key: &str) {
+    pub(crate) fn clear_native(&mut self, key: LocalKey) {
         self.touch();
-        self.native.remove(key);
+        self.native.remove(&key);
     }
 
-    pub(crate) fn native(&self, key: &str) -> Option<&Type> {
-        self.native.get(key)
+    pub(crate) fn native(&self, key: LocalKey) -> Option<&Type> {
+        self.native.get(&key)
     }
 
-    pub(crate) fn natives(&self) -> impl Iterator<Item = (&String, &Type)> {
-        self.native.iter()
+    pub(crate) fn natives(&self) -> impl Iterator<Item = (LocalKey, &Type)> {
+        self.native.iter().map(|(key, ty)| (*key, ty))
     }
 
     /// A fresh, empty scope that still carries `self`'s own `track` flag
@@ -370,6 +527,7 @@ impl Locals {
     /// default()`.
     pub(crate) fn fresh_scope(&self) -> Locals {
         Locals {
+            keys: std::rc::Rc::clone(&self.keys),
             types: LocalsMap::default(),
             synthetic: KeySet::default(),
             native: LocalsMap::default(),

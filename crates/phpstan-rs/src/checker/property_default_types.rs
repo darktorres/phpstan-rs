@@ -3,7 +3,7 @@
 //! property's own default value expression's type must be assignable to
 //! its declared (writable) type.
 
-use crate::checker::{Checker, Locals};
+use crate::checker::Checker;
 use syntax::ast::*;
 
 impl<'a> Checker<'a> {
@@ -48,7 +48,7 @@ impl<'a> Checker<'a> {
             // declaring class, which isn't otherwise the current class
             // outside a method body.
             let previous_class = self.current_class.replace(fqn.to_string());
-            let default_ty = self.infer_expr(default, &Locals::default());
+            let default_ty = self.infer_expr(default, &self.new_locals());
             self.current_class = previous_class;
             if self.accepts(property_ty, &default_ty).yes() {
                 continue;

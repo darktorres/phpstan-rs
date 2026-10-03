@@ -1,5 +1,4 @@
 use crate::checker::narrowing::mirror_comparison;
-use crate::checker::narrowing::predicates::narrowing_key;
 use crate::checker::{Checker, Locals, PregCall, preg_call, preg_result_outcome, preg_result_type};
 use crate::regex_groups;
 use syntax::ast::*;
@@ -43,7 +42,10 @@ impl Checker<'_> {
                 let result = preg_result_type(call.all);
                 (call, result)
             } else if let ExprKind::Variable(name) = &side.peeled().kind
-                && let Some((_, stored)) = locals.condition_aliases().get(name.as_ref()).cloned()
+                && let Some((_, stored)) = locals
+                    .condition_aliases()
+                    .get(&locals.var_key(name))
+                    .cloned()
             {
                 alias = stored;
                 let Some(call) = preg_call(&alias) else {
@@ -109,7 +111,7 @@ impl Checker<'_> {
             return;
         };
         if let Some(matches) = call.matches
-            && let Some(key) = narrowing_key(matches)
+            && let Some(key) = locals.key_of(matches)
             && let Some(ty) = self.preg_matches_type(call, outcome, locals)
         {
             locals.insert(key, ty);
@@ -120,7 +122,7 @@ impl Checker<'_> {
         let Some(subject) = call.subject else {
             return;
         };
-        let Some(key) = narrowing_key(subject) else {
+        let Some(key) = locals.key_of(subject) else {
             return;
         };
         let Some(parsed) = self
@@ -147,7 +149,7 @@ impl Checker<'_> {
             } else {
                 target
             };
-        let current = self.current_narrowed_type(subject, &key, locals);
+        let current = self.current_narrowed_type(subject, key, locals);
         locals.insert(key, self.refine_string_members(&current, &target, true));
     }
 }

@@ -122,7 +122,7 @@ impl<'a> Checker<'a> {
             .chain(self.current_function_byref_snapshot_names.iter().cloned())
             .collect();
         for name in names {
-            let ty = locals.get(&name).cloned().unwrap_or(Type::mixed());
+            let ty = locals.get_var(&name).cloned().unwrap_or(Type::mixed());
             self.current_function_by_ref_exit_snapshots
                 .entry(name)
                 .or_default()

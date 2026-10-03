@@ -2,7 +2,7 @@ use rustc_hash::FxHashMap;
 use types::Name;
 use types::UnionAll as _;
 
-use crate::checker::{CalleeLabel, Checker, Locals, purge_stale_narrowing_for};
+use crate::checker::{CalleeLabel, Checker, Locals, purge_stale_narrowing_for_var};
 use crate::registry::{FunctionReflection, ParameterReflection};
 use syntax::ast::*;
 use syntax::span::Span;
@@ -108,10 +108,10 @@ impl<'a> Checker<'a> {
                 // is this variable's genuine first appearance -
                 // `declare`, not `insert`, matching
                 // `bind_assignment_target`'s own index-write treatment.
-                if !locals.contains_key(name) {
-                    locals.declare(name.to_string(), Type::mixed(), arg.value.span);
+                if !locals.contains_var(name) {
+                    locals.declare_var(name, Type::mixed(), arg.value.span);
                 }
-                locals.clear_native(name);
+                locals.clear_native_var(name);
             }
             return;
         };
@@ -136,13 +136,13 @@ impl<'a> Checker<'a> {
             if !param.by_ref() {
                 continue;
             }
-            if !locals.contains_key(name) {
-                locals.declare(name.to_string(), Type::mixed(), arg_expr.span);
+            if !locals.contains_var(name) {
+                locals.declare_var(name, Type::mixed(), arg_expr.span);
                 continue;
             }
             // The callee may write anything its own native type allows.
-            locals.clear_native(name);
-            locals.set_native(name, param.ty_native().clone());
+            locals.clear_native_var(name);
+            locals.set_native_var(name, param.ty_native().clone());
             // Real PHPStan models the sort() family's own dynamic
             // type-specifying extensions rather than the generic
             // declared-param-type widening below: sort/rsort/usort/
@@ -151,7 +151,7 @@ impl<'a> Checker<'a> {
             // known); asort/arsort/ksort/krsort/uasort/uksort/natsort/
             // natcasesort preserve the exact key structure unchanged.
             if let Some(fn_name) = call_name {
-                let current = locals.get(name).cloned().unwrap_or(Type::mixed());
+                let current = locals.get_var(name).cloned().unwrap_or(Type::mixed());
                 match fn_name {
                     "sort" | "rsort" | "usort" | "shuffle" => {
                         if let Some(elem_ty) = current.array_value_type() {
@@ -162,8 +162,8 @@ impl<'a> Checker<'a> {
                             if current.is_non_empty_array().yes() {
                                 members.push(Type::accessory(types::AccessoryKind::NonEmptyArray));
                             }
-                            purge_stale_narrowing_for(locals, name);
-                            locals.insert(name.to_string(), Type::intersection_of(members));
+                            purge_stale_narrowing_for_var(locals, name);
+                            locals.insert_var(name, Type::intersection_of(members));
                             continue;
                         }
                     }
@@ -222,8 +222,8 @@ impl<'a> Checker<'a> {
                                 Type::accessory(types::AccessoryKind::ArrayList),
                                 Type::accessory(types::AccessoryKind::NonEmptyArray),
                             ];
-                            purge_stale_narrowing_for(locals, name);
-                            locals.insert(name.to_string(), Type::intersection_of(members));
+                            purge_stale_narrowing_for_var(locals, name);
+                            locals.insert_var(name, Type::intersection_of(members));
                             continue;
                         }
                     }
@@ -240,8 +240,8 @@ impl<'a> Checker<'a> {
                                 Type::array(Type::unknown_array_key(), elem_ty),
                                 Type::accessory(types::AccessoryKind::ArrayList),
                             ];
-                            purge_stale_narrowing_for(locals, name);
-                            locals.insert(name.to_string(), Type::intersection_of(members));
+                            purge_stale_narrowing_for_var(locals, name);
+                            locals.insert_var(name, Type::intersection_of(members));
                             continue;
                         }
                     }
@@ -279,8 +279,8 @@ impl<'a> Checker<'a> {
                             if non_empty {
                                 members.push(Type::accessory(types::AccessoryKind::NonEmptyArray));
                             }
-                            purge_stale_narrowing_for(locals, name);
-                            locals.insert(name.to_string(), Type::intersection_of(members));
+                            purge_stale_narrowing_for_var(locals, name);
+                            locals.insert_var(name, Type::intersection_of(members));
                             continue;
                         }
                     }
@@ -328,8 +328,8 @@ impl<'a> Checker<'a> {
             // without this, a stale composite key rooted at `name` would
             // keep answering for whatever the callee may have replaced
             // it with.
-            purge_stale_narrowing_for(locals, name);
-            locals.insert(name.to_string(), widened);
+            purge_stale_narrowing_for_var(locals, name);
+            locals.insert_var(name, widened);
         }
     }
 
@@ -361,9 +361,9 @@ impl<'a> Checker<'a> {
                 continue;
             };
             let out_ty = out_ty.substitute_templates(&FxHashMap::default(), &self.relation());
-            locals.clear_native(name);
-            purge_stale_narrowing_for(locals, name);
-            locals.insert(name.to_string(), out_ty);
+            locals.clear_native_var(name);
+            purge_stale_narrowing_for_var(locals, name);
+            locals.insert_var(name, out_ty);
         }
     }
 

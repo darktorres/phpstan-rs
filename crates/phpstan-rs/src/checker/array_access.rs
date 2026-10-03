@@ -5,7 +5,7 @@
 //! properties, and it isn't pure. An object that is one only through a
 //! subclass may run any code there.
 
-use crate::checker::{Checker, Locals, narrowing_key, purge_stale_narrowing_for};
+use crate::checker::{Checker, Locals, purge_stale_narrowing_for};
 use syntax::ast::{Expr, ExprKind};
 use syntax::span::Span;
 use types::Type;
@@ -101,12 +101,10 @@ impl<'a> Checker<'a> {
             }
         }
         if writes > PropertyWrites::Nothing
-            && let Some(key) = narrowing_key(base)
-            && locals
-                .iter()
-                .any(|(k, _)| crate::checker::narrowing::key_depends_on(k, &key))
+            && let Some(key) = locals.key_of(base)
+            && locals.has_key_depending_on(key)
         {
-            purge_stale_narrowing_for(locals, &key);
+            purge_stale_narrowing_for(locals, key);
         }
         if !self.implicit_calls.contains(&span) {
             self.implicit_calls.push(span);

@@ -146,7 +146,7 @@ impl<'a> Checker<'a> {
         if self.static_var_names.contains(name.as_ref()) {
             return;
         }
-        let Some(ty) = locals.get(name) else {
+        let Some(ty) = locals.get_var(name) else {
             return;
         };
         let Some(verdict) = verdict_fn(ty) else {
@@ -193,7 +193,7 @@ impl<'a> Checker<'a> {
                     {
                         return None;
                     }
-                    locals.get(name).cloned()
+                    locals.get_var(name).cloned()
                 }
                 ExprKind::Index(base, Some(idx)) => {
                     let key = literal_string_key(idx)?;

@@ -1,6 +1,6 @@
 use rustc_hash::FxHashSet;
 
-use crate::checker::{CalleeLabel, CheckArgsCall, Checker, Locals, class_type_word};
+use crate::checker::{CalleeLabel, CheckArgsCall, Checker, class_type_word};
 use crate::registry::{is_allow_dynamic_properties_attribute_name, is_deprecated_attribute_name};
 use diagnostics::DiagnosticBuilder;
 use syntax::ast::*;
@@ -107,7 +107,7 @@ impl<'a> Checker<'a> {
                     "attribute.constructorNotPublic",
                 );
             }
-            let mut locals = Locals::default();
+            let mut locals = self.new_locals();
             for a in &attr.args {
                 self.check_expr(&a.value, &mut locals, label);
             }

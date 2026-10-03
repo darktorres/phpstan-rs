@@ -1,4 +1,5 @@
-use crate::checker::{Checker, Locals, narrowing_key, purge_stale_narrowing_for};
+use crate::checker::keys::{KeyData, LocalKey};
+use crate::checker::{Checker, Locals, purge_stale_narrowing_for, purge_stale_narrowing_for_var};
 use diagnostics::DiagnosticBuilder;
 use syntax::ast::*;
 use types::{Shape, ShapeKey, Type};
@@ -306,16 +307,16 @@ impl<'a> Checker<'a> {
             // arm below, which does the same insert under the identical key
             // for that one case.
             purge_aliased_index_entries(lhs, locals);
-            let own_entry = narrowing_key(lhs).map(|key| {
+            let own_entry = locals.key_of(lhs).map(|key| {
                 // Also drops any deeper stale entry rooted at this exact
                 // key (`"key->prop"`, `"key[lit]"`) or that used `key` as a
                 // variable subscript elsewhere (`"other[$key]"`) - real
                 // invalidation-on-reassignment, generalized over any
                 // `narrowing_key` shape (bare variable, property chain, or
                 // index chain), not just a bare variable.
-                purge_stale_narrowing_for(locals, &key);
+                purge_stale_narrowing_for(locals, key);
                 let stored = self.property_value_after_write(lhs, &ty, locals);
-                locals.insert(key.clone(), stored.clone());
+                locals.insert(key, stored.clone());
                 (key, stored)
             });
             match &lhs.kind {
@@ -330,7 +331,7 @@ impl<'a> Checker<'a> {
                 ExprKind::Variable(name) => {
                     // See `Checker::probe_hit_at`'s doc comment.
                     self.probe_hit_at(lhs.span, &ty);
-                    locals.declare(name.to_string(), ty, lhs.span);
+                    locals.declare_var(name, ty, lhs.span);
                 }
                 // Each element takes the value read at its key, as a read
                 // of it would: a keyed element's literal key, a positional
@@ -411,8 +412,8 @@ impl<'a> Checker<'a> {
                             // though it's typically absent from `locals`
                             // too) - only a real local's first `$x[...] = ...`
                             // write is this variable's true declaration site.
-                            let was_defined = locals.contains_key(name);
-                            let current = locals.get(name).cloned().unwrap_or_else(|| {
+                            let was_defined = locals.contains_var(name);
+                            let current = locals.get_var(name).cloned().unwrap_or_else(|| {
                                 if is_superglobal(name) {
                                     unassigned_variable_type(name)
                                 } else {
@@ -452,7 +453,8 @@ impl<'a> Checker<'a> {
                                 && let Some((subject, value)) =
                                     self.active_discriminant.last().cloned()
                             {
-                                let key = (name.to_string(), subject, value);
+                                let container = locals.var_key(name);
+                                let key = (container, subject, value);
                                 let prior = locals
                                     .discriminant_array_facts()
                                     .get(&key)
@@ -498,14 +500,18 @@ impl<'a> Checker<'a> {
                                 && let Some(idx_ty) = idx_ty.as_ref()
                             {
                                 for literal_key in literal_keys_from_type(idx_ty) {
-                                    let synthetic_key = format!("{name}[{literal_key}]");
-                                    let merged = match locals.get(&synthetic_key) {
+                                    let container = locals.var_key(name);
+                                    let element = locals.intern(KeyData::Index {
+                                        base: container,
+                                        key: literal_key.as_str().into(),
+                                    });
+                                    let merged = match locals.get(element) {
                                         Some(prior) => {
                                             self.relation().union(prior.clone(), ty.clone())
                                         }
                                         None => ty.clone(),
                                     };
-                                    locals.insert(synthetic_key, merged);
+                                    locals.insert(element, merged);
                                 }
                             }
                             // A string takes the write as a string does.
@@ -521,13 +527,13 @@ impl<'a> Checker<'a> {
                             };
                             if let Some(new_ty) = written {
                                 if was_defined || is_superglobal(name) {
-                                    locals.insert(name.to_string(), new_ty);
-                                    if let Some(native) = locals.native(name) {
+                                    locals.insert_var(name, new_ty);
+                                    if let Some(native) = locals.native_var(name) {
                                         let native = native_after_offset_change(native, true);
-                                        locals.set_native(name, native);
+                                        locals.set_native_var(name, native);
                                     }
                                 } else {
-                                    locals.declare(name.to_string(), new_ty, base.span);
+                                    locals.declare_var(name, new_ty, base.span);
                                 }
                             }
                         }
@@ -550,8 +556,8 @@ impl<'a> Checker<'a> {
                         // ... $this->p[$k] = $v;`) updates that narrowed type,
                         // or it would stay the stale pre-write one.
                         _ => {
-                            if let Some(key) = narrowing_key(base)
-                                && let Some(current) = locals.get(&key).cloned()
+                            if let Some(key) = locals.key_of(base)
+                                && let Some(current) = locals.get(key).cloned()
                                 && let Some(new_ty) = current.set_offset_value_type(
                                     idx_ty.as_ref(),
                                     ty,
@@ -590,16 +596,16 @@ impl<'a> Checker<'a> {
         if let Some(Some(thrown)) = self.call_throw_types.remove(&target.span) {
             self.record_throw_state(thrown, locals);
         }
-        if let Some(key) = narrowing_key(target) {
-            purge_stale_narrowing_for(locals, &key);
-            locals.remove(&key);
+        if let Some(key) = locals.key_of(target) {
+            purge_stale_narrowing_for(locals, key);
+            locals.remove(key);
         }
         purge_aliased_index_entries(target, locals);
         let ExprKind::Index(base, Some(idx)) = &target.kind else {
             return;
         };
         if let ExprKind::Variable(name) = &base.kind
-            && !locals.contains_key(name)
+            && !locals.contains_var(name)
         {
             return;
         }
@@ -614,14 +620,15 @@ impl<'a> Checker<'a> {
             // hold with one element gone; facts about the whole array
             // don't.
             ExprKind::Variable(name) => {
-                locals.purge_branch_implied_facts_depending_on(name);
+                let variable = locals.var_key(name);
+                locals.purge_branch_implied_facts_depending_on(variable);
                 locals
                     .discriminant_array_facts_mut()
-                    .retain(|(container, _, _), _| container != name.as_ref());
-                locals.insert(name.to_string(), after);
-                if let Some(native) = locals.native(name) {
+                    .retain(|(container, _, _), _| *container != variable);
+                locals.insert_var(name, after);
+                if let Some(native) = locals.native_var(name) {
                     let native = native_after_offset_change(native, false);
-                    locals.set_native(name, native);
+                    locals.set_native_var(name, native);
                 }
             }
             _ => self.bind_assignment_target(base, after, locals),
@@ -643,8 +650,8 @@ impl<'a> Checker<'a> {
             };
             // An element narrowed by an earlier write or check is present,
             // with that type.
-            if let Some(key) = narrowing_key(e)
-                && let Some(narrowed) = locals.get(&key)
+            if let Some(key) = locals.find_key(e)
+                && let Some(narrowed) = locals.get(key)
             {
                 return narrowed.clone();
             }
@@ -657,11 +664,11 @@ impl<'a> Checker<'a> {
 
     pub(crate) fn bind_simple_target(&self, target: &Expr, ty: Type, locals: &mut Locals) {
         if let ExprKind::Variable(name) = &target.kind {
-            purge_stale_narrowing_for(locals, name);
+            purge_stale_narrowing_for_var(locals, name);
             // Real rebind - `target` is a `foreach` key's bare `$var`
             // expression (its only caller), a real declaration site.
             self.probe_hit_at(target.span, &ty);
-            locals.declare(name.to_string(), ty, target.span);
+            locals.declare_var(name, ty, target.span);
         }
     }
 
@@ -684,9 +691,9 @@ impl<'a> Checker<'a> {
         locals: &Locals,
     ) {
         if locals.may_have_member_narrowing()
-            && let Some(key) = narrowing_key(read)
+            && let Some(key) = locals.find_key(read)
             && locals
-                .get(&key)
+                .get(key)
                 .is_some_and(|narrowed| narrowed.is_null().no())
         {
             return;
@@ -872,26 +879,37 @@ fn purge_aliased_index_entries(lhs: &Expr, locals: &mut Locals) {
             return;
         };
         purge_aliased_index_entries(base, locals);
-        let Some(base_key) = narrowing_key(base) else {
+        let Some(base_key) = locals.key_of(base) else {
             return;
-        };
-        let siblings = format!("{base_key}[");
-        let variable_siblings = format!("{base_key}[$");
-        let prefix = if literal_string_key(idx).is_some() {
-            &variable_siblings
-        } else {
-            &siblings
         };
         // The written element itself isn't an alias of itself: the write
         // rewrites its entry, and a deeper write reads it as its container.
-        let own = narrowing_key(lhs);
-        let stale: Vec<String> = locals
-            .iter()
-            .filter(|(k, _)| k.starts_with(prefix.as_str()) && own.as_deref() != Some(k.as_str()))
-            .map(|(k, _)| k.clone())
-            .collect();
+        let own = locals.key_of(lhs);
+        // What is built on an element of `base`: any element for a write
+        // through a non-literal key, a variable-subscript one for a literal.
+        let literal = literal_string_key(idx).is_some();
+        let stale: Vec<LocalKey> = {
+            let keys = locals.keys().borrow();
+            let mut stale = Vec::new();
+            for &element in keys.dependents(base_key) {
+                let aliased = match keys.data(element) {
+                    KeyData::VarIndex { base, .. } => *base == base_key,
+                    KeyData::Index { base, .. } => !literal && *base == base_key,
+                    _ => false,
+                };
+                if !aliased {
+                    continue;
+                }
+                stale.push(element);
+                stale.extend(keys.all_dependents(element));
+            }
+            stale
+                .into_iter()
+                .filter(|k| locals.contains_key(*k) && Some(*k) != own)
+                .collect()
+        };
         for k in stale {
-            locals.remove(&k);
+            locals.remove(k);
         }
     })
 }

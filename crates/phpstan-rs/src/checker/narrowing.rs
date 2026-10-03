@@ -1,5 +1,6 @@
 use crate::checker::expr::type_definitely_excludes_null;
-use crate::checker::{Checker, Discriminant, Locals, literal_string_key};
+use crate::checker::keys::{KeyData, LocalKey};
+use crate::checker::{Checker, Discriminant, Locals};
 use crate::registry::{AssertTarget, FunctionReflection};
 use syntax::ast::*;
 use syntax::span::Span;
@@ -10,8 +11,8 @@ mod predicates;
 mod preg;
 
 pub(crate) use predicates::{
-    is_real_variable_key, key_depends_on, narrowing_key, narrowing_type_for_predicate,
-    propagate_container_field_facts, purge_stale_narrowing_for,
+    narrowing_type_for_predicate, propagate_container_field_facts, purge_stale_narrowing_for,
+    purge_stale_narrowing_for_var,
 };
 
 /// `count($x)`'s own operand-order detection for the count-comparison
@@ -176,14 +177,14 @@ fn cond_references_variable(e: &Expr, name: &str) -> bool {
 /// same atom" under a naive `narrowing_key`-only comparison, since
 /// `narrowing_key` only ever identifies the *subject*, not the value
 /// compared against.
-fn disjunctive_syllogism_atom_key(e: &Expr) -> Option<String> {
+fn disjunctive_syllogism_atom_key(e: &Expr, locals: &Locals) -> Option<LocalKey> {
     let e = e.peeled();
     let inner = match &e.kind {
         ExprKind::Cast(cast, inner) if cast.kind() == CastKind::Bool => inner,
         _ => e,
     };
     match &inner.kind {
-        ExprKind::Variable(_) => narrowing_key(inner),
+        ExprKind::Variable(_) => locals.key_of(inner),
         _ => None,
     }
 }
@@ -199,16 +200,16 @@ fn disjunctive_syllogism_atom_key(e: &Expr) -> Option<String> {
 /// two corpus-confirmed ones - matching this project's "don't guess"
 /// precedent throughout `narrowing.rs` rather than a general condition
 /// canonicalizer.
-fn truthiness_discriminant_subject(cond: &Expr) -> Option<String> {
+fn truthiness_discriminant_subject(cond: &Expr, locals: &Locals) -> Option<LocalKey> {
     match &cond.kind {
         // Apart from `$x === true`'s key: a truthy `$x` is that only for
         // a bool.
-        ExprKind::Variable(_) => Some(format!("truthy({})", narrowing_key(cond)?)),
+        ExprKind::Variable(_) => Some(locals.intern(KeyData::Truthy(locals.key_of(cond)?))),
         ExprKind::Isset(operands) => {
             let [operand] = operands.as_slice() else {
                 return None;
             };
-            Some(format!("isset({})", narrowing_key(operand)?))
+            Some(locals.intern(KeyData::Isset(locals.key_of(operand)?)))
         }
         _ => None,
     }
@@ -224,8 +225,8 @@ impl<'a> Checker<'a> {
                 ExprKind::Index(base, Some(idx)) => (base, crate::checker::literal_shape_key(idx)),
                 ExprKind::PropertyAccess(base, _, _)
                 | ExprKind::DynamicPropertyAccess(base, _, _) => {
-                    if let Some(base_key) = narrowing_key(base) {
-                        let current = self.current_narrowed_type(base, &base_key, locals);
+                    if let Some(base_key) = locals.key_of(base) {
+                        let current = self.current_narrowed_type(base, base_key, locals);
                         locals.insert(base_key, current.without(&Type::null()));
                     }
                     e = base.peeled();
@@ -233,8 +234,8 @@ impl<'a> Checker<'a> {
                 }
                 _ => return,
             };
-            if let Some(base_key) = narrowing_key(base) {
-                let current = self.current_narrowed_type(base, &base_key, locals);
+            if let Some(base_key) = locals.key_of(base) {
+                let current = self.current_narrowed_type(base, base_key, locals);
                 let narrowed = current.to_isset_container(lit_key.as_ref());
                 if !narrowed.is_never() {
                     locals.insert(base_key, narrowed);
@@ -279,13 +280,13 @@ impl<'a> Checker<'a> {
     /// already uses - a real, sound inference, not a new narrowing rule
     /// of its own.
     pub(crate) fn apply_disjunctive_syllogism(&self, cond: &Expr, locals: &mut Locals) {
-        let Some(cond_key) = disjunctive_syllogism_atom_key(cond) else {
+        let Some(cond_key) = disjunctive_syllogism_atom_key(cond, locals) else {
             return;
         };
         for (l, r) in self.pending_or_disjunctions.iter().rev() {
-            if disjunctive_syllogism_atom_key(l).as_deref() == Some(cond_key.as_str()) {
+            if disjunctive_syllogism_atom_key(l, locals) == Some(cond_key) {
                 self.apply_narrowing(r, locals, true);
-            } else if disjunctive_syllogism_atom_key(r).as_deref() == Some(cond_key.as_str()) {
+            } else if disjunctive_syllogism_atom_key(r, locals) == Some(cond_key) {
                 self.apply_narrowing(l, locals, true);
             }
         }
@@ -301,7 +302,7 @@ impl<'a> Checker<'a> {
     /// looks itself up by `(subject, value)`.
     pub(crate) fn replay_truthiness_discriminant_facts(
         &self,
-        subject: &str,
+        subject: LocalKey,
         locals: &mut Locals,
         branch_true: bool,
     ) {
@@ -316,7 +317,7 @@ impl<'a> Checker<'a> {
             .cloned()
         {
             for (implied_key, implied_ty) in implied.iter() {
-                locals.insert(implied_key.clone(), implied_ty.clone());
+                locals.insert(*implied_key, implied_ty.clone());
             }
         }
     }
@@ -332,7 +333,7 @@ impl<'a> Checker<'a> {
     /// one fixed identity to key facts under.
     pub(crate) fn replay_object_discriminant_facts(
         &self,
-        subject: &str,
+        subject: LocalKey,
         resolved_class: &Type,
         locals: &mut Locals,
     ) {
@@ -342,7 +343,7 @@ impl<'a> Checker<'a> {
             .cloned()
         {
             for (implied_key, implied_ty) in implied.iter() {
-                locals.insert(implied_key.clone(), implied_ty.clone());
+                locals.insert(*implied_key, implied_ty.clone());
             }
         }
     }
@@ -385,9 +386,9 @@ impl<'a> Checker<'a> {
         cond: &Expr,
         before: &Locals,
         branch_true: bool,
-    ) -> Option<(String, Type)> {
+    ) -> Option<(LocalKey, Type)> {
         if branch_true && let ExprKind::Binary(BinOp::Identical | BinOp::Eq, l, r) = &cond.kind {
-            match (narrowing_key(l), narrowing_key(r)) {
+            match (before.key_of(l), before.key_of(r)) {
                 (Some(key), _) => Some((key, self.infer_expr(r, before))),
                 (None, Some(key)) => Some((key, self.infer_expr(l, before))),
                 (None, None) => None,
@@ -398,7 +399,7 @@ impl<'a> Checker<'a> {
                     || ty.string_literal_value().is_some()
             })
         } else {
-            truthiness_discriminant_subject(cond).map(|key| {
+            truthiness_discriminant_subject(cond, before).map(|key| {
                 (
                     key,
                     if branch_true {
@@ -420,7 +421,7 @@ impl<'a> Checker<'a> {
         branch_true: bool,
     ) -> Option<Discriminant> {
         self.primary_discriminant(cond, before, branch_true)
-            .map(|(subject, value)| Discriminant::new(&subject, &value))
+            .map(|(subject, value)| Discriminant::new(subject, &value))
     }
 
     pub(crate) fn record_branch_implied_facts(
@@ -431,16 +432,16 @@ impl<'a> Checker<'a> {
         branch_true: bool,
     ) {
         let primary_subject = self.primary_discriminant(cond, before, branch_true);
-        let mut subjects: Vec<(String, Type)> = primary_subject.into_iter().collect();
-        let mut flag_subjects: Vec<(String, Type)> = Vec::new();
+        let mut subjects: Vec<(LocalKey, Type)> = primary_subject.into_iter().collect();
+        let mut flag_subjects: Vec<(LocalKey, Type)> = Vec::new();
         // Each loop below acts only on a binding this branch added or
         // changed: an unchanged one is no proxy, was already narrowed
         // before, or already excluded null.
-        let changed: Vec<(String, Type)> = before
+        let changed: Vec<(LocalKey, Type)> = before
             .types_diff(after)
             .filter_map(|item| match item {
-                imbl::ordmap::DiffItem::Add(name, ty) => Some((name.clone(), ty.clone())),
-                imbl::ordmap::DiffItem::Update { new, .. } => Some((new.0.clone(), new.1.clone())),
+                imbl::ordmap::DiffItem::Add(name, ty) => Some((*name, ty.clone())),
+                imbl::ordmap::DiffItem::Update { new, .. } => Some((*new.0, new.1.clone())),
                 imbl::ordmap::DiffItem::Remove(..) => None,
             })
             .collect();
@@ -463,20 +464,17 @@ impl<'a> Checker<'a> {
             // matching change.
             let is_enum_case_proxy = after_ty.is_enum_case();
             // `cond`'s own truthiness subject is no proxy for itself.
-            let is_truthy_of_name = |k: &str| {
-                k.strip_prefix("truthy(")
-                    .and_then(|rest| rest.strip_suffix(')'))
-                    == Some(name.as_str())
-            };
+            let is_truthy_of_name =
+                |k: LocalKey| matches!(before.data(k), KeyData::Truthy(tested) if tested == *name);
             if (is_flag_proxy || is_object_proxy || is_enum_case_proxy)
-                && before.get(name) != Some(after_ty)
+                && before.get(*name) != Some(after_ty)
                 && !subjects
                     .iter()
-                    .any(|(k, _)| k == name || is_truthy_of_name(k))
+                    .any(|(k, _)| k == name || is_truthy_of_name(*k))
             {
-                subjects.push((name.clone(), after_ty.clone()));
+                subjects.push((*name, after_ty.clone()));
                 if is_flag_proxy {
-                    flag_subjects.push((name.clone(), after_ty.clone()));
+                    flag_subjects.push((*name, after_ty.clone()));
                 }
             }
         }
@@ -486,16 +484,16 @@ impl<'a> Checker<'a> {
         // A flag set in this branch stands for the whole branch having
         // run, so it also implies every variable the branch narrowed,
         // including the ones `cond` tests.
-        let mut narrowed: Vec<(String, Type)> = Vec::new();
+        let mut narrowed: Vec<(LocalKey, Type)> = Vec::new();
         if !flag_subjects.is_empty() {
             for (name, after_ty) in &changed {
-                if !is_real_variable_key(name)
+                if !before.is_real_variable(*name)
                     || subjects.iter().any(|(k, _)| k == name)
                     || after_ty.is_never()
                 {
                     continue;
                 }
-                if let Some(before_ty) = before.get(name)
+                if let Some(before_ty) = before.get(*name)
                     && before_ty != after_ty
                     && self
                         .registry
@@ -503,12 +501,12 @@ impl<'a> Checker<'a> {
                         .is_super_type_of(before_ty, after_ty)
                         .yes()
                 {
-                    narrowed.push((name.clone(), after_ty.clone()));
+                    narrowed.push((*name, after_ty.clone()));
                 }
             }
         }
         record_implied_facts(&self.relation(), after, &flag_subjects, &narrowed);
-        let mut implied: Vec<(String, Type)> = Vec::new();
+        let mut implied: Vec<(LocalKey, Type)> = Vec::new();
         for (name, after_ty) in &changed {
             if subjects.iter().any(|(k, _)| k == name) {
                 continue;
@@ -530,14 +528,16 @@ impl<'a> Checker<'a> {
             // Only a plain variable name is checked here (`is_real_variable_key`) -
             // a synthetic per-field key (`"row[id]"`) never matches a bare
             // `ExprKind::Variable` walk and isn't this shape's own hazard.
-            if is_real_variable_key(name) && cond_references_variable(cond, name) {
+            if let KeyData::Var(variable) = before.data(*name)
+                && cond_references_variable(cond, &variable)
+            {
                 continue;
             }
             if type_definitely_excludes_null(after_ty)
                 && !after_ty.is_mixed()
-                && !before.get(name).is_some_and(type_definitely_excludes_null)
+                && !before.get(*name).is_some_and(type_definitely_excludes_null)
             {
-                implied.push((name.clone(), after_ty.clone()));
+                implied.push((*name, after_ty.clone()));
             }
         }
         record_implied_facts(&self.relation(), after, &subjects, &implied);
@@ -548,21 +548,21 @@ impl<'a> Checker<'a> {
 fn record_implied_facts(
     relation: &types::Relation,
     after: &mut Locals,
-    subjects: &[(String, Type)],
-    implied: &[(String, Type)],
+    subjects: &[(LocalKey, Type)],
+    implied: &[(LocalKey, Type)],
 ) {
     if implied.is_empty() {
         return;
     }
     for (subject_key, value_ty) in subjects {
-        let key = Discriminant::new(subject_key, value_ty);
+        let key = Discriminant::new(*subject_key, value_ty);
         let mut combined = after
             .branch_implied_facts()
             .get(&key)
             .map(|existing| (**existing).clone())
             .unwrap_or_default();
         for (name, ty) in implied {
-            crate::checker::control_flow::add_implied_fact(relation, &mut combined, name, ty);
+            crate::checker::control_flow::add_implied_fact(relation, &mut combined, *name, ty);
         }
         after
             .branch_implied_facts_mut()
@@ -586,10 +586,10 @@ fn record_implied_facts(
 /// as an alias, matching this project's "don't guess, don't false-
 /// positive" precedent throughout `narrowing.rs`, not a false
 /// conclusion.
-fn condition_alias_targets(rhs: &Expr) -> Option<Vec<String>> {
+fn condition_alias_targets(rhs: &Expr, locals: &Locals) -> Option<Vec<LocalKey>> {
     syntax::stack::guard(|| {
         match &rhs.kind {
-            ExprKind::Instanceof(inner, _) => Some(vec![narrowing_key(inner)?]),
+            ExprKind::Instanceof(inner, _) => Some(vec![locals.key_of(inner)?]),
             // `condition_alias_shape`'s own identical comparison-operator
             // extension, mirrored here so a numeric-comparison leaf inside a
             // larger tree still contributes its own narrowable operand as a
@@ -605,48 +605,48 @@ fn condition_alias_targets(rhs: &Expr) -> Option<Vec<String>> {
                 | BinOp::GtEq,
                 l,
                 r,
-            ) => Some(vec![narrowing_key(l).or_else(|| narrowing_key(r))?]),
+            ) => Some(vec![locals.key_of(l).or_else(|| locals.key_of(r))?]),
             // A stored preg call is replayed with its operands' later
             // values, so rebinding any of them drops the alias.
             ExprKind::Call(..) if let Some(call) = crate::checker::preg_call(rhs) => {
-                let mut targets = vec![narrowing_key(call.matches?)?];
-                targets.extend(call.subject.and_then(narrowing_key));
+                let mut targets = vec![locals.key_of(call.matches?)?];
+                targets.extend(call.subject.and_then(|e| locals.key_of(e)));
                 for operand in [Some(call.pattern), call.offset].into_iter().flatten() {
                     if !matches!(
                         operand.peeled().kind,
                         ExprKind::Literal(_) | ExprKind::Name(_) | ExprKind::ClassConstFetch(..)
                     ) {
-                        targets.push(narrowing_key(operand)?);
+                        targets.push(locals.key_of(operand)?);
                     }
                 }
                 Some(targets)
             }
             ExprKind::Call(_, args) => match args.as_slice() {
-                [single_arg] => Some(vec![narrowing_key(&single_arg.value)?]),
+                [single_arg] => Some(vec![locals.key_of(&single_arg.value)?]),
                 _ => None,
             },
-            ExprKind::Isset(operands) => operands.iter().map(narrowing_key).collect(),
-            ExprKind::Empty(operand) => Some(vec![narrowing_key(operand)?]),
-            ExprKind::Variable(name) => Some(vec![name.to_string()]),
+            ExprKind::Isset(operands) => operands.iter().map(|e| locals.key_of(e)).collect(),
+            ExprKind::Empty(operand) => Some(vec![locals.key_of(operand)?]),
+            ExprKind::Variable(name) => Some(vec![locals.var_key(name)]),
             ExprKind::Binary(
                 BinOp::And | BinOp::Or | BinOp::LogicalAnd | BinOp::LogicalOr,
                 l,
                 r,
             ) => {
-                let mut targets = condition_alias_targets(l)?;
-                for key in condition_alias_targets(r)? {
+                let mut targets = condition_alias_targets(l, locals)?;
+                for key in condition_alias_targets(r, locals)? {
                     if !targets.contains(&key) {
                         targets.push(key);
                     }
                 }
                 Some(targets)
             }
-            ExprKind::Unary(UnaryOp::Not, inner) => condition_alias_targets(inner),
+            ExprKind::Unary(UnaryOp::Not, inner) => condition_alias_targets(inner, locals),
             // Targets the *receiver*'s own key, not the chain's - see
             // `nullsafe_receiver`'s own doc comment for why.
             ExprKind::PropertyAccess(base, _, ObjectOperator::NullsafeArrow)
             | ExprKind::MethodCall(base, _, _, ObjectOperator::NullsafeArrow) => {
-                Some(vec![narrowing_key(base)?])
+                Some(vec![locals.key_of(base)?])
             }
             _ => None,
         }
@@ -746,13 +746,15 @@ impl<'a> Checker<'a> {
         {
             let bare = fn_name.rsplit('\\').next().unwrap_or(fn_name);
             if bare.eq_ignore_ascii_case("method_exists") {
+                let receiver = locals.var_key(recv_name);
                 locals
                     .guarded_methods_mut()
-                    .insert((recv_name.to_string(), member_name.into_owned()));
+                    .insert((receiver, member_name.into_owned()));
             } else if bare.eq_ignore_ascii_case("property_exists") {
+                let receiver = locals.var_key(recv_name);
                 locals
                     .guarded_properties_mut()
-                    .insert((recv_name.to_string(), member_name.into_owned()));
+                    .insert((receiver, member_name.into_owned()));
             }
         }
         match &cond.kind {
@@ -784,7 +786,7 @@ impl<'a> Checker<'a> {
                 if let Some((key, target_ty, repr_expr)) =
                     self.or_chain_narrowing_target(cond, locals)
                 {
-                    let current = self.current_narrowed_type(repr_expr, &key, locals);
+                    let current = self.current_narrowed_type(repr_expr, key, locals);
                     locals.insert(key, self.relation().narrow(&current, &target_ty));
                 }
             }
@@ -811,7 +813,7 @@ impl<'a> Checker<'a> {
                 if let Some((key, target_ty, repr_expr)) =
                     self.and_chain_narrowing_target(cond, locals)
                 {
-                    let current = self.current_narrowed_type(repr_expr, &key, locals);
+                    let current = self.current_narrowed_type(repr_expr, key, locals);
                     locals.insert(key, self.relation().narrow(&current, &target_ty));
                 }
             }
@@ -848,30 +850,27 @@ impl<'a> Checker<'a> {
             // variable, it's null.
             ExprKind::Isset(operands) => {
                 if let [operand] = operands.as_slice()
-                    && let Some(key) = narrowing_key(operand)
+                    && let Some(key) = locals.key_of(operand)
                 {
                     // The identical `isset($x)` re-checked later replays
                     // what the first occurrence's matching branch learned
                     // (`truthiness_discriminant_subject`), both branches.
-                    self.replay_truthiness_discriminant_facts(
-                        &format!("isset({key})"),
-                        locals,
-                        branch_true,
-                    );
+                    let isset = locals.intern(KeyData::Isset(key));
+                    self.replay_truthiness_discriminant_facts(isset, locals, branch_true);
                 }
                 if branch_true {
                     for operand in operands {
-                        if let Some(key) = narrowing_key(operand) {
-                            let current = self.current_narrowed_type(operand, &key, locals);
+                        if let Some(key) = locals.key_of(operand) {
+                            let current = self.current_narrowed_type(operand, key, locals);
                             locals.insert(key, current.without(&Type::null()));
                         }
                         self.narrow_isset_containers(operand, locals);
                     }
                 } else if let [operand] = operands.as_slice()
                     && is_defined_variable(operand, locals)
-                    && let Some(key) = narrowing_key(operand)
+                    && let Some(key) = locals.key_of(operand)
                 {
-                    let current = self.current_narrowed_type(operand, &key, locals);
+                    let current = self.current_narrowed_type(operand, key, locals);
                     let null = if self
                         .relation()
                         .is_super_type_of(&current, &Type::null())
@@ -892,7 +891,7 @@ impl<'a> Checker<'a> {
                 // the `instanceof` arm below already covers for property
                 // chains (`$arg->value instanceof Variable`).
                 if let (ExprKind::Name(name), [single_arg]) = (&callee.kind, args.as_slice())
-                    && let Some(key) = narrowing_key(&single_arg.value)
+                    && let Some(key) = locals.key_of(&single_arg.value)
                 {
                     // The function the call reaches: `\is_array($x)` and
                     // `is_array($x)` in a namespace alike, but not a
@@ -909,12 +908,12 @@ impl<'a> Checker<'a> {
                         // same asymmetry the comparison form's own arm
                         // already accepts (`Type::to_non_empty_array`
                         // has no "prove empty" counterpart).
-                        let current = self.current_narrowed_type(&single_arg.value, &key, locals);
+                        let current = self.current_narrowed_type(&single_arg.value, key, locals);
                         locals.insert(key, current.to_non_empty_array());
                     } else if name == "array_is_list" {
                         // Passing proves list-ness. Failing proves the
                         // array non-empty, as an empty array is a list.
-                        let current = self.current_narrowed_type(&single_arg.value, &key, locals);
+                        let current = self.current_narrowed_type(&single_arg.value, key, locals);
                         let narrowed = if branch_true {
                             current.to_list()
                         } else {
@@ -936,7 +935,7 @@ impl<'a> Checker<'a> {
                         // (`"hello"`) is exactly the ordinary case that
                         // makes `!is_numeric` true. The two directions
                         // need different exclusion sets instead.
-                        let current = self.current_narrowed_type(&single_arg.value, &key, locals);
+                        let current = self.current_narrowed_type(&single_arg.value, key, locals);
                         let narrowed = if branch_true {
                             // Bool/True/False/Null can never satisfy
                             // is_numeric - unconditionally safe to drop.
@@ -971,7 +970,7 @@ impl<'a> Checker<'a> {
                         };
                         locals.insert(key, narrowed);
                     } else if let Some(target_ty) = narrowing_type_for_predicate(name) {
-                        let current = self.current_narrowed_type(&single_arg.value, &key, locals);
+                        let current = self.current_narrowed_type(&single_arg.value, key, locals);
                         let narrowed = if branch_true {
                             self.relation().narrow(&current, &target_ty)
                         } else {
@@ -1020,7 +1019,7 @@ impl<'a> Checker<'a> {
                     )
                     && branch_true
                     && let [haystack, needle] = args.as_slice()
-                    && let Some(key) = narrowing_key(&haystack.value)
+                    && let Some(key) = locals.key_of(&haystack.value)
                 {
                     // Real PHPStan's own
                     // `StrContainingTypeSpecifyingExtension` - a haystack
@@ -1050,13 +1049,13 @@ impl<'a> Checker<'a> {
                         } else {
                             AccessoryKind::NonFalsyString
                         };
-                        let current = self.current_narrowed_type(&haystack.value, &key, locals);
+                        let current = self.current_narrowed_type(&haystack.value, key, locals);
                         locals.insert(key, current.with_string_accessory(kind));
                     }
                 } else if let ExprKind::Name(name) = &callee.kind
                     && matches!(name.trim_start_matches('\\'), "is_a")
                     && let [obj_arg, class_arg, ..] = args.as_slice()
-                    && let Some(key) = narrowing_key(&obj_arg.value)
+                    && let Some(key) = locals.key_of(&obj_arg.value)
                 {
                     // `is_a($x, SomeClass::class)`/`is_a($x, 'SomeClass')`
                     // is semantically `$x instanceof SomeClass` with its
@@ -1081,7 +1080,7 @@ impl<'a> Checker<'a> {
                             .map(|name| self.class_type_named(&name)),
                     };
                     if let Some(resolved) = class {
-                        let current = self.current_narrowed_type(&obj_arg.value, &key, locals);
+                        let current = self.current_narrowed_type(&obj_arg.value, key, locals);
                         if branch_true {
                             locals.insert(
                                 key,
@@ -1148,16 +1147,16 @@ impl<'a> Checker<'a> {
                 // `Type::without` already does soundly elsewhere.
                 // A dynamic target (`$x instanceof $className`) still
                 // doesn't name a concrete class to narrow to either way.
-                if let Some(key) = narrowing_key(inner)
+                if let Some(key) = locals.key_of(inner)
                     && let InstanceofTarget::Name(class_name) = target
                 {
                     let resolved = self.resolve_name_expr(class_name);
                     if branch_true {
-                        self.replay_object_discriminant_facts(&key, &resolved, locals);
-                        let current = self.current_narrowed_type(inner, &key, locals);
+                        self.replay_object_discriminant_facts(key, &resolved, locals);
+                        let current = self.current_narrowed_type(inner, key, locals);
                         locals.insert(key, self.relation().narrow_to_instance(&current, &resolved));
                     } else {
-                        let current = self.current_narrowed_type(inner, &key, locals);
+                        let current = self.current_narrowed_type(inner, key, locals);
                         locals.insert(key, self.exclude(&current, &resolved));
                     }
                 }
@@ -1208,15 +1207,16 @@ impl<'a> Checker<'a> {
                 if let ExprKind::Variable(name) = &lhs.kind
                     && let Some(native) = native
                 {
-                    locals.set_native(name, native);
+                    let key = locals.var_key(name);
+                    locals.set_native(key, native);
                 }
                 // The value's own subjects (`$x` in `$o = $x instanceof
                 // Foo`), unless it reads a variable the target replaced.
                 if !reads_assigned_variable(lhs, rhs) {
                     self.apply_narrowing(rhs, locals, branch_true);
                 }
-                if let Some(key) = narrowing_key(lhs)
-                    && let Some(current) = locals.get(&key).cloned()
+                if let Some(key) = locals.key_of(lhs)
+                    && let Some(current) = locals.get(key).cloned()
                 {
                     let narrowed = if branch_true {
                         current.without_falsy()
@@ -1242,22 +1242,20 @@ impl<'a> Checker<'a> {
             // condition, never a behavior change when there's no alias
             // to replay.
             ExprKind::Variable(name) => {
-                if let Some((_, alias)) = locals.condition_aliases().get(name.as_ref()).cloned() {
+                let key = locals.var_key(name);
+                if let Some((_, alias)) = locals.condition_aliases().get(&key).cloned() {
                     self.apply_narrowing(&alias, locals, branch_true);
                 }
-                self.replay_truthiness_discriminant_facts(
-                    &format!("truthy({name})"),
-                    locals,
-                    branch_true,
-                );
+                let truthy = locals.intern(KeyData::Truthy(key));
+                self.replay_truthiness_discriminant_facts(truthy, locals, branch_true);
                 // A bool is truthy exactly when it's `true`, so what its
                 // equality recorded holds too.
-                if locals.get(name.as_ref()).is_some_and(|t| t.is_bool().yes()) {
-                    self.replay_truthiness_discriminant_facts(name, locals, branch_true);
+                if locals.get(key).is_some_and(|t| t.is_bool().yes()) {
+                    self.replay_truthiness_discriminant_facts(key, locals, branch_true);
                 }
                 if branch_true {
-                    let current = self.current_narrowed_type(cond, name, locals);
-                    locals.insert(name.to_string(), current.without_falsy());
+                    let current = self.current_narrowed_type(cond, key, locals);
+                    locals.insert(key, current.without_falsy());
                 }
             }
             // A bare truthiness check (`if ($x)` / `if (!$x)`, the latter
@@ -1266,9 +1264,9 @@ impl<'a> Checker<'a> {
             // members this project can represent (`Null`/`False`); the
             // falsy branch isn't safely narrowable to anything more
             // specific than the current type.
-            _ if branch_true && narrowing_key(cond).is_some() => {
-                let key = narrowing_key(cond).expect("checked by guard above");
-                let current = self.current_narrowed_type(cond, &key, locals);
+            _ if branch_true && locals.key_of(cond).is_some() => {
+                let key = locals.key_of(cond).expect("checked by guard above");
+                let current = self.current_narrowed_type(cond, key, locals);
                 locals.insert(key, current.without_falsy());
             }
             _ => {}
@@ -1301,17 +1299,18 @@ impl<'a> Checker<'a> {
         if matches!(&rhs.kind, ExprKind::Variable(n) if n == name) {
             return;
         }
-        let Some(target_keys) = condition_alias_targets(rhs) else {
+        let Some(target_keys) = condition_alias_targets(rhs, locals) else {
             return;
         };
         // The same self-reference hazard as the bare-`Variable` check
         // above, generalized: `$flag = $flag || $x === null;` naming
         // `$flag` as one of its own compound condition's targets would
         // replay `$flag`'s own not-yet-narrowed self the same way.
-        if target_keys.iter().any(|k| **k == **name) {
+        let alias = locals.var_key(name);
+        if target_keys.contains(&alias) {
             return;
         }
-        locals.set_condition_alias(name.to_string(), target_keys, std::rc::Rc::new(rhs.clone()));
+        locals.set_condition_alias(alias, target_keys, std::rc::Rc::new(rhs.clone()));
     }
 
     /// A different shape from `record_condition_alias` above: a flag
@@ -1384,21 +1383,22 @@ impl<'a> Checker<'a> {
         if !matches!(rhs.kind, ExprKind::Literal(_)) {
             return;
         }
-        if !else_locals.contains_key(name) {
+        if !else_locals.contains_var(name) {
             return;
         }
         if !condition_alias_shape(cond) {
             return;
         }
-        let Some(target_keys) = condition_alias_targets(cond) else {
+        let Some(target_keys) = condition_alias_targets(cond, else_locals) else {
             return;
         };
-        if target_keys.iter().any(|k| **k == **name) {
+        let flag = else_locals.var_key(name);
+        if target_keys.contains(&flag) {
             return;
         }
         let alias = std::rc::Rc::new(cond.clone());
-        then_locals.set_condition_alias(name.to_string(), target_keys.clone(), alias.clone());
-        else_locals.set_condition_alias(name.to_string(), target_keys, alias);
+        then_locals.set_condition_alias(flag, target_keys.clone(), alias.clone());
+        else_locals.set_condition_alias(flag, target_keys, alias);
     }
 
     /// `AssertRuleHelper`'s equivalent - a `@phpstan-
@@ -1544,7 +1544,7 @@ impl<'a> Checker<'a> {
 
 /// Whether `e` is a plain variable this scope has defined.
 fn is_defined_variable(e: &Expr, locals: &Locals) -> bool {
-    matches!(&e.kind, ExprKind::Variable(name) if locals.contains_key(name))
+    matches!(&e.kind, ExprKind::Variable(name) if locals.contains_var(name))
 }
 
 /// `($a <=> $b) op c` as the comparison of `$a` and `$b` it encodes, for a
@@ -1674,10 +1674,10 @@ impl Checker<'_> {
         known_defined: bool,
         locals: &mut Locals,
     ) {
-        let Some(key) = narrowing_key(operand) else {
+        let Some(key) = locals.key_of(operand) else {
             return;
         };
-        let current = self.current_narrowed_type(operand, &key, locals);
+        let current = self.current_narrowed_type(operand, key, locals);
         if !empty {
             locals.insert(key, current.without_falsy());
         } else if known_defined {
@@ -1697,16 +1697,20 @@ impl Checker<'_> {
         locals: &mut Locals,
     ) {
         let (Some(lit_key), Some(shape_key), Some(arr_key)) = (
-            literal_string_key(key),
+            crate::checker::literal_string_key(key),
             crate::checker::literal_shape_key(key),
-            narrowing_key(arr),
+            locals.key_of(arr),
         ) else {
             return;
         };
-        let current = self.current_narrowed_type(arr, &arr_key, locals);
+        let current = self.current_narrowed_type(arr, arr_key, locals);
         let narrowed = current.with_key_presence(&shape_key, present);
         if present && let Some(value_ty) = narrowed.offset_value_type(Some(&shape_key)) {
-            locals.insert(format!("{arr_key}[{lit_key}]"), value_ty);
+            let element = locals.intern(KeyData::Index {
+                base: arr_key,
+                key: lit_key.as_str().into(),
+            });
+            locals.insert(element, value_ty);
         }
         locals.insert(arr_key, narrowed);
     }
@@ -1724,10 +1728,10 @@ impl Checker<'_> {
         let Some((target_ty, excluded_ty)) = self.in_array_narrowing(haystack, locals) else {
             return;
         };
-        let Some(key) = narrowing_key(needle) else {
+        let Some(key) = locals.key_of(needle) else {
             return;
         };
-        let current = self.current_narrowed_type(needle, &key, locals);
+        let current = self.current_narrowed_type(needle, key, locals);
         let narrowed = if contained {
             Some(self.relation().narrow(&current, &target_ty))
         } else {
@@ -1753,7 +1757,7 @@ impl Checker<'_> {
         holds: bool,
         locals: &mut Locals,
     ) {
-        if let Some(key) = narrowing_key(counted)
+        if let Some(key) = locals.key_of(counted)
             && other_ty.is_int().yes()
             && let Some((bl, bh)) = other_ty.int_bounds()
         {
@@ -1776,7 +1780,7 @@ impl Checker<'_> {
                 (BinOp::Eq | BinOp::Identical, true) => Some((bl, bh)),
                 _ => None,
             };
-            let current = self.current_narrowed_type(counted, &key, locals);
+            let current = self.current_narrowed_type(counted, key, locals);
             let narrowed = match range {
                 // A recursive count proves only that the array isn't empty.
                 Some((lo, _)) if recursive => (lo >= 1).then(|| current.to_non_empty_array()),
@@ -1817,13 +1821,13 @@ impl Checker<'_> {
         contained: bool,
         locals: &mut Locals,
     ) {
-        let Some(key) = narrowing_key(needle) else {
+        let Some(key) = locals.key_of(needle) else {
             return;
         };
         let Some(values) = self.infer_expr(haystack, locals).array_value_type() else {
             return;
         };
-        let current = self.current_narrowed_type(needle, &key, locals);
+        let current = self.current_narrowed_type(needle, key, locals);
         let version = self.comparison_php_version();
         let narrowed = if contained {
             Some(

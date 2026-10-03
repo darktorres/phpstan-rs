@@ -10,9 +10,9 @@
 //! `check_function`: a trait's methods are checked once per using host
 //! there, which would repeat each diagnostic per host.
 
+use crate::checker::Checker;
 use crate::checker::calls::contains_nullsafe_access;
 use crate::checker::type_declarations::TypePosition;
-use crate::checker::{Checker, Locals};
 use diagnostics::DiagnosticBuilder;
 use syntax::ast::*;
 use syntax::span::Span;
@@ -315,7 +315,7 @@ impl<'a> Checker<'a> {
                 Some(class) => self.resolve_pseudo(&param_ty, &class.clone()),
                 None => param_ty,
             };
-            let default_ty = self.infer_expr(default, &Locals::default());
+            let default_ty = self.infer_expr(default, &self.new_locals());
             if default_ty.is_mixed() || self.accepts(&param_ty, &default_ty).yes() {
                 continue;
             }

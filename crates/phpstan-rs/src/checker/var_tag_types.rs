@@ -132,7 +132,7 @@ impl<'a> Checker<'a> {
                     Type::array(Type::unknown_array_key(), value.unwrap_or(Type::mixed()))
                 }
                 ExprKind::Variable(name) if &**name == "this" => self.infer_expr(e, locals),
-                ExprKind::Variable(name) => match (locals.native(name), locals.get(name)) {
+                ExprKind::Variable(name) => match (locals.native_var(name), locals.get_var(name)) {
                     // A by-reference write can leave a value the recorded
                     // native type no longer describes.
                     (Some(native), Some(current))
@@ -529,7 +529,7 @@ impl<'a> Checker<'a> {
             if own.contains(name) {
                 continue;
             }
-            let Some(current) = locals.get(name) else {
+            let Some(current) = locals.get_var(name) else {
                 continue;
             };
             if current == tag {

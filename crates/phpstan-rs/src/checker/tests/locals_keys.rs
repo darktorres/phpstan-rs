@@ -1,11 +1,12 @@
 //! `Locals`' set of synthetic keys: what a rebound key invalidates is found
-//! among them, and is what looking through every local finds.
+//! among them, and is what looking through every key finds.
 use super::super::control_flow::merge_scopes;
-use super::super::narrowing::{key_depends_on, purge_stale_narrowing_for};
+use super::super::keys::{KeyData, LocalKey};
+use super::super::narrowing::purge_stale_narrowing_for;
 use super::super::*;
 
-/// Keys of every shape `narrowing_key` makes, and plain variables, with
-/// names that are prefixes of one another.
+/// Keys of every shape the table makes, and plain variables, with names
+/// that are prefixes of one another.
 const KEYS: &[&str] = &[
     "a",
     "ab",
@@ -21,34 +22,88 @@ const KEYS: &[&str] = &[
     "m[$ab]",
     "m[$a]->p",
     "m['x'][$a]",
-    "n[$a->b]",
     "Foo::$bar",
     "a[$k][$a]",
     "k",
     "this->items[$k]",
 ];
 
+/// The key `text` spells, made in `locals`: a variable or static property,
+/// then `->name`, `[$variable]` and `[literal]` steps.
+fn key(locals: &Locals, text: &str) -> LocalKey {
+    let mut rest = text;
+    let root_end = rest.find(['-', '[']).unwrap_or(rest.len());
+    let mut current = match rest[..root_end].split_once("::$") {
+        Some((class, prop)) => locals.intern(KeyData::StaticProp {
+            class: class.into(),
+            prop: prop.into(),
+        }),
+        None => locals.var_key(&rest[..root_end]),
+    };
+    rest = &rest[root_end..];
+    while !rest.is_empty() {
+        if let Some(after) = rest.strip_prefix("->") {
+            let end = after.find(['-', '[']).unwrap_or(after.len());
+            current = locals.intern(KeyData::Prop {
+                base: current,
+                prop: after[..end].into(),
+            });
+            rest = &after[end..];
+        } else {
+            let after = rest.strip_prefix('[').expect("a step");
+            let end = after.find(']').expect("a closed step");
+            let inner = &after[..end];
+            current = match inner.strip_prefix('$') {
+                Some(variable) => {
+                    let subscript = locals.var_key(variable);
+                    locals.intern(KeyData::VarIndex {
+                        base: current,
+                        subscript,
+                    })
+                }
+                None => locals.intern(KeyData::Index {
+                    base: current,
+                    key: inner.into(),
+                }),
+            };
+            rest = &after[end + 1..];
+        }
+    }
+    current
+}
+
 fn locals_with(keys: &[&str]) -> Locals {
     let mut locals = Locals::default();
-    for key in keys {
-        locals.insert((*key).to_string(), Type::int());
+    for text in keys {
+        let key = key(&locals, text);
+        locals.insert(key, Type::int());
     }
     locals
 }
 
 fn listed(locals: &Locals) -> Vec<String> {
-    let mut keys: Vec<String> = locals.iter().map(|(k, _)| k.clone()).collect();
+    let mut keys: Vec<String> = locals.iter().map(|(k, _)| locals.render(k)).collect();
     keys.sort();
     keys
 }
 
-/// What `purge_stale_narrowing_for` removed before it kept the synthetic
-/// keys apart: every local that depends on `key`, other than `key`.
+/// Whether the text `k` depends on the text `key`, as keys were compared
+/// before they were made by structure: it is `key`, a chain rooted at it,
+/// or a chain with `key` as a variable subscript.
+fn text_depends_on(k: &str, key: &str) -> bool {
+    k == key
+        || k.strip_prefix(key)
+            .is_some_and(|rest| rest.starts_with("->") || rest.starts_with('['))
+        || (k.contains('[') && k.contains(&format!("[${key}]")))
+}
+
+/// What `purge_stale_narrowing_for` removes when every local is looked
+/// through: every local that depends on `key`, other than `key`.
 fn removed_by_scanning_every_local(locals: &Locals, key: &str) -> Vec<String> {
     let mut gone: Vec<String> = locals
         .iter()
-        .map(|(k, _)| k.clone())
-        .filter(|k| k != key && key_depends_on(k, key))
+        .map(|(k, _)| locals.render(k))
+        .filter(|k| k != key && text_depends_on(k, key))
         .collect();
     gone.sort();
     gone
@@ -56,18 +111,19 @@ fn removed_by_scanning_every_local(locals: &Locals, key: &str) -> Vec<String> {
 
 #[test]
 fn purging_a_key_removes_what_scanning_every_local_finds() {
-    for key in KEYS {
+    for text in KEYS {
         let mut locals = locals_with(KEYS);
-        let expected = removed_by_scanning_every_local(&locals, key);
+        let expected = removed_by_scanning_every_local(&locals, text);
         let before = listed(&locals);
-        purge_stale_narrowing_for(&mut locals, key);
+        let purged = key(&locals, text);
+        purge_stale_narrowing_for(&mut locals, purged);
         let after = listed(&locals);
         let removed: Vec<String> = before
             .iter()
             .filter(|k| !after.contains(k))
             .cloned()
             .collect();
-        assert_eq!(removed, expected, "purging {key}");
+        assert_eq!(removed, expected, "purging {text}");
     }
 }
 
@@ -77,28 +133,35 @@ fn the_synthetic_keys_are_the_keys_that_are_not_a_variables_name() {
     let expected = |locals: &Locals| {
         let mut keys: Vec<String> = locals
             .iter()
-            .map(|(k, _)| k.clone())
-            .filter(|k| !narrowing::is_real_variable_key(k))
+            .map(|(k, _)| k)
+            .filter(|k| !locals.is_real_variable(*k))
+            .map(|k| locals.render(k))
             .collect();
         keys.sort();
         keys
     };
     let synthetic = |locals: &Locals| {
-        let mut keys: Vec<String> = locals.synthetic_keys().cloned().collect();
+        let mut keys: Vec<String> = locals.synthetic_keys().map(|k| locals.render(*k)).collect();
         keys.sort();
         keys
     };
     assert_eq!(synthetic(&locals), expected(&locals));
     // Through every way a key is added, removed or copied.
-    locals.declare("x->y".to_string(), Type::string(), Span::default());
-    locals.insert_with_provenance("z[1]".to_string(), Type::null(), Default::default());
+    let xy = key(&locals, "x->y");
+    locals.declare(xy, Type::string(), Span::default());
+    let z1 = key(&locals, "z[1]");
+    locals.insert_with_provenance(z1, Type::null(), Default::default());
     assert_eq!(synthetic(&locals), expected(&locals));
-    locals.remove("a->b");
-    locals.remove("a");
+    let ab = key(&locals, "a->b");
+    let a = key(&locals, "a");
+    locals.remove(ab);
+    locals.remove(a);
     assert_eq!(synthetic(&locals), expected(&locals));
     let copy = locals.clone();
-    locals.remove("m[$a]");
-    locals.insert("w->v".to_string(), Type::bool());
+    let ma = key(&locals, "m[$a]");
+    locals.remove(ma);
+    let wv = key(&locals, "w->v");
+    locals.insert(wv, Type::bool());
     assert_eq!(synthetic(&copy), expected(&copy));
     assert_eq!(synthetic(&locals), expected(&locals));
     let fresh = locals.fresh_scope();
@@ -109,21 +172,27 @@ fn the_synthetic_keys_are_the_keys_that_are_not_a_variables_name() {
 fn a_scope_with_no_synthetic_key_and_no_fact_has_nothing_to_forget() {
     let mut locals = locals_with(&["a", "b", "this"]);
     assert!(!locals.has_state_to_forget());
-    assert!(locals.has_key_depending_on("a"));
-    assert!(!locals.has_key_depending_on("c"));
-    locals.insert("a->p".to_string(), Type::int());
+    let a = key(&locals, "a");
+    let c = key(&locals, "c");
+    assert!(locals.has_key_depending_on(a));
+    assert!(!locals.has_key_depending_on(c));
+    let ap = key(&locals, "a->p");
+    locals.insert(ap, Type::int());
     assert!(locals.has_state_to_forget());
-    assert!(locals.has_key_depending_on("a"));
-    locals.remove("a->p");
+    assert!(locals.has_key_depending_on(a));
+    locals.remove(ap);
     assert!(!locals.has_state_to_forget());
 }
 
 #[test]
 fn has_key_depending_on_is_the_scan_of_every_local() {
     let locals = locals_with(KEYS);
-    for key in KEYS.iter().chain(&["none", "a->", "m", "Foo::$baz"]) {
-        let by_scan = locals.iter().any(|(k, _)| key_depends_on(k, key));
-        assert_eq!(locals.has_key_depending_on(key), by_scan, "{key}");
+    for text in KEYS.iter().chain(&["none", "a->x", "m", "Foo::$baz"]) {
+        let by_scan = locals
+            .iter()
+            .any(|(k, _)| text_depends_on(&locals.render(k), text));
+        let probe = key(&locals, text);
+        assert_eq!(locals.has_key_depending_on(probe), by_scan, "{text}");
     }
 }
 
@@ -150,15 +219,15 @@ fn scenario(tracked: bool, seed: u64) -> (Locals, Locals) {
     let mut base = Locals::default();
     base.set_track(tracked);
     let write = |locals: &mut Locals, n: &mut dyn FnMut(u64) -> u64| {
-        let name = names[n(names.len() as u64) as usize].to_string();
+        let name = key(locals, names[n(names.len() as u64) as usize]);
         match n(5) {
             0 => {
-                locals.remove(&name);
+                locals.remove(name);
             }
             1 => {
-                locals.set_native(&name, types[n(6) as usize].clone());
+                locals.set_native(name, types[n(6) as usize].clone());
             }
-            2 => locals.clear_native(&name),
+            2 => locals.clear_native(name),
             _ => {
                 locals.insert(name, types[n(6) as usize].clone());
             }
@@ -188,17 +257,20 @@ fn the_join_that_patches_a_copy_is_the_join_key_by_key() {
         let keyed = merge_scopes(relation, &then_t, &else_t);
         assert_eq!(listed(&patched), listed(&keyed), "keys, seed {seed}");
         for (key, ty) in keyed.iter() {
-            assert_eq!(patched.get(key), Some(ty), "{key}, seed {seed}");
+            // The two scenarios made their own tables, whose keys come in
+            // the same order: the writes are the same.
+            let patched_key = patched.find(&keyed.data(key)).expect("a key of the other");
+            assert_eq!(patched.get(patched_key), Some(ty), "{key:?}, seed {seed}");
         }
         let natives = |l: &Locals| {
             let mut v: Vec<(String, Type)> =
-                l.natives().map(|(k, t)| (k.clone(), t.clone())).collect();
+                l.natives().map(|(k, t)| (l.render(k), t.clone())).collect();
             v.sort_by(|a, b| a.0.cmp(&b.0));
             v
         };
         assert_eq!(natives(&patched), natives(&keyed), "natives, seed {seed}");
         let synthetic = |l: &Locals| {
-            let mut v: Vec<String> = l.synthetic_keys().cloned().collect();
+            let mut v: Vec<String> = l.synthetic_keys().map(|k| l.render(*k)).collect();
             v.sort();
             v
         };

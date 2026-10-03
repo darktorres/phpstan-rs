@@ -431,7 +431,7 @@ impl<'a> Checker<'a> {
         // the function's body.
         let mut resolved_params: Vec<(String, Type, Span)> = Vec::with_capacity(f.params.len());
 
-        let mut locals: Locals = Locals::default();
+        let mut locals: Locals = self.new_locals();
         // Turns declaration-span tracking on for this whole function-
         // body check exactly when the LSP's probe is active - see
         // `Locals::track`'s doc comment. Every clone of `locals` from
@@ -536,7 +536,7 @@ impl<'a> Checker<'a> {
                         ty
                     };
                     self.probe_hit_at(ast_param.name.span, &ty);
-                    locals.declare(param.name().to_string(), ty, ast_param.name.span);
+                    locals.declare_var(param.name(), ty, ast_param.name.span);
                     let native = match class_name {
                         Some(c) => self.resolve_pseudo(param.ty_native(), c),
                         None => param.ty_native().clone(),
@@ -546,7 +546,7 @@ impl<'a> Checker<'a> {
                     } else {
                         native
                     };
-                    locals.set_native(param.name(), native);
+                    locals.set_native_var(param.name(), native);
                 }
             }
             // A declaration the registry has no signature for. Unlike the
@@ -606,7 +606,7 @@ impl<'a> Checker<'a> {
                         ty
                     };
                     self.probe_hit_at(p.name.span, &ty);
-                    locals.declare(p.name.to_string(), ty, p.name.span);
+                    locals.declare_var(&p.name, ty, p.name.span);
                 }
             }
         }
@@ -625,7 +625,7 @@ impl<'a> Checker<'a> {
                 .get(c)
                 .map(|info| info.own_template_args(c))
                 .unwrap_or_default();
-            locals.insert("this".to_string(), Type::object(c.into(), own));
+            locals.insert_var("this", Type::object(c.into(), own));
         }
 
         // A signature's return type already defaults to Mixed when nothing
@@ -1511,7 +1511,7 @@ impl<'a> Checker<'a> {
                 &|_| true,
                 &self.relation(),
             );
-            let default_ty = self.infer_expr(default, &Locals::default());
+            let default_ty = self.infer_expr(default, &self.new_locals());
             if default_ty.is_mixed() || self.accepts(param_ty, &default_ty).yes() {
                 continue;
             }

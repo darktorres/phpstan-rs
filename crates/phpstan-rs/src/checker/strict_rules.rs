@@ -118,7 +118,7 @@ impl<'a> Checker<'a> {
             }
             if let ExprKind::Variable(name) = &root.kind
                 && name.as_ref() != "this"
-                && !locals.contains_key(name)
+                && !locals.contains_var(name)
                 && !is_superglobal(name)
             {
                 let certainty = if self.might_be_assigned_before(name, root.span) {
@@ -631,7 +631,7 @@ impl<'a> Checker<'a> {
                 StmtKind::Foreach { key, value, .. } => {
                     if let Some(key) = key
                         && let ExprKind::Variable(name) = &key.kind
-                        && locals.contains_key(name)
+                        && locals.contains_var(name)
                     {
                         overwritten.push((
                             key.span,
@@ -813,7 +813,7 @@ impl<'a> Checker<'a> {
 /// destructuring) that `locals` already defines.
 fn defined_targets(target: &Expr, locals: &Locals) -> Vec<(String, syntax::span::Span)> {
     syntax::stack::guard(|| match &target.kind {
-        ExprKind::Variable(name) if locals.contains_key(name) => {
+        ExprKind::Variable(name) if locals.contains_var(name) => {
             vec![(name.to_string(), target.span)]
         }
         ExprKind::Destructure(items, _) => items

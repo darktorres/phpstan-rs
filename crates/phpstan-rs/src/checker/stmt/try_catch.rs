@@ -1,6 +1,6 @@
 use crate::checker::{
     Checker, Completion, Locals, collect_exit_point_statements, exit_point_description,
-    merge_scopes, purge_stale_narrowing_for,
+    merge_scopes, purge_stale_narrowing_for_var,
 };
 use syntax::ast::*;
 use syntax::span::Span;
@@ -262,9 +262,9 @@ impl<'a> Checker<'a> {
                         .relation()
                         .union_of(multiple.iter().map(|t| self.resolve_name_expr(t)).collect()),
                 };
-                purge_stale_narrowing_for(&mut catch_locals, var);
+                purge_stale_narrowing_for_var(&mut catch_locals, var);
                 self.probe_hit_at(var.span, &ty);
-                catch_locals.declare(var.to_string(), ty, var.span);
+                catch_locals.declare_var(var, ty, var.span);
             }
             let catch_block = self.check_block(&c.body, &mut catch_locals, declared_return, label);
             if self.settings.extras.check_exception_hygiene {
@@ -320,7 +320,7 @@ impl<'a> Checker<'a> {
                         .get_provenance(key)
                         .cloned()
                         .unwrap_or_default();
-                    locals.insert_with_provenance(key.clone(), ty.clone(), provenance);
+                    locals.insert_with_provenance(key, ty.clone(), provenance);
                 }
             }
             // Only worth naming the finally block's own exit point(s)

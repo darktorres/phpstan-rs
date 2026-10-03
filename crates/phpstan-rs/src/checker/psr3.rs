@@ -164,14 +164,14 @@ impl<'a> Checker<'a> {
             };
             if !has_exception_key
                 && let Some(name) = locals
-                    .iter()
-                    .filter(|(key, _)| crate::checker::narrowing::is_real_variable_key(key))
+                    .variables()
+                    .into_iter()
                     .filter(|(_, ty)| {
                         self.registry
                             .is_super_type_of(&Type::object("Throwable".into(), Vec::new()), ty)
                             == types::TrinaryLogic::Yes
                     })
-                    .map(|(name, _)| name.clone())
+                    .map(|(name, _)| name)
                     .min()
             {
                 self.report(format!("Parameter $context of logger method {method}() has no 'exception' key while ${name} holds a Throwable."),
@@ -360,7 +360,7 @@ impl<'a> Checker<'a> {
         }
         let ty = match &e.kind {
             ExprKind::Variable(name) => locals
-                .native(name)
+                .native_var(name)
                 .cloned()
                 .unwrap_or_else(|| self.infer_expr(e, locals)),
             ExprKind::Binary(BinOp::Concat, ..) | ExprKind::Interpolated(_) => {
