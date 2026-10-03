@@ -23,6 +23,9 @@ struct NameData {
     text: Box<str>,
     /// `None` when `text` is already lowercase.
     lower: Option<Box<str>>,
+    /// `folded_hash` of the text, made once: what a table keyed by the
+    /// name ignoring case files it under.
+    folded_hash: u64,
 }
 
 /// An interned name; see the module documentation.
@@ -36,7 +39,13 @@ impl Name {
         Name(Arc::new(NameData {
             text: text.into(),
             lower,
+            folded_hash: folded_hash(text.as_bytes()),
         }))
+    }
+
+    /// `folded_hash` of the name's text, made when the name was.
+    pub fn folded_hash(&self) -> u64 {
+        self.0.folded_hash
     }
 
     pub fn as_str(&self) -> &str {
@@ -338,6 +347,305 @@ impl Default for Interner {
     }
 }
 
+/// The high bit of each byte of `word` that is an ASCII capital: in each
+/// byte's low seven bits, the high bit of `+ 0x3f` says `>= 'A'` and that of
+/// `+ 0x25` says `> 'Z'`; a byte with its own high bit set is not ASCII.
+pub fn ascii_capitals(word: u64) -> u64 {
+    const HIGH: u64 = 0x8080_8080_8080_8080;
+    let low = word & !HIGH;
+    let at_least_a = low.wrapping_add(0x3f3f_3f3f_3f3f_3f3f);
+    let past_z = low.wrapping_add(0x2525_2525_2525_2525);
+    at_least_a & !past_z & !word & HIGH
+}
+
+/// `word` with each ASCII capital in lower case.
+fn lowered(word: u64) -> u64 {
+    // A capital's lowercase form has the bit `0x20` set.
+    word | (ascii_capitals(word) >> 2)
+}
+
+/// The hash of `text` ASCII-lowercased, eight bytes at a time and without
+/// building the lowercase text: the hash a name files itself under in a
+/// table that ignores case, so a name in any case finds the same place.
+pub fn folded_hash(text: &[u8]) -> u64 {
+    const K: u64 = 0x517c_c1b7_2722_0a95;
+    let mix = |hash: u64, word: u64| (hash.rotate_left(5) ^ word).wrapping_mul(K);
+    let (words, rest) = text.as_chunks::<8>();
+    let mut hash = mix(0, text.len() as u64);
+    for word in words {
+        hash = mix(hash, lowered(u64::from_le_bytes(*word)));
+    }
+    if !rest.is_empty() {
+        let mut last = [0u8; 8];
+        last[..rest.len()].copy_from_slice(rest);
+        hash = mix(hash, lowered(u64::from_le_bytes(last)));
+    }
+    hash ^ (hash >> 32)
+}
+
+/// Whether `text`, lowercased, is `key`, which is already lowercase, eight
+/// bytes at a time.
+pub fn eq_lowercased(text: &[u8], key: &[u8]) -> bool {
+    if text.len() != key.len() {
+        return false;
+    }
+    let (text_words, text_rest) = text.as_chunks::<8>();
+    let (key_words, key_rest) = key.as_chunks::<8>();
+    for (text, key) in text_words.iter().zip(key_words) {
+        if lowered(u64::from_le_bytes(*text)) != u64::from_le_bytes(*key) {
+            return false;
+        }
+    }
+    text_rest
+        .iter()
+        .zip(key_rest)
+        .all(|(text, key)| text.to_ascii_lowercase() == *key)
+}
+
+/// What a [`FoldedMap`] is looked up by: a name, or text.
+pub trait FoldKey {
+    /// `folded_hash` of the key's text.
+    fn fold_hash(&self) -> u64;
+    /// Whether the key and `stored` are one name ignoring ASCII case.
+    fn is_folded_eq(&self, stored: &Name) -> bool;
+    /// Whether the key's text is `stored` ignoring ASCII case.
+    fn eq_text_ignoring_case(&self, stored: &[u8]) -> bool;
+}
+
+impl FoldKey for Name {
+    fn fold_hash(&self) -> u64 {
+        self.0.folded_hash
+    }
+    fn is_folded_eq(&self, stored: &Name) -> bool {
+        self.eq_ignore_case(stored)
+    }
+    fn eq_text_ignoring_case(&self, stored: &[u8]) -> bool {
+        self.0.text.as_bytes().eq_ignore_ascii_case(stored)
+    }
+}
+
+impl FoldKey for str {
+    fn fold_hash(&self) -> u64 {
+        folded_hash(self.as_bytes())
+    }
+    fn is_folded_eq(&self, stored: &Name) -> bool {
+        eq_lowercased(self.as_bytes(), stored.lower().as_bytes())
+    }
+    fn eq_text_ignoring_case(&self, stored: &[u8]) -> bool {
+        self.as_bytes().eq_ignore_ascii_case(stored)
+    }
+}
+
+impl FoldKey for String {
+    fn fold_hash(&self) -> u64 {
+        self.as_str().fold_hash()
+    }
+    fn is_folded_eq(&self, stored: &Name) -> bool {
+        self.as_str().is_folded_eq(stored)
+    }
+    fn eq_text_ignoring_case(&self, stored: &[u8]) -> bool {
+        self.as_str().eq_text_ignoring_case(stored)
+    }
+}
+
+impl<T: FoldKey + ?Sized> FoldKey for &T {
+    fn fold_hash(&self) -> u64 {
+        (**self).fold_hash()
+    }
+    fn is_folded_eq(&self, stored: &Name) -> bool {
+        (**self).is_folded_eq(stored)
+    }
+    fn eq_text_ignoring_case(&self, stored: &[u8]) -> bool {
+        (**self).eq_text_ignoring_case(stored)
+    }
+}
+
+/// Values by a name that ignores ASCII case: an entry keeps the spelling it
+/// was inserted with, and a lookup by a `Name` reads the hash the name
+/// holds, while one by text hashes it as it is, in any case.
+#[derive(Clone)]
+pub struct FoldedMap<V> {
+    table: hashbrown::HashTable<(Name, V)>,
+}
+
+impl<V> Default for FoldedMap<V> {
+    fn default() -> Self {
+        FoldedMap {
+            table: hashbrown::HashTable::new(),
+        }
+    }
+}
+
+impl<V: fmt::Debug> fmt::Debug for FoldedMap<V> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_map().entries(self.iter()).finish()
+    }
+}
+
+impl<V> FoldedMap<V> {
+    pub fn len(&self) -> usize {
+        self.table.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.table.is_empty()
+    }
+
+    pub fn clear(&mut self) {
+        self.table.clear();
+    }
+
+    fn hash_of(name: &Name) -> u64 {
+        name.0.folded_hash
+    }
+
+    /// The entry `key` finds, with the name it was inserted by.
+    pub fn get_key_value<K: FoldKey + ?Sized>(&self, key: &K) -> Option<(&Name, &V)> {
+        self.table
+            .find(key.fold_hash(), |(name, _)| key.is_folded_eq(name))
+            .map(|(name, value)| (name, value))
+    }
+
+    pub fn get<K: FoldKey + ?Sized>(&self, key: &K) -> Option<&V> {
+        self.get_key_value(key).map(|(_, value)| value)
+    }
+
+    pub fn get_mut<K: FoldKey + ?Sized>(&mut self, key: &K) -> Option<&mut V> {
+        self.table
+            .find_mut(key.fold_hash(), |(name, _)| key.is_folded_eq(name))
+            .map(|(_, value)| value)
+    }
+
+    pub fn contains_key<K: FoldKey + ?Sized>(&self, key: &K) -> bool {
+        self.get_key_value(key).is_some()
+    }
+
+    /// Holds `value` by `name`, in place of the entry its spelling in any
+    /// case had, whose value it returns.
+    pub fn insert(&mut self, name: Name, value: V) -> Option<V> {
+        let hash = Self::hash_of(&name);
+        if let Some(entry) = self
+            .table
+            .find_mut(hash, |(held, _)| name.eq_ignore_case(held))
+        {
+            return Some(std::mem::replace(entry, (name, value)).1);
+        }
+        self.table
+            .insert_unique(hash, (name, value), |(held, _)| Self::hash_of(held));
+        None
+    }
+
+    /// Removes the entry `key` finds and returns it.
+    pub fn remove_entry<K: FoldKey + ?Sized>(&mut self, key: &K) -> Option<(Name, V)> {
+        match self
+            .table
+            .find_entry(key.fold_hash(), |(name, _)| key.is_folded_eq(name))
+        {
+            Ok(entry) => Some(entry.remove().0),
+            Err(_) => None,
+        }
+    }
+
+    pub fn remove<K: FoldKey + ?Sized>(&mut self, key: &K) -> Option<V> {
+        self.remove_entry(key).map(|(_, value)| value)
+    }
+
+    pub fn iter(&self) -> FoldedIter<'_, V> {
+        FoldedIter(self.table.iter())
+    }
+
+    pub fn iter_mut(&mut self) -> impl Iterator<Item = (&Name, &mut V)> {
+        self.table.iter_mut().map(|(name, value)| (&*name, value))
+    }
+
+    pub fn keys(&self) -> impl Iterator<Item = &Name> {
+        self.table.iter().map(|(name, _)| name)
+    }
+
+    pub fn values_mut(&mut self) -> impl Iterator<Item = &mut V> {
+        self.table.iter_mut().map(|(_, value)| value)
+    }
+}
+
+/// A [`FoldedMap`]'s entries, by reference.
+pub struct FoldedIter<'a, V>(hashbrown::hash_table::Iter<'a, (Name, V)>);
+
+impl<'a, V> Iterator for FoldedIter<'a, V> {
+    type Item = (&'a Name, &'a V);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.0.next().map(|(name, value)| (name, value))
+    }
+}
+
+impl<V> IntoIterator for FoldedMap<V> {
+    type Item = (Name, V);
+    type IntoIter = hashbrown::hash_table::IntoIter<(Name, V)>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.table.into_iter()
+    }
+}
+
+impl<V> FromIterator<(Name, V)> for FoldedMap<V> {
+    fn from_iter<I: IntoIterator<Item = (Name, V)>>(iter: I) -> Self {
+        let mut map = FoldedMap::default();
+        for (name, value) in iter {
+            map.insert(name, value);
+        }
+        map
+    }
+}
+
+/// Names that ignore ASCII case, as a set: each kept with the spelling it
+/// was inserted with.
+#[derive(Clone, Default, Debug)]
+pub struct FoldedSet(FoldedMap<()>);
+
+impl FoldedSet {
+    pub fn len(&self) -> usize {
+        self.0.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+
+    pub fn clear(&mut self) {
+        self.0.clear();
+    }
+
+    pub fn contains<K: FoldKey + ?Sized>(&self, key: &K) -> bool {
+        self.0.contains_key(key)
+    }
+
+    pub fn get<K: FoldKey + ?Sized>(&self, key: &K) -> Option<&Name> {
+        self.0.get_key_value(key).map(|(name, _)| name)
+    }
+
+    pub fn insert(&mut self, name: Name) {
+        self.0.insert(name, ());
+    }
+
+    pub fn remove<K: FoldKey + ?Sized>(&mut self, key: &K) -> bool {
+        self.0.remove(key).is_some()
+    }
+
+    pub fn iter(&self) -> impl Iterator<Item = &Name> {
+        self.0.keys()
+    }
+}
+
+impl FromIterator<Name> for FoldedSet {
+    fn from_iter<I: IntoIterator<Item = Name>>(iter: I) -> Self {
+        let mut set = FoldedSet::default();
+        for name in iter {
+            set.insert(name);
+        }
+        set
+    }
+}
+
 /// The hash an [`Interner`] files `text` under.
 pub fn text_hash(text: &str) -> u64 {
     let mut hasher = FxHasher::default();
@@ -427,6 +735,91 @@ impl NameCache {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Texts that differ in case, and in what is not ASCII, from a small
+    /// alphabet so that many collide as one name ignoring case.
+    fn random_texts(count: usize, seed: u64) -> Vec<String> {
+        let mut state = seed;
+        let mut next = move || {
+            state ^= state << 13;
+            state ^= state >> 7;
+            state ^= state << 17;
+            state
+        };
+        let alphabet: Vec<char> = "aAbBzZ_\\0\u{e9}\u{c9}\u{4e2d}".chars().collect();
+        (0..count)
+            .map(|_| {
+                let len = (next() % 20) as usize;
+                (0..len)
+                    .map(|_| alphabet[(next() % alphabet.len() as u64) as usize])
+                    .collect()
+            })
+            .collect()
+    }
+
+    #[test]
+    fn a_folded_map_is_a_map_by_the_lowercased_text() {
+        let texts = random_texts(4000, 0x9e37_79b9);
+        let mut map: FoldedMap<usize> = FoldedMap::default();
+        let mut model: std::collections::BTreeMap<String, (String, usize)> = Default::default();
+        for (i, text) in texts.iter().enumerate() {
+            let name = Interner::global().name(text);
+            let before = map.insert(name, i);
+            let previous = model.insert(text.to_ascii_lowercase(), (text.clone(), i));
+            assert_eq!(before, previous.map(|(_, v)| v), "{text}");
+            if i % 7 == 0 {
+                let gone = &texts[i / 2];
+                assert_eq!(
+                    map.remove(gone.as_str()),
+                    model.remove(&gone.to_ascii_lowercase()).map(|(_, v)| v),
+                    "{gone}"
+                );
+            }
+        }
+        assert_eq!(map.len(), model.len());
+        for text in &texts {
+            let by_text = map.get_key_value(text.as_str());
+            let by_name = map.get_key_value(&Interner::global().name(text));
+            let want = model.get(&text.to_ascii_lowercase());
+            assert_eq!(
+                by_text.map(|(n, v)| (n.to_string(), *v)),
+                want.cloned(),
+                "{text}"
+            );
+            assert_eq!(
+                by_name.map(|(n, v)| (n.to_string(), *v)),
+                want.cloned(),
+                "{text}"
+            );
+            assert_eq!(map.contains_key(text), want.is_some());
+        }
+        let mut held: Vec<(String, usize)> = map.iter().map(|(n, v)| (n.to_string(), *v)).collect();
+        held.sort();
+        let mut wanted: Vec<(String, usize)> = model.values().cloned().collect();
+        wanted.sort();
+        assert_eq!(held, wanted);
+    }
+
+    #[test]
+    fn the_folded_hash_is_that_of_the_lowercased_text() {
+        for text in random_texts(4000, 0x2545_f491) {
+            assert_eq!(
+                folded_hash(text.as_bytes()),
+                folded_hash(text.to_ascii_lowercase().as_bytes()),
+                "{text}"
+            );
+            assert!(eq_lowercased(
+                text.as_bytes(),
+                text.to_ascii_lowercase().as_bytes()
+            ));
+            assert_eq!(
+                Interner::global().name(&text).folded_hash(),
+                folded_hash(text.as_bytes())
+            );
+        }
+        assert!(!eq_lowercased(b"Ab", b"ac"));
+        assert!(!eq_lowercased(b"abc", b"ab"));
+    }
 
     #[test]
     fn concurrent_interning_of_one_text_is_one_allocation() {

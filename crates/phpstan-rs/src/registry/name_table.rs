@@ -1,14 +1,13 @@
 //! The registry's class and function tables, found the way PHP resolves
 //! those names: case-insensitively.
 
-use std::borrow::{Borrow, Cow};
+use std::borrow::Cow;
 use std::cmp::Ordering;
-use std::hash::{Hash, Hasher};
 use std::ops::Range;
 
-use rustc_hash::{FxHashMap, FxHashSet};
+use rustc_hash::FxHashSet;
 use std::sync::{Arc, OnceLock};
-use syntax::name::Name;
+use syntax::name::{FoldKey, FoldedMap, FoldedSet, Name};
 
 use super::container::{Buffer, Reader, Stored, Writer};
 
@@ -60,7 +59,7 @@ pub(crate) fn with_function_key<R>(name: &str, f: impl FnOnce(&str) -> R) -> R {
 
 /// What a table is looked up by: text that is folded to lowercase for the
 /// lookup, or a `Name`, which holds its lowercase form already.
-pub trait TableKey {
+pub trait TableKey: FoldKey {
     /// Calls `f` with the lowercased key.
     fn with_key<R>(&self, f: impl FnOnce(&str) -> R) -> R;
 }
@@ -72,12 +71,6 @@ impl TableKey for str {
 }
 
 impl TableKey for String {
-    fn with_key<R>(&self, f: impl FnOnce(&str) -> R) -> R {
-        with_function_key(self, f)
-    }
-}
-
-impl TableKey for Cow<'_, str> {
     fn with_key<R>(&self, f: impl FnOnce(&str) -> R) -> R {
         with_function_key(self, f)
     }
@@ -98,6 +91,18 @@ impl<T: TableKey + ?Sized> TableKey for &T {
 /// A key already lowercased, as a scope's keys are: looked up as it is.
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct FoldedKey<'a>(pub(crate) &'a str);
+
+impl FoldKey for FoldedKey<'_> {
+    fn fold_hash(&self) -> u64 {
+        self.0.fold_hash()
+    }
+    fn is_folded_eq(&self, stored: &Name) -> bool {
+        self.0.is_folded_eq(stored)
+    }
+    fn eq_text_ignoring_case(&self, stored: &[u8]) -> bool {
+        self.0.eq_text_ignoring_case(stored)
+    }
+}
 
 impl TableKey for FoldedKey<'_> {
     fn with_key<R>(&self, f: impl FnOnce(&str) -> R) -> R {
@@ -127,31 +132,6 @@ fn cmp_folded(text: &[u8], key: &[u8]) -> Ordering {
     text.len().cmp(&key.len())
 }
 
-/// A name as a table key: hashed, compared and borrowed as its lowercase
-/// form.
-#[derive(Debug, Clone)]
-struct Folded(Name);
-
-impl PartialEq for Folded {
-    fn eq(&self, other: &Folded) -> bool {
-        self.0.eq_ignore_case(&other.0)
-    }
-}
-
-impl Eq for Folded {}
-
-impl Hash for Folded {
-    fn hash<H: Hasher>(&self, state: &mut H) {
-        self.0.lower().hash(state);
-    }
-}
-
-impl Borrow<str> for Folded {
-    fn borrow(&self) -> &str {
-        self.0.lower()
-    }
-}
-
 /// Values by a case-insensitive name. Every lookup folds case, and each
 /// entry keeps the spelling it was declared with, which iteration yields.
 ///
@@ -166,11 +146,11 @@ impl Borrow<str> for Folded {
 /// base was made; the own entries' order is the hash map's.
 #[derive(Debug, Clone)]
 pub struct NameTable<V> {
-    entries: FxHashMap<Folded, V>,
+    entries: FoldedMap<V>,
     base: Option<Arc<Base<V>>>,
     // The base's names this table hides: replaced in `entries`, or
     // removed.
-    hidden: FxHashSet<Folded>,
+    hidden: FoldedSet,
     // Which set of names the table holds: a number no other table or
     // state of one has, new at every change of the names (not of a
     // value), kept by a clone. Two tables with one version hold the same
@@ -231,11 +211,7 @@ enum Keys {
 /// The hash a stored table's index files a name under: of its key, which is
 /// the name lowercased when the table folds, eight bytes at a time.
 fn hash_key(key: &[u8]) -> usize {
-    use std::hash::Hasher;
-    let mut hasher = rustc_hash::FxHasher::default();
-    hasher.write(key);
-    let hash = hasher.finish();
-    (hash ^ (hash >> 32)) as usize
+    syntax::name::folded_hash(key) as usize
 }
 
 /// Whether `text` is `key` once lowercased, for a key already lowercased,
@@ -419,6 +395,32 @@ impl<V> Base<V> {
         None
     }
 
+    /// `find`, for a key in any case: found through the stored hash index by
+    /// the key's own folded hash, with no lowercase copy of it.
+    pub(super) fn find_by<K: TableKey + ?Sized>(&self, key: &K) -> Option<usize> {
+        match &self.keys {
+            Keys::Stored { buffer, index, .. } if self.fold => {
+                let places = index.len() / 4;
+                let mask = places - 1;
+                let len = self.len();
+                let mut place = key.fold_hash() as usize & mask;
+                loop {
+                    let at = index.start + place * 4;
+                    let entry = u32::from_le_bytes(buffer[at..at + 4].try_into().unwrap()) as usize;
+                    if entry == 0 {
+                        return None;
+                    }
+                    let i = entry - 1;
+                    if i < len && key.eq_text_ignoring_case(self.keys.bytes(i)) {
+                        return Some(i);
+                    }
+                    place = (place + 1) & mask;
+                }
+            }
+            _ => key.with_key(|lower| self.find(lower)),
+        }
+    }
+
     /// `find` through a stored table's hash index.
     fn find_indexed(&self, buffer: &Buffer, index: &Range<usize>, key: &[u8]) -> Option<usize> {
         let places = index.len() / 4;
@@ -498,9 +500,9 @@ impl<V> Lazy<V> {
 impl<V> Default for NameTable<V> {
     fn default() -> Self {
         NameTable {
-            entries: FxHashMap::default(),
+            entries: FoldedMap::default(),
             base: None,
-            hidden: FxHashSet::default(),
+            hidden: FoldedSet::default(),
             version: next_version(),
         }
     }
@@ -522,35 +524,36 @@ impl<V> NameTable<V> {
         Some((base.name(i), base.value(i)))
     }
 
-    fn base_contains(&self, key: &str) -> bool {
-        self.base
-            .as_ref()
-            .is_some_and(|base| base.find(key).is_some())
+    /// `base_get` for a key in any case: no lowercase copy of it is made.
+    fn base_get_by<K: TableKey + ?Sized>(&self, key: &K) -> Option<(&Name, &V)> {
+        let base = self.base.as_ref()?;
+        if !self.hidden.is_empty() && self.hidden.contains(key) {
+            return None;
+        }
+        let i = base.find_by(key)?;
+        Some((base.name(i), base.value(i)))
     }
 
     pub fn get<K: TableKey + ?Sized>(&self, name: &K) -> Option<&V> {
-        name.with_key(|key| {
-            self.entries
-                .get(key)
-                .or_else(|| self.base_get(key).map(|(_, value)| value))
-        })
+        self.entries
+            .get(name)
+            .or_else(|| self.base_get_by(name).map(|(_, value)| value))
     }
 
     /// The value `name` finds, with its declared name.
     pub fn get_with_name<K: TableKey + ?Sized>(&self, name: &K) -> Option<(&Name, &V)> {
-        name.with_key(|key| {
-            self.entries
-                .get_key_value(key)
-                .map(|(declared, value)| (&declared.0, value))
-                .or_else(|| self.base_get(key))
-        })
+        self.entries
+            .get_key_value(name)
+            .or_else(|| self.base_get_by(name))
     }
 
     pub fn contains_key<K: TableKey + ?Sized>(&self, name: &K) -> bool {
-        name.with_key(|key| {
-            self.entries.contains_key(key)
-                || (self.base_contains(key) && !self.hidden.contains(key))
-        })
+        self.entries.contains_key(name)
+            || (self
+                .base
+                .as_ref()
+                .is_some_and(|base| base.find_by(name).is_some())
+                && (self.hidden.is_empty() || !self.hidden.contains(name)))
     }
 
     /// Every value with its declared name.
@@ -565,7 +568,7 @@ impl<V> NameTable<V> {
                 .map(move |i| base.name(i))
                 .filter(|name| !self.hidden.contains(name.lower()))
         });
-        self.entries.keys().map(|key| &key.0).chain(base)
+        self.entries.keys().chain(base)
     }
 
     pub fn values(&self) -> impl Iterator<Item = &V> {
@@ -575,7 +578,7 @@ impl<V> NameTable<V> {
     /// The entries the table holds itself, not those it reads from its
     /// shared base.
     pub(crate) fn own_iter(&self) -> impl Iterator<Item = (&Name, &V)> {
-        self.entries.iter().map(|(key, value)| (&key.0, value))
+        self.entries.iter()
     }
 
     pub fn len(&self) -> usize {
@@ -590,24 +593,22 @@ impl<V> NameTable<V> {
 /// The names a table finds, as a view that stays whole while the table's
 /// entries change: a lookup by any case answers with the declared name.
 pub(crate) struct DeclaredNames<V> {
-    own: FxHashSet<Folded>,
+    own: FoldedSet,
     base: Option<Arc<Base<V>>>,
-    hidden: FxHashSet<Folded>,
+    hidden: FoldedSet,
 }
 
 impl<V> DeclaredNames<V> {
     /// The declared name `name` finds, in any case.
     pub(crate) fn get(&self, name: &str) -> Option<&Name> {
-        with_function_key(name, |key| {
-            if let Some(own) = self.own.get(key) {
-                return Some(&own.0);
-            }
-            let base = self.base.as_ref()?;
-            if self.hidden.contains(key) {
-                return None;
-            }
-            base.find(key).map(|i| base.name(i))
-        })
+        if let Some(own) = self.own.get(name) {
+            return Some(own);
+        }
+        let base = self.base.as_ref()?;
+        if self.hidden.contains(name) {
+            return None;
+        }
+        base.find_by(name).map(|i| base.name(i))
     }
 }
 
@@ -656,7 +657,7 @@ impl<V> NameTable<V> {
             let base = self.base.as_ref()?;
             let i = base.find(key)?;
             let (declared, base) = (base.name(i).clone(), Arc::clone(base));
-            self.hidden.insert(Folded(declared));
+            self.hidden.insert(declared);
             self.version = next_version();
             Some(Detached::Base(base, i))
         })
@@ -672,8 +673,8 @@ impl<V: Clone> NameTable<V> {
         }
         if let Some((declared, value)) = self.base_get(key) {
             let (declared, value) = (declared.clone(), value.clone());
-            self.hidden.insert(Folded(declared.clone()));
-            self.entries.insert(Folded(declared), value);
+            self.hidden.insert(declared.clone());
+            self.entries.insert(declared, value);
         }
     }
 
@@ -690,7 +691,7 @@ impl<V: Clone> NameTable<V> {
     pub fn insert(&mut self, name: impl Into<Name>, value: V) {
         let name = name.into();
         self.forget(name.lower());
-        self.entries.insert(Folded(name), value);
+        self.entries.insert(name, value);
         self.version = next_version();
     }
 
@@ -698,7 +699,7 @@ impl<V: Clone> NameTable<V> {
     pub fn replace(&mut self, name: impl Into<Name>, value: V) -> Option<V> {
         let name = name.into();
         let old = self.take(name.lower());
-        self.entries.insert(Folded(name), value);
+        self.entries.insert(name, value);
         self.version = next_version();
         old
     }
@@ -719,7 +720,7 @@ impl<V: Clone> NameTable<V> {
         let Some(i) = base.find(key) else {
             return false;
         };
-        self.hidden.insert(Folded(base.name(i).clone()));
+        self.hidden.insert(base.name(i).clone());
         self.version = next_version();
         true
     }
@@ -758,7 +759,7 @@ impl<V: Clone> NameTable<V> {
             }
             let (declared, value) = self.base_get(key)?;
             let (declared, value) = (declared.clone(), value.clone());
-            self.hidden.insert(Folded(declared));
+            self.hidden.insert(declared);
             self.version = next_version();
             Some(value)
         })
@@ -798,8 +799,7 @@ impl<V: Clone> NameTable<V> {
         }
         self.entries
             .iter_mut()
-            .filter(move |(name, _)| keys.is_none_or(|keys| keys.contains(name.0.lower())))
-            .map(|(k, v)| (&k.0, v))
+            .filter(move |(name, _)| keys.is_none_or(|keys| keys.contains(name.lower())))
     }
 
     pub fn values_mut(&mut self) -> impl Iterator<Item = &mut V> {
@@ -824,11 +824,7 @@ impl<V: Clone> NameTable<V> {
                 }
             }
         }
-        all.extend(
-            std::mem::take(&mut self.entries)
-                .into_iter()
-                .map(|(k, v)| (k.0, v)),
-        );
+        all.extend(std::mem::take(&mut self.entries));
         self.hidden.clear();
         self.base = Some(Arc::new(Base::built(all, true)));
     }
@@ -846,9 +842,9 @@ impl<V> std::ops::Index<&str> for NameTable<V> {
 /// `NameTable::iter`'s iterator: the table's own entries, then the base's
 /// it doesn't hide.
 pub struct Iter<'a, V> {
-    entries: std::collections::hash_map::Iter<'a, Folded, V>,
+    entries: syntax::name::FoldedIter<'a, V>,
     base: Option<(&'a Base<V>, Range<usize>)>,
-    hidden: &'a FxHashSet<Folded>,
+    hidden: &'a FoldedSet,
 }
 
 impl<'a, V> Iterator for Iter<'a, V> {
@@ -856,7 +852,7 @@ impl<'a, V> Iterator for Iter<'a, V> {
 
     fn next(&mut self) -> Option<Self::Item> {
         if let Some((key, value)) = self.entries.next() {
-            return Some((&key.0, value));
+            return Some((key, value));
         }
         let (base, positions) = self.base.as_mut()?;
         let base: &'a Base<V> = base;
@@ -897,7 +893,7 @@ impl<V: Clone> IntoIterator for NameTable<V> {
                 }
             }
         }
-        all.extend(self.entries.into_iter().map(|(k, v)| (k.0, v)));
+        all.extend(self.entries);
         all.into_iter()
     }
 }
@@ -926,9 +922,9 @@ impl<V: serde::de::DeserializeOwned + Send + Sync + 'static> NameTable<V> {
     /// The table `store` wrote as section `section`: a base read in place.
     pub(super) fn load(reader: &Reader, section: &str) -> Result<NameTable<V>, String> {
         Ok(NameTable {
-            entries: FxHashMap::default(),
+            entries: FoldedMap::default(),
             base: Some(Arc::new(load_base(reader, section, true)?)),
-            hidden: FxHashSet::default(),
+            hidden: FoldedSet::default(),
             version: next_version(),
         })
     }
