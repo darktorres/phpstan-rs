@@ -132,3 +132,28 @@ fn a_name_the_lexer_repeats_is_the_one_the_interner_holds() {
     };
     assert!(n.same_allocation(first("a")));
 }
+
+#[test]
+fn a_doc_comment_ends_where_going_byte_by_byte_ends_it() {
+    const ALPHABET: &[u8] = b"/*a\n @";
+    let mut state = 0x9E37_79B9_7F4A_7C15u64;
+    let mut next = move |n: usize| {
+        state = state
+            .wrapping_mul(6364136223846793005)
+            .wrapping_add(1442695040888963407);
+        ((state >> 33) as usize) % n
+    };
+    for _ in 0..20_000 {
+        let mut src = b"/**".to_vec();
+        src.extend((0..next(10)).map(|_| ALPHABET[next(ALPHABET.len())]));
+        let mut pos = 3;
+        while pos < src.len() && !src[pos..].starts_with(b"*/") {
+            pos += 1;
+        }
+        let expected = (pos + 2).min(src.len());
+        let mut lexer = Lexer::from_bytes(&src);
+        lexer.in_php = true;
+        lexer.lex_doc_comment();
+        assert_eq!(lexer.pos, expected, "{:?}", String::from_utf8_lossy(&src));
+    }
+}

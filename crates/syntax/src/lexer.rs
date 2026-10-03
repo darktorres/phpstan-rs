@@ -939,10 +939,11 @@ impl<'a> Lexer<'a> {
     fn lex_doc_comment(&mut self) -> Token {
         let start = self.pos;
         self.pos += 3; // consume '/**'
-        while self.pos < self.src.len() && !self.starts_with(b"*/") {
-            self.pos += 1;
-        }
-        self.pos = (self.pos + 2).min(self.src.len());
+        let rest = &self.src[self.pos.min(self.src.len())..];
+        self.pos = match memchr::memmem::find(rest, b"*/") {
+            Some(found) => self.pos + found + 2,
+            None => self.src.len(),
+        };
         Token::DocComment(self.interner.str(&lossy(&self.src[start..self.pos])))
     }
 
