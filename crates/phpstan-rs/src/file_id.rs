@@ -9,6 +9,25 @@
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub(crate) struct FileId(u32);
 
+/// A set of files by number, a bit for each.
+#[derive(Debug, Default, Clone)]
+pub(crate) struct FileIdSet {
+    words: Vec<u64>,
+}
+
+impl FileIdSet {
+    /// Adds `file`; whether it was not in the set.
+    pub(crate) fn insert(&mut self, file: FileId) -> bool {
+        let (word, bit) = (file.index() / 64, file.index() % 64);
+        if self.words.len() <= word {
+            self.words.resize(word + 1, 0);
+        }
+        let new = self.words[word] & (1 << bit) == 0;
+        self.words[word] |= 1 << bit;
+        new
+    }
+}
+
 impl FileId {
     pub(crate) fn new(index: usize) -> FileId {
         FileId(u32::try_from(index).expect("fewer than 2^32 files"))

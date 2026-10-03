@@ -48,6 +48,14 @@ impl Name {
         }))
     }
 
+    /// A name of `text` that no interner holds: equal to the interned
+    /// name of the same text, but not shared with it. For a value that is
+    /// compared and hashed as a name and does not outlive its use, which
+    /// has no need of the interner's lock.
+    pub fn detached(text: &str) -> Name {
+        Name::new_hashed(text, text_hash(text))
+    }
+
     /// `text_hash` of the name's text, made when the name was.
     pub fn text_hash(&self) -> u64 {
         self.0.hash

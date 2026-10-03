@@ -1,5 +1,6 @@
 //! Tests that `referenced_names` collects dependencies from class relationships, calls, type hints, closures and PHPDoc tags, resolved against the file's namespace and imports.
 use super::helpers::*;
+use crate::deps::RefKey;
 
 #[test]
 fn collects_extends_implements_and_trait_use() {
@@ -337,5 +338,99 @@ fn doc_names_are_each_comments_types_less_the_templates_in_scope() {
         "list",
     ] {
         assert!(!names.contains(not), "{not} is not collected");
+    }
+}
+
+#[test]
+fn a_reference_is_a_key_of_what_it_names() {
+    let names = refs(
+        r#"<?php
+            namespace A;
+            use B\C;
+            use function D\e;
+            use const F\G;
+            function f() {
+                h();
+                new I();
+                J;
+                $x = K::class;
+                global $v;
+            }
+        "#,
+    );
+    for key in [
+        RefKey::class_text("B\\C"),
+        RefKey::function_text("D\\e"),
+        RefKey::constant_text("F\\G"),
+        RefKey::function_text("A\\h"),
+        RefKey::function_text("h"),
+        RefKey::class_text("A\\I"),
+        RefKey::constant_text("A\\J"),
+        RefKey::constant_text("J"),
+        RefKey::class_text("A\\K"),
+        RefKey::global_variable("v"),
+    ] {
+        assert!(names.contains_key(&key), "{key:?}");
+    }
+    // What a name is read as is what it is a key of: a class named like a
+    // function is not the function.
+    for key in [
+        RefKey::class_text("A\\h"),
+        RefKey::function_text("A\\I"),
+        RefKey::class_text("A\\J"),
+        RefKey::function_text("A\\K"),
+    ] {
+        assert!(!names.contains_key(&key), "{key:?}");
+    }
+}
+
+#[test]
+fn a_key_is_equal_as_php_compares_what_it_is_of() {
+    use std::hash::BuildHasher as _;
+    let hasher = rustc_hash::FxBuildHasher;
+    // Classes and functions ignore case; a constant's namespace does, and
+    // its own name does not; a variable is exact; a kind is not another.
+    for (a, b, equal) in [
+        (
+            RefKey::class_text("Foo\\Bar"),
+            RefKey::class_text("foo\\BAR"),
+            true,
+        ),
+        (
+            RefKey::function_text("Foo\\Bar"),
+            RefKey::function_text("foo\\bar"),
+            true,
+        ),
+        (
+            RefKey::constant_text("Foo\\BAR"),
+            RefKey::constant_text("foo\\BAR"),
+            true,
+        ),
+        (
+            RefKey::constant_text("Foo\\BAR"),
+            RefKey::constant_text("Foo\\bar"),
+            false,
+        ),
+        (
+            RefKey::constant_text("BAR"),
+            RefKey::constant_text("bar"),
+            false,
+        ),
+        (
+            RefKey::global_variable("a"),
+            RefKey::global_variable("A"),
+            false,
+        ),
+        (
+            RefKey::class_text("Foo"),
+            RefKey::function_text("Foo"),
+            false,
+        ),
+        (RefKey::class_text("\\Foo"), RefKey::class_text("foo"), true),
+    ] {
+        assert_eq!(a == b, equal, "{a:?} {b:?}");
+        if equal {
+            assert_eq!(hasher.hash_one(&a), hasher.hash_one(&b), "{a:?} {b:?}");
+        }
     }
 }

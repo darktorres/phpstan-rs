@@ -9,7 +9,7 @@ use crate::checker::rule_level_helper::RuleLevelHelper;
 use crate::checker::settings::CheckSettings;
 use crate::checker::{self, Checker, PropertyAssignFacts};
 use crate::deps;
-use crate::file_id::FileId;
+use crate::file_id::{FileId, FileIdSet};
 use crate::ignore_comments;
 use crate::pest_config::PestConfig;
 use crate::registry::scope::Scope;
@@ -52,7 +52,7 @@ use use_sites::UseSiteIndex;
 #[derive(Default)]
 struct AffectedWalk {
     affected: FxHashSet<FileId>,
-    seen: FxHashSet<String>,
+    seen: FxHashSet<deps::RefKey>,
     stub_files: StubFileSet,
 }
 
@@ -101,10 +101,10 @@ struct FileState {
     constants: Vec<Name>,
     // Whether it declares or references a `PHPStan\` name.
     mentions_phpstan: bool,
-    references: FxHashSet<String>,
+    references: FxHashSet<deps::RefKey>,
     // The names its declarations themselves mention
     // (`deps::declaration_referenced_names`).
-    declaration_references: FxHashSet<String>,
+    declaration_references: FxHashSet<deps::RefKey>,
     // Inline `@phpstan-ignore*` comments, read while the file was lexed
     // (the AST carries no comment text).
     ignores: ignore_comments::IgnoreComments,
@@ -157,10 +157,10 @@ pub struct Project {
     // What the names in this project's parsed files are interned into,
     // freed with the project.
     interner: Arc<Interner>,
-    dependents: FxHashMap<String, FxHashSet<FileId>>,
+    dependents: FxHashMap<deps::RefKey, FxHashSet<FileId>>,
     // `dependents` for the names files' declarations themselves mention
     // (`deps::declaration_referenced_names`).
-    signature_dependents: FxHashMap<String, FxHashSet<FileId>>,
+    signature_dependents: FxHashMap<deps::RefKey, FxHashSet<FileId>>,
     registry: Registry,
     sql: sql::context::SqlContext,
     // Directory-scoped Pest `$this`-binding config, rebuilt from every
@@ -1137,68 +1137,83 @@ impl Project {
     fn closure_scope(
         &self,
         changed: &crate::registry::ChangedNames,
-        index: &FxHashMap<String, FxHashSet<FileId>>,
+        index: &FxHashMap<deps::RefKey, FxHashSet<FileId>>,
     ) -> Scope {
         let mut classes: FxHashSet<String> = changed.classes.clone();
         let mut functions: FxHashSet<String> = changed.functions.clone();
-        let mut frontier: Vec<String> = classes
+        let mut frontier: Vec<deps::RefKey> = classes
             .iter()
-            .chain(&functions)
-            .cloned()
-            .chain(changed.constants.keys().map(|c| deps::dependency_key(c)))
+            .map(|c| deps::RefKey::class_text(c))
+            .chain(functions.iter().map(|f| deps::RefKey::function_text(f)))
+            .chain(
+                changed
+                    .constants
+                    .keys()
+                    .map(|c| deps::RefKey::constant_text(c)),
+            )
             .collect();
-        let mut seen: FxHashSet<String> = FxHashSet::default();
+        let mut seen: FxHashSet<deps::RefKey> = FxHashSet::default();
+        // Each file is expanded once: what it contributes to the scope is
+        // its declared names, whichever name led to it.
+        let mut expanded = FileIdSet::default();
         let mut stub_files = StubFileSet::default();
         while let Some(key) = frontier.pop() {
             if seen.contains(&key) {
                 continue;
             }
-            // A stub's name is a key already, and takes part in the walk
-            // only through the files that reference it, which its stub
-            // file's closure holds: it is walked only if a project file
-            // references it. A project file's name is made a key first.
-            let mut reached = |name: &str, is_class: bool, stub: bool| {
-                let set = if is_class {
-                    &mut classes
-                } else {
-                    &mut functions
-                };
-                // `deps::dependency_key`, built on the stack: most names
-                // reached are in the set already.
-                let mut reach = |key: &str| {
-                    if !set.contains(key) {
-                        set.insert(key.to_string());
-                        if !stub || index.contains_key(key) {
-                            frontier.push(key.to_string());
-                        }
-                    }
-                };
-                if stub {
-                    reach(name);
-                } else {
-                    crate::registry::with_function_key(name.trim_start_matches('\\'), reach);
-                }
-            };
+            // A project file's declared name is a key of its kind, walked
+            // when something references it.
             for file in index.get(&key).into_iter().flatten() {
+                if !expanded.insert(*file) {
+                    continue;
+                }
                 let Some(state) = self.files.get_by_id(*file) else {
                     continue;
                 };
                 for name in state.classes.iter().chain(&state.anonymous_classes) {
-                    reached(name, true, false);
+                    let text = name.lower().trim_start_matches('\\');
+                    if !classes.contains(text) {
+                        classes.insert(text.to_string());
+                        frontier.push(deps::RefKey::class(name));
+                    }
                 }
                 for name in &state.functions {
-                    reached(name, false, false);
+                    let text = name.lower().trim_start_matches('\\');
+                    if !functions.contains(text) {
+                        functions.insert(text.to_string());
+                        frontier.push(deps::RefKey::function(name));
+                    }
                 }
             }
             // A stub file is reached through every key it references, and
             // with it every stub file that references what it declares;
-            // the names of each are walked the first time.
-            for file in stubs::stub_dependent_files(&key) {
-                stub_files.add_closure(file, |file| {
-                    for (is_class, name) in stubs::stub_file_names(file) {
-                        reached(name, is_class, true);
-                    }
-                });
+            // the names of each are walked the first time. A stub's name is
+            // a key already, and is walked only if a project file
+            // references it.
+            if let Some(stub_key) = key.stub_key() {
+                for file in stubs::stub_dependent_files(stub_key) {
+                    stub_files.add_closure(file, |file| {
+                        for (is_class, name) in stubs::stub_file_names(file) {
+                            let set = if is_class {
+                                &mut classes
+                            } else {
+                                &mut functions
+                            };
+                            if set.contains(name) {
+                                continue;
+                            }
+                            set.insert(name.to_string());
+                            let key = if is_class {
+                                deps::RefKey::class_text(name)
+                            } else {
+                                deps::RefKey::function_text(name)
+                            };
+                            if index.contains_key(&key) {
+                                frontier.push(key);
+                            }
+                        }
+                    });
+                }
             }
             seen.insert(key);
         }
@@ -1806,35 +1821,17 @@ impl Project {
     /// reaches the files that read a changed declaration only through
     /// another's types (`f(A $a) { $a->b()->c(); }` where `A::b()`
     /// returns the changed `B`).
-    fn walk_affected(&self, walk: &mut AffectedWalk, changed: impl IntoIterator<Item = String>) {
+    fn walk_affected(
+        &self,
+        walk: &mut AffectedWalk,
+        changed: impl IntoIterator<Item = deps::RefKey>,
+    ) {
         let AffectedWalk {
             affected,
             seen,
             stub_files,
         } = walk;
-        let mut frontier: Vec<String> = changed.into_iter().collect();
-        // Puts the dependency key of `name` on the frontier unless it was
-        // reached already, or is `current`, which is being walked; most
-        // names are, and then nothing is allocated.
-        let reach =
-            |name: &str, current: &str, seen: &FxHashSet<String>, frontier: &mut Vec<String>| {
-                crate::registry::with_function_key(name.trim_start_matches('\\'), |key| {
-                    if key != current && !seen.contains(key) {
-                        frontier.push(key.to_string());
-                    }
-                });
-            };
-        // A stub's name is a key already, and only a file that reads it
-        // leads further: through the files that reference it, which its
-        // stub file's closure holds.
-        let reach_stub = |key: &str, seen: &FxHashSet<String>, frontier: &mut Vec<String>| {
-            if !seen.contains(key)
-                && (self.dependents.contains_key(key)
-                    || self.signature_dependents.contains_key(key))
-            {
-                frontier.push(key.to_string());
-            }
-        };
+        let mut frontier: Vec<deps::RefKey> = changed.into_iter().collect();
         while let Some(key) = frontier.pop() {
             if seen.contains(&key) {
                 continue;
@@ -1844,18 +1841,45 @@ impl Project {
                 let Some(state) = self.files.get_by_id(*file) else {
                     continue;
                 };
-                for name in state.functions.iter().chain(&state.classes) {
-                    reach(name, &key, seen, &mut frontier);
+                // The names the file declares, as the keys they are
+                // referenced by, unless they were reached already or are
+                // `key`, which is being walked.
+                let reach = |next: deps::RefKey, frontier: &mut Vec<deps::RefKey>| {
+                    if next != key && !seen.contains(&next) {
+                        frontier.push(next);
+                    }
+                };
+                for name in &state.functions {
+                    reach(deps::RefKey::function(name), &mut frontier);
+                }
+                for name in &state.classes {
+                    reach(deps::RefKey::class(name), &mut frontier);
                 }
             }
-            for file in stubs::stub_dependent_files(&key) {
-                stub_files.add_closure(file, |file| {
-                    for (_, name) in stubs::stub_file_names(file) {
-                        if name != key {
-                            reach_stub(name, seen, &mut frontier);
+            // A stub's name is a key already, and only a file that reads it
+            // leads further: through the files that reference it, which
+            // its stub file's closure holds.
+            if let Some(stub_key) = key.stub_key() {
+                for file in stubs::stub_dependent_files(stub_key) {
+                    stub_files.add_closure(file, |file| {
+                        for (is_class, name) in stubs::stub_file_names(file) {
+                            if name == stub_key {
+                                continue;
+                            }
+                            let next = if is_class {
+                                deps::RefKey::class_text(name)
+                            } else {
+                                deps::RefKey::function_text(name)
+                            };
+                            if !seen.contains(&next)
+                                && (self.dependents.contains_key(&next)
+                                    || self.signature_dependents.contains_key(&next))
+                            {
+                                frontier.push(next);
+                            }
                         }
-                    }
-                });
+                    });
+                }
             }
             seen.insert(key);
         }
@@ -2661,8 +2685,8 @@ pub struct ParsedFile {
     functions: Vec<Name>,
     classes: Vec<Name>,
     constants: Vec<Name>,
-    references: FxHashSet<String>,
-    declaration_references: FxHashSet<String>,
+    references: FxHashSet<deps::RefKey>,
+    declaration_references: FxHashSet<deps::RefKey>,
     ignores: ignore_comments::IgnoreComments,
     // This file's own declarations, already built into
     // registry-independent `ClassReflection`/`FunctionReflection`/`Type` values (see
@@ -2888,14 +2912,15 @@ struct UnindexedFile {
 }
 
 /// Whether a file declaring `functions` and `classes` and referencing
-/// `references` (`deps::dependency_key`s) names anything in `PHPStan\`.
-fn mentions_phpstan(functions: &[Name], classes: &[Name], references: &FxHashSet<String>) -> bool {
-    let is_phpstan = |key: &str| key.starts_with("phpstan\\");
-    references.iter().any(|r| is_phpstan(r))
-        || functions
-            .iter()
-            .chain(classes)
-            .any(|n| is_phpstan(&deps::dependency_key(n)))
+/// `references` names anything in `PHPStan\`.
+fn mentions_phpstan(
+    functions: &[Name],
+    classes: &[Name],
+    references: &FxHashSet<deps::RefKey>,
+) -> bool {
+    let is_phpstan = |name: &Name| name.lower().starts_with("phpstan\\");
+    references.iter().any(|r| is_phpstan(r.name()))
+        || functions.iter().chain(classes).any(is_phpstan)
 }
 
 /// Names a file declares, by kind.
@@ -2939,9 +2964,9 @@ pub(crate) fn declared_names(stmts: &[Stmt]) -> (Vec<Name>, Vec<Name>) {
 }
 
 fn register_references(
-    dependents: &mut FxHashMap<String, FxHashSet<FileId>>,
+    dependents: &mut FxHashMap<deps::RefKey, FxHashSet<FileId>>,
     file: FileId,
-    references: &FxHashSet<String>,
+    references: &FxHashSet<deps::RefKey>,
 ) {
     for name in references {
         // The name is copied only for the first file to reference it.
@@ -2957,9 +2982,9 @@ fn register_references(
 }
 
 fn unregister_references(
-    dependents: &mut FxHashMap<String, FxHashSet<FileId>>,
+    dependents: &mut FxHashMap<deps::RefKey, FxHashSet<FileId>>,
     file: FileId,
-    references: &FxHashSet<String>,
+    references: &FxHashSet<deps::RefKey>,
 ) {
     for name in references {
         if let Some(files) = dependents.get_mut(name) {

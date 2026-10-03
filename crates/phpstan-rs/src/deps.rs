@@ -1,28 +1,169 @@
 use rustc_hash::FxHashSet;
 
 use syntax::ast::*;
+use syntax::name::Name;
 use syntax::name_resolution::NameContext;
 use syntax::visit::{
-    Visitor, walk_class_const, walk_class_def, walk_function_decl, walk_param, walk_property_decl,
-    walk_property_hooks, walk_stmt, walk_stmts,
+    Visitor, walk_args, walk_class_const, walk_class_def, walk_expr, walk_function_decl,
+    walk_param, walk_property_decl, walk_property_hooks, walk_stmt, walk_stmts,
 };
 
+/// The key a declaration's or reference's fully-qualified name (with or
+/// without its leading `\`) is tracked under in the registry: PHP matches
+/// class and function names case-insensitively.
+pub fn dependency_key(name: &str) -> String {
+    name.trim_start_matches('\\').to_ascii_lowercase()
+}
+
+/// The key a `global $name;` statement is tracked under in the registry,
+/// for the files whose checking reads the project-wide type inferred for
+/// `$name`. A `$` keeps it apart from every class, function and constant
+/// key.
+pub fn global_variable_key(name: &str) -> String {
+    format!("${name}")
+}
+
+/// What a reference in a file is to, which a change to it makes the file
+/// stale for: a class or an interface or a trait or an enum, a function, a
+/// global constant, or a global variable (`global $name;`). Each kind has
+/// the equality PHP gives it: class and function names ignore case, a
+/// constant's namespace does and its own name does not, a variable's name
+/// is exact. A name holds the hashes it was made with.
+#[derive(Clone, Debug)]
+pub enum RefKey {
+    Class(Name),
+    Function(Name),
+    Constant(Name),
+    GlobalVar(Name),
+}
+
+impl RefKey {
+    /// The class `name` (with or without its leading `\`) names.
+    pub fn class(name: &Name) -> RefKey {
+        RefKey::Class(without_backslash(name))
+    }
+
+    pub fn function(name: &Name) -> RefKey {
+        RefKey::Function(without_backslash(name))
+    }
+
+    pub fn constant(name: &Name) -> RefKey {
+        RefKey::Constant(without_backslash(name))
+    }
+
+    /// `class` for a text, which the key holds without sharing it.
+    pub fn class_text(text: &str) -> RefKey {
+        RefKey::Class(Name::detached(text.trim_start_matches('\\')))
+    }
+
+    pub fn function_text(text: &str) -> RefKey {
+        RefKey::Function(Name::detached(text.trim_start_matches('\\')))
+    }
+
+    pub fn constant_text(text: &str) -> RefKey {
+        RefKey::Constant(Name::detached(text.trim_start_matches('\\')))
+    }
+
+    pub fn global_variable(name: &str) -> RefKey {
+        RefKey::GlobalVar(Name::detached(name))
+    }
+
+    /// The name the key holds.
+    pub fn name(&self) -> &Name {
+        match self {
+            RefKey::Class(name)
+            | RefKey::Function(name)
+            | RefKey::Constant(name)
+            | RefKey::GlobalVar(name) => name,
+        }
+    }
+
+    /// The name the built-in stubs' own references to it are keyed by: in
+    /// lower case, whatever the kind. A variable is in none of them.
+    pub fn stub_key(&self) -> Option<&str> {
+        match self {
+            RefKey::GlobalVar(_) => None,
+            other => Some(other.name().lower()),
+        }
+    }
+
+    fn tag(&self) -> u8 {
+        match self {
+            RefKey::Class(_) => 0,
+            RefKey::Function(_) => 1,
+            RefKey::Constant(_) => 2,
+            RefKey::GlobalVar(_) => 3,
+        }
+    }
+}
+
+/// `name` without a leading `\`.
+fn without_backslash(name: &Name) -> Name {
+    match name.strip_prefix('\\') {
+        Some(rest) => Name::detached(rest.trim_start_matches('\\')),
+        None => name.clone(),
+    }
+}
+
+/// A constant name's namespace and its own name, which the first is
+/// compared ignoring case and the second as written.
+fn constant_parts(name: &str) -> (&str, &str) {
+    match name.rfind('\\') {
+        Some(at) => (&name[..at], &name[at + 1..]),
+        None => ("", name),
+    }
+}
+
+impl PartialEq for RefKey {
+    fn eq(&self, other: &RefKey) -> bool {
+        match (self, other) {
+            (RefKey::Class(a), RefKey::Class(b)) | (RefKey::Function(a), RefKey::Function(b)) => {
+                a.eq_ignore_case(b)
+            }
+            (RefKey::Constant(a), RefKey::Constant(b)) => {
+                let ((a_namespace, a_name), (b_namespace, b_name)) =
+                    (constant_parts(a), constant_parts(b));
+                a_name == b_name && a_namespace.eq_ignore_ascii_case(b_namespace)
+            }
+            (RefKey::GlobalVar(a), RefKey::GlobalVar(b)) => a == b,
+            _ => false,
+        }
+    }
+}
+
+impl Eq for RefKey {}
+
+impl std::hash::Hash for RefKey {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        state.write_u8(self.tag());
+        match self {
+            RefKey::Class(name) | RefKey::Function(name) => state.write_u64(name.folded_hash()),
+            RefKey::Constant(name) => {
+                let (namespace, own) = constant_parts(name);
+                state.write_u64(syntax::name::folded_hash(namespace.as_bytes()));
+                state.write_u64(syntax::name::text_hash(own));
+            }
+            RefKey::GlobalVar(name) => state.write_u64(name.text_hash()),
+        }
+    }
+}
+
 /// Every class, function and constant one file's parse tree could
-/// reference, as the keys `dependency_key` gives - used purely to decide
-/// which files might need re-checking when a declaration changes. Missing
-/// a real reference would let a stale diagnostic survive an edit
-/// elsewhere, while an extra name costs one harmless re-check, so this
-/// errs toward over-collecting: an unqualified function or constant name
-/// in a namespace yields both the namespaced and the global name, and the
+/// reference, as the keys of what each is - used purely to decide which
+/// files might need re-checking when a declaration changes. Missing a
+/// real reference would let a stale diagnostic survive an edit elsewhere,
+/// while an extra name costs one harmless re-check, so this errs toward
+/// over-collecting: an unqualified function or constant name in a
+/// namespace yields both the namespaced and the global name, and the
 /// names in PHPDoc tags are taken from the tag text without parsing it.
-pub fn referenced_names(stmts: &[Stmt]) -> FxHashSet<String> {
+pub fn referenced_names(stmts: &[Stmt]) -> FxHashSet<RefKey> {
     let mut collector = Collector::new(true, false);
     walk_stmts(&mut collector, stmts);
     collector.names
 }
 
 /// `referenced_names` and `declaration_referenced_names`, in one walk.
-pub fn both_referenced_names(stmts: &[Stmt]) -> (FxHashSet<String>, FxHashSet<String>) {
+pub fn both_referenced_names(stmts: &[Stmt]) -> (FxHashSet<RefKey>, FxHashSet<RefKey>) {
     let mut collector = Collector::new(true, true);
     walk_stmts(&mut collector, stmts);
     (collector.names, collector.outside)
@@ -31,35 +172,21 @@ pub fn both_referenced_names(stmts: &[Stmt]) -> (FxHashSet<String>, FxHashSet<St
 /// `referenced_names` without what only function and method bodies
 /// mention: the names a file's declarations can take their shape from
 /// (signatures, hierarchies, PHPDoc, constant values).
-pub fn declaration_referenced_names(stmts: &[Stmt]) -> FxHashSet<String> {
+pub fn declaration_referenced_names(stmts: &[Stmt]) -> FxHashSet<RefKey> {
     let mut collector = Collector::new(false, false);
     walk_stmts(&mut collector, stmts);
     collector.names
-}
-
-/// The key a declaration's or reference's fully-qualified name (with or
-/// without its leading `\`) is tracked under: PHP matches class and
-/// function names case-insensitively.
-pub fn dependency_key(name: &str) -> String {
-    name.trim_start_matches('\\').to_ascii_lowercase()
-}
-
-/// The key a `global $name;` statement is tracked under, for the files
-/// whose checking reads the project-wide type inferred for `$name`. A `$`
-/// keeps it apart from every class, function and constant key.
-pub fn global_variable_key(name: &str) -> String {
-    format!("${name}")
 }
 
 /// Collects every name a file mentions, resolved against the `namespace`
 /// and `use` statements in effect, anywhere in the file (nested scopes
 /// included).
 struct Collector {
-    names: FxHashSet<String>,
+    names: FxHashSet<RefKey>,
     // With `track_outside`, the names found anywhere but in a function or
     // method body: what `declaration_referenced_names` finds, from the same
     // walk.
-    outside: FxHashSet<String>,
+    outside: FxHashSet<RefKey>,
     track_outside: bool,
     // How many function and method bodies the walk is inside.
     body_depth: usize,
@@ -112,7 +239,7 @@ impl Collector {
     }
 
     /// Records `key` as referenced.
-    fn add(&mut self, key: String) {
+    fn add(&mut self, key: RefKey) {
         if self.track_outside && self.body_depth == 0 {
             self.outside.insert(key.clone());
         }
@@ -136,9 +263,9 @@ impl Collector {
             {
                 continue;
             }
-            let resolved = dependency_key(&self.ctx.resolve(token));
+            let resolved = RefKey::class_text(&self.ctx.resolve(token));
             self.add(resolved);
-            self.add(dependency_key(token));
+            self.add(RefKey::class_text(token));
         }
     }
 
@@ -375,12 +502,17 @@ impl<'ast> Visitor<'ast> for Collector {
             StmtKind::Use(imports) => {
                 self.ctx.add_uses(imports);
                 for import in imports {
-                    self.add(dependency_key(&import.path));
+                    let path = &import.path;
+                    self.add(match import.kind {
+                        UseKind::Class => RefKey::class(path),
+                        UseKind::Function => RefKey::function(path),
+                        UseKind::Const => RefKey::constant(path),
+                    });
                 }
             }
             StmtKind::Global(vars) => {
                 for name in vars.iter().filter_map(|v| v.name()) {
-                    self.add(global_variable_key(name));
+                    self.add(RefKey::global_variable(name));
                 }
             }
             _ => {}
@@ -467,24 +599,61 @@ impl<'ast> Visitor<'ast> for Collector {
         walk_property_hooks(self, hooks);
     }
 
-    /// Every class, function and constant reference - in expressions,
-    /// declarations' `extends`/`implements`/`use`, catch clauses,
-    /// attributes and type declarations.
-    fn visit_name(&mut self, name: &'ast QualifiedName) {
-        match &name.resolved {
-            ResolvedName::Exact(resolved) => {
-                self.add(dependency_key(resolved));
+    /// The names in an expression: a constant, the callee of a call, and
+    /// every other name - the class of a `new`, a static access, an
+    /// `instanceof` - as what each is.
+    fn visit_expr(&mut self, expr: &'ast Expr) {
+        match &expr.kind {
+            ExprKind::Name(name) => self.add_name(name, NameKind::Constant),
+            ExprKind::Call(callee, args) if matches!(callee.kind, ExprKind::Name(_)) => {
+                if let ExprKind::Name(name) = &callee.kind {
+                    self.add_name(name, NameKind::Function);
+                }
+                walk_args(self, args);
             }
+            _ => walk_expr(self, expr),
+        }
+    }
+
+    /// Every class reference in declarations' `extends`/`implements`/`use`,
+    /// catch clauses, attributes and type declarations, and in the places
+    /// of an expression the arms above leave to it.
+    fn visit_name(&mut self, name: &'ast QualifiedName) {
+        self.add_name(name, NameKind::Class);
+    }
+}
+
+/// What a name is read as.
+#[derive(Clone, Copy)]
+enum NameKind {
+    Class,
+    Function,
+    Constant,
+}
+
+impl Collector {
+    /// Records a resolved name as a reference to what `kind` says it is:
+    /// the one name it resolved to, and for an unqualified function or
+    /// constant in a namespace the global one it falls back to; a name
+    /// that is not resolved is taken as written, unless it is a keyword.
+    fn add_name(&mut self, name: &QualifiedName, kind: NameKind) {
+        let key = |name: &Name| match kind {
+            NameKind::Class => RefKey::class(name),
+            NameKind::Function => RefKey::function(name),
+            NameKind::Constant => RefKey::constant(name),
+        };
+        match &name.resolved {
+            ResolvedName::Exact(resolved) => self.add(key(resolved)),
             ResolvedName::WithGlobalFallback(resolved) => {
-                self.add(dependency_key(resolved));
-                self.add(dependency_key(&name.written));
+                self.add(key(resolved));
+                self.add(key(&name.written));
             }
             ResolvedName::Unresolved => {
                 if !["self", "parent", "static"]
                     .iter()
                     .any(|keyword| name.is_keyword(keyword))
                 {
-                    self.add(dependency_key(&name.written));
+                    self.add(key(&name.written));
                 }
             }
         }

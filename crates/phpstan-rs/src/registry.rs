@@ -610,32 +610,33 @@ impl Registry {
         }
     }
 
-    /// The `deps::dependency_key`s of the classes, functions and
-    /// constants whose resolved form differs from `before` (and, for
-    /// constants, from `changed`'s earlier types).
+    /// The keys of the classes, functions and constants whose resolved
+    /// form differs from `before` (and, for constants, from `changed`'s
+    /// earlier types).
     pub(crate) fn changed_since(
         &self,
         before: &ResolvedSnapshot,
         changed: &ChangedNames,
-    ) -> FxHashSet<String> {
+    ) -> FxHashSet<crate::deps::RefKey> {
+        use crate::deps::RefKey;
         let mut keys = FxHashSet::default();
         let class_keys = before.class_keys.iter().flat_map(|keys| keys.iter());
         debug_assert_eq!(class_keys.clone().count(), before.classes.len());
         for (key, old) in class_keys.zip(&before.classes) {
             if self.classes.get(&FoldedKey(key)) != old.as_ref().map(Detached::get) {
-                keys.insert(key.clone());
+                keys.insert(RefKey::class_text(key));
             }
         }
         let function_keys = before.function_keys.iter().flat_map(|keys| keys.iter());
         debug_assert_eq!(function_keys.clone().count(), before.functions.len());
         for (key, old) in function_keys.zip(&before.functions) {
             if self.functions.get(&FoldedKey(key)) != old.as_ref().map(Detached::get) {
-                keys.insert(key.clone());
+                keys.insert(RefKey::function_text(key));
             }
         }
         for (name, old) in &changed.constants {
             if self.global_constants.get(name.as_str()) != old.as_ref() {
-                keys.insert(crate::deps::dependency_key(name));
+                keys.insert(RefKey::constant_text(name));
             }
         }
         let decls = before
@@ -644,20 +645,26 @@ impl Registry {
             .chain(self.property_writes.keys())
             .filter(|key| before.property_writes.get(*key) != self.property_writes.get(*key));
         for (class, function) in decls {
-            keys.insert(class.clone().unwrap_or_else(|| function.clone()));
+            keys.insert(match class {
+                Some(class) => RefKey::class_text(class),
+                None => RefKey::function_text(function),
+            });
         }
         keys
     }
 
     /// The keys of the global variables whose inferred type differs from
-    /// `before`'s (`deps::global_variable_key`).
-    pub(crate) fn changed_global_variables(&self, before: &ResolvedSnapshot) -> FxHashSet<String> {
+    /// `before`'s.
+    pub(crate) fn changed_global_variables(
+        &self,
+        before: &ResolvedSnapshot,
+    ) -> FxHashSet<crate::deps::RefKey> {
         before
             .global_variables
             .keys()
             .chain(self.global_variables.keys())
             .filter(|name| before.global_variables.get(*name) != self.global_variables.get(*name))
-            .map(|name| crate::deps::global_variable_key(name))
+            .map(|name| crate::deps::RefKey::global_variable(name))
             .collect()
     }
 

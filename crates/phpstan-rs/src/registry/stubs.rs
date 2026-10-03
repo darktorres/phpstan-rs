@@ -1382,7 +1382,11 @@ fn index_stub_file(source: &str, origin: &Origin) -> StubFileDeclarations {
     crate::stub_attributes::apply_stub_attributes(&mut program);
     let registry = Registry::index_and_flatten(&program, origin);
     StubFileDeclarations {
-        references: crate::deps::referenced_names(&program),
+        references: crate::deps::referenced_names(&program)
+            .iter()
+            .filter_map(crate::deps::RefKey::stub_key)
+            .map(str::to_string)
+            .collect(),
         functions: registry
             .functions
             .into_iter()
