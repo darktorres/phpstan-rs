@@ -3242,6 +3242,64 @@ the channels, not a timeout tick.
 
 **Effort: small.**
 
+### Phase 188 - No silent drops: a run says what it hid (§AZ)
+
+**Status: PLANNED.** A run can lose a finding without a word, by a setting,
+by a suppression the project wrote, or by a rule of the checker itself.
+Each of these is intended, and each should say it did it. Found 2026-10-02
+while listing the opt-ins; the numbers are from the scoped Piwigo run.
+
+- **The checker discards a function's diagnostics when it calls `extract()`
+  or `eval()`.** `saw_dynamic_var_construct` (set by the `extract` call and
+  `ExprKind::Eval` arms of `check_expr_impl`) makes `check_function_impl`
+  truncate every diagnostic the function gave, and `check_program` those of
+  the top-level code. In the Piwigo run that is 223 functions and 31,660 of
+  the 32,555 diagnostics the checks emitted, and nothing reports it. Report
+  each such function: one notice or a diagnostic of its own (an identifier
+  that can be ignored on its own), saying the function was not checked
+  because it defines variables dynamically, and how many findings it held
+  back. The checks still run on the function (they feed the other facts);
+  only the report changes.
+- **A count of what was filtered.** After the checks, the report removes
+  findings by four mechanisms, in this order (`AnalysisResult::finalize`):
+  the level filter, inline `@phpstan-ignore*` comments, `ignore_errors`,
+  then the baseline. Print one line per mechanism that removed anything:
+  how many, and for the baseline and `ignore_errors` the entries that took
+  them. A run with none removes nothing and prints nothing.
+- **Stale `ignore_errors` entries are reported by default.** Today
+  `report_unmatched_ignored_errors` is off, so an entry whose finding is
+  gone keeps hiding whatever matches it next. Turn it on by default (the
+  baseline already reports its entries that match nothing).
+- **The default report level.** `DEFAULT_REPORT_LEVEL` is 6 and its doc
+  comment says "every level this project's diagnostics are tagged with",
+  but the checks emit findings tagged 7 and 8 (55 and 21 in the run), which
+  the level filter removes. Either the default becomes the highest level
+  there is, or the doc comment says what is true and the filtered count
+  above shows it.
+- **The settings that change what is found, written down.** Documented
+  where each is declared (not only here): `ext.<name>.enabled = false` and
+  a per-check `false` turn off a check its package would switch on;
+  `[[assertions]]` and `[[class_argument_returns]]` change the types of
+  calls and can narrow a type until a finding disappears;
+  `dynamic_constant_names` stops a constant's literal value being trusted;
+  `default_parent_calls = false` drops the built-in hook requirements;
+  `no_composer` and a directory left out of `paths` mean less context.
+  Where a setting can be checked against the code (an assertion entry for a
+  function that does not exist, a `dynamic_constant_names` entry naming no
+  constant), report it as the unmatched ignore is.
+- **Tests.** One fixture per mechanism: a function calling `extract()` with
+  a finding in it reports the function and not the finding; a baseline
+  entry, an `ignore_errors` entry, an inline ignore and a level each show
+  their count; a stale `ignore_errors` entry is reported with no setting.
+
+Vendor loading by name was built and removed for the same reason (what is
+not loaded is not seen); the measurements for a design that loses nothing
+are in `PIWIGO_OPTIMIZATION_FINAL_PLAN.md`.
+
+**Effort: small to medium** (the `extract`/`eval` report touches the
+function and file checks; the rest is in `finalize` and the settings'
+docs).
+
 ---
 
 ## Part 7: Config/strictness composability beyond PHPStan's single global level
