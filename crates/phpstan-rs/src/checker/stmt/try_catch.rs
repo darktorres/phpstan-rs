@@ -101,14 +101,14 @@ impl<'a> Checker<'a> {
             outer.extend(escaping);
         }
         let try_end_locals = locals.clone();
-        let try_terminates = body_block.last.terminates;
+        let try_terminates = body_block.completion.terminates;
         if let Some(s) = body.last() {
             self.compare_completion(s, &try_end_locals, body_block.last);
         }
         // How the whole statement completes: the body's last statement and
         // every catch's last must terminate (`finally` runs before either).
         let mut all_terminate = try_terminates;
-        let mut all_exit = body_block.last.exits;
+        let mut all_exit = body_block.completion.exits;
         let mut jumps = body_block.completion.jumps;
         // `OverwrittenExitPointByFinallyRule`: gathers every concrete
         // exit-point statement from the try body and each catch clause
@@ -270,9 +270,9 @@ impl<'a> Checker<'a> {
             if self.settings.extras.check_exception_hygiene {
                 self.check_catch_hygiene(c);
             }
-            let catch_terminates = catch_block.last.terminates;
+            let catch_terminates = catch_block.completion.terminates;
             all_terminate &= catch_terminates;
-            all_exit &= catch_block.last.exits;
+            all_exit &= catch_block.completion.exits;
             jumps |= catch_block.completion.jumps;
             if let Some(s) = c.body.last() {
                 self.compare_completion(s, &catch_locals, catch_block.last);
@@ -292,6 +292,7 @@ impl<'a> Checker<'a> {
                 .fold(first, |acc, s| merge_scopes(&self.relation(), &acc, &s));
         }
         let mut finally_jumps = 0;
+        let mut finally_completion: Option<Completion> = None;
         if let Some(f) = finally {
             // `finally`'s own body is checked against the widened
             // entry scope (see this function's doc comment above), in
@@ -312,6 +313,7 @@ impl<'a> Checker<'a> {
             let mut finally_locals = finally_entry.clone();
             let finally_block = self.check_block(f, &mut finally_locals, declared_return, label);
             finally_jumps = finally_block.completion.jumps;
+            finally_completion = Some(finally_block.completion);
             for (key, ty) in finally_locals.iter() {
                 if finally_entry.get(key) != Some(ty) {
                     let provenance = finally_locals
@@ -360,10 +362,19 @@ impl<'a> Checker<'a> {
                 }
             }
         }
-        Completion {
-            terminates: all_terminate,
-            exits: all_exit,
-            jumps: jumps | finally_jumps,
+        // A `finally` that terminates ends the statement whatever the body
+        // and the catches do.
+        match finally_completion {
+            Some(f) if f.terminates => Completion {
+                terminates: true,
+                exits: f.exits,
+                jumps: jumps | finally_jumps,
+            },
+            _ => Completion {
+                terminates: all_terminate,
+                exits: all_exit,
+                jumps: jumps | finally_jumps,
+            },
         }
     }
 

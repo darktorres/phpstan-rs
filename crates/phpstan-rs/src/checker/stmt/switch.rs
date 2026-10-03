@@ -1,4 +1,4 @@
-use crate::checker::{Checker, Completion, Locals, is_switch_break_equivalent, merge_scopes};
+use crate::checker::{BREAK_HERE, CONTINUE_HERE, Checker, Completion, Locals, merge_scopes};
 use syntax::ast::*;
 use types::Type;
 
@@ -104,8 +104,8 @@ impl<'a> Checker<'a> {
             };
             let block = self.check_block(&case.body, &mut case_locals, declared_return, label);
             let last_stmt = case.body.last();
-            let case_terminates = block.last.terminates;
-            case_lasts.push(block.last);
+            let case_terminates = block.completion.terminates;
+            case_lasts.push(block.completion);
             case_jumps |= block.completion.jumps;
             if let Some(s) = last_stmt {
                 self.compare_completion(s, &case_locals, block.last);
@@ -114,11 +114,10 @@ impl<'a> Checker<'a> {
                 self.apply_loose_equality_narrowing(subject, t, &mut narrowed_locals, false);
             }
             let is_last = i + 1 == case_count;
-            let reaches_after_switch = match last_stmt {
-                Some(s) if is_switch_break_equivalent(s) => true,
-                Some(_) => is_last && !block.last.exits,
-                None => is_last,
-            };
+            // Control passes the switch from a case that breaks, or that is
+            // the last and falls off its end.
+            let reaches_after_switch = block.completion.jumps & (BREAK_HERE | CONTINUE_HERE) != 0
+                || (is_last && !block.completion.terminates);
             if reaches_after_switch {
                 exit_states.push(case_locals.clone());
             }
@@ -145,10 +144,9 @@ impl<'a> Checker<'a> {
         // something other than a `break` (an empty body falls into the next
         // non-empty one, and a trailing empty one falls out of the bottom).
         let ends = |at: usize| {
-            cases[at]
-                .body
-                .last()
-                .is_some_and(|s| !is_switch_break_equivalent(s) && case_lasts[at].terminates)
+            !cases[at].body.is_empty()
+                && case_lasts[at].terminates
+                && case_lasts[at].jumps & (BREAK_HERE | CONTINUE_HERE) == 0
         };
         let terminates = cases.iter().any(|c| c.test.is_none())
             && (0..case_count).all(|i| {

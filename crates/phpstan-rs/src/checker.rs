@@ -954,8 +954,8 @@ pub(crate) use calls::{CheckArgsCall, resolve_call_args};
 pub(crate) use control_flow::{
     LoopZeroIterations, collect_exit_point_statements, exit_point_description,
     generator_missing_return_type, generator_template_param,
-    is_constant_condition_family_identifier, is_switch_break_equivalent, is_truthy_literal,
-    merge_scopes, stmt_contains_break, stmt_contains_escaping_exit, type_allows_generator_return,
+    is_constant_condition_family_identifier, is_truthy_literal, merge_scopes, stmt_contains_break,
+    stmt_contains_escaping_exit, type_allows_generator_return,
 };
 pub(crate) use duplicates::class_kind_identifier;
 pub(crate) use expr::{PregCall, preg_call, preg_result_outcome, preg_result_type};

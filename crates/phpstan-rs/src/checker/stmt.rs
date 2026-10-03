@@ -54,7 +54,9 @@ impl<'a> Checker<'a> {
         // early here would silently drop real, unrelated diagnostics
         // sitting in a since-dead branch.
         let mut reported_unreachable = false;
-        let mut any_terminates = false;
+        // The first statement that terminates in the last stretch of the
+        // block that can be reached: a label a `goto` lands on starts one.
+        let mut ends_with: Option<Completion> = None;
         let mut last = Completion::FALLS_THROUGH;
         // The jumps of the statements that can be reached: one after a
         // statement that terminates is not, unless a `goto` can land on it.
@@ -64,12 +66,15 @@ impl<'a> Checker<'a> {
             if matches!(&stmt.kind, StmtKind::Label(name) if self.current_function_goto_targets.iter().any(|l| l.name == name.name))
             {
                 reachable = true;
+                ends_with = None;
             }
             last = self.check_stmt(stmt, locals, declared_return, label);
-            any_terminates |= last.terminates;
             if reachable {
                 jumps |= last.jumps;
-                reachable = !last.terminates;
+                if last.terminates {
+                    ends_with = Some(last);
+                    reachable = false;
+                }
             }
             self.compare_completion(stmt, locals, last);
             if !reported_unreachable
@@ -92,8 +97,8 @@ impl<'a> Checker<'a> {
         }
         BlockCompletion {
             completion: Completion {
-                terminates: any_terminates,
-                exits: last.exits,
+                terminates: ends_with.is_some(),
+                exits: ends_with.is_some_and(|c| c.exits),
                 jumps,
             },
             last,
@@ -1236,7 +1241,8 @@ impl<'a> Checker<'a> {
                     "if.condNotBoolean"
                 },
             );
-            if let Some(value) = self.inferred_constant_condition(cond, locals) {
+            let known_condition = self.inferred_constant_condition(cond, locals);
+            if let Some(value) = known_condition {
                 if is_elseif {
                     if !(value && is_last_without_else) {
                         self.report(
@@ -1384,12 +1390,18 @@ impl<'a> Checker<'a> {
                     merged
                 }
             };
-            // The chain terminates when every branch does, an `else` among
-            // them: `exits` when every branch exits.
-            Completion {
-                terminates: then_terminates && else_terminates,
-                exits: then_completion.exits && else_completion.exits,
-                jumps: then_completion.jumps | else_completion.jumps,
+            // A condition known by its type to be true leaves only the
+            // branch it picks, and one known false only the rest of the
+            // chain. Otherwise the chain terminates when every branch does,
+            // an `else` among them: `exits` when every branch exits.
+            match known_condition {
+                Some(true) => then_completion,
+                Some(false) => else_completion,
+                None => Completion {
+                    terminates: then_terminates && else_terminates,
+                    exits: then_completion.exits && else_completion.exits,
+                    jumps: then_completion.jumps | else_completion.jumps,
+                },
             }
         })
     }
