@@ -7,7 +7,7 @@ use crate::registry::{self, PropertyReflection, resolve_names_in_type};
 use diagnostics::DiagnosticBuilder;
 use phpdoc::docblock;
 use syntax::ast::*;
-use syntax::token::Span;
+use syntax::span::Span;
 use syntax::visit::{body_contains_yield, expr_contains_yield};
 
 use types::{self, Type};

@@ -1,7 +1,8 @@
 use crate::ast::*;
 use crate::name::Name;
 use crate::parser::{ParseError, Parser};
-use crate::token::{Keyword, Position, Span, Token};
+use crate::span::Span;
+use crate::token::{Keyword, Token};
 
 /// A class-like body's members, as `Parser::parse_class_body` reads them.
 pub(crate) struct ClassBody {
@@ -45,10 +46,7 @@ impl Parser {
     /// handling already establishes for every other declaration. Reuses
     /// parse_class_body for the `{ ... }` part, the same as a named
     /// class/interface/trait declaration.
-    pub(crate) fn parse_anonymous_class_new(
-        &mut self,
-        start: Position,
-    ) -> Result<Expr, ParseError> {
+    pub(crate) fn parse_anonymous_class_new(&mut self, start: u32) -> Result<Expr, ParseError> {
         let decl_start = self.current_pos();
         let attrs = self.parse_attributes()?;
         let mut class_is_readonly = false;

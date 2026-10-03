@@ -579,11 +579,11 @@ impl<'a> Checker<'a> {
             return;
         }
         let class = self.current_class.clone();
-        let line = stmt.doc_line.unwrap_or(stmt.span.start.line);
-        let span = syntax::token::Span {
-            start: syntax::token::Position { line, col: 1 },
-            end: syntax::token::Position { line, col: 1 },
-        };
+        let line = stmt
+            .doc_line
+            .unwrap_or_else(|| self.line_index.line(stmt.span.start));
+        let at = self.line_index.line_start(line).unwrap_or(stmt.span.start);
+        let span = syntax::span::Span { start: at, end: at };
         for (variable, node) in super::phpdoc_unresolvable::var_tag_nodes(doc).iter() {
             if self.type_node_unresolvable(node, class.as_deref()) {
                 let subject = match variable {

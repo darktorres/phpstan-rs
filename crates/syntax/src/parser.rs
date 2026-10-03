@@ -3,7 +3,8 @@ use std::sync::Arc;
 use crate::ast::*;
 use crate::lexer::{Lexed, LexedDoc};
 use crate::name::{Interner, Name};
-use crate::token::{Keyword, Position, Span, Token};
+use crate::span::{LineIndex, Span};
+use crate::token::{Keyword, Token};
 
 /// A parse failure: malformed syntax.
 #[derive(Debug, Clone, PartialEq)]
@@ -52,7 +53,10 @@ pub struct Parser {
     // (`getDocComment()`, `doc_comments` above).
     pub(crate) doc_comments_all: rustc_hash::FxHashMap<usize, Arc<str>>,
     // Where the (first) doc comment in `doc_comments` starts, same keys.
-    pub(crate) doc_comment_starts: rustc_hash::FxHashMap<usize, crate::token::Position>,
+    pub(crate) doc_comment_starts: rustc_hash::FxHashMap<usize, u32>,
+    // The file's lines, which the parser asks about the lines tokens and
+    // doc comments are on.
+    pub(crate) line_index: Arc<LineIndex>,
     // The id the next node built gets - see `NodeId`.
     pub(crate) next_node_id: std::cell::Cell<u32>,
     // What names in the tree are interned into.
@@ -112,6 +116,7 @@ impl Parser {
             spans: Vec::with_capacity(tokens.len()),
             keyword_raw: Vec::new(),
             docs: Vec::new(),
+            line_index: Arc::default(),
         };
         for (token, span, keyword_raw) in tokens {
             match token {
@@ -140,6 +145,7 @@ impl Parser {
             spans,
             keyword_raw,
             docs,
+            line_index,
         } = lexed;
         let mut doc_comments = rustc_hash::FxHashMap::default();
         let mut doc_comment_lines = rustc_hash::FxHashMap::default();
@@ -159,12 +165,12 @@ impl Parser {
             let group = &docs[group_start..group_end];
             let first_start = group[0].span.start;
             doc_comments.insert(before, Arc::clone(&group[group.len() - 1].text));
-            doc_comment_lines.insert(before, first_start.line);
+            doc_comment_lines.insert(before, line_index.line(first_start));
             doc_comment_starts.insert(before, first_start);
             if group.len() > 1 {
                 let lines: Vec<(Arc<str>, u32)> = group
                     .iter()
-                    .map(|doc| (Arc::clone(&doc.text), doc.span.start.line))
+                    .map(|doc| (Arc::clone(&doc.text), line_index.line(doc.span.start)))
                     .collect();
                 doc_comments_all.insert(before, fold_doc_comments(&lines));
             }
@@ -179,6 +185,7 @@ impl Parser {
             doc_comment_lines,
             doc_comments_all,
             doc_comment_starts,
+            line_index,
             next_node_id: std::cell::Cell::new(0),
             interner: Arc::clone(Interner::global()),
             pattern_only: Vec::new(),
@@ -254,7 +261,7 @@ impl Parser {
     /// span: `self.pos` can run one past the last real token
     /// (`__halt_compiler()` jumps there), as `peek()` and `skip()` also
     /// allow.
-    pub(crate) fn current_pos(&self) -> Position {
+    pub(crate) fn current_pos(&self) -> u32 {
         self.spans
             .get(self.pos)
             .or_else(|| self.spans.last())
@@ -276,19 +283,14 @@ impl Parser {
         let previous_line = first_token
             .checked_sub(1)
             .and_then(|i| self.spans.get(i))
-            .map_or(0, |s| s.end.line);
+            .map_or(0, |s| self.line_index.line(s.end));
         let end = self.previous_end();
         let next = self.current_pos();
-        if previous_line < start.line && next.line > end.line {
+        let (start_line, end_line) = (self.line_index.line(start), self.line_index.line(end));
+        if previous_line < start_line && self.line_index.line(next) > end_line {
             Span {
-                start: Position {
-                    line: start.line,
-                    col: 1,
-                },
-                end: Position {
-                    line: end.line + 1,
-                    col: 1,
-                },
+                start: self.line_index.line_start(start_line).unwrap_or(start),
+                end: self.line_index.line_start(end_line + 1).unwrap_or(next),
             }
         } else {
             Span { start, end: next }
@@ -321,7 +323,7 @@ impl Parser {
     /// The end of the last token actually consumed - call right before
     /// returning a `Stmt`/`Expr` to close out its span. Same defensive
     /// fallback as `current_pos` for the same reason.
-    pub(crate) fn previous_end(&self) -> Position {
+    pub(crate) fn previous_end(&self) -> u32 {
         self.pos
             .checked_sub(1)
             .and_then(|i| self.spans.get(i))
@@ -342,7 +344,7 @@ impl Parser {
     }
 
     /// From `start` to the end of the last consumed token.
-    pub(crate) fn span_from(&self, start: Position) -> Span {
+    pub(crate) fn span_from(&self, start: u32) -> Span {
         Span {
             start,
             end: self.previous_end(),
@@ -359,7 +361,7 @@ impl Parser {
     /// Builds a `Stmt` spanning from `start` (the position captured before
     /// this statement's first token was consumed) to whatever token was
     /// last consumed.
-    pub(crate) fn stmt(&self, kind: StmtKind, start: Position) -> Stmt {
+    pub(crate) fn stmt(&self, kind: StmtKind, start: u32) -> Stmt {
         Stmt {
             id: self.node_id(),
             kind,
@@ -373,7 +375,7 @@ impl Parser {
     }
 
     /// Same as `stmt`, for expressions.
-    pub(crate) fn expr(&self, kind: ExprKind, start: Position) -> Expr {
+    pub(crate) fn expr(&self, kind: ExprKind, start: u32) -> Expr {
         Expr {
             id: self.node_id(),
             kind,

@@ -738,7 +738,7 @@ impl<'a> Checker<'a> {
         &mut self,
         container: &Type,
         dim: &Type,
-        span: syntax::token::Span,
+        span: syntax::span::Span,
     ) -> bool {
         if container.has_offset_value_type(dim).no() {
             self.report(

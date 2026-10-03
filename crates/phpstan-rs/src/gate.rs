@@ -7,7 +7,7 @@ use std::sync::Arc;
 
 use rustc_hash::FxHashMap;
 use syntax::ast::{ClassDecl, FunctionDecl, Stmt, StmtKind};
-use syntax::token::Position;
+use syntax::span::LineCol;
 use syntax::visit::{self, Visitor};
 use types::Type;
 
@@ -40,16 +40,11 @@ impl TemplateScope {
     }
 }
 
-/// The templates in scope at `line`:`col` of a file whose statements are
-/// `stmts`, with class templates from `registry`.
-pub fn template_scope_at(
-    registry: &Registry,
-    stmts: &[Stmt],
-    line: u32,
-    col: u32,
-) -> TemplateScope {
+/// The templates in scope at the byte offset `at` of a file whose
+/// statements are `stmts`, with class templates from `registry`.
+pub fn template_scope_at(registry: &Registry, stmts: &[Stmt], at: u32) -> TemplateScope {
     let mut finder = Enclosing {
-        at: Position { line, col },
+        at,
         class: None,
         function: None,
     };
@@ -85,15 +80,14 @@ pub fn template_scope_at(
 /// The innermost class and function or method declarations containing a
 /// position.
 struct Enclosing<'ast> {
-    at: Position,
+    at: u32,
     class: Option<&'ast ClassDecl>,
     function: Option<&'ast FunctionDecl>,
 }
 
 impl Enclosing<'_> {
-    fn contains(&self, start: Position, end: Position) -> bool {
-        (start.line, start.col) <= (self.at.line, self.at.col)
-            && (self.at.line, self.at.col) <= (end.line, end.col)
+    fn contains(&self, start: u32, end: u32) -> bool {
+        start <= self.at && self.at <= end
     }
 }
 
@@ -292,11 +286,14 @@ pub fn type_drift_of_fixtures(
     Ok(drift)
 }
 
+/// A file's statements and lines.
+type ParsedScopeFile = (Vec<Stmt>, Arc<syntax::span::LineIndex>);
+
 /// `template_scope_at` over files read and parsed once each.
 pub struct TemplateScopes<'r> {
     registry: &'r Registry,
     interner: Arc<syntax::name::Interner>,
-    files: FxHashMap<PathBuf, Option<Vec<Stmt>>>,
+    files: FxHashMap<PathBuf, Option<ParsedScopeFile>>,
 }
 
 impl<'r> TemplateScopes<'r> {
@@ -316,10 +313,13 @@ impl<'r> TemplateScopes<'r> {
             let source = std::fs::read(path).ok()?;
             syntax::parse(&source, interner)
                 .ok()
-                .map(|parsed| parsed.stmts)
+                .map(|parsed| (parsed.stmts, parsed.line_index))
         });
         match stmts {
-            Some(stmts) => template_scope_at(self.registry, stmts, line, col),
+            Some((stmts, index)) => match index.offset(LineCol { line, col }) {
+                Some(at) => template_scope_at(self.registry, stmts, at),
+                None => TemplateScope::default(),
+            },
             None => TemplateScope::default(),
         }
     }
@@ -353,7 +353,11 @@ function free(): void {
         let interner = Arc::clone(syntax::name::Interner::global());
         let parsed = syntax::parse(SOURCE.as_bytes(), &interner).unwrap();
         let registry = Registry::build(&parsed.stmts);
-        template_scope_at(&registry, &parsed.stmts, line, 9)
+        let at = parsed
+            .line_index
+            .offset(LineCol { line, col: 9 })
+            .expect("in the source");
+        template_scope_at(&registry, &parsed.stmts, at)
     }
 
     fn bound(scope: &TemplateScope, name: &str) -> Option<String> {

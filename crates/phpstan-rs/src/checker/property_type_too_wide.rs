@@ -19,7 +19,7 @@
 use crate::checker::{Checker, PropertyAssignFacts};
 use diagnostics::{Diagnostic, DiagnosticBuilder};
 use syntax::ast::{ClassDef, Expr, ExprKind, Literal, Visibility};
-use syntax::token::Span;
+use syntax::span::{LineIndex, Span};
 use types::UnionAll as _;
 use types::{Name, Relation, Type};
 
@@ -130,6 +130,7 @@ pub(crate) fn check_too_wide_property_types(
     sites: &[PropertyTypeSite],
     facts: &PropertyAssignFacts,
     relation: &Relation,
+    line_index: &LineIndex,
 ) -> Vec<Diagnostic> {
     let mut found = Vec::new();
     for site in sites {
@@ -176,7 +177,7 @@ pub(crate) fn check_too_wide_property_types(
                         4,
                         identifier,
                     )
-                    .build(),
+                    .build(line_index),
                 );
             }
         }

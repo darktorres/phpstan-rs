@@ -4,7 +4,7 @@ use crate::checker::{
 };
 use crate::registry::{FunctionReflection, Registry};
 use syntax::ast::*;
-use syntax::token::Span;
+use syntax::span::Span;
 use types::PhpString;
 use types::UnionAll as _;
 use types::{self, AccessoryKind, Relation, Shape, ShapeField, ShapeKey, Type};

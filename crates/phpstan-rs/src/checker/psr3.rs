@@ -29,7 +29,7 @@
 use crate::checker::{Checker, Locals};
 use diagnostics::DiagnosticBuilder;
 use syntax::ast::*;
-use syntax::token::Span;
+use syntax::span::Span;
 use types::{AccessoryKind, ShapeKey, Type};
 
 const LEVELS: [&str; 8] = [

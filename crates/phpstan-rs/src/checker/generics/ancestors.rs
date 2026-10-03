@@ -8,7 +8,7 @@ use crate::checker::{Checker, class_kind_identifier};
 use crate::registry;
 use phpdoc::grammar::{self, PhpDocTagValue};
 use syntax::ast::{ClassDef, ClassKind, QualifiedName, TraitUse};
-use syntax::token::Span;
+use syntax::span::Span;
 use types::{self, PositionVariance, Type};
 
 type Templates = rustc_hash::FxHashMap<String, types::TemplateParam>;

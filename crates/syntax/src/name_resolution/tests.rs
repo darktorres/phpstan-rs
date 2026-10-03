@@ -1,7 +1,6 @@
 use super::*;
 use crate::lexer::Lexer;
 use crate::parser::Parser;
-use crate::token::Position;
 use crate::visit::{Visitor, walk_expr, walk_stmts};
 
 fn parse(src: &str) -> Vec<Stmt> {
@@ -170,8 +169,10 @@ fn declarations_carry_the_namespace_they_are_declared_in() {
 
 #[test]
 fn the_context_at_a_position_has_only_what_precedes_it() {
-    let program = parse("<?php\nnamespace A;\nuse X\\Y;\nnamespace B;\nuse Z\\Y;\n");
-    let at = |line| context_at(&program, Position { line, col: 1 });
+    let src = "<?php\nnamespace A;\nuse X\\Y;\nnamespace B;\nuse Z\\Y;\n";
+    let program = parse(src);
+    let index = crate::span::LineIndex::new(src.as_bytes());
+    let at = |line| context_at(&program, index.line_start(line).unwrap_or(u32::MAX));
     assert_eq!(at(3).resolve("Y"), "A\\Y");
     assert_eq!(at(4).resolve("Y"), "X\\Y");
     assert_eq!(at(6).resolve("Y"), "Z\\Y");
@@ -212,13 +213,7 @@ fn resolves_to_is_resolve_equal_to_the_name() {
     ];
     for source in sources {
         let stmts = parse(source);
-        let ctx = context_at(
-            &stmts,
-            Position {
-                line: u32::MAX,
-                col: 1,
-            },
-        );
+        let ctx = context_at(&stmts, u32::MAX);
         for name in names {
             for fqn in candidates {
                 assert_eq!(

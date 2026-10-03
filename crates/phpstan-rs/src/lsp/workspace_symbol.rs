@@ -9,7 +9,7 @@ use lsp_types::SymbolKind;
 
 use crate::project::Project;
 use crate::registry::Provenance;
-use syntax::token::Span;
+use syntax::span::Span;
 
 use super::document_symbol::class_kind_symbol_kind;
 

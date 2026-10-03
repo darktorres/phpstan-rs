@@ -1,7 +1,8 @@
 use crate::ast::{Attribute, Ident, QualifiedName};
 use crate::name::Name;
 use crate::parser::{ParseError, Parser};
-use crate::token::{Keyword, Position, Span, Token};
+use crate::span::Span;
+use crate::token::{Keyword, Token};
 
 impl Parser {
     // ---- token stream helpers ----
@@ -200,7 +201,7 @@ impl Parser {
         Ok(self.ident_from(&name, start))
     }
 
-    fn ident_from(&self, name: &str, start: Position) -> Ident {
+    fn ident_from(&self, name: &str, start: u32) -> Ident {
         Ident {
             name: self.interner.name(name),
             span: Span {
@@ -368,8 +369,7 @@ impl Parser {
                     end: after_group,
                 };
             } else {
-                let starts: Vec<crate::token::Position> =
-                    group.iter().map(|a| a.span.start).collect();
+                let starts: Vec<u32> = group.iter().map(|a| a.span.start).collect();
                 let last = group.len() - 1;
                 let previous_end = group[last - 1].span.end;
                 for (i, attr) in group.iter_mut().enumerate() {

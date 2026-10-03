@@ -57,8 +57,8 @@ pub(crate) fn check_chunk(chunk: &[PathBuf]) -> Vec<(PathBuf, String)> {
                 eprintln!(
                     "warning: {}:{}:{}: {}",
                     path.display(),
-                    w.span.start.line,
-                    w.span.start.col,
+                    parsed.line_index.line_col(w.span.start).line,
+                    parsed.line_index.line_col(w.span.start).col,
                     w.message
                 );
             }

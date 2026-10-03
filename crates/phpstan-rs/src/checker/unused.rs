@@ -14,7 +14,7 @@
 use crate::checker::Checker;
 use diagnostics::DiagnosticBuilder;
 use syntax::ast::*;
-use syntax::token::Span;
+use syntax::span::Span;
 
 mod member_usage;
 mod rebind;

@@ -6,7 +6,7 @@
 
 use crate::checker::{Checker, Locals};
 use syntax::ast::Arg;
-use syntax::token::Span;
+use syntax::span::Span;
 
 impl<'a> Checker<'a> {
     /// `new DateInterval($spec)` - real PHP throws

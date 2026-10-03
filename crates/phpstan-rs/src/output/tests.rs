@@ -3,7 +3,7 @@ use std::path::PathBuf;
 
 use super::*;
 use diagnostics::DiagnosticBuilder;
-use syntax::token::{Position, Span};
+use syntax::span::{LineCol, Range, Span};
 
 fn diag(message: &str, line: u32, col: u32, level: u8) -> Diagnostic {
     diag_with_identifier(message, line, col, level, "variable.undefined")
@@ -16,16 +16,12 @@ fn diag_with_identifier(
     level: u8,
     identifier: &'static str,
 ) -> Diagnostic {
-    DiagnosticBuilder::new(
-        message.to_string(),
-        Span {
-            start: Position { line, col },
-            end: Position { line, col },
+    DiagnosticBuilder::new(message.to_string(), Span::default(), level, identifier).build_at(
+        Range {
+            start: LineCol { line, col },
+            end: LineCol { line, col },
         },
-        level,
-        identifier,
     )
-    .build()
 }
 
 #[test]
@@ -219,7 +215,7 @@ fn friendly_fixture(name: &str) -> PathBuf {
 fn friendly_frames_the_reported_line_with_its_span_underlined() {
     let path = friendly_fixture("plain");
     let mut d = diag_with_identifier("Wrong return.", 4, 12, 0, "return.type");
-    d.span.end = Position { line: 4, col: 18 };
+    d.span.end = LineCol { line: 4, col: 18 };
     d.tips = vec!["Return a string.".to_string()];
     let results = FxHashMap::from_iter([(path.clone(), vec![d])]);
     let text = render_friendly(&results, false);

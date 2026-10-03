@@ -21,7 +21,7 @@
 use crate::checker::Checker;
 use crate::registry::{FunctionReflection, Registry};
 use syntax::ast::{ClassDef, Expr, ExprKind, FunctionDecl, Stmt, StmtKind};
-use syntax::token::Span;
+use syntax::span::Span;
 use syntax::visit::{Visitor, walk_expr_in_scope, walk_stmt, walk_stmts};
 use types::Type;
 

@@ -69,7 +69,7 @@ use crate::registry::{FunctionReflection, Registry, is_phpstan_namespace};
 use diagnostics::{Diagnostic, DiagnosticBuilder};
 use syntax::ast::*;
 use syntax::name_resolution::for_each_in_context;
-use syntax::token::Span;
+use syntax::span::{LineIndex, Span};
 use syntax::visit::{Visitor, walk_args, walk_class_def, walk_expr, walk_stmt};
 
 /// `file_package` is the checked file's composer package name: `None`
@@ -81,11 +81,13 @@ use syntax::visit::{Visitor, walk_args, walk_class_def, walk_expr, walk_stmt};
 /// other unresolvable case in this module already gets.
 pub(crate) fn check_phpstan_api_usage(
     program: &[Stmt],
+    line_index: &LineIndex,
     registry: &Registry,
     file_package: Option<Option<&str>>,
 ) -> Vec<Diagnostic> {
     let mut walker = Walker {
         registry,
+        line_index,
         diagnostics: Vec::new(),
         namespace: String::new(),
         current_class_implements_phpstan_interface: false,
@@ -439,6 +441,7 @@ impl<'a> Checker<'a> {
 
 struct Walker<'a> {
     registry: &'a Registry,
+    line_index: &'a LineIndex,
     diagnostics: Vec<Diagnostic>,
     // The namespace the walk is in.
     namespace: String,
@@ -553,7 +556,7 @@ impl<'a> Walker<'a> {
             None => format!("Doing instanceof {fqn} is error-prone and deprecated."),
         };
         self.diagnostics.push(DiagnosticBuilder::new(message, span, 0, "phpstanApi.instanceofType").tip("Learn more: https://phpstan.org/blog/why-is-instanceof-type-wrong-and-getting-deprecated"
-                    ).build());
+                    ).build(self.line_index));
     }
 
     /// "Referencing this at all requires `@api`" - covers every reference
@@ -585,7 +588,7 @@ impl<'a> Walker<'a> {
         }
         self.diagnostics.push(DiagnosticBuilder::new(format!(
                 "{action} is not covered by PHPStan's backward compatibility promise (missing @api on {fqn})"
-            ), span, 0, identifier).build());
+            ), span, 0, identifier).build(self.line_index));
     }
 
     /// `ApiStaticCallRule::isCovered()`'s real resolution -
@@ -628,7 +631,7 @@ impl<'a> Walker<'a> {
         let action = format!("calling {owner}::{method}()");
         self.diagnostics.push(DiagnosticBuilder::new(format!(
                 "{action} is not covered by PHPStan's backward compatibility promise (missing @api on {owner})"
-            ), span, 0, "phpstanApi.method").build());
+            ), span, 0, "phpstanApi.method").build(self.line_index));
     }
 
     /// An unconditional report with no `@api` short-
@@ -643,7 +646,7 @@ impl<'a> Walker<'a> {
         }
         self.diagnostics.push(DiagnosticBuilder::new(format!(
                 "{action} is not covered by PHPStan's backward compatibility promise (missing @api on {fqn})"
-            ), span, 0, identifier).build());
+            ), span, 0, identifier).build(self.line_index));
     }
 
     /// `check_do_not_implement`: real PHPStan's own `@api-do-not-implement`
@@ -671,13 +674,13 @@ impl<'a> Walker<'a> {
         if check_do_not_implement && info.is_api_do_not_implement() {
             self.diagnostics.push(DiagnosticBuilder::new(format!(
                     "{action} is not supported: {fqn} is marked @api-do-not-implement and may gain new members in a minor version"
-                ), span, 0, identifier).build());
+                ), span, 0, identifier).build(self.line_index));
             return;
         }
         if !info.is_api() {
             self.diagnostics.push(DiagnosticBuilder::new(format!(
                     "{action} is not covered by PHPStan's backward compatibility promise (missing @api on {fqn})"
-                ), span, 0, identifier).build());
+                ), span, 0, identifier).build(self.line_index));
         }
     }
 
@@ -781,7 +784,7 @@ impl<'a> Walker<'a> {
             .tip(
                 "See:\n   https://phpstan.org/developing-extensions/backward-compatibility-promise",
             )
-            .build(),
+            .build(self.line_index),
         );
     }
 
@@ -812,7 +815,7 @@ impl<'a> Walker<'a> {
                 0,
                 "phpParser.classRenamed",
             )
-            .build(),
+            .build(self.line_index),
         );
     }
 
@@ -830,7 +833,7 @@ impl<'a> Walker<'a> {
         };
         self.diagnostics.push(DiagnosticBuilder::new(format!(
                 "Function {matched}() is a runtime reflection concept that might not work in PHPStan because it uses fully static reflection engine. Use objects retrieved from ReflectionProvider instead."
-            ), span, 0, "phpstanApi.runtimeReflection").build());
+            ), span, 0, "phpstanApi.runtimeReflection").build(self.line_index));
     }
 
     /// `RuntimeReflectionInstantiationRule`'s own reporting half.
@@ -849,7 +852,7 @@ impl<'a> Walker<'a> {
         };
         self.diagnostics.push(DiagnosticBuilder::new(format!(
                 "Creating new {matched} is a runtime reflection concept that might not work in PHPStan because it uses fully static reflection engine. Use objects retrieved from ReflectionProvider instead."
-            ), span, 0, "phpstanApi.runtimeReflection").build());
+            ), span, 0, "phpstanApi.runtimeReflection").build(self.line_index));
     }
 }
 
@@ -993,7 +996,7 @@ impl Walker<'_> {
         } else if fqn != "PHPStan\\Type\\Type" && info.kind() != ClassKind::Interface {
             self.diagnostics.push(DiagnosticBuilder::new(format!(
                     "Although {fqn} is covered by backward compatibility promise, this instanceof assumption might break in a minor PHPStan version."
-                ), span, 0, "phpstanApi.instanceofAssumption").build());
+                ), span, 0, "phpstanApi.instanceofAssumption").build(self.line_index));
         }
     }
 }

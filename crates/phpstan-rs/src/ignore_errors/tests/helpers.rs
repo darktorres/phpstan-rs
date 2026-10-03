@@ -1,30 +1,30 @@
 use super::super::*;
 use diagnostics::DiagnosticBuilder;
-use syntax::token::{Position, Span};
+use syntax::span::{LineCol, Range, Span};
 
 pub(super) fn diag(identifier: &str, message: &str) -> Diagnostic {
     DiagnosticBuilder::new(
         message.to_string(),
-        Span {
-            start: Position { line: 1, col: 1 },
-            end: Position { line: 1, col: 1 },
-        },
+        Span::default(),
         0,
         identifier.to_string(),
     )
-    .build()
+    .build_at(Range {
+        start: LineCol { line: 1, col: 1 },
+        end: LineCol { line: 1, col: 1 },
+    })
 }
 
 pub(super) fn non_ignorable_diag(identifier: &str, message: &str) -> Diagnostic {
     DiagnosticBuilder::new(
         message.to_string(),
-        Span {
-            start: Position { line: 1, col: 1 },
-            end: Position { line: 1, col: 1 },
-        },
+        Span::default(),
         0,
         identifier.to_string(),
     )
     .non_ignorable()
-    .build()
+    .build_at(Range {
+        start: LineCol { line: 1, col: 1 },
+        end: LineCol { line: 1, col: 1 },
+    })
 }

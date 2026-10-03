@@ -18,7 +18,7 @@ fn classes_and_members_are_recorded_without_retain_source() {
     let registry = project.registry();
     let (path, span) = registry.class_declaration("Foo").expect("Foo");
     assert_eq!(path, Path::new("a.php"));
-    assert_eq!((span.start.line, span.start.col), (1, 13));
+    assert_eq!(span.start, 12);
     let (path, _) = registry.method_declaration("Foo", "bar").expect("bar");
     assert_eq!(path, Path::new("a.php"));
     assert_eq!(

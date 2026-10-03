@@ -11,7 +11,7 @@
 use crate::checker::{Checker, Locals};
 use crate::php_date_parser::validate_date_time_string;
 use syntax::ast::Arg;
-use syntax::token::Span;
+use syntax::span::Span;
 
 impl<'a> Checker<'a> {
     /// `new DateTime($str)`/`new DateTimeImmutable($str)` - real PHP

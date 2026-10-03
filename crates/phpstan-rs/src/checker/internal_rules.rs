@@ -19,7 +19,7 @@
 
 use crate::checker::Checker;
 use syntax::ast::Visibility;
-use syntax::token::Span;
+use syntax::span::Span;
 
 pub(crate) trait InternalRule {
     fn check_method(

@@ -1,89 +1,39 @@
 use super::super::*;
+use crate::span::LineCol;
 
 /// The line and column of a byte offset, counted from the start: columns
 /// are characters.
-fn naive(src: &str, offset: usize) -> Position {
+fn naive(src: &str, offset: usize) -> LineCol {
     let before = &src[..offset];
     let line = before.matches('\n').count() as u32 + 1;
     let line_start = before.rfind('\n').map_or(0, |i| i + 1);
-    Position {
+    LineCol {
         line,
         col: src[line_start..offset].chars().count() as u32 + 1,
     }
 }
 
 #[test]
-fn positions_asked_in_any_order_are_where_counting_puts_them() {
-    let src = "<?php\n$a = 'héllo wörld';\n\n  echo \"日本語 $a\";\n$b = [1, 2,\n 3];\nlast";
-    let boundaries: Vec<usize> = (0..=src.len())
-        .filter(|&i| src.is_char_boundary(i))
-        .collect();
-    let mut lexer = Lexer::new(src);
-    // Forward, then backwards, then strided: the order tokens and the
-    // strings inside them are resolved in.
-    let forward = boundaries.iter().copied();
-    let backward = boundaries.iter().rev().copied();
-    let strided = (0..boundaries.len()).map(|i| boundaries[(i * 7) % boundaries.len()]);
-    for offset in forward.chain(backward).chain(strided) {
-        assert_eq!(
-            lexer.line_col_at(offset),
-            naive(src, offset),
-            "offset {offset}"
-        );
+fn the_line_index_puts_every_offset_where_counting_does() {
+    let sources = [
+        "<?php\n$a = 'héllo wörld';\n\n  echo \"日本語 $a\";\n$b = [1, 2,\n 3];\nlast",
+        "<?php\n$a = 'hello world';\n\n  echo \"abc $a\";\n$b = [1, 2,\n 3];\nlast",
+        "\u{10348}\n\u{e9}\u{4e2d}x\n",
+    ];
+    for src in sources {
+        let index = Lexer::new(src).run_lexed().line_index;
+        for offset in (0..=src.len()).filter(|&i| src.is_char_boundary(i)) {
+            assert_eq!(
+                index.line_col(offset as u32),
+                naive(src, offset),
+                "{src:?} offset {offset}"
+            );
+        }
     }
 }
 
 #[test]
-fn positions_in_an_ascii_source_are_where_counting_puts_them() {
-    let src = "<?php\n$a = 'hello world';\n\n  echo \"abc $a\";\n$b = [1, 2,\n 3];\nlast";
-    let mut lexer = Lexer::new(src);
-    let all: Vec<usize> = (0..=src.len()).collect();
-    let forward = all.iter().copied();
-    let backward = all.iter().rev().copied();
-    let strided = (0..all.len()).map(|i| all[(i * 7) % all.len()]);
-    // Runs of nearby offsets, as one token's start and end are.
-    let nearby = (0..all.len()).flat_map(|i| [i, (i + 3).min(src.len()), i]);
-    for offset in forward.chain(backward).chain(strided).chain(nearby) {
-        assert_eq!(
-            lexer.line_col_at(offset),
-            naive(src, offset),
-            "offset {offset}"
-        );
-    }
-}
-
-#[test]
-fn positions_in_a_fragment_are_where_counting_from_its_base_puts_them() {
-    let src = "$a = 'héllo';\n  echo $b;\n$c";
-    let base = Position { line: 7, col: 12 };
-    let boundaries: Vec<usize> = (0..=src.len())
-        .filter(|&i| src.is_char_boundary(i))
-        .collect();
-    let mut lexer = Lexer::new_in_php_at(src, base);
-    let order = boundaries
-        .iter()
-        .copied()
-        .chain(boundaries.iter().rev().copied())
-        .chain((0..boundaries.len()).map(|i| boundaries[(i * 5) % boundaries.len()]));
-    for offset in order {
-        let relative = naive(src, offset);
-        let expected = if relative.line == 1 {
-            Position {
-                line: base.line,
-                col: base.col + relative.col - 1,
-            }
-        } else {
-            Position {
-                line: base.line + relative.line - 1,
-                col: relative.col,
-            }
-        };
-        assert_eq!(lexer.line_col_at(offset), expected, "offset {offset}");
-    }
-}
-
-#[test]
-fn columns_between_any_two_offsets_are_the_characters_a_lossy_decoding_reads() {
+fn columns_on_a_line_are_the_characters_a_lossy_decoding_reads() {
     let sources: [&[u8]; 4] = [
         "caf\u{e9} \u{10348} \u{4e2d} x".as_bytes(),
         b"ascii only",
@@ -91,15 +41,36 @@ fn columns_between_any_two_offsets_are_the_characters_a_lossy_decoding_reads() {
         "tail \u{e9}".as_bytes(),
     ];
     for src in sources {
-        let lexer = Lexer::from_bytes(src);
-        for from in 0..=src.len() {
-            for to in from..=src.len() {
+        let index = crate::span::LineIndex::new(src);
+        let boundaries = (0..=src.len()).filter(|&i| {
+            let lossy = String::from_utf8_lossy(&src[..i]);
+            i == src.len()
+                || std::str::from_utf8(&src[i..])
+                    .is_ok_and(|_| lossy.len() == lossy.chars().map(char::len_utf8).sum::<usize>())
+        });
+        for offset in boundaries {
+            let before = lossy(&src[..offset]).chars().count() as u32;
+            // A cut inside an invalid run reads as one character either way.
+            if std::str::from_utf8(&src[offset..]).is_ok() {
                 assert_eq!(
-                    lexer.columns(from, to),
-                    super::super::char_count(&src[from..to]),
-                    "{src:?} {from}..{to}"
+                    index.line_col(offset as u32).col,
+                    before + 1,
+                    "{src:?} {offset}"
                 );
             }
         }
+    }
+}
+
+#[test]
+fn the_spans_of_a_fragment_are_its_base_plus_where_each_token_is() {
+    let src = "$a = 'héllo';\n  echo $b;\n$c";
+    let whole = Lexer::new_in_php(src).tokenize_with_spans();
+    let shifted = Lexer::fragment(src, 1000).tokenize_with_spans();
+    assert_eq!(whole.len(), shifted.len());
+    for ((token, span, _), (shifted_token, shifted_span, _)) in whole.iter().zip(&shifted) {
+        assert_eq!(token, shifted_token);
+        assert_eq!(shifted_span.start, span.start + 1000);
+        assert_eq!(shifted_span.end, span.end + 1000);
     }
 }

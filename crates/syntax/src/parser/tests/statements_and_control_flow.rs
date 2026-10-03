@@ -293,6 +293,12 @@ fn match_arms_are_spanned_with_the_default_in_its_place() {
     };
     assert!(arms[0].conditions.is_none());
     assert_eq!(arms[1].conditions.as_ref().map(Vec::len), Some(2));
-    assert_eq!((arms[1].span.start.col, arms[1].span.end.col), (39, 48));
+    assert_eq!(
+        (
+            position(src, arms[1].span.start).col,
+            position(src, arms[1].span.end).col
+        ),
+        (39, 48)
+    );
     assert!(match_default(arms).is_some());
 }

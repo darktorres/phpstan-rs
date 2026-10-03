@@ -1,6 +1,7 @@
 use crate::ast::*;
 use crate::parser::{ParseError, Parser};
-use crate::token::{Keyword, Position, Span, Token};
+use crate::span::Span;
+use crate::token::{Keyword, Token};
 
 impl Parser {
     pub(crate) fn parse_block(&mut self) -> Result<Stmt, ParseError> {
@@ -91,7 +92,7 @@ impl Parser {
 
     /// `if (c1): … elseif (c2): … else: … endif;`, the `if` keyword and its
     /// condition already read.
-    pub(crate) fn parse_if_alt(&mut self, cond: Expr, start: Position) -> Result<Stmt, ParseError> {
+    pub(crate) fn parse_if_alt(&mut self, cond: Expr, start: u32) -> Result<Stmt, ParseError> {
         let then_branch = Box::new(self.parse_alt_branch()?);
         let mut elseifs = Vec::new();
         while self.check(&Token::Keyword(Keyword::ElseIf)) {

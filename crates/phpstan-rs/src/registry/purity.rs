@@ -42,7 +42,7 @@ use syntax::name::Name;
 
 use crate::registry::{FunctionReflection, Registry};
 use syntax::ast::*;
-use syntax::token::Span;
+use syntax::span::Span;
 use syntax::visit::{Visitor, walk_expr, walk_stmt, walk_stmts};
 
 /// One real, resolved call target a declaration's own effect-freedom is

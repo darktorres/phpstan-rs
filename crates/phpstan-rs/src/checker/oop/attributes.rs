@@ -4,7 +4,7 @@ use crate::checker::{CalleeLabel, CheckArgsCall, Checker, Locals, class_type_wor
 use crate::registry::{is_allow_dynamic_properties_attribute_name, is_deprecated_attribute_name};
 use diagnostics::DiagnosticBuilder;
 use syntax::ast::*;
-use syntax::token::Span;
+use syntax::span::Span;
 use types::php_version::PhpFeature;
 
 /// PHP's `Attribute::TARGET_*` values (see

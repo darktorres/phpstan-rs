@@ -12,7 +12,7 @@ use std::path::PathBuf;
 
 use crate::parent_calls::{HasContent, Invocation, ParentCallRule};
 use syntax::ast::*;
-use syntax::token::Span;
+use syntax::span::{LineIndex, Span};
 use syntax::visit::any_expr_in_body;
 
 use super::Project;
@@ -104,10 +104,16 @@ impl Project {
             let mut found = Vec::new();
             for (fqn, c) in classes {
                 if closed_classes {
-                    self.closed_class_shape(&fqn, c, &mut found);
+                    self.closed_class_shape(&fqn, c, &file.line_index, &mut found);
                 }
                 if !parent_calls.is_empty() {
-                    self.parent_call_rules(&fqn, &c.def, parent_calls, &mut found);
+                    self.parent_call_rules(
+                        &fqn,
+                        &c.def,
+                        parent_calls,
+                        &file.line_index,
+                        &mut found,
+                    );
                 }
             }
             if !found.is_empty() {
@@ -175,7 +181,13 @@ impl Project {
         })
     }
 
-    fn closed_class_shape(&self, fqn: &str, c: &ClassDecl, out: &mut Vec<Diagnostic>) {
+    fn closed_class_shape(
+        &self,
+        fqn: &str,
+        c: &ClassDecl,
+        index: &LineIndex,
+        out: &mut Vec<Diagnostic>,
+    ) {
         if c.def.kind != ClassKind::Class {
             return;
         }
@@ -201,7 +213,7 @@ impl Project {
                     0,
                     "class.notFinal",
                 )
-                .build(),
+                .build(index),
             );
         }
         if info.is_final() {
@@ -229,7 +241,7 @@ impl Project {
                             0,
                             "method.protectedInFinalClass",
                         )
-                        .build(),
+                        .build(index),
                     );
                 }
             }
@@ -245,7 +257,7 @@ impl Project {
                             0,
                             "property.protectedInFinalClass",
                         )
-                        .build(),
+                        .build(index),
                     );
                 }
             }
@@ -265,7 +277,7 @@ impl Project {
                             0,
                             "classConstant.protectedInFinalClass",
                         )
-                        .build(),
+                        .build(index),
                     );
                 }
             }
@@ -290,7 +302,7 @@ impl Project {
                         0,
                         "method.notFinalInAbstractClass",
                     )
-                    .build(),
+                    .build(index),
                 );
             }
         }
@@ -301,6 +313,7 @@ impl Project {
         fqn: &str,
         c: &ClassDef,
         rules: &[ParentCallRule],
+        index: &LineIndex,
         out: &mut Vec<Diagnostic>,
     ) {
         for m in &c.methods {
@@ -339,7 +352,7 @@ impl Project {
                         if let Some((span, text)) = fix {
                             builder = builder.fix(span, text, format!("Call {call}"));
                         }
-                        out.push(builder.build());
+                        out.push(builder.build(index));
                     };
                 if rule.invocation == Invocation::Never {
                     if found {
@@ -365,7 +378,8 @@ impl Project {
                     } else {
                         insertion(
                             f,
-                            m.span.start.col,
+                            index,
+                            index.line_col(m.span.start).col,
                             &call_text,
                             rule.invocation == Invocation::Last,
                         )
@@ -428,19 +442,25 @@ impl Project {
 /// at the body's indentation (an empty body is rewritten onto its own
 /// lines, indented from the member's column `member_col`); `None` for a
 /// last call after a trailing `return`, which nothing can follow.
-fn insertion(f: &FunctionDecl, member_col: u32, call: &str, last: bool) -> Option<(Span, String)> {
+fn insertion(
+    f: &FunctionDecl,
+    index: &LineIndex,
+    member_col: u32,
+    call: &str,
+    last: bool,
+) -> Option<(Span, String)> {
     if last {
         let tail = f.body_stmts().last()?;
         if matches!(tail.kind, StmtKind::Return(_)) {
             return None;
         }
         let at = tail.span.end;
-        let indent = " ".repeat(tail.span.start.col.saturating_sub(1) as usize);
+        let indent = " ".repeat(index.line_col(tail.span.start).col.saturating_sub(1) as usize);
         return Some((Span { start: at, end: at }, format!("\n{indent}{call}")));
     }
     if let Some(first) = f.body_stmts().first() {
         let at = first.span.start;
-        let indent = " ".repeat(at.col.saturating_sub(1) as usize);
+        let indent = " ".repeat(index.line_col(at).col.saturating_sub(1) as usize);
         return Some((Span { start: at, end: at }, format!("{call}\n{indent}")));
     }
     let open = f.body.as_ref()?.open;

@@ -14,7 +14,7 @@ use std::path::{Path, PathBuf};
 
 use crate::checker::{Checker, Locals};
 use syntax::ast::*;
-use syntax::token::Span;
+use syntax::span::Span;
 use syntax::visit::{Visitor, walk_expr, walk_stmt, walk_stmts};
 
 const GUARD_FUNCTIONS: [&str; 6] = [

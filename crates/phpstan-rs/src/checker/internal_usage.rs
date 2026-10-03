@@ -30,7 +30,7 @@ use crate::checker::Checker;
 use crate::registry::{ConstantReflection, FunctionReflection, PropertyReflection};
 use syntax::ast::TypeHint;
 use syntax::ast::{ClassKind, FunctionDecl, Param};
-use syntax::token::Span;
+use syntax::span::Span;
 use types::Name;
 use types::Type;
 

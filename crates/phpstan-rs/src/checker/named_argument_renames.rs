@@ -18,7 +18,7 @@ use types::Name;
 
 use crate::checker::Checker;
 use syntax::ast::{Arg, Visibility};
-use syntax::token::Span;
+use syntax::span::Span;
 
 /// (declaring class, method, parameter name as declared on that
 /// signature) -> every named-argument call site in this one file using

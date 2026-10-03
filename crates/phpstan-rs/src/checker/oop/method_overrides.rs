@@ -2,7 +2,7 @@ use crate::checker::Checker;
 use crate::checker::oop::visibility_word;
 use diagnostics::DiagnosticBuilder;
 use syntax::ast::*;
-use syntax::token::Span;
+use syntax::span::Span;
 use types::Name;
 use types::Type;
 

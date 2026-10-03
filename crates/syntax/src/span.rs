@@ -1,7 +1,89 @@
-//! Where things are in a file: a line index from byte offsets to lines and
-//! columns, which a file's diagnostics and editor positions are made with.
+//! Where things are in a file: a span is a pair of byte offsets, and a
+//! line index turns an offset into the line and column a diagnostic or an
+//! editor shows.
 
-use crate::token::Position;
+/// A stretch of a file, from the byte offset it starts at to the one it
+/// ends at, the byte after its last.
+///
+/// `Hash`: `Locals`'s own declaration-provenance tracking uses a `Span`
+/// as a `HashSet` element, one entry per candidate declaration site for
+/// a variable.
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Hash, Default, serde::Serialize, serde::Deserialize,
+)]
+#[cfg_attr(feature = "fuzzing", derive(arbitrary::Arbitrary))]
+pub struct Span {
+    pub start: u32,
+    pub end: u32,
+}
+
+impl Span {
+    pub fn new(start: u32, end: u32) -> Span {
+        Span { start, end }
+    }
+
+    /// The bytes it covers.
+    pub fn len(self) -> u32 {
+        self.end.saturating_sub(self.start)
+    }
+
+    pub fn is_empty(self) -> bool {
+        self.end <= self.start
+    }
+
+    /// Whether the byte at `offset` is in it.
+    pub fn contains(self, offset: u32) -> bool {
+        self.start <= offset && offset < self.end
+    }
+
+    /// From where this starts to where `other` ends.
+    pub fn to(self, other: Span) -> Span {
+        Span {
+            start: self.start,
+            end: other.end,
+        }
+    }
+
+    /// The bytes of `source` it covers, or none when it is past the end.
+    pub fn slice(self, source: &[u8]) -> Option<&[u8]> {
+        source.get(self.start as usize..self.end as usize)
+    }
+}
+
+/// A point in a file as a person counts it, 1-indexed (matching editor
+/// convention). `col` counts UTF-8 characters, not raw bytes: PHP source
+/// has multi-byte characters inside code, not only in comments (string
+/// literals with em-dashes, curly quotes, accents), and a byte column
+/// would overshoot the character position on every such line.
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    Hash,
+    Default,
+    PartialOrd,
+    Ord,
+    serde::Serialize,
+    serde::Deserialize,
+)]
+#[cfg_attr(feature = "fuzzing", derive(arbitrary::Arbitrary))]
+pub struct LineCol {
+    pub line: u32,
+    pub col: u32,
+}
+
+/// A range in a file as a person counts it: what an editor or an output
+/// format wants of a diagnostic, a start and an end.
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Hash, Default, serde::Serialize, serde::Deserialize,
+)]
+#[cfg_attr(feature = "fuzzing", derive(arbitrary::Arbitrary))]
+pub struct Range {
+    pub start: LineCol,
+    pub end: LineCol,
+}
 
 /// The lines of a file, and the characters on them, found from its bytes
 /// once: a position is made from a byte offset when someone asks for it,
@@ -9,7 +91,7 @@ use crate::token::Position;
 ///
 /// A column counts characters from the start of the line, and a run of
 /// invalid bytes a lossy reading replaces counts as one.
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LineIndex {
     /// The offset each line begins at; the first is 0.
     line_starts: Box<[u32]>,
@@ -19,6 +101,13 @@ pub struct LineIndex {
     /// (or run of invalid bytes), the offset it ends at and the bytes
     /// beyond one for each character up to there.
     surplus: Box<[(u32, u32)]>,
+}
+
+impl Default for LineIndex {
+    /// The index of an empty source.
+    fn default() -> Self {
+        LineIndex::new(b"")
+    }
 }
 
 impl LineIndex {
@@ -101,15 +190,23 @@ impl LineIndex {
         })
     }
 
+    /// The lines and columns a span covers.
+    pub fn range(&self, span: Span) -> Range {
+        Range {
+            start: self.line_col(span.start),
+            end: self.line_col(span.end),
+        }
+    }
+
     /// The line and column of `offset`, which is the end of the source when
     /// it is past it.
-    pub fn line_col(&self, offset: u32) -> Position {
+    pub fn line_col(&self, offset: u32) -> LineCol {
         let offset = offset.min(self.len);
         let index = self.line_index(offset);
         let start = self.line_starts[index];
         let bytes = offset - start;
         let beyond = self.surplus_to(offset) - self.surplus_to(start);
-        Position {
+        LineCol {
             line: index as u32 + 1,
             col: 1 + bytes - beyond,
         }
@@ -117,7 +214,7 @@ impl LineIndex {
 
     /// The offset of `at`, or none when its line is not in the source or
     /// its column is past the end of the line.
-    pub fn offset(&self, at: Position) -> Option<u32> {
+    pub fn offset(&self, at: LineCol) -> Option<u32> {
         let start = self.line_start(at.line)?;
         let end = self.line_end(at.line)?;
         let want = at.col.checked_sub(1)?;
@@ -140,8 +237,8 @@ impl LineIndex {
 mod tests {
     use super::*;
 
-    fn at(line: u32, col: u32) -> Position {
-        Position { line, col }
+    fn at(line: u32, col: u32) -> LineCol {
+        LineCol { line, col }
     }
 
     #[test]

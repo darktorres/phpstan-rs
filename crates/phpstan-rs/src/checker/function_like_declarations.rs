@@ -15,7 +15,7 @@ use crate::checker::type_declarations::TypePosition;
 use crate::checker::{Checker, Locals};
 use diagnostics::DiagnosticBuilder;
 use syntax::ast::*;
-use syntax::token::Span;
+use syntax::span::Span;
 use syntax::visit::{Visitor, any_stmt_in_body, walk_args, walk_expr, walk_stmt, walk_stmts};
 use types::php_version::PhpFeature;
 

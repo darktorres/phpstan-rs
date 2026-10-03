@@ -4,7 +4,7 @@
 use crate::checker::Checker;
 use diagnostics::DiagnosticBuilder;
 use syntax::ast::{CastKind, CastSpelling};
-use syntax::token::Span;
+use syntax::span::Span;
 use types::Type;
 
 impl<'a> Checker<'a> {

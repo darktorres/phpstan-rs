@@ -1,18 +1,14 @@
 use super::super::*;
 use diagnostics::DiagnosticBuilder;
-use syntax::token::{Position, Span};
+use syntax::span::{LineCol, Range, Span};
 
 pub(super) fn diag(message: &str) -> Diagnostic {
-    DiagnosticBuilder::new(
-        message.to_string(),
-        Span {
-            start: Position { line: 1, col: 1 },
-            end: Position { line: 1, col: 1 },
+    DiagnosticBuilder::new(message.to_string(), Span::default(), 0, "test.diagnostic").build_at(
+        Range {
+            start: LineCol { line: 1, col: 1 },
+            end: LineCol { line: 1, col: 1 },
         },
-        0,
-        "test.diagnostic",
     )
-    .build()
 }
 
 pub(super) fn temp_path(label: &str) -> PathBuf {
@@ -24,14 +20,8 @@ pub(super) fn temp_path(label: &str) -> PathBuf {
 }
 
 pub(super) fn diag_with(message: &str, identifier: &'static str) -> Diagnostic {
-    DiagnosticBuilder::new(
-        message.to_string(),
-        Span {
-            start: Position { line: 1, col: 1 },
-            end: Position { line: 1, col: 1 },
-        },
-        0,
-        identifier,
-    )
-    .build()
+    DiagnosticBuilder::new(message.to_string(), Span::default(), 0, identifier).build_at(Range {
+        start: LineCol { line: 1, col: 1 },
+        end: LineCol { line: 1, col: 1 },
+    })
 }

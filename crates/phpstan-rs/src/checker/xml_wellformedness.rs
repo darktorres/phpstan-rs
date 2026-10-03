@@ -10,7 +10,7 @@
 
 use crate::checker::Checker;
 use syntax::ast::{Arg, ExprKind, Literal};
-use syntax::token::Span;
+use syntax::span::Span;
 
 impl<'a> Checker<'a> {
     /// `new SimpleXMLElement($xml)` - real PHP throws a plain `Exception`

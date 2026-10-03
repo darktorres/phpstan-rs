@@ -31,8 +31,8 @@ pub(crate) enum BuiltDecl {
         name: Name,
         conditional: bool,
         sig: Box<FunctionReflection>,
-        // The declaration's name position, `(line, col)`.
-        site: (u32, u32),
+        // The declaration's name position, as a byte offset.
+        site: u32,
     },
     GlobalConst {
         name: Name,
@@ -652,7 +652,7 @@ pub(crate) fn built_declaration(
                 name: Name::from(&declaration.name()),
                 conditional,
                 sig: Box::new(sig),
-                site: (f.name.span.start.line, f.name.span.start.col),
+                site: f.name.span.start,
             });
         }
         Declared::Constant(c) => {

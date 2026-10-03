@@ -10,7 +10,7 @@
 use crate::checker::Checker;
 use crate::registry::access_attributes::AccessAttributes;
 use syntax::ast::*;
-use syntax::token::Span;
+use syntax::span::Span;
 use types::Name;
 
 const TEST_BASE_CLASSES: [&str; 2] = ["PHPUnit\\Framework\\TestCase", "Codeception\\Test\\Unit"];

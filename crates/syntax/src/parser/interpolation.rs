@@ -2,7 +2,8 @@ use crate::ast::*;
 use crate::lexer::Lexer;
 use crate::parser::{ParseError, Parser};
 use crate::php_string::PhpString;
-use crate::token::{Position, SimpleIndexKey, Span, StringPart};
+use crate::span::Span;
+use crate::token::{SimpleIndexKey, StringPart};
 
 impl Parser {
     /// `base` is where the whole string starts. Each part keeps its own
@@ -12,7 +13,7 @@ impl Parser {
     pub(crate) fn build_interpolated(
         &mut self,
         parts: Vec<StringPart>,
-        base: Position,
+        base: u32,
     ) -> Result<Expr, ParseError> {
         let mut exprs = Vec::new();
         for part in parts {
@@ -30,7 +31,7 @@ impl Parser {
                 StringPart::ComplexExpr(src, frag_base) => {
                     // Lexed where it sits in the file, so every span in
                     // the fragment is already the real one.
-                    let tokens = Lexer::new_in_php_at(&src, frag_base)
+                    let tokens = Lexer::fragment(&src, frag_base)
                         .with_interner(&self.interner)
                         .tokenize_with_spans();
                     let mut sub = Parser::new(tokens).with_interner(&self.interner);
@@ -87,12 +88,9 @@ impl Parser {
                             Box::new(var_expr),
                             Ident {
                                 name: self.interner.name(&prop),
-                                // Past the arrow, on the variable's line.
+                                // Past the arrow.
                                 span: Span {
-                                    start: Position {
-                                        line: var_end.line,
-                                        col: var_end.col + arrow_len,
-                                    },
+                                    start: var_end.saturating_add(arrow_len),
                                     end,
                                 },
                             },

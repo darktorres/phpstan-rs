@@ -8,6 +8,7 @@
 use lsp_types::{SemanticToken, SemanticTokenModifier, SemanticTokenType, SemanticTokensLegend};
 
 use crate::checker::semantic_tokens::{UsageSemanticToken, UsageTokenKind};
+use syntax::span::{LineIndex, Range};
 
 const DEPRECATED_BIT: u32 = 1 << 0;
 const INTERNAL_BIT: u32 = 1 << 1;
@@ -48,14 +49,15 @@ fn token_type_index(kind: UsageTokenKind) -> u32 {
 /// `delta_line`/`delta_start` is relative to the previous token's own
 /// start (0 for the very first token; `delta_start` resets to an
 /// absolute column whenever `delta_line` is nonzero, per the LSP spec).
-pub(super) fn encode(mut tokens: Vec<UsageSemanticToken>) -> Vec<SemanticToken> {
-    tokens.retain(|t| t.span.start.line == t.span.end.line);
-    tokens.sort_by_key(|t| (t.span.start.line, t.span.start.col));
-    tokens.dedup_by(|next, prev| {
-        if prev.span.start.line == next.span.start.line
-            && prev.span.start.col == next.span.start.col
-            && prev.span.end.col == next.span.end.col
-        {
+pub(super) fn encode(tokens: Vec<UsageSemanticToken>, index: &LineIndex) -> Vec<SemanticToken> {
+    let mut tokens: Vec<(Range, UsageSemanticToken)> = tokens
+        .into_iter()
+        .map(|token| (index.range(token.span), token))
+        .collect();
+    tokens.retain(|(range, _)| range.start.line == range.end.line);
+    tokens.sort_by_key(|(range, _)| (range.start.line, range.start.col));
+    tokens.dedup_by(|(next_range, next), (prev_range, prev)| {
+        if prev_range.start == next_range.start && prev_range.end.col == next_range.end.col {
             prev.deprecated |= next.deprecated;
             prev.internal |= next.internal;
             true
@@ -67,9 +69,9 @@ pub(super) fn encode(mut tokens: Vec<UsageSemanticToken>) -> Vec<SemanticToken> 
     let mut result = Vec::with_capacity(tokens.len());
     let mut prev_line = 0u32;
     let mut prev_start = 0u32;
-    for (i, token) in tokens.iter().enumerate() {
-        let line = token.span.start.line.saturating_sub(1);
-        let start = token.span.start.col.saturating_sub(1);
+    for (i, (range, token)) in tokens.iter().enumerate() {
+        let line = range.start.line.saturating_sub(1);
+        let start = range.start.col.saturating_sub(1);
         let (delta_line, delta_start) = if i == 0 {
             (line, start)
         } else if line == prev_line {
@@ -87,7 +89,7 @@ pub(super) fn encode(mut tokens: Vec<UsageSemanticToken>) -> Vec<SemanticToken> 
         result.push(SemanticToken {
             delta_line,
             delta_start,
-            length: token.span.end.col.saturating_sub(token.span.start.col),
+            length: range.end.col.saturating_sub(range.start.col),
             token_type: token_type_index(token.kind),
             token_modifiers_bitset: bitset,
         });

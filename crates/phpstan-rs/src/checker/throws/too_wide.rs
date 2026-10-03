@@ -17,7 +17,7 @@
 
 use crate::checker::Checker;
 use syntax::ast::Visibility;
-use syntax::token::Span;
+use syntax::span::Span;
 use types::Type;
 use types::UnionAll as _;
 

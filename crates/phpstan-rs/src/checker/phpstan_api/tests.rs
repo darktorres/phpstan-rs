@@ -33,7 +33,12 @@ fn diagnostics_for(stub_src: &str, consumer_src: &str) -> Vec<Diagnostic> {
     let mut combined = stub.clone();
     combined.extend(consumer.clone());
     let registry = Registry::build(&combined);
-    check_phpstan_api_usage(&consumer, &registry, None)
+    check_phpstan_api_usage(
+        &consumer,
+        &syntax::span::LineIndex::default(),
+        &registry,
+        None,
+    )
 }
 
 #[test]
@@ -301,7 +306,12 @@ mod namespace_in_3rd_party_package {
         );
         let file = absolute_root.join(php_path.strip_prefix(&root.0).unwrap());
         let package = packages.owner(&file).and_then(|o| packages.name(o));
-        check_phpstan_api_usage(&program, &registry, Some(package))
+        check_phpstan_api_usage(
+            &program,
+            &syntax::span::LineIndex::default(),
+            &registry,
+            Some(package),
+        )
     }
 
     #[test]

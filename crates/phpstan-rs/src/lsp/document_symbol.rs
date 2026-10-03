@@ -6,29 +6,31 @@
 use lsp_types::{DocumentSymbol, SymbolKind};
 
 use syntax::ast::{ClassDecl, ClassKind, FunctionDecl, MethodDecl, Stmt, StmtKind};
-use syntax::token::Span;
+use syntax::span::{LineIndex, Span};
 
-use super::protocol::to_lsp_range;
+use super::protocol::span_to_lsp_range;
 
-pub(super) fn document_symbols(stmts: &[Stmt]) -> Vec<DocumentSymbol> {
+pub(super) fn document_symbols(stmts: &[Stmt], index: &LineIndex) -> Vec<DocumentSymbol> {
     syntax::stack::guard(|| {
         let mut symbols = Vec::new();
         for stmt in stmts {
             match &stmt.kind {
-                StmtKind::FunctionDecl(f) => symbols.push(function_symbol(f, SymbolKind::FUNCTION)),
-                StmtKind::ClassDecl(c) => symbols.push(class_symbol(c)),
+                StmtKind::FunctionDecl(f) => {
+                    symbols.push(function_symbol(f, SymbolKind::FUNCTION, index))
+                }
+                StmtKind::ClassDecl(c) => symbols.push(class_symbol(c, index)),
                 StmtKind::Namespace(_) | StmtKind::Use(_) => {}
                 // A conditional top-level declaration (`if (...) { class Foo {} }`)
                 // still gets an outline entry.
                 StmtKind::If(if_stmt) => {
                     for body in if_stmt.bodies() {
-                        symbols.extend(document_symbols(std::slice::from_ref(body)));
+                        symbols.extend(document_symbols(std::slice::from_ref(body), index));
                     }
                 }
                 StmtKind::Block(inner)
                 | StmtKind::Declare {
                     body: Some(inner), ..
-                } => symbols.extend(document_symbols(inner)),
+                } => symbols.extend(document_symbols(inner, index)),
                 _ => {}
             }
         }
@@ -43,6 +45,7 @@ fn symbol(
     range: Span,
     selection_range: Span,
     children: Vec<DocumentSymbol>,
+    index: &LineIndex,
 ) -> DocumentSymbol {
     DocumentSymbol {
         name,
@@ -50,8 +53,8 @@ fn symbol(
         kind,
         tags: None,
         deprecated: None,
-        range: to_lsp_range(range),
-        selection_range: to_lsp_range(selection_range),
+        range: span_to_lsp_range(index, range),
+        selection_range: span_to_lsp_range(index, selection_range),
         children: if children.is_empty() {
             None
         } else {
@@ -60,17 +63,25 @@ fn symbol(
     }
 }
 
-fn function_symbol(f: &FunctionDecl, kind: SymbolKind) -> DocumentSymbol {
-    symbol(f.name.to_string(), kind, f.span, f.name.span, Vec::new())
+fn function_symbol(f: &FunctionDecl, kind: SymbolKind, index: &LineIndex) -> DocumentSymbol {
+    symbol(
+        f.name.to_string(),
+        kind,
+        f.span,
+        f.name.span,
+        Vec::new(),
+        index,
+    )
 }
 
-fn method_symbol(m: &MethodDecl) -> DocumentSymbol {
+fn method_symbol(m: &MethodDecl, index: &LineIndex) -> DocumentSymbol {
     symbol(
         m.function.name.to_string(),
         SymbolKind::METHOD,
         m.span,
         m.function.name.span,
         Vec::new(),
+        index,
     )
 }
 
@@ -87,9 +98,14 @@ pub(super) fn class_kind_symbol_kind(kind: ClassKind) -> SymbolKind {
     }
 }
 
-fn class_symbol(c: &ClassDecl) -> DocumentSymbol {
+fn class_symbol(c: &ClassDecl, index: &LineIndex) -> DocumentSymbol {
     let kind = class_kind_symbol_kind(c.def.kind);
-    let mut children: Vec<DocumentSymbol> = c.def.consts.iter().map(const_symbol).collect();
+    let mut children: Vec<DocumentSymbol> = c
+        .def
+        .consts
+        .iter()
+        .map(|k| const_symbol(k, index))
+        .collect();
     children.extend(c.def.enum_cases.iter().map(|case| {
         symbol(
             case.name.to_string(),
@@ -97,6 +113,7 @@ fn class_symbol(c: &ClassDecl) -> DocumentSymbol {
             case.span,
             case.name.span,
             Vec::new(),
+            index,
         )
     }));
     children.extend(c.def.properties.iter().map(|p| {
@@ -106,19 +123,28 @@ fn class_symbol(c: &ClassDecl) -> DocumentSymbol {
             p.span,
             p.name.span,
             Vec::new(),
+            index,
         )
     }));
-    children.extend(c.def.methods.iter().map(method_symbol));
-    symbol(c.name.to_string(), kind, c.def.span, c.name.span, children)
+    children.extend(c.def.methods.iter().map(|m| method_symbol(m, index)));
+    symbol(
+        c.name.to_string(),
+        kind,
+        c.def.span,
+        c.name.span,
+        children,
+        index,
+    )
 }
 
-fn const_symbol(cst: &syntax::ast::ClassConst) -> DocumentSymbol {
+fn const_symbol(cst: &syntax::ast::ClassConst, index: &LineIndex) -> DocumentSymbol {
     symbol(
         cst.name.to_string(),
         SymbolKind::CONSTANT,
         cst.name.span,
         cst.name.span,
         Vec::new(),
+        index,
     )
 }
 

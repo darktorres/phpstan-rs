@@ -31,7 +31,7 @@ use composer::constraint;
 use composer::manifest::{ComposerManifest, InstalledPackage, path_starts_with};
 use syntax::ast::*;
 use syntax::declarations::Declared;
-use syntax::token::{Position, Span};
+use syntax::span::{LineCol, LineIndex, Range, Span};
 use syntax::visit::{Visitor, walk_expr, walk_stmts};
 
 use super::use_sites::{RefTarget, index_class_fn_refs_without_source};
@@ -143,13 +143,23 @@ fn is_platform_package(name: &str) -> bool {
         || lower.starts_with("composer-")
 }
 
-fn at_line(line: u32) -> Span {
-    let at = Position { line, col: 1 };
-    Span { start: at, end: at }
+/// The empty range at the start of `line` of a file that is not PHP.
+fn at_line(line: u32) -> Range {
+    let at = LineCol { line, col: 1 };
+    Range { start: at, end: at }
 }
 
-fn diagnostic(message: String, span: Span, identifier: &'static str) -> Diagnostic {
-    DiagnosticBuilder::new(message, span, 0, identifier).build()
+fn diagnostic(
+    message: String,
+    span: Span,
+    identifier: &'static str,
+    index: &LineIndex,
+) -> Diagnostic {
+    DiagnosticBuilder::new(message, span, 0, identifier).build(index)
+}
+
+fn manifest_diagnostic(message: String, range: Range, identifier: &'static str) -> Diagnostic {
+    DiagnosticBuilder::new(message, Span::default(), 0, identifier).build_at(range)
 }
 
 /// What an analysed file's code mentions besides resolved references:
@@ -361,7 +371,8 @@ impl Project {
                         ),
                         span,
                         "ext.notRequired",
-                    ));
+&file.line_index,
+));
                     continue;
                 }
 
@@ -381,7 +392,8 @@ impl Project {
                             ),
                             span,
                             "misplaced.autoloadDevSymbol",
-                        ));
+&file.line_index,
+));
                     }
                     continue;
                 }
@@ -413,7 +425,8 @@ impl Project {
                             ),
                             span,
                             "undeclared.composerDependency",
-                        ));
+&file.line_index,
+));
                     }
                 } else if !in_require
                     && production
@@ -425,7 +438,8 @@ impl Project {
                         ),
                         span,
                         "misplaced.composerDependency",
-                    ));
+&file.line_index,
+));
                 }
             }
             self.check_psr4_locations(manifest, path, file, diagnostics);
@@ -456,7 +470,7 @@ impl Project {
                     if installed.has_bin || installed.auto_discovered {
                         continue;
                     }
-                    manifest_diagnostics.push(diagnostic(
+                    manifest_diagnostics.push(manifest_diagnostic(
                         format!(
                             "Package {} is in {section}, but the analysed code uses none of its symbols.",
                             entry.value
@@ -468,7 +482,7 @@ impl Project {
                     && !used_outside_dev.contains(&name)
                     && !manifest.autoload_dev.psr4.is_empty()
                 {
-                    manifest_diagnostics.push(diagnostic(
+                    manifest_diagnostics.push(manifest_diagnostic(
                         format!(
                             "Package {} is in require, but only code autoloaded through autoload-dev uses it; it belongs in require-dev.",
                             entry.value
@@ -550,7 +564,8 @@ impl Project {
                         ),
                         span,
                         "psr4.pathMismatch",
-                    ));
+&file.line_index,
+));
                 }
                 continue;
             };
@@ -580,7 +595,8 @@ impl Project {
                     ),
                     span,
                     "psr4.caseMismatch",
-                ));
+&file.line_index,
+));
                 continue;
             }
             diagnostics.push(diagnostic(
@@ -591,6 +607,7 @@ impl Project {
                 ),
                 span,
                 "psr4.pathMismatch",
+                &file.line_index,
             ));
         }
     }
@@ -637,7 +654,7 @@ impl Project {
             if missing.is_empty() {
                 continue;
             }
-            diagnostics.push(diagnostic(
+            diagnostics.push(manifest_diagnostic(
                 format!(
                     "composer.json provides {}, but no class implements {}.",
                     entry.value,
@@ -670,7 +687,7 @@ impl Project {
             }
             let span = at_line(entry.line);
             let Some((canonical, info)) = self.registry.lookup_class(class) else {
-                diagnostics.push(diagnostic(
+                diagnostics.push(manifest_diagnostic(
                     format!(
                         "Composer script {script} calls {command}, but class {class} doesn't exist."
                     ),
@@ -703,7 +720,7 @@ impl Project {
                 {
                     continue;
                 }
-                diagnostics.push(diagnostic(
+                diagnostics.push(manifest_diagnostic(
                     format!("Composer script {script} calls {command}, but method {canonical}::{method}() doesn't exist."),
                     span,
                     "composerScript.notFound",
@@ -729,7 +746,7 @@ impl Project {
                 (false, true) => "not public",
                 _ => "not static",
             };
-            diagnostics.push(diagnostic(
+            diagnostics.push(manifest_diagnostic(
                 format!(
                     "Composer script {script} calls {command}, but {owner}::{method}() is {problem}; Composer calls it statically from outside the class."
                 ),
@@ -748,7 +765,7 @@ fn check_platform_php(manifest: &ComposerManifest, diagnostics: &mut Vec<Diagnos
         return;
     };
     if constraint::satisfies(required, &platform.value) == Some(false) {
-        diagnostics.push(diagnostic(
+        diagnostics.push(manifest_diagnostic(
             format!(
                 "config.platform.php {} doesn't satisfy require.php {required}; Composer resolves dependencies for a PHP version the package doesn't support.",
                 platform.value

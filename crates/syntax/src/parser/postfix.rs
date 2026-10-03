@@ -2,7 +2,8 @@ use crate::name::Name;
 
 use crate::ast::*;
 use crate::parser::{ParseError, Parser};
-use crate::token::{Span, Token};
+use crate::span::Span;
+use crate::token::Token;
 
 impl Parser {
     pub(crate) fn parse_postfix_from_primary(&mut self) -> Result<Expr, ParseError> {

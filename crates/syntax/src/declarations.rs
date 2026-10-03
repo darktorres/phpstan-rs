@@ -4,7 +4,7 @@
 use crate::ast::*;
 use crate::name_resolution::NameContext;
 use crate::php_string::PhpString;
-use crate::token::Span;
+use crate::span::Span;
 use crate::visit::{
     Visitor, walk_class_decl, walk_expr, walk_function_decl, walk_stmt, walk_stmts,
 };

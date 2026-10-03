@@ -691,8 +691,8 @@ impl Session {
                 format!(
                     "warning: {}:{}:{}: {}",
                     path.display(),
-                    w.span.start.line,
-                    w.span.start.col,
+                    parsed.line_index.line_col(w.span.start).line,
+                    parsed.line_index.line_col(w.span.start).col,
                     w.message
                 )
             }));

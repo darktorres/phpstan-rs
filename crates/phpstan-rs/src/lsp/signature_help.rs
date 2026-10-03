@@ -36,7 +36,7 @@ use std::path::Path;
 use crate::project::Project;
 use crate::registry::Registry;
 use syntax::ast::{Arg, ClassDecl, Expr, ExprKind, FunctionDecl, MethodDecl, Stmt};
-use syntax::token::{Position, Span};
+use syntax::span::Span;
 use syntax::visit::{
     Visitor, walk_args, walk_class_decl, walk_expr, walk_function_decl, walk_method_decl,
     walk_stmts,
@@ -73,7 +73,7 @@ pub(crate) struct SigHelp {
     pub(crate) active_parameter: usize,
 }
 
-pub(crate) fn resolve_at(project: &Project, path: &Path, pos: Position) -> Option<SigHelp> {
+pub(crate) fn resolve_at(project: &Project, path: &Path, pos: u32) -> Option<SigHelp> {
     let stmts = project.ast(path)?;
     let mut w = Walker {
         registry: project.registry(),
@@ -95,18 +95,13 @@ pub(crate) fn resolve_at(project: &Project, path: &Path, pos: Position) -> Optio
 /// reporting an out-of-range index) - `lsp.rs`'s own response-building
 /// step is what actually knows `param_count` and does the clamping
 /// (this function only counts).
-fn active_parameter(args: &[Arg], pos: Position) -> usize {
-    args.iter()
-        .filter(|a| {
-            let end = a.value.span.end;
-            (end.line, end.col) < (pos.line, pos.col)
-        })
-        .count()
+fn active_parameter(args: &[Arg], pos: u32) -> usize {
+    args.iter().filter(|a| a.value.span.end < pos).count()
 }
 
 struct Walker<'a> {
     registry: &'a Registry,
-    pos: Position,
+    pos: u32,
     top_level_stmts: &'a [Stmt],
     current_function: Option<FunctionDecl>,
     current_is_static: bool,
@@ -129,7 +124,7 @@ impl<'a> Walker<'a> {
     /// Offers `target` for a call spanning `span` whose arguments are
     /// `args`, once the cursor is past `boundary`: the callee or member
     /// name. A call around the cursor with no target clears the offer.
-    fn offer(&mut self, span: Span, boundary: Position, args: &[Arg], target: Option<Target>) {
+    fn offer(&mut self, span: Span, boundary: u32, args: &[Arg], target: Option<Target>) {
         if !contains(span, self.pos) {
             return;
         }
@@ -145,8 +140,8 @@ impl<'a> Walker<'a> {
     /// `boundary` is a callee/member sub-span's own end position; the
     /// cursor must be at or past it, not merely somewhere inside the
     /// call's whole span, before a signature is actually offered.
-    fn pos_past(&self, boundary: Position) -> bool {
-        (boundary.line, boundary.col) <= (self.pos.line, self.pos.col)
+    fn pos_past(&self, boundary: u32) -> bool {
+        boundary <= self.pos
     }
 }
 

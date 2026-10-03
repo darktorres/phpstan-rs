@@ -50,11 +50,12 @@ use crate::registry::Registry;
 use syntax::ast::{
     ClassKind, Expr, ExprKind, FunctionBody, FunctionDecl, NodeId, Stmt, StmtKind, Visibility,
 };
-use syntax::token::{Keyword, Position, Span, Token};
+use syntax::span::{LineIndex, Span};
+use syntax::token::{Keyword, Token};
 use types::Type;
 
 use super::navigation::ProbeScope;
-use super::protocol::to_lsp_range;
+use super::protocol::span_to_lsp_range;
 use syntax::name_resolution::{NameContext, context_at};
 
 /// The synthetic local `Locals`/the checker never sees a real declaration
@@ -75,10 +76,6 @@ pub(super) enum Trigger {
     Bare,
 }
 
-fn pos_le(a: Position, b: Position) -> bool {
-    (a.line, a.col) <= (b.line, b.col)
-}
-
 /// Tokenizes a whole file buffer (`<?php` tag and all - matching every
 /// other whole-file tokenization in this project, e.g. `project.rs`'s
 /// own `parse`), dropping the raw-keyword-spelling third element
@@ -94,7 +91,7 @@ pub(super) fn tokenize(text: &str) -> Vec<(Token, Span)> {
 
 /// Classifies `cursor`'s trigger shape against an already-tokenized
 /// buffer (see `tokenize`).
-pub(super) fn classify(tokens: &[(Token, Span)], cursor: Position) -> Trigger {
+pub(super) fn classify(tokens: &[(Token, Span)], cursor: u32) -> Trigger {
     // `Token::Eof` is a zero-width sentinel whose own span sits at (or
     // past) the very end of the buffer, so it always satisfies `span.end
     // <= cursor` too - excluded here, or it would always win `rposition`
@@ -102,7 +99,7 @@ pub(super) fn classify(tokens: &[(Token, Span)], cursor: Position) -> Trigger {
     // cursor right after it.
     let Some(idx) = tokens
         .iter()
-        .rposition(|(tok, span)| !matches!(tok, Token::Eof) && pos_le(span.end, cursor))
+        .rposition(|(tok, span)| !matches!(tok, Token::Eof) && span.end <= cursor)
     else {
         return Trigger::Bare;
     };
@@ -285,17 +282,17 @@ fn find_function_by_name<'a>(
     }
 }
 
-/// Two sentinel `Span`s built from a line number no real file reaches
-/// (`u32::MAX`/`u32::MAX - 1`) - can never collide with a real span, so
+/// Two sentinel `Span`s built from an offset no real file reaches
+/// (`u32::MAX - 1`/`u32::MAX - 3`) - can never collide with a real span, so
 /// the probe match (`Checker::probe_span`, matched by exact span
 /// equality) can never mistake a real statement for one of these two
 /// synthetic ones. A false collision is not a hard impossibility, only
 /// overwhelmingly impractical, and even then would only corrupt one
 /// throwaway request's read, never panic or persist.
-fn sentinel_span(line: u32) -> Span {
+fn sentinel_span(at: u32) -> Span {
     Span {
-        start: Position { line, col: 1 },
-        end: Position { line, col: 2 },
+        start: at,
+        end: at + 1,
     }
 }
 
@@ -307,8 +304,8 @@ fn sentinel_span(line: u32) -> Span {
 /// (`checker/expr.rs`'s own `self.probe_hit_at(e.span, &ty)`) rather
 /// than any new Checker-side mechanism.
 fn probe_statements(receiver: Expr) -> (Stmt, Stmt, Span) {
-    let assign_span = sentinel_span(u32::MAX - 1);
-    let read_span = sentinel_span(u32::MAX);
+    let assign_span = sentinel_span(u32::MAX - 3);
+    let read_span = sentinel_span(u32::MAX - 1);
     let probe_var = |span: Span| Expr {
         id: NodeId::SYNTHETIC,
         kind: ExprKind::Variable(PROBE_VAR.into()),
@@ -343,7 +340,8 @@ fn probe_statements(receiver: Expr) -> (Stmt, Stmt, Span) {
 /// name, e.g. renamed in this same still-unparsed edit; degrades to a
 /// coarser but never wrong scope, same as the file's script-level scope
 /// hover already falls back to). Either way, every statement reaching at
-/// or past `cut_line` is dropped before the two probe statements are
+/// or past `cut_line` (a line of the live buffer, read as a line of the
+/// last-good AST, whose lines `index` holds) is dropped before the two probe statements are
 /// appended - see this module's own doc comment for why truncating
 /// (never "insert before") is the sound choice.
 fn build_probe_scope(
@@ -351,6 +349,7 @@ fn build_probe_scope(
     class_name: Option<&str>,
     function_name: Option<&str>,
     cut_line: u32,
+    index: &LineIndex,
     receiver: Expr,
 ) -> (ProbeScope, bool, Option<String>, Span) {
     let (assign_stmt, read_stmt, probe_span) = probe_statements(receiver);
@@ -364,7 +363,7 @@ fn build_probe_scope(
                 goto_labels: Box::default(),
             });
             let body = std::sync::Arc::make_mut(&mut body.stmts);
-            body.retain(|s| s.span.end.line < cut_line);
+            body.retain(|s| index.line(s.span.end) < cut_line);
             body.push(assign_stmt);
             body.push(read_stmt);
             (
@@ -377,7 +376,7 @@ fn build_probe_scope(
         None => {
             let mut top: Vec<Stmt> = stmts
                 .iter()
-                .filter(|s| s.span.end.line < cut_line)
+                .filter(|s| index.line(s.span.end) < cut_line)
                 .cloned()
                 .collect();
             top.push(assign_stmt);
@@ -521,7 +520,7 @@ fn short_name(fqn: &str) -> &str {
 /// (neither exists) degrades to a fully-qualified insert with no edit at
 /// all (see `resolve_import`) rather than guessing a top-of-file
 /// insertion point.
-fn find_use_insertion_point(stmts: &[Stmt]) -> Option<Position> {
+fn find_use_insertion_point(stmts: &[Stmt]) -> Option<u32> {
     stmts
         .iter()
         .rfind(|s| matches!(&s.kind, StmtKind::Use(_) | StmtKind::Namespace(_)))
@@ -536,7 +535,12 @@ fn find_use_insertion_point(stmts: &[Stmt]) -> Option<Position> {
 /// a short-name collision with something else already in scope, as a
 /// fully-qualified `\Some\Fqn` with no edit at all, rather than silently
 /// importing over an unrelated existing name.
-fn resolve_import(stmts: &[Stmt], ctx: &NameContext, fqn: &str) -> (String, Option<TextEdit>) {
+fn resolve_import(
+    stmts: &[Stmt],
+    index: &LineIndex,
+    ctx: &NameContext,
+    fqn: &str,
+) -> (String, Option<TextEdit>) {
     let short = short_name(fqn);
     if ctx.resolves_to(short, fqn) {
         return (short.to_string(), None);
@@ -553,7 +557,7 @@ fn resolve_import(stmts: &[Stmt], ctx: &NameContext, fqn: &str) -> (String, Opti
             (
                 short.to_string(),
                 Some(TextEdit {
-                    range: to_lsp_range(insert_span),
+                    range: span_to_lsp_range(index, insert_span),
                     new_text: {
                         let mut text = String::with_capacity(fqn.len() + 6);
                         text.push_str("\nuse ");
@@ -579,16 +583,19 @@ pub(super) fn enumerate_bare(
     project: &Project,
     path: &Path,
     current_stmts: &[Stmt],
-    cursor: Position,
+    cursor: u32,
 ) -> Vec<CompletionItem> {
     let ctx = context_at(current_stmts, cursor);
     let registry = project.registry();
+    let Some(index) = project.line_index(path) else {
+        return Vec::new();
+    };
     let mut seen: FxHashSet<String> = FxHashSet::default();
     let mut items = Vec::new();
 
     for (fqn, info) in &registry.classes {
         if seen.insert(fqn.to_string()) {
-            let (insert_text, edit) = resolve_import(current_stmts, &ctx, fqn);
+            let (insert_text, edit) = resolve_import(current_stmts, index, &ctx, fqn);
             items.push(CompletionItem {
                 label: short_name(fqn).to_string(),
                 kind: Some(class_kind_completion_kind(info.kind())),
@@ -600,7 +607,7 @@ pub(super) fn enumerate_bare(
     }
     for fqn in registry.functions.keys() {
         if seen.insert(fqn.to_string()) {
-            let (insert_text, edit) = resolve_import(current_stmts, &ctx, fqn);
+            let (insert_text, edit) = resolve_import(current_stmts, index, &ctx, fqn);
             items.push(CompletionItem {
                 label: short_name(fqn).to_string(),
                 kind: Some(CompletionItemKind::FUNCTION),
@@ -623,7 +630,7 @@ pub(super) fn enumerate_bare(
         let (functions, classes) = project::declared_names(current_ast);
         for fqn in functions.iter().chain(&classes) {
             if seen.insert(fqn.clone()) {
-                let (insert_text, edit) = resolve_import(current_stmts, &ctx, fqn);
+                let (insert_text, edit) = resolve_import(current_stmts, index, &ctx, fqn);
                 let kind = if classes.contains(fqn) {
                     CompletionItemKind::CLASS
                 } else {
@@ -674,14 +681,14 @@ pub(super) enum MemberProbe {
 pub(super) fn build_member_probe(
     text: &str,
     tokens: &[(Token, Span)],
-    cursor: Position,
+    cursor: Cursor,
     stmts: &[Stmt],
     registry: &Registry,
 ) -> Option<MemberProbe> {
     let Trigger::Member {
         anchor_idx,
         is_static,
-    } = classify(tokens, cursor)
+    } = classify(tokens, cursor.live)
     else {
         return None;
     };
@@ -704,7 +711,7 @@ pub(super) fn build_member_probe(
     // inferred type) doesn't apply to it in the first place.
     if is_static && let ExprKind::Name(name) = &receiver.kind {
         let mut name = name.clone();
-        syntax::name_resolution::resolve_class_name(&mut name, &context_at(stmts, cursor));
+        syntax::name_resolution::resolve_class_name(&mut name, &context_at(stmts, cursor.stale));
         let resolved =
             super::navigation::resolve_class_ref(&name, class_name.as_deref(), registry)?;
         return Some(MemberProbe::Resolved {
@@ -714,12 +721,13 @@ pub(super) fn build_member_probe(
         });
     }
 
-    let cut_line = tokens[anchor_idx].1.start.line;
+    let cut_line = cursor.live_index.line(tokens[anchor_idx].1.start);
     let (scope, scope_is_static, scope_class, probe_span) = build_probe_scope(
         stmts,
         class_name.as_deref(),
         function_name.as_deref(),
         cut_line,
+        cursor.stale_index,
         receiver,
     );
     Some(MemberProbe::NeedsProbe {
@@ -731,41 +739,26 @@ pub(super) fn build_member_probe(
     })
 }
 
-/// `source`'s own substring covered by `span` - `Position`'s own doc
-/// comment: 1-indexed, `col` counts UTF-8 *characters*, not bytes, the
-/// same convention every span in this project already uses.
+/// Where the cursor is: in the live buffer, whose tokens are scanned, and
+/// in the last-good AST, which the live position is read as a position of.
+#[derive(Clone, Copy)]
+pub(super) struct Cursor<'a> {
+    /// The byte offset in the live buffer.
+    pub(super) live: u32,
+    /// The lines of the live buffer.
+    pub(super) live_index: &'a LineIndex,
+    /// The byte offset of the same line and column in the last-good AST's
+    /// file.
+    pub(super) stale: u32,
+    /// The lines of the last-good AST's file.
+    pub(super) stale_index: &'a LineIndex,
+}
+
+/// `source`'s own substring covered by `span`, a range of its bytes.
 pub(crate) fn slice_span(source: &str, span: Span) -> Option<String> {
-    let lines: Vec<&str> = source.lines().collect();
-    let start_line = (span.start.line as usize).checked_sub(1)?;
-    let end_line = (span.end.line as usize).checked_sub(1)?;
-    if start_line == end_line {
-        let chars: Vec<char> = lines.get(start_line)?.chars().collect();
-        let start = (span.start.col as usize).checked_sub(1)?;
-        let end = (span.end.col as usize).checked_sub(1)?;
-        if start > end || end > chars.len() {
-            return None;
-        }
-        return Some(chars[start..end].iter().collect());
-    }
-    let mut out = String::new();
-    let first_chars: Vec<char> = lines.get(start_line)?.chars().collect();
-    let start = (span.start.col as usize).checked_sub(1)?;
-    if start > first_chars.len() {
-        return None;
-    }
-    out.extend(&first_chars[start..]);
-    out.push('\n');
-    for line in lines.get(start_line + 1..end_line)? {
-        out.push_str(line);
-        out.push('\n');
-    }
-    let last_chars: Vec<char> = lines.get(end_line)?.chars().collect();
-    let end = (span.end.col as usize).checked_sub(1)?;
-    if end > last_chars.len() {
-        return None;
-    }
-    out.extend(&last_chars[..end]);
-    Some(out)
+    source
+        .get(span.start as usize..span.end as usize)
+        .map(str::to_string)
 }
 
 #[cfg(test)]

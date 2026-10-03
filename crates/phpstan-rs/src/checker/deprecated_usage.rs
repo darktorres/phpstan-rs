@@ -22,7 +22,7 @@
 
 use crate::checker::{Checker, class_type_word};
 use crate::registry::{ConstantReflection, FunctionReflection, PropertyReflection};
-use syntax::token::Span;
+use syntax::span::Span;
 
 impl<'a> Checker<'a> {
     /// `function.deprecated` - a plain function call.

@@ -3,7 +3,7 @@ use crate::checker::oop::visibility_word;
 use crate::registry::PropertyReflection;
 use diagnostics::DiagnosticBuilder;
 use syntax::ast::*;
-use syntax::token::Span;
+use syntax::span::Span;
 use types::php_version::PhpFeature;
 
 impl<'a> Checker<'a> {

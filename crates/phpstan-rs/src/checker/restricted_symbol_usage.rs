@@ -14,7 +14,7 @@ use crate::restricted_symbols::{
 use diagnostics::DiagnosticBuilder;
 use syntax::ast::TypeHint;
 use syntax::ast::{Arg, ClassKind, Expr, FunctionDecl, Param};
-use syntax::token::Span;
+use syntax::span::Span;
 use types::Name;
 use types::Type;
 

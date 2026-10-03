@@ -10,7 +10,7 @@ use std::path::PathBuf;
 use crate::banned::BannedConstruct;
 use crate::registry::Registry;
 use syntax::ast::*;
-use syntax::token::{Position, Span};
+use syntax::span::{LineIndex, Span};
 use syntax::visit::{
     Visitor, walk_attribute, walk_class_const, walk_expr, walk_method_decl, walk_param,
     walk_property_decl, walk_stmt,
@@ -28,6 +28,8 @@ struct Walker<'a> {
     constructs: &'a FxHashSet<BannedConstruct>,
     types: &'a [String],
     registry: &'a Registry,
+    /// The lines of the file being walked.
+    line_index: &'a LineIndex,
     /// The classes whose declarations enclose the walk, innermost last;
     /// `None` for an anonymous class not named yet.
     classes: Vec<Option<String>>,
@@ -46,7 +48,7 @@ impl<'a> Walker<'a> {
             if construct == BannedConstruct::IgnoreComments {
                 builder = builder.non_ignorable();
             }
-            self.out.push(builder.build());
+            self.out.push(builder.build(self.line_index));
         }
     }
 
@@ -60,7 +62,7 @@ impl<'a> Walker<'a> {
                         0,
                         "banned.type",
                     )
-                    .build(),
+                    .build(self.line_index),
                 );
             }
         }
@@ -124,7 +126,7 @@ impl<'a> Walker<'a> {
                         0,
                         "banned.type",
                     )
-                    .build(),
+                    .build(self.line_index),
                 );
             }
         }
@@ -167,10 +169,7 @@ impl<'a> Walker<'a> {
             ExprKind::ErrorSuppress(_) => {
                 let at = Span {
                     start: e.span.start,
-                    end: syntax::token::Position {
-                        line: e.span.start.line,
-                        col: e.span.start.col + 1,
-                    },
+                    end: e.span.start + 1,
                 };
                 self.ban(
                     BannedConstruct::ErrorSuppression,
@@ -261,7 +260,7 @@ impl<'a> Walker<'a> {
                         0,
                         "banned.type",
                     )
-                    .build(),
+                    .build(self.line_index),
                 );
             }
             ExprKind::Cast(cast, _) if cast.kind() == CastKind::Float && self.float_banned() => {
@@ -272,7 +271,7 @@ impl<'a> Walker<'a> {
                         0,
                         "banned.type",
                     )
-                    .build(),
+                    .build(self.line_index),
                 );
             }
             ExprKind::Closure(closure) => {
@@ -471,6 +470,7 @@ impl Project {
                 constructs: &constructs,
                 types: &types,
                 registry: &self.registry,
+                line_index: &file.line_index,
                 classes: Vec::new(),
                 out: Vec::new(),
             };
@@ -487,7 +487,7 @@ impl Project {
             ignore_lines.sort_unstable();
             ignore_lines.dedup();
             for line in ignore_lines {
-                let at = Position { line, col: 1 };
+                let at = file.line_index.line_start(line).unwrap_or_default();
                 walker.ban(
                     BannedConstruct::IgnoreComments,
                     Span { start: at, end: at },

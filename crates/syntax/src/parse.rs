@@ -132,12 +132,7 @@ pub fn parse_with_names<'a>(
     interner: &Arc<Interner>,
     names: Option<&mut NameCache>,
 ) -> Result<ParsedFile, ParseError> {
-    let source = source.into();
-    let line_index = Arc::new(LineIndex::new(match source {
-        Source::Text(text) => text.as_bytes(),
-        Source::Bytes(bytes) => bytes,
-    }));
-    let lexer = Lexer::from_source(source).with_interner(interner);
+    let lexer = Lexer::from_source(source.into()).with_interner(interner);
     let lexer = match names {
         Some(cache) => lexer.with_name_cache(cache),
         None => lexer,
@@ -154,6 +149,7 @@ pub fn parse_with_names<'a>(
             span: error.span,
         });
     }
+    let line_index = Arc::clone(&lexed.line_index);
     let mut facts = FileFacts::of_tokens(&lexed.tokens);
     let mut parser = Parser::from_lexed(lexed).with_interner(interner);
     let stmts = parser.parse_program()?;

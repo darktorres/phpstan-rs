@@ -4,7 +4,7 @@ use rustc_hash::FxHashMap;
 
 use syntax::ast::{ClassKind, Stmt};
 use syntax::declarations::Declared;
-use syntax::token::Span;
+use syntax::span::Span;
 
 /// One class-like (`class`/`interface`/`trait`/`enum`) declaration's own
 /// site, name-keyed the same way `Registry` is - mirrors `project::duplicate_fn_sites::FnDeclSite`

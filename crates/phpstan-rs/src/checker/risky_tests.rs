@@ -16,7 +16,7 @@
 
 use crate::checker::Checker;
 use syntax::ast::*;
-use syntax::token::Span;
+use syntax::span::Span;
 use syntax::visit::{Visitor, walk_expr, walk_stmts};
 
 impl<'a> Checker<'a> {

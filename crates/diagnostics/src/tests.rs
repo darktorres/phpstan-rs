@@ -1,11 +1,12 @@
 use crate::{DiagnosticBuilder, Identifier};
-use syntax::token::{Position, Span};
+use syntax::span::{LineIndex, Span};
 
 fn dummy_span() -> Span {
-    Span {
-        start: Position { line: 1, col: 1 },
-        end: Position { line: 1, col: 1 },
-    }
+    Span::default()
+}
+
+fn index() -> LineIndex {
+    LineIndex::new(b"<?php\n")
 }
 
 #[test]
@@ -19,7 +20,7 @@ fn diagnostic_builder_assembles_every_field() {
     .tip("try this instead")
     .non_ignorable()
     .fix(dummy_span(), "replacement text", "swap it out")
-    .build();
+    .build(&index());
 
     assert_eq!(diag.message, "something went wrong");
     assert_eq!(diag.level, 5);
@@ -39,7 +40,7 @@ fn diagnostic_builder_defaults_are_all_empty_absent_or_false() {
         0,
         "plain.identifier",
     )
-    .build();
+    .build(&index());
 
     assert!(diag.tips.is_empty());
     assert!(!diag.non_ignorable);
@@ -50,12 +51,12 @@ fn diagnostic_builder_defaults_are_all_empty_absent_or_false() {
 fn several_tips_show_as_a_bulleted_list() {
     let one = DiagnosticBuilder::new("m".to_string(), dummy_span(), 0, "a.b")
         .tip("first")
-        .build();
+        .build(&index());
     assert_eq!(one.tip_text().as_deref(), Some("first"));
     let two = DiagnosticBuilder::new("m".to_string(), dummy_span(), 0, "a.b")
         .tip("first")
         .tip("second")
-        .build();
+        .build(&index());
     assert_eq!(two.tip_text().as_deref(), Some("• first\n• second"));
 }
 

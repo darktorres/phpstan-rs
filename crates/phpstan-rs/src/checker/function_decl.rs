@@ -11,7 +11,7 @@ use crate::registry::{
 use diagnostics::DiagnosticBuilder;
 use phpdoc::docblock;
 use syntax::ast::*;
-use syntax::token::Span;
+use syntax::span::Span;
 use syntax::visit::body_contains_yield;
 use types::Name;
 use types::php_version::PhpFeature;
@@ -57,16 +57,13 @@ impl<'a> Checker<'a> {
         // in its own when it has none.
         self.record_property_type_site(fqn, contexts.clone(), &c.def);
         let mut family_verdicts_by_span: rustc_hash::FxHashMap<
-            Span,
+            syntax::span::Range,
             (rustc_hash::FxHashSet<usize>, rustc_hash::FxHashSet<bool>),
         > = rustc_hash::FxHashMap::default();
         for (host_index, host) in contexts.into_iter().enumerate() {
             let host_start = self.diagnostics.len();
             for m in &c.def.methods {
-                let site = (
-                    m.function.name.span.start.line,
-                    m.function.name.span.start.col,
-                );
+                let site = m.function.name.span.start;
                 let own_sig = own_info
                     .redeclared_methods()
                     .get(&site)
@@ -101,13 +98,7 @@ impl<'a> Checker<'a> {
         // consecutive matches). Only this trait's own diagnostics are
         // sorted and deduplicated; what precedes `start` is left as is.
         let mut own = self.diagnostics.split_off(start);
-        own.sort_by(|a, b| {
-            (a.span.start.line, a.span.start.col, &a.message).cmp(&(
-                b.span.start.line,
-                b.span.start.col,
-                &b.message,
-            ))
-        });
+        own.sort_by(|a, b| (a.span.start, &a.message).cmp(&(b.span.start, &b.message)));
         own.dedup_by(|a, b| a.span == b.span && a.message == b.message);
         // Real PHPStan's own `ConstantConditionInTraitRule` (`checker/
         // control_flow/boolean_conditions.rs`'s own doc comment on why a
@@ -216,7 +207,7 @@ impl<'a> Checker<'a> {
     /// from something else - another declaration, several merged, or a
     /// built-in stub; `None` when the slot is `f`'s.
     fn own_declaration_sig(&self, f: &FunctionDecl) -> Option<FunctionReflection> {
-        let site = (f.name.span.start.line, f.name.span.start.col);
+        let site = f.name.span.start;
         let slot_site = self
             .registry
             .function_decl_sites
@@ -249,7 +240,7 @@ impl<'a> Checker<'a> {
         f: &FunctionDecl,
         class: &str,
     ) -> Option<FunctionReflection> {
-        let site = (f.name.span.start.line, f.name.span.start.col);
+        let site = f.name.span.start;
         let sig = self
             .registry
             .classes

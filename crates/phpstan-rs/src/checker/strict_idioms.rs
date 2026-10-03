@@ -264,7 +264,7 @@ impl<'a> Checker<'a> {
                 // The chain's conditions, `elseif`s and `else if`s alike,
                 // while each compares one subject with an enum case.
                 let mut compared: Vec<(String, String)> = Vec::new();
-                let mut chain_ifs: Vec<syntax::token::Span> = Vec::new();
+                let mut chain_ifs: Vec<syntax::span::Span> = Vec::new();
                 let mut current = Some(stmt);
                 'chain: while let Some(Stmt {
                     kind: StmtKind::If(if_stmt),

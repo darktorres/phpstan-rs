@@ -1,7 +1,8 @@
 use std::borrow::Cow;
 
 use crate::name::{Interner, Name, NameCache};
-use crate::token::{Keyword, Position, Span, Token};
+use crate::span::{LineIndex, Span};
+use crate::token::{Keyword, Token};
 use std::sync::Arc;
 
 mod strings;
@@ -26,12 +27,10 @@ pub struct Lexer<'a> {
     shared_names: Option<&'a mut NameCache>,
     pos: usize,
     in_php: bool,
-    // Byte offsets where each line begins (`line_starts[0]` is always 0) -
-    // computed once up front so `line_col_at` is a binary search, not an
-    // O(n) rescan per token. The standard rustc-`SourceMap`-style
-    // technique - means none of the dozens of `self.pos += ...` sites
-    // throughout this file need to track line/col incrementally.
-    line_starts: Vec<usize>,
+    // The file's lines, made where the lexer was made for a whole file,
+    // and handed out with the tokens for a position to be made from an
+    // offset when one is asked for.
+    line_index: Arc<LineIndex>,
     // The byte offset `next_token` most recently settled on as "this is
     // where the token about to be lexed actually starts" (i.e. right
     // after any leading whitespace/comments were skipped) - `tokenize_
@@ -39,27 +38,10 @@ pub struct Lexer<'a> {
     // know where that token's own span should start, since `next_token`
     // itself skips whitespace *and* lexes in one call.
     last_token_start: usize,
-    // `line_col_at`'s positions already resolved on the line it was last
-    // asked about: (line index, (byte offset, position) pairs sorted by
-    // offset, starting with the line's own start). A column counts the
-    // characters from the nearest resolved offset at or before it, so a
-    // generated file's million-character line (a Huffman lookup table) is
-    // counted about once, even as a string's own positions are resolved
-    // before the token starting before them.
-    line_marks: (usize, Vec<(usize, Position)>),
-    // Whether the source is all ASCII, where a column is a byte count.
-    ascii: bool,
-    // Whether the source is valid UTF-8, where the characters between two
-    // character boundaries are the bytes that do not continue one.
-    utf8: bool,
-    // The latest position resolved, as (byte offset, position, where its
-    // line ends): tokens come in source order, so the next one is
-    // usually on the same line, later, and costs the characters between.
-    cursor: (usize, Position, usize),
-    // Where the source starts in its file: line 1, column 1 for a whole
-    // file; a string interpolation fragment's own position when one is
-    // lexed on its own, so its tokens get their real positions.
-    base: Position,
+    // Where the source starts in its file, as a byte offset: 0 for a
+    // whole file; a string interpolation fragment's own offset when one is
+    // lexed on its own, so its tokens get their real spans.
+    base: u32,
     // The just-lexed keyword's own original source-text spelling, stashed
     // out of band - `Token::Keyword` itself carries only the
     // keyword's canonical (always-lowercase) spelling, never the raw
@@ -154,23 +136,6 @@ fn skip_string_literal_bytes(bytes: &[u8], i: usize) -> usize {
     i
 }
 
-fn compute_line_starts(src: &[u8]) -> Vec<usize> {
-    // A line of PHP is about thirty bytes.
-    let mut starts = Vec::with_capacity(src.len() / 32 + 1);
-    starts.push(0);
-    starts.extend(memchr::memchr_iter(b'\n', src).map(|i| i + 1));
-    starts
-}
-
-/// `Lexer::cursor` at the start of the source.
-fn first_line_cursor(line_starts: &[usize], len: usize) -> (usize, Position, usize) {
-    (
-        0,
-        Position { line: 1, col: 1 },
-        line_starts.get(1).copied().unwrap_or(len + 1),
-    )
-}
-
 /// `String::from_utf8_lossy`, found by validating the bytes the way
 /// `str::from_utf8` does - several bytes at a time for the ASCII most of
 /// source is - and decoding lossily only for the rest.
@@ -198,6 +163,8 @@ pub struct Lexed {
     pub keyword_raw: Vec<(usize, String)>,
     /// The doc comments, in order.
     pub docs: Vec<LexedDoc>,
+    /// The lines of the file the tokens are of.
+    pub line_index: Arc<LineIndex>,
 }
 
 /// A doc comment, and the token it comes before.
@@ -218,6 +185,7 @@ impl Lexed {
             spans,
             keyword_raw,
             docs,
+            ..
         } = self;
         let mut out: Vec<SpannedToken> = Vec::with_capacity(tokens.len() + docs.len());
         let mut docs = docs.into_iter().peekable();
@@ -238,7 +206,7 @@ pub struct LexOutput {
     pub lexed: Lexed,
     /// Every non-doc comment: its start and its text, for a lexer that
     /// keeps them (`tokenize_with_comments`).
-    pub comments: Vec<(Position, String)>,
+    pub comments: Vec<(Span, String)>,
     /// The comments that hold `@phpstan-ignore`.
     pub ignore_marks: Vec<IgnoreMark>,
     pub warnings: Vec<LexWarning>,
@@ -264,20 +232,19 @@ impl<'a> Lexer<'a> {
     }
 
     fn build(bytes: &'a [u8], text: Option<&'a str>, in_php: bool) -> Self {
-        let line_starts = compute_line_starts(bytes);
         Lexer {
             src: bytes,
             text,
             shared_names: None,
             pos: 0,
             in_php,
-            cursor: first_line_cursor(&line_starts, bytes.len()),
-            line_starts,
+            line_index: Arc::new(if in_php {
+                LineIndex::default()
+            } else {
+                LineIndex::new(bytes)
+            }),
             last_token_start: 0,
-            line_marks: (0, vec![(0, Position { line: 1, col: 1 })]),
-            ascii: text.is_some_and(str::is_ascii),
-            utf8: text.is_some(),
-            base: Position { line: 1, col: 1 },
+            base: 0,
             pending_keyword_raw: None,
             keep_comments: false,
             comments: Vec::new(),
@@ -343,141 +310,28 @@ impl<'a> Lexer<'a> {
         self
     }
 
-    /// `new_in_php` for a fragment that starts at `base` in its file:
-    /// every position is reported where it is in the file.
-    pub fn new_in_php_at(src: &'a str, base: Position) -> Self {
+    /// `new_in_php` for a fragment that starts at the byte offset `base`
+    /// in its file: every span is reported where it is in the file.
+    pub fn fragment(src: &'a str, base: u32) -> Self {
         Lexer {
             base,
             ..Lexer::new_in_php(src)
         }
     }
 
-    /// The position of a byte offset in the file (see `base`). Tokens
-    /// come in source order, so the offset is nearly always on the line of
-    /// the one before: the characters between the two are counted, a byte
-    /// count in an ASCII file.
+    /// The file's offset of the byte `local` in the source being lexed.
     #[inline]
-    fn line_col_at(&mut self, byte_pos: usize) -> Position {
-        let (offset, from, line_end) = self.cursor;
-        if byte_pos >= offset && byte_pos < line_end {
-            if byte_pos == offset {
-                return self.in_file(from);
-            }
-            let position = Position {
-                line: from.line,
-                col: from.col + self.columns(offset, byte_pos) as u32,
-            };
-            self.cursor = (byte_pos, position, line_end);
-            return self.in_file(position);
-        }
-        let position = self.relative_line_col_at(byte_pos);
-        self.in_file(position)
+    fn offset(&self, local: usize) -> u32 {
+        self.base.saturating_add(local as u32)
     }
 
-    /// `pos`, a position counted from the start of the source, in the file
-    /// the source is part of (see `base`).
+    /// The span of the bytes from `from` to `to` of the source being lexed.
     #[inline]
-    fn in_file(&self, pos: Position) -> Position {
-        if pos.line == 1 {
-            Position {
-                line: self.base.line,
-                col: self.base.col.saturating_add(pos.col - 1),
-            }
-        } else {
-            Position {
-                line: self.base.line.saturating_add(pos.line - 1),
-                col: pos.col,
-            }
+    fn span(&self, from: usize, to: usize) -> Span {
+        Span {
+            start: self.offset(from),
+            end: self.offset(to),
         }
-    }
-
-    /// Converts an absolute byte offset into a 1-indexed line/column -
-    /// `col` counts UTF-8 *characters* from the line's own start, not raw
-    /// bytes: real PHP source has multi-byte UTF-8 inside actual code,
-    /// not just comments, so a byte-offset column would silently
-    /// overshoot the true character position on every such line. The
-    /// extra decoding cost is bounded to one line's own prefix, not the
-    /// whole file.
-    fn line_idx_at(&self, byte_pos: usize) -> usize {
-        match self.line_starts.binary_search(&byte_pos) {
-            Ok(i) => i,
-            Err(i) => i - 1,
-        }
-    }
-
-    fn relative_line_col_at(&mut self, byte_pos: usize) -> Position {
-        let byte_pos = byte_pos.min(self.src.len());
-        let (offset, from, line_end) = self.cursor;
-        if byte_pos >= offset && byte_pos < line_end {
-            if byte_pos == offset {
-                return from;
-            }
-            let position = Position {
-                line: from.line,
-                col: from.col + self.columns(offset, byte_pos) as u32,
-            };
-            self.cursor = (byte_pos, position, line_end);
-            return position;
-        }
-        if byte_pos >= offset {
-            // A later line, as tokens arrive in order: counted from its own
-            // start, which the cursor then moves to.
-            let line_idx = self.line_idx_at(byte_pos);
-            let position = Position {
-                line: (line_idx + 1) as u32,
-                col: 1 + self.columns(self.line_starts[line_idx], byte_pos) as u32,
-            };
-            let line_end = self
-                .line_starts
-                .get(line_idx + 1)
-                .copied()
-                .unwrap_or(self.src.len() + 1);
-            self.cursor = (byte_pos, position, line_end);
-            return position;
-        }
-        self.line_col_from_marks(byte_pos)
-    }
-
-    /// How many columns the bytes from `from` to `to` take: a character
-    /// each, a byte each when the source is ASCII.
-    fn columns(&self, from: usize, to: usize) -> usize {
-        if self.ascii {
-            return to - from;
-        }
-        let at_boundary = |i: usize| self.src.get(i).is_none_or(|&b| b & 0xC0 != 0x80);
-        if self.utf8 && at_boundary(from) && at_boundary(to) {
-            return self.src[from..to]
-                .iter()
-                .filter(|&&b| b & 0xC0 != 0x80)
-                .count();
-        }
-        char_count(&self.src[from..to])
-    }
-
-    fn line_col_from_marks(&mut self, byte_pos: usize) -> Position {
-        let line_idx = self.line_idx_at(byte_pos);
-        if self.line_marks.0 != line_idx {
-            let line_start = self.line_starts[line_idx];
-            let start = Position {
-                line: (line_idx + 1) as u32,
-                col: 1,
-            };
-            self.line_marks = (line_idx, vec![(line_start, start)]);
-        }
-        let at = self
-            .line_marks
-            .1
-            .partition_point(|&(offset, _)| offset <= byte_pos);
-        let (offset, from) = self.line_marks.1[at - 1];
-        if offset == byte_pos {
-            return from;
-        }
-        let position = Position {
-            line: from.line,
-            col: from.col + self.columns(offset, byte_pos) as u32,
-        };
-        self.line_marks.1.insert(at, (byte_pos, position));
-        position
     }
 
     /// The real, span-carrying tokenization entry point - `tokenize`
@@ -492,7 +346,7 @@ impl<'a> Lexer<'a> {
     /// position and source text, and the warnings for what was skipped.
     pub fn tokenize_with_comments(
         mut self,
-    ) -> (Vec<SpannedToken>, Vec<(Position, String)>, Vec<LexWarning>) {
+    ) -> (Vec<SpannedToken>, Vec<(Span, String)>, Vec<LexWarning>) {
         self.keep_comments = true;
         let LexOutput {
             lexed,
@@ -512,7 +366,7 @@ impl<'a> Lexer<'a> {
             .into_iter()
             .map(|(start, end)| {
                 let text = self.slice(start..end).into_owned();
-                (self.line_col_at(start), text)
+                (self.span(start, end), text)
             })
             .collect();
         LexOutput {
@@ -525,13 +379,10 @@ impl<'a> Lexer<'a> {
 
     /// Notes the comment at `start` holding the text `text`.
     fn mark_ignore(&mut self, start: usize, text: &str, is_doc: bool) {
-        let line = self
-            .base
-            .line
-            .saturating_add(self.line_idx_at(start) as u32);
-        let code_before_on_line = self.last_code_start.is_some_and(|code| {
-            self.base.line.saturating_add(self.line_idx_at(code) as u32) == line
-        });
+        let line = self.line_index.line(self.offset(start));
+        let code_before_on_line = self
+            .last_code_start
+            .is_some_and(|code| self.line_index.line(self.offset(code)) == line);
         self.ignore_marks.push(IgnoreMark {
             text: text.into(),
             start,
@@ -556,7 +407,8 @@ impl<'a> Lexer<'a> {
 
     /// The code token at `start`, on `line`, is the next one after each
     /// comment noted since the one before it, and the latest code.
-    fn settle_marks(&mut self, line: u32, start: usize) {
+    fn settle_marks(&mut self, start: usize) {
+        let line = self.line_index.line(self.offset(start));
         for mark in &mut self.ignore_marks[self.unsettled_marks..] {
             mark.next_code = Some((line, start));
         }
@@ -585,10 +437,7 @@ impl<'a> Lexer<'a> {
         loop {
             let token = self.next_token();
             let raw = self.pending_keyword_raw.take();
-            let span = Span {
-                start: self.line_col_at(self.last_token_start),
-                end: self.line_col_at(self.pos),
-            };
+            let span = self.span(self.last_token_start, self.pos);
             if let Token::DocComment(text) = token {
                 if has_ignore_marker(text.as_bytes()) {
                     self.mark_ignore(self.last_token_start, &text, true);
@@ -602,7 +451,7 @@ impl<'a> Lexer<'a> {
             }
             let done = matches!(token, Token::Eof);
             if !done {
-                self.settle_marks(span.start.line, self.last_token_start);
+                self.settle_marks(self.last_token_start);
             }
             if let Some(raw) = raw {
                 keyword_raw.push((tokens.len(), raw));
@@ -618,6 +467,7 @@ impl<'a> Lexer<'a> {
             spans,
             keyword_raw,
             docs,
+            line_index: Arc::clone(&self.line_index),
         }
     }
 
@@ -920,10 +770,7 @@ impl<'a> Lexer<'a> {
         if is_numeric_token(&self.src[start..self.pos]) {
             return;
         }
-        let span = Span {
-            start: self.line_col_at(start),
-            end: self.line_col_at(self.pos),
-        };
+        let span = self.span(start, self.pos);
         self.warnings.push(LexWarning {
             span,
             message: "syntax error, unexpected identifier".to_string(),
@@ -1037,10 +884,7 @@ impl<'a> Lexer<'a> {
             // A legacy octal literal (`0775`); an `8` or `9` in one is a
             // parse error in PHP.
             if !text.bytes().all(|b| (b'0'..=b'7').contains(&b)) {
-                let span = Span {
-                    start: self.line_col_at(start),
-                    end: self.line_col_at(self.pos),
-                };
+                let span = self.span(start, self.pos);
                 self.warnings.push(LexWarning {
                     span,
                     message: "Invalid numeric literal".to_string(),
@@ -1251,10 +1095,7 @@ impl<'a> Lexer<'a> {
             b'\\' => Token::Backslash,
             0 => Token::Eof,
             other => {
-                let span = Span {
-                    start: self.line_col_at(self.pos - 1),
-                    end: self.line_col_at(self.pos),
-                };
+                let span = self.span(self.pos - 1, self.pos);
                 self.warnings.push(LexWarning {
                     span,
                     message: format!("unexpected byte 0x{other:02x} in PHP source, skipping"),
@@ -1362,15 +1203,6 @@ fn is_numeric_token(raw: &[u8]) -> bool {
             }
             i == raw.len()
         }
-    }
-}
-
-/// How many characters `bytes` hold: each invalid sequence one, as a
-/// lossy decoding reads it.
-fn char_count(bytes: &[u8]) -> usize {
-    match std::str::from_utf8(bytes) {
-        Ok(text) => text.chars().count(),
-        Err(_) => lossy(bytes).chars().count(),
     }
 }
 

@@ -1,4 +1,4 @@
-use syntax::token::Span;
+use syntax::span::Span;
 
 /// The whole parsed doc comment - every tag this grammar
 /// recognized, plus every recoverable parse failure encountered along

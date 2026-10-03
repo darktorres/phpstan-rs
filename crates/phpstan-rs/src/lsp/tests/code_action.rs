@@ -10,13 +10,14 @@ use super::helpers::*;
 use diagnostics::DiagnosticBuilder;
 use lsp_types::CodeActionOrCommand;
 use serde_json::{Value, json};
-use syntax::token::{Position, Span};
+use syntax::span::{LineIndex, Span};
 
 fn dummy_span() -> Span {
-    Span {
-        start: Position { line: 1, col: 1 },
-        end: Position { line: 1, col: 10 },
-    }
+    Span { start: 0, end: 9 }
+}
+
+fn index() -> LineIndex {
+    LineIndex::new(b"<?php $x = 1;\n")
 }
 
 fn range(start: (u32, u32), end: (u32, u32)) -> lsp_types::Range {
@@ -42,10 +43,10 @@ fn diagnostic_with_fix_becomes_a_quickfix_code_action() {
     let uri = path_to_uri(Path::new("/tmp/a.php"));
     let diag = DiagnosticBuilder::new("msg".to_string(), dummy_span(), 5, "some.identifier")
         .fix(dummy_span(), "CorrectCasing", "Fix casing")
-        .build();
+        .build(&index());
 
     let Some(CodeActionOrCommand::CodeAction(action)) =
-        diagnostic_fix_to_code_action(&uri, &diag, None)
+        diagnostic_fix_to_code_action(&uri, &diag, None, &index())
     else {
         panic!("expected a CodeAction for a diagnostic with a fix");
     };
@@ -73,9 +74,9 @@ fn diagnostic_with_fix_becomes_a_quickfix_code_action() {
 #[test]
 fn diagnostic_without_fix_yields_no_code_action() {
     let uri = path_to_uri(Path::new("/tmp/a.php"));
-    let diag =
-        DiagnosticBuilder::new("msg".to_string(), dummy_span(), 5, "some.identifier").build();
-    assert!(diagnostic_fix_to_code_action(&uri, &diag, None).is_none());
+    let diag = DiagnosticBuilder::new("msg".to_string(), dummy_span(), 5, "some.identifier")
+        .build(&index());
+    assert!(diagnostic_fix_to_code_action(&uri, &diag, None, &index()).is_none());
 }
 
 #[test]

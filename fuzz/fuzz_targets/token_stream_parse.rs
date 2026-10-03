@@ -4,10 +4,10 @@
 //! lexer entirely, feeding an `arbitrary`-derived token
 //! stream straight into `Parser::new`/`parse_program`. Gated behind the
 //! `syntax` crate's opt-in `fuzzing` feature (`Token`/`Keyword`/
-//! `StringPart`/`Position` only derive `arbitrary::Arbitrary` under it),
+//! `StringPart`/`Span` only derive `arbitrary::Arbitrary` under it),
 //! so an ordinary build never pulls `arbitrary` in.
 //!
-//! `Position::default()` (real zeros) is used for every synthesized
+//! `Span::default()` (real zeros) is used for every synthesized
 //! token's own span rather than an `arbitrary`-derived one: `Parser`
 //! only ever reads span *values* to build diagnostic positions, never to
 //! make a control-flow decision, so a placeholder span can't hide a real
@@ -33,7 +33,8 @@
 
 use libfuzzer_sys::fuzz_target;
 use syntax::parser::Parser;
-use syntax::token::{Position, Span, Token};
+use syntax::span::Span;
+use syntax::token::Token;
 
 fuzz_target!(|tokens: Vec<Token>| {
     if tokens.len() > 2000 {
@@ -44,10 +45,7 @@ fuzz_target!(|tokens: Vec<Token>| {
         // slow.
         return;
     }
-    let span = Span {
-        start: Position::default(),
-        end: Position::default(),
-    };
+    let span = Span::default();
     let with_spans: Vec<(Token, Span, Option<String>)> =
         tokens.into_iter().map(|t| (t, span, None)).collect();
     let _ = Parser::new(with_spans).parse_program();

@@ -22,7 +22,8 @@ use types::Name;
 use syntax::ast::*;
 use syntax::lexer::Lexer;
 use syntax::parser::Parser;
-use syntax::token::{Span, Token};
+use syntax::span::Span;
+use syntax::token::Token;
 use syntax::visit::{VisitorMut, walk_class_def_mut, walk_function_decl_mut, walk_stmt_mut};
 
 #[derive(Clone, Copy, PartialEq, Eq)]

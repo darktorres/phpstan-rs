@@ -11,7 +11,7 @@ use std::path::PathBuf;
 use crate::architecture::{ArchitectureRule, NamePattern, Selector};
 use crate::registry::stubs;
 use syntax::ast::*;
-use syntax::token::Span;
+use syntax::span::Span;
 use syntax::visit::{Visitor, walk_expr, walk_stmts};
 use types::Type;
 
@@ -66,8 +66,7 @@ fn collect_declared<'a>(stmts: &'a [Stmt], out: &mut FxHashMap<String, Declared<
 }
 
 fn contains(outer: Span, inner: Span) -> bool {
-    (outer.start.line, outer.start.col) <= (inner.start.line, inner.start.col)
-        && (inner.end.line, inner.end.col) <= (outer.end.line, outer.end.col)
+    outer.start <= inner.start && inner.end <= outer.end
 }
 
 /// Spans of the class operand of every `new` in `stmts`, wherever it is:
@@ -95,6 +94,9 @@ struct Dependency {
     constructed: bool,
     construction_span: Span,
 }
+
+/// A violation of an architecture rule: where, what and its identifier.
+type Finding = (Span, String, &'static str);
 
 struct Context<'p> {
     project: &'p Project,
@@ -303,7 +305,11 @@ impl Project {
                     let found =
                         self.check_rule(&mut ctx, rule, &rule_name, &fqn, decl, &dependencies);
                     if !found.is_empty() {
-                        out.entry((*path).clone()).or_default().extend(found);
+                        out.entry((*path).clone())
+                            .or_default()
+                            .extend(found.into_iter().map(|(span, message, id)| {
+                                DiagnosticBuilder::new(message, span, 0, id).build(&file.line_index)
+                            }));
                     }
                 }
             }
@@ -388,10 +394,10 @@ impl Project {
         fqn: &str,
         decl: &Declared,
         deps: &[Dependency],
-    ) -> Vec<Diagnostic> {
+    ) -> Vec<Finding> {
         let mut out = Vec::new();
-        let report = |out: &mut Vec<Diagnostic>, span: Span, message: String, id: &'static str| {
-            out.push(DiagnosticBuilder::new(message, span, 0, id).build());
+        let report = |out: &mut Vec<Finding>, span: Span, message: String, id: &'static str| {
+            out.push((span, message, id));
         };
         for dep in deps {
             if ctx.matches_any(&rule.should_not_depend_on, &dep.target) {

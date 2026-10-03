@@ -3,7 +3,7 @@ use crate::checker::{
     merge_scopes, purge_stale_narrowing_for,
 };
 use syntax::ast::*;
-use syntax::token::Span;
+use syntax::span::Span;
 use syntax::visit::{Visitor, any_expr_in_scope, walk_expr_in_scope, walk_stmt, walk_stmts};
 use types::Type;
 

@@ -321,7 +321,7 @@ pub struct Registry {
     // in a file won the slot (a built-in stub's). Lets the checker tell a
     // second same-named declaration from the one the slot describes.
     #[serde(skip)]
-    pub(crate) function_decl_sites: NameMap<Option<(u32, u32)>>,
+    pub(crate) function_decl_sites: NameMap<Option<u32>>,
     // Names `merge_stubs` provided a signature for, not yet
     // overwritten by a real, already-indexed conditional declaration -
     // the same ambiguity `unconditionally_declared_functions` resolves

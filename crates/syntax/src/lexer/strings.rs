@@ -1,7 +1,8 @@
 use crate::lexer::{Lexer, is_ident_continue, is_ident_start, skip_string_literal_bytes};
 use crate::name::Interner;
 use crate::php_string::PhpString;
-use crate::token::{SimpleIndexKey, Span, StringPart, Token};
+use crate::span::Span;
+use crate::token::{SimpleIndexKey, StringPart, Token};
 
 /// Whether `s` is a full, well-formed PHP identifier (not just that it
 /// *starts* like one) - `$var[key]` interpolation's own bareword-string-key
@@ -366,8 +367,7 @@ impl<'a> Lexer<'a> {
     /// `offsets` maps a heredoc's indent-stripped bytes back to it. A
     /// `{$expr}`'s text is taken from the source itself, so a re-lexed
     /// expression spanning lines keeps its columns; each `ComplexExpr` gets
-    /// a real file position via
-    /// `line_col_at`, not one relative to a throwaway fragment
+    /// a real file offset, not one relative to a throwaway fragment
     /// `parser::build_interpolated` re-lexes in isolation.
     fn scan_interpolated(
         &mut self,
@@ -391,10 +391,7 @@ impl<'a> Lexer<'a> {
         macro_rules! flush {
             () => {
                 if !literal.is_empty() {
-                    let span = Span {
-                        start: self.line_col_at(off(literal_start)),
-                        end: self.line_col_at(off(i)),
-                    };
+                    let span = self.span(off(literal_start), off(i));
                     parts.push(StringPart::Literal(
                         PhpString::from(std::mem::take(&mut literal)),
                         span,
@@ -507,10 +504,7 @@ impl<'a> Lexer<'a> {
                                 i = j + 1;
                             }
                             _ => {
-                                let span = Span {
-                                    start: self.line_col_at(off(i)),
-                                    end: self.line_col_at(off((j + 1).min(bytes.len()))),
-                                };
+                                let span = self.span(off(i), off((j + 1).min(bytes.len())));
                                 let too_large = codepoint.is_some() || hex.len() > 8;
                                 self.warnings.push(crate::lexer::LexWarning {
                                     span,
@@ -562,7 +556,7 @@ impl<'a> Lexer<'a> {
                     }
                 }
                 let inner_bytes = &bytes[start..i];
-                let base = self.line_col_at(off(start));
+                let base = self.offset(off(start));
                 let close_brace_pos = i;
                 i = (i + 1).min(bytes.len());
                 match try_parse_simple_interpolation(inner_bytes) {
@@ -574,8 +568,8 @@ impl<'a> Lexer<'a> {
                         let prop = self
                             .interner
                             .name(&super::lossy(&inner_bytes[prop_start..]));
-                        let var_end = self.line_col_at(off(start + name_end));
-                        let end = self.line_col_at(off(close_brace_pos));
+                        let var_end = self.offset(off(start + name_end));
+                        let end = self.offset(off(close_brace_pos));
                         parts.push(StringPart::PropertyAccess {
                             var: name,
                             var_start: base,
@@ -595,8 +589,8 @@ impl<'a> Lexer<'a> {
                             Some(key) => {
                                 let name =
                                     self.interner.name(&super::lossy(&inner_bytes[1..name_end]));
-                                let var_end = self.line_col_at(off(start + name_end));
-                                let end = self.line_col_at(off(close_brace_pos));
+                                let var_end = self.offset(off(start + name_end));
+                                let end = self.offset(off(close_brace_pos));
                                 parts.push(StringPart::Index {
                                     var: name,
                                     var_start: base,
@@ -626,7 +620,7 @@ impl<'a> Lexer<'a> {
             // any other `${expr}` the variable `expr` names.
             if b == b'$' && bytes.get(i + 1) == Some(&b'{') {
                 flush!();
-                let base = self.line_col_at(off(i));
+                let base = self.offset(off(i));
                 i += 2;
                 let start = i;
                 let mut depth = 1;
@@ -651,7 +645,7 @@ impl<'a> Lexer<'a> {
                 if starts_with_name && name_len == inner.len() {
                     let span = Span {
                         start: base,
-                        end: self.line_col_at(off(i)),
+                        end: self.offset(off(i)),
                     };
                     parts.push(StringPart::SimpleVar(self.interner.name(&inner), span));
                 } else if starts_with_name
@@ -678,7 +672,7 @@ impl<'a> Lexer<'a> {
                 // begins - precision within the reconstruction (distinguishing
                 // `$name` from `->prop`/`[key]`) isn't attempted, only anchoring
                 // the whole thing at its real starting position.
-                let base = self.line_col_at(off(name_start - 1));
+                let base = self.offset(off(name_start - 1));
 
                 // `->` or PHP 8's nullsafe `?->`.
                 let arrow_len = match (bytes.get(i), bytes.get(i + 1), bytes.get(i + 2)) {
@@ -689,7 +683,7 @@ impl<'a> Lexer<'a> {
                 if let Some(arrow_len) = arrow_len
                     && bytes.get(i + arrow_len).is_some_and(|&c| is_ident_start(c))
                 {
-                    let var_end = self.line_col_at(off(i));
+                    let var_end = self.offset(off(i));
                     let nullsafe = arrow_len == 3;
                     i += arrow_len;
                     let prop_start = i;
@@ -697,7 +691,7 @@ impl<'a> Lexer<'a> {
                         i += 1;
                     }
                     let prop = self.interner.name(&super::lossy(&bytes[prop_start..i]));
-                    let end = self.line_col_at(off(i));
+                    let end = self.offset(off(i));
                     parts.push(StringPart::PropertyAccess {
                         var: name,
                         var_start: base,
@@ -707,7 +701,7 @@ impl<'a> Lexer<'a> {
                         end,
                     });
                 } else if bytes.get(i) == Some(&b'[') {
-                    let var_end = self.line_col_at(off(i));
+                    let var_end = self.offset(off(i));
                     i += 1;
                     let key_start = i;
                     while i < bytes.len() && bytes[i] != b']' {
@@ -717,7 +711,7 @@ impl<'a> Lexer<'a> {
                     i = (i + 1).min(bytes.len());
                     match classify_index_key(&key, &self.interner) {
                         Some(key) => {
-                            let end = self.line_col_at(off(i));
+                            let end = self.offset(off(i));
                             parts.push(StringPart::Index {
                                 var: name,
                                 var_start: base,
@@ -739,7 +733,7 @@ impl<'a> Lexer<'a> {
                         }
                     }
                 } else {
-                    let end = self.line_col_at(off(i));
+                    let end = self.offset(off(i));
                     parts.push(StringPart::SimpleVar(name, Span { start: base, end }));
                 }
                 continue;
@@ -774,7 +768,7 @@ impl<'a> Lexer<'a> {
         flush!();
 
         if parts.is_empty() {
-            let at = self.line_col_at(off(0));
+            let at = self.offset(off(0));
             parts.push(StringPart::Literal(
                 PhpString::default(),
                 Span { start: at, end: at },

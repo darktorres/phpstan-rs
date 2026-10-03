@@ -5,7 +5,7 @@
 
 use crate::checker::{Checker, Locals};
 use syntax::ast::{ClassKind, Expr, InstanceofTarget};
-use syntax::token::Span;
+use syntax::span::Span;
 use types::Type;
 
 impl<'a> Checker<'a> {

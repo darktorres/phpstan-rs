@@ -1,13 +1,14 @@
 use crate::ast::*;
 use crate::parser::{ParseError, Parser};
-use crate::token::{Keyword, Span, Token};
+use crate::span::Span;
+use crate::token::{Keyword, Token};
 
 impl Parser {
     /// An enum case after its `case` keyword: `Name [= value];`.
     pub(crate) fn parse_enum_case_rest(
         &mut self,
         attrs: Vec<Attribute>,
-        member_start: crate::token::Position,
+        member_start: u32,
     ) -> Result<EnumCase, ParseError> {
         let name_start = self.current_pos();
         let name = self.expect_ident()?;

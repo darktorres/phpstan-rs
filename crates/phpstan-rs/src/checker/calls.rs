@@ -5,7 +5,7 @@ use types::UnionAll as _;
 use crate::checker::{CalleeLabel, Checker, Locals, purge_stale_narrowing_for};
 use crate::registry::{FunctionReflection, ParameterReflection};
 use syntax::ast::*;
-use syntax::token::Span;
+use syntax::span::Span;
 use types::{self, Type};
 
 mod closure_context;

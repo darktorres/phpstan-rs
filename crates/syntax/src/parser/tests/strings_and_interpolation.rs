@@ -2,6 +2,7 @@
 
 use super::super::*;
 use super::helpers::*;
+use crate::span::LineCol;
 use crate::token::StringPart;
 
 #[test]
@@ -26,7 +27,8 @@ fn shell_exec_backtick_string_parses() {
 
 #[test]
 fn complex_interpolation_expression_spans_are_biased_to_real_file_positions() {
-    let program = parse("<?php\nfunction f() {\n    return \"value: {$undefinedThing}\";\n}\n");
+    let src = "<?php\nfunction f() {\n    return \"value: {$undefinedThing}\";\n}\n";
+    let program = parse(src);
     let StmtKind::FunctionDecl(f) = &program[0].kind else {
         panic!("expected a function declaration, got {:?}", program[0].kind);
     };
@@ -45,8 +47,9 @@ fn complex_interpolation_expression_spans_are_biased_to_real_file_positions() {
         .expect("expected a Variable part for $undefinedThing");
     // Line 3, where the real interpolation is - not line 1 col 1,
     // the throwaway re-lex's own fresh coordinates.
-    assert_eq!(var_part.span.start.line, 3, "got: {:?}", var_part.span);
-    assert!(var_part.span.start.col > 1, "got: {:?}", var_part.span);
+    let at = position(src, var_part.span.start);
+    assert_eq!(at.line, 3, "got: {:?}", var_part.span);
+    assert!(at.col > 1, "got: {:?}", var_part.span);
 }
 
 /// `"$arr[key]"` - a bareword between the brackets is a *string* key in
@@ -160,7 +163,8 @@ fn a_non_canonical_number_index_in_interpolation_is_a_string_key() {
 /// several of them in one string land on distinct columns.
 #[test]
 fn multiple_bare_braced_vars_in_one_string_each_keep_their_own_real_position() {
-    let program = parse("<?php\nfunction f() {\n    return \"{$foo} and {$bar}\";\n}\n");
+    let src = "<?php\nfunction f() {\n    return \"{$foo} and {$bar}\";\n}\n";
+    let program = parse(src);
     let StmtKind::FunctionDecl(f) = &program[0].kind else {
         panic!("expected a function declaration, got {:?}", program[0].kind);
     };
@@ -193,8 +197,14 @@ fn multiple_bare_braced_vars_in_one_string_each_keep_their_own_real_position() {
     );
     // `    return "{$foo} and {$bar}";` - `{$foo}`'s own `$` sits at
     // column 14, `{$bar}`'s at column 25.
-    assert_eq!(var_spans[0].1.start, Position { line: 3, col: 14 });
-    assert_eq!(var_spans[1].1.start, Position { line: 3, col: 25 });
+    assert_eq!(
+        position(src, var_spans[0].1.start),
+        LineCol { line: 3, col: 14 }
+    );
+    assert_eq!(
+        position(src, var_spans[1].1.start),
+        LineCol { line: 3, col: 25 }
+    );
 }
 
 /// `"{$var->prop}"`/`"{$var[key]}"` - the explicitly-braced spelling of
@@ -310,17 +320,13 @@ fn quote_inside_complex_interpolation_does_not_end_the_string() {
     ));
 }
 
-// `bias_position` (interpolation.rs) computes `frag_base.col + pos.col
-// - 1` with plain u32 arithmetic - a `ComplexExpr` `frag_base` this
-// close to `u32::MAX` must not overflow/panic, even though no real PHP
-// file gets remotely close to it. Exercised through the real
+// A fragment's spans are its base plus its own offsets in u32 arithmetic -
+// a `ComplexExpr` base this close to `u32::MAX` must not overflow/panic,
+// even though no real PHP file gets remotely close to it. Exercised through the real
 // Parser::new/parse_program path, not a private-helper unit test.
 #[test]
 fn a_complex_interpolation_fragment_with_an_extreme_base_position_does_not_panic() {
-    let extreme = Position {
-        line: u32::MAX,
-        col: u32::MAX,
-    };
+    let extreme = u32::MAX;
     let token = Token::InterpString(vec![StringPart::ComplexExpr("2".to_string(), extreme)]);
     let span = Span {
         start: extreme,

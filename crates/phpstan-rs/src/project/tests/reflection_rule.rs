@@ -12,11 +12,11 @@ impl ReflectionRule for FlagsEveryPublicClass {
         vec![
             DiagnosticBuilder::new(
                 format!("saw class {fqn}"),
-                syntax::token::Span::default(),
+                syntax::span::Span::default(),
                 0,
                 "test.sawClass",
             )
-            .build(),
+            .build(&syntax::span::LineIndex::default()),
         ]
     }
 }
@@ -28,11 +28,11 @@ impl ReflectionRule for FlagsEveryFunction {
         vec![
             DiagnosticBuilder::new(
                 format!("saw function {fqn}"),
-                syntax::token::Span::default(),
+                syntax::span::Span::default(),
                 0,
                 "test.sawFunction",
             )
-            .build(),
+            .build(&syntax::span::LineIndex::default()),
         ]
     }
 }

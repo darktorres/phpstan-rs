@@ -10,7 +10,7 @@ use crate::checker::{Checker, Locals};
 use crate::registry::{FunctionReflection, ParameterReflection};
 use diagnostics::DiagnosticBuilder;
 use syntax::ast::*;
-use syntax::token::Span;
+use syntax::span::Span;
 use types::php_version::PhpFeature;
 use types::{Shape, ShapeKey, Type};
 

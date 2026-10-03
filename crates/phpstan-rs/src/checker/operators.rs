@@ -34,7 +34,7 @@
 
 use crate::checker::Checker;
 use syntax::ast::{BinOp, Expr, ExprKind, UnaryOp};
-use syntax::token::Span;
+use syntax::span::Span;
 use types::UnionAll as _;
 use types::{ArithmeticOp, OrderingOp, Type};
 

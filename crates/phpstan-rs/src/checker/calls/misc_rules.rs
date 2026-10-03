@@ -2,7 +2,7 @@ use crate::checker::{Checker, Locals};
 use crate::registry::FunctionReflection;
 use diagnostics::DiagnosticBuilder;
 use syntax::ast::*;
-use syntax::token::Span;
+use syntax::span::Span;
 use types::Type;
 
 impl<'a> Checker<'a> {
@@ -102,7 +102,7 @@ impl<'a> Checker<'a> {
     fn report_discarded(
         &mut self,
         callee: String,
-        span: syntax::token::Span,
+        span: syntax::span::Span,
         identifier: &'static str,
     ) {
         self.report_builder(

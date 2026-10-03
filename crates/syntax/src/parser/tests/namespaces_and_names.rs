@@ -141,7 +141,8 @@ fn use_with_comma_separated_list_parses() {
 
 #[test]
 fn use_group_expands_each_member_with_the_shared_prefix() {
-    let program = parse(r#"<?php use Foo\Bar\{Baz, Qux as Quux};"#);
+    let src = r#"<?php use Foo\Bar\{Baz, Qux as Quux};"#;
+    let program = parse(src);
     let StmtKind::Use(imports) = &program[0].kind else {
         panic!("expected Use");
     };
@@ -152,7 +153,10 @@ fn use_group_expands_each_member_with_the_shared_prefix() {
     let alias = imports[1].alias.as_ref().expect("an alias");
     assert_eq!(alias.name, "Quux");
     assert_eq!(
-        (alias.span.start.col, alias.span.end.col),
+        (
+            position(src, alias.span.start).col,
+            position(src, alias.span.end).col
+        ),
         (32, 36),
         "the alias spans its own text"
     );

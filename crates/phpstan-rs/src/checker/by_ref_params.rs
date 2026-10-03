@@ -79,7 +79,7 @@ impl<'a> Checker<'a> {
         &mut self,
         name: &str,
         actual: &Type,
-        span: syntax::token::Span,
+        span: syntax::span::Span,
     ) {
         let Some(declared) = self.current_function_by_ref_params.get(name).cloned() else {
             return;
@@ -141,7 +141,7 @@ impl<'a> Checker<'a> {
     /// `@param-out int|string` accepts the union; only a genuinely
     /// unacceptable exit state should ever be reported, not "some path
     /// disagreed with another."
-    pub(crate) fn check_by_ref_execution_end(&mut self, span: syntax::token::Span) {
+    pub(crate) fn check_by_ref_execution_end(&mut self, span: syntax::span::Span) {
         let out_types: Vec<(Name, Type)> = self
             .current_function_by_ref_params_with_tag
             .iter()
@@ -175,7 +175,7 @@ impl<'a> Checker<'a> {
     /// too_wide_by_ref_type` (mirroring `should_check_too_wide_method_
     /// return_type`'s own visibility/finality gate) - callers must check
     /// that before calling this.
-    pub(crate) fn check_too_wide_by_ref_type(&mut self, span: syntax::token::Span) {
+    pub(crate) fn check_too_wide_by_ref_type(&mut self, span: syntax::span::Span) {
         let params: Vec<(Name, Type)> = self
             .current_function_by_ref_params
             .iter()

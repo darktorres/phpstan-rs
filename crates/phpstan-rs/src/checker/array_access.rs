@@ -7,7 +7,7 @@
 
 use crate::checker::{Checker, Locals, narrowing_key, purge_stale_narrowing_for};
 use syntax::ast::{Expr, ExprKind};
-use syntax::token::Span;
+use syntax::span::Span;
 use types::Type;
 
 impl<'a> Checker<'a> {

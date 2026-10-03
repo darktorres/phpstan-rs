@@ -11,7 +11,7 @@ use rustc_hash::FxHashSet;
 use crate::checker::Checker;
 use diagnostics::DiagnosticBuilder;
 use syntax::ast::*;
-use syntax::token::Span;
+use syntax::span::Span;
 use syntax::visit::{Visitor, walk_expr, walk_stmt, walk_stmts};
 
 const MAGIC_CONSTANTS: [&str; 10] = [

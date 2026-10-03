@@ -27,7 +27,7 @@ use phpdoc::docblock;
 use phpdoc::grammar::TypeNode;
 use syntax::ast::TypeHint;
 use syntax::ast::{ClassConst, ClassKind, FunctionDecl, PropertyDecl};
-use syntax::token::Span;
+use syntax::span::Span;
 use types::Type;
 
 /// Real PHPStan's own tip text (`MissingTypehintCheck::

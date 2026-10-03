@@ -5,7 +5,7 @@ use std::sync::Arc;
 
 use rustc_hash::FxHashMap;
 use syntax::ast::{FunctionDecl, Stmt};
-use syntax::token::Span;
+use syntax::span::Span;
 use syntax::visit::{self, Visitor};
 
 use crate::registry::Provenance;

@@ -7,7 +7,7 @@
 
 use crate::checker::{Checker, MemberLabel};
 use syntax::ast::{Expr, ExprKind, Literal, Visibility};
-use syntax::token::Span;
+use syntax::span::Span;
 
 /// `check_member_visibility`'s own call bundle - 7 positional
 /// parameters tripped clippy's `too_many_arguments` lint, and a named-

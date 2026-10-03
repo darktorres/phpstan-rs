@@ -23,7 +23,7 @@
 
 use crate::checker::Checker;
 use crate::registry::FunctionReflection;
-use syntax::token::Span;
+use syntax::span::Span;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum UsageTokenKind {
@@ -55,7 +55,9 @@ impl<'a> Checker<'a> {
         deprecated: bool,
         internal: bool,
     ) {
-        if (!deprecated && !internal) || span.start.line != span.end.line {
+        if (!deprecated && !internal)
+            || self.line_index.line(span.start) != self.line_index.line(span.end)
+        {
             return;
         }
         self.semantic_tokens.push(UsageSemanticToken {

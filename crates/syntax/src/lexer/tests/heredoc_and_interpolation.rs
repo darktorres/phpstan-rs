@@ -1,6 +1,7 @@
 //! Heredoc/nowdoc parsing and string interpolation.
 use super::super::*;
-use crate::token::{Position, Span, StringPart};
+use crate::span::{LineCol, Span};
+use crate::token::StringPart;
 
 // Heredoc/nowdoc are real, common PHP syntax - flexible/PHP-7.3+
 // indentation stripping (`strip_heredoc_indent`) in particular.
@@ -16,7 +17,8 @@ fn nowdoc_strips_the_closing_markers_indentation_with_no_interpolation() {
 fn heredoc_strips_indentation_and_still_interpolates_variables() {
     let src = "<?php\n$x = <<<EOT\n    Hello, $name!\n      {$o->p}\n    EOT;\n";
     let toks = Lexer::new(src).tokenize();
-    let at = |line, col| Position { line, col };
+    let index = crate::span::LineIndex::new(src.as_bytes());
+    let at = |line, col| index.offset(LineCol { line, col }).expect("in the source");
     let span = |start, end| Span { start, end };
     assert_eq!(
         toks[2],
@@ -40,7 +42,8 @@ fn heredoc_strips_indentation_and_still_interpolates_variables() {
 fn each_part_of_a_double_quoted_string_spans_its_own_text() {
     let src = "<?php \"a $x b ${y}\";";
     let toks = Lexer::new(src).tokenize();
-    let at = |line, col| Position { line, col };
+    let index = crate::span::LineIndex::new(src.as_bytes());
+    let at = |line, col| index.offset(LineCol { line, col }).expect("in the source");
     let span = |start, end| Span { start, end };
     assert_eq!(
         toks[0],

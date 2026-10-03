@@ -277,7 +277,7 @@ impl<'a> Checker<'a> {
         op: &BinOp,
         l: &Expr,
         r: &Expr,
-        span: syntax::token::Span,
+        span: syntax::span::Span,
         locals: &Locals,
     ) {
         let left = self.infer_expr(l, locals);
@@ -397,7 +397,7 @@ impl<'a> Checker<'a> {
         l: &Expr,
         r: &Expr,
         compound: bool,
-        span: syntax::token::Span,
+        span: syntax::span::Span,
         locals: &Locals,
     ) {
         let left = self.infer_expr(l, locals);
@@ -469,7 +469,7 @@ impl<'a> Checker<'a> {
         sig: &FunctionReflection,
         args: &[Arg],
         locals: &Locals,
-        span: syntax::token::Span,
+        span: syntax::span::Span,
     ) {
         if args.iter().any(|a| a.spread) {
             return;
@@ -539,7 +539,7 @@ impl<'a> Checker<'a> {
         &mut self,
         cast: &Type,
         expr: &Type,
-        span: syntax::token::Span,
+        span: syntax::span::Span,
     ) {
         if expr.is_never() || self.registry.is_super_type_of(cast, expr) != TrinaryLogic::Yes {
             return;
@@ -570,7 +570,7 @@ impl<'a> Checker<'a> {
     /// Whether an assignment to `name` could have run before the one at
     /// `site`: it comes earlier, or shares an enclosing loop with it (as
     /// `site` itself does on a later iteration).
-    fn might_be_assigned_before(&self, name: &str, site: syntax::token::Span) -> bool {
+    fn might_be_assigned_before(&self, name: &str, site: syntax::span::Span) -> bool {
         let sites = &self.current_function_assigned_variables;
         let own_loops = sites
             .iter()
@@ -579,8 +579,7 @@ impl<'a> Checker<'a> {
             .unwrap_or_default();
         sites.iter().any(|a| {
             a.name.as_ref() == name
-                && ((a.span.start.line, a.span.start.col) < (site.start.line, site.start.col)
-                    || a.loops.iter().any(|l| own_loops.contains(l)))
+                && (a.span.start < site.start || a.loops.iter().any(|l| own_loops.contains(l)))
         })
     }
 
@@ -591,7 +590,7 @@ impl<'a> Checker<'a> {
         sig: &FunctionReflection,
         args: &[Arg],
         locals: &Locals,
-        span: syntax::token::Span,
+        span: syntax::span::Span,
     ) {
         if args.iter().any(|a| a.spread) {
             return;
@@ -627,7 +626,7 @@ impl<'a> Checker<'a> {
     /// The statement-level ports, before `stmt` itself is checked.
     pub(crate) fn check_strict_rules_statement(&mut self, stmt: &Stmt, locals: &Locals) {
         if self.settings.strict_rules.check_loop_variable_overwrite {
-            let mut overwritten: Vec<(syntax::token::Span, &str, String)> = Vec::new();
+            let mut overwritten: Vec<(syntax::span::Span, &str, String)> = Vec::new();
             match &stmt.kind {
                 StmtKind::Foreach { key, value, .. } => {
                     if let Some(key) = key
@@ -812,7 +811,7 @@ impl<'a> Checker<'a> {
 
 /// The plain variables `target` binds (recursing into `[...]`/`list()`
 /// destructuring) that `locals` already defines.
-fn defined_targets(target: &Expr, locals: &Locals) -> Vec<(String, syntax::token::Span)> {
+fn defined_targets(target: &Expr, locals: &Locals) -> Vec<(String, syntax::span::Span)> {
     syntax::stack::guard(|| match &target.kind {
         ExprKind::Variable(name) if locals.contains_key(name) => {
             vec![(name.to_string(), target.span)]
@@ -861,8 +860,8 @@ fn is_tuple(shape: &types::Shape) -> bool {
 #[derive(Clone)]
 pub(crate) struct AssignedVariable {
     name: Name,
-    span: syntax::token::Span,
-    loops: Vec<syntax::token::Span>,
+    span: syntax::span::Span,
+    loops: Vec<syntax::span::Span>,
 }
 
 /// Every site in `body` that binds a variable, outside nested functions,
@@ -877,7 +876,7 @@ pub(crate) fn assigned_variables(body: &[Stmt]) -> Vec<AssignedVariable> {
 }
 
 struct Assigned {
-    loops: Vec<syntax::token::Span>,
+    loops: Vec<syntax::span::Span>,
     out: Vec<AssignedVariable>,
 }
 
@@ -948,7 +947,7 @@ impl<'ast> syntax::visit::Visitor<'ast> for Assigned {
 
 /// The variables an assignment target binds: a plain variable, the root
 /// of an offset chain, or each element of a destructuring.
-fn bind_targets(target: &Expr, loops: &[syntax::token::Span], out: &mut Vec<AssignedVariable>) {
+fn bind_targets(target: &Expr, loops: &[syntax::span::Span], out: &mut Vec<AssignedVariable>) {
     syntax::stack::guard(|| match &target.kind {
         ExprKind::Variable(name) => out.push(AssignedVariable {
             name: name.clone(),

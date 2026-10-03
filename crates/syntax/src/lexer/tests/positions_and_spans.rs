@@ -1,6 +1,12 @@
 //! Token line/column position and span tracking.
 use super::super::*;
+use crate::span::LineCol;
 use crate::token::StringPart;
+
+/// The line and column of the byte offset `offset` of `src`.
+fn position(src: &str, offset: u32) -> LineCol {
+    crate::span::LineIndex::new(src.as_bytes()).line_col(offset)
+}
 
 // `tokenize_with_spans` - source-position tracking.
 
@@ -11,8 +17,8 @@ fn tokens_on_a_later_line_get_real_line_and_column_positions() {
     // toks: Variable(x), Equals, Integer(1), Semicolon, Variable(y), ...
     let (tok, span, _) = &toks[4];
     assert_eq!(*tok, Token::Variable("y".to_string().into()));
-    assert_eq!(span.start, Position { line: 3, col: 1 });
-    assert_eq!(span.end, Position { line: 3, col: 3 });
+    assert_eq!(position(src, span.start), LineCol { line: 3, col: 1 });
+    assert_eq!(position(src, span.end), LineCol { line: 3, col: 3 });
 }
 
 #[test]
@@ -28,13 +34,13 @@ fn a_token_spanning_multiple_lines_does_not_throw_off_the_next_token_s_position(
     // The heredoc body itself spans lines 3-4, but the token's own
     // extent runs through its closing marker on line 5, not just the
     // last content line.
-    assert_eq!(heredoc_end.line, 5);
+    assert_eq!(position(src, heredoc_end).line, 5);
     let (next_tok, next_span, _) = toks
         .iter()
         .find(|(t, _, _)| *t == Token::Variable("y".to_string().into()))
         .unwrap();
     assert_eq!(*next_tok, Token::Variable("y".to_string().into()));
-    assert_eq!(next_span.start, Position { line: 6, col: 1 });
+    assert_eq!(position(src, next_span.start), LineCol { line: 6, col: 1 });
 }
 
 #[test]
@@ -48,7 +54,7 @@ fn a_multi_byte_character_earlier_on_a_line_does_not_shift_later_columns() {
         .iter()
         .find(|(t, _, _)| *t == Token::Variable("x".to_string().into()))
         .unwrap();
-    assert_eq!(span.start, Position { line: 2, col: 6 });
+    assert_eq!(position(src, span.start), LineCol { line: 2, col: 6 });
 }
 
 #[test]
@@ -84,9 +90,9 @@ fn complex_interpolation_gets_a_real_base_position_on_a_later_line() {
     // `$s = "a\n{$obj->prop}";` - the `$` of `$obj` is the 11th
     // character (right after `{`, the 10th), `->` starts at the 15th
     // (right after `obj`), and the closing `}` sits at the 21st.
-    assert_eq!(var_start, Position { line: 2, col: 11 });
-    assert_eq!(var_end, Position { line: 2, col: 15 });
-    assert_eq!(end, Position { line: 2, col: 21 });
+    assert_eq!(position(src, var_start), LineCol { line: 2, col: 11 });
+    assert_eq!(position(src, var_end), LineCol { line: 2, col: 15 });
+    assert_eq!(position(src, end), LineCol { line: 2, col: 21 });
 }
 
 #[test]
@@ -120,9 +126,9 @@ fn shorthand_property_interpolation_base_points_at_the_dollar_sign() {
     // `$s = "x $obj->prop y";` - the `$` of `$obj` is the 9th character,
     // `->` starts at the 13th (right after `obj`), and `prop` ends right
     // before the trailing space at the 19th.
-    assert_eq!(var_start, Position { line: 2, col: 9 });
-    assert_eq!(var_end, Position { line: 2, col: 13 });
-    assert_eq!(end, Position { line: 2, col: 19 });
+    assert_eq!(position(src, var_start), LineCol { line: 2, col: 9 });
+    assert_eq!(position(src, var_end), LineCol { line: 2, col: 13 });
+    assert_eq!(position(src, end), LineCol { line: 2, col: 19 });
 }
 
 #[test]
@@ -188,7 +194,10 @@ fn many_double_quoted_strings_on_one_long_line_stay_linear_and_exact() {
         .rfind("\"0\"")
         .map(|byte| src[..byte].chars().count() + 1)
         .expect("the last string");
-    assert_eq!(last_string.1.start.col as usize, expected_col);
+    assert_eq!(
+        position(&src, last_string.1.start).col as usize,
+        expected_col
+    );
 }
 
 #[test]
@@ -212,13 +221,14 @@ fn a_short_echo_tag_after_inline_html_still_echoes() {
 
 #[test]
 fn an_unexpected_byte_is_a_warning_at_its_position_not_output() {
-    let (tokens, _, warnings) = Lexer::new("<?php\n$a = 1;\x01 $b;").tokenize_with_comments();
+    let src = "<?php\n$a = 1;\x01 $b;";
+    let (tokens, _, warnings) = Lexer::new(src).tokenize_with_comments();
     assert_eq!(
         warnings,
         vec![LexWarning {
             span: Span {
-                start: Position { line: 2, col: 8 },
-                end: Position { line: 2, col: 9 },
+                start: src.find('\x01').unwrap() as u32,
+                end: src.find('\x01').unwrap() as u32 + 1,
             },
             message: "unexpected byte 0x01 in PHP source, skipping".to_string(),
             is_error: false,

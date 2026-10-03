@@ -17,7 +17,7 @@ use rustc_hash::{FxHashMap, FxHashSet};
 use std::path::PathBuf;
 use syntax::ast::{ClassDef, Stmt, Visibility};
 use syntax::declarations::{Declared, for_each_declaration};
-use syntax::token::Span;
+use syntax::span::Span;
 use types::Name;
 
 /// Project-wide merge of every analysed file's `NamedArgumentCallFacts`,

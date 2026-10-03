@@ -15,7 +15,7 @@ use crate::pest_config;
 use crate::registry::FunctionReflection;
 use diagnostics::DiagnosticBuilder;
 use syntax::ast::*;
-use syntax::token::Span;
+use syntax::span::Span;
 use syntax::visit::{body_contains_yield, expr_contains_yield};
 use types::Name;
 use types::UnionAll as _;
@@ -6636,7 +6636,7 @@ fn closure_inferred_return_type(
 
 /// Where a static call's class part (`Foo` in `Foo::bar()`, or `$obj` in
 /// `$obj::bar()`) ends.
-fn static_target_end(target: &StaticTarget) -> syntax::token::Position {
+fn static_target_end(target: &StaticTarget) -> u32 {
     match target {
         StaticTarget::Name(name) => name.span.end,
         StaticTarget::Expr(expr) => expr.span.end,

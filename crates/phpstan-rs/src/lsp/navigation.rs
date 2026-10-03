@@ -39,7 +39,7 @@ use crate::registry::Registry;
 use rustc_hash::FxHashSet;
 use std::path::Path;
 use syntax::ast::*;
-use syntax::token::{Position, Span};
+use syntax::span::Span;
 use syntax::visit::{
     Visitor, walk_args, walk_catch_clause, walk_class_const, walk_class_decl, walk_class_def,
     walk_enum_case, walk_expr, walk_function_decl, walk_method_decl, walk_property_decl, walk_stmt,
@@ -131,26 +131,27 @@ pub(crate) enum ProbeScope {
 /// (`collect_all`'s use, for `document_highlight` - every candidate the
 /// walker would otherwise gate on cursor proximity is recorded instead).
 pub(crate) enum Anchor {
-    Position(Position),
+    /// A byte offset of the file.
+    Offset(u32),
     All,
 }
 
 impl Anchor {
     fn matches(&self, span: Span) -> bool {
         match self {
-            Anchor::Position(pos) => contains(span, *pos),
+            Anchor::Offset(at) => contains(span, *at),
             Anchor::All => true,
         }
     }
 }
 
-/// The entry point: what's declared/referenced at `pos` in the file
+/// The entry point: what's declared/referenced at the byte offset `at` in the file
 /// loaded under `path`, or `None` for nothing resolvable there. The
 /// walk order matches `out`'s own push order, so `.last()` is exactly
 /// the old single-`best`-overwritten-on-every-match semantics: the
 /// innermost (visited last) containing match wins.
-pub(crate) fn resolve_at(project: &Project, path: &Path, pos: Position) -> Option<Resolved> {
-    walk_file(project, path, Anchor::Position(pos))?
+pub(crate) fn resolve_at(project: &Project, path: &Path, at: u32) -> Option<Resolved> {
+    walk_file(project, path, Anchor::Offset(at))?
         .into_iter()
         .map(|(_, r)| r)
         .next_back()
@@ -182,15 +183,10 @@ fn walk_file(project: &Project, path: &Path, anchor: Anchor) -> Option<Vec<(Span
     Some(w.out)
 }
 
-/// 1-indexed, half-open (`span.end` is one past the last real character -
-/// confirmed against the lexer's own token-span construction) containment
-/// check.
-pub(super) fn contains(span: Span, pos: Position) -> bool {
-    let after_start =
-        span.start.line < pos.line || (span.start.line == pos.line && span.start.col <= pos.col);
-    let before_end =
-        pos.line < span.end.line || (pos.line == span.end.line && pos.col < span.end.col);
-    after_start && before_end
+/// Half-open (`span.end` is one past the last real byte - confirmed
+/// against the lexer's own token-span construction) containment check.
+pub(super) fn contains(span: Span, at: u32) -> bool {
+    span.contains(at)
 }
 
 /// The class a class name written in code (`self`/`static`/`parent`, or

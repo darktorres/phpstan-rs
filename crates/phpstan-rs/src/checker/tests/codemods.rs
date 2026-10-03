@@ -15,7 +15,7 @@ fn fixed(
         .filter_map(|x| x.fix.as_ref())
         .collect();
     assert!(!fixes.is_empty(), "no {identifier} fix in {d:?}");
-    diagnostics::fix::apply_fixes(src, fixes).0
+    String::from_utf8(diagnostics::fix::apply_fixes(src.as_bytes(), fixes).0).unwrap()
 }
 
 #[test]
@@ -53,7 +53,8 @@ fn unused_private_members_are_deleted_with_their_doc_comments() {
         .filter(|x| x.identifier.ends_with(".unused"))
         .filter_map(|x| x.fix.as_ref())
         .collect();
-    let (out, applied) = diagnostics::fix::apply_fixes(src, fixes);
+    let (out, applied) = diagnostics::fix::apply_fixes(src.as_bytes(), fixes);
+    let out = String::from_utf8(out).unwrap();
     assert_eq!(applied, 3, "{d:?}");
     assert_eq!(
         out,

@@ -20,7 +20,7 @@
 
 use crate::checker::Checker;
 use syntax::ast::*;
-use syntax::token::Span;
+use syntax::span::Span;
 
 impl<'a> Checker<'a> {
     /// The value of `e` when it's a magic number.

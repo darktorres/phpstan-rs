@@ -226,7 +226,7 @@ fn report(
             if !diagnostics.iter().any(|d| d.fix.is_some()) {
                 continue;
             }
-            let Ok(source) = std::fs::read_to_string(path) else {
+            let Ok(source) = std::fs::read(path) else {
                 eprintln!("failed to read {} to apply fixes", path.display());
                 continue;
             };

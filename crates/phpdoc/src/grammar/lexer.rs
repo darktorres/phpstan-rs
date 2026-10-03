@@ -1,4 +1,4 @@
-use syntax::token::{Position, Span};
+use syntax::span::Span;
 
 /// PHPDoc's own token set - deliberately much smaller than the full PHP
 /// `Lexer`/`Token` this project already has (`src/lexer.rs`/`src/
@@ -46,8 +46,8 @@ pub(crate) enum PhpDocToken {
 pub(crate) struct Lexer<'a> {
     chars: Vec<char>,
     pos: usize,
-    line: u32,
-    col: u32,
+    // The byte offset of `chars[pos]` in the text.
+    byte: u32,
     _src: &'a str,
 }
 
@@ -56,8 +56,7 @@ impl<'a> Lexer<'a> {
         Lexer {
             chars: src.chars().collect(),
             pos: 0,
-            line: 1,
-            col: 1,
+            byte: 0,
             _src: src,
         }
     }
@@ -70,22 +69,14 @@ impl<'a> Lexer<'a> {
         self.chars.get(self.pos + offset).copied()
     }
 
-    fn position(&self) -> Position {
-        Position {
-            line: self.line,
-            col: self.col,
-        }
+    fn position(&self) -> u32 {
+        self.byte
     }
 
     fn advance(&mut self) -> Option<char> {
         let c = self.peek()?;
         self.pos += 1;
-        if c == '\n' {
-            self.line += 1;
-            self.col = 1;
-        } else {
-            self.col += 1;
-        }
+        self.byte += c.len_utf8() as u32;
         Some(c)
     }
 

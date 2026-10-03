@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use crate::name::Name;
 use crate::php_string::PhpString;
-use crate::token::Span;
+use crate::span::Span;
 
 /// A syntax node's identity within one parsed file: the parser numbers
 /// every `Stmt` and `Expr` densely from 0 in the order it builds them, so a

@@ -1,36 +1,7 @@
 use std::sync::Arc;
 
 use crate::php_string::PhpString;
-
-/// A single point in a source file, 1-indexed (matching editor convention).
-/// `col` counts UTF-8 characters, not raw bytes - real PHP source can and
-/// does contain multi-byte content inside actual code, not just comments
-/// (string literals with em-dashes/curly quotes/accented characters), and
-/// a byte-offset column would silently overshoot the true character
-/// position on every such line.
-#[derive(
-    Debug, Clone, Copy, PartialEq, Eq, Hash, Default, serde::Serialize, serde::Deserialize,
-)]
-#[cfg_attr(feature = "fuzzing", derive(arbitrary::Arbitrary))]
-pub struct Position {
-    pub line: u32,
-    pub col: u32,
-}
-
-/// A source range - real LSP `range`s and most compiler-style diagnostics
-/// want both a start and an end, not just a single anchor point.
-///
-/// `Hash`: `Locals`'s own declaration-provenance tracking uses a `Span`
-/// as a `HashSet` element, one entry per candidate declaration site for
-/// a variable.
-#[derive(
-    Debug, Clone, Copy, PartialEq, Eq, Hash, Default, serde::Serialize, serde::Deserialize,
-)]
-#[cfg_attr(feature = "fuzzing", derive(arbitrary::Arbitrary))]
-pub struct Span {
-    pub start: Position,
-    pub end: Position,
-}
+use crate::span::Span;
 
 #[derive(Debug, Clone, PartialEq)]
 #[cfg_attr(feature = "fuzzing", derive(arbitrary::Arbitrary))]
@@ -330,17 +301,17 @@ pub enum StringPart {
     // real lookup/lock cost for text that's read exactly once and never
     // compared/deduplicated again, with no downstream `Arc<str>` field to
     // carry the saved allocation into anyway.
-    ComplexExpr(String, Position),
+    ComplexExpr(String, u32),
     // `$var->prop` (or `$var?->prop`) simple syntax. `var_start` is the
     // `$`'s own position, `var_end` the position right after the variable
     // name (where the arrow starts), `end` the position right after `prop`.
     PropertyAccess {
         var: crate::name::Name,
-        var_start: Position,
-        var_end: Position,
+        var_start: u32,
+        var_end: u32,
         prop: crate::name::Name,
         nullsafe: bool,
-        end: Position,
+        end: u32,
     },
     // `$var[key]` simple syntax, `key` restricted to `SimpleIndexKey`'s
     // three shapes - anything else falls back to `ComplexExpr` instead
@@ -349,10 +320,10 @@ pub enum StringPart {
     // name, `end` is the position right after the closing `]`.
     Index {
         var: crate::name::Name,
-        var_start: Position,
-        var_end: Position,
+        var_start: u32,
+        var_end: u32,
         key: SimpleIndexKey,
-        end: Position,
+        end: u32,
     },
 }
 

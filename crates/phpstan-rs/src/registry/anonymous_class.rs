@@ -18,6 +18,7 @@ use crate::registry::class_info::MemberSpans;
 use crate::registry::provenance::Origin;
 use rustc_hash::FxHashMap;
 use syntax::name::Name;
+use syntax::span::LineIndex;
 
 use crate::registry::{BuiltDecl, ClassReflection};
 use syntax::ast::*;
@@ -41,8 +42,12 @@ pub(crate) fn synthetic_name(
 /// own caller prints diagnostics against) - only needs to be stable per
 /// file across one analysis run, not to match real PHPStan's own path
 /// convention exactly, since nothing compares the two.
-pub(crate) fn name_anonymous_classes(stmts: &mut [Stmt], relative_file: &str) {
-    let mut lines = Lines(Vec::new());
+pub(crate) fn name_anonymous_classes(
+    stmts: &mut [Stmt],
+    relative_file: &str,
+    line_index: &LineIndex,
+) {
+    let mut lines = Lines(Vec::new(), line_index);
     for stmt in stmts.iter() {
         lines.visit_stmt(stmt);
     }
@@ -55,6 +60,7 @@ pub(crate) fn name_anonymous_classes(stmts: &mut [Stmt], relative_file: &str) {
     }
     let mut namer = Namer {
         relative_file,
+        line_index,
         per_line,
         seen_on_line: FxHashMap::default(),
     };
@@ -88,12 +94,12 @@ pub(crate) fn anonymous_class_decls(stmts: &[Stmt], origin: &Origin) -> Vec<Buil
 }
 
 /// The start line of every anonymous class, in source order.
-struct Lines(Vec<u32>);
+struct Lines<'i>(Vec<u32>, &'i LineIndex);
 
-impl<'a> Visitor<'a> for Lines {
+impl<'a> Visitor<'a> for Lines<'_> {
     fn visit_expr(&mut self, expr: &'a Expr) {
         if let ExprKind::NewAnonymousClass(_) = &expr.kind {
-            self.0.push(expr.span.start.line);
+            self.0.push(self.1.line(expr.span.start));
         }
         walk_expr(self, expr);
     }
@@ -102,6 +108,7 @@ impl<'a> Visitor<'a> for Lines {
 /// Names each anonymous class in the order `Lines` found them.
 struct Namer<'a> {
     relative_file: &'a str,
+    line_index: &'a LineIndex,
     per_line: FxHashMap<u32, u32>,
     seen_on_line: FxHashMap<u32, u32>,
 }
@@ -109,7 +116,7 @@ struct Namer<'a> {
 impl VisitorMut for Namer<'_> {
     fn visit_expr(&mut self, expr: &mut Expr) {
         if let ExprKind::NewAnonymousClass(class) = &mut expr.kind {
-            let line = expr.span.start.line;
+            let line = self.line_index.line(expr.span.start);
             let line_index = if self.per_line.get(&line).is_some_and(|n| *n > 1) {
                 let counter = self.seen_on_line.entry(line).or_insert(0);
                 *counter += 1;

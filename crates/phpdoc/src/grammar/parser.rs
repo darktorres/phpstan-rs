@@ -3,7 +3,7 @@ use super::ast::{
     PhpDocParseError, PhpDocTag, PhpDocTagValue, ShapeKey, TypeNode,
 };
 use super::lexer::{Lexer, PhpDocToken};
-use syntax::token::{Position, Span};
+use syntax::span::Span;
 
 /// The whole doc-comment-parsing entry point - preprocesses `raw` into
 /// one logical text span per `@tag` (joining wrapped continuation
@@ -40,10 +40,7 @@ pub(crate) fn parse(raw: &str) -> PhpDocNode {
             continue;
         }
         let tokens = Lexer::new(rest).tokenize();
-        let span = tokens.first().map(|(_, s)| *s).unwrap_or(Span {
-            start: Position { line: 1, col: 1 },
-            end: Position { line: 1, col: 1 },
-        });
+        let span = tokens.first().map(|(_, s)| *s).unwrap_or_default();
         let mut parser = TagParser::new(tokens);
         let value = parser.parse_tag_value(&name);
         let errors = std::mem::take(&mut parser.errors);
@@ -1231,28 +1228,8 @@ pub fn parse_type_prefix(rest: &str) -> (Option<TypeNode>, &str, Vec<PhpDocParse
     let tokens = Lexer::new(rest).tokenize();
     let mut parser = TagParser::new(tokens);
     let ty = parser.try_parse_type();
-    let byte_idx = byte_offset_of(rest, parser.peek_span().start);
-    (ty, &rest[byte_idx..], parser.errors)
-}
-
-/// The byte offset in `text` of the lexer's 1-based `pos` (line, and char
-/// column within that line). A tag's `rest` can span several lines (a
-/// wrapped tag's continuation lines are joined with `\n`, see
-/// `docblock::parse`), and Rust slicing is byte-indexed while `text` can
-/// hold multi-byte UTF-8, so both coordinates matter.
-fn byte_offset_of(text: &str, pos: syntax::token::Position) -> usize {
-    let line_start = if pos.line <= 1 {
-        0
-    } else {
-        text.match_indices('\n')
-            .nth(pos.line as usize - 2)
-            .map_or(text.len(), |(i, _)| i + 1)
-    };
-    let col = (pos.col as usize).saturating_sub(1);
-    text[line_start..]
-        .char_indices()
-        .nth(col)
-        .map_or(text.len(), |(b, _)| line_start + b)
+    let byte_idx = parser.peek_span().start as usize;
+    (ty, &rest[byte_idx.min(rest.len())..], parser.errors)
 }
 
 fn token_text(t: &PhpDocToken) -> String {

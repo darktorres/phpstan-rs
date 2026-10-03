@@ -22,7 +22,7 @@ impl Rule for FlagsVariableNamed {
                 6,
                 "test.flagged"
             )
-            .build();
+            .build(&syntax::span::LineIndex::default());
             1
         ]
     }
@@ -44,7 +44,7 @@ impl Rule for FlagsEchoStatements {
                 6,
                 "test.echoFlagged",
             )
-            .build(),
+            .build(&syntax::span::LineIndex::default()),
         ]
     }
 }
@@ -135,7 +135,7 @@ fn scope_exposes_the_current_class_and_method_and_the_variable_s_own_local_type(
                     6,
                     "test.scope",
                 )
-                .build(),
+                .build(&syntax::span::LineIndex::default()),
             ]
         }
     }
@@ -177,7 +177,7 @@ fn is_function_guarded_reflects_a_real_function_exists_narrowing() {
                     6,
                     "test.guard",
                 )
-                .build(),
+                .build(&syntax::span::LineIndex::default()),
             ]
         }
     }

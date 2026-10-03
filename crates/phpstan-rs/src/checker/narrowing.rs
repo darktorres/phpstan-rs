@@ -2,7 +2,7 @@ use crate::checker::expr::type_definitely_excludes_null;
 use crate::checker::{Checker, Discriminant, Locals, literal_string_key};
 use crate::registry::{AssertTarget, FunctionReflection};
 use syntax::ast::*;
-use syntax::token::Span;
+use syntax::span::Span;
 use types::{AccessoryKind, Type};
 mod assertions;
 mod phpunit;

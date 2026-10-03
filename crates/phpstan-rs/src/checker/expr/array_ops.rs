@@ -2,7 +2,7 @@ use crate::checker::expr::invalid_array_key_description;
 use crate::checker::{Checker, Locals, TemplateBindings};
 use crate::registry::FunctionReflection;
 use syntax::ast::*;
-use syntax::token::Span;
+use syntax::span::Span;
 use types::UnionAll as _;
 
 use types::{

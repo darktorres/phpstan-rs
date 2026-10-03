@@ -2,7 +2,7 @@ use crate::checker::Checker;
 use crate::registry::FunctionReflection;
 use phpdoc::docblock;
 use syntax::ast::*;
-use syntax::token::Span;
+use syntax::span::Span;
 use types::{self, PositionVariance, Type};
 
 impl<'a> Checker<'a> {

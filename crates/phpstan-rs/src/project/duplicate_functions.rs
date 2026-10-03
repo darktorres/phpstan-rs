@@ -26,6 +26,7 @@ use std::path::Path;
 
 use crate::project::duplicate_fn_sites::{DuplicateFunctionSites, FnDeclSite};
 use diagnostics::{Diagnostic, DiagnosticBuilder};
+use syntax::span::LineIndex;
 
 fn sites_differ(a: &FnDeclSite, b: &FnDeclSite) -> bool {
     a.param_hints != b.param_hints || a.return_hint != b.return_hint
@@ -37,8 +38,13 @@ fn sites_differ(a: &FnDeclSite, b: &FnDeclSite) -> bool {
 /// list of every declaration site. This project has no
 /// `RelativePathHelper` equivalent, so the location list uses each site's
 /// absolute path - a disclosed adaptation, not a silent difference.
+///
+/// `index` holds the lines of `path`, and `line_in` answers for any loaded
+/// file the line of an offset.
 pub(crate) fn check_duplicate_function_declarations(
     path: &Path,
+    index: &LineIndex,
+    line_in: &dyn Fn(&Path, u32) -> u32,
     sites: &DuplicateFunctionSites,
 ) -> Vec<Diagnostic> {
     let mut diagnostics = Vec::new();
@@ -50,13 +56,7 @@ pub(crate) fn check_duplicate_function_declarations(
         // location list's own order, must not depend on `FxHashMap`
         // file-load-order.
         let mut sorted: Vec<&FnDeclSite> = decl_sites.iter().collect();
-        sorted.sort_by(|a, b| {
-            (&a.path, a.span.start.line, a.span.start.col).cmp(&(
-                &b.path,
-                b.span.start.line,
-                b.span.start.col,
-            ))
-        });
+        sorted.sort_by(|a, b| (&a.path, a.span.start).cmp(&(&b.path, b.span.start)));
 
         // Adjacent sites with the identical native signature form one
         // "real duplicate" group; a signature difference starts a fresh
@@ -75,7 +75,7 @@ pub(crate) fn check_duplicate_function_declarations(
             }
             let location_list = group
                 .iter()
-                .map(|s| format!("- {}:{}", s.path.display(), s.span.start.line))
+                .map(|s| format!("- {}:{}", s.path.display(), line_in(&s.path, s.span.start)))
                 .collect::<Vec<_>>()
                 .join("\n");
             let message = format!("Function {name} declared multiple times:\n{location_list}");
@@ -86,7 +86,7 @@ pub(crate) fn check_duplicate_function_declarations(
                 diagnostics.push(
                     DiagnosticBuilder::new(message.clone(), s.span, 0, "function.duplicate")
                         .non_ignorable()
-                        .build(),
+                        .build(index),
                 );
             }
         }

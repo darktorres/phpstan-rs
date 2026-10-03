@@ -17,7 +17,7 @@ use phpdoc::grammar::TypeNode;
 use syntax::ast::{ClassDecl, ClassDef, ClassKind, ExprKind, Literal, Visibility};
 use syntax::name::FoldedMap;
 use syntax::name_resolution::NameContext;
-use syntax::token::Span;
+use syntax::span::Span;
 use types::{self, AccessoryKind, Name, TemplateParam, Type};
 
 mod attributes;
@@ -371,7 +371,7 @@ pub struct ClassReflection {
     // The own signature of each method whose name the body declares more
     // than once, keyed by its name's position: `methods` holds their
     // union.
-    pub(in crate::registry) redeclared_methods: FxHashMap<(u32, u32), FunctionReflection>,
+    pub(in crate::registry) redeclared_methods: FxHashMap<u32, FunctionReflection>,
     pub(in crate::registry) properties: FxHashMap<Name, PropertyReflection>,
     // Declaration order is kept: a listing of constants (a `match`
     // remainder, a `Foo::X_*` wildcard) follows source order, as in real
@@ -622,7 +622,7 @@ impl ClassReflection {
         &self.methods
     }
 
-    pub fn redeclared_methods(&self) -> &FxHashMap<(u32, u32), FunctionReflection> {
+    pub fn redeclared_methods(&self) -> &FxHashMap<u32, FunctionReflection> {
         &self.redeclared_methods
     }
 
@@ -825,17 +825,17 @@ pub struct ResolvedTypeImport {
 /// name's position (`ClassReflection::redeclared_methods`).
 #[allow(clippy::type_complexity)]
 fn collect_merged_methods(
-    methods: Vec<(Name, (u32, u32), FunctionReflection)>,
+    methods: Vec<(Name, u32, FunctionReflection)>,
 ) -> (
     FoldedMap<FunctionReflection>,
-    FxHashMap<(u32, u32), FunctionReflection>,
+    FxHashMap<u32, FunctionReflection>,
 ) {
     // PHP's method names ignore case: a name declared twice is one method.
     let mut counts: FxHashMap<&str, usize> = FxHashMap::default();
     for (name, _, _) in &methods {
         *counts.entry(name.lower()).or_default() += 1;
     }
-    let redeclared: FxHashMap<(u32, u32), FunctionReflection> = methods
+    let redeclared: FxHashMap<u32, FunctionReflection> = methods
         .iter()
         .filter(|(name, _, _)| counts[name.lower()] > 1)
         .map(|(_, site, sig)| (*site, sig.clone()))
@@ -854,8 +854,8 @@ fn collect_merged_methods(
     (out, redeclared)
 }
 
-fn name_site(f: &syntax::ast::FunctionDecl) -> (u32, u32) {
-    (f.name.span.start.line, f.name.span.start.col)
+fn name_site(f: &syntax::ast::FunctionDecl) -> u32 {
+    f.name.span.start
 }
 
 /// Each declared member's name span, by kind: what `ClassReflection::
@@ -863,7 +863,7 @@ fn name_site(f: &syntax::ast::FunctionDecl) -> (u32, u32) {
 #[derive(Default)]
 pub(crate) struct MemberSpans<'a> {
     pub(crate) methods: FxHashMap<&'a str, Span>,
-    pub(crate) method_sites: FxHashMap<(u32, u32), Span>,
+    pub(crate) method_sites: FxHashMap<u32, Span>,
     pub(crate) properties: FxHashMap<&'a str, Span>,
     pub(crate) consts: FxHashMap<&'a str, Span>,
 }
@@ -996,7 +996,7 @@ impl ClassReflection {
         // cloned only for the sets it actually belongs to, instead of
         // every method in the class being filtered/name-cloned once per
         // set across 5 separate iterations.
-        let mut methods_vec: Vec<(Name, (u32, u32), FunctionReflection)> =
+        let mut methods_vec: Vec<(Name, u32, FunctionReflection)> =
             Vec::with_capacity(c.methods.len());
         let mut abstract_methods: FxHashSet<Name> = FxHashSet::default();
         let mut final_methods: FxHashSet<Name> = FxHashSet::default();
@@ -1855,7 +1855,7 @@ impl ClassReflection {
                         .find(|k| k.name == **name)
                         .map(|k| k.name.span)
                 })
-                .map(|span| (span.start.line, span.start.col))
+                .map(|span| span.start)
         };
         self.consts.sort_by_cached_key(|name, _| position(name));
 

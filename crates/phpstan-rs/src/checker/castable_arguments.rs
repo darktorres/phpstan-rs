@@ -217,11 +217,7 @@ impl<'a> Checker<'a> {
     /// `ArrayUnpackingRule` (`arrayUnpacking.stringOffset`): below PHP
     /// 8.1, `[...$x]` can't unpack string keys. Level 3 when the keys
     /// are definitely strings, level 7 when only some may be.
-    pub(crate) fn check_unpacked_string_keys(
-        &mut self,
-        value_ty: &Type,
-        span: syntax::token::Span,
-    ) {
+    pub(crate) fn check_unpacked_string_keys(&mut self, value_ty: &Type, span: syntax::span::Span) {
         if self
             .registry
             .php_supports_everywhere(types::php_version::PhpFeature::ArrayUnpackingWithStringKeys)

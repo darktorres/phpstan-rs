@@ -26,7 +26,7 @@ use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::checker::Checker;
 use crate::registry::ClassReflection;
-use syntax::token::Span;
+use syntax::span::Span;
 use types::{self, Type};
 
 impl<'a> Checker<'a> {

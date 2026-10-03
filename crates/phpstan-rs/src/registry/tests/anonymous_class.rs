@@ -13,7 +13,11 @@ use syntax::visit::{Visitor, walk_expr};
 fn parse(src: &str) -> Vec<Stmt> {
     let tokens = Lexer::new(src).tokenize_with_spans();
     let mut program = Parser::new(tokens).parse_program().unwrap();
-    name_anonymous_classes(&mut program, "src/Foo.php");
+    name_anonymous_classes(
+        &mut program,
+        "src/Foo.php",
+        &syntax::span::LineIndex::new(src.as_bytes()),
+    );
     program
 }
 

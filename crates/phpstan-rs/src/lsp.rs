@@ -52,7 +52,7 @@ use crate::project::{Project, ProjectSettings};
 use crate::registry::{FunctionReflection, format_signature, param_label};
 use crate::{baseline, ignore_errors};
 use syntax::ast::ClassKind;
-use syntax::token::Span;
+use syntax::span::{LineIndex, Span};
 use types::Type;
 
 mod completion;
@@ -72,7 +72,7 @@ use protocol::percent_decode;
 use protocol::{
     diagnostic_fix_to_code_action, from_lsp_position, log_message_notification, path_to_uri,
     progress_notification, publish_diagnostics_notification, pump_messages, ranges_overlap,
-    to_lsp_range, to_request_id, uri_to_path, write_message,
+    span_to_lsp_range, to_lsp_range, to_request_id, uri_to_path, write_message,
 };
 
 /// Resolves a receiver's own (possibly multi-class) type down to every
@@ -877,7 +877,8 @@ impl Server {
     /// the LSP spec, not an error.
     fn hover(&self, uri: &Uri, position: LspPosition) -> Option<Hover> {
         let path = uri_to_path(uri)?;
-        let resolved = navigation::resolve_at(&self.project, &path, from_lsp_position(position))?;
+        let resolved =
+            navigation::resolve_at(&self.project, &path, self.offset_at(&path, position)?)?;
         let text = self.format_hover(&resolved)?;
         Some(Hover {
             contents: HoverContents::Scalar(MarkedString::String(text)),
@@ -1070,7 +1071,8 @@ impl Server {
     /// diagnostic, not this method's job to report again).
     fn definition(&self, uri: &Uri, position: LspPosition) -> Option<GotoDefinitionResponse> {
         let path = uri_to_path(uri)?;
-        let resolved = navigation::resolve_at(&self.project, &path, from_lsp_position(position))?;
+        let resolved =
+            navigation::resolve_at(&self.project, &path, self.offset_at(&path, position)?)?;
         // A local variable's own declaration site(s) are same-file and
         // never need a registry lookup at all, unlike every other
         // variant below.
@@ -1184,7 +1186,8 @@ impl Server {
     /// than every `Resolved` variant in its v1.
     fn type_definition(&self, uri: &Uri, position: LspPosition) -> Option<GotoDefinitionResponse> {
         let path = uri_to_path(uri)?;
-        let resolved = navigation::resolve_at(&self.project, &path, from_lsp_position(position))?;
+        let resolved =
+            navigation::resolve_at(&self.project, &path, self.offset_at(&path, position)?)?;
         let ty = match &resolved {
             navigation::Resolved::Instance {
                 receiver_span,
@@ -1235,8 +1238,9 @@ impl Server {
     fn document_symbol(&self, uri: &Uri) -> Option<DocumentSymbolResponse> {
         let path = uri_to_path(uri)?;
         let stmts = self.project.ast(&path)?;
+        let index = self.project.line_index(&path)?;
         Some(DocumentSymbolResponse::Nested(
-            document_symbol::document_symbols(stmts),
+            document_symbol::document_symbols(stmts, index),
         ))
     }
 
@@ -1249,10 +1253,11 @@ impl Server {
     fn semantic_tokens_full(&self, uri: &Uri) -> Option<lsp_types::SemanticTokensResult> {
         let path = uri_to_path(uri)?;
         let tokens = self.project.semantic_tokens_for_file(&path);
+        let index = self.project.line_index(&path)?;
         Some(lsp_types::SemanticTokensResult::Tokens(
             lsp_types::SemanticTokens {
                 result_id: None,
-                data: semantic_tokens::encode(tokens),
+                data: semantic_tokens::encode(tokens, index),
             },
         ))
     }
@@ -1310,7 +1315,8 @@ impl Server {
         include_declaration: bool,
     ) -> Option<Vec<Location>> {
         let path = uri_to_path(uri)?;
-        let resolved = navigation::resolve_at(&self.project, &path, from_lsp_position(position))?;
+        let resolved =
+            navigation::resolve_at(&self.project, &path, self.offset_at(&path, position)?)?;
         let targets = self.ref_targets_for(&resolved);
         if targets.is_empty() {
             return None;
@@ -1356,7 +1362,8 @@ impl Server {
         new_name: &str,
     ) -> Option<lsp_types::WorkspaceEdit> {
         let path = uri_to_path(uri)?;
-        let resolved = navigation::resolve_at(&self.project, &path, from_lsp_position(position))?;
+        let resolved =
+            navigation::resolve_at(&self.project, &path, self.offset_at(&path, position)?)?;
         let (target, decl) = match &resolved {
             navigation::Resolved::Class(fqn) => (
                 use_sites::RefTarget::Class(fqn.clone()),
@@ -1382,7 +1389,7 @@ impl Server {
                 .entry(edit_uri)
                 .or_default()
                 .push(lsp_types::TextEdit {
-                    range: to_lsp_range(*span),
+                    range: self.lsp_range(p, *span),
                     new_text: new_name.to_string(),
                 });
         }
@@ -1392,7 +1399,7 @@ impl Server {
                 .entry(edit_uri)
                 .or_default()
                 .push(lsp_types::TextEdit {
-                    range: to_lsp_range(span),
+                    range: self.lsp_range(&p, span),
                     new_text: new_name.to_string(),
                 });
         }
@@ -1422,18 +1429,19 @@ impl Server {
         position: LspPosition,
     ) -> Option<Vec<DocumentHighlight>> {
         let path = uri_to_path(uri)?;
-        let target = navigation::resolve_at(&self.project, &path, from_lsp_position(position))?;
+        let target =
+            navigation::resolve_at(&self.project, &path, self.offset_at(&path, position)?)?;
         let mut spans: Vec<Span> = navigation::collect_all(&self.project, &path)
             .into_iter()
             .filter(|(_, r)| self.same_symbol(&target, r))
             .map(|(span, _)| span)
             .collect();
-        spans.sort_by_key(|s| (s.start.line, s.start.col, s.end.line, s.end.col));
+        spans.sort_by_key(|s| (s.start, s.end));
         spans.dedup();
         let highlights: Vec<DocumentHighlight> = spans
             .into_iter()
             .map(|span| DocumentHighlight {
-                range: to_lsp_range(span),
+                range: self.lsp_range(&path, span),
                 kind: None,
             })
             .collect();
@@ -1561,7 +1569,12 @@ impl Server {
                 (params, locals)
             }
         };
-        let hints = inlay_hints::filter_to_range(&cached.0, &cached.1, range);
+        let hints = inlay_hints::filter_to_range(
+            &cached.0,
+            &cached.1,
+            range,
+            self.project.line_index(&path)?,
+        );
         (!hints.is_empty()).then_some(hints)
     }
 
@@ -1588,7 +1601,7 @@ impl Server {
     /// module doc comment for the claim-and-clear walker this reads.
     fn signature_help(&self, uri: &Uri, position: LspPosition) -> Option<SignatureHelp> {
         let path = uri_to_path(uri)?;
-        let pos = from_lsp_position(position);
+        let pos = self.offset_at(&path, position)?;
         let help = signature_help::resolve_at(&self.project, &path, pos)?;
         self.build_signature_help(help)
     }
@@ -1691,7 +1704,14 @@ impl Server {
             .or_else(|| self.project.source(&path).map(str::to_string))?;
         let stmts = self.project.ast(&path)?;
         let tokens = completion::tokenize(&text);
-        let cursor = from_lsp_position(position);
+        let live_index = LineIndex::new(text.as_bytes());
+        let stale_index = self.project.line_index(&path)?;
+        let cursor = completion::Cursor {
+            live: live_index.offset(from_lsp_position(position))?,
+            live_index: &live_index,
+            stale: stale_index.offset(from_lsp_position(position))?,
+            stale_index,
+        };
         match completion::build_member_probe(&text, &tokens, cursor, stmts, self.project.registry())
         {
             Some(completion::MemberProbe::Resolved {
@@ -1728,7 +1748,7 @@ impl Server {
                 &self.project,
                 &path,
                 stmts,
-                cursor,
+                cursor.stale,
             ))),
         }
     }
@@ -1750,11 +1770,12 @@ impl Server {
         }
         let diagnostics = self.last_diagnostics.get(&path)?;
         let source = self.project.source(&path);
+        let index = self.project.line_index(&path)?;
         Some(
             diagnostics
                 .iter()
                 .filter(|d| d.fix.is_some() && ranges_overlap(to_lsp_range(d.span), range))
-                .filter_map(|d| diagnostic_fix_to_code_action(uri, d, source))
+                .filter_map(|d| diagnostic_fix_to_code_action(uri, d, source, index))
                 .collect(),
         )
     }
@@ -1763,8 +1784,23 @@ impl Server {
         let (target_uri, _version) = self.uri_and_version_for(target_path);
         Location {
             uri: target_uri,
-            range: to_lsp_range(span),
+            range: self.lsp_range(target_path, span),
         }
+    }
+
+    /// The byte offset of `position` in the loaded file `path`.
+    fn offset_at(&self, path: &Path, position: LspPosition) -> Option<u32> {
+        self.project
+            .line_index(path)?
+            .offset(from_lsp_position(position))
+    }
+
+    /// The LSP range of `span` in the loaded file `path`; empty when the
+    /// file isn't loaded.
+    fn lsp_range(&self, path: &Path, span: Span) -> LspRange {
+        self.project
+            .line_index(path)
+            .map_or_else(LspRange::default, |index| span_to_lsp_range(index, span))
     }
 
     /// Sends a server-initiated JSON-RPC request and registers its id

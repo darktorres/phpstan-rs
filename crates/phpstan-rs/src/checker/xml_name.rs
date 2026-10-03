@@ -11,7 +11,7 @@
 
 use crate::checker::Checker;
 use syntax::ast::{Arg, ExprKind, Literal};
-use syntax::token::Span;
+use syntax::span::Span;
 
 impl<'a> Checker<'a> {
     /// `(new DOMDocument())->createElement($name)` - real PHP throws

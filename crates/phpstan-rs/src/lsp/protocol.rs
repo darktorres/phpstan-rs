@@ -12,7 +12,7 @@ use lsp_types::{
 };
 
 use diagnostics::{Diagnostic, diagnostic_order};
-use syntax::token::{Position, Span};
+use syntax::span::{LineCol, LineIndex, Range, Span};
 
 /// The outcome of trying to read one framed LSP message. `Eof` (a clean
 /// transport disconnection) and `Disconnected` (a real I/O failure
@@ -269,22 +269,28 @@ pub(crate) fn level_to_severity(level: u8) -> DiagnosticSeverity {
     }
 }
 
-/// `Span`'s 1-indexed line/col becomes LSP's 0-indexed line/character -
+/// `Range`'s 1-indexed line/col becomes LSP's 0-indexed line/character -
 /// shared by every diagnostic/hover/definition response this server
-/// sends, so the same approximation (this project's own `Span` counts
+/// sends, so the same approximation (this project's own columns count
 /// UTF-8 characters; LSP wants UTF-16 code units - see this module's own
 /// doc comment) is made exactly once.
-pub(crate) fn to_lsp_range(span: Span) -> LspRange {
+pub(crate) fn to_lsp_range(range: Range) -> LspRange {
     LspRange {
-        start: to_lsp_position(span.start),
-        end: to_lsp_position(span.end),
+        start: to_lsp_position(range.start),
+        end: to_lsp_position(range.end),
     }
+}
+
+/// `to_lsp_range` of the lines and columns `span` has in the file whose
+/// lines `index` holds.
+pub(crate) fn span_to_lsp_range(index: &LineIndex, span: Span) -> LspRange {
+    to_lsp_range(index.range(span))
 }
 
 /// The single-position half of `to_lsp_range` - see its own doc comment
 /// for the 1-indexed-vs-0-indexed/UTF-8-vs-UTF-16 caveats, which apply
 /// identically here.
-pub(crate) fn to_lsp_position(pos: Position) -> LspPosition {
+pub(crate) fn to_lsp_position(pos: LineCol) -> LspPosition {
     LspPosition {
         line: pos.line.saturating_sub(1),
         character: pos.col.saturating_sub(1),
@@ -294,7 +300,7 @@ pub(crate) fn to_lsp_position(pos: Position) -> LspPosition {
 /// Whether `a` and `b` overlap, including merely touching at a point (a
 /// zero-width `a` - a bare cursor, no selection - still overlaps a
 /// diagnostic span it sits inside or right at the edge of). Compares
-/// `Position` endpoints directly: `Position` derives `Ord`/`PartialOrd`
+/// `LineCol` endpoints directly: `LineCol` derives `Ord`/`PartialOrd`
 /// (lexicographic on line-then-character, matching field declaration
 /// order) in lsp_types 0.97.0, but `Range` itself does not - there is no
 /// whole-`Range` comparison to make here, only this one.
@@ -312,10 +318,11 @@ pub(crate) fn diagnostic_fix_to_code_action(
     uri: &Uri,
     d: &Diagnostic,
     source: Option<&str>,
+    index: &LineIndex,
 ) -> Option<CodeActionOrCommand> {
     let fix = d.fix.as_ref()?;
     let span = match source {
-        Some(source) => diagnostics::fix::resolve_span(source, fix)?,
+        Some(source) => diagnostics::fix::resolve_span(source.as_bytes(), fix)?,
         None if fix.within.is_none() => fix.span,
         None => return None,
     };
@@ -328,7 +335,7 @@ pub(crate) fn diagnostic_fix_to_code_action(
                 [(
                     uri.clone(),
                     vec![TextEdit {
-                        range: to_lsp_range(span),
+                        range: span_to_lsp_range(index, span),
                         new_text: fix.replacement.clone(),
                     }],
                 )]
@@ -346,8 +353,8 @@ pub(crate) fn diagnostic_fix_to_code_action(
 /// position, converted from LSP's 0-indexed/UTF-16 convention to this
 /// project's own 1-indexed/UTF-8-character one. Same accepted
 /// approximation, just applied in the other direction.
-pub(crate) fn from_lsp_position(pos: LspPosition) -> Position {
-    Position {
+pub(crate) fn from_lsp_position(pos: LspPosition) -> LineCol {
+    LineCol {
         line: pos.line + 1,
         col: pos.character + 1,
     }

@@ -12,7 +12,7 @@
 use crate::checker::Checker;
 use crate::pcre_validate::validate_pattern;
 use syntax::ast::{Arg, Expr, ExprKind, Literal};
-use syntax::token::Span;
+use syntax::span::Span;
 
 /// Which of the 8 real PCRE-pattern-taking builtins `name` is, and how
 /// its own pattern argument(s) are shaped - `None` for anything else.

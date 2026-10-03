@@ -32,7 +32,7 @@ use rustc_hash::FxHashMap;
 use std::path::{Path, PathBuf};
 
 use syntax::ast::*;
-use syntax::token::Span;
+use syntax::span::Span;
 use syntax::visit::{Visitor, walk_catch_clause, walk_class_def, walk_expr, walk_stmts};
 
 /// What a reference site points at - no local-variable variant (see

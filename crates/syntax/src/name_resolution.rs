@@ -3,7 +3,6 @@
 
 use crate::ast::*;
 use crate::name::Name;
-use crate::token::Position;
 use crate::visit::{
     VisitorMut, walk_attribute_mut, walk_catch_clause_mut, walk_class_def_mut, walk_expr_mut,
     walk_stmt_mut, walk_stmts_mut,
@@ -191,15 +190,12 @@ pub fn for_each_in_context<'a>(stmts: &'a [Stmt], mut f: impl FnMut(&'a Stmt, &N
     walk(stmts, &mut NameContext::default(), &mut f);
 }
 
-/// The context in effect at `pos`: every `namespace` and `use` statement
-/// that starts before it has taken effect.
-pub fn context_at(stmts: &[Stmt], pos: Position) -> NameContext {
+/// The context in effect at the byte offset `pos`: every `namespace` and
+/// `use` statement that starts before it has taken effect.
+pub fn context_at(stmts: &[Stmt], pos: u32) -> NameContext {
     let mut at = NameContext::default();
     for_each_in_context(stmts, |stmt, ctx| {
-        let start = stmt.span.start;
-        if matches!(stmt.kind, StmtKind::Namespace(_) | StmtKind::Use(_))
-            && (start.line, start.col) < (pos.line, pos.col)
-        {
+        if matches!(stmt.kind, StmtKind::Namespace(_) | StmtKind::Use(_)) && stmt.span.start < pos {
             at = ctx.clone();
         }
     });

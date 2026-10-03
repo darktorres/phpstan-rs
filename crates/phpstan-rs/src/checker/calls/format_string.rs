@@ -344,7 +344,7 @@ impl<'a> Checker<'a> {
         name: &str,
         args: &[Arg],
         locals: &Locals,
-        span: syntax::token::Span,
+        span: syntax::span::Span,
     ) {
         let Some(function) = format_function(name) else {
             return;
@@ -371,7 +371,7 @@ impl<'a> Checker<'a> {
         function: &FormatFunction,
         args: &[Arg],
         locals: &Locals,
-        span: syntax::token::Span,
+        span: syntax::span::Span,
     ) -> Option<Vec<usize>> {
         let format_ty = self.infer_expr(&args.get(function.format)?.value, locals);
         let registry = self.registry;
@@ -404,7 +404,7 @@ impl<'a> Checker<'a> {
         function: &FormatFunction,
         args: &[Arg],
         locals: &Locals,
-        span: syntax::token::Span,
+        span: syntax::span::Span,
     ) {
         if args.iter().any(|a| a.spread) || args.len() < function.minimum {
             return;
@@ -433,7 +433,7 @@ impl<'a> Checker<'a> {
         function: &FormatFunction,
         args: &[Arg],
         locals: &Locals,
-        span: syntax::token::Span,
+        span: syntax::span::Span,
     ) {
         if args.len() < function.minimum {
             return;
@@ -515,7 +515,7 @@ impl<'a> Checker<'a> {
         function: &FormatFunction,
         args: &[Arg],
         locals: &Locals,
-        span: syntax::token::Span,
+        span: syntax::span::Span,
     ) {
         if args.iter().any(|a| a.spread) || args.len() < function.minimum {
             return;

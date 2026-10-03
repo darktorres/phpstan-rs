@@ -24,7 +24,7 @@ use syntax::declarations::Declared;
 use syntax::lexer::LexWarning;
 use syntax::name::Interner;
 use syntax::parser::ParseError;
-use syntax::token::Span;
+use syntax::span::{LineIndex, Span};
 use types::Name;
 use whole_program::renamed_named_arguments::NamedArgumentCallFactsWithPath;
 
@@ -128,6 +128,8 @@ struct FileState {
     bodies: FileBodies,
     // What is true of the file as a whole (`syntax::FileFacts`).
     facts: FileFacts,
+    // Its lines, which the lines and columns of its spans are found by.
+    line_index: Arc<LineIndex>,
 }
 
 /// The loaded files' function and method bodies, found by provenance.
@@ -672,6 +674,19 @@ impl Project {
         &self.files
     }
 
+    /// The lines of the loaded file `path`.
+    pub(crate) fn line_index(&self, path: &Path) -> Option<&Arc<LineIndex>> {
+        self.files.get(path).map(|file| &file.line_index)
+    }
+
+    /// The 1-based line of the byte offset `offset` of the loaded file
+    /// `path`: the first line for a file that is not loaded.
+    pub(crate) fn line_in(&self, path: &Path, offset: u32) -> u32 {
+        self.files
+            .get(path)
+            .map_or(1, |file| file.line_index.line(offset))
+    }
+
     /// Applies every analyzed file's inline ignore comments to `results`
     /// and, with `report_unmatched`, reports each ignore that suppressed
     /// nothing (`ignore.unmatchedLine`/`ignore.unmatchedIdentifier`),
@@ -710,20 +725,14 @@ impl Project {
             if !report_unmatched {
                 continue;
             }
-            let trait_lines = trait_line_ranges(&file.ast);
+            let trait_lines = trait_line_ranges(&file.ast, &file.line_index);
             let in_trait = |line: u32| trait_lines.iter().any(|(a, b)| (*a..=*b).contains(&line));
             let mut unmatched: Vec<Diagnostic> = Vec::new();
             let mut unmatched_line = |line: u32, message: String, identifier: &'static str| {
-                let at = syntax::token::Position { line, col: 1 };
                 unmatched.push(
-                    diagnostics::DiagnosticBuilder::new(
-                        message,
-                        Span { start: at, end: at },
-                        0,
-                        identifier,
-                    )
-                    .non_ignorable()
-                    .build(),
+                    diagnostics::DiagnosticBuilder::new(message, Span::default(), 0, identifier)
+                        .non_ignorable()
+                        .build_at(line_start_range(line)),
                 );
             };
             for &line in &ignores.lines {
@@ -869,6 +878,7 @@ impl Project {
             bodies,
             origin_path,
             facts,
+            line_index,
             class_fn_refs,
         } = parsed;
         self.begin_declaration_changes();
@@ -914,6 +924,7 @@ impl Project {
                 owner,
                 bodies,
                 facts,
+                line_index,
             },
         );
     }
@@ -1593,7 +1604,13 @@ impl Project {
         // *before* the very edit that introduced its own trigger) for as
         // long as the file kept failing to parse, not just for the one
         // request that happened to race a genuinely-invalid save.
-        let (ast, ignores, _, facts) = parse_with_ignores(path, new_source, &self.interner, None)?;
+        let Parsed {
+            ast,
+            ignores,
+            facts,
+            line_index,
+            ..
+        } = parse_with_ignores(path, new_source, &self.interner, None)?;
         let previous = self.unindex_file(path);
         let (functions, classes) = declared_names(&ast);
         let constants = declared_constants(&ast);
@@ -1672,6 +1689,7 @@ impl Project {
                 owner: self.packages.owner(&self.absolute_path(path)),
                 bodies,
                 facts,
+                line_index,
             },
         );
         let mut affected = self.finish_declarations();
@@ -2005,13 +2023,18 @@ impl Project {
             }
         }
         let relation = self.settings.rule_levels.relation(&self.registry);
-        for (_, outcome) in checks.iter_mut() {
-            if let Ok(check) = outcome {
+        for (path, outcome) in checks.iter_mut() {
+            if let Ok(check) = outcome
+                && let Some(file) = self.files.get(path.as_path())
+            {
                 let sites = std::mem::take(&mut check.property_type_sites);
                 check
                     .diagnostics
                     .extend(checker::check_too_wide_property_types(
-                        &sites, &merged, &relation,
+                        &sites,
+                        &merged,
+                        &relation,
+                        &file.line_index,
                     ));
             }
         }
@@ -2027,7 +2050,8 @@ impl Project {
         let mut checker = Checker::new(&self.registry)
             .with_sql(&self.sql)
             .with_settings(&self.settings)
-            .with_bodies(&self.files);
+            .with_bodies(&self.files)
+            .with_line_index(&file.line_index);
         checker.set_pest_this_type(self.pest_config.resolve_this_type(path, &self.registry));
         checker.set_pest_hook_properties(self.pest_config.resolve_hook_properties(path));
         checker.set_current_file(path);
@@ -2088,35 +2112,36 @@ impl Project {
         if self.settings.rules.check_duplicate_function_declarations {
             diagnostics.extend(duplicate_functions::check_duplicate_function_declarations(
                 path,
+                &file.line_index,
+                &|path, offset| self.line_in(path, offset),
                 &self.duplicate_fn_sites,
             ));
         }
         if self.settings.rules.check_duplicate_class_declarations {
             diagnostics.extend(duplicate_classes::check_duplicate_class_declarations(
                 path,
+                &file.line_index,
+                &|path, offset| self.line_in(path, offset),
                 &self.duplicate_class_sites,
             ));
         }
         for (line, message) in &file.ignores.parse_errors {
-            let at = syntax::token::Position {
-                line: *line,
-                col: 1,
-            };
             diagnostics.push(
                 diagnostics::DiagnosticBuilder::new(
                     format!("Parse error in @phpstan-ignore: {message}"),
-                    Span { start: at, end: at },
+                    Span::default(),
                     0,
                     "ignore.parseError",
                 )
                 .non_ignorable()
-                .build(),
+                .build_at(line_start_range(*line)),
             );
         }
         diagnostics.sort_by_key(|d| (d.span.start.line, d.span.start.col));
         if self.settings.phpstan_api {
             diagnostics.extend(checker::phpstan_api::check_phpstan_api_usage(
                 &file.ast,
+                &file.line_index,
                 &self.registry,
                 Some(self.package_name(path)),
             ));
@@ -2277,17 +2302,18 @@ impl Project {
         if !file.analyzed {
             return None;
         }
-        if !self.defer_inline_ignores && file.ignores.lines.contains(&span.start.line)
+        let line = file.line_index.line(span.start);
+        if !self.defer_inline_ignores && file.ignores.lines.contains(&line)
             || !self.defer_inline_ignores
                 && file
                     .ignores
                     .identifiers
-                    .get(&span.start.line)
+                    .get(&line)
                     .is_some_and(|ids| ids.iter().any(|id| id == identifier))
         {
             return None;
         }
-        Some(DiagnosticBuilder::new(message, span, 5, identifier).build())
+        Some(DiagnosticBuilder::new(message, span, 5, identifier).build(&file.line_index))
     }
 
     /// Runs every opt-in whole-program diagnostic check (currently
@@ -2537,15 +2563,21 @@ impl Default for Project {
     }
 }
 
+/// The empty range at the start of `line`.
+fn line_start_range(line: u32) -> syntax::span::Range {
+    let at = syntax::span::LineCol { line, col: 1 };
+    syntax::span::Range { start: at, end: at }
+}
+
 /// First and last line of every trait declared in `ast`.
-fn trait_line_ranges(ast: &[Stmt]) -> Vec<(u32, u32)> {
+fn trait_line_ranges(ast: &[Stmt], line_index: &LineIndex) -> Vec<(u32, u32)> {
     let mut ranges = Vec::new();
     for stmt in ast {
         syntax::visit::any_stmt_in_body(stmt, |s| {
             if let StmtKind::ClassDecl(c) = &s.kind
                 && c.def.kind == syntax::ast::ClassKind::Trait
             {
-                ranges.push((s.span.start.line, s.span.end.line));
+                ranges.push((line_index.line(s.span.start), line_index.line(s.span.end)));
             }
             false
         });
@@ -2553,13 +2585,14 @@ fn trait_line_ranges(ast: &[Stmt]) -> Vec<(u32, u32)> {
     ranges
 }
 
-/// Parses `source`, with its inline ignore comments.
-type Parsed = (
-    Vec<Stmt>,
-    ignore_comments::IgnoreComments,
-    Vec<LexWarning>,
-    FileFacts,
-);
+/// A file parsed, with its inline ignore comments.
+struct Parsed {
+    ast: Vec<Stmt>,
+    ignores: ignore_comments::IgnoreComments,
+    warnings: Vec<LexWarning>,
+    facts: FileFacts,
+    line_index: Arc<LineIndex>,
+}
 
 fn parse_with_ignores<'a>(
     path: &Path,
@@ -2576,9 +2609,19 @@ fn parse_with_ignores<'a>(
         crate::stub_attributes::apply_stub_attributes(&mut ast);
     }
     if parsed.facts.has_anonymous_class {
-        crate::registry::name_anonymous_classes(&mut ast, &path.display().to_string());
+        crate::registry::name_anonymous_classes(
+            &mut ast,
+            &path.display().to_string(),
+            &parsed.line_index,
+        );
     }
-    Ok((ast, ignores, parsed.warnings, parsed.facts))
+    Ok(Parsed {
+        ast,
+        ignores,
+        warnings: parsed.warnings,
+        facts: parsed.facts,
+        line_index: parsed.line_index,
+    })
 }
 
 /// Everything about loading one file that's pure - parsing, plus every
@@ -2630,6 +2673,8 @@ pub struct ParsedFile {
     origin_path: Arc<Path>,
     // What is true of the file as a whole (`syntax::FileFacts`).
     facts: FileFacts,
+    // Its lines, which the lines and columns of its spans are found by.
+    line_index: Arc<LineIndex>,
     // The file's class and function use sites, when indexed alongside the
     // parse (`Project::index_use_sites`); `insert_parsed_file` indexes
     // them itself otherwise.
@@ -2662,7 +2707,13 @@ pub fn parse_file_with_names<'a>(
     interner: &Arc<Interner>,
     names: Option<&mut syntax::name::NameCache>,
 ) -> Result<ParsedFile, ParseError> {
-    let (ast, ignores, lex_warnings, facts) = parse_with_ignores(path, source, interner, names)?;
+    let Parsed {
+        ast,
+        ignores,
+        warnings: lex_warnings,
+        facts,
+        line_index,
+    } = parse_with_ignores(path, source, interner, names)?;
     let origin_path: Arc<Path> = Arc::from(path);
     let origin = Origin::File(Arc::clone(&origin_path));
     let file_declarations::FileDeclarations {
@@ -2700,6 +2751,7 @@ pub fn parse_file_with_names<'a>(
         bodies,
         origin_path,
         facts,
+        line_index,
         class_fn_refs: None,
     })
 }

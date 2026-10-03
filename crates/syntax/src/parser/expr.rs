@@ -1,6 +1,7 @@
 use crate::ast::*;
 use crate::parser::{ParseError, Parser};
-use crate::token::{Keyword, Position, Span, Token};
+use crate::span::Span;
+use crate::token::{Keyword, Token};
 
 impl Parser {
     // ---- expressions (precedence climbing) ----
@@ -67,7 +68,7 @@ impl Parser {
     pub(crate) fn parse_assignment_tail(
         &mut self,
         lhs: Expr,
-        start: Position,
+        start: u32,
     ) -> Result<Expr, ParseError> {
         let op = match self.peek() {
             Token::Equals => None,
@@ -249,7 +250,7 @@ impl Parser {
             .pattern_only
             .drain(..)
             .map(|(_, error)| error)
-            .min_by_key(|error| (error.span.start.line, error.span.start.col))
+            .min_by_key(|error| error.span.start)
         {
             Some(error) => Err(error),
             None => Ok(()),

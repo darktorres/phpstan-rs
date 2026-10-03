@@ -8,7 +8,7 @@ use crate::checker::Checker;
 use diagnostics::DiagnosticBuilder;
 use phpdoc::docblock;
 use syntax::ast::*;
-use syntax::token::Span;
+use syntax::span::Span;
 use types::php_version::PhpFeature;
 
 /// One property's declaration-relevant facts, shared by a plain

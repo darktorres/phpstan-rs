@@ -466,7 +466,7 @@ impl<'a> Checker<'a> {
         sig: Option<&FunctionReflection>,
         is_method: bool,
         label: &str,
-        implicit_calls: &[syntax::token::Span],
+        implicit_calls: &[syntax::span::Span],
     ) {
         let Some(sig) = sig else {
             return;

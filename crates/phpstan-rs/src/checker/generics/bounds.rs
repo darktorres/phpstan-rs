@@ -6,7 +6,7 @@ use crate::checker::{
 };
 use phpdoc::docblock;
 use syntax::ast::*;
-use syntax::token::Span;
+use syntax::span::Span;
 use types::{self, Type};
 
 impl<'a> Checker<'a> {

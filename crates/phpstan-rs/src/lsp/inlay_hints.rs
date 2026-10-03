@@ -13,7 +13,7 @@ use types::Name;
 use lsp_types::{InlayHint, InlayHintKind, InlayHintLabel, Range as LspRange};
 
 use crate::project::Project;
-use syntax::token::Span;
+use syntax::span::{LineIndex, Span};
 use types::Type;
 
 use super::protocol::to_lsp_position;
@@ -36,10 +36,11 @@ pub(super) fn filter_to_range(
     param_hints: &[(Span, Name)],
     local_hints: &[(Span, Type)],
     range: LspRange,
+    index: &LineIndex,
 ) -> Vec<InlayHint> {
     let mut hints = Vec::new();
     for (span, name) in param_hints {
-        let position = to_lsp_position(span.start);
+        let position = to_lsp_position(index.line_col(span.start));
         if position < range.start || position > range.end {
             continue;
         }
@@ -55,7 +56,7 @@ pub(super) fn filter_to_range(
         });
     }
     for (span, ty) in local_hints {
-        let position = to_lsp_position(span.end);
+        let position = to_lsp_position(index.line_col(span.end));
         if position < range.start || position > range.end {
             continue;
         }

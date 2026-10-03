@@ -8,26 +8,17 @@
 use super::*;
 
 fn resolve_import_at_end(stmts: &[Stmt], fqn: &str) -> (String, Option<TextEdit>) {
-    let end = Position {
-        line: u32::MAX,
-        col: 0,
-    };
-    resolve_import(stmts, &context_at(stmts, end), fqn)
+    resolve_import(
+        stmts,
+        &LineIndex::default(),
+        &context_at(stmts, u32::MAX),
+        fqn,
+    )
 }
 
-fn pos_after(text: &str, needle: &str) -> Position {
-    let byte_offset = text.find(needle).unwrap() + needle.len();
-    let mut line = 1u32;
-    let mut col = 1u32;
-    for ch in text[..byte_offset].chars() {
-        if ch == '\n' {
-            line += 1;
-            col = 1;
-        } else {
-            col += 1;
-        }
-    }
-    Position { line, col }
+/// The byte offset right after the first `needle` in `text`.
+fn pos_after(text: &str, needle: &str) -> u32 {
+    (text.find(needle).unwrap() + needle.len()) as u32
 }
 
 fn parse(text: &str) -> Vec<Stmt> {

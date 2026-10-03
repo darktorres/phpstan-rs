@@ -8,7 +8,7 @@
 
 use crate::checker::{Checker, Locals};
 use syntax::ast::StaticTarget;
-use syntax::token::Span;
+use syntax::span::Span;
 
 impl<'a> Checker<'a> {
     /// For a static call whose target resolved to no class: the

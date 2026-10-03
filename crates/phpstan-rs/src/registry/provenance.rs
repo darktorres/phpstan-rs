@@ -6,7 +6,7 @@ use std::path::Path;
 use std::sync::Arc;
 use syntax::name::Name;
 
-use syntax::token::Span;
+use syntax::span::Span;
 
 use crate::registry::Registry;
 

@@ -60,7 +60,7 @@ use crate::checker::Checker;
 use crate::checker::uninitialized::property_assigned_anywhere_in_hierarchy;
 use crate::registry::FunctionReflection;
 use syntax::ast::*;
-use syntax::token::Span;
+use syntax::span::Span;
 use syntax::visit::{Visitor, for_each_child_expr};
 
 /// Bare property names known-initialized on every path reaching a given

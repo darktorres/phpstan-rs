@@ -132,7 +132,7 @@ impl Checker<'_> {
         &mut self,
         body: &[Stmt],
         locals: &Locals,
-        span: syntax::token::Span,
+        span: syntax::span::Span,
         new_terminates: bool,
     ) {
         if self.completion_oracle {
@@ -143,7 +143,7 @@ impl Checker<'_> {
 
     pub(crate) fn note_completion_difference(
         &mut self,
-        span: syntax::token::Span,
+        span: syntax::span::Span,
         what: &str,
         old: bool,
         new: bool,

@@ -13,7 +13,7 @@
 use crate::checker::{Checker, Locals};
 use crate::registry::FunctionReflection;
 use syntax::ast::Arg;
-use syntax::token::Span;
+use syntax::span::Span;
 
 use types::{Type, is_numeric_string_literal};
 

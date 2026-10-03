@@ -2,7 +2,7 @@ use crate::checker::{Checker, Locals, class_type_word};
 use crate::registry::{self, FunctionReflection};
 use diagnostics::DiagnosticBuilder;
 use syntax::ast::{QualifiedName, StaticTarget, TypeHint};
-use syntax::token::Span;
+use syntax::span::Span;
 use types::Name;
 use types::{self, Type};
 
@@ -399,7 +399,7 @@ impl<'a> Checker<'a> {
     /// A fix rewriting the name `raw`, written at `span`, to `canonical`'s
     /// casing - keeping `raw`'s own qualification (only its segments'
     /// letter case changes). Offered only when `span` is exactly `raw`'s
-    /// width on one line, so the edit can't touch anything else.
+    /// width, so the edit can't touch anything else.
     pub(crate) fn name_case_fix(
         raw: &str,
         canonical: &str,
@@ -416,8 +416,7 @@ impl<'a> Checker<'a> {
         if !tail.eq_ignore_ascii_case(written) || tail == written {
             return None;
         }
-        let width = raw.chars().count() as u32;
-        if span.start.line != span.end.line || span.end.col.checked_sub(span.start.col)? != width {
+        if span.len() as usize != raw.len() {
             return None;
         }
         let replacement = if leading { format!("\\{tail}") } else { tail };

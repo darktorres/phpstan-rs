@@ -1,69 +1,39 @@
 //! Applying diagnostics' suggested fixes (`DiagnosticFix`) to source text.
 
 use crate::{Diagnostic, DiagnosticFix};
-use syntax::token::{Position, Span};
-
-/// Byte offset of 1-based `position` (column in characters) in `source`,
-/// or `None` past the end of its line or the text.
-fn byte_offset(source: &str, position: Position) -> Option<usize> {
-    let mut line_start = 0;
-    for _ in 1..position.line {
-        line_start += source[line_start..].find('\n')? + 1;
-    }
-    let line_end = source[line_start..]
-        .find('\n')
-        .map_or(source.len(), |i| line_start + i);
-    let line = &source[line_start..line_end];
-    let col = position.col.checked_sub(1)? as usize;
-    if col == line.chars().count() {
-        return Some(line_end);
-    }
-    line.char_indices().nth(col).map(|(i, _)| line_start + i)
-}
-
-fn position_at(source: &str, offset: usize) -> Position {
-    let before = &source[..offset];
-    let line_start = before.rfind('\n').map_or(0, |i| i + 1);
-    Position {
-        line: before.matches('\n').count() as u32 + 1,
-        col: source[line_start..offset].chars().count() as u32 + 1,
-    }
-}
+use syntax::span::Span;
 
 /// The exact span `fix` edits in `source`: its own span, or for a `within`
 /// fix the first whole-word occurrence of that text inside it.
-pub fn resolve_span(source: &str, fix: &DiagnosticFix) -> Option<Span> {
+pub fn resolve_span(source: &[u8], fix: &DiagnosticFix) -> Option<Span> {
     let Some(text) = &fix.within else {
         return Some(fix.span);
     };
-    let start = byte_offset(source, fix.span.start)?;
-    let end = byte_offset(source, fix.span.end)?;
-    let region = source.get(start..end)?;
+    let region = std::str::from_utf8(fix.span.slice(source)?).ok()?;
     let is_word = |c: char| c.is_alphanumeric() || c == '_';
     let found = region.match_indices(text.as_str()).find(|(i, _)| {
         !region[..*i].chars().next_back().is_some_and(is_word)
             && !region[i + text.len()..].chars().next().is_some_and(is_word)
     })?;
-    let from = start + found.0;
+    let from = fix.span.start + found.0 as u32;
     Some(Span {
-        start: position_at(source, from),
-        end: position_at(source, from + text.len()),
+        start: from,
+        end: from + text.len() as u32,
     })
 }
 
 /// `source` with every fix applied, and how many were. A fix overlapping
 /// one already applied, or pointing outside the text, is skipped.
 pub fn apply_fixes<'d>(
-    source: &str,
+    source: &[u8],
     fixes: impl IntoIterator<Item = &'d DiagnosticFix>,
-) -> (String, usize) {
+) -> (Vec<u8>, usize) {
     let mut edits: Vec<(usize, usize, &str)> = fixes
         .into_iter()
         .filter_map(|fix| {
             let span = resolve_span(source, fix)?;
-            let start = byte_offset(source, span.start)?;
-            let end = byte_offset(source, span.end)?;
-            (start <= end).then_some((start, end, fix.replacement.as_str()))
+            let (start, end) = (span.start as usize, span.end as usize);
+            (start <= end && end <= source.len()).then_some((start, end, fix.replacement.as_str()))
         })
         .collect();
     edits.sort_by_key(|(start, end, _)| (*start, *end));
@@ -78,9 +48,9 @@ pub fn apply_fixes<'d>(
         }
         applied.push(edit);
     }
-    let mut out = source.to_string();
+    let mut out = source.to_vec();
     for (start, end, replacement) in applied.iter().rev() {
-        out.replace_range(*start..*end, replacement);
+        out.splice(*start..*end, replacement.bytes());
     }
     (out, applied.len())
 }
@@ -94,17 +64,11 @@ pub fn fixes_of(diagnostics: &[Diagnostic]) -> impl Iterator<Item = &DiagnosticF
 mod tests {
     use super::*;
 
-    fn fix(start: (u32, u32), end: (u32, u32), replacement: &str) -> DiagnosticFix {
+    fn fix(start: usize, end: usize, replacement: &str) -> DiagnosticFix {
         DiagnosticFix {
             span: Span {
-                start: Position {
-                    line: start.0,
-                    col: start.1,
-                },
-                end: Position {
-                    line: end.0,
-                    col: end.1,
-                },
+                start: start as u32,
+                end: end as u32,
             },
             replacement: replacement.to_string(),
             description: String::new(),
@@ -112,41 +76,59 @@ mod tests {
         }
     }
 
+    /// The fix replacing `text` where it first occurs in `source`.
+    fn fix_of(source: &str, text: &str, replacement: &str) -> DiagnosticFix {
+        let start = source.find(text).expect("the text is in the source");
+        fix(start, start + text.len(), replacement)
+    }
+
     #[test]
     fn fixes_apply_back_to_front_and_overlaps_are_skipped() {
         let source = "<?php\n$ä = foo();\nbar();\n";
         let fixes = [
-            fix((2, 6), (2, 9), "Foo"),
-            fix((3, 1), (3, 4), "Baz"),
-            fix((3, 2), (3, 3), "x"),
-            fix((9, 1), (9, 2), "out of range"),
+            fix_of(source, "foo", "Foo"),
+            fix_of(source, "bar", "Baz"),
+            fix_of(source, "a", "x"),
+            fix(900, 901, "out of range"),
         ];
-        let (out, applied) = apply_fixes(source, &fixes);
-        assert_eq!(out, "<?php\n$ä = Foo();\nBaz();\n");
+        let (out, applied) = apply_fixes(source.as_bytes(), &fixes);
+        assert_eq!(out, "<?php\n$ä = Foo();\nBaz();\n".as_bytes());
         assert_eq!(applied, 2);
     }
 
     #[test]
     fn a_fix_can_delete_whole_lines_and_insert_at_a_point() {
         let source = "a\nb\nc\n";
-        let (out, _) = apply_fixes(source, &[fix((2, 1), (3, 1), ""), fix((3, 1), (3, 1), "x")]);
-        assert_eq!(out, "a\nxc\n");
+        let (out, _) = apply_fixes(source.as_bytes(), &[fix(2, 4, ""), fix(4, 4, "x")]);
+        assert_eq!(out, b"a\nxc\n");
+    }
+
+    #[test]
+    fn a_fix_edits_bytes_that_are_not_utf8() {
+        let source = b"a \xff b";
+        let (out, applied) = apply_fixes(source, &[fix(2, 3, "x")]);
+        assert_eq!((out, applied), (b"a x b".to_vec(), 1));
     }
 
     #[test]
     fn a_within_fix_edits_only_the_first_whole_word_occurrence_in_its_span() {
         let source = "<?php\n$RUNNER->RUN();\n";
-        let mut within = fix((2, 1), (2, 16), "run");
+        let start = source.find("$RUNNER").unwrap();
+        let mut within = fix(start, start + 15, "run");
         within.within = Some("RUN".to_string());
+        let run = source.find("->RUN").unwrap() + 2;
         assert_eq!(
-            resolve_span(source, &within),
+            resolve_span(source.as_bytes(), &within),
             Some(Span {
-                start: Position { line: 2, col: 10 },
-                end: Position { line: 2, col: 13 },
+                start: run as u32,
+                end: run as u32 + 3,
             })
         );
-        assert_eq!(apply_fixes(source, [&within]).0, "<?php\n$RUNNER->run();\n");
+        assert_eq!(
+            apply_fixes(source.as_bytes(), [&within]).0,
+            "<?php\n$RUNNER->run();\n".as_bytes()
+        );
         within.within = Some("MISSING".to_string());
-        assert_eq!(resolve_span(source, &within), None);
+        assert_eq!(resolve_span(source.as_bytes(), &within), None);
     }
 }

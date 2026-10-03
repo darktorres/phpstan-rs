@@ -8,7 +8,7 @@ pub mod fix;
 
 use std::borrow::Cow;
 
-use syntax::token::Span;
+use syntax::span::{LineIndex, Range, Span};
 
 /// A diagnostic kind's machine identifier: dot-separated ASCII
 /// alphanumeric segments (`argument.type`, `class.notFound`), the syntax
@@ -97,7 +97,7 @@ impl PartialEq<&str> for Identifier {
 #[derive(Debug, Clone)]
 pub struct Diagnostic {
     pub message: String,
-    pub span: Span,
+    pub span: Range,
     pub level: u8,
     /// A dot-separated, PHPStan-style machine identifier for this
     /// diagnostic's *kind* (e.g. `"argument.type"`, `"class.notFound"`,
@@ -261,10 +261,19 @@ impl DiagnosticBuilder {
         self
     }
 
-    pub fn build(self) -> Diagnostic {
+    /// The diagnostic, at the lines and columns the span has in the file
+    /// whose lines `index` holds.
+    pub fn build(self, index: &LineIndex) -> Diagnostic {
+        let range = index.range(self.span);
+        self.build_at(range)
+    }
+
+    /// The diagnostic at `range`, for one whose lines and columns are
+    /// known and not an offset of a file.
+    pub fn build_at(self, range: Range) -> Diagnostic {
         Diagnostic {
             message: self.message,
-            span: self.span,
+            span: range,
             level: self.level,
             identifier: self.identifier,
             tips: self.tips,

@@ -2,7 +2,7 @@ use crate::checker::expr::ranges::{NullProbeVerdictFn, expr_reads_a_property};
 use crate::checker::operators::ordering_op;
 use crate::checker::{Checker, Locals, literal_string_key, narrowing_type_for_predicate};
 use syntax::ast::*;
-use syntax::token::Span;
+use syntax::span::Span;
 use types::OrderingOp;
 use types::Type;
 

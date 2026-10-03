@@ -13,7 +13,7 @@ use crate::checker::Checker;
 use diagnostics::DiagnosticBuilder;
 use syntax::ast::*;
 use syntax::name::Name;
-use syntax::token::Span;
+use syntax::span::Span;
 use syntax::visit::{Visitor, walk_stmt, walk_stmts};
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -205,7 +205,7 @@ impl<'a> Checker<'a> {
             }
         }
         let mut labels: Vec<_> = scope.labels.iter().collect();
-        labels.sort_by_key(|(_, p)| (p.span.start.line, p.span.start.col));
+        labels.sort_by_key(|(_, p)| p.span.start);
         for (name, placement) in labels {
             if !used.contains(name) {
                 self.report(

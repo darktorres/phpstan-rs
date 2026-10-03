@@ -47,7 +47,7 @@ use crate::checker::sql_reflection::query_builder::{
 };
 use crate::checker::{Checker, Locals};
 use syntax::ast::{Arg, Expr, ExprKind};
-use syntax::token::Span;
+use syntax::span::Span;
 use types::Type;
 
 /// Every placeholder the SQL text itself references, in first-occurrence

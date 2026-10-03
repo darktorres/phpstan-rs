@@ -7,7 +7,7 @@ impl<'a> Checker<'a> {
         &mut self,
         subject: &Expr,
         cases: &[SwitchCase],
-        span: syntax::token::Span,
+        span: syntax::span::Span,
         locals: &mut Locals,
         declared_return: Option<&Type>,
         label: &str,

@@ -10,7 +10,7 @@
 use crate::checker::Checker;
 use diagnostics::DiagnosticBuilder;
 use syntax::ast::{NativeType, QualifiedName, TypeHint, TypeHintKind};
-use syntax::token::Span;
+use syntax::span::Span;
 use types::php_version::PhpFeature;
 
 #[derive(Clone, Copy, PartialEq, Eq)]

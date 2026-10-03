@@ -8,7 +8,8 @@ use std::path::{Path, PathBuf};
 
 use diagnostics::Diagnostic;
 use syntax::lexer::Lexer;
-use syntax::token::{Position, Token};
+use syntax::span::{LineCol, LineIndex};
+use syntax::token::Token;
 
 const CONTEXT_LINES: u32 = 2;
 
@@ -37,7 +38,7 @@ fn token_colour(token: &Token) -> Option<&'static str> {
     }
 }
 
-fn add_range(highlights: &mut Highlights, start: Position, end: Position, colour: &'static str) {
+fn add_range(highlights: &mut Highlights, start: LineCol, end: LineCol, colour: &'static str) {
     for line in start.line..=end.line {
         let from = if line == start.line { start.col } else { 1 };
         let to = (line == end.line).then_some(end.col);
@@ -48,26 +49,16 @@ fn add_range(highlights: &mut Highlights, start: Position, end: Position, colour
 fn highlights_for(source: &str) -> Highlights {
     let mut highlights = Highlights::default();
     let (tokens, comments, _) = Lexer::new(source).tokenize_with_comments();
+    let index = LineIndex::new(source.as_bytes());
     for (token, span, _) in &tokens {
         if let Some(colour) = token_colour(token) {
-            add_range(&mut highlights, span.start, span.end, colour);
+            let range = index.range(*span);
+            add_range(&mut highlights, range.start, range.end, colour);
         }
     }
-    for (start, text) in &comments {
-        let lines = text.matches('\n').count() as u32;
-        let last = text.rsplit('\n').next().unwrap_or(text).chars().count() as u32;
-        let end = if lines == 0 {
-            Position {
-                line: start.line,
-                col: start.col + last,
-            }
-        } else {
-            Position {
-                line: start.line + lines,
-                col: last + 1,
-            }
-        };
-        add_range(&mut highlights, *start, end, GRAY);
+    for (span, _) in &comments {
+        let range = index.range(*span);
+        add_range(&mut highlights, range.start, range.end, GRAY);
     }
     highlights
 }

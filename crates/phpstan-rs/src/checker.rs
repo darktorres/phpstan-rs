@@ -5,9 +5,10 @@ use types::Name;
 use crate::pest_config;
 use crate::registry::Registry;
 use diagnostics::{Diagnostic, DiagnosticBuilder};
+use std::sync::Arc;
 use syntax::ast::*;
 use syntax::name_resolution::NameContext;
-use syntax::token::Span;
+use syntax::span::{LineIndex, Span};
 use types::Type;
 
 /// A checked scope's variable-name-to-inferred-type bindings.
@@ -597,6 +598,9 @@ pub struct Checker<'a> {
     // wins" precedence) with whatever file-local `beforeEach(...)` calls
     // `check_program` itself finds. Defaults empty.
     pub(crate) pest_hook_properties: FxHashSet<Name>,
+    // The lines of the file being checked, which a diagnostic's span is
+    // turned into a line and column by.
+    pub(crate) line_index: Arc<LineIndex>,
     // The file being checked, for resolving `include`/`require` paths.
     pub(crate) current_file: Option<std::path::PathBuf>,
     // `current_file` as an absolute path (`Project::absolute_path`), what
@@ -620,8 +624,7 @@ pub struct Checker<'a> {
     // parameter, recorded by `predefine_byref_or_unknown_args` before the
     // arguments are checked - the one read-looking position where PHP
     // accepts an empty dim, since it creates the element.
-    pub(crate) by_ref_empty_dim_args:
-        std::cell::RefCell<rustc_hash::FxHashSet<syntax::token::Span>>,
+    pub(crate) by_ref_empty_dim_args: std::cell::RefCell<rustc_hash::FxHashSet<syntax::span::Span>>,
     // The type of every legal write to a private property, keyed by the
     // declaring class and the property. A trait's methods are checked once
     // per host, so a write in one lands under the host's name.
@@ -1011,6 +1014,13 @@ impl<'a> Checker<'a> {
         self
     }
 
+    /// The lines of the file to check, for its diagnostics' lines and
+    /// columns.
+    pub fn with_line_index(mut self, line_index: &Arc<LineIndex>) -> Self {
+        self.line_index = Arc::clone(line_index);
+        self
+    }
+
     /// The type relations over the registry's classes, as lenient as the
     /// configured rule levels say.
     pub(crate) fn relation(&self) -> types::Relation<'a> {
@@ -1143,6 +1153,7 @@ impl<'a> Checker<'a> {
             in_exempt_last_condition: false,
             pest_this_type: Type::mixed(),
             pest_hook_properties: FxHashSet::default(),
+            line_index: Arc::default(),
             current_file: None,
             current_file_absolute: None,
             include_guarded_paths: FxHashSet::default(),
@@ -1301,7 +1312,8 @@ impl<'a> Checker<'a> {
             }
         }
         let host = self.current_class.clone().unwrap_or_default();
-        dump.insert((stmt.span.start.line, stmt.span.start.col, host), line);
+        let at = self.line_index.line_col(stmt.span.start);
+        dump.insert((at.line, at.col, host), line);
     }
 
     /// `line:col [host] vars` for every statement recorded by
@@ -1466,7 +1478,7 @@ impl<'a> Checker<'a> {
         identifier: impl Into<diagnostics::Identifier>,
     ) {
         self.diagnostics
-            .push(DiagnosticBuilder::new(message, span, level, identifier).build());
+            .push(DiagnosticBuilder::new(message, span, level, identifier).build(&self.line_index));
     }
 
     /// The builder path - for a call site that also wants a `tip`, a
@@ -1474,7 +1486,7 @@ impl<'a> Checker<'a> {
     /// positional signature has room for without every plain call site
     /// paying for arguments it never uses.
     pub(crate) fn report_builder(&mut self, builder: DiagnosticBuilder) {
-        self.diagnostics.push(builder.build());
+        self.diagnostics.push(builder.build(&self.line_index));
     }
 
     /// An object used somewhere real PHP implicitly converts it to a
@@ -1779,6 +1791,7 @@ impl<'a> Checker<'a> {
                 &sites,
                 &self.property_assign_facts,
                 &self.relation(),
+                &self.line_index,
             );
             self.diagnostics.extend(found);
         }

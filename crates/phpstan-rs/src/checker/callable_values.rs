@@ -9,7 +9,7 @@ use crate::checker::calls::CheckArgsCall;
 use crate::checker::{CalleeLabel, Checker, Locals};
 use crate::registry::FunctionReflection;
 use syntax::ast::{Arg, Visibility};
-use syntax::token::Span;
+use syntax::span::Span;
 use types::{ShapeKey, Type};
 
 /// The function or method a callable value names.

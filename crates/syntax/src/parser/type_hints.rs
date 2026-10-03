@@ -1,6 +1,7 @@
 use crate::ast::{NativeType, TypeHint, TypeHintKind};
 use crate::parser::{ParseError, Parser};
-use crate::token::{Keyword, Position, Span, Token};
+use crate::span::Span;
+use crate::token::{Keyword, Token};
 
 impl Parser {
     // ---- type hints ----
@@ -140,7 +141,7 @@ impl Parser {
         }))
     }
 
-    fn type_hint(&self, kind: TypeHintKind, start: Position) -> TypeHint {
+    fn type_hint(&self, kind: TypeHintKind, start: u32) -> TypeHint {
         TypeHint {
             kind,
             span: Span {

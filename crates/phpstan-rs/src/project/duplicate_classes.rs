@@ -33,9 +33,12 @@ use std::path::Path;
 use crate::checker::{class_kind_identifier, class_kind_word};
 use crate::project::duplicate_class_sites::{ClassDeclSite, DuplicateClassSites};
 use diagnostics::{Diagnostic, DiagnosticBuilder};
+use syntax::span::LineIndex;
 
 pub(crate) fn check_duplicate_class_declarations(
     path: &Path,
+    index: &LineIndex,
+    line_in: &dyn Fn(&Path, u32) -> u32,
     sites: &DuplicateClassSites,
 ) -> Vec<Diagnostic> {
     let mut diagnostics = Vec::new();
@@ -51,17 +54,11 @@ pub(crate) fn check_duplicate_class_declarations(
         // Sorted for determinism, mirroring `duplicate_functions`'s own
         // identical reasoning - which location list order a reader sees
         // must not depend on `FxHashMap` file-load-order.
-        real_sites.sort_by(|a, b| {
-            (&a.path, a.span.start.line, a.span.start.col).cmp(&(
-                &b.path,
-                b.span.start.line,
-                b.span.start.col,
-            ))
-        });
+        real_sites.sort_by(|a, b| (&a.path, a.span.start).cmp(&(&b.path, b.span.start)));
 
         let location_list = real_sites
             .iter()
-            .map(|s| format!("- {}:{}", s.path.display(), s.span.start.line))
+            .map(|s| format!("- {}:{}", s.path.display(), line_in(&s.path, s.span.start)))
             .collect::<Vec<_>>()
             .join("\n");
         // Every real site's own `kind` is expected to agree in practice
@@ -86,7 +83,7 @@ pub(crate) fn check_duplicate_class_declarations(
             diagnostics.push(
                 DiagnosticBuilder::new(message.clone(), s.span, 0, identifier.clone())
                     .non_ignorable()
-                    .build(),
+                    .build(index),
             );
         }
     }

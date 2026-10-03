@@ -4,7 +4,7 @@ use rustc_hash::FxHashMap;
 
 use syntax::ast::{FunctionDecl, Stmt, TypeHint};
 use syntax::declarations::Declared;
-use syntax::token::Span;
+use syntax::span::Span;
 
 /// One `function` declaration's own site, name-keyed the same way
 /// `Registry` is - but every unconditional

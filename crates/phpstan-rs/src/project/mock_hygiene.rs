@@ -22,7 +22,7 @@ use rustc_hash::FxHashMap;
 use std::path::PathBuf;
 
 use syntax::ast::*;
-use syntax::token::Span;
+use syntax::span::{LineIndex, Span};
 use syntax::visit::{Visitor, walk_expr, walk_expr_in_scope, walk_stmt, walk_stmts};
 
 use super::Project;
@@ -80,6 +80,7 @@ fn chain(e: &Expr) -> Vec<(&str, &[Arg], Span)> {
 struct Walker<'a> {
     banned: &'a [String],
     ctx: NameContext,
+    line_index: &'a LineIndex,
     out: Vec<Diagnostic>,
     // `$name` / `this->prop` -> whether it holds a mock (`true`) or a
     // stub (`false`), from what it was assigned.
@@ -153,7 +154,7 @@ impl<'a> Walker<'a> {
 
     fn report(&mut self, span: Span, message: String, id: &'static str) {
         self.out
-            .push(DiagnosticBuilder::new(message, span, 2, id).build());
+            .push(DiagnosticBuilder::new(message, span, 2, id).build(self.line_index));
     }
 
     fn class(&mut self, c: &ClassDecl) {
@@ -368,6 +369,7 @@ impl Project {
             let mut walker = Walker {
                 banned,
                 ctx: NameContext::default(),
+                line_index: &file.line_index,
                 out: Vec::new(),
                 origins: FxHashMap::default(),
             };
