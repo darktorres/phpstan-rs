@@ -36,6 +36,9 @@ impl Parser<'_> {
                     let lexer = Lexer::fragment(&src, frag_base).with_interner(&self.interner);
                     let mut sub = Parser::from_lexer(lexer).with_interner(&self.interner);
                     sub.line_index = Arc::clone(&self.line_index);
+                    // The fragment's names are read in the namespace and
+                    // imports where it sits.
+                    *sub.ctx.borrow_mut() = self.ctx.borrow().clone();
                     sub.next_node_id.set(self.next_node_id.get());
                     let parsed = sub.parse_expression()?;
                     sub.check_pattern_only()?;

@@ -395,6 +395,12 @@ impl<'a> Lexer<'a> {
         lossy(&src[range])
     }
 
+    /// The name for `text` as the parser asks for one, by the same tables
+    /// as the lexer's own.
+    pub(crate) fn intern(&mut self, text: &str) -> Name {
+        self.name(text)
+    }
+
     /// The name for `text`: this lexer's own, or the interner's.
     fn name(&mut self, text: &str) -> Name {
         self.name_and_bits(text).0

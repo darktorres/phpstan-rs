@@ -882,11 +882,11 @@ pub enum ResolvedName {
     /// resolution pass has not seen.
     Unresolved,
     /// The one fully-qualified name it refers to (no leading `\\`).
-    Exact(Box<str>),
+    Exact(Name),
     /// An unqualified function or constant name in a namespace: this
     /// namespaced name if one is declared, else the global one, which is
     /// the name as written.
-    WithGlobalFallback(Box<str>),
+    WithGlobalFallback(Name),
 }
 
 impl QualifiedName {
@@ -902,7 +902,7 @@ impl QualifiedName {
     /// and `static`, and for a name resolution has not seen.
     pub fn resolved_class(&self) -> Option<&str> {
         match &self.resolved {
-            ResolvedName::Exact(name) => Some(name),
+            ResolvedName::Exact(name) => Some(name.as_str()),
             _ => None,
         }
     }
@@ -918,8 +918,8 @@ impl QualifiedName {
     /// declared.
     pub fn candidates(&self) -> (&str, Option<&str>) {
         match &self.resolved {
-            ResolvedName::Exact(name) => (name, None),
-            ResolvedName::WithGlobalFallback(name) => (name, Some(&self.written)),
+            ResolvedName::Exact(name) => (name.as_str(), None),
+            ResolvedName::WithGlobalFallback(name) => (name.as_str(), Some(self.written.as_str())),
             ResolvedName::Unresolved => (self.written.trim_start_matches('\\'), None),
         }
     }

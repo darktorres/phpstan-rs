@@ -1,7 +1,7 @@
 use crate::ast::{Attribute, Ident, QualifiedName};
 use crate::lexer::{DocGroup, Tok};
 use crate::name::Name;
-use crate::parser::{ParseError, Parser};
+use crate::parser::{NameKind, ParseError, Parser};
 use crate::span::Span;
 use crate::token::{Keyword, Token};
 
@@ -298,7 +298,7 @@ impl Parser<'_> {
     pub(crate) fn parse_name_reference(&mut self) -> QualifiedName {
         let start = self.current_pos();
         let name = self.parse_qualified_name();
-        self.qualified_name(name, self.span_from(start))
+        self.qualified_name(name, self.span_from(start), NameKind::Class)
     }
 
     /// `parse_qualified_name`, plus the span it occupied, for a name that

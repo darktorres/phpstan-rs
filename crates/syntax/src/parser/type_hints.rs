@@ -1,5 +1,5 @@
 use crate::ast::{NativeType, TypeHint, TypeHintKind};
-use crate::parser::{ParseError, Parser};
+use crate::parser::{NameKind, ParseError, Parser};
 use crate::span::Span;
 use crate::token::{Keyword, Token};
 
@@ -80,7 +80,11 @@ impl Parser<'_> {
             // and `\int` included, names a class.
             let kind = match NativeType::from_name(&name) {
                 Some(keyword) => TypeHintKind::Keyword(keyword, name.as_str().into()),
-                None => TypeHintKind::Name(self.qualified_name(name, self.span_from(start))),
+                None => TypeHintKind::Name(self.qualified_name(
+                    name,
+                    self.span_from(start),
+                    NameKind::Class,
+                )),
             };
             Ok(self.type_hint(kind, start))
         })

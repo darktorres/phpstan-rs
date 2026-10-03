@@ -1,5 +1,5 @@
 use crate::ast::*;
-use crate::parser::{ParseError, Parser};
+use crate::parser::{NameKind, ParseError, Parser};
 use crate::span::Span;
 use crate::token::{Keyword, Token};
 
@@ -331,9 +331,11 @@ impl Parser<'_> {
                     self.skip();
                     self.skip();
                     let name = self.expr(
-                        ExprKind::Name(
-                            self.qualified_name(self.interner.name("clone"), clone_span),
-                        ),
+                        ExprKind::Name(self.qualified_name(
+                            self.interner.name("clone"),
+                            clone_span,
+                            NameKind::Constant,
+                        )),
                         start,
                     );
                     return Ok(self.expr(ExprKind::FirstClassCallable(Box::new(name)), start));
@@ -469,9 +471,11 @@ impl Parser<'_> {
             Token::Keyword(Keyword::Static) => {
                 self.skip();
                 self.expr(
-                    ExprKind::Name(
-                        self.qualified_name(self.interner.name("static"), self.span_from(start)),
-                    ),
+                    ExprKind::Name(self.qualified_name(
+                        self.interner.name("static"),
+                        self.span_from(start),
+                        self.name_kind_ahead(),
+                    )),
                     start,
                 )
             }
@@ -545,8 +549,14 @@ impl Parser<'_> {
                     if self.check(&Token::LParen) {
                         let (args, is_first_class_callable) = self.parse_args()?;
                         if is_first_class_callable {
-                            let callee = self
-                                .expr(ExprKind::Name(self.qualified_name(name, name_span)), start);
+                            let callee = self.expr(
+                                ExprKind::Name(self.qualified_name(
+                                    name,
+                                    name_span,
+                                    NameKind::Function,
+                                )),
+                                start,
+                            );
                             let call = self.expr(ExprKind::Call(Box::new(callee), args), start);
                             self.expr(ExprKind::FirstClassCallable(Box::new(call)), start)
                         } else {
@@ -591,7 +601,11 @@ impl Parser<'_> {
                     };
                     self.expr(ExprKind::Eval(Box::new(code.value)), start)
                 } else {
-                    self.expr(ExprKind::Name(self.qualified_name(name, name_span)), start)
+                    let kind = self.name_kind_ahead();
+                    self.expr(
+                        ExprKind::Name(self.qualified_name(name, name_span, kind)),
+                        start,
+                    )
                 }
             }
             other => {

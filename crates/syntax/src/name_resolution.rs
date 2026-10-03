@@ -411,10 +411,11 @@ pub fn qualify(namespace: &str, name: &str) -> String {
     }
 }
 
-/// Fills in [`QualifiedName::resolved`] for every name in a parsed file,
-/// tracking `namespace` and `use` statements in order: a braced namespace
-/// body shares the context of its `namespace` statement. Declarations get
-/// their namespaced name.
+/// Fills in [`QualifiedName::resolved`] for every name in a tree, tracking
+/// `namespace` and `use` statements in order: a braced namespace body
+/// shares the context of its `namespace` statement. Declarations get their
+/// namespaced name. The parser resolves each name as it makes it, so this
+/// is for a tree changed after: the stub attributes' types.
 pub fn resolve_names(stmts: &mut [Stmt]) {
     let mut resolver = Resolver {
         ctx: NameContext::default(),
@@ -449,13 +450,11 @@ impl Resolver {
     }
 
     fn function(&self, name: &mut QualifiedName) {
-        let (primary, fallback) = self.ctx.resolve_function_candidates(&name.written);
-        name.resolved = with_fallback(primary, fallback);
+        name.resolved = self.ctx.function_reference(&name.written).into();
     }
 
     fn constant(&self, name: &mut QualifiedName) {
-        let (primary, fallback) = self.ctx.resolve_constant_candidates(&name.written);
-        name.resolved = with_fallback(primary, fallback);
+        name.resolved = self.ctx.constant_reference(&name.written).into();
     }
 
     #[inline(never)]
@@ -519,14 +518,55 @@ impl Resolver {
     }
 }
 
+/// What a name written in a file refers to, as text: the result of a
+/// resolution before its name is interned.
+pub(crate) enum Resolution {
+    Unresolved,
+    Exact(String),
+    WithGlobalFallback(String),
+}
+
+impl NameContext {
+    /// What a class reference as written refers to.
+    pub(crate) fn class_reference(&self, written: &str) -> Resolution {
+        if is_class_keyword(written) {
+            Resolution::Unresolved
+        } else {
+            Resolution::Exact(self.resolve(written))
+        }
+    }
+
+    /// What a function reference as written refers to.
+    pub(crate) fn function_reference(&self, written: &str) -> Resolution {
+        match self.resolve_function_candidates(written) {
+            (primary, Some(_)) => Resolution::WithGlobalFallback(primary),
+            (primary, None) => Resolution::Exact(primary),
+        }
+    }
+
+    /// What a constant reference as written refers to.
+    pub(crate) fn constant_reference(&self, written: &str) -> Resolution {
+        match self.resolve_constant_candidates(written) {
+            (primary, Some(_)) => Resolution::WithGlobalFallback(primary),
+            (primary, None) => Resolution::Exact(primary),
+        }
+    }
+}
+
+impl From<Resolution> for ResolvedName {
+    fn from(resolution: Resolution) -> ResolvedName {
+        match resolution {
+            Resolution::Unresolved => ResolvedName::Unresolved,
+            Resolution::Exact(name) => ResolvedName::Exact(name.into()),
+            Resolution::WithGlobalFallback(name) => ResolvedName::WithGlobalFallback(name.into()),
+        }
+    }
+}
+
 /// Fills in `name`'s resolution as a class name in `ctx`, for a name
 /// parsed apart from the file it belongs to.
 pub fn resolve_class_name(name: &mut QualifiedName, ctx: &NameContext) {
-    name.resolved = if is_class_keyword(&name.written) {
-        ResolvedName::Unresolved
-    } else {
-        ResolvedName::Exact(ctx.resolve(&name.written).into())
-    };
+    name.resolved = ctx.class_reference(&name.written).into();
 }
 
 /// `self`, `parent` and `static` name a class relative to where they
@@ -535,13 +575,6 @@ fn is_class_keyword(name: &str) -> bool {
     ["self", "parent", "static"]
         .iter()
         .any(|k| name.eq_ignore_ascii_case(k))
-}
-
-fn with_fallback(primary: String, fallback: Option<String>) -> ResolvedName {
-    match fallback {
-        Some(_) => ResolvedName::WithGlobalFallback(primary.into()),
-        None => ResolvedName::Exact(primary.into()),
-    }
 }
 
 impl VisitorMut for Resolver {

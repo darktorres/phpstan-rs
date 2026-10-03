@@ -3,6 +3,7 @@ use std::sync::Arc;
 use crate::ast::*;
 use crate::lexer::{LexEnd, Lexed, LexedDoc, Lexer, Tok};
 use crate::name::{Interner, Name};
+use crate::name_resolution::Resolution;
 use crate::span::{LineIndex, Span};
 use crate::token::{Keyword, Token};
 
@@ -24,7 +25,10 @@ impl std::error::Error for ParseError {}
 pub struct Parser<'a> {
     // Where the tokens come from: the lexer, as the parser asks for them,
     // or a list already made.
-    supply: Supply<'a>,
+    supply: std::cell::RefCell<Supply<'a>>,
+    // The namespace and imports in effect where the parser is, which each
+    // name it makes is resolved by, in the order PHP applies them.
+    pub(crate) ctx: std::cell::RefCell<crate::name_resolution::NameContext>,
     // The tokens not yet consumed, the current one first: the parser looks
     // a few tokens ahead and never back, so these are all of the file it
     // holds. Filled to `LOOKAHEAD` tokens past the current one whenever
@@ -56,6 +60,15 @@ pub struct Parser<'a> {
     // The labels `goto` statements name, one entry per function-like body
     // being parsed, the file's own first.
     pub(crate) goto_scopes: Vec<GotoScope>,
+}
+
+/// What a name is read as: PHP resolves classes, functions and constants
+/// each by its own imports.
+#[derive(Clone, Copy)]
+pub(crate) enum NameKind {
+    Class,
+    Function,
+    Constant,
 }
 
 /// How many tokens past the current one the parser holds.
@@ -166,7 +179,8 @@ impl<'a> Parser<'a> {
 
     fn with_supply(supply: Supply<'a>, line_index: Arc<LineIndex>) -> Parser<'a> {
         let mut parser = Parser {
-            supply,
+            supply: std::cell::RefCell::new(supply),
+            ctx: std::cell::RefCell::default(),
             ahead: std::collections::VecDeque::with_capacity(LOOKAHEAD + 2),
             eof_queued: false,
             pos: 0,
@@ -188,7 +202,7 @@ impl<'a> Parser<'a> {
     /// the supply has no more.
     pub(crate) fn fill(&mut self, count: usize) {
         while !self.eof_queued && self.ahead.len() <= count {
-            let Some(tok) = self.supply.next() else {
+            let Some(tok) = self.supply.get_mut().next() else {
                 self.eof_queued = true;
                 break;
             };
@@ -211,7 +225,7 @@ impl<'a> Parser<'a> {
     /// of the file is lexed, so that what it found in the part the parse
     /// did not reach is there too. None for a parser of a list of tokens.
     pub fn into_lex_end(self) -> Option<LexEnd> {
-        match self.supply {
+        match self.supply.into_inner() {
             Supply::Lexer(lexer) => Some(lexer.finish()),
             Supply::List(_) => None,
         }
@@ -323,7 +337,7 @@ impl Parser<'_> {
     pub(crate) fn skip_to_eof(&mut self) {
         self.ahead.clear();
         self.eof_queued = true;
-        let eof = match &mut self.supply {
+        let eof = match self.supply.get_mut() {
             Supply::Lexer(lexer) => lexer.skip_to_end(),
             Supply::List(tokens) => tokens.last().map_or(self.last_span, |tok| tok.span),
         };
@@ -390,9 +404,62 @@ impl Parser<'_> {
         self
     }
 
-    /// A reference by name, not yet resolved.
-    pub(crate) fn qualified_name(&self, written: Name, span: Span) -> QualifiedName {
-        QualifiedName::new(written, span)
+    /// How a name just parsed is read, by what follows it: a call's callee
+    /// is a function, the class of a `::` is a class, and anything else is
+    /// a constant.
+    pub(crate) fn name_kind_ahead(&self) -> NameKind {
+        match self.peek() {
+            Token::DoubleColon => NameKind::Class,
+            Token::LParen => NameKind::Function,
+            _ => NameKind::Constant,
+        }
+    }
+
+    /// The name for `text`, through the lexer's tables when it has them.
+    pub(crate) fn intern(&self, text: &str) -> Name {
+        match &mut *self.supply.borrow_mut() {
+            Supply::Lexer(lexer) => lexer.intern(text),
+            Supply::List(_) => self.interner.name(text),
+        }
+    }
+
+    /// A reference by name, resolved as `kind` in the namespace and
+    /// imports in effect.
+    pub(crate) fn qualified_name(
+        &self,
+        written: Name,
+        span: Span,
+        kind: NameKind,
+    ) -> QualifiedName {
+        let resolution = {
+            let ctx = self.ctx.borrow();
+            match kind {
+                NameKind::Class => ctx.class_reference(&written),
+                NameKind::Function => ctx.function_reference(&written),
+                NameKind::Constant => ctx.constant_reference(&written),
+            }
+        };
+        let resolved = match resolution {
+            Resolution::Unresolved => ResolvedName::Unresolved,
+            Resolution::Exact(text) => ResolvedName::Exact(self.resolved_name(&written, text)),
+            Resolution::WithGlobalFallback(text) => {
+                ResolvedName::WithGlobalFallback(self.resolved_name(&written, text))
+            }
+        };
+        QualifiedName {
+            written,
+            resolved,
+            span,
+        }
+    }
+
+    /// The name a resolution gave: the one written when it is that.
+    fn resolved_name(&self, written: &Name, text: String) -> Name {
+        if text == written.as_str() {
+            written.clone()
+        } else {
+            self.intern(&text)
+        }
     }
 
     /// From `start` to the end of the last consumed token.
@@ -413,7 +480,27 @@ impl Parser<'_> {
     /// Builds a `Stmt` spanning from `start` (the position captured before
     /// this statement's first token was consumed) to whatever token was
     /// last consumed.
-    pub(crate) fn stmt(&self, kind: StmtKind, start: u32) -> Stmt {
+    pub(crate) fn stmt(&self, mut kind: StmtKind, start: u32) -> Stmt {
+        // What a statement changes in the names that follow it, and the
+        // names a declaration gets, are settled as it is made: PHP reads a
+        // file in this order.
+        match &mut kind {
+            StmtKind::Namespace(name) => self.ctx.borrow_mut().set_namespace(name),
+            StmtKind::Use(imports) => self.ctx.borrow_mut().add_uses(imports),
+            StmtKind::FunctionDecl(f) => {
+                f.namespaced_name = Some(self.ctx.borrow().declared_name(&f.name).into());
+            }
+            StmtKind::ClassDecl(c) => {
+                c.namespaced_name = self.ctx.borrow().declared_name(&c.name).into();
+            }
+            StmtKind::GlobalConst(consts) => {
+                let ctx = self.ctx.borrow();
+                for c in consts {
+                    c.namespaced_name = Some(ctx.declared_name(&c.name).into());
+                }
+            }
+            _ => {}
+        }
         Stmt {
             id: self.node_id(),
             kind,
@@ -460,7 +547,6 @@ impl Parser<'_> {
             }
         }
         self.check_pattern_only()?;
-        crate::name_resolution::resolve_names(&mut stmts);
         Ok(stmts)
     }
 
