@@ -9,7 +9,7 @@ use crate::checker::settings::EngineSettings;
 use crate::ext::extras::ExtrasSettings;
 use crate::ext::sql::SqlSettings;
 use crate::project::session::SessionSettings;
-use crate::registry::settings::ReflectionSettings;
+use crate::registry::settings::{PhpVersionSetting, ReflectionSettings};
 use crate::rules_settings::RulesSettings;
 
 fn load(text: &str) -> ConfigFile {
@@ -67,7 +67,10 @@ fn every_section_loads_from_its_own_table() {
         vec![PathBuf::from("phpstan-stubs/Imagick.stub.php")]
     );
     assert_eq!(reflection.no_composer, Some(true));
-    assert_eq!(reflection.php_version, Some("8.1".to_string()));
+    assert_eq!(
+        reflection.php_version,
+        Some(PhpVersionSetting::Exactly("8.1".to_string()))
+    );
     let rules = file.section::<RulesSettings>().unwrap();
     assert!(rules.strict_mixed_arrays);
     assert!(rules.check_duplicate_class_declarations);
@@ -278,4 +281,29 @@ fn dynamic_constant_names_accept_a_list_a_typed_table_or_mixed_entries() {
             ("MODE".to_string(), Some("'dev'|'prod'".to_string())),
         ]
     );
+}
+
+#[test]
+fn a_php_version_is_one_version_or_a_range() {
+    let versions = |text: &str| {
+        load(text)
+            .section::<ReflectionSettings>()
+            .unwrap()
+            .php_version
+            .map(|setting| setting.versions())
+    };
+    let v = types::PhpVersion::new;
+    assert_eq!(
+        versions(r#"php_version = "8.1""#),
+        Some(Ok(types::PhpVersions::exactly(v(8, 1))))
+    );
+    assert_eq!(
+        versions(r#"php_version = { min = "7.0", max = "8.4" }"#),
+        Some(Ok(types::PhpVersions::new(v(7, 0), v(8, 4))))
+    );
+    assert_eq!(
+        versions(r#"php_version = { min = "8.4", max = "7.0" }"#),
+        Some(Err("php_version: min 8.4 is above max 7.0".to_string()))
+    );
+    assert_eq!(versions(""), None);
 }

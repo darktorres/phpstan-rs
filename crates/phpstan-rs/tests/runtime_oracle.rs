@@ -126,6 +126,16 @@ enum Runner {
     Docker(String),
 }
 
+impl Runner {
+    /// A name for the runner, fit for a directory.
+    fn label(&self) -> String {
+        match self {
+            Runner::Local => "local".to_string(),
+            Runner::Docker(image) => image.replace([':', '/'], "_"),
+        }
+    }
+}
+
 fn run(
     name: &str,
     stem: &Path,
@@ -140,18 +150,29 @@ fn run(
     {
         return Ok(Outcome::Skipped("a required feature is off".to_string()));
     }
-    let runner = match config.php_version() {
-        Some(version) if major_minor(&version) != local => {
-            let image = format!("php:{}-cli", major_minor(&version));
-            if !docker_image_present(&image) {
-                return Ok(Outcome::Skipped(format!(
-                    "needs the `{image}` Docker image"
-                )));
+    // A fixture analysed for a range of versions runs at each end of it.
+    let mut runners = Vec::new();
+    match config.php_versions()? {
+        None => runners.push(Runner::Local),
+        Some(versions) => {
+            let mut ends = vec![versions.min, versions.max];
+            ends.dedup();
+            for end in ends {
+                let version = end.to_string();
+                if version == local {
+                    runners.push(Runner::Local);
+                    continue;
+                }
+                let image = format!("php:{version}-cli");
+                if !docker_image_present(&image) {
+                    return Ok(Outcome::Skipped(format!(
+                        "needs the `{image}` Docker image"
+                    )));
+                }
+                runners.push(Runner::Docker(image));
             }
-            Runner::Docker(image)
         }
-        _ => Runner::Local,
-    };
+    }
     let autoload = if config.runtime_packages.is_empty() {
         None
     } else {
@@ -161,47 +182,58 @@ fn run(
         }
     };
     let (base, subjects) = subjects(stem, &config)?;
-    let work = Path::new(env!("CARGO_TARGET_TMPDIR"))
-        .join("runtime_oracle")
-        .join(name.replace('/', "__"));
-    let _ = std::fs::remove_dir_all(&work);
-    if stem.with_extension("php").is_file() {
-        std::fs::create_dir_all(&work)?;
-        for subject in &subjects {
-            std::fs::copy(base.join(subject), work.join(subject))?;
-        }
-    } else {
-        copy_dir(&base, &work)?;
-    }
-    let entry = work.join("__oracle_entry.php");
-    let mut script = String::from("<?php\n");
-    for subject in &subjects {
-        script.push_str(&format!(
-            "require_once __DIR__ . '/{}';\n",
-            subject
-                .display()
-                .to_string()
-                .replace('\\', "\\\\")
-                .replace('\'', "\\'")
-        ));
-    }
-    std::fs::write(&entry, script)?;
-    let out = work.join("__oracle.jsonl");
-    let finished = execute(&runner, &work, autoload.as_deref())?;
-    let records = read_records(&out)?;
-    let asserts: Vec<&Value> = records.iter().filter(|r| r["kind"] == "assert").collect();
     let mut failures = Vec::new();
-    if config.runtime_warnings_exact {
-        failures.extend(unexpected_warnings(stem, &records, &work, &runner));
-    }
-    if asserts.is_empty() {
-        if failures.is_empty() {
-            let why = if finished {
-                "no assertType() ran".to_string()
+    let mut not_executed = Vec::new();
+    let mut runs = Vec::new();
+    for runner in &runners {
+        let work = Path::new(env!("CARGO_TARGET_TMPDIR"))
+            .join("runtime_oracle")
+            .join(name.replace('/', "__"))
+            .join(runner.label());
+        let _ = std::fs::remove_dir_all(&work);
+        if stem.with_extension("php").is_file() {
+            std::fs::create_dir_all(&work)?;
+            for subject in &subjects {
+                std::fs::copy(base.join(subject), work.join(subject))?;
+            }
+        } else {
+            copy_dir(&base, &work)?;
+        }
+        let entry = work.join("__oracle_entry.php");
+        let mut script = String::from("<?php\n");
+        for subject in &subjects {
+            script.push_str(&format!(
+                "require_once __DIR__ . '/{}';\n",
+                subject
+                    .display()
+                    .to_string()
+                    .replace('\\', "\\\\")
+                    .replace('\'', "\\'")
+            ));
+        }
+        std::fs::write(&entry, script)?;
+        let out = work.join("__oracle.jsonl");
+        let finished = execute(runner, &work, autoload.as_deref())?;
+        let records = read_records(&out)?;
+        if config.runtime_warnings_exact {
+            failures.extend(unexpected_warnings(stem, &records, &work, runner));
+        }
+        let asserts: Vec<Value> = records
+            .into_iter()
+            .filter(|r| r["kind"] == "assert")
+            .collect();
+        if asserts.is_empty() {
+            not_executed.push(if finished {
+                format!("{}: no assertType() ran", runner.label())
             } else {
-                format!("timed out after {}s", TIMEOUT.as_secs())
-            };
-            return Ok(Outcome::NotExecuted(why));
+                format!("{}: timed out after {}s", runner.label(), TIMEOUT.as_secs())
+            });
+        }
+        runs.push((runner, work, asserts));
+    }
+    if runs.iter().all(|(_, _, asserts)| asserts.is_empty()) {
+        if failures.is_empty() {
+            return Ok(Outcome::NotExecuted(not_executed.join("; ")));
         }
         return Err(failures.join("\n").into());
     }
@@ -210,31 +242,34 @@ fn run(
     let registry = loaded.project.registry();
     let relation = registry.relation();
     let mut scopes = TemplateScopes::new(registry);
-    for record in asserts {
-        let Some(rel) = relative(&record["file"], &work, &runner) else {
-            continue;
-        };
-        let line = record["line"].as_u64().unwrap_or(0) as u32;
-        let original = base.join(&rel);
-        let col = assert_type_column(&original, line);
-        let scope = scopes.at(&original, line, col);
-        let expected_text = record["expected"].as_str().unwrap_or_default();
-        let at = format!("{}:{line}", rel.display());
-        let Some(expected) = types::try_parse_displayed_with(expected_text, &|n| scope.resolve(n))
-        else {
-            failures.push(format!(
-                "{at}: expected type `{expected_text}` does not parse"
-            ));
-            continue;
-        };
-        let Some(value) = value_type(&record["value"]) else {
-            failures.push(format!("{at}: unreadable value {}", record["value"]));
-            continue;
-        };
-        if relation.is_super_type_of(&expected, &value).no() {
-            failures.push(format!(
-                "{at}: assertType('{expected_text}') got a value of type {value}"
-            ));
+    for (runner, work, asserts) in &runs {
+        for record in asserts {
+            let Some(rel) = relative(&record["file"], work, runner) else {
+                continue;
+            };
+            let line = record["line"].as_u64().unwrap_or(0) as u32;
+            let original = base.join(&rel);
+            let col = assert_type_column(&original, line);
+            let scope = scopes.at(&original, line, col);
+            let expected_text = record["expected"].as_str().unwrap_or_default();
+            let at = format!("{}:{line} ({})", rel.display(), runner.label());
+            let Some(expected) =
+                types::try_parse_displayed_with(expected_text, &|n| scope.resolve(n))
+            else {
+                failures.push(format!(
+                    "{at}: expected type `{expected_text}` does not parse"
+                ));
+                continue;
+            };
+            let Some(value) = value_type(&record["value"]) else {
+                failures.push(format!("{at}: unreadable value {}", record["value"]));
+                continue;
+            };
+            if relation.is_super_type_of(&expected, &value).no() {
+                failures.push(format!(
+                    "{at}: assertType('{expected_text}') got a value of type {value}"
+                ));
+            }
         }
     }
     if failures.is_empty() {
@@ -506,15 +541,6 @@ fn hex(text: &str) -> Option<Vec<u8>> {
 }
 
 /// `8.0` of `8.0`, `8.0.30` or `8.0 - 8.3`'s lower end.
-fn major_minor(version: &str) -> String {
-    let parts: Vec<&str> = version
-        .split(|c: char| !c.is_ascii_digit())
-        .filter(|p| !p.is_empty())
-        .take(2)
-        .collect();
-    parts.join(".")
-}
-
 fn local_php_version() -> Option<String> {
     let output = Command::new("php")
         .args(["-r", "echo PHP_MAJOR_VERSION, '.', PHP_MINOR_VERSION;"])

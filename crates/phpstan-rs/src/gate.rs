@@ -125,13 +125,15 @@ pub struct FixtureConfig {
 }
 
 impl FixtureConfig {
-    /// The PHP version the fixture is analysed for, as written
-    /// (`php_version = "8.0"`).
-    pub fn php_version(&self) -> Option<String> {
+    /// The PHP versions the fixture is analysed for (`php_version = "8.0"`,
+    /// or `{ min = "7.0", max = "8.4" }`).
+    pub fn php_versions(&self) -> Result<Option<types::PhpVersions>, String> {
         self.config
-            .section::<crate::registry::settings::ReflectionSettings>()
-            .ok()
-            .and_then(|settings| settings.php_version)
+            .section::<crate::registry::settings::ReflectionSettings>()?
+            .php_version
+            .as_ref()
+            .map(crate::registry::settings::PhpVersionSetting::versions)
+            .transpose()
     }
 }
 

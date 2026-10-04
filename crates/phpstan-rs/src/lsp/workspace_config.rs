@@ -90,9 +90,9 @@ pub(crate) fn resolve(
 
     let resolve_against_root = |p: PathBuf| root.join(p);
 
-    let php_version = match reflection.php_version {
-        Some(s) => match types::php_version::parse_php_version(&s) {
-            Ok(v) => Some(v),
+    let php_version = match &reflection.php_version {
+        Some(setting) => match setting.versions() {
+            Ok(versions) => Some(versions),
             Err(e) => {
                 eprintln!("phpstan-rs lsp: {e}");
                 None
@@ -161,9 +161,8 @@ pub(crate) fn resolve(
         eprintln!("phpstan-rs lsp: {e}");
         crate::ext::ActiveExtensions::default()
     });
-    let php_versions = php_version
-        .map(types::PhpVersions::exactly)
-        .or_else(|| crate::project::session::declared_php_versions(&package));
+    let php_versions =
+        php_version.or_else(|| crate::project::session::declared_php_versions(&package));
     let packages = composer::PackageIndex::new(package.manifest.into_iter().collect());
     let vendor_context = package.vendor.get().clone();
 

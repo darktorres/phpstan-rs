@@ -381,12 +381,16 @@ impl Session {
             .or(configured_level)
             .unwrap_or(DEFAULT_REPORT_LEVEL);
         psr3.context_key_pattern()?;
-        let php_version = overrides
-            .php_version
-            .clone()
-            .or(reflection.php_version.clone())
-            .map(|s| types::parse_php_version(&s))
-            .transpose()?;
+        let php_version = match &overrides.php_version {
+            Some(version) => Some(types::PhpVersions::exactly(types::parse_php_version(
+                version,
+            )?)),
+            None => reflection
+                .php_version
+                .as_ref()
+                .map(crate::registry::settings::PhpVersionSetting::versions)
+                .transpose()?,
+        };
         let restricted_symbols = disallowed_calls.entries()?;
         let banned_constructs = banned_settings
             .constructs
@@ -498,9 +502,7 @@ impl Session {
             }
         }
 
-        let php_versions = php_version
-            .map(types::PhpVersions::exactly)
-            .or(composer_php_versions);
+        let php_versions = php_version.or(composer_php_versions);
         let extensions = ext::ActiveExtensions::resolve(config, &|p| {
             ext::installed_in(root_manifest.as_ref(), p)
         })?;
