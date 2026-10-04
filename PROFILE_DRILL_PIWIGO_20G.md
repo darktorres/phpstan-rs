@@ -743,6 +743,19 @@ Twenty-one items, numbered in the order they are built. Each states what is ther
 - **A function's scope had its short name** (`6181696f`), where its static variables' storage has the declared one, with the namespace, so a recursive call's writes were not found.
 - **The effects read a stale class index** (`a7363772`). The finishing passes indexed the class hierarchy after resolving purity and effects, so the effects of a call through `static::`, and every bound by descendants, read the index of the load before, or an empty one.
 
+The edit replay found four ways an edit left a file's diagnostics stale, each a file it did not recheck, each fixed in its own commit with a test that holds diagnostics as the server does (`4df4f67c`):
+- **Traits** (`cbe3da2e`). A trait is checked as each class using it, so a changed, added or removed class leaves its traits' files stale. An edit now rechecks the files of the traits such a class uses, before the edit and after it.
+- **Duplicate declarations** (`1bf9c6a0`). A duplicate's report lists every declaring file. An edit now rechecks the other files declaring a function or a class the edited or removed file declared or declares.
+- **`@see` targets** (`29ee128b`). The class an `@see` tag names was no reference of its file, so declaring, renaming or removing it left the tag's report stale. The tag's grammar is now one function (`docblock::see_reference`), read by the check and by the references alike; the class is a reference, but not a declaration reference, since it shapes no declaration.
+- **Included paths** (`2db7524c`). The include check probes the filesystem itself, so a file appearing or vanishing where an `include` looked changed no recheck. A check now keeps the places its includes looked, and a file added or removed there rechecks it. The server also watches every other file and directory for creation and deletion, and rechecks the files that looked there.
+
+It also found the project's state after edits apart from a fresh load's, though no diagnostic showed it:
+- **Use sites** (`1225f83a`). A recheck dropped a file's use sites and indexed them again only when the source was kept, so a project checking dead code without it read its edited files as referencing nothing.
+- **Assert-tagged names** (`dd80910b`). Each declaration added its names as it was inserted, and none left; stubs merged in added none. The names are now indexed from the resolved declarations after the finishing passes, the base's kept as it was frozen.
+- **Orders** (`f76fceb3`). The use-site lists, references, a rename's edits and the classes declaring a method name came in the order files were indexed or declared in.
+- **A loaded file's length** (`2648ab5e`). A file the session loads had the length of the text it kept, none unless the source was kept, so a recheck weighed every file as empty.
+- **Load order** (`1ff368c4`). An edited file keeps its place in the load order and an added one comes last, where a fresh load numbers files as it finds them. The dump now prints files by path with their load order, and the replay calls a section that differs in nothing else `differs only in load order`. Item 1 gives an added file the place a fresh load would.
+
 **Oracle.** None beyond §11 for the dumps and the deletions: they leave release behaviour as it is. The fixes found in step 1 are semantic, read in 0.11 against `5fb858c9`'s reports.
 
 ### 1. One session for the CLI, the language server and the tests
@@ -804,6 +817,7 @@ Twenty-one items, numbered in the order they are built. Each states what is ther
   - **Its role is a function of its resolved path:** the strongest configured root that contains it, among analysed, stub and context. The roots' resolved paths are known once the session is resolved.
     - A file reachable only through links to a target outside every root takes the strongest role among those links.
   - One function, `Session::classify(path) -> (FileId, role, is_stub)`, serves the load and every edit entry point: `didOpen`, `didChange`, `didSave`, watched-file create, change and delete, and workspace-folder add and remove. An alias table from path to `FileId` keeps other spellings and deleted files resolving.
+  - **Its place in the load order is its place in the session's walk:** the role, the configured root and the path, as the load finds it. A file an edit adds takes the place a fresh load would give it, so a rebuild of a name declared in several files follows the same order after edits as after a load.
 - **One configuration.** `Session::resolve` is the server's resolution too, with one error policy as a parameter: fail, or degrade and report through `window/showMessage`. `workspace_config::resolve` is deleted. A reload resolves again and applies the difference in file sets: removed files go through `remove_file`, added ones through the session's reader.
 - **One load.** `Session::load` reads through a file source with an in-memory overlay. The server's open documents are that overlay, and so are the tests' files.
   - The server, the tests, `incremental-bench` and the benches all load through it.
@@ -829,7 +843,7 @@ Twenty-one items, numbered in the order they are built. Each states what is ther
 
 **Oracle.**
 - **Without a baseline:** for the same workspace and configuration, the server's first project dump, `registry-dump` and published diagnostics equal the CLI's views of the same session.
-- **The edit replay of item 0, driven through the server's entry points.** It adds:
+- **The edit replay of item 0, driven through the server's entry points,** with every section equal to a fresh load's, load order included. It adds:
   - opening a document by a link's spelling;
   - a non-UTF-8 file;
   - a watched-file delete;
