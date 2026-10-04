@@ -80,6 +80,30 @@ A commit that intentionally changes an artifact adds
 renames tests adds `gates/test-renames/<slug>.txt` (`old -> new` or
 `old -> REMOVED: reason`).
 
+## Item 0's dumps (`cargo xtask dumps`)
+
+Each taken at one thread and at the default, which must give the same
+bytes, and recorded by commit:
+
+- `front-end-<config>/<commit>/` for the scoped, all-on, unscoped,
+  vendor-tree and arch configurations: `check-project --dump-front-end`,
+  each file's text under its BLAKE3 digest in `texts/`, gzip-compressed,
+  `index.tsv` by role and path, and `unions.gz`;
+- `registry-<config>/<commit>.txt.gz`: `check-project --dump-registry`;
+- `expr-types-<config>`, `doc-resolutions-<config>`
+  (`<commit>.txt.gz`): the checker's records;
+- `session-piwigo`, `session-vendor-symfony-console`,
+  `session-vendor-doctrine-orm` (`<commit>.txt.gz`): `phpstan-rs
+  record-session`, the language server's session in one process;
+- `replay-piwigo/<commit>/`, `replay-vendor-<vendor>-<package>/<commit>/`:
+  `check-project --edit-replay` over a fresh copy of the corpus (scoped)
+  or of each vendor project (every rule set on), made under
+  `.corpus-runs/gate/.replay/` and removed after: the dumps after each
+  step and after a fresh load, `script.txt` and `verdict.txt`.
+
+`cargo xtask dumps --binary <path>` takes every dump with another build
+(the `oracle` profile) and records nothing.
+
 ## Binaries and profiles kept beside the runs
 
 `cargo clean` empties `target/`, and `/tmp` is a tmpfs a reboot empties,

@@ -33,6 +33,7 @@ fn main() -> ExitCode {
     let result = match args.first().map(String::as_str) {
         Some("gates") => gates(&args[1..]),
         Some("corpus") => corpus_command(&args[1..]),
+        Some("dumps") => dumps_command(&args[1..]),
         Some("compare") => compare(&args[1..]),
         Some("type-drift") => type_drift(&args[1..]),
         Some("perf") => perf(),
@@ -58,6 +59,13 @@ fn main() -> ExitCode {
 const USAGE: &str = "usage: cargo xtask <command>
   gates [--full]         every gate for HEAD (quick tier by default)
   corpus [--full]        record HEAD's corpus, type and baseline snapshots
+  dumps [--binary <path>]
+                         record HEAD's item-0 dumps - the front end, the
+                         registry, the checker's records, the server's
+                         sessions and the edit replays - each at one
+                         thread and the default, which must agree; with
+                         --binary, run them with that build and record
+                         nothing (the oracle build's run)
   compare [--full] [--against <hash>]
                          diff HEAD's snapshots against its parent's (or
                          the nearest ancestor that has them)
@@ -1040,6 +1048,259 @@ fn determinism_check(full: bool, timings: &mut Timings) -> Result<(), String> {
         eprintln!("{}: emission order reproducible", config.name);
     }
     Ok(())
+}
+
+// --- item 0's dumps ----------------------------------------------------------
+
+/// The vendor projects the server's sessions run over, beside the corpus.
+const SESSION_PROJECTS: [&str; 2] = ["vendor/symfony/console", "vendor/doctrine/orm"];
+
+/// `cargo xtask dumps`: records HEAD's dumps as `.corpus-runs/gate/<artifact>/
+/// <commit>[.<ext>]`, each taken at one thread and at the default, which
+/// must give the same bytes:
+/// - for the scoped, all-on, unscoped, vendor-tree and arch configurations:
+///   the front end's dump (`front-end-<config>/<commit>/`), the registry
+///   dump (`registry-<config>`), and the checker's expression-type and
+///   PHPDoc resolution records (`expr-types-<config>`,
+///   `doc-resolutions-<config>`);
+/// - the server's session over the corpus and over `SESSION_PROJECTS`
+///   (`session-<name>`);
+/// - the edit replay over a copy of the corpus with the scoped
+///   configuration, and over a copy of each vendor project, every rule set
+///   on (`replay-<name>/<commit>/`).
+///
+/// With `--binary <path>`, every dump is taken with that build, its exit
+/// checked and nothing recorded: the oracle build's run, whose assertions
+/// must all hold.
+fn dumps_command(args: &[String]) -> Result<(), String> {
+    let binary = match args.iter().position(|a| a == "--binary") {
+        Some(i) => Some(PathBuf::from(
+            args.get(i + 1).ok_or("--binary needs a path")?,
+        )),
+        None => None,
+    };
+    let hash = match &binary {
+        Some(_) => None,
+        None => {
+            require_clean_tree()?;
+            build_gate()?;
+            Some(head_hash()?)
+        }
+    };
+    let binary = binary.unwrap_or_else(self::binary);
+    let mut timings = Timings::new();
+    let result = take_dumps(&binary, hash.as_deref(), &mut timings);
+    if let Some(hash) = &hash {
+        timings.write(hash, "dumps")?;
+    }
+    result
+}
+
+/// The arguments of a dump's command, given the path it writes to.
+type DumpArgs = Box<dyn Fn(&Path) -> Vec<String>>;
+
+/// One dump: its artifact, the extension of its snapshot (empty for a
+/// directory), where it runs, and the command that writes it to the path
+/// it is given.
+struct Dump {
+    artifact: String,
+    ext: &'static str,
+    dir: PathBuf,
+    // A fresh copy of a tree to run in, made before each run: `(from, to)`.
+    copy: Option<(PathBuf, PathBuf)>,
+    args: DumpArgs,
+}
+
+fn take_dumps(binary: &Path, hash: Option<&str>, timings: &mut Timings) -> Result<(), String> {
+    let mut dumps: Vec<Dump> = Vec::new();
+    for config in [SCOPED, ALL_ON, UNSCOPED, VENDOR_TREE, ARCH] {
+        let with = move |extra: Vec<String>| -> DumpArgs {
+            Box::new(move |out: &Path| {
+                let mut args = vec!["check-project".to_string()];
+                args.extend((config.args)());
+                for flag in &extra {
+                    args.push(flag.clone());
+                    if flag.starts_with("--dump") {
+                        args.push(out.to_string_lossy().into_owned());
+                    }
+                }
+                args
+            })
+        };
+        dumps.push(Dump {
+            artifact: format!("front-end-{}", config.name),
+            ext: "",
+            dir: corpus_dir(),
+            copy: None,
+            args: with(vec!["--dump-front-end".into()]),
+        });
+        dumps.push(Dump {
+            artifact: format!("registry-{}", config.name),
+            ext: "txt.gz",
+            dir: corpus_dir(),
+            copy: None,
+            args: with(vec!["--dump-registry".into()]),
+        });
+        for (artifact, flag) in [
+            ("expr-types", "--dump-expr-types"),
+            ("doc-resolutions", "--dump-doc-resolutions"),
+        ] {
+            dumps.push(Dump {
+                artifact: format!("{artifact}-{}", config.name),
+                ext: "txt.gz",
+                dir: corpus_dir(),
+                copy: None,
+                args: with(vec![flag.into(), "--format".into(), "json".into()]),
+            });
+        }
+    }
+    for (name, project) in std::iter::once(("piwigo".to_string(), ".".to_string())).chain(
+        SESSION_PROJECTS
+            .iter()
+            .map(|project| (project.replace('/', "-"), project.to_string())),
+    ) {
+        dumps.push(Dump {
+            artifact: format!("session-{name}"),
+            ext: "txt.gz",
+            dir: corpus_dir(),
+            copy: None,
+            args: Box::new(move |out: &Path| {
+                vec![
+                    "record-session".into(),
+                    project.clone(),
+                    out.to_string_lossy().into_owned(),
+                ]
+            }),
+        });
+    }
+    let replays = gate_dir().join(".replay");
+    dumps.push(Dump {
+        artifact: "replay-piwigo".into(),
+        ext: "",
+        dir: replays.join("piwigo"),
+        copy: Some((corpus_dir(), replays.join("piwigo"))),
+        args: Box::new(|out: &Path| {
+            let mut args = vec!["check-project".to_string()];
+            args.extend(scoped_args());
+            args.push("--edit-replay".into());
+            args.push(out.to_string_lossy().into_owned());
+            args
+        }),
+    });
+    for project in vendor_projects()? {
+        let slug = project.replace('/', "-");
+        dumps.push(Dump {
+            artifact: format!("replay-{slug}"),
+            ext: "",
+            dir: replays.join(&slug),
+            copy: Some((corpus_dir().join(&project), replays.join(&slug))),
+            args: Box::new(|out: &Path| {
+                let mut args = vec!["check-project".to_string(), "--no-composer".to_string()];
+                for set in ALL_ON_SETS {
+                    args.push("--set".into());
+                    args.push((*set).into());
+                }
+                args.push("--edit-replay".into());
+                args.push(out.to_string_lossy().into_owned());
+                args.push(".".into());
+                args
+            }),
+        });
+    }
+
+    let scratch = gate_dir().join(".dumps");
+    for dump in &dumps {
+        let mut taken: Vec<PathBuf> = Vec::new();
+        for threads in [None, Some("1")] {
+            let out = scratch.join(format!(
+                "{}-{}{}",
+                dump.artifact,
+                threads.unwrap_or("default"),
+                if dump.ext.is_empty() {
+                    String::new()
+                } else {
+                    format!(".{}", dump.ext)
+                }
+            ));
+            let _ = std::fs::remove_dir_all(&out);
+            let _ = std::fs::remove_file(&out);
+            std::fs::create_dir_all(&scratch).map_err(|e| e.to_string())?;
+            if let Some((from, to)) = &dump.copy {
+                let _ = std::fs::remove_dir_all(to);
+                std::fs::create_dir_all(to.parent().unwrap()).map_err(|e| e.to_string())?;
+                run(Command::new("cp").arg("-a").arg(from).arg(to))?;
+                write(&to.join(".phpstan-rs-replay"), b"")?;
+            }
+            let mut cmd = Command::new(binary);
+            cmd.current_dir(&dump.dir)
+                .args((dump.args)(&out))
+                .stdout(Stdio::null());
+            if let Some(threads) = threads {
+                cmd.env("PHPSTAN_RS_THREADS", threads);
+            }
+            let label = format!(
+                "dump {} at {} threads",
+                dump.artifact,
+                threads.unwrap_or("default")
+            );
+            timings.time(&label, |_| run(&mut cmd))?;
+            taken.push(out);
+        }
+        if let Some((_, to)) = &dump.copy {
+            let _ = std::fs::remove_dir_all(to);
+        }
+        let (default, one) = (&taken[0], &taken[1]);
+        if let Some(difference) = first_difference(default, one)? {
+            return Err(format!(
+                "{}: one thread differs from the default at {}",
+                dump.artifact,
+                difference.display()
+            ));
+        }
+        if let Some(hash) = hash {
+            let target = if dump.ext.is_empty() {
+                gate_dir().join(&dump.artifact).join(hash)
+            } else {
+                snapshot_path(&dump.artifact, hash, dump.ext)
+            };
+            let _ = std::fs::remove_dir_all(&target);
+            let _ = std::fs::remove_file(&target);
+            std::fs::create_dir_all(target.parent().unwrap()).map_err(|e| e.to_string())?;
+            std::fs::rename(default, &target).map_err(|e| format!("{}: {e}", target.display()))?;
+        }
+        let _ = std::fs::remove_dir_all(one);
+        let _ = std::fs::remove_file(one);
+        let _ = std::fs::remove_dir_all(default);
+        let _ = std::fs::remove_file(default);
+    }
+    Ok(())
+}
+
+/// The first file under `a` whose bytes differ from the one at the same
+/// place under `b`, or that only one has; for two files, `a` itself.
+fn first_difference(a: &Path, b: &Path) -> Result<Option<PathBuf>, String> {
+    if a.is_file() || b.is_file() {
+        let read = |path: &Path| std::fs::read(path).ok();
+        return Ok((read(a) != read(b)).then(|| a.to_path_buf()));
+    }
+    let names = |dir: &Path| -> Result<Vec<std::ffi::OsString>, String> {
+        let mut names: Vec<_> = std::fs::read_dir(dir)
+            .map_err(|e| format!("{}: {e}", dir.display()))?
+            .filter_map(|e| e.ok().map(|e| e.file_name()))
+            .collect();
+        names.sort();
+        Ok(names)
+    };
+    let (in_a, in_b) = (names(a)?, names(b)?);
+    if in_a != in_b {
+        return Ok(Some(a.to_path_buf()));
+    }
+    for name in in_a {
+        if let Some(found) = first_difference(&a.join(&name), &b.join(&name))? {
+            return Ok(Some(found));
+        }
+    }
+    Ok(None)
 }
 
 // --- baseline compatibility ----------------------------------------------
