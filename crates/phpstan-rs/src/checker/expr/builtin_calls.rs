@@ -537,25 +537,10 @@ impl<'a> Checker<'a> {
                     return stripped;
                 }
             }
-            // A fold: the result is ultimately whatever the callback's
-            // own return type is (each call's return becomes the next
-            // call's $carry). Binds the callback's two params: $carry to
-            // $initial's type (Null when omitted, matching real PHP's
-            // default), $item to the array's element type.
-            "array_reduce" if args.len() == 2 || args.len() == 3 => {
-                if let Some(item_ty) = (self.infer_expr(&args[0].value, locals)).array_value_type()
-                {
-                    let carry_ty = args
-                        .get(2)
-                        .map(|initial| self.infer_expr(&initial.value, locals))
-                        .unwrap_or(Type::null());
-                    if let Some(reduced) = self.infer_closure_return_with_param_overrides(
-                        &args[1].value,
-                        &[carry_ty, item_ty],
-                        locals,
-                    ) {
-                        return reduced;
-                    }
+            "array_reduce" => {
+                let resolved = resolve_call_args(args, sig.params());
+                if let [Some(array), Some(callback), initial, ..] = resolved[..] {
+                    return self.reduced_array_type(array, callback, initial, locals);
                 }
             }
             // `$keys`' values, converted to strings and cast as keys, key
@@ -2035,6 +2020,83 @@ impl<'a> Checker<'a> {
     /// registry has no entry for at all is treated the same as non-`final`.
     fn get_debug_type_result(&self, ty: &Type) -> Option<Type> {
         get_debug_type_for(ty, self.registry)
+    }
+
+    /// `array_reduce`'s value: the initial value when the array is empty,
+    /// the callback's last return otherwise, both when either may be.
+    fn reduced_array_type(
+        &self,
+        array: &Expr,
+        callback: &Expr,
+        initial: Option<&Expr>,
+        locals: &Locals,
+    ) -> Type {
+        let array_ty = self.infer_expr(array, locals);
+        let initial_ty = initial.map_or_else(Type::null, |e| self.infer_expr(e, locals));
+        if array_ty.is_empty_array().yes() {
+            return initial_ty;
+        }
+        let item_ty = array_ty.array_value_type().unwrap_or_else(Type::mixed);
+        let returned = self.reduce_callback_return(callback, &initial_ty, &item_ty, locals);
+        if array_ty.is_non_empty_array().yes() {
+            returned
+        } else {
+            self.relation().union_of(vec![returned, initial_ty])
+        }
+    }
+
+    /// What `array_reduce`'s callback returns. Its `$carry` holds the
+    /// initial value on the first call and the callback's own return on
+    /// every later one, so a closure is inferred with the two joined
+    /// until that stops growing, widened as a loop's variables are; one
+    /// that never settles is inferred with any `$carry`.
+    fn reduce_callback_return(
+        &self,
+        callback: &Expr,
+        initial: &Type,
+        item: &Type,
+        locals: &Locals,
+    ) -> Type {
+        const MAX_PASSES: usize = 6;
+        const WIDEN_FROM_PASS: usize = 2;
+        let relation = self.relation();
+        let mut carry = initial.clone();
+        for pass in 0..MAX_PASSES {
+            let Some(returned) = self.infer_closure_return_with_param_overrides(
+                callback,
+                &[carry.clone(), item.clone()],
+                locals,
+            ) else {
+                return self.callable_return_type(callback, locals);
+            };
+            let mut next = relation.union_of(vec![initial.clone(), returned.clone()]);
+            if pass >= WIDEN_FROM_PASS && !relation.is_super_type_of(&carry, &next).yes() {
+                next = carry.widen_towards(&next);
+            }
+            if relation.is_super_type_of(&carry, &next).yes() {
+                return returned;
+            }
+            carry = next;
+        }
+        self.infer_closure_return_with_param_overrides(
+            callback,
+            &[Type::mixed(), item.clone()],
+            locals,
+        )
+        .unwrap_or_else(|| self.callable_return_type(callback, locals))
+    }
+
+    /// The return type of the callable `callback` evaluates to: a
+    /// closure's, a first-class callable's or a callable shape's, or that
+    /// of the function or method a string or an array names; `mixed` when
+    /// none is known.
+    fn callable_return_type(&self, callback: &Expr, locals: &Locals) -> Type {
+        let ty = self.infer_expr(callback, locals);
+        if let Some(sig) = ty.callable_sig() {
+            return (*sig.return_type).clone();
+        }
+        self.named_callable_signature(&ty)
+            .map_or_else(Type::mixed, |sig| sig.return_type().clone())
     }
 
     /// The shared three-way split every internal-array-pointer function's
