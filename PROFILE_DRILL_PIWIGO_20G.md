@@ -612,7 +612,7 @@ Twenty items, numbered in the order they are built. Each states what is there no
   - the server's UTF-16 columns.
 
 **Design.**
-1. **The starting state is read first.** At HEAD, the vendor-tree, all-on and unscoped reports are compared with those of the last validated state (`1892b477`), and each difference is read, the six listed among them. Anything wrong is fixed in its own commit before anything else.
+1. **The starting state is read first.** At HEAD, each report is compared with the last state it was validated at, and each difference is read: the vendor-tree report with `1892b477`'s, and the all-on and unscoped reports with `7a3f3f99`'s, the 25 G work's baseline, since level 7 compared only the scoped run and the vendor tree. The six changes listed above were all built before `1892b477`, so they show only against `7a3f3f99`. Anything wrong is fixed in its own commit before anything else.
 2. **The debug oracles run once, over everything, then go.**
    - **The build:** an `oracle` profile, `gate` with `debug-assertions` and `overflow-checks`, run with `PHPSTAN_RS_NO_FILE_CACHE=1`.
    - **The runs:**

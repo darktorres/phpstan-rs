@@ -27,7 +27,7 @@ Building started on 2026-10-03 (`WORK_STACK.md`, level 8).
 | # | plan | task | needs | kind | status |
 |---|---|---|---|---|---|
 | **0** | **item 0** | **Baselines; the debug oracles retired** | | | |
-| 0.1 | step 1 | Read the starting state: the vendor-tree, all-on and unscoped reports at HEAD against `1892b477`'s, each difference read and recorded | — | val | OPEN |
+| 0.1 | step 1 | Read the starting state: at HEAD, the vendor-tree report against `1892b477`'s, and the all-on and unscoped reports against `7a3f3f99`'s (where the six changes show), each difference read and recorded | — | val | OPEN |
 | 0.4 | step 3 | One canonical type printer in `types` over all of `Repr`, with no interning. Every printer destructures without `..` and matches without `_` | — | infra | OPEN |
 | 0.5 | step 3 | O1, `--dump-front-end` through `parse_file`. It covers: the tree after the stub rules and anonymous-class names; facts; ignore marks; warnings and errors; positions at every token boundary; doc sites with their `DocBlock`s; references; built declarations; duplicate sites; use sites. It also records every type node with the type today's round trip gives it, and every union built, with its operands and result | 0.4 | infra | OPEN |
 | 0.6 | step 3 | The full `registry-dump`, after the finishing passes | 0.4 | infra | OPEN |
