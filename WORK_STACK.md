@@ -253,7 +253,8 @@ when it runs, and the plan adds the checks found along the way.
   one pass, `cargo xtask corpus --full` on a worker per core (rows
   0.11a-0.11c, done), with `cargo xtask progress --watch`. Next, before the
   baseline, in this order: fast validation (0.11d-0.11j), from the profile
-  of a replay and a vendor project's run; the PHP catalog from php-src
+  of a replay and a vendor project's run, and every level's report from
+  one analysis (0.11v); the PHP catalog from php-src
   per PHP version, every builtin and every engine operation with the
   conditions the source tests (0.11k-0.11n), which replaces the recorded
   builtin-runs table; the fix's precision (0.11o-0.11q): closures' writes
