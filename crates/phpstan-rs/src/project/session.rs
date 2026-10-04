@@ -944,16 +944,33 @@ impl Session {
             }
             out
         };
+        // An edited file keeps its place in the load order and an added
+        // one comes last, where a fresh load numbers the files in the order
+        // it finds them: a section that differs in nothing else says so.
+        let without_load_order = |body: &str| -> String {
+            body.lines()
+                .filter(|line| {
+                    let line = line.trim_start();
+                    !line.starts_with("load_order: ") && !line.starts_with("next_load_order: ")
+                })
+                .collect::<Vec<_>>()
+                .join("\n")
+        };
         let mut verdict = String::new();
         let (last_sections, fresh_sections) = (sections(&last.0), sections(&fresh.0));
         for (name, body) in &last_sections {
-            let same = fresh_sections
+            let fresh_body = fresh_sections
                 .iter()
-                .any(|(fresh_name, fresh_body)| fresh_name == name && fresh_body == body);
-            verdict.push_str(&format!(
-                "registry {name}: {}\n",
-                if same { "same" } else { "differs" }
-            ));
+                .find(|(fresh_name, _)| fresh_name == name)
+                .map(|(_, fresh_body)| fresh_body);
+            let state = match fresh_body {
+                Some(fresh_body) if fresh_body == body => "same",
+                Some(fresh_body) if without_load_order(fresh_body) == without_load_order(body) => {
+                    "differs only in load order"
+                }
+                _ => "differs",
+            };
+            verdict.push_str(&format!("registry {name}: {state}\n"));
         }
         verdict.push_str(&format!(
             "diagnostics: {}\n",

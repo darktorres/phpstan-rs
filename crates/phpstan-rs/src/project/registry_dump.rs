@@ -4,7 +4,7 @@
 //! it is stored.
 //!
 //! The text has, in order:
-//! - the file table, in load order: each file's path, role, load order,
+//! - the file table, by path: each file's path, role, load order,
 //!   absolute path, package and what the load keeps of it, and each of its
 //!   declarations with its guard, decided on the configured PHP versions
 //!   and on each end of their range;
@@ -62,9 +62,9 @@ pub(crate) fn registry_dump(project: &Project, bases: &[(&str, &Registry)]) -> S
         let mut p = Printer::default();
         section(&mut p, "files");
         let versions = registry.php_versions;
-        let mut by_load_order: Vec<(&PathBuf, &FileState)> = files.iter().collect();
-        by_load_order.sort_by_key(|(_, state)| state.load_order);
-        for (path, state) in by_load_order {
+        let mut by_path: Vec<(&PathBuf, &FileState)> = files.iter().collect();
+        by_path.sort_by_key(|(path, _)| *path);
+        for (path, state) in by_path {
             p.line();
             write_file(project, path, state, versions, packages, &mut p);
         }
