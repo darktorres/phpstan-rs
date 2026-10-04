@@ -69,6 +69,16 @@ lto = false
 codegen-units = 16
 incremental = true
 
+# The debug oracles' build: `gate` with debug assertions and overflow
+# checks, so every `cfg(debug_assertions)` comparison and `debug_assert!`
+# runs over the corpus at release speed. Run with
+# `PHPSTAN_RS_NO_FILE_CACHE=1`: the per-file cache's entries carry no
+# statements for the comparisons to read.
+[profile.oracle]
+inherits = "gate"
+debug-assertions = true
+overflow-checks = true
+
 # Release-speed build that keeps debug info, so profiles symbolicate their
 # call stacks: `dhat-heap`'s output
 # (`cargo build -p phpstan-rs --profile dhat --features dhat-heap`) and a
