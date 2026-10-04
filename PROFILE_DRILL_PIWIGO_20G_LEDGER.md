@@ -38,7 +38,7 @@ Building started on 2026-10-03 (`WORK_STACK.md`, level 8).
 | 0.4 | step 3 | One canonical type printer in `types` over all of `Repr`, with no interning. Every printer destructures without `..` and matches without `_` | — | infra | DONE (0fa1723c) |
 | 0.5 | step 3 | O1, `--dump-front-end` through `parse_file`. It covers: the tree after the stub rules and anonymous-class names; facts; ignore marks; warnings and errors; positions at every token boundary; doc sites with their `DocBlock`s; references; built declarations; duplicate sites; use sites. It also records every type node with the type today's round trip gives it, and every union built, with its operands and result | 0.4 | infra | DONE (64ddd7e3, 11f3f8ba, c965722c, 0e9479ec) |
 | 0.6 | step 3 | The full `registry-dump`, after the finishing passes | 0.4 | infra | DONE (a4acabd2) |
-| 0.7 | step 3 | The checker's records: the PHPDoc resolution record and the expression-type record | 0.4 | infra | OPEN |
+| 0.7 | step 3 | The checker's records: the PHPDoc resolution record and the expression-type record | 0.4 | infra | DONE (ba5cb5e1) |
 | 0.8 | step 3 | O2 as the gate's whole artifact set (`cargo xtask corpus --full`), with every diagnostic field and every cache state, and a configuration with architecture rules and banned types | — | infra | OPEN |
 | 0.9 | step 3 | The server: an in-process session over Piwigo and two vendor projects, and the edit replay | 0.5, 0.6 | infra | OPEN |
 | 0.10 | step 3 | Memory: the dhat profile by holder, with the heap at the start of the check and at the check's own maximum, and a profile with untrimmed backtraces | — | infra | OPEN |
