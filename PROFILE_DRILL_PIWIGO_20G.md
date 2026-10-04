@@ -522,15 +522,15 @@ Counted by M10's rule: a row naming a function counts what M10 charges to that f
 | 14, PHPDoc | 2.66 M | 13.7% |
 | 4, the registry by ids | 2.02 M | 10.4% |
 | 13, a file's products | 1.31 M | 6.7% |
+| 16, interned values | 0.74 M | 3.8% |
 | 2, the walk and path data | 0.56 M | 2.9% |
-| 10, flat token arrays | 0.52 M | 2.7% |
 | 8, declarations | 0.48 M | 2.5% |
-| 16, interned values | 0.47 M | 2.4% |
 | 6, stub records | 0.45 M | 2.3% |
+| 10, flat token arrays | 0.23 M | 1.2% |
 | 12, lexer details | 0.17 M | 0.9% |
 | 5, merge and indexes | 0.11 M | 0.6% |
 | 3, context files read into a worker's buffer | 0.06 M | 0.3% |
-| 11, line starts and ignore marks | 0.05 M | 0.3% |
+| 11, line starts and ignore marks | 0.07 M | 0.3% |
 | unattributable: stacks that end inside the allocator | 0.01 M | 0.1% |
 | made once per process: argument and configuration parsing, the pool | 0.001 M | 0.0% |
 
@@ -1344,7 +1344,7 @@ Exact, except the semantic changes listed in §11: non-UTF-8 identifiers keep th
   - every `Box<Expr>` and `Box<Stmt>`: `parse_postfix` 537,753, `parse_expr_bp_inner` 271,838, `parse_assignment_tail` 244,768, and so on;
   - every list: arguments 258,870, statements 166,525, array items 105,245, parameters 46,703, and so on;
   - the payloads: single-quoted literals 352,352 and doc comments 72,171.
-- **Three builders allocate where nothing is kept.** The scratch stacks of step 7 take them over:
+- **Three builders allocate where nothing is kept.** The scratch stacks of step 7 take them over, and item 10's inline tokens the interpolated strings:
   - `parse_type_hint` builds a `Vec<Vec<TypeHint>>` for every type hint, `int` included: 468,730 temporaries (`type_hints.rs:102`, `:105`, `:135`), beside the 11,843 boxes of nullable types (`:142`), which are nodes;
   - interpolated strings: the lexer's fragment scan (`scan_interpolated`, `strings.rs:383-396`, 454,535 with the `PhpString` conversions it asks for) and the parser's parts (`build_interpolated`, 154,592);
   - each `use` import, in a box of its own (`stmt.rs:255`, 62,346).
@@ -1367,34 +1367,73 @@ pub struct TokenStream {
     pub kinds: Vec<TokenKind>,        // one byte: 73 token kinds and 62 keywords fit
     pub spans: Vec<Span>,
     pub payloads: Vec<Payload>,       // one per payload-bearing token, in order:
-                                      // Name(NameId) | Int | Float | Str(a source range, or a decoded one) | Parts | Html(a source range)
+                                      // Name(NameId) | Int | Float | Str(a range of the source or of the file's decoded bytes) | Html(a source range)
     pub docs: Vec<(u32, Span)>,       // each doc comment, with the index of the token it precedes
+    pub errors: Vec<LexError>,        // each lexer error, with its offset
 }
 ```
 - **The parser keeps three cursors:** token, payload and doc.
   - `peek_at(n)` is `kinds[pos + n]`, at any distance.
   - A payload moves out when its token is taken.
-  - The doc group before the current token is the run of `docs` at `pos`, folded only when a declaration or statement asks for it.
   - A keyword's spelling, when it stands as a name, is the source slice at its span.
 - **Names.** The lexer's name table is scratch: it maps a spelling's bytes to its `NameId` in the file's `names` (item 9), which owns the names.
-- **Buffers.** The four vectors are per worker thread for the length of a load, as the cross-file name cache is. They are cleared, not freed, between files, and emptied when the load ends.
-- **Fragments.** Interpolation fragments are lexed by `Lexer::fragment` into streams taken from a small stack of scratch streams, because the file's own stream is still in use.
+- **Escaped literals** are decoded by the lexer once, straight into the file's byte vector (item 9). `Str` is a range of the source or of that vector.
+- **Buffers.** The vectors are per worker thread for the length of a load, as the cross-file name cache is. They are cleared, not freed, between files, and emptied when the load ends.
+- **`__halt_compiler` ends the stream, as it ends PHP's lexing.**
+  - PHP's lexer takes the three tokens after `__halt_compiler` (any case; whitespace and comments between them are skipped), then returns the rest of the file as one inline-HTML token, whatever it holds. Its grammar then requires `( ) ;` or `( ) ?>`. `php` 8.5 confirms: `__halt_compiler(1);` is a syntax error, and `__halt_compiler /* c */ ( ) ?>tail` lexes `tail` as inline HTML.
+  - Today the parser stops the lexer at `__halt_compiler` followed by `(` (`parser/stmt.rs:389-400`, `parser.rs:351-362`), so the data after it, often a phar's binary payload, is never lexed. A lexer that ran over the whole file first would lex that data as PHP.
+  - So the lexer does as PHP's does: it emits those three tokens, records the offset where the data begins, and stops. The parser reports what PHP's grammar rejects there.
+  - **`__COMPILER_HALT_OFFSET__` gets its value.** In a file with `__halt_compiler`, it is that offset (just past the `;` or `?>`: 61 and 59 in the probes). In any other file, PHP throws `Error: Undefined constant "__COMPILER_HALT_OFFSET__"`, which a new check reports. Today it is `int<1, max>` everywhere (`predefined_constants.rs:67`).
+- **Interpolated strings are lexed inline, as PHP's scanner emits them.**
+  - `token_get_all` gives a string's parts as tokens of the one stream: literal parts, `{$` (`T_CURLY_OPEN`), `${` (`T_DOLLAR_OPEN_CURLY_BRACES`), a simple variable with its `[` or `->` offset, and the closing `}`.
+  - Today a `{$…}` part is kept as text, and `build_interpolated` lexes and parses it again with `Lexer::fragment` and a parser of its own. That costs a clone of the `NameContext`, a fork of the reference recorder, and the node counter copied in and out (`parser/interpolation.rs:21-45`).
+  - The lexer emits the parts inline, and the parser reads them from the same stream. A literal part is a range of the source or of the decoded bytes.
+  - `Lexer::fragment`, the scratch streams, the sub-parser, the context clone, the recorder fork and the `Parts` payload all go. So do `scan_interpolated`'s buffers (item 9).
+- **The file's error is the first one in the file, as PHP reports it.**
+  - Today a lexer error anywhere is the file's error, ahead of a syntax error found earlier in the file (`parse.rs:115-128`).
+  - PHP's parser pulls its tokens from the lexer, so it reports whichever error it meets first. `eval("$a = ;\n$b = 08;")` reports the syntax error on line 1; `eval("$a = 1;\n$b = 08;\n$c = ;")` reports "Invalid numeric literal" on line 2.
+  - The stream records each lexer error with its offset, and the parse stops at its first error. The file's error is whichever of the two comes first.
+- **A declaration's doc is the one PHP gives it.**
+  - PHP keeps the last doc comment it lexed. A `}` clears it, and a declaration takes it: a function, method, class-like, closure, arrow function, anonymous class, property, class constant or enum case. Neither a `{`, a statement nor `?>` clears it.
+  - `php` 8.5 confirms, through `getDocComment`:
+    - `/** first */ /** second */ function f` gives `f` the second;
+    - `/** d */ $y = [1]; function j() {}` gives `j` `/** d */`, and so does `/** a */ { function k2() {} }`;
+    - with `{ }` or `if (true) { }` before the function, it gets none;
+    - `/** h */ $z = function() {}; function m() {}` gives the closure the doc and `m` none, and an arrow function or an anonymous class likewise takes it;
+    - in a class, `/** p */ public $a; public $b;` gives `$b` none.
+  - That is what an annotation reader sees when the code runs: Doctrine's, PHPUnit's `@dataProvider` before attributes, a framework's routes.
+  - Today a declaration takes the doc right before its first token (`parser.rs:608-611`), so `j` gets none.
+  - From the `docs` array, the parser gives each declaration the doc by PHP's rule. A statement keeps the doc right before it, for an inline `@var`.
+  - A new check reports a doc comment that PHP gives to a declaration it does not precede, where the declaration has no doc of its own: the declaration gets that doc's tags at run time.
+- **Reading by the configured versions.**
+  - Some source lexes differently across the versions a project may run on:
+    - `#[` starts a comment before 8.0, so `#[Attr] function f() {}` on one line is no function at all there;
+    - `fn` is an identifier before 7.4, `match` before 8.0, and `enum` and `readonly` before 8.1;
+    - `?->` is two tokens before 8.0;
+    - `1_000` lexes differently before 7.4, and `0o17` before 8.1.
+  - The lexer reads the configured versions (`Registry::php_versions`). Where they lex a construct differently, a check reports it, with the versions that read it otherwise. The file is read as the newest configured version reads it.
 - **Unchanged.** Ignore marks and file facts are recorded in the lexing loop, as now.
-- **Readers of token lists.** `stub_attributes.rs`, the code frame and completion read the stream, and `Parser::new(TokenStream)` replaces the test constructors.
+- **Readers of tokens.**
+  - Comments are recorded only when asked (`keep_comments` today), for the code frame (`output/codeframe.rs:49-63`) and O1.
+  - The stub rules, which item 9 moves into the parse, lex an attribute's type string into a scratch stream (`stub_attributes.rs:121-133` today).
+  - Completion lexes the editor's text into a stream of its own.
+  - `Parser::new(TokenStream)` replaces the test constructors.
 - **What goes:** `Token`, `Tok`, `Supply`, `next_raw`/`next_tok`, the `VecDeque`, `fill`/`pop`, `raw_keyword`, and `LexEnd`'s second pass.
 
-**Oracle.** O1, O2. Exact.
+**Oracle.** O1, O2, and phar stubs among the fixtures. Exact, except the semantic changes listed in §11: the halt offset and its check, the first error in the file, PHP's doc rule for declarations and its check, and the versions' check.
 
 **Saving.** About two array writes per token in the lexer and an index per read in the parser, ≈20-30 Ir per token, in place of ≈1.95 G: ≈1.7 G.
 
-**Allocations: ≈0.52 M (M10).**
-- **What goes:**
-  - the token supply (`next_tok`, 106,750);
-  - the parser's start-up for each file (`with_supply` 44,744: a goto-scope box and buffers; `from_lexer` 16,419; `Lexer::build` 16,419);
-  - the lexer's name table, which grows anew for each file (64,311 rehashes).
-- **What becomes per-worker scratch, cleared between files:** the name table and the parser's goto scopes (`parser.rs:206`), beside the token buffers.
-- **Doc comments go into the `docs` array.** Today the supply pushes each one onto a vector and boxes each group (`lexer.rs:597`, `:602`: 106,437).
-- **The names made while lexing** (334,629 allocations) are item 16's.
+**Allocations: ≈0.23 M (M10).**
+- **Doc comments go into the `docs` array.** Today the token supply pushes each one onto a vector and boxes each group (`next_tok`: `lexer.rs:597` 54,107, `:602` 52,330, `:607` 313).
+- **The parser's start-up for each file:** `with_supply` 44,744 (a goto-scope box at `parser.rs:193` and buffers at `:206`) and `from_lexer` 16,419 (`parser.rs:185`).
+- **The lexer's name table,** which grows anew for each file: 64,311 rehashes (`lexer.rs:443`).
+- **What becomes per-worker scratch, cleared between files:** the name table and the parser's goto scopes, beside the token buffers.
+- **Not this item's:**
+  - the names the lexer makes (`lexer.rs:434-435`, 270,240), which item 16 makes one allocation each;
+  - the line index's `Arc` in `Lexer::build` (`lexer.rs:368`, 16,419), which goes with item 11's line starts.
+  
+  M10 charges both to the lexer's functions, and gives them to the items whose designs remove them.
 
 ### 11. Line starts for every file, columns where read, offsets in the tree (R4)
 
@@ -1424,7 +1463,7 @@ Context files need line starts, for duplicate-declaration messages (`duplicate_c
 
 **Oracle.** O1, O2 (every position, fix span, ignore result, anonymous-class name), the line-index tests over multi-byte and astral lines, the LSP tests. Exact.
 
-**Allocations.** `LineIndex::new` makes three allocations per file (43,630 in all). `LineStarts` makes one, and context files build no column tables. Ignore marks keep their text as a `String` today (`lexer.rs:535`), and ignore comments keep their identifiers that way too (`ignore_comments.rs:268`, `:334`). Both become offsets and slices, read through the analysed file's source.
+**Allocations.** `LineIndex::new` makes three allocations per file (43,630 in all). `LineStarts` makes one, and context files build no column tables. The lexer also wraps each index in an `Arc` (`lexer.rs:368`, 16,419); the file's state holds its `Lines` itself, and the checker borrows them. Ignore marks keep their text as a `String` today (`lexer.rs:535`), and ignore comments keep their identifiers that way too (`ignore_comments.rs:268`, `:334`). Both become offsets and slices, read through the analysed file's source.
 
 ### 12. Lexer details (R12)
 
@@ -1625,7 +1664,7 @@ The purity and property-write keys went by item 4, as ids.
 ### 16. Interned values: one allocation each, tables without per-entry allocations (M7)
 
 **Now.**
-- **A name takes up to three allocations.** `Name` is an `Arc<NameData>`, and `NameData` holds its text and, when the text is not lowercase, its lowercase form, each in a box of its own (`name.rs:22-49`). At exit there are 135,777 `NameData`, 118,237 texts and 79,600 lowercase copies.
+- **A name takes three allocations to make.** `Name` is an `Arc<NameData>`, and `NameData` holds its text and, when the text is not lowercase, its lowercase form, each in a box of its own (`name.rs:22-49`). The lowercase copy is made for every name and dropped when it equals the text (`name.rs:41-42`). The run makes 186,348 names in 559,250 allocations. At exit there are 135,777 `NameData`, 118,237 texts and 79,600 lowercase copies.
 - **The type interner's index costs nearly as much as the types.** It is `FxHashMap<u64, Vec<Weak<Node>>>` (`intern.rs:21-25`), with a `Vec` for each distinct hash: 120,644 allocations and 3.9 MB, plus 8.7 MB of table, for 119,757 nodes of 112 B (13.4 MB). That is ≈105 B of index per node.
 - **A shape's string key allocates each time it is made.** `ShapeKey::from_bytes` builds a `PhpString` (an `Arc<[u8]>`) for every key the checker forms: 128,140 allocations, and 29,131 held at exit.
 - **The type memos are never cleared.** `remember` keeps 5.4 MB and the shape memo 1.5 MB at exit.
@@ -1650,10 +1689,12 @@ The purity and property-write keys went by item 4, as ids.
 
 **Memory.** ≈15 MB at exit.
 
-**Allocations: ≈0.5 M (M10):**
+**Allocations: ≈0.74 M (M10):**
 - the type interner's per-hash vectors (120,644);
 - shape keys that already exist (most of 182,591);
-- two of the up to three allocations of each name made (≈200 K).
+- the names the lexer makes (`name_and_bits`, `lexer.rs:434-435`: 270,240).
+
+Two of every name's three allocations go wherever it is made: ≈373 K of the run's 559,250. The rest of those are in the rows of the items whose code asks for the names (`RefKey::class_text` 101,896, `parse_qualified_name` 58,737, and others).
 
 
 ### 17. Warm runs: entries checked by `stat`, a resolved context base
@@ -1867,6 +1908,7 @@ Exact.
   - item 7: constants on a cycle read as `never` and reported;
   - item 8: a `@property` tag shadowed by a declared property checked against the tag's own names;
   - item 9: identifiers and docs read from a source that is not UTF-8 keep their bytes, so names that differ only in such bytes are distinct; the stub rules apply only to stub sources;
+  - item 10: `__COMPILER_HALT_OFFSET__` as its file's offset, with the new check of its use elsewhere; `__halt_compiler` followed by anything but `( ) ;` or `( ) ?>` is a syntax error; a broken file's error is its first one; a declaration's doc is the one PHP gives it, with the new check of a doc given away; and the new check of source the configured versions lex differently;
   - item 15: container-field keys canonical as PHP's array keys;
   - item 18: the rule families of §12.10.
   
@@ -1902,13 +1944,13 @@ Exact.
 | 7 | one relation memo, by content generation | up to ≈0.3 G | — | bounded as today; `KEEP_DECISIONS`' 1.3 MB goes | exact |
 | 8 | case references in the checker, declarations built lean | ≈0.1 G | — | both caches' entries; 0.48 M allocations | exact, except one `@property` case |
 | 9 | typed vectors, ids, `peeled` | ≈0.8-1.2 G | — | ≥53 MB of the analysed trees; 4.24 M allocations | exact, but semantic for non-UTF-8 names and the stub rules |
-| 10 | flat token arrays | ≈1.7 G | — | 0.52 M allocations | exact |
-| 11 | line starts, columns, offsets, ignore marks | ≈0.2 G | — | 0.05 M allocations | exact |
+| 10 | flat token arrays | ≈1.7 G | — | 0.23 M allocations | exact, but semantic for the halt offset, the first error, declarations' docs and the versions |
+| 11 | line starts, columns, offsets, ignore marks | ≈0.2 G | — | 0.07 M allocations | exact |
 | 12 | lexer details, qualified names as one token | ≈0.35 G | — | 0.5 M allocations | exact |
 | 13 | declaration list, one walk, builders in scratch | ≈0.45 G | — | bodies as one slice per file; 1.31 M allocations | exact |
 | 14 | PHPDoc finished, two memos | ≈0.35 G | — | ≈50 MB; 2.66 M allocations | exact |
 | 15 | names as names | ≈0.6 G | partly | 2.76 M allocations | exact, except key corrections |
-| 16 | interned values in one allocation | ≈0.1 G | — | ≈15 MB; 0.5 M allocations | exact |
+| 16 | interned values in one allocation | ≈0.1 G | — | ≈15 MB; 0.74 M allocations | exact |
 | 17 | warm runs | decoding and reads ≈0.85 core-s, most of the finishing window | yes | only decoded records in the heap | exact |
 | 18 | check phase remainder, rule temporaries | ≈1.6-2.0 G | — | 3.58 M allocations | semantic (§12.10) |
 | 19 | each tree until its last reader | — | — | batch: the analysed trees freed during the check; server: open documents and an LRU | exact |
@@ -2064,6 +2106,7 @@ The rewrite made two more changes:
 | 7 | A registry-backed memo already existed (`KEEP_DECISIONS`). The generation must cover every registry content the relation reads, not just the hierarchy. On-demand evaluation could freeze an answer computed under an open cycle guard. Clearing per generation does not bound a batch run. The settings in the key are not read. The oracle's switch was test-only. | A content generation, also for read-only pass levels. One memo absorbing both. Provisional answers under cycle guards, with each cycle resolved per component by what PHP does: a constant cycle throws, so its reads are `never` and are reported. A two-segment bound. A runtime off switch. |
 | 8 | Six case-reference fields with seven kinds of readers, not one. One reader checks the merged reflection, not what the tag writes. Overlap with item 4's `FileDecls`. A wrong reason given for duplicate parameters. `reconcile_with_native` still collected. | Every field listed with its readers. Case references computed at every checked position from what is written. Dedup done in the file's parameter vector. One semantic case listed. The saving restated as work. |
 | 9 | The arena's `Sync` came from an `unsafe impl`, which the workspace denies, and the name arena was not `Sync` either. The tree is changed after the parse (the stub rules, anonymous-class names, a second name resolution), and other code builds and keeps expressions. A non-UTF-8 source cannot give `&str` payloads, and its identifiers are decoded lossily today, so `class \xA9` and `class \xAA` are one class. Statement docs need only today's doc sites. The counts mixed rules: the expression clones included PHPDoc's, and M9 counted by a rule no item used. Checking the stub rules found that they apply to any file that mentions them, and for the newest PHP version only. | The tree as typed vectors addressed by `u32` ids: no `unsafe`, no lifetime, a few allocations per kept file. Chosen on merit over a safe reference arena (`bumpalo-herd` with `self_cell`): smaller nodes, exact sizes, no lifetime, dense side tables. The stub rules applied as a stub is parsed, to stubs only, recording versions that item 6's readers answer for the configured range. Anonymous-class names as a side table. Every holder of an expression listed, holding ids. Payloads as byte ranges; names as bytes (item 15) and docs lexed as bytes (item 14). Attributes kept in their node. M9 recounted by M10's rule, and item 9's counts stated by it. |
+| 10 | Lexing the whole file first would lex the data after `__halt_compiler` as PHP. Interpolated strings were to keep a sub-parser, where PHP's scanner emits their parts inline. A lexer error anywhere would still beat an earlier syntax error, where PHP reports the first. Docs attached by adjacency miss the docs PHP gives declarations. The token readers were incomplete. Allocations were counted twice, and the item's M10 row held the lexer's names and the line index's `Arc`. The lexer ignores the configured versions. | The lexer stops where PHP's does, records the offset, and `__COMPILER_HALT_OFFSET__` gets its value, with a check of its use elsewhere. String parts as inline tokens; the sub-parser, fragments and scratch streams go. Errors recorded with offsets, the first one reported. Declarations' docs by PHP's rule (only `}` clears a pending doc, as `php` showed, not `{`), with a check of a doc given away. A check of source the configured versions lex differently. Comments only on request. The row recounted to 0.23 M, with the names moved to item 16 (whose `Now` is corrected: three allocations per name, always) and the `Arc` to item 11. |
 
 # Appendix A. The allocation tail, every site
 
