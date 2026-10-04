@@ -1534,42 +1534,62 @@ Context files need line starts, for duplicate-declaration messages (`duplicate_c
   - for any tree a pass changed after the parse (`file_references`, `project.rs:2836`);
   - for the stub base (`stubs.rs:1385`).
 - **The incremental path** walks again (`declared_names`, `declared_constants`, `project.rs:3201-3225`).
+- **A guard does not follow when PHP binds a declaration.**
+  - Today an earlier top-level `if (c) { return; }` guards only nested declarations: "PHP declares those before running anything" (`syntax/src/declarations.rs:69-71`). Only `return` counts as an exit there.
+  - PHP binds some declarations when it compiles the file, and others only when execution reaches them. Tested with `php` 8.5 on a file whose first statement is `return;`, included from another, with opcache on and off:
+    - **bound at compile time, so they exist anyway:** functions; traits that use no trait; interfaces with no parent; classes that implement no interface and use no trait, with no parent, or with a parent that already exists when PHP compiles the file: internal (`extends Exception`), earlier in the same file, or declared by a file loaded before (`class D extends P`, with `P` from an earlier file);
+    - **bound only when reached, so they do not exist:** a class that uses a trait or implements an interface, or whose parent is declared later; a trait that uses a trait; an interface with a parent; an enum; a top-level `const`; a `define()`.
+  - So `if (!defined('ABSPATH')) { exit; }`, WordPress's guard, decides whether every run-time-bound declaration after it exists. Today `exit` is not counted, and neither kind is told apart.
 
 P12 step 3 was set aside because "it cannot hold references into a tree still being built". With item 9's layout it can: a node's id is fixed when it is built.
 
 **Design.**
 1. **The parser lists the declarations** as it builds them: class-likes, functions, constants and `define()` calls. Each entry holds:
    - the name and kind;
-   - the guard (the enclosing conditions and the earlier top-level early returns, from the parser's statement stack);
+   - the guard, from the parser's statement stack, following how PHP binds the declaration:
+     - a declaration PHP binds at compile time (the first kind above) is guarded only by the conditions it is nested in;
+     - any other is guarded by every earlier top-level exit too, conditional or not: `return`, `exit`, `die`, `throw` and `__halt_compiler`. After an unconditional exit it never exists, and is reported as dead code;
+     - a class whose parent is declared in another file is bound at compile time only if that file was loaded first, which only the run decides. So it is guarded as possibly declared: both possibilities are kept;
    - the `ImportScope`;
+   - its doc, as item 10's rule picks it. The doc's names are resolved in the entry's own `ImportScope`, since a `use` may stand between the doc and the declaration;
    - the node's id.
+   
+   **The list is in source order,** which decides collisions: a second unconditional class of the same name merges into the first, and the first wins any conflict (`registry/index.rs:256-345`). Item 9 gives a node its id only when its list commits, after its children. So the parser reserves an entry when a declaration starts and fills in the id at the commit. Anonymous classes are entries of their own, named from item 9's side table, and stay after the named ones as today (`file_declarations.rs:31-32`).
+   
+   **A file that defines constants it cannot name is marked so:** `define($name, ..)`, `define(__NAMESPACE__ . '\X', ..)`, `call_user_func('define', ..)`, `('define')(..)`. Today only a literal name is recorded. Readers then know some constant may be defined there.
    
    Declaration building iterates it, and so do the duplicate sites, the incremental path and the opt-in rules over analysed files. They all run while the tree exists. What outlives the tree is copied out on the worker, as item 3 says. The declarations walk, its facts-gated expression walks and the separate declared-classes collection go.
 2. **`ImportScope`s are published once**, at each `namespace` and `use`. Readers start from them.
 3. **One walk for the rest**, with every builder at each node:
    - `BodySummary` (purity, property writes, assigned properties);
-   - `InitFlow`, built from the same statement entries and exits, since it follows the statement structure and evaluation order the walk visits;
-   - `FileSites` (`GlobalFacts`).
+   - `InitFlow`, built from the same statement entries and exits;
+   - `FileSites` (`GlobalFacts`);
+   - the per-file families item 19 moves here from the project-wide passes, registered like the rest.
+   
+   **The walk visits in PHP's order of evaluation,** which `InitFlow` records and `BodySummary` ignores.
+   - In an assignment, PHP evaluates the target's operands first, then the value, then stores: `$a[f()] = g()` and `$o->{f()} = g()` print `fg`. A destructuring assignment evaluates the value first: `[$x[f()]] = [g()]` prints `gf`.
+   - The short-circuit operators are visited as they run.
+   - Today `events_of` records the value's events before the target's (`init_flow.rs:420-422`), so a read in a target's operands comes after reads in the value. That order is corrected, and the change is semantic.
    
    Statement docblocks' names stay where `2dc1aa9b` put them: the parser records each doc site with its context.
-4. **The collector goes.** The stub-attribute pass records the references of the types it adds, as it resolves them. The stub build reads the parser's record.
-5. **A file's bodies are one sorted slice** of `(span, summary, flow)`. Today they are a hash map holding two `Arc`s per body (`BodySummary` and `InitFlow`, 57,506 bodies, M8). A pass finds a body by binary search on its span.
+4. **The collector goes.** The stub rules, which item 9 applies as a stub is parsed, record the references of the types they add, as they resolve them. The stub build reads the parser's record.
+5. **A file's bodies are one slice** of `(summary, flow)`. Today they are a hash map holding two `Arc`s per body (`BodySummary` and `InitFlow`, 57,506 bodies, M8). A function's or method's `FileDecls` entry (item 4) holds its body's index, so a pass reaches a body through the declaration's id. Only the server's position lookups search the slice by span.
    - A body's lists are ranges into vectors of the file: one each for calls, purity calls, reassigned names, assigned properties, events and flows.
    - So a file's summaries are a few allocations, not several per body, as item 4 stores declarations.
 6. **Builders gather in scratch and emit exact-size slices.**
    - Today the summary and flow builders grow vectors per body and per node:
-     - `events_of` 165,258 and `Summarizer::call` 173,767;
+     - `events_of` 165,258 and `Summarizer::call` 138,869;
      - `FileBodies::of_file` 135,912 and `push_events` 104,304;
      - `flow_of_stmt` 76,492, `purity_call` 42,080 and `Summarizer::finish` 37,003.
    - They gather in per-walk scratch stacks, reused across bodies and files, and move each body's lists out once, at their exact size.
-7. **References are recorded into one vector per file, sorted once** (item 5's sorted slices). Today they go into hash sets grown insert by insert: `Recorder::add` 89,648, `Recorder::doc` 51,886, `file_references` 122,290.
+7. **References are recorded into one vector per file, sorted once** (item 5's sorted slices). Today they go into hash sets grown insert by insert: `Recorder::add` 57,859 and `Recorder::doc` 51,886.
    - A doc site holds the interned `ImportScope` of step 2. Today every doc site clones the whole name context into an `Arc` of its own (`references.rs:279`).
-   - `recorded_references` reads the sites in their recorded order. Today it collects and sorts them, and the frames, per file (`deps.rs:55`).
-   - A declaration's name is its `Name`. Today `Declaration::name` formats it (`declarations.rs:45`: 24,814).
+   - `recorded_references` reads the sites in their recorded order. Today it collects and sorts them, and the frames, per file (`deps.rs:55`: 33,273). What else runs under `file_references` is item 14's `DocNames` memo.
+   - A declaration's name is its `Name`. Today `Declaration::name` formats it (`declarations.rs:45`: 30,159).
 
-**Oracle.** O1 (declaration lists, guards, contexts, summaries, flows, references), `registry-dump`, O2. Exact.
+**Oracle.** O1 (declaration lists, guards, contexts, summaries, flows, references), `registry-dump`, O2, and a fixture of the binding cases above, checked against `php`. Exact, except the semantic changes listed in §11: guards by PHP's binding, and the order of evaluation in `InitFlow`.
 
-**Allocations: ≈1.31 M (M10).** This includes the declarations walk's lists, which step 1's list replaces: `if_chain` 52,762, the collector 52,520, `Declaration::name` 30,159, duplicate sites 49,224 and `built_declaration` 28,516.
+**Allocations: ≈1.31 M (M10).** This includes the declarations walk's lists, which step 1's list replaces: the walk's `if_chain` 52,762, `Declaration::name` 30,159, the duplicate sites 62,346 (class sites' `record` 36,898 and `merge` 12,326, function sites' 11,198 and 1,924) and `built_declaration` 28,516. The old collector allocates nothing in this run: no stub base is built, and no tree is changed after its parse.
 
 ### 14. PHPDoc finished: P7 and P11 as designed (§3.2)
 
@@ -1941,6 +1961,7 @@ Exact.
   - item 10: `__COMPILER_HALT_OFFSET__` as its file's offset, with the new check of its use elsewhere; `__halt_compiler` followed by anything but `( ) ;` or `( ) ?>` is a syntax error; a broken file's error is its first one; a declaration's doc is the one PHP gives it, with the new check of a doc given away; and the new check of source the configured versions lex differently;
   - item 11: lines end at a lone `\r` as at `\n`, and so does a `//` or `#` comment;
   - item 12: casts as PHP's single tokens; spaced qualified names a syntax error on 8.x; doc comments only with whitespace after `/**`; `?>` and heredoc lines ending at a lone `\r`; heredoc indentation errors; `<?php` open only before whitespace, and `<?` by `short_open_tag`;
+  - item 13: declarations exist as PHP binds them: run-time-bound ones are guarded by every earlier exit (`exit`, `die` and `throw` included) and are dead after an unconditional one, and a class whose parent is in another file is possibly declared; `InitFlow` in PHP's order of evaluation;
   - item 15: container-field keys canonical as PHP's array keys;
   - item 18: the rule families of §12.10.
   
@@ -1979,7 +2000,7 @@ Exact.
 | 10 | flat token arrays | ≈1.7 G | — | 0.23 M allocations | exact, but semantic for the halt offset, the first error, declarations' docs and the versions |
 | 11 | line starts, columns, offsets, ignore marks | ≈0.2 G | — | 0.07 M allocations | exact, but semantic for a lone `\r` |
 | 12 | lexer details, qualified names and casts as one token | ≈0.35 G | — | 0.49 M allocations | exact, but semantic for PHP's tokens (§11) |
-| 13 | declaration list, one walk, builders in scratch | ≈0.45 G | — | bodies as one slice per file; 1.31 M allocations | exact |
+| 13 | declaration list, one walk, builders in scratch | ≈0.45 G | — | bodies as one slice per file; 1.31 M allocations | exact, but semantic for guards and `InitFlow`'s order |
 | 14 | PHPDoc finished, two memos | ≈0.35 G | — | ≈50 MB; 2.66 M allocations | exact |
 | 15 | names as names | ≈0.6 G | partly | 2.76 M allocations | exact, except key corrections |
 | 16 | interned values in one allocation | ≈0.1 G | — | ≈15 MB; 0.74 M allocations | exact |
@@ -2141,6 +2162,7 @@ The rewrite made two more changes:
 | 10 | Lexing the whole file first would lex the data after `__halt_compiler` as PHP. Interpolated strings were to keep a sub-parser, where PHP's scanner emits their parts inline. A lexer error anywhere would still beat an earlier syntax error, where PHP reports the first. Docs attached by adjacency miss the docs PHP gives declarations. The token readers were incomplete. Allocations were counted twice, and the item's M10 row held the lexer's names and the line index's `Arc`. The lexer ignores the configured versions. | The lexer stops where PHP's does, records the offset, and `__COMPILER_HALT_OFFSET__` gets its value, with a check of its use elsewhere. String parts as inline tokens; the sub-parser, fragments and scratch streams go. Errors recorded with offsets, the first one reported. Declarations' docs by PHP's rule (only `}` clears a pending doc, as `php` showed, not `{`), with a check of a doc given away. A check of source the configured versions lex differently. Comments only on request. The row recounted to 0.23 M, with the names moved to item 16 (whose `Now` is corrected: three allocations per name, always) and the `Arc` to item 11. |
 | 11 | PHP and the editor end a line at a lone `\r`, and PHP ends a line comment there too; today neither does. Context files need columns for their lexer warnings and parse failures. The per-file cache stores the index. Open documents need their overlay. The count was 46,422, not 43,630, and fragment lexers build an empty index. | Lines and line comments end where PHP's do. Warnings and failures record their line and column on the worker. `LineStarts` in the cache, with a format bump. The overlay first. One allocation for `LineStarts`, none for fragments. |
 | 12 | Six places where our lexer reads source otherwise than PHP's: doc comments without whitespace after `/**`, a lone `\r` after `?>` and in heredocs, heredoc indentation PHP refuses, casts as one token with only spaces and tabs inside, the spaced qualified name that PHP 8 rejects, and open tags (`<?phpx`, and `<?` by `short_open_tag`). A perfect-hash watch list is not needed. Blank runs are mostly one byte. One comparison cannot answer both questions of step 2. | Each reading made PHP's, checked against `token_get_all`, and listed as semantic; the cast checks of `coercion.rs` kept. Watch bits cached with the name. Blank runs tested a byte first. The keyword comparison restated. `parse_qualified_name`'s allocations moved from item 9's row to this one. |
+| 13 | Guards did not follow PHP's binding: compile-time-bound declarations exist after an early exit, run-time-bound ones (trait users, implementers, enums, interfaces with parents, `const`, `define()`) do not, and `exit` was not an exit. Ids given at commit would put nested declarations first. `InitFlow` records a value before its target's operands, against PHP's order. Item 19's families had no host. A doc's scope, a body's lookup and dynamic `define()` were open. Several counts were off, and two sites do not occur in this run. | Guards by PHP's binding, tested with `php` (a parent from a file loaded earlier makes a class bound at compile time, so it is kept as possibly declared). Entries reserved in source order. The walk in PHP's order, destructuring included. Families hosted. Docs resolved in the entry's scope; bodies by declaration id; a marker for constants a file defines by a computed name. Counts by M10's data. |
 
 # Appendix A. The allocation tail, every site
 
