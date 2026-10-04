@@ -660,7 +660,7 @@ Twenty-one items, numbered in the order they are built. Each states what is ther
      - both reverse indexes, the use-site index and the duplicate-site tables;
      - the file table: path, role, load order, absolute path, Composer owner and `mentions_phpstan`.
    - **The checker's records:**
-     - every PHPDoc resolution, keyed by file, docblock span, tag ordinal, host class and function;
+     - every PHPDoc resolution, keyed by file, host class and function, the reader that resolves it (an inline `@var`, a hook's `@throws`, a `@template` bound, ...) and the written type: the checker reads a docblock's types as text, without the docblock's span or the tag's ordinal (`Stmt::doc_comment` and the declarations' doc comments are strings), so a resolution is known by what is resolved, where and by which reader;
      - every expression's inferred and native type in the final pass, keyed by file, span and host class (`--dump-expr-types`, beside today's `--dump-types`).
    - **O2: the gate's full artifact set** (`cargo xtask corpus --full`: scoped, all-on, unscoped, levels 0-10, the type dumps, the baselines and the emission-order check).
      - It adds a view of every field of every diagnostic: the end position, the UTF-16 columns and the whole fix.
