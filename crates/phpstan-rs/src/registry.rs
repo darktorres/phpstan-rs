@@ -69,6 +69,7 @@ pub use shared::Shared;
 pub use summaries::BodySummary;
 pub type FunctionTable = NameTable<FunctionReflection>;
 pub(crate) use effects::{CallContext, Effect, Holder, Storage, holder_of};
+pub(crate) use guard::Guard;
 pub(crate) use index::{
     BuiltDecl, DeclKind, build_declarations, built_declaration, register_global_constant,
 };

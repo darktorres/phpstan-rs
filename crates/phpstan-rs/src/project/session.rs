@@ -829,6 +829,14 @@ impl Session {
         })
     }
 
+    /// Loads every file, runs the finishing passes, and writes the registry
+    /// dump (`registry_dump`) of what the load leaves to `out`,
+    /// gzip-compressed.
+    pub fn dump_registry(&self, out: &Path) -> Result<(), String> {
+        let loaded = self.load()?;
+        write_gzip(out, loaded.project.registry_dump().as_bytes())
+    }
+
     /// Loads and checks every analysed file, with the `--dump-types`
     /// output when `dump_types` is set. Fails when the analysed paths hold
     /// no `.php` file.

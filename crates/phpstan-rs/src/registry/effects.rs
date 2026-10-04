@@ -1829,3 +1829,38 @@ impl<'r> Resolve<'r> {
             .collect()
     }
 }
+
+/// `class::member`, or the function's name.
+impl syntax::canonical::Canonical for DeclKey {
+    fn canonical(&self, p: &mut syntax::canonical::Printer) {
+        let DeclKey { class, member } = self;
+        if let Some(class) = class {
+            p.name(class);
+            p.atom("::");
+        }
+        p.name(member);
+    }
+}
+
+/// `anything`, or the storages.
+impl syntax::canonical::Canonical for Effect {
+    fn canonical(&self, p: &mut syntax::canonical::Printer) {
+        let Effect(storages) = self;
+        match storages {
+            Some(storages) => storages.canonical(p),
+            None => p.atom("anything"),
+        }
+    }
+}
+
+syntax::canonical_enum!(Storage {
+    Own(prop),
+    Property { class, prop },
+    Static { class, prop },
+    Global(name),
+    StaticVar {
+        class,
+        function,
+        var,
+    },
+});

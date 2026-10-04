@@ -374,6 +374,26 @@ impl<N: Into<Name>> FromIterator<N> for NameSet {
     }
 }
 
+/// Every entry, the map's own and its base's it does not hide, by name.
+impl<V: syntax::canonical::Canonical> syntax::canonical::Canonical for NameMap<V> {
+    fn canonical(&self, p: &mut syntax::canonical::Printer) {
+        let NameMap {
+            // All read through `iter`, which joins them.
+            entries: _,
+            base: _,
+            hidden: _,
+        } = self;
+        p.by_name(self.iter());
+    }
+}
+
+impl syntax::canonical::Canonical for NameSet {
+    fn canonical(&self, p: &mut syntax::canonical::Printer) {
+        let NameSet(map) = self;
+        p.set(map.keys());
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

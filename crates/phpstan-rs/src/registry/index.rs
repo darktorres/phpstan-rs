@@ -67,6 +67,23 @@ impl BuiltDecl {
         guard.as_ref().map_or(Guard::Maybe, |g| g.on(versions))
     }
 
+    /// Whether the declaration runs on the PHP versions `versions`, and on
+    /// the lowest and the highest of them alone.
+    pub(crate) fn guard_on_range_and_ends(
+        &self,
+        versions: Option<types::PhpVersions>,
+    ) -> (Guard, Guard, Guard) {
+        let end = |version: types::PhpVersion| types::PhpVersions {
+            min: version,
+            max: version,
+        };
+        (
+            self.guard_on(versions),
+            self.guard_on(versions.map(|v| end(v.min))),
+            self.guard_on(versions.map(|v| end(v.max))),
+        )
+    }
+
     /// The declaration as one that always runs.
     fn made_unconditional(mut self) -> BuiltDecl {
         match &mut self {

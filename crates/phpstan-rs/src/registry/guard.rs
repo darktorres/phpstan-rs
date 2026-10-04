@@ -269,3 +269,9 @@ fn version_id(version: &[u8]) -> Option<u32> {
     let id = next(10_000)? + next(100)? + next(1)?;
     parts.next().is_none().then_some(id)
 }
+
+syntax::canonical_enum!(Guard {
+    Never,
+    Always,
+    Maybe,
+});

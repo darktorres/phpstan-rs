@@ -156,6 +156,34 @@ impl Printer {
         );
     }
 
+    /// Writes `entries`, each `name => value` on a line of its own, sorted
+    /// by the name in ASCII lowercase and then as written: a table by
+    /// name, whose order is not part of it.
+    pub fn by_name<'a, V: Canonical + ?Sized + 'a>(
+        &mut self,
+        entries: impl IntoIterator<Item = (&'a Name, &'a V)>,
+    ) {
+        let mut entries: Vec<(&Name, &V)> = entries.into_iter().collect();
+        entries.sort_unstable_by(|(a, _), (b, _)| {
+            (a.lower(), a.as_str()).cmp(&(b.lower(), b.as_str()))
+        });
+        if entries.is_empty() {
+            self.out.push_str("[]");
+            return;
+        }
+        self.out.push('[');
+        self.depth += 1;
+        for (name, value) in entries {
+            self.newline();
+            name.canonical(self);
+            self.out.push_str(" => ");
+            value.canonical(self);
+        }
+        self.depth -= 1;
+        self.newline();
+        self.out.push(']');
+    }
+
     /// `value` printed one level below the current line.
     fn nested(&self, value: &(impl Canonical + ?Sized)) -> String {
         let mut p = Printer {
@@ -252,6 +280,13 @@ impl<T: Canonical + ?Sized> Canonical for Box<T> {
 impl<T: Canonical + ?Sized> Canonical for Arc<T> {
     fn canonical(&self, p: &mut Printer) {
         (**self).canonical(p);
+    }
+}
+
+/// What is stored: the value once set, `-` before.
+impl<T: Canonical> Canonical for std::sync::OnceLock<T> {
+    fn canonical(&self, p: &mut Printer) {
+        self.get().canonical(p);
     }
 }
 
@@ -415,6 +450,12 @@ macro_rules! canonical_enum {
     (@print $p:ident, $variant:ident) => {
         $p.atom(stringify!($variant))
     };
+}
+
+impl Canonical for () {
+    fn canonical(&self, p: &mut Printer) {
+        p.atom("()");
+    }
 }
 
 impl Canonical for bool {

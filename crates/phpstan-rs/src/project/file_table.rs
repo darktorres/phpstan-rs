@@ -150,6 +150,11 @@ impl<V> FileTable<V> {
         removed
     }
 
+    /// The path of every file given a number, held or removed, by number.
+    pub(crate) fn paths_by_id(&self) -> Vec<PathBuf> {
+        self.slots.iter().map(|slot| slot.path.clone()).collect()
+    }
+
     /// Every file held, in the order its path was first seen.
     pub(crate) fn iter(&self) -> impl Iterator<Item = (&PathBuf, &V)> {
         self.slots

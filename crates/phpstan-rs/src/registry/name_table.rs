@@ -1268,6 +1268,22 @@ impl<V: syntax::canonical::Canonical> syntax::canonical::Canonical for Lazy<V> {
     }
 }
 
+/// Every entry, the table's own and its base's it does not hide, decoded,
+/// by name.
+impl<V: syntax::canonical::Canonical> syntax::canonical::Canonical for NameTable<V> {
+    fn canonical(&self, p: &mut syntax::canonical::Printer) {
+        let NameTable {
+            // All read through `iter`, which joins them.
+            entries: _,
+            base: _,
+            hidden: _,
+            // Which set of names the table holds, within one run.
+            version: _,
+        } = self;
+        p.by_name(self.iter());
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

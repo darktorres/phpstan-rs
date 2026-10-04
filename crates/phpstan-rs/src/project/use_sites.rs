@@ -253,3 +253,5 @@ syntax::canonical_enum!(RefTarget {
     Function(name),
     Member(class, member),
 });
+
+syntax::canonical_struct!(UseSiteIndex { by_target, by_file });

@@ -316,3 +316,16 @@ impl Registry {
         self.scope = scope;
     }
 }
+
+/// The names in scope; not the scope's number, which tells one apart
+/// within a run.
+impl syntax::canonical::Canonical for Scope {
+    fn canonical(&self, p: &mut syntax::canonical::Printer) {
+        let Scope {
+            classes,
+            functions,
+            id: _,
+        } = self;
+        p.node("Scope", &[("classes", classes), ("functions", functions)]);
+    }
+}

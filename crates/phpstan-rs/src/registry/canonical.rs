@@ -11,8 +11,9 @@ use crate::registry::class_info::TraitAlias;
 use crate::registry::guard::{Compare, GuardExpr};
 use crate::registry::index::BuiltDecl;
 use crate::registry::{
-    AssertInfo, AssertTarget, ClassReflection, ConstantReflection, FunctionReflection,
-    ParameterReflection, PropertyReflection, PurityDependency,
+    AssertInfo, AssertTarget, ChangedNames, ClassReflection, ConstantReflection,
+    DoctrineEntityIndex, FunctionReflection, ParameterReflection, PropertyReflection,
+    PurityDependency, RawDeclarations, Registry,
 };
 
 canonical_struct!(ClassReflection {
@@ -239,4 +240,54 @@ canonical_enum!(BuiltDecl {
         site,
     },
     GlobalConst { name, guard, ty },
+});
+
+canonical_struct!(Registry {
+    classes,
+    configured_assertions,
+    configured_class_argument_returns,
+    functions,
+    global_constants,
+    global_variables,
+    phpstan_class_files,
+    doctrine_entity_index,
+    raw,
+    raw_active,
+    changed,
+    phpstan_stubs_loaded,
+    scope,
+    php_versions,
+    unconditionally_declared_classes,
+    built_in_stub_classes,
+    unconditionally_declared_functions,
+    function_decl_sites,
+    stub_provided_functions,
+    names_with_assert_tags,
+    ancestor_names,
+    phpstan_ancestry,
+    subtype_children,
+    trait_users,
+    recorded_parents,
+    member_owners,
+    effects,
+    builtin_methods_running_code,
+    methods_by_name,
+    global_sites,
+} skip {
+    // What the last lookups of the names in scope made of `scope` and the
+    // tables.
+    scoped_names,
+});
+
+canonical_struct!(RawDeclarations { classes, functions });
+
+canonical_struct!(ChangedNames {
+    classes,
+    functions,
+    constants,
+});
+
+canonical_struct!(DoctrineEntityIndex {
+    by_table,
+    by_repository,
 });

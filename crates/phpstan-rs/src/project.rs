@@ -45,6 +45,7 @@ mod file_declarations;
 mod file_table;
 mod front_end_dump;
 mod mock_hygiene;
+mod registry_dump;
 pub mod session;
 pub(crate) mod use_sites;
 mod whole_program;
@@ -532,6 +533,18 @@ impl Project {
     /// registry resolved once per process, sharing its tables.
     pub fn new() -> Self {
         Project::with_registry(Project::plain_base().clone())
+    }
+
+    /// The registry dump (`registry_dump`) of the project, with both stub
+    /// bases.
+    pub(crate) fn registry_dump(&self) -> String {
+        registry_dump::registry_dump(
+            self,
+            &[
+                ("stub-base", Project::plain_base()),
+                ("stub-base-phpstan", Project::phpstan_base()),
+            ],
+        )
     }
 
     /// The registry of the built-in stubs, resolved once per process.

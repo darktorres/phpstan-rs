@@ -37,3 +37,30 @@ impl FileId {
         self.0 as usize
     }
 }
+
+thread_local! {
+    /// The path of each file by number, while a dump prints them.
+    static PATHS: std::cell::RefCell<Vec<std::path::PathBuf>> =
+        const { std::cell::RefCell::new(Vec::new()) };
+}
+
+/// Runs `print` with each file numbered by `paths` printing as its path,
+/// on this thread.
+pub(crate) fn printing_paths<R>(paths: Vec<std::path::PathBuf>, print: impl FnOnce() -> R) -> R {
+    let previous = PATHS.with(|known| known.replace(paths));
+    let result = print();
+    PATHS.with(|known| known.replace(previous));
+    result
+}
+
+/// The file's path, under `printing_paths`; a number is no part of what a
+/// file is, and another numbering prints the same.
+impl syntax::canonical::Canonical for FileId {
+    fn canonical(&self, p: &mut syntax::canonical::Printer) {
+        let FileId(index) = *self;
+        PATHS.with(|known| match known.borrow().get(index as usize) {
+            Some(path) => path.canonical(p),
+            None => p.atom(&format!("#{index}")),
+        });
+    }
+}

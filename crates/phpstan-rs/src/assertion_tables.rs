@@ -143,3 +143,25 @@ pub fn default_class_argument_returns() -> Vec<ClassArgumentReturn> {
         entry("Mockery", "instanceMock", 1, &["Mockery\\MockInterface"]),
     ]
 }
+
+syntax::canonical_struct!(AssertionEntry {
+    class,
+    function,
+    method,
+    parameter,
+    ty,
+    when,
+});
+
+syntax::canonical_struct!(ClassArgumentReturn {
+    class,
+    method,
+    argument,
+    intersect,
+});
+
+syntax::canonical_enum!(AssertWhen {
+    Always,
+    True,
+    False,
+});

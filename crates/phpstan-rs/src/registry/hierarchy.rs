@@ -1296,3 +1296,9 @@ impl Registry {
         }
     }
 }
+
+syntax::canonical_struct!(ClassOwners {
+    methods,
+    properties,
+    consts,
+});

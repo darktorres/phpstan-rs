@@ -61,6 +61,10 @@ pub(crate) struct CheckProjectArgs {
     /// this directory and stops (a regression-gate snapshot, O1).
     #[arg(long, hide = true)]
     pub(crate) dump_front_end: Option<PathBuf>,
+    /// Writes the registry dump of what the load leaves, gzip-compressed,
+    /// to this file and stops (a regression-gate snapshot).
+    #[arg(long, hide = true)]
+    pub(crate) dump_registry: Option<PathBuf>,
     /// Prints each file's diagnostics in the order the checks emitted them
     /// (a determinism check), not the usual total order.
     #[arg(long, hide = true)]
@@ -143,6 +147,14 @@ pub(crate) fn run_check_project_command(args: CheckProjectArgs) {
                 std::process::exit(1);
             }
         }
+        return;
+    }
+    if let Some(out) = &args.dump_registry {
+        if let Err(e) = run.session.dump_registry(out) {
+            eprintln!("{e}");
+            std::process::exit(1);
+        }
+        eprintln!("registry: {}", out.display());
         return;
     }
     // A file whose parse or check panics is reported per file; don't also

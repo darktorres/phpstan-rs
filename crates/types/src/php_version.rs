@@ -428,5 +428,23 @@ impl PhpFeature {
     }
 }
 
+/// `8.1`.
+impl syntax::canonical::Canonical for PhpVersion {
+    fn canonical(&self, p: &mut syntax::canonical::Printer) {
+        let PhpVersion { major, minor } = self;
+        p.atom(&format!("{major}.{minor}"));
+    }
+}
+
+/// `8.1..8.4`.
+impl syntax::canonical::Canonical for PhpVersions {
+    fn canonical(&self, p: &mut syntax::canonical::Printer) {
+        let PhpVersions { min, max } = self;
+        min.canonical(p);
+        p.atom("..");
+        max.canonical(p);
+    }
+}
+
 #[cfg(test)]
 mod tests;

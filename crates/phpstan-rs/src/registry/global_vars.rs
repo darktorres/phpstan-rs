@@ -839,3 +839,22 @@ syntax::canonical_enum!(StaticValue {
     ClassConst(class, name),
     MethodCall(base, method),
 });
+
+syntax::canonical_struct!(FileSites {
+    sites,
+    include_sites,
+});
+
+syntax::canonical_struct!(StagedSite {
+    gate,
+    name,
+    contribution,
+});
+
+syntax::canonical_enum!(SiteContribution {
+    WholeValue(ty),
+    ShapeField(key, ty),
+    ShapeFields(fields),
+});
+
+syntax::canonical_struct!(FieldContribution { key, ty });
