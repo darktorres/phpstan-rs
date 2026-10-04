@@ -10,15 +10,18 @@ starting a new tracking file. When a level is finished, mark it done here
 and say which level to resume. Per-item progress stays in the level's own
 documents; this file holds only the order and the pointers.
 
-State as of 2026-10-01, `f0babecf`. Counts below were read from the files on
+State as of 2026-10-03, `48669123`. Counts below were read from the files on
 that date.
 
 ## Where to resume
 
-1. Finish **level 6**: recreate master's 87 commits on `master2`, one row
+1. Finish **level 8**: the item-by-item review of
+   `PROFILE_DRILL_PIWIGO_20G.md` (items 16-19, then §11-§13), then build it
+   once told to, item 0 first.
+2. Then **level 6**: recreate master's 87 commits on `master2`, one row
    at a time (`MASTER_REIMPLEMENTATION_LEDGER.md`: 86 open, 1 skipped, none
    done).
-2. Then pop back, in this order: **level 3** (the 140 open review tasks, and
+3. Then pop back, in this order: **level 3** (the 140 open review tasks, and
    the A/B ledger's open steps 19 and 21 on `master`), then **level 2** (the
    crate split from Stage C on), then **level 1** (the lanes).
 
@@ -127,14 +130,14 @@ against are in §12. The profiling method is in `CLAUDE.md` and the README.
   the module-graph edges added here (`gates/module-graph.txt`) may meet
   master's own edits to that file.
 
-### 6. Recreate master's commits here — `MASTER_REIMPLEMENTATION_LEDGER.md`  ← current
+### 6. Recreate master's commits here — `MASTER_REIMPLEMENTATION_LEDGER.md`
 
 The 87 commits `master` has that `master2` lacks, each written again against
 this branch with master's subject line, one row each. 86 open, 1 skipped.
 The ledger also lists what `master2` changed that those commits meet (stored
 types need serde and `PartialEq`, passes must run in scope, `project.rs`).
 
-### 7. The 25 G Piwigo profile — `PROFILE_DRILL_PIWIGO_25G.md` (implemented, validated at `1892b477`)
+### 7. The 25 G Piwigo profile — `PROFILE_DRILL_PIWIGO_25G.md` (done; validated at `1892b477`, its later work read by level 8's item 0)
 
 Validated: `cargo test --workspace` and the fixtures (3,818) pass; the Piwigo
 O2 checksum equals the baseline's (`6e5fa444…`, from `7a3f3f99`); both binaries
@@ -191,6 +194,53 @@ docblock is inherited across case-different names; union member order).
   a docblock being no class name, declarations ruled out by the configured PHP
   versions not being indexed, and UTF-16/UTF-8 columns in the language server.
 - Two tests of `syntax::span` were wrong and are fixed; expect a few more.
+- **Carried into level 8.** The later work above, never validated together,
+  is read first by level 8's item 0 (step 1: the vendor-tree, all-on and
+  unscoped reports against `1892b477`, each difference read), before
+  anything is built on it. Each item not built here is designed or ruled on
+  in level 8's plan:
+  - P7's lowering and the text grammar's retirement: item 14, now for
+    correctness as much as cost (one parse per doc, where today two parses
+    split a doc two ways; a lowering oracle with its differences listed),
+    with the second parse's 144.0 M and the round trip's 118.3 + 83.3 M;
+  - §12.10: item 18, step 1;
+  - C3 step 6: item 15;
+  - C1's effects and yields, and `collect_throws`: item 18, step 2;
+  - P12 step 3 and the `InitFlow` fusion: item 13 (ids make the list
+    possible while the tree is built; the one walk visits in PHP's order of
+    evaluation);
+  - the guards on `class_exists`-style tests: item 6, step 2 (availability
+    on run-time evidence only, from the stubs' version ranges);
+  - pull parsing for the tag lexer: item 14, step 5 (a token slice read by
+    index instead).
+
+### 8. The 20 G Piwigo profile — `PROFILE_DRILL_PIWIGO_20G.md`  ← current
+
+The callgrind drill-down of the 20.57 G run at `5fb858c9` (level 7's end
+state), the dhat heap profile of the same run (`target/dhat-heap.json`; its
+2.67 GB and 19.4 M allocations each given to an item, §8), and the plan built
+from both: items 0-19, validated once, after item 19 (§11). The goal is
+beyond PHPStan and Psalm, not parity: semantics are judged by what PHP does
+when it runs, and the plan adds the checks found along the way.
+
+- **State: reviewed in part, nothing built.** The plan was committed at
+  `d520c9fd`. A separate reviewer goes through it adversarially, one item at
+  a time, in order; each finding is checked against the code, `php` 8.5 and
+  the heap profile before it goes in, and §13's review table has a row per
+  item. Items 0-15 are reviewed and committed one by one; item 16 is in
+  review; then 17, 18, 19 and §11-§13.
+- **Passes outside the item order,** also in §13: a dependency pass (six
+  crates taken: `la-arena`, `wide`, `triomphe`, `quick_cache`, `siphasher`
+  and `blake3`; ten considered and not taken; item 15's review added
+  `encoding_rs`),
+  and item 6, step 6: the caches' key covers every input the build embeds,
+  where today it misses `vendor/phpstan-src/stubs`.
+- **The projection,** §12: ≈290 MB at exit (from 657), a ≈375 MB peak (from
+  866) plus the check's working set, ≈1.35 M allocations (from 19.4 M);
+  items 16-19 are not yet reviewed, so it may still move.
+- **Building it** waits for an explicit go-ahead. It starts at item 0: the
+  starting state read, the `oracle` profile's run, and the baseline dumps
+  from item 0's own commit.
 
 ## Documents with no place in the stack
 
