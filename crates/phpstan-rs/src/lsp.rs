@@ -1398,6 +1398,14 @@ impl Server {
                 }
             }
         }
+        // By file and place, not in the order the index took the files.
+        locations.sort_by(|a, b| {
+            (a.uri.as_str(), a.range.start, a.range.end).cmp(&(
+                b.uri.as_str(),
+                b.range.start,
+                b.range.end,
+            ))
+        });
         (!locations.is_empty()).then_some(locations)
     }
 
@@ -1460,6 +1468,11 @@ impl Server {
         }
         if changes.is_empty() {
             return None;
+        }
+        // Each file's edits in the order of the file, not in the order the
+        // index took the files.
+        for edits in changes.values_mut() {
+            edits.sort_by_key(|edit| (edit.range.start, edit.range.end));
         }
         Some(lsp_types::WorkspaceEdit {
             // `lsp_types` fixes the map type; entry order isn't observable.

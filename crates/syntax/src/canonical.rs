@@ -345,6 +345,16 @@ impl<A: Canonical, B: Canonical, C: Canonical> Canonical for (A, B, C) {
     }
 }
 
+/// A list printed as a set: for one whose order is not part of its value.
+pub struct AsSet<'a, T>(pub &'a [T]);
+
+impl<T: Canonical> Canonical for AsSet<'_, T> {
+    fn canonical(&self, p: &mut Printer) {
+        let AsSet(items) = self;
+        p.set(items.iter());
+    }
+}
+
 /// A map prints sorted by its keys' prints: its order is the hasher's.
 impl<K: Canonical, V: Canonical> Canonical for rustc_hash::FxHashMap<K, V> {
     fn canonical(&self, p: &mut Printer) {

@@ -415,6 +415,8 @@ const CODE_RUNNING_PARAMETER_TYPES: [&str; 11] = [
 
 /// The method declarations of every loaded class with a body, by name
 /// (lowercased): what a call on a value whose class is not known may reach.
+/// Each name's classes are sorted, so what is made of them does not depend
+/// on the order the classes were declared in.
 fn methods_by_name(registry: &Registry) -> FxHashMap<String, Vec<Name>> {
     let mut by_name: FxHashMap<String, Vec<Name>> = FxHashMap::default();
     for (class, info) in registry.classes.own_iter() {
@@ -426,6 +428,9 @@ fn methods_by_name(registry: &Registry) -> FxHashMap<String, Vec<Name>> {
                     .push(class.clone());
             }
         }
+    }
+    for classes in by_name.values_mut() {
+        classes.sort_unstable_by(|a, b| (a.lower(), a.as_str()).cmp(&(b.lower(), b.as_str())));
     }
     by_name
 }

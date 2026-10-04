@@ -254,4 +254,33 @@ syntax::canonical_enum!(RefTarget {
     Member(class, member),
 });
 
-syntax::canonical_struct!(UseSiteIndex { by_target, by_file });
+/// Each target's sites and each file's as sets: they are in the order the
+/// files were indexed in.
+impl syntax::canonical::Canonical for UseSiteIndex {
+    fn canonical(&self, p: &mut syntax::canonical::Printer) {
+        let UseSiteIndex { by_target, by_file } = self;
+        p.node(
+            "UseSiteIndex",
+            &[
+                ("by_target", &SitesBy(by_target)),
+                ("by_file", &SitesBy(by_file)),
+            ],
+        );
+    }
+}
+
+/// A table of sites, each key's printed as a set.
+struct SitesBy<'a, K, S>(&'a FxHashMap<K, Vec<S>>);
+
+impl<K: syntax::canonical::Canonical, S: syntax::canonical::Canonical> syntax::canonical::Canonical
+    for SitesBy<'_, K, S>
+{
+    fn canonical(&self, p: &mut syntax::canonical::Printer) {
+        let SitesBy(table) = self;
+        let sets: Vec<(&K, syntax::canonical::AsSet<'_, S>)> = table
+            .iter()
+            .map(|(key, sites)| (key, syntax::canonical::AsSet(sites.as_slice())))
+            .collect();
+        p.map(sets.iter().map(|(key, sites)| (*key, sites)));
+    }
+}

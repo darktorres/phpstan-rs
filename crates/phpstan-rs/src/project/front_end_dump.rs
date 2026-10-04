@@ -158,20 +158,10 @@ impl Canonical for DocSiteReferences<'_> {
             "DocSiteReferences",
             &[
                 ("site", site),
-                ("keys", &Sorted(types)),
-                ("see", &Sorted(see)),
+                ("keys", &syntax::canonical::AsSet(types)),
+                ("see", &syntax::canonical::AsSet(see)),
             ],
         );
-    }
-}
-
-/// A list printed as a set.
-struct Sorted<'a, T>(&'a [T]);
-
-impl<T: Canonical> Canonical for Sorted<'_, T> {
-    fn canonical(&self, p: &mut Printer) {
-        let Sorted(items) = self;
-        p.set(items.iter());
     }
 }
 
