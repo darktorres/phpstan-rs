@@ -178,81 +178,67 @@ impl<'a> Checker<'a> {
     }
 
     /// After a call that may write an object's properties, what is known
-    /// about them is stale (`registry::property_writes`): the receiver's,
-    /// or `$this`'s when a `self::`, `static::` or `parent::` call forwards
-    /// it to a non-static method, unless the call writes no object's
+    /// about them is stale (`registry::effects`): the receiver's, or
+    /// `$this`'s when a `self::`, `static::` or `parent::` call forwards it
+    /// to a non-static method, unless the call writes no object's
     /// properties; an object argument's, unless it writes at most its own
     /// object's. What is known about each object itself stays.
     fn forget_members_a_call_may_change(&self, e: &Expr, locals: &mut Locals) {
-        use crate::registry::PropertyWrites;
         // With no property chain, index, or fact about one in the scope,
         // there is nothing a call could make stale, however much it writes.
         if !locals.has_state_to_forget() {
             return;
         }
-        let (receiver, args, writes) = match &e.kind {
+        let (receiver, args, effect) = match &e.kind {
             ExprKind::MethodCall(recv, method, args, _) => {
                 let recv_ty = self.infer_expr(recv, locals);
-                let writes = recv_ty
-                    .as_object()
-                    .and_then(|(class, _)| {
-                        let (owner, sig) = self.lookup_method_with_owner(class, method)?;
-                        crate::registry::is_non_overridable(
-                            self.registry,
-                            class,
-                            &owner,
-                            method,
-                            sig,
-                        )
-                        .then(|| self.registry.method_property_writes(&owner, method))
-                    })
-                    .unwrap_or(PropertyWrites::Anything);
-                (locals.key_of(recv), args, writes)
+                (
+                    locals.key_of(recv),
+                    args,
+                    self.method_call_effect(&recv_ty, method),
+                )
             }
             ExprKind::StaticCall(target, method, args) => {
                 let class = self.infer_static_target_class(target, locals);
                 let keyword = |word: &str| matches!(target, StaticTarget::Name(name) if name.is_keyword(word));
-                let resolved = class.as_deref().and_then(|class| {
-                    let (owner, sig) = if keyword("parent") {
-                        self.registry
-                            .lookup_ancestor_method_with_owner(class, method)?
-                    } else {
-                        self.lookup_method_with_owner(class, method)?
-                    };
-                    let exact = !keyword("static")
-                        || crate::registry::is_non_overridable(
-                            self.registry,
-                            class,
-                            &owner,
-                            method,
-                            sig,
-                        );
-                    Some((owner, exact))
-                });
-                let forwards_this = (keyword("self") || keyword("static") || keyword("parent"))
-                    && !resolved
-                        .as_ref()
-                        .is_some_and(|(owner, _)| self.method_is_static(owner, method));
-                let writes = match resolved {
-                    Some((owner, true)) => self.registry.method_property_writes(&owner, method),
-                    _ => PropertyWrites::Anything,
+                let effect = match class.as_deref() {
+                    Some(class) if keyword("static") => {
+                        self.registry.virtual_method_effect(class, method)
+                    }
+                    Some(class) => {
+                        let resolved = if keyword("parent") {
+                            self.registry
+                                .lookup_ancestor_method_with_owner(class, method)
+                        } else {
+                            self.lookup_method_with_owner(class, method)
+                        };
+                        match resolved {
+                            Some((owner, _)) => self.registry.method_effect(&owner, method),
+                            None => crate::registry::Effect::anything(),
+                        }
+                    }
+                    None => self.registry.method_effect_by_name(method),
                 };
-                (forwards_this.then(|| locals.var_key("this")), args, writes)
+                let forwards_this = (keyword("self") || keyword("static") || keyword("parent"))
+                    && !class
+                        .as_deref()
+                        .is_some_and(|class| self.method_is_static(class, method));
+                (forwards_this.then(|| locals.var_key("this")), args, effect)
             }
             ExprKind::Call(callee, args) => {
-                let writes = match &callee.kind {
+                let effect = match &callee.kind {
                     ExprKind::Name(name) => self
                         .registry
                         .resolve_function(name)
-                        .map_or(PropertyWrites::Anything, |(resolved, _)| {
-                            self.registry.function_property_writes(resolved)
+                        .map_or(crate::registry::Effect::nothing(), |(resolved, _)| {
+                            self.registry.function_effect(resolved)
                         }),
-                    _ => PropertyWrites::Anything,
+                    _ => crate::registry::Effect::anything(),
                 };
-                (None, args, writes)
+                (None, args, effect)
             }
             ExprKind::New(class, args) => {
-                let writes = match &class.kind {
+                let effect = match &class.kind {
                     ExprKind::Name(name) => {
                         let target = if name.is_keyword("self") || name.is_keyword("static") {
                             self.current_class.clone()
@@ -263,23 +249,21 @@ impl<'a> Checker<'a> {
                             .as_deref()
                             .and_then(|t| self.lookup_method_with_owner(t, "__construct"))
                         {
-                            Some((owner, _)) => {
-                                self.registry.method_property_writes(&owner, "__construct")
-                            }
-                            None => PropertyWrites::Nothing,
+                            Some((owner, _)) => self.registry.method_effect(&owner, "__construct"),
+                            None => crate::registry::Effect::nothing(),
                         }
                     }
-                    _ => PropertyWrites::Anything,
+                    _ => crate::registry::Effect::anything(),
                 };
-                (None, args, writes)
+                (None, args, effect)
             }
             _ => return,
         };
         let mut stale: Vec<LocalKey> = Vec::new();
-        if writes > PropertyWrites::Nothing {
+        if effect.writes_own_object() || effect.writes_other_objects() {
             stale.extend(receiver);
         }
-        if writes == PropertyWrites::Anything {
+        if effect.writes_other_objects() {
             stale.extend(args.iter().filter_map(|arg| {
                 let key = locals.key_of(&arg.value)?;
                 self.infer_expr(&arg.value, locals)
@@ -294,6 +278,29 @@ impl<'a> Checker<'a> {
                 purge_stale_narrowing_for(locals, key);
             }
         }
+    }
+
+    /// What calling `method` on a value of `receiver`'s type may write: over
+    /// every class the value may be an object of, by the hierarchy, or over
+    /// every loaded declaration of the method when the class is not known.
+    pub(crate) fn method_call_effect(
+        &self,
+        receiver: &Type,
+        method: &str,
+    ) -> crate::registry::Effect {
+        let mut effect = crate::registry::Effect::nothing();
+        for member in receiver.union_members() {
+            let member_effect = match member.as_object() {
+                Some((class, _)) => self.registry.virtual_method_effect(class, method),
+                None if member.is_object().no() => continue,
+                None => self.registry.method_effect_by_name(method),
+            };
+            effect.join(&member_effect);
+            if effect.is_anything() {
+                break;
+            }
+        }
+        effect
     }
 
     /// Whether `class`'s `method` is declared static.

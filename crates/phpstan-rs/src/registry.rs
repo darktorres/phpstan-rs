@@ -12,6 +12,7 @@ mod assertion_table;
 pub mod bodies;
 mod class_info;
 mod container;
+mod effects;
 mod function_sig;
 mod generics;
 mod global_vars;
@@ -24,7 +25,6 @@ mod name_context;
 mod name_map;
 mod name_table;
 mod packed;
-mod property_writes;
 pub mod provenance;
 mod purity;
 pub mod reflection_attribute;
@@ -67,6 +67,7 @@ pub(crate) use name_table::{Detached, FoldedKey, Lazy};
 pub use shared::Shared;
 pub use summaries::BodySummary;
 pub type FunctionTable = NameTable<FunctionReflection>;
+pub(crate) use effects::Effect;
 pub(crate) use index::{
     BuiltDecl, DeclKind, build_declarations, built_declaration, register_global_constant,
 };
@@ -74,7 +75,6 @@ pub(crate) use index::{
 pub(crate) use index::{Keep, build_declarations_where};
 pub(crate) use name_context::{collect_class_name_case_refs, resolve_names_in_type};
 pub(crate) use name_table::{folded_key, function_key, with_function_key};
-pub(crate) use property_writes::PropertyWrites;
 pub use provenance::{Origin, Provenance};
 pub use purity::PurityDependency;
 pub(crate) use purity::{collect_impure_points, is_non_overridable};
@@ -180,7 +180,7 @@ pub(crate) struct ResolvedSnapshot {
     classes: Vec<Option<Detached<ClassReflection>>>,
     function_keys: Option<Arc<FxHashSet<String>>>,
     functions: Vec<Option<Detached<FunctionReflection>>>,
-    property_writes: FxHashMap<property_writes::DeclKey, PropertyWrites>,
+    effects: FxHashMap<effects::DeclKey, Effect>,
     global_variables: syntax::name::NameMap<Type>,
 }
 
@@ -397,18 +397,21 @@ pub struct Registry {
     // `lookup_method`/`precompute_member_owners` (`registry/hierarchy.rs`).
     #[serde(skip)]
     pub(crate) member_owners: NameTable<hierarchy::ClassOwners>,
-    // Whose properties each function and method with a body may write
-    // (`registry::property_writes`), keyed by lowercased (class, name).
-    pub(crate) property_writes: FxHashMap<property_writes::DeclKey, PropertyWrites>,
+    // What a call to each function and method with a body may write
+    // (`registry::effects`), keyed by lowercased (class, name).
+    pub(crate) effects: FxHashMap<effects::DeclKey, Effect>,
+    // The names of the builtin methods that run code passed to them, found
+    // once (`registry::effects`).
+    #[serde(skip)]
+    builtin_methods_running_code: Arc<std::sync::OnceLock<FxHashSet<String>>>,
+    // The loaded classes declaring each method name with a body, lowercased,
+    // as the last finish found them (`registry::effects`).
+    #[serde(skip)]
+    methods_by_name: Arc<FxHashMap<String, Vec<syntax::name::Name>>>,
     // What each file's walk for global variables found, kept for the files
     // a later finish doesn't walk again (`infer_global_variables_of`).
     #[serde(skip)]
     global_sites: FxHashMap<crate::file_id::FileId, global_vars::FileSites>,
-    // What each body's property writes were classified as, kept for the
-    // declarations a later finish doesn't classify again.
-    #[serde(skip)]
-    property_write_classes:
-        FxHashMap<property_writes::DeclKey, Option<property_writes::Classification>>,
 }
 
 impl Registry {
@@ -575,7 +578,7 @@ impl Registry {
             classes,
             function_keys: body_scope.and_then(scope::Scope::shared_function_keys),
             functions,
-            property_writes: registry.property_writes.clone(),
+            effects: registry.effects.clone(),
             global_variables: registry.global_variables.clone(),
         };
         if scope.is_all() {
@@ -665,10 +668,10 @@ impl Registry {
             }
         }
         let decls = before
-            .property_writes
+            .effects
             .keys()
-            .chain(self.property_writes.keys())
-            .filter(|key| before.property_writes.get(*key) != self.property_writes.get(*key));
+            .chain(self.effects.keys())
+            .filter(|key| before.effects.get(*key) != self.effects.get(*key));
         for key in decls {
             keys.insert(match &key.class {
                 Some(class) => RefKey::class_text(class),

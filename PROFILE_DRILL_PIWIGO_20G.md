@@ -587,7 +587,7 @@ Twenty-one items, numbered in the order they are built. Each states what is ther
   The CLI never takes this path, and no dump does.
 - **The other session migrated its items by keeping each old implementation alive** under `cfg(debug_assertions)`, comparing on every debug run:
   - purity's tree walk: the comparison (`purity.rs:356-363`), `classify_body` (`:416-436`) and `Disqualifier` (`:452-574`);
-  - the property-write scan (`property_writes.rs:426-433`, `:619-620`);
+  - the property-write scan (`property_writes.rs:426-433`, `:619-620`), deleted with its module by row 0.1b, whose effects replace the verdict it checked;
   - the assigned-properties builder (`summaries.rs:115-121`, `:188-201`);
   - the uninitialized-property check's body path (`uninitialized.rs:133-141`);
   - the function bodies `FileBodies` stores for them (`bodies.rs:110-111`, `project.rs:216-221`);

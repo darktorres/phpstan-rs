@@ -67,40 +67,25 @@ impl<'a> Checker<'a> {
         span: Span,
         locals: &mut Locals,
     ) {
-        use crate::registry::PropertyWrites;
         let members = self.members_implementing(base_ty, interface);
         if members.is_empty() {
             return;
         }
-        let mut writes = PropertyWrites::Nothing;
+        let mut effect = crate::registry::Effect::nothing();
         for (member, exact) in &members {
             let resolved = exact
                 .then(|| self.find_method_receiver(member, method))
                 .flatten();
             match &resolved {
-                Some((class, _, owner, sig)) => {
+                Some((class, _, _, sig)) => {
                     let dynamic = self.dynamic_method_throw_type(class, method, &[]);
                     self.record_call_throw_point(dynamic, Some(sig), span);
-                    let member_writes = if crate::registry::is_non_overridable(
-                        self.registry,
-                        class,
-                        owner,
-                        method,
-                        sig,
-                    ) {
-                        self.registry.method_property_writes(owner, method)
-                    } else {
-                        PropertyWrites::Anything
-                    };
-                    writes = writes.max(member_writes);
                 }
-                None => {
-                    self.record_call_throw_point(None, None, span);
-                    writes = PropertyWrites::Anything;
-                }
+                None => self.record_call_throw_point(None, None, span),
             }
+            effect.join(&self.method_call_effect(member, method));
         }
-        if writes > PropertyWrites::Nothing
+        if (effect.writes_own_object() || effect.writes_other_objects())
             && let Some(key) = locals.key_of(base)
             && locals.has_key_depending_on(key)
         {

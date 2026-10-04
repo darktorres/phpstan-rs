@@ -6,12 +6,12 @@
 //!
 //! - Purity (`registry::purity`): whether a construct that makes a body
 //!   impure occurs in it, and the calls whose own purity decides the rest.
-//! - Property writes (`registry::property_writes`): the writes the body
-//!   makes itself and the calls it inherits writes from.
+//! - Effects (`registry::effects`): the places the body writes, what its
+//!   variables are bound to, and the calls it inherits writes from.
 //! - Assigned properties (`checker::uninitialized`): the properties the body
 //!   assigns anywhere, on `$this` or on a variable it made an instance of.
 
-use rustc_hash::FxHashSet;
+use rustc_hash::{FxHashMap, FxHashSet};
 use syntax::ast::*;
 use syntax::name::Name;
 use syntax::visit::{Visitor, walk_class_def, walk_expr, walk_function_decl, walk_stmt};
@@ -30,16 +30,135 @@ pub(crate) enum PurityCall {
     New(QualifiedName),
 }
 
-/// Whose property an argument is, when the argument is a property of an
-/// object (or of several, destructured).
-#[derive(
-    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, serde::Serialize, serde::Deserialize,
-)]
-pub(crate) enum PropertyOf {
-    /// Of the body's own `$this`.
+/// Where a write lands, as the body wrote it: a root, and the properties
+/// and elements walked from it, the root's first.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub(crate) struct Place {
+    pub(crate) root: Root,
+    pub(crate) steps: Box<[Step]>,
+}
+
+/// What a place starts from.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub(crate) enum Root {
+    /// `$this`.
     This,
-    /// Of any other object.
-    Other,
+    /// A variable other than `$this` and the superglobals; `None` for one
+    /// whose name is computed (`$$n`, `${…}`) or not written (`extract`).
+    Variable(Option<Name>),
+    /// `X::$p`, the class as written; `None` for a computed property name.
+    Static(QualifiedName, Option<Name>),
+    /// A static property of a class computed at run time (`$c::$p`).
+    DynamicStatic(Option<Name>),
+    /// A global: `$GLOBALS['x']` or a superglobal, by name; `None` for
+    /// `$GLOBALS[$k]`.
+    Global(Option<Name>),
+    /// Any other value: a call's result, a new object, a literal.
+    Value,
+}
+
+/// One step from a place's root.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub(crate) enum Step {
+    /// `->p`; `None` for a computed name.
+    Property(Option<Name>),
+    /// `[k]`.
+    Element,
+}
+
+impl Place {
+    fn root(root: Root) -> Place {
+        Place {
+            root,
+            steps: Box::new([]),
+        }
+    }
+
+    fn then(self, step: Step) -> Place {
+        let mut steps = self.steps.into_vec();
+        steps.push(step);
+        Place {
+            root: self.root,
+            steps: steps.into_boxed_slice(),
+        }
+    }
+
+    /// The place `e` names, when it names one: a variable, a property, an
+    /// element, a static property or a global, through any nesting.
+    pub(crate) fn of(e: &Expr) -> Option<Place> {
+        syntax::stack::guard(|| {
+            Some(match &e.peeled().kind {
+                ExprKind::Variable(v) if **v == *"this" => Place::root(Root::This),
+                ExprKind::Variable(v) if is_superglobal(v) && **v != *"GLOBALS" => {
+                    Place::root(Root::Global(Some(v.clone())))
+                }
+                ExprKind::Variable(v) => Place::root(Root::Variable(Some(v.clone()))),
+                ExprKind::DynamicVariable(_) => Place::root(Root::Variable(None)),
+                ExprKind::PropertyAccess(base, prop, _) => Place::of(base)
+                    .unwrap_or_else(|| Place::root(Root::Value))
+                    .then(Step::Property(Some(prop.name.clone()))),
+                ExprKind::DynamicPropertyAccess(base, _, _) => Place::of(base)
+                    .unwrap_or_else(|| Place::root(Root::Value))
+                    .then(Step::Property(None)),
+                ExprKind::Index(base, key) => {
+                    if matches!(&base.peeled().kind, ExprKind::Variable(v) if **v == *"GLOBALS") {
+                        let name = key
+                            .as_deref()
+                            .and_then(literal_string_value)
+                            .map(|name| Name::from(&*name));
+                        return Some(Place::root(Root::Global(name)));
+                    }
+                    Place::of(base)
+                        .unwrap_or_else(|| Place::root(Root::Value))
+                        .then(Step::Element)
+                }
+                ExprKind::StaticPropertyFetch(StaticTarget::Name(class), prop) => {
+                    Place::root(Root::Static((**class).clone(), Some(prop.name.clone())))
+                }
+                ExprKind::StaticPropertyFetch(StaticTarget::Expr(_), prop) => {
+                    Place::root(Root::DynamicStatic(Some(prop.name.clone())))
+                }
+                ExprKind::DynamicStaticPropertyFetch(StaticTarget::Name(class), _) => {
+                    Place::root(Root::Static((**class).clone(), None))
+                }
+                ExprKind::DynamicStaticPropertyFetch(StaticTarget::Expr(_), _) => {
+                    Place::root(Root::DynamicStatic(None))
+                }
+                _ => return None,
+            })
+        })
+    }
+
+    /// The variable this place is, with no step from it.
+    fn variable(&self) -> Option<&Name> {
+        match (&self.root, &*self.steps) {
+            (Root::Variable(Some(name)), []) => Some(name),
+            _ => None,
+        }
+    }
+}
+
+/// What a variable of a body is bound to.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub(crate) enum Binding {
+    /// `global $x`: the global of that name; `None` for `global $$n`.
+    Global(Option<Name>),
+    /// `static $x`: the declaration's static variable.
+    Static,
+    /// `$x = &place`, `foreach (place as &$x)`: a reference to the place.
+    Reference(Place),
+}
+
+/// What a variable only ever holds, when it holds nothing the body did not
+/// make.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub(crate) enum Made {
+    /// An object the body made: by `new` of the class named (`self`,
+    /// `static` and `parent` as written), or of a class not named (`clone`,
+    /// `new $c`, `new class`).
+    Object(Option<QualifiedName>),
+    /// A closure or an arrow function the body wrote.
+    Closure,
 }
 
 /// The object a method is called on, as far as the body shows it.
@@ -49,43 +168,70 @@ pub(crate) enum Receiver {
     This,
     /// A property of `$this`.
     ThisProperty(Name),
-    /// Another variable: a parameter, when the body never assigns it.
+    /// Another variable.
     Variable(Name),
+    /// A static property, the class as written.
+    Static(QualifiedName, Name),
+    /// Any other value: a call's result, an element, a literal.
+    Unknown,
 }
 
 /// What a call is to.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub(crate) enum Callee {
     Function(QualifiedName),
+    /// `$receiver->method()`; `None` for a computed method name.
     Method {
         receiver: Receiver,
-        method: Name,
+        method: Option<Name>,
     },
-    /// `target::method()`, `target` a name.
-    Static(QualifiedName, Name),
-    New(QualifiedName),
+    /// `Class::method()`, the class as written; `None` for a class computed
+    /// at run time, or a computed method name.
+    Static {
+        class: Option<QualifiedName>,
+        method: Option<Name>,
+    },
+    /// `new Class`; `None` for a class computed at run time.
+    New(Option<QualifiedName>),
     /// `new class(...)`, whose class has this name.
     Anonymous(Option<Name>),
+    /// A value called: the variable holding it, or `None` for any other
+    /// expression.
+    Value(Option<Name>),
 }
 
-/// A call in a body, with the positions of its arguments that are
-/// properties: a by-reference parameter at one of them writes it.
+/// Where an argument is passed.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub(crate) enum ArgAt {
+    Position(u32),
+    Named(Name),
+    /// `...$args`, and every argument after one.
+    Spread,
+}
+
+/// A call in a body, with its arguments that are places: a by-reference
+/// parameter where one is passed writes it.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub(crate) struct CallWrites {
     pub(crate) callee: Callee,
-    pub(crate) properties: Box<[(u32, PropertyOf)]>,
+    pub(crate) places: Box<[(ArgAt, Place)]>,
 }
 
-/// What a body writes, before any declaration is looked up.
+/// What a body writes, before any declaration is looked up. A closure's and
+/// an arrow function's body count for the body that holds them.
 #[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize)]
 pub(crate) struct WriteFacts {
     /// The variables the body assigns, which a declared type of a parameter
     /// then no longer describes.
     pub(crate) reassigned: Box<[Name]>,
-    /// A write to a property of `$this`.
-    pub(crate) writes_own_object: bool,
-    /// A write that reaches another object's property, or a construct that
-    /// may write anything (`eval`, `include`, a call of no known target).
+    /// Every place the body writes.
+    pub(crate) writes: Box<[Place]>,
+    /// What its variables are bound to; `None` for a variable whose name is
+    /// computed (`global $$n`), which may be any.
+    pub(crate) bindings: Box<[(Option<Name>, Binding)]>,
+    /// The variables that only ever hold what the body made.
+    pub(crate) made: Box<[(Name, Made)]>,
+    /// A construct that may write anything: `eval` or `include`.
     pub(crate) anything: bool,
     /// Every call, in the order the body makes them.
     pub(crate) calls: Box<[CallWrites]>,
@@ -264,7 +410,11 @@ struct Summarizer {
     impure: bool,
     purity_calls: Vec<PurityCall>,
     reassigned: FxHashSet<Name>,
-    writes_own_object: bool,
+    writes: Vec<Place>,
+    bindings: Vec<(Option<Name>, Binding)>,
+    // What each variable written holds: what the body made, or `None` once
+    // it is written anything else.
+    made: FxHashMap<Name, Option<Made>>,
     anything: bool,
     calls: Vec<CallWrites>,
     assigned: AssignedBuilder,
@@ -274,11 +424,19 @@ impl Summarizer {
     fn finish(self) -> BodySummary {
         let mut reassigned: Vec<Name> = self.reassigned.into_iter().collect();
         reassigned.sort();
+        let mut made: Vec<(Name, Made)> = self
+            .made
+            .into_iter()
+            .filter_map(|(name, made)| Some((name, made?)))
+            .collect();
+        made.sort_by(|a, b| a.0.cmp(&b.0));
         BodySummary {
             purity: (!self.impure).then(|| self.purity_calls.into_boxed_slice()),
             writes: WriteFacts {
                 reassigned: reassigned.into_boxed_slice(),
-                writes_own_object: self.writes_own_object,
+                writes: self.writes.into_boxed_slice(),
+                bindings: self.bindings.into_boxed_slice(),
+                made: made.into_boxed_slice(),
                 anything: self.anything,
                 calls: self.calls.into_boxed_slice(),
             },
@@ -300,58 +458,84 @@ impl Summarizer {
         }
     }
 
-    /// A write to `target`.
-    fn write(&mut self, target: &Expr) {
-        match property_of(target) {
-            Some(PropertyOf::This) => self.writes_own_object = true,
-            Some(PropertyOf::Other) => self.anything = true,
-            None => {}
+    /// A write to `target`: to each target of a destructuring, to the place
+    /// `target` names otherwise. A variable written holds what the body
+    /// made when `made` says what.
+    fn write(&mut self, target: &Expr, made: Option<Made>) {
+        if let ExprKind::Destructure(items, _) = &target.peeled().kind {
+            for item in items {
+                if let Some(target) = &item.target {
+                    self.write(target, None);
+                }
+            }
+            return;
         }
+        let Some(place) = Place::of(target) else {
+            return;
+        };
+        if let Some(name) = place.variable() {
+            self.note_variable(name.clone(), made);
+        }
+        self.writes.push(place);
     }
 
-    /// A call, with the property targets among `args`.
+    /// That the variable `name` is written what `made` says, or anything
+    /// else when `made` is `None`.
+    fn note_variable(&mut self, name: Name, made: Option<Made>) {
+        let held = self.made.entry(name).or_insert_with(|| made.clone());
+        *held = match (held.take(), made) {
+            (Some(Made::Closure), Some(Made::Closure)) => Some(Made::Closure),
+            (Some(Made::Object(a)), Some(Made::Object(b))) => Some(Made::Object(
+                a.zip(b)
+                    .filter(|(a, b)| a.written.eq_ignore_ascii_case(&b.written))
+                    .map(|(a, _)| a),
+            )),
+            _ => None,
+        };
+    }
+
+    fn bind(&mut self, variable: Option<Name>, binding: Binding) {
+        if let Some(name) = &variable {
+            self.made.insert(name.clone(), None);
+        }
+        self.bindings.push((variable, binding));
+    }
+
+    /// A call, with the arguments that are places.
     fn call(&mut self, callee: Callee, args: &[Arg]) {
-        let properties = args
+        let mut spread = false;
+        let places = args
             .iter()
             .enumerate()
-            .filter_map(|(at, arg)| Some((at as u32, property_of(&arg.value)?)))
+            .filter_map(|(at, arg)| {
+                spread |= arg.spread;
+                let place = Place::of(&arg.value)?;
+                let at = match &arg.name {
+                    _ if spread => ArgAt::Spread,
+                    Some(name) => ArgAt::Named(name.name.clone()),
+                    None => ArgAt::Position(at as u32),
+                };
+                Some((at, place))
+            })
             .collect();
-        self.calls.push(CallWrites { callee, properties });
+        self.calls.push(CallWrites { callee, places });
     }
 }
 
-/// Whose property a write to `target` writes, when it writes one: an
-/// assignment to a list takes the farthest reach of its targets.
-fn property_of(target: &Expr) -> Option<PropertyOf> {
-    match &target.peeled().kind {
-        ExprKind::Destructure(items, _) => items
-            .iter()
-            .filter_map(|item| item.target.as_ref().and_then(property_of))
-            .max(),
-        ExprKind::PropertyAccess(base, _, _) | ExprKind::DynamicPropertyAccess(base, _, _) => {
-            Some(own_or_other(base))
+/// What the body made that `e` evaluates to, when it is that.
+fn made_by(e: &Expr) -> Option<Made> {
+    syntax::stack::guard(|| match &e.peeled().kind {
+        ExprKind::New(callee, _) => Some(Made::Object(match &callee.kind {
+            ExprKind::Name(name) => Some(name.clone()),
+            _ => None,
+        })),
+        ExprKind::NewAnonymousClass(_) | ExprKind::Clone(..) => Some(Made::Object(None)),
+        ExprKind::Closure(_) | ExprKind::ArrowFn(_) | ExprKind::FirstClassCallable(_) => {
+            Some(Made::Closure)
         }
-        ExprKind::Index(base, _) => property_of_index_base(base),
+        ExprKind::Assign(_, rhs) => made_by(rhs),
         _ => None,
-    }
-}
-
-fn property_of_index_base(base: &Expr) -> Option<PropertyOf> {
-    match &base.peeled().kind {
-        ExprKind::PropertyAccess(object, _, _) | ExprKind::DynamicPropertyAccess(object, _, _) => {
-            Some(own_or_other(object))
-        }
-        ExprKind::Index(inner, _) => property_of_index_base(inner),
-        _ => None,
-    }
-}
-
-fn own_or_other(object: &Expr) -> PropertyOf {
-    if matches!(&object.peeled().kind, ExprKind::Variable(v) if **v == *"this") {
-        PropertyOf::This
-    } else {
-        PropertyOf::Other
-    }
+    })
 }
 
 /// `$obj->prop = ...`/`unset($obj->prop)`: a write to a property of any
@@ -364,16 +548,18 @@ fn property_write_target(e: &Expr) -> bool {
     })
 }
 
-impl Summarizer {
-    fn receiver(&self, recv: &Expr) -> Option<Receiver> {
-        match &recv.peeled().kind {
-            ExprKind::Variable(v) if **v == *"this" => Some(Receiver::This),
-            ExprKind::Variable(v) => Some(Receiver::Variable(v.clone())),
-            ExprKind::PropertyAccess(base, prop, _) if matches!(&base.peeled().kind, ExprKind::Variable(v) if **v == *"this") => {
-                Some(Receiver::ThisProperty(prop.name.clone()))
-            }
-            _ => None,
+/// The object `recv` is, as far as the body shows it.
+fn receiver(recv: &Expr) -> Receiver {
+    match &recv.peeled().kind {
+        ExprKind::Variable(v) if **v == *"this" => Receiver::This,
+        ExprKind::Variable(v) => Receiver::Variable(v.clone()),
+        ExprKind::PropertyAccess(base, prop, _) if matches!(&base.peeled().kind, ExprKind::Variable(v) if **v == *"this") => {
+            Receiver::ThisProperty(prop.name.clone())
         }
+        ExprKind::StaticPropertyFetch(StaticTarget::Name(class), prop) => {
+            Receiver::Static((**class).clone(), prop.name.clone())
+        }
+        _ => Receiver::Unknown,
     }
 }
 
@@ -412,7 +598,7 @@ impl<'ast> Visitor<'ast> for Summarizer {
             match &stmt.kind {
                 StmtKind::Unset(targets) => {
                     for target in targets {
-                        self.write(target);
+                        self.write(target, None);
                     }
                 }
                 StmtKind::Foreach {
@@ -422,12 +608,39 @@ impl<'ast> Visitor<'ast> for Summarizer {
                     by_ref,
                     ..
                 } => {
-                    self.write(value);
+                    if let Some(key) = key {
+                        self.write(key, None);
+                    }
+                    match &value.peeled().kind {
+                        ExprKind::Variable(name) if *by_ref => {
+                            let element = Place::of(subject)
+                                .unwrap_or_else(|| Place::root(Root::Value))
+                                .then(Step::Element);
+                            self.bind(Some(name.clone()), Binding::Reference(element));
+                        }
+                        _ => self.write(value, None),
+                    }
                     if *by_ref {
-                        self.write(subject);
+                        self.write(subject, None);
                     }
                     for target in key.iter().map(|k| &**k).chain([&**value]) {
                         collect_assigned(target, &mut self.reassigned);
+                    }
+                }
+                StmtKind::Global(vars) => {
+                    for var in vars {
+                        match var {
+                            GlobalVar::Name(name) => self.bind(
+                                Some(name.name.clone()),
+                                Binding::Global(Some(name.name.clone())),
+                            ),
+                            GlobalVar::Dynamic(_) => self.bind(None, Binding::Global(None)),
+                        }
+                    }
+                }
+                StmtKind::StaticVar(vars) => {
+                    for (name, _) in vars {
+                        self.bind(Some(name.name.clone()), Binding::Static);
                     }
                 }
                 _ => {}
@@ -462,19 +675,29 @@ impl<'ast> Visitor<'ast> for Summarizer {
             };
             self.impure_unless_in_closure(impure);
             match &e.kind {
-                ExprKind::Assign(lhs, _) | ExprKind::CompoundAssign(_, lhs, _) => {
-                    self.write(lhs);
+                ExprKind::Assign(lhs, rhs) => {
+                    self.write(lhs, made_by(rhs));
+                    collect_assigned(lhs, &mut self.reassigned);
+                }
+                ExprKind::CompoundAssign(_, lhs, _) => {
+                    self.write(lhs, None);
                     collect_assigned(lhs, &mut self.reassigned);
                 }
                 ExprKind::AssignRef(lhs, rhs) => {
-                    self.write(lhs);
-                    self.write(rhs);
+                    match &lhs.peeled().kind {
+                        ExprKind::Variable(name) if **name != *"this" => {
+                            let place = Place::of(rhs).unwrap_or_else(|| Place::root(Root::Value));
+                            self.bind(Some(name.clone()), Binding::Reference(place));
+                        }
+                        _ => self.write(lhs, None),
+                    }
+                    self.write(rhs, None);
                     collect_assigned(lhs, &mut self.reassigned);
                 }
                 ExprKind::Unary(
                     UnaryOp::PreInc | UnaryOp::PreDec | UnaryOp::PostInc | UnaryOp::PostDec,
                     target,
-                ) => self.write(target),
+                ) => self.write(target, None),
                 ExprKind::Eval(_) | ExprKind::Include(..) => self.anything = true,
                 ExprKind::Call(callee, args) => match &callee.kind {
                     ExprKind::Name(name) => {
@@ -483,7 +706,11 @@ impl<'ast> Visitor<'ast> for Summarizer {
                     }
                     _ => {
                         self.impure_unless_in_closure(true);
-                        self.anything = true;
+                        let variable = match &callee.peeled().kind {
+                            ExprKind::Variable(name) => Some(name.clone()),
+                            _ => None,
+                        };
+                        self.call(Callee::Value(variable), args);
                     }
                 },
                 ExprKind::MethodCall(recv, method, args, _) => {
@@ -493,38 +720,51 @@ impl<'ast> Visitor<'ast> for Summarizer {
                     } else {
                         self.impure_unless_in_closure(true);
                     }
-                    match self.receiver(recv) {
-                        Some(receiver) => self.call(
-                            Callee::Method {
-                                receiver,
-                                method: method.name.clone(),
-                            },
-                            args,
-                        ),
-                        None => self.anything = true,
-                    }
+                    self.call(
+                        Callee::Method {
+                            receiver: receiver(recv),
+                            method: Some(method.name.clone()),
+                        },
+                        args,
+                    );
                 }
-                ExprKind::StaticCall(target, method, args) => match target.as_name() {
-                    Some(name) => {
-                        self.purity_call(PurityCall::Static(name.clone(), method.name.clone()));
-                        self.call(Callee::Static(name.clone(), method.name.clone()), args);
+                ExprKind::DynamicMethodCall(recv, _, args, _) => self.call(
+                    Callee::Method {
+                        receiver: receiver(recv),
+                        method: None,
+                    },
+                    args,
+                ),
+                ExprKind::StaticCall(target, method, args) => {
+                    match target.as_name() {
+                        Some(name) => {
+                            self.purity_call(PurityCall::Static(name.clone(), method.name.clone()));
+                        }
+                        None => self.impure_unless_in_closure(true),
                     }
-                    None => {
-                        self.impure_unless_in_closure(true);
-                        self.anything = true;
-                    }
-                },
-                ExprKind::DynamicMethodCall(..) | ExprKind::DynamicStaticCall(..) => {
-                    self.anything = true;
+                    self.call(
+                        Callee::Static {
+                            class: target.as_name().cloned(),
+                            method: Some(method.name.clone()),
+                        },
+                        args,
+                    );
                 }
+                ExprKind::DynamicStaticCall(target, _, args) => self.call(
+                    Callee::Static {
+                        class: target.as_name().cloned(),
+                        method: None,
+                    },
+                    args,
+                ),
                 ExprKind::New(callee, args) => match &callee.kind {
                     ExprKind::Name(name) => {
                         self.purity_call(PurityCall::New(name.clone()));
-                        self.call(Callee::New(name.clone()), args);
+                        self.call(Callee::New(Some(name.clone())), args);
                     }
                     _ => {
                         self.impure_unless_in_closure(true);
-                        self.anything = true;
+                        self.call(Callee::New(None), args);
                     }
                 },
                 ExprKind::NewAnonymousClass(class) => {
