@@ -245,6 +245,21 @@ when it runs, and the plan adds the checks found along the way.
   before the baseline (rows 0.1a-0.1f), and added item 20. It starts at
   item 0: the starting state read, the `oracle` profile's run, and the
   baseline dumps from item 0's own commit.
+- **Item 0's validation (0.11)** is under way: the tests, fixtures and
+  runtime oracle pass, and the edit replay over Piwigo and every vendor
+  project found the stale diagnostics and registry state the plan's "Found
+  in item 0's validation" block lists, each fixed. Left: the dumps with the
+  `gate` and `oracle` builds, `cargo xtask corpus --full` with the
+  equalities, the reports against `5fb858c9`'s, the memory baseline.
+- **Queued after level 8, found along the way:**
+  - Version gates for PHP 7.x syntax. The "supported only on PHP X" family
+    starts at 8.0; nothing reports `void`, `?T` or `iterable` before 7.1,
+    `object` before 7.2, or what 7.4 added (typed properties, arrow
+    functions, `??=`), each of which PHP before then rejects or reads as a
+    class name. Check which later gates are missing too (`mixed`,
+    `static`, `never`, `match`, `?->`, enums).
+  - The runtime oracle executes 81 of 3851 fixtures: the others assert
+    inside functions nothing calls, so PHP never reaches the assertion.
 
 ## Documents with no place in the stack
 
