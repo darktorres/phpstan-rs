@@ -85,7 +85,12 @@ namespace {
                 }
                 $items = [];
                 foreach ($value as $key => $item) {
-                    $items[] = [$key, self::encode($item, $depth + 1)];
+                    // A string key as its bytes, which JSON keeps only
+                    // when they are UTF-8.
+                    $items[] = [
+                        is_int($key) ? $key : ['hex' => bin2hex($key)],
+                        self::encode($item, $depth + 1),
+                    ];
                 }
                 return ['t' => 'array', 'items' => $items];
             }

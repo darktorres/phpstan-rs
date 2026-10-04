@@ -512,7 +512,9 @@ fn value_type(value: &Value) -> Option<Type> {
             for item in value["items"].as_array()? {
                 let key = match &item[0] {
                     Value::Number(n) => ShapeKey::Int(n.as_i64()?),
-                    Value::String(s) => ShapeKey::Str(PhpString::from_bytes(s.as_bytes())),
+                    Value::Object(key) => ShapeKey::Str(PhpString::from_bytes(
+                        hex(key.get("hex")?.as_str()?)?.as_slice(),
+                    )),
                     _ => return None,
                 };
                 fields.push(ShapeField::new(key, value_type(&item[1])?, false));
