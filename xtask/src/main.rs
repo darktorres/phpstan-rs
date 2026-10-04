@@ -20,6 +20,7 @@ use std::time::Instant;
 
 mod arch;
 mod modgraph;
+mod progress;
 mod stub_index;
 #[cfg(test)]
 mod tests;
@@ -34,6 +35,7 @@ fn main() -> ExitCode {
         Some("gates") => gates(&args[1..]),
         Some("corpus") => corpus_command(&args[1..]),
         Some("dumps") => dumps_command(&args[1..]),
+        Some("progress") => progress::progress_command(&gate_dir(), &args[1..]),
         Some("compare") => compare(&args[1..]),
         Some("type-drift") => type_drift(&args[1..]),
         Some("perf") => perf(),
@@ -66,6 +68,10 @@ const USAGE: &str = "usage: cargo xtask <command>
                          thread and the default, which must agree; with
                          --binary, run them with that build and record
                          nothing (the oracle build's run)
+  progress [--watch] [<command>]
+                         show how far the running or last `dumps` (or
+                         <command>) is: runs done by group, runs under
+                         way, failures; --watch refreshes it until it ends
   compare [--full] [--against <hash>]
                          diff HEAD's snapshots against its parent's (or
                          the nearest ancestor that has them)
@@ -1118,6 +1124,8 @@ struct Dump {
     // Whether it runs over the corpus, which takes a few gigabytes of
     // memory, rather than one vendor project.
     large: bool,
+    // The configuration it is taken in, for one over the corpus's.
+    config: Option<&'static str>,
     args: DumpArgs,
 }
 
@@ -1150,6 +1158,7 @@ fn take_dumps(binary: &Path, hash: Option<&str>, timings: &mut Timings) -> Resul
             dir: corpus_dir(),
             copy: None,
             large: true,
+            config: Some(config.name),
             args: with(vec!["--dump-front-end".into()]),
         });
         dumps.push(Dump {
@@ -1158,6 +1167,7 @@ fn take_dumps(binary: &Path, hash: Option<&str>, timings: &mut Timings) -> Resul
             dir: corpus_dir(),
             copy: None,
             large: true,
+            config: Some(config.name),
             args: with(vec!["--dump-registry".into()]),
         });
         for (artifact, flag) in [
@@ -1170,6 +1180,7 @@ fn take_dumps(binary: &Path, hash: Option<&str>, timings: &mut Timings) -> Resul
                 dir: corpus_dir(),
                 copy: None,
                 large: true,
+                config: Some(config.name),
                 args: with(vec![flag.into(), "--format".into(), "json".into()]),
             });
         }
@@ -1185,6 +1196,7 @@ fn take_dumps(binary: &Path, hash: Option<&str>, timings: &mut Timings) -> Resul
             dir: corpus_dir(),
             copy: None,
             large: project == ".",
+            config: None,
             args: Box::new(move |out: &Path| {
                 vec![
                     "record-session".into(),
@@ -1201,6 +1213,7 @@ fn take_dumps(binary: &Path, hash: Option<&str>, timings: &mut Timings) -> Resul
         dir: replays.join("piwigo"),
         copy: Some((corpus_dir(), replays.join("piwigo"))),
         large: true,
+        config: None,
         args: Box::new(|out: &Path| {
             let mut args = vec!["check-project".to_string()];
             args.extend(scoped_args());
@@ -1217,6 +1230,7 @@ fn take_dumps(binary: &Path, hash: Option<&str>, timings: &mut Timings) -> Resul
             dir: replays.join(&slug),
             copy: Some((corpus_dir().join(&project), replays.join(&slug))),
             large: false,
+            config: None,
             args: Box::new(|out: &Path| {
                 let mut args = vec!["check-project".to_string(), "--no-composer".to_string()];
                 for set in ALL_ON_SETS {
@@ -1250,10 +1264,70 @@ struct DumpQueue {
     failures: Vec<String>,
 }
 
+/// What every worker reads and writes.
+struct DumpWorkers<'a> {
+    binary: &'a Path,
+    hash: Option<&'a str>,
+    dumps: &'a [Dump],
+    // The progress groups each dump's runs count in.
+    groups: Vec<Vec<usize>>,
+    scratch: PathBuf,
+    queue: std::sync::Mutex<DumpQueue>,
+    ready: std::sync::Condvar,
+    timings: std::sync::Mutex<&'a mut Timings>,
+    progress: std::sync::Mutex<progress::Progress>,
+}
+
+/// The progress groups of `dumps`' runs: all of them, the configurations'
+/// (then each configuration's), the sessions' and the replays'; and the
+/// groups each dump's runs count in.
+fn dump_groups(dumps: &[Dump]) -> (Vec<progress::Group>, Vec<Vec<usize>>) {
+    let runs = DUMP_THREADS.len();
+    let mut configs: Vec<&'static str> = Vec::new();
+    for config in dumps.iter().filter_map(|d| d.config) {
+        if !configs.contains(&config) {
+            configs.push(config);
+        }
+    }
+    let count = |keep: &dyn Fn(&Dump) -> bool| dumps.iter().filter(|d| keep(d)).count() * runs;
+    let group = |label: &str, total: usize, indent: usize| progress::Group {
+        label: label.to_string(),
+        total,
+        indent,
+    };
+    let mut groups = vec![
+        group("all runs", dumps.len() * runs, 0),
+        group("configurations", count(&|d| d.config.is_some()), 0),
+    ];
+    for config in &configs {
+        groups.push(group(config, count(&|d| d.config == Some(config)), 1));
+    }
+    let sessions = groups.len();
+    groups.push(group(
+        "sessions",
+        count(&|d| d.config.is_none() && d.copy.is_none()),
+        0,
+    ));
+    groups.push(group("replays", count(&|d| d.copy.is_some()), 0));
+    let of = dumps
+        .iter()
+        .map(|d| match d.config {
+            Some(config) => {
+                let row = configs.iter().position(|c| *c == config).expect("listed");
+                vec![0, 1, 2 + row]
+            }
+            None if d.copy.is_none() => vec![0, sessions],
+            None => vec![0, sessions + 1],
+        })
+        .collect();
+    (groups, of)
+}
+
 /// Takes every dump of `dumps` at each of `DUMP_THREADS` on a worker per
 /// core, compares each pair once both are taken, and, with `hash`, records
 /// the default run's. Every failure is reported at the end; the runs of a
-/// dump that failed are left in `.dumps` to read.
+/// dump that failed are left in `.dumps` to read. The progress is written
+/// for `cargo xtask progress` as the runs start and end.
 fn run_dumps(
     binary: &Path,
     hash: Option<&str>,
@@ -1282,46 +1356,66 @@ fn run_dumps(
             }
         }
     }
-    let queue = std::sync::Mutex::new(DumpQueue {
-        jobs,
-        large_running: 0,
-        taken: vec![[None, None]; dumps.len()],
-        failures: Vec::new(),
-    });
-    let ready = std::sync::Condvar::new();
-    let timings = std::sync::Mutex::new(timings);
+    let (groups, of) = dump_groups(dumps);
+    let shared = DumpWorkers {
+        binary,
+        hash,
+        dumps,
+        groups: of,
+        scratch,
+        queue: std::sync::Mutex::new(DumpQueue {
+            jobs,
+            large_running: 0,
+            taken: vec![[None, None]; dumps.len()],
+            failures: Vec::new(),
+        }),
+        ready: std::sync::Condvar::new(),
+        timings: std::sync::Mutex::new(timings),
+        progress: std::sync::Mutex::new(progress::Progress::new(
+            progress::status_path(&gate_dir(), "dumps"),
+            "dumps",
+            groups,
+        )),
+    };
     let workers = std::thread::available_parallelism().map_or(1, usize::from);
     std::thread::scope(|scope| {
         for _ in 0..workers {
-            scope.spawn(|| dump_worker(binary, hash, dumps, &scratch, &queue, &ready, &timings));
+            scope.spawn(|| dump_worker(&shared));
         }
     });
-    let failures = queue
+    let failures = shared
+        .queue
         .into_inner()
         .unwrap_or_else(std::sync::PoisonError::into_inner)
         .failures;
-    if failures.is_empty() {
+    let result = if failures.is_empty() {
         Ok(())
     } else {
         Err(failures.join("\n"))
-    }
+    };
+    shared
+        .progress
+        .into_inner()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .end(&result);
+    result
 }
 
-/// Runs jobs from `queue` until none is left.
-fn dump_worker(
-    binary: &Path,
-    hash: Option<&str>,
-    dumps: &[Dump],
-    scratch: &Path,
-    queue: &std::sync::Mutex<DumpQueue>,
-    ready: &std::sync::Condvar,
-    timings: &std::sync::Mutex<&mut Timings>,
-) {
+/// Runs jobs from the queue until none is left.
+fn dump_worker(shared: &DumpWorkers) {
     let lock = || {
-        queue
+        shared
+            .queue
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
     };
+    let progress = || {
+        shared
+            .progress
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+    };
+    let dumps = shared.dumps;
     loop {
         let job = {
             let mut state = lock();
@@ -1337,7 +1431,8 @@ fn dump_worker(
                 if state.jobs.is_empty() {
                     return;
                 }
-                state = ready
+                state = shared
+                    .ready
                     .wait(state)
                     .unwrap_or_else(std::sync::PoisonError::into_inner);
             }
@@ -1346,7 +1441,7 @@ fn dump_worker(
         let mut outcomes = Vec::new();
         for &t in &job.threads {
             let threads = DUMP_THREADS[t];
-            let out = scratch.join(format!(
+            let out = shared.scratch.join(format!(
                 "{}-{}{}",
                 dump.artifact,
                 threads.unwrap_or("default"),
@@ -1356,17 +1451,24 @@ fn dump_worker(
                     format!(".{}", dump.ext)
                 }
             ));
-            let started = Instant::now();
-            let result = take_dump(binary, dump, threads, &out);
             let label = format!(
                 "dump {} at {} threads",
                 dump.artifact,
                 threads.unwrap_or("default")
             );
-            timings
+            progress().start(&label);
+            let started = Instant::now();
+            let result = take_dump(shared.binary, dump, threads, &out);
+            shared
+                .timings
                 .lock()
                 .unwrap_or_else(std::sync::PoisonError::into_inner)
                 .record(&label, started.elapsed().as_secs_f64(), result.is_ok());
+            progress().finish(
+                &label,
+                &shared.groups[job.dump],
+                result.as_ref().err().map(|e| format!("{label}: {e}")),
+            );
             outcomes.push((t, result.map(|()| out)));
         }
         if let Some((_, to)) = &dump.copy {
@@ -1389,11 +1491,12 @@ fn dump_worker(
                 Err(error) => state.failures.push(format!("{}: {error}", dump.artifact)),
             }
         }
-        ready.notify_all();
+        shared.ready.notify_all();
         drop(state);
         if let Some([default, one]) = pair
-            && let Err(error) = record_dump(dump, hash, &default, &one)
+            && let Err(error) = record_dump(dump, shared.hash, &default, &one)
         {
+            progress().fail(error.clone());
             lock().failures.push(error);
         }
     }

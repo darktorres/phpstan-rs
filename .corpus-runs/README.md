@@ -105,6 +105,16 @@ bytes, and recorded by commit:
 `cargo xtask dumps --binary <path>` takes every dump with another build
 (the `oracle` profile) and records nothing.
 
+The runs share the machine: a worker per core takes the next one from a
+single queue, the corpus's first and at most three of those at once for
+memory, a replay's two runs one after the other in its copy. Each pair is
+compared as soon as both runs are done, and every difference is reported
+at the end. As runs start and end, the command writes its state to
+`gate/progress-dumps.json`; `cargo xtask progress --watch`, from another
+terminal, shows it: the runs done in each group and each configuration,
+the runs under way with their time so far, the failures, and how it
+ended, or that its process is gone.
+
 ## Binaries and profiles kept beside the runs
 
 `cargo clean` empties `target/`, and `/tmp` is a tmpfs a reboot empties,

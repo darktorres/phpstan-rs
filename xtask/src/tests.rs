@@ -81,3 +81,68 @@ fn the_session_the_binary_the_language_server_and_tests_may() {
         assert!(arch_findings(rel, source).is_empty(), "{rel}");
     }
 }
+
+/// A directory of its own under the system's temporary one, emptied.
+fn scratch_dir(name: &str) -> std::path::PathBuf {
+    let dir = std::env::temp_dir().join(format!("xtask-{name}-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    dir
+}
+
+#[test]
+fn the_progress_view_shows_counts_runs_under_way_and_failures() {
+    use super::progress::{Group, Progress, render, status_path};
+    let dir = scratch_dir("progress");
+    let path = status_path(&dir, "dumps");
+    let group = |label: &str, total, indent| Group {
+        label: label.to_string(),
+        total,
+        indent,
+    };
+    let mut progress = Progress::new(
+        path.clone(),
+        "dumps",
+        vec![
+            group("all runs", 4, 0),
+            group("replays", 2, 0),
+            group("one", 2, 1),
+        ],
+    );
+    progress.start("dump a at default threads");
+    progress.start("dump b at 1 threads");
+    progress.finish("dump a at default threads", &[0, 1], None);
+    progress.finish(
+        "dump b at 1 threads",
+        &[0, 2],
+        Some("dump b: exit 1".into()),
+    );
+    progress.start("dump c at default threads");
+    let started = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs();
+    let (view, over) = render(&path, started + 75).unwrap();
+    assert!(!over, "the run is under way: {view}");
+    assert!(
+        view.contains("all runs  ███████████████░░░░░░░░░░░░░░░   2/4"),
+        "{view}"
+    );
+    assert!(
+        view.contains("  one     "),
+        "a nested group is indented: {view}"
+    );
+    assert!(view.contains("running now (1)"), "{view}");
+    assert!(
+        view.contains("    dump c at default threads    1m 15s\n"),
+        "{view}"
+    );
+    assert!(view.contains("failures (1)\n    dump b: exit 1"), "{view}");
+
+    progress.end(&Err("dump b: exit 1".into()));
+    let (view, over) = render(&path, started + 80).unwrap();
+    assert!(over);
+    assert!(!view.contains("running now"), "{view}");
+    assert!(view.contains("finished: failed"), "{view}");
+    std::fs::remove_dir_all(&dir).unwrap();
+}
