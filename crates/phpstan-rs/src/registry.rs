@@ -603,6 +603,19 @@ impl Registry {
         body_scope.map(|_| snapshot(classes, functions, self))
     }
 
+    /// Takes from `base`, the stub base the registry now stands on, what
+    /// it has of its stubs alone: which classes and functions are built-in
+    /// stubs, and the names its declarations assert with or run code
+    /// under. Declarations rebuilt over another base leave these as the
+    /// old base had them.
+    pub(crate) fn adopt_stub_tables(&mut self, base: &Registry) {
+        self.built_in_stub_classes = base.built_in_stub_classes.clone();
+        self.stub_provided_functions = base.stub_provided_functions.clone();
+        self.base_assert_tagged = Arc::clone(&base.base_assert_tagged);
+        self.base_builtin_methods_running_code =
+            Arc::clone(&base.base_builtin_methods_running_code);
+    }
+
     /// Makes the class, function and derived tables a shared base, for
     /// clones of the registry to share rather than copy.
     pub(crate) fn freeze(&mut self) {

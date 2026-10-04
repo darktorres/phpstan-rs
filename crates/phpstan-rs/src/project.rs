@@ -1236,6 +1236,11 @@ impl Project {
             return;
         }
         self.registry.phpstan_stubs_loaded = wanted;
+        self.registry.adopt_stub_tables(if wanted {
+            Project::phpstan_base()
+        } else {
+            Project::plain_base()
+        });
         let names = stubs::phpstan_stub_names();
         self.rebuild_declarations(
             &DeclaredNames {

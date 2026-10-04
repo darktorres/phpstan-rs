@@ -1068,10 +1068,12 @@ fn phpstans_own_classes_are_loaded_only_while_a_file_names_them() {
         )
         .unwrap();
     assert!(project.registry().classes.contains_key(rule));
+    assert!(project.registry().built_in_stub_classes.contains_key(rule));
     project
         .update_file(&PathBuf::from("a.php"), "<?php class A {}")
         .unwrap();
     assert!(!project.registry().classes.contains_key(rule));
+    assert!(!project.registry().built_in_stub_classes.contains_key(rule));
     assert!(project.registry().classes.contains_key("Exception"));
 }
 
