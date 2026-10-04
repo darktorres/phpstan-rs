@@ -283,5 +283,29 @@ impl DiagnosticBuilder {
     }
 }
 
+impl syntax::canonical::Canonical for Identifier {
+    fn canonical(&self, p: &mut syntax::canonical::Printer) {
+        let Identifier(text) = self;
+        p.atom(text);
+    }
+}
+
+syntax::canonical_struct!(Diagnostic {
+    message,
+    span,
+    level,
+    identifier,
+    tips,
+    non_ignorable,
+    fix,
+});
+
+syntax::canonical_struct!(DiagnosticFix {
+    span,
+    replacement,
+    description,
+    within,
+});
+
 #[cfg(test)]
 mod tests;

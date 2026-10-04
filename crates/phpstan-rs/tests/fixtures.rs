@@ -17,7 +17,9 @@
 //! `PHPSTAN_RS_BLESS=1 cargo test --test fixtures` rewrites every
 //! expectation from the current output. `PHPSTAN_RS_DUMP_TYPES=<dir>`
 //! also writes each fixture's `--dump-types` output to `<dir>`, its paths
-//! relative to the fixture and each line prefixed with the fixture's name.
+//! relative to the fixture and each line prefixed with the fixture's name;
+//! `PHPSTAN_RS_DUMP_DIAGNOSTICS=<dir>` writes its every diagnostic whole
+//! (`AnalysisResult::diagnostic_view`) the same way.
 
 use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
@@ -158,6 +160,12 @@ fn run_fixture(name: &str, expect_file: &Path, pool: Arc<rayon::ThreadPool>) -> 
         return Err(format!("{} panicked: {message}", path.display()).into());
     }
     let report = analysis.finalize(&session.finalize_options());
+    if let Some(dir) = std::env::var_os("PHPSTAN_RS_DUMP_DIAGNOSTICS") {
+        let out = PathBuf::from(dir)
+            .join(name.replace('/', "__"))
+            .with_extension("diagnostics");
+        write_type_dump(name, &base, &analysis.diagnostic_view(&report), &out)?;
+    }
     let actual = render(&report.results, &base, single_file);
     if std::env::var_os("PHPSTAN_RS_BLESS").is_some() {
         std::fs::write(expect_file, &actual)?;
@@ -205,6 +213,8 @@ fn fixture_config(path: &Path) -> Result<FixtureConfig, Failed> {
 
 /// Writes `text`, the session's type dump, to `out`: each line's path
 /// relative to `base` and prefixed with the fixture's name.
+/// Writes `text`, a dump of the fixture `name` whose paths are under
+/// `base`, to `out`: each line prefixed with the name, its path relative.
 fn write_type_dump(name: &str, base: &Path, text: &str, out: &Path) -> Result<(), Failed> {
     let prefix = format!("{}/", base.display());
     let mut rewritten = String::new();

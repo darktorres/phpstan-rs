@@ -454,9 +454,57 @@ const ALL_ON_SETS: &[&str] = &[
     "rules.banned.constructs=[\"eval\", \"goto\", \"global\", \"backticks\", \"variable-variables\"]",
 ];
 
+/// The architecture rules of the `arch` configuration: one or more of
+/// each assertion and each selector, over Piwigo's namespaces, so each
+/// architecture pass has a corpus to be checked on.
+const ARCH_RULES: &[&str] = &[
+    r#"{name = "core below controllers", classes = [{namespace = 'Piwigo\Core'}], should_not_depend_on = [{namespace = 'Piwigo\Controller'}, {namespace = 'Piwigo\Admin'}], should_not_construct = [{namespace = 'Piwigo\Db'}]}"#,
+    r#"{name = "value objects", classes = [{namespace = 'Piwigo\Common\ValueObject'}], excluding = [{is_interface = true}], can_only_depend_on = [{namespace = 'Piwigo\Common'}, {namespace = 'Piwigo\Core'}], should_be_final = true, should_be_readonly = true}"#,
+    r#"{name = "projections", classes = [{classname = '/\\Projection\\/'}], should_be_final = true, should_have_only_one_public_method = true, should_not_use_trait = [{is_trait = true}]}"#,
+    r#"{name = "controllers", classes = [{namespace = 'Piwigo\Controller', is_standard_class = true}], excluding = [{is_abstract = true}], should_be_named = '/Controller$/', should_depend_on = [{namespace = 'Piwigo\Core'}], should_apply_attribute = 'Piwigo\Controller\Route'}"#,
+    r#"{name = "exceptions", classes = [{is_exception = true}], should_extend = [{classname = 'RuntimeException'}], should_not_extend = [{classname = 'Exception'}], should_be_named = '/Exception$/'}"#,
+    r#"{name = "interfaces", classes = [{is_interface = true}], should_be_named = '/Interface$/', should_not_implement = [{classname = 'Countable'}]}"#,
+    r#"{name = "abstract classes", classes = [{is_abstract = true, is_interface = false}], should_be_abstract = true, should_implement = [{classname = 'Stringable'}], should_use_trait = [{is_trait = true}]}"#,
+    r#"{name = "attributes", classes = [{is_attribute = true}, {applies_attribute = 'Attribute'}], should_be_final = true}"#,
+    r#"{name = "enums and traits", classes = [{is_enum = true}, {is_trait = true}, {is_final = true}, {is_readonly = true}], should_not_depend_on = [{extends = 'Exception'}, {implements = 'Traversable'}, {uses_trait = '/./'}]}"#,
+];
+
+/// The types the `arch` configuration bans: every keyword type banning
+/// understands, and two classes.
+const ARCH_BANNED_TYPES: &str = r#"rules.banned.types=["float", "int", "string", "bool", "array", "mixed", "object", "callable", "iterable", "DateTime", "stdClass"]"#;
+
+/// The constructs the `arch` configuration bans: every one banning knows.
+const ARCH_BANNED_CONSTRUCTS: &str = r#"rules.banned.constructs=["eval", "isset", "empty", "compact", "extract", "exit", "error-suppression", "switch", "goto", "global", "named-arguments", "assign-by-reference", "by-reference-parameters", "by-reference-returns", "short-ternary", "loose-comparison", "array-append", "backticks", "ignore-comments", "superglobals", "variable-variables", "dynamic-member-access"]"#;
+
+/// The scoped configuration with architecture rules and banned types and
+/// constructs, which no other configuration sets.
+fn arch_args() -> Vec<String> {
+    let mut args = scoped_args();
+    args.push("--set".into());
+    args.push(format!("rules.architecture=[{}]", ARCH_RULES.join(", ")));
+    for set in [ARCH_BANNED_TYPES, ARCH_BANNED_CONSTRUCTS] {
+        args.push("--set".into());
+        args.push(set.into());
+    }
+    args
+}
+
+/// The corpus's vendor tree as one project, its own context.
+fn vendor_tree_args() -> Vec<String> {
+    vec!["--no-composer".into(), "vendor".into()]
+}
+
 const SCOPED: Config = Config {
     name: "scoped",
     args: scoped_args,
+};
+const ARCH: Config = Config {
+    name: "arch",
+    args: arch_args,
+};
+const VENDOR_TREE: Config = Config {
+    name: "vendor-tree",
+    args: vendor_tree_args,
 };
 const UNSCOPED: Config = Config {
     name: "unscoped",
@@ -473,6 +521,8 @@ fn artifacts(full: bool) -> Vec<(Config, &'static str)> {
     let mut out = vec![(SCOPED, "unset"), (ALL_ON, "unset")];
     if full {
         out.push((UNSCOPED, "unset"));
+        out.push((VENDOR_TREE, "unset"));
+        out.push((ARCH, "unset"));
         for config in [SCOPED, ALL_ON] {
             for level in &LEVELS[1..] {
                 out.push((config, level));
@@ -579,7 +629,13 @@ fn corpus(
     if with_fixture_types {
         record_fixture_types(hash, timings)?;
     }
+    if full {
+        record_vendor_projects(hash, timings)?;
+    }
     determinism_check(full, timings)?;
+    if full {
+        equalities(hash, timings)?;
+    }
     Ok(())
 }
 
@@ -662,7 +718,7 @@ fn record_artifact(
     let artifact = &artifact_name(config, level);
     let out = runner_out(artifact);
     let _ = std::fs::remove_dir_all(&out);
-    let views = level == "unset" && config.name != "unscoped";
+    let views = level == "unset" && matches!(config.name, "scoped" | "all-on");
     let baseline = baseline_file(config.name);
     let mut cmd = Command::new(runner());
     cmd.current_dir(corpus_dir())
@@ -694,6 +750,11 @@ fn record_artifact(
     write(
         &snapshot_path(artifact, hash, "err"),
         read("report.err")?.as_bytes(),
+    )?;
+    compress(
+        &out.join("diagnostics.txt"),
+        &snapshot_path(&format!("diagnostics-{artifact}"), hash, "txt.zst"),
+        timings,
     )?;
     if !views {
         return Ok(());
@@ -745,8 +806,29 @@ fn record_fixture_types(hash: &str, timings: &mut Timings) -> Result<(), String>
     timings.time("fixtures", |_| {
         run(cargo()
             .args(["test", "--profile", "gate", "--test", "fixtures", "--quiet"])
-            .env("PHPSTAN_RS_DUMP_TYPES", &dir))
+            .env("PHPSTAN_RS_DUMP_TYPES", &dir)
+            .env("PHPSTAN_RS_DUMP_DIAGNOSTICS", &dir))
     })?;
+    let joined_dumps = |extension: &str| -> Result<String, String> {
+        let mut dumps: Vec<PathBuf> = std::fs::read_dir(&dir)
+            .map_err(|e| e.to_string())?
+            .filter_map(|e| e.ok().map(|e| e.path()))
+            .filter(|p| p.extension().is_some_and(|e| e == extension))
+            .collect();
+        dumps.sort();
+        let mut text = String::new();
+        for dump in &dumps {
+            text.push_str(&std::fs::read_to_string(dump).map_err(|e| e.to_string())?);
+        }
+        Ok(text)
+    };
+    let diagnostics = dir.join("diagnostics.txt");
+    write(&diagnostics, joined_dumps("diagnostics")?.as_bytes())?;
+    compress(
+        &diagnostics,
+        &snapshot_path("diagnostics-fixtures", hash, "txt.zst"),
+        timings,
+    )?;
     let mut dumps: Vec<PathBuf> = std::fs::read_dir(&dir)
         .map_err(|e| e.to_string())?
         .filter_map(|e| e.ok().map(|e| e.path()))
@@ -770,6 +852,156 @@ fn record_fixture_types(hash: &str, timings: &mut Timings) -> Result<(), String>
     })?;
     std::fs::remove_dir_all(&dir).map_err(|e| e.to_string())?;
     Ok(())
+}
+
+/// Compresses `from` into the snapshot `to` with `zstd`.
+fn compress(from: &Path, to: &Path, timings: &mut Timings) -> Result<(), String> {
+    std::fs::create_dir_all(to.parent().unwrap()).map_err(|e| e.to_string())?;
+    let name = to
+        .parent()
+        .and_then(Path::file_name)
+        .map_or_else(String::new, |n| n.to_string_lossy().into_owned());
+    timings.time(&format!("compress {name}"), |_| {
+        run(Command::new("zstd")
+            .args(["-q", "-f", "-3", "-T0"])
+            .arg(from)
+            .arg("-o")
+            .arg(to))
+    })
+}
+
+/// The corpus's vendor projects: each `vendor/<vendor>/<package>` with a
+/// `composer.json`, in path order.
+fn vendor_projects() -> Result<Vec<String>, String> {
+    let vendor = corpus_dir().join("vendor");
+    let mut projects = Vec::new();
+    for org in std::fs::read_dir(&vendor).map_err(|e| format!("{}: {e}", vendor.display()))? {
+        let org = org.map_err(|e| e.to_string())?.path();
+        if !org.is_dir() {
+            continue;
+        }
+        for package in std::fs::read_dir(&org).map_err(|e| e.to_string())? {
+            let package = package.map_err(|e| e.to_string())?.path();
+            if package.join("composer.json").is_file()
+                && let Ok(relative) = package.strip_prefix(corpus_dir())
+            {
+                projects.push(relative.to_string_lossy().into_owned());
+            }
+        }
+    }
+    projects.sort();
+    Ok(projects)
+}
+
+/// Runs each vendor project alone, every rule set on (`ALL_ON_SETS`, with
+/// no configuration file and no Composer context), and records the
+/// reports, one after another, each after a `# project <dir>` line, as
+/// `vendor-projects`, with their stderr, and their full diagnostic views
+/// as `diagnostics-vendor-projects`.
+fn record_vendor_projects(hash: &str, timings: &mut Timings) -> Result<(), String> {
+    let out = runner_out("vendor-projects");
+    let (mut report, mut err, mut diagnostics) = (String::new(), String::new(), String::new());
+    for project in vendor_projects()? {
+        let _ = std::fs::remove_dir_all(&out);
+        let mut cmd = Command::new(runner());
+        cmd.current_dir(corpus_dir()).arg("--no-composer");
+        for set in ALL_ON_SETS {
+            cmd.arg("--set").arg(set);
+        }
+        cmd.arg("--out").arg(&out).arg(&project);
+        timings.time(&format!("vendor project {project}"), |_| run(&mut cmd))?;
+        let read = |name: &str| {
+            std::fs::read_to_string(out.join(name)).map_err(|e| format!("{project}: {name}: {e}"))
+        };
+        for (text, name) in [
+            (&mut err, "report.err"),
+            (&mut diagnostics, "diagnostics.txt"),
+        ] {
+            writeln!(text, "# project {project}").unwrap();
+            text.push_str(&read(name)?);
+        }
+        writeln!(report, "# project {project}").unwrap();
+        report.push_str(&normalize(&read("report.json")?)?);
+    }
+    write(
+        &snapshot_path("vendor-projects", hash, "txt"),
+        report.as_bytes(),
+    )?;
+    write(
+        &snapshot_path("vendor-projects", hash, "err"),
+        err.as_bytes(),
+    )?;
+    let joined = out.join("diagnostics-all.txt");
+    write(&joined, diagnostics.as_bytes())?;
+    compress(
+        &joined,
+        &snapshot_path("diagnostics-vendor-projects", hash, "txt.zst"),
+        timings,
+    )
+}
+
+/// The equalities a run must keep whatever state it starts from: for the
+/// scoped, all-on and unscoped configurations, the shipped binary's report
+/// and stderr at one thread equal the default's, and equal across the
+/// cache states - the stub cache cold and then warm with the per-file
+/// cache off, and the per-file cache written and then read - each from a
+/// cache directory of its own. Records each as `equalities`; a difference
+/// fails.
+fn equalities(hash: &str, timings: &mut Timings) -> Result<(), String> {
+    let caches = gate_dir().join(".cache-states");
+    let mut lines = String::new();
+    for config in [SCOPED, ALL_ON, UNSCOPED] {
+        let _ = std::fs::remove_dir_all(&caches);
+        let state = |name: &str, cache: &str, file_cache: bool, threads: Option<&str>| {
+            let mut cmd = Command::new(binary());
+            cmd.current_dir(corpus_dir())
+                .arg("check-project")
+                .args((config.args)())
+                .args(["--format", "json"])
+                .env("PHPSTAN_RS_CACHE_DIR", caches.join(cache));
+            if !file_cache {
+                cmd.env("PHPSTAN_RS_NO_FILE_CACHE", "1");
+            }
+            if let Some(threads) = threads {
+                cmd.env("PHPSTAN_RS_THREADS", threads);
+            }
+            (name.to_string(), cmd)
+        };
+        let mut states = vec![
+            state("stub cache cold, file cache off", "a", false, None),
+            state("stub cache warm, file cache off", "a", false, None),
+            state("file cache written", "b", true, None),
+            state("file cache read", "b", true, None),
+            state("one thread", "b", true, Some("1")),
+        ];
+        let mut first: Option<(String, Vec<u8>, Vec<u8>)> = None;
+        for (name, cmd) in &mut states {
+            let output = timings.time(&format!("equality {} {name}", config.name), |_| {
+                cmd.output()
+                    .map_err(|e| format!("running {}: {e}", config.name))
+            })?;
+            match &first {
+                None => first = Some((name.clone(), output.stdout, output.stderr)),
+                Some((reference, stdout, stderr)) => {
+                    if *stdout != output.stdout || *stderr != output.stderr {
+                        let diff = if *stdout != output.stdout {
+                            unified_diff(stdout, &output.stdout)?
+                        } else {
+                            unified_diff(stderr, &output.stderr)?
+                        };
+                        let shown: String = diff.lines().take(40).collect::<Vec<_>>().join("\n");
+                        return Err(format!(
+                            "{}: the run with {name} differs from the run with {reference}\n{shown}",
+                            config.name
+                        ));
+                    }
+                    writeln!(lines, "{}: {name} = {reference}", config.name).unwrap();
+                }
+            }
+        }
+    }
+    let _ = std::fs::remove_dir_all(&caches);
+    write(&snapshot_path("equalities", hash, "txt"), lines.as_bytes())
 }
 
 /// Runs the shipped binary on a configuration with `--emission-order`
@@ -931,14 +1163,23 @@ fn unified_diff(old: &[u8], new: &[u8]) -> Result<String, String> {
 
 /// Every artifact `compare` checks, with its file extension.
 fn compared_artifacts(full: bool) -> Vec<(String, &'static str)> {
-    let mut names = vec![("types-fixtures".to_string(), "txt.zst")];
+    let mut names = vec![
+        ("types-fixtures".to_string(), "txt.zst"),
+        ("diagnostics-fixtures".to_string(), "txt.zst"),
+    ];
     for (config, level) in artifacts(full) {
         let artifact = artifact_name(&config, level);
-        if level == "unset" && config.name != "unscoped" {
+        if level == "unset" && matches!(config.name, "scoped" | "all-on") {
             names.push((format!("types-{artifact}"), "txt.zst"));
             names.push((format!("baseline-{artifact}"), "txt"));
         }
+        names.push((format!("diagnostics-{artifact}"), "txt.zst"));
         names.push((artifact, "txt"));
+    }
+    if full {
+        names.push(("vendor-projects".to_string(), "txt"));
+        names.push(("diagnostics-vendor-projects".to_string(), "txt.zst"));
+        names.push(("equalities".to_string(), "txt"));
     }
     names
 }

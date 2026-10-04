@@ -10,7 +10,10 @@
 //! - `emission.json`/`emission.err`: the same with `--emission-order`;
 //! - `baseline.json`/`baseline.err` with `--baseline`: the same with
 //!   `--baseline <file>`;
-//! - `types.txt` with `--dump-types`: `--dump-types`' file.
+//! - `types.txt` with `--dump-types`: `--dump-types`' file;
+//! - `diagnostics.txt`: every field of every diagnostic of the report, one
+//!   line each, with the UTF-16 columns of its ends
+//!   (`AnalysisResult::diagnostic_view`).
 //!
 //! `gate-runner --type-drift <old> <new> [--fixture-root <dir>] [<config
 //! arguments>] --out <dir>` relates two recorded type dumps instead of
@@ -112,7 +115,11 @@ fn run() -> Result<(), String> {
         .chain(analysis.notices())
         .collect();
 
-    write_view(&args.out, "report", &run, &analysis, &notices, |o| o)?;
+    let report = write_view(&args.out, "report", &run, &analysis, &notices, |o| o)?;
+    write(
+        &args.out.join("diagnostics.txt"),
+        &analysis.diagnostic_view(&report),
+    )?;
     write_view(&args.out, "emission", &run, &analysis, &notices, |mut o| {
         o.order = DiagnosticOrder::Emission;
         o
@@ -165,7 +172,7 @@ fn drift(args: &Args, old: &Path, new: &Path) -> Result<(), String> {
 
 /// Writes `<name>.json` and `<name>.err`: the report `adjust` makes of the
 /// run's default finalization, as `check-project --format json` prints
-/// it, after the `notices` printed before it.
+/// it, after the `notices` printed before it. Gives the report.
 fn write_view(
     out: &Path,
     name: &str,
@@ -175,7 +182,7 @@ fn write_view(
     adjust: impl FnOnce(
         phpstan_rs::project::session::Finalize,
     ) -> phpstan_rs::project::session::Finalize,
-) -> Result<(), String> {
+) -> Result<phpstan_rs::project::session::Report, String> {
     let report = analysis.finalize(&adjust(run.finalize_options(None)));
     let mut err = String::new();
     for line in notices.iter().chain(&report.notices()) {
@@ -186,7 +193,8 @@ fn write_view(
         &out.join(format!("{name}.json")),
         &format!("{}\n", render_json(&report.results, analysis.checked)),
     )?;
-    write(&out.join(format!("{name}.err")), &err)
+    write(&out.join(format!("{name}.err")), &err)?;
+    Ok(report)
 }
 
 fn write(path: &Path, text: &str) -> Result<(), String> {

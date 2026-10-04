@@ -42,6 +42,25 @@ pub fn print(value: &(impl Canonical + ?Sized)) -> String {
     p.out
 }
 
+/// `value`'s canonical print on one line: each line break, with the
+/// indentation after it, a space. Nodes and lists are bracketed and
+/// strings quoted with their line breaks escaped, so the line tells the
+/// same values apart the print does; it is what a dump that is sorted by
+/// line holds.
+pub fn print_line(value: &(impl Canonical + ?Sized)) -> String {
+    let printed = print(value);
+    let mut out = String::with_capacity(printed.len());
+    let mut lines = printed.split('\n');
+    if let Some(first) = lines.next() {
+        out.push_str(first);
+    }
+    for line in lines {
+        out.push(' ');
+        out.push_str(line.trim_start_matches(' '));
+    }
+    out
+}
+
 /// Where a canonical print is written.
 #[derive(Default)]
 pub struct Printer {

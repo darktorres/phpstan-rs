@@ -35,6 +35,22 @@ Artifacts:
   `path, line, col, level, identifier, message, tip`
   (tab-separated; `\t`/`\n`/`\\` escaped). The first line records
   `files_checked`. Stderr is kept separately as `<commit>.err`.
+- `diagnostics-<artifact>`, `diagnostics-fixtures`,
+  `diagnostics-vendor-projects`: every field of every diagnostic of the
+  report, one line each - path, the UTF-16 columns of its ends, and its
+  canonical print (end position, tips, fix and all) - zstd-compressed.
+- `vendor-tree`, `arch` (`--full`): the corpus's `vendor` as one project
+  (`--no-composer vendor`), and the scoped configuration with
+  `ARCH_RULES`' architecture rules and every banned type and construct
+  (`arch_args`), which no other configuration sets.
+- `vendor-projects` (`--full`): each `vendor/<vendor>/<package>` with a
+  `composer.json`, alone, with `--no-composer` and `ALL_ON_SETS`, each
+  report after a `# project <dir>` line.
+- `equalities` (`--full`): for the scoped, all-on and unscoped
+  configurations, the shipped binary's report and stderr with the stub
+  cache cold and warm, the per-file cache off, written and read, and at
+  one thread, each from a cache directory of its own; a difference fails
+  the run, and the file lists each equality kept.
 - `types-scoped`, `types-all-on`: `--dump-types` output (every tracked
   variable's type and native type after each statement), zstd-compressed.
 - `types-fixtures`: the same for every fixture of the fixture suite, each
@@ -73,9 +89,10 @@ so nothing a later comparison needs stays in either:
   committed tree, by its full hash and cargo profile (`gate`, `oracle`,
   `dhat`), copied there as soon as it is built; ignored with the rest of
   `gate/`.
-- `gate/<artifact>/<commit>.<ext>`: every run, as above. `vendor-tree` is
-  `check-project --no-composer vendor` in the corpus, normalized the
-  same way.
+- `gate/<artifact>/<commit>.<ext>`: every run, as above. `vendor-tree`'s
+  older snapshots were taken by hand with `check-project --no-composer
+  vendor` in the corpus, normalized the same way; `cargo xtask corpus
+  --full` records it since.
 - `~/.cache/prs-profile/<run>/`: callgrind and dhat profiles with the
   binary that made them and a `README` naming the commit and the command
   (`cl-20g`, `dhat-20g`: the 20 G plan's baselines).

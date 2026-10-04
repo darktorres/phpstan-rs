@@ -202,6 +202,37 @@ impl Report {
 }
 
 impl AnalysisResult {
+    /// Every field of every diagnostic of `report` (`syntax::canonical`),
+    /// one line each - `path`, the UTF-16 columns of its start and end, and
+    /// the diagnostic - files in path order, each file's in the report's:
+    /// the view the gate compares, which no output format shows whole.
+    pub fn diagnostic_view(&self, report: &Report) -> String {
+        let mut files: Vec<(&PathBuf, &Vec<Diagnostic>)> = report.results.iter().collect();
+        files.sort_by(|a, b| a.0.cmp(b.0));
+        let mut text = String::new();
+        for (path, diagnostics) in files {
+            let line_index = self.project.line_index(path);
+            let utf16 = |at: syntax::span::LineCol| {
+                line_index
+                    .and_then(|index| {
+                        let offset = index.offset(at)?;
+                        Some(index.column(offset, syntax::span::Unit::Utf16).to_string())
+                    })
+                    .unwrap_or_else(|| "-".to_string())
+            };
+            for diagnostic in diagnostics {
+                text.push_str(&format!(
+                    "{}\t{}-{}\t{}\n",
+                    path.display(),
+                    utf16(diagnostic.span.start),
+                    utf16(diagnostic.span.end),
+                    syntax::canonical::print_line(diagnostic)
+                ));
+            }
+        }
+        text
+    }
+
     /// What the analysis says beyond its diagnostics, one line each.
     pub fn notices(&self) -> Vec<String> {
         self.lex_warnings.clone()
