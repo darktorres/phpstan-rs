@@ -517,14 +517,14 @@ Counted by M10's rule: a row naming a function counts what M10 charges to that f
 | item | allocations | share |
 |---|---|---|
 | 9, trees in typed vectors | 3.92 M | 20.2% |
-| 18, the check phase | 3.65 M | 18.8% |
+| 18, the check phase | 3.61 M | 18.6% |
 | 15, names as names | 2.76 M | 14.2% |
 | 14, PHPDoc | 2.59 M | 13.3% |
 | 4, the registry by ids | 2.02 M | 10.4% |
 | 13, a file's products | 1.31 M | 6.7% |
 | 16, interned values | 0.78 M | 4.0% |
 | 2, the walk and path data | 0.56 M | 2.9% |
-| 8, declarations | 0.48 M | 2.5% |
+| 8, declarations | 0.52 M | 2.7% |
 | 12, lexer details | 0.45 M | 2.3% |
 | 6, stub records | 0.45 M | 2.3% |
 | 10, flat token arrays | 0.23 M | 1.2% |
@@ -1245,7 +1245,7 @@ Exact, except one case listed in §11: a `@property` tag shadowed by a declared 
 
 **Saving.** The work, not the storage: case references computed for the analysed files only (2,793), where today they are computed for all 14,251 files, plus the bytes they take in both caches. ≈0.1 G. The kept parameter lists are item 4's per-file vector, not this item's.
 
-**Allocations: ≈0.48 M (M10).** This covers the case references' lists (`declared_type` 50,267, `collect_class_names` 43,874), `dedup_versioned_params`' map and order vector, `reconcile_with_native` (41,085) and `from_decl`'s name list.
+**Allocations: ≈0.52 M (M10).** This covers the case references' lists (`declared_type` 50,267, `collect_class_names` 43,874), their copies when a generic call copies its signature (≈38 K, moved here from item 18's row), `dedup_versioned_params`' map and order vector, `reconcile_with_native` (41,085) and `from_decl`'s name list.
 
 ### 9. Trees in typed vectors, nodes by index (R8; §3.2)
 
@@ -1900,7 +1900,9 @@ A cold run pays one more incremental finishing, over the analysed files' closure
    Within it:
    - step 1 deletes C5's interim `statement_method_call` record (`calls/misc_rules.rs:49-58`), because the statement rules become the first observer family;
    - the PHPStan-API walker becomes its family, registered by `mentions_phpstan` or the ancestry fact;
-   - a literal's type is computed once per node per pass (`string_literal_ref` 86.0 M).
+   - a literal's type is computed once per node per pass (`string_literal_ref` 86.0 M);
+   - **`process_expr` evaluates in PHP's order,** the order item 13's walk follows, so a rule sees each operand's type in the scope it ran in. In an assignment (plain, compound, `??=`, by reference), first the target's operands (receiver, dims, property and static names), then the value (for `??=`, only on the branch where the target is null), then the store. In a destructuring, the value first, then each target's operands in order. `php` 8.5: `$a[$i++] = $i` gives `[0 => 1]`, and `[$c[$j++]] = [$j]` gives `[0 => 0]`. Today the checker types the value first (`expr.rs:2002-2008`) and the target after it (`:2047`), so it types `$a[$i++] = $i`'s value as `0`;
+   - **the member-usage family counts a member as used when any access may reach it:** a receiver whose type may be the class, a dynamic name whose type may be its name, an array or string callable whose type may name it however uncertain, and an access inside a closure the class may rebind. A member is reported only when no access can reach it. PHPStan's `UnusedPrivateMethodRule`, which §12.10 cites for the mechanism, skips an array callable that is not certainly callable (`UnusedPrivateMethodRule.php:154`), so `call_user_func([$this, $name])` with `$name` a `string` lets every private method be reported unused, though any of them may be the one called.
 2. **C1 step 5's tail.**
    - Effects are carried in the statement result, so `noop::expr_side_effects`' walk (`noop.rs:51`, 30.7 M) goes.
    - So is `has_yield`.
@@ -1908,12 +1910,21 @@ A cold run pays one more incremental finishing, over the analysed files' closure
 3. **Variables as slots, scopes as radix arrays: ≈0.15-0.25 G.**
    - The parser numbers each function-like body's variables. A variable node holds its `NameId` and its `VarSlot`, and a closure's `use` list and an arrow function's captures map to the enclosing body's slots.
    - A variable's `LocalKey` is its slot: no name lookup (`KeyTable::find_var` 79.1 M).
-   - **Variables PHP can reach by a computed name or a shared scope keep the name lookup:** `$$x`, `${expr}`, `extract`, `compact`, `get_defined_vars`, `parse_str` with no result, `$GLOBALS` in the global scope, and `include`/`require`/`eval`, whose code runs in the function's scope. The parser marks a body holding any of these.
+   - **Variables PHP can reach by a computed name or a shared scope keep the name lookup.** The parser marks a body that holds any of:
+     - `$$x`, `${expr}`, `include`, `require` or `eval`, whose code runs in the function's scope;
+     - a static call of `extract`, `compact` or `get_defined_vars`;
+     - `call_user_func` or `call_user_func_array` resolved to the global function at compile time (in global code, fully qualified, or imported), with a literal first argument naming one of those three, in any case and with no leading `\`. PHP compiles that form to a direct call: in `php` 8.5, `call_user_func("extract", ["a" => 2])` and `call_user_func_array("extract", [["a" => 4]])` set the caller's `$a`, while a variable callee, a leading `\`, `array_map("extract", ..)`, or an unqualified `call_user_func` inside a namespace throw "Cannot call extract() dynamically";
+     - `$GLOBALS` in the global scope;
+     - where the configured versions include 7.x: `parse_str` or `mb_parse_str` with one argument, and `assert` with an argument that may be a string, which 7.x evaluates as code (from PHP's manual; all three end in 8.0).
+     
+     A fixture of each form is checked against `php`.
+   - **Every key a scope holds is dense in its body.** Today slots would be numbered per body from 0, while every other key (properties, indexes, `truthy` and `isset` facts) comes from the file-wide `KeyTable` that every scope of the file shares (`KeyTableRef`, `locals.rs:32`): a slot `n` and a table key `n` would collide in one array, and a function late in a large file would hold a few table keys with ids in the thousands. So each function-like body numbers its keys in a table of its own, slots first, then synthetic keys as they are made. An arrow function's table extends its parent's, and a closure's `use` list maps the parent's keys at entry.
    - **The scope's maps index the dense keys.** They become a persistent radix array: 32-way nodes indexed by the key's bits, `Arc`-shared and copied along the path on a write, in place of `imbl::OrdMap` (`get` 72.9 M, `Cursor::next` 34.6 M, `Leaf::insert` 29.8 M).
-     - A lookup is two or three indexings, with no comparisons.
+     - A lookup is two indexings for up to 1,024 keys, with no comparisons.
      - A node that no other scope shares is written in place (`Arc::get_mut`), so only a shared path is copied. The copies that remain are what persistence costs. C4 keeps it because its diff skips every subtree that is the same pointer in both scopes.
      - The diff C4 relies on walks two arrays and skips every subtree that is the same pointer in both.
-     - Iteration stays in key order.
+     - Merging and diffing two scopes walk both tries and skip every subtree that is the same pointer in both, as Okasaki and Gill's mergeable integer maps (`Data.IntMap`) do.
+     - Iteration is in key order, which is slot order. Anything that lists locals (`--dump-types` prints every tracked key) sorts by name, so no output depends on numbering.
 4. **C2 step 2:** conditional subjects bound by parameter position (`ConditionalSubject::Parameter { name, index }`), which changes the cached layout (the key follows, item 6 step 6).
 5. **§12.11's rest:** the `MemberIndex` and the normalized-operand fast path (`union.rs` 58.7 M, `reduce_array_members` 21.3 M).
 6. **C8 step 2's rest: type operations from borrowed parts.**
@@ -1926,6 +1937,7 @@ A cold run pays one more incremental finishing, over the analysed files' closure
      - traversals ≈75 K;
      - `into_repr` ≈55 K;
      - `reconcile_with_native`, `finite_types`, `Shape::push` and `absorb_contained_members`.
+   - **`concat` makes new bytes, not a member list.** It writes the two operands' bytes into a per-thread byte scratch and interns from `&[u8]` (item 16's `ReprRef::StringLiteral`), so a string that exists already allocates nothing.
    - **A traversal copies on the first change.** Today `map_all` allocates its output before it knows whether anything changes (`traverse.rs:241`: ≈50 K across the passes, among them `bind_self`, `replace_objects`, `map_class_names` and template substitution).
    - **A memo is probed with the borrowed member list,** and builds its key only on a miss. Today `union_many` clones its members to key the memo (`union.rs:79`), and `memoized_many` collects the rest of the addresses (`intern.rs:766`).
    - **Shared values are borrowed, not cloned:**
@@ -1937,15 +1949,17 @@ A cold run pays one more incremental finishing, over the analysed files' closure
      - Where a type is displayed for a message, the message itself is deferred (step 10, F1).
 7. **A call's argument binding is made once (M9).**
    - Today each rule that needs a call's binding of arguments to parameters builds it again:
-     - `resolve_call_args`, from `apply_param_out_types`, `generic_object_method_return_type` and `infer_builtin_call_return_type`: 119,628 + 59,308 + 57,338 vectors;
+     - `resolve_call_args`: 374,354, of which its callers `apply_param_out_types`, `generic_object_method_return_type` and `infer_builtin_call_return_type` ask for 236,274;
      - `bind_arguments`: 236,963;
-     - `check_parameters`: 116,324, 27 MB.
+     - `check_parameters`: 126,792, 27.3 MB;
+     
+     738,109 in all, M9's row.
    - The binding becomes part of the call's record in the pass (step 1's one inference per node). Every rule borrows it.
 8. **Per-function state is reused.**
    - `check_function_impl` allocates its tables anew for each function (125,654 allocations), and the expression-type cache grows anew too (`cached`: 19,778 allocations, 27.9 MB).
    - These belong to the checker and are cleared, not freed, between functions.
 9. **A generic call's signature is substituted type by type.**
-   - Today the call copies the whole signature to substitute it (`FunctionReflection::map_types`, `function_sig.rs:372`, with `clone_vec`'s parameter copies: ≈110 K).
+   - Today the call copies the whole signature to substitute it (`FunctionReflection::map_types`, `function_sig.rs:372`: 35,574, plus the parameters' copies). The copies of the case references under it (≈38 K: 9,991 directly in `clone_vec` and 27,902 through the parameters' clones) go with item 8, which moves those fields out of declarations.
    - Instead, the call asks for the substituted type of the parameter or return type it reads.
 10. **The rules' temporaries (M11).** Every site is in Appendix A.
     - **F1. Messages are formatted only when reported.** Today 37 rules format a subject, a message or an identifier for every element they check. Examples:
@@ -1955,16 +1969,17 @@ A cold run pays one more incremental finishing, over the analysed files' closure
       - `check_function_impl` formats each function's labels (`function_decl.rs:282`, `:1117`: 46,005);
       - `check_statement_var_tag_names` and `check_statement_var_tag_classes` format a message or a subject for every `@var` variable (`stmt.rs:529`, `var_tag_types.rs:346`: ≈65 K).
       
-      A subject becomes a value that displays itself, formatted by the report. An identifier is a `&'static str`, since identifiers are a closed set.
+      A subject becomes a value that displays itself, formatted by the report, names with item 15's escape. A built-in rule's identifier is a `&'static str` from its rule's table. `Identifier` stays `Cow<'static, str>` (`diagnostics/src/lib.rs:17`), since the public `Rule` trait lets an external rule name its own (`rule.rs:61-93`).
     - **F2. Constant types are built once.** `union_of(vec![Type::int(), Type::float()])` and its kind are rebuilt on every call in 41 functions (`strict_rules.rs:230`, `operators.rs:57`, `:672`, `:685`). Instead they are interned constants, as `types` builds its `Constant` nodes (`intern.rs:43`). A two-member union or intersection takes its two operands with no `Vec`.
     - **F6a. Rules borrow, iterate, or use scratch.**
       - A one-element list is `slice::from_ref` (`type_declarations.rs:182`).
       - A list collected only to be iterated is iterated (`member_resolution.rs:298`, `operators.rs:706`, `offset_assignment.rs:46`, `:50`).
       - A constant list is a `static` slice (`declaration_level_rules`, `internal_rules.rs:56`, rebuilt per call). A list fixed for the file is made once per file (`default_include_dirs`, `includes.rs:380`).
       - A `seen` vector lives in the checker's scratch (`array_ops.rs:70`, `function_like_declarations.rs:266`).
-    - **F6c. Throw, exit and loop states copy no scope.**
-      - Every throw point clones the whole scope (`record_throw_state`, `expr.rs:348`: 3,920 clones, 16.1 MB), and `check_try` collects scopes (`try_catch.rs:99`, `:124`: 17.2 MB). With step 3's persistent scopes, a copy is a pointer copy.
-      - The per-try and per-loop vectors (`control_flow.rs:140-141`, `try_catch.rs:84`) are scratch stacks.
+    - **F6c. A scope is one pointer, and throw, exit and loop states are scratch.**
+      - Copying a scope already copies only pointers: every map in `Locals` is an `imbl` persistent map (`checker.rs:27-191`), so `locals.clone()` copies about fifteen roots. The cost is that each element of a throw frame is the whole `Locals` struct inline, a few hundred bytes: `record_throw_state`'s 3,920 allocations (16.1 MB, `expr.rs:347-350`) are the growth of a `Vec<(Type, Locals)>`, and `check_try`'s 17.2 MB is the same element type's vectors (`try_catch.rs:99`, `:124`). Step 3 alone leaves these numbers as they are.
+      - `Locals` holds its maps behind one `Rc`, so a copy is one count and a throw frame's element is two words.
+      - Throw frames, catch collections and the per-loop break and continue states (`control_flow.rs:140-141`, `try_catch.rs:84`) are scratch stacks of the checker, truncated, not freed, when their construct ends.
     - **F6d.** The narrowing inserts and the `Rc<Vec<..>>` implied facts (`narrowing.rs:569`, `control_flow.rs:276`, `:314`, `:336`) live in step 3's radix arrays.
     - **F6e.** The separate walks' vectors (`bind_targets`, `strict_rules.rs:951`: 20,655; the keyword-scope and `declare` visitors; `section_ends`; the usage walkers) go with the walks, which become families of step 1's traversal.
     - **F6f. Analyses that are a function of a text are made once per distinct text,** in item 14's fingerprint-keyed, weight-bounded memo, scanning bytes and keeping slices:
@@ -1978,9 +1993,17 @@ A cold run pays one more incremental finishing, over the analysed files' closure
       - Regex matches are read through one reused `Captures`, not one allocated per match (`regex` 7.7 K).
     - **One checker per worker.** Today `Checker::new` allocates a default `Arc<LineIndex>` and a key table for each file and then replaces them (`checker.rs:1155`, `:1175`), and `set_current_file` and `checker_for` copy paths. A worker's checker is reset for each file instead.
 
-**Oracle.** O2 with its diff read family by family, `--dump-types` and `--dump-expr-types`. Semantic for §12.10, as the 25 G report says; exact otherwise.
+**Oracle.**
+- O2, its diff read family by family.
+- `--dump-types` and `--dump-expr-types` byte-identical through §12.10's steps 1, 3 and 4, and through step 3 here, with locals listed by name (25 G §12.10).
+- The replay assertion: a test build runs an observed pass from each fixpoint entry and asserts that its reports equal the replay's (25 G §12.10).
+- §12.11's differential test over random member lists and every union the corpus run builds, comparing the n-ary result with the left fold; its differences are listed before step 5 lands, since a fold and one pass can differ.
+- A debug assertion that the radix arrays' merge over the diff equals the full merge (C4's, for the new structure).
+- Fixtures for the order of evaluation, the computed-name forms and the member-usage family, checked against `php`.
 
-**Memory and allocations.** The check phase makes 3.65 M allocations (M10), the `@var` messages F1 defers included. What they leave:
+Semantic, listed in §11: §12.10's families, the order of evaluation, the member-usage family, and §12.11's single pass where it differs from the fold. Exact otherwise.
+
+**Memory and allocations.** The check phase makes 3.61 M allocations (M10), the `@var` messages F1 defers included and the case-reference copies of step 9 given to item 8. What they leave:
 - the results;
 - the radix arrays' path copies, which replace `imbl`'s 114,979 leaf copies (31 MB);
 - new types.
@@ -2058,7 +2081,7 @@ Exact.
   - item 13: declarations exist as PHP binds them: run-time-bound ones are guarded by every earlier exit (`exit`, `die` and `throw` included) and are dead after an unconditional one, and a class whose parent is in another file is possibly declared; `InitFlow` in PHP's order of evaluation;
   - item 14: the readings the lowering oracle lists (escaped quotes, `mentions_mixed` from the node, identifiers by their bytes, a `//` inside a literal type, `Integer::MAX`), and one winner rule for every tag (`@phan-real-return`, `@phan-param-out`);
   - item 15: names that differ only in bytes outside UTF-8 are distinct (the lexer keeps the bytes, item 9) and print with `\x{NN}`; names fold ASCII only where Unicode's lowercasing was used; string values name classes, functions and constants by PHP's rules (one leading backslash, no trimming); container-field keys canonical as PHP's array keys;
-  - item 18: the rule families of §12.10.
+  - item 18: the rule families of §12.10; types in PHP's order of evaluation (an assignment's target operands before its value, a destructuring's value first); a member counted as used when any access may reach it; the union's single pass where it differs from the fold.
   
   Each difference is listed with its file and read.
 - **O2 against the baseline's**, in output order (`xtask compare`), saved as `.corpus-runs/<scope>/<hash>.txt`, its diff read line by line.
@@ -2090,7 +2113,7 @@ Exact.
 | 5 | parallel merge, stable ids, posting lists | ≈0.25 G | yes | ≈5 MB; 0.11 M allocations | exact |
 | 6 | stub scope, records read on demand with per-record CRCs | ≈0.35 G, then more of `warm` | partly | ≈40 MB of heap; 0.45 M allocations | exact (1, 3, 5), semantic (2, with the stubs' versions) |
 | 7 | one relation memo, by content generation | up to ≈0.3 G | — | bounded as today; `KEEP_DECISIONS`' 1.3 MB goes | exact |
-| 8 | case references in the checker, declarations built lean | ≈0.1 G | — | both caches' entries; 0.48 M allocations | exact, except one `@property` case |
+| 8 | case references in the checker, declarations built lean | ≈0.1 G | — | both caches' entries; 0.52 M allocations | exact, except one `@property` case |
 | 9 | typed vectors, ids, `peeled` | ≈0.8-1.2 G | — | ≥53 MB of the analysed trees; 3.92 M allocations | exact, but semantic for non-UTF-8 names and the stub rules |
 | 10 | flat token arrays | ≈1.7 G | — | 0.23 M allocations | exact, but semantic for the halt offset, the first error, declarations' docs and the versions |
 | 11 | line starts, columns, offsets, ignore marks | ≈0.2 G | — | 0.07 M allocations | exact, but semantic for a lone `\r` |
@@ -2100,7 +2123,7 @@ Exact.
 | 15 | names as names, as bytes | ≈0.6 G | partly | 2.76 M allocations | exact, except the changes §11 lists |
 | 16 | interned values in one allocation | ≈0.1 G | — | ≈15 MB; 0.78 M allocations | exact |
 | 17 | warm runs | decoding and reads ≈0.85 core-s, most of the finishing window | yes | only decoded records in the heap | exact |
-| 18 | check phase remainder, rule temporaries | ≈1.6-2.0 G | — | 3.65 M allocations | semantic (§12.10) |
+| 18 | check phase remainder, rule temporaries | ≈1.6-2.0 G | — | 3.61 M allocations | semantic (§12.10, the order of evaluation, member usage) |
 | 19 | each tree until its last reader | — | — | batch: the analysed trees freed during the check; server: open documents and an LRU | exact |
 
 **Instructions.** The rows overlap little: 9 and 10 share the parser's allocation, and 4 and 15 the purity keys. Together they come to ≈8 G of this run's 20.57 G. Most of the serial time goes with them: the finishing window's 0.41 s, the insert's 0.58 G and the start's 0.15 s.
@@ -2265,6 +2288,7 @@ The rewrite made two more changes:
 | 15 | `\xA9` as an escape is ambiguous with a namespace separator. Fixes would write escaped names into source files. An open document arrives decoded by the editor. `Name` serializes a `str`. String values become names by rules that are not PHP's (every backslash stripped, non-UTF-8 dropped), and some sites fold with Unicode. The semantic changes were listed under item 9. The short-name header came from a later item. Item 16's freeing rule could leak an entry or deadlock. Counts were by several rules, `Name::to_string` double-counted its callers. | The `\x{NN}` escape everywhere text shows a name. Fixes as bytes, applied on bytes. Each open document's encoding found with `encoding_rs`. Bytes in the caches. One `from_runtime` conversion by PHP's rules (one backslash, no trimming, ASCII folding, constants' case), tested with `php`. ASCII folding at the eight sites. §11 moved to item 15, with a fixture. `last_segment` in `NameData` now. Item 16 sweeps and drops outside the lock. Counts by M10. |
 | 16 | The type memos are emptied when full, and their answers depend on no hierarchy, so a generation protects nothing; their cost is the nodes they keep. A table of shape keys would repeat the type interner's, and most keys copy a literal's bytes. `Interner::str` was left out. A raw holder (`FRONT`) would escape the freeing rule. Tests on threads cannot find the protocol's races, and O2 cannot see a leak. The counts mixed removable and kept allocations, and a name's text count was off. | Memos bounded by two segments, no generation. `PhpString` interned as a `ThinArc`, shared by literal types and shape keys; `Interner::str` goes. Every holder holds the handle. `loom` for the protocol and a leak test after the edit replay. Counts restated by what goes and what stays; 39,140 moved from item 12's row. |
 | 17 | Content hashes in the base's key would make every changed context file a cold run. A parse now reads the configured versions and `short_open_tag`, which the per-file key lacked. The base's key missed most resolved inputs (Composer data, run-time evidence, stub and bootstrap files). `stat` has no stable inode on Windows, mtimes can be restored, git's racy rule assumes one filesystem, and some filesystems keep coarse or remote times. The server could write overlay bytes into the index. The build's hash is 64-bit `DefaultHasher`. The oracle compared two new paths with each other. | The base keyed by the build and a destructured hash of resolved settings (tracked or untracked), with its file list applied as edits. The per-file key adds the versions and `short_open_tag`. Stat fields per platform, ctime compared, the racy rule applied where the file was read, and `stat` trusted only on identified local filesystems (`rustix`, `sysinfo`). Disk-only index and base. BLAKE3 everywhere, full digests. An oracle against the baseline, an edit replay across runs, the `stat` cases on three platforms, and the server. |
+| 18 | The traversal would keep typing a value before its target's operands, against PHP's order. `call_user_func` with a literal `extract`, `compact` or `get_defined_vars` writes the caller's scope, and 7.x adds `parse_str`/`mb_parse_str` with one argument and string `assert`. Slots and file-wide keys would collide in one radix array, sparse over large ids. The throw states' cost is inline `Locals` structs, which persistent maps do not remove. The member-usage family would inherit PHPStan's skip of uncertain callables. The 25 G oracles were dropped. External rules name their own identifiers. `concat` builds bytes. Step 7 and 9's counts. | PHP's order in `process_expr`. The computed-name forms listed exactly, tested with `php`. Per-body key tables, dense; `IntMap`-style merges; locals listed by name. `Locals` behind one `Rc`, frames as scratch. Uses counted when any access may reach a member. The oracles restored. `Identifier` kept as `Cow`. `concat` through a byte scratch. Counts by M10, ≈38 K moved to item 8. |
 
 # Appendix A. The allocation tail, every site
 
