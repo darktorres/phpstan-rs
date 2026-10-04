@@ -560,10 +560,16 @@ impl Project {
     /// The registry dump (`registry_dump`) of the project, its registry
     /// over the stub base it stands on.
     pub fn registry_dump(&self) -> String {
+        self.registry_dump_comparing(crate::registry::canonical::CompareAt::Layers)
+    }
+
+    /// `registry_dump`, the registry compared with its base as `compare`
+    /// says.
+    fn registry_dump_comparing(&self, compare: crate::registry::canonical::CompareAt) -> String {
         let base = Project::loaded_bases()
             .into_iter()
             .find(|(_, base)| self.registry.classes.shares_base(&base.classes));
-        registry_dump::registry_dump(self, base)
+        registry_dump::registry_dump(self, base, compare)
     }
 
     /// Both stub bases whole, by name (`registry_dump::stub_bases_dump`).

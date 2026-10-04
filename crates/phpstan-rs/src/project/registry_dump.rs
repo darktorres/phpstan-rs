@@ -26,11 +26,15 @@ use syntax::canonical::{Canonical, Printer};
 
 use crate::project::{FileState, Project};
 use crate::registry::Registry;
-use crate::registry::canonical::CanonicalOver;
+use crate::registry::canonical::{CanonicalOver, CompareAt};
 
 /// The dump of `project`, its registry over `base` (the base's name, and
-/// the base) when it stands on one.
-pub(crate) fn registry_dump(project: &Project, base: Option<(&str, &Registry)>) -> String {
+/// the base) when it stands on one, compared with it as `compare` says.
+pub(crate) fn registry_dump(
+    project: &Project,
+    base: Option<(&str, &Registry)>,
+    compare: CompareAt,
+) -> String {
     let Project {
         files,
         dependents,
@@ -89,7 +93,7 @@ pub(crate) fn registry_dump(project: &Project, base: Option<(&str, &Registry)>) 
         match base {
             Some((name, base)) => {
                 section(&mut p, &format!("registry over {name}"));
-                registry.canonical_over(base, &mut p);
+                registry.canonical_over(base, compare, &mut p);
             }
             None => {
                 section(&mut p, "registry");

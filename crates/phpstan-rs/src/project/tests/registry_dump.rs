@@ -4,6 +4,7 @@
 use std::path::PathBuf;
 
 use crate::project::Project;
+use crate::registry::canonical::CompareAt;
 
 #[test]
 fn a_project_s_registry_prints_over_its_base_with_its_own_declarations_only() {
@@ -36,4 +37,33 @@ fn the_stub_bases_dump_holds_each_base_whole() {
         assert!(dump.contains(&format!("\n== stub base {base}\n")), "{base}");
     }
     assert!(dump.contains("    ArrayIterator => "));
+}
+
+#[test]
+fn the_registry_compared_from_its_layers_prints_as_compared_whole() {
+    let mut project = Project::new();
+    for (path, source) in [
+        (
+            "a.php",
+            "<?php\nnamespace App;\ninterface Shape {}\ntrait Named { public function name(): string { return 'a'; } }\n\
+             final class Circle implements Shape { use Named; }\nfunction area(): float { return 1.0; }\nconst LIMIT = 3;\n",
+        ),
+        (
+            "polyfills.php",
+            "<?php\nif (!function_exists('str_contains')) {\n    function str_contains(string $h, string $n): bool { return true; }\n}\n\
+             if (!class_exists('WeakMap')) {\n    final class WeakMap {}\n}\nfunction array_first(array $a): mixed { return null; }\n\
+             class ArrayIterator {}\nclass Own extends \\Exception {}\n",
+        ),
+    ] {
+        project
+            .load_analyzed_file(PathBuf::from(path), source)
+            .unwrap();
+    }
+    project.finish_loading();
+    let layers = project.registry_dump_comparing(CompareAt::Layers);
+    assert!(
+        layers.contains("\n== registry over stub-base\n"),
+        "{layers}"
+    );
+    assert_eq!(layers, project.registry_dump_comparing(CompareAt::Whole));
 }

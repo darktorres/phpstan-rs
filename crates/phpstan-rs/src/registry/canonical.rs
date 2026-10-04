@@ -6,7 +6,9 @@
 //! A project's registry also prints over the stub base it stands on
 //! (`CanonicalOver`): each table, map and set as what the project adds,
 //! changes and drops of the base's, by what the two hold, not by how their
-//! layers are stored.
+//! layers are stored. Where the two read from the base's very storage, only
+//! the names either holds itself or hides are compared: every other name
+//! finds the same entry in both.
 
 use std::sync::Arc;
 
@@ -255,19 +257,52 @@ canonical_enum!(BuiltDecl {
     GlobalConst { name, guard, ty },
 });
 
+/// Which names a value and its base are compared at.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum CompareAt {
+    /// Where the two read from one base's storage, the names either holds
+    /// itself or hides; every name otherwise.
+    Layers,
+    /// Every name of both: what a test checks the layers against.
+    #[cfg(test)]
+    Whole,
+}
+
 /// A value printed as its difference from `base`, a value of its kind:
-/// what a project's registry holds over the stub base it stands on.
+/// what a project's registry holds over the stub base it stands on. Both
+/// ways of comparing print the same.
 pub(crate) trait CanonicalOver {
-    fn canonical_over(&self, base: &Self, p: &mut Printer);
+    fn canonical_over(&self, base: &Self, compare: CompareAt, p: &mut Printer);
 }
 
 /// A value and the base it prints over, as a field of a node.
-struct Over<'a, T: ?Sized>(&'a T, &'a T);
+struct Over<'a, T: ?Sized>(&'a T, &'a T, CompareAt);
 
 impl<T: CanonicalOver + ?Sized> Canonical for Over<'_, T> {
     fn canonical(&self, p: &mut Printer) {
-        self.0.canonical_over(self.1, p);
+        self.0.canonical_over(self.1, self.2, p);
     }
+}
+
+/// The names to compare a value and its base at: those `apart` gives,
+/// the names the two may hold apart when their layers tell, under
+/// `CompareAt::Layers`; every name of both otherwise. Each once, by `key`.
+fn names_to_compare<'a, K: Eq + std::hash::Hash>(
+    compare: CompareAt,
+    apart: impl FnOnce() -> Option<Vec<&'a Name>>,
+    every: impl FnOnce() -> Vec<&'a Name>,
+    key: impl Fn(&'a Name) -> K,
+) -> Vec<&'a Name> {
+    let names = match compare {
+        CompareAt::Layers => apart().unwrap_or_else(every),
+        #[cfg(test)]
+        CompareAt::Whole => every(),
+    };
+    let mut seen: rustc_hash::FxHashSet<K> = rustc_hash::FxHashSet::default();
+    names
+        .into_iter()
+        .filter(|name| seen.insert(key(name)))
+        .collect()
 }
 
 /// Entries by name, as `Printer::by_name` prints them.
@@ -297,18 +332,27 @@ fn same<V: PartialEq>(value: &V, was: &V) -> bool {
 /// The entries whose name, spelling or value the base does not have, and
 /// the base's names the table lacks.
 impl<V: Canonical + PartialEq> CanonicalOver for NameTable<V> {
-    fn canonical_over(&self, base: &Self, p: &mut Printer) {
-        let changed: Vec<(&Name, &V)> = self
-            .iter()
-            .filter(|(name, value)| match base.get_with_name(name.as_str()) {
-                Some((declared, was)) => declared.as_str() != name.as_str() || !same(*value, was),
-                None => true,
-            })
-            .collect();
-        let dropped: Vec<&Name> = base
-            .keys()
-            .filter(|name| !self.contains_key(name.as_str()))
-            .collect();
+    fn canonical_over(&self, base: &Self, compare: CompareAt, p: &mut Printer) {
+        let names = names_to_compare(
+            compare,
+            || self.names_apart(base),
+            || self.keys().chain(base.keys()).collect(),
+            Name::lower,
+        );
+        let mut changed: Vec<(&Name, &V)> = Vec::new();
+        let mut dropped: Vec<&Name> = Vec::new();
+        for name in names {
+            match (self.get_with_name(name), base.get_with_name(name)) {
+                (Some((own, value)), Some((declared, was))) => {
+                    if own.as_str() != declared.as_str() || !same(value, was) {
+                        changed.push((own, value));
+                    }
+                }
+                (Some(entry), None) => changed.push(entry),
+                (None, Some((declared, _))) => dropped.push(declared),
+                (None, None) => {}
+            }
+        }
         p.node(
             "Over",
             &[("changed", &ByName(changed)), ("dropped", &Names(dropped))],
@@ -318,15 +362,27 @@ impl<V: Canonical + PartialEq> CanonicalOver for NameTable<V> {
 
 /// `NameTable`'s difference, for a map by exact name.
 impl<V: Canonical + PartialEq> CanonicalOver for NameMap<V> {
-    fn canonical_over(&self, base: &Self, p: &mut Printer) {
-        let changed: Vec<(&Name, &V)> = self
-            .iter()
-            .filter(|(name, value)| base.get(name.as_str()).is_none_or(|was| !same(*value, was)))
-            .collect();
-        let dropped: Vec<&Name> = base
-            .keys()
-            .filter(|name| !self.contains_key(name.as_str()))
-            .collect();
+    fn canonical_over(&self, base: &Self, compare: CompareAt, p: &mut Printer) {
+        let names = names_to_compare(
+            compare,
+            || self.names_apart(base),
+            || self.keys().chain(base.keys()).collect(),
+            Name::as_str,
+        );
+        let mut changed: Vec<(&Name, &V)> = Vec::new();
+        let mut dropped: Vec<&Name> = Vec::new();
+        for name in names {
+            match (self.get(name.as_str()), base.get(name.as_str())) {
+                (Some(value), Some(was)) => {
+                    if !same(value, was) {
+                        changed.push((name, value));
+                    }
+                }
+                (Some(value), None) => changed.push((name, value)),
+                (None, Some(_)) => dropped.push(name),
+                (None, None) => {}
+            }
+        }
         p.node(
             "Over",
             &[("changed", &ByName(changed)), ("dropped", &Names(dropped))],
@@ -336,9 +392,22 @@ impl<V: Canonical + PartialEq> CanonicalOver for NameMap<V> {
 
 /// The names the base lacks, and the base's names the set lacks.
 impl CanonicalOver for NameSet {
-    fn canonical_over(&self, base: &Self, p: &mut Printer) {
-        let added: Vec<&Name> = self.iter().filter(|name| !base.contains(name)).collect();
-        let dropped: Vec<&Name> = base.iter().filter(|name| !self.contains(name)).collect();
+    fn canonical_over(&self, base: &Self, compare: CompareAt, p: &mut Printer) {
+        let names = names_to_compare(
+            compare,
+            || self.names_apart(base),
+            || self.iter().chain(base.iter()).collect(),
+            Name::as_str,
+        );
+        let mut added: Vec<&Name> = Vec::new();
+        let mut dropped: Vec<&Name> = Vec::new();
+        for name in names {
+            match (self.contains(name), base.contains(name)) {
+                (true, false) => added.push(name),
+                (false, true) => dropped.push(name),
+                _ => {}
+            }
+        }
         p.node(
             "Over",
             &[("added", &Names(added)), ("dropped", &Names(dropped))],
@@ -347,23 +416,23 @@ impl CanonicalOver for NameSet {
 }
 
 impl<T: CanonicalOver + ?Sized> CanonicalOver for Arc<T> {
-    fn canonical_over(&self, base: &Self, p: &mut Printer) {
-        (**self).canonical_over(base, p);
+    fn canonical_over(&self, base: &Self, compare: CompareAt, p: &mut Printer) {
+        (**self).canonical_over(base, compare, p);
     }
 }
 
 /// The declarations as built over the base's, when both keep them; whole
 /// otherwise.
 impl CanonicalOver for Option<Box<RawDeclarations>> {
-    fn canonical_over(&self, base: &Self, p: &mut Printer) {
+    fn canonical_over(&self, base: &Self, compare: CompareAt, p: &mut Printer) {
         match (self, base) {
             (Some(raw), Some(base)) => {
                 let RawDeclarations { classes, functions } = &**raw;
                 p.node(
                     "RawDeclarations",
                     &[
-                        ("classes", &Over(classes, &base.classes)),
-                        ("functions", &Over(functions, &base.functions)),
+                        ("classes", &Over(classes, &base.classes, compare)),
+                        ("functions", &Over(functions, &base.functions, compare)),
                     ],
                 );
             }
@@ -376,7 +445,7 @@ impl CanonicalOver for Option<Box<RawDeclarations>> {
 /// whole: a project's own state and settings, its effects and sites, which
 /// a base holds none of.
 impl CanonicalOver for Registry {
-    fn canonical_over(&self, base: &Self, p: &mut Printer) {
+    fn canonical_over(&self, base: &Self, compare: CompareAt, p: &mut Printer) {
         let Registry {
             classes,
             configured_assertions,
@@ -417,24 +486,24 @@ impl CanonicalOver for Registry {
         p.node(
             "Registry",
             &[
-                ("classes", &Over(classes, &base.classes)),
+                ("classes", &Over(classes, &base.classes, compare)),
                 ("configured_assertions", configured_assertions),
                 (
                     "configured_class_argument_returns",
                     configured_class_argument_returns,
                 ),
-                ("functions", &Over(functions, &base.functions)),
+                ("functions", &Over(functions, &base.functions, compare)),
                 (
                     "global_constants",
-                    &Over(global_constants, &base.global_constants),
+                    &Over(global_constants, &base.global_constants, compare),
                 ),
                 ("global_variables", global_variables),
                 (
                     "phpstan_class_files",
-                    &Over(phpstan_class_files, &base.phpstan_class_files),
+                    &Over(phpstan_class_files, &base.phpstan_class_files, compare),
                 ),
                 ("doctrine_entity_index", doctrine_entity_index),
-                ("raw", &Over(raw, &base.raw)),
+                ("raw", &Over(raw, &base.raw, compare)),
                 ("raw_active", raw_active),
                 ("changed", changed),
                 ("phpstan_stubs_loaded", phpstan_stubs_loaded),
@@ -445,59 +514,76 @@ impl CanonicalOver for Registry {
                     &Over(
                         unconditionally_declared_classes,
                         &base.unconditionally_declared_classes,
+                        compare,
                     ),
                 ),
                 (
                     "built_in_stub_classes",
-                    &Over(built_in_stub_classes, &base.built_in_stub_classes),
+                    &Over(built_in_stub_classes, &base.built_in_stub_classes, compare),
                 ),
                 (
                     "unconditionally_declared_functions",
                     &Over(
                         unconditionally_declared_functions,
                         &base.unconditionally_declared_functions,
+                        compare,
                     ),
                 ),
                 (
                     "function_decl_sites",
-                    &Over(function_decl_sites, &base.function_decl_sites),
+                    &Over(function_decl_sites, &base.function_decl_sites, compare),
                 ),
                 (
                     "stub_provided_functions",
-                    &Over(stub_provided_functions, &base.stub_provided_functions),
+                    &Over(
+                        stub_provided_functions,
+                        &base.stub_provided_functions,
+                        compare,
+                    ),
                 ),
                 (
                     "names_with_assert_tags",
-                    &Over(names_with_assert_tags, &base.names_with_assert_tags),
+                    &Over(
+                        names_with_assert_tags,
+                        &base.names_with_assert_tags,
+                        compare,
+                    ),
                 ),
                 (
                     "base_assert_tagged",
-                    &Over(base_assert_tagged, &base.base_assert_tagged),
+                    &Over(base_assert_tagged, &base.base_assert_tagged, compare),
                 ),
                 (
                     "ancestor_names",
-                    &Over(ancestor_names, &base.ancestor_names),
+                    &Over(ancestor_names, &base.ancestor_names, compare),
                 ),
                 (
                     "phpstan_ancestry",
-                    &Over(phpstan_ancestry, &base.phpstan_ancestry),
+                    &Over(phpstan_ancestry, &base.phpstan_ancestry, compare),
                 ),
                 (
                     "subtype_children",
-                    &Over(subtype_children, &base.subtype_children),
+                    &Over(subtype_children, &base.subtype_children, compare),
                 ),
-                ("trait_users", &Over(trait_users, &base.trait_users)),
+                (
+                    "trait_users",
+                    &Over(trait_users, &base.trait_users, compare),
+                ),
                 (
                     "recorded_parents",
-                    &Over(recorded_parents, &base.recorded_parents),
+                    &Over(recorded_parents, &base.recorded_parents, compare),
                 ),
-                ("member_owners", &Over(member_owners, &base.member_owners)),
+                (
+                    "member_owners",
+                    &Over(member_owners, &base.member_owners, compare),
+                ),
                 ("effects", effects),
                 (
                     "builtin_methods_running_code",
                     &Over(
                         builtin_methods_running_code,
                         &base.builtin_methods_running_code,
+                        compare,
                     ),
                 ),
                 (
@@ -505,6 +591,7 @@ impl CanonicalOver for Registry {
                     &Over(
                         base_builtin_methods_running_code,
                         &base.base_builtin_methods_running_code,
+                        compare,
                     ),
                 ),
                 ("methods_by_name", methods_by_name),

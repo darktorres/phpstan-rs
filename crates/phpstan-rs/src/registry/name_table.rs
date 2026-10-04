@@ -623,6 +623,21 @@ impl<V> NameTable<V> {
         }
     }
 
+    /// The names this table and `other` may hold apart when both read from
+    /// the very same base: the entries each holds itself and the base's
+    /// names each hides. Every other name finds the same entry of the base
+    /// in both. `None` when they read from different bases, or none.
+    pub(crate) fn names_apart<'a>(&'a self, other: &'a NameTable<V>) -> Option<Vec<&'a Name>> {
+        self.shares_base(other).then(|| {
+            self.entries
+                .keys()
+                .chain(self.hidden.iter())
+                .chain(other.entries.keys())
+                .chain(other.hidden.iter())
+                .collect()
+        })
+    }
+
     /// The entries the table holds itself, not those it reads from its
     /// shared base.
     pub(crate) fn own_iter(&self) -> impl Iterator<Item = (&Name, &V)> {

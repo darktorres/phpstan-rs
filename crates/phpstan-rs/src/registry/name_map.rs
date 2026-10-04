@@ -83,6 +83,22 @@ impl<V> NameMap<V> {
     pub fn is_empty(&self) -> bool {
         self.len() == 0
     }
+
+    /// `NameTable::names_apart`, for a map.
+    pub(crate) fn names_apart<'a>(&'a self, other: &'a NameMap<V>) -> Option<Vec<&'a Name>> {
+        let shared = match (&self.base, &other.base) {
+            (Some(own), Some(theirs)) => Arc::ptr_eq(own, theirs),
+            _ => false,
+        };
+        shared.then(|| {
+            self.entries
+                .keys()
+                .chain(self.hidden.iter())
+                .chain(other.entries.keys())
+                .chain(other.hidden.iter())
+                .collect()
+        })
+    }
 }
 
 impl<V: Clone> NameMap<V> {
@@ -338,6 +354,11 @@ impl NameSet {
 
     pub fn iter(&self) -> impl Iterator<Item = &Name> {
         self.0.keys()
+    }
+
+    /// `NameTable::names_apart`, for a set.
+    pub(crate) fn names_apart<'a>(&'a self, other: &'a NameSet) -> Option<Vec<&'a Name>> {
+        self.0.names_apart(&other.0)
     }
 
     pub fn freeze(&mut self) {

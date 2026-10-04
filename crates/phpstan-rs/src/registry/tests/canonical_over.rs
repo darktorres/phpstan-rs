@@ -3,15 +3,20 @@
 
 use syntax::canonical::Printer;
 
-use crate::registry::canonical::CanonicalOver;
+use crate::registry::canonical::{CanonicalOver, CompareAt};
 use crate::registry::name_map::NameSet;
 use crate::registry::name_table::NameTable;
 
-/// `table` printed over `base`.
+/// `table` printed over `base`, which comparing every name prints the same.
 fn over<T: CanonicalOver>(table: &T, base: &T) -> String {
-    let mut p = Printer::default();
-    table.canonical_over(base, &mut p);
-    p.finish()
+    let print = |compare| {
+        let mut p = Printer::default();
+        table.canonical_over(base, compare, &mut p);
+        p.finish()
+    };
+    let layers = print(CompareAt::Layers);
+    assert_eq!(layers, print(CompareAt::Whole), "both ways print the same");
+    layers
 }
 
 #[test]
@@ -64,5 +69,42 @@ fn a_set_prints_the_names_it_adds_and_drops() {
     assert_eq!(
         over(&set, &base),
         "Over {\n  added: [\n    added\n  ]\n  dropped: [\n    dropped\n  ]\n}"
+    );
+}
+
+#[test]
+fn a_table_over_another_base_compares_every_name() {
+    let mut base: NameTable<u32> = NameTable::default();
+    base.insert("One", 1);
+    base.freeze();
+    let mut table: NameTable<u32> = NameTable::default();
+    table.insert("One", 1);
+    table.insert("Two", 2);
+    table.freeze();
+    assert!(!table.shares_base(&base));
+    assert_eq!(
+        over(&table, &base),
+        "Over {\n  changed: [\n    Two => 2\n  ]\n  dropped: []\n}"
+    );
+}
+
+#[test]
+fn a_table_whose_base_has_entries_of_its_own_prints_over_both_layers() {
+    let mut shared: NameTable<u32> = NameTable::default();
+    for (name, value) in [("Kept", 1), ("Hidden", 2), ("Theirs", 3)] {
+        shared.insert(name, value);
+    }
+    shared.freeze();
+    let mut base = shared.clone();
+    base.insert("Added", 4);
+    assert!(base.remove("Theirs"));
+    let mut table = shared.clone();
+    assert!(table.remove("Hidden"));
+    table.replace("Kept", 10);
+    assert!(table.shares_base(&base));
+    assert_eq!(
+        over(&table, &base),
+        "Over {\n  changed: [\n    Kept => 10\n    Theirs => 3\n  ]\n  \
+         dropped: [\n    Added\n    Hidden\n  ]\n}"
     );
 }
