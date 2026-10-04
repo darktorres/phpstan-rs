@@ -1483,6 +1483,11 @@ impl Project {
         // The class graph is final here; the effects bound a call by the
         // classes descending from its receiver's, which this indexes.
         self.registry.precompute_ancestor_names();
+        // The declared types are final after these two, and purity and
+        // the effects read them: a call through a property is resolved by
+        // the type the property has, the one PHP enforces.
+        self.registry.resolve_constant_named_types();
+        self.registry.drop_doc_members_excluded_by_native();
         // Neither `resolve_transitive_purity` nor anything below it adds
         // or removes a method/property/const name anywhere, so the
         // member-owner maps built just above stay correct through this
@@ -1491,8 +1496,6 @@ impl Project {
         self.registry.set_scope(body_scope);
         self.registry.resolve_transitive_purity(&self.files);
         self.registry.set_scope(scope);
-        self.registry.resolve_constant_named_types();
-        self.registry.drop_doc_members_excluded_by_native();
         self.registry.index_assert_tagged_names();
         self.registry.index_doctrine_entities();
         let changed_keys = match (&before, &changed) {

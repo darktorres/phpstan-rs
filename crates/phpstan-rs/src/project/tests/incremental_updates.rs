@@ -870,6 +870,41 @@ fn of_two_entities_on_one_table_the_first_by_name_maps_it_whatever_the_order() {
     assert_eq!(mapped(&project).as_deref(), Some("AlphaRepository"));
 }
 
+#[test]
+fn effects_read_a_property_by_the_type_php_enforces_before_and_after_an_edit() {
+    let files = [
+        (
+            "store.php",
+            "<?php interface Store { public function get(): int; } final class Counter implements Store { public static int $n = 0; public function get(): int { return ++self::$n; } }",
+        ),
+        (
+            "holder.php",
+            "<?php final class Holder { /** @param Store $store */ public function __construct(private readonly int $store) {} public function read(): int { return $this->store->get(); } }",
+        ),
+        ("other.php", "<?php echo 1;"),
+    ];
+    let mut project = Project::new();
+    for (path, source) in files {
+        project
+            .load_analyzed_file(PathBuf::from(path), source)
+            .unwrap();
+    }
+    project.finish_loading();
+    assert!(
+        project
+            .registry()
+            .virtual_method_effect("Holder", "read")
+            .is_nothing()
+    );
+    project.remove_file(&PathBuf::from("other.php"));
+    assert!(
+        project
+            .registry()
+            .virtual_method_effect("Holder", "read")
+            .is_nothing()
+    );
+}
+
 /// Asserts that editing `edited` to `new_source` leaves every file with the
 /// diagnostics a project loading the edited text from the start reports.
 fn assert_edit_matches_a_fresh_load(files: &[(&str, &str)], edited: &str, new_source: &str) {
