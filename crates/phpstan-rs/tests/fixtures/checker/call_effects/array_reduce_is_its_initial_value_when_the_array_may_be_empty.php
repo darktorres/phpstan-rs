@@ -26,7 +26,7 @@ function check(array $maybe, array $nonEmpty, callable $callback): void
     assertType('int|null', array_reduce($maybe, static fn (?int $carry, int $item): int => $item));
     assertType('int', array_reduce($nonEmpty, static fn (?int $carry, int $item): int => $item));
     assertType(
-        'non-empty-list<int>',
+        'array',
         array_reduce($nonEmpty, static function (array $carry, int $item): array {
             $carry[] = $item;
             return $carry;

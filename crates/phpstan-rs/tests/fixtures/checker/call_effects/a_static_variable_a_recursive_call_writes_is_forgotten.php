@@ -3,7 +3,7 @@ namespace CallEffects\StaticLocal;
 
 use function PHPStan\Testing\assertType;
 
-function depth(int $level): ?int
+function depth(int $level): int
 {
     static $deepest = null;
     if ($level === 0) {
