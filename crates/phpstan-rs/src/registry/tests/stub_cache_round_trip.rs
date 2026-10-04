@@ -145,8 +145,12 @@ fn the_stored_maps_and_sets_read_back_whole() {
         unconditionally_declared_classes,
         unconditionally_declared_functions,
         stub_provided_functions,
-        names_with_assert_tags
+        names_with_assert_tags,
+        builtin_methods_running_code
     );
+    // A loaded registry reads its classes lazily: what is made from them
+    // comes stored, not from the classes it holds itself.
+    assert!(registry.builtin_methods_running_code.contains("getmessage"));
 }
 
 #[test]

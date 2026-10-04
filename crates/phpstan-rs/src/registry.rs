@@ -396,14 +396,15 @@ pub struct Registry {
     // What a call to each function and method with a body may write
     // (`registry::effects`), keyed by lowercased (class, name).
     pub(crate) effects: FxHashMap<effects::DeclKey, Effect>,
-    // The names of the builtin methods that run code passed to them
-    // (`registry::effects`): the base's, and those of the classes the
-    // registry holds itself, as the last finish found them.
+    // The names, lowercased, of the builtin methods that run code passed
+    // to them (`registry::effects`): the base's, and those of the classes
+    // the registry holds itself, as the last finish found them. Stored
+    // with the registry, whose classes a load reads lazily.
     #[serde(skip)]
-    builtin_methods_running_code: Arc<FxHashSet<String>>,
-    // `builtin_methods_running_code` of the base, found when it was frozen.
+    builtin_methods_running_code: NameSet,
+    // `builtin_methods_running_code` of the base, as it was when frozen.
     #[serde(skip)]
-    base_builtin_methods_running_code: Arc<FxHashSet<String>>,
+    base_builtin_methods_running_code: Arc<NameSet>,
     // The loaded classes declaring each method name with a body, lowercased,
     // as the last finish found them (`registry::effects`).
     #[serde(skip)]
@@ -620,10 +621,8 @@ impl Registry {
     /// clones of the registry to share rather than copy.
     pub(crate) fn freeze(&mut self) {
         self.base_assert_tagged = Arc::new(self.names_with_assert_tags.clone());
-        let mut running_code = (*self.base_builtin_methods_running_code).clone();
-        running_code.extend(self.own_builtin_methods_running_code());
-        self.base_builtin_methods_running_code = Arc::new(running_code);
-        self.builtin_methods_running_code = Arc::clone(&self.base_builtin_methods_running_code);
+        self.base_builtin_methods_running_code =
+            Arc::new(self.builtin_methods_running_code.clone());
         self.classes.freeze();
         self.functions.freeze();
         self.built_in_stub_classes.freeze();
@@ -810,6 +809,7 @@ impl Registry {
         unconditionally_declared_functions,
         stub_provided_functions,
         names_with_assert_tags,
+        builtin_methods_running_code,
         function_decl_sites,
         phpstan_class_files,
     );

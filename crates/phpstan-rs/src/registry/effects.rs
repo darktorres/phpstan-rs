@@ -28,7 +28,7 @@ use crate::registry::summaries::{
     ArgAt, Binding, BodySummary, CallWrites, Callable, Callee, Made, PairTarget, Place, Receiver,
     Root, Step, WriteFacts,
 };
-use crate::registry::{ClassReflection, FunctionReflection, Registry, is_non_overridable};
+use crate::registry::{ClassReflection, FunctionReflection, NameSet, Registry, is_non_overridable};
 use types::Type;
 
 /// Storage a write may change.
@@ -464,8 +464,10 @@ impl Registry {
     pub(crate) fn resolve_effects(&mut self, bodies: &dyn BodySource) {
         self.methods_by_name = Arc::new(methods_by_name(self));
         let mut running_code = (*self.base_builtin_methods_running_code).clone();
-        running_code.extend(self.own_builtin_methods_running_code());
-        self.builtin_methods_running_code = Arc::new(running_code);
+        for name in self.own_builtin_methods_running_code() {
+            running_code.insert(name);
+        }
+        self.builtin_methods_running_code = running_code;
         let registry: &Registry = self;
         let functions: Vec<(&Name, &FunctionReflection)> = registry
             .functions
@@ -808,7 +810,7 @@ impl Registry {
 
     /// The names (lowercased) of the builtin methods that run code passed to
     /// them, found once: the stubs do not change.
-    fn builtin_methods_running_code(&self) -> &FxHashSet<String> {
+    fn builtin_methods_running_code(&self) -> &NameSet {
         &self.builtin_methods_running_code
     }
 
