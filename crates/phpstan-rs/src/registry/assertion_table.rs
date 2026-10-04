@@ -57,7 +57,6 @@ impl Registry {
             .chain(self.configured_assertions.iter())
             .cloned()
             .collect();
-        let mut tagged: Vec<Name> = Vec::new();
         for entry in entries {
             let sig = match (&entry.function, &entry.class, &entry.method) {
                 (Some(function), _, _) => {
@@ -72,9 +71,6 @@ impl Registry {
                     else {
                         continue;
                     };
-                    tagged.push(Name::from(
-                        declared.rsplit('\\').next().unwrap_or(&declared),
-                    ));
                     self.functions.get_mut(&declared)
                 }
                 (None, Some(class), Some(method)) => {
@@ -91,10 +87,7 @@ impl Registry {
                         info.methods
                             .iter_mut()
                             .find(|(name, _)| name.eq_ignore_ascii_case(method))
-                            .map(|(name, sig)| {
-                                tagged.push(name.clone());
-                                sig
-                            })
+                            .map(|(_, sig)| sig)
                     })
                 }
                 _ => None,
@@ -139,6 +132,5 @@ impl Registry {
                 list.push(info);
             }
         }
-        self.names_with_assert_tags.extend(tagged);
     }
 }

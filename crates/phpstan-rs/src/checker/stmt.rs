@@ -1304,8 +1304,8 @@ impl<'a> Checker<'a> {
     /// hierarchy walk for `MethodCall`, `StaticCall`'s own
     /// `lookup_method` walk, and `Call`'s `Registry::resolve_function`
     /// would be wasted work on nearly every call site.
-    /// `registry.names_with_assert_tags` (populated once, see its own
-    /// doc comment) turns that into a single cheap set-membership check
+    /// `registry.names_with_assert_tags` (see its own doc comment)
+    /// turns that into a single cheap set-membership check
     /// by the call's bare name before paying for any receiver-type
     /// inference or hierarchy walk - safe because the set is a superset
     /// of "names that could possibly match" (see that field's doc

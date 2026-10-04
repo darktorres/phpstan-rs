@@ -358,18 +358,18 @@ pub struct Registry {
     // being a no-op once the built-in stub already occupies the slot.
     #[serde(skip)]
     stub_provided_functions: NameSet,
-    // Every bare function/method name with a non-empty `assert` list
-    // on some indexed `FunctionReflection`. `@phpstan-assert` is rare in real
-    // corpora (zero occurrences across the full Symfony monorepo plus
-    // every vendored PHP stub), so `checker::stmt`'s bare-statement
-    // narrowing pass checks this set-membership first and skips the
-    // expensive receiver-type inference + hierarchy walk for a name that
-    // provably can't match. Names are only ever added, never removed on
-    // `remove_declarations` - a harmless, rare false positive (still a
-    // "may still do the real check" set, not a "known good" one), never
-    // a false negative.
+    // Every bare function and method name a resolved declaration's
+    // `assert` list is not empty under (`index_assert_tagged_names`): the
+    // base's, and those of the declarations the registry holds itself.
+    // `@phpstan-assert` is rare in real corpora, so `checker::stmt`'s
+    // bare-statement narrowing pass checks this set-membership first and
+    // skips the expensive receiver-type inference + hierarchy walk for a
+    // name that provably can't match.
     #[serde(skip)]
     pub(crate) names_with_assert_tags: NameSet,
+    // `names_with_assert_tags` of the base, as it was when frozen.
+    #[serde(skip)]
+    base_assert_tagged: Arc<NameSet>,
     // Every class's precomputed `extends`+`implements` transitive
     // closure - see `is_subclass_of`/`precompute_ancestor_names`
     // (`registry/hierarchy.rs`). Rebuilt whenever the class graph could
@@ -506,6 +506,7 @@ impl Registry {
         registry.resolve_constant_named_types();
         registry.drop_doc_members_excluded_by_native();
         registry.precompute_member_owners_after_mixins();
+        registry.index_assert_tagged_names();
         registry.infer_global_variables(&[(
             crate::file_id::FileId::new(0),
             std::path::Path::new("<flattened>"),
@@ -604,6 +605,7 @@ impl Registry {
     /// Makes the class, function and derived tables a shared base, for
     /// clones of the registry to share rather than copy.
     pub(crate) fn freeze(&mut self) {
+        self.base_assert_tagged = Arc::new(self.names_with_assert_tags.clone());
         self.classes.freeze();
         self.functions.freeze();
         self.built_in_stub_classes.freeze();

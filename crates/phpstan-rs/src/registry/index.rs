@@ -167,7 +167,6 @@ impl Registry {
             Guard::Always => decl.made_unconditional(),
             Guard::Maybe => decl,
         };
-        self.record_assert_tagged_names(&decl);
         // A name is changed when its entry is: a conditional declaration the
         // existing entry outranks leaves the table as it was.
         let leaves_entry = match &decl {
@@ -467,40 +466,25 @@ impl Registry {
         }
     }
 
-    /// Populates `names_with_assert_tags` from `decl`'s signature(s) -
-    /// see that field's doc comment. Reads `decl` only, never the
-    /// collision-resolution decision `insert_built_decl` goes on to make
-    /// right after this call - a name is recorded whenever any indexed
-    /// declaration under that name ever had a non-empty `assert` list,
-    /// whether or not it ends up winning the registry slot (a losing
-    /// declaration's `assert` info being recorded anyway is a harmless,
-    /// rare over-approximation, never a missed real one).
-    fn record_assert_tagged_names(&mut self, decl: &BuiltDecl) {
-        match decl {
-            BuiltDecl::Function { name, sig, .. } => {
-                if !sig.assert.is_empty() {
-                    // `name` is the fully-qualified name
-                    // (`Registry::functions`' key shape); store just
-                    // the bare, unqualified tail so a bare-statement
-                    // `Call`'s as-written callee text - not yet FQN-
-                    // resolved at that point, see
-                    // `apply_bare_statement_assert_narrowing`'s Call
-                    // arm - can check membership without resolving it
-                    // first, the same bare-name shape method names
-                    // already are.
-                    let bare = name.rsplit('\\').next().unwrap_or(name);
-                    self.names_with_assert_tags.insert(Name::from(bare));
-                }
+    /// Indexes `names_with_assert_tags` from the resolved declarations:
+    /// the base's names, and the bare name of each function and the name
+    /// of each method the registry holds itself whose `assert` list is not
+    /// empty.
+    pub(crate) fn index_assert_tagged_names(&mut self) {
+        let mut names = (*self.base_assert_tagged).clone();
+        for (name, sig) in self.functions.own_iter() {
+            if !sig.assert.is_empty() {
+                names.insert(Name::from(name.rsplit('\\').next().unwrap_or(name)));
             }
-            BuiltDecl::Class { info, .. } => {
-                for (method_name, sig) in info.methods.iter() {
-                    if !sig.assert.is_empty() {
-                        self.names_with_assert_tags.insert(method_name.clone());
-                    }
-                }
-            }
-            BuiltDecl::GlobalConst { .. } => {}
         }
+        for (_, info) in self.classes.own_iter() {
+            for (method, sig) in info.methods.iter() {
+                if !sig.assert.is_empty() {
+                    names.insert(method.clone());
+                }
+            }
+        }
+        self.names_with_assert_tags = names;
     }
 
     /// Surgically removes one file's prior contributions before

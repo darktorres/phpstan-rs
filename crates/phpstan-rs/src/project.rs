@@ -1491,6 +1491,7 @@ impl Project {
         self.registry.set_scope(scope);
         self.registry.resolve_constant_named_types();
         self.registry.drop_doc_members_excluded_by_native();
+        self.registry.index_assert_tagged_names();
         let changed_keys = match (&before, &changed) {
             (Some(before), Some(changed)) => self.registry.changed_since(before, changed),
             _ => FxHashSet::default(),

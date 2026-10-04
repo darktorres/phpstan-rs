@@ -1515,6 +1515,27 @@ fn an_include_is_rechecked_when_the_file_it_names_appears_or_vanishes() {
 }
 
 #[test]
+fn a_name_leaves_the_assert_tagged_names_with_its_last_assert_tag() {
+    let tagged =
+        "<?php class A { /** @phpstan-assert int $x */ public function check($x): void {} }";
+    let untagged = "<?php class A { public function check($x): void {} }";
+    let mut project = Project::new();
+    project
+        .load_analyzed_file(PathBuf::from("a.php"), tagged)
+        .unwrap();
+    project.finish_loading();
+    assert!(project.registry().names_with_assert_tags.contains("check"));
+    project
+        .update_file(&PathBuf::from("a.php"), untagged)
+        .unwrap();
+    assert!(!project.registry().names_with_assert_tags.contains("check"));
+    project
+        .update_file(&PathBuf::from("a.php"), tagged)
+        .unwrap();
+    assert!(project.registry().names_with_assert_tags.contains("check"));
+}
+
+#[test]
 fn an_edit_keeps_the_use_sites_of_the_files_it_rechecks() {
     let mut project = Project::new();
     project.apply_settings(ProjectSettings {

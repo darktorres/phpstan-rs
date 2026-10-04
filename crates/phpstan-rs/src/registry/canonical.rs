@@ -264,6 +264,7 @@ canonical_struct!(Registry {
     function_decl_sites,
     stub_provided_functions,
     names_with_assert_tags,
+    base_assert_tagged,
     ancestor_names,
     phpstan_ancestry,
     subtype_children,
