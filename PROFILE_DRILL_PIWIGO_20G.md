@@ -517,9 +517,9 @@ Counted by M10's rule: a row naming a function counts what M10 charges to that f
 | item | allocations | share |
 |---|---|---|
 | 9, trees in typed vectors | 3.92 M | 20.2% |
-| 18, the check phase | 3.58 M | 18.4% |
+| 18, the check phase | 3.65 M | 18.8% |
 | 15, names as names | 2.76 M | 14.2% |
-| 14, PHPDoc | 2.66 M | 13.7% |
+| 14, PHPDoc | 2.59 M | 13.3% |
 | 4, the registry by ids | 2.02 M | 10.4% |
 | 13, a file's products | 1.31 M | 6.7% |
 | 16, interned values | 0.74 M | 3.8% |
@@ -645,7 +645,7 @@ Twenty items, numbered in the order they are built. Each states what is there no
      - the facts with every watch bit;
      - ignore marks, warnings, the parse error and goto labels;
      - at every token boundary, the line, the UTF-8 and UTF-16 columns, and the `offset_in` round trip;
-     - doc sites, and the references sorted;
+     - doc sites, each with its `DocBlock`, every field printed canonically, and the references sorted;
      - each built declaration in order, with its guard and full reflection;
      - duplicate sites, declared classes, Pest facts, anonymous-class names and use sites;
      - each body's summary and `InitFlow`, and the global facts.
@@ -1593,16 +1593,35 @@ P12 step 3 was set aside because "it cannot hold references into a tree still be
 
 ### 14. PHPDoc finished: P7 and P11 as designed (§3.2)
 
-1. **P7's lowering replaces the lazy round trip.** `DocType`'s type comes from `phpdoc::lower(&TypeNode)`, eagerly in `docblock::parse`, not from `parse_written_type(to_source_string())` on first use (`doc_type.rs:57`, `:90`; 118.3 + 83.3 M).
-   - The text grammar's other callers move to `phpdoc::parse_type`, and the text grammar is deleted.
-   - The statement `@var` memo goes in: `resolve_type_node` still resolves 34,821 tags per run.
-2. **Resolution memoized as §11.7 designed.** The memo is per file, keyed by the type node and an interned resolution context: item 13's `ImportScope`, plus the template names, the type aliases and the class `self` names. It holds the whole resolved type, template marking and alias substitution included. Today's memo (`b081be75`) is sound but covers only the namespace-and-imports step, and `mark_template_params` and `substitute_type_aliases` still run on every use (`type_resolution.rs:74`, `class_info.rs:1129`, `:1220`).
-3. **P11 step 1:** `parse_tag -> Arc<TagEffect>` and `apply(&mut DocBlock, &TagEffect)`. There is no scratch block and no `merge_from` (56.2 M). Step 3's `Arc` fields follow.
-4. **The tag memo keyed in place,** by the borrowed pair `(tag, rest)` in a `hashbrown::HashTable`, not a `format!` (`docblock.rs:497`, 54.7 M).
-5. **Tag tokens borrow.** The tag parser reads a token slice by index. A `PhpDocToken`'s text is a `&'t [u8]` into the tag (303 K string clones today), and `TypeNode`'s identifiers are `Name`s (item 15).
-   - A doc is lexed from its bytes, as the PHP lexer reads source (item 9). An identifier takes any byte from `0x80` up, as PHP's does, and keeps its bytes as a `Name`, so a doc naming `\xA9` names the class the code declares.
-   - A description is text only for display.
-6. **One product per doc text, one per tag line (M6).**
+1. **P7's lowering replaces the lazy round trip.** `DocType`'s type comes from `phpdoc::lower(&TypeNode)`, not from `parse_written_type(to_source_string())` on first use (`doc_type.rs:57`, `:90`; 118.3 + 83.3 M).
+   - **It lowers eagerly, in `parse_tag`, once per distinct tag line.** A tag's `DocType`s are shared by every docblock with that line, which is why there are 21,146 lowerings today against 41,176 docblock parses. `docblock::parse` lowers only the types no tag effect holds.
+   - **The statement `@var` memo stays** (`var_tag_memo`, `checker.rs:282`, since `2b6aeb84`). Its 34,821 misses resolve the `DocType` winners of step 6, lowered once, through step 2's memo. Today each goes through `impl WrittenType for TypeNode`, the text round trip (`doc_type.rs:88-96`: 34.1 M), which goes.
+   - **The text grammar's callers, by kind:**
+     - text from the configuration (`restricted_symbol_usage.rs`, `constant_resolver.rs:40`) goes through `phpdoc::parse_type`;
+     - texts written in our Rust source (`stubs.rs`, `predefined_constants.rs`, `mysqli.rs`, `assertion_table.rs`, `probe_checks.rs`, `narrowing/*`, `result_shape.rs`, `native_type_hints.rs:197`) are built once into `static` tables (25 G §11.7). Today they are parsed again on every call once the memo is gone: `parse_type_string` runs 6,718 times;
+     - **a class name from code becomes `Type::object(name)`,** with `self`, `static` and `parent` as today. Today `infer_class_const_type` parses it as PHPDoc (`function_sig.rs:529`), whose keywords match `integer`, `double`, `boolean`, `resource`, `numeric` and `scalar` in any case. So `const A = Integer::MAX;` reads as an `int` constant, though `class Integer`, `class Resource` and `class Numeric` are valid PHP (`php` 8.5: `Integer::MAX` gives the class's 9);
+     - a test of whether one word is a type keyword (`phpdoc_unresolvable.rs:258`, `:347`) asks `types::type_keyword`.
+   - **What stays of the text grammar:** `native_type`; `keyword_type`, built from the keyword table rather than by parsing (it calls `parse_type_string` today, `parse.rs:913`); `is_reserved_type_word`; `canonical_int_key`; `display_shape_key`; and `parse_display.rs`, the different grammar that reads displayed types for the gate and the tests (`gate/type_drift.rs:196-197`, `gate.rs:385`, `tests/runtime_oracle.rs:223`). The rest of `parse.rs` is deleted.
+   - **`mentions_mixed` is set by the lowering, from the node.** Today `text_mentions_mixed` finds the word `mixed` between non-identifier bytes (`parse.rs:1443-1458`), so `App\Mixed\Foo`, a valid class, counts as explicit `mixed`.
+2. **Resolution memoized as §11.7 designed.**
+   - The memo is per file, keyed by `(written Type, context id)`.
+     - The written `Type` is the interned node P7's lowering gives. The entry holds it, as `b081be75`'s memo does, so no address is reused while the entry lives. A `TypeNode` cannot be the key: after step 7 it is an index into one owner's arena.
+     - The context is interned by content. It holds the `ImportScope` (item 13; for a declaration's doc, the declaration's scope), the template table with each name's whole `TemplateParam` (bound, variance, default, scope), the alias table with each alias's resolved type (the local table at build time, the registry's final one in the checker), and the class `self` names.
+     - Template names alone would not do. Marking puts the whole `TemplateParam` into the type (`registry/generics.rs:141-142`), and a method's table is its own templates, scoped by its name, plus the class's (`function_sig.rs:744-754`). So `@template T of int` on method `a` and `@template T of string` on method `b` share names but not types.
+   - It holds the whole resolved type, template marking and alias substitution included. Today's memo (`b081be75`) is sound but covers only the namespace-and-imports step, and `mark_template_params` and `substitute_type_aliases` still run on every use (`type_resolution.rs:74`, `class_info.rs:1129`, `:1220`).
+   - A type used in many docblocks of a file is resolved once per context.
+3. **P11 step 1: `parse_tag(tag, rest) -> Arc<TagEffect>` and `apply(&mut DocBlock, written, &TagEffect)`.** There is no scratch block and no `merge_from` (56.2 M). Step 3's `Arc` fields follow.
+   - **The effect holds only what `(tag, rest)` decides:** the fields and the parse errors.
+   - **`apply` makes every decision that depends on the spelling as written:** the Doctrine argument check, whether a tag PHPStan parses is dropped for its errors, and the `InvalidTagValue` naming the spelling (`docblock.rs:451-488`). 25 G §11.8 put `invalid` in the effect; then `@param X` and `@phpstan-param X` would share one effect, and its `tag` and drop decision would come from whichever spelling a thread parsed first.
+4. **The tag memo is keyed by the fingerprint of the pair:** the tag's length, the tag and then the rest, fed to one `SipHasher13` (step 8). There is no `format!` (`docblock.rs:497`, 54.7 M) and no separator.
+5. **Tag tokens borrow, and the doc is read as bytes.**
+   - The tag parser reads a token slice by index, and a token's text is its byte range of the doc (303 K string clones today).
+   - **The lexer's classes are PHP's, on bytes.** Blanks are space, tab, `\r` and `\n`. An identifier or a variable is `[A-Za-z_\x80-\xff][A-Za-z0-9_\x80-\xff]*`. Today the doc lexer uses Unicode's classes (`c.is_whitespace()`, `is_alphabetic`, `grammar/lexer.rs:89`, `:124`), so `@param Price€ $p` stops at `Price`, though `class Price€` is valid PHP.
+   - Every token keeps its bytes: variables, string literal contents (as `PhpString`), shape keys, and template, property, method and constant-fetch names. A parameter `$caf\xE9` is named by those bytes in reflection and in `getDocComment`, so the doc's variable matches it byte for byte.
+   - Identifiers become `Name`s as code identifiers do. From item 15, that keeps their bytes, so a doc naming `\xA9` names the class the code declares.
+   - **A wrapped tag is not contiguous in the doc.** A tag's text is the doc's byte range from the tag to the next tag line, and the lexer reads a newline followed by blanks and one `*` (not `*/`) as one blank. A raw slice of `@return array{\n *   id: int,\n * }` would otherwise put `*` tokens in the type. The fingerprint is fed the same logical bytes, so equal tags share an entry whatever their indentation.
+   - A description is decoded, its decorations removed, only for display.
+6. **One parse and one product per doc text, one per tag line (M6).**
    - **Today one doc text feeds eight memos,** each keyed by its own copy of the text:
      - the grammar node (`grammar.rs:29`);
      - the block (`docblock.rs:295`);
@@ -1612,41 +1631,61 @@ P12 step 3 was set aside because "it cannot hold references into a tree still be
      - the `@var` winners (`phpdoc_unresolvable.rs:73`);
      - `DocNames` (`deps.rs:145`);
      - written types (`types/src/parse.rs:29`).
+   - **Today a doc is parsed twice, and the two parses split it differently.** `grammar::parser::parse` cuts each line at its first `//` and joins wrapped lines with a space (`grammar/parser.rs:20-30`); `docblock::parse` keeps `//` and joins with a newline, so that `http://` survives (`docblock.rs:322-341`). So `/** @var 'http://a'|'https://b' $u */` on a statement reads as `@var 'http:` through the grammar path, an unterminated literal that raises no error, while the same doc on a property gives the union. The grammar parse costs 144.0 M (`grammar::parse_shared`, 9,309 calls).
+   - **After this step, a doc is parsed once.** The lexer splits it into tags; `PhpDocNode`'s tags are the block's tags, and the block is `apply` over each tag's effect. `grammar::parser::parse`'s own splitter is deleted. The readers of grammar nodes (`var_tag_nodes`, `tag_type_nodes`, `ancestor_tag_types` at `ancestors.rs:512`, `unknown_phpstan_tags` at `docblock.rs:1364`) read the block's tags. A `//` is a comment only between tokens and outside literals, by the lexer's rule.
+   - **The block records each tag's winner by one rule,** the resolver's order that `select_var_tag_nodes` follows for `@var` (`PhpDocNodeResolver`): params and param-outs by name, the return, and the var tags, named and unnamed. Each winner is a `DocType`.
+     - Today `phpdoc_unresolvable::tag_type_nodes` is a second implementation, not memoized, cloning nodes, at six call sites (`function_decl.rs:445`, `missing_typehint.rs:438`, `phpdoc_type_compat.rs:34`, `:352`, `:362`, `:370`; 69.1 M over 8,704 calls). It disagrees with the block: it ignores `@phan-real-return`, which the block maps to `return` (`docblock.rs:801`, as PHPStan does, `PhpDocNodeResolver.php:431`), and takes `@phan-param-out`, which the block's mapping rejects. `DocBlock.var_type`/`var_name` is a third rule.
+     - `tag_type_nodes`, `select_var_tag_nodes` and the single `var_type`/`var_name` go, and every checker site reads the block.
    - **After this step there are two memos.**
-     - **The docblock memo** holds, per text, the grammar node, the block, its referenced names as `Name`s and its `@var` winners. The names are what the 25 G report's P9 step 3 designed: `DocBlock::referenced_names() -> &[Name]`, computed with the block, which `recorded_references` reads. So `DocNames` and its memo go.
+     - **The docblock memo** holds, per text, the block (its tags, effects and winners), its referenced names as `Name`s, and its `@var` winners. The names are what the 25 G report's P9 step 3 designed: `DocBlock::referenced_names() -> &[Name]`, computed with the block, which `recorded_references` reads. So `DocNames` and its memo go.
      - **The tag memo** holds `TagEffect`s (step 3), which absorbs the tag-value and prefix memos.
      - The written-type memo goes with the text grammar (step 1).
-7. **A docblock's nodes are one vector.**
-   - A `TypeNode`'s children are indices into its docblock's node vector, as the per-file arenas of rust-analyzer and Zig's AST index their nodes. Today every `Nullable`, `ArrayOf`, `OffsetAccess` and `VarianceArg` boxes its child, and every union, intersection and generic has a vector of its own (`grammar/ast.rs:114-144`).
-   - The grammar node, the tag effects and the block's per-tag maps live in vectors of the docblock too.
-   - So a distinct docblock is a handful of allocations, not one per node.
-8. **Keys by fingerprint, bounds by weight.**
-   - **A memo is keyed by a 128-bit fingerprint of its text,** as rustc keys incremental results by `Fingerprint`, so no text is copied into a key. Today's key copies come to about 15 MB.
+7. **Nodes live in their owner's arena.**
+   - A `TypeNode`'s children are indices into an arena, as the per-file arenas of rust-analyzer and Zig's AST index their nodes: `la_arena::Arena<TypeNode>`, as items 4 and 9 use. Today every `Nullable`, `ArrayOf`, `OffsetAccess` and `VarianceArg` boxes its child, and every union, intersection and generic has a vector of its own (`grammar/ast.rs:114-144`).
+   - **Each `TagEffect` owns the arena of its nodes,** since an effect is shared by every docblock with its tag line: its nodes cannot be indices into any one docblock's vector, and copying them into each block would undo the sharing. A docblock owns an arena only for what no effect holds.
+   - A `DocType` is `(Arc<owner>, Idx<TypeNode>, Type)`. Readers walk nodes through `DocType::node() -> NodeRef<'_>`, which carries its arena, as `phpdoc_unresolvable.rs:120-140` and `narrowing.rs:1481` walk them today.
+   - So a distinct docblock or tag line is a handful of allocations, not one per node.
+   - **The caches' format.** A `FunctionReflection` is serialized into the per-file cache and the stub cache (`function_sig.rs:262`), with its asserts' `written_ty: DocType` (`asserts.rs:63`). Today a `DocType` serializes its node only, and decoding calls `DocType::new(node)`, which leaves the lowered type empty (`doc_type.rs:133-143`). A serialized `DocType` holds its own subtree, re-based into an arena of its own, and its lowered `Type`, so decoding lowers nothing. Format bump for both caches.
+8. **Keys by fingerprint, bounds by weight.** `syntax::memo::Memo<V>` becomes this memo, for all its users (`memo.rs:70-93`), and item 18's F6f uses it. Its shard-clearing code goes.
+   - **A memo is keyed by a 128-bit fingerprint of its text,** as rustc keys incremental results by `Fingerprint`, so no text is copied into a key. Today's key copies come to ≈6.1 MB beside `DocNames`' own.
      - The fingerprint is SipHash-1-3 with 128-bit output (`siphasher` 1.0.4, `sip128::SipHasher13::new_with_keys`, already in the lockfile through `phf`), keyed by a key drawn at random for each process.
      - So no input can be crafted to collide with another without the key, and an accidental collision has a 2^-128 chance per pair. A collision would hand one docblock's types to another.
-     - rustc's key is fixed, because it stores its fingerprints. These memos live in one process.
+     - rustc's key is fixed, because it stores its fingerprints. These memos live in one process. Their results are pure, so a different eviction order cannot change the output.
    - **It is bounded by a byte budget** that counts its values as well as its keys.
    - **It evicts by `quick_cache`'s weighted cache** (0.7, `sync::Cache::with_weighter`), a Clock-PRO variant that resists scans, with 21 B of overhead per entry. That replaces a hand-written CLOCK. Today a full shard is emptied whole (`memo.rs:88`), and the tag memo's bound is 131 K entries.
 
-**Oracle.** `registry-dump` (every docblock's resolved types), the PHPDoc resolution record, O2. Exact. **Saving.** ≈0.35 G.
+**Oracle.**
+- **For every type node of the fixtures, the vendor tree and the corpus,** `lower(node)` against `parse_written_type(node.to_source_string())`, taken before the text grammar is deleted (25 G §11.7). Every difference is listed in §11 as semantic:
+  - escaped quotes: the literal printer does not escape them (`grammar/ast.rs:435`), so `"don't"|"do"` prints as `'don't'|'do'`, which `split_top_level` reads as one literal (`parse.rs:300-317`); the lowering gives the two literals;
+  - `mentions_mixed` read from the node;
+  - identifiers by their bytes (`Price€`, non-UTF-8 names);
+  - the unified winners (`@phan-real-return`, `@phan-param-out`);
+  - a `//` inside a literal type;
+  - class constants of classes named like type keywords (`Integer::MAX`).
+- `registry-dump` (every docblock's resolved types), the PHPDoc resolution record, O2 with every cache state (cold, warm, written, read).
+- **O1's references and doc sites, the edit replay and the server session.** `DocNames` feeds `recorded_references` (`deps.rs:63-75`), which feeds dependents and `walk_affected`; a name lost there shows only as a stale diagnostic after an edit, which no full run sees. Item 0's O1 prints each doc site's `DocBlock`, every field canonically, so the fields no reflection carries (closures' docs, `optional_params`, `invalid_tag_values`, `parse_errors`, flags) are compared too.
 
-**Allocations: ≈2.66 M (M10).** Steps 1-7 remove them.
+Exact otherwise. **Saving.** ≈0.35 G, and the second parse of every doc (144.0 M).
+
+**Allocations: ≈2.59 M (M10).** Steps 1-7 remove them.
 - **Three sites need a word more:**
-  - **A docblock's tag lines** are copied into `String`s (`docblock.rs:337`, `:339`: ≈220 K). They become slices of the doc text.
-  - **The tag lexer and parser copy text.** The lexer makes a `String` per identifier (`grammar/lexer.rs:127`, 209,225). The parser clones tokens as it advances (`grammar/parser.rs:98`, 210,623), and lowercases identifiers and tag values to match them (≈145 K). Tokens become slices (step 5), matched case-insensitively without copies.
-  - **`apply_tag` copies every description to test a prefix** (`description.replace(' ', "")`, `docblock.rs:915`, 47,902). The test skips spaces as it reads.
+  - **A docblock's tag lines** are copied into `String`s (`docblock.rs:337`, `:339`: ≈220 K). They become byte ranges of the doc (step 5).
+  - **The tag lexer and parser copy text.** The lexer makes a `String` per identifier (`grammar/lexer.rs:127`, 209,225). The parser clones tokens as it advances (`grammar/parser.rs:98`, 210,623), and lowercases identifiers and tag values to match them (≈145 K). Tokens become byte ranges (step 5), matched case-insensitively without copies.
+  - **`apply_tag` copies every description to test a prefix** (`description.replace(' ', "")`, `docblock.rs:915`: 19,391). The test skips spaces as it reads.
 - **The rest:**
-  - memo keys built by `format!` (`docblock.rs:497`, `grammar.rs:61-66`: ≈390 K);
+  - memo keys and entries (`docblock.rs:497-498`, `grammar.rs:61-66`: 340 K, of which 199 K are `format!`s and 42 K a value cloned on every hit);
   - `to_source_string` (≈245 K);
   - `merge_from` (44,557);
   - the `DocNames` memo (75,793);
-  - the checker re-parsing statement docs and resolving their `@var` tags (≈370 K).
+  - the checker re-parsing statement docs and resolving their `@var` tags (≈305 K).
+- The checker's eager messages for `@var` tags (`stmt.rs:529` 30,060, `var_tag_types.rs:346` 35,058) are item 18's F1, which formats them only when reported.
 
-**Memory.** About 50 MB of the memos' 72.5 MB at exit (M6):
+**Memory.** About 43 MB of the memos' 72.5 MB at exit (M6), plus what the duplicate memos hold:
 - the per-tag blocks, 22.2 MB, become effects of a few words each;
-- `DocNames`, 14.6 MB;
-- the key copies, ≈15 MB;
-- the duplicate memos.
+- `DocNames`, 14.6 MB, its 8.9 MB of keys included;
+- the other memos' key copies, ≈6.1 MB;
+- the duplicate memos (the grammar node, tag values, written types, the `@var` winners).
+
 
 ### 15. Names held as names (R6; C3 steps 6-7)
 
@@ -1886,7 +1925,7 @@ A cold run pays one more incremental finishing, over the analysed files' closure
 
 **Oracle.** O2 with its diff read family by family, `--dump-types` and `--dump-expr-types`. Semantic for §12.10, as the 25 G report says; exact otherwise.
 
-**Memory and allocations.** The check phase makes 3.58 M allocations (M10). What they leave:
+**Memory and allocations.** The check phase makes 3.65 M allocations (M10), the `@var` messages F1 defers included. What they leave:
 - the results;
 - the radix arrays' path copies, which replace `imbl`'s 114,979 leaf copies (31 MB);
 - new types.
@@ -1962,6 +2001,7 @@ Exact.
   - item 11: lines end at a lone `\r` as at `\n`, and so does a `//` or `#` comment;
   - item 12: casts as PHP's single tokens; spaced qualified names a syntax error on 8.x; doc comments only with whitespace after `/**`; `?>` and heredoc lines ending at a lone `\r`; heredoc indentation errors; `<?php` open only before whitespace, and `<?` by `short_open_tag`;
   - item 13: declarations exist as PHP binds them: run-time-bound ones are guarded by every earlier exit (`exit`, `die` and `throw` included) and are dead after an unconditional one, and a class whose parent is in another file is possibly declared; `InitFlow` in PHP's order of evaluation;
+  - item 14: the readings the lowering oracle lists (escaped quotes, `mentions_mixed` from the node, identifiers by their bytes, a `//` inside a literal type, `Integer::MAX`), and one winner rule for every tag (`@phan-real-return`, `@phan-param-out`);
   - item 15: container-field keys canonical as PHP's array keys;
   - item 18: the rule families of §12.10.
   
@@ -2001,11 +2041,11 @@ Exact.
 | 11 | line starts, columns, offsets, ignore marks | ≈0.2 G | — | 0.07 M allocations | exact, but semantic for a lone `\r` |
 | 12 | lexer details, qualified names and casts as one token | ≈0.35 G | — | 0.49 M allocations | exact, but semantic for PHP's tokens (§11) |
 | 13 | declaration list, one walk, builders in scratch | ≈0.45 G | — | bodies as one slice per file; 1.31 M allocations | exact, but semantic for guards and `InitFlow`'s order |
-| 14 | PHPDoc finished, two memos | ≈0.35 G | — | ≈50 MB; 2.66 M allocations | exact |
+| 14 | PHPDoc finished, one parse, two memos | ≈0.5 G | — | ≈43 MB; 2.59 M allocations | exact, but semantic for the readings §11 lists |
 | 15 | names as names | ≈0.6 G | partly | 2.76 M allocations | exact, except key corrections |
 | 16 | interned values in one allocation | ≈0.1 G | — | ≈15 MB; 0.74 M allocations | exact |
 | 17 | warm runs | decoding and reads ≈0.85 core-s, most of the finishing window | yes | only decoded records in the heap | exact |
-| 18 | check phase remainder, rule temporaries | ≈1.6-2.0 G | — | 3.58 M allocations | semantic (§12.10) |
+| 18 | check phase remainder, rule temporaries | ≈1.6-2.0 G | — | 3.65 M allocations | semantic (§12.10) |
 | 19 | each tree until its last reader | — | — | batch: the analysed trees freed during the check; server: open documents and an LRU | exact |
 
 **Instructions.** The rows overlap little: 9 and 10 share the parser's allocation, and 4 and 15 the purity keys. Together they come to ≈8 G of this run's 20.57 G. Most of the serial time goes with them: the finishing window's 0.41 s, the insert's 0.58 G and the start's 0.15 s.
@@ -2014,13 +2054,13 @@ Exact.
 - **At exit,** the 657 MB the project holds loses:
   - the analysed trees (173 MB, item 19);
   - the passes' copies and string tables (≈90 MB, item 4);
-  - the memos' ≈50 MB (item 14);
+  - the memos' ≈43 MB (item 14);
   - the stub records' ≈40 MB (item 6);
   - the interners' ≈15 MB (item 16);
   - the per-file tables' ≈7 MB (items 2 and 5).
   
-  That leaves ≈280 MB.
-- **The peak** moves from the end of the parse (866 MB) to the start of the check. There, those ≈280 MB sit beside the analysed trees, about 85 MB after item 9: **≈365 MB**, plus the check's working set.
+  That leaves ≈290 MB.
+- **The peak** moves from the end of the parse (866 MB) to the start of the check. There, those ≈290 MB sit beside the analysed trees, about 85 MB after item 9: **≈375 MB**, plus the check's working set.
 - **Allocations.** M10 gives every one of the run's 19.4 M allocations to the item that removes it. What each row keeps, estimated from what its design still allocates:
 
   | item | what stays | today | after |
@@ -2163,6 +2203,7 @@ The rewrite made two more changes:
 | 11 | PHP and the editor end a line at a lone `\r`, and PHP ends a line comment there too; today neither does. Context files need columns for their lexer warnings and parse failures. The per-file cache stores the index. Open documents need their overlay. The count was 46,422, not 43,630, and fragment lexers build an empty index. | Lines and line comments end where PHP's do. Warnings and failures record their line and column on the worker. `LineStarts` in the cache, with a format bump. The overlay first. One allocation for `LineStarts`, none for fragments. |
 | 12 | Six places where our lexer reads source otherwise than PHP's: doc comments without whitespace after `/**`, a lone `\r` after `?>` and in heredocs, heredoc indentation PHP refuses, casts as one token with only spaces and tabs inside, the spaced qualified name that PHP 8 rejects, and open tags (`<?phpx`, and `<?` by `short_open_tag`). A perfect-hash watch list is not needed. Blank runs are mostly one byte. One comparison cannot answer both questions of step 2. | Each reading made PHP's, checked against `token_get_all`, and listed as semantic; the cast checks of `coercion.rs` kept. Watch bits cached with the name. Blank runs tested a byte first. The keyword comparison restated. `parse_qualified_name`'s allocations moved from item 9's row to this one. |
 | 13 | Guards did not follow PHP's binding: compile-time-bound declarations exist after an early exit, run-time-bound ones (trait users, implementers, enums, interfaces with parents, `const`, `define()`) do not, and `exit` was not an exit. Ids given at commit would put nested declarations first. `InitFlow` records a value before its target's operands, against PHP's order. Item 19's families had no host. A doc's scope, a body's lookup and dynamic `define()` were open. Several counts were off, and two sites do not occur in this run. | Guards by PHP's binding, tested with `php` (a parent from a file loaded earlier makes a class bound at compile time, so it is kept as possibly declared). Entries reserved in source order. The walk in PHP's order, destructuring included. Families hosted. Docs resolved in the entry's scope; bodies by declaration id; a marker for constants a file defines by a computed name. Counts by M10's data. |
+| 14 | Keying resolution by template names would hand one method's bound and scope to another's same-named template, and a node index is no key. The tag memo would freeze the spelling's decisions from whichever thread came first. Steps 4 and 8 described two structures for one memo. Shared effects cannot index one docblock's vector. Cached `DocType`s would lose their nodes and their types. A doc is parsed twice, split two ways (`//`), and three rules pick tag winners. The doc lexer uses Unicode's classes. Wrapped tags are not slices. The oracle could not be exact, and missed references and edits. The text grammar's callers were not sorted, and a class from code is parsed as PHPDoc (`Integer::MAX`). The `@var` memo already exists. Counts and memory were double-counted. | Resolution keyed by the written `Type` and a context holding whole `TemplateParam`s. `apply` decides by the spelling. One fingerprint-keyed `quick_cache` memo type for every `syntax::memo` user. Arenas per tag effect. A serialized `DocType` with its subtree and type. One parse, one winner rule, PHP's byte classes, logical tag text. A lowering oracle with its differences listed, plus O1, the edit replay and every cache state. Callers by kind, with static tables and `Type::object` for code. Counts by M10: 2.59 M, with 65 K moved to item 18; memory ≈43 MB, so the projected exit is ≈290 MB and the peak ≈375 MB. |
 
 # Appendix A. The allocation tail, every site
 
