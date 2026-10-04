@@ -3,12 +3,15 @@
 //! snapshots, through the same library calls `check-project` makes.
 //!
 //! `gate-runner [--config <file>] [--set <key=value>]... [--no-composer]
-//! [--level <n>] [--baseline <file>] [--dump-types] [--dump-front-end]
-//! [--dump-registry] [--dump-stub-bases] [--dump-expr-types]
-//! [--dump-doc-resolutions] [--reference <dir>] --out <dir> [<path>...]`
-//! loads once, checks once and writes to `<dir>`:
+//! [--level <n>] [--levels] [--baseline <file>] [--dump-types]
+//! [--dump-front-end] [--dump-registry] [--dump-stub-bases]
+//! [--dump-expr-types] [--dump-doc-resolutions] [--reference <dir>] --out
+//! <dir> [<path>...]` loads once, checks once and writes to `<dir>`:
 //! - `report.json`/`report.err`: `check-project --format json`'s stdout
 //!   and stderr;
+//! - `levels/<n>/` with `--levels`, for each level `n`: `report.json`,
+//!   `report.err` and `diagnostics.txt` as `--level <n>` writes them, cut
+//!   from the same analysis;
 //! - `emission.json`/`emission.err`: the same with `--emission-order`;
 //! - `baseline.json`/`baseline.err` with `--baseline`: the same with
 //!   `--baseline <file>`;
@@ -45,6 +48,7 @@ use phpstan_rs::project::session::{AnalysisResult, DiagnosticOrder, write_dump};
 
 struct Args {
     request: CheckRequest,
+    levels: bool,
     baseline: Option<PathBuf>,
     dump_types: bool,
     dump_front_end: bool,
@@ -84,6 +88,7 @@ impl Args {
 
 fn parse_args() -> Result<Args, String> {
     let mut request = CheckRequest::default();
+    let mut levels = false;
     let mut baseline = None;
     let mut dump_types = false;
     let (mut dump_front_end, mut dump_registry, mut dump_stub_bases) = (false, false, false);
@@ -103,6 +108,7 @@ fn parse_args() -> Result<Args, String> {
                 let level = value()?;
                 request.level = Some(level.parse().map_err(|_| format!("bad level {level}"))?);
             }
+            "--levels" => levels = true,
             "--baseline" => baseline = Some(PathBuf::from(value()?)),
             "--dump-types" => dump_types = true,
             "--dump-front-end" => dump_front_end = true,
@@ -124,6 +130,7 @@ fn parse_args() -> Result<Args, String> {
     }
     Ok(Args {
         request,
+        levels,
         baseline,
         dump_types,
         dump_front_end,
@@ -213,6 +220,20 @@ fn run() -> Result<(), String> {
         &args.out.join("diagnostics.txt"),
         &analysis.diagnostic_view(&report),
     )?;
+    if args.levels {
+        for level in 0..=types::MAX_RULE_LEVEL {
+            let out = args.out.join("levels").join(level.to_string());
+            std::fs::create_dir_all(&out).map_err(|e| format!("{}: {e}", out.display()))?;
+            let report = write_view(&out, "report", &run, &analysis, &notices, |mut o| {
+                o.cutoff = diagnostics::LevelCutoff::at(level);
+                o
+            })?;
+            write(
+                &out.join("diagnostics.txt"),
+                &analysis.diagnostic_view(&report),
+            )?;
+        }
+    }
     write_view(&args.out, "emission", &run, &analysis, &notices, |mut o| {
         o.order = DiagnosticOrder::Emission;
         o

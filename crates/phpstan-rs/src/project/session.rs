@@ -31,11 +31,24 @@ use crate::{ext, ignore_errors};
 
 use super::file_cache;
 use super::{ParsedFile, Project, ProjectSettings};
-use diagnostics::{self, Diagnostic, DiagnosticBuilder};
+use diagnostics::{self, Diagnostic, DiagnosticBuilder, LevelCutoff};
 
 /// The level reported when neither the command line nor the config sets
 /// one: every level this project's diagnostics are tagged with.
 pub const DEFAULT_REPORT_LEVEL: u8 = 6;
+
+/// The cutoff of the configured level `configured`; with none, rules up
+/// to `unconfigured_rule` are reported, their type acceptances judged at
+/// `types::UNCONFIGURED_RULE_LEVEL`.
+pub fn configured_cutoff(configured: Option<u8>, unconfigured_rule: u8) -> LevelCutoff {
+    match configured {
+        Some(level) => LevelCutoff::at(level),
+        None => LevelCutoff {
+            rule: unconfigured_rule,
+            found: types::UNCONFIGURED_RULE_LEVEL,
+        },
+    }
+}
 
 /// The run's own top-level keys: what's analysed, at which level, and how
 /// the report is post-processed.
@@ -72,9 +85,9 @@ pub struct Overrides {
     pub scan_paths: Vec<PathBuf>,
     pub stub_paths: Vec<PathBuf>,
     pub level: Option<u8>,
-    /// Reports diagnostics up to this level without configuring it (the
-    /// level also drives type acceptance): the fixture harness records
-    /// every level at once this way.
+    /// Reports the rules up to this level without configuring it (the
+    /// level also judges the type acceptances): the fixture harness
+    /// records every rule level at once this way.
     pub report_level: Option<u8>,
     pub php_version: Option<String>,
     pub no_composer: bool,
@@ -103,7 +116,7 @@ pub struct Session {
     vendors: Vec<composer::PendingVendor>,
     promoted: Vec<PathBuf>,
     stub_dirs: Vec<PathBuf>,
-    level: u8,
+    cutoff: LevelCutoff,
     emission_order: bool,
     banned_constructs: Vec<banned::BannedConstruct>,
     banned_types: Vec<String>,
@@ -167,10 +180,10 @@ pub struct AnalysisResult {
 }
 
 /// The post-processing a finalized report gets, in this order: the level
-/// filter, inline ignores, `ignore_errors`, the baseline, then the order.
+/// cutoff, inline ignores, `ignore_errors`, the baseline, then the order.
 #[derive(Clone)]
 pub struct Finalize {
-    pub level: u8,
+    pub cutoff: LevelCutoff,
     pub report_unmatched_ignores: bool,
     pub ignore_errors: Vec<ignore_errors::IgnoreErrorEntry>,
     pub baseline: Option<crate::baseline::Baseline>,
@@ -251,7 +264,7 @@ impl AnalysisResult {
                 .extend(diagnostics.iter().cloned());
         }
         for diagnostics in results.values_mut() {
-            diagnostics.retain(|d| d.level <= options.level);
+            diagnostics.retain(|d| options.cutoff.reports(d));
         }
         self.project
             .apply_inline_ignores(&mut results, options.report_unmatched_ignores);
@@ -384,11 +397,10 @@ impl Session {
         if dirs.is_empty() {
             return Err("no paths given on the command line or in the config file".to_string());
         }
-        let configured_level = overrides.level.or(session.level);
-        let level = overrides
-            .report_level
-            .or(configured_level)
-            .unwrap_or(DEFAULT_REPORT_LEVEL);
+        let mut cutoff = configured_cutoff(overrides.level.or(session.level), DEFAULT_REPORT_LEVEL);
+        if let Some(rule) = overrides.report_level {
+            cutoff.rule = rule;
+        }
         psr3.context_key_pattern()?;
         let php_version = match &overrides.php_version {
             Some(version) => Some(types::PhpVersions::exactly(types::parse_php_version(
@@ -521,7 +533,6 @@ impl Session {
             absolute_root: Some(absolute_root),
             packages: composer::PackageIndex::new(composer_manifests),
             php_versions,
-            configured_level,
             phpstan_api_check_enabled,
             defer_inline_ignores: true,
             retain_source: false,
@@ -555,7 +566,7 @@ impl Session {
             vendors,
             promoted,
             stub_dirs,
-            level,
+            cutoff,
             emission_order: overrides.emission_order,
             banned_constructs,
             banned_types: banned_settings.types,
@@ -615,7 +626,7 @@ impl Session {
     /// a baseline.
     pub fn finalize_options(&self) -> Finalize {
         Finalize {
-            level: self.level,
+            cutoff: self.cutoff,
             report_unmatched_ignores: self.session.report_unmatched_ignored_errors,
             ignore_errors: self.session.ignore_errors.clone(),
             baseline: None,

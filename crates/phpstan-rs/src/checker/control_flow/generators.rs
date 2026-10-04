@@ -134,27 +134,27 @@ impl<'a> Checker<'a> {
         let enclosing_send = generator_template_param(&enclosing, self.registry, "TSend");
         if !enclosing_key.is_mixed()
             && !inner_key.is_mixed()
-            && !self.rule_level_accepts(&enclosing_key, &inner_key).yes()
+            && let Some(from) = self.rejected_from(&enclosing_key, &inner_key)
         {
-            self.report(format!(
+            self.report_found_from(format!(
                     "Key type {inner_key} of yielded generator is not assignable to key type {enclosing_key} of enclosing generator."
                 ),
                 span,
                 0,
+                from,
                 "generator.keyType",
             );
         }
         if !enclosing_value.is_mixed()
             && !inner_value.is_mixed()
-            && !self
-                .rule_level_accepts(&enclosing_value, &inner_value)
-                .yes()
+            && let Some(from) = self.rejected_from(&enclosing_value, &inner_value)
         {
-            self.report(format!(
+            self.report_found_from(format!(
                     "Value type {inner_value} of yielded generator is not assignable to value type {enclosing_value} of enclosing generator."
                 ),
                 span,
                 0,
+                from,
                 "generator.valueType",
             );
         }

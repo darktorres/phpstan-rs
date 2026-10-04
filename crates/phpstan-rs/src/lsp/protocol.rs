@@ -247,7 +247,7 @@ pub(crate) fn to_lsp_diagnostic(
     };
     LspDiagnostic {
         range: range_to_lsp(index, unit, d.span),
-        severity: Some(level_to_severity(d.level)),
+        severity: Some(level_to_severity(d.reporting_level())),
         code: Some(NumberOrString::String(d.identifier.to_string())),
         source: Some("phpstan-rs".to_string()),
         message,
@@ -255,8 +255,8 @@ pub(crate) fn to_lsp_diagnostic(
     }
 }
 
-/// Maps `Diagnostic::level` (0 lowest/laxest - see that field's own doc
-/// comment) to an LSP severity tier. Level 0 ("definitely broken":
+/// Maps `Diagnostic::reporting_level` (0 lowest/laxest - see
+/// `Diagnostic::level`'s own doc comment) to an LSP severity tier. Level 0 ("definitely broken":
 /// undefined symbol/arity) is the only bucket that unambiguously means
 /// the code cannot be right, so it's the only `ERROR`; level 6 is the
 /// only bucket this project's own doc comments single out as a

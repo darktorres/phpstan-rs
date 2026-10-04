@@ -6,6 +6,7 @@ mod accepts;
 mod kinds;
 mod super_type;
 
+pub use accepts::{MAX_RULE_LEVEL, UNCONFIGURED_RULE_LEVEL, strict_mixed_receiver_from};
 pub(crate) use super_type::scalar_family;
 
 use crate::{ClassHierarchy, TrinaryLogic};
@@ -16,8 +17,6 @@ pub struct Relation<'h> {
     pub hierarchy: &'h dyn ClassHierarchy,
     /// `array<mixed>` and a `mixed` shape field stop meaning "unknown".
     pub strict_mixed_arrays: bool,
-    /// The configured rule level, before any default is applied.
-    pub configured_level: Option<u8>,
     /// PHPStan's `checkBenevolentUnionTypes`.
     pub check_benevolent_union_types: bool,
 }
@@ -29,7 +28,6 @@ impl Relation<'static> {
         Relation {
             hierarchy: &crate::NoClasses,
             strict_mixed_arrays: false,
-            configured_level: None,
             check_benevolent_union_types: false,
         }
     }

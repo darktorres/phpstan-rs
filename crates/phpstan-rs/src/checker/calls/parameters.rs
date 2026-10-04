@@ -301,12 +301,12 @@ impl<'a> Checker<'a> {
                 Some(c) => self.resolve_pseudo(param.ty(), c),
                 None => param.ty().clone(),
             };
-            if !self.rule_level_accepts(&param_ty, &arg_ty).yes() {
+            if let Some(from) = self.rejected_from(&param_ty, &arg_ty) {
                 let position = match &argument.name {
                     Some(name) => Position::Name(name),
                     None => Position::Index(i + 1),
                 };
-                self.report(
+                self.report_found_from(
                     format!(
                         "{} of {} expects {param_ty}, {arg_ty} given.",
                         describe_parameter(param, position),
@@ -314,6 +314,7 @@ impl<'a> Checker<'a> {
                     ),
                     argument.span,
                     5,
+                    from,
                     "argument.type",
                 );
             }

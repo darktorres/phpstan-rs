@@ -152,11 +152,14 @@ impl<'a> Checker<'a> {
                             "return.noParent",
                         );
                     }
-                    if !body_ty.is_mixed() && !self.rule_level_accepts(&expected, &body_ty).yes() {
-                        self.report(
+                    if !body_ty.is_mixed()
+                        && let Some(from) = self.rejected_from(&expected, &body_ty)
+                    {
+                        self.report_found_from(
                             format!("return type mismatch: expected {expected}, got {body_ty}"),
                             body.span,
                             3,
+                            from,
                             "return.type",
                         );
                     }

@@ -12,8 +12,10 @@
 //!   (`THREAD_STATES`). The front end's dump is taken in the states that
 //!   change the thread count, and the stub bases in the scoped
 //!   configuration's first two, cold and then read back.
-//! - **Levels** run once each: a level changes the analysis, so no level's
-//!   report is another's filtered.
+//! - **Levels.** Every finding carries the levels it is made at, so each
+//!   level's report is a cut of one analysis: the scoped and all-on
+//!   configurations' runs in the full pass write every level's report
+//!   beside their own, compared across states like their other artifacts.
 //! - **The server's sessions and the edit replays** run at the default
 //!   thread count and at one, a replay's two runs one after the other in a
 //!   fresh copy of its tree, which the dumps print.
@@ -143,19 +145,16 @@ const RUN_THREADS: [Option<&str>; 2] = [None, Some("1")];
 /// One worker's task.
 enum Task {
     /// A configuration in each of `states`, with the type and baseline
-    /// views, the dumps, the stub bases and the check of the shipped
-    /// binary's emission order as asked.
+    /// views, every level's report, the dumps, the stub bases and the
+    /// check of the shipped binary's emission order as asked.
     Config {
         config: Config,
         states: &'static [State],
         views: bool,
+        levels: bool,
         dumps: bool,
         stub_bases: bool,
         determinism: bool,
-    },
-    Level {
-        config: Config,
-        level: &'static str,
     },
     /// The server's session over `project`, at each thread count.
     Session {
@@ -178,7 +177,7 @@ impl Task {
     /// Whether it runs over the corpus, which takes a few gigabytes.
     fn large(&self) -> bool {
         match self {
-            Task::Config { .. } | Task::Level { .. } | Task::Fixtures => true,
+            Task::Config { .. } | Task::Fixtures => true,
             Task::Session { project, .. } => project == ".",
             Task::Replay { slug, .. } => slug == "piwigo",
             Task::VendorProject { .. } => false,
@@ -194,7 +193,7 @@ impl Task {
                 ..
             } => states.len() + usize::from(*determinism),
             Task::Session { .. } | Task::Replay { .. } => RUN_THREADS.len(),
-            Task::Level { .. } | Task::VendorProject { .. } | Task::Fixtures => 1,
+            Task::VendorProject { .. } | Task::Fixtures => 1,
         }
     }
 
@@ -202,7 +201,6 @@ impl Task {
     fn group(&self) -> (&'static str, Option<&'static str>) {
         match self {
             Task::Config { config, .. } => ("configurations", Some(config.name)),
-            Task::Level { .. } => ("levels", None),
             Task::Session { .. } => ("sessions", None),
             Task::Replay { .. } => ("replays", None),
             Task::VendorProject { .. } => ("vendor projects", None),
@@ -234,10 +232,12 @@ fn tasks(setup: &PassSetup) -> Result<Vec<Task>, String> {
         vec![(SCOPED, &QUICK_STATE[..]), (ALL_ON, &QUICK_STATE[..])]
     };
     for (config, states) in configs {
+        let views = matches!(config.name, "scoped" | "all-on");
         tasks.push(Task::Config {
             config,
             states,
-            views: matches!(config.name, "scoped" | "all-on"),
+            views,
+            levels: views && setup.full,
             dumps: setup.full,
             stub_bases: setup.full && config.name == "scoped",
             determinism: config.name == "all-on" || (setup.full && config.name == "unscoped"),
@@ -248,11 +248,6 @@ fn tasks(setup: &PassSetup) -> Result<Vec<Task>, String> {
             name: "piwigo".into(),
             project: ".".into(),
         });
-        for config in [SCOPED, ALL_ON] {
-            for level in &LEVELS[1..] {
-                tasks.push(Task::Level { config, level });
-            }
-        }
     }
     if setup.fixtures {
         tasks.push(Task::Fixtures);
@@ -416,13 +411,7 @@ fn progress_groups(tasks: &[Task]) -> (Vec<Group>, Vec<Vec<usize>>) {
             lines.push((row, 1));
         }
     }
-    for kind in [
-        "levels",
-        "sessions",
-        "replays",
-        "vendor projects",
-        "fixtures",
-    ] {
+    for kind in ["sessions", "replays", "vendor projects", "fixtures"] {
         lines.push((kind, 0));
     }
     let mut totals = vec![0; lines.len()];
@@ -617,8 +606,8 @@ impl Pass<'_> {
 
     /// Where the run in `b` first differs from the run in `a`: a dump,
     /// written as a text with its manifest beside it, or a directory of
-    /// them and of plain files, which a file only `a` has does not make
-    /// differ: a dump `b`'s state does not take.
+    /// them, of plain files and of such directories, which a file only `a`
+    /// has does not make differ: a dump `b`'s state does not take.
     fn run_difference(&self, a: &Path, b: &Path) -> Result<Option<String>, String> {
         if !b.is_dir() {
             return Ok(self
@@ -637,6 +626,12 @@ impl Pass<'_> {
             }
             if !old.exists() {
                 return Ok(Some(format!("{}: only this run has it", new.display())));
+            }
+            if new.is_dir() {
+                if let Some(found) = self.run_difference(&old, &new)? {
+                    return Ok(Some(found));
+                }
+                continue;
             }
             let found = if name.ends_with(".manifest") {
                 self.dump_difference(&old, &new)?
@@ -690,6 +685,7 @@ fn run_task(pass: &Pass, index: usize, task: Task) -> Result<(), String> {
             config,
             states,
             views,
+            levels,
             dumps,
             stub_bases,
             determinism,
@@ -698,12 +694,14 @@ fn run_task(pass: &Pass, index: usize, task: Task) -> Result<(), String> {
             index,
             config,
             states,
-            views,
-            dumps,
-            stub_bases,
-            determinism,
+            ConfigRuns {
+                views,
+                levels,
+                dumps,
+                stub_bases,
+                determinism,
+            },
         ),
-        Task::Level { config, level } => level_task(pass, index, config, level),
         Task::Session { name, project } => session_task(pass, index, &name, &project),
         Task::Replay { slug, from, args } => replay_task(pass, index, &slug, &from, &args),
         Task::VendorProject { project } => vendor_project_task(pass, index, &project),
@@ -729,20 +727,36 @@ fn config_dumps(config: &str, stub_bases: bool) -> Vec<(&'static str, String)> {
     dumps
 }
 
+/// What a configuration's runs write and check beyond its report.
+#[derive(Clone, Copy)]
+struct ConfigRuns {
+    /// The type and baseline views.
+    views: bool,
+    /// Every level's report.
+    levels: bool,
+    dumps: bool,
+    stub_bases: bool,
+    /// The check of the shipped binary's emission order.
+    determinism: bool,
+}
+
 /// Analyses `config` in each of `states`, each state's artifacts compared
 /// with the first's, and records the first's as soon as it has run, its
 /// dumps' texts then gone from the scratch.
-#[allow(clippy::too_many_arguments)]
 fn config_task(
     pass: &Pass,
     index: usize,
     config: Config,
     states: &'static [State],
-    views: bool,
-    dumps: bool,
-    stub_bases: bool,
-    determinism: bool,
+    runs: ConfigRuns,
 ) -> Result<(), String> {
+    let ConfigRuns {
+        views,
+        levels,
+        dumps,
+        stub_bases,
+        determinism,
+    } = runs;
     let dir = pass.scratch.join(config.name);
     let caches = dir.join("caches");
     let baseline = baseline_file(config.name);
@@ -766,6 +780,9 @@ fn config_task(
                 cmd.arg("--baseline").arg(&baseline);
             }
         }
+        if levels {
+            cmd.arg("--levels");
+        }
         if dumps {
             cmd.args([
                 "--dump-registry",
@@ -785,7 +802,7 @@ fn config_task(
         match &first {
             None => {
                 if pass.hash().is_some() {
-                    record_config(pass, config, &out, views, dumps, stub_bases)?;
+                    record_config(pass, config, &out, runs)?;
                     for (file, _) in config_dumps(config.name, stub_bases) {
                         let _ = std::fs::remove_file(out.join(file));
                     }
@@ -857,18 +874,18 @@ fn emission_order_check(
     Ok(())
 }
 
-/// Records the artifacts of `config`'s run in `out`.
-fn record_config(
-    pass: &Pass,
-    config: Config,
-    out: &Path,
-    views: bool,
-    dumps: bool,
-    stub_bases: bool,
-) -> Result<(), String> {
+/// Records the artifacts of `config`'s run in `out`, each level's report
+/// as its own artifact.
+fn record_config(pass: &Pass, config: Config, out: &Path, runs: ConfigRuns) -> Result<(), String> {
     let artifact = config.name;
     let mut entries = report_entries(artifact, out)?;
-    if views {
+    if runs.levels {
+        for level in &LEVELS[1..] {
+            let name = artifact_name(&config, level);
+            entries.extend(report_entries(&name, &out.join("levels").join(level))?);
+        }
+    }
+    if runs.views {
         let name = format!("types-{artifact}.txt");
         entries.push((
             name.clone(),
@@ -900,8 +917,8 @@ fn record_config(
             eprintln!("no reference baseline for {artifact} yet; run `cargo xtask baseline`");
         }
     }
-    if dumps {
-        for (file, entry) in config_dumps(artifact, stub_bases) {
+    if runs.dumps {
+        for (file, entry) in config_dumps(artifact, runs.stub_bases) {
             entries.push((entry, Content::Dump(manifest_path(&out.join(file)))));
         }
     }
@@ -934,29 +951,6 @@ fn report_entries(artifact: &str, out: &Path) -> Result<Vec<(String, Content)>, 
 
 fn read_text(path: &Path) -> Result<String, String> {
     std::fs::read_to_string(path).map_err(|e| format!("{}: {e}", path.display()))
-}
-
-/// Analyses `config` at `level`, once, and records its report.
-fn level_task(pass: &Pass, index: usize, config: Config, level: &str) -> Result<(), String> {
-    let artifact = artifact_name(&config, level);
-    let out = pass.scratch.join(&artifact);
-    // Runs at once share the cache directory: the per-file cache stays off.
-    let state = State {
-        name: "levels",
-        cache: Some("levels"),
-        file_cache: false,
-        threads: None,
-    };
-    let mut cmd = pass.command(&pass.runner, &state, &pass.scratch);
-    cmd.args((config.args)())
-        .args(["--level", level, "--out"])
-        .arg(&out);
-    pass.step(index, &format!("level {artifact}"), || run(&mut cmd))?;
-    if pass.hash().is_some() {
-        pass.record(&artifact, report_entries(&artifact, &out)?)?;
-    }
-    let _ = std::fs::remove_dir_all(&out);
-    Ok(())
 }
 
 /// Takes the server's session over `project` at each thread count, and

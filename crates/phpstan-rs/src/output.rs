@@ -83,9 +83,17 @@ struct JsonMessage<'a> {
     line: u32,
     column: u32,
     level: u8,
+    #[serde(rename = "foundFrom", skip_serializing_if = "is_zero")]
+    found_from: u8,
+    #[serde(rename = "foundBelow", skip_serializing_if = "Option::is_none")]
+    found_below: Option<u8>,
     identifier: &'a str,
     #[serde(skip_serializing_if = "Option::is_none")]
     tip: Option<String>,
+}
+
+fn is_zero(level: &u8) -> bool {
+    *level == 0
 }
 
 /// One file's entry: its diagnostics, counted and listed without being
@@ -111,6 +119,8 @@ impl Serialize for JsonMessages<'_> {
             line: d.span.start.line,
             column: d.span.start.col,
             level: d.level,
+            found_from: d.found_from,
+            found_below: d.found_below,
             identifier: &d.identifier,
             tip: d.tip_text(),
         }))

@@ -2,11 +2,18 @@ use crate::relation::{AcceptsResult, Relation};
 use crate::{CallableSig, ClassKind, Repr, Shape, ShapeKey, Type, Variance};
 
 // The levels at which PHPStan's `RuleLevelHelper` checks turn on
-// (`rule_level_accepts`, `accepts_at_level`).
+// (`rejected_from`, `accepts_at_level`).
 const UNION_TYPES_CHECK_LEVEL: u8 = 7;
 const NULLABLES_CHECK_LEVEL: u8 = 8;
 const EXPLICIT_MIXED_CHECK_LEVEL: u8 = 9;
 const IMPLICIT_MIXED_CHECK_LEVEL: u8 = 10;
+
+/// The highest rule level: every `RuleLevelHelper` check is on.
+pub const MAX_RULE_LEVEL: u8 = IMPLICIT_MIXED_CHECK_LEVEL;
+
+/// The level acceptance is judged at when none is configured: nullables
+/// and union types checked, `mixed` accepted anywhere.
+pub const UNCONFIGURED_RULE_LEVEL: u8 = NULLABLES_CHECK_LEVEL;
 
 impl Relation<'_> {
     /// PHPStan's `Type::accepts()`: whether a value of `accepted` may
@@ -15,12 +22,23 @@ impl Relation<'_> {
         AcceptsResult::from_bool(self.accepts_type(accepted, accepting))
     }
 
-    /// `accepts`, as a `RuleLevelHelper` applies it at the configured
-    /// rule level (`checkNullables`, `checkUnionTypes`,
+    /// The lowest rule level at which `accepts`, as a `RuleLevelHelper`
+    /// applies it (`checkNullables`, `checkUnionTypes`,
     /// `checkExplicitMixed`/`checkImplicitMixed`,
-    /// `checkBenevolentUnionTypes`).
-    pub fn rule_level_accepts(&self, accepting: &Type, accepted: &Type) -> AcceptsResult {
-        AcceptsResult::from_bool(self.rule_level_accepts_type(accepted, accepting))
+    /// `checkBenevolentUnionTypes`), rejects `accepted` where `accepting`
+    /// is declared: every level from it on rejects it, every level below
+    /// it accepts it. `None` when every level accepts it.
+    pub fn rejected_from(&self, accepting: &Type, accepted: &Type) -> Option<u8> {
+        let found = self.rejected_from_type(accepted, accepting);
+        #[cfg(debug_assertions)]
+        for level in 0..=MAX_RULE_LEVEL {
+            assert_eq!(
+                self.rule_level_accepts_type(accepted, accepting, level),
+                found.is_none_or(|from| level < from),
+                "`{accepting}` accepting `{accepted}` at level {level}, rejected from {found:?}",
+            );
+        }
+        found
     }
 
     /// `accepts` as a plain relation of `sub` to `sup`, consulting the
@@ -469,43 +487,39 @@ impl Relation<'_> {
         })
     }
 
-    /// The level-aware counterpart to `accepts` above - real
-    /// PHPStan's `RuleLevelHelper::accepts()` two genuinely level-gated
-    /// behaviors (`checkNullables`/`checkUnionTypes`) applied to the
-    /// identical argument/return/property-type check `accepts`
-    /// already performs, for the handful of real call sites a `Rule`
-    /// class actually consumes `RuleLevelHelper` through (not every
-    /// `accepts` call site project-wide - narrowing, LSP-override
-    /// compatibility, and generics bound-checking are real PHPStan's own
-    /// separate, never-level-gated `isSuperTypeOf()` domain, and must
-    /// keep calling `accepts` directly).
-    ///
-    /// `self.configured_level` is the project's own `level` setting
-    /// *before* `check-project`'s own `MAX_LEVEL`-driven `.unwrap_or(6)`
-    /// collapse - `None` (never configured) keeps today's always-strict
-    /// answer exactly, the safe default for every existing caller/test
-    /// that never opts into this.
+    /// `rejected_from`, deciding at the strictest level first: most
+    /// values are accepted there, and each level below it only adds
+    /// leniency.
+    fn rejected_from_type(&self, sub: &Type, sup: &Type) -> Option<u8> {
+        if self.rule_level_accepts_type(sub, sup, MAX_RULE_LEVEL) {
+            return None;
+        }
+        let thresholds = [
+            IMPLICIT_MIXED_CHECK_LEVEL,
+            EXPLICIT_MIXED_CHECK_LEVEL,
+            NULLABLES_CHECK_LEVEL,
+            UNION_TYPES_CHECK_LEVEL,
+        ];
+        Some(
+            thresholds
+                .into_iter()
+                .find(|&from| self.rule_level_accepts_type(sub, sup, from - 1))
+                .unwrap_or(0),
+        )
+    }
+
+    /// PHPStan's `RuleLevelHelper::accepts()` at rule level `level`: the
+    /// argument, return and property type checks' `accepts`, where
+    /// narrowing, override compatibility and generic bounds use the plain
+    /// one, never level-gated.
     ///
     /// Below `checkUnionTypes`' level a union given is accepted when some
     /// member is (PHPStan accepts its `Maybe`); from it on, every member
     /// must be.
-    fn rule_level_accepts_type(&self, sub: &Type, sup: &Type) -> bool {
+    fn rule_level_accepts_type(&self, sub: &Type, sup: &Type, level: u8) -> bool {
         if matches!(sub.repr(), Repr::Error) || matches!(sup.repr(), Repr::Error) {
             return true;
         }
-        // Never configured means "assume the strictest threshold for
-        // `checkNullables`/`checkUnionTypes`" (`NULLABLES_CHECK_LEVEL`,
-        // matching this method's own pre-existing behavior exactly - the
-        // safe default for every caller/test that never opts in) - but
-        // NOT the strictest threshold for the newer `checkExplicitMixed`/
-        // `checkImplicitMixed` (9/10, strictly above 8): those are real
-        // PHPStan's own always-off-unless-opted-in checks, so an
-        // unconfigured level must keep accepting `Mixed` unconditionally,
-        // exactly like every other caller already did before either
-        // existed. `NULLABLES_CHECK_LEVEL` sits below both, so passing it
-        // through `rule_level_accepts` gets both properties
-        // at once rather than needing its own separate branch.
-        let level = self.configured_level.unwrap_or(NULLABLES_CHECK_LEVEL);
         self.rule_level_accepts_rec(sub, sup, level)
     }
 
@@ -534,9 +548,7 @@ impl Relation<'_> {
             // byte-identical to `accepts_at_level` (which still applies
             // `checkExplicitMixed`/`checkImplicitMixed`, real PHPStan's own
             // level 9/10 - unlike `checkNullables`/`checkUnionTypes`, neither
-            // is subsumed by this fast path, since 9/10 sit *above* 8), the
-            // safe default for a project explicitly configured at (or above)
-            // real PHPStan's own strictest level for *this* behavior.
+            // is subsumed by this fast path, since 9/10 sit *above* 8).
             // `NULLABLES_CHECK_LEVEL` (8) is strictly above
             // `UNION_TYPES_CHECK_LEVEL` (7), so `level >= NULLABLES_CHECK_LEVEL`
             // alone already implies the other - both consts are still named
@@ -553,6 +565,13 @@ impl Relation<'_> {
             // assignability on).
             if !matches!(sub.repr(), Repr::Union(_)) && !matches!(sup.repr(), Repr::Union(_)) {
                 return self.accepts_at_level(sub, sup, level);
+            }
+            // What the strict levels accept, every level below them does:
+            // the member-wise leniencies below only add to it (a union
+            // declared, taken member by member, rejects a template its
+            // bound makes acceptable).
+            if self.accepts_at_level(sub, sup, level) {
+                return true;
             }
 
             // `checkNullables` (real PHPStan's own `transformAcceptedType`,
@@ -608,26 +627,6 @@ impl Relation<'_> {
                 _ => self.accepts_at_level(sub, sup, level),
             }
         })
-    }
-
-    /// The level at which real PHPStan's `RuleLevelHelper::
-    /// findTypeToCheck` turns `ty` into a `StrictMixedType` receiver -
-    /// one that can't have a method called, a property read, or an
-    /// offset taken on it (`Cannot call method foo() on mixed.`) - or
-    /// `None` when `ty` isn't `Mixed` or the configured level is below
-    /// that threshold. An unconfigured level never triggers it, the same
-    /// "`checkExplicitMixed`/`checkImplicitMixed` stay off unless opted
-    /// into" default `rule_level_accepts` documents.
-    pub fn strict_mixed_receiver_level(&self, ty: &Type) -> Option<u8> {
-        let Repr::Mixed(is_explicit, _) = ty.repr() else {
-            return None;
-        };
-        let threshold = if *is_explicit {
-            EXPLICIT_MIXED_CHECK_LEVEL
-        } else {
-            IMPLICIT_MIXED_CHECK_LEVEL
-        };
-        (self.configured_level? >= threshold).then_some(threshold)
     }
 
     /// `accepts` at rule level `level`, with PHPStan's level 9/10
@@ -862,4 +861,21 @@ fn is_finite_scalar_type(ty: &Type) -> bool {
             | Repr::FloatLiteral(_)
             | Repr::EnumCase(_, _)
     ) || matches!(ty.repr(), Repr::ArrayShape(shape) if shape.is_empty_array())
+}
+
+/// The level from which PHPStan's `RuleLevelHelper::findTypeToCheck`
+/// turns `ty` into a `StrictMixedType` receiver - one that can't have a
+/// method called, a property read, or an offset taken on it (`Cannot call
+/// method foo() on mixed.`): `checkExplicitMixed`'s for an explicit
+/// `mixed`, `checkImplicitMixed`'s for an implicit one. `None` when `ty`
+/// isn't `mixed`.
+pub fn strict_mixed_receiver_from(ty: &Type) -> Option<u8> {
+    let Repr::Mixed(is_explicit, _) = ty.repr() else {
+        return None;
+    };
+    Some(if *is_explicit {
+        EXPLICIT_MIXED_CHECK_LEVEL
+    } else {
+        IMPLICIT_MIXED_CHECK_LEVEL
+    })
 }

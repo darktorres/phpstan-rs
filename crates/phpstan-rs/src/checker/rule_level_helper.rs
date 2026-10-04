@@ -5,8 +5,6 @@ use types::{ClassHierarchy, Relation, Type};
 
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub struct RuleLevelHelper {
-    /// The configured rule level, before any default is applied.
-    pub configured_level: Option<u8>,
     /// `array<mixed>` and a `mixed` shape field stop meaning "unknown".
     pub strict_mixed_arrays: bool,
     /// PHPStan's `checkBenevolentUnionTypes`.
@@ -19,7 +17,6 @@ impl RuleLevelHelper {
         Relation {
             hierarchy,
             strict_mixed_arrays: self.strict_mixed_arrays,
-            configured_level: self.configured_level,
             check_benevolent_union_types: self.check_benevolent_union_types,
         }
     }

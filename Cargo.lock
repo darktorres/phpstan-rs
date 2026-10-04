@@ -1625,7 +1625,9 @@ name = "phpstan-rs-gate-runner"
 version = "0.1.0"
 dependencies = [
  "phpstan-rs",
+ "phpstan-rs-diagnostics",
  "phpstan-rs-dumps",
+ "phpstan-rs-types",
 ]
 
 [[package]]

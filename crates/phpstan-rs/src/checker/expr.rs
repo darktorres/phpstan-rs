@@ -1100,17 +1100,14 @@ impl<'a> Checker<'a> {
                         return Type::mixed();
                     }
                 }
-                if let Some(level) = self.strict_mixed_receiver_level(&nonobject_ty) {
-                    self.report(
+                if let Some(from) = types::strict_mixed_receiver_from(&nonobject_ty) {
+                    self.report_found_from(
                         format!("Cannot call method {method}() on mixed."),
                         e.span,
-                        level,
+                        0,
+                        from,
                         "method.nonObject",
                     );
-                    for a in args {
-                        self.check_expr(&a.value, locals, label);
-                    }
-                    return Type::mixed();
                 }
                 // `sig` (and every class-name-dependent decision below
                 // it - argument-type checking, visibility/`@internal`/
@@ -2885,11 +2882,12 @@ impl<'a> Checker<'a> {
                     );
                 }
                 if non_object_level != Some(0) {
-                    if let Some(level) = self.strict_mixed_receiver_level(&nonobject_ty) {
-                        self.report(
+                    if let Some(from) = types::strict_mixed_receiver_from(&nonobject_ty) {
+                        self.report_found_from(
                             format!("Cannot access property ${prop} on mixed."),
                             e.span,
-                            level,
+                            0,
+                            from,
                             "property.nonObject",
                         );
                     } else if !property_exists_guarded
@@ -4001,14 +3999,14 @@ impl<'a> Checker<'a> {
                         );
                     }
                     // See `checker::calls`' own identical comment:
-                    // `rule_level_accepts` already accepts a
-                    // `Mixed` body type unconditionally below real
-                    // PHPStan's own level 9/10.
-                    if !self.rule_level_accepts(&expected, &body_ty).yes() {
-                        self.report(
+                    // `rejected_from` already accepts a `Mixed` body type
+                    // below real PHPStan's own level 9/10.
+                    if let Some(from) = self.rejected_from(&expected, &body_ty) {
+                        self.report_found_from(
                             format!("return type mismatch: expected {expected}, got {body_ty}"),
                             body.span,
                             3,
+                            from,
                             "return.type",
                         );
                     }
@@ -6372,8 +6370,8 @@ impl<'a> Checker<'a> {
                 self.relation().can_access_properties(m).no()
             }
         }) else {
-            // A `mixed` receiver, on the levels that check it.
-            if let Some(level) = self.strict_mixed_receiver_level(&checked) {
+            // A `mixed` receiver, from the levels that check it.
+            if let Some(from) = types::strict_mixed_receiver_from(&checked) {
                 let (message, identifier) = if is_call {
                     ("Cannot call a dynamic method on mixed.", "method.nonObject")
                 } else {
@@ -6382,7 +6380,7 @@ impl<'a> Checker<'a> {
                         "property.nonObject",
                     )
                 };
-                self.report(message.to_string(), span, level, identifier);
+                self.report_found_from(message.to_string(), span, 0, from, identifier);
             }
             return;
         };

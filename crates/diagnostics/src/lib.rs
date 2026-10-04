@@ -99,6 +99,16 @@ pub struct Diagnostic {
     pub message: String,
     pub span: Range,
     pub level: u8,
+    /// The lowest configured level the finding is made at: below it, the
+    /// type acceptance it reports is lenient enough (PHPStan's
+    /// `checkUnionTypes`, `checkNullables`, `checkExplicitMixed`/
+    /// `checkImplicitMixed`) to accept the value. 0 when every level
+    /// makes it.
+    pub found_from: u8,
+    /// The configured level from which the finding is no longer made: a
+    /// check of a value that runs only where a broader acceptance took
+    /// it, which reports the value itself from that level on.
+    pub found_below: Option<u8>,
     /// A dot-separated, PHPStan-style machine identifier for this
     /// diagnostic's *kind* (e.g. `"argument.type"`, `"class.notFound"`,
     /// `"return.type"`) - stable across occurrences of the same underlying
@@ -121,6 +131,12 @@ pub struct Diagnostic {
 }
 
 impl Diagnostic {
+    /// The lowest configured level a report shows this finding at, which
+    /// grades its severity.
+    pub fn reporting_level(&self) -> u8 {
+        self.level.max(self.found_from)
+    }
+
     /// The tips as one text: a single tip as written, several as a
     /// bulleted list, the way PHPStan shows them. `None` without tips.
     pub fn tip_text(&self) -> Option<String> {
@@ -138,8 +154,9 @@ impl Diagnostic {
 }
 
 /// The total order every consumer presents diagnostics in within a file:
-/// position, then identifier, message and tip, so diagnostics sharing a
-/// position don't come out in whatever order the checks happened to run.
+/// position, then identifier, message, tip and levels, so diagnostics
+/// sharing a position don't come out in whatever order the checks
+/// happened to run.
 pub fn diagnostic_order(a: &Diagnostic, b: &Diagnostic) -> std::cmp::Ordering {
     (
         a.span.start.line,
@@ -147,6 +164,9 @@ pub fn diagnostic_order(a: &Diagnostic, b: &Diagnostic) -> std::cmp::Ordering {
         &a.identifier,
         &a.message,
         &a.tips,
+        a.level,
+        a.found_from,
+        a.found_below,
     )
         .cmp(&(
             b.span.start.line,
@@ -154,12 +174,45 @@ pub fn diagnostic_order(a: &Diagnostic, b: &Diagnostic) -> std::cmp::Ordering {
             &b.identifier,
             &b.message,
             &b.tips,
+            b.level,
+            b.found_from,
+            b.found_below,
         ))
 }
 
 /// Sorts one file's diagnostics into `diagnostic_order`.
 pub fn sort_diagnostics(diagnostics: &mut [Diagnostic]) {
     diagnostics.sort_by(diagnostic_order);
+}
+
+/// Which findings a report shows: those of rules at or below `rule`, made
+/// at the configured level `found`. Every finding of an analysis is made
+/// whatever the level; a report cuts them.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct LevelCutoff {
+    /// The highest rule level reported.
+    pub rule: u8,
+    /// The configured level the type acceptances are judged at.
+    pub found: u8,
+}
+
+impl LevelCutoff {
+    /// The cutoff of the configured level `level`.
+    pub fn at(level: u8) -> LevelCutoff {
+        LevelCutoff {
+            rule: level,
+            found: level,
+        }
+    }
+
+    /// Whether a report at this cutoff shows `diagnostic`.
+    pub fn reports(&self, diagnostic: &Diagnostic) -> bool {
+        diagnostic.level <= self.rule
+            && diagnostic.found_from <= self.found
+            && diagnostic
+                .found_below
+                .is_none_or(|below| self.found < below)
+    }
 }
 
 /// A single suggested textual replacement: replace whatever source text
@@ -190,6 +243,8 @@ pub struct DiagnosticBuilder {
     message: String,
     span: Span,
     level: u8,
+    found_from: u8,
+    found_below: Option<u8>,
     identifier: Identifier,
     tips: Vec<String>,
     non_ignorable: bool,
@@ -211,11 +266,25 @@ impl DiagnosticBuilder {
             message: message.into(),
             span,
             level,
+            found_from: 0,
+            found_below: None,
             identifier: identifier.into(),
             tips: Vec::new(),
             non_ignorable: false,
             fix: None,
         }
+    }
+
+    /// The finding is made only from configured level `level` on.
+    pub fn found_from(mut self, level: u8) -> Self {
+        self.found_from = level;
+        self
+    }
+
+    /// The finding is made only below configured level `level`.
+    pub fn found_below(mut self, level: u8) -> Self {
+        self.found_below = Some(level);
+        self
     }
 
     pub fn tip(mut self, tip: impl Into<String>) -> Self {
@@ -275,6 +344,8 @@ impl DiagnosticBuilder {
             message: self.message,
             span: range,
             level: self.level,
+            found_from: self.found_from,
+            found_below: self.found_below,
             identifier: self.identifier,
             tips: self.tips,
             non_ignorable: self.non_ignorable,
@@ -294,6 +365,8 @@ syntax::canonical_struct!(Diagnostic {
     message,
     span,
     level,
+    found_from,
+    found_below,
     identifier,
     tips,
     non_ignorable,

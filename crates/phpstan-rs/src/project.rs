@@ -541,8 +541,6 @@ pub struct ProjectSettings {
     /// The composer packages, and which directories each owns.
     pub packages: composer::PackageIndex,
     pub php_versions: Option<types::PhpVersions>,
-    /// The level types are accepted at; `None` when it's unset.
-    pub configured_level: Option<u8>,
     /// Whether the project consumes PHPStan as a library, which the
     /// PHPStan-API rules apply to.
     pub phpstan_api_check_enabled: bool,
@@ -758,7 +756,6 @@ impl Project {
             absolute_root,
             packages,
             php_versions,
-            configured_level,
             phpstan_api_check_enabled,
             defer_inline_ignores,
             retain_source,
@@ -792,7 +789,6 @@ impl Project {
 
         self.settings = CheckSettings {
             rule_levels: RuleLevelHelper {
-                configured_level,
                 strict_mixed_arrays: rules.strict_mixed_arrays,
                 check_benevolent_union_types: rules.check_benevolent_union_types,
             },

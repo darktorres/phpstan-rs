@@ -55,43 +55,11 @@ fn strict_mixed_arrays_opts_out_of_the_unknown_array_shape_leniency() {
     assert!(!levels.relation(&NoClasses).accepts(&shape, &unknown).yes());
 }
 
-// `rule_level_accepts`'s level-aware leniency.
-#[test]
-fn accepts_at_configured_level_matches_is_assignable_when_never_configured() {
-    let levels = RuleLevelHelper::default();
-    let nullable_string = Type::union_of(vec![Type::string(), Type::null()]);
-    assert_eq!(levels.configured_level, None);
-    assert_eq!(
-        levels
-            .relation(&NoClasses)
-            .rule_level_accepts(&Type::string(), &nullable_string)
-            .yes(),
-        levels
-            .relation(&NoClasses)
-            .accepts(&Type::string(), &nullable_string)
-            .yes()
-    );
-    assert!(
-        !levels
-            .relation(&NoClasses)
-            .rule_level_accepts(&Type::string(), &nullable_string)
-            .yes()
-    );
-}
-
-#[test]
-fn accepts_at_configured_level_matches_is_assignable_at_the_strict_threshold() {
-    let levels = RuleLevelHelper {
-        configured_level: Some(8),
-        ..RuleLevelHelper::default()
-    };
-    let nullable_string = Type::union_of(vec![Type::string(), Type::null()]);
-    assert!(
-        !levels
-            .relation(&NoClasses)
-            .rule_level_accepts(&Type::string(), &nullable_string)
-            .yes()
-    );
+// `rejected_from`: the level from which a rule rejects a value.
+fn rejected_from(levels: RuleLevelHelper, accepting: &Type, accepted: &Type) -> Option<u8> {
+    levels
+        .relation(&NoClasses)
+        .rejected_from(accepting, accepted)
 }
 
 // The load-bearing case: a nullable-typed actual value (`?string`, the
@@ -100,19 +68,19 @@ fn accepts_at_configured_level_matches_is_assignable_at_the_strict_threshold() {
 // `accepts` (and a naive "bail to accepts whenever `sup` is
 // a Union too" fast path) both reject it.
 #[test]
-fn a_nullable_actual_type_is_accepted_by_a_non_nullable_declared_type_below_level_eight() {
-    let mut levels = RuleLevelHelper::default();
+fn a_nullable_actual_type_is_rejected_by_a_non_nullable_declared_type_from_level_eight() {
+    let levels = RuleLevelHelper::default();
     let nullable_string = Type::union_of(vec![Type::string(), Type::null()]);
-    for level in 0..8 {
-        levels.configured_level = Some(level);
-        assert!(
-            levels
-                .relation(&NoClasses)
-                .rule_level_accepts(&Type::string(), &nullable_string)
-                .yes(),
-            "level {level} should accept a nullable actual type"
-        );
-    }
+    assert!(
+        !levels
+            .relation(&NoClasses)
+            .accepts(&Type::string(), &nullable_string)
+            .yes()
+    );
+    assert_eq!(
+        rejected_from(levels, &Type::string(), &nullable_string),
+        Some(8)
+    );
 }
 
 // The real, common shape every one of this phase's 8 call sites actually
@@ -123,190 +91,129 @@ fn a_nullable_actual_type_is_accepted_by_a_non_nullable_declared_type_below_leve
 // recursive Union-vs-Union-aware method instead of silently regressing.
 #[test]
 fn a_plain_actual_value_still_satisfies_a_nullable_declared_type() {
-    let mut levels = RuleLevelHelper::default();
     let nullable_string = Type::union_of(vec![Type::string(), Type::null()]);
-    levels.configured_level = Some(5);
-    assert!(
-        levels
-            .relation(&NoClasses)
-            .rule_level_accepts(&nullable_string, &Type::string())
-            .yes()
+    assert_eq!(
+        rejected_from(
+            RuleLevelHelper::default(),
+            &nullable_string,
+            &Type::string()
+        ),
+        None
     );
 }
 
 #[test]
-fn a_definite_null_actual_value_is_still_rejected_by_a_non_nullable_declared_type() {
-    let levels = RuleLevelHelper {
-        configured_level: Some(5),
-        ..RuleLevelHelper::default()
-    };
-    assert!(
-        !levels
-            .relation(&NoClasses)
-            .rule_level_accepts(&Type::string(), &Type::null())
-            .yes()
+fn a_definite_null_actual_value_is_rejected_by_a_non_nullable_declared_type_at_every_level() {
+    assert_eq!(
+        rejected_from(RuleLevelHelper::default(), &Type::string(), &Type::null()),
+        Some(0)
     );
 }
 
 #[test]
-fn a_nullable_actual_type_is_not_accepted_by_a_definite_null_declared_type() {
-    let mut levels = RuleLevelHelper::default();
-    let nullable_string = Type::union_of(vec![Type::string(), Type::null()]);
-    // Level 7 checks union members but not nullables; below it any
-    // member of a union given is enough.
-    levels.configured_level = Some(7);
+fn a_nullable_actual_type_is_rejected_by_a_definite_null_declared_type_from_level_seven() {
     // Stripping Null out of `sub` must never happen when `sup` is itself
-    // bare `null` - a `?string` actual value still doesn't
-    // definitely satisfy a target that only ever accepts `null`.
-    assert!(
-        !levels
-            .relation(&NoClasses)
-            .rule_level_accepts(&Type::null(), &nullable_string)
-            .yes()
+    // bare `null` - a `?string` actual value still doesn't definitely
+    // satisfy a target that only ever accepts `null` once level 7 checks
+    // union members; below it any member of a union given is enough.
+    let nullable_string = Type::union_of(vec![Type::string(), Type::null()]);
+    assert_eq!(
+        rejected_from(RuleLevelHelper::default(), &Type::null(), &nullable_string),
+        Some(7)
     );
 }
 
 #[test]
 fn a_union_vs_union_pair_recurses_correctly_below_the_strict_threshold() {
-    let levels = RuleLevelHelper {
-        configured_level: Some(5),
-        ..RuleLevelHelper::default()
-    };
+    let levels = RuleLevelHelper::default();
     let nullable_string = Type::union_of(vec![Type::string(), Type::null()]);
-    assert!(
-        levels
-            .relation(&NoClasses)
-            .rule_level_accepts(&nullable_string, &nullable_string)
-            .yes()
+    assert_eq!(
+        rejected_from(levels, &nullable_string, &nullable_string),
+        None
     );
     let nullable_int = Type::union_of(vec![Type::int(), Type::null()]);
     // A nullable string's non-null member (`string`) doesn't satisfy a
     // nullable int's declared type at all, even once Null is stripped
     // from the actual side.
-    assert!(
-        !levels
-            .relation(&NoClasses)
-            .rule_level_accepts(&nullable_int, &nullable_string)
-            .yes()
+    assert_eq!(
+        rejected_from(levels, &nullable_int, &nullable_string),
+        Some(0)
+    );
+}
+
+// A template its bound makes acceptable stays accepted where a union is
+// declared, though no member of the union accepts it alone.
+#[test]
+fn a_template_bounded_by_a_declared_union_is_accepted_at_every_level() {
+    let int_or_string = Type::union_of(vec![Type::int(), Type::string()]);
+    let t = Type::template_param(types::TemplateParam {
+        bound: Box::new(int_or_string.clone()),
+        ..types::TemplateParam::unbounded("T".to_string())
+    });
+    assert_eq!(
+        rejected_from(RuleLevelHelper::default(), &int_or_string, &t),
+        None
     );
 }
 
 // `checkExplicitMixed`/`checkImplicitMixed` - real PHPStan's own level
-// 9/10 (`rule_level_accepts`'s own `accepts_at_level`).
+// 9/10 (`rejected_from`'s own `accepts_at_level`).
 #[test]
-fn below_level_nine_an_explicit_mixed_value_is_accepted_by_a_concrete_declared_type() {
-    let mut levels = RuleLevelHelper::default();
-    for level in 0..9 {
-        levels.configured_level = Some(level);
-        assert!(
-            levels
-                .relation(&NoClasses)
-                .rule_level_accepts(&Type::string(), &Type::explicit_mixed())
-                .yes(),
-            "level {level} should still accept an explicit mixed value"
-        );
-    }
-}
-
-#[test]
-fn at_level_nine_an_explicit_mixed_value_is_rejected_by_a_concrete_declared_type() {
-    let levels = RuleLevelHelper {
-        configured_level: Some(9),
-        ..RuleLevelHelper::default()
-    };
-    assert!(
-        !levels
-            .relation(&NoClasses)
-            .rule_level_accepts(&Type::string(), &Type::explicit_mixed())
-            .yes()
+fn an_explicit_mixed_value_is_rejected_by_a_concrete_declared_type_from_level_nine() {
+    assert_eq!(
+        rejected_from(
+            RuleLevelHelper::default(),
+            &Type::string(),
+            &Type::explicit_mixed()
+        ),
+        Some(9)
     );
 }
 
 #[test]
-fn at_level_nine_an_implicit_mixed_value_is_still_accepted() {
-    let levels = RuleLevelHelper {
-        configured_level: Some(9),
-        ..RuleLevelHelper::default()
-    };
+fn an_implicit_mixed_value_is_rejected_by_a_concrete_declared_type_from_level_ten() {
     // Level 9 is `checkExplicitMixed` only - `checkImplicitMixed` needs
     // level 10, real PHPStan's own cumulative-but-distinct pair.
-    assert!(
-        levels
-            .relation(&NoClasses)
-            .rule_level_accepts(&Type::string(), &Type::mixed())
-            .yes()
+    assert_eq!(
+        rejected_from(RuleLevelHelper::default(), &Type::string(), &Type::mixed()),
+        Some(10)
     );
 }
 
 #[test]
-fn at_level_ten_both_explicit_and_implicit_mixed_values_are_rejected() {
-    let levels = RuleLevelHelper {
-        configured_level: Some(10),
-        ..RuleLevelHelper::default()
-    };
-    assert!(
-        !levels
-            .relation(&NoClasses)
-            .rule_level_accepts(&Type::string(), &Type::explicit_mixed())
-            .yes()
+fn a_mixed_value_is_accepted_by_a_mixed_declared_type_at_every_level() {
+    let levels = RuleLevelHelper::default();
+    assert_eq!(
+        rejected_from(levels, &Type::mixed(), &Type::explicit_mixed()),
+        None
     );
-    assert!(
-        !levels
-            .relation(&NoClasses)
-            .rule_level_accepts(&Type::string(), &Type::mixed())
-            .yes()
+    assert_eq!(
+        rejected_from(levels, &Type::explicit_mixed(), &Type::mixed()),
+        None
     );
 }
 
 #[test]
-fn at_level_ten_a_mixed_value_is_still_accepted_by_a_mixed_declared_type() {
-    let levels = RuleLevelHelper {
-        configured_level: Some(10),
-        ..RuleLevelHelper::default()
-    };
-    assert!(
-        levels
-            .relation(&NoClasses)
-            .rule_level_accepts(&Type::mixed(), &Type::explicit_mixed())
-            .yes()
-    );
-    assert!(
-        levels
-            .relation(&NoClasses)
-            .rule_level_accepts(&Type::explicit_mixed(), &Type::mixed())
-            .yes()
-    );
-}
-
-#[test]
-fn at_level_ten_a_mixed_value_inside_a_union_is_still_rejected_by_a_concrete_type() {
-    let levels = RuleLevelHelper {
-        configured_level: Some(10),
-        ..RuleLevelHelper::default()
-    };
+fn a_mixed_value_inside_a_union_is_rejected_by_a_concrete_type_from_level_ten() {
     let string_or_mixed = Type::union_of(vec![Type::string(), Type::mixed()]);
-    assert!(
-        !levels
-            .relation(&NoClasses)
-            .rule_level_accepts(&Type::string(), &string_or_mixed)
-            .yes()
+    assert_eq!(
+        rejected_from(
+            RuleLevelHelper::default(),
+            &Type::string(),
+            &string_or_mixed
+        ),
+        Some(10)
     );
 }
 
 #[test]
-fn at_level_ten_ordinary_rejection_is_unaffected() {
-    let levels = RuleLevelHelper {
-        configured_level: Some(10),
-        ..RuleLevelHelper::default()
-    };
+fn ordinary_rejection_is_made_at_every_level() {
     // A real mismatch (not mixed-driven at all) must still be rejected -
     // this mechanism only ever turns an acceptance into a rejection,
     // never masks a genuine one.
-    assert!(
-        !levels
-            .relation(&NoClasses)
-            .rule_level_accepts(&Type::string(), &Type::int())
-            .yes()
+    assert_eq!(
+        rejected_from(RuleLevelHelper::default(), &Type::string(), &Type::int()),
+        Some(0)
     );
 }
 
@@ -318,11 +225,9 @@ fn a_benevolent_union_is_accepted_leniently_by_default() {
     assert!(!levels.check_benevolent_union_types);
     // Only `Int` actually matches `string` here - the default,
     // unconfigured leniency accepts because *any* member does.
-    assert!(
-        levels
-            .relation(&NoClasses)
-            .rule_level_accepts(&Type::string(), &Type::benevolent_array_key())
-            .yes()
+    assert_eq!(
+        rejected_from(levels, &Type::string(), &Type::benevolent_array_key()),
+        None
     );
 }
 
@@ -334,11 +239,9 @@ fn a_benevolent_union_is_rejected_strictly_once_opted_in() {
     };
     // Once opted in, *every* member of the wrapped union must satisfy
     // `sup` - `Int` doesn't satisfy `string`, so this now fails.
-    assert!(
-        !levels
-            .relation(&NoClasses)
-            .rule_level_accepts(&Type::string(), &Type::benevolent_array_key())
-            .yes()
+    assert_eq!(
+        rejected_from(levels, &Type::string(), &Type::benevolent_array_key()),
+        Some(0)
     );
 }
 
@@ -350,11 +253,9 @@ fn a_benevolent_union_still_accepted_once_opted_in_when_every_member_matches() {
     };
     let int_or_string = Type::benevolent_union_of(vec![Type::int(), Type::string()]);
     let int_or_string_target = Type::union_of(vec![Type::int(), Type::string()]);
-    assert!(
-        levels
-            .relation(&NoClasses)
-            .rule_level_accepts(&int_or_string_target, &int_or_string)
-            .yes()
+    assert_eq!(
+        rejected_from(levels, &int_or_string_target, &int_or_string),
+        None
     );
 }
 
@@ -364,7 +265,7 @@ fn opting_in_never_affects_is_assignable_directly() {
     // `RuleLevelHelper::accepts()` - never a bare `isSuperTypeOf()`/
     // `accepts()` call outside it (narrowing, generics bound-checking,
     // ...). Mirrored here: opting in must never touch this project's
-    // own general-purpose `accepts`, only `rule_level_accepts`.
+    // own general-purpose `accepts`, only `rejected_from`.
     let levels = RuleLevelHelper {
         check_benevolent_union_types: true,
         ..RuleLevelHelper::default()

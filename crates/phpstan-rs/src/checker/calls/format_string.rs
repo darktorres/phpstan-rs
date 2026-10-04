@@ -9,6 +9,7 @@
 use std::collections::BTreeMap;
 use std::sync::LazyLock;
 
+use diagnostics::DiagnosticBuilder;
 use regex::Regex;
 
 use crate::checker::{Checker, Locals};
@@ -491,15 +492,16 @@ impl<'a> Checker<'a> {
             self.relation().union_of(vec![Type::int(), Type::string()]),
             format_value_type(),
         );
-        if self.rule_level_accepts(&expected, &values_ty).yes() {
+        let Some(from) = self.rejected_from(&expected, &values_ty) else {
             return;
-        }
-        self.report(format!(
+        };
+        self.report_found_from(format!(
                 "Parameter #{} $values of function {name} expects array<bool|float|int|string|null>, {values_ty} given.",
                 position + 1
             ),
             values.value.span,
             5,
+            from,
             "argument.type",
         );
     }
@@ -508,7 +510,9 @@ impl<'a> Checker<'a> {
     /// consuming it, for a format with one constant string. A value the
     /// function's own parameter type rejects gets that parameter's error
     /// instead (`CallToFunctionParametersRule` with PHPStan's
-    /// `functionMap.php` signature, `bool|float|int|string|null` values).
+    /// `functionMap.php` signature, `bool|float|int|string|null` values),
+    /// from the level that rejects it on: the placeholders' findings are
+    /// made below it.
     fn check_format_value_types(
         &mut self,
         name: &str,
@@ -534,16 +538,20 @@ impl<'a> Checker<'a> {
         let allowed = format_value_type();
         for (i, arg) in args.iter().enumerate().skip(function.format + 1) {
             let arg_ty = self.infer_expr(&arg.value, locals);
-            if !self.rule_level_accepts(&allowed, &arg_ty).yes() {
-                self.report(format!(
+            let rejected_from = self.rejected_from(&allowed, &arg_ty);
+            if let Some(from) = rejected_from {
+                self.report_found_from(format!(
                         "Parameter #{} ...$values of function {name} expects bool|float|int|string|null, {arg_ty} given.",
                         i + 1
                     ),
                     arg.value.span,
                     5,
+                    from,
                     "argument.type",
                 );
-                continue;
+                if from == 0 {
+                    continue;
+                }
             }
             let value_index = i64::try_from(i - function.format - 1).unwrap_or(i64::MAX);
             for placeholder in by_index.get(&value_index).into_iter().flatten() {
@@ -563,7 +571,8 @@ impl<'a> Checker<'a> {
                     (Accepting::Float, false) => "castable to float",
                     (Accepting::String | Accepting::Mixed, false) => "castable to string",
                 };
-                self.report(format!(
+                let finding = DiagnosticBuilder::new(
+                    format!(
                         "Parameter #{} of function {name} is expected to be {expected} by placeholder #{} ({}), {} given.",
                         i + 1,
                         placeholder.number,
@@ -574,6 +583,10 @@ impl<'a> Checker<'a> {
                     level,
                     "argument.type",
                 );
+                self.report_builder(match rejected_from {
+                    Some(below) => finding.found_below(below),
+                    None => finding,
+                });
             }
         }
     }

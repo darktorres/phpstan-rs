@@ -249,9 +249,14 @@ fn render(
                 write!(out, "{relative}:").unwrap();
             }
             let s = &d.span;
+            let found = match (d.found_from, d.found_below) {
+                (0, None) => String::new(),
+                (from, None) => format!(" F{from}"),
+                (from, Some(below)) => format!(" F{from}..{below}"),
+            };
             writeln!(
                 out,
-                "{}:{}-{}:{} {} L{} | {}",
+                "{}:{}-{}:{} {} L{}{found} | {}",
                 s.start.line,
                 s.start.col,
                 s.end.line,

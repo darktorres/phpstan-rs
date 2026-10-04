@@ -837,11 +837,12 @@ impl<'a> Checker<'a> {
                 level,
                 "offsetAccess.nonOffsetAccessible",
             );
-        } else if let Some(level) = self.strict_mixed_receiver_level(base_ty) {
-            self.report(
+        } else if let Some(from) = types::strict_mixed_receiver_from(base_ty) {
+            self.report_found_from(
                 "Cannot access offset on mixed.".to_string(),
                 idx.span,
-                level,
+                3,
+                from,
                 "offsetAccess.nonOffsetAccessible",
             );
         }

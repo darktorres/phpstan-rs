@@ -170,13 +170,16 @@ struct Server {
     // `didChange` do), so `publishDiagnostics` can be stamped with it -
     // see `uri_and_version_for`.
     open_uris: FxHashMap<PathBuf, (Uri, Option<i32>)>,
-    // The last-computed, post-`apply_post_filters` diagnostic set for
-    // every path this server has ever checked - `code_actions` reads
-    // this instead of re-running a whole-file checker pass per request
-    // (a real editor's lightbulb fires `textDocument/codeAction` far
-    // more often than actual edits, e.g. on cursor movement). Kept in
-    // sync by every diagnostic-producing path (`check_all_analyzed_paths`,
-    // `publish_diagnostics_for`), cleared for a path `remove_workspace_folders`/
+    // What the checks last found in every path this server has ever
+    // checked, before `apply_post_filters` - every level's findings, so a
+    // configuration change that only changes which are shown publishes
+    // them again without checking anything (`reload_configuration`).
+    // `code_actions` reads this instead of re-running a whole-file
+    // checker pass per request (a real editor's lightbulb fires
+    // `textDocument/codeAction` far more often than actual edits, e.g. on
+    // cursor movement). Kept in sync by every diagnostic-producing path
+    // (`check_all_analyzed_paths`, `publish_diagnostics_for`), cleared
+    // for a path `remove_workspace_folders`/
     // `handle_watched_files_changed`'s Deleted branch drop. Safe under
     // today's fully synchronous, one-message-at-a-time `run_loop`: a
     // `codeAction` request can only ever see whatever the most recently
@@ -241,11 +244,8 @@ struct Server {
     root: Option<PathBuf>,
     baseline: Option<crate::baseline::Baseline>,
     ignore_error_entries: Vec<crate::ignore_errors::IgnoreErrorEntry>,
-    // The same `Option<u8>` `Project::apply_settings` also
-    // received - kept separately here too since `Project`/`Registry`
-    // only use it for type-strictness, not for filtering already-
-    // produced diagnostics before they're published.
-    level_cutoff: Option<u8>,
+    // Which levels' findings are published.
+    level_cutoff: diagnostics::LevelCutoff,
     // A `phpstan-rs.configPath` setting override, applied on top of
     // `root`'s own default `phpstan-rs.toml` lookup by every subsequent
     // `configure_from_workspace`/`reload_configuration` call. `None`
@@ -335,7 +335,7 @@ impl Server {
             root: None,
             baseline: None,
             ignore_error_entries: Vec::new(),
-            level_cutoff: None,
+            level_cutoff: crate::project::session::configured_cutoff(None, u8::MAX),
             config_path_override: None,
             enabled: true,
             supports_configuration_pull: false,
@@ -368,31 +368,40 @@ impl Server {
     /// `reload_configuration` can apply an already-resolved value (its own
     /// no-op fast path needs the resolved value in hand *before* deciding
     /// whether to apply it, which `configure_from_workspace`'s
-    /// resolve-then-apply-in-one-call shape doesn't allow). Stores a clone
-    /// of `resolved` into `self.last_applied_config` before any of its
-    /// fields are moved out below.
+    /// resolve-then-apply-in-one-call shape doesn't allow).
     fn apply_resolved_config(
         &mut self,
         root: &Path,
         resolved: workspace_config::ResolvedWorkspaceConfig,
     ) -> workspace_config::WorkspaceContextPaths {
-        self.last_applied_config = Some(resolved.clone());
-        self.level_cutoff = resolved.settings.configured_level;
-        self.project.apply_settings(resolved.settings);
-
-        self.root = Some(root.to_path_buf());
-        self.baseline = resolved.baseline;
-        self.ignore_error_entries = resolved.ignore_error_entries;
-
-        workspace_config::WorkspaceContextPaths {
-            vendor: resolved.vendor_context,
-            extra_dirs: resolved.extra_context_dirs,
-            analyze_paths: resolved.analyze_paths,
-        }
+        self.project.apply_settings(resolved.settings.clone());
+        self.apply_report_config(root, resolved)
     }
 
-    /// Applies the same severity-level cutoff / `ignore_errors` /
-    /// baseline post-filters `check-project` applies (in that order),
+    /// The part of `apply_resolved_config` that decides which findings
+    /// are published, not what the checks find, keeping `resolved` as
+    /// `self.last_applied_config`.
+    fn apply_report_config(
+        &mut self,
+        root: &Path,
+        resolved: workspace_config::ResolvedWorkspaceConfig,
+    ) -> workspace_config::WorkspaceContextPaths {
+        self.root = Some(root.to_path_buf());
+        self.level_cutoff = resolved.level_cutoff;
+        self.baseline.clone_from(&resolved.baseline);
+        self.ignore_error_entries
+            .clone_from(&resolved.ignore_error_entries);
+        let paths = workspace_config::WorkspaceContextPaths {
+            vendor: resolved.vendor_context.clone(),
+            extra_dirs: resolved.extra_context_dirs.clone(),
+            analyze_paths: resolved.analyze_paths.clone(),
+        };
+        self.last_applied_config = Some(resolved);
+        paths
+    }
+
+    /// Applies the same level cutoff / `ignore_errors` / baseline
+    /// post-filters `check-project` applies (in that order) to `findings`,
     /// but scoped to whatever partial result set `update_file`'s own
     /// transitive-dependents pass just produced. Never surfaces
     /// `baseline::filter`'s stale-entry report here: its staleness
@@ -403,15 +412,21 @@ impl Server {
     /// match against a root-relative path string, so results are
     /// rewritten to root-relative and back around each - a reasonable
     /// default, not a provable-correct one, for either.
-    fn apply_post_filters(
+    fn apply_post_filters<'d>(
         &self,
-        mut results: FxHashMap<PathBuf, Vec<diagnostics::Diagnostic>>,
+        findings: impl IntoIterator<Item = (&'d PathBuf, &'d Vec<diagnostics::Diagnostic>)>,
     ) -> FxHashMap<PathBuf, Vec<diagnostics::Diagnostic>> {
-        if let Some(cutoff) = self.level_cutoff {
-            for diagnostics in results.values_mut() {
-                diagnostics.retain(|d| d.level <= cutoff);
-            }
-        }
+        let results: FxHashMap<PathBuf, Vec<diagnostics::Diagnostic>> = findings
+            .into_iter()
+            .map(|(path, found)| {
+                let shown = found
+                    .iter()
+                    .filter(|d| self.level_cutoff.reports(d))
+                    .cloned()
+                    .collect();
+                (path.clone(), shown)
+            })
+            .collect();
         if self.ignore_error_entries.is_empty() && self.baseline.is_none() {
             return results;
         }
@@ -624,17 +639,17 @@ impl Server {
     }
 
     /// Runs the checker over every analyzed (first-party) file currently
-    /// loaded, post-filtered the same way any other published diagnostic
-    /// set is. Runs on the worker pool, and through
+    /// loaded, keeping what it finds in `last_diagnostics`, and returns
+    /// the paths checked, in order. Runs on the worker pool, and through
     /// `Project::check_paths_isolating_panics` (not `check_paths`) so one
     /// file's latent checker bug can't take down the whole push. Shared by `publish_workspace_diagnostics`
     /// (which then drops empty results) and `republish_known_files`
     /// (which must not, so a file previously flagged and now clean gets
     /// an explicit clearing notification).
-    fn check_all_analyzed_paths(&mut self) -> FxHashMap<PathBuf, Vec<diagnostics::Diagnostic>> {
+    fn check_all_analyzed_paths(&mut self) -> Vec<PathBuf> {
         let mut paths = self.project.analyzed_paths();
         if paths.is_empty() {
-            return FxHashMap::default();
+            return Vec::new();
         }
         // Deterministic order (matches load_workspace's own `files.sort()`
         // rationale) - HashMap/HashSet iteration order would otherwise
@@ -650,10 +665,10 @@ impl Server {
                 path.display()
             );
         }
-        let results = self.apply_post_filters(results);
-        self.last_diagnostics
-            .extend(results.iter().map(|(p, diags)| (p.clone(), diags.clone())));
-        results
+        let mut checked: Vec<PathBuf> = results.keys().cloned().collect();
+        checked.sort();
+        self.last_diagnostics.extend(results);
+        checked
     }
 
     /// Looks up the last known `(Uri, document version)` for `path` -
@@ -699,14 +714,8 @@ impl Server {
     /// initial load nothing has been published for these paths yet, so
     /// there is nothing to clear.
     fn publish_workspace_diagnostics(&mut self) -> Vec<Message> {
-        self.check_all_analyzed_paths()
-            .into_iter()
-            .filter(|(_, diags)| !diags.is_empty())
-            .map(|(p, diags)| {
-                let (uri, version) = self.uri_and_version_for(&p);
-                self.diagnostics_message(&p, uri, version, &diags)
-            })
-            .collect()
+        let checked = self.check_all_analyzed_paths();
+        self.publish_shown(&checked, false)
     }
 
     /// `reload_configuration`'s own republish step, once it decides
@@ -719,21 +728,54 @@ impl Server {
     /// showing squiggles", not "stop the language server".
     fn republish_known_files(&mut self) -> Vec<Message> {
         if !self.enabled {
-            let unit = self.unit;
-            return self
-                .open_uris
-                .values()
-                .cloned()
-                .map(|(uri, version)| {
-                    publish_diagnostics_notification(uri, version, &[], None, unit)
-                })
-                .collect();
+            return self.clear_open_files();
         }
-        self.check_all_analyzed_paths()
-            .into_iter()
-            .map(|(p, diags)| {
-                let (uri, version) = self.uri_and_version_for(&p);
-                self.diagnostics_message(&p, uri, version, &diags)
+        let checked = self.check_all_analyzed_paths();
+        self.publish_shown(&checked, true)
+    }
+
+    /// `republish_known_files` for a configuration that changes only
+    /// which findings are shown: the last findings of every checked path
+    /// published again through the new post-filters, without checking
+    /// anything.
+    fn republish_last_diagnostics(&mut self) -> Vec<Message> {
+        if !self.enabled {
+            return self.clear_open_files();
+        }
+        let mut paths: Vec<PathBuf> = self.last_diagnostics.keys().cloned().collect();
+        paths.sort();
+        self.publish_shown(&paths, true)
+    }
+
+    /// An empty `publishDiagnostics` for every open file.
+    fn clear_open_files(&self) -> Vec<Message> {
+        let unit = self.unit;
+        self.open_uris
+            .values()
+            .cloned()
+            .map(|(uri, version)| publish_diagnostics_notification(uri, version, &[], None, unit))
+            .collect()
+    }
+
+    /// The `publishDiagnostics` notifications of what `last_diagnostics`
+    /// holds for `paths`, as the post-filters show it; with `with_empty`,
+    /// a path showing nothing is published too, clearing what it showed
+    /// before.
+    fn publish_shown(&self, paths: &[PathBuf], with_empty: bool) -> Vec<Message> {
+        let mut shown = self.apply_post_filters(
+            paths
+                .iter()
+                .filter_map(|path| self.last_diagnostics.get_key_value(path)),
+        );
+        paths
+            .iter()
+            .filter_map(|path| {
+                let diags = shown.remove(path).unwrap_or_default();
+                if diags.is_empty() && !with_empty {
+                    return None;
+                }
+                let (uri, version) = self.uri_and_version_for(path);
+                Some(self.diagnostics_message(path, uri, version, &diags))
             })
             .collect()
     }
@@ -753,17 +795,11 @@ impl Server {
         // Opening a file exactly as it was loaded changes nothing in the
         // project, so only its own diagnostics need publishing.
         if self.project.source(&path) == Some(text) {
-            let diags = match self.last_diagnostics.get(&path) {
-                Some(diags) => diags.clone(),
-                None => {
-                    let checked =
-                        FxHashMap::from_iter([(path.clone(), self.project.check_file(&path))]);
-                    self.apply_post_filters(checked)
-                        .remove(&path)
-                        .unwrap_or_default()
-                }
-            };
-            return self.publish_diagnostics_for(FxHashMap::from_iter([(path, diags)]));
+            if !self.last_diagnostics.contains_key(&path) {
+                let found = self.project.check_file(&path);
+                self.last_diagnostics.insert(path.clone(), found);
+            }
+            return self.publish_shown(&[path], true);
         }
         // Same graceful-degradation as load_workspace, and more exposed
         // in practice here: momentarily-invalid syntax is the normal
@@ -787,7 +823,7 @@ impl Server {
                 )];
             }
         };
-        self.publish_diagnostics_for(self.apply_post_filters(results))
+        self.publish_diagnostics_for(results)
     }
 
     /// The debounce worker's own counterpart to `handle_open_or_change`
@@ -833,7 +869,7 @@ impl Server {
         for stale in self.project.take_unchecked() {
             self.last_diagnostics.remove(&stale);
         }
-        self.publish_diagnostics_for(self.apply_post_filters(results))
+        self.publish_diagnostics_for(results)
     }
 
     /// Routes a `workspace/didChangeWatchedFiles` batch through the same
@@ -874,7 +910,7 @@ impl Server {
                 self.last_diagnostics.remove(&path);
                 self.latest_text.remove(&path);
                 let results = self.project.remove_file(&path);
-                messages.extend(self.publish_diagnostics_for(self.apply_post_filters(results)));
+                messages.extend(self.publish_diagnostics_for(results));
                 continue;
             }
             // Created and Changed both just need the path's current
@@ -895,7 +931,7 @@ impl Server {
             let appeared = !self.project.is_loaded(&path);
             match self.project.update_file(&path, &text) {
                 Ok(results) => {
-                    messages.extend(self.publish_diagnostics_for(self.apply_post_filters(results)));
+                    messages.extend(self.publish_diagnostics_for(results));
                 }
                 Err(e) => {
                     eprintln!(
@@ -910,13 +946,14 @@ impl Server {
         }
         if !appeared_or_vanished.is_empty() {
             let results = self.project.recheck_including(&appeared_or_vanished);
-            messages.extend(self.publish_diagnostics_for(self.apply_post_filters(results)));
+            messages.extend(self.publish_diagnostics_for(results));
         }
         messages
     }
 
-    /// Converts a diagnostics-by-path map into `publishDiagnostics`
-    /// messages, resolving each path to whatever URI the client last
+    /// Keeps what the checks found by path in `last_diagnostics` and
+    /// converts it into `publishDiagnostics` messages through the
+    /// post-filters, resolving each path to whatever URI the client last
     /// used for it (a re-checked dependent might not itself be open in
     /// the editor - it still needs a fresh notification, using the
     /// workspace scan's own synthesized URI if nothing else ever opened
@@ -926,15 +963,9 @@ impl Server {
         &mut self,
         results: FxHashMap<PathBuf, Vec<diagnostics::Diagnostic>>,
     ) -> Vec<Message> {
-        results
-            .into_iter()
-            .map(|(p, diags)| {
-                let (dep_uri, dep_version) = self.uri_and_version_for(&p);
-                let message = self.diagnostics_message(&p, dep_uri, dep_version, &diags);
-                self.last_diagnostics.insert(p, diags);
-                message
-            })
-            .collect()
+        let paths: Vec<PathBuf> = results.keys().cloned().collect();
+        self.last_diagnostics.extend(results);
+        self.publish_shown(&paths, true)
     }
 
     /// `navigation::resolve_at` finds what symbol is under the cursor;
@@ -1858,21 +1889,21 @@ impl Server {
     }
 
     /// Quick fixes for whatever diagnostics in `path` overlap `range` and
-    /// carry a `DiagnosticFix`. Reads `self.last_diagnostics` rather than
-    /// re-running the checker - see that field's own doc comment for why.
-    /// A cache miss (a workspace file requested before any `didOpen`/
-    /// `didChange`/scan ever populated it) is a one-time, self-healing
-    /// fallback: computed once via `Project::check_file`, post-filtered
-    /// the same way every other diagnostic set is, then cached.
+    /// carry a `DiagnosticFix`, of those the post-filters show. Reads
+    /// `self.last_diagnostics` rather than re-running the checker - see
+    /// that field's own doc comment for why. A cache miss (a workspace
+    /// file requested before any `didOpen`/`didChange`/scan ever
+    /// populated it) is a one-time, self-healing fallback: computed once
+    /// via `Project::check_file`, then cached.
     fn code_actions(&mut self, uri: &Uri, range: LspRange) -> Option<CodeActionResponse> {
         let path = uri_to_path(uri)?;
         if !self.last_diagnostics.contains_key(&path) {
-            let raw = self.project.check_file(&path);
-            let filtered = self.apply_post_filters(FxHashMap::from_iter([(path.clone(), raw)]));
-            let diags = filtered.into_values().next().unwrap_or_default();
-            self.last_diagnostics.insert(path.clone(), diags);
+            let found = self.project.check_file(&path);
+            self.last_diagnostics.insert(path.clone(), found);
         }
-        let diagnostics = self.last_diagnostics.get(&path)?;
+        let diagnostics = self
+            .apply_post_filters(self.last_diagnostics.get_key_value(&path))
+            .remove(&path)?;
         let source = self.project.source(&path);
         let positions = self.positions(&path)?;
         Some(
@@ -2026,6 +2057,10 @@ impl Server {
     /// settings save under the registered section, not just a
     /// `phpstan-rs` one; re-checking every analyzed file on every
     /// unrelated settings.json save would be a real, common-case cost.
+    /// A change that leaves the project's settings as they were (the
+    /// level, `ignore_errors`, the baseline, `enable`) checks nothing
+    /// either: the last findings are published again through the new
+    /// post-filters.
     ///
     /// `scan_paths`/`stub_paths`/`no_composer` changes are detected
     /// separately (via the resolved `vendor_context`/`extra_context_dirs`)
@@ -2058,10 +2093,18 @@ impl Server {
             prev.vendor_context != resolved.vendor_context
                 || prev.extra_context_dirs != resolved.extra_context_dirs
         });
+        let checks_unchanged = self
+            .last_applied_config
+            .as_ref()
+            .is_some_and(|prev| prev.settings == resolved.settings);
 
         self.enabled = settings.enable;
         self.config_path_override = config_path_override;
-        self.apply_resolved_config(&root, resolved);
+        if checks_unchanged {
+            self.apply_report_config(&root, resolved);
+        } else {
+            self.apply_resolved_config(&root, resolved);
+        }
 
         let mut messages = Vec::new();
         if file_set_changed
@@ -2074,7 +2117,11 @@ impl Server {
             ));
         }
 
-        messages.extend(self.republish_known_files());
+        messages.extend(if checks_unchanged {
+            self.republish_last_diagnostics()
+        } else {
+            self.republish_known_files()
+        });
         messages
     }
 }

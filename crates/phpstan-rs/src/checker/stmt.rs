@@ -805,10 +805,9 @@ impl<'a> Checker<'a> {
                             "return.void",
                         );
                     // See `checker::calls`' own identical comment:
-                    // `rule_level_accepts` already accepts a
-                    // `Mixed` actual value unconditionally below real
-                    // PHPStan's own level 9/10.
-                    } else if !self.rule_level_accepts(&expected, &actual).yes() {
+                    // `rejected_from` already accepts a `Mixed` actual
+                    // value below real PHPStan's own level 9/10.
+                    } else if let Some(from) = self.rejected_from(&expected, &actual) {
                         // `DiscriminantArrayFactsMap`'s own doc comment -
                         // before reporting a real mismatch, retry against
                         // a *reconstructed* type built from this exact
@@ -820,16 +819,26 @@ impl<'a> Checker<'a> {
                         // anything else, so a function this mechanism
                         // doesn't apply to (the overwhelming majority)
                         // sees no change in behavior at all.
+                        // The reconstructed types pass at the levels that
+                        // accept every one of them: the mismatch is found
+                        // from the lowest level that rejects one of them,
+                        // and at none when every level accepts them all.
                         let reconstructed = reconstructed_discriminant_return_types(e, locals);
-                        let passes_via_reconstruction = !reconstructed.is_empty()
-                            && reconstructed
+                        let found_from = if reconstructed.is_empty() {
+                            Some(from)
+                        } else {
+                            reconstructed
                                 .iter()
-                                .all(|r| self.rule_level_accepts(&expected, r).yes());
-                        if !passes_via_reconstruction {
-                            self.report(
+                                .filter_map(|r| self.rejected_from(&expected, r))
+                                .min()
+                                .map(|passes_below| from.max(passes_below))
+                        };
+                        if let Some(from) = found_from {
+                            self.report_found_from(
                                 format!("return type mismatch: expected {expected}, got {actual}"),
                                 e.span,
                                 3,
+                                from,
                                 "return.type",
                             );
                         }

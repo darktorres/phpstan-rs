@@ -118,7 +118,7 @@ impl<'a> Checker<'a> {
                         // `checkImplicitMixed` never applies to a generic
                         // bound check in real PHPStan either, so this
                         // stays on plain `accepts`, not
-                        // `rule_level_accepts` (see that
+                        // `rejected_from` (see that
                         // method's own doc comment, which already
                         // disclosed this exact exclusion).
                         if !checked_arg.is_mixed()

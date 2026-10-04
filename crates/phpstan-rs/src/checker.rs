@@ -1052,7 +1052,7 @@ impl<'a> Checker<'a> {
     }
 
     /// The type relations over the registry's classes, as lenient as the
-    /// configured rule levels say.
+    /// configured settings say.
     pub(crate) fn relation(&self) -> types::Relation<'a> {
         self.settings.rule_levels.relation(self.registry)
     }
@@ -1072,16 +1072,11 @@ impl<'a> Checker<'a> {
         self.relation().accepts(accepting, accepted)
     }
 
-    pub(crate) fn rule_level_accepts(
-        &self,
-        accepting: &Type,
-        accepted: &Type,
-    ) -> types::AcceptsResult {
-        self.relation().rule_level_accepts(accepting, accepted)
-    }
-
-    pub(crate) fn strict_mixed_receiver_level(&self, ty: &Type) -> Option<u8> {
-        self.relation().strict_mixed_receiver_level(ty)
+    /// The lowest configured level at which a rule rejects `accepted`
+    /// where `accepting` is declared (`Relation::rejected_from`); `None`
+    /// when every level accepts it.
+    pub(crate) fn rejected_from(&self, accepting: &Type, accepted: &Type) -> Option<u8> {
+        self.relation().rejected_from(accepting, accepted)
     }
 
     /// The registry, for its Doctrine entities, while the Doctrine
@@ -1707,6 +1702,21 @@ impl<'a> Checker<'a> {
     ) {
         self.diagnostics
             .push(DiagnosticBuilder::new(message, span, level, identifier).build(&self.line_index));
+    }
+
+    /// `report`, for a finding made only from configured level
+    /// `found_from` on (`rejected_from`).
+    pub(crate) fn report_found_from(
+        &mut self,
+        message: String,
+        span: Span,
+        level: u8,
+        found_from: u8,
+        identifier: impl Into<diagnostics::Identifier>,
+    ) {
+        self.report_builder(
+            DiagnosticBuilder::new(message, span, level, identifier).found_from(found_from),
+        );
     }
 
     /// The builder path - for a call site that also wants a `tip`, a

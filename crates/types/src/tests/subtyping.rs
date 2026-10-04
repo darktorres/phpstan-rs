@@ -85,10 +85,9 @@ fn an_unbounded_template_param_takes_anything_but_is_as_unknown_as_mixed_when_gi
     assert!(accepts(&t, &Type::object("Foo".into(), Vec::new())));
     assert!(!accepts(&Type::string(), &t));
     assert!(!accepts(&Type::int(), &t));
-    assert!(
-        crate::Relation::structural()
-            .rule_level_accepts(&Type::string(), &t)
-            .yes()
+    assert_eq!(
+        crate::Relation::structural().rejected_from(&Type::string(), &t),
+        Some(9)
     );
     assert!(!is_subtype(&t, &Type::string()));
     assert!(!is_subtype(&Type::string(), &t));
@@ -530,10 +529,9 @@ fn property_names_keep_their_case_method_names_do_not() {
 fn an_error_accepts_and_is_accepted_by_everything() {
     assert!(accepts(&Type::int(), &Type::error()));
     assert!(accepts(&Type::error(), &Type::string()));
-    assert!(
-        crate::Relation::structural()
-            .rule_level_accepts(&Type::int(), &Type::error())
-            .yes()
+    assert_eq!(
+        crate::Relation::structural().rejected_from(&Type::int(), &Type::error()),
+        None
     );
     assert!(is_subtype(&Type::int(), &Type::error()));
     assert_eq!(Type::error().to_string(), "*ERROR*");

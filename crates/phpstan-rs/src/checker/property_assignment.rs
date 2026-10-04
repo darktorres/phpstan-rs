@@ -125,18 +125,18 @@ impl<'a> Checker<'a> {
                 .or_default()
                 .push(actual.clone());
         }
-        // See `checker::calls`' own identical comment: `accepts_at_
-        // configured_level` already accepts a `Mixed` actual value
-        // unconditionally below real PHPStan's own level 9/10, so no
-        // separate bail-out is needed (and one here would wrongly skip
-        // this check once either is enabled).
-        if self.rule_level_accepts(&expected, &actual).yes() {
+        // See `checker::calls`' own identical comment: `rejected_from`
+        // already accepts a `Mixed` actual value below real PHPStan's own
+        // level 9/10, so no separate bail-out is needed (and one here
+        // would wrongly skip this check at either).
+        let Some(from) = self.rejected_from(&expected, &actual) else {
             return;
-        }
-        self.report(
+        };
+        self.report_found_from(
             format!("{class}::${prop} expects {expected}, {actual} given"),
             rhs.span,
             3,
+            from,
             "assign.propertyType",
         );
     }

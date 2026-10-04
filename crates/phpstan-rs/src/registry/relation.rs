@@ -111,12 +111,11 @@ impl Registry {
 
     /// The type relations against this registry's classes, at their
     /// default leniency; the checker's `relation` applies the configured
-    /// rule levels.
+    /// strictness.
     pub fn relation(&self) -> Relation<'_> {
         Relation {
             hierarchy: self,
             strict_mixed_arrays: false,
-            configured_level: None,
             check_benevolent_union_types: false,
         }
     }

@@ -84,16 +84,17 @@ impl<'a> Checker<'a> {
         let Some(declared) = self.current_function_by_ref_params.get(name).cloned() else {
             return;
         };
-        // See `checker::calls`' own identical comment: `accepts_at_
-        // configured_level` already accepts a `Mixed` actual value
-        // unconditionally below real PHPStan's own level 9/10.
-        if self.rule_level_accepts(&declared, actual).yes() {
+        // See `checker::calls`' own identical comment: `rejected_from`
+        // already accepts a `Mixed` actual value below real PHPStan's own
+        // level 9/10.
+        let Some(from) = self.rejected_from(&declared, actual) else {
             return;
-        }
-        self.report(
+        };
+        self.report_found_from(
             format!("by-ref parameter ${name} expects {declared}, {actual} given"),
             span,
             3,
+            from,
             "parameterByRef.type",
         );
     }
@@ -154,14 +155,15 @@ impl<'a> Checker<'a> {
             let Some(actual) = snapshots.iter().cloned().union_all_with(&self.relation()) else {
                 continue;
             };
-            if self.rule_level_accepts(&declared, &actual).yes() {
+            let Some(from) = self.rejected_from(&declared, &actual) else {
                 continue;
-            }
-            self.report(format!(
+            };
+            self.report_found_from(format!(
                     "by-ref parameter ${name} expects {declared} at the end of execution, {actual} given"
                 ),
                 span,
                 3,
+                from,
                 "parameterByRef.executionEnd",
             );
         }

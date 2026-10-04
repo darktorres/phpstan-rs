@@ -65,7 +65,9 @@ pub use php_version::{
     parse_php_version,
 };
 pub use record::{record_unions, recorded_unions};
-pub use relation::{AcceptsResult, Relation};
+pub use relation::{
+    AcceptsResult, MAX_RULE_LEVEL, Relation, UNCONFIGURED_RULE_LEVEL, strict_mixed_receiver_from,
+};
 pub use shape::{AppendKey, NextArrayIndex, Shape, ShapeField, ShapeKey};
 pub use subtype::is_numeric_string_literal;
 pub use template_references::PositionVariance;

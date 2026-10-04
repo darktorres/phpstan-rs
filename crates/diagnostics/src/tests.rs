@@ -1,4 +1,4 @@
-use crate::{DiagnosticBuilder, Identifier};
+use crate::{DiagnosticBuilder, Identifier, LevelCutoff};
 use syntax::span::{LineIndex, Span};
 
 fn dummy_span() -> Span {
@@ -17,6 +17,8 @@ fn diagnostic_builder_assembles_every_field() {
         5,
         "my.identifier",
     )
+    .found_from(8)
+    .found_below(9)
     .tip("try this instead")
     .non_ignorable()
     .fix(dummy_span(), "replacement text", "swap it out")
@@ -24,6 +26,9 @@ fn diagnostic_builder_assembles_every_field() {
 
     assert_eq!(diag.message, "something went wrong");
     assert_eq!(diag.level, 5);
+    assert_eq!(diag.found_from, 8);
+    assert_eq!(diag.found_below, Some(9));
+    assert_eq!(diag.reporting_level(), 8);
     assert_eq!(diag.identifier, "my.identifier");
     assert_eq!(diag.tips, vec!["try this instead".to_string()]);
     assert!(diag.non_ignorable);
@@ -42,6 +47,8 @@ fn diagnostic_builder_defaults_are_all_empty_absent_or_false() {
     )
     .build(&index());
 
+    assert_eq!(diag.found_from, 0);
+    assert_eq!(diag.found_below, None);
     assert!(diag.tips.is_empty());
     assert!(!diag.non_ignorable);
     assert!(diag.fix.is_none());
@@ -71,4 +78,27 @@ fn an_identifier_is_dot_separated_alphanumeric_segments() {
     assert!(!Identifier::is_valid("argument.type."));
     assert!(!Identifier::is_valid("argument-type"));
     assert!(!Identifier::is_valid("argument type"));
+}
+
+#[test]
+fn a_cutoff_shows_a_finding_at_its_rule_level_and_the_levels_it_is_made_at() {
+    let finding = |found_from, found_below: Option<u8>| {
+        let builder = DiagnosticBuilder::new("m", dummy_span(), 5, "a.b").found_from(found_from);
+        match found_below {
+            Some(below) => builder.found_below(below),
+            None => builder,
+        }
+        .build(&index())
+    };
+    let everywhere = finding(0, None);
+    let from_eight = finding(8, None);
+    let below_nine = finding(0, Some(9));
+    let shown = |cutoff: LevelCutoff| {
+        [&everywhere, &from_eight, &below_nine].map(|finding| cutoff.reports(finding))
+    };
+    assert_eq!(shown(LevelCutoff::at(4)), [false; 3]);
+    assert_eq!(shown(LevelCutoff::at(5)), [true, false, true]);
+    assert_eq!(shown(LevelCutoff::at(8)), [true, true, true]);
+    assert_eq!(shown(LevelCutoff::at(9)), [true, true, false]);
+    assert_eq!(shown(LevelCutoff { rule: 6, found: 8 }), [true, true, true]);
 }

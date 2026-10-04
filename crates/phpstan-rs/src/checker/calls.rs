@@ -463,8 +463,8 @@ impl<'a> Checker<'a> {
             // See the identical, earlier comment in this file's own
             // ordinary-call argument check for why no separate `Mixed`
             // bail-out is needed here.
-            if !self.rule_level_accepts(&param.ty, &arg_ty).yes() {
-                self.report(
+            if let Some(from) = self.rejected_from(&param.ty, &arg_ty) {
+                self.report_found_from(
                     format!(
                         "Closure() argument #{} expects {}, {} given",
                         i + 1,
@@ -473,6 +473,7 @@ impl<'a> Checker<'a> {
                     ),
                     a.value.span,
                     5,
+                    from,
                     "argument.type",
                 );
             }

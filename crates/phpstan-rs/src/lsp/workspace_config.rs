@@ -27,6 +27,9 @@ pub(crate) struct ResolvedWorkspaceConfig {
     pub(crate) settings: ProjectSettings,
     pub(crate) vendor_context: VendorContext,
     pub(crate) extra_context_dirs: Vec<PathBuf>,
+    /// Which findings are published: every rule's, with no level
+    /// configured.
+    pub(crate) level_cutoff: diagnostics::LevelCutoff,
     pub(crate) baseline: Option<crate::baseline::Baseline>,
     pub(crate) ignore_error_entries: Vec<crate::ignore_errors::IgnoreErrorEntry>,
     pub(crate) analyze_paths: Vec<PathBuf>,
@@ -193,7 +196,6 @@ pub(crate) fn resolve(
         absolute_root: Some(absolute_root),
         packages,
         php_versions,
-        configured_level: session.level,
         phpstan_api_check_enabled,
         defer_inline_ignores: false,
         retain_source: true,
@@ -220,6 +222,7 @@ pub(crate) fn resolve(
         settings,
         vendor_context,
         extra_context_dirs,
+        level_cutoff: crate::project::session::configured_cutoff(session.level, u8::MAX),
         baseline,
         ignore_error_entries: session.ignore_errors,
         analyze_paths,
