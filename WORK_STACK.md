@@ -261,6 +261,10 @@ when it runs, and the plan adds the checks found along the way.
   float), a general array's key taken to be there (PHP reads `null` with a
   warning), and `ArrayIterator::current()` taken to give a value (`null` at
   an invalid position).
+- **Queued after level 8:** 114 fixtures that assert still never reach an
+  assertion under the runtime oracle: assertions in closures nothing
+  invokes, code that throws first with the values sampled, parameters no
+  value can be made for, methods of traits.
 
 ## Documents with no place in the stack
 
