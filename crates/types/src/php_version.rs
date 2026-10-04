@@ -357,6 +357,69 @@ pub enum PhpFeature {
     /// `'c'`); before, it reads `''` with a notice and writes nothing with
     /// a warning.
     NegativeStringOffsets,
+    /// `?T`.
+    NullableTypes,
+    /// `void`, a class name before.
+    VoidType,
+    /// `iterable`, a class name before.
+    IterableType,
+    /// `public`, `protected` and `private` on class constants.
+    ClassConstantVisibility,
+    /// `catch (A | B $e)`.
+    MultiCatch,
+    /// `[$a, $b] = ...`, where only `list($a, $b)` was.
+    ShortListSyntax,
+    /// Keys in a destructuring (`['a' => $a] = ...`).
+    KeyedList,
+    /// `object`, a class name before.
+    ObjectType,
+    /// A trailing comma in a grouped `use`.
+    TrailingCommaInGroupedUse,
+    /// A trailing comma in the arguments of a call, `isset` or `unset`.
+    TrailingCommaInArguments,
+    /// A heredoc's closing label indented, or followed on its line.
+    FlexibleHeredoc,
+    /// `[&$a] = ...`.
+    ListReferenceAssignment,
+    /// A property's native type.
+    TypedProperties,
+    /// `fn() => ...`.
+    ArrowFunctions,
+    /// `??=`.
+    NullCoalescingAssignment,
+    /// `[...$a]`.
+    SpreadInArrays,
+    /// `1_000`.
+    NumericLiteralSeparator,
+    /// `match`.
+    MatchExpression,
+    /// `?->`.
+    NullsafeOperator,
+    /// `static` as a return type.
+    StaticReturnType,
+    /// `mixed`, a class name before.
+    MixedType,
+    /// A trailing comma in a parameter list.
+    TrailingCommaInParameters,
+    /// A trailing comma in a closure's `use` list.
+    TrailingCommaInClosureUse,
+    /// `$object::class`.
+    ClassNameOnObject,
+    /// `enum`.
+    Enums,
+    /// `never`, a class name before.
+    NeverType,
+    /// `new` in a parameter's default, a static variable's initializer, a
+    /// global constant or an attribute's argument.
+    NewInInitializers,
+    /// `0o17`.
+    ExplicitOctal,
+    /// `new A()->f()`, where `(new A())->f()` was.
+    NewWithoutParentheses,
+    /// `|>`.
+    PipeOperator,
+    /// `clone($object, [...])`.
+    CloneWith,
 }
 
 impl PhpFeature {
@@ -367,7 +430,33 @@ impl PhpFeature {
     pub fn threshold(self) -> PhpVersion {
         use PhpFeature::*;
         match self {
-            NegativeStringOffsets => PhpVersion::new(7, 1),
+            NegativeStringOffsets
+            | NullableTypes
+            | VoidType
+            | IterableType
+            | ClassConstantVisibility
+            | MultiCatch
+            | ShortListSyntax
+            | KeyedList => PhpVersion::new(7, 1),
+            ObjectType | TrailingCommaInGroupedUse => PhpVersion::new(7, 2),
+            TrailingCommaInArguments | FlexibleHeredoc | ListReferenceAssignment => {
+                PhpVersion::new(7, 3)
+            }
+            TypedProperties
+            | ArrowFunctions
+            | NullCoalescingAssignment
+            | SpreadInArrays
+            | NumericLiteralSeparator => PhpVersion::new(7, 4),
+            MatchExpression
+            | NullsafeOperator
+            | StaticReturnType
+            | MixedType
+            | TrailingCommaInParameters
+            | TrailingCommaInClosureUse
+            | ClassNameOnObject => PhpVersion::new(8, 0),
+            Enums | NeverType | NewInInitializers | ExplicitOctal => PhpVersion::new(8, 1),
+            NewWithoutParentheses => PhpVersion::new(8, 4),
+            PipeOperator | CloneWith => PhpVersion::new(8, 5),
             NoncapturingCatch
             | ThrowExpression
             | PromotedProperties
