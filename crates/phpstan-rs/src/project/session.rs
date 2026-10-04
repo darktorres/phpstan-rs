@@ -622,8 +622,12 @@ impl Session {
         &self.dirs
     }
 
-    fn configure(&self, project: &mut Project) {
-        project.apply_settings(self.settings.clone());
+    /// Configures `project` with the session's settings, built once or
+    /// kept for edits as `built_once` says.
+    fn configure(&self, project: &mut Project, built_once: bool) {
+        let mut settings = self.settings.clone();
+        settings.built_once = built_once;
+        project.apply_settings(settings);
     }
 
     /// Whether `path` (relative to the root) is in a package promoted to an
@@ -780,7 +784,7 @@ impl Session {
             .collect();
 
         let mut project = Project::new();
-        self.configure(&mut project);
+        self.configure(&mut project, self.settings.built_once);
         let index_use_sites = project.check_settings().rules.check_dead_code;
         let retain_source = self.settings.retain_source;
         types::record_unions();
@@ -886,7 +890,7 @@ impl Session {
             ));
         }
         std::fs::create_dir_all(out).map_err(|e| format!("{}: {e}", out.display()))?;
-        let mut project = self.load()?.project;
+        let mut project = self.load_editable()?.project;
         let mut held = super::edit_replay::check_all(&project, &self.pool);
         let write_step =
             |name: &str, project: &Project, held: &super::edit_replay::HeldDiagnostics| {
@@ -918,7 +922,7 @@ impl Session {
             super::edit_replay::print_held(&held),
         );
         drop(project);
-        let fresh_project = self.load()?.project;
+        let fresh_project = self.load_editable()?.project;
         let fresh_held = super::edit_replay::check_all(&fresh_project, &self.pool);
         write_step("fresh", &fresh_project, &fresh_held)?;
         let fresh = (
@@ -980,6 +984,19 @@ impl Session {
     /// Parses every context and analysed file into a configured,
     /// finished `Project`, ready for `analyse`.
     pub fn load(&self) -> Result<Loaded, String> {
+        self.load_project(self.settings.built_once)
+    }
+
+    /// `load`, the project kept for edits as the language server keeps it:
+    /// with its declarations as built, and every file's tree, so no file is
+    /// read back from the per-file cache.
+    fn load_editable(&self) -> Result<Loaded, String> {
+        self.load_project(false)
+    }
+
+    /// `load`, the project built once or kept for edits as `built_once`
+    /// says.
+    fn load_project(&self, built_once: bool) -> Result<Loaded, String> {
         let mut analyze_files = Vec::new();
         for dir in &self.dirs {
             self.collect_php_files(dir, &mut analyze_files);
@@ -1005,7 +1022,7 @@ impl Session {
         }
 
         let mut project = Project::new();
-        self.configure(&mut project);
+        self.configure(&mut project, built_once);
 
         let pool = &self.pool;
 
@@ -1032,8 +1049,10 @@ impl Session {
                                 p,
                                 stub_files.contains(p.as_path()),
                                 names,
-                                // The context files come first.
-                                index < context_files.len(),
+                                // The context files come first; a project kept
+                                // for edits keeps their trees, which no entry
+                                // holds.
+                                built_once && index < context_files.len(),
                                 index_use_sites,
                             );
                             if let Read::Loaded(file) = &mut read {
