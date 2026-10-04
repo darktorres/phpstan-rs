@@ -57,6 +57,15 @@ pub(crate) struct CheckProjectArgs {
     /// every analysed file to this path (a regression-gate snapshot).
     #[arg(long, hide = true)]
     pub(crate) dump_types: Option<PathBuf>,
+    /// Writes every expression's inferred and native type in the final
+    /// pass of each analysed file to this path, gzip-compressed (a
+    /// regression-gate snapshot).
+    #[arg(long, hide = true)]
+    pub(crate) dump_expr_types: Option<PathBuf>,
+    /// Writes every PHPDoc resolution the check makes of each analysed
+    /// file to this path, gzip-compressed (a regression-gate snapshot).
+    #[arg(long, hide = true)]
+    pub(crate) dump_doc_resolutions: Option<PathBuf>,
     /// Writes the front end's dump of every file and embedded stub into
     /// this directory and stops (a regression-gate snapshot, O1).
     #[arg(long, hide = true)]
@@ -161,7 +170,11 @@ pub(crate) fn run_check_project_command(args: CheckProjectArgs) {
     // print each caught panic's default message.
     let default_hook = std::panic::take_hook();
     std::panic::set_hook(Box::new(|_| {}));
-    let analysis = run.session.run(args.dump_types.is_some());
+    let analysis = run.session.run(phpstan_rs::project::Records {
+        types: args.dump_types.is_some(),
+        expr_types: args.dump_expr_types.is_some(),
+        doc_resolutions: args.dump_doc_resolutions.is_some(),
+    });
     std::panic::set_hook(default_hook);
     let analysis = match analysis {
         Ok(analysis) => analysis,
@@ -177,6 +190,16 @@ pub(crate) fn run_check_project_command(args: CheckProjectArgs) {
         && let Err(e) = std::fs::write(out, dump)
     {
         eprintln!("failed to write type dump {}: {e}", out.display());
+    }
+    for (out, dump) in [
+        (&args.dump_expr_types, &analysis.expr_type_dump),
+        (&args.dump_doc_resolutions, &analysis.doc_resolution_dump),
+    ] {
+        if let (Some(out), Some(dump)) = (out, dump)
+            && let Err(e) = phpstan_rs::project::session::write_gzip(out, dump.as_bytes())
+        {
+            eprintln!("failed to write {e}");
+        }
     }
     report(
         &run,

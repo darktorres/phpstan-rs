@@ -399,6 +399,12 @@ pub(crate) struct FileCheck {
     /// The `--dump-types` lines (`line:col [host] vars`, one per
     /// statement); empty unless requested.
     pub(crate) type_dump: Vec<String>,
+    /// The expression-type record's lines (`Checker::take_expr_types`);
+    /// empty unless requested.
+    pub(crate) expr_types: Vec<String>,
+    /// The PHPDoc resolution record's lines
+    /// (`Checker::take_doc_resolutions`); empty unless requested.
+    pub(crate) doc_resolutions: Vec<String>,
     /// The file's writes to private properties.
     property_assign_facts: PropertyAssignFacts,
     /// The file's private property types, until judged against the
@@ -415,10 +421,23 @@ impl FileCheck {
             escaped_member_classes: FxHashSet::default(),
             named_argument_calls: FxHashMap::default(),
             type_dump: Vec::new(),
+            expr_types: Vec::new(),
+            doc_resolutions: Vec::new(),
             property_assign_facts: NameMap::default(),
             property_type_sites: Vec::new(),
         }
     }
+}
+
+/// The records a check keeps of each file, beside its diagnostics.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct Records {
+    /// `--dump-types`: every tracked variable's type after each statement.
+    pub types: bool,
+    /// Every expression's inferred and native type in the final pass.
+    pub expr_types: bool,
+    /// Every PHPDoc resolution.
+    pub doc_resolutions: bool,
 }
 
 /// What checking a file came to: its check, or the message it panicked
@@ -1745,7 +1764,7 @@ impl Project {
         }
         let paths: Vec<PathBuf> = self.files.keys().cloned().collect();
         for path in paths {
-            let check = self.run_checker(&path, true, false);
+            let check = self.run_checker(&path, true, Records::default());
             self.seed_member_refs(
                 &path,
                 check.member_refs,
@@ -2103,7 +2122,16 @@ impl Project {
     #[cfg(test)]
     pub(crate) fn type_dump(&self, path: &Path) -> Vec<String> {
         match self
-            .check_files(&[path.to_path_buf()], None, false, true)
+            .check_files(
+                &[path.to_path_buf()],
+                None,
+                false,
+                Records {
+                    types: true,
+                    expr_types: false,
+                    doc_resolutions: false,
+                },
+            )
             .pop()
         {
             Some((_, Ok(check))) => check.type_dump,
@@ -2139,7 +2167,7 @@ impl Project {
     /// `check_files` for one file, whose panic propagates.
     fn check_one(&self, path: &Path, collect_member_refs: bool) -> FileCheck {
         let paths = [path.to_path_buf()];
-        let mut checks = self.check_files(&paths, None, collect_member_refs, false);
+        let mut checks = self.check_files(&paths, None, collect_member_refs, Records::default());
         match checks.pop() {
             Some((_, Ok(check))) => check,
             Some((_, Err(message))) => panic!("{message}"),
@@ -2149,8 +2177,8 @@ impl Project {
 
     /// Checks `paths` (in parallel on `pool` when there is one), each
     /// file's panic caught as its outcome. With `collect_member_refs`, the
-    /// Tier-2 member-reference data too (fed to `seed_member_refs`); with
-    /// `dump_types`, the file's `--dump-types` lines. The private property
+    /// Tier-2 member-reference data too (fed to `seed_member_refs`); and
+    /// the records `records` asks for. The private property
     /// types each file declares are judged once every file is checked,
     /// against the writes all of them made plus those of any other file
     /// writing the same properties (`judge_property_types`).
@@ -2159,7 +2187,7 @@ impl Project {
         paths: &[PathBuf],
         pool: Option<&rayon::ThreadPool>,
         collect_member_refs: bool,
-        dump_types: bool,
+        records: Records,
     ) -> Vec<(PathBuf, CheckOutcome)> {
         let mut checks = map_on_pool_largest_first(
             pool,
@@ -2167,7 +2195,7 @@ impl Project {
             |path| self.files.get(path).map_or(0, |file| file.source_len),
             |path| {
                 let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                    self.run_checker(path, collect_member_refs, dump_types)
+                    self.run_checker(path, collect_member_refs, records)
                 }))
                 .map_err(panic_message);
                 (path.clone(), outcome)
@@ -2236,7 +2264,8 @@ impl Project {
         others.sort();
         let other_facts = map_on_pool(pool, &others, |path| {
             std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                self.run_checker(path, false, false).property_assign_facts
+                self.run_checker(path, false, Records::default())
+                    .property_assign_facts
             }))
             .ok()
         });
@@ -2325,7 +2354,7 @@ impl Project {
 
     /// Runs the checker over `path`, leaving its private property types
     /// unjudged and its diagnostics unfiltered (`finish_diagnostics`).
-    fn run_checker(&self, path: &Path, collect_member_refs: bool, dump_types: bool) -> FileCheck {
+    fn run_checker(&self, path: &Path, collect_member_refs: bool, records: Records) -> FileCheck {
         #[cfg(test)]
         tests::panic_injection::panic_if_injected(path);
         let Some((mut checker, ast)) = self.checker_for(path) else {
@@ -2333,7 +2362,7 @@ impl Project {
         };
         checker.set_defer_property_type_checks(true);
         checker.set_collect_member_refs(collect_member_refs);
-        checker.set_dump_types(dump_types);
+        checker.set_records(records);
         checker.check_program(&ast);
         if collect_member_refs {
             checker.collect_default_and_const_value_member_refs(&ast);
@@ -2344,6 +2373,8 @@ impl Project {
             escaped_member_classes: checker.take_escaped_member_classes(),
             named_argument_calls: checker.take_named_argument_call_facts(),
             type_dump: checker.take_type_dump(),
+            expr_types: checker.take_expr_types(),
+            doc_resolutions: checker.take_doc_resolutions(),
             property_assign_facts: checker.take_property_assign_facts(),
             property_type_sites: checker.take_property_type_sites(),
             diagnostics: checker.into_diagnostics(),
@@ -2467,7 +2498,7 @@ impl Project {
         paths: &[PathBuf],
         pool: &rayon::ThreadPool,
     ) -> FxHashMap<PathBuf, Vec<Diagnostic>> {
-        self.check_files(paths, Some(pool), false, false)
+        self.check_files(paths, Some(pool), false, Records::default())
             .into_iter()
             .map(|(path, outcome)| match outcome {
                 Ok(check) => (path, check.diagnostics),
@@ -2495,7 +2526,7 @@ impl Project {
     ) -> CheckPathsIsolatingPanics {
         let default_hook = std::panic::take_hook();
         std::panic::set_hook(Box::new(|_| {}));
-        let outcomes = self.check_files(paths, Some(pool), false, false);
+        let outcomes = self.check_files(paths, Some(pool), false, Records::default());
         std::panic::set_hook(default_hook);
 
         let mut results = FxHashMap::default();

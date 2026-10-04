@@ -33,6 +33,9 @@ type LocalsMap = imbl::GenericOrdMap<LocalKey, Type, imbl::shared_ptr::DefaultSh
 type ProvenanceSet =
     imbl::GenericHashSet<Span, rustc_hash::FxBuildHasher, imbl::shared_ptr::DefaultSharedPtr>;
 type KeySet = imbl::GenericOrdSet<LocalKey, imbl::shared_ptr::DefaultSharedPtr>;
+/// Where a record entry is: a span's start and end, and the class it was
+/// checked in.
+type RecordedAt = (u32, u32, String);
 type ProvenanceMap =
     imbl::GenericOrdMap<LocalKey, ProvenanceSet, imbl::shared_ptr::DefaultSharedPtr>;
 
@@ -860,6 +863,14 @@ pub struct Checker<'a> {
     // checked in, so a later loop pass or trait host overwrites an earlier
     // one. `None` unless enabled.
     type_dump: Option<std::collections::BTreeMap<(u32, u32, String), String>>,
+    // The expression-type record: each expression's inferred and native
+    // type, keyed by its span and the class it was checked in, so a later
+    // pass overwrites an earlier one and the final pass's stays. `None`
+    // unless kept.
+    expr_types: Option<std::collections::BTreeMap<RecordedAt, (Type, Type)>>,
+    // The PHPDoc resolution record (`record_doc_resolution`), one line for
+    // each distinct resolution. `None` unless kept.
+    doc_resolutions: RefCell<Option<std::collections::BTreeSet<String>>>,
     // The types `infer_expr` found while one outermost `check_expr` runs,
     // by expression (its address and id) and scope version, in a slot for
     // each node (`infer_cache.rs`): checking a
@@ -1209,6 +1220,8 @@ impl<'a> Checker<'a> {
             semantic_tokens: Vec::new(),
             pending_or_disjunctions: Vec::new(),
             type_dump: None,
+            expr_types: None,
+            doc_resolutions: RefCell::new(None),
             infer_cache: RefCell::new(None),
             infer_spare: RefCell::new(InferCache::default()),
         }
@@ -1412,10 +1425,6 @@ impl<'a> Checker<'a> {
         self.working_dir = dir;
     }
 
-    pub(crate) fn set_dump_types(&mut self, enabled: bool) {
-        self.type_dump = enabled.then(std::collections::BTreeMap::new);
-    }
-
     /// Records every tracked variable's type after `stmt` - see
     /// `type_dump`.
     pub(crate) fn record_type_dump(&mut self, stmt: &Stmt, locals: &Locals) {
@@ -1450,6 +1459,73 @@ impl<'a> Checker<'a> {
             .unwrap_or_default()
             .into_iter()
             .map(|((line, col, host), vars)| format!("{line}:{col} [{host}] {vars}"))
+            .collect()
+    }
+
+    /// Keeps the expression-type and the PHPDoc resolution records, as
+    /// `records` asks.
+    pub(crate) fn set_records(&mut self, records: crate::project::Records) {
+        self.type_dump = records.types.then(std::collections::BTreeMap::new);
+        self.expr_types = records.expr_types.then(std::collections::BTreeMap::new);
+        *self.doc_resolutions.borrow_mut() = records
+            .doc_resolutions
+            .then(std::collections::BTreeSet::new);
+    }
+
+    /// Whether the expression-type record is kept.
+    pub(crate) fn records_expr_types(&self) -> bool {
+        self.expr_types.is_some()
+    }
+
+    /// Records that the expression at `span` has the type `inferred` and
+    /// the native type `native` in this pass.
+    pub(crate) fn record_expr_type(&mut self, span: Span, inferred: Type, native: Type) {
+        let host = self.current_class.clone().unwrap_or_default();
+        if let Some(record) = self.expr_types.as_mut() {
+            record.insert((span.start, span.end, host), (inferred, native));
+        }
+    }
+
+    /// `start..end [host] inferred | native` for every expression the
+    /// expression-type record holds, in source order.
+    pub(crate) fn take_expr_types(&mut self) -> Vec<String> {
+        self.expr_types
+            .take()
+            .unwrap_or_default()
+            .into_iter()
+            .map(|((start, end, host), (inferred, native))| {
+                format!(
+                    "{start}..{end} [{host}] {} | {}",
+                    inferred.canonical_text(),
+                    native.canonical_text()
+                )
+            })
+            .collect()
+    }
+
+    /// Records, when the PHPDoc resolution record is kept, that the type
+    /// `written`, read from a doc comment by `site`, resolves to `resolved`
+    /// where the checker is: `[class] function site: written => resolved`.
+    pub(crate) fn record_doc_resolution(&self, site: &str, written: &Type, resolved: &Type) {
+        let mut record = self.doc_resolutions.borrow_mut();
+        let Some(record) = record.as_mut() else {
+            return;
+        };
+        record.insert(format!(
+            "[{}] {} {site}: {} => {}",
+            self.current_class.as_deref().unwrap_or_default(),
+            self.current_method.as_deref().unwrap_or_default(),
+            written.canonical_text(),
+            resolved.canonical_text()
+        ));
+    }
+
+    /// The PHPDoc resolution record's lines, sorted.
+    pub(crate) fn take_doc_resolutions(&mut self) -> Vec<String> {
+        self.doc_resolutions
+            .take()
+            .unwrap_or_default()
+            .into_iter()
             .collect()
     }
 

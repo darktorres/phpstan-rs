@@ -525,11 +525,12 @@ impl<'a> Checker<'a> {
                 let PhpDocTagValue::ExtendsLike { ty: node } = &t.value else {
                     continue;
                 };
-                let ty = registry::parse_type_node(node);
-                let ty = registry::mark_template_params(ty, class_templates);
+                let written = registry::parse_type_node(node);
+                let ty = registry::mark_template_params(written.clone(), class_templates);
                 let ty = registry::resolve_names_in_type(ty, &self.name_ctx);
                 let ty = registry::substitute_type_aliases(ty, &aliases);
                 let ty = self.registry.resolve_deferred_value_of_now(ty);
+                self.record_doc_resolution(&format!("@{}", t.name), &written, &ty);
                 let key = match ty.as_object() {
                     Some((class, _)) => class.to_ascii_lowercase(),
                     None => ty.to_string(),

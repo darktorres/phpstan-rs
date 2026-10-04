@@ -308,11 +308,11 @@ impl<'a> Checker<'a> {
                 );
             }
             let resolve = |node: &dyn phpdoc::WrittenType| {
-                let ty = crate::registry::mark_template_params(
-                    crate::registry::parse_type_node(node),
-                    &scope,
-                );
-                crate::registry::resolve_names_in_type(ty, &self.name_ctx)
+                let written = crate::registry::parse_type_node(node);
+                let ty = crate::registry::mark_template_params(written.clone(), &scope);
+                let ty = crate::registry::resolve_names_in_type(ty, &self.name_ctx);
+                self.record_doc_resolution("@method template", &written, &ty);
+                ty
             };
             let names: Vec<Name> = tag
                 .templates
@@ -416,7 +416,8 @@ impl<'a> Checker<'a> {
             let mut case_refs = Vec::new();
             collect_class_name_case_refs(&parsed, &self.name_ctx, &mut case_refs);
             self.check_type_class_name_case(&case_refs, c.span);
-            let ty = resolve_names_in_type(parsed, &self.name_ctx);
+            let ty = resolve_names_in_type(parsed.clone(), &self.name_ctx);
+            self.record_doc_resolution("@phpstan-require-extends", &parsed, &ty);
             let names: Vec<String> = ty
                 .object_class_names()
                 .iter()
@@ -486,7 +487,8 @@ impl<'a> Checker<'a> {
             let mut case_refs = Vec::new();
             collect_class_name_case_refs(&parsed, &self.name_ctx, &mut case_refs);
             self.check_type_class_name_case(&case_refs, c.span);
-            let ty = resolve_names_in_type(parsed, &self.name_ctx);
+            let ty = resolve_names_in_type(parsed.clone(), &self.name_ctx);
+            self.record_doc_resolution("@phpstan-require-implements", &parsed, &ty);
             let names: Vec<String> = ty
                 .object_class_names()
                 .iter()
@@ -559,7 +561,8 @@ impl<'a> Checker<'a> {
             let mut case_refs = Vec::new();
             collect_class_name_case_refs(&parsed, &self.name_ctx, &mut case_refs);
             self.check_type_class_name_case(&case_refs, span);
-            let ty = resolve_names_in_type(parsed, &self.name_ctx);
+            let ty = resolve_names_in_type(parsed.clone(), &self.name_ctx);
+            self.record_doc_resolution("@phpstan-sealed", &parsed, &ty);
             let names: Vec<String> = ty
                 .object_class_names()
                 .iter()

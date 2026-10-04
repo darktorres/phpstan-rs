@@ -364,9 +364,11 @@ impl<'a> Checker<'a> {
                 .map(|n| (n.clone(), types::TemplateParam::unbounded(n.clone())))
                 .collect();
             let resolve = |node: &phpdoc::DocType| -> Type {
-                let ty = crate::registry::parse_type_node(node);
-                let ty = mark_template_params(ty, &shallow);
-                resolve_names_in_type(ty, &self.name_ctx)
+                let written = crate::registry::parse_type_node(node);
+                let ty = mark_template_params(written.clone(), &shallow);
+                let ty = resolve_names_in_type(ty, &self.name_ctx);
+                self.record_doc_resolution("function @template", &written, &ty);
+                ty
             };
             let templates: Vec<Name> = doc.templates.iter().map(Name::from).collect();
             let bounds: syntax::name::NameMap<Type> = doc

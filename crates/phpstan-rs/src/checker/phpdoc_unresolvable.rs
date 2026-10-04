@@ -323,7 +323,7 @@ impl<'a> Checker<'a> {
     /// `node`'s type, resolved in the current name scope - for the
     /// structural checks above, not stored anywhere.
     fn node_type(&self, node: &TypeNode, class: Option<&str>) -> Type {
-        let ty = self.resolve_type_node(node);
+        let ty = self.resolve_type_node(node, "unresolvable-type check");
         let Some(c) = class else {
             return ty;
         };

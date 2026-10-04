@@ -315,7 +315,7 @@ impl<'a> Checker<'a> {
             .iter()
             .map(|(name, node)| {
                 let name = name.clone();
-                let ty = self.resolve_type_node(node);
+                let ty = self.resolve_type_node(node, "inline @var");
                 let ty = match &self.current_class {
                     Some(class) => match self.registry.classes.get(class.as_str()) {
                         Some(info) if !info.type_aliases().is_empty() => {

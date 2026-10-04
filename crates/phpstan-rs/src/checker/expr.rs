@@ -220,9 +220,15 @@ impl<'a> Checker<'a> {
 
     fn check_expr_cached(&mut self, e: &Expr, locals: &mut Locals, label: &str) -> Type {
         syntax::stack::guard(|| {
+            let native = self
+                .records_expr_types()
+                .then(|| self.native_expr_type(e, locals));
             let ty = crate::checker::profiling::measure_outermost!("checker::check_expr", {
                 self.check_expr_impl(e, locals, label)
             });
+            if let Some(native) = native {
+                self.record_expr_type(e.span, ty.clone(), native);
+            }
             self.forget_what_a_call_may_change(e, locals);
             if !self.try_throw_states.is_empty()
                 && let Some(thrown) = self.thrown_by(e, locals)

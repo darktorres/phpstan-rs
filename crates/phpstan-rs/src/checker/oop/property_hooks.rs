@@ -114,8 +114,9 @@ impl<'a> Checker<'a> {
     fn resolve_hook_throws(&self, doc: Option<&str>) -> Option<Type> {
         let block = docblock::parse_shared(doc?);
         block.throws.iter().fold(None::<Type>, |acc, node| {
-            let ty = crate::registry::parse_type_node(node);
-            let ty = resolve_names_in_type(ty, &self.name_ctx);
+            let written = crate::registry::parse_type_node(node);
+            let ty = resolve_names_in_type(written.clone(), &self.name_ctx);
+            self.record_doc_resolution("hook @throws", &written, &ty);
             Some(match acc {
                 Some(prev) => self.relation().union(prev, ty),
                 None => ty,

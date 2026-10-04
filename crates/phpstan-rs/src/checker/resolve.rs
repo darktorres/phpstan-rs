@@ -78,9 +78,16 @@ impl<'a> Checker<'a> {
         (types::native_type(hint), case_refs)
     }
 
-    /// `resolve_type_hint` for a parsed PHPDoc type.
-    pub(crate) fn resolve_type_node<T: phpdoc::WrittenType + ?Sized>(&self, node: &T) -> Type {
-        self.resolve_written_type(registry::parse_type_node(node)).0
+    /// `resolve_type_hint` for a parsed PHPDoc type, which `site` reads.
+    pub(crate) fn resolve_type_node<T: phpdoc::WrittenType + ?Sized>(
+        &self,
+        node: &T,
+        site: &str,
+    ) -> Type {
+        let written = registry::parse_type_node(node);
+        let resolved = self.resolve_written_type(written.clone()).0;
+        self.record_doc_resolution(site, &written, &resolved);
+        resolved
     }
 
     /// Resolves a type as written in the current scope: its templates

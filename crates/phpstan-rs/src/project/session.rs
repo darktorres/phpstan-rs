@@ -154,6 +154,14 @@ pub struct AnalysisResult {
     /// `path:line:col [host] vars` line per statement, files in path
     /// order.
     pub type_dump: Option<String>,
+    /// The expression-type record when requested: `path:start..end [host]
+    /// inferred | native` for every expression of each analysed file, in
+    /// the final pass, files in path order.
+    pub expr_type_dump: Option<String>,
+    /// The PHPDoc resolution record when requested: `path:[class] function
+    /// site: written => resolved`, sorted within each file, files in path
+    /// order.
+    pub doc_resolution_dump: Option<String>,
 }
 
 /// The post-processing a finalized report gets, in this order: the level
@@ -840,9 +848,9 @@ impl Session {
     /// Loads and checks every analysed file, with the `--dump-types`
     /// output when `dump_types` is set. Fails when the analysed paths hold
     /// no `.php` file.
-    pub fn run(&self, dump_types: bool) -> Result<AnalysisResult, String> {
+    pub fn run(&self, records: super::Records) -> Result<AnalysisResult, String> {
         let loaded = self.load()?;
-        Ok(self.analyse(loaded, dump_types))
+        Ok(self.analyse(loaded, records))
     }
 
     /// Parses every context and analysed file into a configured,
@@ -1033,7 +1041,7 @@ impl Session {
 
     /// Checks every analysed file of `loaded` and runs the project-wide
     /// passes.
-    pub fn analyse(&self, loaded: Loaded, dump_types: bool) -> AnalysisResult {
+    pub fn analyse(&self, loaded: Loaded, records: super::Records) -> AnalysisResult {
         let Loaded {
             mut project,
             analyze_files_by_size,
@@ -1050,13 +1058,15 @@ impl Session {
             &analyze_files_by_size,
             Some(&self.pool),
             needs_tier_2,
-            dump_types,
+            records,
         );
 
         let mut results: FxHashMap<PathBuf, Vec<Diagnostic>> = FxHashMap::default();
         let mut check_panics: Vec<(PathBuf, String)> = Vec::new();
         let mut named_argument_calls = Vec::new();
         let mut type_dumps = Vec::new();
+        let mut expr_type_dumps = Vec::new();
+        let mut doc_resolution_dumps = Vec::new();
         for (path, outcome) in checked_results {
             match outcome {
                 Ok(check) => {
@@ -1069,8 +1079,14 @@ impl Session {
                         );
                     }
                     named_argument_calls.push((path.clone(), check.named_argument_calls));
-                    if dump_types {
+                    if records.types {
                         type_dumps.push((path.clone(), check.type_dump));
+                    }
+                    if records.expr_types {
+                        expr_type_dumps.push((path.clone(), check.expr_types));
+                    }
+                    if records.doc_resolutions {
+                        doc_resolution_dumps.push((path.clone(), check.doc_resolutions));
                     }
                     results.insert(path, check.diagnostics);
                 }
@@ -1079,16 +1095,11 @@ impl Session {
         }
         check_panics.sort();
         named_argument_calls.sort_by(|a, b| a.0.cmp(&b.0));
-        let type_dump = dump_types.then(|| {
-            type_dumps.sort_by(|a, b| a.0.cmp(&b.0));
-            let mut text = String::new();
-            for (path, lines) in type_dumps {
-                for line in lines {
-                    text.push_str(&format!("{}:{line}\n", path.display()));
-                }
-            }
-            text
-        });
+        let type_dump = records.types.then(|| by_path(type_dumps));
+        let expr_type_dump = records.expr_types.then(|| by_path(expr_type_dumps));
+        let doc_resolution_dump = records
+            .doc_resolutions
+            .then(|| by_path(doc_resolution_dumps));
         let named_argument_calls = merge_named_argument_calls(named_argument_calls);
         if needs_tier_2 {
             project.mark_member_index_built();
@@ -1135,8 +1146,23 @@ impl Session {
             check_panics,
             lex_warnings,
             type_dump,
+            expr_type_dump,
+            doc_resolution_dump,
         }
     }
+}
+
+/// Each file's record lines, each after the file's path, files in path
+/// order.
+fn by_path(mut files: Vec<(PathBuf, Vec<String>)>) -> String {
+    files.sort_by(|a, b| a.0.cmp(&b.0));
+    let mut text = String::new();
+    for (path, lines) in files {
+        for line in lines {
+            text.push_str(&format!("{}:{line}\n", path.display()));
+        }
+    }
+    text
 }
 
 /// A file's role, its path and its dump; none when it cannot be read.
@@ -1152,7 +1178,7 @@ pub struct FrontEndDump {
 
 /// Writes `bytes` gzip-compressed to `path`, with no name or time in the
 /// header, so equal bytes give an equal file.
-fn write_gzip(path: &Path, bytes: &[u8]) -> Result<(), String> {
+pub fn write_gzip(path: &Path, bytes: &[u8]) -> Result<(), String> {
     use std::io::Write as _;
     let file = std::fs::File::create(path).map_err(|e| format!("{}: {e}", path.display()))?;
     let mut encoder = flate2::GzBuilder::new().mtime(0).write(

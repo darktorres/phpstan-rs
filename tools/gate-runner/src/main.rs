@@ -96,7 +96,11 @@ fn run() -> Result<(), String> {
     let run = check_project::prepare(&args.request, &config, phpstan_rs::project::worker_pool())?;
     let default_hook = std::panic::take_hook();
     std::panic::set_hook(Box::new(|_| {}));
-    let analysis = run.session.run(args.dump_types);
+    let analysis = run.session.run(phpstan_rs::project::Records {
+        types: args.dump_types,
+        expr_types: false,
+        doc_resolutions: false,
+    });
     std::panic::set_hook(default_hook);
     let analysis = analysis?;
     if let Some(dump) = &analysis.type_dump {
