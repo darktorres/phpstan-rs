@@ -828,7 +828,7 @@ The design. Each step is exact unless it says otherwise:
    - **The script exercises every dependency the edit path tracks,** each where the project has one, drawn by the seed: a signature, a body alone, a doc type, a constant's value, a class a trait's user is checked as, a declaration declared twice, an `@see` target, an include's target appearing and vanishing, a parse error made and mended, a file renamed. Today's six edits miss most of these, and each stale-diagnostic bug item 0's validation found was one of them.
    - **Then a seeded sequence of those edits at random,** each step checked the same way, as the unit tests already do over the fixtures (`random_edits_match_a_fresh_load`), so that orders the script does not try are tried too.
 8. **The edit path rechecks its dependents in one check.** `recheck` checks the dependents one after another on the calling thread (`project.rs:2324-2341`; 52 M of `update_file`'s 58 M in the replay). Each check goes through `check_files` for its one file, which judges the private property types again for that file alone, checking once more the files declaring its classes for their writes. The dependents go to one `check_files` over the worker pool instead, as the load's check does, which judges the property types once for all of them; their use sites are then reindexed in one pass, which is what needs the project mutably. The server's latency gains as much.
-9. **Measured again,** once the catalog below has landed, with the same script: instructions and peak memory, and the whole pass's wall time.
+9. **Measured again,** once the catalog below has landed: instructions and peak memory, and the whole pass's wall time. The script becomes a command, `cargo xtask profile <kind> [<project>]`, which builds the frame-pointer `dhat` binaries, warms a cache of its own, runs callgrind the way `CLAUDE.md` prescribes and writes the profile with its binaries and a `README` to `~/.cache/prs-profile/`, so that step 10, O3 and every later measurement take the same runs the same way.
 10. **Every other kind of run the pass makes is profiled the same way,** a configuration's state, a level, a session and the fixture suite, and planned from what it shows, so the whole pass is fast, not only its two commonest runs.
 11. **An item's validation is one command.** `cargo xtask validate` runs §11 whole on the worker pool, with its progress: the `gate` and `oracle` builds, the workspace tests and the item's, the runtime oracle on every version image, the pass with each build, and the comparison with the previous item's snapshot. It writes the summary the ledger's V row records, where today each of these is started by hand, one after another.
 12. **The runtime oracle reaches every asserting fixture.** 114 still never reach an assertion (`WORK_STACK.md`), in four kinds, each closed:
@@ -847,6 +847,7 @@ Expected: a vendor project's run near 70 M instructions and well under its 336 M
    - **the user storages it may write** besides its by-reference parameters: global variables and superglobals (`session_start` fills `$_SESSION`), the caller's variables (`$http_response_header`, `$php_errormsg` under `track_errors` before 8.0, `extract`, one-argument `parse_str`);
    - **where it hands control to code the program registered:** each diagnostic it may raise, by level, which runs the error handler; each class it may look up by name, which runs the autoloaders; the output it may write, which runs the output-buffer callbacks;
    - **the values it may release:** an element it removes or overwrites, an argument it drops, which runs a destructor when it held the last reference;
+   - **what it may return and throw, on every path:** the kinds of value each path returns (`null`, `false`, its own object, a value of the declared type) and the exception classes it may throw. Item 21's iterator outcomes come from these, and a builtin's throw points with them, where today the stubs' hand-written `@throws` give them;
    - **the code it keeps for later and the kept code it runs,** each by the engine state it keeps it in: `session_set_save_handler` keeps an object that `session_start` and the session functions run, `PDOStatement::setFetchMode` keeps a class that the fetches instantiate, `XSLTProcessor::registerPHPFunctions` lets a transformation call PHP functions; and the registrations among these: the error and exception handlers, the autoloaders, the output buffers, the tick and shutdown functions.
    
    Item 20 reads all of these from the catalog: its sites, where it runs code the program registered or kept, and its destructor sites inside builtins. Its design decides them by hand today, from the documented failures and a list of builtins.
@@ -2351,12 +2352,10 @@ Exact, except the private-property judgment, listed in §11.
 
 *Iterators:*
 
-8. **What each builtin iterator gives, recorded from PHP.**
-   - A script like the builtin-runs recorder runs, on every version image from 7.0 to 8.5:
-     - every builtin class implementing `Iterator`;
-     - the iterators that `getIterator` returns (`ArrayObject`'s, `SplFixedArray`'s, `DatePeriod`'s).
-   - It runs each empty, at its end and before its first move, and records what `current()`, `key()` and a `Generator`'s `send()` and `getReturn()` give or throw.
-   - The table is registry data, as the builtin runs are.
+8. **What each builtin iterator gives, from PHP's source.**
+   - The builtin catalog (item 0) gives, for every builtin class implementing `Iterator` and every iterator `getIterator` returns (`ArrayObject`'s, `SplFixedArray`'s, `DatePeriod`'s), what `current()`, `key()` and a `Generator`'s `send()` and `getReturn()` may return and throw on each path, on every version.
+   - A recording of a few states (empty, at the end, before the first move) proves nothing of the states it did not reach, such as a position whose element was removed, so the recorder runs those states as the catalog's oracle, not as the source.
+   - It is compiled in with the catalog.
 9. **The types.**
    - **At a position not proven valid,** a call gives the stub's type for a valid position joined with the recorded outcome, and the recorded exception becomes a throw point.
    - **On a type that names only an interface** (`Iterator`, `SeekableIterator`, `OuterIterator`), the call is the union over every loaded implementation, by the hierarchy, as item 0's calls are.
