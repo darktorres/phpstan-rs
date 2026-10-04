@@ -30,7 +30,6 @@ use crate::rules_settings::RulesSettings;
 use crate::{ext, ignore_errors};
 
 use super::file_cache;
-use super::whole_program::renamed_named_arguments::merge_named_argument_calls;
 use super::{ParsedFile, Project, ProjectSettings};
 use diagnostics::{self, Diagnostic, DiagnosticBuilder};
 
@@ -138,8 +137,11 @@ pub struct Loaded {
 /// so one analysis can be finalized several ways.
 pub struct AnalysisResult {
     project: Project,
-    /// Per-file diagnostics as the checks emitted them.
+    /// Per-file diagnostics as the checks emitted them, and a parse error
+    /// for each analysed file that does not parse.
     results: FxHashMap<PathBuf, Vec<Diagnostic>>,
+    /// The whole-program checks' diagnostics (`Session::whole_program`).
+    whole_program: FxHashMap<PathBuf, Vec<Diagnostic>>,
     /// Analysed files that parsed and checked without an internal error.
     pub checked: usize,
     pub skipped_analyze: usize,
@@ -238,9 +240,16 @@ impl AnalysisResult {
         self.lex_warnings.clone()
     }
 
-    /// The report `options` make of this analysis.
+    /// The report `options` make of this analysis: each file's diagnostics
+    /// followed by the whole-program checks' about it.
     pub fn finalize(&self, options: &Finalize) -> Report {
         let mut results = self.results.clone();
+        for (path, diagnostics) in &self.whole_program {
+            results
+                .entry(path.clone())
+                .or_default()
+                .extend(diagnostics.iter().cloned());
+        }
         for diagnostics in results.values_mut() {
             diagnostics.retain(|d| d.level <= options.level);
         }
@@ -886,18 +895,22 @@ impl Session {
         })
     }
 
-    /// Runs the edit replay (`edit_replay`) over the analysed files, its
-    /// files drawn with `seed`, and writes into `out` the registry dump
-    /// without the stub bases and the diagnostics held after the load and
-    /// after each step (`step-<n>.registry.txt`, `step-<n>.diagnostics.txt`,
-    /// dumps with their manifests, `dumps`), and after a fresh load of the
-    /// edited tree (`fresh.*`); and `script.txt`, the steps, and
-    /// `verdict.txt`, which sections of the last step's dumps and the fresh
-    /// load's are the same. Each dump is written where it differs from the
-    /// same dump of `reference`, another replay's directory, when that has
-    /// it, and from this replay's step before otherwise. Edits the tree it
+    /// Runs the edit replay (`edit_replay`) over an analysis of the
+    /// project kept for edits, its files drawn with `seed`, and writes into
+    /// `out` the registry dump without the stub bases, the diagnostics held
+    /// and the whole-program checks' after the analysis and after each
+    /// step (`step-<n>.registry.txt`, `step-<n>.diagnostics.txt`,
+    /// `step-<n>.whole-program.txt`, dumps with their manifests, `dumps`),
+    /// the same of a fresh analysis of the tree as each step that is
+    /// compared with one leaves it (`fresh-<n>.*`); and `script.txt`, the
+    /// steps, and `verdict.txt`, for each step which sections of its dumps
+    /// and those it is compared with differ. Each dump is written where it
+    /// differs from the same dump of `reference`, another replay's
+    /// directory, when that has it, and otherwise from this replay's step
+    /// before, or for a fresh analysis from its step. Edits the tree it
     /// reads: refuses one without the replay's marker file at its root.
-    /// Gives the verdict.
+    /// Gives the verdict, or an error with it when a step differs in more
+    /// than its load order.
     pub fn edit_replay(
         &self,
         out: &Path,
@@ -912,21 +925,20 @@ impl Session {
             ));
         }
         std::fs::create_dir_all(out).map_err(|e| format!("{}: {e}", out.display()))?;
-        let mut project = self.load_editable()?.project;
-        let mut held = super::edit_replay::check_all(&project, &self.pool);
-        let mut previous: Option<String> = None;
-        let mut write_step = |name: &str,
-                              project: &Project,
-                              held: &super::edit_replay::HeldDiagnostics|
+        let write_state = |name: &str,
+                           base: Option<&str>,
+                           project: &Project,
+                           held: &super::edit_replay::HeldDiagnostics,
+                           whole_program: &super::edit_replay::HeldDiagnostics|
          -> Result<(), String> {
-            for dump in [REPLAY_REGISTRY, REPLAY_DIAGNOSTICS] {
+            for dump in [REPLAY_REGISTRY, REPLAY_DIAGNOSTICS, REPLAY_WHOLE_PROGRAM] {
                 let text = out.join(format!("{name}.{dump}.txt"));
                 let given = reference
                     .map(|dir| dumps::manifest_path(&dir.join(format!("{name}.{dump}.txt"))))
                     .filter(|given| given.is_file())
                     .or_else(|| {
-                        previous.as_ref().map(|previous| {
-                            dumps::manifest_path(&out.join(format!("{previous}.{dump}.txt")))
+                        base.map(|base| {
+                            dumps::manifest_path(&out.join(format!("{base}.{dump}.txt")))
                         })
                     });
                 if dump == REPLAY_REGISTRY {
@@ -934,38 +946,99 @@ impl Session {
                         project.write_registry_dump(w)
                     })?;
                 } else {
+                    let held = if dump == REPLAY_DIAGNOSTICS {
+                        held
+                    } else {
+                        whole_program
+                    };
                     write_dump(&text, dumps::Kind::ByPrefix(b'\t'), given.as_deref(), |w| {
                         w.write_all(super::edit_replay::print_held(held).as_bytes())
                     })?;
                 }
             }
-            previous = Some(name.to_string());
             Ok(())
         };
-        write_step("step-0", &project, &held)?;
+        let analyse = || -> Result<AnalysisResult, String> {
+            Ok(self.analyse(self.load_editable()?, super::Records::default()))
+        };
+        let AnalysisResult {
+            mut project,
+            results,
+            whole_program,
+            ..
+        } = analyse()?;
+        let mut held: super::edit_replay::HeldDiagnostics = results.into_iter().collect();
+        write_state(
+            "step-0",
+            None,
+            &project,
+            &held,
+            &whole_program.into_iter().collect(),
+        )?;
         let mut script = String::from("0\tload\n");
+        let mut verdict = String::new();
+        let mut differing: Vec<usize> = Vec::new();
         let mut number = 0;
+        let list = || self.analysed_files();
         super::edit_replay::replay(
             &mut project,
             &self.root,
             seed,
             &mut held,
+            &list,
             |step, project, held| {
                 number += 1;
                 script.push_str(&format!("{number}\t{}\t{}\n", step.label, step.description));
-                write_step(&format!("step-{number}"), project, held)
+                let name = format!("step-{number}");
+                let previous = format!("step-{}", number - 1);
+                let whole_program = self.whole_program(project).into_iter().collect();
+                write_state(&name, Some(&previous), project, held, &whole_program)?;
+                let against = match step.against {
+                    super::edit_replay::Against::Fresh => {
+                        let fresh = analyse()?;
+                        let fresh_name = format!("fresh-{number}");
+                        write_state(
+                            &fresh_name,
+                            Some(&name),
+                            &fresh.project,
+                            &fresh.results.into_iter().collect(),
+                            &fresh.whole_program.into_iter().collect(),
+                        )?;
+                        fresh_name
+                    }
+                    super::edit_replay::Against::Previous => previous,
+                };
+                let states = replay_verdict(out, &name, &against)
+                    .map_err(|e| format!("{}: {e}", out.display()))?;
+                let differs: Vec<String> = states
+                    .iter()
+                    .filter(|(_, state)| *state != SAME)
+                    .map(|(section, state)| format!("{section} {state}"))
+                    .collect();
+                if states.iter().any(|(_, state)| *state == DIFFERS) {
+                    differing.push(number);
+                }
+                let summary = if differs.is_empty() {
+                    SAME.to_string()
+                } else {
+                    differs.join(", ")
+                };
+                verdict.push_str(&format!("{number}\t{against}\t{summary}\n"));
+                Ok(())
             },
         )?;
-        drop(project);
-        let fresh_project = self.load_editable()?.project;
-        let fresh_held = super::edit_replay::check_all(&fresh_project, &self.pool);
-        write_step("fresh", &fresh_project, &fresh_held)?;
-        let verdict = replay_verdict(out, &format!("step-{number}"), "fresh")
-            .map_err(|e| format!("{}: {e}", out.display()))?;
         for (name, text) in [("script.txt", &script), ("verdict.txt", &verdict)] {
             std::fs::write(out.join(name), text).map_err(|e| format!("{name}: {e}"))?;
         }
-        Ok(verdict)
+        if differing.is_empty() {
+            Ok(verdict)
+        } else {
+            let steps: Vec<String> = differing.iter().map(usize::to_string).collect();
+            Err(format!(
+                "{verdict}the edited project differs from what it is compared with at step {}",
+                steps.join(", ")
+            ))
+        }
     }
 
     /// Loads every file, runs the finishing passes, and writes the registry
@@ -1011,14 +1084,20 @@ impl Session {
         self.load_project(false)
     }
 
+    /// The files the load analyses, in path order.
+    fn analysed_files(&self) -> Vec<PathBuf> {
+        let mut files = Vec::new();
+        for dir in &self.dirs {
+            self.collect_php_files(dir, &mut files);
+        }
+        composer::path_order::sort_paths(&mut files);
+        files
+    }
+
     /// `load`, the project built once or kept for edits as `built_once`
     /// says.
     fn load_project(&self, built_once: bool) -> Result<Loaded, String> {
-        let mut analyze_files = Vec::new();
-        for dir in &self.dirs {
-            self.collect_php_files(dir, &mut analyze_files);
-        }
-        composer::path_order::sort_paths(&mut analyze_files);
+        let analyze_files = self.analysed_files();
         // The vendor context was being found while the analysed files were
         // listed.
         let mut scan_dirs = self.scan_dirs.clone();
@@ -1229,22 +1308,13 @@ impl Session {
 
         let mut results: FxHashMap<PathBuf, Vec<Diagnostic>> = FxHashMap::default();
         let mut check_panics: Vec<(PathBuf, String)> = Vec::new();
-        let mut named_argument_calls = Vec::new();
         let mut type_dumps = Vec::new();
         let mut expr_type_dumps = Vec::new();
         let mut doc_resolution_dumps = Vec::new();
         for (path, outcome) in checked_results {
             match outcome {
-                Ok(check) => {
-                    if needs_tier_2 {
-                        project.seed_member_refs(
-                            &path,
-                            check.member_refs,
-                            check.escaped_enums,
-                            check.escaped_member_classes,
-                        );
-                    }
-                    named_argument_calls.push((path.clone(), check.named_argument_calls));
+                Ok(mut check) => {
+                    project.keep_analysed_check(&path, &mut check, needs_tier_2);
                     if records.types {
                         type_dumps.push((path.clone(), check.type_dump));
                     }
@@ -1260,13 +1330,11 @@ impl Session {
             }
         }
         check_panics.sort();
-        named_argument_calls.sort_by(|a, b| a.0.cmp(&b.0));
         let type_dump = records.types.then(|| by_path(type_dumps));
         let expr_type_dump = records.expr_types.then(|| by_path(expr_type_dumps));
         let doc_resolution_dump = records
             .doc_resolutions
             .then(|| by_path(doc_resolution_dumps));
-        let named_argument_calls = merge_named_argument_calls(named_argument_calls);
         if needs_tier_2 {
             project.mark_member_index_built();
         }
@@ -1284,12 +1352,41 @@ impl Session {
                     .build_at(syntax::span::Range { start: at, end: at }),
             );
         }
+        let whole_program = self.whole_program(&mut project);
+
+        crate::heap::check_finished();
+        AnalysisResult {
+            project,
+            results,
+            whole_program,
+            checked: analyze_files_by_size.len() - skipped_analyze - check_panics.len(),
+            skipped_analyze,
+            skipped_context,
+            context_loaded,
+            check_panics,
+            lex_warnings,
+            type_dump,
+            expr_type_dump,
+            doc_resolution_dump,
+        }
+    }
+
+    /// The diagnostics of the checks that read the whole of `project` as
+    /// it is, where no file's check sees enough: the dead code, the
+    /// namespace cycles, the renamed named arguments, the mock and
+    /// Composer hygiene, the class shapes, the banned constructs and the
+    /// architecture rules.
+    pub(crate) fn whole_program(
+        &self,
+        project: &mut Project,
+    ) -> FxHashMap<PathBuf, Vec<Diagnostic>> {
+        let mut results: FxHashMap<PathBuf, Vec<Diagnostic>> = FxHashMap::default();
         let mut extend = |found: FxHashMap<PathBuf, Vec<Diagnostic>>| {
             for (path, diags) in found {
                 results.entry(path).or_default().extend(diags);
             }
         };
-        extend(project.check_whole_program(&named_argument_calls));
+        extend(project.check_whole_program());
         if self.check_mock_hygiene {
             extend(project.check_mock_hygiene(&self.mock_banned_classes));
         }
@@ -1301,21 +1398,7 @@ impl Session {
                 extend(project.check_composer_hygiene(root));
             }
         }
-
-        crate::heap::check_finished();
-        AnalysisResult {
-            project,
-            results,
-            checked: analyze_files_by_size.len() - skipped_analyze - check_panics.len(),
-            skipped_analyze,
-            skipped_context,
-            context_loaded,
-            check_panics,
-            lex_warnings,
-            type_dump,
-            expr_type_dump,
-            doc_resolution_dump,
-        }
+        results
     }
 }
 
@@ -1340,9 +1423,17 @@ pub struct FrontEndDump {
     pub unions: usize,
 }
 
-/// The edit replay's dump of the registry, and of the diagnostics held.
+/// The edit replay's dump of the registry, of the diagnostics held, and of
+/// the whole-program checks' diagnostics.
 const REPLAY_REGISTRY: &str = "registry";
 const REPLAY_DIAGNOSTICS: &str = "diagnostics";
+const REPLAY_WHOLE_PROGRAM: &str = "whole-program";
+
+/// What a section of a replay's dumps is beside the dump it is compared
+/// with.
+const SAME: &str = "same";
+const DIFFERS: &str = "differs";
+const DIFFERS_IN_LOAD_ORDER: &str = "differs only in load order";
 
 /// Writes the dump `kind` (`dumps`) to `text`, its manifest beside it, as
 /// `write` prints it; given `reference`, the manifest of another run of it,
@@ -1360,18 +1451,25 @@ pub fn write_dump(
     Ok(())
 }
 
-/// Which sections of the registry dumps of the replay's steps `last` and
-/// `fresh` in `out` are the same, and whether their diagnostics are: read
-/// from the manifests, and from the texts of the entities whose ids
-/// differ.
-fn replay_verdict(out: &Path, last: &str, fresh: &str) -> std::io::Result<String> {
+/// What each section of the dumps `step` in `out` is beside the same dumps
+/// of `against`: each section of the registry dump, the diagnostics held
+/// and the whole-program checks' (`SAME`, `DIFFERS`,
+/// `DIFFERS_IN_LOAD_ORDER`). Read from the manifests, and from the texts
+/// of the entities whose ids differ.
+fn replay_verdict(
+    out: &Path,
+    step: &str,
+    against: &str,
+) -> std::io::Result<Vec<(String, &'static str)>> {
     let open = |name: &str, dump: &str| {
         dumps::Dump::open(&dumps::manifest_path(
             &out.join(format!("{name}.{dump}.txt")),
         ))
     };
-    let (mut last_registry, mut fresh_registry) =
-        (open(last, REPLAY_REGISTRY)?, open(fresh, REPLAY_REGISTRY)?);
+    let (mut step_registry, mut against_registry) = (
+        open(step, REPLAY_REGISTRY)?,
+        open(against, REPLAY_REGISTRY)?,
+    );
     let sections = |dump: &dumps::Dump| -> Vec<(String, Vec<usize>)> {
         let mut sections: Vec<(String, Vec<usize>)> = Vec::new();
         for (index, entry) in dump.manifest.entries.iter().enumerate() {
@@ -1399,55 +1497,54 @@ fn replay_verdict(out: &Path, last: &str, fresh: &str) -> std::io::Result<String
             .copied()
             .collect()
     };
-    let fresh_sections = sections(&fresh_registry);
-    let mut verdict = String::new();
-    for (name, entries) in sections(&last_registry) {
-        let fresh_entries = fresh_sections
+    let against_sections = sections(&against_registry);
+    let mut states = Vec::new();
+    for (name, entries) in sections(&step_registry) {
+        let against_entries = against_sections
             .iter()
-            .find(|(fresh_name, _)| *fresh_name == name)
+            .find(|(against_name, _)| *against_name == name)
             .map(|(_, entries)| entries.clone());
-        let alike = |a: usize, b: usize, last: &dumps::Dump, fresh: &dumps::Dump| {
-            let (a, b) = (&last.manifest.entries[a], &fresh.manifest.entries[b]);
+        let alike = |a: usize, b: usize, step: &dumps::Dump, against: &dumps::Dump| {
+            let (a, b) = (&step.manifest.entries[a], &against.manifest.entries[b]);
             (a.path == b.path, a.id == b.id)
         };
-        let state = match fresh_entries {
-            Some(fresh_entries)
-                if fresh_entries.len() == entries.len()
+        let state = match against_entries {
+            Some(against_entries)
+                if against_entries.len() == entries.len()
                     && entries
                         .iter()
-                        .zip(&fresh_entries)
-                        .all(|(&a, &b)| alike(a, b, &last_registry, &fresh_registry).0) =>
+                        .zip(&against_entries)
+                        .all(|(&a, &b)| alike(a, b, &step_registry, &against_registry).0) =>
             {
-                let mut state = "same";
-                for (&a, &b) in entries.iter().zip(&fresh_entries) {
-                    if alike(a, b, &last_registry, &fresh_registry).1 {
+                let mut state = SAME;
+                for (&a, &b) in entries.iter().zip(&against_entries) {
+                    if alike(a, b, &step_registry, &against_registry).1 {
                         continue;
                     }
-                    if without_load_order(&last_registry.text(a)?)
-                        != without_load_order(&fresh_registry.text(b)?)
+                    if without_load_order(&step_registry.text(a)?)
+                        != without_load_order(&against_registry.text(b)?)
                     {
-                        state = "differs";
+                        state = DIFFERS;
                         break;
                     }
-                    state = "differs only in load order";
+                    state = DIFFERS_IN_LOAD_ORDER;
                 }
                 state
             }
-            _ => "differs",
+            _ => DIFFERS,
         };
-        verdict.push_str(&format!("registry {name}: {state}\n"));
+        states.push((format!("registry {name}"), state));
     }
-    let (last_held, fresh_held) = (
-        open(last, REPLAY_DIAGNOSTICS)?,
-        open(fresh, REPLAY_DIAGNOSTICS)?,
-    );
-    verdict.push_str(&format!(
-        "diagnostics: {}\n",
-        if last_held.manifest.root == fresh_held.manifest.root {
-            "same"
+    for (name, dump) in [
+        ("diagnostics", REPLAY_DIAGNOSTICS),
+        ("whole-program", REPLAY_WHOLE_PROGRAM),
+    ] {
+        let state = if open(step, dump)?.manifest.root == open(against, dump)?.manifest.root {
+            SAME
         } else {
-            "differs"
-        }
-    ));
-    Ok(verdict)
+            DIFFERS
+        };
+        states.push((name.to_string(), state));
+    }
+    Ok(states)
 }

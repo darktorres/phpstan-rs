@@ -1663,3 +1663,62 @@ fn an_edit_keeps_the_use_sites_of_the_files_it_rechecks() {
     assert!(rechecked.contains_key(&PathBuf::from("user.php")));
     assert_eq!(project.use_sites().references(&target).len(), 1);
 }
+
+/// What an edit takes from the whole-program checks' inputs goes with it:
+/// an enum whose only escape an edit removes has dead cases again, and a
+/// named-argument call an edit removes is no longer reported, as in a
+/// fresh analysis of the files as they are.
+#[test]
+fn an_edit_takes_away_the_escapes_and_named_argument_calls_it_removes() {
+    let declarations = "<?php enum Suit { case Hearts; case Spades; }
+        class Base { public function m(int $old): void {} }
+        class Sub extends Base { public function m(int $new): void {} }";
+    let before = "<?php function f($name, Base $b) { $b->m(old: 1); return Suit::{$name}; }";
+    let after = "<?php function f($name, Base $b) { $b->m(1); return $name; }";
+    let analysed = |user: &str| -> Project {
+        let mut project = Project::new();
+        project.settings.rules.check_dead_enum_cases = true;
+        project.settings.rules.check_renamed_named_arguments = true;
+        for (path, source) in [("declarations.php", declarations), ("user.php", user)] {
+            project
+                .load_analyzed_file(PathBuf::from(path), source)
+                .unwrap();
+        }
+        project.finish_loading();
+        let mut paths = project.analyzed_paths();
+        paths.sort();
+        for (path, outcome) in project.check_files(&paths, None, true, Records::default()) {
+            project.keep_analysed_check(&path, &mut outcome.expect("checks"), true);
+        }
+        project.mark_member_index_built();
+        project
+    };
+    let whole_program = |project: &mut Project| -> Vec<String> {
+        let mut messages: Vec<String> = project
+            .check_whole_program()
+            .into_values()
+            .flatten()
+            .map(|d| d.message)
+            .collect();
+        messages.sort();
+        messages
+    };
+    let mut edited = analysed(before);
+    assert!(
+        whole_program(&mut edited)
+            .iter()
+            .any(|message| message.contains("named argument")),
+        "{:?}",
+        whole_program(&mut edited)
+    );
+    edited.update_file(Path::new("user.php"), after).unwrap();
+    let mut fresh = analysed(after);
+    let expected = whole_program(&mut fresh);
+    assert!(
+        expected
+            .iter()
+            .any(|message| message.contains("Suit::Hearts")),
+        "{expected:?}"
+    );
+    assert_eq!(whole_program(&mut edited), expected);
+}

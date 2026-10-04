@@ -27,7 +27,6 @@ use syntax::lexer::LexWarning;
 use syntax::parser::ParseError;
 use syntax::span::{LineIndex, Span};
 use types::Name;
-use whole_program::renamed_named_arguments::NamedArgumentCallFactsWithPath;
 
 mod architecture;
 mod banned;
@@ -318,16 +317,16 @@ pub struct Project {
     // corpus, this walk is too expensive to run for every loaded file
     // when nothing in batch mode consumes it. Tier 2 (member references)
     // is NOT populated by ordinary indexing at all - see
-    // `member_index_built`.
+    // `member_index`.
     use_sites: UseSiteIndex,
-    // Whether Tier 2 (member references) of `use_sites` has ever been
-    // built for this project - `false` until the first
-    // `ensure_member_index_built` call. Deliberately NOT built as part
+    // Which files Tier 2 (member references) of `use_sites` and
+    // `escapes` cover - none until the first `ensure_member_index_built`
+    // call or the analysis seeds them. Deliberately NOT built as part
     // of `finish_loading`/`load_file`: Tier 2 needs one real `Checker`
     // pass per file, which would make every workspace load pay a cost
     // only `textDocument/references`/`textDocument/rename` actually
     // need - see `ensure_member_index_built`'s own doc comment.
-    member_index_built: bool,
+    member_index: MemberIndex,
     // The trees of context files re-parsed on demand, the latest few.
     ast_cache: Mutex<AstCache>,
     // Each file's places its last check looked for a file an `include` or
@@ -335,20 +334,49 @@ pub struct Project {
     // appearing or vanishing at one changes what the check reports. Kept
     // only for a project that is changed after it is built.
     include_probes: Mutex<FxHashMap<PathBuf, Vec<PathBuf>>>,
-    // Every real `Enum` class's own canonically-declared FQN that
-    // `Checker::escaped_enums` (see its own doc comment) recorded for
-    // some file - populated/queried alongside `use_sites`/`member_
-    // index_built` above, by the identical two paths (`ensure_member_
-    // index_built`'s own loop, or `seed_member_refs` fed from `check-
-    // project`'s primary pass). Consulted by `whole_program::
-    // dead_enum_cases::find_dead_cases`.
-    escaped_enum_cases: FxHashSet<String>,
-    // `Checker::escaped_member_classes`'s own project-wide merge -
-    // exactly the same shape/population paths as `escaped_enum_cases`
-    // above, for `whole_program::dead_members::find_dead_members`
-    // instead of dead enum cases.
-    escaped_member_classes: FxHashSet<String>,
+    // What the last check of each file the member index covers let
+    // escape, for the files where it let anything: kept with Tier 2 of
+    // `use_sites`, and replaced with it at each recheck.
+    escapes: FxHashMap<PathBuf, Escapes>,
+    // Each analysed file's named-argument call sites against overridable
+    // methods, from its last check, for the files that have any: kept by
+    // the analysis (`keep_analysed_check`), `ensure_member_index_built` and
+    // each recheck, so whole only once one of the first two has run.
+    named_argument_calls: FxHashMap<PathBuf, checker::NamedArgumentCallFacts>,
 }
+
+/// The files a project's member index covers: Tier 2 of its use sites and
+/// what its checks let escape.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum MemberIndex {
+    /// None: nothing has asked for it yet.
+    Unbuilt,
+    /// The analysed files, as the analysis seeds it.
+    Analysed,
+    /// Every loaded file, as `ensure_member_index_built` builds it.
+    Every,
+}
+
+syntax::canonical_enum!(MemberIndex {
+    Unbuilt,
+    Analysed,
+    Every,
+});
+
+/// What one check let escape the names it reads: the `Enum` classes whose
+/// cases (`Checker::escaped_enums`) and the classes whose members
+/// (`Checker::escaped_member_classes`) it may reach by a name it does not
+/// write, which the dead enum case and dead member checks count as used.
+#[derive(Debug, Default)]
+struct Escapes {
+    enums: FxHashSet<String>,
+    member_classes: FxHashSet<String>,
+}
+
+syntax::canonical_struct!(Escapes {
+    enums,
+    member_classes
+});
 
 /// The stack each checking thread starts with. Deep walks grow their stack
 /// on demand (`syntax::stack`), so this only spares ordinary code those
@@ -714,11 +742,11 @@ impl Project {
             duplicate_fn_sites: DuplicateFunctionSites::default(),
             duplicate_class_sites: DuplicateClassSites::default(),
             use_sites: UseSiteIndex::default(),
-            member_index_built: false,
+            member_index: MemberIndex::Unbuilt,
             ast_cache: Mutex::default(),
             include_probes: Mutex::default(),
-            escaped_enum_cases: FxHashSet::default(),
-            escaped_member_classes: FxHashSet::default(),
+            escapes: FxHashMap::default(),
+            named_argument_calls: FxHashMap::default(),
         }
     }
 
@@ -1208,7 +1236,7 @@ impl Project {
             // (`ensure_member_index_built`), a loaded workspace pays
             // nothing for it.
             match source {
-                Some(source) if self.member_index_built => {
+                Some(source) if self.member_index != MemberIndex::Unbuilt => {
                     use_sites::index_class_fn_refs(ast, source)
                 }
                 _ => Vec::new(),
@@ -1759,11 +1787,11 @@ impl Project {
     /// class-name-case canonicalization) even though its own source text
     /// didn't, so re-deriving Tier 1 only for the edited file itself
     /// would let a dependent's index silently go stale.
-    /// `member_refs`: `None` before `ensure_member_index_built` has ever
-    /// been called (nothing to reindex for Tier 2 yet, since no path has
-    /// any Member entry to begin with), `Some(refs)` (`refs` freshly
-    /// recomputed by the caller's own `check_file_and_member_refs` call)
-    /// once it has. A single `use_sites.remove_file` covers both tiers at
+    /// `member_refs`: `None` where the member index does not cover `path`
+    /// (nothing to reindex for Tier 2, since the path has no Member entry
+    /// to begin with), `Some(refs)` (`refs` freshly recomputed by the
+    /// caller's own check, `recheck_file`) where it does. A single
+    /// `use_sites.remove_file` covers both tiers at
     /// once - Tier 1 and Tier 2 entries share the same underlying
     /// `by_file`/`by_target` maps, so clearing and rebuilding them
     /// separately (as two independent remove-then-insert calls) would
@@ -1802,7 +1830,7 @@ impl Project {
     /// therefore the one place this cost is paid, synchronously, on
     /// whatever thread calls it - see this item's own open-risks note.
     pub(crate) fn ensure_member_index_built(&mut self) {
-        if self.member_index_built {
+        if self.member_index != MemberIndex::Unbuilt {
             return;
         }
         if self.retain_source {
@@ -1830,46 +1858,90 @@ impl Project {
         }
         let paths: Vec<PathBuf> = self.files.keys().cloned().collect();
         for path in paths {
-            let check = self.run_checker(&path, true, Records::default());
-            self.seed_member_refs(
-                &path,
-                check.member_refs,
-                check.escaped_enums,
-                check.escaped_member_classes,
-            );
+            let mut check = self.run_checker(&path, true, Records::default());
+            self.seed_member_refs(&path, std::mem::take(&mut check.member_refs));
+            self.keep_check_facts(&path, &mut check, true);
         }
-        self.mark_member_index_built();
+        self.member_index = MemberIndex::Every;
     }
 
-    /// Adopts already-computed Tier-2 member-ref/escaped-enum/escaped-
-    /// member-class data for `path` into `use_sites`/`escaped_enum_
-    /// cases`/`escaped_member_classes` - the per-file work `ensure_
-    /// member_index_built`'s own loop body does above, factored out so
-    /// `check-project`'s own primary pass can feed it data it already
-    /// computed inline (via `check_files`) instead of
-    /// `ensure_member_index_built`
-    /// re-deriving it via a second, redundant pass. Caller must call
-    /// `mark_member_index_built` once every file has been seeded.
-    pub fn seed_member_refs(
+    /// Keeps what the analysis's check of `path` found for the use-site
+    /// index and the whole-program checks: its member references too where
+    /// the analysis builds the member index (`index_members`), which is
+    /// marked built (`mark_member_index_built`) once every analysed file's
+    /// check is kept - instead of `ensure_member_index_built` re-deriving
+    /// them via a second, redundant pass.
+    pub(crate) fn keep_analysed_check(
         &mut self,
         path: &Path,
-        member_refs: Vec<(Span, String, String)>,
-        escaped_enums: FxHashSet<String>,
-        escaped_member_classes: FxHashSet<String>,
+        check: &mut FileCheck,
+        index_members: bool,
     ) {
+        if index_members {
+            self.seed_member_refs(path, std::mem::take(&mut check.member_refs));
+        }
+        self.keep_check_facts(path, check, index_members);
+    }
+
+    /// Adopts already-computed Tier-2 member references for `path` into
+    /// `use_sites` - the per-file work `ensure_member_index_built`'s own
+    /// loop body does above, and the analysis's (`keep_analysed_check`).
+    fn seed_member_refs(&mut self, path: &Path, member_refs: Vec<(Span, String, String)>) {
         for (span, owner, member) in member_refs {
             self.use_sites
                 .insert(path, use_sites::RefTarget::Member(owner, member), span);
         }
-        self.escaped_enum_cases.extend(escaped_enums);
-        self.escaped_member_classes.extend(escaped_member_classes);
     }
 
-    /// See `seed_member_refs`'s own doc comment - marks Tier 2 as built
-    /// without `ensure_member_index_built`'s own per-file loop ever
-    /// running, once every file has been seeded some other way.
-    pub fn mark_member_index_built(&mut self) {
-        self.member_index_built = true;
+    /// Keeps what `check`, the last check of `path`, found for the
+    /// whole-program checks, in place of what an earlier check of it
+    /// kept: what it let escape when the member index covers the file
+    /// (`covered`), and its named-argument calls when it is analysed.
+    fn keep_check_facts(&mut self, path: &Path, check: &mut FileCheck, covered: bool) {
+        let escapes = Escapes {
+            enums: std::mem::take(&mut check.escaped_enums),
+            member_classes: std::mem::take(&mut check.escaped_member_classes),
+        };
+        if covered && !(escapes.enums.is_empty() && escapes.member_classes.is_empty()) {
+            self.escapes.insert(path.to_path_buf(), escapes);
+        } else {
+            self.escapes.remove(path);
+        }
+        let calls = std::mem::take(&mut check.named_argument_calls);
+        if self.is_analyzed(path) && !calls.is_empty() {
+            self.named_argument_calls.insert(path.to_path_buf(), calls);
+        } else {
+            self.named_argument_calls.remove(path);
+        }
+    }
+
+    /// See `keep_analysed_check`'s own doc comment - marks Tier 2 as built
+    /// over the analysed files without `ensure_member_index_built`'s own
+    /// per-file loop ever running, once each of them has been seeded
+    /// that way.
+    pub(crate) fn mark_member_index_built(&mut self) {
+        self.member_index = MemberIndex::Analysed;
+    }
+
+    /// Whether the member index covers `path`, so that its recheck
+    /// collects its member references and escapes.
+    fn member_index_covers(&self, path: &Path) -> bool {
+        match self.member_index {
+            MemberIndex::Unbuilt => false,
+            MemberIndex::Analysed => self.is_analyzed(path),
+            MemberIndex::Every => self.is_loaded(path),
+        }
+    }
+
+    /// Checks `path` again, as an edit leaves the project: its use sites
+    /// reindexed and what the whole-program checks read of it kept.
+    fn recheck_file(&mut self, path: &Path) -> Vec<Diagnostic> {
+        let covered = self.member_index_covers(path);
+        let mut check = self.check_one(path, covered);
+        let member_refs = covered.then(|| std::mem::take(&mut check.member_refs));
+        self.reindex_use_sites_for_file(path, member_refs);
+        self.keep_check_facts(path, &mut check, covered);
+        check.diagnostics
     }
 
     /// The always-run-to-completion convenience wrapper every existing
@@ -2026,13 +2098,7 @@ impl Project {
                 self.unchecked.extend(affected);
                 break;
             }
-            let (diagnostics, member_refs) = if self.member_index_built {
-                let (d, m) = self.check_file_and_member_refs(&p);
-                (d, Some(m))
-            } else {
-                (self.check_file(&p), None)
-            };
-            self.reindex_use_sites_for_file(&p, member_refs);
+            let diagnostics = self.recheck_file(&p);
             results.insert(p, diagnostics);
         }
         Ok(results)
@@ -2224,21 +2290,6 @@ impl Project {
         self.check_one(path, false).diagnostics
     }
 
-    /// The Tier-2 (member-reference) counterpart of `check_file` - the
-    /// SAME `Checker`/`check_program` pass already used for diagnostics
-    /// also collects member-reference sites, rather than paying for a
-    /// second, independent `Checker` pass over the same file. Only
-    /// `update_file`'s own affected-file loop calls this, and only once
-    /// `member_index_built` is true - see `ensure_member_index_built`'s
-    /// own doc comment.
-    pub(crate) fn check_file_and_member_refs(
-        &self,
-        path: &Path,
-    ) -> (Vec<Diagnostic>, Vec<(Span, String, String)>) {
-        let check = self.check_one(path, true);
-        (check.diagnostics, check.member_refs)
-    }
-
     /// `check_files` for one file, whose panic propagates.
     fn check_one(&self, path: &Path, collect_member_refs: bool) -> FileCheck {
         let paths = [path.to_path_buf()];
@@ -2349,7 +2400,7 @@ impl Project {
         self.recheck(including)
     }
 
-    /// Checks each of `paths` again, its member references reindexed.
+    /// Checks each of `paths` again (`recheck_file`).
     fn recheck(
         &mut self,
         paths: impl IntoIterator<Item = PathBuf>,
@@ -2357,13 +2408,7 @@ impl Project {
         paths
             .into_iter()
             .map(|p| {
-                let (diagnostics, member_refs) = if self.member_index_built {
-                    let (d, m) = self.check_file_and_member_refs(&p);
-                    (d, Some(m))
-                } else {
-                    (self.check_file(&p), None)
-                };
-                self.reindex_use_sites_for_file(&p, member_refs);
+                let diagnostics = self.recheck_file(&p);
                 (p, diagnostics)
             })
             .collect()
@@ -2849,8 +2894,9 @@ impl Project {
     /// `results`, merging this method's own return value in before
     /// level-filtering/`ignore_errors`/baseline (so `@phpstan-ignore`/
     /// baseline suppression apply to a whole-program finding exactly
-    /// like an ordinary one). `named_argument_calls` is the primary pass's
-    /// named-argument call sites, merged in path order.
+    /// like an ordinary one). Each check reads what the project keeps of
+    /// every file's last check (`keep_check_facts`), so an edited project
+    /// answers as a fresh one does.
     ///
     /// `check_dead_enum_cases` and `check_dead_members` both need
     /// `ensure_member_index_built`'s own Tier-2 use-site index - a real
@@ -2870,10 +2916,7 @@ impl Project {
     /// directly off `Registry.classes`' own already-resolved fields, so
     /// each costs nothing beyond its own traversal regardless of how
     /// large the project is.
-    pub(crate) fn check_whole_program(
-        &mut self,
-        named_argument_calls: &NamedArgumentCallFactsWithPath,
-    ) -> FxHashMap<PathBuf, Vec<Diagnostic>> {
+    pub(crate) fn check_whole_program(&mut self) -> FxHashMap<PathBuf, Vec<Diagnostic>> {
         let mut results: FxHashMap<PathBuf, Vec<Diagnostic>> = FxHashMap::default();
 
         if self.settings.rules.check_dead_enum_cases || self.settings.rules.check_dead_members {
@@ -2882,11 +2925,16 @@ impl Project {
         let (functions, classes) = self.analysed_declarations();
 
         if self.settings.rules.check_dead_enum_cases {
+            let escaped: FxHashSet<String> = self
+                .escapes
+                .values()
+                .flat_map(|escapes| escapes.enums.iter().cloned())
+                .collect();
             let dead = whole_program::dead_enum_cases::find_dead_cases(
                 self.registry_names(classes.iter().map(|(d, _)| d.name)),
                 &self.registry,
                 &self.use_sites,
-                &self.escaped_enum_cases,
+                &escaped,
             );
             for (fqn, case) in dead {
                 let Some((path, span)) = self.registry.constant_declaration(&fqn, &case) else {
@@ -2994,6 +3042,11 @@ impl Project {
         }
 
         if self.settings.rules.check_dead_members {
+            let escaped: FxHashSet<String> = self
+                .escapes
+                .values()
+                .flat_map(|escapes| escapes.member_classes.iter().cloned())
+                .collect();
             let hosts: Vec<Name> = classes
                 .iter()
                 .filter(|(_, info)| info.kind() == syntax::ast::ClassKind::Trait)
@@ -3008,7 +3061,7 @@ impl Project {
                 ),
                 &self.registry,
                 &self.use_sites,
-                &self.escaped_member_classes,
+                &escaped,
             );
             for (owner, name, kind) in dead_members {
                 let declaration = match kind {
@@ -3057,10 +3110,13 @@ impl Project {
                 &self.registry,
                 programs.into_iter().flat_map(|(_, classes)| classes),
             );
+            let mut calls: Vec<(&PathBuf, &checker::NamedArgumentCallFacts)> =
+                self.named_argument_calls.iter().collect();
+            calls.sort_by(|a, b| a.0.cmp(b.0));
+            let calls = whole_program::renamed_named_arguments::merge_named_argument_calls(calls);
             let collisions =
                 whole_program::renamed_named_arguments::find_renamed_named_argument_collisions(
-                    named_argument_calls,
-                    &overrides,
+                    &calls, &overrides,
                 );
             for (path, span, message) in collisions {
                 if let Some(d) = self.whole_program_diagnostic(

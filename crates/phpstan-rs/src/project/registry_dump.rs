@@ -82,12 +82,12 @@ fn print_registry_dump(
         duplicate_fn_sites,
         duplicate_class_sites,
         use_sites,
-        member_index_built,
+        member_index,
         // The trees last read again for checks.
         ast_cache: _,
         include_probes,
-        escaped_enum_cases,
-        escaped_member_classes,
+        escapes,
+        named_argument_calls,
     } = project;
     crate::file_id::printing_paths(files.paths_by_id(), || {
         section(p, "files");
@@ -145,9 +145,9 @@ fn print_registry_dump(
                 ("next_load_order", next_load_order),
                 ("globals_stale", globals_stale),
                 ("unchecked", unchecked),
-                ("member_index_built", member_index_built),
-                ("escaped_enum_cases", escaped_enum_cases),
-                ("escaped_member_classes", escaped_member_classes),
+                ("member_index", member_index),
+                ("escapes", escapes),
+                ("named_argument_calls", named_argument_calls),
             ],
         );
         p.line();

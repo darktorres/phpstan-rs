@@ -131,9 +131,12 @@ the commit's snapshot:
 - `replay-piwigo`, `replay-vendor-<vendor>-<package>`: `check-project
   --edit-replay` over a fresh copy of the corpus (scoped) or of each
   vendor project (every rule set on), made under the pass's scratch and
-  removed after: the dumps after each step and after a fresh load
-  (`step-<n>.registry.txt`, `step-<n>.diagnostics.txt`, `fresh.*.txt`),
-  `script.txt` and `verdict.txt`.
+  removed after: the dumps after each step and after a fresh analysis of
+  the tree as each step leaves it (`step-<n>.registry.txt`,
+  `step-<n>.diagnostics.txt`, `step-<n>.whole-program.txt`,
+  `fresh-<n>.*.txt`), `script.txt` and `verdict.txt`, which says for each
+  step what differs from what it is compared with. A step that differs
+  in more than the load order fails the replay.
 
 A run writes each dump as its text with a manifest beside it, the id of
 each entity's text as git computes it, so recording it sends the store

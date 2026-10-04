@@ -73,8 +73,10 @@ pub(crate) struct CheckProjectArgs {
     #[arg(long, hide = true)]
     pub(crate) dump_front_end: Option<PathBuf>,
     /// Runs the edit replay over the analysed files, writing its dumps and
-    /// verdict into this directory, and stops. Edits the files: the tree
-    /// must be a copy with a `.phpstan-rs-replay` file at its root.
+    /// verdict into this directory, and stops; fails when a step leaves
+    /// the project other than a fresh analysis finds it. Edits the files:
+    /// the tree must be a copy with a `.phpstan-rs-replay` file at its
+    /// root.
     #[arg(long, hide = true)]
     pub(crate) edit_replay: Option<PathBuf>,
     /// The seed the edit replay draws its files with.

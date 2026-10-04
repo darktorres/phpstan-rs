@@ -27,16 +27,16 @@ pub(crate) type NamedArgumentCallFactsWithPath =
 
 /// Merges each analysed file's call sites in the order given, which the
 /// caller makes path order.
-pub(crate) fn merge_named_argument_calls(
-    per_file: Vec<(PathBuf, NamedArgumentCallFacts)>,
+pub(crate) fn merge_named_argument_calls<'a>(
+    per_file: impl IntoIterator<Item = (&'a PathBuf, &'a NamedArgumentCallFacts)>,
 ) -> NamedArgumentCallFactsWithPath {
     let mut merged: NamedArgumentCallFactsWithPath = FxHashMap::default();
     for (path, calls) in per_file {
         for (key, spans) in calls {
             merged
-                .entry(key)
+                .entry(key.clone())
                 .or_default()
-                .extend(spans.into_iter().map(|span| (path.clone(), span)));
+                .extend(spans.iter().map(|span| (path.clone(), *span)));
         }
     }
     merged
