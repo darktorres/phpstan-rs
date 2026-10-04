@@ -88,6 +88,7 @@ pub(crate) fn anonymous_class_decls(stmts: &[Stmt], origin: &Origin) -> Vec<Buil
                 conditional: false,
                 guard: None,
                 info: std::sync::Arc::new(info),
+                namespace: Name::from(ctx.namespace()),
             });
         }
     });

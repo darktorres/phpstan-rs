@@ -73,6 +73,25 @@ use protocol::{
     range_to_lsp, ranges_overlap, to_request_id, uri_to_path, write_message,
 };
 
+/// `owner`'s member `member` as the use-site index keys it: a method by
+/// its declared name, since PHP compares method names without case, unless
+/// a property or constant has this very name.
+fn member_target(
+    registry: &crate::registry::Registry,
+    owner: String,
+    member: &str,
+) -> use_sites::RefTarget {
+    let names_another_member = registry.classes.get(&owner).is_some_and(|info| {
+        info.properties().contains_key(member) || info.consts().contains_key(member)
+    });
+    let member = if names_another_member {
+        member.to_string()
+    } else {
+        registry.declared_method_name(&owner, member)
+    };
+    use_sites::RefTarget::Member(owner, member)
+}
+
 /// Resolves a receiver's own (possibly multi-class) type down to every
 /// class that actually declares `member` - a `Union`/`Intersection`
 /// receiver can have more than one real answer (`(Foo&Bar) $x` where
@@ -1331,7 +1350,7 @@ impl Server {
                 vec![use_sites::RefTarget::Function(fqn.clone())]
             }
             navigation::Resolved::Member(owner, name) => {
-                vec![use_sites::RefTarget::Member(owner.clone(), name.clone())]
+                vec![member_target(self.project.registry(), owner.clone(), name)]
             }
             navigation::Resolved::Instance {
                 receiver_span,
@@ -1347,7 +1366,7 @@ impl Server {
                 };
                 resolve_member_owners(self.project.registry(), &ty, member)
                     .into_iter()
-                    .map(|owner| use_sites::RefTarget::Member(owner, member.clone()))
+                    .map(|owner| member_target(self.project.registry(), owner, member))
                     .collect()
             }
             navigation::Resolved::VariableSelf { .. }
@@ -1379,8 +1398,8 @@ impl Server {
         self.project.ensure_member_index_built();
         let mut locations: Vec<Location> = Vec::new();
         for target in &targets {
-            for (p, span) in self.project.use_sites().references(target) {
-                locations.push(self.location(p, *span));
+            for (p, span) in self.project.use_sites().sites(target) {
+                locations.push(self.location(p, span));
             }
         }
         if include_declaration {
@@ -1388,7 +1407,10 @@ impl Server {
             for target in &targets {
                 let decl = match target {
                     use_sites::RefTarget::Class(fqn) => registry.class_declaration(fqn),
-                    use_sites::RefTarget::Function(fqn) => registry.function_declaration(fqn),
+                    use_sites::RefTarget::Function(fqn)
+                    | use_sites::RefTarget::UnqualifiedFunction(fqn) => {
+                        registry.function_declaration(fqn)
+                    }
                     use_sites::RefTarget::Member(owner, name) => {
                         registry.member_declaration(owner, name)
                     }
@@ -1445,14 +1467,31 @@ impl Server {
             _ => return None,
         };
         self.project.ensure_member_index_built();
+        // A call that may reach another declared function too keeps its
+        // name: renaming it would change which function it reaches.
+        let sites: Vec<(&Path, Span)> = match &target {
+            use_sites::RefTarget::Function(name) => self
+                .project
+                .use_sites()
+                .function_references(name)
+                .into_iter()
+                .filter(|site| {
+                    site.other.is_none_or(|other| {
+                        self.project.registry().lookup_function(other).is_none()
+                    })
+                })
+                .map(|site| (site.path, site.span))
+                .collect(),
+            _ => self.project.use_sites().sites(&target),
+        };
         let mut changes: FxHashMap<Uri, Vec<lsp_types::TextEdit>> = FxHashMap::default();
-        for (p, span) in self.project.use_sites().references(&target) {
+        for (p, span) in sites {
             let (edit_uri, _) = self.uri_and_version_for(p);
             changes
                 .entry(edit_uri)
                 .or_default()
                 .push(lsp_types::TextEdit {
-                    range: self.lsp_range(p, *span),
+                    range: self.lsp_range(p, span),
                     new_text: new_name.to_string(),
                 });
         }

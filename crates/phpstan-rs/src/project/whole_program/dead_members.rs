@@ -23,9 +23,9 @@
 //!   `$obj->foo`); when it's genuinely computed, every class the
 //!   receiver's own resolved type could reach (itself, its ancestors,
 //!   and - for an interface/non-final-abstract receiver - every real
-//!   subclass/implementor anywhere in the registry, found by inverting
-//!   `Registry::all_ancestor_names` the same way `dead_abstract_
-//!   classes` already does) is escaped conservatively, all its members
+//!   subclass/implementor anywhere in the registry, from its
+//!   descendants index, `Registry::inheritors`) is escaped
+//!   conservatively, all its members
 //!   treated as used. A receiver this project can't resolve at all
 //!   (`Mixed`) contributes no escape protection - a real, disclosed
 //!   false-positive risk this project can't close without real type
@@ -184,20 +184,27 @@ fn overrides_an_ancestor_method(registry: &Registry, fqn: &str, method_name: &st
     })
 }
 
-/// Every `(owner FQN, member name, kind)` with no recorded usage
-/// anywhere in the project - see this module's own doc comment for
-/// what counts as "used" and what's disclosed, not fixed. Callers
-/// resolve each pair's own reportable location via `Project::
-/// decl_locations` themselves (this function stays unaware of files/
-/// spans/`Diagnostic` entirely - see `Project::check_whole_program`'s
-/// own doc comment for why).
-pub(crate) fn find_dead_members(
+/// Every `(owner FQN, member name, kind)` of `classes`, by their
+/// registry names, with no recorded usage anywhere in the project - see
+/// this module's own doc comment for what counts as "used" and what's
+/// disclosed, not fixed. `classes` are the class-likes the analysed
+/// files declare and the classes using a trait one declares: every class
+/// a member an analysed file declares is resolved into. Callers resolve
+/// each pair's own reportable location via `Project::decl_locations`
+/// themselves (this function stays unaware of files/spans/`Diagnostic`
+/// entirely - see `Project::check_whole_program`'s own doc comment for
+/// why).
+pub(crate) fn find_dead_members<'a>(
+    classes: impl IntoIterator<Item = &'a str>,
     registry: &Registry,
     use_sites: &UseSiteIndex,
     escaped_classes: &rustc_hash::FxHashSet<String>,
 ) -> Vec<(String, String, MemberKind)> {
     let mut dead = Vec::new();
-    for (fqn, info) in &registry.classes {
+    for fqn in classes {
+        let Some(info) = registry.classes.get(fqn) else {
+            continue;
+        };
         // An interface/trait is never itself instantiable - its own
         // method declarations are pure contracts for whatever implements
         // (interface) or hosts (trait) them, never something callable in
@@ -206,7 +213,7 @@ pub(crate) fn find_dead_members(
         // above - only their own candidacy as a *source* of findings is
         // excluded).
         if !matches!(info.kind(), ClassKind::Class | ClassKind::Enum)
-            || escaped_classes.contains(fqn.as_ref())
+            || escaped_classes.contains(fqn)
         {
             continue;
         }

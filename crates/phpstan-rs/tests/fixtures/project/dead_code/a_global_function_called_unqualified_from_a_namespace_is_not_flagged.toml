@@ -1,0 +1,4 @@
+paths = ["a.php", "b.php"]
+
+[rules]
+check_dead_code = true

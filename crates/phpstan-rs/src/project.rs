@@ -2718,6 +2718,98 @@ impl Project {
         Some(DiagnosticBuilder::new(message, span, 5, identifier).build(&file.line_index))
     }
 
+    /// The function and class-like declarations of the analysed files,
+    /// anonymous classes included, in path order and then the order of
+    /// each file's declarations.
+    fn analysed_declarations(
+        &self,
+    ) -> (
+        Vec<whole_program::Declaration<'_>>,
+        Vec<(
+            whole_program::Declaration<'_>,
+            &crate::registry::ClassReflection,
+        )>,
+    ) {
+        let mut files: Vec<(&PathBuf, &FileState)> = self
+            .files
+            .iter()
+            .filter(|(_, file)| file.analyzed)
+            .collect();
+        files.sort_by(|a, b| a.0.cmp(b.0));
+        let mut functions = Vec::new();
+        let mut classes = Vec::new();
+        for (path, file) in files {
+            for decl in &file.built_decls {
+                match decl {
+                    BuiltDecl::Function { name, sig, .. } => {
+                        functions.push(whole_program::Declaration {
+                            name,
+                            path,
+                            span: sig.provenance().declaration_span(),
+                        });
+                    }
+                    BuiltDecl::Class { name, info, .. } => classes.push((
+                        whole_program::Declaration {
+                            name,
+                            path,
+                            span: info.provenance().declaration_span(),
+                        },
+                        info.as_ref(),
+                    )),
+                    BuiltDecl::GlobalConst { .. } => {}
+                }
+            }
+        }
+        (functions, classes)
+    }
+
+    /// Every class-like declaration of a project file, analysed or
+    /// context, as the namespace graph reads it, in path order.
+    fn project_class_declarations(
+        &self,
+    ) -> Vec<whole_program::circular_namespace_deps::ClassDeclaration<'_>> {
+        let mut files: Vec<(&PathBuf, &FileState)> = self.files.iter().collect();
+        files.sort_by(|a, b| a.0.cmp(b.0));
+        files
+            .into_iter()
+            .flat_map(|(path, file)| {
+                file.built_decls.iter().filter_map(move |decl| match decl {
+                    BuiltDecl::Class {
+                        name,
+                        info,
+                        namespace,
+                        ..
+                    } => Some(whole_program::circular_namespace_deps::ClassDeclaration {
+                        declaration: whole_program::Declaration {
+                            name,
+                            path,
+                            span: info.provenance().declaration_span(),
+                        },
+                        namespace,
+                        info,
+                        analysed: file.analyzed,
+                    }),
+                    _ => None,
+                })
+            })
+            .collect()
+    }
+
+    /// The registry's names of the class-likes `names` names, once each, in
+    /// the order first named: a name declared twice has one entry.
+    fn registry_names<'n>(&self, names: impl IntoIterator<Item = &'n str>) -> Vec<&str> {
+        let mut seen: FxHashSet<&str> = FxHashSet::default();
+        names
+            .into_iter()
+            .filter_map(|name| {
+                self.registry
+                    .lookup_class(name)
+                    .map(|(declared, _)| declared)
+            })
+            .filter(|declared| seen.insert(declared))
+            .collect()
+    }
+
     /// Runs every opt-in whole-program diagnostic check (currently
     /// `check_dead_enum_cases`, `check_dead_code`, `check_circular_
     /// dependencies`, `check_dead_abstract_classes`, and `check_dead_
@@ -2755,9 +2847,14 @@ impl Project {
     ) -> FxHashMap<PathBuf, Vec<Diagnostic>> {
         let mut results: FxHashMap<PathBuf, Vec<Diagnostic>> = FxHashMap::default();
 
-        if self.settings.rules.check_dead_enum_cases {
+        if self.settings.rules.check_dead_enum_cases || self.settings.rules.check_dead_members {
             self.ensure_member_index_built();
+        }
+        let (functions, classes) = self.analysed_declarations();
+
+        if self.settings.rules.check_dead_enum_cases {
             let dead = whole_program::dead_enum_cases::find_dead_cases(
+                self.registry_names(classes.iter().map(|(d, _)| d.name)),
                 &self.registry,
                 &self.use_sites,
                 &self.escaped_enum_cases,
@@ -2779,86 +2876,107 @@ impl Project {
         }
 
         if self.settings.rules.check_dead_code {
-            let dead_functions =
-                whole_program::dead_code::find_dead_functions(&self.registry, &self.use_sites);
-            for name in dead_functions {
-                let Some((path, span)) = self.registry.function_declaration(&name) else {
-                    continue;
-                };
-                let path = path.to_path_buf();
+            let dead_functions = whole_program::dead_code::find_dead_functions(
+                functions.iter().copied(),
+                &self.use_sites,
+            );
+            for declaration in dead_functions {
+                let name = declaration.name;
                 if let Some(d) = self.whole_program_diagnostic(
-                    &path,
-                    span,
+                    declaration.path,
+                    declaration.span,
                     format!("Function {name} is never referenced."),
                     "function.unused",
                 ) {
-                    results.entry(path).or_default().push(d);
+                    results
+                        .entry(declaration.path.to_path_buf())
+                        .or_default()
+                        .push(d);
                 }
             }
-            let dead_classes =
-                whole_program::dead_code::find_dead_classes(&self.registry, &self.use_sites);
-            for name in dead_classes {
-                let Some((path, span)) = self.registry.class_declaration(&name) else {
-                    continue;
-                };
-                let path = path.to_path_buf();
+            let dead_classes = whole_program::dead_code::find_dead_classes(
+                classes
+                    .iter()
+                    .filter(|(_, info)| !info.is_anonymous())
+                    .map(|(d, _)| *d),
+                &self.use_sites,
+            );
+            for declaration in dead_classes {
+                let name = declaration.name;
                 if let Some(d) = self.whole_program_diagnostic(
-                    &path,
-                    span,
+                    declaration.path,
+                    declaration.span,
                     format!("Class {name} is never referenced."),
                     "class.unused",
                 ) {
-                    results.entry(path).or_default().push(d);
+                    results
+                        .entry(declaration.path.to_path_buf())
+                        .or_default()
+                        .push(d);
                 }
             }
         }
 
         if self.settings.rules.check_circular_dependencies {
-            let cycles =
-                whole_program::circular_namespace_deps::find_namespace_cycles(&self.registry);
+            let declarations = self.project_class_declarations();
+            let cycles = whole_program::circular_namespace_deps::find_namespace_cycles(
+                &declarations,
+                |name| self.registry.is_builtin_class(name),
+            );
             for cycle in cycles {
-                let Some((path, span)) =
-                    self.registry.class_declaration(&cycle.representative_class)
-                else {
-                    continue;
-                };
-                let path = path.to_path_buf();
                 let namespaces = cycle.namespaces.join(", ");
+                let declaration = cycle.representative;
                 if let Some(d) = self.whole_program_diagnostic(
-                    &path,
-                    span,
+                    declaration.path,
+                    declaration.span,
                     format!("Circular namespace dependency: {namespaces}."),
                     "namespace.circularDependency",
                 ) {
-                    results.entry(path).or_default().push(d);
+                    results
+                        .entry(declaration.path.to_path_buf())
+                        .or_default()
+                        .push(d);
                 }
             }
         }
 
         if self.settings.rules.check_dead_abstract_classes {
             let dead_abstract_classes =
-                whole_program::dead_abstract_classes::find_dead_abstract_classes(&self.registry);
-            for name in dead_abstract_classes {
-                let Some((path, span)) = self.registry.class_declaration(&name) else {
-                    continue;
-                };
-                let path = path.to_path_buf();
+                whole_program::dead_abstract_classes::find_dead_abstract_classes(
+                    classes.iter().map(|(d, info)| (*d, *info)),
+                    &self.registry,
+                );
+            for declaration in dead_abstract_classes {
+                let name = declaration.name;
                 if let Some(d) = self.whole_program_diagnostic(
-                    &path,
-                    span,
+                    declaration.path,
+                    declaration.span,
                     format!(
                         "Abstract class {name} has no concrete subclass anywhere in the project."
                     ),
                     "class.deadAbstract",
                 ) {
-                    results.entry(path).or_default().push(d);
+                    results
+                        .entry(declaration.path.to_path_buf())
+                        .or_default()
+                        .push(d);
                 }
             }
         }
 
         if self.settings.rules.check_dead_members {
-            self.ensure_member_index_built();
+            let hosts: Vec<Name> = classes
+                .iter()
+                .filter(|(_, info)| info.kind() == syntax::ast::ClassKind::Trait)
+                .flat_map(|(d, _)| self.registry.classes_using_trait(d.name))
+                .collect();
             let dead_members = whole_program::dead_members::find_dead_members(
+                self.registry_names(
+                    classes
+                        .iter()
+                        .map(|(d, _)| d.name)
+                        .chain(hosts.iter().map(|name| name.as_ref())),
+                ),
                 &self.registry,
                 &self.use_sites,
                 &self.escaped_member_classes,

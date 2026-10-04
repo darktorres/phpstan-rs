@@ -1,0 +1,2 @@
+a.php:3:56-3:59 class.nameCase L0 | Class referenced with incorrect case: foo.
+    fix: Use Foo => "Foo"

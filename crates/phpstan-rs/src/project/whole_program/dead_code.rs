@@ -1,8 +1,11 @@
 //! Flags a top-level function or class-like
 //! declaration (class/interface/trait/enum) never referenced anywhere in
 //! the project - no `new`/`extends`/`implements`/`use`/`instanceof`/type-
-//! hint/`catch` for a class-like, no call or bare-callable `Name` for a
-//! function. Built on `Project::use_sites`'s Tier 1 index (`RefTarget::
+//! hint/`catch`/attribute for a class-like, no call or first-class
+//! callable for a function, names compared as PHP compares them. An
+//! unqualified call in a namespace counts for the namespaced function and
+//! for the global one it falls back to, since which is declared when it
+//! runs decides. Built on `Project::use_sites`'s Tier 1 index (`RefTarget::
 //! Class`/`RefTarget::Function`) - see `project::use_sites::index_class_
 //! fn_refs_without_source`'s own doc comment for why that index is real
 //! and canonically name-resolved even in a batch `check-project` run with
@@ -23,13 +26,7 @@
 //! PHPStan has no such rule at all, for exactly this open-world reason);
 //! a function referenced only via a string-callable (`array_map(
 //! 'myFunc', ...)`, `call_user_func('myFunc')`) - a string literal has no
-//! `Name` node for Tier 1 to resolve; a class referenced only as a PHP
-//! attribute target (`#[MyAttribute]` on some other declaration) -
-//! `use_sites::ClassFnRefWalker` doesn't walk `attrs` fields at all (a
-//! separate, pre-existing gap, not introduced here - unlike `deps.rs`'s
-//! own identically-shaped gap, fixed separately for `Project.dependents`,
-//! fixing this one risks corrupting `textDocument/rename`'s real,
-//! precise rewrite spans for comparatively little benefit); anything
+//! `Name` node for Tier 1 to resolve; anything
 //! reachable only through framework magic/reflection (a DI container
 //! definition, a Symfony/Laravel service tag, `class_exists`/
 //! `ReflectionClass`). `__autoload` (PHP's own deprecated magic autoload
@@ -38,43 +35,35 @@
 //! callable shape above is disclosed, not special-cased.
 
 use crate::project::use_sites::{RefTarget, UseSiteIndex};
-use crate::registry::Registry;
+use crate::project::whole_program::Declaration;
 
-/// Every top-level function with zero recorded `RefTarget::Function`
-/// sites anywhere in the project - see this module's own doc comment for
-/// what counts as "used" and what's disclosed, not fixed. Callers resolve
-/// each name's own reportable location via `Project::decl_locations`
-/// themselves (this function stays unaware of files/spans/`Diagnostic`
-/// entirely - see `Project::check_whole_program`'s own doc comment for
-/// why).
-pub(crate) fn find_dead_functions(registry: &Registry, use_sites: &UseSiteIndex) -> Vec<String> {
-    registry
-        .functions
-        .keys()
-        .filter(|fqn| !fqn.eq_ignore_ascii_case("__autoload"))
-        .filter(|fqn| {
-            use_sites
-                .references(&RefTarget::Function(fqn.to_string()))
-                .is_empty()
-        })
-        .map(|fqn| fqn.to_string())
+/// The function declarations of the analysed files that nothing may
+/// call - see this module's own doc comment for what counts as "used"
+/// and what's disclosed, not fixed. A name declared twice is judged at
+/// each declaration.
+pub(crate) fn find_dead_functions<'a>(
+    declarations: impl IntoIterator<Item = Declaration<'a>>,
+    use_sites: &UseSiteIndex,
+) -> Vec<Declaration<'a>> {
+    declarations
+        .into_iter()
+        .filter(|declaration| !declaration.name.eq_ignore_ascii_case("__autoload"))
+        .filter(|declaration| use_sites.function_references(declaration.name).is_empty())
         .collect()
 }
 
-/// Every class/interface/trait/enum with zero recorded `RefTarget::Class`
-/// sites anywhere in the project - same shape as `find_dead_functions`
-/// above, for `Registry.classes` instead. An anonymous class is used
-/// where it is declared.
-pub(crate) fn find_dead_classes(registry: &Registry, use_sites: &UseSiteIndex) -> Vec<String> {
-    registry
-        .classes
-        .iter()
-        .filter(|(fqn, info)| {
-            !info.is_anonymous()
-                && use_sites
-                    .references(&RefTarget::Class(fqn.to_string()))
-                    .is_empty()
+/// The class-like declarations of the analysed files, anonymous ones
+/// apart, that nothing references - `find_dead_functions` for classes.
+pub(crate) fn find_dead_classes<'a>(
+    declarations: impl IntoIterator<Item = Declaration<'a>>,
+    use_sites: &UseSiteIndex,
+) -> Vec<Declaration<'a>> {
+    declarations
+        .into_iter()
+        .filter(|declaration| {
+            use_sites
+                .references(&RefTarget::Class(declaration.name.to_string()))
+                .is_empty()
         })
-        .map(|(fqn, _)| fqn.to_string())
         .collect()
 }

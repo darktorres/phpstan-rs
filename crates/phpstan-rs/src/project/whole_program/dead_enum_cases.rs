@@ -39,20 +39,26 @@ use crate::project::use_sites::{RefTarget, UseSiteIndex};
 use crate::registry::Registry;
 use syntax::ast::ClassKind;
 
-/// Every `(enum FQN, case name)` pair with no recorded usage anywhere in
-/// the project - see this module's own doc comment for what counts as
-/// "used" and what's disclosed, not fixed. Callers resolve each pair's
-/// own reportable location via `Project::decl_locations` themselves
-/// (this function stays unaware of files/spans/`Diagnostic` entirely -
-/// see `Project::check_whole_program`'s own doc comment for why).
-pub(crate) fn find_dead_cases(
+/// Every `(enum FQN, case name)` pair of `enums`, the enums the analysed
+/// files declare by their registry names, with no recorded usage
+/// anywhere in the project - see this module's own doc comment for what
+/// counts as "used" and what's disclosed, not fixed. Callers resolve
+/// each pair's own reportable location via `Project::decl_locations`
+/// themselves (this function stays unaware of files/spans/`Diagnostic`
+/// entirely - see `Project::check_whole_program`'s own doc comment for
+/// why).
+pub(crate) fn find_dead_cases<'a>(
+    enums: impl IntoIterator<Item = &'a str>,
     registry: &Registry,
     use_sites: &UseSiteIndex,
     escaped_enum_cases: &FxHashSet<String>,
 ) -> Vec<(String, String)> {
     let mut dead = Vec::new();
-    for (fqn, info) in &registry.classes {
-        if info.kind() != ClassKind::Enum || escaped_enum_cases.contains(fqn.as_ref()) {
+    for fqn in enums {
+        let Some(info) = registry.classes.get(fqn) else {
+            continue;
+        };
+        if info.kind() != ClassKind::Enum || escaped_enum_cases.contains(fqn) {
             continue;
         }
         for (case_name, sig) in info.consts() {

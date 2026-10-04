@@ -1,0 +1,2 @@
+a.php:3:14-3:19 function.unused L5 | Function twice is never referenced.
+a.php:5:14-5:19 function.unused L5 | Function twice is never referenced.

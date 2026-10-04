@@ -173,3 +173,84 @@ fn rename_a_class_updates_type_hints_and_instantiations_but_not_an_unrelated_cla
         "expected the type hint and the `new Foo()` site, not `new Bar()`, got: {result:?}"
     );
 }
+
+#[test]
+fn references_on_a_method_include_a_call_written_in_another_case() {
+    let dir = TempDir::new("refs_method_case");
+    let src = "<?php\nclass A { function bar(): void {} }\nfunction f(A $a): void { $a->BAR(); }\n";
+    let path = dir.write("a.php", src);
+    let uri = path_to_uri(&path).to_string();
+    let pos = lsp_pos(src, "bar(): void");
+
+    let messages = run(&dir, &[references_request(2, &uri, pos, false)]);
+    let result = response_result(&messages, 2);
+    assert_eq!(
+        ranges(result).len(),
+        1,
+        "expected the call written `BAR`, got: {result:?}"
+    );
+}
+
+#[test]
+fn rename_a_global_function_rewrites_an_unqualified_call_from_a_namespace() {
+    let dir = TempDir::new("rename_function_fallback");
+    let a_src = "<?php\nfunction greet(): void {}\n";
+    let b_src = "<?php\nnamespace App;\ngreet();\n";
+    let a_path = dir.write("a.php", a_src);
+    let b_path = dir.write("b.php", b_src);
+    let a_uri = path_to_uri(&a_path).to_string();
+    let b_uri = path_to_uri(&b_path).to_string();
+    let pos = lsp_pos(a_src, "greet(): void");
+
+    let messages = run(
+        &dir,
+        &[
+            references_request(2, &a_uri, pos.clone(), false),
+            rename_request(3, &a_uri, pos, "hello"),
+        ],
+    );
+    let references = response_result(&messages, 2);
+    assert_eq!(ranges(references).len(), 1, "got: {references:?}");
+    let result = response_result(&messages, 3);
+    assert_eq!(
+        result["changes"][&b_uri].as_array().unwrap().len(),
+        1,
+        "expected the call in b.php, got: {result:?}"
+    );
+}
+
+#[test]
+fn rename_keeps_an_unqualified_call_that_may_reach_another_declared_function() {
+    let dir = TempDir::new("rename_function_two_candidates");
+    let a_src = "<?php\nfunction greet(): void {}\n";
+    let b_src = "<?php\nnamespace App;\nfunction greet(): void {}\ngreet();\n";
+    let a_path = dir.write("a.php", a_src);
+    let b_path = dir.write("b.php", b_src);
+    let a_uri = path_to_uri(&a_path).to_string();
+    let b_uri = path_to_uri(&b_path).to_string();
+    let pos = lsp_pos(a_src, "greet(): void");
+
+    let messages = run(
+        &dir,
+        &[
+            references_request(2, &a_uri, pos.clone(), false),
+            rename_request(3, &a_uri, pos, "hello"),
+        ],
+    );
+    let references = response_result(&messages, 2);
+    assert_eq!(
+        ranges(references).len(),
+        1,
+        "the call may reach the global function, got: {references:?}"
+    );
+    let result = response_result(&messages, 3);
+    assert_eq!(
+        result["changes"][&a_uri].as_array().unwrap().len(),
+        1,
+        "expected the declaration alone, got: {result:?}"
+    );
+    assert!(
+        result["changes"].get(&b_uri).is_none(),
+        "the call may reach App\\greet too, so it keeps its name, got: {result:?}"
+    );
+}

@@ -1287,7 +1287,7 @@ impl<'a> Checker<'a> {
                             sig.is_internal(),
                             e.span,
                         );
-                        self.record_member_ref(e.span, owner, method);
+                        self.record_method_ref(e.span, owner, method);
                         self.check_call_site_method_name_case(
                             class,
                             method,
@@ -2604,7 +2604,7 @@ impl<'a> Checker<'a> {
                                 sig.is_internal(),
                                 e.span,
                             );
-                            self.record_member_ref(e.span, owner, method);
+                            self.record_method_ref(e.span, owner, method);
                             self.check_static_call_context(target, class, owner, method, e.span);
                             // Mirrors real PHPStan's
                             // `CallPrivateMethodThroughStaticRule` - same
@@ -3040,7 +3040,7 @@ impl<'a> Checker<'a> {
                     && let Some(name) = name.as_str()
                 {
                     if let Some((owner, _)) = self.find_method_owner(&recv_ty, name) {
-                        self.record_member_ref(e.span, &owner, name);
+                        self.record_method_ref(e.span, &owner, name);
                         callee = self.registry.lookup_method(&owner, name);
                     }
                 } else if self.collect_member_refs {
@@ -4705,7 +4705,7 @@ impl<'a> Checker<'a> {
                     && let Some(class) = self.infer_static_target_class(target, locals)
                     && let Some((owner, _)) = self.lookup_method_with_owner(&class, method)
                 {
-                    self.record_member_ref(e.span, &owner, method);
+                    self.record_method_ref(e.span, &owner, method);
                     // The `::cases()` escape hatch - see
                     // `Checker::escaped_enums`'s own doc comment. `owner`
                     // is already the registry's own canonically-declared
@@ -5046,7 +5046,7 @@ impl<'a> Checker<'a> {
                     }) = &target
                     && let Some((owner, _)) = self.lookup_method_with_owner(class, name)
                 {
-                    self.record_member_ref(callback.span, &owner, name);
+                    self.record_method_ref(callback.span, &owner, name);
                 }
                 let (sig, class) = match target {
                     Some(t) => (Some(t.sig), t.class),

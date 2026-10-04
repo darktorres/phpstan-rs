@@ -1,0 +1,4 @@
+paths = ["a.php", "b.php", "c.php"]
+
+[rules]
+check_circular_dependencies = true

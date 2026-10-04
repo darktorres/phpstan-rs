@@ -315,7 +315,25 @@ impl Project {
                             stubs::builtin_class_extension(fqn),
                         )
                     }
+                    // A qualified name reaches the function it names alone.
                     RefTarget::Function(fqn) => {
+                        let lower = fqn.to_ascii_lowercase();
+                        let declared = functions_by_lower.get(&lower);
+                        let builtin = if lower.contains('\\') {
+                            None
+                        } else {
+                            stubs::builtin_function_extension(&lower)
+                        };
+                        (
+                            "Function",
+                            declared
+                                .map(|(n, _)| format!("{n}()"))
+                                .unwrap_or_else(|| format!("{}()", last_segment(fqn))),
+                            declared.map(|(_, p)| *p),
+                            builtin,
+                        )
+                    }
+                    RefTarget::UnqualifiedFunction(fqn) => {
                         let lower = fqn.to_ascii_lowercase();
                         let global = last_segment(&lower).to_string();
                         let namespaced_declaration =

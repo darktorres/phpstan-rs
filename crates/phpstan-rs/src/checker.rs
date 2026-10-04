@@ -1565,6 +1565,20 @@ impl<'a> Checker<'a> {
         ));
     }
 
+    /// `record_member_ref` for method `method` of `owner`, named as `owner`
+    /// declares it: PHP compares method names without case, and the
+    /// index keys a member by its declared name.
+    pub(crate) fn record_method_ref(&self, span: Span, owner: &str, method: &str) {
+        if !self.collect_member_refs {
+            return;
+        }
+        self.record_member_ref(
+            span,
+            owner,
+            &self.registry.declared_method_name(owner, method),
+        );
+    }
+
     /// Drains `member_ref_sites` into an owned `Vec` - the same
     /// `mem::take`-then-collect shape `take_semantic_tokens` uses one
     /// field up.
@@ -1616,11 +1630,8 @@ impl<'a> Checker<'a> {
     /// through a subclass instance too); `ty` resolving to an interface
     /// or non-final abstract class additionally includes every real
     /// class anywhere in the registry that has it in *their* own
-    /// ancestor set (the same inversion `project::whole_program::dead_
-    /// abstract_classes` already uses, applied here per dynamic-access
-    /// site instead of once project-wide - dynamic accesses are rare
-    /// enough in practice that this doesn't need its own persistent
-    /// index). A `Union`/`Intersection` recurses into every member and
+    /// ancestor set (`Registry::inheritors`). A `Union`/`Intersection`
+    /// recurses into every member and
     /// escapes the union of all of them - conservative by design: the
     /// real runtime receiver could be any one of them, and under-
     /// escaping (missing a real dynamic-dispatch reference) is the

@@ -1,0 +1,4 @@
+paths = ["a.php"]
+
+[rules]
+check_dead_members = true

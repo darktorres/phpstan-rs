@@ -13,3 +13,15 @@ pub(crate) mod dead_code;
 pub(crate) mod dead_enum_cases;
 pub(crate) mod dead_members;
 pub(crate) mod renamed_named_arguments;
+
+use std::path::Path;
+use syntax::span::Span;
+
+/// A declaration an analysed file makes: its name as declared, and its
+/// name's place in the file.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct Declaration<'a> {
+    pub(crate) name: &'a str,
+    pub(crate) path: &'a Path,
+    pub(crate) span: Span,
+}

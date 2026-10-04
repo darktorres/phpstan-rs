@@ -30,6 +30,9 @@ pub(crate) enum BuiltDecl {
         conditional: bool,
         guard: Option<GuardExpr>,
         info: Arc<ClassReflection>,
+        // The namespace the declaration is in: an anonymous class's name
+        // has none.
+        namespace: Name,
     },
     Function {
         name: Name,
@@ -691,6 +694,7 @@ pub(crate) fn built_declaration(
                 conditional,
                 guard,
                 info: Arc::new(info),
+                namespace: Name::from(ctx.namespace()),
             });
         }
         Declared::Function(f) => {

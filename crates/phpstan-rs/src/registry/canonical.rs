@@ -243,6 +243,7 @@ canonical_enum!(BuiltDecl {
         conditional,
         guard,
         info,
+        namespace,
     },
     Function {
         name,

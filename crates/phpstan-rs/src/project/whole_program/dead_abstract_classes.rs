@@ -15,11 +15,8 @@
 //! Narrower than inferring a *sealed* hierarchy for
 //! `ObjectType::isInstanceOf` to answer a certain `false` instead of
 //! PHPStan's permanent `Maybe`: this only asks whether *any* concrete
-//! descendant exists - answered directly here
-//! via `Registry::all_ancestor_names`, inverted (a witness class's own
-//! ancestors include every abstract superclass it has a concrete
-//! descendant for), rather than building a persistent reverse index on
-//! `Registry` that nothing else yet needs.
+//! descendant exists, from the registry's descendants index
+//! (`Registry::subclasses`).
 //!
 //! Real, disclosed false-positive risk (ship opt-in): a concrete
 //! subclass generated only at runtime by framework magic (a Doctrine
@@ -28,27 +25,31 @@
 //! universe is reported as one in the *real* universe, which isn't
 //! always true.
 
-use crate::registry::Registry;
+use crate::project::whole_program::Declaration;
+use crate::registry::{ClassReflection, Registry};
 use syntax::ast::ClassKind;
-use syntax::name::NameSet;
 
-pub(crate) fn find_dead_abstract_classes(registry: &Registry) -> Vec<String> {
-    let mut has_concrete_descendant: NameSet = NameSet::default();
-    for (fqn, info) in &registry.classes {
-        // Only a real, instantiable class counts as a witness - an
-        // abstract subclass, an interface, or a trait proves nothing
-        // about whether *this* class can ever actually be constructed.
-        if info.kind() != ClassKind::Class || info.is_abstract() {
-            continue;
-        }
-        has_concrete_descendant.extend(registry.all_ancestor_names(fqn));
-    }
-
-    registry
-        .classes
-        .iter()
+/// The abstract class declarations of the analysed files with no
+/// concrete class below them. A name declared twice is judged at each
+/// declaration, by what extends that name.
+pub(crate) fn find_dead_abstract_classes<'a>(
+    declarations: impl IntoIterator<Item = (Declaration<'a>, &'a ClassReflection)>,
+    registry: &Registry,
+) -> Vec<Declaration<'a>> {
+    declarations
+        .into_iter()
         .filter(|(_, info)| info.kind() == ClassKind::Class && info.is_abstract())
-        .filter(|(fqn, _)| !has_concrete_descendant.contains(fqn.as_ref()))
-        .map(|(fqn, _)| fqn.to_string())
+        .filter(|(declaration, _)| {
+            // Only a real, instantiable class counts as a witness - an
+            // abstract subclass proves nothing about whether this class
+            // can ever actually be constructed.
+            !registry.subclasses(declaration.name).iter().any(|name| {
+                registry
+                    .classes
+                    .get(name)
+                    .is_some_and(|info| info.kind() == ClassKind::Class && !info.is_abstract())
+            })
+        })
+        .map(|(declaration, _)| declaration)
         .collect()
 }

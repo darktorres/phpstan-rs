@@ -33,7 +33,7 @@ use std::path::{Path, PathBuf};
 
 use syntax::ast::*;
 use syntax::span::Span;
-use syntax::visit::{Visitor, walk_catch_clause, walk_class_def, walk_expr, walk_stmts};
+use syntax::visit::{Visitor, walk_args, walk_catch_clause, walk_class_def, walk_expr, walk_stmts};
 
 /// What a reference site points at - no local-variable variant (see
 /// this item's own edge-case notes: local-variable rename/references is
@@ -43,11 +43,48 @@ use syntax::visit::{Visitor, walk_catch_clause, walk_class_def, walk_expr, walk_
 pub(crate) enum RefTarget {
     Class(String),
     Function(String),
+    /// An unqualified function name in a namespace, by its namespaced
+    /// name: that function when one is declared as the call runs, else the
+    /// global one of the same name.
+    UnqualifiedFunction(String),
     /// `(declaring owner FQN, member name)` - always the true,
     /// ancestry-resolved declaring class, never the raw syntactic
     /// receiver/class name a `self::`/inherited-call site was written
-    /// against.
+    /// against. A method is named as it is declared.
     Member(String, String),
+}
+
+impl RefTarget {
+    /// The target as the index keys it: class and function names, which
+    /// PHP compares without case, in lowercase. A member's name keeps its
+    /// case: a property's and a constant's are compared with it.
+    fn folded(self) -> RefTarget {
+        match self {
+            RefTarget::Class(name) => RefTarget::Class(name.to_ascii_lowercase()),
+            RefTarget::Function(name) => RefTarget::Function(name.to_ascii_lowercase()),
+            RefTarget::UnqualifiedFunction(name) => {
+                RefTarget::UnqualifiedFunction(name.to_ascii_lowercase())
+            }
+            RefTarget::Member(owner, member) => {
+                RefTarget::Member(owner.to_ascii_lowercase(), member)
+            }
+        }
+    }
+}
+
+/// A function's name after its namespace.
+fn last_segment(name: &str) -> &str {
+    name.rsplit_once('\\').map_or(name, |(_, last)| last)
+}
+
+/// A site that may reach a function, and the other function it reaches
+/// instead when that one is declared: the global one for an unqualified
+/// call naming a namespaced function, the namespaced one for an
+/// unqualified call falling back to a global function.
+pub(crate) struct FunctionSite<'a> {
+    pub(crate) path: &'a Path,
+    pub(crate) span: Span,
+    pub(crate) other: Option<&'a str>,
 }
 
 /// Every reference site this project has ever indexed, in both
@@ -58,10 +95,20 @@ pub(crate) enum RefTarget {
 pub(crate) struct UseSiteIndex {
     by_target: FxHashMap<RefTarget, Vec<(PathBuf, Span)>>,
     by_file: FxHashMap<PathBuf, Vec<(RefTarget, Span)>>,
+    // For each global function name, the namespaced names unqualified
+    // calls are recorded under that fall back to it.
+    fallbacks: FxHashMap<String, rustc_hash::FxHashSet<String>>,
 }
 
 impl UseSiteIndex {
     pub(crate) fn insert(&mut self, path: &Path, target: RefTarget, span: Span) {
+        let target = target.folded();
+        if let RefTarget::UnqualifiedFunction(namespaced) = &target {
+            self.fallbacks
+                .entry(last_segment(namespaced).to_string())
+                .or_default()
+                .insert(namespaced.clone());
+        }
         self.by_target
             .entry(target.clone())
             .or_default()
@@ -85,13 +132,82 @@ impl UseSiteIndex {
                 sites.retain(|(p, s)| !(p == path && *s == span));
                 if sites.is_empty() {
                     self.by_target.remove(&target);
+                    if let RefTarget::UnqualifiedFunction(namespaced) = &target {
+                        let global = last_segment(namespaced);
+                        if let Some(names) = self.fallbacks.get_mut(global) {
+                            names.remove(namespaced);
+                            if names.is_empty() {
+                                self.fallbacks.remove(global);
+                            }
+                        }
+                    }
                 }
             }
         }
     }
 
+    /// The sites recorded for `target` itself, its names compared as PHP
+    /// compares them. A function's are `function_references`.
     pub(crate) fn references(&self, target: &RefTarget) -> &[(PathBuf, Span)] {
-        self.by_target.get(target).map(Vec::as_slice).unwrap_or(&[])
+        self.by_target
+            .get(&target.clone().folded())
+            .map(Vec::as_slice)
+            .unwrap_or(&[])
+    }
+
+    /// Every site that may reach function `name`: the calls naming it,
+    /// and the unqualified calls in a namespace that reach it or the
+    /// other function of their two.
+    pub(crate) fn function_references(&self, name: &str) -> Vec<FunctionSite<'_>> {
+        let key = name.to_ascii_lowercase();
+        let sites = |target: &RefTarget| self.by_target.get(target).into_iter().flatten();
+        let mut out: Vec<FunctionSite<'_>> = sites(&RefTarget::Function(key.clone()))
+            .map(|(path, span)| FunctionSite {
+                path,
+                span: *span,
+                other: None,
+            })
+            .collect();
+        if let Some((RefTarget::UnqualifiedFunction(namespaced), found)) = self
+            .by_target
+            .get_key_value(&RefTarget::UnqualifiedFunction(key.clone()))
+        {
+            let global = last_segment(namespaced);
+            out.extend(found.iter().map(|(path, span)| FunctionSite {
+                path,
+                span: *span,
+                other: Some(global),
+            }));
+        }
+        for namespaced in self.fallbacks.get(&key).into_iter().flatten() {
+            out.extend(
+                sites(&RefTarget::UnqualifiedFunction(namespaced.clone())).map(|(path, span)| {
+                    FunctionSite {
+                        path,
+                        span: *span,
+                        other: Some(namespaced.as_str()),
+                    }
+                }),
+            );
+        }
+        out
+    }
+
+    /// Every site of `target`: a function's as `function_references`
+    /// gives them, anything else's as `references`.
+    pub(crate) fn sites(&self, target: &RefTarget) -> Vec<(&Path, Span)> {
+        match target {
+            RefTarget::Function(name) | RefTarget::UnqualifiedFunction(name) => self
+                .function_references(name)
+                .into_iter()
+                .map(|site| (site.path, site.span))
+                .collect(),
+            _ => self
+                .references(target)
+                .iter()
+                .map(|(path, span)| (path.as_path(), *span))
+                .collect(),
+        }
     }
 }
 
@@ -175,8 +291,13 @@ impl ClassFnRefWalker<'_> {
 
     /// Records `name`, a function name as a call or callable names it.
     fn function_at(&mut self, name: &QualifiedName, span: Span) {
-        let fqn = name.candidates().0.to_string();
-        self.out.push((span, RefTarget::Function(fqn)));
+        let target = match name.candidates() {
+            (namespaced, Some(global)) if !namespaced.eq_ignore_ascii_case(global) => {
+                RefTarget::UnqualifiedFunction(namespaced.to_string())
+            }
+            (fqn, _) => RefTarget::Function(fqn.to_string()),
+        };
+        self.out.push((span, target));
     }
 }
 
@@ -206,6 +327,11 @@ impl<'ast> Visitor<'ast> for ClassFnRefWalker<'_> {
         walk_catch_clause(self, clause);
     }
 
+    fn visit_attribute(&mut self, attribute: &'ast Attribute) {
+        self.class_at(&attribute.name, attribute.name.span);
+        walk_args(self, &attribute.args);
+    }
+
     fn visit_expr(&mut self, expr: &'ast Expr) {
         syntax::stack::guard(|| {
             match &expr.kind {
@@ -227,10 +353,6 @@ impl<'ast> Visitor<'ast> for ClassFnRefWalker<'_> {
                     }
                     return;
                 }
-                // A bare `Name` reached any other way than a callee (e.g. a
-                // first-class-callable target `foo(...)`) is taken as a
-                // function.
-                ExprKind::Name(n) => self.function_at(n, expr.span),
                 ExprKind::ClassConstFetch(StaticTarget::Name(class), _)
                 | ExprKind::ClassNameFetch(StaticTarget::Name(class))
                 | ExprKind::StaticPropertyFetch(StaticTarget::Name(class), _)
@@ -251,6 +373,7 @@ impl<'ast> Visitor<'ast> for ClassFnRefWalker<'_> {
 syntax::canonical_enum!(RefTarget {
     Class(name),
     Function(name),
+    UnqualifiedFunction(name),
     Member(class, member),
 });
 
@@ -258,12 +381,17 @@ syntax::canonical_enum!(RefTarget {
 /// files were indexed in.
 impl syntax::canonical::Canonical for UseSiteIndex {
     fn canonical(&self, p: &mut syntax::canonical::Printer) {
-        let UseSiteIndex { by_target, by_file } = self;
+        let UseSiteIndex {
+            by_target,
+            by_file,
+            fallbacks,
+        } = self;
         p.node(
             "UseSiteIndex",
             &[
                 ("by_target", &syntax::canonical::MapOfSets(by_target)),
                 ("by_file", &syntax::canonical::MapOfSets(by_file)),
+                ("fallbacks", fallbacks),
             ],
         );
     }
