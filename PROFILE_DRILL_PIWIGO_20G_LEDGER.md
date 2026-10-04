@@ -1,0 +1,222 @@
+# 20 G plan ledger
+
+Tracks building the plan of `PROFILE_DRILL_PIWIGO_20G.md`: items 0-19 (§10), then the validation (§11). One row per task. The design of each row is in the plan, at the step or bullet the row names; this file holds only the order and the state. The plan was reviewed in full at `d6e43bf7` (§13's review table).
+
+Nothing is built yet. Building starts when the user says so (`WORK_STACK.md`, level 8).
+
+**Status:** OPEN, DONE (hash), PART (what is left), SKIP (reason).
+
+**Kind:**
+- **perf**: exact; the output does not change.
+- **sem**: a semantic change §11 lists.
+- **check**: a new diagnostic.
+- **infra**: an oracle, a dump or a test.
+- **val**: a validation run.
+
+## How the rows are worked
+
+- **In order.** Item 0 comes first, and the rows run top to bottom; within an item they are in an order that builds, which is not always the plan's step order (the *plan* column gives the step). The *needs* column names a row in another item that must be done first. A row that needs a later row waits for it: 3.4 for 9.2, and 6.2 for 9.5.
+- **Per row:** `cargo fmt`, then `cargo check` and clippy, then a commit with an explicit pathspec, since another session may share the checkout. A row may take several commits; its status takes the last one's hash.
+- **Validation once, at the end.** Tests, fixtures, the oracle build, the dumps and the corpus run once, in the V rows (§9, §11). There are no checkpoint runs between items. Item 0's rows are the exception: they read the starting state and take the baseline.
+- **A design that turns out wrong** is fixed in the plan first, in its own commit, and then built.
+- **A new dependency** is added in the row that first uses it (§13's table). `twox-hash` leaves in row 17.2.
+- **Heavy jobs** (builds of other profiles, the corpus, profilers) run one at a time, under `nice -n 19`, with no `timeout`.
+
+## Tasks
+
+| # | plan | task | needs | kind | status |
+|---|---|---|---|---|---|
+| **0** | **item 0** | **Baselines; the debug oracles retired** | | | |
+| 0.1 | step 1 | Read the starting state: the vendor-tree, all-on and unscoped reports at HEAD against `1892b477`'s, each difference read and recorded | — | val | OPEN |
+| 0.2 | step 2 | The `oracle` profile (`gate` with `debug-assertions` and `overflow-checks`, per-file cache off). Run every debug oracle over Piwigo's three configurations, each vendor project with every rule on, and the edit replay; count coverage with an uncommitted counter; fix each failure in its own commit | 0.1 | infra | OPEN |
+| 0.3 | step 2 | Delete the debug oracles: `FileBodies`' statements, `BodySource::body`, the debug-only re-exports, the test oracles whose second implementation exists only for them | 0.2 | infra | OPEN |
+| 0.4 | step 3 | One canonical type printer in `types` over all of `Repr`, with no interning. Every printer destructures without `..` and matches without `_` | — | infra | OPEN |
+| 0.5 | step 3 | O1, `--dump-front-end` through `parse_file`. It covers: the tree after the stub rules and anonymous-class names; facts; ignore marks; warnings and errors; positions at every token boundary; doc sites with their `DocBlock`s; references; built declarations; duplicate sites; use sites. It also records every type node with the type today's round trip gives it, and every union built, with its operands and result | 0.4 | infra | OPEN |
+| 0.6 | step 3 | The full `registry-dump`, after the finishing passes | 0.4 | infra | OPEN |
+| 0.7 | step 3 | The checker's records: the PHPDoc resolution record and the expression-type record | 0.4 | infra | OPEN |
+| 0.8 | step 3 | O2 as the gate's whole artifact set (`cargo xtask corpus --full`), with every diagnostic field and every cache state | — | infra | OPEN |
+| 0.9 | step 3 | The server: an in-process session over Piwigo and two vendor projects, and the edit replay | — | infra | OPEN |
+| 0.10 | step 3 | Memory: the dhat profile by holder, with the heap at the start of the check and at the check's own maximum, and a profile with untrimmed backtraces | — | infra | OPEN |
+| 0.11 | step 4 | The baseline, from this item's commit: every dump, identical across thread counts, saved under `.corpus-runs/gate/<artifact>/<commit>.<ext>` | 0.3-0.10 | val | OPEN |
+| **1** | **item 1** | **One session** | | | |
+| 1.1 | One identity | A file is its resolved path: each link resolved once by `realpath`; cycles found against ancestors' identity; on Windows, identity through `same-file` (now a direct dependency); bind mounts and hard links stay distinct | — | sem | OPEN |
+| 1.2 | What the identity decides | Spelling, `__FILE__`, `__DIR__` and owner from the resolved path. The role is the strongest root that contains it. `Session::classify` serves the load and every edit entry point, with an alias table | 1.1 | sem | OPEN |
+| 1.3 | One configuration | `Session::resolve` serves the server too, with an error-policy parameter. A reload applies the difference in file sets. `workspace_config::resolve` is deleted | — | sem | OPEN |
+| 1.4 | One load | `Session::load` through a file source with an overlay. The server, tests, `incremental-bench` and benches load through it. The old loaders are deleted. One byte reader. `FileState` keeps each file's content hash | 1.2 | sem | OPEN |
+| 1.5 | One analysis | `finalize` by value. The server's first publish is `analyse` plus `finalize`. An edit rechecks through the same check. Whole-program passes run on save, debounced. `defer_inline_ignores` goes | 1.4 | sem | OPEN |
+| 1.6 | What the server keeps | `built_once` split. Context trees come from `ast_of`. Only open documents' text is kept. The use-site index becomes a per-file product | 1.4 | perf | OPEN |
+| 1.7 | Folders | One session and project per workspace folder; a document belongs to the deepest folder | 1.4 | sem | OPEN |
+| 1.8 | Off the message loop | The load runs on the pool with `$/progress`; edits arriving meanwhile are queued as overlays | 1.4 | perf | OPEN |
+| **2** | **item 2** | **The parallel walk and path data** | | | |
+| 2.1 | One listing per directory | The vendor resolver's listings become the walk's table. Classmap and `files` entries under PSR-4 directories are dropped. Stub directories are walked once | — | perf | OPEN |
+| 2.2 | One task per directory | Entries sorted by name bytes; kinds from the dirent. Item 1's link rules. Stronger roots and promoted packages pruned. `collect_php_files_excluding` and the name exclusions deleted | 1.2 | sem | OPEN |
+| 2.3 | Spellings, path data | Spellings built, not respelled. Resolved path data from the walk; `owner_of_dir` once per directory, in one implementation | 2.2 | perf | OPEN |
+| 2.4 | Parsing as listed | Each directory's PHP files go to the pool as one task, with the thread's name cache owned by the load | 2.2 | perf | OPEN |
+| 2.5 | Order without comparisons | Keyed by root index and entry index path; explicit files placed by binary search | 2.2 | perf | OPEN |
+| 2.6 | A path stored once | `FileTable` as a `HashTable<FileId>` using the walk's hash | 2.3 | perf | OPEN |
+| 2.7 | Allocations | `installed.json` and manifests deserialized typed; `eval_concat` into one buffer; `ignore_errors` matched by the walk's text | — | perf | OPEN |
+| **3** | **item 3** | **Context trees dropped on the worker** | | | |
+| 3.1 | keep / drop | `keeps_tree(role, open)` in the load and in `update_file`; one state shape for a context file, the cached one | 1.4 | perf | OPEN |
+| 3.2 | drop, read buffer | The drop runs on the allocating worker. Context files are read into the worker's reusable buffer | 3.1 | perf | OPEN |
+| 3.3 | `ast_of` | `ast_of` reads the overlay before the disk | 1.4 | sem | OPEN |
+| 3.4 | scratch store | A tree that is not kept is parsed into the worker's scratch store | 9.2 | perf | OPEN |
+| **4** | **item 4** | **The registry by declaration ids** | | | |
+| 4.1 | review row 4 | Make the registry's fields private first, so readers go through its API | — | perf | OPEN |
+| 4.2 | Three ranges | Each store's ids fall in three ranges, one per source; accessors dispatch by range | 4.1 | perf | OPEN |
+| 4.3 | `FileDecls` | A file's declarations stored together in `la-arena`'s typed arenas (new dependency); members and parameters as ranges | 4.2 | perf | OPEN |
+| 4.4 | Generations | Ids carry a generation; the id space has one too; a debug build checks it on read | 4.2 | perf | OPEN |
+| 4.5 | Member lists | One entry per member a class has, traits' and aliases included; `MethodRef` is (class, slot) | 4.3 | sem | OPEN |
+| 4.6 | Never changed | Declarations never change after they are built; every pass result is a table by id | 4.3 | perf | OPEN |
+| 4.7 | Parallel passes | Each pass is a parallel map by its relation: hierarchy levels, references between classes, the global-variable include graph, and the purity and property-write worklists | 4.6 | perf | OPEN |
+| 4.8 | Scope, snapshots | The scope is a bitset over ids; snapshots and change detection are by id | 4.6 | perf | OPEN |
+| **5** | **item 5** | **The merge in parallel; files by id** | | | |
+| 5.1 | Ids before the merge | Contiguous ranges by prefix sum of per-file counts, in load order | 4.2 | perf | OPEN |
+| 5.2 | Stable ids | A file parsed again on the edit path keeps its ids | 5.1 | perf | OPEN |
+| 5.3 | Sharded merge | Over every table the insert writes, each sharded by its own key | 5.1 | perf | OPEN |
+| 5.4 | Path rank | Whole-program merges go by path rank; named-argument facts are recorded only when their rule is on | 5.3 | perf | OPEN |
+| 5.5 | Keys stay keys | Duplicate sites and origins by `FileId` | 5.3 | perf | OPEN |
+| 5.6 | Frontier from ids | `closure_scope`'s frontier starts from item 4's changed ids | 4.8 | perf | OPEN |
+| 5.7 | Posting lists | Reverse indexes hold posting lists; a file's references are slices in content order; the per-file cache stores them sorted | 5.3 | perf | OPEN |
+| **6** | **item 6** | **The stub scope and the caches' container** | | | |
+| 6.1 | step 1 | Deferred types resolved on demand; the eager pass and `class_has_deferred_type`/`function_has_deferred_type` go | 4.6 | perf | OPEN |
+| 6.2 | step 2 | The stub index records each declaration's, parameter's and per-version type's version range, and each declaration's extension | 9.5 | sem | OPEN |
+| 6.3 | step 2 | Guards decided on run-time evidence only (extensions PHP cannot lack, Composer's `platform_check.php`, the configured runtime); an unknown guard keeps both declarations; readers answer for the configured versions | 6.2 | sem | OPEN |
+| 6.4 | step 2 | New check: a polyfill's signature against its native one | 6.3 | check | OPEN |
+| 6.5 | step 3 | Names stored once per cache file; records refer to them by index | — | perf | OPEN |
+| 6.6 | step 4 | F2's count as a debug-only diagnostic | — | infra | OPEN |
+| 6.7 | step 5 | Records read with `read_at` under a decode context; per-record CRCs; recoverable failures; eager sections; stub index keys read in place; `u64` offsets | 6.5 | perf | OPEN |
+| 6.8 | step 6 | The caches' key covers every embedded input: `stub_sources::SOURCES_HASH` from the same list as the embeds; `container.rs`'s `VERSION` goes | — | perf | OPEN |
+| 6.9 | Oracle | Tests written: a file replaced while read, a corrupt record, `SOURCES_HASH` against the embedded files | 6.7, 6.8 | infra | OPEN |
+| **7** | **item 7** | **One memo for the type relation** | | | |
+| 7.1 | read first | The relation's code read for any input beyond the registry's content (thread-locals, the current class, contextual statics) | — | perf | OPEN |
+| 7.2 | generation | `ClassHierarchy::generation()`, the content generation; bumped by every finishing run and base switch; read-only levels get one of their own | 4.6 | perf | OPEN |
+| 7.3 | one memo | One memo replaces `structural_memo` and `KEEP_DECISIONS` | 7.2 | perf | OPEN |
+| 7.4 | final answers | Answers are stored only when final; cycles are resolved per component; constants on a cycle read `never` and are reported | 7.3 | sem | OPEN |
+| 7.5 | bound, switch | Two segments per thread; a runtime off switch (`PHPSTAN_RS_NO_RELATION_MEMO`) | 7.3 | perf | OPEN |
+| **8** | **item 8** | **Declarations carry only what every reader needs** | | | |
+| 8.1 | fields and readers | Every declaration field listed with its readers | 4.3 | perf | OPEN |
+| 8.2 | case references | Computed by the checker from what it checks; the six fields leave the declarations | 8.1 | sem | OPEN |
+| 8.3 | duplicate params | Resolved as parameters are pushed into the file's parameter vector | 4.3 | perf | OPEN |
+| 8.4 | `from_decl`, `reconcile_with_native` | Parameters passed on; a lone member refined and returned with no `Vec` | — | perf | OPEN |
+| **9** | **item 9** | **Trees in typed vectors, nodes by index** | | | |
+| 9.1 | step 1 | `Expr::peeled` becomes a loop, with no guard, alone | — | perf | OPEN |
+| 9.2 | step 2 | `ParsedFile` of typed arenas (`la-arena`): source bytes, `names`, `exprs`/`stmts` with spans, large variants and list elements in their own arenas; per-worker scratch store | 4.3 | perf | OPEN |
+| 9.3 | step 3 | Nodes by index (`ExprId`, `StmtId`): parse functions return nodes committed by their callers; `ParseError` boxed; matching and `syntax::visit` over ids; the inference cache by `ExprId` | 9.2 | perf | OPEN |
+| 9.4 | step 4 | Payloads as byte ranges; escaped literals decoded once into the file's byte vector | 9.2 | perf | OPEN |
+| 9.5 | step 5 | Nothing changes a tree after its parse. The stub rules apply while a stub is parsed, to stubs only, recording versions. Anonymous-class names go in a side table. Synthetic nodes go in a per-file scratch store. Completion and Composer's reader parse their own `ParsedFile`. `VisitorMut` goes | 9.3 | sem | OPEN |
+| 9.6 | step 6 | Holders keep ids: disjunction pairs, `Initializers`, alias maps, both query-builder chains | 9.3 | perf | OPEN |
+| 9.7 | step 7 | Lists committed together from scratch as `IdxRange`s; kept trees' arenas moved out at exact size | 9.3 | perf | OPEN |
+| 9.8 | step 8 | Small nodes; statements and parameters without doc fields (doc sites by offset); attributes stay in their node | 9.3 | perf | OPEN |
+| **10** | **item 10** | **Tokens in flat arrays** | | | |
+| 10.1 | Design | Whole-file lexing into a `TokenStream`: three cursors; per-worker buffers; `Token`, `Tok`, `Supply`, the `VecDeque` and `LexEnd`'s second pass go | 9.2 | perf | OPEN |
+| 10.2 | Names, literals | The lexer's name table maps bytes to `NameId`; escaped literals go into the file's byte vector | 10.1 | perf | OPEN |
+| 10.3 | halt | `__halt_compiler` ends the stream after its three tokens, with the offset recorded; the parser reports what PHP's grammar rejects | 10.1 | sem | OPEN |
+| 10.4 | halt offset | `__COMPILER_HALT_OFFSET__` typed as its file's offset; new check of its use in a file without a halt | 10.3 | check | OPEN |
+| 10.5 | interpolation | String parts lexed inline; `Lexer::fragment`, the sub-parser, the context clone, the recorder fork and the scratch streams go | 10.1 | perf | OPEN |
+| 10.6 | first error | Lexer errors recorded with offsets; the file's error is the first one in it | 10.1 | sem | OPEN |
+| 10.7 | docs | A declaration's doc by PHP's rule (only `}` clears it); statements keep adjacency; new check of a doc given away | 10.1 | check | OPEN |
+| 10.8 | versions | The lexer reads the configured versions; new check of constructs they lex differently | 10.1 | check | OPEN |
+| 10.9 | token readers | Comments recorded only when asked; the stub rules' type strings use a scratch stream; completion uses its own stream; `Parser::new(TokenStream)` | 10.1 | perf | OPEN |
+| **11** | **item 11** | **Line starts, columns, offsets** | | | |
+| 11.1 | step 1 | `LineStarts` for every file, `LineIndex` for analysed files and open documents; `enum Lines` in `FileState` | — | perf | OPEN |
+| 11.2 | step 1 | Lines end at `\n` and at a lone `\r`; line comments end at a lone `\r` | 11.1 | sem | OPEN |
+| 11.3 | step 2 | The block pass on `wide::u8x16` (a direct dependency now); no AVX2 path | 11.1 | perf | OPEN |
+| 11.4 | step 1 | Lexer warnings and parse failures record line and column on the worker; fragment lexers build no index | 11.1 | perf | OPEN |
+| 11.5 | step 3 | The server indexes context files on demand: the overlay first, the hash check otherwise | 1.4 | perf | OPEN |
+| 11.6 | step 4 | The per-file cache stores `LineStarts`; no `Arc<LineIndex>` | 11.1 | perf | OPEN |
+| 11.7 | step 5 | Nothing in the front end reads lines: ignore marks, member spans and doc lines as offsets; anonymous-class lines from `LineStarts` | 11.1 | perf | OPEN |
+| **12** | **item 12** | **Lexer details** | | | |
+| 12.1 | step 1 | The identifier lookup inlined; watch bits cached with each name in the cross-file cache; stub-attribute spellings go | 10.2 | perf | OPEN |
+| 12.2 | step 2 | Keywords compared by word | — | perf | OPEN |
+| 12.3 | step 3 | Blank runs: one byte first, the `wide` mask for longer runs | 11.3 | perf | OPEN |
+| 12.4 | step 4 | Operators without a call; casts as PHP's single tokens (the parser's lookahead goes) | 10.1 | sem | OPEN |
+| 12.5 | step 5 | `RefKey::Constant` keeps namespace and name apart | — | perf | OPEN |
+| 12.6 | step 6 | `UseMap::get` stops re-validating UTF-8 | — | perf | OPEN |
+| 12.7 | step 7 | Native type names matched without a lowercase copy | 12.2 | perf | OPEN |
+| 12.8 | step 8 | A qualified name is one token; the spaced form is a syntax error on 8.x | 10.1 | sem | OPEN |
+| 12.9 | steps 9-10 | Numbers parsed skipping `_`; `strip_leading_backslash` returns a slice | — | perf | OPEN |
+| 12.10 | step 11 | A doc comment only where whitespace follows `/**` | — | sem | OPEN |
+| 12.11 | step 12 | `?>` and heredoc lines end at a lone `\r` too | 11.2 | sem | OPEN |
+| 12.12 | step 13 | Heredoc indentation errors reported as PHP's | — | check | OPEN |
+| 12.13 | step 14 | Open tags as PHP's: `<?php` only before whitespace; `<?` by `short_open_tag`, reported where the setting is unknown | 6.3 | sem | OPEN |
+| **13** | **item 13** | **A file's products: the declaration list and one walk** | | | |
+| 13.1 | step 1 | The parser lists declarations. Guards follow PHP's binding: exits include `exit`, `die`, `throw` and `__halt_compiler`; a parent from another file means possibly declared. Entries are reserved in source order. Docs follow item 10's rule, resolved in the entry's scope. A marker records constants a file defines by a computed name | 9.7, 10.7 | sem | OPEN |
+| 13.2 | step 1 | New check: a run-time-bound declaration after an unconditional exit is dead | 13.1 | check | OPEN |
+| 13.3 | step 2 | `ImportScope`s published once | 13.1 | perf | OPEN |
+| 13.4 | step 3 | One walk for `BodySummary`, `InitFlow`, `FileSites` and registered families, in PHP's order of evaluation | 13.1 | sem | OPEN |
+| 13.5 | step 4 | The old collector goes; the stub rules record their types' references | 9.5 | perf | OPEN |
+| 13.6 | step 5 | A file's bodies as one slice, reached through the declaration's id | 13.4, 4.3 | perf | OPEN |
+| 13.7 | step 6 | Builders gather in scratch and emit exact-size slices | 13.4 | perf | OPEN |
+| 13.8 | step 7 | References in one vector per file, sorted once; doc sites hold the interned `ImportScope`; `Declaration::name` is a `Name` | 13.3, 5.7 | perf | OPEN |
+| **14** | **item 14** | **PHPDoc finished** | | | |
+| 14.1 | step 8 | `syntax::memo::Memo` becomes the fingerprint-keyed memo: keyed SipHash-1-3-128 (`siphasher`, now direct) bounded by `quick_cache`'s weighted cache (new dependency); shard clearing goes | — | perf | OPEN |
+| 14.2 | step 3 | `parse_tag(tag, rest) -> Arc<TagEffect>`; `apply(block, written, effect)` makes the decisions that depend on the spelling | — | perf | OPEN |
+| 14.3 | step 4 | The tag memo keyed by the pair's fingerprint | 14.1 | perf | OPEN |
+| 14.4 | step 1 | Eager lowering in `parse_tag`, once per distinct tag line; the statement `@var` memo stays; `impl WrittenType for TypeNode` goes | 14.2 | perf | OPEN |
+| 14.5 | step 1 | The text grammar's callers by kind: configured text through `phpdoc::parse_type`; texts in our source as `static` tables; class names from code as `Type::object` (the `Integer::MAX` fix); keyword tests through `types::type_keyword`; `mentions_mixed` from the node; the rest of `parse.rs` deleted | 14.4 | sem | OPEN |
+| 14.6 | step 2 | The resolution memo keyed by (written `Type`, context id); the context holds whole `TemplateParam`s, aliases and `self` names | 14.4 | perf | OPEN |
+| 14.7 | step 5 | Tag tokens borrow byte ranges; the doc lexed as bytes with PHP's classes; wrapped tags read as logical text | 9.4 | sem | OPEN |
+| 14.8 | step 6 | One parse per doc (the grammar's own splitter deleted); one winner rule per tag (`tag_type_nodes`, `select_var_tag_nodes` and `var_type`/`var_name` go); two memos; `DocNames` goes | 14.2, 14.7 | sem | OPEN |
+| 14.9 | step 7 | Nodes in their owner's `la-arena`; `DocType` as (owner, `Idx`, `Type`); a serialized `DocType` holds its subtree and type | 14.8 | perf | OPEN |
+| **15** | **item 15** | **Names held as names, as bytes** | | | |
+| 15.1 | C3 step 7 | The checker's method memo and `class_memo` deleted | — | perf | OPEN |
+| 15.2 | C3 step 6 | Every `String`-keyed map and identifier value takes PHP's identity (`FoldedName`, `Name`, `ConstName`, `ArrayKey`), in the plan's order of cost, then by module | 15.1 | sem | OPEN |
+| 15.3 | end state | `TableKey for str` and `FoldKey for str` deleted; outside text interned where it enters | 15.2 | perf | OPEN |
+| 15.4 | bytes | `Name` holds bytes and `Deref<Target = str>` goes; the `\x{NN}` escape wherever a name's text is shown; `parse_display` decodes it | 9.4 | sem | OPEN |
+| 15.5 | fixes | `DiagnosticFix` holds bytes; `apply_fixes` and `resolve_span` work on bytes | 15.4 | sem | OPEN |
+| 15.6 | serde | `Name` serializes its bytes | 15.4 | perf | OPEN |
+| 15.7 | run-time strings | `syntax::name::from_runtime` by PHP's rules; the `trim_start_matches('\\')` and `as_str()?` sites go | 15.4 | sem | OPEN |
+| 15.8 | folding | ASCII-only folding at the eight sites that use Unicode lowercasing | 15.4 | sem | OPEN |
+| 15.9 | documents | Each open document's encoding found with `encoding_rs` (new dependency); overlays encoded back; fixes offered only when encodable | 15.4, 1.4 | sem | OPEN |
+| 15.10 | short names | `NameData.last_segment`; a short name is a slice | 15.4 | perf | OPEN |
+| 15.11 | two sites | Name resolution hashes the parts without building text; a callee's folded name reused | 15.4 | perf | OPEN |
+| **16** | **item 16** | **Interned values** | | | |
+| 16.1 | name | `Name` as `triomphe::ThinArc<Header, u8>` (new dependency), one allocation, with `last_segment` in the header | 15.10 | perf | OPEN |
+| 16.2 | tables | Strong tables: removal at a count of two, re-checked under the shard lock; a sweep at twice the last size; drop after unlock. Type nodes become `triomphe::Arc` | 16.1 | perf | OPEN |
+| 16.3 | `PhpString` | Interned as a `ThinArc`, shared by literal types and shape keys; `Interner::str` and `WeakTable` go | 16.2 | perf | OPEN |
+| 16.4 | holders | Every holder holds the handle: `FRONT`, memos' kept arguments, the lexer's tables | 16.2 | perf | OPEN |
+| 16.5 | memos | The type memos bounded by two segments; no generation | 7.5 | perf | OPEN |
+| 16.6 | Oracle | The `loom` model of drop, lookup and sweep (`loom`, test-only); the leak test after the edit replay | 16.2 | infra | OPEN |
+| **17** | **item 17** | **Warm runs** | | | |
+| 17.1 | step 1 | The stat index: per-platform fields; the racy rule applied where the file was read; `stat` trusted only on filesystems identified as local and fine (`rustix` direct, `sysinfo` new) | 1.4 | perf | OPEN |
+| 17.2 | step 1 | Every content hash is BLAKE3 with full digests (`blake3`, new), the build's hash and `SOURCES_HASH` included; `twox-hash` removed | 6.8 | perf | OPEN |
+| 17.3 | step 1 | The server writes neither the index nor the base from overlays | 17.1 | perf | OPEN |
+| 17.4 | step 2 | The per-file key adds the configured versions and `short_open_tag` | 10.8, 12.13 | perf | OPEN |
+| 17.5 | step 3 | The context base: its contents and file list; keyed by a destructured hash of the tracked settings; stored in item 6's container; the cold and warm paths; the server loads from it | 6.7, 17.2 | perf | OPEN |
+| 17.6 | Oracle | Tests written: the `stat` cases, the edit replay across two runs, the server loading from the base | 17.5 | infra | OPEN |
+| **18** | **item 18** | **The check phase's remainder** | | | |
+| 18.1 | step 1 | §12.10: observers and one inference per node; the PHPStan-API walker as a family; literal types once per node; `process_expr` in PHP's order of evaluation | 13.4 | sem | OPEN |
+| 18.2 | step 1 | The member-usage family counts a member used when any access may reach it | 18.1 | sem | OPEN |
+| 18.3 | step 2 | C1 step 5's tail: effects carried in the statement result; `has_yield` and `collect_throws` go | 18.1 | sem | OPEN |
+| 18.4 | step 3 | Variables as slots; the computed-name forms marked exactly; per-body key tables | 9.3 | perf | OPEN |
+| 18.5 | step 3 | Scopes as radix arrays, with `IntMap`-style merges and diffs; locals listed by name | 18.4, 16.2 | perf | OPEN |
+| 18.6 | step 4 | C2 step 2: conditional subjects by parameter position | — | perf | OPEN |
+| 18.7 | step 5 | §12.11's rest: the `MemberIndex` and the normalized-operand fast path | — | sem | OPEN |
+| 18.8 | step 6 | C8 step 2's rest: interning from borrowed parts; copy on first change; memos probed borrowed; shared values borrowed; `Display` into the formatter; `concat` through a byte scratch | 16.3 | perf | OPEN |
+| 18.9 | step 7 | One argument binding per call | 18.1 | perf | OPEN |
+| 18.10 | step 8 | Per-function state reused | — | perf | OPEN |
+| 18.11 | step 9 | Generic signatures substituted per type | 8.2 | perf | OPEN |
+| 18.12 | step 10, F1 | Messages formatted only when reported; built-in identifiers as `&'static str` | — | perf | OPEN |
+| 18.13 | step 10, F2 | Constant types built once; two-operand unions with no `Vec` | — | perf | OPEN |
+| 18.14 | step 10, F6a | Borrow, iterate or use scratch | — | perf | OPEN |
+| 18.15 | step 10, F6c | `Locals` behind one `Rc`; throw, catch and loop frames as scratch | — | perf | OPEN |
+| 18.16 | step 10, F6d-F6e | Narrowing facts in the radix arrays; the separate walks' vectors go with them | 18.5, 18.1 | perf | OPEN |
+| 18.17 | step 10, F6f, F4 | Per-text analyses once per distinct text (item 14's memo); SQL parsed once per text; one reused regex `Captures` | 14.1 | perf | OPEN |
+| 18.18 | step 10 | One checker per worker | — | perf | OPEN |
+| **19** | **item 19** | **Each tree until its last reader** | | | |
+| 19.1 | passes | The project-wide passes as families: architecture, banned constructs, class shapes (with parent-call facts), Composer hygiene, mock hygiene, unmatched ignores, the use-site index | 13.4, 18.1 | perf | OPEN |
+| 19.2 | retention | `keeps_tree(role, open, mode, checked)`; a batch frees each tree when its check ends | 3.1 | perf | OPEN |
+| 19.3 | schedule | Each worker takes the largest file left (`scope_fifo` or an atomic cursor) | — | perf | OPEN |
+| 19.4 | judgment | The private-property judgment keeps writes from bound closures and reflection; outside files run only the property-write family | 18.1 | sem | OPEN |
+| 19.5 | server | The tree cache: `quick_cache` weighted by bytes, keyed by (`FileId`, content hash); a hash mismatch is an edit | 14.1, 17.2 | perf | OPEN |
+| 19.6 | readers | `FileState::ast` goes; every reader asks `ast_of` | 19.2 | perf | OPEN |
+| **V** | **§11** | **Validation, once** | | | |
+| V.1 | How it runs, 1 | The `gate`, `oracle` and frame-pointer `dhat` builds | 19.6 | val | OPEN |
+| V.2 | Tests run once | `cargo test --workspace` and `--test fixtures`; the `loom` tests; the leak test; item 6's tests; item 17's `stat` cases; a Latin-1 document in the server | V.1 | val | OPEN |
+| V.3 | How it runs, 3 | The fixtures against `php` 8.5, and against `php:7.4-cli` through `docker` for the 7.x readings | V.1 | val | OPEN |
+| V.4 | Platforms | A CI matrix job on `macos-26` and `windows-2025-vs2026`: item 6's file-replacement test and item 17's `stat` cases | V.1 | val | OPEN |
+| V.5 | The dumps | Item 0's dumps again, with `gate` and with `oracle` (per-file cache off, replay and merge-over-diff assertions); type nodes lowered and unions built again from item 0's records; every difference a change §11 lists | V.2 | val | OPEN |
+| V.6 | O2 | O2 against the baseline, plus a configuration with architecture rules and banned types; diffs after `LC_ALL=C sort`; emission order by `xtask compare` | V.5 | val | OPEN |
+| V.7 | Equalities | One thread against the default; caches cold, warm and across configurations; the base absent, written and read, and edits across two runs; the relation memo on and off; the server against the CLI; edit replays at the configured and zero tree budgets; a disk change with no event | V.6 | val | OPEN |
+| V.8 | O3 | callgrind (`--separate-threads=yes`); `perf` of a warm run; `hyperfine` warm and cold against the starting commit; dhat by holder, the check's live and resident maxima, a second dhat run from the check's start; the server's heap | V.7 | val | OPEN |
+| V.9 | results | The measured figures into the plan's §12 and into `WORK_STACK.md` | V.8 | val | OPEN |

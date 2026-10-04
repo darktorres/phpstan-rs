@@ -15,8 +15,9 @@ that date.
 
 ## Where to resume
 
-1. **Level 8**: build `PROFILE_DRILL_PIWIGO_20G.md` once told to, item 0
-   first. Its review is finished.
+1. **Level 8**: build `PROFILE_DRILL_PIWIGO_20G.md` once told to, row by
+   row from `PROFILE_DRILL_PIWIGO_20G_LEDGER.md`, item 0 first. Its review
+   is finished.
 2. Then **level 6**: recreate master's 87 commits on `master2`, one row
    at a time (`MASTER_REIMPLEMENTATION_LEDGER.md`: 86 open, 1 skipped, none
    done).
@@ -236,7 +237,9 @@ when it runs, and the plan adds the checks found along the way.
 - **The projection,** §12, estimated: ≈290 MB at exit (from 657), a
   ≈350-385 MB peak (from 866) plus the checks in flight, ≈1.85 M allocations
   (from 19.4 M), and roughly 8 G of the 20.57 G instructions.
-- **Building it** waits for an explicit go-ahead. It starts at item 0: the
+- **Building it** waits for an explicit go-ahead. Its tasks, in order, with
+  their state and commits, are in `PROFILE_DRILL_PIWIGO_20G_LEDGER.md` (173
+  rows: items 0-19, then §11's validation). It starts at item 0: the
   starting state read, the `oracle` profile's run, and the baseline dumps
   from item 0's own commit.
 
