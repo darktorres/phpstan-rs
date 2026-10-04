@@ -1,6 +1,6 @@
 # 20 G plan ledger
 
-Tracks building the plan of `PROFILE_DRILL_PIWIGO_20G.md`: items 0-20 (§10), each closed by its validation (§11), then O3. One row per task. The design of each row is in the plan, at the step or bullet the row names; this file holds only the order and the state. The plan was reviewed in full at `d6e43bf7` (§13's review table).
+Tracks building the plan of `PROFILE_DRILL_PIWIGO_20G.md`: items 0-21 (§10), each closed by its validation (§11), then O3. One row per task. The design of each row is in the plan, at the step or bullet the row names; this file holds only the order and the state. The plan was reviewed in full at `d6e43bf7` (§13's review table).
 
 Building started on 2026-10-03 (`WORK_STACK.md`, level 8).
 
@@ -17,7 +17,7 @@ Building started on 2026-10-03 (`WORK_STACK.md`, level 8).
 
 - **In order.** Item 0 comes first, and the rows run top to bottom; an item starts after the previous item's validation row; within an item they are in an order that builds, which is not always the plan's step order (the *plan* column gives the step). The *needs* column names a row in another item that must be done first. Within item 0, the dumps (0.4-0.10) come before the oracle run (0.2), whose edit replay records them, and the deletions (0.3) after it. A row that needs a later item's row sits right after it and is validated with that item: 3.4 after 9.2, and 6.2-6.4 after 9.5, all with 9.V, whose comparison then also admits item 6's step-2 changes.
 - **Per row:** `cargo fmt`, then `cargo check` and clippy, then a commit with an explicit pathspec, since another session may share the checkout. A row may take several commits; its status takes the last one's hash.
-- **Validation at the end of each item.** Each item's last row, *N*.V, runs §11: the builds, the tests, the fixtures, item 0's dumps with the `gate` and `oracle` builds, O2 and the equalities, compared with the previous item's, plus what the item adds. Nothing of it runs between an item's rows. Item 0's own rows also read the starting state and run the debug oracles; 0.11 is its validation and the baseline. O3 runs once, in the V rows, after 20.V.
+- **Validation at the end of each item.** Each item's last row, *N*.V, runs §11: the builds, the tests, the fixtures, item 0's dumps with the `gate` and `oracle` builds, O2 and the equalities, compared with the previous item's, plus what the item adds. Nothing of it runs between an item's rows. Item 0's own rows also read the starting state and run the debug oracles; 0.11 is its validation and the baseline. O3 runs once, in the V rows, after 21.V.
 - **A design that turns out wrong** is fixed in the plan first, in its own commit, and then built.
 - **A new dependency** is added in the row that first uses it (§13's table). `twox-hash` leaves in row 17.2.
 - **Heavy jobs** (builds of other profiles, the corpus, profilers) run one at a time, under `nice -n 19`, with no `timeout`.
@@ -240,8 +240,20 @@ Building started on 2026-10-03 (`WORK_STACK.md`, level 8).
 | 20.1 | Design | Magic and interface methods PHP calls (`__get`, `__set`, `__isset`, `__unset`, `__toString`, `__clone`, `__invoke`, `ArrayAccess`, iteration, the serialization hooks) as calls, by the class hierarchy over the value's type | 0.1d | sem | OPEN |
 | 20.2 | Design | Destructors at every site where an object may lose its last reference | 20.1 | sem | OPEN |
 | 20.3 | Design | Autoloaders, the error handler, output-buffer callbacks, tick functions, and the code builtins keep to run later (session handlers, SQLite and XSLT functions, curl and XML callbacks, fetch and node classes), by the program's registrations | 20.1 | sem | OPEN |
-| 20.4 | Oracle | Fixtures for each kind of site, checked against `php` 8.5 | 20.3 | infra | OPEN |
-| 20.V | §11 | Validation against item 19's dumps | 20.4 | val | OPEN |
+| 20.4 | Design | Generators: a generator function's call writes nothing of its body; each resumption (`current`, `key`, `next`, `send`, `throw`, `valid`, `rewind`, a `foreach` step) writes what the body may write between yields, over the generator functions the receiver may come from | 20.1 | sem | OPEN |
+| 20.5 | Oracle | Fixtures for each kind of site, checked against `php` 8.5 | 20.4 | infra | OPEN |
+| 20.V | §11 | Validation against item 19's dumps | 20.5 | val | OPEN |
+| **21** | **item 21** | **What PHP gives where a type assumed: int overflow, missing keys, iterators past the end** | | | |
+| 21.1 | ints, steps 1-2 | An open end of an int range is its limit, one form per set; every int operation exact in `i128`, with the floats PHP gives past a limit, as literals where few (`+`, `-`, `*`, `**`, unary `-`, `++`, `--`, `abs`, `array_sum`, `array_product`); shifts stay ints | — | sem | OPEN |
+| 21.2 | ints, steps 3-4 | Int comparisons narrow in integers; `count()` of an array and a list's keys within `HT_MAX_SIZE` by the configured versions | 21.1 | sem | OPEN |
+| 21.3 | ints, step 5 | `intdiv(PHP_INT_MIN, -1)`'s `ArithmeticError`; appending after `PHP_INT_MAX` (`Error` from 8.0, a warning and no write before); a float key outside the int range, with its deprecation (8.1) and warning (8.5) | 21.1 | sem | OPEN |
+| 21.4 | keys, step 6 | A read at a key not proven present gives `null` too and is reported with PHP's words by version, at reads, compound assignments, `++`/`--`, destructuring and nested reads; a nested write there makes the element from nothing; string offsets the same; `report_possibly_nonexistent_general_array_offset` goes | — | sem | OPEN |
+| 21.5 | keys, step 7 | Presence proven: the fact that a value is a key of a container place, its sources (`isset`, `array_key_exists`, writes, `foreach` keys, `array_keys`, `array_key_first`/`last`, `key`, `array_search`, `array_rand`, list and string bounds) and what drops it | 21.4 | sem | OPEN |
+| 21.6 | iterators, step 8 | The recorder: every builtin iterator, and the iterators `getIterator` returns, empty, at the end and before the first move, on every version image; its table as registry data | — | infra | OPEN |
+| 21.7 | iterators, step 9 | Off a proven position, the stub's type joined with the recorded outcome and the recorded throw point; interfaces over every loaded implementation | 21.6 | sem | OPEN |
+| 21.8 | iterators, step 10 | The position as a storage of the object, written by the moving methods and a wrapped iterator's moves, carried by item 0's effects; `valid()` true and an `ArrayIterator` over a non-empty array prove it | 21.7 | sem | OPEN |
+| 21.9 | Oracle | Fixtures for each part on every version image; the seven opted-out fixtures take the calls again, expectations made PHP's and names corrected | 21.8 | infra | OPEN |
+| 21.V | §11 | Validation against item 20's dumps; the runtime oracle with generated calls on every version image; the iterator table recorded again and compared | 21.9 | val | OPEN |
 | **V** | **§11** | **O3, once** | | | |
-| V.1 | O3 | The frame-pointer `dhat` build; callgrind (`--separate-threads=yes`); `perf` of a warm run; `hyperfine` warm and cold against the starting commit; dhat by holder, the check's live and resident maxima, a second dhat run from the check's start; the server's heap | 20.V | val | OPEN |
+| V.1 | O3 | The frame-pointer `dhat` build; callgrind (`--separate-threads=yes`); `perf` of a warm run; `hyperfine` warm and cold against the starting commit; dhat by holder, the check's live and resident maxima, a second dhat run from the check's start; the server's heap | 21.V | val | OPEN |
 | V.2 | results | The measured figures into the plan's §12 and into `WORK_STACK.md` | V.1 | val | OPEN |
