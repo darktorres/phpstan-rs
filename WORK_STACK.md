@@ -16,8 +16,8 @@ that date.
 ## Where to resume
 
 1. Finish **level 8**: the item-by-item review of
-   `PROFILE_DRILL_PIWIGO_20G.md` (§11-§13 left), then build it once told
-   to, item 0 first.
+   `PROFILE_DRILL_PIWIGO_20G.md` (§13 left), then build it once told to,
+   item 0 first.
 2. Then **level 6**: recreate master's 87 commits on `master2`, one row
    at a time (`MASTER_REIMPLEMENTATION_LEDGER.md`: 86 open, 1 skipped, none
    done).
@@ -227,17 +227,17 @@ when it runs, and the plan adds the checks found along the way.
   `d520c9fd`. A separate reviewer goes through it adversarially, one item at
   a time, in order; each finding is checked against the code, `php` 8.5 and
   the heap profile before it goes in, and §13's review table has a row per
-  item. Items 0-19 are reviewed and committed one by one; §11 is in
-  review, then §12 and §13.
+  item. Items 0-19, §11 and §12 are reviewed and committed one by one;
+  §13 is in review.
 - **Passes outside the item order,** also in §13: a dependency pass (six
   crates taken: `la-arena`, `wide`, `triomphe`, `quick_cache`, `siphasher`
   and `blake3`; ten considered and not taken; item 15's review added
   `encoding_rs`),
   and item 6, step 6: the caches' key covers every input the build embeds,
   where today it misses `vendor/phpstan-src/stubs`.
-- **The projection,** §12: ≈290 MB at exit (from 657), a ≈375 MB peak (from
-  866) plus the checks in flight, ≈1.35 M allocations (from 19.4 M); §12's
-  own review may still move it.
+- **The projection,** §12, estimated: ≈290 MB at exit (from 657), a
+  ≈350-385 MB peak (from 866) plus the checks in flight, ≈1.85 M allocations
+  (from 19.4 M), and roughly 8 G of the 20.57 G instructions.
 - **Building it** waits for an explicit go-ahead. It starts at item 0: the
   starting state read, the `oracle` profile's run, and the baseline dumps
   from item 0's own commit.

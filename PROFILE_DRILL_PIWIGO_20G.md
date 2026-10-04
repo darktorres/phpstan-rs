@@ -881,6 +881,8 @@ Exact against item 1's results. Against the baseline, a link cycle's tree is lis
 
 **Oracle.** O2, item 0's server session and its edit replay, all run with the `oracle` build too, whose assertions fire on any read of a dropped tree. Exact.
 
+**Saving.** In instructions, the cross-thread frees' premium: 343.4 M of frees at 42.5 Ir a call, against 23 on the allocating thread, ≈0.16 G. The 575.5 M of drops leave the serial loop, which is wall time, not instructions. Most of the drops themselves go with item 9, whose row counts them.
+
 **Memory (M1).**
 - **The end of the parse falls from 866 MB to ≈446 MB.**
 - **But the run's peak moves to the end of the check,** where at least the 657 MB live at exit is still live. So item 3 alone lowers the peak by at most ≈209 MB. The items that shrink what lives to the end (4, 6, 14, 16 and 19) lower it further; §12 has the end state.
@@ -1064,6 +1066,8 @@ Exact, except the member-order effects listed in §11.
 
 Exact.
 
+**Saving.** ≈0.06 G of instructions: the two path sorts (20.7 M each) where they go, and `closure_scope`'s text keys (16.5 M). The insert's 145.1 M (`insert_built_decl` 52.5 M, `register_references` 92.6 M) leaves the serial path, which is wall time. What the posting lists save on inserts is not separated in this profile.
+
 **Memory.**
 - **≈5 MB:** most of the 3.0 MB of inner sets (35,769 of the 45,696 are the smallest table, 36 B), and about a third of the 6.4 MB of reference sets, whose slack goes.
 - **Up to 45,696 allocations:** one for each key that only one file references.
@@ -1199,7 +1203,7 @@ Exact for 1, 3, 5 and 6; semantic for 2, listed in §11.
   - item 0's server session and edit replay, which cross generations;
   - each at one thread and at the default count.
 
-Exact.
+Exact, except constants on a cycle, listed in §11.
 
 **Memory.** Each thread's memo is bounded as today's (2^17 entries; the structural tables hold 9.4 MB at exit, M7), and keeps the more recent half when full. `KEEP_DECISIONS`' unbounded table goes (1.3 MB at exit).
 
@@ -1488,6 +1492,8 @@ Context files need line starts, for duplicate-declaration messages (`duplicate_c
 
 **Oracle.** O1, O2 (every position, fix span, ignore result, anonymous-class name), the line-index tests over multi-byte and astral lines and over `\r`, `\n` and `\r\n` breaks, the LSP tests. Exact, except the semantic change in §11: lines end at a lone `\r`, and so does a line comment.
 
+**Saving.** ≈0.2 G: the line index's 270.4 M, less the block pass (≈35 M, step 2) and the analysed files' column tables, which stay.
+
 **Allocations.** `LineIndex::new` makes 46,422 allocations (20.7 MB): the line starts' capacity guess, its growths and its shrink (`span.rs:128`), then `surplus` (`:151`) and `astral` (`:147`). `LineStarts` makes one, and context files build no column tables. The lexer also wraps each index in an `Arc` (`lexer.rs:368`, 16,419); the file's state holds its `Lines` itself, and the checker borrows them. Ignore marks keep their text as a `String` today (`lexer.rs:535`), and ignore comments keep their identifiers that way too (`ignore_comments.rs:268`, `:334`). Both become offsets and slices, read through the analysed file's source.
 
 ### 12. Lexer details (R12)
@@ -1597,7 +1603,9 @@ P12 step 3 was set aside because "it cannot hold references into a tree still be
    - `recorded_references` reads the sites in their recorded order. Today it collects and sorts them, and the frames, per file (`deps.rs:55`: 33,273). What else runs under `file_references` is item 14's `DocNames` memo.
    - A declaration's name is its `Name`. Today `Declaration::name` formats it (`declarations.rs:45`: 30,159).
 
-**Oracle.** O1 (declaration lists, guards, contexts, summaries, flows, references), `registry-dump`, O2, and a fixture of the binding cases above, checked against `php`. Exact, except the semantic changes listed in §11: guards by PHP's binding, and the order of evaluation in `InitFlow`.
+**Oracle.** O1 (declaration lists, guards, contexts, summaries, flows, references), `registry-dump`, O2, and a fixture of the binding cases above, checked against `php`. Exact, except the semantic changes listed in §11: guards by PHP's binding, constants a file defines under names it cannot spell, and the order of evaluation in `InitFlow`.
+
+**Saving.** ≈0.45 G, estimated: the declarations walk (≈140 M around its builders) and its eight callers' walks, and the traversal of two of the three body walks (`InitFlow::of` and `GlobalFacts::of`, 218.5 M each, of which their builders' own work stays). This profile does not separate a walk's traversal from its builders'.
 
 **Allocations: ≈1.31 M (M10).** This includes the declarations walk's lists, which step 1's list replaces: the walk's `if_chain` 52,762, `Declaration::name` 30,159, the duplicate sites 62,346 (class sites' `record` 36,898 and `merge` 12,326, function sites' 11,198 and 1,924) and `built_declaration` 28,516. The old collector allocates nothing in this run: no stub base is built, and no tree is changed after its parse.
 
@@ -1814,6 +1822,8 @@ The purity and property-write keys went by item 4, as ids.
 Exact.
 
 **What stays.** One allocation per distinct live value: that is what interning with freeing costs. rust-analyzer's `intern::Interned` pays the same. A per-session arena that never frees, as rustc's interners use, would grow without end in a server, so the plan keeps freeing.
+
+**Saving.** ≈0.1 G, estimated: the ≈0.5 M allocations it removes, with their frees, and the weak upgrades on every lookup. This profile does not separate the interner's probing from its callers'.
 
 **Memory.** ≈15 MB at exit.
 
@@ -2154,25 +2164,32 @@ Every difference from the baseline must be one of the semantic changes the items
 | 0 | baseline dumps, debug oracles retired | debug builds and tests | — | — | — |
 | 1 | one session: load, configuration, analysis, identity | the server and the tests get every load item | load off the server's message loop | server: the context trees (≈420 MB) and the unopened files' sources | semantic (§11) |
 | 2 | parallel walk, path data | ≈0.3 G | ≈0.15 s serial start | the second copy of each path; 0.56 M allocations | exact, except link cycles |
-| 3 | context trees dropped on the worker | ≈0.3 G | 0.58 G off the serial path | peak −≤209 MB alone (the end of the parse −≈420 MB); context reads, 66 MB | exact |
+| 3 | context trees dropped on the worker | ≈0.16 G | 0.58 G off the serial path | peak −≤209 MB alone (the end of the parse −≈420 MB); context reads, 66 MB | exact |
 | 4 | registry by ids, declarations never changed after build | ≈0.9 G | ≈0.4 s serial | ≈90 MB at exit; ≈1.5 M allocations | exact, except member order |
-| 5 | parallel merge, stable ids, posting lists | ≈0.25 G | yes | ≈5 MB; 0.11 M allocations | exact |
+| 5 | parallel merge, stable ids, posting lists | ≈0.06 G | 0.15 G off the serial path | ≈5 MB; 0.11 M allocations | exact |
 | 6 | stub scope, records read on demand with per-record CRCs | ≈0.35 G, then more of `warm` | partly | ≈40 MB of heap; 0.45 M allocations | exact (1, 3, 5), semantic (2, with the stubs' versions) |
-| 7 | one relation memo, by content generation | up to ≈0.3 G | — | bounded as today; `KEEP_DECISIONS`' 1.3 MB goes | exact |
+| 7 | one relation memo, by content generation | the registry-backed part of ≈0.47 G, not separated in this profile | — | bounded as today; `KEEP_DECISIONS`' 1.3 MB goes | semantic for constants on a cycle (§11) |
 | 8 | case references in the checker, declarations built lean | ≈0.1 G | — | both caches' entries; 0.52 M allocations | exact, except one `@property` case |
-| 9 | typed vectors, ids, `peeled` | ≈0.8-1.2 G | — | ≥53 MB of the analysed trees; 3.92 M allocations | exact, but semantic for non-UTF-8 names and the stub rules |
-| 10 | flat token arrays | ≈1.7 G | — | 0.23 M allocations | exact, but semantic for the halt offset, the first error, declarations' docs and the versions |
+| 9 | typed vectors, ids, `peeled` | ≈0.8-1.2 G | — | ≥53 MB of the analysed trees; 3.92 M allocations | exact, but semantic for the stub rules |
+| 10 | flat token arrays | ≈1.7 G, less the configured versions' check where they read a construct differently | — | 0.23 M allocations | exact, but semantic for the halt offset, the first error, declarations' docs and the versions |
 | 11 | line starts, columns, offsets, ignore marks | ≈0.2 G | — | 0.07 M allocations | exact, but semantic for a lone `\r` |
 | 12 | lexer details, qualified names and casts as one token | ≈0.35 G | — | 0.45 M allocations | exact, but semantic for PHP's tokens (§11) |
-| 13 | declaration list, one walk, builders in scratch | ≈0.45 G | — | bodies as one slice per file; 1.31 M allocations | exact, but semantic for guards and `InitFlow`'s order |
+| 13 | declaration list, one walk, builders in scratch | ≈0.45 G | — | bodies as one slice per file; 1.31 M allocations | exact, but semantic for guards, constants defined under names a file cannot spell, and `InitFlow`'s order |
 | 14 | PHPDoc finished, one parse, two memos | ≈0.5 G | — | ≈43 MB; 2.59 M allocations | exact, but semantic for the readings §11 lists |
 | 15 | names as names, as bytes | ≈0.6 G | partly | 2.76 M allocations | exact, except the changes §11 lists |
 | 16 | interned values in one allocation | ≈0.1 G | — | ≈15 MB; 0.78 M allocations | exact |
-| 17 | warm runs | decoding and reads ≈0.85 core-s, most of the finishing window | yes | only decoded records in the heap | exact |
-| 18 | check phase remainder, rule temporaries | ≈1.6-2.0 G | — | 3.61 M allocations | semantic (§12.10, the order of evaluation, member usage) |
+| 17 | warm runs | warm: decoding and reads ≈0.85 core-s and most of the finishing window; a cold run pays one incremental finishing over the analysed files' closure, and every run one `stat` per context file | yes | only decoded records in the heap | exact |
+| 18 | check phase remainder, rule temporaries | ≈1.6-2.0 G | — | 3.61 M allocations | semantic (§12.10's families, the statement result, the order of evaluation, member usage, the union pass) |
 | 19 | each tree until its last reader | — | — | batch: the analysed trees freed during the check; server: open documents and a cache weighted by bytes | exact, except the private-property judgment |
 
-**Instructions.** The rows overlap little: 9 and 10 share the parser's allocation, and 4 and 15 the purity keys. Together they come to ≈8 G of this run's 20.57 G. Most of the serial time goes with them: the finishing window's 0.41 s, the insert's 0.58 G and the start's 0.15 s.
+**Instructions.** The rows sum to ≈8.2-9.3 G of this run's 20.57 G (items 3 and 5 at their instruction savings, item 7 at none to ≈0.3 G, items 9 and 18 at the ends of their ranges). Some costs are counted by two rows, and this profile does not separate the shares:
+- 3 and 9, the tree drops;
+- 9 and 10, the parser's allocation;
+- 12 and 15, the qualified names (item 12, step 8 is item 15's round trip);
+- 14 and 15, the doc identifiers;
+- 16 and 18, interning (`intern::insert`, 521.2 M, which both make cheaper).
+
+So the net is below the sum by an amount §11's callgrind measures; roughly 8 G. The serial time that goes with them: the finishing window's 0.41 s, the insert loop's 0.58 G of drops and its 145 M of inserts, and the start's 0.15 s.
 
 **Memory.**
 - **At exit,** the 657 MB the project holds loses:
@@ -2184,18 +2201,18 @@ Every difference from the baseline must be one of the semantic changes the items
   - the per-file tables' ≈7 MB (items 2 and 5).
   
   That leaves ≈290 MB.
-- **The peak** moves from the end of the parse (866 MB) to the start of the check. There, those ≈290 MB sit beside the analysed trees, about 85 MB after item 9: **≈375 MB**, plus the checks in flight, the largest files' first, which item 0's memory oracle measures (item 19).
+- **The peak** moves from the end of the parse (866 MB), estimated at the start of the check: the ≈265 MB live after the finishing passes (the ≈290 MB at exit less the checker's 25.7 MB of results, §8), beside the analysed trees, at most 120 MB after item 9 (its ≥53 MB of unused capacity gone from 173 MB), ≈85 MB if its padding estimate holds. That is **≈350-385 MB**, plus the checks in flight, the largest files' first (item 19). The finishing window, which holds the same products plus item 4's pass tables while they are computed, is the other candidate. §11's heap oracle measures both: the global maximum and the check's own.
 - **Allocations.** M10 gives every one of the run's 19.4 M allocations to the item that removes it. What each row keeps, estimated from what its design still allocates:
 
   | item | what stays | today | after |
   |---|---|---|---|
-  | 18, the check | shared persistent-scope paths copied on write; per-text analyses once per text; reported messages | 3.58 M | ≈0.5 M |
-  | 4, the registry | a few vectors per file; each stub record a run decodes | 2.02 M | ≈0.1 M |
-  | 14, PHPDoc | a handful per distinct docblock and tag line | 2.66 M | ≈0.1 M |
+  | 18, the check | shared persistent-scope paths copied on write; per-text analyses once per text; reported messages | 3.61 M | ≈0.5 M |
+  | 4, the registry | the declarations being built; the owner tables' entries (item 4: about 1.5 M of its 2.02 M goes) | 2.02 M | ≈0.5 M |
+  | 14, PHPDoc | a handful per distinct docblock and tag line | 2.59 M | ≈0.1 M |
   | 13, a file's products | a few vectors per file | 1.31 M | ≈0.05 M |
-  | 16, 10 and 6 | one per new type node and new name; the stub records a run reads | 1.44 M | ≈0.4 M |
-  | 9, 15, 2, 8, 12, 5, 3, 11 and the rest | kept trees' vectors, kept sources, per-file vectors | 8.43 M | ≈0.2 M |
-  | **total** | | **19.4 M** | **≈1.35 M** |
+  | 16, 10 and 6 | one per new type node and new name; the stub records a run reads | 1.46 M | ≈0.4 M |
+  | 9, 15, 2, 8, 12, 5, 3, 11 and the rest | kept trees' arenas, per-file vectors, one binding map per generic resolution (item 15's template bindings, ≈0.3 M of maps built today) | 8.46 M | ≈0.3 M |
+  | **total** | | **19.44 M** | **≈1.85 M** |
   
   **What stays, and why:**
   - **Inherent to a design the plan chose:**
@@ -2209,9 +2226,12 @@ Every difference from the baseline must be one of the semantic changes the items
     - argument and configuration parsing, once per process.
 
   The bytes allocated fall from 2.67 GB to roughly 0.5-0.7 GB. Most of what remains is the kept trees' vectors, the declarations, the docblocks and the check's transient types. Storing declarations, summaries and docblock nodes in per-file and per-docblock vectors also removes each object's allocation header and size-class rounding, which dhat does not count.
-- **The language server** today holds the 657 MB, plus ≈420 MB of context trees and the sources: about 1.1 GB for this workspace. After items 1, 3 and 19 it holds about the batch run's end state: the trees of its open documents and its LRU instead of every analysed file's, with memos bounded by weight (item 14).
-- **These are estimates, and probably optimistic.** The review has so far found items 3, 4 and 5 overstated, and items 6-19 are not yet reviewed. dhat counts requested bytes; the resident size adds mimalloc's overhead. The final heap profile (§11) is the measure.
-- The final heap profile (§11) measures all of this.
+- **The language server** today holds the 657 MB, plus ≈420 MB of context trees and the sources: about 1.1 GB for this workspace. After items 1, 3 and 19 it holds about the batch run's end state: the trees of its open documents and of its cache weighted by bytes instead of every analysed file's, with memos bounded by weight (item 14).
+- **What is measured and what is estimated.**
+  - **Measured** in this profile: the instruction totals and their parts, §8's holders at the peak and at exit, and M10's rows.
+  - **Estimated** from the items' designs: every saving, every memory figure after an item, every residual, the peak after, and the bytes allocated after. The item-by-item review lowered several (items 3, 4, 5, 6, 14) and raised the allocations left.
+  - **Not counted,** so the exit figure is conservative there: the memory items 8, 11 and 13 free (case-reference lists out of declarations; no column tables for context files; one body slice per file in place of two `Arc`s per body, 35.8 MB today).
+  - dhat counts requested bytes; the resident size adds mimalloc's overhead. §11's dhat runs and callgrind are the measure.
 
 ## 13. How the plan was audited
 
@@ -2284,7 +2304,7 @@ The rewrite made two more changes:
   - summaries in per-file vectors (13);
   - docblock nodes in one vector per docblock (14).
   
-  It also added radix nodes written in place when unshared (18), and a profile with untrimmed backtraces for the unplaced 11 K (0). What still stays is listed in §12 with its reason: ≈1.35 M allocations.
+  It also added radix nodes written in place when unshared (18), and a profile with untrimmed backtraces for the unplaced 11 K (0). What still stays is listed in §12 with its reason: ≈1.35 M allocations as the pass estimated it, ≈1.85 M after the item-by-item review.
 
 **The dependency pass.** New dependencies were allowed after item 9's review, so every item was read again for hand-written code that a sound crate would replace. Each crate's API was checked in its source or its documentation. Our own code still has no `unsafe`; a crate may use it behind a safe API.
 
@@ -2337,6 +2357,7 @@ The rewrite made two more changes:
 | 18 | The traversal would keep typing a value before its target's operands, against PHP's order. `call_user_func` with a literal `extract`, `compact` or `get_defined_vars` writes the caller's scope, and 7.x adds `parse_str`/`mb_parse_str` with one argument and string `assert`. Slots and file-wide keys would collide in one radix array, sparse over large ids. The throw states' cost is inline `Locals` structs, which persistent maps do not remove. The member-usage family would inherit PHPStan's skip of uncertain callables. The 25 G oracles were dropped. External rules name their own identifiers. `concat` builds bytes. Step 7 and 9's counts. | PHP's order in `process_expr`. The computed-name forms listed exactly, tested with `php`. Per-body key tables, dense; `IntMap`-style merges; locals listed by name. `Locals` behind one `Rc`, frames as scratch. Uses counted when any access may reach a member. The oracles restored. `Identifier` kept as `Cow`. `concat` through a byte scratch. Counts by M10, ≈38 K moved to item 8. |
 | 19 | Class shapes read method bodies, not just the declaration list. Private properties are written from outside their class, through bound closures and reflection, which the judgment never sees, and its outside files get a full check. A changed file on disk had no defined path, and the tree cache had no content key. The pool does not take files largest first, and the peak omits the checks in flight, which were never measured. Banned constructs read the registry, mock hygiene is per file, and Composer hygiene reads files in order. Retention gained inputs outside item 3's function. The oracle could not see a reader of a kept tree. | A parent-call fact per method from item 13's walk. Writes from bound closures and reflection recorded, unnarrowed ones blocking the judgment, outside files run with only the property-write family. A hash mismatch is an edit; the cache keyed by content. A largest-first queue, and the check's own maximum measured. Each pass placed by what it reads. `keeps_tree(role, open, mode, checked)`. Oracles with a zero-budget replay, disk changes and the write forms. |
 | §11 | Four items' semantic changes were missing (the unknown `short_open_tag` report, constants a file defines by a computed name, the server's encodings and fixes as bytes, the rules reading the statement result). Three oracles compared with code the plan deletes. Most oracles the reviews added ran nowhere, and the all-on configuration sets no architecture rules or banned types. One dhat profile cannot isolate the check's maximum. The commands and order of the runs, the platforms, PHP 7.x and the snapshot layout were unstated. | The list completed and ordered. Item 0 records type nodes and unions, which §11 lowers and builds again. Tests run once, equalities extended, a configuration for item 19's passes. The check's live and resident maxima and a second dhat run from the check's start. An order of runs under `nice`, `CLAUDE.md`'s commands, a CI matrix for macOS and Windows, `php:7.4-cli` through `docker`, snapshots as `xtask` lays them out. |
+| §12 | The allocations' "today" column predated the row moves; item 4's residual contradicted its item, and item 15's binding maps stay, so ≈1.85 M remain, not ≈1.35 M. The instruction rows sum to more than the total stated, overlap in more pairs than named, and five items had no saving line (3 and 5 overstated). The peak counted the checker's results and an item 9 figure item 9 does not make. The kind column missed four §11 changes. The estimates' status was stale. | Rows and totals restated; saving lines with their basis for items 3, 5, 11, 13 and 16 (3 at ≈0.16 G, 5 at ≈0.06 G). The overlapping pairs named, the net left to callgrind. The peak as ≈350-385 MB plus the checks in flight, with the finishing window as the other candidate. Kind column matched to §11. What is measured, estimated and not counted. |
 
 # Appendix A. The allocation tail, every site
 
