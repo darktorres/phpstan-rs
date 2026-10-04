@@ -2,7 +2,7 @@
 
 Profile: `~/.cache/prs-profile/cl-20g/cg.out-01..10` (ten threads), copied from the scratchpad of the session that built `PROFILE_DRILL_PIWIGO_25G.md`'s designs. Binary `cl-20g/prs-dhat`: the `dhat` profile with frame pointers, code of `5fb858c9` (HEAD's code). Command `check-project --config phpstan-rs.toml --format json` in `/home/torres/piwigo17-frozen`, `PHPSTAN_RS_NO_FILE_CACHE=1`, warm stub cache. Total **20,570,586,331 Ir**. The same directory holds that session's sampling profile (`perf.data`, 3,322 samples) and build log. Percentages are of 20.57 G unless marked.
 
-Nothing was built or run for this report. Everything below is read from these two profiles, from the other session's dhat heap profile of the same code (`target/dhat-heap.json`, §8), from the 25.14 G profile (`cl-final`) and its line-tables twin (`lt`), and from the code at HEAD. Part I compares what was built with the 25 G report's designs, step by step (§2), and drills down the heap (§8). Part II is the plan: twenty-two items in the order they are built, each validated at its end; §13 outlines the audits that shaped it.
+Nothing was built or run for this report. Everything below is read from these two profiles, from the other session's dhat heap profile of the same code (`target/dhat-heap.json`, §8), from the 25.14 G profile (`cl-final`) and its line-tables twin (`lt`), and from the code at HEAD. Part I compares what was built with the 25 G report's designs, step by step (§2), and drills down the heap (§8). Part II is the plan: twenty items in the order they are built, each validated at its end; §13 outlines the audits that shaped it.
 
 # Part I. Drill-down
 
@@ -556,11 +556,11 @@ The rows sum to the run's 19,440,892. An item removes most of its row, not all o
 
 # Part II. The plan
 
-Twenty-two items, numbered in the order they are built. Each states what is there now, the design, what its validation compares, and what the profiles say it saves, in instructions and in memory. "Exact" means the output cannot change; "semantic" means it can, and §11 lists where. Finding codes (R1-R8, R12 for instructions, M1-M9 for memory) and section numbers refer to Part I.
+Twenty items, numbered in the order they are built. Each states what is there now, the design, what its validation compares, and what the profiles say it saves, in instructions and in memory. "Exact" means the output cannot change; "semantic" means it can, and §11 lists where. Finding codes (R1-R8, R12 for instructions, M1-M9 for memory) and section numbers refer to Part I.
 
 ## 9. How the plan is built and checked
 
-- **Validation at the end of each item (§11).** An item's rows are committed one by one, with `cargo fmt`, `cargo check` and clippy, and nothing else runs between them. When its last row lands, the item is validated: the tests, the fixtures, item 0's dumps and O2, compared with the previous item's, and the equalities. The next item starts after that. O3 measures once, after item 21.
+- **Validation at the end of each item (§11).** An item's rows are committed one by one, with `cargo fmt`, `cargo check` and clippy, and nothing else runs between them. When its last row lands, the item is validated: the tests, the fixtures, item 0's dumps and O2, compared with the previous item's, and the equalities. The next item starts after that. O3 measures once, after item 19.
 - **Oracles are dumps.** Item 0 takes dumps of everything the items change, from the starting commit, in a form that does not depend on how the code represents it. §11 takes the same dumps at the end of each item and compares them with the previous item's, so each difference belongs to the item that made it. So no item keeps an old implementation alive to compare against, and each replaces what it replaces outright.
 - **Measuring.**
   - `cl-20g` is the callgrind baseline: the `dhat` profile with frame pointers, as `CLAUDE.md` prescribes, with `PHPSTAN_RS_NO_FILE_CACHE=1`. The final callgrind run uses the same profile and setting.
@@ -735,7 +735,7 @@ Twenty-two items, numbered in the order they are built. Each states what is ther
    - static properties by storage; variables bound to a written global, every variable at a file's top level counting as global; the function's static variables when the call may enter the function again; variables captured by reference that the call may write; and variables bound by reference to any written storage.
 6. **F3:** a variable captured by reference is entered with the union of its type at the capture and of every type a write gives it while the reference is shared. The closure's body is checked until that union stops growing, as a loop body is, each pass starting from what it held where the body returned as well as where it ended. The enclosing scope is checked again when it holds a type in the variable, after any statement, that the closure was not entered with. At a file's top level, where checking again would check every declaration again, a capture the scope assigns after the closure is made is entered as anything. The closures checked with a bound `$this` keep their own by-reference state, as the others do.
 7. **F4:** `array_reduce` follows its stub's generics: `$carry` is the initial value's type joined with the callback's return type, until that stops growing. The result is the callback's return type for an array that is never empty, the initial value's for one that is always empty, and their union otherwise.
-8. **Code PHP runs without a call written** (magic methods on member access, destructors, autoloaders, error and exception handlers, output-buffer callbacks, tick functions) is item 20, with the same effects.
+8. **Code PHP runs without a call written** (magic methods on member access, destructors, autoloaders, error and exception handlers, output-buffer callbacks, tick functions) is built in item 0 too, after the builtin catalog, with the same effects ("Code PHP runs without a call written", below).
 
 **Oracle for the fix:** fixtures for each storage and binding kind (an inherited, a redeclared and a trait's static property; `static::`; a method's static variable on PHP 7.4 and 8.1), each call kind (a virtual call with two implementations, one writing; an interface call; a callback; a builtin calling an argument's method; a stream wrapper, registered and not), field sensitivity (a call writing another property keeps this one), an escaped and an unescaped new object, a capture written later by the outer function, and `array_reduce` over an empty, a non-empty and a possibly empty array, each checked against `php` (7.4 through `docker` for the static variables). In item 0's validation (0.11) the reports are compared with `5fb858c9`'s: the five false reports above go, and every other difference is read.
 
@@ -780,7 +780,7 @@ Two gaps turned up with it, each closed in item 0:
   Commits: `492ccf0e`, `50fa1e43`, `d8090e5e`. A fixture's `php_version` also takes a range now, and the runtime oracle runs a ranged fixture at both ends (`dfdfeeb4`).
 - **The runtime oracle ran 81 fixtures.** An assertion in a function nothing calls never ran. The oracle now calls each function and method of an asserting fixture with values of its parameters' declared types: literals the relation admits, and objects, enum cases, class-strings, closures, object shapes and arrays built from the type (`gate::samples`, `3d8085f3`). That makes 353 fixtures run. A fixture whose assertions rest on what PHP never checks (inline `@var`, docs-only declarations, assertion functions with empty bodies) opts out with its reason.
 
-The calls found three places where a type assumes what PHP does not give: an int operation with an open end taken not to overflow, a general array's key taken to be there, and an iterator's `current()` taken to give a value. They are item 21; until it is built, their seven fixtures opt out of the calls. The 114 asserting fixtures the calls still do not reach are queued in `WORK_STACK.md`.
+The calls found three places where a type assumes what PHP does not give: an int operation with an open end taken not to overflow, a general array's key taken to be there, and an iterator's `current()` taken to give a value. They are built in item 0 ("What PHP gives where a type assumed", below); until then, their seven fixtures opt out of the calls. The 114 asserting fixtures the calls still do not reach are queued in `WORK_STACK.md`.
 
 The dumps at one thread and at the default found two states that depended on the caches, though no diagnostic did, since the first run filled the caches the second read:
 - **The stub cache lost which classes have PHPStan ancestry** (`f80df7a4`). The table was not among those it stores, so every warm run's base had none, and the rules gated on it saw no PHPStan class among the stubs'. The round-trip test now compares the whole print of a freshly built base, plain and with PHPStan's source, with what reads back.
@@ -847,10 +847,10 @@ Expected: a vendor project's run near 70 M instructions and well under its 336 M
    - **the user storages it may write** besides its by-reference parameters: global variables and superglobals (`session_start` fills `$_SESSION`), the caller's variables (`$http_response_header`, `$php_errormsg` under `track_errors` before 8.0, `extract`, one-argument `parse_str`);
    - **where it hands control to code the program registered:** each diagnostic it may raise, by level, which runs the error handler; each class it may look up by name, which runs the autoloaders; the output it may write, which runs the output-buffer callbacks;
    - **the values it may release:** an element it removes or overwrites, an argument it drops, which runs a destructor when it held the last reference;
-   - **what it may return and throw, on every path:** the kinds of value each path returns (`null`, `false`, its own object, a value of the declared type) and the exception classes it may throw. Item 21's iterator outcomes come from these, and a builtin's throw points with them, where today the stubs' hand-written `@throws` give them;
+   - **what it may return and throw, on every path:** the kinds of value each path returns (`null`, `false`, its own object, a value of the declared type) and the exception classes it may throw. The assumed types' iterator outcomes (below) come from these, and a builtin's throw points with them, where today the stubs' hand-written `@throws` give them;
    - **the code it keeps for later and the kept code it runs,** each by the engine state it keeps it in: `session_set_save_handler` keeps an object that `session_start` and the session functions run, `PDOStatement::setFetchMode` keeps a class that the fetches instantiate, `XSLTProcessor::registerPHPFunctions` lets a transformation call PHP functions; and the registrations among these: the error and exception handlers, the autoloaders, the output buffers, the tick and shutdown functions.
    
-   Item 20 reads all of these from the catalog: its sites, where it runs code the program registered or kept, and its destructor sites inside builtins. Its design decides them by hand today, from the documented failures and a list of builtins.
+   The implicit calls ("Code PHP runs without a call written", below) read all of these from the catalog: their sites, where they run code the program registered or kept, and their destructor sites inside builtins, which their design would otherwise decide by hand, from the documented failures and a list of builtins.
    
    It follows the engine's entry points for user code (`zend_call_method`, `zend_call_known_*`, `zend_call_function`, `call_user_function`, the user iterator functions), the object handlers that dispatch to user methods, the symbol-table writes (`zend_set_local_var*`, `EG(symbol_table)`), the diagnostics (`php_error_docref`, `zend_error` and their kin) and the class lookups (`zend_lookup_class*`, `zend_fetch_class*`), transitively through php-src's own functions.
    - **Function pointers:** it models the dispatch points the engine uses: the object handlers, the class entry's callbacks, the stream wrapper operations, `zend_fcall_info` callables, and a value's release through `zval_ptr_dtor` to a destructor. A call through a pointer it does not model makes the builtin run anything.
@@ -861,6 +861,132 @@ Expected: a vendor project's run near 70 M instructions and well under its 336 M
 Semantic: a builtin runs and writes what its source may make it run and write on the configured versions. Where the recording missed a path or a write, more is forgotten; where a builtin calls none of its own object's methods, less is (§11, item 0).
 
 **Oracle.** None beyond §11 for the dumps and the deletions: they leave release behaviour as it is. The fixes found in step 1 are semantic, read in 0.11 against `5fb858c9`'s reports.
+
+#### Code PHP runs without a call written
+
+Found reading the starting state (row 0.1), first an item of its own at the end of the plan; built in item 0 after the builtin catalog, whose sites and kept code it reads, so that the baseline holds it (rows 0.12a-0.12e).
+
+**Now.** After item 0's fix, a call written in the code forgets what the code it reaches may write. PHP also runs user code where no call is written, and nothing there is forgotten:
+- **magic methods:** `__get`, `__set`, `__isset` and `__unset` on a property the code cannot reach; `__toString` where a value becomes a string; `__clone`; `__invoke` when an object is called; `offsetGet`, `offsetSet`, `offsetExists` and `offsetUnset` on an `ArrayAccess` index; `getIterator`, `rewind`, `valid`, `current`, `key` and `next` in a `foreach`; `__serialize`, `__unserialize`, `__sleep`, `__wakeup`, `__set_state` and `__debugInfo` through the builtins that call them;
+- **destructors:** `__destruct` where the last reference to an object may go: an assignment over it, `unset`, the end of a scope;
+- **autoloaders:** every function `spl_autoload_register` registered, wherever a class not yet loaded may be named: `new`, a static access, a `class_exists`-family test that autoloads;
+- **handlers and callbacks:** the error handler wherever a warning or notice may be raised, output-buffer callbacks where output is written, tick functions under `declare(ticks)`;
+- **code a builtin keeps and runs later, from another builtin:** session handlers, the SQLite functions PDO and SQLite3 register, the PHP functions XSLT and XPath call, the callbacks curl and the XML parser hold, the classes PDO fetches into and DOM registers for nodes. Row 0.1c's table runs only what a call runs while it runs; an object made with a callable or an object, such as a `Fiber` or an iterator over a user's iterator, already counts as running anything. The builtin catalog (item 0) gives each keeping builtin and each running one, by the engine state between them; these are examples of it, not the list.
+- **generator bodies:** calling a generator function runs none of its body. The body runs, up to its next `yield`, at the generator's first `current`, `key`, `next`, `send`, `throw`, `valid` or `rewind`, and at each step of a `foreach` over it. Today the call takes the body's effects, though nothing of it runs there. A `Generator`'s methods write anything: no run of PHP recorded them and their stubs are not declared pure (`effects.rs:706-728`).
+
+**Design.**
+- **Each such site is a call** to the union of what its possible targets write, applied by the checker as after a written call (item 0, fix steps 3-4):
+  - a magic or interface method: by the class hierarchy over the value's type, and over every loaded class that declares the method when the type is `mixed` or `object`;
+  - autoloaders, handlers and callbacks: the ones the program registers, found by their registration calls; a registration whose callable is not known writes anything.
+- **Destructors:** a site where an object may lose its last reference runs the `__destruct` of every class the value's type may be; the reference count itself is not tracked, so every such site counts.
+- **Generators:** a call to a generator function binds its arguments and writes nothing of its body. Each resumption site writes what the body may write between one `yield` and the next, over every generator function the receiver's `Generator` may come from: all of them when its origin is not known. A `yield from` there also runs what it delegates to.
+- **Where a site is decided** follows PHP's rules for each: a property is magic only where the declared properties do not cover it; a conversion to string only where an object may reach it; a warning only where the builtin catalog (item 0) says the builtin may raise one, or where an operation's failure can occur for the operand's type; an autoloader where the catalog says a builtin may look a class up, and where a construct names a class not yet loaded.
+
+**Oracle.** Fixtures for each kind of site, each checked against `php` 8.5; O2 read line by line. Semantic, listed in §11.
+
+#### What PHP gives where a type assumed: int overflow, missing keys, iterators past the end
+
+Found by the runtime oracle's generated calls in item 0's validation, first an item of its own at the end of the plan; built in item 0 after the implicit calls above, so that the baseline holds it and every later item preserves it (rows 0.13a-0.13i).
+
+**Now.** The runtime oracle's generated calls (`3d8085f3`, in item 0's validation) found three places where a type says less than what PHP gives. Seven fixtures show them; until this item, they opt out of the calls, each with its reason.
+
+- **An int operation is taken not to overflow where an operand's end is open.**
+  - **What PHP does.** It gives a float where an int `+`, `-`, `*`, `**`, unary `-`, `++`, `--` or `abs` passes `PHP_INT_MAX` or `PHP_INT_MIN`. At an `int` parameter, return or typed property, that float throws a `TypeError` in both typing modes, since no float outside the int range coerces. The argument, return and property checks already report a float there.
+  - **Where the types add the float.** Only when both operands' ends are written: an open end counts as no overflow (`checked_bound_op`, `arithmetic.rs:15-27`; `mul_int_range`, `:84-95`). So `int + int` is `int` and `int<1, max> + 1` is `int<2, max>`, while `int<1, PHP_INT_MAX> + 1` is `int<2, max>|float` (`arithmetic.rs:520-538`). The same split runs through:
+    - `++` and `--` (`step`, `transform.rs:165-224`);
+    - unary minus (`negate`, `arithmetic.rs:458-479`);
+    - `abs` (`to_absolute_number`, `coercion.rs:249-285`).
+  - **One set, two forms.** `int<1, max>` and `int<1, PHP_INT_MAX>` are the same set (`Type::int_range`, `constructors.rs:68-75`).
+  - **Literal overflow.** Two literals that overflow give `int|float`, not the float PHP gives: `PHP_INT_MAX + 1` is `9.2233720368547758E+18`.
+  - **Comparisons** narrow through `f64` and drop a bound past ±9.2e18 (`cut_int`, `comparison.rs:870-920`). So `$i < $n` does not cap `$i` at `PHP_INT_MAX - 1`, and the `$i++` after it could not stay `int` once open ends overflow.
+  - **What follows from an overflow:**
+    - `intdiv(PHP_INT_MIN, -1)`'s `ArithmeticError` is left out on purpose (`throws/dynamic.rs:63-80`).
+    - Appending after the key `PHP_INT_MAX` is read as throwing on every version (`shape.rs:68-73`), but PHP before 8.0 warns and writes nothing.
+    - A float key outside the int range is converted modulo 2^64 (`php_float_to_int`, `coercion.rs:320-331`; `PHP_INT_MAX + 1` becomes `PHP_INT_MIN`), but PHP's deprecation (8.1-8.4) and warning (8.5) there are not reported.
+- **A general array's key is taken to be there.**
+  - A read whose presence the type leaves unknown gives the value type alone (`member_offset_read_type`, `member_resolution.rs:321-337`). It is reported only under `report_possibly_nonexistent_general_array_offset` (`report_missing_offset`, `assignment.rs:748-822`; `OffsetPresence::Unknown`, `offsets.rs:810-811`).
+  - PHP reads `null` there and raises "Undefined array key" (a warning from 8.0) or "Undefined offset" / "Undefined index" (a notice before). It does so too for:
+    - the read inside `.=`, `+=` and the other compound assignments, and `++` and `--` on an element;
+    - a destructuring;
+    - a nested read (`$a[$k]['x']`, which then also warns on `null`).
+  
+    Not for `isset`, `empty`, `??`, `??=`, a nested write (`$a[$k][] = …`, which makes the element from nothing) or a reference (`&$a[$k]`, which makes it `null`).
+  - A string offset out of range reads `''` with "Uninitialized string offset" (a warning from 8.0, a notice before), reported only under the same setting.
+  - Of a key's presence the analysis proves little: a narrowed `$a[$k]` key (`KeyData::VarIndex`, `keys.rs:37`), and lists indexed below `count()` in a `for` condition, for writes only (`in_range_index_writes`, `checker.rs:690-707`).
+- **An iterator's `current()` is taken to give a value.**
+  - PHPStan's stubs declare `Iterator::current()` as `@return TValue` (`iterable.stub:36-39`), which `ArrayIterator` and most builtin iterators inherit (`:127`).
+  - Off a valid position, `php` 8.5 gives:
+    - `null` for `ArrayIterator`, `RecursiveArrayIterator`, `ArrayObject`'s iterator, a finished `Generator`, the `IteratorIterator` family, `AppendIterator`, `SplDoublyLinkedList`, `SplQueue`, `SplStack` and the heaps;
+    - a `RuntimeException` for `SplObjectStorage`, `MultipleIterator` and `FilesystemIterator`;
+    - an `OutOfBoundsException` for `SplFixedArray`'s iterator;
+    - a `BadMethodCallException` for `EmptyIterator` (its stub says `never`, `:553`);
+    - the iterator itself for `DirectoryIterator`;
+    - `false` for `SplFileObject`.
+  - Its `key()` gives `null`, `0`, `-1`, a count or a path, by class.
+
+**Design.** Each part is the most precise truth PHP gives, kept wherever it may hold.
+
+*Ints:*
+1. **Every end is a value.** An int range's open end is its limit, `PHP_INT_MIN` or `PHP_INT_MAX`, so each set has one form, printed with `min` and `max`.
+2. **Exact arithmetic.** Every int operation computes its ends exactly in `i128`. Where an end passes a limit, it adds the floats PHP gives: as literals where they are few, as PHP computes them (each operand converted to a float, then the operation; `PHP_INT_MAX + 1` is `9.2233720368547758E+18`), and as `float` otherwise. This applies to `+`, `-`, `*`, `**`, unary `-`, `++`, `--`, `abs`, `array_sum` and `array_product`. Shifts wrap in PHP (`PHP_INT_MAX << 1` is `-2`) and stay ints.
+3. **Exact comparisons.** Int against int narrows in integers: `$i < $n`, with `$n` an int, caps `$i` at `PHP_INT_MAX - 1`, so `$i++` after it stays an int. Int against float compares as PHP does, converting the int.
+4. **Sources the engine bounds.** `count()` of an array, and a list's keys, are bounded by the engine's maximum array size (`HT_MAX_SIZE` on 64-bit builds): 2^31 through PHP 8.0 and 2^30 from 8.1, the largest over the configured versions. So a counter compared with a count stays an int. A counter that nothing bounds gains the float at its step past `PHP_INT_MAX`, as every open int does.
+5. **What PHP does with the float.**
+   - At an `int` parameter, return or typed property, the checks already report it.
+   - `intdiv(PHP_INT_MIN, -1)` throws `ArithmeticError`, and `PHP_INT_MIN % -1` is `0`.
+   - Appending after the key `PHP_INT_MAX` throws `Error` from 8.0; before 8.0 it warns and writes nothing. Either is a throw point or a report wherever an array's int keys may include `PHP_INT_MAX`.
+   - A float key outside the int range is the key PHP's conversion gives, reported as PHP raises it: a deprecation from 8.1, a warning from 8.5.
+
+*Missing keys:*
+
+6. **The read.** A read at a key not proven present gives the value type joined with `null`. It is reported as `offsetAccess.mightNotExist` where PHP raises it, at every site the "Now" list names, with PHP's own words for the configured versions: "Undefined array key" (a warning, from 8.0), or "Undefined offset" / "Undefined index" (a notice, before). `isset`, `empty`, `??` and `??=` are neither typed `null` nor reported. A nested write at such a key makes the element from nothing, so its type joins the written shape alone. A string offset not proven in range is read and reported the same way, with "Uninitialized string offset". `report_possibly_nonexistent_general_array_offset` goes.
+7. **Presence is proven, not assumed.**
+   - **The fact.** A value carries the fact that it is a key of a container place (`$a`, `$this->rows`, `$a['x']`), kept with that place's facts. Every read of the place at that value is present: `$a[$k]`, a nested base, a destructuring of `$a` at known keys.
+   - **What establishes it:**
+     - `isset($a[$k])` and `!empty($a[$k])` where true;
+     - `array_key_exists($k, $a)` and `key_exists`;
+     - a write at `$k`, and `&$a[$k]`;
+     - the key of a `foreach` over `$a`;
+     - the values of `array_keys($a)`;
+     - `array_key_first`, `array_key_last` and `key` where not `null`;
+     - `array_search` where not `false`;
+     - `array_rand`;
+     - `in_array($k, array_keys($a))` where true;
+     - for a list, an int proven at least `0` and below the same list's `count()`;
+     - for a string, an offset proven within its `strlen()`, negative offsets by the configured versions.
+     
+     A copy of the container keeps the fact.
+   - **What drops it:** a write that may remove a key, such as `unset` of an element or an assignment to the place. Also a by-reference pass, and a call whose effect may write the place (item 0). A write that only adds or replaces keys keeps it.
+
+*Iterators:*
+
+8. **What each builtin iterator gives, from PHP's source.**
+   - The builtin catalog (item 0) gives, for every builtin class implementing `Iterator` and every iterator `getIterator` returns (`ArrayObject`'s, `SplFixedArray`'s, `DatePeriod`'s), what `current()`, `key()` and a `Generator`'s `send()` and `getReturn()` may return and throw on each path, on every version.
+   - A recording of a few states (empty, at the end, before the first move) proves nothing of the states it did not reach, such as a position whose element was removed, so the recorder runs those states as the catalog's oracle, not as the source.
+   - It is compiled in with the catalog.
+9. **The types.**
+   - **At a position not proven valid,** a call gives the stub's type for a valid position joined with the recorded outcome, and the recorded exception becomes a throw point.
+   - **On a type that names only an interface** (`Iterator`, `SeekableIterator`, `OuterIterator`), the call is the union over every loaded implementation, by the hierarchy, as item 0's calls are.
+   - **A user class's own `current()`** keeps its declared return. Its `parent::current()` reads the builtin's.
+10. **A valid position, proven.**
+    - **The position is a storage of the object,** like a property. It is written by `next`, `rewind`, `seek`, a generator's `send` and `throw`, and a `foreach` over it. For an iterator that wraps another, a move of the inner one writes it too. Item 0's effects carry it through calls.
+    - **Where `valid()` returns true,** the position is valid until such a write, and `current()` and `key()` give exactly the stub's types. The same holds for an `ArrayIterator`, or `ArrayObject`'s iterator, made over a non-empty array and not moved since.
+    - **Why a fact on the position.** `TValue` may itself hold `null`, so the proof cannot be a narrowing that removes `null`.
+
+**Oracle.**
+- **Fixtures** for each part:
+  - each operator at each limit;
+  - a counter bounded by a count, and one bounded by nothing;
+  - each consequence of the float;
+  - each kind of read at an unproven key, and each proof;
+  - the string offsets;
+  - every recorded iterator class at a valid and an invalid position.
+- **How they run.** The runtime oracle runs them with generated calls on every version image.
+- **The seven fixtures** now opted out take the calls again. Their expectations become what PHP gives, and they are renamed where a name says otherwise (`a_dynamic_key_read_after_a_foreach_populated_array_is_not_spuriously_nullable`).
+- **The recorder** runs the iterators' states on each image as the catalog's oracle.
+- O2 is read line by line.
+- Semantic, listed in §11.
+
 
 ### 1. One session for the CLI, the language server and the tests
 
@@ -2258,127 +2384,6 @@ Exact, except the private-property judgment, listed in §11.
 - **The peak** becomes the start of the check plus the checks in flight: the largest files' checks, which run first, while every tree is still alive. That load has not been measured: at today's maximum, during the parse, the checker holds almost nothing (§8, M1). Item 0's memory oracle records the heap at the start of the check and at the check's maximum, and §12's projection takes both.
 - **In the server,** the trees held are the open documents' and the LRU's, not the workspace's.
 
-### 20. Code PHP runs without a call written
-
-**Now.** After item 0's fix, a call written in the code forgets what the code it reaches may write. PHP also runs user code where no call is written, and nothing there is forgotten:
-- **magic methods:** `__get`, `__set`, `__isset` and `__unset` on a property the code cannot reach; `__toString` where a value becomes a string; `__clone`; `__invoke` when an object is called; `offsetGet`, `offsetSet`, `offsetExists` and `offsetUnset` on an `ArrayAccess` index; `getIterator`, `rewind`, `valid`, `current`, `key` and `next` in a `foreach`; `__serialize`, `__unserialize`, `__sleep`, `__wakeup`, `__set_state` and `__debugInfo` through the builtins that call them;
-- **destructors:** `__destruct` where the last reference to an object may go: an assignment over it, `unset`, the end of a scope;
-- **autoloaders:** every function `spl_autoload_register` registered, wherever a class not yet loaded may be named: `new`, a static access, a `class_exists`-family test that autoloads;
-- **handlers and callbacks:** the error handler wherever a warning or notice may be raised, output-buffer callbacks where output is written, tick functions under `declare(ticks)`;
-- **code a builtin keeps and runs later, from another builtin:** session handlers, the SQLite functions PDO and SQLite3 register, the PHP functions XSLT and XPath call, the callbacks curl and the XML parser hold, the classes PDO fetches into and DOM registers for nodes. Row 0.1c's table runs only what a call runs while it runs; an object made with a callable or an object, such as a `Fiber` or an iterator over a user's iterator, already counts as running anything. The builtin catalog (item 0) gives each keeping builtin and each running one, by the engine state between them; these are examples of it, not the list.
-- **generator bodies:** calling a generator function runs none of its body. The body runs, up to its next `yield`, at the generator's first `current`, `key`, `next`, `send`, `throw`, `valid` or `rewind`, and at each step of a `foreach` over it. Today the call takes the body's effects, though nothing of it runs there. A `Generator`'s methods write anything: no run of PHP recorded them and their stubs are not declared pure (`effects.rs:706-728`).
-
-**Design.**
-- **Each such site is a call** to the union of what its possible targets write, applied by the checker as after a written call (item 0, fix steps 3-4):
-  - a magic or interface method: by the class hierarchy over the value's type, and over every loaded class that declares the method when the type is `mixed` or `object`;
-  - autoloaders, handlers and callbacks: the ones the program registers, found by their registration calls; a registration whose callable is not known writes anything.
-- **Destructors:** a site where an object may lose its last reference runs the `__destruct` of every class the value's type may be; the reference count itself is not tracked, so every such site counts.
-- **Generators:** a call to a generator function binds its arguments and writes nothing of its body. Each resumption site writes what the body may write between one `yield` and the next, over every generator function the receiver's `Generator` may come from: all of them when its origin is not known. A `yield from` there also runs what it delegates to.
-- **Where a site is decided** follows PHP's rules for each: a property is magic only where the declared properties do not cover it; a conversion to string only where an object may reach it; a warning only where the builtin catalog (item 0) says the builtin may raise one, or where an operation's failure can occur for the operand's type; an autoloader where the catalog says a builtin may look a class up, and where a construct names a class not yet loaded.
-
-**Oracle.** Fixtures for each kind of site, each checked against `php` 8.5; O2 read line by line. Semantic, listed in §11.
-
-### 21. What PHP gives where a type assumed: int overflow, missing keys, iterators past the end
-
-**Now.** The runtime oracle's generated calls (`3d8085f3`, in item 0's validation) found three places where a type says less than what PHP gives. Seven fixtures show them; until this item, they opt out of the calls, each with its reason.
-
-- **An int operation is taken not to overflow where an operand's end is open.**
-  - **What PHP does.** It gives a float where an int `+`, `-`, `*`, `**`, unary `-`, `++`, `--` or `abs` passes `PHP_INT_MAX` or `PHP_INT_MIN`. At an `int` parameter, return or typed property, that float throws a `TypeError` in both typing modes, since no float outside the int range coerces. The argument, return and property checks already report a float there.
-  - **Where the types add the float.** Only when both operands' ends are written: an open end counts as no overflow (`checked_bound_op`, `arithmetic.rs:15-27`; `mul_int_range`, `:84-95`). So `int + int` is `int` and `int<1, max> + 1` is `int<2, max>`, while `int<1, PHP_INT_MAX> + 1` is `int<2, max>|float` (`arithmetic.rs:520-538`). The same split runs through:
-    - `++` and `--` (`step`, `transform.rs:165-224`);
-    - unary minus (`negate`, `arithmetic.rs:458-479`);
-    - `abs` (`to_absolute_number`, `coercion.rs:249-285`).
-  - **One set, two forms.** `int<1, max>` and `int<1, PHP_INT_MAX>` are the same set (`Type::int_range`, `constructors.rs:68-75`).
-  - **Literal overflow.** Two literals that overflow give `int|float`, not the float PHP gives: `PHP_INT_MAX + 1` is `9.2233720368547758E+18`.
-  - **Comparisons** narrow through `f64` and drop a bound past ±9.2e18 (`cut_int`, `comparison.rs:870-920`). So `$i < $n` does not cap `$i` at `PHP_INT_MAX - 1`, and the `$i++` after it could not stay `int` once open ends overflow.
-  - **What follows from an overflow:**
-    - `intdiv(PHP_INT_MIN, -1)`'s `ArithmeticError` is left out on purpose (`throws/dynamic.rs:63-80`).
-    - Appending after the key `PHP_INT_MAX` is read as throwing on every version (`shape.rs:68-73`), but PHP before 8.0 warns and writes nothing.
-    - A float key outside the int range is converted modulo 2^64 (`php_float_to_int`, `coercion.rs:320-331`; `PHP_INT_MAX + 1` becomes `PHP_INT_MIN`), but PHP's deprecation (8.1-8.4) and warning (8.5) there are not reported.
-- **A general array's key is taken to be there.**
-  - A read whose presence the type leaves unknown gives the value type alone (`member_offset_read_type`, `member_resolution.rs:321-337`). It is reported only under `report_possibly_nonexistent_general_array_offset` (`report_missing_offset`, `assignment.rs:748-822`; `OffsetPresence::Unknown`, `offsets.rs:810-811`).
-  - PHP reads `null` there and raises "Undefined array key" (a warning from 8.0) or "Undefined offset" / "Undefined index" (a notice before). It does so too for:
-    - the read inside `.=`, `+=` and the other compound assignments, and `++` and `--` on an element;
-    - a destructuring;
-    - a nested read (`$a[$k]['x']`, which then also warns on `null`).
-  
-    Not for `isset`, `empty`, `??`, `??=`, a nested write (`$a[$k][] = …`, which makes the element from nothing) or a reference (`&$a[$k]`, which makes it `null`).
-  - A string offset out of range reads `''` with "Uninitialized string offset" (a warning from 8.0, a notice before), reported only under the same setting.
-  - Of a key's presence the analysis proves little: a narrowed `$a[$k]` key (`KeyData::VarIndex`, `keys.rs:37`), and lists indexed below `count()` in a `for` condition, for writes only (`in_range_index_writes`, `checker.rs:690-707`).
-- **An iterator's `current()` is taken to give a value.**
-  - PHPStan's stubs declare `Iterator::current()` as `@return TValue` (`iterable.stub:36-39`), which `ArrayIterator` and most builtin iterators inherit (`:127`).
-  - Off a valid position, `php` 8.5 gives:
-    - `null` for `ArrayIterator`, `RecursiveArrayIterator`, `ArrayObject`'s iterator, a finished `Generator`, the `IteratorIterator` family, `AppendIterator`, `SplDoublyLinkedList`, `SplQueue`, `SplStack` and the heaps;
-    - a `RuntimeException` for `SplObjectStorage`, `MultipleIterator` and `FilesystemIterator`;
-    - an `OutOfBoundsException` for `SplFixedArray`'s iterator;
-    - a `BadMethodCallException` for `EmptyIterator` (its stub says `never`, `:553`);
-    - the iterator itself for `DirectoryIterator`;
-    - `false` for `SplFileObject`.
-  - Its `key()` gives `null`, `0`, `-1`, a count or a path, by class.
-
-**Design.** Each part is the most precise truth PHP gives, kept wherever it may hold.
-
-*Ints:*
-1. **Every end is a value.** An int range's open end is its limit, `PHP_INT_MIN` or `PHP_INT_MAX`, so each set has one form, printed with `min` and `max`.
-2. **Exact arithmetic.** Every int operation computes its ends exactly in `i128`. Where an end passes a limit, it adds the floats PHP gives: as literals where they are few, as PHP computes them (each operand converted to a float, then the operation; `PHP_INT_MAX + 1` is `9.2233720368547758E+18`), and as `float` otherwise. This applies to `+`, `-`, `*`, `**`, unary `-`, `++`, `--`, `abs`, `array_sum` and `array_product`. Shifts wrap in PHP (`PHP_INT_MAX << 1` is `-2`) and stay ints.
-3. **Exact comparisons.** Int against int narrows in integers: `$i < $n`, with `$n` an int, caps `$i` at `PHP_INT_MAX - 1`, so `$i++` after it stays an int. Int against float compares as PHP does, converting the int.
-4. **Sources the engine bounds.** `count()` of an array, and a list's keys, are bounded by the engine's maximum array size (`HT_MAX_SIZE` on 64-bit builds): 2^31 through PHP 8.0 and 2^30 from 8.1, the largest over the configured versions. So a counter compared with a count stays an int. A counter that nothing bounds gains the float at its step past `PHP_INT_MAX`, as every open int does.
-5. **What PHP does with the float.**
-   - At an `int` parameter, return or typed property, the checks already report it.
-   - `intdiv(PHP_INT_MIN, -1)` throws `ArithmeticError`, and `PHP_INT_MIN % -1` is `0`.
-   - Appending after the key `PHP_INT_MAX` throws `Error` from 8.0; before 8.0 it warns and writes nothing. Either is a throw point or a report wherever an array's int keys may include `PHP_INT_MAX`.
-   - A float key outside the int range is the key PHP's conversion gives, reported as PHP raises it: a deprecation from 8.1, a warning from 8.5.
-
-*Missing keys:*
-
-6. **The read.** A read at a key not proven present gives the value type joined with `null`. It is reported as `offsetAccess.mightNotExist` where PHP raises it, at every site the "Now" list names, with PHP's own words for the configured versions: "Undefined array key" (a warning, from 8.0), or "Undefined offset" / "Undefined index" (a notice, before). `isset`, `empty`, `??` and `??=` are neither typed `null` nor reported. A nested write at such a key makes the element from nothing, so its type joins the written shape alone. A string offset not proven in range is read and reported the same way, with "Uninitialized string offset". `report_possibly_nonexistent_general_array_offset` goes.
-7. **Presence is proven, not assumed.**
-   - **The fact.** A value carries the fact that it is a key of a container place (`$a`, `$this->rows`, `$a['x']`), kept with that place's facts. Every read of the place at that value is present: `$a[$k]`, a nested base, a destructuring of `$a` at known keys.
-   - **What establishes it:**
-     - `isset($a[$k])` and `!empty($a[$k])` where true;
-     - `array_key_exists($k, $a)` and `key_exists`;
-     - a write at `$k`, and `&$a[$k]`;
-     - the key of a `foreach` over `$a`;
-     - the values of `array_keys($a)`;
-     - `array_key_first`, `array_key_last` and `key` where not `null`;
-     - `array_search` where not `false`;
-     - `array_rand`;
-     - `in_array($k, array_keys($a))` where true;
-     - for a list, an int proven at least `0` and below the same list's `count()`;
-     - for a string, an offset proven within its `strlen()`, negative offsets by the configured versions.
-     
-     A copy of the container keeps the fact.
-   - **What drops it:** a write that may remove a key, such as `unset` of an element or an assignment to the place. Also a by-reference pass, and a call whose effect may write the place (item 0). A write that only adds or replaces keys keeps it.
-
-*Iterators:*
-
-8. **What each builtin iterator gives, from PHP's source.**
-   - The builtin catalog (item 0) gives, for every builtin class implementing `Iterator` and every iterator `getIterator` returns (`ArrayObject`'s, `SplFixedArray`'s, `DatePeriod`'s), what `current()`, `key()` and a `Generator`'s `send()` and `getReturn()` may return and throw on each path, on every version.
-   - A recording of a few states (empty, at the end, before the first move) proves nothing of the states it did not reach, such as a position whose element was removed, so the recorder runs those states as the catalog's oracle, not as the source.
-   - It is compiled in with the catalog.
-9. **The types.**
-   - **At a position not proven valid,** a call gives the stub's type for a valid position joined with the recorded outcome, and the recorded exception becomes a throw point.
-   - **On a type that names only an interface** (`Iterator`, `SeekableIterator`, `OuterIterator`), the call is the union over every loaded implementation, by the hierarchy, as item 0's calls are.
-   - **A user class's own `current()`** keeps its declared return. Its `parent::current()` reads the builtin's.
-10. **A valid position, proven.**
-    - **The position is a storage of the object,** like a property. It is written by `next`, `rewind`, `seek`, a generator's `send` and `throw`, and a `foreach` over it. For an iterator that wraps another, a move of the inner one writes it too. Item 0's effects carry it through calls.
-    - **Where `valid()` returns true,** the position is valid until such a write, and `current()` and `key()` give exactly the stub's types. The same holds for an `ArrayIterator`, or `ArrayObject`'s iterator, made over a non-empty array and not moved since.
-    - **Why a fact on the position.** `TValue` may itself hold `null`, so the proof cannot be a narrowing that removes `null`.
-
-**Oracle.**
-- **Fixtures** for each part:
-  - each operator at each limit;
-  - a counter bounded by a count, and one bounded by nothing;
-  - each consequence of the float;
-  - each kind of read at an unproven key, and each proof;
-  - the string offsets;
-  - every recorded iterator class at a valid and an invalid position.
-- **How they run.** The runtime oracle runs them with generated calls on every version image.
-- **The seven fixtures** now opted out take the calls again. Their expectations become what PHP gives, and they are renamed where a name says otherwise (`a_dynamic_key_read_after_a_foreach_populated_array_is_not_spuriously_nullable`).
-- **The iterator table** is recorded again on each image and compared with the committed one.
-- O2 is read line by line.
-- Semantic, listed in §11.
-
 ## 11. Validation at the end of each item
 
 **When.** An item is validated when its last row lands, before the next item's first row. Between rows only `cargo fmt`, `cargo check` and clippy run. A failure is fixed in its own commit, within the item, and only what failed runs again, from the saved binaries where they still apply. Item 0's validation is its baseline (item 0, step 4), with the tests and the fixtures. Two items have steps that wait for item 9: item 3's scratch store for item 9's step 2, and item 6's step 2 for the stub rules' versions (item 9, step 5). Each is built right after the step it waits for and validated with item 9, whose comparison then also admits item 6's step-2 changes.
@@ -2395,6 +2400,7 @@ Exact, except the private-property judgment, listed in §11.
 7. the item's state in the ledger and its one-line state in `WORK_STACK.md`.
 
 **What an item adds to its own validation:**
+- **item 0:** the runtime oracle with generated calls on every version image from `php:7.0-cli` to 8.5, with no fixture opted out for an assumption the assumed types remove; the recorder on every image as the builtin catalog's oracle, the iterators' states included.
 - **item 1:** the server's first dumps against the CLI's join the equalities;
 - **item 6:** its tests (a file replaced while a reader holds it, a corrupt record, and `SOURCES_HASH` against the embedded files); the platforms job, below, with the file-replacement test;
 - **item 7:** the relation memo on against off joins the equalities;
@@ -2410,14 +2416,20 @@ Exact, except the private-property judgment, listed in §11.
   - one-argument `parse_str` and `mb_parse_str`, and string `assert`, read on 7.x through `docker`;
   - `--dump-types` and `--dump-expr-types` with locals listed by name, since §12.10's step-by-step identity cannot be checked within one item's validation;
 - **item 19:** each edit replay also at a tree-cache budget of zero; a closed file changed on disk with no event before a dependent's recheck.
-- **item 21:**
-  - the runtime oracle with generated calls on every version image from `php:7.0-cli` to 8.5, with no fixture opted out for an assumption the item removes;
-  - the iterator table recorded again on each image and compared with the committed one.
 
 **Platforms.** CI runs on `ubuntu-24.04` only (`rust-ci.yml:18`), while the release builds for `macos-26` and `windows-2025-vs2026` (`release.yml:33-53`). A CI matrix job on those two runs item 6's file-replacement test from item 6's validation on, and item 17's `stat` cases from item 17's, and each result is recorded.
 
 **The semantic changes, by item.** At an item's validation, every difference from the previous item's dumps must be one of its own:
   - **item 0:** a builtin runs and writes what its php-src implementation may make it run and write, on the configured versions (the builtin catalog), where it ran what a recording on 8.5 saw and every override of its own object's methods, and wrote only its by-reference parameters; a dead function or class declared twice is reported at each declaration, and a namespace cycle is reported at its first analysed class, where it went unreported when its first class was a context or stub one (fast validation, step 1); the fixes found in step 1: what a call may write, by storage, forgotten after it (object properties by field and type, static properties, globals, static variables, captures and references), calls bounded by the class hierarchy and builtins by what they call, captures by reference entered with every type written while shared, and `array_reduce` with its initial value; the one found in step 2: past the union cap, class-strings fold to one class-string and callables to `callable`, where the union was `mixed`; and the one found in item 0's validation: a stub no run of PHP has seen, declared pure and taking no code, writes nothing;
+    - the implicit calls: what a magic method, a destructor, an autoloader, an error handler, an output-buffer callback or a tick function may write is forgotten where PHP may run it; a generator function's call writes nothing of its body, and the generator's resumptions write what the body may write;
+    - the assumed types:
+      - int operations give the float PHP gives past `PHP_INT_MAX` or `PHP_INT_MIN`, as literals where its values are few, with what PHP does with the float;
+      - an open end of an int range is its limit, so `int<0, max>` and `int<0, PHP_INT_MAX>` are one type;
+      - comparisons narrow ints exactly;
+      - an array's count is bounded by the engine's maximum array size;
+      - an array read at a key not proven present gives `null` too, and is reported where PHP raises a warning (a notice before 8.0); the same holds for string offsets; `report_possibly_nonexistent_general_array_offset` goes;
+      - a nested write at such a key makes the element from nothing;
+      - a builtin iterator's `current()` and `key()` off a valid position give and throw what PHP does, and exactly the stub's types where `valid()` proved the position.
   - **item 1:**
     - a file reached through a link is loaded once and reported under its resolved path, with `__FILE__` and `__DIR__` resolved;
     - a file both analysed and context is analysed, once;
@@ -2440,15 +2452,6 @@ Exact, except the private-property judgment, listed in §11.
   - item 15: names that differ only in bytes outside UTF-8 are distinct (the lexer keeps the bytes, item 9) and print with `\x{NN}`; names fold ASCII only where Unicode's lowercasing was used; string values name classes, functions and constants by PHP's rules (one leading backslash, no trimming); container-field keys canonical as PHP's array keys; in the server, an open document read as the bytes its encoding gives, and one whose encoding is not found analysed as UTF-8, with a diagnostic; a fix writes a name's bytes;
   - item 18: the rule families of §12.10; the rules that read the statement result where it differs from today's side walks (`finally` overrides, `try`/`catch` and throws, no-op statements, loops' constant conditions); types in PHP's order of evaluation (an assignment's target operands before its value, a destructuring's value first); a member counted as used when any access may reach it; the union's single pass where it differs from the fold;
   - item 19: the private-property judgment counting writes from bound closures and reflection, and leaving unjudged the properties an unnarrowed one may reach;
-  - item 20: what a magic method, a destructor, an autoloader, an error handler, an output-buffer callback or a tick function may write is forgotten where PHP may run it; a generator function's call writes nothing of its body, and the generator's resumptions write what the body may write;
-  - item 21:
-    - int operations give the float PHP gives past `PHP_INT_MAX` or `PHP_INT_MIN`, as literals where its values are few, with what PHP does with the float;
-    - an open end of an int range is its limit, so `int<0, max>` and `int<0, PHP_INT_MAX>` are one type;
-    - comparisons narrow ints exactly;
-    - an array's count is bounded by the engine's maximum array size;
-    - an array read at a key not proven present gives `null` too, and is reported where PHP raises a warning (a notice before 8.0); the same holds for string offsets; `report_possibly_nonexistent_general_array_offset` goes;
-    - a nested write at such a key makes the element from nothing;
-    - a builtin iterator's `current()` and `key()` off a valid position give and throw what PHP does, and exactly the stub's types where `valid()` proved the position.
   
   Each difference is listed with its file and read.
 
@@ -2462,7 +2465,7 @@ Exact, except the private-property judgment, listed in §11.
 - each edit replay against a fresh load of the edited tree; from item 19, with the tree cache's budget as configured and at zero;
 - from item 19: a closed file changed on disk with no event before a dependent's recheck.
 
-**O3, once, after item 21's validation,** with the commands `CLAUDE.md` gives:
+**O3, once, after item 19's validation,** with the commands `CLAUDE.md` gives:
 - callgrind with `--separate-threads=yes` on the frame-pointer `dhat` build, over `cl-20g`'s workload;
 - `perf record -F 499 -g` on the same build, read with `--no-inline`, of a warm run (per-file cache and base), for the serial windows;
 - `hyperfine -N --warmup 2 --runs 10`, the starting commit's `gate` binary against the last commit's, alternating; warm with both caches warm, and cold with `--prepare` emptying both binaries' cache directories;
@@ -2477,7 +2480,7 @@ Exact, except the private-property judgment, listed in §11.
 
 | # | item | saving (this profile) | serial / wall | memory (§8) | kind |
 |---|---|---|---|---|---|
-| 0 | baseline dumps, debug oracles retired | debug builds and tests | — | — | — |
+| 0 | baseline dumps, debug oracles retired; the builtin catalog, the implicit calls, the assumed types | debug builds and tests | — | — | semantic: the fixes of step 1, the catalog, the implicit calls, the assumed types (§11) |
 | 1 | one session: load, configuration, analysis, identity | the server and the tests get every load item | load off the server's message loop | server: the context trees (≈420 MB) and the unopened files' sources | semantic (§11) |
 | 2 | parallel walk, path data | ≈0.3 G | ≈0.15 s serial start | the second copy of each path; 0.56 M allocations | exact, except link cycles |
 | 3 | context trees dropped on the worker | ≈0.16 G | 0.58 G off the serial path | peak −≤209 MB alone (the end of the parse −≈420 MB); context reads, 66 MB | exact |
@@ -2497,8 +2500,6 @@ Exact, except the private-property judgment, listed in §11.
 | 17 | warm runs | warm: decoding and reads ≈0.85 core-s and most of the finishing window; a cold run pays one incremental finishing over the analysed files' closure, and every run one `stat` per context file | yes | only decoded records in the heap | exact |
 | 18 | check phase remainder, rule temporaries | ≈1.6-2.0 G | — | 3.61 M allocations | semantic (§12.10's families, the statement result, the order of evaluation, member usage, the union pass) |
 | 19 | each tree until its last reader | — | — | batch: the analysed trees freed during the check; server: open documents and a cache weighted by bytes | exact, except the private-property judgment |
-| 20 | code PHP runs without a call written | — | — | — | semantic: what implicit calls may write is forgotten (§11) |
-| 21 | what PHP gives where a type assumed: int overflow, missing keys, iterators past the end | — | — | — | semantic: the float past an int limit, `null` and a report at a key not proven present, iterators off a valid position (§11) |
 
 **Instructions.** The rows sum to ≈8.2-9.3 G of this run's 20.57 G (items 3 and 5 at their instruction savings, item 7 at none to ≈0.3 G, items 9 and 18 at the ends of their ranges). Some costs are counted by two rows, and this profile does not separate the shares:
 - 3 and 9, the tree drops;
@@ -2682,7 +2683,7 @@ The rewrite made two more changes:
 | §12 | The allocations' "today" column predated the row moves; item 4's residual contradicted its item, and item 15's binding maps stay, so ≈1.85 M remain, not ≈1.35 M. The instruction rows sum to more than the total stated, overlap in more pairs than named, and five items had no saving line (3 and 5 overstated). The peak counted the checker's results and an item 9 figure item 9 does not make. The kind column missed four §11 changes. The estimates' status was stale. | Rows and totals restated; saving lines with their basis for items 3, 5, 11, 13 and 16 (3 at ≈0.16 G, 5 at ≈0.06 G). The overlapping pairs named, the net left to callgrind. The peak as ≈350-385 MB plus the checks in flight, with the finishing window as the other candidate. Kind column matched to §11. What is measured, estimated and not counted. |
 | §13 | M11's F1 and F6c fixes predated item 18's review. Superseded passes read as current designs. M7 and §2's P7 and P11 rows were stale. `same-file` was missing from the dependencies, and `twox-hash`'s removal unstated. | M11 matched to item 18. A "superseded by" column and "later" notes. Part I corrected. The dependency table completed. |
 
-Items 20 and 21 were added while building, after the review: item 20 from reading the starting state (row 0.1), item 21 from the runtime oracle's generated calls in item 0's validation.
+Two parts of item 0 were added while building, after the review: the implicit calls ("Code PHP runs without a call written"), from reading the starting state (row 0.1), and the assumed types ("What PHP gives where a type assumed"), from the runtime oracle's generated calls in item 0's validation. Each was first an item of its own at the end of the plan, and moved into item 0 so that the baseline holds the corrected analysis and every later item is checked against it.
 
 # Appendix A. The allocation tail, every site
 

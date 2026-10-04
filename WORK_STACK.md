@@ -219,8 +219,8 @@ docblock is inherited across case-different names; union member order).
 The callgrind drill-down of the 20.57 G run at `5fb858c9` (level 7's end
 state), the dhat heap profile of the same run (`target/dhat-heap.json`; its
 2.67 GB and 19.4 M allocations each given to an item, §8), and the plan built
-from both: items 0-21, each validated at its end (§11), with O3 once after
-item 21. The goal is
+from both: items 0-19, each validated at its end (§11), with O3 once after
+item 19. The goal is
 beyond PHPStan and Psalm, not parity: semantics are judged by what PHP does
 when it runs, and the plan adds the checks found along the way.
 
@@ -239,10 +239,11 @@ when it runs, and the plan adds the checks found along the way.
   ≈350-385 MB peak (from 866) plus the checks in flight, ≈1.85 M allocations
   (from 19.4 M), and roughly 8 G of the 20.57 G instructions.
 - **Building it** started on 2026-10-03. Its tasks, in order, with their
-  state and commits, are in `PROFILE_DRILL_PIWIGO_20G_LEDGER.md` (207 rows:
-  items 0-21, each closed by its validation row, then O3). Reading the
+  state and commits, are in `PROFILE_DRILL_PIWIGO_20G_LEDGER.md` (items 0-19, each closed by its
+  validation row, then O3). Reading the
   starting state (0.1) found four false-report bugs, fixed in item 0
-  before the baseline (rows 0.1a-0.1f), and added item 20. It starts at
+  before the baseline (rows 0.1a-0.1f), and added the implicit calls, now
+  part of item 0. It starts at
   item 0: the starting state read, the `oracle` profile's run, and the
   baseline dumps from item 0's own commit.
 - **Item 0's validation (0.11)** is under way: the tests, fixtures and
@@ -251,24 +252,29 @@ when it runs, and the plan adds the checks found along the way.
   in item 0's validation" block lists, each fixed. The dumps and O2 became
   one pass, `cargo xtask corpus --full` on a worker per core (rows
   0.11a-0.11c, done), with `cargo xtask progress --watch`. Next, before the
-  baseline: fast validation (0.11d-0.11j, 0.11n), from the profile of a
-  replay and a vendor project's run, and the builtin catalog from php-src
+  baseline, in this order: fast validation (0.11d-0.11j), from the profile
+  of a replay and a vendor project's run; the builtin catalog from php-src
   per PHP version (0.11k-0.11m), which replaces the recorded builtin-runs
-  table and which item 20 reads. Then the pass with the `gate` and
-  `oracle` builds, the reports against `5fb858c9`'s, the memory baseline.
+  table; the implicit calls (0.12a-0.12e) and the assumed types
+  (0.13a-0.13i), moved in from the end of the plan; the runtime oracle
+  reaching every asserting fixture (0.11q); the measurements and
+  `cargo xtask validate` (0.11n-0.11p). Then the validation itself (0.11):
+  the pass with the `gate` and `oracle` builds, the reports against
+  `5fb858c9`'s, the memory baseline.
 - **Found along the way, done:** version gates for the syntax PHP 7.1 to 8.5
   added (`492ccf0e`, `50fa1e43`, `d8090e5e`), and `php_version` taking a
   range (`dfdfeeb4`). The runtime oracle calls each asserting function with
   values of its parameters' types (`3d8085f3`): 353 fixtures run, from 81.
-- **Decided, item 21:** three assumptions the oracle's calls showed against
-  what PHP does are built as PHP's truth, after item 20. Int operations get
-  the float PHP gives past a limit, exact, with its consequences. A read at a
-  key not proven present gives `null` and is reported as PHP warns, with
-  presence proven. Builtin iterators off a valid position give and throw what
-  PHP does, recorded from every version, with `valid()` proving the
-  position. Their seven fixtures opt out of the calls until then. Item 20
-  also took generator bodies: a generator's body runs at its resumptions,
-  not at its call.
+- **Decided, in item 0 (rows 0.13a-0.13i):** three assumptions the
+  oracle's calls showed against what PHP does are built as PHP's truth,
+  after the implicit calls (rows 0.12a-0.12e), both before the baseline.
+  Int operations get the float PHP gives past a limit, exact, with its
+  consequences. A read at a key not proven present gives `null` and is
+  reported as PHP warns, with presence proven. Builtin iterators off a valid
+  position give and throw what the builtin catalog derives from php-src,
+  with `valid()` proving the position. Their seven fixtures opt out of the
+  calls until then. The implicit calls also took generator bodies: a
+  generator's body runs at its resumptions, not at its call.
 - **Moved into item 0 (row 0.11q):** the 114 fixtures that assert and
   never reach an assertion under the runtime oracle: assertions in closures
   nothing invokes, code that throws first with the values sampled,
