@@ -858,7 +858,9 @@ Expected: a vendor project's run near 70 M instructions and well under its 336 M
    - an operand's or an argument's type tag (`Z_TYPE_P` and its kin);
    - the parameter parsing's coercions, which follow the caller's typing mode: in weak mode `strlen` converts an object through `__toString`, in strict mode it throws a `TypeError`; and from 8.1 a `null` passed to a scalar parameter raises a deprecation, which runs the error handler;
    - a class (`instanceof_function` and its kin);
-   - a constant's bits in an int argument (`JSON_THROW_ON_ERROR`).
+   - a constant's bits in an int argument (`JSON_THROW_ON_ERROR`);
+   - a URL's scheme, which picks the stream wrapper (`php_stream_locate_url_wrapper`), so a path whose known start names no scheme the program registers reaches no user wrapper;
+   - an ini setting (`track_errors`, `zend.enable_gc`, `unserialize_callback_func`, `session.save_handler`), held open unless the configuration sets it and the program changes it nowhere (`ini_set`, `ini_alter` or `ini_restore` with its name, or with a name not known).
    
    A fact behind a test the tool cannot read holds for every input. Without conditions, a registered error handler would run at every operation that can warn for some operand.
    
@@ -866,7 +868,7 @@ Expected: a vendor project's run near 70 M instructions and well under its 336 M
    
    The implicit calls ("Code PHP runs without a call written", below) read their sites from the catalog: which constructs and builtins run which user code, under which condition on their operands, where they run code the program registered or kept, and every release. The assumed types read the builtins' outcomes, and the level and words of each diagnostic by version, such as an undefined array key's.
    
-   It follows the engine's entry points for user code (`zend_call_method`, `zend_call_known_*`, `zend_call_function`, `call_user_function`, the user iterator functions), the object handlers that dispatch to user methods, the symbol-table writes (`zend_set_local_var*`, `EG(symbol_table)`), the diagnostics (`php_error_docref`, `zend_error` and their kin) and the class lookups (`zend_lookup_class*`, `zend_fetch_class*`), transitively through php-src's own functions.
+   It follows the engine's entry points for user code (`zend_call_method`, `zend_call_known_*`, `zend_call_function`, `call_user_function`, the user iterator functions), the object handlers that dispatch to user methods, the symbol-table writes (`zend_set_local_var*`, `EG(symbol_table)`), the diagnostics (`php_error_docref`, `zend_error` and their kin) and the class lookups (`zend_lookup_class*`, `zend_fetch_class*`), transitively through php-src's own functions. Code compiled from a string (`zend_eval_string*`: `assert` with a string and `create_function`, before 8.0) runs anything.
    - **Function pointers:** it models the dispatch points the engine uses: the object handlers, the class entry's callbacks, the stream wrapper and stream filter operations, `zend_fcall_info` callables, and a value's release through `zval_ptr_dtor` to a destructor and to the cycle collector. Control also leaves php-src's own calls two other ways, each modelled:
      - **a library calling back:** each php-src function handed to an external library is reachable from every call into that library. libxml2's input callbacks reach the stream wrappers, so `DOMDocument::load`, `simplexml_load_file`, `XMLReader::open` and an external DTD in `loadXML` run a user wrapper's `url_stat` and `stream_open`. So do libcurl's callbacks, SQLite's user functions and libxslt's PHP functions;
      - **a fiber switch** (`zend_fiber_switch_context`), which runs whatever the other side runs: anything.
@@ -875,7 +877,11 @@ Expected: a vendor project's run near 70 M instructions and well under its 336 M
    - **The toolchain:** clang's AST of php-src, configured inside each version's image from the source it ships (`/usr/src/php.tar.xz`), with every bundled extension enabled and its libraries' headers installed, so that the macros (`PHP_FUNCTION`, `ZEND_METHOD`, the `RETURN_*` and call wrappers) are expanded as the compiler sees them. A parser that does not preprocess would read them wrong. The VM is generated with each handler a function of its own (`zend_vm_gen.php --with-vm-kind=CALL`), so that a handler is a unit to read. The extensions outside php-src that the stubs declare are read from their own source, at the releases that support each version.
    - **What no source covers** runs and writes anything, as an unknown call does: an extension that builds only elsewhere (`com_dotnet`), or one whose source is not read. A function no PHP provides, such as PHPStan's `assertType`, keeps today's rule: declared pure and taking no code, it writes nothing.
 2. **The recorder becomes the catalog's oracle.** Every call it observes, on every version image, must be in the catalog; one that is not fails the tool, as a gap in its reading of php-src. It also runs each construct form over operands of every type tag, in both typing modes, with an error handler, magic methods, hooks and destructors that record their calls, so that the operations' facts have the same oracle.
-3. **The effects read the catalog,** by the union over the configured versions, built at compile time (fast validation, step 3). A fact applies where the argument's type may meet its condition: at a call the checker sees, by the argument's type; in a declaration's summary, made before the checker's types, unless the argument's declared or literal type excludes it. A builtin method's call reaches the overrides of the methods the catalog says it may call on its own object, found as fast validation's step 2 finds them.
+3. **The effects read the catalog,** by the union over the configured versions, built at compile time (fast validation, step 3). A fact applies where the argument's type may meet its condition. At a call the checker sees, the argument's type decides it. A declaration's summary is made before the checker's types:
+   - a condition on a value that one of the declaration's parameters gives stays a condition on that parameter, carried through the declaration's own calls that pass it on, and each call decides it by its argument's type;
+   - any other value is typed from the declarations, without flow: a parameter's, a property's, a call's return, a constant's, a literal's or a `new`'s type, and a local's as the union over its assignments, anything where `extract`, `$$`, `global` or a reference may write it.
+   
+   The summaries are the checker's input, so the checker's own types cannot decide them without checking callees before callers along the call graph, which would serialize the check along every call chain. A builtin method's call reaches the overrides of the methods the catalog says it may call on its own object, found as fast validation's step 2 finds them.
 
 Semantic: a builtin runs and writes what its source may make it run and write on the configured versions. Where the recording missed a path or a write, more is forgotten; where a builtin calls none of its own object's methods, less is; a builtin no source covers writes anything (§11, item 0).
 
@@ -892,10 +898,11 @@ Found reading the starting state (row 0.1), first an item of its own at the end 
 - **destructors:** `__destruct` where the last reference to an object may go: an assignment over it, `unset`, the end of a scope, a temporary nothing keeps (a call's discarded result, `new C;` as a statement), and every value the released one held, in its elements and properties;
 - **the cycle collector:** once its root buffer fills, a release that leaves an array or an object collectable runs the destructors of every object in a garbage cycle, wherever the cycle was made. In a probe, an `unset` of a `stdClass` ran 9,980 destructors of cyclic objects that earlier calls had made;
 - **a generator's release:** a suspended generator, released, runs its `finally` blocks;
-- **autoloaders:** every function `spl_autoload_register` registered, wherever a class not yet loaded may be named: `new`, a static access, a `class_exists`-family test that autoloads;
-- **handlers and callbacks:** the error handler wherever a warning, a notice or a deprecation may be raised; output-buffer callbacks where output is written; tick functions under `declare(ticks)`; signal handlers at `pcntl_signal_dispatch()`, at ticks, and, once `pcntl_async_signals(true)` has run, wherever the VM checks for an interrupt;
+- **autoloaders:** every function `spl_autoload_register` registered, and before 8.0 a function named `__autoload`, wherever a class not yet loaded may be named: `new`, a static access, a `class_exists`-family test that autoloads;
+- **handlers and callbacks:** the error handler wherever a warning, a notice or a deprecation may be raised, a call to a function declared `#[\Deprecated]` (8.4) and the compilation of a file an `include` or an autoloader loads among them; output-buffer callbacks where output is written; tick functions under `declare(ticks)`; signal handlers at `pcntl_signal_dispatch()`, at ticks, and, once `pcntl_async_signals(true)` has run, wherever the VM checks for an interrupt;
 - **code a builtin keeps and runs later, from another builtin:** session handlers, the SQLite functions PDO and SQLite3 register, the PHP functions XSLT and XPath call, the callbacks curl and the XML parser hold, the classes PDO fetches into and DOM registers for nodes. Row 0.1c's table runs only what a call runs while it runs; an object made with a callable or an object, such as a `Fiber` or an iterator over a user's iterator, already counts as running anything. The PHP catalog (item 0) gives each keeping builtin and each running one, by the engine state between them; these are examples of it, not the list.
 - **included files:** an `include` or a `require` runs the file's top level, which counts as writing anything (`summaries.rs:863`), even where the include check resolves the path;
+- **fibers:** `Fiber::start`, `resume` and `throw` run the fiber's callable up to its next suspension, and `Fiber::suspend` returns after whatever code resumes it. Each is a written call, but to a builtin that runs kept code, and today the effects take `new Fiber` as running anything and these calls as the stubs declare;
 - **generator bodies:** calling a generator function runs none of its body. The body runs, up to its next `yield`, at the generator's first `current`, `key`, `next`, `send`, `throw`, `valid` or `rewind`, and at each step of a `foreach` over it. Today the call takes the body's effects, though nothing of it runs there. A `Generator`'s methods write anything: no run of PHP recorded them and their stubs are not declared pure (`effects.rs:706-728`).
 
 **Design.**
@@ -907,21 +914,23 @@ Found reading the starting state (row 0.1), first an item of its own at the end 
   - a property access is magic where no declared property is accessible from the scope, and also where the declared one may have been unset, typed or not, since PHP then calls `__get`: any `unset` of it in code that can reach it (the class, a descendant, a closure bound to it, a dynamic `unset`);
   - a hooked access runs the hooks of every class the value may be that declares the property with one;
   - a lazy object's initializer runs at an access that may initialize it, on a value whose class the program may make lazy: the classes it passes to `newLazyGhost`, `newLazyProxy`, `resetAsLazyGhost` or `resetAsLazyProxy`, every class where it passes one not known;
-  - a diagnostic runs the error handler where the catalog says the construct or the builtin may raise it, for the operands' types;
+  - a diagnostic runs the error handler where the catalog says the construct or the builtin may raise it, for the operands' types; where a call's callee may be declared `#[\Deprecated]`; and where an `include` or an autoloader compiles a file whose syntax the configured versions deprecate or warn on, which the versions check reads;
   - an autoloader runs where the catalog says a construct or a builtin may look a class up, and the class may not be loaded yet;
   - a signal handler runs at each interrupt check the catalog's operations give, once the program may have turned asynchronous signals on.
-- **Destructors.** A release site runs the destructors of every class whose objects the released value may hold: its type's own, its elements' and its objects' properties', transitively. Reference counts are not tracked, so every such site counts.
-- **The cycle collector.** A release that may leave an array or an object collectable may run the destructor of any object in a garbage cycle, so it runs the destructors of every loaded class that declares one: whether a cycle can hold an object of a class is not decided.
+- **Destructors.** A release site runs the destructors of every class whose objects the released value may hold: its type's own, its elements' and its objects' properties', transitively. Reference counts are not tracked, so every such site counts, but one:
+- **A release that is not the last.** A value proven held by a place that outlives the release (a property, a static property, a global, an element of one, or a local the same release does not drop) loses a reference there, not its last, and runs no destructor. The value is held by such a place when it was read from it (`$x = $this->a`, a `foreach` over it, an element read) or stored into it, and the place has not been written since. The fact is kept and dropped as the key-of-container fact is (the assumed types, step 7). So a `foreach` over a property's objects runs no destructor at each step.
+- **The cycle collector.** A release that may leave an array or an object collectable may run the destructor of any object in a garbage cycle, so it runs the destructors of every loaded class that declares one. Whether a cycle can hold an object of a class is not decided: a graph of what each class's native types let it hold reaches every class wherever an array or an untyped property may hold an object, which is nearly every program, and the precise answer is the heap's shape.
 - **What a dead object's destructor writes to it is not seen.** Its writes to its own `$this` reach an object no code holds any more; a destructor that keeps its object alive writes the storage it keeps it in, which its effect already holds. So a destructor that writes only its own object's properties forgets nothing at either kind of site.
 - **Generators:** a call to a generator function binds its arguments and writes nothing of its body. Each resumption site writes what the body may write between one `yield` and the next, over every generator function the receiver's `Generator` may come from: all of them when its origin is not known. A `yield from` there also runs what it delegates to. A generator's release runs the `finally` blocks around each `yield` it may be suspended at.
+- **Fibers:** `Fiber::start`, `resume` and `throw` write what the fiber's callable may write, over every callable the receiver's `Fiber` may be made with: all of them when its origin is not known. `Fiber::suspend` writes anything: the code that resumes the fiber is any code holding it.
 
 **Oracle.** Fixtures for each kind of site, each checked against `php` on every version image that has it: hooks and lazy objects from 8.4, the cycle collector run by an unrelated release, signals where `pcntl` is built. O2 read line by line. Semantic, listed in §11.
 
-#### What PHP gives where a type assumed: int overflow, missing keys and properties, builtins' outcomes
+#### What PHP gives where a type assumed: int overflow, missing keys and properties, builtins' outcomes, what may be thrown
 
-Found by the runtime oracle's generated calls in item 0's validation, first an item of its own at the end of the plan; built in item 0 after the implicit calls above, so that the baseline holds it and every later item preserves it (rows 0.13a-0.13i).
+Found by the runtime oracle's generated calls in item 0's validation, first an item of its own at the end of the plan; built in item 0 after the implicit calls above, so that the baseline holds it and every later item preserves it (rows 0.13a-0.13k).
 
-**Now.** The runtime oracle's generated calls (`3d8085f3`, in item 0's validation) found three places where a type says less than what PHP gives. Seven fixtures show them; until these rows, they opt out of the calls, each with its reason. Reading the code beside them found the same assumption for properties, and for every builtin's stub.
+**Now.** The runtime oracle's generated calls (`3d8085f3`, in item 0's validation) found three places where a type says less than what PHP gives. Seven fixtures show them; until these rows, they opt out of the calls, each with its reason. Reading the code beside them found the same assumption for properties, for every builtin's stub, and for what a call or an operation may throw.
 
 - **An int operation is taken not to overflow where an operand's end is open.**
   - **What PHP does.** It gives a float where an int `+`, `-`, `*`, `**`, unary `-`, `++`, `--` or `abs` passes `PHP_INT_MAX` or `PHP_INT_MIN`. At an `int` parameter, return or typed property, that float throws a `TypeError` in both typing modes, since no float outside the int range coerces. The argument, return and property checks already report a float there.
@@ -958,6 +967,10 @@ Found by the runtime oracle's generated calls in item 0's validation, first an i
     - the iterator itself for `DirectoryIterator`;
     - `false` for `SplFileObject`.
   - Its `key()` gives `null`, `0`, `-1`, a count or a path, by class.
+- **A call is taken to throw only what its callee's `@throws` says.**
+  - A user function's `@throws` is taken as all it throws (`call_throw_type`, `throws.rs:105-116`): `@throws void` as nothing, `@throws E` as `E` alone, though its body may throw an `Error` from any operation and whatever its callees throw. A builtin throws anything (`Throwable`). An undocumented user function throws anything.
+  - An operation throws only at a division or a modulo (`DivisionByZeroError`, whatever the divisor), a shift, a `clone`, a `yield`, a pipe and an `ArrayAccess` offset (`thrown_by_itself`, `expr.rs:286-315`). An uninitialized typed property read, a readonly property written, an unsupported operand (`[] + 1`), an undefined constant, function or method, and a call on a non-object throw `Error`s PHP raises there.
+  - A `catch` that no recorded throw point may reach is not entered, and its end state is left out of the state after the `try` (`try_catch.rs:225-266`). So after `try { $w = v($n); $w = 'done'; } catch (\Throwable $e) {}`, with `v` documented `@throws void` and dividing by `$n`, the analysis has `$w` as `'done'`, where `php` 8.5 gives `0`, `DivisionByZeroError` having been caught.
 
 **Design.** Each part is the most precise truth PHP gives, kept wherever it may hold.
 
@@ -1010,6 +1023,18 @@ Found by the runtime oracle's generated calls in item 0's validation, first an i
     - **Where `valid()` returns true,** the position is valid until such a write, and `current()` and `key()` give exactly the stub's types. The same holds for an `ArrayIterator`, or `ArrayObject`'s iterator, made over a non-empty array and not moved since.
     - **Why a fact on the position.** `TValue` may itself hold `null`, so the proof cannot be a narrowing that removes `null`.
 
+*What may be thrown:*
+
+11. **A declaration's throws, settled with its effects.** The fixed point that settles effects (item 0's fix, step 4) settles, for each declaration, the classes it may throw:
+    - its `throw`s, by the thrown value's type;
+    - its calls', a builtin's from the catalog, by its arguments' conditions;
+    - its operations', from the catalog (step 12);
+    - the `TypeError`s its return's check may raise, and, at each call, its parameters' checks where the argument's type may fail them;
+    - less what its own `try` blocks surely catch.
+    
+    A call's throw point is its callee's set, over the receiver by the hierarchy, as for effects. A `@throws` tag is a claim the too-wide and missing checks compare with the set, no longer taken in its place: `@throws void` and `@throws E` say what a caller is told to expect, not what PHP may throw.
+12. **An operation throws what the catalog says, for its operands' types.** An operation is a throw point for each exception its opcodes may throw under a condition its operands' types may meet: `TypeError` for an unsupported operand, `Error` for an uninitialized typed property read, a readonly property written, an undefined constant, function, method or class, or a call on a non-object, `DivisionByZeroError` only where the divisor may be zero, `ArithmeticError` for a shift by a negative amount, and the engine's `ValueError`s. Each `catch` is then entered from every point that may throw what it catches.
+
 **Oracle.**
 - **Fixtures** for each part:
   - each operator at each limit;
@@ -1018,7 +1043,8 @@ Found by the runtime oracle's generated calls in item 0's validation, first an i
   - each kind of read at an unproven key or property, and each proof;
   - the string offsets;
   - each builtin whose type the catalog changes, at the path it adds;
-  - every builtin iterator class at a valid and an invalid position.
+  - every builtin iterator class at a valid and an invalid position;
+  - a `catch` reached only through an operation's or an undocumented callee's throw, and through a callee whose `@throws` says less than it throws.
 - **How they run.** The runtime oracle runs them with generated calls on every version image.
 - **The seven fixtures** now opted out take the calls again. Their expectations become what PHP gives, and they are renamed where a name says otherwise (`a_dynamic_key_read_after_a_foreach_populated_array_is_not_spuriously_nullable`).
 - **The recorder** runs the iterators' states on each image as the catalog's oracle.
@@ -2459,7 +2485,7 @@ Exact, except the private-property judgment, listed in §11.
 
 **The semantic changes, by item.** At an item's validation, every difference from the previous item's dumps must be one of its own:
   - **item 0:** a builtin runs and writes what its php-src implementation may make it run and write, on the configured versions (the PHP catalog), where it ran what a recording on 8.5 saw and every override of its own object's methods, and wrote only its by-reference parameters; a builtin no source covers writes anything; a dead function or class declared twice is reported at each declaration, and a namespace cycle is reported at its first analysed class, where it went unreported when its first class was a context or stub one (fast validation, step 1); the fixes found in step 1: what a call may write, by storage, forgotten after it (object properties by field and type, static properties, globals, static variables, captures and references), calls bounded by the class hierarchy and builtins by what they call, captures by reference entered with every type written while shared, and `array_reduce` with its initial value; the one found in step 2: past the union cap, class-strings fold to one class-string and callables to `callable`, where the union was `mixed`; and the one found in item 0's validation: a stub no run of PHP has seen, declared pure and taking no code, writes nothing;
-    - the implicit calls: what a magic method, a property hook, a lazy object's initializer, a destructor (at every release, and through the cycle collector at every release that may leave a value collectable), an autoloader, an error handler, an output-buffer callback, a tick or signal handler, or an included file may write is forgotten where PHP may run it; a generator function's call writes nothing of its body, the generator's resumptions write what the body may write, and its release what its `finally` blocks write;
+    - the implicit calls: what a magic method, a property hook, a lazy object's initializer, a destructor (at every release, and through the cycle collector at every release that may leave a value collectable), an autoloader, an error handler, an output-buffer callback, a tick or signal handler, a fiber's callable, or an included file may write is forgotten where PHP may run it, and a release proven not the last runs no destructor; a generator function's call writes nothing of its body, the generator's resumptions write what the body may write, and its release what its `finally` blocks write;
     - the assumed types:
       - int operations give the float PHP gives past `PHP_INT_MAX` or `PHP_INT_MIN`, as literals where its values are few, with what PHP does with the float;
       - an open end of an int range is its limit, so `int<0, max>` and `int<0, PHP_INT_MAX>` are one type;
@@ -2469,6 +2495,7 @@ Exact, except the private-property judgment, listed in §11.
       - a nested write at such a key makes the element from nothing;
       - a property read where the type leaves the property's presence unknown gives `null` too, and is reported where PHP warns;
       - every builtin returns and throws what the catalog finds on a path its arguments may take, where its stub said less;
+      - a declaration throws what its body may throw, settled over the call graph, its `@throws` checked against that and no longer taken in its place; an operation throws what the catalog says for its operands' types; so a `catch` is entered from every point that may throw what it catches;
       - a builtin iterator's `current()` and `key()` off a valid position give and throw what PHP does, and exactly the stub's types where `valid()` proved the position.
   - **item 1:**
     - a file reached through a link is loaded once and reported under its resolved path, with `__FILE__` and `__DIR__` resolved;

@@ -257,7 +257,7 @@ when it runs, and the plan adds the checks found along the way.
   per PHP version, every builtin and every engine operation with the
   conditions the source tests (0.11k-0.11n), which replaces the recorded
   builtin-runs table; the implicit calls (0.12a-0.12f) and the assumed
-  types (0.13a-0.13i), moved in from the end of the plan; the runtime
+  types (0.13a-0.13k), moved in from the end of the plan; the runtime
   oracle reaching every asserting fixture (0.11o); the measurements and
   `cargo xtask validate` (0.11p-0.11r). Then the validation itself (0.11):
   the pass with the `gate` and `oracle` builds, the reports against
@@ -266,7 +266,7 @@ when it runs, and the plan adds the checks found along the way.
   added (`492ccf0e`, `50fa1e43`, `d8090e5e`), and `php_version` taking a
   range (`dfdfeeb4`). The runtime oracle calls each asserting function with
   values of its parameters' types (`3d8085f3`): 353 fixtures run, from 81.
-- **Decided, in item 0 (rows 0.13a-0.13i):** three assumptions the
+- **Decided, in item 0 (rows 0.13a-0.13k):** three assumptions the
   oracle's calls showed against what PHP does are built as PHP's truth,
   after the implicit calls (rows 0.12a-0.12f), both before the baseline.
   Int operations get the float PHP gives past a limit, exact, with its
@@ -275,13 +275,19 @@ when it runs, and the plan adds the checks found along the way.
   where the type leaves the property's presence unknown. Every builtin
   returns and throws what the PHP catalog derives from php-src where its
   stub says less; builtin iterators off a valid position are the case
-  found, with `valid()` proving the position. Their seven fixtures opt out of the
+  found, with `valid()` proving the position. A declaration throws what
+  its body may throw, settled with its effects, and `@throws` is checked
+  against that instead of trusted: today `@throws void` on a function
+  dividing by its argument leaves a `catch (\Throwable)` around it
+  unentered, so the state after the `try` misses the catch's. Their seven fixtures opt out of the
   calls until then. The implicit calls also took generator bodies: a
   generator's body runs at its resumptions, not at its call. An audit
   against `php` 8.5 added property hooks, lazy objects' initializers, the
   cycle collector (an `unset` of one `stdClass` ran 9,980 destructors of
   earlier cyclic objects), a generator's `finally` at its release, signal
-  handlers, included files, and libxml2 reaching user stream wrappers.
+  handlers, included files, and libxml2 reaching user stream wrappers;
+  a second added fibers, `__autoload` before 8.0, `#[\Deprecated]`
+  callees, and no destructor at a release proven not the last.
 - **Moved into item 0 (row 0.11o):** the 114 fixtures that assert and
   never reach an assertion under the runtime oracle: assertions in closures
   nothing invokes, code that throws first with the values sampled,
