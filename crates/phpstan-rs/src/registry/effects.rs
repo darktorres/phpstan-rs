@@ -686,24 +686,30 @@ impl Registry {
         out
     }
 
-    /// What a call of the builtin `key` (`sig`) whose arguments are not
-    /// known may write: nothing when a call of it was seen to run no code
-    /// through any argument, its object holds none, and none of its
-    /// parameters takes something through which it runs code
-    /// (`CODE_RUNNING_PARAMETER_TYPES`); anything otherwise.
+    /// What a call of the stub `key` (`sig`) whose arguments are not known
+    /// may write: nothing when a call of it was seen to run no code through
+    /// any argument, its object holds none, and none of its parameters
+    /// takes something through which it runs code
+    /// (`CODE_RUNNING_PARAMETER_TYPES`); for a stub no call of which was
+    /// seen, nothing when its doc declares it pure and it takes no code;
+    /// anything otherwise.
     fn stub_effect(&self, key: &DeclKey, sig: &FunctionReflection) -> Effect {
         let runs_code = *sig.stub_effect.0.get_or_init(|| {
+            let takes_code = sig
+                .params
+                .iter()
+                .any(|p| p.ty.mentions_any(&CODE_RUNNING_PARAMETER_TYPES));
             let table = builtin_table();
             let Some(name) = self.builtin_entry(key) else {
-                return true;
+                // A stub no run of PHP has seen is taken at its word: one
+                // its doc declares pure writes nothing, unless it takes
+                // code to run.
+                return !sig.declared_pure || takes_code;
             };
             key.class.as_deref().is_some_and(|class| {
                 self.builtin_holds_code(class) || !self.builtin_held_wrappers(class).is_empty()
             }) || table.runs.contains_key(name.as_str())
-                || sig
-                    .params
-                    .iter()
-                    .any(|p| p.ty.mentions_any(&CODE_RUNNING_PARAMETER_TYPES))
+                || takes_code
         });
         if runs_code {
             Effect::anything()
@@ -971,7 +977,11 @@ impl Reach<'_> {
     ) -> Option<Vec<(DeclKey, Transfer)>> {
         let registry = self.registry;
         let table = builtin_table();
-        let name = registry.builtin_entry(key)?;
+        let Some(name) = registry.builtin_entry(key) else {
+            // A stub no run of PHP has seen runs nothing when it is taken at
+            // its word (`Registry::stub_effect`), and anything otherwise.
+            return registry.stub_effect(key, sig).is_nothing().then(Vec::new);
+        };
         if key
             .class
             .as_deref()

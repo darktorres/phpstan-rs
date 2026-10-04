@@ -152,6 +152,7 @@ impl Clone for FunctionReflection {
             assert,
             purity_dependencies,
             is_transitively_pure,
+            declared_pure,
             is_stub,
             is_magic,
             attributes,
@@ -181,6 +182,7 @@ impl Clone for FunctionReflection {
             assert: clone_vec(assert),
             purity_dependencies: purity_dependencies.clone(),
             is_transitively_pure: *is_transitively_pure,
+            declared_pure: *declared_pure,
             is_stub: *is_stub,
             is_magic: *is_magic,
             attributes: clone_vec(attributes),
@@ -329,6 +331,10 @@ pub struct FunctionReflection {
     // pure. The field the bare-discarded-call-to-a-pure-declaration
     // diagnostic actually reads.
     pub(in crate::registry) is_transitively_pure: bool,
+    // Whether its doc declares it pure (`@phpstan-pure`, `@psalm-pure`,
+    // `@pure`, `@phan-side-effect-free`): what a stub with no behaviour
+    // seen of it is taken to write (`Registry::stub_effect`).
+    pub(in crate::registry) declared_pure: bool,
     // `true` for every signature `registry::stubs` generates - a stub
     // body is always empty (`{}`), so without this,
     // `registry::purity::classify_body` would wrongly call PHP builtins
@@ -913,6 +919,7 @@ impl FunctionReflection {
             assert,
             purity_dependencies: None,
             is_transitively_pure: false,
+            declared_pure: doc.as_ref().is_some_and(|d| d.pure),
             is_stub: false,
             is_magic: false,
             stub_effect: Default::default(),
@@ -1072,6 +1079,8 @@ impl FunctionReflection {
             // as any other not-yet-classified signature.
             purity_dependencies: None,
             is_transitively_pure: false,
+            // Pure only when both declarations say so.
+            declared_pure: self.declared_pure && other.declared_pure,
             // `||`, not `&&`: merging a stub-derived signature with a
             // *second*, independently-parsed declaration of the same
             // name (e.g. a vendored copy of the same stub file, itself

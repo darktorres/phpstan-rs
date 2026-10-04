@@ -178,6 +178,7 @@ canonical_struct!(FunctionReflection {
     assert,
     purity_dependencies,
     is_transitively_pure,
+    declared_pure,
     is_stub,
     is_magic,
     attributes,
