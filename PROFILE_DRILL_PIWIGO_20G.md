@@ -925,7 +925,7 @@ purity: PurityTable, property_writes: WriteTable, phpstan_ancestry: BitVec,
   - project ids follow. Until item 5 assigns them before the merge, they are assigned in the serial insert. A declaration merged at insert (a conditional polyfill onto a stub class, `index.rs:200-245`; context declarations onto each other) keeps the winning entry's id, with the merged value in the store.
   
   So no id is assigned while passes run in parallel, and base slots are decoded lazily, as `Base` decodes stub slots today.
-- **A file's declarations are stored together, as rust-analyzer's `ItemTree` stores a file's items in typed arenas.**
+- **A file's declarations are stored together, as rust-analyzer's `ItemTree` stores a file's items in typed arenas,** with `la-arena`'s arenas and ranges, as item 9's tree is.
   - `FileDecls` holds one vector per kind: classes, functions, members, parameters, properties, constants and names (for `extends`, `implements`, `use`). A class's members and a function's parameters are ranges into them. Until item 8 moves the case references to the checker, they are one more vector of the file.
   - One folded index per file gives a member's slot.
   - Per-member facts are flag bits on the member's entry. Today they are per-class name sets: `abstract_methods`, `final_methods`, `static_methods`, `final_properties` and their `_by_phpdoc` forms, plus the `redeclared_methods` map (`class_info.rs:375-409`).
@@ -1263,12 +1263,13 @@ Exact, except one case listed in §11: a `@property` tag shadowed by a declared 
 
 **Design.**
 1. **`peeled` becomes a loop**, with no guard. This step comes first, on its own.
-2. **A file's tree is a handful of typed vectors, addressed by index.** `ParsedFile` has no lifetime and owns:
+2. **A file's tree is a handful of typed arenas, addressed by index.** `ParsedFile` has no lifetime and owns:
    - `source: Box<[u8]>`, the file's bytes as read;
    - `names: Box<[Name]>`, each distinct name of the file once, which a node refers to by `NameId(u32)`;
-   - `exprs: Box<[ExprNode]>` and `stmts: Box<[StmtNode]>`, with their spans in parallel vectors;
-   - the large variants that few nodes are, in vectors of their own that exist only when the file has one: functions and methods, classes, closures, parameters, `match` arms, attributes;
-   - `lists: Box<[u32]>`, which holds every child list as a range.
+   - `exprs: Arena<ExprNode>` and `stmts: Arena<StmtNode>`, with their spans in parallel vectors;
+   - in arenas of their own, which exist only when the file has one: the large variants that few nodes are (functions and methods, classes, closures), and the elements of lists (arguments, array items, parameters, `match` arms, attributes).
+   
+   Every child list is an `IdxRange` of its elements in their arena (step 7), so no list needs a vector of its own.
    
    `ParsedFile` is plain vectors, so it is `Send` and `Sync` with no `unsafe` of ours: the workspace denies `unsafe_code` (`Cargo.toml:42`), and item 19 shares trees across threads.
    
@@ -1276,22 +1277,24 @@ Exact, except one case listed in §11: a `@property` tag shadowed by a declared 
    - **Size.** A child is 4 bytes as an id, and 16 as a reference that carries its variant's tag (oxc's `Expression<'a>`). Most of a node is its children, so a node of ids is a third to a half the size.
    - **Exact size.** A bump arena grows by chunks of doubling size (`alloc_layout_slow`, `checked_mul(2)`) and keeps the last chunk's unused tail, which can be as large as everything before it. A kept tree's vectors are moved out at their exact size (step 7).
    - **No lifetime.** A tree of references puts `'a` on the checker, on item 18's scopes and on whatever the server keeps across edits, and every holder that crosses files needs a self-referential owner of its own. An id needs only its file.
-   - **Side tables.** Ids are dense, so a table keyed by node is a vector indexed by id, not a hash map keyed by address.
+   - **Side tables.** Ids are dense, so a table keyed by node is a vector indexed by id (`ArenaMap`), not a hash map keyed by address.
    - **What ids cost:** an index and a bounds check per access, where a reference is one load. The check is a branch that is always predicted.
    
-   This is the layout of rust-analyzer's `Body` (`la_arena::Arena<Expr>` with `Idx<Expr>`) and Zig's AST, and of item 4's `FileDecls`.
+   This is the layout of rust-analyzer's `Body` and Zig's AST, and of item 4's `FileDecls`.
+   
+   **The arenas are `la-arena`'s** (0.3.1), the crate rust-analyzer's `Body` uses. `Arena<T>` is a `Vec<T>`, `Idx<T>` a `u32` that is `Copy` and typed by what it indexes, `IdxRange<T>` a typed `Range<u32>`, and `ArenaMap` a dense side table. The crate has no `unsafe`. The types keep an expression's id from indexing statements, which bare `u32`s would not.
    - **A kept tree** is a few exact-size allocations.
    - **A tree that is not kept** (item 3) is built in the worker's scratch store, a set of the same vectors cleared between files, so a context file allocates nothing for its tree once the worker has warmed up.
    - **The lexer puts each distinct name in `names` once.** This holds whether it still streams (before item 10) or lexes the whole file first (after it).
 3. **Nodes by index.**
-   - `ExprId(u32)` and `StmtId(u32)` are `Copy` and carry no lifetime. So no `'a` runs through the checker, through item 18's persistent scopes, or through the language server's caches.
+   - `ExprId` and `StmtId` (`Idx<ExprNode>`, `Idx<StmtNode>`) are `Copy` and carry no lifetime. So no `'a` runs through the checker, through item 18's persistent scopes, or through the language server's caches.
    - An id is meaningful only with its file. A holder that crosses files keeps the `Arc<ParsedFile>` with the ids, as the re-parse cache and the debug build's bodies do (`project.rs:175-217`, `registry/bodies.rs:51`).
    - An id is its node's identity. `NodeId` numbers expressions and statements together today (`ast.rs:7-11`), and its one keyed table, the inference cache (`infer_cache.rs:47-108`), takes `ExprId`.
-   - The parser appends each node once its children are built, and passes the id. `ParseError` is boxed, so a `Result<ExprId, ParseError>` is two words.
+   - A parse function returns its node once its children are built, and its caller commits it: alone, which gives its id, or with the rest of its list (step 7). `ParseError` is boxed, so a `Result` is the node's size and a word.
    - Matching changes from `match &e.kind { ExprKind::Call(..) }` to `match file.expr(id) { ExprNode::Call { .. } }`, compile-driven. `syntax::visit` takes the file and ids.
 4. **Payloads are byte ranges of the source.**
    - A doc comment, an unescaped literal and inline HTML are ranges of `source`. An escaped literal is decoded once, into a byte vector of the file.
-   - A name is a `NameId`. A body is a range of `lists`.
+   - A name is a `NameId`. A body is an `IdxRange<StmtNode>`.
    - **Nothing is decoded to text for its own sake, and nothing lossily but for display.** An identifier becomes a `Name` with its bytes (item 15), so `class \xA9` and `class \xAA` are two classes, as PHP sees them. A doc is parsed from its bytes (item 14), so a doc naming `\xA9` names the class the code declares.
    - What outlives the file (interned types, memoized docblocks, reflections) copies what it keeps, as now.
 5. **Nothing changes a tree after its parse.** `VisitorMut`, `walk_*_mut` and `resolve_names`' second run go.
@@ -1305,7 +1308,7 @@ Exact, except one case listed in §11: a `@property` tag shadowed by a declared 
      - The checker's synthetic nodes go in a per-file scratch store, cleared with the file.
      - Completion and Composer's autoload reader parse into a `ParsedFile` of their own. `into_kind` goes.
 6. **Holders keep ids.** `pending_or_disjunctions`, `Initializers`, the alias maps and both query-builder chains hold `ExprId`s into the file's tree.
-7. **No growth inside a kept tree.** Children are gathered in the parser's reusable scratch stacks and appended once to `lists`, and each vector of a kept tree is moved out of the scratch store at its exact size. Today a list grows by `push` from empty and is never shrunk, so 53 MB of the analysed trees' 173 MB is capacity no element uses (M2).
+7. **No growth inside a kept tree.** A list's elements wait in the parser's reusable scratch stack until the list ends, and are then committed together (`alloc_many`), so they are contiguous and the list is their `IdxRange`. Their ids are assigned at that commit, so whatever records an element's id during the parse records it then (item 13's declaration list). Each arena of a kept tree is moved out of the scratch store at its exact size. Today a list grows by `push` from empty and is never shrunk, so 53 MB of the analysed trees' 173 MB is capacity no element uses (M2).
 8. **Nodes are small.**
    - Today every `Expr` is 80 B, every `Stmt` 160 B, an `Arg` 104 B and an `ArrayItem` 168 B, whatever they hold.
    - An `ExprNode` or `StmtNode` holds ids, ranges and flags, so a common node is 16-24 B: a binary operation is its operator and two ids, and a method call is an id, a name and a list range. A variant that would be larger, such as a closure, is an id into its own vector.
@@ -1325,7 +1328,7 @@ Exact, except the semantic changes listed in §11: non-UTF-8 identifiers keep th
 
 **Memory (M2).**
 - **At least the 53 MB of unused capacity** in the analysed trees, 31% of their 173 MB.
-- **The 1.10 M per-node allocations become a few vectors per kept file,** about ten for each of the 2,793 analysed files, so their allocator overhead goes too, along with the padding of every node to its largest variant.
+- **The 1.10 M per-node allocations become a few arenas per kept file,** about a dozen for each of the 2,793 analysed files, so their allocator overhead goes too, along with the padding of every node to its largest variant.
 - **The tree keeps its file's source alive** (19.1 MB for the analysed files) in place of the copies it holds today: doc comments and inline HTML through `Interner::str` (9.1 MB) and literals as `PhpString`s (4.4 MB). It costs a few MB more and saves those allocations.
 - **The final heap profile measures the total.** The trees on the workers shrink likewise, and with them the peak once item 3 is in.
 
@@ -1408,7 +1411,10 @@ Context files need line starts, for duplicate-declaration messages (`duplicate_c
    - `LineIndex` (`LineStarts` plus the column tables, `line_col`, `offset(LineCol)`) for analysed files only, built on the worker.
    
    `FileState` holds `enum Lines { Starts(LineStarts), Full(LineIndex) }`.
-2. **Blocks.** The build targets baseline x86-64 (`.cargo/config.toml` sets no `target-cpu`). So the pass uses SSE2's 16-byte blocks, with AVX2's 32-byte blocks behind one `is_x86_feature_detected!` dispatch per process, and eight-byte words in a `u64` on other targets.
+2. **Blocks, through `wide`.** The release builds target baseline x86-64 (`.cargo/config.toml` sets no `target-cpu`) and aarch64.
+   - The pass reads 16-byte blocks as `wide::u8x16` (`u8x16::new`, `cmp_eq`, `move_mask`). These compile to SSE2 on x86-64 and to NEON on aarch64, with a scalar form elsewhere (`wide-0.7.33/src/i8x16_.rs`, `move_mask`), and need no `unsafe` of ours. `wide` 0.7.33 is already in the lockfile, through `imbl`.
+   - **Intrinsics written by hand would need `unsafe`** for their loads, which the workspace denies.
+   - **No AVX2 path.** One behind run-time detection would also need `unsafe` to call, and `pulp`, the safe dispatching crate, documents no bitmask operation. At about half an instruction per byte over the under 70 MB of source a run reads (`read_and_parse_file` allocates 66.5 MB, reallocations included), the SSE2 pass costs ≈35 M. AVX2 would save about half of that, under 0.1% of the run.
 3. **The language server indexes context files on demand.** It reads the file and builds a `LineIndex`, but only when the hash of the bytes the project loaded, which item 1 keeps in `FileState`, still matches the file on disk. When the hash differs, the file is reloaded first.
 4. **Nothing in the front end reads lines.**
    - Ignore marks record offsets: the mark's start, the last and the next code token's start. `ignore_comments` resolves lines through the analysed file's index.
@@ -1431,7 +1437,7 @@ Context files need line starts, for duplicate-declaration messages (`duplicate_c
    
    The lookup is inlined into the identifier arm, and the table is item 10's scratch. A probe compares the length first. The watch list becomes a compile-time perfect-hash table of its spellings, as the keyword slots are: one probe, not a scan (`lexer.rs:240`).
 2. **Keywords by word.** The slot's spelling and the identifier (at most 16 bytes) are loaded as `u64` pairs and folded by OR with the slot's case mask, which leaves `_` and digits alone. One comparison answers both "is it the keyword" and "is it spelled in lower case", so `lex_word`'s second comparison (`lexer.rs:867`) goes. Today: 127.2 M, 73 Ir per call.
-3. **Blank runs by bitmask**, with the blocks and dispatch of item 11 (`class_run` 100 M).
+3. **Blank runs by bitmask**, with item 11's `wide` blocks (`class_run` 100 M).
 4. **Operators without a call.** `lex_operator` costs 45 Ir per operator token over 3.7 M tokens, a third of it its own prologue and epilogue (`lexer.rs:1145`, `:1338`).
    - A byte that is a whole operator nothing can extend (`(`, `)`, `;`, `,`, `{`, `}`, `[`, `]`, `~`, `@`) takes its kind from the byte-class table: `ByteClass::Single(TokenKind)`.
    - A byte that can begin a longer operator goes to a matcher that loads four bytes as one `u32` and compares against that byte's candidates, longest first, from a table generated with the token list.
@@ -1526,9 +1532,12 @@ P12 step 3 was set aside because "it cannot hold references into a tree still be
    - The grammar node, the tag effects and the block's per-tag maps live in vectors of the docblock too.
    - So a distinct docblock is a handful of allocations, not one per node.
 8. **Keys by fingerprint, bounds by weight.**
-   - A memo is keyed by a 128-bit fingerprint of its text, as rustc keys incremental results by `Fingerprint`, so no text is copied into a key. Today's key copies come to about 15 MB.
-   - It is bounded by a byte budget that counts its values as well as its keys.
-   - It evicts by CLOCK, the least recently hit first. Today a full shard is emptied whole (`memo.rs:88`), and the tag memo's bound is 131 K entries.
+   - **A memo is keyed by a 128-bit fingerprint of its text,** as rustc keys incremental results by `Fingerprint`, so no text is copied into a key. Today's key copies come to about 15 MB.
+     - The fingerprint is SipHash-1-3 with 128-bit output (`siphasher` 1.0.4, `sip128::SipHasher13::new_with_keys`, already in the lockfile through `phf`), keyed by a key drawn at random for each process.
+     - So no input can be crafted to collide with another without the key, and an accidental collision has a 2^-128 chance per pair. A collision would hand one docblock's types to another.
+     - rustc's key is fixed, because it stores its fingerprints. These memos live in one process.
+   - **It is bounded by a byte budget** that counts its values as well as its keys.
+   - **It evicts by `quick_cache`'s weighted cache** (0.7, `sync::Cache::with_weighter`), a Clock-PRO variant that resists scans, with 21 B of overhead per entry. That replaces a hand-written CLOCK. Today a full shard is emptied whole (`memo.rs:88`), and the tag memo's bound is 131 K entries.
 
 **Oracle.** `registry-dump` (every docblock's resolved types), the PHPDoc resolution record, O2. Exact. **Saving.** ≈0.35 G.
 
@@ -1625,13 +1634,17 @@ The purity and property-write keys went by item 4, as ids.
 - **A name is one allocation.**
   - A header holds the text hash, the folded hash, the length, the offset of the last segment (item 15's short names), and where the lowercase form starts, or that the text is already lowercase.
   - The text follows the header in the same block, then the lowercase form when it differs.
-  - This is a thin dynamically sized value, as `triomphe::ThinArc<Header, [u8]>` is, and as rowan holds its green nodes.
-  - `Name` stays one pointer wide, and equality stays identity.
-- **The weak tables hold `(hash, Weak)` pairs in a `hashbrown::HashTable`,** with collisions as separate entries. The hash stays in the entry because a dead `Weak` cannot be read. The type interner loses its per-hash `Vec`s; the name tables already have this form.
-- **Shape string keys are interned** in a weak table of byte strings, as names are. A key found in the table costs no allocation.
+  - It is a `triomphe::ThinArc<Header, u8>` (0.1.16), built by `from_header_and_slice`: one pointer wide, header and bytes in one block, with no `unsafe` of ours. A thin dynamically sized value written by hand would need it. Rowan holds its green nodes the same way.
+  - Equality stays identity, through `ThinArc::ptr`.
+- **The tables hold strong entries, as rust-analyzer's interner does** (`ra_ap_intern`'s `Interned`).
+  - `triomphe` has no weak references, so the tables cannot hold `Weak`s as today's do.
+  - A handle whose drop sees a count of two (itself and the table) takes the table's shard lock, checks the count again, and removes the entry. A lookup clones its entry under the same lock, so it cannot revive an entry being removed.
+  - An entry is hashed by the hash in its header, so it is one pointer, with no stored hash. The type interner loses its per-hash `Vec`s.
+  - The type interner's nodes become `triomphe::Arc`s on the same rule, which also removes the weak count from every node.
+- **Shape string keys are interned** in a table of byte strings, as names are. A key found in the table costs no allocation.
 - **The type memos are cleared with the relation memo's generation** (item 7), so a long session does not keep the answers of hierarchies it no longer has.
 
-**Oracle.** O2, `--dump-types`, `registry-dump`; the interner's tests over dead entries. Exact.
+**Oracle.** O2, `--dump-types`, `registry-dump`; the interner's tests over freed entries and drops racing lookups on other threads. Exact.
 
 **What stays.** One allocation per distinct live value: that is what interning with freeing costs. rust-analyzer's `intern::Interned` pays the same. A per-session arena that never frees, as rustc's interners use, would grow without end in a server, so the plan keeps freeing.
 
@@ -1660,6 +1673,10 @@ Each cached file is read whole only to hash it for its entry's key (`session.rs:
    - A per-project index, written at the end of a run, maps each path to `(size, mtime_ns, inode, device, content hash)`.
    - When a context file's four stat fields match, and its recorded mtime is older than the index's own write time (git's rule for racily clean entries), the recorded hash is taken without reading the file. Otherwise the file is read and hashed.
    - Analysed files are read anyway.
+   - **Every content hash is BLAKE3** (`blake3` 1.8.7): this index's, the base's key, item 1's hash in `FileState` and item 11's check, and the per-file cache's keys, which today are XXH3-128 of a file's bytes and path (`file_cache.rs:164-176`).
+     - A cache must never answer for other content. XXH3 makes no claim against inputs crafted to collide. A cache directory shared between CI runs of untrusted pull requests is where a crafted file could inherit a clean file's results.
+     - BLAKE3 is cryptographic. It picks its SIMD at run time behind a safe API, NEON included, and builds its assembly with `cc`, which the release builds already run for `pcre2-sys`.
+     - An estimated few tens of ms of CPU over the under 70 MB of source a cold run reads, spread over the workers. A warm run hashes only what `stat` cannot clear.
 2. **A resolved context base**, as the stub base is resolved.
    - **What it holds:**
      - the registry after the finishing passes over the context declarations alone;
@@ -1765,7 +1782,7 @@ A cold run pays one more incremental finishing, over the analysed files' closure
       - The per-try and per-loop vectors (`control_flow.rs:140-141`, `try_catch.rs:84`) are scratch stacks.
     - **F6d.** The narrowing inserts and the `Rc<Vec<..>>` implied facts (`narrowing.rs:569`, `control_flow.rs:276`, `:314`, `:336`) live in step 3's radix arrays.
     - **F6e.** The separate walks' vectors (`bind_targets`, `strict_rules.rs:951`: 20,655; the keyword-scope and `declare` visitors; `section_ends`; the usage walkers) go with the walks, which become families of step 1's traversal.
-    - **F6f. Analyses that are a function of a text are made once per distinct text,** scanning bytes and keeping slices:
+    - **F6f. Analyses that are a function of a text are made once per distinct text,** in item 14's fingerprint-keyed, weight-bounded memo, scanning bytes and keeping slices:
       - regex groups (`regex_groups.rs`: the pattern as a `Vec<char>`, `:505`; a `String` per literal char, `:936`);
       - `preg` shapes;
       - DQL (`dql.rs:172`);
@@ -1814,7 +1831,9 @@ The autoload thread (321.4 M, off the critical path) keeps the one parser, as P1
   - The check takes the tree out of the file's state and owns it for the length of the job.
   - Files are checked largest first, so the largest trees go first.
   - The private-property judgment (`judge_property_types`) reads the writes recorded during the checks, and parses again only the files outside the batch, through `ast_of`.
-- **The server keeps the trees of open documents, plus an LRU of recently checked files.** This is the policy rust-analyzer applies to its parse trees (`lru.capacity`, 128 files by default).
+- **The server keeps the trees of open documents, plus a cache of recently checked files bounded by bytes.**
+  - The cache is `quick_cache`'s weighted cache, weighing each tree by its arenas' bytes. It replaces `AstCache`'s `VecDeque` (`project.rs:175-190`).
+  - rust-analyzer applies the same policy to its parse trees, but bounds them by count (`lru.capacity`, 128 files by default), whatever their size.
   - Any other tree is parsed again on demand through `ast_of`, from text read on demand and checked against the hash item 1 keeps.
   - An edit that rechecks a dependent file parses that file again if its tree was evicted.
 - **No reader gets an empty file.** `FileState::ast` goes, and every reader asks `ast_of`, which parses again when the tree is gone.
@@ -2007,6 +2026,29 @@ The rewrite made two more changes:
   - docblock nodes in one vector per docblock (14).
   
   It also added radix nodes written in place when unshared (18), and a profile with untrimmed backtraces for the unplaced 11 K (0). What still stays is listed in §12 with its reason: ≈1.35 M allocations.
+
+**The dependency pass.** New dependencies were allowed after item 9's review, so every item was read again for hand-written code that a sound crate would replace. Each crate's API was checked in its source or its documentation. Our own code still has no `unsafe`; a crate may use it behind a safe API.
+
+| crate | items | what it does there |
+|---|---|---|
+| `la-arena` 0.3.1 | 4, 9, 14 | typed arenas, ids, ranges and side tables; a list as the range of its contiguous elements |
+| `wide` 0.7.33, already in the lockfile | 11, 12 | 16-byte blocks: SSE2 on x86-64, NEON on aarch64 |
+| `triomphe` 0.1.16 | 16 | a name as one thin allocation (`ThinArc`); type nodes without a weak count; strong tables, freed by rust-analyzer's rule |
+| `quick_cache` 0.7 | 14, 18, 19 | weighted, scan-resistant memos; the server's tree cache bounded by bytes |
+| `siphasher` 1.0.4, already in the lockfile through `phf` | 14, 18 | memo fingerprints keyed per process, so no collision can be crafted |
+| `blake3` 1.8.7 | 1, 11, 17 | every content hash a cache trusts |
+
+**Considered and not taken:**
+- `bumpalo-herd` with `self_cell` (9): a safe arena of references, but ids give smaller nodes, exact sizes, no lifetime and dense side tables.
+- `pulp` (11, 12): safe dispatch at run time, but it documents no bitmask operation, and AVX2 would save under 0.1%.
+- `rkyv` (6, 17): records read in place with no decoding, but every reader would need the archived form beside the owned one, and after items 6 and 17 only the records a run reads are decoded.
+- `jwalk` and `ignore` (2): their walks cannot carry item 2's role pruning, link rules, index-path order and per-directory parse tasks. `same-file` already gives item 2's identity on Windows.
+- `slotmap` (4): ids are assigned by prefix sum across a parallel merge (item 5), which a slot map's serial insert cannot do. The generation is kept as `slotmap` designs it.
+- `imbl::Vector` and `rpds::Vector` (18): neither exposes the subtree pointers that C4's diff skips by.
+- `phf` (12): its SipHash costs more per identifier than the hash the lexer's perfect tables use.
+- `roaring` (5): posting lists are short, with one id held inline.
+- `bstr` (15): `std`'s `utf8_chunks` gives a name's display.
+- `simdutf8`: after item 9, the lexer does not validate a whole source to borrow text from it.
 
 **The item-by-item review** (in progress):
 
