@@ -701,22 +701,37 @@ Twenty-one items, numbered in the order they are built. Each states what is ther
 - **F3. Captures by reference.** Inside a closure, a variable captured by reference starts with its type at the capture, though the closure's earlier calls and the outer function may have written it since: `$shouldBeNewLine` is `true` at the capture, the closure sets it `false`, and its next call reads `false`.
 - **F4. `array_reduce`.** Its type is the callback's return type even when the array may be empty, where PHP returns the initial value; and `$carry` is bound to the initial value's type only, though from the second element on it holds the callback's return.
 
-**The fix: what a call may write, sound, bounded by the class hierarchy** (the user's decision, over keeping the receiver-and-arguments rule):
-1. **One verdict per declaration:** the objects it may write (nothing, its own, any) and the shared slots it may write, a set or any. A slot is a static property (its declaring class and name), a global variable by name, or a declaration's static variable.
-2. **The summary's one walk records slot writes:** every write form (assignment, compound, `++`/`--`, `unset`, a write into an element, `=&`, `foreach (… as &$v)`) to `X::$p`, `$GLOBALS['x']`, a variable the body binds by `global` or `static`, or a variable bound by reference to one of those; and a slot passed where a parameter is by reference. A dynamic form (`$c::$p`, `X::$$n`, `$GLOBALS[$k]`, `$$n`, `extract`, a one-argument `parse_str`) writes any slot of its kind where the body has such a binding. A closure's or arrow function's body counts for the declaration that holds it.
-3. **The fixed point settles both parts.**
-   - A call to an overridable method, or through an interface, reaches every implementation loaded (the receiver class's own and every descendant's, by `subtype_children`), and writes what they write together. Code not loaded is not assumed: the program is what the run loads.
-   - A callable whose origin is unknown writes anything; a callback that is a closure, an arrow function, a first-class callable or a function named by a literal writes what its body or its target writes.
-   - A builtin writes nothing, except through a parameter that runs code (`CODE_RUNNING_PARAMETER_TYPES`), where it writes what the code passed writes, and except a stream function, which runs the stream-wrapper methods (`stream_open`, `url_stat`, `dir_opendir`, …) of every loaded class that has them and writes what they write. The stream functions are found by running each of PHP's functions against a wrapper that records its calls, in `php` 8.5.
-4. **The checker forgets what the verdict says may change,** with every key that depends on it:
-   - any object written: every property narrowing;
-   - its own object written: the narrowings of every value that may be the receiver, its type not disjoint from the receiver's;
-   - slots: the written static properties' narrowings (the same name, on classes related by inheritance, or either class unknown); the variables bound to a written global, every variable at a file's top level counting as global; the function's static variables when the call may enter the function again; and the variables bound by reference to a written slot.
-5. **F3:** a variable captured by reference is entered with the union of its type at the capture and of every type a write gives it while the reference is shared. The closure's body is checked until that union stops growing, as a loop body is, and checked again when the outer function writes the variable after the capture.
-6. **F4:** `array_reduce` is the callback's return type for an array that is never empty, the initial value's for one that is always empty, and their union otherwise; `$carry` is bound to the initial value's type together with the callback's return type.
-7. **Code PHP runs without a call written:** magic methods, destructors, autoloaders, error and exception handlers, output-buffer callbacks. These are item 20.
+**The fix: what code may write, by storage, sound, bounded by the class hierarchy** (the user's decision, over keeping the receiver-and-arguments rule, then made field- and type-sensitive):
+1. **The premise:** the program is what the run loads. This is the closed world the whole-program checks already assume (dead code, unused members, sealed hierarchies). Everything below is sound for that program and keeps every possibility it leaves open.
+2. **An effect is a set of storages written, or anything.** The storages:
+   - an object property: the property, on objects that may be of the class declaring it, with a write to the callee's own `$this` kept apart, so that a call site can place it on its receiver;
+   - a static property: its storage, the class that declares it as reached from the class named. `static::$p` reaches every storage of `$p` over the class and its descendants. A property a trait gives is stored per using class.
+   - a global variable, by name;
+   - a declaration's `static` variable. A method's is shared with the classes that inherit it without overriding from PHP 8.1, and is per class before, so it follows the configured versions;
+   - a variable captured by reference, as a storage of the frame that captured it.
+3. **The summary's one walk records the writes,** together with their base expressions:
+   - every write form: assignment, compound, `++`/`--`, `unset`, a write into an element or a nested property, `=&`, `foreach (… as &$v)`;
+   - a storage passed where a parameter is by reference;
+   - a variable bound by `global`, by `static` or by reference to a storage;
+   - a dynamic form (`$o->$p`, `$c::$p`, `X::$$n`, `$GLOBALS[$k]`, `$$n`, `extract`, a one-argument `parse_str`) writes every storage of its kind its base may reach;
+   - a closure's or arrow function's body counts for the declaration that holds it.
+4. **The fixed point settles every declaration's effect over the call graph.**
+   - A call to an overridable method, or through an interface, reaches every loaded implementation: the receiver type's own and every descendant's, by `subtype_children`.
+   - A callable whose target is not known writes anything; a closure, an arrow function, a first-class callable or a function named by a literal writes what its target writes.
+   - A builtin writes exactly what its documented behaviour writes:
+     - nothing, by default;
+     - the storage passed at a by-reference parameter;
+     - what the code passed as a callback writes;
+     - what the methods it calls on an argument write, over the argument's type by the hierarchy: `count` and `Countable::count`, `json_encode` and `jsonSerialize`, iteration, string conversion, the serialization hooks;
+     - for a stream function, what the wrapper methods it calls write (`fopen` calls `stream_open`, `file_exists` calls `url_stat`, …), on every class the program registers with `stream_wrapper_register`, or on every loaded class with that method when a registration's class is not known. Which methods each function calls is found by running every PHP function against a wrapper that records its calls, in `php` 8.5.
+5. **The checker forgets what an effect may have changed,** with every key that depends on it:
+   - object properties: the facts about property `p` (its narrowing and every key below it) on each value whose type may be an object the write reaches. That is the receiver and the values that may alias it for a write to the callee's own `$this`, and every value whose type may be of the declaring class otherwise. An object the function created and never let escape keeps its facts: not passed, stored, captured, returned, yielded or bound by reference since its `new`.
+   - static properties by storage; variables bound to a written global, every variable at a file's top level counting as global; the function's static variables when the call may enter the function again; variables captured by reference that the call may write; and variables bound by reference to any written storage.
+6. **F3:** a variable captured by reference is entered with the union of its type at the capture and of every type a write gives it while the reference is shared. The closure's body is checked until that union stops growing, as a loop body is, and checked again when the outer function writes the variable after the capture.
+7. **F4:** `array_reduce` follows its stub's generics: `$carry` is the initial value's type joined with the callback's return type, until that stops growing. The result is the callback's return type for an array that is never empty, the initial value's for one that is always empty, and their union otherwise.
+8. **Code PHP runs without a call written** (magic methods on member access, destructors, autoloaders, error and exception handlers, output-buffer callbacks, tick functions) is item 20, with the same effects.
 
-**Oracle for the fix:** fixtures for each slot and binding kind, each call kind (a virtual call with two implementations, one writing; a callback; a stream wrapper), a capture written later by the outer function, and `array_reduce` over an empty, a non-empty and a possibly empty array, each checked against `php`. In item 0's validation (0.11) the reports are compared with `5fb858c9`'s: the five false reports above go, and every other difference is read.
+**Oracle for the fix:** fixtures for each storage and binding kind (an inherited, a redeclared and a trait's static property; `static::`; a method's static variable on PHP 7.4 and 8.1), each call kind (a virtual call with two implementations, one writing; an interface call; a callback; a builtin calling an argument's method; a stream wrapper, registered and not), field sensitivity (a call writing another property keeps this one), an escaped and an unescaped new object, a capture written later by the outer function, and `array_reduce` over an empty, a non-empty and a possibly empty array, each checked against `php` (7.4 through `docker` for the static variables). In item 0's validation (0.11) the reports are compared with `5fb858c9`'s: the five false reports above go, and every other difference is read.
 
 **Oracle.** None beyond §11 for the dumps and the deletions: they leave release behaviour as it is. The fixes found in step 1 are semantic, read in 0.11 against `5fb858c9`'s reports.
 
@@ -2167,7 +2182,7 @@ Exact, except the private-property judgment, listed in §11.
 **Platforms.** CI runs on `ubuntu-24.04` only (`rust-ci.yml:18`), while the release builds for `macos-26` and `windows-2025-vs2026` (`release.yml:33-53`). A CI matrix job on those two runs item 6's file-replacement test from item 6's validation on, and item 17's `stat` cases from item 17's, and each result is recorded.
 
 **The semantic changes, by item.** At an item's validation, every difference from the previous item's dumps must be one of its own:
-  - **item 0:** the fixes found in step 1: shared storage forgotten after a call that may write it, calls that may write anything bounded by the class hierarchy, captures by reference entered with every type written while shared, and `array_reduce` with its initial value;
+  - **item 0:** the fixes found in step 1: what a call may write, by storage, forgotten after it (object properties by field and type, static properties, globals, static variables, captures and references), calls bounded by the class hierarchy and builtins by what they call, captures by reference entered with every type written while shared, and `array_reduce` with its initial value;
   - **item 1:**
     - a file reached through a link is loaded once and reported under its resolved path, with `__FILE__` and `__DIR__` resolved;
     - a file both analysed and context is analysed, once;
