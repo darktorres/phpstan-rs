@@ -248,9 +248,14 @@ when it runs, and the plan adds the checks found along the way.
 - **Item 0's validation (0.11)** is under way: the tests, fixtures and
   runtime oracle pass, and the edit replay over Piwigo and every vendor
   project found the stale diagnostics and registry state the plan's "Found
-  in item 0's validation" block lists, each fixed. Left: the dumps with the
-  `gate` and `oracle` builds, `cargo xtask corpus --full` with the
-  equalities, the reports against `5fb858c9`'s, the memory baseline.
+  in item 0's validation" block lists, each fixed. The dumps and O2 became
+  one pass, `cargo xtask corpus --full` on a worker per core (rows
+  0.11a-0.11c, done), with `cargo xtask progress --watch`. Next, before the
+  baseline: fast validation (0.11d-0.11j, 0.11n), from the profile of a
+  replay and a vendor project's run, and the builtin catalog from php-src
+  per PHP version (0.11k-0.11m), which replaces the recorded builtin-runs
+  table and which item 20 reads. Then the pass with the `gate` and
+  `oracle` builds, the reports against `5fb858c9`'s, the memory baseline.
 - **Found along the way, done:** version gates for the syntax PHP 7.1 to 8.5
   added (`492ccf0e`, `50fa1e43`, `d8090e5e`), and `php_version` taking a
   range (`dfdfeeb4`). The runtime oracle calls each asserting function with
