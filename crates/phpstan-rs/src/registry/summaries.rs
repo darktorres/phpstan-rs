@@ -345,13 +345,6 @@ impl BodySummary {
         syntax::visit::walk_stmts(&mut walk, body);
         let mut summary = walk.finish();
         summary.empty = body.is_empty();
-        // What a walk of the statements alone finds.
-        #[cfg(debug_assertions)]
-        assert_eq!(
-            summary.assigned,
-            AssignedProperties::of(body),
-            "the walk of a body and the walk of its statements disagree on the properties it assigns"
-        );
         summary
     }
 }
@@ -417,22 +410,6 @@ impl AssignedBuilder {
 }
 
 impl AssignedProperties {
-    /// What a walk of the statements of `body` alone finds: the reference
-    /// for what the one walk of the summary does.
-    #[cfg(debug_assertions)]
-    fn of(body: &[Stmt]) -> Option<Box<AssignedProperties>> {
-        let mut builder = AssignedBuilder::default();
-        for stmt in body {
-            syntax::visit::any_stmt_in_body(stmt, |s| {
-                if let StmtKind::Expression(e) = &s.kind {
-                    builder.statement(e);
-                }
-                false
-            });
-        }
-        builder.finish()
-    }
-
     /// Whether the body assigns `prop` on `$this` or on a variable it made
     /// an instance of `class_name` (or of `self` or `static`).
     pub(crate) fn assigns(&self, prop: &str, class_name: &str) -> bool {

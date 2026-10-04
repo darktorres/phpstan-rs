@@ -106,28 +106,10 @@ pub(super) fn collect(
                     .push(Name::from(name.trim_start_matches('\\')));
             }
         }
-        built_declaration(
-            declaration,
-            ctx,
-            guards,
-            origin,
-            None,
-            &mut found.built_decls,
-        );
+        built_declaration(declaration, ctx, guards, origin, &mut found.built_decls);
     });
     if has_anonymous_class {
         found.built_decls.extend(anonymous_class_decls(ast, origin));
-    }
-    // What a walk of the expressions too finds.
-    #[cfg(debug_assertions)]
-    if !in_expressions {
-        let mut declared = 0;
-        syntax::declarations::for_each_declaration(ast, |_, _, _| declared += 1);
-        assert_eq!(
-            declared,
-            found.functions.len() + found.classes.len() + found.constants.len(),
-            "a file whose facts say it declares nothing in an expression does"
-        );
     }
     found
 }

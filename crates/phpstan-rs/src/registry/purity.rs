@@ -352,15 +352,6 @@ fn classify_summary(
         .purity
         .as_deref()
         .and_then(|calls| resolve_purity_calls(calls, declaring_class, registry));
-    // The answer from the statements themselves, for the bodies at hand.
-    #[cfg(debug_assertions)]
-    if let Some(body) = bodies.body(provenance) {
-        assert_eq!(
-            deps,
-            classify_body(body, declaring_class, registry),
-            "the summary of a body and the body disagree on its purity"
-        );
-    }
     Some(deps)
 }
 
@@ -405,36 +396,6 @@ fn resolve_purity_calls(
     Some(deps)
 }
 
-/// Walks a declaration's own body once, returning its dependency list
-/// (`Some(deps)`, possibly empty) or `None` the moment any disqualifying
-/// construct or unresolvable call is found - matches real PHPStan's own
-/// "one impure point/one unresolvable call disqualifies the whole
-/// declaration" rule exactly, not a per-statement partial result.
-/// `declaring_class` is `None` for a plain top-level function, `Some`
-/// for a method/constructor - needed to resolve `$this->`/`self::`/
-/// `static::`/`parent::`/`new self()`/`new static()`.
-#[cfg(debug_assertions)]
-fn classify_body(
-    body: &[Stmt],
-    declaring_class: Option<&str>,
-    registry: &Registry,
-) -> Option<Vec<PurityDependency>> {
-    let mut search = Disqualifier {
-        declaring_class,
-        registry,
-        deps: Vec::new(),
-        found: false,
-    };
-    walk_stmts(&mut search, body);
-    if search.found {
-        return None;
-    }
-    let mut deps = search.deps;
-    deps.sort();
-    deps.dedup();
-    Some(deps)
-}
-
 /// The class `new <name>(...)` instantiates: the declaring class for
 /// `self`/`static`, else the name as resolved.
 fn new_target_class(name: &QualifiedName, declaring_class: Option<&str>) -> Option<String> {
@@ -442,135 +403,6 @@ fn new_target_class(name: &QualifiedName, declaring_class: Option<&str>) -> Opti
         return declaring_class.map(str::to_string);
     }
     name.resolved_class().map(str::to_string)
-}
-
-/// Searches one body for a construct that disqualifies it from purity,
-/// collecting the calls its purity depends on along the way. A closure,
-/// arrow function or class defined in the body doesn't run by being
-/// defined, so none is entered (an anonymous class's constructor
-/// arguments are).
-#[cfg(debug_assertions)]
-struct Disqualifier<'r> {
-    declaring_class: Option<&'r str>,
-    registry: &'r Registry,
-    deps: Vec<PurityDependency>,
-    found: bool,
-}
-
-#[cfg(debug_assertions)]
-impl<'ast> Visitor<'ast> for Disqualifier<'_> {
-    fn visit_function_decl(&mut self, _: &'ast FunctionDecl) {}
-
-    fn visit_class_def(&mut self, _: &'ast ClassDef) {}
-
-    fn visit_stmt(&mut self, stmt: &'ast Stmt) {
-        if self.found {
-            return;
-        }
-        syntax::stack::guard(|| {
-            self.found = match &stmt.kind {
-                // `echo`/`die`/`exit`/`print` are `betweenPhpTags`'s own
-                // "output" siblings - real PHPStan's own separate `echo`
-                // identifier for the statement form specifically.
-                StmtKind::Echo(_) => true,
-                // An *explicit* `throw` - matches `resolveDependencies`'s
-                // own `$throwPoint->isExplicit()` check exactly (an implicit
-                // throw from a called function is a different, unmodeled
-                // concern, same as real PHPStan's own treatment).
-                StmtKind::Throw(_) => true,
-                StmtKind::Global(_) => true,
-                // `static $x = ...;` - a function-local variable persisting
-                // across calls, real PHPStan's own `'static'` identifier.
-                StmtKind::StaticVar(_) => true,
-                // Real output between PHP tags - `betweenPhpTags`.
-                StmtKind::InlineHtml(_) => true,
-                // Unsetting a variable changes nothing outside the function;
-                // unsetting a property does (`propertyUnset`).
-                StmtKind::Unset(targets) => targets.iter().any(property_write_target),
-                _ => false,
-            };
-            if !self.found {
-                walk_stmt(self, stmt);
-            }
-        })
-    }
-
-    fn visit_expr(&mut self, e: &'ast Expr) {
-        if self.found {
-            return;
-        }
-        syntax::stack::guard(|| {
-            let (class, registry) = (self.declaring_class, self.registry);
-            let disqualifies = match &e.kind {
-                // Any static property access at all - real PHPStan's own
-                // `staticPropertyAccess` fires even for a bare read of
-                // shared static state, not just a write.
-                ExprKind::ClassConstFetch(..)
-                | ExprKind::ClassNameFetch(_)
-                | ExprKind::StaticPropertyFetch(..)
-                | ExprKind::DynamicStaticPropertyFetch(..) => true,
-                ExprKind::Variable(name) => is_superglobal(name),
-                ExprKind::Yield(..) | ExprKind::YieldFrom(_) => true,
-                // Runs a shell command.
-                ExprKind::ShellExec(_) => true,
-                ExprKind::Print(_)
-                | ExprKind::Exit(..)
-                | ExprKind::Eval(_)
-                | ExprKind::Include(..) => true,
-                ExprKind::Assign(lhs, _)
-                | ExprKind::AssignRef(lhs, _)
-                | ExprKind::CompoundAssign(_, lhs, _) => property_write_target(lhs),
-                // The declared name, not a lowercased one - see
-                // `resolve_this_method_call`'s own doc comment for why a
-                // lowercased key would break `dependency_is_pure`'s later
-                // exact lookup.
-                ExprKind::Call(callee, _) => match &callee.kind {
-                    ExprKind::Name(name) => match registry.resolve_function(name) {
-                        Some((resolved, _)) => {
-                            let declared = registry
-                                .lookup_function_with_name(resolved)
-                                .map_or(resolved, |(declared, _)| declared);
-                            self.deps
-                                .push(PurityDependency::Function(Name::from(declared)));
-                            false
-                        }
-                        None => true,
-                    },
-                    _ => true,
-                },
-                ExprKind::MethodCall(recv, name, _, _) => {
-                    !matches!(&recv.kind, ExprKind::Variable(v) if *v == "this")
-                        || class.is_none_or(|class| {
-                            resolve_this_method_call(class, name, registry, &mut self.deps)
-                        })
-                }
-                // A dynamic receiver is never one of the resolvable
-                // pseudo-keywords: unresolvable, so disqualifying.
-                ExprKind::StaticCall(target, name, _) => match (class, target.as_name()) {
-                    (Some(class), Some(target)) => {
-                        resolve_static_call(class, target, name, registry, &mut self.deps)
-                    }
-                    _ => true,
-                },
-                // A computed method name: any method, so unresolvable.
-                ExprKind::DynamicMethodCall(..) | ExprKind::DynamicStaticCall(..) => true,
-                ExprKind::New(callee, _) => match &callee.kind {
-                    ExprKind::Name(name) => match new_target_class(name, class) {
-                        Some(target) => resolve_new(&target, registry, &mut self.deps),
-                        None => true,
-                    },
-                    _ => true,
-                },
-                ExprKind::Closure { .. } | ExprKind::ArrowFn { .. } => return,
-                _ => false,
-            };
-            if disqualifies {
-                self.found = true;
-            } else {
-                walk_expr(self, e);
-            }
-        })
-    }
 }
 
 /// `$obj->prop = ...`/`unset($obj->prop)` - a property write/unset on

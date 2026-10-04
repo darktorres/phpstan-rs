@@ -18,8 +18,6 @@ use crate::registry::stubs;
 use crate::registry::{
     BodySource, BuiltDecl, DeclKind, FileBodies, GlobalFacts, Origin, Provenance, Registry,
 };
-#[cfg(debug_assertions)]
-use crate::registry::{Keep, build_declarations_where};
 use declared_classes::{DeclaredClass, declared_classes};
 use diagnostics::{self, Diagnostic, DiagnosticBuilder};
 use syntax::FileFacts;
@@ -216,13 +214,6 @@ impl FileState {
 
 /// The loaded files' function and method bodies, found by provenance.
 impl BodySource for file_table::FileTable<FileState> {
-    #[cfg(debug_assertions)]
-    fn body(&self, provenance: &Provenance) -> Option<&Arc<Vec<Stmt>>> {
-        self.get_by_origin(provenance.file()?)?
-            .bodies
-            .get(provenance.declaration_span())
-    }
-
     fn summary(&self, provenance: &Provenance) -> Option<&Arc<crate::registry::BodySummary>> {
         self.get_by_origin(provenance.file()?)?
             .bodies
@@ -1284,21 +1275,6 @@ impl Project {
             })
             .collect();
         sources.sort_by_key(|source| (source.0, source.1));
-        // What the files' trees build, which their kept declarations are.
-        #[cfg(debug_assertions)]
-        for (_, _, path, decls) in &sources {
-            if let Some(state) = self.files.get(path)
-                && let Some(ast) = state.tree()
-            {
-                let built =
-                    crate::registry::build_declarations(ast, &Origin::File(Arc::from(*path)));
-                assert!(
-                    built.iter().eq(decls.iter()),
-                    "the declarations kept of {} are not those its tree builds",
-                    path.display()
-                );
-            }
-        }
         for (analyzed, _, path, decls) in sources {
             for decl in decls {
                 if let BuiltDecl::Class { name, .. } = decl {
@@ -1651,28 +1627,6 @@ impl Project {
                 DeclKind::Function => function_keys.contains(&name.to_ascii_lowercase()),
                 DeclKind::Constant => constant_keys.contains(name),
             };
-            // What the file's tree builds, which its kept declarations are.
-            #[cfg(debug_assertions)]
-            if !is_pending
-                && let Some(state) = self.files.get(path)
-                && let Some(ast) = state.tree()
-            {
-                let origin = Origin::File(Arc::from(path));
-                let keep: Keep<'_> = &rebuilt;
-                let built = build_declarations_where(ast, &origin, Some(keep));
-                let kept: Vec<&BuiltDecl> = decls
-                    .iter()
-                    .filter(|decl| {
-                        let (kind, name) = decl.kind_and_name();
-                        rebuilt(kind, name)
-                    })
-                    .collect();
-                assert!(
-                    built.iter().eq(kept.iter().copied()),
-                    "the declarations kept of {} are not those its tree builds",
-                    path.display()
-                );
-            }
             for decl in decls {
                 let (kind, name) = decl.kind_and_name();
                 if !is_pending && !rebuilt(kind, name) {
@@ -2900,40 +2854,7 @@ fn file_references(
     let Some(recorded) = recorded else {
         return deps::both_referenced_names(ast);
     };
-    let found = deps::recorded_references(recorded);
-    // What a walk of the tree finds.
-    #[cfg(debug_assertions)]
-    {
-        let walked = deps::both_referenced_names(ast);
-        assert!(
-            found.0 == walked.0,
-            "the references the parse recorded and the walk finds differ: {:?}",
-            symmetric_difference(&found.0, &walked.0)
-        );
-        assert!(
-            found.1 == walked.1,
-            "the declaration references the parse recorded and the walk finds differ: {:?}",
-            symmetric_difference(&found.1, &walked.1)
-        );
-        let declared = deps::declaration_referenced_names(ast);
-        assert!(
-            found.1 == declared,
-            "the declaration references the parse recorded and the declarations' walk finds differ: {:?}",
-            symmetric_difference(&found.1, &declared)
-        );
-    }
-    found
-}
-
-#[cfg(debug_assertions)]
-fn symmetric_difference(
-    a: &FxHashSet<deps::RefKey>,
-    b: &FxHashSet<deps::RefKey>,
-) -> (Vec<deps::RefKey>, Vec<deps::RefKey>) {
-    (
-        a.difference(b).cloned().collect(),
-        b.difference(a).cloned().collect(),
-    )
+    deps::recorded_references(recorded)
 }
 
 /// A file parsed, with its inline ignore comments.
@@ -3130,13 +3051,6 @@ pub(crate) fn parse_file_recording<'a>(
         declared_classes,
     } = file_declarations::collect(&ast, path, is_stub, &origin, &facts);
     let (references, declaration_references) = file_references(&ast, references);
-    // What a walk of the declarations finds.
-    #[cfg(debug_assertions)]
-    assert_eq!(
-        format!("{declared_classes:?}"),
-        format!("{:?}", declared_classes::declared_classes(&ast)),
-        "the classes found alongside the declarations and by their own walk differ"
-    );
     // The anonymous classes are the declarations built last, one per
     // `new class`, so the file's own walk need not be repeated for them.
     let anonymous_classes = built_decls

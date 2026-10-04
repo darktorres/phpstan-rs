@@ -33,7 +33,7 @@ pub fn global_variable_key(name: &str) -> String {
 /// namespace yields both the namespaced and the global name, and the
 /// names in PHPDoc tags are taken from the tag text without parsing it.
 pub fn referenced_names(stmts: &[Stmt]) -> FxHashSet<RefKey> {
-    let mut collector = Collector::new(true, false);
+    let mut collector = Collector::new(false);
     walk_stmts(&mut collector, stmts);
     collector.names
 }
@@ -112,18 +112,9 @@ pub(crate) fn doc_site_references(
 
 /// `referenced_names` and `declaration_referenced_names`, in one walk.
 pub fn both_referenced_names(stmts: &[Stmt]) -> (FxHashSet<RefKey>, FxHashSet<RefKey>) {
-    let mut collector = Collector::new(true, true);
+    let mut collector = Collector::new(true);
     walk_stmts(&mut collector, stmts);
     (collector.names, collector.outside)
-}
-
-/// `referenced_names` without what only function and method bodies
-/// mention: the names a file's declarations can take their shape from
-/// (signatures, hierarchies, PHPDoc, constant values).
-pub fn declaration_referenced_names(stmts: &[Stmt]) -> FxHashSet<RefKey> {
-    let mut collector = Collector::new(false, false);
-    walk_stmts(&mut collector, stmts);
-    collector.names
 }
 
 /// Collects every name a file mentions, resolved against the `namespace`
@@ -132,15 +123,13 @@ pub fn declaration_referenced_names(stmts: &[Stmt]) -> FxHashSet<RefKey> {
 struct Collector {
     names: FxHashSet<RefKey>,
     // With `track_outside`, the names found anywhere but in a function or
-    // method body: what `declaration_referenced_names` finds, from the same
-    // walk.
+    // method body: what a file's declarations can take their shape from
+    // (signatures, hierarchies, PHPDoc, constant values).
     outside: FxHashSet<RefKey>,
     track_outside: bool,
     // How many function and method bodies the walk is inside.
     body_depth: usize,
     ctx: NameContext,
-    // Whether function and method bodies are walked.
-    bodies: bool,
     // The doc comments of the classes and functions being walked,
     // innermost last: their template parameters are names that are not
     // classes.
@@ -174,14 +163,13 @@ fn doc_names_of(doc: &str) -> std::sync::Arc<DocNames> {
 }
 
 impl Collector {
-    fn new(bodies: bool, track_outside: bool) -> Collector {
+    fn new(track_outside: bool) -> Collector {
         Collector {
             names: FxHashSet::default(),
             outside: FxHashSet::default(),
             track_outside,
             body_depth: 0,
             ctx: NameContext::default(),
-            bodies,
             templates: Vec::new(),
         }
     }
@@ -264,7 +252,7 @@ impl<'ast> Visitor<'ast> for Collector {
         self.doc_names(function.doc_comment.as_deref());
         self.templates
             .push(Collector::templates_of(function.doc_comment.as_deref()));
-        if self.bodies && self.track_outside {
+        if self.track_outside {
             // The parts that are not the body count as outside it.
             for attr in &function.attrs {
                 self.visit_attribute(attr);
@@ -278,18 +266,8 @@ impl<'ast> Visitor<'ast> for Collector {
             self.body_depth += 1;
             walk_stmts(self, function.body_stmts());
             self.body_depth -= 1;
-        } else if self.bodies {
-            walk_function_decl(self, function);
         } else {
-            for attr in &function.attrs {
-                self.visit_attribute(attr);
-            }
-            for param in &function.params {
-                self.visit_param(param);
-            }
-            if let Some(hint) = &function.return_type {
-                self.visit_type_hint(hint);
-            }
+            walk_function_decl(self, function);
         }
         self.templates.pop();
     }

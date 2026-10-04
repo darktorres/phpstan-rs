@@ -664,10 +664,16 @@ impl Registry {
 /// it sits (`for_each_declaration`).
 #[hotpath::measure]
 pub(crate) fn build_declarations(stmts: &[Stmt], origin: &Origin) -> Vec<BuiltDecl> {
-    build_declarations_where(stmts, origin, None)
+    let mut out = Vec::new();
+    for_each_declaration(stmts, |declaration, ctx, guards| {
+        built_declaration(declaration, ctx, guards, origin, &mut out);
+    });
+    out.extend(crate::registry::anonymous_class_decls(stmts, origin));
+    out
 }
 
-/// What `build_declarations_where` asks `keep` about.
+/// What a declaration declares: a class-like, a function or a global
+/// constant.
 #[derive(Clone, Copy)]
 pub(crate) enum DeclKind {
     Class,
@@ -675,41 +681,16 @@ pub(crate) enum DeclKind {
     Constant,
 }
 
-/// What decides which declarations `build_declarations_where` builds.
-pub(crate) type Keep<'a> = &'a dyn Fn(DeclKind, &str) -> bool;
-
-/// `build_declarations`, building only the declarations `keep` accepts,
-/// asked by kind and name before the declaration is built. Without a
-/// `keep` every declaration is built. With one, the anonymous classes are
-/// not: their names can never be a declared name's, which `keep` is
-/// about.
-pub(crate) fn build_declarations_where(
-    stmts: &[Stmt],
-    origin: &Origin,
-    keep: Option<Keep<'_>>,
-) -> Vec<BuiltDecl> {
-    let mut out = Vec::new();
-    for_each_declaration(stmts, |declaration, ctx, guards| {
-        built_declaration(declaration, ctx, guards, origin, keep, &mut out);
-    });
-    if keep.is_none() {
-        out.extend(crate::registry::anonymous_class_decls(stmts, origin));
-    }
-    out
-}
-
-/// The declaration `declaration` builds into, pushed on `out`: nothing
-/// when `keep` refuses its kind and name. `ctx` is the name context in
-/// effect where it sits and `guards` the terms that guard it.
+/// The declaration `declaration` builds into, pushed on `out`. `ctx` is
+/// the name context in effect where it sits and `guards` the terms that
+/// guard it.
 pub(crate) fn built_declaration(
     declaration: Declaration<'_>,
     ctx: &NameContext,
     guards: &[GuardTerm<'_>],
     origin: &Origin,
-    keep: Option<Keep<'_>>,
     out: &mut Vec<BuiltDecl>,
 ) {
-    let kept = |kind: DeclKind, name: &str| keep.is_none_or(|keep| keep(kind, name));
     let conditional = declaration.conditional;
     let guard = if conditional {
         GuardExpr::of_terms(guards)
@@ -718,11 +699,7 @@ pub(crate) fn built_declaration(
     };
     match declaration.declared {
         Declared::Class(c) => {
-            let name = declaration.name();
-            if !kept(DeclKind::Class, &name) {
-                return;
-            }
-            let name = Name::from(&name);
+            let name = Name::from(&declaration.name());
             let mut info = ClassReflection::from_decl(c, ctx);
             info.record_provenance(origin, &name, c.name.span, &MemberSpans::of_class(&c.def));
             out.push(BuiltDecl::Class {
@@ -733,9 +710,6 @@ pub(crate) fn built_declaration(
             });
         }
         Declared::Function(f) => {
-            if keep.is_some() && !kept(DeclKind::Function, &declaration.name()) {
-                return;
-            }
             let mut sig = FunctionReflection::from_decl(
                 f,
                 ctx,
@@ -752,20 +726,13 @@ pub(crate) fn built_declaration(
                 site: f.name.span.start,
             });
         }
-        Declared::Constant(c) => {
-            let name = declaration.name();
-            if kept(DeclKind::Constant, &name) {
-                out.push(BuiltDecl::GlobalConst {
-                    name: Name::from(&name),
-                    guard,
-                    ty: infer_const_type(&c.value),
-                });
-            }
-        }
+        Declared::Constant(c) => out.push(BuiltDecl::GlobalConst {
+            name: Name::from(&declaration.name()),
+            guard,
+            ty: infer_const_type(&c.value),
+        }),
         Declared::Define { name, value } => {
-            if let Some((name, ty)) = define_constant(name, value)
-                && kept(DeclKind::Constant, name.as_str())
-            {
+            if let Some((name, ty)) = define_constant(name, value) {
                 out.push(BuiltDecl::GlobalConst { name, guard, ty });
             }
         }

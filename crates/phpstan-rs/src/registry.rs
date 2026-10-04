@@ -73,8 +73,6 @@ pub(crate) use guard::Guard;
 pub(crate) use index::{
     BuiltDecl, DeclKind, build_declarations, built_declaration, register_global_constant,
 };
-#[cfg(debug_assertions)]
-pub(crate) use index::{Keep, build_declarations_where};
 pub(crate) use name_context::{collect_class_name_case_refs, resolve_names_in_type};
 pub(crate) use name_table::{folded_key, function_key, with_function_key};
 pub use provenance::{Origin, Provenance};
