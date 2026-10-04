@@ -615,6 +615,14 @@ impl<V> NameTable<V> {
         self.iter().map(|(_, value)| value)
     }
 
+    /// Whether this table reads from the very base `other` reads from.
+    pub(crate) fn shares_base(&self, other: &NameTable<V>) -> bool {
+        match (&self.base, &other.base) {
+            (Some(own), Some(theirs)) => Arc::ptr_eq(own, theirs),
+            _ => false,
+        }
+    }
+
     /// The entries the table holds itself, not those it reads from its
     /// shared base.
     pub(crate) fn own_iter(&self) -> impl Iterator<Item = (&Name, &V)> {

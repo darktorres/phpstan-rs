@@ -898,7 +898,7 @@ impl Session {
             |name: &str, project: &Project, held: &super::edit_replay::HeldDiagnostics| {
                 write_gzip(
                     &out.join(format!("{name}.registry.gz")),
-                    project.registry_dump_of_project().as_bytes(),
+                    project.registry_dump().as_bytes(),
                 )?;
                 write_gzip(
                     &out.join(format!("{name}.diagnostics.gz")),
@@ -920,7 +920,7 @@ impl Session {
             },
         )?;
         let last = (
-            project.registry_dump_of_project(),
+            project.registry_dump(),
             super::edit_replay::print_held(&held),
         );
         drop(project);
@@ -928,7 +928,7 @@ impl Session {
         let fresh_held = super::edit_replay::check_all(&fresh_project, &self.pool);
         write_step("fresh", &fresh_project, &fresh_held)?;
         let fresh = (
-            fresh_project.registry_dump_of_project(),
+            fresh_project.registry_dump(),
             super::edit_replay::print_held(&fresh_held),
         );
         let sections = |text: &str| -> Vec<(String, String)> {
@@ -990,6 +990,12 @@ impl Session {
     pub fn dump_registry(&self, out: &Path) -> Result<(), String> {
         let loaded = self.load()?;
         write_gzip(out, loaded.project.registry_dump().as_bytes())
+    }
+
+    /// Writes both stub bases whole (`Project::stub_bases_dump`), what a
+    /// registry dump prints its project over, gzip-compressed, to `out`.
+    pub fn dump_stub_bases(&self, out: &Path) -> Result<(), String> {
+        write_gzip(out, Project::stub_bases_dump().as_bytes())
     }
 
     /// Loads and checks every analysed file, with the `--dump-types`

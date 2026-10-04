@@ -16,4 +16,5 @@ mod phpstan_api_gating;
 mod project_settings;
 mod property_assign_facts;
 mod reflection_rule;
+mod registry_dump;
 mod use_site_index;

@@ -82,6 +82,11 @@ pub(crate) struct CheckProjectArgs {
     /// to this file and stops (a regression-gate snapshot).
     #[arg(long, hide = true)]
     pub(crate) dump_registry: Option<PathBuf>,
+    /// Writes both stub bases whole, which the registry dump prints its
+    /// project over, gzip-compressed, to this file and stops (a
+    /// regression-gate snapshot).
+    #[arg(long, hide = true)]
+    pub(crate) dump_stub_bases: Option<PathBuf>,
     /// Prints each file's diagnostics in the order the checks emitted them
     /// (a determinism check), not the usual total order.
     #[arg(long, hide = true)]
@@ -174,6 +179,14 @@ pub(crate) fn run_check_project_command(args: CheckProjectArgs) {
                 std::process::exit(1);
             }
         }
+        return;
+    }
+    if let Some(out) = &args.dump_stub_bases {
+        if let Err(e) = run.session.dump_stub_bases(out) {
+            eprintln!("{e}");
+            std::process::exit(1);
+        }
+        eprintln!("stub bases: {}", out.display());
         return;
     }
     if let Some(out) = &args.dump_registry {

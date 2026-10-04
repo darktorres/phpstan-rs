@@ -10,11 +10,12 @@
 //!   and on each end of their range;
 //! - both reverse indexes, the use-site index and the duplicate-site
 //!   tables;
-//! - the registry, each table whole, by name: the project's declarations
-//!   over the stub base it reads;
-//! - each stub base whole: the built-in stubs, and those with PHPStan's
-//!   own source;
+//! - the registry, by name, over the stub base it stands on, which it
+//!   names: each table, map and set as what the project adds, changes and
+//!   drops of the base's (`CanonicalOver`), the rest whole;
 //! - what the project records of the load.
+//!
+//! The stub bases print whole in a dump of their own (`stub_bases_dump`).
 //!
 //! A file's number prints as its path, so that another numbering prints
 //! the same.
@@ -25,9 +26,11 @@ use syntax::canonical::{Canonical, Printer};
 
 use crate::project::{FileState, Project};
 use crate::registry::Registry;
+use crate::registry::canonical::CanonicalOver;
 
-/// The dump of `project`, with `bases` (each base's name, and the base).
-pub(crate) fn registry_dump(project: &Project, bases: &[(&str, &Registry)]) -> String {
+/// The dump of `project`, its registry over `base` (the base's name, and
+/// the base) when it stands on one.
+pub(crate) fn registry_dump(project: &Project, base: Option<(&str, &Registry)>) -> String {
     let Project {
         files,
         dependents,
@@ -83,11 +86,15 @@ pub(crate) fn registry_dump(project: &Project, bases: &[(&str, &Registry)]) -> S
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .canonical(&mut p);
-        section(&mut p, "registry");
-        registry.canonical(&mut p);
-        for (name, base) in bases {
-            section(&mut p, &format!("stub base {name}"));
-            base.canonical(&mut p);
+        match base {
+            Some((name, base)) => {
+                section(&mut p, &format!("registry over {name}"));
+                registry.canonical_over(base, &mut p);
+            }
+            None => {
+                section(&mut p, "registry");
+                registry.canonical(&mut p);
+            }
         }
         section(&mut p, "project");
         p.node(
@@ -211,4 +218,16 @@ fn section(p: &mut Printer, name: &str) {
     p.atom("== ");
     p.atom(name);
     p.line();
+}
+
+/// Each of `bases` whole, after its name: what a registry dump prints its
+/// project over.
+pub(crate) fn stub_bases_dump(bases: &[(&str, &Registry)]) -> String {
+    let mut p = Printer::default();
+    for (name, base) in bases {
+        section(&mut p, &format!("stub base {name}"));
+        base.canonical(&mut p);
+    }
+    p.line();
+    p.finish()
 }

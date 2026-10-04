@@ -3,6 +3,7 @@ mod stub_cache_round_trip;
 
 mod anonymous_class;
 mod assignability;
+mod canonical_over;
 mod class_hierarchy;
 mod declaration_guards;
 mod doctrine_entities;
