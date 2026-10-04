@@ -16,7 +16,6 @@
 
 #![deny(clippy::wildcard_enum_match_arm)]
 
-use std::fmt::Write as _;
 use std::io;
 use std::sync::Arc;
 
@@ -314,21 +313,18 @@ impl<'s> Printer<'s> {
 pub fn quote_bytes(bytes: &[u8], out: &mut String) {
     out.push('\'');
     for chunk in bytes.utf8_chunks() {
-        for ch in chunk.valid().chars() {
-            match ch {
+        write_escaped(
+            chunk.valid(),
+            out,
+            |ascii| matches!(ascii, b'\\' | b'\''),
+            |ch, out| match ch {
                 '\\' => out.push_str("\\\\"),
                 '\'' => out.push_str("\\'"),
-                ch if unseen(ch) => {
-                    let mut buf = [0; 4];
-                    for byte in ch.encode_utf8(&mut buf).bytes() {
-                        let _ = write!(out, "\\x{byte:02x}");
-                    }
-                }
-                ch => out.push(ch),
-            }
-        }
-        for byte in chunk.invalid() {
-            let _ = write!(out, "\\x{byte:02x}");
+                ch => escape_char(ch, out, false),
+            },
+        );
+        for &byte in chunk.invalid() {
+            escape_byte(byte, out, false);
         }
     }
     out.push('\'');
@@ -337,15 +333,67 @@ pub fn quote_bytes(bytes: &[u8], out: &mut String) {
 /// Writes the name `name` as it is spelled, but the bytes of a character
 /// `unseen` and of the space as `\x{NN}`, which no name's text can be.
 pub fn write_name(name: &str, out: &mut String) {
-    for ch in name.chars() {
-        if unseen(ch) || ch == ' ' {
-            let mut buf = [0; 4];
-            for byte in ch.encode_utf8(&mut buf).bytes() {
-                let _ = write!(out, "\\x{{{byte:02x}}}");
+    write_escaped(
+        name,
+        out,
+        |ascii| ascii == b' ',
+        |ch, out| {
+            escape_char(ch, out, true);
+        },
+    );
+}
+
+/// Writes `text`, each character `unseen` and each ASCII one `special`
+/// says through `escape`, and every run of the others copied whole.
+fn write_escaped(
+    text: &str,
+    out: &mut String,
+    special: impl Fn(u8) -> bool,
+    escape: impl Fn(char, &mut String),
+) {
+    let bytes = text.as_bytes();
+    let mut plain = 0;
+    let mut at = 0;
+    while at < bytes.len() {
+        let byte = bytes[at];
+        let ch = if byte.is_ascii() {
+            if !special(byte) && !unseen_ascii(byte) {
+                at += 1;
+                continue;
             }
+            char::from(byte)
         } else {
-            out.push(ch);
-        }
+            let ch = text[at..].chars().next().expect("a character starts here");
+            if !unseen(ch) {
+                at += ch.len_utf8();
+                continue;
+            }
+            ch
+        };
+        out.push_str(&text[plain..at]);
+        escape(ch, out);
+        at += ch.len_utf8();
+        plain = at;
+    }
+    out.push_str(&text[plain..]);
+}
+
+/// Writes each byte of `ch` as `\xNN`, or as `\x{NN}` when `braced`.
+fn escape_char(ch: char, out: &mut String, braced: bool) {
+    let mut buf = [0; 4];
+    for &byte in ch.encode_utf8(&mut buf).as_bytes() {
+        escape_byte(byte, out, braced);
+    }
+}
+
+/// Writes `byte` as `\xNN`, or as `\x{NN}` when `braced`.
+fn escape_byte(byte: u8, out: &mut String, braced: bool) {
+    const HEX: &[u8; 16] = b"0123456789abcdef";
+    out.push_str(if braced { "\\x{" } else { "\\x" });
+    out.push(char::from(HEX[usize::from(byte >> 4)]));
+    out.push(char::from(HEX[usize::from(byte & 0xf)]));
+    if braced {
+        out.push('}');
     }
 }
 
@@ -353,6 +401,12 @@ pub fn write_name(name: &str, out: &mut String) {
 /// it is: a control character, or whitespace other than the space.
 fn unseen(ch: char) -> bool {
     ch.is_control() || (ch.is_whitespace() && ch != ' ')
+}
+
+/// `unseen` for an ASCII byte: the controls, which take in every ASCII
+/// whitespace but the space.
+fn unseen_ascii(byte: u8) -> bool {
+    byte.is_ascii_control()
 }
 
 impl<T: Canonical + ?Sized> Canonical for &T {
@@ -743,5 +797,76 @@ mod tests {
         let mut name = String::new();
         write_name("A\u{1}B", &mut name);
         assert_eq!(name, r"A\x{01}B");
+    }
+
+    /// A character at a time, as the escapes are specified.
+    fn quoted_by_character(bytes: &[u8]) -> String {
+        let mut out = String::from("'");
+        for chunk in bytes.utf8_chunks() {
+            for ch in chunk.valid().chars() {
+                match ch {
+                    '\\' => out.push_str("\\\\"),
+                    '\'' => out.push_str("\\'"),
+                    ch if unseen(ch) => {
+                        for byte in ch.to_string().bytes() {
+                            out.push_str(&format!("\\x{byte:02x}"));
+                        }
+                    }
+                    ch => out.push(ch),
+                }
+            }
+            for byte in chunk.invalid() {
+                out.push_str(&format!("\\x{byte:02x}"));
+            }
+        }
+        out.push('\'');
+        out
+    }
+
+    fn name_by_character(name: &str) -> String {
+        let mut out = String::new();
+        for ch in name.chars() {
+            if unseen(ch) || ch == ' ' {
+                for byte in ch.to_string().bytes() {
+                    out.push_str(&format!("\\x{{{byte:02x}}}"));
+                }
+            } else {
+                out.push(ch);
+            }
+        }
+        out
+    }
+
+    #[test]
+    fn runs_of_plain_bytes_print_as_their_characters_would_one_at_a_time() {
+        let mut texts: Vec<Vec<u8>> = (0..=255u8)
+            .map(|byte| [b"ab".as_slice(), &[byte], b"cd"].concat())
+            .collect();
+        texts.push((0..=255u8).collect());
+        for sample in [
+            "",
+            " ",
+            "plain",
+            "\u{85}",
+            "\u{a0}x",
+            "x\u{2028}",
+            "\u{3000}\u{200b}",
+            "é日本",
+            "it's \\ a\tb\nc",
+            "\u{7f}\u{9f}\u{1680} \u{feff}",
+        ] {
+            texts.push(sample.as_bytes().to_vec());
+            texts.push(format!("{sample}{sample}").into_bytes());
+        }
+        texts.push(b"\xe2\x80 \xff\xc3\xa9\xc3".to_vec());
+        for text in &texts {
+            let mut out = String::new();
+            quote_bytes(text, &mut out);
+            assert_eq!(out, quoted_by_character(text), "{text:?}");
+            let name = String::from_utf8_lossy(text);
+            let mut out = String::new();
+            write_name(&name, &mut out);
+            assert_eq!(out, name_by_character(&name), "{name:?}");
+        }
     }
 }
