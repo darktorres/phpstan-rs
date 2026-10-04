@@ -269,10 +269,10 @@ when it runs, and the plan adds the checks found along the way.
   position. Their seven fixtures opt out of the calls until then. Item 20
   also took generator bodies: a generator's body runs at its resumptions,
   not at its call.
-- **Queued after level 8:** 114 fixtures that assert still never reach an
-  assertion under the runtime oracle: assertions in closures nothing
-  invokes, code that throws first with the values sampled, parameters no
-  value can be made for, methods of traits.
+- **Moved into item 0 (row 0.11q):** the 114 fixtures that assert and
+  never reach an assertion under the runtime oracle: assertions in closures
+  nothing invokes, code that throws first with the values sampled,
+  parameters no value can be made for, methods of traits.
 
 ## Documents with no place in the stack
 

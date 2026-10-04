@@ -668,7 +668,7 @@ Twenty-two items, numbered in the order they are built. Each states what is ther
      - **the runs go on a worker per core** from one queue, the corpus's first and at most three of them at once for memory, a replay's two runs one after the other in its copy, and every difference is listed at the end;
      - **the fixture suite runs once,** in this pass, with its type and diagnostic records; the tests step runs the rest;
      - **the level runs stay:** a level changes the analysis, not only which reports print, so no level's report is a filter of another's;
-     - **the `oracle` build runs the same pass,** with the per-file cache off, recording nothing.
+     - **the `oracle` build runs the same pass,** in every state, the per-file cache written and read included, recording nothing. The statements that once kept it off the cache went with the debug oracles (row 0.3), and the one assertion only a debug build makes is the cache's round trip (`file_cache.rs:228-236`), which runs only where the cache is written.
      - It adds a view of every field of every diagnostic: the end position, the UTF-16 columns and the whole fix.
      - It runs over the Piwigo configurations, the vendor tree as one project, each vendor project with every rule set, and the fixtures. A vendor project is each `vendor/<vendor>/<package>` of the corpus with a `composer.json` (205), analysed alone with `--no-composer`.
      - It adds a configuration with architecture rules and banned types, which the all-on configuration does not set (`xtask/src/main.rs:394-461`), so that item 19's passes have a corpus oracle from the baseline on.
@@ -830,6 +830,14 @@ The design. Each step is exact unless it says otherwise:
 8. **The edit path rechecks its dependents in one check.** `recheck` checks the dependents one after another on the calling thread (`project.rs:2324-2341`; 52 M of `update_file`'s 58 M in the replay). Each check goes through `check_files` for its one file, which judges the private property types again for that file alone, checking once more the files declaring its classes for their writes. The dependents go to one `check_files` over the worker pool instead, as the load's check does, which judges the property types once for all of them; their use sites are then reindexed in one pass, which is what needs the project mutably. The server's latency gains as much.
 9. **Measured again,** once the catalog below has landed, with the same script: instructions and peak memory, and the whole pass's wall time.
 10. **Every other kind of run the pass makes is profiled the same way,** a configuration's state, a level, a session and the fixture suite, and planned from what it shows, so the whole pass is fast, not only its two commonest runs.
+11. **An item's validation is one command.** `cargo xtask validate` runs §11 whole on the worker pool, with its progress: the `gate` and `oracle` builds, the workspace tests and the item's, the runtime oracle on every version image, the pass with each build, and the comparison with the previous item's snapshot. It writes the summary the ledger's V row records, where today each of these is started by hand, one after another.
+12. **The runtime oracle reaches every asserting fixture.** 114 still never reach an assertion (`WORK_STACK.md`), in four kinds, each closed:
+    - **an assertion in a closure nothing invokes:** the generated calls invoke each closure and arrow function the fixture makes, with values of its parameters' types, as they call functions;
+    - **code that throws first with the values sampled:** a call that throws is made again with the pool's other values until one reaches the assertion, and the fixture records which did;
+    - **a parameter no value can be made for:** the sampler makes one for every type it meets, an interface with no implementation by an anonymous class implementing it, and a resource by opening one of its kind;
+    - **a trait's method:** called through an anonymous class using the trait.
+    
+    A fixture that still reaches no assertion fails the oracle, unless it opts out with its reason, as `runtime_calls = false` does.
 
 Expected: a vendor project's run near 70 M instructions and well under its 336 MB peak, most of which is the decoded stub base (the replay, which decodes little of it, peaks at 129 MB). A replay, with a fresh load after every step, near 0.4 G, from 1.98 G.
 
@@ -1308,7 +1316,7 @@ Exact.
    - **The gap.** `stub-sources` also embeds `vendor/phpstan-src/stubs/*.stub`, PHPStan's own stubs (`stub-sources/build.rs:95-145`), which the hash does not read. A submodule update that changes only those files keeps the key, and the new binary reads a stub cache built from the old stubs. Step 2's version deltas (`vendor/phpstan-src/resources/functionMap_php*delta.php`) would be a second such input.
    - **One list of embedded inputs.** The build script of the crate that embeds data hashes exactly the files it generates `include_str!`s for, from the same list, and exports the result (`stub_sources::SOURCES_HASH`). The caches' key is the code's hash with that one, both BLAKE3 digests (item 17). `phpstan-rs`'s build script hashes the workspace's code and manifests only. So a file that is embedded is in the key by construction, and a new embedded input, such as step 2's deltas, joins the same list.
    - **The hand-kept `VERSION` goes** (`container.rs:14-18`, now 7). The key already changes with the code that writes the layout, and a number bumped by hand can only fall behind it. The magic numbers stay, to tell our files from others, with the CRCs.
-   - **A layout depends on nothing else.** Debug and release builds share a key, which is safe because they write the same layout: `FileBodies` drops its debug-only statements when it is stored (`bodies.rs:150-181`), and a debug build round-trips what it stores (`file_cache.rs:228-236`). A field under `cfg` in a serialized type would break that, so none is allowed. Item 0's oracle runs with the per-file cache off, because entries carry no statements for its assertions.
+   - **A layout depends on nothing else.** Debug and release builds share a key, which is safe because they write the same layout, and a debug build round-trips what it stores (`file_cache.rs:228-236`). A field under `cfg` in a serialized type would break that, so none is allowed. The debug-only statements `FileBodies` kept went with the debug oracles (row 0.3), so the `oracle` pass runs with the per-file cache on, in every state.
    - So no item has to bump anything when it changes a cached layout: the key changes with its code.
 
 **Oracle.**
@@ -2383,7 +2391,7 @@ Exact, except the private-property judgment, listed in §11.
 2. the tests: `cargo test --workspace` and the tests the item wrote (the fixtures run in step 4);
 3. the fixtures against `php` 8.5, and, for an item with 7.x readings, against `php:7.4-cli` through `docker`;
 4. the pass of item 0's step 3 with the `gate` build (`cargo xtask corpus --full`): every configuration in each of its states, every artifact compared across them and with the equalities that exist by then, the server's sessions, the edit replays, the vendor projects and the fixture suite, recorded by commit;
-5. the same pass with the `oracle` build, with the per-file cache off, since entries carry no statements for its assertions (item 6, step 6); it records nothing and must finish without an assertion;
+5. the same pass with the `oracle` build, in every state, the per-file cache written and read included; it records nothing and must finish without an assertion;
 6. the differences from the previous item's snapshots, read line by line;
 7. the item's state in the ledger and its one-line state in `WORK_STACK.md`.
 
