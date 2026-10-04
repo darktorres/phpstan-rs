@@ -623,6 +623,17 @@ impl Project {
                 }
             }
         }
+        let mut registry = Project::built_stubs(with_phpstan);
+        if let Err(error) = registry.store_cached(cache_name) {
+            eprintln!("phpstan-rs: the {cache_name} can't be stored ({error})");
+        }
+        registry.freeze();
+        registry
+    }
+
+    /// The registry of the built-in stubs, with PHPStan's own source when
+    /// `with_phpstan`, built and resolved: what the stub cache stores.
+    pub(crate) fn built_stubs(with_phpstan: bool) -> Registry {
         let mut registry = Registry::default();
         if with_phpstan {
             registry.phpstan_stubs_loaded = true;
@@ -637,12 +648,7 @@ impl Project {
         let mut base = Project::with_registry(registry);
         base.phpstan_pinned = with_phpstan;
         base.finish_loading();
-        let mut registry = base.registry;
-        if let Err(error) = registry.store_cached(cache_name) {
-            eprintln!("phpstan-rs: the {cache_name} can't be stored ({error})");
-        }
-        registry.freeze();
-        registry
+        base.registry
     }
 
     fn with_registry(registry: Registry) -> Self {

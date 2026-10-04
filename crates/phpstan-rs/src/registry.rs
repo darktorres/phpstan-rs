@@ -800,6 +800,7 @@ impl Registry {
         functions,
         built_in_stub_classes,
         ancestor_names,
+        phpstan_ancestry,
         subtype_children,
         trait_users,
         recorded_parents,

@@ -5,22 +5,27 @@ use crate::project::Project;
 use crate::registry::Registry;
 use crate::registry::container::{Reader, Writer};
 
+/// `registry` stored and read back, and frozen, as a run loads it from the
+/// stub cache.
+fn round_trip(registry: &Registry) -> Registry {
+    let mut writer = Writer::new();
+    registry.store(&mut writer).expect("stores");
+    let reader = match Reader::new(writer.finish()) {
+        Ok(reader) => reader,
+        Err(_) => panic!("a stored registry is a whole file"),
+    };
+    let mut back = Registry::load(&reader).expect("reads back");
+    back.check_stored().expect("every stored table is in order");
+    back.freeze();
+    back
+}
+
 /// The stub registry of `Project::new` stored and read back, once for all
 /// the tests here: storing encodes every entry and reading decodes the ones
 /// a test asks for, which is most of what these tests cost.
 fn read_back() -> &'static Registry {
-    static BACK: std::sync::LazyLock<Registry> = std::sync::LazyLock::new(|| {
-        let project = Project::new();
-        let mut writer = Writer::new();
-        project.registry().store(&mut writer).expect("stores");
-        let reader = match Reader::new(writer.finish()) {
-            Ok(reader) => reader,
-            Err(_) => panic!("a stored registry is a whole file"),
-        };
-        let back = Registry::load(&reader).expect("reads back");
-        back.check_stored().expect("every stored table is in order");
-        back
-    });
+    static BACK: std::sync::LazyLock<Registry> =
+        std::sync::LazyLock::new(|| round_trip(Project::new().registry()));
     &BACK
 }
 
@@ -89,11 +94,53 @@ fn every_stored_table_reads_back_with_its_names_and_values() {
     same_table!(
         built_in_stub_classes,
         ancestor_names,
+        phpstan_ancestry,
         subtype_children,
         trait_users,
         recorded_parents,
         member_owners
     );
+}
+
+#[test]
+fn a_built_stub_registry_reads_back_as_it_was_stored() {
+    // The declarations are compared one by one above; printed, they would
+    // decode every stored member.
+    let printed = |registry: &Registry| {
+        let mut registry = registry.clone();
+        registry.classes = Default::default();
+        registry.functions = Default::default();
+        registry.raw = None;
+        syntax::canonical::print(&registry)
+    };
+    // Built here, since `Project::new` may itself have read its base back.
+    for with_phpstan in [false, true] {
+        let mut built = Project::built_stubs(with_phpstan);
+        let back = round_trip(&built);
+        built.freeze();
+        let (stored, back) = (printed(&built), printed(&back));
+        if let Some(line) = stored
+            .lines()
+            .zip(back.lines())
+            .position(|(a, b)| a != b)
+            .or((stored.lines().count() != back.lines().count())
+                .then(|| stored.lines().count().min(back.lines().count())))
+        {
+            let from = |text: &str| {
+                text.lines()
+                    .skip(line)
+                    .take(8)
+                    .collect::<Vec<_>>()
+                    .join("\n")
+            };
+            panic!(
+                "with PHPStan's source {with_phpstan}, the print read back differs from line {}:\n{}\n---\n{}",
+                line + 1,
+                from(&stored),
+                from(&back),
+            );
+        }
+    }
 }
 
 #[test]
