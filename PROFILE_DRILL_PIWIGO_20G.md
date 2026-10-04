@@ -664,9 +664,9 @@ Twenty-one items, numbered in the order they are built. Each states what is ther
      - every expression's inferred and native type in the final pass, keyed by file, span and host class (`--dump-expr-types`, beside today's `--dump-types`).
    - **O2: the gate's full artifact set** (`cargo xtask corpus --full`: scoped, all-on, unscoped, levels 0-10, the type dumps, the baselines and the emission-order check).
      - It adds a view of every field of every diagnostic: the end position, the UTF-16 columns and the whole fix.
-     - It runs over the Piwigo configurations, each vendor project with every rule set, and the fixtures.
+     - It runs over the Piwigo configurations, the vendor tree as one project, each vendor project with every rule set, and the fixtures. A vendor project is each `vendor/<vendor>/<package>` of the corpus with a `composer.json` (205), analysed alone with `--no-composer`.
      - It adds a configuration with architecture rules and banned types, which the all-on configuration does not set (`xtask/src/main.rs:394-461`), so that item 19's passes have a corpus oracle from the baseline on.
-     - It runs with the stub cache cold and warm, and the per-file cache off, written and read. Every state must give the same output.
+     - It runs with the stub cache cold and warm, and the per-file cache off, written and read, and at one thread, each from a cache directory of its own. Every state must give the same output.
      - It is compared in output order with `xtask compare`.
    - **The server:** an in-process session over Piwigo and two vendor projects. It records:
      - the loaded files with their roles, and `registry-dump`;
