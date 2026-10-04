@@ -737,20 +737,47 @@ impl Registry {
         sig.is_stub.then_some(sig)
     }
 
-    /// The methods `class` has with a body that override one of the builtin
-    /// class `builtin`'s: what a method of the builtin may run on its own
-    /// object.
-    fn overrides_of_builtin(&self, class: &str, builtin: &str) -> Vec<DeclKey> {
+    /// The methods with a body overriding one of the builtin class
+    /// `builtin`'s that an object of `receiver` or of a class below it may
+    /// run: what a method of the builtin may run on its own object. Each of
+    /// the builtin's methods is taken as `receiver` resolves it, which may
+    /// be an ancestor's, and from each class below `receiver` declaring it
+    /// with a body.
+    fn overrides_of_builtin(&self, receiver: &str, builtin: &str) -> Vec<DeclKey> {
         let Some(info) = self.classes.get(builtin) else {
             return Vec::new();
         };
-        info.methods
-            .iter()
-            .filter_map(|(method, _)| {
-                let (owner, sig) = self.lookup_method_with_owner(class, method)?;
-                (!sig.is_stub).then(|| method_key(&owner, method))
-            })
-            .collect()
+        let below = self.subclasses(receiver);
+        let below_lower: FxHashSet<&str> = below.iter().map(Name::lower).collect();
+        let mut out = Vec::new();
+        for method in info.methods.keys() {
+            if let Some((owner, sig)) = self.lookup_method_with_owner(receiver, method)
+                && !sig.is_stub
+            {
+                out.push(method_key(&owner, method));
+            }
+            let declaring = self.classes_declaring(method);
+            if below.len() < declaring.len() {
+                out.extend(
+                    below
+                        .iter()
+                        .filter(|class| {
+                            self.classes.get(class).is_some_and(|info| {
+                                info.methods.get(method).is_some_and(|sig| !sig.is_stub)
+                            })
+                        })
+                        .map(|class| method_key(class, method)),
+                );
+            } else {
+                out.extend(
+                    declaring
+                        .iter()
+                        .filter(|class| below_lower.contains(class.lower()))
+                        .map(|class| method_key(class, method)),
+                );
+            }
+        }
+        out
     }
 
     /// The loaded classes declaring `method` with a body.
@@ -1031,16 +1058,12 @@ impl Reach<'_> {
                 }
             };
             for receiver in &receivers {
-                for candidate in
-                    std::iter::once(receiver.clone()).chain(registry.subclasses(receiver))
-                {
-                    out.extend(
-                        registry
-                            .overrides_of_builtin(&candidate, owner)
-                            .into_iter()
-                            .map(|key| (key, transfer.clone())),
-                    );
-                }
+                out.extend(
+                    registry
+                        .overrides_of_builtin(receiver, owner)
+                        .into_iter()
+                        .map(|key| (key, transfer.clone())),
+                );
             }
         }
         let runs = table.runs.get(name.as_str()).map_or(&[][..], Vec::as_slice);
