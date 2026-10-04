@@ -1513,3 +1513,32 @@ fn an_include_is_rechecked_when_the_file_it_names_appears_or_vanishes() {
     let rechecked = project.recheck_including(&[dir.0.join("unrelated.inc")]);
     assert!(rechecked.is_empty(), "{rechecked:?}");
 }
+
+#[test]
+fn an_edit_keeps_the_use_sites_of_the_files_it_rechecks() {
+    let mut project = Project::new();
+    project.apply_settings(ProjectSettings {
+        rules: crate::rules_settings::RulesSettings {
+            check_dead_code: true,
+            ..Default::default()
+        },
+        ..ProjectSettings::default()
+    });
+    project
+        .load_analyzed_file(PathBuf::from("base.php"), "<?php class Base {}")
+        .unwrap();
+    project
+        .load_analyzed_file(PathBuf::from("user.php"), "<?php new Base();")
+        .unwrap();
+    project.finish_loading();
+    let target = use_sites::RefTarget::Class("Base".to_string());
+    assert_eq!(project.use_sites().references(&target).len(), 1);
+    let rechecked = project
+        .update_file(
+            &PathBuf::from("base.php"),
+            "<?php class Base { public int $x = 1; }",
+        )
+        .unwrap();
+    assert!(rechecked.contains_key(&PathBuf::from("user.php")));
+    assert_eq!(project.use_sites().references(&target).len(), 1);
+}

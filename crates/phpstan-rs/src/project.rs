@@ -1080,7 +1080,7 @@ impl Project {
         );
         let class_fn_refs = class_fn_refs.unwrap_or_else(|| {
             ast.as_deref()
-                .map_or_else(Vec::new, |ast| self.class_fn_refs_of(ast, &source))
+                .map_or_else(Vec::new, |ast| self.class_fn_refs_of(ast, Some(&source)))
         });
         for (span, target) in class_fn_refs {
             self.use_sites.insert(path, target, span);
@@ -1144,15 +1144,20 @@ impl Project {
     /// own wall time. Gated on `check_dead_code` (its only batch-mode
     /// consumer) for exactly that reason - a run with the check left
     /// off, the default, pays nothing extra here at all.
-    fn class_fn_refs_of(&self, ast: &[Stmt], source: &str) -> Vec<(Span, use_sites::RefTarget)> {
+    fn class_fn_refs_of(
+        &self,
+        ast: &[Stmt],
+        source: Option<&str>,
+    ) -> Vec<(Span, use_sites::RefTarget)> {
         if self.retain_source {
             // Until the first request that reads the index
             // (`ensure_member_index_built`), a loaded workspace pays
             // nothing for it.
-            if self.member_index_built {
-                use_sites::index_class_fn_refs(ast, source)
-            } else {
-                Vec::new()
+            match source {
+                Some(source) if self.member_index_built => {
+                    use_sites::index_class_fn_refs(ast, source)
+                }
+                _ => Vec::new(),
             }
         } else if self.settings.rules.check_dead_code {
             use_sites::index_class_fn_refs_without_source(ast)
@@ -1165,7 +1170,7 @@ impl Project {
     /// caller parsing many files in parallel indexes them there too.
     pub(crate) fn index_use_sites(&self, parsed: &mut ParsedFile, source: &str) {
         if let Some(ast) = &parsed.ast {
-            parsed.class_fn_refs = Some(self.class_fn_refs_of(ast, source));
+            parsed.class_fn_refs = Some(self.class_fn_refs_of(ast, Some(source)));
         }
     }
 
@@ -1667,9 +1672,9 @@ impl Project {
 
     /// Recomputes `path`'s own Tier-1 (class/function) use-sites from its
     /// currently-loaded `FileState`, replacing whatever was previously
-    /// indexed for it - a no-op past the initial `use_sites.remove_file`
-    /// when `retain_source` is off or `path` isn't currently loaded at
-    /// all. Called for EVERY
+    /// indexed for it, as its load indexes them (`class_fn_refs_of`) - a
+    /// no-op past the initial `use_sites.remove_file` when `path` isn't
+    /// currently loaded at all. Called for EVERY
     /// file `update_file`'s own affected-file loop re-checks, not just
     /// the one that was directly edited: a dependent file's own bare-
     /// `Name`/`ClassConstFetch`/`StaticPropertyFetch` resolution can change (e.g. registry-wide
@@ -1692,14 +1697,11 @@ impl Project {
         member_refs: Option<Vec<(Span, String, String)>>,
     ) {
         self.use_sites.remove_file(path);
-        if self.retain_source
-            && self.member_index_built
-            && let Some(file) = self.files.get(path)
-            && let Some(source) = &file.source
-        {
-            for (span, target) in use_sites::index_class_fn_refs(file.ast(), source) {
-                self.use_sites.insert(path, target, span);
-            }
+        let class_fn_refs = self.files.get(path).map_or_else(Vec::new, |file| {
+            self.class_fn_refs_of(file.ast(), file.source.as_deref())
+        });
+        for (span, target) in class_fn_refs {
+            self.use_sites.insert(path, target, span);
         }
         if let Some(member_refs) = member_refs {
             for (span, owner, member) in member_refs {
