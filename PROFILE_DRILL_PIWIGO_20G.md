@@ -708,7 +708,7 @@ Twenty items, numbered in the order they are built. Each states what is there no
 - **F4. `array_reduce`.** Its type is the callback's return type even when the array may be empty, where PHP returns the initial value; and `$carry` is bound to the initial value's type only, though from the second element on it holds the callback's return.
 
 **The fix: what code may write, by storage, sound, bounded by the class hierarchy** (the user's decision, over keeping the receiver-and-arguments rule, then made field- and type-sensitive):
-1. **The premise:** the program is what the run loads. This is the closed world the whole-program checks already assume (dead code, unused members, sealed hierarchies). Everything below is sound for that program and keeps every possibility it leaves open.
+1. **The premise:** the program is what the run loads. This is the closed world the whole-program checks already assume (dead code, unused members, sealed hierarchies). Everything below is sound for that program and keeps every possibility it leaves open. A project whose code the run does not load calls or extends, a library, opens it by configuration ("An open world, by configuration", below).
 2. **An effect is a set of storages written, or anything.** The storages:
    - an object property: the property, on objects that may be of the class declaring it, with a write to the callee's own `$this` kept apart, so that a call site can place it on its receiver;
    - a static property: its storage, the class that declares it as reached from the class named. `static::$p` reaches every storage of `$p` over the class and its descendants. A property a trait gives is stored per using class.
@@ -895,7 +895,7 @@ Semantic: a builtin runs and writes what its source may make it run and write on
 
 Semantic: fewer facts forgotten after a call that stores a closure, after a call of a declaration that calls a callable parameter, and at the top level's captures (§11, item 0).
 
-**Oracle.** None beyond §11 for the dumps and the deletions: they leave release behaviour as it is. The fixes found in step 1, fast validation's step 1, the catalog, the fix's precision, the implicit calls and the assumed types are semantic, read in 0.11 against `5fb858c9`'s reports.
+**Oracle.** None beyond §11 for the dumps and the deletions: they leave release behaviour as it is. The fixes found in step 1, fast validation's step 1, the catalog, the fix's precision, the implicit calls, the assumed types, the claims and the open world are semantic, read in 0.11 against `5fb858c9`'s reports.
 
 #### Code PHP runs without a call written
 
@@ -1062,6 +1062,63 @@ Found by the runtime oracle's generated calls in item 0's validation, first an i
 - **The recorder** runs the iterators' states on each image as the catalog's oracle.
 - O2 is read line by line.
 - Semantic, listed in §11.
+
+#### PHPDoc types as claims, verified
+
+Decided after the assumed types: a PHPDoc type can be wrong or stale, and PHP enforces only native types, so a doc type is used where the analysis verifies it, and PHP's own guarantee holds elsewhere. Built in item 0 after the assumed types, so that the baseline holds it (rows 0.14a-0.14g).
+
+**Now.** Every doc type is used as if PHP enforced it, as PHPStan does. That is sound as assume-guarantee only where each guarantee is checked, and many are not:
+
+| claim | used at | checked at | not checked at |
+|---|---|---|---|
+| `@param` | the whole body | direct calls in analysed files (`argument.type`) | dynamic calls (callables, `call_user_func`, reflection, `$o->$m()`), a callback a builtin calls, calls from context files |
+| `@return` | every call | the body's returns (`return.type`) | context and vendor bodies, never checked |
+| property `@var` | every read | writes in analysed code (`assign.propertyType`) | reflection hydration (Doctrine, serializers), `unserialize`, `$o->$p`, context code |
+| inline `@var` | from the tag on | plain contradictions only (`varTag.type`, `varTag.nativeType`, `var_tag_types.rs:638-680`) | everything else: it is an assertion |
+
+A violation found but hidden by the level, ignored or held by a baseline leaves its claim trusted everywhere else: an ignored `argument.type` keeps the callee believing its `@param`. A stale `@return string` on a body that may return `null` is reported once, in the callee, while every caller takes `string`, so the null checks the callers need are never asked for.
+
+**Design.**
+1. **Every doc type and doc marker is a claim:** `@param`, `@return`, `@var` on a property and inline, `@property` and `@method`, `@phpstan-assert` and its `-if-true` and `-if-false` forms, `@param-out`, `@phpstan-self-out`, conditional return types, `@template` bounds, the `@extends`, `@implements` and `@use` arguments, `@mixin`, `@readonly` and `@pure`. A claim is used where the analysis verifies it everywhere it can be broken. Elsewhere the type is what PHP enforces: the native type, which the checker already computes beside each expression's (`native_expr_type`, `var_tag_types.rs:97`).
+   - `@throws` is no claim: a declaration's throw set comes from its body (the assumed types, step 11), and the tag is checked against it.
+   - The builtins' stubs stay claims about C code, which nothing reads at their level of detail; the PHP catalog bounds their outcomes.
+2. **What verifies each claim, and what breaks it.**
+   - `@param` is verified at every call that may reach the declaration, its arguments checked against the claim. A dynamic call is checked against every declaration it may reach, so it breaks only the claims its arguments may violate. A callback a builtin calls is checked against the values the catalog says the builtin passes. A caller nothing checks breaks the claim: one in a context file the check below does not reach, or one outside the program (the open world, next section).
+   - `@return`, `@param-out`, `@phpstan-self-out` and the assertions are verified by the body, at each return, and by every override's body for the calls that may reach it.
+   - A property's `@var` and `@readonly` are verified at every write that may reach the property: assignments, by-reference passes, `unset`. A write nothing checks breaks them: `ReflectionProperty::setValue`, `Closure::bind`, `$o->$p`, `unserialize`, `extract` and the catalog's other writers, each over the properties its target may name, every property where it is not known.
+   - `@property` and `@method` are verified by the magic method's body checked with the name as that literal (`__get('total')`). Where that does not settle the type, the magic method's native return type holds.
+   - `@template` bounds and the `@extends` family are verified by the instantiation and inheritance checks that exist; `@pure` by the purity analysis' verdict.
+   - **Inline `@var` narrows nothing it does not prove.** The variable keeps its inferred type. A tag the inferred type satisfies changes nothing; a narrower one is reported (`varTag.unproven`), to become an `assert()` or a check the analysis follows.
+3. **The fixed point.** Every claim starts trusted, and the check runs. Each claim a check finds violated (whatever the level reports, an ignore or a baseline hides), or with a site nothing checks, is dropped. The files that rely on a dropped claim are checked again, found by the dependency index the edit path uses (`deps.rs`), in parallel as the load's check is. This repeats until no claim drops, and the diagnostics are the last round's. The finishing passes that read claims (the effects' receivers by a parameter's declared type, `effects.rs:1635`; the summaries' flow-insensitive types; purity) take the dropped claims too, and what they change rechecks its dependents the same way.
+4. **Context code is checked, not reported.** A context declaration's claim the analysed code relies on (a vendor `@return`, which carries most of an application's generic types) is verified by checking that declaration's body without reporting, and so on through the claims that check relies on. The per-file cache keeps each verdict, so a warm run checks no context body again (item 17).
+5. **A dropped claim is reported at its declaration** (`phpDoc.unverified`), with why: the site that violates it, or the kind of site nothing checks (a dynamic call with arguments not known, a reflection write, a caller outside the program). The fix is then the doc's or the call's.
+
+Semantic: a claim violated anywhere, or open to a site nothing checks, gives the native type where it was used; inline `@var` narrows only what it proves; each dropped claim is reported at its declaration; a hidden, ignored or baselined violation no longer leaves its claim trusted (§11).
+
+**Oracle.** Fixtures for each claim kind, verified and dropped, and for each kind of unchecked site; a stale `@return` reported at the caller that dereferences its `null`; an ignored violation dropping its claim; a context body verified and one refuted; a claim dropped in the second round by a body that relied on one dropped in the first. O2 read line by line.
+
+#### An open world, by configuration
+
+Decided with the claims (rows 0.15a-0.15f): the fix's premise, the program is what the run loads, holds for an application analysed with its vendor tree, whose callers and subclasses are all loaded, but not for a library, which code the run never loads calls and extends. A project says which.
+
+**Now.** Every run is closed. A library's template method that narrows `$this->state` and then calls an overridable hook keeps the narrowing, though a consumer's override may change it; its public API is reported dead where the library does not use it.
+
+**Design.** Runtime truth at the boundary: what PHP enforces holds there, nothing else.
+1. **`open_paths`** in the configuration lists the paths whose declarations code outside the run may call and extend; empty by default. Composer's `type` cannot decide it: it defaults to `library`, applications included.
+2. **A run with an open path is open.** Code the run does not load may have registered error handlers, autoloaders, output-buffer callbacks, signal handlers and stream wrappers, so every site where those run writes anything and throws anything. Its objects may hold the analysed code's and have destructors, so a release that may leave a value collectable writes anything.
+3. **An open declaration:**
+   - a public function or method, and a protected method, has callers nothing checks: its `@param` claims drop to the native types (the claims above);
+   - a method neither `private` nor `final`, in a class that is not `final`, may be overridden outside: a call that may dispatch to it, through `$this`, `static::` or a receiver whose exact class is not known, writes anything, throws anything, and gives the native return type, while the method's own body is still checked against its `@return`;
+   - an interface may be implemented outside, with the same at each call through it;
+   - a class that is not `final` may be extended outside, by a subclass that adds `__destruct`, `__toString`, `__get` and `__set` (reached where the subclass unsets a declared property), or property hooks (8.4) to its non-private properties: the implicit calls on a value that may be such a subclass write anything;
+   - its properties are written by code nothing checks, between any two calls into the library and by reflection and `Closure::bind` from outside, the private ones included: their doc claims drop.
+4. **Exact classes.** A value whose class is known exactly is no unloaded subclass: one made by `new` of a named class, a `clone` of one, an enum case, `$this` in a `final` class. Object types carry whether the class is exact; a union keeps it only where every member is exact. Calls, property accesses and releases on an exact value are closed. The canonical printer prints it.
+5. **The whole-program checks** take an open declaration as used and extended from outside: no dead public or protected member, class, function, interface or enum case is reported under an open path, and no dead abstract class; item 19's private-property judgment counts writes from outside.
+6. **The pass runs each vendor project closed and open** (its own sources open), so both modes have a corpus oracle and their equalities.
+
+Semantic: none in a closed run; an open run as designed here (§11).
+
+**Oracle.** Fixtures in an open run for each kind: an override's writes, a call through an interface, a hook and a destructor a subclass may add, a handler outside, an exact `new` kept closed, a `@param` dropped at the boundary, a property written from outside, the dead-code passes silent under an open path. O2 read line by line, closed and open.
 
 
 ### 1. One session for the CLI, the language server and the tests
@@ -2498,6 +2555,8 @@ Exact, except the private-property judgment, listed in §11.
 **The semantic changes, by item.** At an item's validation, every difference from the previous item's dumps must be one of its own:
   - **item 0:** a builtin runs and writes what its php-src implementation may make it run and write, on the configured versions (the PHP catalog), where it ran what a recording on 8.5 saw and every override of its own object's methods, and wrote only its by-reference parameters; a builtin no source covers writes anything; a dead function or class declared twice is reported at each declaration, and a namespace cycle is reported at its first analysed class, where it went unreported when its first class was a context or stub one (fast validation, step 1); the fixes found in step 1: what a call may write, by storage, forgotten after it (object properties by field and type, static properties, globals, static variables, captures and references), calls bounded by the class hierarchy and builtins by what they call, captures by reference entered with every type written while shared, and `array_reduce` with its initial value; the one found in step 2: past the union cap, class-strings fold to one class-string and callables to `callable`, where the union was `mixed`; and the one found in item 0's validation: a stub no run of PHP has seen, declared pure and taking no code, writes nothing;
     - the fix's precision: a closure's writes count where it may run, not where it is made; a call through a parameter writes what each call's argument may write, not anything; a capture at a file's top level is entered as at any other scope, not as `mixed`;
+    - the claims: a PHPDoc type or marker is used where the analysis verifies it everywhere it can be broken, the native type elsewhere; a violation hidden by the level, ignored or baselined drops its claim; context bodies are checked, not reported, for the claims the analysed code relies on; inline `@var` narrows only what it proves, a narrower one reported (`varTag.unproven`); each dropped claim reported at its declaration (`phpDoc.unverified`);
+    - the open world: none in a closed run; under `open_paths`, outside callers, overrides, implementations, subclasses, writers and registrations are code not known, exact classes stay closed, and the whole-program checks take the open API as used;
     - the implicit calls: what a magic method, a property hook, a lazy object's initializer, a destructor (at every release, and through the cycle collector at every release that may leave a value collectable), an autoloader, an error handler, an output-buffer callback, a tick or signal handler, a fiber's callable, or an included file may write is forgotten where PHP may run it, and a release proven not the last runs no destructor; a generator function's call writes nothing of its body, the generator's resumptions write what the body may write, and its release what its `finally` blocks write;
     - the assumed types:
       - int operations give the float PHP gives past `PHP_INT_MAX` or `PHP_INT_MIN`, as literals where its values are few, with what PHP does with the float;
@@ -2560,7 +2619,7 @@ Exact, except the private-property judgment, listed in §11.
 
 | # | item | saving (this profile) | serial / wall | memory (§8) | kind |
 |---|---|---|---|---|---|
-| 0 | baseline dumps, debug oracles retired; the PHP catalog, the implicit calls, the assumed types | debug builds and tests | — | — | semantic: the fixes of step 1, the catalog, the implicit calls, the assumed types (§11) |
+| 0 | baseline dumps, debug oracles retired; the PHP catalog, the fix's precision, the implicit calls, the assumed types, PHPDoc as verified claims, the open world | debug builds and tests | — | — | semantic: the fixes of step 1, the catalog, the fix's precision, the implicit calls, the assumed types, the claims, the open world (§11) |
 | 1 | one session: load, configuration, analysis, identity | the server and the tests get every load item | load off the server's message loop | server: the context trees (≈420 MB) and the unopened files' sources | semantic (§11) |
 | 2 | parallel walk, path data | ≈0.3 G | ≈0.15 s serial start | the second copy of each path; 0.56 M allocations | exact, except link cycles |
 | 3 | context trees dropped on the worker | ≈0.16 G | 0.58 G off the serial path | peak −≤209 MB alone (the end of the parse −≈420 MB); context reads, 66 MB | exact |

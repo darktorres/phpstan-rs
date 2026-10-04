@@ -259,7 +259,10 @@ when it runs, and the plan adds the checks found along the way.
   builtin-runs table; the fix's precision (0.11o-0.11q): closures' writes
   where they run, calls through a parameter resolved at each call, captures
   at a file's top level; the implicit calls (0.12a-0.12f) and the assumed
-  types (0.13a-0.13k), moved in from the end of the plan; the runtime
+  types (0.13a-0.13k), moved in from the end of the plan; PHPDoc types as
+  claims verified by a fixed point, the native type where a claim cannot
+  be (0.14a-0.14g); an open world by configuration (`open_paths`), with
+  runtime truth at a library's boundary (0.15a-0.15f); the runtime
   oracle reaching every asserting fixture (0.11r); the measurements and
   `cargo xtask validate` (0.11s-0.11u). Then the validation itself (0.11):
   the pass with the `gate` and `oracle` builds, the reports against
