@@ -287,7 +287,12 @@ when it runs, and the plan adds the checks found along the way.
   earlier cyclic objects), a generator's `finally` at its release, signal
   handlers, included files, and libxml2 reaching user stream wrappers;
   a second added fibers, `__autoload` before 8.0, `#[\Deprecated]`
-  callees, and no destructor at a release proven not the last.
+  callees, and no destructor at a release proven not the last; a third
+  added throwing implicit calls (an error handler turning warnings into
+  `ErrorException`), images built with every extension (the official
+  ones lack `pcntl`, `intl` and `xsl`), `phpdbg -p*` for the construct
+  map (7.0 has no opcache listing), and strings' numericness as a
+  condition (`"abc" * 1` throws on 8.x).
 - **Moved into item 0 (row 0.11o):** the 114 fixtures that assert and
   never reach an assertion under the runtime oracle: assertions in closures
   nothing invokes, code that throws first with the values sampled,
