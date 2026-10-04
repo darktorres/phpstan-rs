@@ -1923,6 +1923,7 @@ impl Project {
 
         let mut results = FxHashMap::default();
         affected.insert(path.to_path_buf());
+        affected.extend(self.declaring_the_same(&rebuilt));
         self.unchecked.clear();
         let mut affected = affected.into_iter();
         while let Some(p) = affected.next() {
@@ -1998,6 +1999,7 @@ impl Project {
         if any_removed {
             self.rebuild_declarations(&removed, None);
             affected.extend(self.finish_declarations());
+            affected.extend(self.declaring_the_same(&removed));
         }
 
         affected
@@ -2013,6 +2015,20 @@ impl Project {
                 (p, diagnostics)
             })
             .collect()
+    }
+
+    /// The files declaring a function or a class of `names`: what reports a
+    /// declaration as declared more than once in each reads the others.
+    fn declaring_the_same(&self, names: &DeclaredNames) -> Vec<PathBuf> {
+        let functions = names
+            .functions
+            .iter()
+            .flat_map(|name| self.duplicate_fn_sites.paths_of(name));
+        let classes = names
+            .classes
+            .iter()
+            .flat_map(|name| self.duplicate_class_sites.paths_of(name));
+        functions.chain(classes).map(Path::to_path_buf).collect()
     }
 
     /// The files to recheck once the classes, functions and constants

@@ -82,6 +82,15 @@ impl DuplicateFunctionSites {
         }
     }
 
+    /// The files declaring `name`.
+    pub(crate) fn paths_of(&self, name: &str) -> impl Iterator<Item = &Path> {
+        self.sites
+            .get(name)
+            .into_iter()
+            .flatten()
+            .map(|site| site.path.as_path())
+    }
+
     pub(crate) fn iter(&self) -> impl Iterator<Item = (&String, &Vec<FnDeclSite>)> {
         self.sites.iter()
     }
