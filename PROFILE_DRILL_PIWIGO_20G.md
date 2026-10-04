@@ -655,7 +655,7 @@ Twenty-one items, numbered in the order they are built. Each states what is ther
      Its file set includes every extension PHP is run from (`.inc`, `.module`, `.install`, `.theme`, `.engine`, `.profile`, `.php.inc`) and any file that starts with `<?php` or `<?=`. Each file's text is stored gzip-compressed (`flate2`) under its BLAKE3 digest, with an index of digests by role and path.
    - **`registry-dump`**, taken after the finishing passes and before checking. It only reads: lazy records are decoded, but deferred values are printed as stored. It sorts by kind, folded name and load order, and prints:
      - every project declaration, and every record of both stub bases, at the configured PHP range and at its two ends;
-     - for each, its reflection, its guard and the guard's value, its purity dependencies and verdict, its property-write classification and verdict, its ancestors and owners, and the ancestry fact;
+     - for each, its reflection, its guard and the guard's value, its purity dependencies and verdict, its effect (what it may write, by storage, which replaced the property-write classification in row 0.1b), its ancestors and owners, and the ancestry fact;
      - both scopes, the global constants and the global-variable facts;
      - both reverse indexes, the use-site index and the duplicate-site tables;
      - the file table: path, role, load order, absolute path, Composer owner and `mentions_phpstan`.
