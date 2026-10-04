@@ -5,8 +5,14 @@
 //! another's are made of them.
 //!
 //! A print is a tree: an atom (a number, a name, a quoted string, a type)
-//! stays on its line; a node puts each of its fields, and a list each of
-//! its items, on a line of its own, indented under it.
+//! and a tuple (`Kind(a, b)`) stay on their line; a node puts each of its
+//! fields, and a list each of its items, on a line of its own, indented
+//! under it.
+//!
+//! `canonical_struct!` and `canonical_enum!` write a print for a struct or
+//! an enum from the list of its fields or variants, which must name every
+//! one: the pattern they destructure with has no `..`, and the match no `_`
+//! arm.
 
 #![deny(clippy::wildcard_enum_match_arm)]
 
@@ -16,6 +22,9 @@ use std::sync::Arc;
 use crate::name::Name;
 use crate::php_string::PhpString;
 use crate::span::Span;
+
+mod tokens;
+mod tree;
 
 /// A value with a canonical print. An implementation names every field of
 /// the value, destructuring without `..` and matching without a `_` arm,
@@ -76,10 +85,36 @@ impl Printer {
         self.out.push('}');
     }
 
+    /// Writes a tuple of `kind` with `values`, `Kind(a, b)`, on the current
+    /// line; without a kind, `(a, b)`.
+    pub fn tuple(&mut self, kind: &str, values: &[&dyn Canonical]) {
+        self.out.push_str(kind);
+        self.out.push('(');
+        for (i, value) in values.iter().enumerate() {
+            if i > 0 {
+                self.out.push_str(", ");
+            }
+            value.canonical(self);
+        }
+        self.out.push(')');
+    }
+
     /// Writes `items` in their order, each on a line of its own.
     pub fn list<'a, T: Canonical + ?Sized + 'a>(&mut self, items: impl IntoIterator<Item = &'a T>) {
-        let printed: Vec<String> = items.into_iter().map(|item| self.nested(item)).collect();
-        self.lines(printed);
+        let mut items = items.into_iter().peekable();
+        if items.peek().is_none() {
+            self.out.push_str("[]");
+            return;
+        }
+        self.out.push('[');
+        self.depth += 1;
+        for item in items {
+            self.newline();
+            item.canonical(self);
+        }
+        self.depth -= 1;
+        self.newline();
+        self.out.push(']');
     }
 
     /// Writes `items` sorted by their prints: a set, whose order is not
@@ -234,12 +269,103 @@ impl<T: Canonical> Canonical for Vec<T> {
 impl<A: Canonical, B: Canonical> Canonical for (A, B) {
     fn canonical(&self, p: &mut Printer) {
         let (a, b) = self;
-        p.atom("(");
-        a.canonical(p);
-        p.atom(", ");
-        b.canonical(p);
-        p.atom(")");
+        p.tuple("", &[a, b]);
     }
+}
+
+impl<A: Canonical, B: Canonical, C: Canonical> Canonical for (A, B, C) {
+    fn canonical(&self, p: &mut Printer) {
+        let (a, b, c) = self;
+        p.tuple("", &[a, b, c]);
+    }
+}
+
+/// `{:?}` prints the shortest text that reads back as the same bits, `-0.0`
+/// and the infinities included; a NaN's payload only its bits show.
+impl Canonical for f64 {
+    fn canonical(&self, p: &mut Printer) {
+        if self.is_nan() {
+            p.atom(&format!("NaN(0x{:016x})", self.to_bits()));
+        } else {
+            p.atom(&format!("{self:?}"));
+        }
+    }
+}
+
+impl Canonical for char {
+    fn canonical(&self, p: &mut Printer) {
+        let mut buf = [0; 4];
+        p.bytes(self.encode_utf8(&mut buf).as_bytes());
+    }
+}
+
+/// A print of a struct from the list of its fields, as a node of them:
+/// `canonical_struct!(Param { name, ty })`, or with `skip { cache }` after
+/// it for fields that hold only what the others give. A tuple struct
+/// names its fields by position: `canonical_struct!(Pair(left, right))`,
+/// printed as a tuple.
+#[macro_export]
+macro_rules! canonical_struct {
+    ($ty:ident { $($field:ident),* $(,)? } $(skip { $($skipped:ident),* $(,)? })?) => {
+        impl $crate::canonical::Canonical for $ty {
+            fn canonical(&self, p: &mut $crate::canonical::Printer) {
+                let $ty { $($field,)* $($($skipped: _,)*)? } = self;
+                p.node(
+                    stringify!($ty),
+                    &[$((stringify!($field), $field as &dyn $crate::canonical::Canonical)),*],
+                );
+            }
+        }
+    };
+    ($ty:ident ( $($field:ident),* $(,)? )) => {
+        impl $crate::canonical::Canonical for $ty {
+            fn canonical(&self, p: &mut $crate::canonical::Printer) {
+                let $ty($($field),*) = self;
+                p.tuple(
+                    stringify!($ty),
+                    &[$($field as &dyn $crate::canonical::Canonical),*],
+                );
+            }
+        }
+    };
+}
+
+/// A print of an enum from the list of its variants, each with its fields:
+/// `canonical_enum!(Kind { Unit, Pair(left, right), Named { a, b } })`. A
+/// unit variant prints as its name, a tuple variant as a tuple and a
+/// struct variant as a node.
+#[macro_export]
+macro_rules! canonical_enum {
+    ($ty:ident { $($variant:ident $(( $($pos:ident),* $(,)? ))? $({ $($named:ident),* $(,)? })?),* $(,)? }) => {
+        impl $crate::canonical::Canonical for $ty {
+            fn canonical(&self, p: &mut $crate::canonical::Printer) {
+                match self {
+                    $(
+                        $ty::$variant $(( $($pos),* ))? $({ $($named),* })? => {
+                            $crate::canonical_enum!(
+                                @print p, $variant $(( $($pos),* ))? $({ $($named),* })?
+                            )
+                        }
+                    )*
+                }
+            }
+        }
+    };
+    (@print $p:ident, $variant:ident ( $($pos:ident),* )) => {
+        $p.tuple(
+            stringify!($variant),
+            &[$($pos as &dyn $crate::canonical::Canonical),*],
+        )
+    };
+    (@print $p:ident, $variant:ident { $($named:ident),* }) => {
+        $p.node(
+            stringify!($variant),
+            &[$((stringify!($named), $named as &dyn $crate::canonical::Canonical)),*],
+        )
+    };
+    (@print $p:ident, $variant:ident) => {
+        $p.atom(stringify!($variant))
+    };
 }
 
 impl Canonical for bool {
