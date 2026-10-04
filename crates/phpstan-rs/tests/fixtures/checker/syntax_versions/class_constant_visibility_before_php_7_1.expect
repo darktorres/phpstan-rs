@@ -1,0 +1,2 @@
+4:5-4:12 classConstant.visibilityNotSupported L0 | Class constant visibility is supported only on PHP 7.1 and later.
+    non-ignorable

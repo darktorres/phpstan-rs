@@ -1,0 +1,8 @@
+2:1-5:2 missingType.iterableValue L6 | Function f() return type has no value type specified in iterable type iterable.
+    tip: See: https://phpstan.org/blog/solving-phpstan-no-value-type-specified-in-iterable-type
+2:12-2:20 iterableType.notSupported L0 | Type iterable is supported only on PHP 7.1 and later.
+    non-ignorable
+2:12-2:23 missingType.iterableValue L6 | Function f() has parameter $x with no value type specified in iterable type iterable.
+    tip: See: https://phpstan.org/blog/solving-phpstan-no-value-type-specified-in-iterable-type
+2:26-2:34 iterableType.notSupported L0 | Type iterable is supported only on PHP 7.1 and later.
+    non-ignorable

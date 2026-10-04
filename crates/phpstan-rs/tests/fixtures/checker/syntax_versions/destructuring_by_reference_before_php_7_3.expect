@@ -1,0 +1,2 @@
+3:1-3:14 list.referenceNotSupported L0 | Destructuring by reference is supported only on PHP 7.3 and later.
+    non-ignorable

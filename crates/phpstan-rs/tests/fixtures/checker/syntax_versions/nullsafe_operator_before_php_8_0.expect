@@ -1,0 +1,2 @@
+4:12-4:28 nullsafe.notSupported L0 | The nullsafe operator is supported only on PHP 8.0 and later.
+    non-ignorable

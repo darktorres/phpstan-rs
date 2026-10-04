@@ -1,0 +1,4 @@
+2:12-2:16 nullableType.notSupported L0 | Nullable types are supported only on PHP 7.1 and later.
+    non-ignorable
+2:22-2:26 nullableType.notSupported L0 | Nullable types are supported only on PHP 7.1 and later.
+    non-ignorable

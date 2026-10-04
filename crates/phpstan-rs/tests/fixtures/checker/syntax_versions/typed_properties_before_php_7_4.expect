@@ -1,0 +1,2 @@
+4:12-4:15 property.typeNotSupported L0 | Typed properties are supported only on PHP 7.4 and later.
+    non-ignorable

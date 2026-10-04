@@ -1,0 +1,2 @@
+2:6-2:7 enum.notSupported L0 | Enums are supported only on PHP 8.1 and later.
+    non-ignorable

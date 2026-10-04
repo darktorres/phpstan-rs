@@ -1,0 +1,2 @@
+2:6-2:11 number.separatorNotSupported L0 | A numeric literal separator is supported only on PHP 7.4 and later.
+    non-ignorable

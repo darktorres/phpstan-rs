@@ -1,0 +1,4 @@
+2:1-2:9 list.shortSyntaxNotSupported L0 | Destructuring with [] is supported only on PHP 7.1 and later.
+    non-ignorable
+3:22-3:30 list.shortSyntaxNotSupported L0 | Destructuring with [] is supported only on PHP 7.1 and later.
+    non-ignorable

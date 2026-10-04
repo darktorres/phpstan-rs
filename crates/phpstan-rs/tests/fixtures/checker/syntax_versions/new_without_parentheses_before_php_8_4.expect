@@ -1,0 +1,4 @@
+12:6-12:13 new.withoutParenthesesNotSupported L0 | Member access on new without parentheses is supported only on PHP 8.4 and later.
+    non-ignorable
+13:6-13:13 new.withoutParenthesesNotSupported L0 | Member access on new without parentheses is supported only on PHP 8.4 and later.
+    non-ignorable

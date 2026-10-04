@@ -1,0 +1,2 @@
+7:10-7:11 arguments.trailingCommaNotSupported L0 | A trailing comma in arguments is supported only on PHP 7.3 and later.
+    non-ignorable

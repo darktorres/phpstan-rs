@@ -1,0 +1,2 @@
+2:6-2:18 arrowFunction.notSupported L0 | Arrow functions are supported only on PHP 7.4 and later.
+    non-ignorable

@@ -1,0 +1,2 @@
+3:8-4:2 catch.multipleNotSupported L0 | Catching multiple exception types is supported only on PHP 7.1 and later.
+    non-ignorable

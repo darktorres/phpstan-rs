@@ -1,0 +1,2 @@
+2:12-2:33 intersectionType.notSupported L0 | Intersection types are supported only on PHP 8.1 and later.
+    non-ignorable

@@ -120,7 +120,7 @@ impl<'a> Checker<'a> {
         let Some(shape) = shape(hint) else {
             return;
         };
-        self.check_type_version_support(hint, &shape, span);
+        self.check_type_version_support(hint, &shape, position, span);
         match shape {
             Shape::Single(atom) => self.check_type_position(atom, position, span),
             Shape::Nullable(inner) => {
@@ -172,7 +172,13 @@ impl<'a> Checker<'a> {
         }
     }
 
-    fn check_type_version_support(&mut self, hint: &TypeHint, shape: &Shape, span: Span) {
+    fn check_type_version_support(
+        &mut self,
+        hint: &TypeHint,
+        shape: &Shape,
+        position: TypePosition,
+        span: Span,
+    ) {
         if self.registry.php_versions.is_none() {
             return;
         }
@@ -189,6 +195,58 @@ impl<'a> Checker<'a> {
                 })
                 .collect(),
         };
+        if unavailable(PhpFeature::NullableTypes) && matches!(shape, Shape::Nullable(_)) {
+            self.report_type_declaration(
+                "Nullable types are supported only on PHP 7.1 and later.".to_string(),
+                span,
+                "nullableType.notSupported".to_string(),
+            );
+        }
+        // Before their versions these keywords name a class, which no
+        // value is an instance of.
+        let keywords = [
+            (NativeType::Void, PhpFeature::VoidType),
+            (NativeType::Iterable, PhpFeature::IterableType),
+            (NativeType::Object, PhpFeature::ObjectType),
+            (NativeType::Mixed, PhpFeature::MixedType),
+            (NativeType::Static, PhpFeature::StaticReturnType),
+            (NativeType::Never, PhpFeature::NeverType),
+        ];
+        for (keyword, feature) in keywords {
+            if unavailable(feature)
+                && let Some(atom) = atoms.iter().find(|a| a.is(keyword))
+            {
+                let written = atom.written().to_ascii_lowercase();
+                self.report_type_declaration(
+                    format!(
+                        "Type {written} is supported only on PHP {} and later.",
+                        feature.threshold()
+                    ),
+                    span,
+                    format!("{written}Type.notSupported"),
+                );
+            }
+        }
+        if unavailable(PhpFeature::PureIntersectionTypes) && matches!(shape, Shape::Intersection(_))
+        {
+            self.report_type_declaration(
+                "Intersection types are supported only on PHP 8.1 and later.".to_string(),
+                span,
+                "intersectionType.notSupported".to_string(),
+            );
+        }
+        if let TypePosition::Property(property) = position
+            && unavailable(PhpFeature::NativeUnionTypes)
+            && matches!(shape, Shape::Union(_))
+        {
+            self.report_type_declaration(
+                format!(
+                    "Property {property} uses native union types but they're supported only on PHP 8.0 and later."
+                ),
+                span,
+                "property.unionTypeNotSupported".to_string(),
+            );
+        }
         if unavailable(PhpFeature::DisjunctiveNormalFormTypes)
             && let Shape::Union(members) = shape
             && members.iter().any(|m| matches!(m, Member::Group(_)))

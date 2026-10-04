@@ -70,6 +70,7 @@ impl<'ast> Visitor<'ast> for Promotions<'_, '_> {
                     PromotionSite::NotConstructor,
                     f.by_ref,
                     Some(ReturnSource::Body(f.body_stmts())),
+                    None,
                 );
                 self.checker.walk_promoted_in_body(f.body_stmts());
             }
@@ -102,6 +103,7 @@ impl<'ast> Visitor<'ast> for Promotions<'_, '_> {
                     PromotionSite::NotConstructor,
                     *by_ref,
                     Some(ReturnSource::Body(body)),
+                    None,
                 );
                 self.checker
                     .check_literal_default_parameter_types(params, "anonymous function");
@@ -121,6 +123,7 @@ impl<'ast> Visitor<'ast> for Promotions<'_, '_> {
                     PromotionSite::NotConstructor,
                     *by_ref,
                     Some(ReturnSource::Arrow(body)),
+                    None,
                 );
                 self.checker
                     .check_literal_default_parameter_types(params, "arrow function");
@@ -192,6 +195,7 @@ impl<'a> Checker<'a> {
                 site,
                 m.function.by_ref,
                 returns,
+                Some(fqn),
             );
             self.walk_promoted_in_body(m.function.body_stmts());
         }
@@ -232,6 +236,9 @@ impl<'a> Checker<'a> {
             })
     }
 
+    /// `promoted_into` is the class a constructor promotes its parameters
+    /// into: a promoted parameter's type is checked as a property's
+    /// (`check_property_declarations`), not here.
     #[allow(clippy::too_many_arguments)]
     fn check_function_like_declaration(
         &mut self,
@@ -240,9 +247,13 @@ impl<'a> Checker<'a> {
         site: PromotionSite,
         by_ref: bool,
         returns: Option<ReturnSource>,
+        promoted_into: Option<&str>,
     ) {
         self.check_promoted_params(params, site);
         for p in params {
+            if promoted_into.is_some() && is_promoted(p) {
+                continue;
+            }
             self.check_type_declaration(
                 p.type_hint.as_ref(),
                 TypePosition::Parameter,

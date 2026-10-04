@@ -1,0 +1,2 @@
+3:6-3:27 clone.withNotSupported L0 | Clone with properties is supported only on PHP 8.5 and later.
+    non-ignorable

@@ -762,6 +762,9 @@ pub struct Checker<'a> {
     // include path, which is what its include guards are found by; true
     // until said otherwise.
     pub(crate) include_guards_possible: bool,
+    // Where the file first spells each syntax its tree does not keep
+    // (`syntax_versions`).
+    pub(crate) syntax_marks: syntax::SyntaxMarks,
     pub(crate) rebind_escape_all: bool,
     // The LSP's one-off "what type is this instance receiver" probe.
     // `probe_span` is the exact `Span` of the receiver `Expr` the caller
@@ -950,6 +953,7 @@ pub mod rule_level_helper;
 pub mod settings;
 mod strict_idioms;
 mod strict_rules;
+mod syntax_versions;
 pub(crate) use imports::INTERNAL_CLASS_PREFIXES;
 mod internal_rules;
 mod internal_usage;
@@ -1210,6 +1214,7 @@ impl<'a> Checker<'a> {
             rebind_target_classes: NameSet::default(),
             closure_rebind_possible: true,
             include_guards_possible: true,
+            syntax_marks: syntax::SyntaxMarks::default(),
             rebind_escape_all: false,
             probe_span: Cell::new(None),
             probe_hit: RefCell::new(None),
@@ -1748,6 +1753,12 @@ impl<'a> Checker<'a> {
         self.include_guards_possible = possible;
     }
 
+    /// Where the file being checked first spells each syntax its tree
+    /// does not keep.
+    pub fn set_syntax_marks(&mut self, marks: syntax::SyntaxMarks) {
+        self.syntax_marks = marks;
+    }
+
     #[hotpath::measure]
     pub fn check_program(&mut self, program: &[Stmt]) {
         self.current_function_assigned_variables =
@@ -1768,6 +1779,8 @@ impl<'a> Checker<'a> {
         self.check_declare_directives(program);
         self.check_file_whitespace(program);
         self.check_statement_keywords(program);
+        let syntax_marks = self.syntax_marks;
+        self.check_syntax_versions(program, &syntax_marks);
         self.check_use_function_imports(program);
         self.check_use_const_imports(program);
         self.check_use_class_imports(program);

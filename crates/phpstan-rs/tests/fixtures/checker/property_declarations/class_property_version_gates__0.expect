@@ -2,5 +2,5 @@
     non-ignorable
 4:24-4:40 property.hooksNotSupported L0 | Property hooks are supported only on PHP 8.4 and later.
     non-ignorable
-5:44-5:50 property.staticAsymmetricVisibility L0 | Asymmetric visibility for static properties is supported only on PHP 8.5 and later.
+5:44-5:50 property.asymmetricVisibilityNotSupported L0 | Asymmetric visibility is supported only on PHP 8.4 and later.
     non-ignorable

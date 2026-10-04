@@ -1,0 +1,2 @@
+4:1-4:14 assignOp.nullCoalesceNotSupported L0 | The ??= operator is supported only on PHP 7.4 and later.
+    non-ignorable

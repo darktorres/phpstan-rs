@@ -1,0 +1,2 @@
+4:12-4:22 property.unionTypeNotSupported L0 | Property A::$x uses native union types but they're supported only on PHP 8.0 and later.
+    non-ignorable

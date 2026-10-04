@@ -1,0 +1,2 @@
+4:18-4:39 throw.notSupported L0 | Throw expression is supported only on PHP 8.0 and later.
+    non-ignorable

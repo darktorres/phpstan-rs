@@ -1,0 +1,2 @@
+2:15-2:19 voidType.notSupported L0 | Type void is supported only on PHP 7.1 and later.
+    non-ignorable

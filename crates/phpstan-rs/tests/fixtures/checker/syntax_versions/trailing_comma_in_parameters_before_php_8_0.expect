@@ -1,0 +1,4 @@
+2:26-2:27 parameters.trailingCommaNotSupported L0 | A trailing comma in parameters is supported only on PHP 8.0 and later.
+    non-ignorable
+4:33-4:34 closureUse.trailingCommaNotSupported L0 | A trailing comma in a closure's use list is supported only on PHP 8.0 and later.
+    non-ignorable

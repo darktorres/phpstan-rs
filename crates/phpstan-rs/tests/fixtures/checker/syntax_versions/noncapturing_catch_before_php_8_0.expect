@@ -1,0 +1,2 @@
+3:8-4:2 catch.nonCapturingNotSupported L0 | Non-capturing catch is supported only on PHP 8.0 and later.
+    non-ignorable

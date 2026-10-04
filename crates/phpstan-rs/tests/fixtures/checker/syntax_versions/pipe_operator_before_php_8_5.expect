@@ -1,0 +1,2 @@
+2:6-2:24 pipe.notSupported L0 | The pipe operator is supported only on PHP 8.5 and later.
+    non-ignorable

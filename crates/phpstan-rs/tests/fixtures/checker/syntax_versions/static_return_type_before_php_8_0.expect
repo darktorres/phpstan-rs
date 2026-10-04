@@ -1,0 +1,2 @@
+4:26-4:32 staticType.notSupported L0 | Type static is supported only on PHP 8.0 and later.
+    non-ignorable

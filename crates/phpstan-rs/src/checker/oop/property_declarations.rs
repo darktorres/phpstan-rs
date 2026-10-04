@@ -291,6 +291,11 @@ impl<'a> Checker<'a> {
                 "Hooked properties cannot be static.",
                 "property.hookedStatic",
             ))
+        } else if has_set_visibility && unavailable(PhpFeature::AsymmetricVisibility) {
+            Some((
+                "Asymmetric visibility is supported only on PHP 8.4 and later.",
+                "property.asymmetricVisibilityNotSupported",
+            ))
         } else if view.is_static
             && has_set_visibility
             && unavailable(PhpFeature::AsymmetricVisibilityForStaticProperties)

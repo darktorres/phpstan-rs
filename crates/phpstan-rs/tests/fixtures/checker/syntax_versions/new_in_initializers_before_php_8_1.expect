@@ -1,0 +1,6 @@
+2:26-2:40 new.inInitializerNotSupported L0 | New in initializers is supported only on PHP 8.1 and later.
+    non-ignorable
+4:17-4:34 new.inInitializerNotSupported L0 | New in initializers is supported only on PHP 8.1 and later.
+    non-ignorable
+8:13-8:36 new.inInitializerNotSupported L0 | New in initializers is supported only on PHP 8.1 and later.
+    non-ignorable

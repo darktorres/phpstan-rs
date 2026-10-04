@@ -1,3 +1,5 @@
+9:103-9:108 mixedType.notSupported L0 | Type mixed is supported only on PHP 8.0 and later.
+    non-ignorable
 12:5-12:27 function.looseComparison L0 | Loose comparison in in_array() between needle int and haystack value 'a'|'b' can match values that are not identical; pass true as the strict argument.
 13:5-13:25 function.looseComparison L0 | Loose comparison in in_array() between needle int and haystack value string can match values that are not identical; pass true as the strict argument.
 14:5-14:27 function.looseComparison L0 | Loose comparison in in_array() between needle string and haystack value numeric-string can match values that are not identical; pass true as the strict argument.

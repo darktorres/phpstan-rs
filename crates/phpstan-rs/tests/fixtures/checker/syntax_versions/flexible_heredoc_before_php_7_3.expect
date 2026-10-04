@@ -1,0 +1,2 @@
+2:6-4:8 heredoc.flexibleNotSupported L0 | A heredoc's closing label indented or followed on its line is supported only on PHP 7.3 and later.
+    non-ignorable

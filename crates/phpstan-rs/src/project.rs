@@ -2436,6 +2436,7 @@ impl Project {
         checker.set_include_guards_possible(
             file.facts.mentions & checker::includes::MENTIONS_GUARD != 0,
         );
+        checker.set_syntax_marks(file.facts.syntax);
         Some((checker, ast))
     }
 

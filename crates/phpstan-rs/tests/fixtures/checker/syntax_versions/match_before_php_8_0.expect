@@ -1,0 +1,2 @@
+4:12-7:6 match.notSupported L0 | Match expressions are supported only on PHP 8.0 and later.
+    non-ignorable

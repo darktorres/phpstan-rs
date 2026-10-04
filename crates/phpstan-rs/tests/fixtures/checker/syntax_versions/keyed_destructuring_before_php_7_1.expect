@@ -1,0 +1,2 @@
+2:1-2:16 list.keysNotSupported L0 | Keys in a destructuring are supported only on PHP 7.1 and later.
+    non-ignorable

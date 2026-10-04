@@ -1,0 +1,2 @@
+2:15-2:20 neverType.notSupported L0 | Type never is supported only on PHP 8.1 and later.
+    non-ignorable

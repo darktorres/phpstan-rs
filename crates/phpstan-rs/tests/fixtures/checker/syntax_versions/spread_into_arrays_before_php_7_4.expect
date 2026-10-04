@@ -1,0 +1,2 @@
+3:6-3:16 array.spreadNotSupported L0 | Spreading into an array is supported only on PHP 7.4 and later.
+    non-ignorable
