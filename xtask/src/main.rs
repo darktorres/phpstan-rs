@@ -23,7 +23,6 @@ use std::time::Instant;
 use store::{Content, Snapshots, Store, snapshot_ref, text_content};
 
 mod arch;
-mod import;
 mod modgraph;
 mod pass;
 mod progress;
@@ -53,10 +52,6 @@ fn main() -> ExitCode {
         Some("baseline") => baseline_generate(),
         Some("approve") => approve(&args[1..]),
         Some("rekey") => rekey(&args[1..]),
-        Some("store") => match args.get(1).map(String::as_str) {
-            Some("import") => import::import_snapshots(),
-            _ => Err(USAGE.to_string()),
-        },
         _ => Err(USAGE.to_string()),
     };
     match result {
@@ -107,10 +102,6 @@ const USAGE: &str = "usage: cargo xtask <command>
                          (then amend them in)
   rekey <old-hash>       move <old-hash>'s snapshot to HEAD after an amend
                          that only added gates/ files
-  store import           import the snapshots kept as plain files under
-                         .corpus-runs/gate/<artifact>/ and the front end's
-                         text pool into the store, each commit's checked
-                         against its files before they go
 
 `gates` and `corpus` write each step's wall time to
 .corpus-runs/gate/gatetime/<commit>.<command>.tsv, also when a step fails.";

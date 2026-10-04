@@ -76,8 +76,6 @@ pub(crate) enum Content {
     Cut(Kind, Box<dyn Read>),
     /// The dump a run wrote, by its manifest.
     Dump(PathBuf),
-    /// A dump of files, each entity's text given by its index.
-    Files(Manifest, Box<dyn FnMut(usize) -> Result<Vec<u8>, String>>),
     /// A directory of entries by name.
     Dir(Vec<(String, Content)>),
 }
@@ -439,10 +437,6 @@ impl Store {
                     &mut |index| dump.text(index).map_err(|e| format!("{path}: {e}")),
                     lines,
                 )?;
-                Ok((id, Mode::Tree))
-            }
-            Content::Files(manifest, mut text) => {
-                let id = self.put_tree(import, path, &manifest, &mut text, lines)?;
                 Ok((id, Mode::Tree))
             }
             Content::Dir(entries) => {

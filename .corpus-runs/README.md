@@ -38,8 +38,6 @@ against, another store:
     cargo xtask compare [--full] [--against <hash>]
     cargo xtask type-drift --against <hash> [--artifact <types-scoped|types-all-on|types-fixtures>]
     cargo xtask rekey <old> <new>  # a snapshot under an amended commit
-    cargo xtask store import     # the snapshots kept as plain files
-                                 # before the store, into it
 
 `type-drift` relates every binding of HEAD's type snapshot to the same one
 in `<hash>`'s, both parsed back from their display text and compared
@@ -167,14 +165,11 @@ so nothing a later comparison needs stays in either:
   committed tree, by its full hash and cargo profile (`gate`, `oracle`,
   `dhat`), copied there as soon as it is built; ignored with the rest of
   `gate/`.
-- `gate/store.git`: every run, as above. `vendor-tree`'s older snapshots
-  were taken by hand with `check-project --no-composer vendor` in the
-  corpus, normalized the same way; `cargo xtask corpus --full` records it
-  since. Those and every other snapshot kept as plain files
-  (`gate/<artifact>/<commit>.<ext>`, the front end's texts pooled in
-  `gate/front-end-texts/` by BLAKE3 digest) were imported into the store
-  by `cargo xtask store import`, which removes each commit's files once
-  its snapshot reads back as they held.
+- `gate/store.git`: every run, as above. The snapshots kept as plain
+  files before the store (`gate/<artifact>/<commit>.<ext>`) were
+  discarded with their binaries, not imported: their formats predate
+  item 0's changes to the dumps, and the 20 G plan's first comparison is
+  item 1's validation against item 0's baseline.
 - `~/.cache/prs-profile/<run>/`: callgrind and dhat profiles with the
   binary that made them and a `README` naming the commit and the command
   (`cl-20g`, `dhat-20g`: the 20 G plan's baselines).

@@ -60,8 +60,8 @@ incremental = true
 [profile.test]
 opt-level = 1
 
-# `cargo xtask` runs at `opt-level = 0`; the crates that cut, hash and
-# decompress the gates' snapshots, gigabytes at a time, are optimized in it.
+# `cargo xtask` runs at `opt-level = 0`; the crates that cut and hash the
+# gates' snapshots, gigabytes at a time, are optimized in it.
 [profile.dev.package.phpstan-rs-dumps]
 opt-level = 3
 
@@ -69,15 +69,6 @@ opt-level = 3
 opt-level = 3
 
 [profile.dev.package.sha2]
-opt-level = 3
-
-[profile.dev.package.blake3]
-opt-level = 3
-
-[profile.dev.package.flate2]
-opt-level = 3
-
-[profile.dev.package.zlib-rs]
 opt-level = 3
 
 # The regression gates' corpus, type and baseline snapshots: release
