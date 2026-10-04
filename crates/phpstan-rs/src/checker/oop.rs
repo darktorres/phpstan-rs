@@ -783,40 +783,14 @@ impl<'a> Checker<'a> {
     /// those apart from a real reference with any confidence.
     fn check_doc_see_tag_targets(&mut self, block: &docblock::DocBlock, span: Span) {
         for target in &block.see {
-            let (class_part, member) = match target.split_once("::") {
-                Some((c, m)) => (c, Some(m)),
-                None => (target.as_str(), None),
+            let Some(reference) = docblock::see_reference(target) else {
+                continue;
             };
-            // A bare (no `::`) target only counts as a class reference
-            // when it starts uppercase/backslash, PHP's own class-naming
-            // convention - a lowercase bare word is far more likely the
-            // first word of a free-text description (`@see the return
-            // value of parseFoo`), which real PHPStan's own missing
-            // `SeeTagValueNode` grammar can't tell apart from a real
-            // reference either - erring towards not guessing here.
-            if member.is_none()
-                && !class_part.starts_with(|c: char| c.is_ascii_uppercase() || c == '\\')
-            {
-                continue;
-            }
-            let trimmed = class_part.trim_start_matches('\\');
-            if trimmed.is_empty()
-                || !trimmed
-                    .split('\\')
-                    .all(|seg| is_php_identifier(seg) && !seg.is_empty())
-            {
-                continue;
-            }
-            // `class_part`, not `trimmed`, is passed here - a leading `\`
-            // means "already fully qualified" to `NameContext::resolve`
-            // (`resolve_as`'s own `strip_prefix('\\')` check), matching
-            // real PHP name-resolution rules. Resolving the already-
-            // stripped form re-qualified an FQN `@see` target against the
-            // current namespace a second time, corrupting it into a name
-            // that could never resolve (a real, confirmed false positive:
-            // `\Piwigo\Controller\Projection\PictureElement` from a
-            // `Piwigo\Controller\Projection`-namespaced file).
-            let resolved = self.name_ctx.resolve(class_part);
+            let trimmed = reference.class.trim_start_matches('\\');
+            // `reference.class`, not `trimmed`, is resolved: a leading `\`
+            // is what makes `NameContext::resolve` take the name as fully
+            // qualified instead of qualifying it with the namespace again.
+            let resolved = self.name_ctx.resolve(reference.class);
             if self.registry.lookup_class(&resolved).is_none() {
                 self.report(
                     format!("PHPDoc tag @see contains unknown class {trimmed}"),
@@ -826,18 +800,20 @@ impl<'a> Checker<'a> {
                 );
                 continue;
             }
-            let Some(member) = member else { continue };
-            let found = if let Some(method) = member.strip_suffix("()") {
-                self.registry.lookup_method(&resolved, method).is_some()
-            } else if let Some(prop) = member.strip_prefix('$') {
-                self.registry.lookup_property(&resolved, prop).is_some()
-            } else if is_php_identifier(member) {
-                self.registry.lookup_const(&resolved, member).is_some()
-            } else {
-                // An unrecognized member shape (stray punctuation, a
-                // description that happened to contain "::") - don't
-                // guess.
-                true
+            let (found, member) = match reference.member {
+                None | Some(docblock::SeeMember::Other) => continue,
+                Some(docblock::SeeMember::Method(method)) => (
+                    self.registry.lookup_method(&resolved, method).is_some(),
+                    format!("{method}()"),
+                ),
+                Some(docblock::SeeMember::Property(property)) => (
+                    self.registry.lookup_property(&resolved, property).is_some(),
+                    format!("${property}"),
+                ),
+                Some(docblock::SeeMember::Constant(constant)) => (
+                    self.registry.lookup_const(&resolved, constant).is_some(),
+                    constant.to_string(),
+                ),
             };
             if !found {
                 self.report(
@@ -1933,12 +1909,6 @@ fn body_calls_parent_construct(stmts: &[Stmt]) -> bool {
                         && syntax::ast::is_constructor_name(method)))
         })
     })
-}
-
-fn is_php_identifier(s: &str) -> bool {
-    let mut chars = s.chars();
-    matches!(chars.next(), Some(c) if c.is_ascii_alphabetic() || c == '_')
-        && chars.all(|c| c.is_ascii_alphanumeric() || c == '_')
 }
 
 pub(crate) fn visibility_word(v: &Visibility) -> &'static str {

@@ -145,15 +145,22 @@ fn write_record(record: &ParseRecord, p: &mut Printer) {
 /// A doc site and what its tags refer to, sorted.
 struct DocSiteReferences<'a> {
     site: &'a syntax::references::DocSite,
-    keys: Vec<crate::deps::RefKey>,
+    keys: crate::deps::DocSiteKeys,
 }
 
 impl Canonical for DocSiteReferences<'_> {
     fn canonical(&self, p: &mut Printer) {
-        let DocSiteReferences { site, keys } = self;
+        let DocSiteReferences {
+            site,
+            keys: crate::deps::DocSiteKeys { types, see },
+        } = self;
         p.node(
             "DocSiteReferences",
-            &[("site", site), ("keys", &Sorted(keys))],
+            &[
+                ("site", site),
+                ("keys", &Sorted(types)),
+                ("see", &Sorted(see)),
+            ],
         );
     }
 }

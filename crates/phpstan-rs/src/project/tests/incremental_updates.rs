@@ -1414,6 +1414,27 @@ fn a_trait_is_rechecked_when_a_class_using_it_changes() {
 }
 
 #[test]
+fn a_file_naming_a_class_only_in_a_see_tag_is_rechecked() {
+    let files = [
+        ("see.php", "<?php /** @see Target */ function f(): void {}"),
+        ("target.php", "<?php class Target {}"),
+    ];
+    assert_held_diagnostics_match_a_fresh_load(
+        ProjectSettings::default,
+        &files,
+        &[Edit::Update("target.php", "<?php class Renamed {}")],
+    );
+    assert_held_diagnostics_match_a_fresh_load(
+        ProjectSettings::default,
+        &files,
+        &[
+            Edit::Remove("target.php"),
+            Edit::Update("added.php", "<?php class Target {}"),
+        ],
+    );
+}
+
+#[test]
 fn the_other_declarations_of_a_duplicate_are_rechecked() {
     let settings = || ProjectSettings {
         rules: crate::rules_settings::RulesSettings {

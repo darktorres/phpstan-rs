@@ -46,7 +46,7 @@ pub fn referenced_names(stmts: &[Stmt]) -> FxHashSet<RefKey> {
 pub fn recorded_references(
     references: syntax::references::FileReferences,
 ) -> (FxHashSet<RefKey>, FxHashSet<RefKey>) {
-    let found: Vec<(bool, Vec<RefKey>)> = doc_site_references(&references)
+    let found: Vec<(bool, DocSiteKeys)> = doc_site_references(&references)
         .into_iter()
         .map(|(site, keys)| (site.outside, keys))
         .collect();
@@ -57,23 +57,36 @@ pub fn recorded_references(
         doc_frames: _,
     } = references;
     for (is_outside, keys) in found {
-        for key in keys {
+        let DocSiteKeys { types, see } = keys;
+        for key in types {
             if is_outside {
                 outside.insert(key.clone());
             }
             names.insert(key);
         }
+        names.extend(see);
     }
     (names, outside)
 }
 
+/// What the names in one doc site's tags refer to.
+#[derive(Debug, Default)]
+pub(crate) struct DocSiteKeys {
+    /// The names in its tags' types, each resolved where the site is and
+    /// as written: what the declaration it documents can take its shape
+    /// from.
+    pub(crate) types: Vec<RefKey>,
+    /// The classes its `@see` tags name, resolved where the site is, which
+    /// only the check of the tag reads.
+    pub(crate) see: Vec<RefKey>,
+}
+
 /// Each doc site of `references`, in the order of the file, with what the
-/// names in its tags refer to: each name resolved where the site is and as
-/// written, the templates the site and its enclosing functions and classes
-/// declare left out.
+/// names in its tags refer to, the templates the site and its enclosing
+/// functions and classes declare left out of the names in types.
 pub(crate) fn doc_site_references(
     references: &syntax::references::FileReferences,
-) -> Vec<(&syntax::references::DocSite, Vec<RefKey>)> {
+) -> Vec<(&syntax::references::DocSite, DocSiteKeys)> {
     let mut sites: Vec<&syntax::references::DocSite> = references.doc_sites.iter().collect();
     sites.sort_by_key(|site| site.pos);
     let mut frames: Vec<&syntax::references::DocFrame> = references.doc_frames.iter().collect();
@@ -93,7 +106,7 @@ pub(crate) fn doc_site_references(
             enclosing.pop();
         }
         let parsed = doc_names_of(&site.doc);
-        let mut keys = Vec::new();
+        let mut keys = DocSiteKeys::default();
         for token in &parsed.tokens {
             if parsed.declared.contains(token)
                 || enclosing
@@ -102,8 +115,13 @@ pub(crate) fn doc_site_references(
             {
                 continue;
             }
-            keys.push(RefKey::class_text(&site.scope.resolve(token)));
-            keys.push(RefKey::class_text(token));
+            keys.types
+                .push(RefKey::class_text(&site.scope.resolve(token)));
+            keys.types.push(RefKey::class_text(token));
+        }
+        for class in &parsed.see {
+            keys.see
+                .push(RefKey::class_text(&site.scope.resolve(class)));
         }
         out.push((site, keys));
     }
@@ -145,6 +163,9 @@ struct DocNames {
     tokens: Vec<String>,
     /// The template parameters its `@template` tags declare.
     declared: FxHashSet<String>,
+    /// The classes its `@see` tags name, as written: read as classes
+    /// whatever templates are in scope, as the check of the tag reads them.
+    see: Vec<String>,
 }
 
 /// `doc`'s `DocNames`: what its docblock holds.
@@ -158,6 +179,12 @@ fn doc_names_of(doc: &str) -> std::sync::Arc<DocNames> {
         DocNames {
             tokens,
             declared: block.templates.iter().cloned().collect(),
+            see: block
+                .see
+                .iter()
+                .filter_map(|target| phpdoc::docblock::see_reference(target))
+                .map(|reference| reference.class.to_string())
+                .collect(),
         }
     })
 }
@@ -182,10 +209,11 @@ impl Collector {
         self.names.insert(key);
     }
 
-    /// The names a doc comment's tags mention, each resolved as a class
-    /// and also taken as written (a constant-named type's global
-    /// fallback). Only the types of a tag are read, not its description,
-    /// and a template parameter in scope isn't a class.
+    /// The names a doc comment's tags mention: those in the types of its
+    /// tags, each resolved as a class and also taken as written (a
+    /// constant-named type's global fallback), a template parameter in
+    /// scope not being a class; and the classes its `@see` tags name,
+    /// which no declaration takes its shape from.
     fn doc_names(&mut self, doc: Option<&str>) {
         let Some(doc) = doc else { return };
         let parsed = doc_names_of(doc);
@@ -202,6 +230,10 @@ impl Collector {
             let resolved = RefKey::class_text(&self.ctx.resolve(token));
             self.add(resolved);
             self.add(RefKey::class_text(token));
+        }
+        for class in &parsed.see {
+            self.names
+                .insert(RefKey::class_text(&self.ctx.resolve(class)));
         }
     }
 

@@ -403,3 +403,51 @@ fn a_key_is_equal_as_php_compares_what_it_is_of() {
         }
     }
 }
+
+#[test]
+fn a_class_a_see_tag_names_is_referenced_but_shapes_no_declaration() {
+    let src = r#"<?php
+        namespace App;
+        use Lib\Imported as Alias;
+
+        /**
+         * @template T
+         * @see Alias
+         * @see \Lib\Qualified::method()
+         * @see Sub\Local::$property
+         * @see T
+         * @see the description, which names no class
+         * @see https://example.com/Page
+         * @see helper()
+         */
+        class Foo {
+            /** @see Member::CONSTANT */
+            public function m() {}
+        }
+    "#;
+    let walked = crate::deps::both_referenced_names(&syntax::parse(src).unwrap().stmts);
+    let recorded = crate::deps::recorded_references(syntax::parse(src).unwrap().references);
+    for (names, outside) in [walked, recorded] {
+        for class in [
+            "Lib\\Imported",
+            "Lib\\Qualified",
+            "App\\Sub\\Local",
+            "App\\T",
+            "App\\Member",
+        ] {
+            assert!(names.contains(&RefKey::class_text(class)), "{class}");
+        }
+        for class in ["Lib\\Qualified", "App\\Sub\\Local", "App\\T", "App\\Member"] {
+            assert!(!outside.contains(&RefKey::class_text(class)), "{class}");
+        }
+        for not in [
+            "App\\the",
+            "the",
+            "App\\https:",
+            "App\\helper",
+            "Lib\\Qualified::method",
+        ] {
+            assert!(!names.contains(&RefKey::class_text(not)), "{not}");
+        }
+    }
+}

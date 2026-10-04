@@ -4,6 +4,7 @@ mod callable_invocation_tags;
 mod method_and_mixin_tags;
 mod param_and_return_tags;
 mod psalm_and_phan_tags;
+mod see_tags;
 mod templates_and_generics;
 mod type_aliases;
 mod unknown_tags;

@@ -1300,6 +1300,69 @@ fn see_target(s: &str) -> &str {
     s
 }
 
+/// A `@see` target that refers to a class or to one of its members.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SeeReference<'a> {
+    /// The class as written, a leading `\` kept.
+    pub class: &'a str,
+    /// What follows `::`, when something does.
+    pub member: Option<SeeMember<'a>>,
+}
+
+/// What follows the `::` of a `@see` target.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SeeMember<'a> {
+    /// `name()`.
+    Method(&'a str),
+    /// `$name`.
+    Property(&'a str),
+    /// `NAME`.
+    Constant(&'a str),
+    /// Of no member's shape: stray punctuation, an argument list, or a
+    /// description that contains `::`.
+    Other,
+}
+
+/// What `target`, a `@see` tag's target, refers to: a class when it is
+/// shaped like a class name, or a member of it when it is shaped like
+/// `Class::method()`, `Class::$property` or `Class::CONSTANT`. A target
+/// without `::` is taken for a class only when it starts with an uppercase
+/// letter or a `\`, as PHP code names classes: a lowercase word is more
+/// likely the first word of a description (`@see the return value of
+/// parseFoo`). A URL, a function and free text refer to nothing.
+pub fn see_reference(target: &str) -> Option<SeeReference<'_>> {
+    let (class, member) = match target.split_once("::") {
+        Some((class, member)) => (class, Some(member)),
+        None => (target, None),
+    };
+    if member.is_none() && !class.starts_with(|c: char| c.is_ascii_uppercase() || c == '\\') {
+        return None;
+    }
+    let bare = class.trim_start_matches('\\');
+    if bare.is_empty() || !bare.split('\\').all(is_identifier) {
+        return None;
+    }
+    let member = member.map(|member| {
+        if let Some(method) = member.strip_suffix("()") {
+            SeeMember::Method(method)
+        } else if let Some(property) = member.strip_prefix('$') {
+            SeeMember::Property(property)
+        } else if is_identifier(member) {
+            SeeMember::Constant(member)
+        } else {
+            SeeMember::Other
+        }
+    });
+    Some(SeeReference { class, member })
+}
+
+/// Whether `s` is a PHP identifier spelled in ASCII.
+fn is_identifier(s: &str) -> bool {
+    let mut chars = s.chars();
+    matches!(chars.next(), Some(c) if c.is_ascii_alphabetic() || c == '_')
+        && chars.all(|c| c.is_ascii_alphanumeric() || c == '_')
+}
+
 /// Every `@phpstan-*` tag name real PHPStan itself recognizes - `real
 /// PhpDoc/Tag`'s own inventory, transcribed directly (`InvalidPHPStanDocTagRule
 /// ::POSSIBLE_PHPSTAN_TAGS`, `vendor/phpstan-src`, not guessed) - the
