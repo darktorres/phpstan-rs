@@ -908,7 +908,9 @@ impl<'a> Checker<'a> {
             self.enter_shared_scope(crate::checker::shared_scope::SharedScope::of(
                 f.body_stmts(),
                 &[],
-                Some((class_name.map(Name::from), f.name.name.clone())),
+                // By the name the registry declares it under: a function's
+                // with its namespace, a method's as written.
+                Some((class_name.map(Name::from), Name::from(f.fq_name()))),
                 false,
             ));
         // See `Checker::current_function_throw_points`'s doc comment.
