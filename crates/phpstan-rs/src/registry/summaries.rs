@@ -209,12 +209,87 @@ pub(crate) enum ArgAt {
     Spread,
 }
 
-/// A call in a body, with its arguments that are places: a by-reference
-/// parameter where one is passed writes it.
+/// A callable an argument names, as the body wrote it.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub(crate) enum Callable {
+    /// A string: a function's name, or `Class::method`.
+    Text(Name),
+    /// `[target, 'method']`.
+    Pair(PairTarget, Name),
+    /// A closure, an arrow function or a first-class callable the body
+    /// wrote: what it runs is the body's.
+    Written,
+}
+
+/// The first element of an array callable.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub(crate) enum PairTarget {
+    /// An object: `$this`, a property of it, a variable or a static
+    /// property, as a method's receiver.
+    Object(Receiver),
+    /// A class, by a string or `Class::class`.
+    Class(QualifiedName),
+}
+
+impl Callable {
+    /// The callable `e` names, when the body wrote one.
+    fn of(e: &Expr) -> Option<Callable> {
+        match &e.peeled().kind {
+            ExprKind::Literal(Literal::String(text)) => {
+                Some(Callable::Text(Name::from(text.as_str()?)))
+            }
+            ExprKind::Closure(_) | ExprKind::ArrowFn(_) | ExprKind::FirstClassCallable(_) => {
+                Some(Callable::Written)
+            }
+            ExprKind::ArrayLiteral(items) => {
+                let [first, second] = &items[..] else {
+                    return None;
+                };
+                let positional = |item: &ArrayItem, at: i64| {
+                    !item.spread
+                        && !item.by_ref
+                        && match &item.key {
+                            None => true,
+                            Some(key) => {
+                                matches!(&key.peeled().kind, ExprKind::Literal(Literal::Int(n)) if *n == at)
+                            }
+                        }
+                };
+                if !positional(first, 0) || !positional(second, 1) {
+                    return None;
+                }
+                let method = literal_string_value(&second.value)?;
+                let target = match &first.value.peeled().kind {
+                    // A class a string names is fully qualified.
+                    ExprKind::Literal(Literal::String(text)) => {
+                        let name = Name::from(text.as_str()?.trim_start_matches('\\'));
+                        PairTarget::Class(QualifiedName {
+                            written: name.clone(),
+                            resolved: ResolvedName::Exact(name),
+                            span: first.value.span,
+                        })
+                    }
+                    ExprKind::ClassNameFetch(StaticTarget::Name(class)) => {
+                        PairTarget::Class((**class).clone())
+                    }
+                    _ => PairTarget::Object(receiver(&first.value)),
+                };
+                Some(Callable::Pair(target, Name::from(&*method)))
+            }
+            _ => None,
+        }
+    }
+}
+
+/// A call in a body, with its arguments that are places, where a
+/// by-reference parameter writes them, and those that name a callable.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub(crate) struct CallWrites {
     pub(crate) callee: Callee,
+    /// Where each argument is passed.
+    pub(crate) arguments: Box<[ArgAt]>,
     pub(crate) places: Box<[(ArgAt, Place)]>,
+    pub(crate) callables: Box<[(ArgAt, Callable)]>,
 }
 
 /// What a body writes, before any declaration is looked up. A closure's and
@@ -501,24 +576,34 @@ impl Summarizer {
         self.bindings.push((variable, binding));
     }
 
-    /// A call, with the arguments that are places.
+    /// A call, with the arguments that are places and those that name a
+    /// callable.
     fn call(&mut self, callee: Callee, args: &[Arg]) {
         let mut spread = false;
-        let places = args
-            .iter()
-            .enumerate()
-            .filter_map(|(at, arg)| {
-                spread |= arg.spread;
-                let place = Place::of(&arg.value)?;
-                let at = match &arg.name {
-                    _ if spread => ArgAt::Spread,
-                    Some(name) => ArgAt::Named(name.name.clone()),
-                    None => ArgAt::Position(at as u32),
-                };
-                Some((at, place))
-            })
-            .collect();
-        self.calls.push(CallWrites { callee, places });
+        let mut arguments = Vec::new();
+        let mut places = Vec::new();
+        let mut callables = Vec::new();
+        for (at, arg) in args.iter().enumerate() {
+            spread |= arg.spread;
+            let at = match &arg.name {
+                _ if spread => ArgAt::Spread,
+                Some(name) => ArgAt::Named(name.name.clone()),
+                None => ArgAt::Position(at as u32),
+            };
+            arguments.push(at.clone());
+            if let Some(callable) = Callable::of(&arg.value) {
+                callables.push((at.clone(), callable));
+            }
+            if let Some(place) = Place::of(&arg.value) {
+                places.push((at, place));
+            }
+        }
+        self.calls.push(CallWrites {
+            callee,
+            arguments: arguments.into_boxed_slice(),
+            places: places.into_boxed_slice(),
+            callables: callables.into_boxed_slice(),
+        });
     }
 }
 

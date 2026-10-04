@@ -20,12 +20,13 @@ use std::sync::Arc;
 
 use rayon::prelude::*;
 use rustc_hash::{FxHashMap, FxHashSet};
-use syntax::ast::{ClassKind, QualifiedName};
+use syntax::ast::{ClassKind, QualifiedName, ResolvedName};
 use syntax::name::Name;
 
 use crate::registry::bodies::BodySource;
 use crate::registry::summaries::{
-    ArgAt, Binding, Callee, Made, Place, Receiver, Root, Step, WriteFacts,
+    ArgAt, Binding, CallWrites, Callable, Callee, Made, PairTarget, Place, Receiver, Root, Step,
+    WriteFacts,
 };
 use crate::registry::{ClassReflection, FunctionReflection, Registry, is_non_overridable};
 use types::Type;
@@ -261,6 +262,17 @@ impl<'a> std::borrow::Borrow<dyn DeclQuery + 'a> for DeclKey {
     }
 }
 
+impl DeclKey {
+    /// The name the builtin table knows the declaration by: a function's,
+    /// or `class::method`, lowercased.
+    fn builtin_name(&self) -> String {
+        match &self.class {
+            Some(class) => format!("{class}::{}", self.member),
+            None => self.member.clone(),
+        }
+    }
+}
+
 fn function_key(name: &str) -> DeclKey {
     DeclKey {
         class: None,
@@ -272,6 +284,101 @@ fn method_key(class: &str, method: &str) -> DeclKey {
     DeclKey {
         class: Some(class.to_ascii_lowercase()),
         member: method.to_ascii_lowercase(),
+    }
+}
+
+/// Where a builtin runs code: at a parameter, or through the elements of an
+/// array passed there.
+#[derive(Debug, Clone, Copy)]
+struct Position {
+    at: u32,
+    elements: bool,
+}
+
+/// What a builtin runs through an argument.
+#[derive(Debug, Clone, Copy)]
+enum BuiltinRun {
+    /// It invokes the callable.
+    Calls,
+    /// It calls this method (lowercased) of the object.
+    Method(&'static str),
+    /// It runs this stream-wrapper method.
+    Wrapper(&'static str),
+}
+
+/// What each builtin runs, as `tools/builtin-runs/record.php` found it.
+struct BuiltinTable {
+    /// The builtins a call reached: functions and `class::method`,
+    /// lowercased.
+    probed: FxHashSet<&'static str>,
+    runs: FxHashMap<&'static str, Vec<(Position, BuiltinRun)>>,
+    /// The classes (lowercased) a method of which ran a callable or an
+    /// object's method its object was made with.
+    holding: FxHashSet<&'static str>,
+    /// The stream-wrapper methods (lowercased) a method of each class
+    /// (lowercased) ran through a URL its object was made with.
+    held_wrappers: FxHashMap<&'static str, Vec<&'static str>>,
+}
+
+fn builtin_table() -> &'static BuiltinTable {
+    static TABLE: std::sync::LazyLock<BuiltinTable> =
+        std::sync::LazyLock::new(|| BuiltinTable::parse(include_str!("data/builtin-runs-8.5.tsv")));
+    &TABLE
+}
+
+impl BuiltinTable {
+    fn parse(text: &'static str) -> BuiltinTable {
+        let mut table = BuiltinTable {
+            probed: FxHashSet::default(),
+            runs: FxHashMap::default(),
+            holding: FxHashSet::default(),
+            held_wrappers: FxHashMap::default(),
+        };
+        for line in text.lines() {
+            let mut fields = line.split('\t');
+            let (Some(builtin), Some(place), Some(kind)) =
+                (fields.next(), fields.next(), fields.next())
+            else {
+                continue;
+            };
+            let detail = fields.next().unwrap_or("");
+            if kind == "probed" {
+                table.probed.insert(builtin);
+                continue;
+            }
+            if place.starts_with("new:") {
+                if let Some((class, _)) = builtin.split_once("::") {
+                    if kind == "wrapper" {
+                        let held = table.held_wrappers.entry(class).or_default();
+                        if !held.contains(&detail) {
+                            held.push(detail);
+                        }
+                    } else {
+                        table.holding.insert(class);
+                    }
+                }
+                continue;
+            }
+            let (at, elements) = match place.strip_suffix("[]") {
+                Some(at) => (at, true),
+                None => (place, false),
+            };
+            let Ok(at) = at.parse() else {
+                continue;
+            };
+            let run = match kind {
+                "calls" => BuiltinRun::Calls,
+                "method" => BuiltinRun::Method(detail),
+                "wrapper" => BuiltinRun::Wrapper(detail),
+                _ => continue,
+            };
+            table
+                .runs
+                .entry(builtin)
+                .or_default()
+                .push((Position { at, elements }, run));
+        }
+        table
     }
 }
 
@@ -308,21 +415,6 @@ const CODE_RUNNING_PARAMETER_TYPES: [&str; 11] = [
     "ArrayAccess",
     "Serializable",
 ];
-
-/// A builtin writes nothing unless a parameter of it takes one of
-/// `CODE_RUNNING_PARAMETER_TYPES`.
-fn stub_effect(sig: &FunctionReflection) -> Effect {
-    let runs_code = *sig.stub_effect.0.get_or_init(|| {
-        sig.params
-            .iter()
-            .any(|p| p.ty.mentions_any(&CODE_RUNNING_PARAMETER_TYPES))
-    });
-    if runs_code {
-        Effect::anything()
-    } else {
-        Effect::nothing()
-    }
-}
 
 /// The method declarations of every loaded class with a body, by name
 /// (lowercased): what a call on a value whose class is not known may reach.
@@ -464,7 +556,7 @@ impl Registry {
                     return Effect::anything();
                 };
                 if sig.is_stub {
-                    stub_effect(sig)
+                    self.stub_effect(key, sig)
                 } else if never_runs(info, &key.member, sig) {
                     Effect::nothing()
                 } else {
@@ -472,7 +564,7 @@ impl Registry {
                 }
             }
             None => match self.functions.get(key.member.as_str()) {
-                Some(sig) if sig.is_stub => stub_effect(sig),
+                Some(sig) if sig.is_stub => self.stub_effect(key, sig),
                 _ => Effect::anything(),
             },
         }
@@ -555,6 +647,113 @@ impl Registry {
         method_key(owner, method)
     }
 
+    /// The name the builtin table knows the builtin `key` by: its own, or,
+    /// for a method, its name on the first of its class's ancestors PHP
+    /// declares it on; `None` when no call of it was reached.
+    fn builtin_entry(&self, key: &DeclKey) -> Option<String> {
+        let table = builtin_table();
+        let name = key.builtin_name();
+        if table.probed.contains(name.as_str()) {
+            return Some(name);
+        }
+        let class = key.class.as_deref()?;
+        self.all_ancestor_names(class).iter().find_map(|ancestor| {
+            let name = format!("{}::{}", ancestor.to_ascii_lowercase(), key.member);
+            table.probed.contains(name.as_str()).then_some(name)
+        })
+    }
+
+    /// The builtin classes `class` is: itself and its ancestors, lowercased.
+    fn builtin_lineage(&self, class: &str) -> Vec<String> {
+        std::iter::once(class.to_ascii_lowercase())
+            .chain(
+                self.all_ancestor_names(class)
+                    .iter()
+                    .map(|ancestor| ancestor.to_ascii_lowercase()),
+            )
+            .collect()
+    }
+
+    /// Whether an object of the builtin class `class` may run a callable or
+    /// an object's method it was made with.
+    fn builtin_holds_code(&self, class: &str) -> bool {
+        let table = builtin_table();
+        self.builtin_lineage(class)
+            .iter()
+            .any(|class| table.holding.contains(class.as_str()))
+    }
+
+    /// The stream-wrapper methods an object of the builtin class `class` may
+    /// run through a URL it was made with.
+    fn builtin_held_wrappers(&self, class: &str) -> Vec<&'static str> {
+        let table = builtin_table();
+        let mut out = Vec::new();
+        for class in self.builtin_lineage(class) {
+            for method in table
+                .held_wrappers
+                .get(class.as_str())
+                .into_iter()
+                .flatten()
+            {
+                if !out.contains(method) {
+                    out.push(*method);
+                }
+            }
+        }
+        out
+    }
+
+    /// What a call of the builtin `key` (`sig`) whose arguments are not
+    /// known may write: nothing when a call of it was seen to run no code
+    /// through any argument, its object holds none, and none of its
+    /// parameters takes something through which it runs code
+    /// (`CODE_RUNNING_PARAMETER_TYPES`); anything otherwise.
+    fn stub_effect(&self, key: &DeclKey, sig: &FunctionReflection) -> Effect {
+        let runs_code = *sig.stub_effect.0.get_or_init(|| {
+            let table = builtin_table();
+            let Some(name) = self.builtin_entry(key) else {
+                return true;
+            };
+            key.class.as_deref().is_some_and(|class| {
+                self.builtin_holds_code(class) || !self.builtin_held_wrappers(class).is_empty()
+            }) || table.runs.contains_key(name.as_str())
+                || sig
+                    .params
+                    .iter()
+                    .any(|p| p.ty.mentions_any(&CODE_RUNNING_PARAMETER_TYPES))
+        });
+        if runs_code {
+            Effect::anything()
+        } else {
+            Effect::nothing()
+        }
+    }
+
+    /// The builtin `key` is, when it is one.
+    fn builtin(&self, key: &DeclKey) -> Option<&FunctionReflection> {
+        let sig = match &key.class {
+            Some(class) => self.lookup_method(class, &key.member),
+            None => self.functions.get(key.member.as_str()),
+        }?;
+        sig.is_stub.then_some(sig)
+    }
+
+    /// The methods `class` has with a body that override one of the builtin
+    /// class `builtin`'s: what a method of the builtin may run on its own
+    /// object.
+    fn overrides_of_builtin(&self, class: &str, builtin: &str) -> Vec<DeclKey> {
+        let Some(info) = self.classes.get(builtin) else {
+            return Vec::new();
+        };
+        info.methods
+            .iter()
+            .filter_map(|(method, _)| {
+                let (owner, sig) = self.lookup_method_with_owner(class, method)?;
+                (!sig.is_stub).then(|| method_key(&owner, method))
+            })
+            .collect()
+    }
+
     /// The loaded classes declaring `method` with a body.
     fn classes_declaring(&self, method: &str) -> &[Name] {
         self.methods_by_name
@@ -615,9 +814,13 @@ impl Registry {
     fn builtin_methods_running_code(&self) -> &FxHashSet<String> {
         self.builtin_methods_running_code.get_or_init(|| {
             let mut names = FxHashSet::default();
-            for (_, info) in self.classes.iter() {
+            for (class, info) in self.classes.iter() {
                 for (method, sig) in info.methods.iter() {
-                    if sig.is_stub && stub_effect(sig).is_anything() {
+                    let Some((owner, _)) = self.lookup_method_with_owner(class, method) else {
+                        continue;
+                    };
+                    let key = method_key(&owner, method);
+                    if sig.is_stub && self.stub_effect(&key, sig).is_anything() {
                         names.insert(method.to_ascii_lowercase());
                     }
                 }
@@ -739,8 +942,8 @@ impl<'r> Resolve<'r> {
         // What each call reaches depends on the variables' types, and which
         // variables a call writes by reference on what it reaches: both are
         // found again until no variable is lost.
-        let (calls, written_args) = loop {
-            let mut calls: Vec<(DeclKey, Transfer)> = Vec::new();
+        let (reached, written_args) = loop {
+            let mut reached: Vec<Vec<(DeclKey, Transfer)>> = Vec::new();
             let mut written_args: Vec<&'r Place> = Vec::new();
             for call in &self.facts.calls {
                 let Some(targets) = self.call_targets(&call.callee) else {
@@ -755,7 +958,7 @@ impl<'r> Resolve<'r> {
                         written_args.push(place);
                     }
                 }
-                calls.extend(targets);
+                reached.push(targets);
             }
             let mut lost = false;
             for place in &written_args {
@@ -765,9 +968,26 @@ impl<'r> Resolve<'r> {
                 }
             }
             if !lost {
-                break (calls, written_args);
+                break (reached, written_args);
             }
         };
+        // A builtin writes what the code it runs writes: what is passed to
+        // it, and what of its object a class extending it declares.
+        let mut calls: Vec<(DeclKey, Transfer)> = Vec::new();
+        for (call, targets) in self.facts.calls.iter().zip(reached) {
+            for (key, transfer) in targets {
+                match self.registry.builtin(&key) {
+                    Some(sig) => match self.builtin_runs(&key, sig, &transfer, call) {
+                        Some(runs) => calls.extend(runs),
+                        None => {
+                            self.classification.own = Effect::anything();
+                            return;
+                        }
+                    },
+                    None => calls.push((key, transfer)),
+                }
+            }
+        }
         let mut own = Effect::nothing();
         for place in self.facts.writes.iter().chain(written_args) {
             self.place_storages(place, &mut own, 0);
@@ -777,6 +997,203 @@ impl<'r> Resolve<'r> {
         }
         self.classification.own = own;
         self.classification.calls = calls;
+    }
+
+    /// The declarations a call of the builtin `key` (`sig`) runs, with the
+    /// call's arguments: what the callables passed to it run, the methods it
+    /// calls on the objects passed to it, the stream-wrapper methods it runs,
+    /// and, for a method, the methods of its object a class extending it
+    /// declares. `None` when it may run code not known.
+    fn builtin_runs(
+        &self,
+        key: &DeclKey,
+        sig: &FunctionReflection,
+        transfer: &Transfer,
+        call: &CallWrites,
+    ) -> Option<Vec<(DeclKey, Transfer)>> {
+        let registry = self.registry;
+        let table = builtin_table();
+        let name = registry.builtin_entry(key)?;
+        if key
+            .class
+            .as_deref()
+            .is_some_and(|class| registry.builtin_holds_code(class))
+        {
+            return None;
+        }
+        let mut out = Vec::new();
+        let wrapper_runs = |method: &str, out: &mut Vec<(DeclKey, Transfer)>| {
+            for class in registry.classes_declaring(method) {
+                if let Some((owner, sig)) = registry.lookup_method_with_owner(class, method) {
+                    out.push((registry.reached(&owner, method, sig), Transfer::Made));
+                }
+            }
+        };
+        if let Some(class) = &key.class {
+            for method in registry.builtin_held_wrappers(class) {
+                wrapper_runs(method, &mut out);
+            }
+        }
+        if let Some(owner) = &key.class {
+            let receivers: Vec<Name> = match transfer {
+                Transfer::Same => self.class.map(Name::from).into_iter().collect(),
+                Transfer::Other(Some(class)) => vec![class.clone()],
+                Transfer::Other(None) | Transfer::Made | Transfer::Static => {
+                    vec![Name::from(owner.as_str())]
+                }
+            };
+            for receiver in &receivers {
+                for candidate in
+                    std::iter::once(receiver.clone()).chain(registry.subclasses(receiver))
+                {
+                    out.extend(
+                        registry
+                            .overrides_of_builtin(&candidate, owner)
+                            .into_iter()
+                            .map(|key| (key, transfer.clone())),
+                    );
+                }
+            }
+        }
+        let runs = table.runs.get(name.as_str()).map_or(&[][..], Vec::as_slice);
+        // Each parameter a callable is passed at runs it.
+        for (at, param) in sig.params.iter().enumerate() {
+            let at = at as u32;
+            let takes_callable = param.ty.mentions_any(&["callable", "Closure"])
+                || runs
+                    .iter()
+                    .any(|(position, run)| position.at == at && matches!(run, BuiltinRun::Calls));
+            if !takes_callable {
+                continue;
+            }
+            let passed = |arg: &ArgAt| match arg {
+                ArgAt::Position(position) => *position == at || (param.variadic && *position >= at),
+                ArgAt::Named(name) => name.as_str() == param.name.as_ref(),
+                ArgAt::Spread => true,
+            };
+            if !call.arguments.iter().any(passed) {
+                continue;
+            }
+            let elements = runs.iter().any(|(position, run)| {
+                position.at == at && position.elements && matches!(run, BuiltinRun::Calls)
+            });
+            if elements {
+                return None;
+            }
+            let callable = call
+                .callables
+                .iter()
+                .find(|(arg, _)| passed(arg))
+                .map(|(_, callable)| callable);
+            match callable {
+                Some(callable) => out.extend(self.callable_targets(callable)?),
+                // A closure the body wrote, held in a variable.
+                None => match call.places.iter().find(|(arg, _)| passed(arg)) {
+                    Some((_, place))
+                        if place_variable(place)
+                            .and_then(|name| self.made.get(name.as_str()))
+                            .is_some_and(|made| matches!(made, Made::Closure)) => {}
+                    _ => return None,
+                },
+            }
+        }
+        for (position, run) in runs {
+            let arg_at = |arg: &ArgAt| match arg {
+                ArgAt::Position(at) => *at == position.at,
+                ArgAt::Named(name) => sig
+                    .params
+                    .get(position.at as usize)
+                    .is_some_and(|p| p.name.as_ref() == name.as_str()),
+                ArgAt::Spread => true,
+            };
+            if !call.arguments.iter().any(arg_at) {
+                continue;
+            }
+            match run {
+                BuiltinRun::Calls => {}
+                BuiltinRun::Method(method) => {
+                    let holder = match call.places.iter().find(|(arg, _)| arg_at(arg)) {
+                        Some((_, place)) if !position.elements => {
+                            self.value_holder(&place.root, &place.steps)
+                        }
+                        _ => Holder::Unknown,
+                    };
+                    out.extend(self.method_targets_on(&holder, method)?);
+                }
+                BuiltinRun::Wrapper(method) => wrapper_runs(method, &mut out),
+            }
+        }
+        Some(out)
+    }
+
+    /// The declarations calling `method` on an object `holder` says may be
+    /// run, PHP calling it: by the hierarchy over its classes when each has
+    /// the method, and every loaded declaration of it otherwise, since the
+    /// method may run on an object the first one gave back. Nothing for a
+    /// value that is no object. `None` when a builtin method of the name runs
+    /// code passed to it.
+    fn method_targets_on(&self, holder: &Holder, method: &str) -> Option<Vec<(DeclKey, Transfer)>> {
+        let registry = self.registry;
+        let has_method = |class: &Name| {
+            registry.lookup_method(class, method).is_some()
+                || registry.lookup_method(class, "__call").is_some()
+        };
+        Some(match holder {
+            Holder::Classes(classes) if classes.is_empty() => Vec::new(),
+            Holder::Classes(classes) if classes.iter().all(has_method) => classes
+                .iter()
+                .flat_map(|class| {
+                    registry
+                        .implementations(class, method)
+                        .into_iter()
+                        .map(|key| (key, Transfer::Other(Some(class.clone()))))
+                })
+                .collect(),
+            Holder::Made(Some(classes)) if classes.iter().all(has_method) => classes
+                .iter()
+                .filter_map(|class| self.exact_method(class, method))
+                .map(|key| (key, Transfer::Made))
+                .collect(),
+            _ => registry
+                .methods_named(method)?
+                .into_iter()
+                .map(|key| (key, Transfer::Other(None)))
+                .collect(),
+        })
+    }
+
+    /// The declarations a callable the body names runs.
+    fn callable_targets(&self, callable: &Callable) -> Option<Vec<(DeclKey, Transfer)>> {
+        let registry = self.registry;
+        match callable {
+            Callable::Written => Some(Vec::new()),
+            Callable::Text(text) => match text.split_once("::") {
+                Some((class, method)) => {
+                    let class = QualifiedName {
+                        written: Name::from(class.trim_start_matches('\\')),
+                        resolved: ResolvedName::Exact(Name::from(class.trim_start_matches('\\'))),
+                        span: Default::default(),
+                    };
+                    self.static_targets(&class, Some(&Name::from(method)))
+                }
+                None => {
+                    let name = text.trim_start_matches('\\');
+                    Some(match registry.lookup_function_with_name(name) {
+                        Some((declared, _)) => vec![(function_key(declared), Transfer::Static)],
+                        None => Vec::new(),
+                    })
+                }
+            },
+            Callable::Pair(PairTarget::Class(class), method) => {
+                self.static_targets(class, Some(method))
+            }
+            Callable::Pair(PairTarget::Object(receiver), method) => {
+                self.call_targets(&Callee::Method {
+                    receiver: receiver.clone(),
+                    method: Some(method.clone()),
+                })
+            }
+        }
     }
 
     /// Whether the declaration `key` takes the argument passed `at` by
