@@ -646,6 +646,8 @@ Twenty items, numbered in the order they are built. Each states what is there no
      - ignore marks, warnings, the parse error and goto labels;
      - at every token boundary, the line, the UTF-8 and UTF-16 columns, and the `offset_in` round trip;
      - doc sites, each with its `DocBlock`, every field printed canonically, and the references sorted;
+     - every type node of every docblock, with the type today's round trip gives it (`parse_written_type(to_source_string())`), printed canonically and keyed by file, doc span, tag ordinal and node path, for item 14's lowering oracle;
+     - every union the run builds, with its operands and its result, printed canonically, for item 18's union pass;
      - each built declaration in order, with its guard and full reflection;
      - duplicate sites, declared classes, Pest facts, anonymous-class names and use sites;
      - each body's summary and `InitFlow`, and the global facts.
@@ -2068,8 +2070,35 @@ Exact, except the private-property judgment, listed in §11.
 
 ## 11. Validation, once, after item 19
 
-- `cargo test --workspace` and the fixtures (`--test fixtures`).
-- **The dumps of item 0, taken again** with the `gate` build and the `oracle` build. The `oracle` build must finish without an assertion. Every difference from the baseline must be one of the semantic changes the items name:
+**How it runs.** One heavy job at a time, each under `nice -n 19` with `/proc/loadavg` noted, with no `timeout`, in this order:
+1. the `gate`, `oracle` and frame-pointer `dhat` builds;
+2. the tests;
+3. the fixtures, against `php` 8.5, and against `php:7.4-cli` through `docker` for the 7.x readings (item 10's versions check, item 12's spaced names, item 18's one-argument `parse_str` and `mb_parse_str` and string `assert`);
+4. item 0's dumps, with the `gate` build and then the `oracle` build;
+5. O2, one configuration and cache state after another, at one thread and at the default;
+6. the equalities;
+7. O3.
+
+Each corpus run is saved by the full commit hash, as `xtask` lays them out (`.corpus-runs/gate/<artifact>/<commit>.<ext>`, `.corpus-runs/README.md`), the starting commit's as the baseline. Contents are diffed after `LC_ALL=C sort`, and the order of emission is checked apart, by `xtask compare`.
+
+**Tests run once:**
+- `cargo test --workspace` and the fixtures (`--test fixtures`);
+- the `loom` tests of the interner's protocol (item 16);
+- the interner's leak test after the edit replay (item 16);
+- item 6's tests: a file replaced while a reader holds it, a corrupt record, and `SOURCES_HASH` against the embedded files;
+- item 17's `stat` cases;
+- a Latin-1 document opened in the server session (item 15).
+
+**Platforms.** CI runs on `ubuntu-24.04` only (`rust-ci.yml:18`), while the release builds for `macos-26` and `windows-2025-vs2026` (`release.yml:33-53`). A CI matrix job on those two runs item 6's file-replacement test and item 17's `stat` cases, and its result is recorded.
+
+**The dumps of item 0, taken again** with the `gate` build and the `oracle` build. The `oracle` build runs with the per-file cache off, since entries carry no statements for its assertions (item 6, step 6). It carries item 18's replay assertion and merge-over-diff assertion, and must finish without an assertion.
+
+Three oracles compare with code the plan deletes, so they read what item 0 recorded:
+- **item 14's lowering:** each type node item 0 recorded is lowered again and compared with the type today's round trip gave it;
+- **item 18's union pass:** each union item 0 recorded is built again from its operands and compared with today's result (§12.11's differential test);
+- **`--dump-types` and `--dump-expr-types`:** compared with the baseline, with locals listed by name, since §12.10's step-by-step identity cannot be checked in one validation at the end.
+
+Every difference from the baseline must be one of the semantic changes the items name:
   - **item 1:**
     - a file reached through a link is loaded once and reported under its resolved path, with `__FILE__` and `__DIR__` resolved;
     - a file both analysed and context is analysed, once;
@@ -2086,30 +2115,37 @@ Exact, except the private-property judgment, listed in §11.
   - item 9: the stub rules apply only to stub sources;
   - item 10: `__COMPILER_HALT_OFFSET__` as its file's offset, with the new check of its use elsewhere; `__halt_compiler` followed by anything but `( ) ;` or `( ) ?>` is a syntax error; a broken file's error is its first one; a declaration's doc is the one PHP gives it, with the new check of a doc given away; and the new check of source the configured versions lex differently;
   - item 11: lines end at a lone `\r` as at `\n`, and so does a `//` or `#` comment;
-  - item 12: casts as PHP's single tokens; spaced qualified names a syntax error on 8.x; doc comments only with whitespace after `/**`; `?>` and heredoc lines ending at a lone `\r`; heredoc indentation errors; `<?php` open only before whitespace, and `<?` by `short_open_tag`;
-  - item 13: declarations exist as PHP binds them: run-time-bound ones are guarded by every earlier exit (`exit`, `die` and `throw` included) and are dead after an unconditional one, and a class whose parent is in another file is possibly declared; `InitFlow` in PHP's order of evaluation;
+  - item 12: casts as PHP's single tokens; spaced qualified names a syntax error on 8.x; doc comments only with whitespace after `/**`; `?>` and heredoc lines ending at a lone `\r`; heredoc indentation errors; `<?php` open only before whitespace, and `<?` by `short_open_tag`, with a report at each short tag when the setting is unknown;
+  - item 13: declarations exist as PHP binds them: run-time-bound ones are guarded by every earlier exit (`exit`, `die` and `throw` included) and are dead after an unconditional one, and a class whose parent is in another file is possibly declared; a file that defines constants it cannot name (`define($name, ..)`, a name built from the namespace, `call_user_func('define', ..)`, `('define')(..)`) may define any constant, so fewer constants are reported as not found; `InitFlow` in PHP's order of evaluation;
   - item 14: the readings the lowering oracle lists (escaped quotes, `mentions_mixed` from the node, identifiers by their bytes, a `//` inside a literal type, `Integer::MAX`), and one winner rule for every tag (`@phan-real-return`, `@phan-param-out`);
-  - item 15: names that differ only in bytes outside UTF-8 are distinct (the lexer keeps the bytes, item 9) and print with `\x{NN}`; names fold ASCII only where Unicode's lowercasing was used; string values name classes, functions and constants by PHP's rules (one leading backslash, no trimming); container-field keys canonical as PHP's array keys;
-  - item 19: the private-property judgment counting writes from bound closures and reflection, and leaving unjudged the properties an unnarrowed one may reach;
-  - item 18: the rule families of §12.10; types in PHP's order of evaluation (an assignment's target operands before its value, a destructuring's value first); a member counted as used when any access may reach it; the union's single pass where it differs from the fold.
+  - item 15: names that differ only in bytes outside UTF-8 are distinct (the lexer keeps the bytes, item 9) and print with `\x{NN}`; names fold ASCII only where Unicode's lowercasing was used; string values name classes, functions and constants by PHP's rules (one leading backslash, no trimming); container-field keys canonical as PHP's array keys; in the server, an open document read as the bytes its encoding gives, and one whose encoding is not found analysed as UTF-8, with a diagnostic; a fix writes a name's bytes;
+  - item 18: the rule families of §12.10; the rules that read the statement result where it differs from today's side walks (`finally` overrides, `try`/`catch` and throws, no-op statements, loops' constant conditions); types in PHP's order of evaluation (an assignment's target operands before its value, a destructuring's value first); a member counted as used when any access may reach it; the union's single pass where it differs from the fold;
+  - item 19: the private-property judgment counting writes from bound closures and reflection, and leaving unjudged the properties an unnarrowed one may reach.
   
   Each difference is listed with its file and read.
-- **O2 against the baseline's**, in output order (`xtask compare`), saved as `.corpus-runs/<scope>/<hash>.txt`, its diff read line by line.
-- **Equalities that need no baseline:**
-  - one thread against the default;
-  - the stub cache cold against warm;
-  - the per-file cache off against written and read;
-  - a warm run against a cold one (item 17);
-  - the relation memo on against off (item 7);
-  - the server's first dumps against the CLI's (item 1);
-  - each edit replay against a fresh load of the edited tree.
-- **O3:**
-  - callgrind in `cl-20g`'s profile;
-  - a sampling profile of a cached run, for the serial windows;
-  - `hyperfine`, cold and warm, alternating with the starting commit's `gate` binary under `nice`, with the load average noted;
-  - the dhat heap profile in §8's build, compared by holder with §8's at the peak and at exit, and its allocation count;
-  - the server's heap on the in-process session of item 0;
-  - the results in `WORK_STACK.md`.
+
+**O2 against the baseline's** (`cargo xtask corpus --full`), its diff read line by line. O2 adds a configuration with architecture rules and banned types, which the all-on configuration does not set (`xtask/src/main.rs:394-461`), so that item 19's passes have a corpus oracle.
+
+**Equalities that need no baseline:**
+- one thread against the default;
+- the stub cache cold against warm;
+- the per-file cache off against written and read; and written under one configuration (the versions, `short_open_tag`) and read under another, against that one's cache-off run (item 17, step 2);
+- item 17's base absent, written and read; its edits between two runs, as item 17 lists them; and a warm run, which leaves the cache directory byte for byte as it found it;
+- the relation memo on against off (item 7);
+- the server's first dumps against the CLI's (item 1), with no open document that differs from its file;
+- each edit replay against a fresh load of the edited tree, with the tree cache's budget as configured and at zero (item 19);
+- a closed file changed on disk with no event before a dependent's recheck (item 19).
+
+**O3,** with the commands `CLAUDE.md` gives:
+- callgrind with `--separate-threads=yes` on the frame-pointer `dhat` build, over `cl-20g`'s workload;
+- `perf record -F 499 -g` on the same build, read with `--no-inline`, of a warm run (per-file cache and base), for the serial windows;
+- `hyperfine -N --warmup 2 --runs 10`, the starting commit's `gate` binary against the last commit's, alternating; warm with both caches warm, and cold with `--prepare` emptying both binaries' cache directories;
+- **the heap:**
+  - the dhat profile in §8's build, compared by holder with §8's at the peak and at exit, and its allocation count;
+  - **the check's own maximum,** which one dhat profile cannot isolate: it keeps one global maximum, today's falls in the parse, and `HeapStats`' maximum cannot be reset. So the `dhat` build records `HeapStats::get().curr_bytes` at the start of the check and after each file's check, and writes `5` to `/proc/self/clear_refs` before the check and reads `VmHWM` after it, which give the check's live and resident maxima;
+  - **the check's holders:** a second dhat run starts its profiler (`dhat::Profiler::new_heap()`) at the check's start, so its global maximum is the check's own, by holder;
+  - the server's heap on item 0's session;
+- the results in `WORK_STACK.md`.
 
 ## 12. Summary
 
@@ -2300,6 +2336,7 @@ The rewrite made two more changes:
 | 17 | Content hashes in the base's key would make every changed context file a cold run. A parse now reads the configured versions and `short_open_tag`, which the per-file key lacked. The base's key missed most resolved inputs (Composer data, run-time evidence, stub and bootstrap files). `stat` has no stable inode on Windows, mtimes can be restored, git's racy rule assumes one filesystem, and some filesystems keep coarse or remote times. The server could write overlay bytes into the index. The build's hash is 64-bit `DefaultHasher`. The oracle compared two new paths with each other. | The base keyed by the build and a destructured hash of resolved settings (tracked or untracked), with its file list applied as edits. The per-file key adds the versions and `short_open_tag`. Stat fields per platform, ctime compared, the racy rule applied where the file was read, and `stat` trusted only on identified local filesystems (`rustix`, `sysinfo`). Disk-only index and base. BLAKE3 everywhere, full digests. An oracle against the baseline, an edit replay across runs, the `stat` cases on three platforms, and the server. |
 | 18 | The traversal would keep typing a value before its target's operands, against PHP's order. `call_user_func` with a literal `extract`, `compact` or `get_defined_vars` writes the caller's scope, and 7.x adds `parse_str`/`mb_parse_str` with one argument and string `assert`. Slots and file-wide keys would collide in one radix array, sparse over large ids. The throw states' cost is inline `Locals` structs, which persistent maps do not remove. The member-usage family would inherit PHPStan's skip of uncertain callables. The 25 G oracles were dropped. External rules name their own identifiers. `concat` builds bytes. Step 7 and 9's counts. | PHP's order in `process_expr`. The computed-name forms listed exactly, tested with `php`. Per-body key tables, dense; `IntMap`-style merges; locals listed by name. `Locals` behind one `Rc`, frames as scratch. Uses counted when any access may reach a member. The oracles restored. `Identifier` kept as `Cow`. `concat` through a byte scratch. Counts by M10, ≈38 K moved to item 8. |
 | 19 | Class shapes read method bodies, not just the declaration list. Private properties are written from outside their class, through bound closures and reflection, which the judgment never sees, and its outside files get a full check. A changed file on disk had no defined path, and the tree cache had no content key. The pool does not take files largest first, and the peak omits the checks in flight, which were never measured. Banned constructs read the registry, mock hygiene is per file, and Composer hygiene reads files in order. Retention gained inputs outside item 3's function. The oracle could not see a reader of a kept tree. | A parent-call fact per method from item 13's walk. Writes from bound closures and reflection recorded, unnarrowed ones blocking the judgment, outside files run with only the property-write family. A hash mismatch is an edit; the cache keyed by content. A largest-first queue, and the check's own maximum measured. Each pass placed by what it reads. `keeps_tree(role, open, mode, checked)`. Oracles with a zero-budget replay, disk changes and the write forms. |
+| §11 | Four items' semantic changes were missing (the unknown `short_open_tag` report, constants a file defines by a computed name, the server's encodings and fixes as bytes, the rules reading the statement result). Three oracles compared with code the plan deletes. Most oracles the reviews added ran nowhere, and the all-on configuration sets no architecture rules or banned types. One dhat profile cannot isolate the check's maximum. The commands and order of the runs, the platforms, PHP 7.x and the snapshot layout were unstated. | The list completed and ordered. Item 0 records type nodes and unions, which §11 lowers and builds again. Tests run once, equalities extended, a configuration for item 19's passes. The check's live and resident maxima and a second dhat run from the check's start. An order of runs under `nice`, `CLAUDE.md`'s commands, a CI matrix for macOS and Windows, `php:7.4-cli` through `docker`, snapshots as `xtask` lays them out. |
 
 # Appendix A. The allocation tail, every site
 
