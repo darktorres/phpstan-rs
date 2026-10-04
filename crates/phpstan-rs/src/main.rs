@@ -71,12 +71,11 @@ enum Command {
 
 #[hotpath::main]
 fn main() {
-    // Held for the whole run; its `Drop` writes `dhat-heap.json` on
-    // clean exit (every `check-project` error path below that matters
-    // for a profiling run falls through to a normal return, not
+    // Stopped at the end of the run, which writes `dhat-heap.json` in the
+    // `dhat-heap` build (every `check-project` error path below that
+    // matters for a profiling run falls through to a normal return, not
     // `process::exit`, so this always flushes).
-    #[cfg(feature = "dhat-heap")]
-    let _profiler = dhat::Profiler::new_heap();
+    phpstan_rs::heap::start_of_run();
 
     let cli = Cli::parse();
     match cli.command {
@@ -120,6 +119,7 @@ fn main() {
             }
         },
     }
+    phpstan_rs::heap::end_of_run();
 }
 
 #[cfg(test)]

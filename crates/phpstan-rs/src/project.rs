@@ -2205,6 +2205,7 @@ impl Project {
                     self.run_checker(path, collect_member_refs, records)
                 }))
                 .map_err(panic_message);
+                crate::heap::file_checked();
                 (path.clone(), outcome)
             },
         );

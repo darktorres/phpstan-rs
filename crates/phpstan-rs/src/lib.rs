@@ -36,6 +36,7 @@ pub(crate) mod file_id;
 
 pub mod ext;
 pub mod gate;
+pub mod heap;
 pub mod ignore_comments;
 pub mod ignore_errors;
 pub mod lsp;

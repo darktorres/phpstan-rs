@@ -1178,6 +1178,7 @@ impl Session {
 
         let needs_tier_2 =
             self.settings.rules.check_dead_enum_cases || self.settings.rules.check_dead_members;
+        crate::heap::check_started();
         let checked_results = project.check_files(
             &analyze_files_by_size,
             Some(&self.pool),
@@ -1260,6 +1261,7 @@ impl Session {
             }
         }
 
+        crate::heap::check_finished();
         AnalysisResult {
             project,
             results,
