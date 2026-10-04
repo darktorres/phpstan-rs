@@ -905,6 +905,40 @@ fn effects_read_a_property_by_the_type_php_enforces_before_and_after_an_edit() {
     );
 }
 
+#[test]
+fn a_class_in_scope_copies_a_trait_member_as_a_load_does() {
+    let files = [
+        (
+            "position.php",
+            "<?php interface Positionable { /** @return $this */ public function at(): Positionable; } trait Position { /** @return $this */ public function at(): Positionable { return $this; } }",
+        ),
+        ("format.php", "<?php class Format {}"),
+        (
+            "comment.php",
+            "<?php class Comment implements Positionable { use Position; public function render(Format $f): string { return ''; } }",
+        ),
+    ];
+    let mut project = Project::new();
+    for (path, source) in files {
+        project
+            .load_analyzed_file(PathBuf::from(path), source)
+            .unwrap();
+    }
+    project.finish_loading();
+    let return_type = |project: &Project| {
+        project
+            .registry()
+            .lookup_method("Comment", "at")
+            .map(|sig| sig.return_type().to_string())
+    };
+    let loaded = return_type(&project);
+    assert_eq!(loaded.as_deref(), Some("$this"));
+    project
+        .update_file(&PathBuf::from("format.php"), files[1].1)
+        .unwrap();
+    assert_eq!(return_type(&project), loaded);
+}
+
 /// Asserts that editing `edited` to `new_source` leaves every file with the
 /// diagnostics a project loading the edited text from the start reports.
 fn assert_edit_matches_a_fresh_load(files: &[(&str, &str)], edited: &str, new_source: &str) {

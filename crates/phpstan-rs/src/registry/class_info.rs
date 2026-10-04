@@ -784,6 +784,22 @@ impl ClassReflection {
         &self.mixin_case_refs
     }
 
+    /// The classes the finishing passes copy into this one from: what it
+    /// extends, implements and uses, its mixins, and the classes it
+    /// imports types from.
+    pub(crate) fn copies_from(&self) -> impl Iterator<Item = &Name> {
+        self.extends
+            .iter()
+            .chain(&self.implements)
+            .chain(&self.uses)
+            .chain(&self.mixins)
+            .chain(
+                self.type_imports
+                    .iter()
+                    .map(|import| &import.source_class_fqn),
+            )
+    }
+
     pub fn provenance(&self) -> &Provenance {
         &self.provenance
     }

@@ -1413,6 +1413,23 @@ impl Project {
             }
             seen.insert(key);
         }
+        // A class in scope is resolved from the classes it copies from as
+        // they are mid-way through the passes, as a load resolves them
+        // together, never from their finished entries: those are in scope
+        // too, read from the declarations as built.
+        let mut copied_from: Vec<String> = classes.iter().cloned().collect();
+        while let Some(class) = copied_from.pop() {
+            let Some(info) = self.registry.classes.get(class.as_str()) else {
+                continue;
+            };
+            for name in info.copies_from() {
+                let text = name.lower().trim_start_matches('\\');
+                if !classes.contains(text) {
+                    classes.insert(text.to_string());
+                    copied_from.push(text.to_string());
+                }
+            }
+        }
         Scope::from_keys(classes, functions)
     }
 
