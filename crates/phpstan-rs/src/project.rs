@@ -1463,6 +1463,9 @@ impl Project {
         // here, before it runs.
         self.registry.resolve_deferred_mixins();
         self.registry.precompute_member_owners_after_mixins();
+        // The class graph is final here; the effects bound a call by the
+        // classes descending from its receiver's, which this indexes.
+        self.registry.precompute_ancestor_names();
         // Neither `resolve_transitive_purity` nor anything below it adds
         // or removes a method/property/const name anywhere, so the
         // member-owner maps built just above stay correct through this
@@ -1471,7 +1474,6 @@ impl Project {
         self.registry.set_scope(body_scope);
         self.registry.resolve_transitive_purity(&self.files);
         self.registry.set_scope(scope);
-        self.registry.precompute_ancestor_names();
         self.registry.resolve_constant_named_types();
         self.registry.drop_doc_members_excluded_by_native();
         let changed_keys = match (&before, &changed) {
