@@ -522,10 +522,10 @@ Counted by M10's rule: a row naming a function counts what M10 charges to that f
 | 14, PHPDoc | 2.59 M | 13.3% |
 | 4, the registry by ids | 2.02 M | 10.4% |
 | 13, a file's products | 1.31 M | 6.7% |
-| 16, interned values | 0.74 M | 3.8% |
+| 16, interned values | 0.78 M | 4.0% |
 | 2, the walk and path data | 0.56 M | 2.9% |
-| 12, lexer details | 0.49 M | 2.5% |
 | 8, declarations | 0.48 M | 2.5% |
+| 12, lexer details | 0.45 M | 2.3% |
 | 6, stub records | 0.45 M | 2.3% |
 | 10, flat token arrays | 0.23 M | 1.2% |
 | 5, merge and indexes | 0.11 M | 0.6% |
@@ -1528,7 +1528,7 @@ Context files need line starts, for duplicate-declaration messages (`duplicate_c
     - `<?php` opens PHP only before whitespace (a lone `\r` included) or the end of the file: `<?phpx echo 1;` is inline HTML. Today any case-insensitive `<?php` prefix opens it (`lexer.rs:887-897`).
     - **`<?` is read by `short_open_tag`,** from the run-time configuration item 6 reads. PHP's default is on (`php -n`), and `php.ini-development` turns it off, so the setting decides whether `<? … ?>` is code. Today `<?` is never an open tag. When the setting is unknown, each short tag is reported as code whose meaning depends on it, and is analysed as code.
 
-**Oracle.** O1, and lexer tests over each of PHP's readings above, checked against `token_get_all`. Exact for steps 1-10 and the rest of step 4. Semantic for the casts, the spaced names, and steps 11-14, listed in §11. **Saving.** ≈0.35 G. **Allocations:** ≈0.49 M (M10): `parse_qualified_name` 321,919, `NativeType::from_name` 135,859, `strip_leading_backslash` 29,664, and the digit separators 582.
+**Oracle.** O1, and lexer tests over each of PHP's readings above, checked against `token_get_all`. Exact for steps 1-10 and the rest of step 4. Semantic for the casts, the spaced names, and steps 11-14, listed in §11. **Saving.** ≈0.35 G. **Allocations:** ≈0.45 M (M10): `parse_qualified_name` 282,779 (its 321,919 less the 39,140 name allocations item 16 removes; one per new name, 19,570, stays), `NativeType::from_name` 135,859, `strip_leading_backslash` 29,664, and the digit separators 582.
 
 ### 13. A file's products: the declaration list and one walk (R7; P12 steps 2-4)
 
@@ -1776,10 +1776,11 @@ The purity and property-write keys went by item 4, as ids.
 ### 16. Interned values: one allocation each, tables without per-entry allocations (M7)
 
 **Now.**
-- **A name takes three allocations to make.** `Name` is an `Arc<NameData>`, and `NameData` holds its text and, when the text is not lowercase, its lowercase form, each in a box of its own (`name.rs:22-49`). The lowercase copy is made for every name and dropped when it equals the text (`name.rs:41-42`). The run makes 186,348 names in 559,250 allocations. At exit there are 135,777 `NameData`, 118,237 texts and 79,600 lowercase copies.
-- **The type interner's index costs nearly as much as the types.** It is `FxHashMap<u64, Vec<Weak<Node>>>` (`intern.rs:21-25`), with a `Vec` for each distinct hash: 120,644 allocations and 3.9 MB, plus 8.7 MB of table, for 119,757 nodes of 112 B (13.4 MB). That is ≈105 B of index per node.
-- **A shape's string key allocates each time it is made.** `ShapeKey::from_bytes` builds a `PhpString` (an `Arc<[u8]>`) for every key the checker forms: 128,140 allocations, and 29,131 held at exit.
-- **The type memos are never cleared.** `remember` keeps 5.4 MB and the shape memo 1.5 MB at exit.
+- **A name takes three allocations to make.** `Name` is an `Arc<NameData>`, and `NameData` holds its text and, when the text is not lowercase, its lowercase form, each in a box of its own (`name.rs:22-49`). The lowercase copy is made for every name and dropped when it equals the text (`name.rs:41-42`). The run makes 186,348 names in 559,042 allocations: 186,348 records, 186,347 texts and 186,347 lowercase copies. At exit there are 135,777 `NameData`, as many texts, and ≈84,410 lowercase copies.
+- **The type interner's index costs nearly as much as the types.** It is `FxHashMap<u64, Vec<Weak<Node>>>` (`intern.rs:21-25`), with a `Vec` for each distinct hash: 121,484 allocations and 3.9 MB (`intern.rs:313`), plus 8.7 MB of table, for 119,757 nodes of 112 B (13.4 MB). That is ≈105 B of index per node.
+- **A shape's string key allocates each time it is made.** `ShapeKey::from_bytes` builds a `PhpString` (an `Arc<[u8]>`) for every key it is given: 182,591 allocations, 41,300 alive at exit. 103,568 of them copy the bytes of a string-literal type that already holds them in an `Arc<[u8]>` (`ShapeKey::from_type`, `shape.rs:43-48`: `offsets::literal_key` 48,485, `array_literal_key` 45,292, `offset_value_type_at` 9,584, `unset_offset` 207).
+- **A second table interns text:** `Interner::str`, a `WeakTable<str>` (`name.rs:271-325`, `:1444`). Inline HTML and doc comments use it today and become source ranges in item 9; the interpolation index keys stay (`lexer/strings.rs:127`, `:130`).
+- **The type memos hold 2^16 pairs per thread and are emptied whole when full:** `remember` (`intern.rs:684-705`) and `keys_superset_memo` (`union.rs:995-1025`), as item 7 says. Their entries hold their argument nodes, which an interner that frees could then not free: 5.4 MB and 1.5 MB at exit.
 
 **Design.**
 - **A name is one allocation.**
@@ -1794,21 +1795,32 @@ The purity and property-write keys went by item 4, as ids.
   - **An entry is removed under the lock and dropped after it is released.** A type node's drop drops its children's handles, each of which may take a shard's lock, the same one included.
   - An entry is hashed by the hash in its header, so it is one pointer, with no stored hash. The type interner loses its per-hash `Vec`s.
   - The type interner's nodes become `triomphe::Arc`s on the same rule, which also removes the weak count from every node.
-- **Shape string keys are interned** in a table of byte strings, as names are. A key found in the table costs no allocation.
-- **The type memos are cleared with the relation memo's generation** (item 7), so a long session does not keep the answers of hierarchies it no longer has.
+- **`PhpString` is the interned byte string:** one `ThinArc<Header, u8>` per distinct value, with the text hash in its header, under the same strong-table rule as names.
+  - The type interner already hash-conses string literals by their bytes (`ReprRef::StringLiteral`, `intern.rs:621-624`), so a separate table of shape keys would hash the same bytes again, and every conversion between a key and a type would cross between the two tables.
+  - `Repr::StringLiteral` and `ShapeKey::Str` hold the same handle, so `from_type` and `to_type` copy a pointer.
+  - `ReprRef::StringLiteral` borrows `&[u8]`, so a literal built from source bytes is looked up without making a `PhpString`.
+  - Equality is identity; `Ord` and the serialized form stay by bytes.
+  - The interpolation index keys (`SimpleIndexKey::Str`) are these handles. `Interner::str` and `WeakTable` go.
+- **Every holder of a node or a name holds the handle whose drop runs the rule:** `Type`, `Name` and the interned `PhpString`. That includes each thread's `FRONT` cache, which holds 4,096 raw `Arc<Node>`s today and overwrites them as the thread goes (`intern.rs:257-285`), the memos' kept arguments, and the lexer's tables. A raw holder's drop would leave an entry for the sweep alone, and `FRONT`'s slots turn over constantly. The constant nodes (`Constant::node`, `intern.rs:225-245`) are held for the process and never reach a count of two.
+- **The type memos keep their answers, bounded as item 7's memo is.** Their answers depend on the interned types alone: `memoized_pair` is "only for an operation that asks nothing but the types (no class hierarchy)" (`intern.rs:715-717`), and the shape memo answers over the structural relation. So no generation enters them. They take two segments of 2^15 pairs per thread, the older dropped when the current one fills, in place of emptying the whole table. The bound is also what limits the dead nodes they keep from the interner.
 
-**Oracle.** O2, `--dump-types`, `registry-dump`; the interner's tests over freed entries and drops racing lookups on other threads. Exact.
+**Oracle.**
+- O2, `--dump-types`, `registry-dump`.
+- **The drop, lookup and sweep protocol is model-checked with `loom`** (0.7.2, a test dependency), which tries every interleaving, over a model of a shard and its counts: the count read before the lock, the re-check under it, and the sweep's count-of-one test are windows a few instructions wide that tests on real threads seldom land in. crossbeam and tokio check their protocols this way.
+- **A leak test after item 0's edit replay:** the session is dropped, every shard must hold only the constant nodes and what `FRONT` keeps, and a second replay must end with the same shard sizes. O2 shows output, not freeing, so a leak in a long session would pass it.
+
+Exact.
 
 **What stays.** One allocation per distinct live value: that is what interning with freeing costs. rust-analyzer's `intern::Interned` pays the same. A per-session arena that never frees, as rustc's interners use, would grow without end in a server, so the plan keeps freeing.
 
 **Memory.** ≈15 MB at exit.
 
-**Allocations: ≈0.74 M (M10):**
-- the type interner's per-hash vectors (120,644);
-- shape keys that already exist (most of 182,591);
-- the names the lexer makes (`name_and_bits`, `lexer.rs:434-435`: 270,240).
+**Allocations: ≈0.78 M (M10).** What goes:
+- **two of the three allocations of every name still made** after items 4, 5, 13 and 15: 249,674, of which the lexer's 176,168, `parse_qualified_name`'s 39,140 (moved here from item 12's row, which keeps its 19,570, one per new name) and the cache loads' 29,312 (`Name::deserialize`). The makers those items remove outright keep all three allocations in their rows: `RefKey::class_text` 101,880, `RefKey::function_text` 22,161, `file_declarations::collect` 17,760, `name_table::Base::name` 17,472, `KeyTable` 10,066, `member_usage::method_key` 8,904, `folded_key` 6,288;
+- the type interner's per-hash vectors, 121,484;
+- the shape-key copies of bytes a literal already holds, 103,568, and the keys from source that already exist.
 
-Two of every name's three allocations go wherever it is made: ≈373 K of the run's 559,250. The rest of those are in the rows of the items whose code asks for the names (`RefKey::class_text` 101,896, `parse_qualified_name` 58,737, and others).
+What stays of the row: one allocation per new name (the lexer's 88,084 among them), and the lexer's table growth (`lexer.rs:435`, 5,911, and the interner's own).
 
 
 ### 17. Warm runs: entries checked by `stat`, a resolved context base
@@ -2064,11 +2076,11 @@ Exact.
 | 9 | typed vectors, ids, `peeled` | ≈0.8-1.2 G | — | ≥53 MB of the analysed trees; 3.92 M allocations | exact, but semantic for non-UTF-8 names and the stub rules |
 | 10 | flat token arrays | ≈1.7 G | — | 0.23 M allocations | exact, but semantic for the halt offset, the first error, declarations' docs and the versions |
 | 11 | line starts, columns, offsets, ignore marks | ≈0.2 G | — | 0.07 M allocations | exact, but semantic for a lone `\r` |
-| 12 | lexer details, qualified names and casts as one token | ≈0.35 G | — | 0.49 M allocations | exact, but semantic for PHP's tokens (§11) |
+| 12 | lexer details, qualified names and casts as one token | ≈0.35 G | — | 0.45 M allocations | exact, but semantic for PHP's tokens (§11) |
 | 13 | declaration list, one walk, builders in scratch | ≈0.45 G | — | bodies as one slice per file; 1.31 M allocations | exact, but semantic for guards and `InitFlow`'s order |
 | 14 | PHPDoc finished, one parse, two memos | ≈0.5 G | — | ≈43 MB; 2.59 M allocations | exact, but semantic for the readings §11 lists |
 | 15 | names as names, as bytes | ≈0.6 G | partly | 2.76 M allocations | exact, except the changes §11 lists |
-| 16 | interned values in one allocation | ≈0.1 G | — | ≈15 MB; 0.74 M allocations | exact |
+| 16 | interned values in one allocation | ≈0.1 G | — | ≈15 MB; 0.78 M allocations | exact |
 | 17 | warm runs | decoding and reads ≈0.85 core-s, most of the finishing window | yes | only decoded records in the heap | exact |
 | 18 | check phase remainder, rule temporaries | ≈1.6-2.0 G | — | 3.65 M allocations | semantic (§12.10) |
 | 19 | each tree until its last reader | — | — | batch: the analysed trees freed during the check; server: open documents and an LRU | exact |
@@ -2198,6 +2210,7 @@ The rewrite made two more changes:
 | `siphasher` 1.0.4, already in the lockfile through `phf` | 14, 18 | memo fingerprints keyed per process, so no collision can be crafted |
 | `blake3` 1.8.7 | 1, 11, 17 | every content hash a cache trusts |
 | `encoding_rs` 0.8.42 | 15 | an open document's encoding, so the server reads the bytes PHP reads |
+| `loom` 0.7.2, for tests | 16 | the interner's drop, lookup and sweep protocol checked in every interleaving |
 
 **Considered and not taken:**
 - `bumpalo-herd` with `self_cell` (9): a safe arena of references, but ids give smaller nodes, exact sizes, no lifetime and dense side tables.
@@ -2231,6 +2244,7 @@ The rewrite made two more changes:
 | 13 | Guards did not follow PHP's binding: compile-time-bound declarations exist after an early exit, run-time-bound ones (trait users, implementers, enums, interfaces with parents, `const`, `define()`) do not, and `exit` was not an exit. Ids given at commit would put nested declarations first. `InitFlow` records a value before its target's operands, against PHP's order. Item 19's families had no host. A doc's scope, a body's lookup and dynamic `define()` were open. Several counts were off, and two sites do not occur in this run. | Guards by PHP's binding, tested with `php` (a parent from a file loaded earlier makes a class bound at compile time, so it is kept as possibly declared). Entries reserved in source order. The walk in PHP's order, destructuring included. Families hosted. Docs resolved in the entry's scope; bodies by declaration id; a marker for constants a file defines by a computed name. Counts by M10's data. |
 | 14 | Keying resolution by template names would hand one method's bound and scope to another's same-named template, and a node index is no key. The tag memo would freeze the spelling's decisions from whichever thread came first. Steps 4 and 8 described two structures for one memo. Shared effects cannot index one docblock's vector. Cached `DocType`s would lose their nodes and their types. A doc is parsed twice, split two ways (`//`), and three rules pick tag winners. The doc lexer uses Unicode's classes. Wrapped tags are not slices. The oracle could not be exact, and missed references and edits. The text grammar's callers were not sorted, and a class from code is parsed as PHPDoc (`Integer::MAX`). The `@var` memo already exists. Counts and memory were double-counted. | Resolution keyed by the written `Type` and a context holding whole `TemplateParam`s. `apply` decides by the spelling. One fingerprint-keyed `quick_cache` memo type for every `syntax::memo` user. Arenas per tag effect. A serialized `DocType` with its subtree and type. One parse, one winner rule, PHP's byte classes, logical tag text. A lowering oracle with its differences listed, plus O1, the edit replay and every cache state. Callers by kind, with static tables and `Type::object` for code. Counts by M10: 2.59 M, with 65 K moved to item 18; memory ≈43 MB, so the projected exit is ≈290 MB and the peak ≈375 MB. |
 | 15 | `\xA9` as an escape is ambiguous with a namespace separator. Fixes would write escaped names into source files. An open document arrives decoded by the editor. `Name` serializes a `str`. String values become names by rules that are not PHP's (every backslash stripped, non-UTF-8 dropped), and some sites fold with Unicode. The semantic changes were listed under item 9. The short-name header came from a later item. Item 16's freeing rule could leak an entry or deadlock. Counts were by several rules, `Name::to_string` double-counted its callers. | The `\x{NN}` escape everywhere text shows a name. Fixes as bytes, applied on bytes. Each open document's encoding found with `encoding_rs`. Bytes in the caches. One `from_runtime` conversion by PHP's rules (one backslash, no trimming, ASCII folding, constants' case), tested with `php`. ASCII folding at the eight sites. §11 moved to item 15, with a fixture. `last_segment` in `NameData` now. Item 16 sweeps and drops outside the lock. Counts by M10. |
+| 16 | The type memos are emptied when full, and their answers depend on no hierarchy, so a generation protects nothing; their cost is the nodes they keep. A table of shape keys would repeat the type interner's, and most keys copy a literal's bytes. `Interner::str` was left out. A raw holder (`FRONT`) would escape the freeing rule. Tests on threads cannot find the protocol's races, and O2 cannot see a leak. The counts mixed removable and kept allocations, and a name's text count was off. | Memos bounded by two segments, no generation. `PhpString` interned as a `ThinArc`, shared by literal types and shape keys; `Interner::str` goes. Every holder holds the handle. `loom` for the protocol and a leak test after the edit replay. Counts restated by what goes and what stays; 39,140 moved from item 12's row. |
 
 # Appendix A. The allocation tail, every site
 
