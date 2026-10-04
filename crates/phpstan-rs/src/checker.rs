@@ -716,16 +716,18 @@ pub struct Checker<'a> {
     pub(crate) active_discriminant: Vec<(LocalKey, bool)>,
     // The keys of every scope of this file's check: see `keys::KeyTable`.
     keys: keys::KeyTableRef,
-    // Every variable name seen bound via `static $x = ...;` anywhere in
-    // the file being checked. A `static` local can carry a value left
-    // over from an earlier call - the same "this single forward pass
-    // can't see a wider type a different execution of the same code
-    // would" unsoundness `loop_depth` guards against, just across
-    // invocations instead of iterations (real PHPStan stays silent on
-    // this shape too). Accumulated across the whole file rather than
-    // reset per function/closure - a stale entry only costs a missed
-    // diagnostic on an unrelated later local sharing the same name.
+    // The variables `static $x = ...;` binds in the scope being checked. A
+    // `static` local can carry a value left over from an earlier call - the
+    // same "this single forward pass can't see a wider type a different
+    // execution of the same code would" unsoundness `loop_depth` guards
+    // against, just across invocations instead of iterations (real
+    // PHPStan stays silent on this shape too).
     pub(crate) static_var_names: NameSet,
+    // What of the scope being checked other code may write or run
+    // (`shared_scope`), and what the closures it wrote may have left in the
+    // variables they capture by reference.
+    pub(crate) shared_scope: std::rc::Rc<shared_scope::SharedScope>,
+    pub(crate) captured_types: rustc_hash::FxHashMap<syntax::name::Name, Type>,
     // Every class named as the resolved `$scope` of a `Closure::
     // bind(...)`/`->bindTo(...)` call anywhere in the file being checked
     // (`unused::scan_program_for_rebind_targets`, built once per
@@ -897,6 +899,7 @@ mod locals;
 pub(crate) use locals::Locals;
 mod assignment;
 mod by_ref_params;
+mod call_effects;
 mod callable_values;
 mod calls;
 mod castable_arguments;
@@ -953,6 +956,7 @@ mod restricted_symbol_usage;
 mod return_type_too_wide;
 mod risky_tests;
 pub(crate) mod semantic_tokens;
+mod shared_scope;
 pub(crate) mod sql_reflection;
 mod static_call_context;
 mod stmt;
@@ -1174,6 +1178,8 @@ impl<'a> Checker<'a> {
             active_discriminant: Vec::new(),
             keys: keys::KeyTableRef::default(),
             static_var_names: NameSet::default(),
+            shared_scope: Default::default(),
+            captured_types: Default::default(),
             rebind_target_classes: NameSet::default(),
             closure_rebind_possible: true,
             include_guards_possible: true,
@@ -1263,6 +1269,27 @@ impl<'a> Checker<'a> {
             inlay_param_name_hints: self.inlay_param_name_hints.len(),
             inlay_local_type_hints: self.inlay_local_type_hints.len(),
         }
+    }
+
+    /// Starts checking a scope of its own: what of it other code may write
+    /// (`scope`), its static variables, and no capture written yet. What
+    /// the scope it is in had comes back with `leave_shared_scope`.
+    pub(crate) fn enter_shared_scope(
+        &mut self,
+        scope: shared_scope::SharedScope,
+    ) -> EnclosingScope {
+        let statics = scope.statics.iter().cloned().collect();
+        EnclosingScope {
+            shared: std::mem::replace(&mut self.shared_scope, std::rc::Rc::new(scope)),
+            captured: std::mem::take(&mut self.captured_types),
+            statics: std::mem::replace(&mut self.static_var_names, statics),
+        }
+    }
+
+    pub(crate) fn leave_shared_scope(&mut self, enclosing: EnclosingScope) {
+        self.shared_scope = enclosing.shared;
+        self.captured_types = enclosing.captured;
+        self.static_var_names = enclosing.statics;
     }
 
     /// Drops what every record gained since `mark`.
@@ -1602,6 +1629,8 @@ impl<'a> Checker<'a> {
 
         let mut top_locals: Locals = self.new_locals();
         top_locals.set_track(self.probe_span.get().is_some());
+        let enclosing_scope =
+            self.enter_shared_scope(shared_scope::SharedScope::of(program, &[], None, true));
         let diagnostics_before = self.diagnostics.len();
         // `self.name_ctx` is tracked *positionally* here: real PHP only
         // allows a `namespace`/`use` statement at the top level of a file,
@@ -1803,6 +1832,7 @@ impl<'a> Checker<'a> {
                 }
             }
         }
+        self.leave_shared_scope(enclosing_scope);
         if self.saw_dynamic_var_construct {
             self.diagnostics.truncate(diagnostics_before);
             self.property_type_sites.clear();
@@ -1819,6 +1849,14 @@ impl<'a> Checker<'a> {
             self.diagnostics.extend(found);
         }
     }
+}
+
+/// What `Checker::enter_shared_scope` set aside for the scope a nested one
+/// is in.
+pub(crate) struct EnclosingScope {
+    shared: std::rc::Rc<shared_scope::SharedScope>,
+    captured: rustc_hash::FxHashMap<syntax::name::Name, Type>,
+    statics: NameSet,
 }
 
 #[cfg(test)]

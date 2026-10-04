@@ -5,7 +5,7 @@
 //! properties, and it isn't pure. An object that is one only through a
 //! subclass may run any code there.
 
-use crate::checker::{Checker, Locals, purge_stale_narrowing_for};
+use crate::checker::{Checker, Locals};
 use syntax::ast::{Expr, ExprKind};
 use syntax::span::Span;
 use types::Type;
@@ -40,19 +40,18 @@ impl<'a> Checker<'a> {
             .collect()
     }
 
-    /// The effects of `base[…]` calling `method` on each of `base_ty`'s
-    /// `ArrayAccess` members, at the expression `span` that makes the
-    /// call: its throw point, the facts about `base` it may change, and
-    /// an impure point.
+    /// The effects of an offset access calling `method` on each of
+    /// `base_ty`'s `ArrayAccess` members, at the expression `span` that
+    /// makes the call: its throw point, the facts it may change, and an
+    /// impure point.
     pub(crate) fn implicit_array_access_call(
         &mut self,
-        base: &Expr,
         base_ty: &Type,
         method: &str,
         span: Span,
         locals: &mut Locals,
     ) {
-        self.implicit_method_call(base, base_ty, "ArrayAccess", method, span, locals);
+        self.implicit_method_call(base_ty, "ArrayAccess", method, span, locals);
     }
 
     /// The effects of PHP calling `method` of `interface` on each member of
@@ -60,7 +59,6 @@ impl<'a> Checker<'a> {
     /// object, `count($o)` on a `Countable` one.
     pub(crate) fn implicit_method_call(
         &mut self,
-        base: &Expr,
         base_ty: &Type,
         interface: &str,
         method: &str,
@@ -85,12 +83,7 @@ impl<'a> Checker<'a> {
             }
             effect.join(&self.method_call_effect(member, method));
         }
-        if (effect.writes_own_object() || effect.writes_other_objects())
-            && let Some(key) = locals.key_of(base)
-            && locals.has_key_depending_on(key)
-        {
-            purge_stale_narrowing_for(locals, key);
-        }
+        self.forget_effect(&effect, false, locals);
         if !self.implicit_calls.contains(&span) {
             self.implicit_calls.push(span);
         }
@@ -112,11 +105,11 @@ impl<'a> Checker<'a> {
             return;
         };
         let base_ty = self.infer_expr(base, locals);
-        self.implicit_array_access_call(base, &base_ty, "offsetSet", span, locals);
+        self.implicit_array_access_call(&base_ty, "offsetSet", span, locals);
         let mut link: &Expr = base;
         while let ExprKind::Index(inner, _) = &link.kind {
             let inner_ty = self.infer_expr(inner, locals);
-            self.implicit_array_access_call(inner, &inner_ty, "offsetGet", span, locals);
+            self.implicit_array_access_call(&inner_ty, "offsetGet", span, locals);
             let by_value = self
                 .array_access_members(&inner_ty)
                 .into_iter()
@@ -156,12 +149,12 @@ impl<'a> Checker<'a> {
         };
         let base_ty = self.infer_expr(base, locals);
         for method in root {
-            self.implicit_array_access_call(base, &base_ty, method, span, locals);
+            self.implicit_array_access_call(&base_ty, method, span, locals);
         }
         let mut link: &Expr = base;
         while let ExprKind::Index(inner, _) = &link.kind {
             let inner_ty = self.infer_expr(inner, locals);
-            self.implicit_array_access_call(inner, &inner_ty, "offsetGet", span, locals);
+            self.implicit_array_access_call(&inner_ty, "offsetGet", span, locals);
             link = inner;
         }
     }

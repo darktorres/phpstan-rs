@@ -25,8 +25,8 @@ use syntax::name::Name;
 
 use crate::registry::bodies::BodySource;
 use crate::registry::summaries::{
-    ArgAt, Binding, CallWrites, Callable, Callee, Made, PairTarget, Place, Receiver, Root, Step,
-    WriteFacts,
+    ArgAt, Binding, BodySummary, CallWrites, Callable, Callee, Made, PairTarget, Place, Receiver,
+    Root, Step, WriteFacts,
 };
 use crate::registry::{ClassReflection, FunctionReflection, Registry, is_non_overridable};
 use types::Type;
@@ -84,6 +84,22 @@ impl Effect {
         self.0.is_none()
     }
 
+    pub(crate) fn is_nothing(&self) -> bool {
+        self.0.as_ref().is_some_and(BTreeSet::is_empty)
+    }
+
+    /// The storages written, when they are known.
+    pub(crate) fn storages(&self) -> Option<&BTreeSet<Storage>> {
+        self.0.as_ref()
+    }
+
+    /// This effect of a method, called on an object that may be of `class`
+    /// (of any class, when `None`): its own object's properties are that
+    /// object's.
+    pub(crate) fn on_object(&self, class: Option<&Name>) -> Effect {
+        self.transferred(&Transfer::Other(class.cloned()))
+    }
+
     fn insert(&mut self, storage: Storage) {
         if let Some(storages) = &mut self.0 {
             storages.insert(storage);
@@ -104,25 +120,6 @@ impl Effect {
                 storages.len() != before
             }
         }
-    }
-
-    /// Whether it may write a property of the callee's own `$this`.
-    pub(crate) fn writes_own_object(&self) -> bool {
-        self.0.as_ref().is_none_or(|storages| {
-            storages
-                .iter()
-                .any(|storage| matches!(storage, Storage::Own(_)))
-        })
-    }
-
-    /// Whether it may write a property of an object other than the
-    /// callee's own `$this`.
-    pub(crate) fn writes_other_objects(&self) -> bool {
-        self.0.as_ref().is_none_or(|storages| {
-            storages
-                .iter()
-                .any(|storage| matches!(storage, Storage::Property { .. }))
-        })
     }
 
     /// This effect, written by a call whose callee's own `$this` is the
@@ -582,20 +579,6 @@ impl Registry {
         }
     }
 
-    /// What calling the function `name` may write.
-    pub(crate) fn function_effect(&self, name: &str) -> Effect {
-        let declared = self
-            .lookup_function_with_name(name)
-            .map_or(name, |(declared, _)| declared);
-        self.settled_effect(&function_key(declared))
-    }
-
-    /// What calling `owner`'s `method` - the declaration a call reaches, not
-    /// an override of it - may write.
-    pub(crate) fn method_effect(&self, owner: &str, method: &str) -> Effect {
-        self.settled_effect(&method_key(owner, method))
-    }
-
     /// What calling `method` on an object that may be of `class` may write:
     /// every implementation it may reach, `class`'s own and each
     /// descendant's, or `__call`'s where there is none.
@@ -853,14 +836,14 @@ impl Registry {
             made: FxHashMap::default(),
             classification: Classification::default(),
         };
-        resolve.run(sig);
+        resolve.run(Some(sig));
         resolve.classification
     }
 }
 
 /// The classes `ty` may be an object of: `Some` with each one named, `None`
 /// when it may be an object of a class not named (`object`, `mixed`).
-fn object_classes(ty: &Type) -> Option<Vec<Name>> {
+pub(crate) fn object_classes(ty: &Type) -> Option<Vec<Name>> {
     let mut classes = Vec::new();
     for member in ty.union_members() {
         if let Some((class, _)) = member.as_object() {
@@ -874,10 +857,10 @@ fn object_classes(ty: &Type) -> Option<Vec<Name>> {
 
 /// The object a value may be.
 #[derive(Clone)]
-enum Holder {
+pub(crate) enum Holder {
     /// An object of one of the classes, or of a descendant of one.
     Classes(Vec<Name>),
-    /// An object the body made, no one else has: of exactly one of the
+    /// An object the caller made, no one else has: of exactly one of the
     /// classes, or of a class not known.
     Made(Option<Vec<Name>>),
     /// An object of any class.
@@ -885,7 +868,7 @@ enum Holder {
 }
 
 /// The holder of a value of type `ty`.
-fn holder_of(ty: &Type) -> Holder {
+pub(crate) fn holder_of(ty: &Type) -> Holder {
     match object_classes(ty) {
         Some(classes) => Holder::Classes(classes),
         None => Holder::Unknown,
@@ -900,103 +883,78 @@ fn place_variable(place: &Place) -> Option<&Name> {
     }
 }
 
-/// Looks a body's writes and calls up in the registry.
-struct Resolve<'r> {
-    registry: &'r Registry,
-    class: Option<&'r str>,
-    member: &'r Name,
-    facts: &'r WriteFacts,
-    // The parameters whose declared type holds all through the body: neither
-    // assigned nor passed where a parameter is by reference.
-    params: FxHashMap<&'r str, &'r Type>,
-    // The variables that only ever hold what the body made.
-    made: FxHashMap<&'r str, &'r Made>,
-    classification: Classification,
+/// What the code making a call knows of it.
+pub(crate) trait CallContext {
+    /// The class the calling code belongs to.
+    fn class(&self) -> Option<&str>;
+    /// The object a method is called on, and whether it is the caller's own
+    /// `$this`.
+    fn receiver(&self, receiver: &Receiver) -> (Holder, bool);
+    /// The object the argument passed `at` is; `place` is what it names,
+    /// when it names one.
+    fn argument(&self, at: &ArgAt, place: Option<&Place>) -> Holder;
+    /// What the closure the caller wrote and passed `at` may write, when the
+    /// argument is one: a closure, an arrow function or a first-class callable
+    /// there (`written`), or a variable (`place`) holding only those. `None`
+    /// for any other argument.
+    fn written_effect(&self, at: &ArgAt, written: bool, place: Option<&Place>) -> Option<Effect>;
+    /// What calling the variable `name` may write, when it holds only
+    /// closures the caller wrote; `None` otherwise.
+    fn called_effect(&self, name: &Name) -> Option<Effect>;
 }
 
-impl<'r> Resolve<'r> {
-    fn run(&mut self, sig: &'r FunctionReflection) {
-        if self.facts.anything {
-            self.classification.own = Effect::anything();
-            return;
-        }
-        self.params = sig
-            .params
-            .iter()
-            .filter(|p| {
-                !p.by_ref
-                    && !self
-                        .facts
-                        .reassigned
-                        .iter()
-                        .any(|name| name == p.name.as_ref())
-            })
-            .map(|p| (p.name.as_ref(), &p.ty))
-            .collect();
-        self.made = self
-            .facts
-            .made
-            .iter()
-            .map(|(name, made)| (name.as_str(), made))
-            .collect();
-        // What each call reaches depends on the variables' types, and which
-        // variables a call writes by reference on what it reaches: both are
-        // found again until no variable is lost.
-        let (reached, written_args) = loop {
-            let mut reached: Vec<Vec<(DeclKey, Transfer)>> = Vec::new();
-            let mut written_args: Vec<&'r Place> = Vec::new();
-            for call in &self.facts.calls {
-                let Some(targets) = self.call_targets(&call.callee) else {
-                    self.classification.own = Effect::anything();
-                    return;
-                };
-                // A closure the body wrote, called: what it takes by
-                // reference is not looked up.
-                let unknown_params = matches!(call.callee, Callee::Value(_));
-                for (at, place) in &call.places {
-                    if unknown_params || targets.iter().any(|(key, _)| self.by_ref_at(key, at)) {
-                        written_args.push(place);
-                    }
-                }
-                reached.push(targets);
-            }
-            let mut lost = false;
-            for place in &written_args {
-                if let Some(name) = place_variable(place) {
-                    lost |= self.params.remove(name.as_str()).is_some();
-                    lost |= self.made.remove(name.as_str()).is_some();
-                }
-            }
-            if !lost {
-                break (reached, written_args);
-            }
-        };
-        // A builtin writes what the code it runs writes: what is passed to
-        // it, and what of its object a class extending it declares.
-        let mut calls: Vec<(DeclKey, Transfer)> = Vec::new();
-        for (call, targets) in self.facts.calls.iter().zip(reached) {
-            for (key, transfer) in targets {
-                match self.registry.builtin(&key) {
-                    Some(sig) => match self.builtin_runs(&key, sig, &transfer, call) {
-                        Some(runs) => calls.extend(runs),
-                        None => {
-                            self.classification.own = Effect::anything();
-                            return;
-                        }
-                    },
-                    None => calls.push((key, transfer)),
-                }
+/// The classes `class` as written names from code of the class `own`: `own`
+/// for `self`, its parent for `parent`, `own` and every descendant for
+/// `static`, the named one otherwise. `None` when `own` is not known, or has
+/// no parent; empty for a name that is no class.
+fn named_classes(
+    registry: &Registry,
+    own: Option<&str>,
+    class: &QualifiedName,
+) -> Option<Vec<Name>> {
+    Some(if class.is_keyword("self") {
+        vec![Name::from(own?)]
+    } else if class.is_keyword("parent") {
+        vec![registry.classes.get(own?)?.extends().first()?.clone()]
+    } else if class.is_keyword("static") {
+        let own = own?;
+        std::iter::once(Name::from(own))
+            .chain(registry.subclasses(own))
+            .collect()
+    } else {
+        class.resolved_class().map(Name::from).into_iter().collect()
+    })
+}
+
+/// Finds the declarations a call runs, with what its caller knows of it.
+struct Reach<'r> {
+    registry: &'r Registry,
+    ctx: &'r dyn CallContext,
+    // What the closures the caller wrote, which a call runs, may write.
+    written: std::cell::RefCell<Effect>,
+}
+
+impl Reach<'_> {
+    /// Every declaration the call runs, a builtin's by what it runs.
+    fn runs(&self, call: &CallWrites) -> Option<Vec<(DeclKey, Transfer)>> {
+        let targets = self.call_targets(&call.callee)?;
+        self.expand(call, targets)
+    }
+
+    /// `targets`, each builtin among them replaced by what it runs.
+    fn expand(
+        &self,
+        call: &CallWrites,
+        targets: Vec<(DeclKey, Transfer)>,
+    ) -> Option<Vec<(DeclKey, Transfer)>> {
+        let mut out = Vec::new();
+        for (key, transfer) in targets {
+            match self.registry.builtin(&key) {
+                Some(sig) => out.extend(self.builtin_runs(&key, sig, &transfer, call)?),
+                None => out.push((key, transfer)),
             }
         }
-        let mut own = Effect::nothing();
-        for place in self.facts.writes.iter().chain(written_args) {
-            self.place_storages(place, &mut own, 0);
-            if own.is_anything() {
-                break;
-            }
-        }
-        self.classification.own = own;
-        self.classification.calls = calls;
+        Some(out)
     }
 
     /// The declarations a call of the builtin `key` (`sig`) runs, with the
@@ -1036,7 +994,7 @@ impl<'r> Resolve<'r> {
         }
         if let Some(owner) = &key.class {
             let receivers: Vec<Name> = match transfer {
-                Transfer::Same => self.class.map(Name::from).into_iter().collect(),
+                Transfer::Same => self.ctx.class().map(Name::from).into_iter().collect(),
                 Transfer::Other(Some(class)) => vec![class.clone()],
                 Transfer::Other(None) | Transfer::Made | Transfer::Static => {
                     vec![Name::from(owner.as_str())]
@@ -1080,21 +1038,28 @@ impl<'r> Resolve<'r> {
             if elements {
                 return None;
             }
-            let callable = call
-                .callables
-                .iter()
-                .find(|(arg, _)| passed(arg))
-                .map(|(_, callable)| callable);
-            match callable {
-                Some(callable) => out.extend(self.callable_targets(callable)?),
-                // A closure the body wrote, held in a variable.
-                None => match call.places.iter().find(|(arg, _)| passed(arg)) {
-                    Some((_, place))
-                        if place_variable(place)
-                            .and_then(|name| self.made.get(name.as_str()))
-                            .is_some_and(|made| matches!(made, Made::Closure)) => {}
-                    _ => return None,
-                },
+            for arg in call.arguments.iter().filter(|arg| passed(arg)) {
+                let callable = call
+                    .callables
+                    .iter()
+                    .find(|(at, _)| at == arg)
+                    .map(|(_, callable)| callable);
+                let place = call
+                    .places
+                    .iter()
+                    .find(|(at, _)| at == arg)
+                    .map(|(_, place)| place);
+                match callable {
+                    Some(Callable::Written) | None => {
+                        let written = self.ctx.written_effect(
+                            arg,
+                            matches!(callable, Some(Callable::Written)),
+                            place,
+                        )?;
+                        self.written.borrow_mut().join(&written);
+                    }
+                    Some(callable) => out.extend(self.callable_targets(callable)?),
+                }
             }
         }
         for (position, run) in runs {
@@ -1112,9 +1077,14 @@ impl<'r> Resolve<'r> {
             match run {
                 BuiltinRun::Calls => {}
                 BuiltinRun::Method(method) => {
-                    let holder = match call.places.iter().find(|(arg, _)| arg_at(arg)) {
-                        Some((_, place)) if !position.elements => {
-                            self.value_holder(&place.root, &place.steps)
+                    let holder = match call.arguments.iter().find(|arg| arg_at(arg)) {
+                        Some(arg) if !position.elements => {
+                            let place = call
+                                .places
+                                .iter()
+                                .find(|(at, _)| at == arg)
+                                .map(|(_, place)| place);
+                            self.ctx.argument(arg, place)
                         }
                         _ => Holder::Unknown,
                     };
@@ -1166,7 +1136,8 @@ impl<'r> Resolve<'r> {
     fn callable_targets(&self, callable: &Callable) -> Option<Vec<(DeclKey, Transfer)>> {
         let registry = self.registry;
         match callable {
-            Callable::Written => Some(Vec::new()),
+            // What the caller wrote is found where it is passed.
+            Callable::Written => None,
             Callable::Text(text) => match text.split_once("::") {
                 Some((class, method)) => {
                     let class = QualifiedName {
@@ -1196,32 +1167,6 @@ impl<'r> Resolve<'r> {
         }
     }
 
-    /// Whether the declaration `key` takes the argument passed `at` by
-    /// reference.
-    fn by_ref_at(&self, key: &DeclKey, at: &ArgAt) -> bool {
-        let sig = match &key.class {
-            Some(class) => self.registry.lookup_method(class, &key.member),
-            None => self.registry.functions.get(key.member.as_str()),
-        };
-        let Some(sig) = sig else {
-            return true;
-        };
-        match at {
-            ArgAt::Position(at) => sig
-                .params
-                .get(*at as usize)
-                .or_else(|| sig.params.last().filter(|p| p.variadic))
-                .is_some_and(|p| p.by_ref),
-            ArgAt::Named(name) => sig
-                .params
-                .iter()
-                .find(|p| p.name.as_ref() == name.as_str())
-                .or_else(|| sig.params.last().filter(|p| p.variadic))
-                .is_some_and(|p| p.by_ref),
-            ArgAt::Spread => sig.params.iter().any(|p| p.by_ref),
-        }
-    }
-
     /// The declarations a call may run, each with what its callee's own
     /// `$this` is to the caller; `None` when it may run code not known.
     fn call_targets(&self, callee: &Callee) -> Option<Vec<(DeclKey, Transfer)>> {
@@ -1238,7 +1183,7 @@ impl<'r> Resolve<'r> {
                 None => Vec::new(),
             },
             Callee::Method { receiver, method } => {
-                let (holder, same) = self.receiver(receiver);
+                let (holder, same) = self.ctx.receiver(receiver);
                 let transfer = |class: Option<&Name>| {
                     if same {
                         Transfer::Same
@@ -1300,7 +1245,9 @@ impl<'r> Resolve<'r> {
             },
             Callee::New(class) => {
                 let classes = match class {
-                    Some(class) => self.instantiated(class),
+                    Some(class) => {
+                        named_classes(self.registry, self.ctx.class(), class).unwrap_or_default()
+                    }
                     None => self.registry.classes_declaring("__construct").to_vec(),
                 };
                 classes
@@ -1315,14 +1262,11 @@ impl<'r> Resolve<'r> {
                 .map(|(owner, _)| (method_key(&owner, "__construct"), Transfer::Made))
                 .into_iter()
                 .collect(),
-            Callee::Value(variable) => match variable
-                .as_ref()
-                .and_then(|name| self.made.get(name.as_str()))
-            {
-                // A closure the body wrote: its statements are the body's.
-                Some(Made::Closure) => Vec::new(),
-                _ => return None,
-            },
+            Callee::Value(variable) => {
+                let written = self.ctx.called_effect(variable.as_ref()?)?;
+                self.written.borrow_mut().join(&written);
+                Vec::new()
+            }
         })
     }
 
@@ -1369,9 +1313,9 @@ impl<'r> Resolve<'r> {
         method: Option<&Name>,
     ) -> Option<Vec<(DeclKey, Transfer)>> {
         let registry = self.registry;
-        let classes = self.named_classes(class)?;
+        let classes = named_classes(registry, self.ctx.class(), class)?;
         let forwards_from = |target: &str| {
-            self.class.is_some_and(|own| {
+            self.ctx.class().is_some_and(|own| {
                 own.eq_ignore_ascii_case(target) || registry.is_subclass_of(own, target)
             })
         };
@@ -1410,38 +1354,74 @@ impl<'r> Resolve<'r> {
         }
         Some(out)
     }
+}
 
-    /// The classes `class` as written names from the body: the body's own
-    /// for `self`, its parent for `parent`, the body's own and every
-    /// descendant for `static`, the named one otherwise. `None` when the
-    /// body's class is not known, or has no parent; empty for a name that
-    /// is no class.
-    fn named_classes(&self, class: &QualifiedName) -> Option<Vec<Name>> {
-        let registry = self.registry;
-        Some(if class.is_keyword("self") {
-            vec![Name::from(self.class?)]
-        } else if class.is_keyword("parent") {
-            vec![
-                registry
-                    .classes
-                    .get(self.class?)?
-                    .extends()
-                    .first()?
-                    .clone(),
-            ]
-        } else if class.is_keyword("static") {
-            let own = self.class?;
-            std::iter::once(Name::from(own))
-                .chain(registry.subclasses(own))
-                .collect()
-        } else {
-            class.resolved_class().map(Name::from).into_iter().collect()
-        })
+impl Registry {
+    /// What running code the caller wrote may write - a closure's or an
+    /// arrow function's body, summarized - its `$this` the caller's: what it
+    /// writes itself and what the calls it makes may write, as settled.
+    pub(crate) fn body_effect(&self, summary: &BodySummary, class: Option<&str>) -> Effect {
+        let member = Name::from("{closure}");
+        let mut resolve = Resolve {
+            registry: self,
+            class,
+            member: &member,
+            facts: &summary.writes,
+            params: FxHashMap::default(),
+            made: FxHashMap::default(),
+            classification: Classification::default(),
+        };
+        resolve.run(None);
+        let Classification { own, calls } = resolve.classification;
+        let mut effect = own;
+        for (key, transfer) in calls {
+            effect.join(&self.settled_effect(&key).transferred(&transfer));
+            if effect.is_anything() {
+                break;
+            }
+        }
+        effect
     }
 
-    /// The classes `new class` may make an object of.
-    fn instantiated(&self, class: &QualifiedName) -> Vec<Name> {
-        self.named_classes(class).unwrap_or_default()
+    /// What a call may write, with what its caller knows of it: the
+    /// callee's own `$this` stays its own when it is the caller's.
+    pub(crate) fn call_effect(&self, call: &CallWrites, ctx: &dyn CallContext) -> Effect {
+        let reach = Reach {
+            registry: self,
+            ctx,
+            written: Default::default(),
+        };
+        let Some(runs) = reach.runs(call) else {
+            return Effect::anything();
+        };
+        let mut effect = reach.written.into_inner();
+        for (key, transfer) in runs {
+            effect.join(&self.settled_effect(&key).transferred(&transfer));
+            if effect.is_anything() {
+                break;
+            }
+        }
+        effect
+    }
+}
+
+/// Looks a body's writes and calls up in the registry.
+struct Resolve<'r> {
+    registry: &'r Registry,
+    class: Option<&'r str>,
+    member: &'r Name,
+    facts: &'r WriteFacts,
+    // The parameters whose declared type holds all through the body: neither
+    // assigned nor passed where a parameter is by reference.
+    params: FxHashMap<&'r str, &'r Type>,
+    // The variables that only ever hold what the body made.
+    made: FxHashMap<&'r str, &'r Made>,
+    classification: Classification,
+}
+
+impl CallContext for Resolve<'_> {
+    fn class(&self) -> Option<&str> {
+        self.class
     }
 
     /// The object a method is called on, and whether it is the body's own
@@ -1468,12 +1448,167 @@ impl<'r> Resolve<'r> {
         }
     }
 
+    fn argument(&self, _: &ArgAt, place: Option<&Place>) -> Holder {
+        match place {
+            Some(place) => self.value_holder(&place.root, &place.steps),
+            None => Holder::Unknown,
+        }
+    }
+
+    // A closure the body wrote counts with the body's own writes.
+    fn written_effect(&self, _: &ArgAt, written: bool, place: Option<&Place>) -> Option<Effect> {
+        let held = place
+            .and_then(place_variable)
+            .is_some_and(|name| self.made_closure(name));
+        (written || held).then(Effect::nothing)
+    }
+
+    fn called_effect(&self, name: &Name) -> Option<Effect> {
+        self.made_closure(name).then(Effect::nothing)
+    }
+}
+
+impl<'r> Resolve<'r> {
+    /// Whether the variable `name` holds only closures the body wrote.
+    fn made_closure(&self, name: &Name) -> bool {
+        self.made
+            .get(name.as_str())
+            .is_some_and(|made| matches!(made, Made::Closure))
+    }
+
+    fn run(&mut self, sig: Option<&'r FunctionReflection>) {
+        let facts = self.facts;
+        if facts.anything {
+            self.classification.own = Effect::anything();
+            return;
+        }
+        self.params = sig
+            .map_or(&[][..], |sig| &sig.params)
+            .iter()
+            .filter(|p| !p.by_ref && !facts.reassigned.iter().any(|name| name == p.name.as_ref()))
+            .map(|p| (p.name.as_ref(), &p.ty))
+            .collect();
+        self.made = facts
+            .made
+            .iter()
+            .map(|(name, made)| (name.as_str(), made))
+            .collect();
+        // What each call reaches depends on the variables' types, and which
+        // variables a call writes by reference on what it reaches: both are
+        // found again until no variable is lost.
+        let (reached, written_args) = loop {
+            let found = {
+                let reach = Reach {
+                    registry: self.registry,
+                    ctx: &*self,
+                    written: Default::default(),
+                };
+                let mut reached: Vec<Vec<(DeclKey, Transfer)>> = Vec::new();
+                let mut written_args: Vec<&'r Place> = Vec::new();
+                let mut known = true;
+                for call in facts.calls.iter() {
+                    let Some(targets) = reach.call_targets(&call.callee) else {
+                        known = false;
+                        break;
+                    };
+                    // A closure the body wrote, called: what it takes by
+                    // reference is not looked up.
+                    let unknown_params = matches!(call.callee, Callee::Value(_));
+                    for (at, place) in call.places.iter() {
+                        if unknown_params || targets.iter().any(|(key, _)| self.by_ref_at(key, at))
+                        {
+                            written_args.push(place);
+                        }
+                    }
+                    reached.push(targets);
+                }
+                known.then_some((reached, written_args))
+            };
+            let Some((reached, written_args)) = found else {
+                self.classification.own = Effect::anything();
+                return;
+            };
+            let mut lost = false;
+            for place in &written_args {
+                if let Some(name) = place_variable(place) {
+                    lost |= self.params.remove(name.as_str()).is_some();
+                    lost |= self.made.remove(name.as_str()).is_some();
+                }
+            }
+            if !lost {
+                break (reached, written_args);
+            }
+        };
+        // A builtin writes what the code it runs writes: what is passed to
+        // it, and what of its object a class extending it declares.
+        let calls = {
+            let reach = Reach {
+                registry: self.registry,
+                ctx: &*self,
+                written: Default::default(),
+            };
+            let mut calls: Vec<(DeclKey, Transfer)> = Vec::new();
+            let mut known = true;
+            for (call, targets) in facts.calls.iter().zip(reached) {
+                match reach.expand(call, targets) {
+                    Some(runs) => calls.extend(runs),
+                    None => {
+                        known = false;
+                        break;
+                    }
+                }
+            }
+            known.then_some(calls)
+        };
+        let Some(calls) = calls else {
+            self.classification.own = Effect::anything();
+            return;
+        };
+        let mut own = Effect::nothing();
+        for place in facts.writes.iter().chain(written_args) {
+            self.place_storages(place, &mut own, 0);
+            if own.is_anything() {
+                break;
+            }
+        }
+        self.classification.own = own;
+        self.classification.calls = calls;
+    }
+
+    /// Whether the declaration `key` takes the argument passed `at` by
+    /// reference.
+    fn by_ref_at(&self, key: &DeclKey, at: &ArgAt) -> bool {
+        let sig = match &key.class {
+            Some(class) => self.registry.lookup_method(class, &key.member),
+            None => self.registry.functions.get(key.member.as_str()),
+        };
+        let Some(sig) = sig else {
+            return true;
+        };
+        match at {
+            ArgAt::Position(at) => sig
+                .params
+                .get(*at as usize)
+                .or_else(|| sig.params.last().filter(|p| p.variadic))
+                .is_some_and(|p| p.by_ref),
+            ArgAt::Named(name) => sig
+                .params
+                .iter()
+                .find(|p| p.name.as_ref() == name.as_str())
+                .or_else(|| sig.params.last().filter(|p| p.variadic))
+                .is_some_and(|p| p.by_ref),
+            ArgAt::Spread => sig.params.iter().any(|p| p.by_ref),
+        }
+    }
+
     /// The object the variable `name` holds: what the body made, by its
     /// class; a parameter, by its declared type; anything else not known.
     fn variable_holder(&self, name: &Name) -> Holder {
         if let Some(made) = self.made.get(name.as_str()) {
             return match made {
-                Made::Object(Some(class)) => Holder::Made(Some(self.instantiated(class))),
+                Made::Object(Some(class)) => Holder::Made(Some(
+                    named_classes(self.registry, self.class, class).unwrap_or_default(),
+                )),
                 Made::Object(None) => Holder::Made(None),
                 Made::Closure => Holder::Made(Some(vec![Name::from("Closure")])),
             };
@@ -1511,7 +1646,7 @@ impl<'r> Resolve<'r> {
         class: &QualifiedName,
         prop: Option<&Name>,
     ) -> Vec<(Option<Name>, Option<Name>)> {
-        let Some(classes) = self.named_classes(class) else {
+        let Some(classes) = named_classes(self.registry, self.class, class) else {
             return vec![(None, prop.cloned())];
         };
         let mut out: Vec<(Option<Name>, Option<Name>)> = Vec::new();

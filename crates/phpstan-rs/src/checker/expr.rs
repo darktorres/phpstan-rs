@@ -9,7 +9,7 @@ use crate::checker::{
     ATTRIBUTE_TARGET_CLASS_CONSTANT, ATTRIBUTE_TARGET_FUNCTION, ATTRIBUTE_TARGET_PROPERTY,
     CalleeLabel, CheckArgsCall, Checker, Locals, LoopZeroIterations, MemberKind, MemberLabel,
     MemberVisibilityCheck, TemplateBindings, UsageTokenKind, binop_sigil, generator_template_param,
-    literal_string_key, merge_scopes, propagate_container_field_facts, purge_stale_narrowing_for,
+    literal_string_key, merge_scopes, propagate_container_field_facts,
     purge_stale_narrowing_for_var, resolve_call_args, unassigned_variable_type,
 };
 use crate::pest_config;
@@ -177,109 +177,6 @@ impl<'a> Checker<'a> {
         }
     }
 
-    /// After a call that may write an object's properties, what is known
-    /// about them is stale (`registry::effects`): the receiver's, or
-    /// `$this`'s when a `self::`, `static::` or `parent::` call forwards it
-    /// to a non-static method, unless the call writes no object's
-    /// properties; an object argument's, unless it writes at most its own
-    /// object's. What is known about each object itself stays.
-    fn forget_members_a_call_may_change(&self, e: &Expr, locals: &mut Locals) {
-        // With no property chain, index, or fact about one in the scope,
-        // there is nothing a call could make stale, however much it writes.
-        if !locals.has_state_to_forget() {
-            return;
-        }
-        let (receiver, args, effect) = match &e.kind {
-            ExprKind::MethodCall(recv, method, args, _) => {
-                let recv_ty = self.infer_expr(recv, locals);
-                (
-                    locals.key_of(recv),
-                    args,
-                    self.method_call_effect(&recv_ty, method),
-                )
-            }
-            ExprKind::StaticCall(target, method, args) => {
-                let class = self.infer_static_target_class(target, locals);
-                let keyword = |word: &str| matches!(target, StaticTarget::Name(name) if name.is_keyword(word));
-                let effect = match class.as_deref() {
-                    Some(class) if keyword("static") => {
-                        self.registry.virtual_method_effect(class, method)
-                    }
-                    Some(class) => {
-                        let resolved = if keyword("parent") {
-                            self.registry
-                                .lookup_ancestor_method_with_owner(class, method)
-                        } else {
-                            self.lookup_method_with_owner(class, method)
-                        };
-                        match resolved {
-                            Some((owner, _)) => self.registry.method_effect(&owner, method),
-                            None => crate::registry::Effect::anything(),
-                        }
-                    }
-                    None => self.registry.method_effect_by_name(method),
-                };
-                let forwards_this = (keyword("self") || keyword("static") || keyword("parent"))
-                    && !class
-                        .as_deref()
-                        .is_some_and(|class| self.method_is_static(class, method));
-                (forwards_this.then(|| locals.var_key("this")), args, effect)
-            }
-            ExprKind::Call(callee, args) => {
-                let effect = match &callee.kind {
-                    ExprKind::Name(name) => self
-                        .registry
-                        .resolve_function(name)
-                        .map_or(crate::registry::Effect::nothing(), |(resolved, _)| {
-                            self.registry.function_effect(resolved)
-                        }),
-                    _ => crate::registry::Effect::anything(),
-                };
-                (None, args, effect)
-            }
-            ExprKind::New(class, args) => {
-                let effect = match &class.kind {
-                    ExprKind::Name(name) => {
-                        let target = if name.is_keyword("self") || name.is_keyword("static") {
-                            self.current_class.clone()
-                        } else {
-                            name.resolved_class().map(str::to_string)
-                        };
-                        match target
-                            .as_deref()
-                            .and_then(|t| self.lookup_method_with_owner(t, "__construct"))
-                        {
-                            Some((owner, _)) => self.registry.method_effect(&owner, "__construct"),
-                            None => crate::registry::Effect::nothing(),
-                        }
-                    }
-                    _ => crate::registry::Effect::anything(),
-                };
-                (None, args, effect)
-            }
-            _ => return,
-        };
-        let mut stale: Vec<LocalKey> = Vec::new();
-        if effect.writes_own_object() || effect.writes_other_objects() {
-            stale.extend(receiver);
-        }
-        if effect.writes_other_objects() {
-            stale.extend(args.iter().filter_map(|arg| {
-                let key = locals.key_of(&arg.value)?;
-                self.infer_expr(&arg.value, locals)
-                    .union_members()
-                    .iter()
-                    .any(|member| !member.is_object().no())
-                    .then_some(key)
-            }));
-        }
-        for key in stale {
-            if locals.has_key_depending_on(key) {
-                purge_stale_narrowing_for(locals, key);
-            }
-        }
-    }
-
     /// What calling `method` on a value of `receiver`'s type may write: over
     /// every class the value may be an object of, by the hierarchy, or over
     /// every loaded declaration of the method when the class is not known.
@@ -291,9 +188,12 @@ impl<'a> Checker<'a> {
         let mut effect = crate::registry::Effect::nothing();
         for member in receiver.union_members() {
             let member_effect = match member.as_object() {
-                Some((class, _)) => self.registry.virtual_method_effect(class, method),
+                Some((class, _)) => self
+                    .registry
+                    .virtual_method_effect(class, method)
+                    .on_object(Some(&Name::from(class))),
                 None if member.is_object().no() => continue,
-                None => self.registry.method_effect_by_name(method),
+                None => self.registry.method_effect_by_name(method).on_object(None),
             };
             effect.join(&member_effect);
             if effect.is_anything() {
@@ -301,18 +201,6 @@ impl<'a> Checker<'a> {
             }
         }
         effect
-    }
-
-    /// Whether `class`'s `method` is declared static.
-    fn method_is_static(&self, class: &str, method: &str) -> bool {
-        self.registry
-            .lookup_method_with_owner(class, method)
-            .and_then(|(owner, _)| self.registry.classes.get(owner.as_ref()))
-            .is_some_and(|info| {
-                info.static_methods()
-                    .iter()
-                    .any(|name| name.eq_ignore_ascii_case(method))
-            })
     }
 
     /// Thin wrapper over `check_expr_impl` - the real work - so every
@@ -335,7 +223,7 @@ impl<'a> Checker<'a> {
             let ty = crate::checker::profiling::measure_outermost!("checker::check_expr", {
                 self.check_expr_impl(e, locals, label)
             });
-            self.forget_members_a_call_may_change(e, locals);
+            self.forget_what_a_call_may_change(e, locals);
             if !self.try_throw_states.is_empty()
                 && let Some(thrown) = self.thrown_by(e, locals)
             {
@@ -509,14 +397,7 @@ impl<'a> Checker<'a> {
                     && let Some(counted) = args.first()
                 {
                     let counted_ty = self.infer_expr(&counted.value, locals);
-                    self.implicit_method_call(
-                        &counted.value,
-                        &counted_ty,
-                        "Countable",
-                        "count",
-                        e.span,
-                        locals,
-                    );
+                    self.implicit_method_call(&counted_ty, "Countable", "count", e.span, locals);
                 }
                 if let ExprKind::Name(name) = &callee.kind
                     && name == "extract"
@@ -2058,7 +1939,7 @@ impl<'a> Checker<'a> {
                     // Destructuring an `ArrayAccess` object reads each key
                     // through `offsetGet`.
                     if matches!(&lhs.kind, ExprKind::Destructure(..)) {
-                        self.implicit_array_access_call(rhs, &rhs_ty, "offsetGet", e.span, locals);
+                        self.implicit_array_access_call(&rhs_ty, "offsetGet", e.span, locals);
                     }
                 }
                 self.check_self_assignment(lhs, rhs);
@@ -2313,13 +2194,7 @@ impl<'a> Checker<'a> {
                             None => self.infer_expr(i, locals),
                         };
                         self.check_array_access_offset(&base_ty, "offsetGet", &key_ty, i.span);
-                        self.implicit_array_access_call(
-                            base,
-                            &base_ty,
-                            "offsetGet",
-                            e.span,
-                            locals,
-                        );
+                        self.implicit_array_access_call(&base_ty, "offsetGet", e.span, locals);
                         // The `Index` counterpart of `PropertyAccess`'s
                         // "check the narrowed key first" handling above -
                         // without this, `check_expr` (unlike `infer_expr`,
@@ -3775,6 +3650,16 @@ impl<'a> Checker<'a> {
                     GotoState::new(goto_labels.clone()),
                 );
                 let previous_assigned_variables = self.enter_assigned_variables(body);
+                let enclosing_scope =
+                    self.enter_shared_scope(crate::checker::shared_scope::SharedScope::of(
+                        body,
+                        uses,
+                        Some((
+                            self.current_class.as_deref().map(Name::from),
+                            Name::from("{closure}"),
+                        )),
+                        false,
+                    ));
                 // Real PHPStan exempts an anonymous function entirely
                 // from both by-ref-parameter rules (`isInAnonymousFunction()`
                 // bails in `ParameterOutAssignedTypeRule`/
@@ -3913,6 +3798,7 @@ impl<'a> Checker<'a> {
                 self.current_function_exit_points = previous_exit_points;
                 self.current_function_goto_targets = previous_goto_targets;
                 self.current_function_assigned_variables = previous_assigned_variables;
+                self.leave_shared_scope(enclosing_scope);
                 self.current_function_by_ref_params = previous_by_ref_params;
                 self.current_function_by_ref_params_with_tag = previous_by_ref_params_with_tag;
                 self.current_function_byref_snapshot_names = previous_byref_snapshot_names;
@@ -3962,7 +3848,7 @@ impl<'a> Checker<'a> {
                         // argument auto-vivification this project models
                         // in `predefine_byref_or_unknown_args`, now given
                         // a real, navigable declaration site.
-                        locals.declare_var(&u.name, mutated, u.name.span);
+                        locals.declare_var(&u.name, mutated.clone(), u.name.span);
                         // `locals.declare` above is this variable's only
                         // provenance site in this case (it didn't exist
                         // in the outer scope before), so the probe hook
@@ -3975,10 +3861,17 @@ impl<'a> Checker<'a> {
                                 Some([u.name.span].into_iter().collect());
                         }
                     } else {
-                        locals.insert_var(&u.name, mutated);
+                        locals.insert_var(&u.name, mutated.clone());
                         // The closure may write anything to it.
                         locals.clear_native_var(&u.name);
                     }
+                    // What it may hold after any later call that runs the
+                    // closure (`forget_effect`).
+                    let written = match self.captured_types.remove(&u.name.name) {
+                        Some(earlier) => self.relation().union_of(vec![earlier, mutated]),
+                        None => mutated,
+                    };
+                    self.captured_types.insert(u.name.name.clone(), written);
                 }
                 let inferred_return = (!closure_is_generator).then(|| {
                     closure_inferred_return_type(
@@ -4073,7 +3966,11 @@ impl<'a> Checker<'a> {
                 let previous_by_ref_params_with_tag =
                     std::mem::take(&mut self.current_function_by_ref_params_with_tag);
                 self.check_generator_return_type(declared_return.as_ref(), e.span);
+                let enclosing_scope = self.enter_shared_scope(
+                    crate::checker::shared_scope::SharedScope::of_arrow_function(body),
+                );
                 let body_ty = self.check_expr(body, &mut arrow_locals, label);
+                self.leave_shared_scope(enclosing_scope);
                 self.current_function_is_generator = previous_generator_flag;
                 self.current_declared_return_type = previous_declared_return_type;
                 self.current_declared_throws_type = previous_declared_throws_type;

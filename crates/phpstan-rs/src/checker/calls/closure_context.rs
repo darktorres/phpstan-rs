@@ -304,6 +304,16 @@ impl<'a> Checker<'a> {
                     GotoState::new(goto_labels.clone()),
                 );
                 let previous_assigned_variables = self.enter_assigned_variables(body);
+                let enclosing_scope =
+                    self.enter_shared_scope(crate::checker::shared_scope::SharedScope::of(
+                        body,
+                        uses,
+                        Some((
+                            self.current_class.as_deref().map(syntax::name::Name::from),
+                            syntax::name::Name::from("{closure}"),
+                        )),
+                        false,
+                    ));
                 // See `checker/expr.rs`'s `Closure` arm's identical comment.
                 let previous_throw_points = std::mem::take(&mut self.current_function_throw_points);
                 let previous_try_throw_states = std::mem::take(&mut self.try_throw_states);
@@ -347,6 +357,7 @@ impl<'a> Checker<'a> {
                 self.current_function_exit_points = previous_exit_points;
                 self.current_function_goto_targets = previous_goto_targets;
                 self.current_function_assigned_variables = previous_assigned_variables;
+                self.leave_shared_scope(enclosing_scope);
                 self.check_unused_closure_uses(uses, body, closure_expr.span);
                 for u in uses {
                     if !u.by_ref {

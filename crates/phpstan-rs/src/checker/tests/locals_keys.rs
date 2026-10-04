@@ -193,28 +193,11 @@ fn rebinding_a_receiver_forgets_the_members_it_was_proved_to_have() {
 fn a_scope_with_no_synthetic_key_and_no_fact_has_nothing_to_forget() {
     let mut locals = locals_with(&["a", "b", "this"]);
     assert!(!locals.has_state_to_forget());
-    let a = key(&locals, "a");
-    let c = key(&locals, "c");
-    assert!(locals.has_key_depending_on(a));
-    assert!(!locals.has_key_depending_on(c));
     let ap = key(&locals, "a->p");
     locals.insert(ap, Type::int());
     assert!(locals.has_state_to_forget());
-    assert!(locals.has_key_depending_on(a));
     locals.remove(ap);
     assert!(!locals.has_state_to_forget());
-}
-
-#[test]
-fn has_key_depending_on_is_the_scan_of_every_local() {
-    let locals = locals_with(KEYS);
-    for text in KEYS.iter().chain(&["none", "a->x", "m", "Foo::$baz"]) {
-        let by_scan = locals
-            .iter()
-            .any(|(k, _)| text_depends_on(&locals.render(k), text));
-        let probe = key(&locals, text);
-        assert_eq!(locals.has_key_depending_on(probe), by_scan, "{text}");
-    }
 }
 
 /// The same scenario of writes, in a scope that tracks provenance (which

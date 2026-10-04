@@ -902,6 +902,13 @@ impl<'a> Checker<'a> {
                 .unwrap_or_default(),
         );
         let previous_assigned_variables = self.enter_assigned_variables(f.body_stmts());
+        let enclosing_scope =
+            self.enter_shared_scope(crate::checker::shared_scope::SharedScope::of(
+                f.body_stmts(),
+                &[],
+                Some((class_name.map(Name::from), f.name.name.clone())),
+                false,
+            ));
         // See `Checker::current_function_throw_points`'s doc comment.
         let previous_throw_points = std::mem::take(&mut self.current_function_throw_points);
         let previous_try_throw_states = std::mem::take(&mut self.try_throw_states);
@@ -1224,6 +1231,7 @@ impl<'a> Checker<'a> {
         self.current_function_by_ref_params_with_tag = previous_by_ref_params_with_tag;
         self.current_function_goto_targets = previous_goto_targets;
         self.current_function_assigned_variables = previous_assigned_variables;
+        self.leave_shared_scope(enclosing_scope);
 
         self.current_class = previous_class;
         self.current_method = previous_method;

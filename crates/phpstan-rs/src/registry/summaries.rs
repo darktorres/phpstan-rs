@@ -74,7 +74,13 @@ impl Place {
         }
     }
 
-    fn then(self, step: Step) -> Place {
+    /// Any other value: a call's result, a new object, a literal.
+    pub(crate) fn value() -> Place {
+        Place::root(Root::Value)
+    }
+
+    /// This place, then `step`.
+    pub(crate) fn then(self, step: Step) -> Place {
         let mut steps = self.steps.into_vec();
         steps.push(step);
         Place {
@@ -201,7 +207,7 @@ pub(crate) enum Callee {
 }
 
 /// Where an argument is passed.
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub(crate) enum ArgAt {
     Position(u32),
     Named(Name),
@@ -326,6 +332,13 @@ pub struct BodySummary {
 }
 
 impl BodySummary {
+    /// The summary of an arrow function's body.
+    pub(crate) fn of_expr(body: &Expr) -> BodySummary {
+        let mut walk = Summarizer::default();
+        walk.visit_expr(body);
+        walk.finish()
+    }
+
     /// The summary of the statements of one body.
     pub fn of(body: &[Stmt]) -> BodySummary {
         let mut walk = Summarizer::default();
@@ -607,6 +620,93 @@ impl Summarizer {
     }
 }
 
+impl Summarizer {
+    /// Records `e` when it is a call.
+    fn record_call(&mut self, e: &Expr) {
+        match &e.kind {
+            ExprKind::Call(callee, args) => match &callee.kind {
+                ExprKind::Name(name) => {
+                    self.purity_call(PurityCall::Function(name.clone()));
+                    self.call(Callee::Function(name.clone()), args);
+                }
+                _ => {
+                    self.impure_unless_in_closure(true);
+                    let variable = match &callee.peeled().kind {
+                        ExprKind::Variable(name) => Some(name.clone()),
+                        _ => None,
+                    };
+                    self.call(Callee::Value(variable), args);
+                }
+            },
+            ExprKind::MethodCall(recv, method, args, _) => {
+                let on_this = matches!(&recv.kind, ExprKind::Variable(v) if *v == "this");
+                if on_this {
+                    self.purity_call(PurityCall::ThisMethod(method.name.clone()));
+                } else {
+                    self.impure_unless_in_closure(true);
+                }
+                self.call(
+                    Callee::Method {
+                        receiver: receiver(recv),
+                        method: Some(method.name.clone()),
+                    },
+                    args,
+                );
+            }
+            ExprKind::DynamicMethodCall(recv, _, args, _) => self.call(
+                Callee::Method {
+                    receiver: receiver(recv),
+                    method: None,
+                },
+                args,
+            ),
+            ExprKind::StaticCall(target, method, args) => {
+                match target.as_name() {
+                    Some(name) => {
+                        self.purity_call(PurityCall::Static(name.clone(), method.name.clone()));
+                    }
+                    None => self.impure_unless_in_closure(true),
+                }
+                self.call(
+                    Callee::Static {
+                        class: target.as_name().cloned(),
+                        method: Some(method.name.clone()),
+                    },
+                    args,
+                );
+            }
+            ExprKind::DynamicStaticCall(target, _, args) => self.call(
+                Callee::Static {
+                    class: target.as_name().cloned(),
+                    method: None,
+                },
+                args,
+            ),
+            ExprKind::New(callee, args) => match &callee.kind {
+                ExprKind::Name(name) => {
+                    self.purity_call(PurityCall::New(name.clone()));
+                    self.call(Callee::New(Some(name.clone())), args);
+                }
+                _ => {
+                    self.impure_unless_in_closure(true);
+                    self.call(Callee::New(None), args);
+                }
+            },
+            ExprKind::NewAnonymousClass(class) => {
+                self.call(Callee::Anonymous(class.name.clone()), &class.args);
+            }
+            _ => {}
+        }
+    }
+}
+
+/// The call `e` is, as a body's summary records it.
+pub(crate) fn call_of(e: &Expr) -> Option<CallWrites> {
+    let mut walk = Summarizer::default();
+    walk.record_call(e);
+    walk.calls.pop()
+}
+
 /// What the body made that `e` evaluates to, when it is that.
 fn made_by(e: &Expr) -> Option<Made> {
     syntax::stack::guard(|| match &e.peeled().kind {
@@ -784,78 +884,7 @@ impl<'ast> Visitor<'ast> for Summarizer {
                     target,
                 ) => self.write(target, None),
                 ExprKind::Eval(_) | ExprKind::Include(..) => self.anything = true,
-                ExprKind::Call(callee, args) => match &callee.kind {
-                    ExprKind::Name(name) => {
-                        self.purity_call(PurityCall::Function(name.clone()));
-                        self.call(Callee::Function(name.clone()), args);
-                    }
-                    _ => {
-                        self.impure_unless_in_closure(true);
-                        let variable = match &callee.peeled().kind {
-                            ExprKind::Variable(name) => Some(name.clone()),
-                            _ => None,
-                        };
-                        self.call(Callee::Value(variable), args);
-                    }
-                },
-                ExprKind::MethodCall(recv, method, args, _) => {
-                    let on_this = matches!(&recv.kind, ExprKind::Variable(v) if *v == "this");
-                    if on_this {
-                        self.purity_call(PurityCall::ThisMethod(method.name.clone()));
-                    } else {
-                        self.impure_unless_in_closure(true);
-                    }
-                    self.call(
-                        Callee::Method {
-                            receiver: receiver(recv),
-                            method: Some(method.name.clone()),
-                        },
-                        args,
-                    );
-                }
-                ExprKind::DynamicMethodCall(recv, _, args, _) => self.call(
-                    Callee::Method {
-                        receiver: receiver(recv),
-                        method: None,
-                    },
-                    args,
-                ),
-                ExprKind::StaticCall(target, method, args) => {
-                    match target.as_name() {
-                        Some(name) => {
-                            self.purity_call(PurityCall::Static(name.clone(), method.name.clone()));
-                        }
-                        None => self.impure_unless_in_closure(true),
-                    }
-                    self.call(
-                        Callee::Static {
-                            class: target.as_name().cloned(),
-                            method: Some(method.name.clone()),
-                        },
-                        args,
-                    );
-                }
-                ExprKind::DynamicStaticCall(target, _, args) => self.call(
-                    Callee::Static {
-                        class: target.as_name().cloned(),
-                        method: None,
-                    },
-                    args,
-                ),
-                ExprKind::New(callee, args) => match &callee.kind {
-                    ExprKind::Name(name) => {
-                        self.purity_call(PurityCall::New(name.clone()));
-                        self.call(Callee::New(Some(name.clone())), args);
-                    }
-                    _ => {
-                        self.impure_unless_in_closure(true);
-                        self.call(Callee::New(None), args);
-                    }
-                },
-                ExprKind::NewAnonymousClass(class) => {
-                    self.call(Callee::Anonymous(class.name.clone()), &class.args);
-                }
-                _ => {}
+                _ => self.record_call(e),
             }
             if matches!(e.kind, ExprKind::Closure { .. } | ExprKind::ArrowFn { .. }) {
                 self.closures += 1;

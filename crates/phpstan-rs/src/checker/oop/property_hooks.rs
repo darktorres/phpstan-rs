@@ -216,6 +216,22 @@ impl<'a> Checker<'a> {
             PropertyHookBody::Block(stmts) => self.enter_assigned_variables(stmts),
             _ => self.enter_assigned_variables(&[]),
         };
+        let hook_scope = match body {
+            PropertyHookBody::Block(stmts) => crate::checker::shared_scope::SharedScope::of(
+                stmts,
+                &[],
+                Some((
+                    self.current_class.as_deref().map(syntax::name::Name::from),
+                    syntax::name::Name::from("{hook}"),
+                )),
+                false,
+            ),
+            PropertyHookBody::Arrow(e) => {
+                crate::checker::shared_scope::SharedScope::of_arrow_function(e)
+            }
+            PropertyHookBody::Abstract => crate::checker::shared_scope::SharedScope::default(),
+        };
+        let enclosing_scope = self.enter_shared_scope(hook_scope);
         let previous_goto_targets = match body {
             PropertyHookBody::Arrow(_) => {
                 self.current_function_is_generator = hook.is_generator;
@@ -323,6 +339,7 @@ impl<'a> Checker<'a> {
             self.current_function_goto_targets = previous;
         }
         self.current_function_assigned_variables = previous_assigned_variables;
+        self.leave_shared_scope(enclosing_scope);
         self.current_class = previous_class;
     }
 
@@ -513,6 +530,22 @@ impl<'a> Checker<'a> {
             PropertyHookBody::Block(stmts) => self.enter_assigned_variables(stmts),
             _ => self.enter_assigned_variables(&[]),
         };
+        let hook_scope = match body {
+            PropertyHookBody::Block(stmts) => crate::checker::shared_scope::SharedScope::of(
+                stmts,
+                &[],
+                Some((
+                    self.current_class.as_deref().map(syntax::name::Name::from),
+                    syntax::name::Name::from("{hook}"),
+                )),
+                false,
+            ),
+            PropertyHookBody::Arrow(e) => {
+                crate::checker::shared_scope::SharedScope::of_arrow_function(e)
+            }
+            PropertyHookBody::Abstract => crate::checker::shared_scope::SharedScope::default(),
+        };
+        let enclosing_scope = self.enter_shared_scope(hook_scope);
         let previous_goto_targets = match body {
             PropertyHookBody::Arrow(_) => {
                 self.current_function_is_generator = hook.is_generator;
@@ -579,6 +612,7 @@ impl<'a> Checker<'a> {
             self.current_function_goto_targets = previous;
         }
         self.current_function_assigned_variables = previous_assigned_variables;
+        self.leave_shared_scope(enclosing_scope);
         self.current_class = previous_class;
     }
 }

@@ -252,15 +252,6 @@ impl Locals {
             || !self.discriminant_array_facts.is_empty()
     }
 
-    /// Whether the scope has `key`, or a key that depends on it: found
-    /// among the synthetic ones, the only ones that can.
-    pub(crate) fn has_key_depending_on(&self, key: LocalKey) -> bool {
-        self.types.contains_key(&key) || {
-            let keys = self.keys.borrow();
-            self.synthetic.iter().any(|&k| keys.depends_on(k, key))
-        }
-    }
-
     /// Provenance-preserving update, for narrowing an existing binding
     /// (`instanceof`/null/array-shape checks) or a by-ref call's type
     /// widening (`sort($arr)`, `preg_match(..., $matches)`) - the value's
