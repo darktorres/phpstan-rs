@@ -251,15 +251,16 @@ when it runs, and the plan adds the checks found along the way.
   in item 0's validation" block lists, each fixed. Left: the dumps with the
   `gate` and `oracle` builds, `cargo xtask corpus --full` with the
   equalities, the reports against `5fb858c9`'s, the memory baseline.
-- **Queued after level 8, found along the way:**
-  - Version gates for PHP 7.x syntax. The "supported only on PHP X" family
-    starts at 8.0; nothing reports `void`, `?T` or `iterable` before 7.1,
-    `object` before 7.2, or what 7.4 added (typed properties, arrow
-    functions, `??=`), each of which PHP before then rejects or reads as a
-    class name. Check which later gates are missing too (`mixed`,
-    `static`, `never`, `match`, `?->`, enums).
-  - The runtime oracle executes 81 of 3851 fixtures: the others assert
-    inside functions nothing calls, so PHP never reaches the assertion.
+- **Found along the way, done:** version gates for the syntax PHP 7.1 to 8.5
+  added (`492ccf0e`, `50fa1e43`, `d8090e5e`), and `php_version` taking a
+  range (`dfdfeeb4`). The runtime oracle calls each asserting function with
+  values of its parameters' types (`3d8085f3`): 353 fixtures run, from 81.
+- **Waiting on a decision:** three approximations the oracle's calls showed
+  against what PHP does, each fixture opted out with its reason:
+  unbounded int arithmetic taken not to overflow (`PHP_INT_MAX + 1` is a
+  float), a general array's key taken to be there (PHP reads `null` with a
+  warning), and `ArrayIterator::current()` taken to give a value (`null` at
+  an invalid position).
 
 ## Documents with no place in the stack
 
