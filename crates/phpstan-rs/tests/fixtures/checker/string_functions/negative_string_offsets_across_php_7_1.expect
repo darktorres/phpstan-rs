@@ -1,0 +1,3 @@
+7:31-7:33 offsetAccess.mightNotExist L7 | Offset -1 might not exist on 'abc'.
+9:5-9:11 offsetAssign.valueType L3 | Illegal string offset -1 before PHP 7.1.
+12:5-12:11 offsetAssign.valueType L3 | Illegal string offset -5.

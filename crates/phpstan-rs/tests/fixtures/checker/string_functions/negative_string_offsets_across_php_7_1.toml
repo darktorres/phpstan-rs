@@ -1,0 +1,2 @@
+php_version = { min = "7.0", max = "8.4" }
+runtime_warnings = "exact"
