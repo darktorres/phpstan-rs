@@ -71,8 +71,11 @@ impl Progress {
         self.write();
     }
 
-    /// A failure that belongs to no one run.
+    /// A failure, unless a run's failure already says it.
     pub(crate) fn fail(&mut self, failure: String) {
+        if self.failures.iter().any(|f| f.ends_with(&failure)) {
+            return;
+        }
         self.failures.push(failure);
         self.write();
     }
@@ -213,7 +216,7 @@ pub(crate) fn render(path: &Path, at: u64) -> Result<(String, bool), String> {
 }
 
 /// `cargo xtask progress [--watch] [<command>]`: shows the progress of the
-/// last run of `command` (`dumps` by default) from `dir`; with `--watch`,
+/// last run of `command` (`corpus` by default) from `dir`; with `--watch`,
 /// again every two seconds until it is over, waiting for a run to write
 /// its progress when none has.
 pub(crate) fn progress_command(dir: &Path, args: &[String]) -> Result<(), String> {
@@ -221,7 +224,7 @@ pub(crate) fn progress_command(dir: &Path, args: &[String]) -> Result<(), String
     let command = args
         .iter()
         .find(|a| !a.starts_with("--"))
-        .map_or("dumps", String::as_str);
+        .map_or("corpus", String::as_str);
     let path = status_path(dir, command);
     loop {
         let (view, over) = if path.exists() {

@@ -20,6 +20,7 @@ use std::time::Instant;
 
 mod arch;
 mod modgraph;
+mod pass;
 mod progress;
 mod stub_index;
 #[cfg(test)]
@@ -34,7 +35,6 @@ fn main() -> ExitCode {
     let result = match args.first().map(String::as_str) {
         Some("gates") => gates(&args[1..]),
         Some("corpus") => corpus_command(&args[1..]),
-        Some("dumps") => dumps_command(&args[1..]),
         Some("progress") => progress::progress_command(&gate_dir(), &args[1..]),
         Some("compare") => compare(&args[1..]),
         Some("type-drift") => type_drift(&args[1..]),
@@ -60,16 +60,19 @@ fn main() -> ExitCode {
 
 const USAGE: &str = "usage: cargo xtask <command>
   gates [--full]         every gate for HEAD (quick tier by default)
-  corpus [--full]        record HEAD's corpus, type and baseline snapshots
-  dumps [--binary <path>]
-                         record HEAD's item-0 dumps - the front end, the
-                         registry, the checker's records, the server's
-                         sessions and the edit replays - each at one
-                         thread and the default, which must agree; with
-                         --binary, run them with that build and record
-                         nothing (the oracle build's run)
+  corpus [--full] [--profile <gate|oracle>]
+                         one pass over the corpus on a worker per core:
+                         the scoped and all-on reports, their types and
+                         baselines; with --full every configuration in
+                         each of its states with every artifact compared
+                         (the reports, the front end, the registry, the
+                         stub bases, the checker's records), the levels,
+                         the server's sessions, the edit replays, the
+                         vendor projects and the fixtures; records HEAD's
+                         snapshots, or with --profile oracle runs the
+                         oracle build and records nothing
   progress [--watch] [<command>]
-                         show how far the running or last `dumps` (or
+                         show how far the running or last `corpus` (or
                          <command>) is: runs done by group, runs under
                          way, failures; --watch refreshes it until it ends
   compare [--full] [--against <hash>]
@@ -596,58 +599,38 @@ fn write(path: &Path, contents: &[u8]) -> Result<(), String> {
     std::fs::write(path, contents).map_err(|e| format!("writing {}: {e}", path.display()))
 }
 
-fn run_corpus(config: &Config, level: &str, extra: &[String]) -> Result<(String, String), String> {
-    let mut cmd = Command::new(binary());
-    cmd.current_dir(corpus_dir())
-        .arg("check-project")
-        .args((config.args)())
-        .args(["--format", "json"])
-        .args(extra);
-    if level != "unset" {
-        cmd.args(["--level", level]);
-    }
-    let out = cmd
-        .output()
-        .map_err(|e| format!("running phpstan-rs on {}: {e}", config.name))?;
-    Ok((
-        String::from_utf8_lossy(&out.stdout).into_owned(),
-        String::from_utf8_lossy(&out.stderr).into_owned(),
-    ))
-}
-
 fn corpus_command(args: &[String]) -> Result<(), String> {
-    require_clean_tree()?;
-    let hash = head_hash()?;
-    let mut timings = Timings::new();
-    let result = corpus(args, true, &hash, &mut timings);
-    timings.write(&hash, "corpus")?;
-    result
-}
-
-/// `with_fixture_types` records `types-fixtures` too; `gates` records it
-/// from its own fixture run instead.
-fn corpus(
-    args: &[String],
-    with_fixture_types: bool,
-    hash: &str,
-    timings: &mut Timings,
-) -> Result<(), String> {
     let full = args.iter().any(|a| a == "--full");
-    timings.time("gate build", |_| build_gate())?;
-    for (config, level) in artifacts(full) {
-        record_artifact(&config, level, hash, timings)?;
+    let profile = match args.iter().position(|a| a == "--profile") {
+        Some(i) => match args.get(i + 1).map(String::as_str) {
+            Some("gate") => "gate",
+            Some("oracle") => "oracle",
+            other => return Err(format!("--profile takes gate or oracle, not {other:?}")),
+        },
+        None => "gate",
+    };
+    // Only the shipped profile's artifacts are recorded, from a committed
+    // tree.
+    let hash = if profile == "gate" {
+        require_clean_tree()?;
+        Some(head_hash()?)
+    } else {
+        None
+    };
+    let mut timings = Timings::new();
+    let result = pass::run_pass(
+        &pass::PassSetup {
+            full,
+            fixtures: true,
+            profile,
+            hash: hash.clone(),
+        },
+        &mut timings,
+    );
+    if let Some(hash) = &hash {
+        timings.write(hash, "corpus")?;
     }
-    if with_fixture_types {
-        record_fixture_types(hash, timings)?;
-    }
-    if full {
-        record_vendor_projects(hash, timings)?;
-    }
-    determinism_check(full, timings)?;
-    if full {
-        equalities(hash, timings)?;
-    }
-    Ok(())
+    result
 }
 
 /// `cargo xtask type-drift`: relates HEAD's recorded type snapshot of
@@ -716,100 +699,8 @@ fn runner_out(artifact: &str) -> PathBuf {
     gate_dir().join(format!(".run-{artifact}"))
 }
 
-/// Runs `config` at `level` through the runner and writes its snapshots
-/// for `hash`: the report, and for the unset level of the scoped and
-/// all-on configurations, the type snapshot and the view with the
-/// reference baseline applied.
-fn record_artifact(
-    config: &Config,
-    level: &str,
-    hash: &str,
-    timings: &mut Timings,
-) -> Result<(), String> {
-    let artifact = &artifact_name(config, level);
-    let out = runner_out(artifact);
-    let _ = std::fs::remove_dir_all(&out);
-    let views = level == "unset" && matches!(config.name, "scoped" | "all-on");
-    let baseline = baseline_file(config.name);
-    let mut cmd = Command::new(runner());
-    cmd.current_dir(corpus_dir())
-        .args((config.args)())
-        .arg("--out")
-        .arg(&out);
-    if level != "unset" {
-        cmd.args(["--level", level]);
-    }
-    if views {
-        cmd.arg("--dump-types");
-        if baseline.exists() {
-            cmd.arg("--baseline").arg(&baseline);
-        } else {
-            eprintln!(
-                "no reference baseline for {} yet; run `cargo xtask baseline`",
-                config.name
-            );
-        }
-    }
-    timings.time(&format!("corpus {artifact}"), |_| run(&mut cmd))?;
-    let read = |name: &str| {
-        std::fs::read_to_string(out.join(name)).map_err(|e| format!("{artifact}: {name}: {e}"))
-    };
-    write(
-        &snapshot_path(artifact, hash, "txt"),
-        normalize(&read("report.json")?)?.as_bytes(),
-    )?;
-    write(
-        &snapshot_path(artifact, hash, "err"),
-        read("report.err")?.as_bytes(),
-    )?;
-    compress(
-        &out.join("diagnostics.txt"),
-        &snapshot_path(&format!("diagnostics-{artifact}"), hash, "txt.zst"),
-        timings,
-    )?;
-    if !views {
-        return Ok(());
-    }
-    let target = snapshot_path(&format!("types-{artifact}"), hash, "txt.zst");
-    std::fs::create_dir_all(target.parent().unwrap()).map_err(|e| e.to_string())?;
-    timings.time(&format!("compress types-{artifact}"), |_| {
-        run(Command::new("zstd")
-            .args(["-q", "-f", "-3", "-T0"])
-            .arg(out.join("types.txt"))
-            .arg("-o")
-            .arg(&target))
-    })?;
-    if baseline.exists() {
-        let normalized = normalize(&read("baseline.json")?)?;
-        let stderr = read("baseline.err")?;
-        let baseline_artifact = format!("baseline-{artifact}");
-        write(
-            &snapshot_path(&baseline_artifact, hash, "txt"),
-            normalized.as_bytes(),
-        )?;
-        write(
-            &snapshot_path(&baseline_artifact, hash, "err"),
-            stderr.as_bytes(),
-        )?;
-        let remaining = normalized.lines().filter(|l| !l.starts_with('#')).count();
-        let stale = stderr
-            .lines()
-            .filter(|l| l.contains("baseline entry"))
-            .count();
-        // The Stage A snapshot is empty; `compare` holds every later one
-        // to its parent's plus the commit's approved delta.
-        if remaining != 0 || stale != 0 {
-            eprintln!(
-                "baseline compatibility ({}): {remaining} diagnostic(s) and {stale} stale entr(ies) with the reference baseline",
-                config.name
-            );
-        }
-    }
-    Ok(())
-}
-
-/// Runs the fixture suite with each fixture's type dump on and records
-/// them, in fixture order, as the `types-fixtures` snapshot.
+/// Runs the fixture suite with each fixture's type and diagnostic records
+/// on, and records them (`record_fixture_dumps`).
 fn record_fixture_types(hash: &str, timings: &mut Timings) -> Result<(), String> {
     let dir = gate_dir().join(".fixture-types.tmp");
     let _ = std::fs::remove_dir_all(&dir);
@@ -820,8 +711,15 @@ fn record_fixture_types(hash: &str, timings: &mut Timings) -> Result<(), String>
             .env("PHPSTAN_RS_DUMP_TYPES", &dir)
             .env("PHPSTAN_RS_DUMP_DIAGNOSTICS", &dir))
     })?;
-    let joined_dumps = |extension: &str| -> Result<String, String> {
-        let mut dumps: Vec<PathBuf> = std::fs::read_dir(&dir)
+    record_fixture_dumps(&dir, hash)?;
+    std::fs::remove_dir_all(&dir).map_err(|e| e.to_string())
+}
+
+/// Records the fixture suite's records in `dir`, in fixture order, as the
+/// `diagnostics-fixtures` and `types-fixtures` snapshots.
+fn record_fixture_dumps(dir: &Path, hash: &str) -> Result<(), String> {
+    let joined = |extension: &str| -> Result<String, String> {
+        let mut dumps: Vec<PathBuf> = std::fs::read_dir(dir)
             .map_err(|e| e.to_string())?
             .filter_map(|e| e.ok().map(|e| e.path()))
             .filter(|p| p.extension().is_some_and(|e| e == extension))
@@ -833,52 +731,25 @@ fn record_fixture_types(hash: &str, timings: &mut Timings) -> Result<(), String>
         }
         Ok(text)
     };
-    let diagnostics = dir.join("diagnostics.txt");
-    write(&diagnostics, joined_dumps("diagnostics")?.as_bytes())?;
-    compress(
-        &diagnostics,
-        &snapshot_path("diagnostics-fixtures", hash, "txt.zst"),
-        timings,
-    )?;
-    let mut dumps: Vec<PathBuf> = std::fs::read_dir(&dir)
-        .map_err(|e| e.to_string())?
-        .filter_map(|e| e.ok().map(|e| e.path()))
-        .filter(|p| p.extension().is_some_and(|e| e == "types"))
-        .collect();
-    dumps.sort();
-    let mut text = String::new();
-    for dump in &dumps {
-        text.push_str(&std::fs::read_to_string(dump).map_err(|e| e.to_string())?);
+    for (extension, artifact) in [
+        ("diagnostics", "diagnostics-fixtures"),
+        ("types", "types-fixtures"),
+    ] {
+        let all = dir.join(format!("all.{extension}.txt"));
+        write(&all, joined(extension)?.as_bytes())?;
+        compress(&all, &snapshot_path(artifact, hash, "txt.zst"))?;
     }
-    let joined = dir.join("all.txt");
-    write(&joined, text.as_bytes())?;
-    let target = snapshot_path("types-fixtures", hash, "txt.zst");
-    std::fs::create_dir_all(target.parent().unwrap()).map_err(|e| e.to_string())?;
-    timings.time("compress types-fixtures", |_| {
-        run(Command::new("zstd")
-            .args(["-q", "-f", "-3", "-T0"])
-            .arg(&joined)
-            .arg("-o")
-            .arg(&target))
-    })?;
-    std::fs::remove_dir_all(&dir).map_err(|e| e.to_string())?;
     Ok(())
 }
 
 /// Compresses `from` into the snapshot `to` with `zstd`.
-fn compress(from: &Path, to: &Path, timings: &mut Timings) -> Result<(), String> {
+fn compress(from: &Path, to: &Path) -> Result<(), String> {
     std::fs::create_dir_all(to.parent().unwrap()).map_err(|e| e.to_string())?;
-    let name = to
-        .parent()
-        .and_then(Path::file_name)
-        .map_or_else(String::new, |n| n.to_string_lossy().into_owned());
-    timings.time(&format!("compress {name}"), |_| {
-        run(Command::new("zstd")
-            .args(["-q", "-f", "-3", "-T0"])
-            .arg(from)
-            .arg("-o")
-            .arg(to))
-    })
+    run(Command::new("zstd")
+        .args(["-q", "-f", "-3", "-T0"])
+        .arg(from)
+        .arg("-o")
+        .arg(to))
 }
 
 /// The corpus's vendor projects: each `vendor/<vendor>/<package>` with a
@@ -904,652 +775,10 @@ fn vendor_projects() -> Result<Vec<String>, String> {
     Ok(projects)
 }
 
-/// Runs each vendor project alone, every rule set on (`ALL_ON_SETS`, with
-/// no configuration file and no Composer context), and records the
-/// reports, one after another, each after a `# project <dir>` line, as
-/// `vendor-projects`, with their stderr, and their full diagnostic views
-/// as `diagnostics-vendor-projects`.
-fn record_vendor_projects(hash: &str, timings: &mut Timings) -> Result<(), String> {
-    let out = runner_out("vendor-projects");
-    let (mut report, mut err, mut diagnostics) = (String::new(), String::new(), String::new());
-    for project in vendor_projects()? {
-        let _ = std::fs::remove_dir_all(&out);
-        let mut cmd = Command::new(runner());
-        cmd.current_dir(corpus_dir()).arg("--no-composer");
-        for set in ALL_ON_SETS {
-            cmd.arg("--set").arg(set);
-        }
-        cmd.arg("--out").arg(&out).arg(&project);
-        timings.time(&format!("vendor project {project}"), |_| run(&mut cmd))?;
-        let read = |name: &str| {
-            std::fs::read_to_string(out.join(name)).map_err(|e| format!("{project}: {name}: {e}"))
-        };
-        for (text, name) in [
-            (&mut err, "report.err"),
-            (&mut diagnostics, "diagnostics.txt"),
-        ] {
-            writeln!(text, "# project {project}").unwrap();
-            text.push_str(&read(name)?);
-        }
-        writeln!(report, "# project {project}").unwrap();
-        report.push_str(&normalize(&read("report.json")?)?);
-    }
-    write(
-        &snapshot_path("vendor-projects", hash, "txt"),
-        report.as_bytes(),
-    )?;
-    write(
-        &snapshot_path("vendor-projects", hash, "err"),
-        err.as_bytes(),
-    )?;
-    let joined = out.join("diagnostics-all.txt");
-    write(&joined, diagnostics.as_bytes())?;
-    compress(
-        &joined,
-        &snapshot_path("diagnostics-vendor-projects", hash, "txt.zst"),
-        timings,
-    )
-}
-
-/// The equalities a run must keep whatever state it starts from: for the
-/// scoped, all-on and unscoped configurations, the shipped binary's report
-/// and stderr at one thread equal the default's, and equal across the
-/// cache states - the stub cache cold and then warm with the per-file
-/// cache off, and the per-file cache written and then read - each from a
-/// cache directory of its own. Records each as `equalities`; a difference
-/// fails.
-fn equalities(hash: &str, timings: &mut Timings) -> Result<(), String> {
-    let caches = gate_dir().join(".cache-states");
-    let mut lines = String::new();
-    for config in [SCOPED, ALL_ON, UNSCOPED] {
-        let _ = std::fs::remove_dir_all(&caches);
-        let state = |name: &str, cache: &str, file_cache: bool, threads: Option<&str>| {
-            let mut cmd = Command::new(binary());
-            cmd.current_dir(corpus_dir())
-                .arg("check-project")
-                .args((config.args)())
-                .args(["--format", "json"])
-                .env("PHPSTAN_RS_CACHE_DIR", caches.join(cache));
-            if !file_cache {
-                cmd.env("PHPSTAN_RS_NO_FILE_CACHE", "1");
-            }
-            if let Some(threads) = threads {
-                cmd.env("PHPSTAN_RS_THREADS", threads);
-            }
-            (name.to_string(), cmd)
-        };
-        let mut states = vec![
-            state("stub cache cold, file cache off", "a", false, None),
-            state("stub cache warm, file cache off", "a", false, None),
-            state("file cache written", "b", true, None),
-            state("file cache read", "b", true, None),
-            state("one thread", "b", true, Some("1")),
-        ];
-        let mut first: Option<(String, Vec<u8>, Vec<u8>)> = None;
-        for (name, cmd) in &mut states {
-            let output = timings.time(&format!("equality {} {name}", config.name), |_| {
-                cmd.output()
-                    .map_err(|e| format!("running {}: {e}", config.name))
-            })?;
-            match &first {
-                None => first = Some((name.clone(), output.stdout, output.stderr)),
-                Some((reference, stdout, stderr)) => {
-                    if *stdout != output.stdout || *stderr != output.stderr {
-                        let diff = if *stdout != output.stdout {
-                            unified_diff(stdout, &output.stdout)?
-                        } else {
-                            unified_diff(stderr, &output.stderr)?
-                        };
-                        let shown: String = diff.lines().take(40).collect::<Vec<_>>().join("\n");
-                        return Err(format!(
-                            "{}: the run with {name} differs from the run with {reference}\n{shown}",
-                            config.name
-                        ));
-                    }
-                    writeln!(lines, "{}: {name} = {reference}", config.name).unwrap();
-                }
-            }
-        }
-    }
-    let _ = std::fs::remove_dir_all(&caches);
-    write(&snapshot_path("equalities", hash, "txt"), lines.as_bytes())
-}
-
-/// Runs the shipped binary on a configuration with `--emission-order`
-/// (each file's diagnostics in the order the checks produced them, no
-/// final sort) and requires the runner's emission-order view of the same
-/// configuration, from a separate process, to be identical, stdout and
-/// stderr: the engine itself must be reproducible, not just the sorted
-/// report, and the runner must run what the binary runs.
-fn determinism_check(full: bool, timings: &mut Timings) -> Result<(), String> {
-    let mut configs = vec![ALL_ON];
-    if full {
-        configs.push(UNSCOPED);
-    }
-    for config in configs {
-        let out = runner_out(&artifact_name(&config, "unset"));
-        let (stdout, stderr) = timings.time(&format!("determinism {}", config.name), |_| {
-            run_corpus(&config, "unset", &["--emission-order".to_string()])
-        })?;
-        let read = |name: &str| {
-            std::fs::read_to_string(out.join(name))
-                .map_err(|e| format!("{}: {name}: {e}", config.name))
-        };
-        let (runner_stdout, runner_stderr) = (read("emission.json")?, read("emission.err")?);
-        if stdout != runner_stdout || stderr != runner_stderr {
-            let diff = if stdout != runner_stdout {
-                unified_diff(runner_stdout.as_bytes(), stdout.as_bytes())?
-            } else {
-                unified_diff(runner_stderr.as_bytes(), stderr.as_bytes())?
-            };
-            let shown: String = diff.lines().take(40).collect::<Vec<_>>().join("\n");
-            return Err(format!(
-                "{}: the binary's --emission-order output differs from the runner's: either the engine isn't reproducible, or the runner doesn't run what the binary runs\n{shown}",
-                config.name
-            ));
-        }
-        eprintln!("{}: emission order reproducible", config.name);
-    }
-    Ok(())
-}
-
 // --- item 0's dumps ----------------------------------------------------------
 
 /// The vendor projects the server's sessions run over, beside the corpus.
 const SESSION_PROJECTS: [&str; 2] = ["vendor/symfony/console", "vendor/doctrine/orm"];
-
-/// `cargo xtask dumps`: records HEAD's dumps as `.corpus-runs/gate/<artifact>/
-/// <commit>[.<ext>]`, each taken at one thread and at the default, which
-/// must give the same bytes:
-/// - for the scoped, all-on, unscoped, vendor-tree and arch configurations:
-///   the front end's dump (`front-end-<config>/<commit>/`), the registry
-///   dump (`registry-<config>`), and the checker's expression-type and
-///   PHPDoc resolution records (`expr-types-<config>`,
-///   `doc-resolutions-<config>`);
-/// - the server's session over the corpus and over `SESSION_PROJECTS`
-///   (`session-<name>`);
-/// - the edit replay over a copy of the corpus with the scoped
-///   configuration, and over a copy of each vendor project, every rule set
-///   on (`replay-<name>/<commit>/`).
-///
-/// The runs share the machine: one worker per core, each taking the next
-/// run from one queue, with at most `LARGE_AT_ONCE` of the corpus's at a
-/// time, and each pair compared as soon as both its runs are done. Every
-/// difference is reported once all have run.
-///
-/// With `--binary <path>`, every dump is taken with that build, its exit
-/// checked and nothing recorded: the oracle build's run, whose assertions
-/// must all hold.
-fn dumps_command(args: &[String]) -> Result<(), String> {
-    let binary = match args.iter().position(|a| a == "--binary") {
-        Some(i) => Some(PathBuf::from(
-            args.get(i + 1).ok_or("--binary needs a path")?,
-        )),
-        None => None,
-    };
-    let hash = match &binary {
-        Some(_) => None,
-        None => {
-            require_clean_tree()?;
-            build_gate()?;
-            Some(head_hash()?)
-        }
-    };
-    let binary = binary.unwrap_or_else(self::binary);
-    let mut timings = Timings::new();
-    let result = take_dumps(&binary, hash.as_deref(), &mut timings);
-    if let Some(hash) = &hash {
-        timings.write(hash, "dumps")?;
-    }
-    result
-}
-
-/// The arguments of a dump's command, given the path it writes to.
-type DumpArgs = Box<dyn Fn(&Path) -> Vec<String> + Send + Sync>;
-
-/// One dump: its artifact, the extension of its snapshot (empty for a
-/// directory), where it runs, and the command that writes it to the path
-/// it is given.
-struct Dump {
-    artifact: String,
-    ext: &'static str,
-    dir: PathBuf,
-    // A fresh copy of a tree to run in, made before each run: `(from, to)`.
-    // Both runs use the same place, which the dumps print, so they run one
-    // after the other.
-    copy: Option<(PathBuf, PathBuf)>,
-    // Whether it runs over the corpus, which takes a few gigabytes of
-    // memory, rather than one vendor project.
-    large: bool,
-    // The configuration it is taken in, for one over the corpus's.
-    config: Option<&'static str>,
-    args: DumpArgs,
-}
-
-/// How many runs over the corpus take place at once: each holds the
-/// project and its dump, a few gigabytes, so more would exhaust memory.
-const LARGE_AT_ONCE: usize = 3;
-
-/// The thread counts each dump is taken at: the default, then one.
-const DUMP_THREADS: [Option<&str>; 2] = [None, Some("1")];
-
-fn take_dumps(binary: &Path, hash: Option<&str>, timings: &mut Timings) -> Result<(), String> {
-    let mut dumps: Vec<Dump> = Vec::new();
-    for config in [SCOPED, ALL_ON, UNSCOPED, VENDOR_TREE, ARCH] {
-        let with = move |extra: Vec<String>| -> DumpArgs {
-            Box::new(move |out: &Path| {
-                let mut args = vec!["check-project".to_string()];
-                args.extend((config.args)());
-                for flag in &extra {
-                    args.push(flag.clone());
-                    if flag.starts_with("--dump") {
-                        args.push(out.to_string_lossy().into_owned());
-                    }
-                }
-                args
-            })
-        };
-        dumps.push(Dump {
-            artifact: format!("front-end-{}", config.name),
-            ext: "",
-            dir: corpus_dir(),
-            copy: None,
-            large: true,
-            config: Some(config.name),
-            args: with(vec!["--dump-front-end".into()]),
-        });
-        dumps.push(Dump {
-            artifact: format!("registry-{}", config.name),
-            ext: "txt.gz",
-            dir: corpus_dir(),
-            copy: None,
-            large: true,
-            config: Some(config.name),
-            args: with(vec!["--dump-registry".into()]),
-        });
-        for (artifact, flag) in [
-            ("expr-types", "--dump-expr-types"),
-            ("doc-resolutions", "--dump-doc-resolutions"),
-        ] {
-            dumps.push(Dump {
-                artifact: format!("{artifact}-{}", config.name),
-                ext: "txt.gz",
-                dir: corpus_dir(),
-                copy: None,
-                large: true,
-                config: Some(config.name),
-                args: with(vec![flag.into(), "--format".into(), "json".into()]),
-            });
-        }
-    }
-    for (name, project) in std::iter::once(("piwigo".to_string(), ".".to_string())).chain(
-        SESSION_PROJECTS
-            .iter()
-            .map(|project| (project.replace('/', "-"), project.to_string())),
-    ) {
-        dumps.push(Dump {
-            artifact: format!("session-{name}"),
-            ext: "txt.gz",
-            dir: corpus_dir(),
-            copy: None,
-            large: project == ".",
-            config: None,
-            args: Box::new(move |out: &Path| {
-                vec![
-                    "record-session".into(),
-                    project.clone(),
-                    out.to_string_lossy().into_owned(),
-                ]
-            }),
-        });
-    }
-    let replays = gate_dir().join(".replay");
-    dumps.push(Dump {
-        artifact: "replay-piwigo".into(),
-        ext: "",
-        dir: replays.join("piwigo"),
-        copy: Some((corpus_dir(), replays.join("piwigo"))),
-        large: true,
-        config: None,
-        args: Box::new(|out: &Path| {
-            let mut args = vec!["check-project".to_string()];
-            args.extend(scoped_args());
-            args.push("--edit-replay".into());
-            args.push(out.to_string_lossy().into_owned());
-            args
-        }),
-    });
-    for project in vendor_projects()? {
-        let slug = project.replace('/', "-");
-        dumps.push(Dump {
-            artifact: format!("replay-{slug}"),
-            ext: "",
-            dir: replays.join(&slug),
-            copy: Some((corpus_dir().join(&project), replays.join(&slug))),
-            large: false,
-            config: None,
-            args: Box::new(|out: &Path| {
-                let mut args = vec!["check-project".to_string(), "--no-composer".to_string()];
-                for set in ALL_ON_SETS {
-                    args.push("--set".into());
-                    args.push((*set).into());
-                }
-                args.push("--edit-replay".into());
-                args.push(out.to_string_lossy().into_owned());
-                args.push(".".into());
-                args
-            }),
-        });
-    }
-
-    run_dumps(binary, hash, &dumps, timings)
-}
-
-/// One worker's task: one dump's run at one thread count, or both runs of a
-/// dump that copies a tree, in turn.
-struct DumpJob {
-    dump: usize,
-    threads: Vec<usize>,
-}
-
-/// What the workers share: the runs not yet started, how many over the
-/// corpus are under way, each dump's finished runs, and what failed.
-struct DumpQueue {
-    jobs: std::collections::VecDeque<DumpJob>,
-    large_running: usize,
-    taken: Vec<[Option<PathBuf>; 2]>,
-    failures: Vec<String>,
-}
-
-/// What every worker reads and writes.
-struct DumpWorkers<'a> {
-    binary: &'a Path,
-    hash: Option<&'a str>,
-    dumps: &'a [Dump],
-    // The progress groups each dump's runs count in.
-    groups: Vec<Vec<usize>>,
-    scratch: PathBuf,
-    queue: std::sync::Mutex<DumpQueue>,
-    ready: std::sync::Condvar,
-    timings: std::sync::Mutex<&'a mut Timings>,
-    progress: std::sync::Mutex<progress::Progress>,
-}
-
-/// The progress groups of `dumps`' runs: all of them, the configurations'
-/// (then each configuration's), the sessions' and the replays'; and the
-/// groups each dump's runs count in.
-fn dump_groups(dumps: &[Dump]) -> (Vec<progress::Group>, Vec<Vec<usize>>) {
-    let runs = DUMP_THREADS.len();
-    let mut configs: Vec<&'static str> = Vec::new();
-    for config in dumps.iter().filter_map(|d| d.config) {
-        if !configs.contains(&config) {
-            configs.push(config);
-        }
-    }
-    let count = |keep: &dyn Fn(&Dump) -> bool| dumps.iter().filter(|d| keep(d)).count() * runs;
-    let group = |label: &str, total: usize, indent: usize| progress::Group {
-        label: label.to_string(),
-        total,
-        indent,
-    };
-    let mut groups = vec![
-        group("all runs", dumps.len() * runs, 0),
-        group("configurations", count(&|d| d.config.is_some()), 0),
-    ];
-    for config in &configs {
-        groups.push(group(config, count(&|d| d.config == Some(config)), 1));
-    }
-    let sessions = groups.len();
-    groups.push(group(
-        "sessions",
-        count(&|d| d.config.is_none() && d.copy.is_none()),
-        0,
-    ));
-    groups.push(group("replays", count(&|d| d.copy.is_some()), 0));
-    let of = dumps
-        .iter()
-        .map(|d| match d.config {
-            Some(config) => {
-                let row = configs.iter().position(|c| *c == config).expect("listed");
-                vec![0, 1, 2 + row]
-            }
-            None if d.copy.is_none() => vec![0, sessions],
-            None => vec![0, sessions + 1],
-        })
-        .collect();
-    (groups, of)
-}
-
-/// Takes every dump of `dumps` at each of `DUMP_THREADS` on a worker per
-/// core, compares each pair once both are taken, and, with `hash`, records
-/// the default run's. Every failure is reported at the end; the runs of a
-/// dump that failed are left in `.dumps` to read. The progress is written
-/// for `cargo xtask progress` as the runs start and end.
-fn run_dumps(
-    binary: &Path,
-    hash: Option<&str>,
-    dumps: &[Dump],
-    timings: &mut Timings,
-) -> Result<(), String> {
-    let scratch = gate_dir().join(".dumps");
-    std::fs::create_dir_all(&scratch).map_err(|e| e.to_string())?;
-    // The longest start first: the corpus's runs, and of those the replay,
-    // whose two runs go one after the other.
-    let mut order: Vec<usize> = (0..dumps.len()).collect();
-    order.sort_by_key(|&i| (!dumps[i].large, dumps[i].copy.is_none()));
-    let mut jobs = std::collections::VecDeque::new();
-    for i in order {
-        if dumps[i].copy.is_some() {
-            jobs.push_back(DumpJob {
-                dump: i,
-                threads: vec![0, 1],
-            });
-        } else {
-            for t in 0..DUMP_THREADS.len() {
-                jobs.push_back(DumpJob {
-                    dump: i,
-                    threads: vec![t],
-                });
-            }
-        }
-    }
-    let (groups, of) = dump_groups(dumps);
-    let shared = DumpWorkers {
-        binary,
-        hash,
-        dumps,
-        groups: of,
-        scratch,
-        queue: std::sync::Mutex::new(DumpQueue {
-            jobs,
-            large_running: 0,
-            taken: vec![[None, None]; dumps.len()],
-            failures: Vec::new(),
-        }),
-        ready: std::sync::Condvar::new(),
-        timings: std::sync::Mutex::new(timings),
-        progress: std::sync::Mutex::new(progress::Progress::new(
-            progress::status_path(&gate_dir(), "dumps"),
-            "dumps",
-            groups,
-        )),
-    };
-    let workers = std::thread::available_parallelism().map_or(1, usize::from);
-    std::thread::scope(|scope| {
-        for _ in 0..workers {
-            scope.spawn(|| dump_worker(&shared));
-        }
-    });
-    let failures = shared
-        .queue
-        .into_inner()
-        .unwrap_or_else(std::sync::PoisonError::into_inner)
-        .failures;
-    let result = if failures.is_empty() {
-        Ok(())
-    } else {
-        Err(failures.join("\n"))
-    };
-    shared
-        .progress
-        .into_inner()
-        .unwrap_or_else(std::sync::PoisonError::into_inner)
-        .end(&result);
-    result
-}
-
-/// Runs jobs from the queue until none is left.
-fn dump_worker(shared: &DumpWorkers) {
-    let lock = || {
-        shared
-            .queue
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-    };
-    let progress = || {
-        shared
-            .progress
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-    };
-    let dumps = shared.dumps;
-    loop {
-        let job = {
-            let mut state = lock();
-            loop {
-                let room = state.large_running < LARGE_AT_ONCE;
-                if let Some(at) = state.jobs.iter().position(|j| room || !dumps[j.dump].large) {
-                    let job = state.jobs.remove(at).expect("found");
-                    if dumps[job.dump].large {
-                        state.large_running += 1;
-                    }
-                    break job;
-                }
-                if state.jobs.is_empty() {
-                    return;
-                }
-                state = shared
-                    .ready
-                    .wait(state)
-                    .unwrap_or_else(std::sync::PoisonError::into_inner);
-            }
-        };
-        let dump = &dumps[job.dump];
-        let mut outcomes = Vec::new();
-        for &t in &job.threads {
-            let threads = DUMP_THREADS[t];
-            let out = shared.scratch.join(format!(
-                "{}-{}{}",
-                dump.artifact,
-                threads.unwrap_or("default"),
-                if dump.ext.is_empty() {
-                    String::new()
-                } else {
-                    format!(".{}", dump.ext)
-                }
-            ));
-            let label = format!(
-                "dump {} at {} threads",
-                dump.artifact,
-                threads.unwrap_or("default")
-            );
-            progress().start(&label);
-            let started = Instant::now();
-            let result = take_dump(shared.binary, dump, threads, &out);
-            shared
-                .timings
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner)
-                .record(&label, started.elapsed().as_secs_f64(), result.is_ok());
-            progress().finish(
-                &label,
-                &shared.groups[job.dump],
-                result.as_ref().err().map(|e| format!("{label}: {e}")),
-            );
-            outcomes.push((t, result.map(|()| out)));
-        }
-        if let Some((_, to)) = &dump.copy {
-            let _ = std::fs::remove_dir_all(to);
-        }
-        let mut state = lock();
-        if dump.large {
-            state.large_running -= 1;
-        }
-        let mut pair = None;
-        for (t, outcome) in outcomes {
-            match outcome {
-                Ok(out) => {
-                    let taken = &mut state.taken[job.dump];
-                    taken[t] = Some(out);
-                    if let [Some(_), Some(_)] = taken {
-                        pair = Some([taken[0].take().unwrap(), taken[1].take().unwrap()]);
-                    }
-                }
-                Err(error) => state.failures.push(format!("{}: {error}", dump.artifact)),
-            }
-        }
-        shared.ready.notify_all();
-        drop(state);
-        if let Some([default, one]) = pair
-            && let Err(error) = record_dump(dump, shared.hash, &default, &one)
-        {
-            progress().fail(error.clone());
-            lock().failures.push(error);
-        }
-    }
-}
-
-/// Takes `dump` at `threads` into `out`, in a fresh copy of its tree when
-/// it runs in one.
-fn take_dump(binary: &Path, dump: &Dump, threads: Option<&str>, out: &Path) -> Result<(), String> {
-    let _ = std::fs::remove_dir_all(out);
-    let _ = std::fs::remove_file(out);
-    if let Some((from, to)) = &dump.copy {
-        let _ = std::fs::remove_dir_all(to);
-        std::fs::create_dir_all(to.parent().unwrap()).map_err(|e| e.to_string())?;
-        run(Command::new("cp").arg("-a").arg(from).arg(to))?;
-        write(&to.join(".phpstan-rs-replay"), b"")?;
-    }
-    let mut cmd = Command::new(binary);
-    cmd.current_dir(&dump.dir)
-        .args((dump.args)(out))
-        .stdout(Stdio::null());
-    if let Some(threads) = threads {
-        cmd.env("PHPSTAN_RS_THREADS", threads);
-    }
-    run(&mut cmd)
-}
-
-/// Compares `dump`'s runs at the default and at one thread and, with
-/// `hash`, records the default's; the runs are removed unless they differ.
-fn record_dump(dump: &Dump, hash: Option<&str>, default: &Path, one: &Path) -> Result<(), String> {
-    if let Some(difference) = first_difference(default, one)? {
-        return Err(format!(
-            "{}: one thread differs from the default at {}",
-            dump.artifact,
-            difference.display()
-        ));
-    }
-    if let Some(hash) = hash {
-        let target = if dump.ext.is_empty() {
-            gate_dir().join(&dump.artifact).join(hash)
-        } else {
-            snapshot_path(&dump.artifact, hash, dump.ext)
-        };
-        let _ = std::fs::remove_dir_all(&target);
-        let _ = std::fs::remove_file(&target);
-        std::fs::create_dir_all(target.parent().unwrap()).map_err(|e| e.to_string())?;
-        if dump.artifact.starts_with("front-end-") {
-            pool_texts(&default.join("texts"))?;
-        }
-        std::fs::rename(default, &target).map_err(|e| format!("{}: {e}", target.display()))?;
-    }
-    for path in [one, default] {
-        let _ = std::fs::remove_dir_all(path);
-        let _ = std::fs::remove_file(path);
-    }
-    Ok(())
-}
 
 /// Moves the texts of a front-end dump into the pool every front-end dump
 /// shares (`front-end-texts/`): each is named by its digest, so a file whose
@@ -1692,15 +921,59 @@ fn approved_delta(artifact: &str) -> Result<Option<String>, String> {
 }
 
 fn read_snapshot(artifact: &str, hash: &str, ext: &str) -> Result<Option<Vec<u8>>, String> {
+    if ext.is_empty() {
+        return read_snapshot_dir(&gate_dir().join(artifact).join(hash));
+    }
     let path = snapshot_path(artifact, hash, ext);
     if !path.exists() {
         return Ok(None);
     }
-    if ext.ends_with(".zst") {
-        let text = capture(Command::new("zstd").args(["-dc", "-q"]).arg(&path))?;
-        return Ok(Some(text.into_bytes()));
+    read_snapshot_file(&path).map(Some)
+}
+
+/// A snapshot file's text, decompressed.
+fn read_snapshot_file(path: &Path) -> Result<Vec<u8>, String> {
+    let name = path.to_string_lossy();
+    if name.ends_with(".zst") {
+        let text = capture(Command::new("zstd").args(["-dc", "-q"]).arg(path))?;
+        return Ok(text.into_bytes());
     }
-    std::fs::read(&path).map(Some).map_err(|e| e.to_string())
+    if name.ends_with(".gz") {
+        let text = capture(Command::new("gzip").args(["-dc"]).arg(path))?;
+        return Ok(text.into_bytes());
+    }
+    std::fs::read(path).map_err(|e| format!("{}: {e}", path.display()))
+}
+
+/// A snapshot directory as one text: each file under it, in path order,
+/// after a `== <path>` line, decompressed. A front-end dump's texts are
+/// left out: its index names each by its digest.
+fn read_snapshot_dir(dir: &Path) -> Result<Option<Vec<u8>>, String> {
+    if !dir.is_dir() {
+        return Ok(None);
+    }
+    let mut files = Vec::new();
+    let mut pending = vec![dir.to_path_buf()];
+    while let Some(next) = pending.pop() {
+        for entry in std::fs::read_dir(&next).map_err(|e| format!("{}: {e}", next.display()))? {
+            let path = entry.map_err(|e| e.to_string())?.path();
+            if path.is_dir() {
+                if path.file_name().is_some_and(|n| n != "texts") {
+                    pending.push(path);
+                }
+            } else {
+                files.push(path);
+            }
+        }
+    }
+    files.sort();
+    let mut text = Vec::new();
+    for file in files {
+        let relative = file.strip_prefix(dir).unwrap_or(&file);
+        text.extend_from_slice(format!("== {}\n", relative.display()).as_bytes());
+        text.extend(read_snapshot_file(&file)?);
+    }
+    Ok(Some(text))
 }
 
 fn unified_diff(old: &[u8], new: &[u8]) -> Result<String, String> {
@@ -1737,6 +1010,21 @@ fn compared_artifacts(full: bool) -> Vec<(String, &'static str)> {
         names.push(("vendor-projects".to_string(), "txt"));
         names.push(("diagnostics-vendor-projects".to_string(), "txt.zst"));
         names.push(("equalities".to_string(), "txt"));
+        for config in [SCOPED, ALL_ON, UNSCOPED, VENDOR_TREE, ARCH] {
+            for dump in ["registry", "expr-types", "doc-resolutions"] {
+                names.push((format!("{dump}-{}", config.name), "txt.gz"));
+            }
+            names.push((format!("front-end-{}", config.name), ""));
+        }
+        names.push(("stub-bases".to_string(), "txt.gz"));
+        names.push(("session-piwigo".to_string(), "txt.gz"));
+        for project in SESSION_PROJECTS {
+            names.push((format!("session-{}", project.replace('/', "-")), "txt.gz"));
+        }
+        names.push(("replay-piwigo".to_string(), ""));
+        for project in vendor_projects().unwrap_or_default() {
+            names.push((format!("replay-{}", project.replace('/', "-")), ""));
+        }
     }
     names
 }
@@ -2378,7 +1666,15 @@ fn gate_steps(full: bool, hash: &str, timings: &mut Timings) -> Result<(), Strin
     if full {
         corpus_args.push("--full".to_string());
     }
-    corpus(&corpus_args, false, hash, timings)?;
+    pass::run_pass(
+        &pass::PassSetup {
+            full,
+            fixtures: false,
+            profile: "gate",
+            hash: Some(hash.to_string()),
+        },
+        timings,
+    )?;
     timings.time("compare", |_| compare(&corpus_args))?;
     if full {
         timings.time("perf", |_| perf())?;

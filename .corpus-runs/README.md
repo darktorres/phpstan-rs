@@ -18,7 +18,12 @@ against, another store:
                                  # all-on corpus, type snapshots, baseline
     cargo xtask gates --full     # + unscoped, levels 0-10, hack/machete/
                                  # deny, performance, build time
-    cargo xtask corpus [--full]  # record snapshots only
+    cargo xtask corpus [--full]  # record snapshots only: one pass
+    cargo xtask corpus --full --profile oracle
+                                 # the same pass with the oracle build,
+                                 # recording nothing
+    cargo xtask progress [--watch]
+                                 # how far the running pass is
     cargo xtask compare [--full] [--against <hash>]
     cargo xtask type-drift --against <hash> [--artifact <types-scoped|types-all-on|types-fixtures>]
 
@@ -51,10 +56,12 @@ Artifacts:
   `composer.json`, alone, with `--no-composer` and `ALL_ON_SETS`, each
   report after a `# project <dir>` line.
 - `equalities` (`--full`): for the scoped, all-on and unscoped
-  configurations, the shipped binary's report and stderr with the stub
+  configurations, every artifact of the runner's analysis with the stub
   cache cold and warm, the per-file cache off, written and read, and at
-  one thread, each from a cache directory of its own; a difference fails
-  the run, and the file lists each equality kept.
+  one thread, each from a cache directory of its own, and for the vendor
+  tree and the architecture configuration at the default thread count
+  and at one; a difference fails the run, and the file lists each
+  equality kept.
 - `types-scoped`, `types-all-on`: `--dump-types` output (every tracked
   variable's type and native type after each statement), zstd-compressed.
 - `types-fixtures`: the same for every fixture of the fixture suite, each
@@ -84,17 +91,23 @@ A commit that intentionally changes an artifact adds
 renames tests adds `gates/test-renames/<slug>.txt` (`old -> new` or
 `old -> REMOVED: reason`).
 
-## Item 0's dumps (`cargo xtask dumps`)
+## Item 0's dumps (`cargo xtask corpus --full`)
 
-Each taken at one thread and at the default, which must give the same
-bytes, and recorded by commit:
+Taken in the same pass as the reports: each configuration is analysed once
+per state, and that analysis writes the report, its views and the dumps,
+all compared across the states and recorded from the first, by commit:
 
 - `front-end-<config>/<commit>/` for the scoped, all-on, unscoped,
   vendor-tree and arch configurations: `check-project --dump-front-end`'s
   `index.tsv`, by role and path, and `unions.gz`; each file's text,
   gzip-compressed under its BLAKE3 digest, is in `front-end-texts/`, which
   every configuration and commit share;
-- `registry-<config>/<commit>.txt.gz`: `check-project --dump-registry`;
+- `registry-<config>/<commit>.txt.gz`: the registry dump, the registry
+  printed over the stub base it stands on, which it names: what the
+  project adds, changes and drops of each table, map and set;
+- `stub-bases/<commit>.txt.gz`: both stub bases whole, taken in the scoped
+  configuration's first two states, the stub cache cold and then read
+  back;
 - `expr-types-<config>`, `doc-resolutions-<config>`
   (`<commit>.txt.gz`): the checker's records;
 - `session-piwigo`, `session-vendor-symfony-console`,
@@ -102,22 +115,23 @@ bytes, and recorded by commit:
   record-session`, the language server's session in one process;
 - `replay-piwigo/<commit>/`, `replay-vendor-<vendor>-<package>/<commit>/`:
   `check-project --edit-replay` over a fresh copy of the corpus (scoped)
-  or of each vendor project (every rule set on), made under
-  `.corpus-runs/gate/.replay/` and removed after: the dumps after each
-  step and after a fresh load, `script.txt` and `verdict.txt`.
+  or of each vendor project (every rule set on), made under the pass's
+  scratch and removed after: the dumps after each step and after a fresh
+  load, `script.txt` and `verdict.txt`.
 
-`cargo xtask dumps --binary <path>` takes every dump with another build
-(the `oracle` profile) and records nothing.
+The sessions and the replays are taken at one thread and at the default,
+which must give the same bytes. `compare --full` diffs every dump too: a
+directory as its files in path order, each decompressed.
 
-The runs share the machine: a worker per core takes the next one from a
-single queue, the corpus's first and at most three of those at once for
-memory, a replay's two runs one after the other in its copy. Each pair is
-compared as soon as both runs are done, and every difference is reported
-at the end. As runs start and end, the command writes its state to
-`gate/progress-dumps.json`; `cargo xtask progress --watch`, from another
-terminal, shows it: the runs done in each group and each configuration,
-the runs under way with their time so far, the failures, and how it
-ended, or that its process is gone.
+The pass shares the machine: a worker per core takes the next task from
+a single queue, the corpus's first and at most three of those at once for
+memory; a configuration's states run in order, since each pair shares a
+cache directory, and a replay's two runs one after the other in its copy.
+Every difference is reported at the end. As runs start and end, the pass
+writes its state to `gate/progress-corpus.json`; `cargo xtask progress
+--watch`, from another terminal, shows it: the runs done in each group and
+each configuration, the runs under way with their time so far, the
+failures, and how it ended, or that its process is gone.
 
 ## Binaries and profiles kept beside the runs
 
