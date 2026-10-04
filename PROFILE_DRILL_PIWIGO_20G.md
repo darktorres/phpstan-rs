@@ -652,7 +652,7 @@ Twenty-one items, numbered in the order they are built. Each states what is ther
      - duplicate sites, declared classes, Pest facts, anonymous-class names and use sites;
      - each body's summary and `InitFlow`, and the global facts.
      
-     Its file set includes every extension PHP is run from (`.inc`, `.module`, `.install`, `.theme`, `.engine`, `.profile`, `.php.inc`) and any file that starts with `<?php` or `<?=`. Each file's text is stored compressed, with an index of digests.
+     Its file set includes every extension PHP is run from (`.inc`, `.module`, `.install`, `.theme`, `.engine`, `.profile`, `.php.inc`) and any file that starts with `<?php` or `<?=`. Each file's text is stored gzip-compressed (`flate2`) under its BLAKE3 digest, with an index of digests by role and path.
    - **`registry-dump`**, taken after the finishing passes and before checking. It only reads: lazy records are decoded, but deferred values are printed as stored. It sorts by kind, folded name and load order, and prints:
      - every project declaration, and every record of both stub bases, at the configured PHP range and at its two ends;
      - for each, its reflection, its guard and the guard's value, its purity dependencies and verdict, its property-write classification and verdict, its ancestors and owners, and the ancestry fact;
@@ -2390,7 +2390,8 @@ The rewrite made two more changes:
 | `triomphe` 0.1.16 | 16 | a name as one thin allocation (`ThinArc`); type nodes without a weak count; strong tables, freed by rust-analyzer's rule |
 | `quick_cache` 0.7 | 14, 18, 19 | weighted, scan-resistant memos; the server's tree cache bounded by bytes |
 | `siphasher` 1.0.4, already in the lockfile through `phf` | 14, 18 | memo fingerprints keyed per process, so no collision can be crafted |
-| `blake3` 1.8.7 | 1, 6, 11, 17 | every content hash a cache trusts, the build's own included, as full digests |
+| `blake3` 1.8.7 | 0, 1, 6, 11, 17 | every content hash a cache trusts, the build's own included, as full digests; the digests of O1's index |
+| `flate2` 1.1.10, already in the lockfile through `mysql` | 0 | O1's texts, gzip-compressed, which `zcat` reads |
 | `encoding_rs` 0.8.42 | 15 | an open document's encoding, so the server reads the bytes PHP reads |
 | `same-file` 1.0.6, already in the lockfile through `walkdir` | 1, 2 | a directory's identity on Windows (volume serial and file index) |
 | `loom` 0.7.2, for tests | 16 | the interner's drop, lookup and sweep protocol checked in every interleaving |
