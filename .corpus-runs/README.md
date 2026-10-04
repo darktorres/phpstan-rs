@@ -6,12 +6,23 @@ rebuilding an old commit just to re-diff against it.
 
 ## Regression gates (`cargo xtask`)
 
-The gates of `CRATE_SPLIT_PLAN.md` §4 record their snapshots under
-`.corpus-runs/gate/<artifact>/<commit>.<ext>`, keyed by the full hash of
-a committed tree (`xtask` refuses a dirty tree). Each checkout, a linked
-worktree included, has its own `.corpus-runs/gate`, which holds the runs'
-scratch too, so runs in two worktrees never share a file;
-`PHPSTAN_RS_GATE_DIR=<dir>` makes a command record into, or compare
+The gates of `CRATE_SPLIT_PLAN.md` §4 record their snapshots in the
+store, `.corpus-runs/gate/store.git`: a bare git repository in the SHA-256
+object format, which `xtask` feeds through `git fast-import`. A commit's
+snapshot is the store's commit under `refs/snapshots/<commit>`, keyed by
+the full hash of a committed tree (`xtask` refuses a dirty tree), with an
+entry per artifact: `<artifact>.txt` and `<artifact>.err`, or a directory.
+A text kept whole is a blob; a dump, and a text cut the way the dumps are
+(a line per diagnostic or binding by its path, a registry dump by its
+sections), is a tree of entities, each a blob, with an `.order` per
+directory giving the text's order back. A pass adds its artifacts as
+commits on `refs/pass/<commit>` and makes that its snapshot once every run
+has passed, over the snapshot the commit had before.
+`git --git-dir .corpus-runs/gate/store.git diff refs/snapshots/<a>
+refs/snapshots/<b> -- <entry>` shows a change, and `compare` is that diff.
+Each checkout, a linked worktree included, has its own `.corpus-runs/gate`,
+which holds the runs' scratch too, so runs in two worktrees never share a
+file; `PHPSTAN_RS_GATE_DIR=<dir>` makes a command record into, or compare
 against, another store:
 
     cargo xtask gates            # quick tier: build/test gates, scoped +
@@ -26,12 +37,15 @@ against, another store:
                                  # how far the running pass is
     cargo xtask compare [--full] [--against <hash>]
     cargo xtask type-drift --against <hash> [--artifact <types-scoped|types-all-on|types-fixtures>]
+    cargo xtask rekey <old> <new>  # a snapshot under an amended commit
+    cargo xtask store import     # the snapshots kept as plain files
+                                 # before the store, into it
 
 `type-drift` relates every binding of HEAD's type snapshot to the same one
 in `<hash>`'s, both parsed back from their display text and compared
 within the corpus project's class hierarchy (each fixture's own for
 `types-fixtures`; today's hierarchy for both sides). It writes
-`type-drift-<artifact>/<commit>.txt`: counts of equal, narrower, wider,
+`type-drift-<artifact>.txt` into HEAD's snapshot: counts of equal, narrower, wider,
 incomparable and unparsed changes for the PHPDoc and the native type, then
 every non-narrowing change, added and removed binding grouped by its
 literal- and class-masked pattern with up to 20 locations each. A binding
@@ -43,11 +57,11 @@ Artifacts:
   --format json`, normalized to one line per diagnostic in output order:
   `path, line, col, level, identifier, message, tip`
   (tab-separated; `\t`/`\n`/`\\` escaped). The first line records
-  `files_checked`. Stderr is kept separately as `<commit>.err`.
+  `files_checked`. Stderr is kept separately as `<artifact>.err`.
 - `diagnostics-<artifact>`, `diagnostics-fixtures`,
   `diagnostics-vendor-projects`: every field of every diagnostic of the
   report, one line each - path, the UTF-16 columns of its ends, and its
-  canonical print (end position, tips, fix and all) - zstd-compressed.
+  canonical print (end position, tips, fix and all).
 - `vendor-tree`, `arch` (`--full`): the corpus's `vendor` as one project
   (`--no-composer vendor`), and the scoped configuration with
   `ARCH_RULES`' architecture rules and every banned type and construct
@@ -63,7 +77,7 @@ Artifacts:
   and at one; a difference fails the run, and the file lists each
   equality kept.
 - `types-scoped`, `types-all-on`: `--dump-types` output (every tracked
-  variable's type and native type after each statement), zstd-compressed.
+  variable's type and native type after each statement).
 - `types-fixtures`: the same for every fixture of the fixture suite, each
   line prefixed with the fixture's name, recorded through the harness's
   `PHPSTAN_RS_DUMP_TYPES`.
@@ -71,7 +85,7 @@ Artifacts:
   baselines from `cargo xtask baseline` (generated once, by the Stage A
   binary). Stage A's run is empty with no stale entries; a later commit
   may change it only by an approved delta, like any other artifact.
-- `perf/`, `buildtime/`, `tests/`: hyperfine + peak RSS of the scoped
+- `perf/`, `buildtime/`, `tests/` (files beside the store): hyperfine + peak RSS of the scoped
   run, incremental rebuild times with the workspace crates each scenario
   rebuilt (its targets asserted), and the test-name manifest.
 
@@ -86,8 +100,10 @@ runner's emission-order view. `compare` diffs the snapshots as recorded,
 in output order, never sorted. The performance gate measures `release`.
 
 A commit that intentionally changes an artifact adds
-`gates/approved/<slug>/<artifact>.diff` holding exactly the `diff -u`
-(labels `old`/`new`) from its parent's snapshot. A commit that removes or
+`gates/approved/<slug>/<entry>.diff` holding exactly the store's `git diff`
+of that entry from its parent's snapshot (`cargo xtask approve <slug>`
+writes them; the older ones, `<artifact>.diff`, are `diff -u` of the plain
+texts). A commit that removes or
 renames tests adds `gates/test-renames/<slug>.txt` (`old -> new` or
 `old -> REMOVED: reason`).
 
@@ -95,33 +111,42 @@ renames tests adds `gates/test-renames/<slug>.txt` (`old -> new` or
 
 Taken in the same pass as the reports: each configuration is analysed once
 per state, and that analysis writes the report, its views and the dumps,
-all compared across the states and recorded from the first, by commit:
+all compared across the states and recorded from the first, as entries of
+the commit's snapshot:
 
-- `front-end-<config>/<commit>/` for the scoped, all-on, unscoped,
-  vendor-tree and arch configurations: `check-project --dump-front-end`'s
-  `index.tsv`, by role and path, and `unions.gz`; each file's text,
-  gzip-compressed under its BLAKE3 digest, is in `front-end-texts/`, which
-  every configuration and commit share;
-- `registry-<config>/<commit>.txt.gz`: the registry dump, the registry
-  printed over the stub base it stands on, which it names: what the
-  project adds, changes and drops of each table, map and set;
-- `stub-bases/<commit>.txt.gz`: both stub bases whole, taken in the scoped
+- `front-end-<config>` for the scoped, all-on, unscoped, vendor-tree and
+  arch configurations: `check-project --dump-front-end`, a dump of files,
+  each file's front-end text under its role and path (`unread/<role>/…`,
+  empty, for a file that could not be read; `embedded/…` for the stubs
+  built in), and `unions`;
+- `registry-<config>.txt`: the registry dump, the registry printed over
+  the stub base it stands on, which it names: what the project adds,
+  changes and drops of each table, map and set;
+- `stub-bases.txt`: both stub bases whole, taken in the scoped
   configuration's first two states, the stub cache cold and then read
   back;
-- `expr-types-<config>`, `doc-resolutions-<config>`
-  (`<commit>.txt.gz`): the checker's records;
-- `session-piwigo`, `session-vendor-symfony-console`,
-  `session-vendor-doctrine-orm` (`<commit>.txt.gz`): `phpstan-rs
-  record-session`, the language server's session in one process;
-- `replay-piwigo/<commit>/`, `replay-vendor-<vendor>-<package>/<commit>/`:
-  `check-project --edit-replay` over a fresh copy of the corpus (scoped)
-  or of each vendor project (every rule set on), made under the pass's
-  scratch and removed after: the dumps after each step and after a fresh
-  load, `script.txt` and `verdict.txt`.
+- `expr-types-<config>.txt`, `doc-resolutions-<config>.txt`: the checker's
+  records;
+- `session-piwigo.txt`, `session-vendor-symfony-console.txt`,
+  `session-vendor-doctrine-orm.txt`: `phpstan-rs record-session`, the
+  language server's session in one process;
+- `replay-piwigo`, `replay-vendor-<vendor>-<package>`: `check-project
+  --edit-replay` over a fresh copy of the corpus (scoped) or of each
+  vendor project (every rule set on), made under the pass's scratch and
+  removed after: the dumps after each step and after a fresh load
+  (`step-<n>.registry.txt`, `step-<n>.diagnostics.txt`, `fresh.*.txt`),
+  `script.txt` and `verdict.txt`.
+
+A run writes each dump as its text with a manifest beside it, the id of
+each entity's text as git computes it, so recording it sends the store
+only the blobs it lacks. A configuration's first state and a session's
+default run are written against the manifest of the nearest snapshot that
+holds the dump, and a later state and the one-thread run against the
+first: each writes only the entities that differ, and a comparison reads
+only those.
 
 The sessions and the replays are taken at one thread and at the default,
-which must give the same bytes. `compare --full` diffs every dump too: a
-directory as its files in path order, each decompressed.
+which must give the same bytes. `compare --full` diffs every dump too.
 
 The pass shares the machine: a worker per core takes the next task from
 a single queue, the corpus's first and at most three of those at once for
@@ -142,10 +167,14 @@ so nothing a later comparison needs stays in either:
   committed tree, by its full hash and cargo profile (`gate`, `oracle`,
   `dhat`), copied there as soon as it is built; ignored with the rest of
   `gate/`.
-- `gate/<artifact>/<commit>.<ext>`: every run, as above. `vendor-tree`'s
-  older snapshots were taken by hand with `check-project --no-composer
-  vendor` in the corpus, normalized the same way; `cargo xtask corpus
-  --full` records it since.
+- `gate/store.git`: every run, as above. `vendor-tree`'s older snapshots
+  were taken by hand with `check-project --no-composer vendor` in the
+  corpus, normalized the same way; `cargo xtask corpus --full` records it
+  since. Those and every other snapshot kept as plain files
+  (`gate/<artifact>/<commit>.<ext>`, the front end's texts pooled in
+  `gate/front-end-texts/` by BLAKE3 digest) were imported into the store
+  by `cargo xtask store import`, which removes each commit's files once
+  its snapshot reads back as they held.
 - `~/.cache/prs-profile/<run>/`: callgrind and dhat profiles with the
   binary that made them and a `README` naming the commit and the command
   (`cl-20g`, `dhat-20g`: the 20 G plan's baselines).

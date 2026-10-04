@@ -54,8 +54,8 @@ enum Command {
     /// current baseline format.
     ConvertBaseline { path: PathBuf },
     /// Runs a language-server session over the workspace `dir` in this
-    /// process and writes its record, gzip-compressed, to `out` (a
-    /// regression-gate snapshot).
+    /// process and writes its record to `out`, a dump with its manifest
+    /// beside it (a regression-gate snapshot).
     #[command(hide = true)]
     RecordSession {
         dir: PathBuf,
@@ -66,6 +66,10 @@ enum Command {
         files: usize,
         #[arg(long, default_value_t = 8)]
         positions: usize,
+        /// The manifest of another record: the record is written only
+        /// where it differs from that one.
+        #[arg(long)]
+        reference: Option<PathBuf>,
     },
 }
 
@@ -103,10 +107,16 @@ fn main() {
             seed,
             files,
             positions,
+            reference,
         } => {
             let dir = std::fs::canonicalize(&dir).unwrap_or(dir);
             let record = lsp::session_record::record_session(&dir, seed, files, positions);
-            if let Err(e) = phpstan_rs::project::session::write_gzip(&out, record.as_bytes()) {
+            if let Err(e) = phpstan_rs::project::session::write_dump(
+                &out,
+                dumps::Kind::Tree,
+                reference.as_deref(),
+                |w| w.write_all(record.as_bytes()),
+            ) {
                 eprintln!("error: {e}");
                 std::process::exit(1);
             }

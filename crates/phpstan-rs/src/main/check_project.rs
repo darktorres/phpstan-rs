@@ -58,16 +58,18 @@ pub(crate) struct CheckProjectArgs {
     #[arg(long, hide = true)]
     pub(crate) dump_types: Option<PathBuf>,
     /// Writes every expression's inferred and native type in the final
-    /// pass of each analysed file to this path, gzip-compressed (a
-    /// regression-gate snapshot).
+    /// pass of each analysed file to this path, a dump with its manifest
+    /// beside it (a regression-gate snapshot).
     #[arg(long, hide = true)]
     pub(crate) dump_expr_types: Option<PathBuf>,
     /// Writes every PHPDoc resolution the check makes of each analysed
-    /// file to this path, gzip-compressed (a regression-gate snapshot).
+    /// file to this path, a dump with its manifest beside it (a
+    /// regression-gate snapshot).
     #[arg(long, hide = true)]
     pub(crate) dump_doc_resolutions: Option<PathBuf>,
-    /// Writes the front end's dump of every file and embedded stub into
-    /// this directory and stops (a regression-gate snapshot, O1).
+    /// Writes the front end's dump of every file and embedded stub to this
+    /// path, a dump with its manifest beside it, and stops (a
+    /// regression-gate snapshot, O1).
     #[arg(long, hide = true)]
     pub(crate) dump_front_end: Option<PathBuf>,
     /// Runs the edit replay over the analysed files, writing its dumps and
@@ -78,15 +80,22 @@ pub(crate) struct CheckProjectArgs {
     /// The seed the edit replay draws its files with.
     #[arg(long, hide = true, default_value_t = 1)]
     pub(crate) replay_seed: u64,
-    /// Writes the registry dump of what the load leaves, gzip-compressed,
-    /// to this file and stops (a regression-gate snapshot).
+    /// Writes the registry dump of what the load leaves to this path, a
+    /// dump with its manifest beside it, and stops (a regression-gate
+    /// snapshot).
     #[arg(long, hide = true)]
     pub(crate) dump_registry: Option<PathBuf>,
     /// Writes both stub bases whole, which the registry dump prints its
-    /// project over, gzip-compressed, to this file and stops (a
-    /// regression-gate snapshot).
+    /// project over, to this path, a dump with its manifest beside it, and
+    /// stops (a regression-gate snapshot).
     #[arg(long, hide = true)]
     pub(crate) dump_stub_bases: Option<PathBuf>,
+    /// Another run's dumps: each dump above is written only where it
+    /// differs from the dump of the same name in this directory, when it
+    /// has one, and the edit replay's from those of the replay written
+    /// into it.
+    #[arg(long, hide = true)]
+    pub(crate) dump_reference: Option<PathBuf>,
     /// Prints each file's diagnostics in the order the checks emitted them
     /// (a determinism check), not the usual total order.
     #[arg(long, hide = true)]
@@ -156,8 +165,13 @@ pub(crate) fn run_check_project_command(args: CheckProjectArgs) {
     for notice in run.notices() {
         eprintln!("{notice}");
     }
+    let reference = |out: &Path| -> Option<PathBuf> {
+        let dir = args.dump_reference.as_ref()?;
+        let manifest = dumps::manifest_path(&dir.join(out.file_name()?));
+        manifest.is_file().then_some(manifest)
+    };
     if let Some(out) = &args.dump_front_end {
-        match run.session.dump_front_end(out) {
+        match run.session.dump_front_end(out, reference(out).as_deref()) {
             Ok(dump) => eprintln!(
                 "front end: {} files, {} unions, in {}",
                 dump.files,
@@ -172,7 +186,10 @@ pub(crate) fn run_check_project_command(args: CheckProjectArgs) {
         return;
     }
     if let Some(out) = &args.edit_replay {
-        match run.session.edit_replay(out, args.replay_seed) {
+        match run
+            .session
+            .edit_replay(out, args.replay_seed, args.dump_reference.as_deref())
+        {
             Ok(verdict) => eprint!("{verdict}"),
             Err(e) => {
                 eprintln!("{e}");
@@ -182,7 +199,7 @@ pub(crate) fn run_check_project_command(args: CheckProjectArgs) {
         return;
     }
     if let Some(out) = &args.dump_stub_bases {
-        if let Err(e) = run.session.dump_stub_bases(out) {
+        if let Err(e) = run.session.dump_stub_bases(out, reference(out).as_deref()) {
             eprintln!("{e}");
             std::process::exit(1);
         }
@@ -190,7 +207,7 @@ pub(crate) fn run_check_project_command(args: CheckProjectArgs) {
         return;
     }
     if let Some(out) = &args.dump_registry {
-        if let Err(e) = run.session.dump_registry(out) {
+        if let Err(e) = run.session.dump_registry(out, reference(out).as_deref()) {
             eprintln!("{e}");
             std::process::exit(1);
         }
@@ -227,7 +244,12 @@ pub(crate) fn run_check_project_command(args: CheckProjectArgs) {
         (&args.dump_doc_resolutions, &analysis.doc_resolution_dump),
     ] {
         if let (Some(out), Some(dump)) = (out, dump)
-            && let Err(e) = phpstan_rs::project::session::write_gzip(out, dump.as_bytes())
+            && let Err(e) = phpstan_rs::project::session::write_dump(
+                out,
+                dumps::Kind::ByPrefix(b':'),
+                reference(out).as_deref(),
+                |w| w.write_all(dump.as_bytes()),
+            )
         {
             eprintln!("failed to write {e}");
         }

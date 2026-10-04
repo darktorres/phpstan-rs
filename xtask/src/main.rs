@@ -1,12 +1,13 @@
 //! Regression gates for phpstan-rs (`cargo xtask <command>`).
 //!
-//! Snapshots live under `.corpus-runs/gate/<artifact>/<commit>.<ext>`
-//! (gitignored), keyed by the full hash of the commit the binary was
-//! built from. `compare` checks HEAD's snapshots against its parent's
-//! (or, when the parent has none, the nearest ancestor that has them):
-//! every artifact must be byte-identical unless HEAD's own commit adds
-//! `gates/approved/<slug>/<artifact>.diff` holding exactly the expected
-//! `diff -u` output.
+//! Snapshots live in the gate's store, `.corpus-runs/gate/store.git`
+//! (gitignored, `store`), each a commit under `refs/snapshots/<commit>`,
+//! keyed by the full hash of the commit the binary was built from, with an
+//! entry for each artifact. `compare` checks HEAD's snapshot against its
+//! parent's (or, when the parent has none, the nearest ancestor that has
+//! them): every entry must be the same unless HEAD's own commit adds
+//! `gates/approved/<slug>/<entry>.diff` holding exactly the store's
+//! `git diff` of it.
 //!
 //! The corpus is the frozen Piwigo checkout at `$PHPSTAN_RS_CORPUS`
 //! (default `/home/torres/piwigo17-frozen`).
@@ -14,14 +15,19 @@
 use std::collections::BTreeSet;
 use std::fmt::Write as _;
 use std::io::BufRead as _;
+use std::io::Write as _;
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitCode, Stdio};
 use std::time::Instant;
 
+use store::{Content, Snapshots, Store, snapshot_ref, text_content};
+
 mod arch;
+mod import;
 mod modgraph;
 mod pass;
 mod progress;
+mod store;
 mod stub_index;
 #[cfg(test)]
 mod tests;
@@ -47,6 +53,10 @@ fn main() -> ExitCode {
         Some("baseline") => baseline_generate(),
         Some("approve") => approve(&args[1..]),
         Some("rekey") => rekey(&args[1..]),
+        Some("store") => match args.get(1).map(String::as_str) {
+            Some("import") => import::import_snapshots(),
+            _ => Err(USAGE.to_string()),
+        },
         _ => Err(USAGE.to_string()),
     };
     match result {
@@ -69,15 +79,16 @@ const USAGE: &str = "usage: cargo xtask <command>
                          stub bases, the checker's records), the levels,
                          the server's sessions, the edit replays, the
                          vendor projects and the fixtures; records HEAD's
-                         snapshots, or with --profile oracle runs the
-                         oracle build and records nothing
+                         snapshot in the store once every run has passed,
+                         or with --profile oracle runs the oracle build and
+                         records nothing
   progress [--watch] [<command>]
                          show how far the running or last `corpus` (or
                          <command>) is: runs done by group, runs under
                          way, failures; --watch refreshes it until it ends
   compare [--full] [--against <hash>]
-                         diff HEAD's snapshots against its parent's (or
-                         the nearest ancestor that has them)
+                         diff HEAD's snapshot against its parent's (or
+                         the nearest ancestor that has one) in the store
   type-drift --against <hash> [--artifact <types-scoped|types-all-on|types-fixtures>]
                          relate every binding of HEAD's type snapshot to
                          <hash>'s and write the drift report
@@ -94,8 +105,12 @@ const USAGE: &str = "usage: cargo xtask <command>
                          write HEAD's snapshot diffs against the same base
                          as compare (or <commit>) to gates/approved/<slug>/
                          (then amend them in)
-  rekey <old-hash>       move <old-hash>'s snapshots to HEAD after an amend
+  rekey <old-hash>       move <old-hash>'s snapshot to HEAD after an amend
                          that only added gates/ files
+  store import           import the snapshots kept as plain files under
+                         .corpus-runs/gate/<artifact>/ and the front end's
+                         text pool into the store, each commit's checked
+                         against its files before they go
 
 `gates` and `corpus` write each step's wall time to
 .corpus-runs/gate/gatetime/<commit>.<command>.tsv, also when a step fails.";
@@ -590,10 +605,6 @@ fn normalize(json: &str) -> Result<String, String> {
     Ok(out)
 }
 
-fn snapshot_path(artifact: &str, hash: &str, ext: &str) -> PathBuf {
-    gate_dir().join(artifact).join(format!("{hash}.{ext}"))
-}
-
 fn write(path: &Path, contents: &[u8]) -> Result<(), String> {
     std::fs::create_dir_all(path.parent().unwrap()).map_err(|e| e.to_string())?;
     std::fs::write(path, contents).map_err(|e| format!("writing {}: {e}", path.display()))
@@ -658,18 +669,18 @@ fn type_drift(args: &[String]) -> Result<(), String> {
     let _ = std::fs::remove_dir_all(&out);
     std::fs::create_dir_all(&out).map_err(|e| e.to_string())?;
     let (old, new) = (out.join("old.txt"), out.join("new.txt"));
+    let mut store = Store::open()?;
     for (commit, target) in [(&against, &old), (&hash, &new)] {
-        let snapshot = snapshot_path(&artifact, commit, "txt.zst");
-        if !snapshot.is_file() {
+        let mut file = std::io::BufWriter::new(
+            std::fs::File::create(target).map_err(|e| format!("{}: {e}", target.display()))?,
+        );
+        let rev = format!("{}:{artifact}.txt", snapshot_ref(commit));
+        if !store.write_text(&rev, &mut file)? {
             return Err(format!(
                 "no {artifact} snapshot for {commit}: record it with `cargo xtask corpus` there"
             ));
         }
-        run(Command::new("zstd")
-            .args(["-q", "-d", "-f"])
-            .arg(&snapshot)
-            .arg("-o")
-            .arg(target))?;
+        file.flush().map_err(|e| e.to_string())?;
     }
     let mut cmd = Command::new(runner());
     cmd.arg("--type-drift")
@@ -687,9 +698,14 @@ fn type_drift(args: &[String]) -> Result<(), String> {
         other => return Err(format!("no type snapshot named {other}")),
     };
     run(&mut cmd)?;
-    let report = snapshot_path(&format!("type-drift-{artifact}"), &hash, "txt");
-    let text = std::fs::read(out.join("type-drift.txt")).map_err(|e| e.to_string())?;
-    write(&report, &text)?;
+    let report = out.join("type-drift.txt");
+    let text = std::fs::read(&report).map_err(|e| e.to_string())?;
+    let entry = format!("type-drift-{artifact}.txt");
+    store.add(
+        &snapshot_ref(&hash),
+        &format!("record {entry}"),
+        vec![(entry.clone(), text_content(&entry, text))],
+    )?;
     println!("{}", report.display());
     Ok(())
 }
@@ -700,7 +716,7 @@ fn runner_out(artifact: &str) -> PathBuf {
 }
 
 /// Runs the fixture suite with each fixture's type and diagnostic records
-/// on, and records them (`record_fixture_dumps`).
+/// on, and records them in HEAD's snapshot (`fixture_entries`).
 fn record_fixture_types(hash: &str, timings: &mut Timings) -> Result<(), String> {
     let dir = gate_dir().join(".fixture-types.tmp");
     let _ = std::fs::remove_dir_all(&dir);
@@ -711,13 +727,17 @@ fn record_fixture_types(hash: &str, timings: &mut Timings) -> Result<(), String>
             .env("PHPSTAN_RS_DUMP_TYPES", &dir)
             .env("PHPSTAN_RS_DUMP_DIAGNOSTICS", &dir))
     })?;
-    record_fixture_dumps(&dir, hash)?;
+    Store::open()?.add(
+        &snapshot_ref(hash),
+        "record the fixtures",
+        fixture_entries(&dir)?,
+    )?;
     std::fs::remove_dir_all(&dir).map_err(|e| e.to_string())
 }
 
-/// Records the fixture suite's records in `dir`, in fixture order, as the
-/// `diagnostics-fixtures` and `types-fixtures` snapshots.
-fn record_fixture_dumps(dir: &Path, hash: &str) -> Result<(), String> {
+/// The fixture suite's records in `dir`, in fixture order, as the
+/// snapshot's `diagnostics-fixtures.txt` and `types-fixtures.txt`.
+fn fixture_entries(dir: &Path) -> Result<Vec<(String, Content)>, String> {
     let joined = |extension: &str| -> Result<String, String> {
         let mut dumps: Vec<PathBuf> = std::fs::read_dir(dir)
             .map_err(|e| e.to_string())?
@@ -731,25 +751,17 @@ fn record_fixture_dumps(dir: &Path, hash: &str) -> Result<(), String> {
         }
         Ok(text)
     };
-    for (extension, artifact) in [
-        ("diagnostics", "diagnostics-fixtures"),
-        ("types", "types-fixtures"),
+    let mut entries = Vec::new();
+    for (extension, entry) in [
+        ("diagnostics", "diagnostics-fixtures.txt"),
+        ("types", "types-fixtures.txt"),
     ] {
-        let all = dir.join(format!("all.{extension}.txt"));
-        write(&all, joined(extension)?.as_bytes())?;
-        compress(&all, &snapshot_path(artifact, hash, "txt.zst"))?;
+        entries.push((
+            entry.to_string(),
+            text_content(entry, joined(extension)?.into_bytes()),
+        ));
     }
-    Ok(())
-}
-
-/// Compresses `from` into the snapshot `to` with `zstd`.
-fn compress(from: &Path, to: &Path) -> Result<(), String> {
-    std::fs::create_dir_all(to.parent().unwrap()).map_err(|e| e.to_string())?;
-    run(Command::new("zstd")
-        .args(["-q", "-f", "-3", "-T0"])
-        .arg(from)
-        .arg("-o")
-        .arg(to))
+    Ok(entries)
 }
 
 /// The corpus's vendor projects: each `vendor/<vendor>/<package>` with a
@@ -779,54 +791,6 @@ fn vendor_projects() -> Result<Vec<String>, String> {
 
 /// The vendor projects the server's sessions run over, beside the corpus.
 const SESSION_PROJECTS: [&str; 2] = ["vendor/symfony/console", "vendor/doctrine/orm"];
-
-/// Moves the texts of a front-end dump into the pool every front-end dump
-/// shares (`front-end-texts/`): each is named by its digest, so a file whose
-/// text no configuration or commit changed is stored once.
-fn pool_texts(texts: &Path) -> Result<(), String> {
-    let pool = gate_dir().join("front-end-texts");
-    std::fs::create_dir_all(&pool).map_err(|e| format!("{}: {e}", pool.display()))?;
-    for entry in std::fs::read_dir(texts).map_err(|e| format!("{}: {e}", texts.display()))? {
-        let path = entry.map_err(|e| e.to_string())?.path();
-        let Some(name) = path.file_name() else {
-            continue;
-        };
-        let pooled = pool.join(name);
-        if pooled.exists() {
-            std::fs::remove_file(&path).map_err(|e| format!("{}: {e}", path.display()))?;
-        } else {
-            std::fs::rename(&path, &pooled).map_err(|e| format!("{}: {e}", pooled.display()))?;
-        }
-    }
-    std::fs::remove_dir(texts).map_err(|e| format!("{}: {e}", texts.display()))
-}
-
-/// The first file under `a` whose bytes differ from the one at the same
-/// place under `b`, or that only one has; for two files, `a` itself.
-fn first_difference(a: &Path, b: &Path) -> Result<Option<PathBuf>, String> {
-    if a.is_file() || b.is_file() {
-        let read = |path: &Path| std::fs::read(path).ok();
-        return Ok((read(a) != read(b)).then(|| a.to_path_buf()));
-    }
-    let names = |dir: &Path| -> Result<Vec<std::ffi::OsString>, String> {
-        let mut names: Vec<_> = std::fs::read_dir(dir)
-            .map_err(|e| format!("{}: {e}", dir.display()))?
-            .filter_map(|e| e.ok().map(|e| e.file_name()))
-            .collect();
-        names.sort();
-        Ok(names)
-    };
-    let (in_a, in_b) = (names(a)?, names(b)?);
-    if in_a != in_b {
-        return Ok(Some(a.to_path_buf()));
-    }
-    for name in in_a {
-        if let Some(found) = first_difference(&a.join(&name), &b.join(&name))? {
-            return Ok(Some(found));
-        }
-    }
-    Ok(None)
-}
 
 // --- baseline compatibility ----------------------------------------------
 
@@ -861,20 +825,19 @@ fn baseline_generate() -> Result<(), String> {
 
 // --- comparison ------------------------------------------------------------
 
-/// The nearest proper ancestor of HEAD that has every snapshot `compare`
-/// checks (an artifact no older commit has counts as present: it starts
-/// at HEAD). Usually HEAD's parent; an ancestor whose gate run failed
-/// before recording is skipped. A skipped commit that adds an approved
-/// delta can't be skipped: `compare` only reads HEAD's own deltas.
-fn comparison_base(full: bool) -> Result<String, String> {
+/// The nearest proper ancestor of HEAD whose snapshot has every entry
+/// `compare` checks (an entry no older snapshot has counts as present: it
+/// starts at HEAD). Usually HEAD's parent; an ancestor whose gate run
+/// failed before recording is skipped. A skipped commit that adds an
+/// approved delta can't be skipped: `compare` only reads HEAD's own deltas.
+fn comparison_base(full: bool, snapshots: &Snapshots) -> Result<String, String> {
     let hash = head_hash()?;
-    let artifacts = compared_artifacts(full);
+    let entries = compared_artifacts(full);
     let ancestors = git(&["rev-list", "HEAD~1"])?;
     let mut skipped: Vec<String> = Vec::new();
     for ancestor in ancestors.lines() {
-        let complete = artifacts.iter().all(|(artifact, ext)| {
-            snapshot_path(artifact, ancestor, ext).exists()
-                || !artifact_recorded_before(artifact, &hash)
+        let complete = entries.iter().all(|entry| {
+            has_entry(snapshots, ancestor, entry) || !recorded_before(snapshots, entry, &hash)
         });
         if complete {
             if let Some(commit) = skipped
@@ -882,12 +845,12 @@ fn comparison_base(full: bool) -> Result<String, String> {
                 .find(|commit| adds_approved_delta(commit).unwrap_or(true))
             {
                 return Err(format!(
-                    "{commit} has no snapshots but adds an approved delta; record its snapshots, or compare with --against"
+                    "{commit} has no snapshot but adds an approved delta; record its snapshot, or compare with --against"
                 ));
             }
             if !skipped.is_empty() {
                 eprintln!(
-                    "comparing against {ancestor}: {} newer commit(s) have no snapshots",
+                    "comparing against {ancestor}: {} newer commit(s) have no snapshot",
                     skipped.len()
                 );
             }
@@ -895,7 +858,21 @@ fn comparison_base(full: bool) -> Result<String, String> {
         }
         skipped.push(ancestor.to_string());
     }
-    Err("no ancestor has a complete snapshot set".to_string())
+    Err("no ancestor has a complete snapshot".to_string())
+}
+
+fn has_entry(snapshots: &Snapshots, hash: &str, entry: &str) -> bool {
+    snapshots
+        .get(hash)
+        .is_some_and(|entries| entries.contains(entry))
+}
+
+/// Whether a snapshot besides `hash`'s has `entry`: one none does is first
+/// recorded at `hash`, with nothing older to compare against.
+fn recorded_before(snapshots: &Snapshots, entry: &str, hash: &str) -> bool {
+    snapshots
+        .iter()
+        .any(|(other, entries)| other != hash && entries.contains(entry))
 }
 
 /// Whether `commit` adds or changes a file under `gates/approved/`.
@@ -904,82 +881,28 @@ fn adds_approved_delta(commit: &str) -> Result<bool, String> {
     Ok(changed.lines().any(|p| p.starts_with("gates/approved/")))
 }
 
-/// `gates/approved/*/<artifact>.diff` files HEAD's own commit adds or
-/// changes.
-fn approved_delta(artifact: &str) -> Result<Option<String>, String> {
+/// The `gates/approved/*/<entry>.diff` HEAD's own commit adds or changes.
+fn approved_delta(entry: &str) -> Result<Option<Vec<u8>>, String> {
     let changed = git(&["show", "--name-only", "--format=", "HEAD"])?;
     for path in changed.lines() {
         if path.starts_with("gates/approved/")
             && Path::new(path).file_name().and_then(|f| f.to_str())
-                == Some(&format!("{artifact}.diff"))
+                == Some(&format!("{entry}.diff"))
         {
-            let text = std::fs::read_to_string(root().join(path)).map_err(|e| e.to_string())?;
+            let text = std::fs::read(root().join(path)).map_err(|e| e.to_string())?;
             return Ok(Some(text));
         }
     }
     Ok(None)
 }
 
-fn read_snapshot(artifact: &str, hash: &str, ext: &str) -> Result<Option<Vec<u8>>, String> {
-    if ext.is_empty() {
-        return read_snapshot_dir(&gate_dir().join(artifact).join(hash));
-    }
-    let path = snapshot_path(artifact, hash, ext);
-    if !path.exists() {
-        return Ok(None);
-    }
-    read_snapshot_file(&path).map(Some)
-}
-
-/// A snapshot file's text, decompressed.
-fn read_snapshot_file(path: &Path) -> Result<Vec<u8>, String> {
-    let name = path.to_string_lossy();
-    if name.ends_with(".zst") {
-        let text = capture(Command::new("zstd").args(["-dc", "-q"]).arg(path))?;
-        return Ok(text.into_bytes());
-    }
-    if name.ends_with(".gz") {
-        let text = capture(Command::new("gzip").args(["-dc"]).arg(path))?;
-        return Ok(text.into_bytes());
-    }
-    std::fs::read(path).map_err(|e| format!("{}: {e}", path.display()))
-}
-
-/// A snapshot directory as one text: each file under it, in path order,
-/// after a `== <path>` line, decompressed. A front-end dump's texts are
-/// left out: its index names each by its digest.
-fn read_snapshot_dir(dir: &Path) -> Result<Option<Vec<u8>>, String> {
-    if !dir.is_dir() {
-        return Ok(None);
-    }
-    let mut files = Vec::new();
-    let mut pending = vec![dir.to_path_buf()];
-    while let Some(next) = pending.pop() {
-        for entry in std::fs::read_dir(&next).map_err(|e| format!("{}: {e}", next.display()))? {
-            let path = entry.map_err(|e| e.to_string())?.path();
-            if path.is_dir() {
-                if path.file_name().is_some_and(|n| n != "texts") {
-                    pending.push(path);
-                }
-            } else {
-                files.push(path);
-            }
-        }
-    }
-    files.sort();
-    let mut text = Vec::new();
-    for file in files {
-        let relative = file.strip_prefix(dir).unwrap_or(&file);
-        text.extend_from_slice(format!("== {}\n", relative.display()).as_bytes());
-        text.extend(read_snapshot_file(&file)?);
-    }
-    Ok(Some(text))
-}
-
 fn unified_diff(old: &[u8], new: &[u8]) -> Result<String, String> {
+    static NEXT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
     let dir = gate_dir().join(".diff");
     std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
-    let (a, b) = (dir.join("old"), dir.join("new"));
+    let at = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let name = |side: &str| dir.join(format!("{}-{at}.{side}", std::process::id()));
+    let (a, b) = (name("old"), name("new"));
     std::fs::write(&a, old).map_err(|e| e.to_string())?;
     std::fs::write(&b, new).map_err(|e| e.to_string())?;
     let out = Command::new("diff")
@@ -987,114 +910,117 @@ fn unified_diff(old: &[u8], new: &[u8]) -> Result<String, String> {
         .arg(&a)
         .arg(&b)
         .output()
-        .map_err(|e| e.to_string())?;
-    Ok(String::from_utf8_lossy(&out.stdout).into_owned())
+        .map_err(|e| e.to_string());
+    let _ = std::fs::remove_file(&a);
+    let _ = std::fs::remove_file(&b);
+    Ok(String::from_utf8_lossy(&out?.stdout).into_owned())
 }
 
-/// Every artifact `compare` checks, with its file extension.
-fn compared_artifacts(full: bool) -> Vec<(String, &'static str)> {
+/// Every entry of a snapshot `compare` checks.
+fn compared_artifacts(full: bool) -> Vec<String> {
     let mut names = vec![
-        ("types-fixtures".to_string(), "txt.zst"),
-        ("diagnostics-fixtures".to_string(), "txt.zst"),
+        "types-fixtures.txt".to_string(),
+        "diagnostics-fixtures.txt".to_string(),
     ];
     for (config, level) in artifacts(full) {
         let artifact = artifact_name(&config, level);
         if level == "unset" && matches!(config.name, "scoped" | "all-on") {
-            names.push((format!("types-{artifact}"), "txt.zst"));
-            names.push((format!("baseline-{artifact}"), "txt"));
+            names.push(format!("types-{artifact}.txt"));
+            names.push(format!("baseline-{artifact}.txt"));
         }
-        names.push((format!("diagnostics-{artifact}"), "txt.zst"));
-        names.push((artifact, "txt"));
+        names.push(format!("diagnostics-{artifact}.txt"));
+        names.push(format!("{artifact}.txt"));
     }
     if full {
-        names.push(("vendor-projects".to_string(), "txt"));
-        names.push(("diagnostics-vendor-projects".to_string(), "txt.zst"));
-        names.push(("equalities".to_string(), "txt"));
+        for name in [
+            "vendor-projects.txt",
+            "diagnostics-vendor-projects.txt",
+            "equalities.txt",
+        ] {
+            names.push(name.to_string());
+        }
         for config in [SCOPED, ALL_ON, UNSCOPED, VENDOR_TREE, ARCH] {
             for dump in ["registry", "expr-types", "doc-resolutions"] {
-                names.push((format!("{dump}-{}", config.name), "txt.gz"));
+                names.push(format!("{dump}-{}.txt", config.name));
             }
-            names.push((format!("front-end-{}", config.name), ""));
+            names.push(format!("front-end-{}", config.name));
         }
-        names.push(("stub-bases".to_string(), "txt.gz"));
-        names.push(("session-piwigo".to_string(), "txt.gz"));
+        names.push("stub-bases.txt".to_string());
+        names.push("session-piwigo.txt".to_string());
         for project in SESSION_PROJECTS {
-            names.push((format!("session-{}", project.replace('/', "-")), "txt.gz"));
+            names.push(format!("session-{}.txt", project.replace('/', "-")));
         }
-        names.push(("replay-piwigo".to_string(), ""));
+        names.push("replay-piwigo".to_string());
         for project in vendor_projects().unwrap_or_default() {
-            names.push((format!("replay-{}", project.replace('/', "-")), ""));
+            names.push(format!("replay-{}", project.replace('/', "-")));
         }
     }
     names
 }
 
-/// Whether `artifact` has any snapshot besides `hash`'s: one that doesn't
-/// is first recorded at `hash`, with nothing older to compare against.
-fn artifact_recorded_before(artifact: &str, hash: &str) -> bool {
-    std::fs::read_dir(gate_dir().join(artifact)).is_ok_and(|entries| {
-        entries
-            .flatten()
-            .any(|e| !e.file_name().to_string_lossy().starts_with(hash))
-    })
+/// The first lines of a diff.
+fn shown(diff: &[u8]) -> String {
+    String::from_utf8_lossy(diff)
+        .lines()
+        .take(40)
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
 fn compare(args: &[String]) -> Result<(), String> {
     let full = args.iter().any(|a| a == "--full");
+    let store = Store::open()?;
+    let snapshots = store.snapshots()?;
     let against = match args.iter().position(|a| a == "--against") {
         Some(i) => git(&[
             "rev-parse",
             args.get(i + 1).ok_or("--against needs a hash")?,
         ])?,
-        None => comparison_base(full)?,
+        None => comparison_base(full, &snapshots)?,
     };
     let hash = head_hash()?;
     let mut failures = Vec::new();
-    for (artifact, ext) in &compared_artifacts(full) {
-        let (old, new) = (
-            read_snapshot(artifact, &against, ext)?,
-            read_snapshot(artifact, &hash, ext)?,
-        );
-        let (old, new) = match (old, new) {
-            (Some(old), Some(new)) => (old, new),
-            // An artifact the older commit predates starts here.
-            (None, Some(_)) if !artifact_recorded_before(artifact, &hash) => {
-                eprintln!("{artifact}: first recorded at {hash}");
+    for entry in &compared_artifacts(full) {
+        match (
+            has_entry(&snapshots, &against, entry),
+            has_entry(&snapshots, &hash, entry),
+        ) {
+            (true, true) => {}
+            // An entry the older snapshot predates starts here.
+            (false, true) if !recorded_before(&snapshots, entry, &hash) => {
+                eprintln!("{entry}: first recorded at {hash}");
                 continue;
             }
             _ => {
                 failures.push(format!(
-                    "{artifact}: missing snapshot for {against} or {hash}"
+                    "{entry}: not in the snapshot of {against} or {hash}"
                 ));
                 continue;
             }
-        };
-        if old == new {
+        }
+        let diff = store.diff(&against, &hash, entry)?;
+        if diff.is_empty() {
             continue;
         }
-        let diff = unified_diff(&old, &new)?;
-        match approved_delta(artifact)? {
+        match approved_delta(entry)? {
             Some(approved) if approved == diff => {
-                eprintln!("{artifact}: approved delta matches");
+                eprintln!("{entry}: approved delta matches");
             }
-            Some(_) => failures.push(format!("{artifact}: differs from its approved delta")),
-            None => {
-                let shown: String = diff.lines().take(40).collect::<Vec<_>>().join("\n");
-                failures.push(format!("{artifact}: unapproved change\n{shown}"));
-            }
+            Some(_) => failures.push(format!("{entry}: differs from its approved delta")),
+            None => failures.push(format!("{entry}: unapproved change\n{}", shown(&diff))),
         }
     }
     if failures.is_empty() {
-        eprintln!("snapshots of {hash} match {against}");
+        eprintln!("the snapshot of {hash} matches {against}'s");
         Ok(())
     } else {
         Err(failures.join("\n\n"))
     }
 }
 
-/// Writes every artifact that differs between HEAD's snapshots and its
-/// parent's to `gates/approved/<slug>/<artifact>.diff`, for amending
-/// into the commit that makes the change.
+/// Writes the store's diff of every entry that differs between HEAD's
+/// snapshot and its parent's to `gates/approved/<slug>/<entry>.diff`, for
+/// amending into the commit that makes the change.
 fn approve(args: &[String]) -> Result<(), String> {
     let mut against = None;
     let mut slug = None;
@@ -1108,27 +1034,24 @@ fn approve(args: &[String]) -> Result<(), String> {
     }
     let slug = slug.ok_or("approve needs a slug")?;
     let full = args.iter().any(|a| a == "--full");
+    let store = Store::open()?;
+    let snapshots = store.snapshots()?;
     let parent = match against {
         Some(commit) => git(&["rev-parse", commit])?,
-        None => comparison_base(full)?,
+        None => comparison_base(full, &snapshots)?,
     };
     let hash = head_hash()?;
     let dir = root().join("gates/approved").join(slug);
     let mut written = 0usize;
-    for (artifact, ext) in compared_artifacts(full) {
-        let (Some(old), Some(new)) = (
-            read_snapshot(&artifact, &parent, ext)?,
-            read_snapshot(&artifact, &hash, ext)?,
-        ) else {
+    for entry in compared_artifacts(full) {
+        if !has_entry(&snapshots, &parent, &entry) || !has_entry(&snapshots, &hash, &entry) {
             return Err(format!(
-                "{artifact}: missing snapshot for {parent} or {hash}"
+                "{entry}: not in the snapshot of {parent} or {hash}"
             ));
-        };
-        if old != new {
-            write(
-                &dir.join(format!("{artifact}.diff")),
-                unified_diff(&old, &new)?.as_bytes(),
-            )?;
+        }
+        let diff = store.diff(&parent, &hash, &entry)?;
+        if !diff.is_empty() {
+            write(&dir.join(format!("{entry}.diff")), &diff)?;
             written += 1;
         }
     }
@@ -1136,8 +1059,9 @@ fn approve(args: &[String]) -> Result<(), String> {
     Ok(())
 }
 
-/// After `git commit --amend` added only `gates/` files, HEAD's
-/// snapshots are still keyed by the pre-amend hash: move them.
+/// After `git commit --amend` added only `gates/` files, HEAD's snapshot
+/// and the files kept by commit are still keyed by the pre-amend hash: move
+/// them.
 fn rekey(args: &[String]) -> Result<(), String> {
     let old = args.first().ok_or("rekey needs the pre-amend hash")?;
     let old = &git(&["rev-parse", old])?;
@@ -1146,12 +1070,16 @@ fn rekey(args: &[String]) -> Result<(), String> {
     if let Some(path) = changed.lines().find(|p| !p.starts_with("gates/")) {
         return Err(format!("{old}..HEAD changes {path}, not only gates/"));
     }
+    let moved_snapshot = Store::open()?.rename_snapshot(old, &hash)?;
     let mut moved = 0usize;
     for entry in std::fs::read_dir(gate_dir())
         .map_err(|e| e.to_string())?
         .flatten()
     {
         let dir = entry.path();
+        if dir.file_name().is_some_and(|name| name == "store.git") {
+            continue;
+        }
         let Ok(files) = std::fs::read_dir(&dir) else {
             continue;
         };
@@ -1164,7 +1092,14 @@ fn rekey(args: &[String]) -> Result<(), String> {
             }
         }
     }
-    eprintln!("moved {moved} snapshot file(s) from {old} to {hash}");
+    eprintln!(
+        "moved {} and {moved} file(s) from {old} to {hash}",
+        if moved_snapshot {
+            "the snapshot"
+        } else {
+            "no snapshot"
+        }
+    );
     Ok(())
 }
 

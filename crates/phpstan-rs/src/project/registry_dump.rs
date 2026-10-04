@@ -4,7 +4,7 @@
 //! it is stored.
 //!
 //! The text has, in order:
-//! - the file table, by path: each file's path, role, load order,
+//! - the file table, a map by path: each file's role, load order,
 //!   absolute path, package and what the load keeps of it, and each of its
 //!   declarations with its guard, decided on the configured PHP versions
 //!   and on each end of their range;
@@ -20,6 +20,7 @@
 //! A file's number prints as its path, so that another numbering prints
 //! the same.
 
+use std::io;
 use std::path::{Path, PathBuf};
 
 use syntax::canonical::{Canonical, Printer};
@@ -35,6 +36,29 @@ pub(crate) fn registry_dump(
     base: Option<(&str, &Registry)>,
     compare: CompareAt,
 ) -> String {
+    let mut p = Printer::default();
+    print_registry_dump(project, base, compare, &mut p);
+    p.finish()
+}
+
+/// `registry_dump`, written into `out` as it is printed.
+pub(crate) fn write_registry_dump(
+    project: &Project,
+    base: Option<(&str, &Registry)>,
+    compare: CompareAt,
+    out: &mut dyn io::Write,
+) -> io::Result<()> {
+    let mut p = Printer::to(out);
+    print_registry_dump(project, base, compare, &mut p);
+    p.close()
+}
+
+fn print_registry_dump(
+    project: &Project,
+    base: Option<(&str, &Registry)>,
+    compare: CompareAt,
+    p: &mut Printer,
+) {
     let Project {
         files,
         dependents,
@@ -66,41 +90,48 @@ pub(crate) fn registry_dump(
         escaped_member_classes,
     } = project;
     crate::file_id::printing_paths(files.paths_by_id(), || {
-        let mut p = Printer::default();
-        section(&mut p, "files");
+        section(p, "files");
         let versions = registry.php_versions;
         let mut by_path: Vec<(&PathBuf, &FileState)> = files.iter().collect();
         by_path.sort_by_key(|(path, _)| *path);
-        for (path, state) in by_path {
-            p.line();
-            write_file(project, path, state, versions, packages, &mut p);
-        }
-        section(&mut p, "dependents");
-        dependents.canonical(&mut p);
-        section(&mut p, "signature dependents");
-        signature_dependents.canonical(&mut p);
-        section(&mut p, "use sites");
-        use_sites.canonical(&mut p);
-        section(&mut p, "duplicate function sites");
-        duplicate_fn_sites.canonical(&mut p);
-        section(&mut p, "duplicate class sites");
-        duplicate_class_sites.canonical(&mut p);
-        section(&mut p, "include probes");
+        p.map_in_order(by_path.into_iter().map(|(path, state)| {
+            (
+                path,
+                FileEntry {
+                    project,
+                    path,
+                    state,
+                    versions,
+                    packages,
+                },
+            )
+        }));
+        section(p, "dependents");
+        dependents.canonical(p);
+        section(p, "signature dependents");
+        signature_dependents.canonical(p);
+        section(p, "use sites");
+        use_sites.canonical(p);
+        section(p, "duplicate function sites");
+        duplicate_fn_sites.canonical(p);
+        section(p, "duplicate class sites");
+        duplicate_class_sites.canonical(p);
+        section(p, "include probes");
         include_probes
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .canonical(&mut p);
+            .canonical(p);
         match base {
             Some((name, base)) => {
-                section(&mut p, &format!("registry over {name}"));
-                registry.canonical_over(base, compare, &mut p);
+                section(p, &format!("registry over {name}"));
+                registry.canonical_over(base, compare, p);
             }
             None => {
-                section(&mut p, "registry");
-                registry.canonical(&mut p);
+                section(p, "registry");
+                registry.canonical(p);
             }
         }
-        section(&mut p, "project");
+        section(p, "project");
         p.node(
             "Project",
             &[
@@ -120,8 +151,30 @@ pub(crate) fn registry_dump(
             ],
         );
         p.line();
-        p.finish()
-    })
+    });
+}
+
+/// The file at `path`, which the load keeps as `state`: the file table's
+/// entry for it.
+struct FileEntry<'a> {
+    project: &'a Project,
+    path: &'a Path,
+    state: &'a FileState,
+    versions: Option<types::PhpVersions>,
+    packages: &'a composer::PackageIndex,
+}
+
+impl Canonical for FileEntry<'_> {
+    fn canonical(&self, p: &mut Printer) {
+        let FileEntry {
+            project,
+            path,
+            state,
+            versions,
+            packages,
+        } = *self;
+        write_file(project, path, state, versions, packages, p);
+    }
 }
 
 /// Writes the file at `path`, which the load keeps as `state`.
@@ -169,7 +222,6 @@ fn write_file(
     p.node(
         "File",
         &[
-            ("path", &path),
             ("role", &role),
             ("load_order", load_order),
             ("absolute_path", &project.absolute_path(path)),
@@ -228,10 +280,24 @@ fn section(p: &mut Printer, name: &str) {
 /// project over.
 pub(crate) fn stub_bases_dump(bases: &[(&str, &Registry)]) -> String {
     let mut p = Printer::default();
+    print_stub_bases(bases, &mut p);
+    p.finish()
+}
+
+/// `stub_bases_dump`, written into `out` as it is printed.
+pub(crate) fn write_stub_bases_dump(
+    bases: &[(&str, &Registry)],
+    out: &mut dyn io::Write,
+) -> io::Result<()> {
+    let mut p = Printer::to(out);
+    print_stub_bases(bases, &mut p);
+    p.close()
+}
+
+fn print_stub_bases(bases: &[(&str, &Registry)], p: &mut Printer) {
     for (name, base) in bases {
-        section(&mut p, &format!("stub base {name}"));
-        base.canonical(&mut p);
+        section(p, &format!("stub base {name}"));
+        base.canonical(p);
     }
     p.line();
-    p.finish()
 }

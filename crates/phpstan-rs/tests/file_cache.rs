@@ -38,7 +38,7 @@ fn run(dir: &TempDir, cache: &Path) -> String {
 
 /// The registry dump of a run, with the cache in `cache`.
 fn registry(dir: &TempDir, cache: &Path) -> String {
-    let out = dir.path().join("registry.txt.gz");
+    let out = dir.path().join("registry.txt");
     let output = bin()
         .current_dir(dir.path())
         .env("PHPSTAN_RS_CACHE_DIR", cache)
@@ -54,13 +54,7 @@ fn registry(dir: &TempDir, cache: &Path) -> String {
         .output()
         .unwrap();
     assert!(output.status.success(), "{output:?}");
-    let mut text = String::new();
-    std::io::Read::read_to_string(
-        &mut flate2::read::GzDecoder::new(std::fs::File::open(&out).unwrap()),
-        &mut text,
-    )
-    .unwrap();
-    text
+    std::fs::read_to_string(&out).unwrap()
 }
 
 /// The entries the per-file cache holds.

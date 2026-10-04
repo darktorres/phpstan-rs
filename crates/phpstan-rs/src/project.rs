@@ -566,18 +566,41 @@ impl Project {
     /// `registry_dump`, the registry compared with its base as `compare`
     /// says.
     fn registry_dump_comparing(&self, compare: crate::registry::canonical::CompareAt) -> String {
-        let base = Project::loaded_bases()
+        registry_dump::registry_dump(self, self.dump_base(), compare)
+    }
+
+    /// `registry_dump`, written into `out` as it is printed.
+    pub fn write_registry_dump(&self, out: &mut dyn std::io::Write) -> std::io::Result<()> {
+        registry_dump::write_registry_dump(
+            self,
+            self.dump_base(),
+            crate::registry::canonical::CompareAt::Layers,
+            out,
+        )
+    }
+
+    /// The stub base the project's registry stands on, by name.
+    fn dump_base(&self) -> Option<(&'static str, &'static Registry)> {
+        Project::loaded_bases()
             .into_iter()
-            .find(|(_, base)| self.registry.classes.shares_base(&base.classes));
-        registry_dump::registry_dump(self, base, compare)
+            .find(|(_, base)| self.registry.classes.shares_base(&base.classes))
     }
 
     /// Both stub bases whole, by name (`registry_dump::stub_bases_dump`).
     pub fn stub_bases_dump() -> String {
-        registry_dump::stub_bases_dump(&[
+        registry_dump::stub_bases_dump(&Project::stub_bases())
+    }
+
+    /// `stub_bases_dump`, written into `out` as it is printed.
+    pub fn write_stub_bases_dump(out: &mut dyn std::io::Write) -> std::io::Result<()> {
+        registry_dump::write_stub_bases_dump(&Project::stub_bases(), out)
+    }
+
+    fn stub_bases() -> [(&'static str, &'static Registry); 2] {
+        [
             (PLAIN_BASE_NAME, Project::plain_base()),
             (PHPSTAN_BASE_NAME, Project::phpstan_base()),
-        ])
+        ]
     }
 
     /// The stub bases this process has made so far, by name: a project's

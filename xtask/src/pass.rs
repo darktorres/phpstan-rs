@@ -20,8 +20,16 @@
 //! - **The vendor projects** run alone, every rule set on, and the fixture
 //!   suite with its records.
 //!
-//! The first state's artifacts are recorded by commit; a pass with another
-//! build records nothing.
+//! The first state's artifacts are recorded by commit in the store
+//! (`store`), each added to the pass's tree once its runs are done, and the
+//! tree becomes the commit's snapshot once every run has passed; a pass
+//! with another build records nothing.
+//!
+//! A dump is written only where it differs from another run's: a
+//! configuration's first state, and a session's default run, from the
+//! nearest snapshot that has the dump, every later state, and the one-thread
+//! run, from the first's. Two runs are compared by their dumps' manifests,
+//! and an entity's texts are read only where its ids differ.
 
 use std::collections::VecDeque;
 use std::fmt::Write as _;
@@ -30,12 +38,14 @@ use std::process::{Command, Stdio};
 use std::sync::{Condvar, Mutex, PoisonError};
 use std::time::Instant;
 
+use dumps::{Dump, manifest_path};
+
 use super::progress::{Group, Progress};
+use super::store::{Content, Snapshots, Store, dump_kind, pass_ref, snapshot_ref, text_content};
 use super::{
     ALL_ON, ALL_ON_SETS, ARCH, Config, LEVELS, SCOPED, SESSION_PROJECTS, Timings, UNSCOPED,
-    VENDOR_TREE, artifact_name, baseline_file, cargo, compress, corpus_dir, first_difference,
-    gate_dir, normalize, pool_texts, record_fixture_dumps, root, run, snapshot_path, unified_diff,
-    vendor_projects, write,
+    VENDOR_TREE, artifact_name, baseline_file, cargo, corpus_dir, fixture_entries, gate_dir, git,
+    normalize, root, run, shown, unified_diff, vendor_projects, write,
 };
 
 /// How many runs over the corpus take place at once: each holds the
@@ -287,6 +297,11 @@ struct Pass<'a> {
     // The equalities kept, by configuration, in the order of the tasks.
     equalities: Mutex<Vec<(usize, String)>>,
     failures: Mutex<Vec<String>>,
+    store: Mutex<Store>,
+    // Each snapshot's commit, with its entries.
+    snapshots: Snapshots,
+    // HEAD and its ancestors, nearest first.
+    ancestors: Vec<String>,
 }
 
 /// The tasks not yet started, and how many over the corpus are under way.
@@ -322,6 +337,15 @@ pub(crate) fn run_pass(setup: &PassSetup, timings: &mut Timings) -> Result<(), S
     let scratch = gate_dir().join(".pass");
     let _ = std::fs::remove_dir_all(&scratch);
     std::fs::create_dir_all(&scratch).map_err(|e| e.to_string())?;
+    let store = Store::open()?;
+    if let Some(hash) = &setup.hash {
+        store.begin_pass(hash)?;
+    }
+    let snapshots = store.snapshots()?;
+    let ancestors = git(&["rev-list", "HEAD"])?
+        .lines()
+        .map(str::to_string)
+        .collect();
     let tasks = tasks(setup)?;
     let (groups, of) = progress_groups(&tasks);
     let pass = Pass {
@@ -343,6 +367,9 @@ pub(crate) fn run_pass(setup: &PassSetup, timings: &mut Timings) -> Result<(), S
         groups: of,
         equalities: Mutex::new(Vec::new()),
         failures: Mutex::new(Vec::new()),
+        store: Mutex::new(store),
+        snapshots,
+        ancestors,
     };
     let workers = std::thread::available_parallelism().map_or(1, usize::from);
     std::thread::scope(|scope| {
@@ -350,22 +377,19 @@ pub(crate) fn run_pass(setup: &PassSetup, timings: &mut Timings) -> Result<(), S
             scope.spawn(|| worker(&pass));
         }
     });
-    let mut failures = pass
-        .failures
-        .into_inner()
-        .unwrap_or_else(PoisonError::into_inner);
+    let mut failures = std::mem::take(&mut *lock(&pass.failures));
     if failures.is_empty()
         && let Some(hash) = &setup.hash
-        && setup.full
-        && let Err(error) = record_pass_wide(
-            &pass.scratch,
-            hash,
-            pass.equalities
-                .into_inner()
-                .unwrap_or_else(PoisonError::into_inner),
-        )
     {
-        failures.push(error);
+        let equalities = std::mem::take(&mut *lock(&pass.equalities));
+        let recorded = if setup.full {
+            record_pass_wide(&pass, equalities)
+        } else {
+            Ok(())
+        };
+        if let Err(error) = recorded.and_then(|()| lock(&pass.store).finish_pass(hash)) {
+            failures.push(error);
+        }
     }
     let result = if failures.is_empty() {
         Ok(())
@@ -524,6 +548,140 @@ impl Pass<'_> {
     fn hash(&self) -> Option<&str> {
         self.setup.hash.as_deref()
     }
+
+    /// Writes to `to` the manifest of the dump `entry` of the nearest
+    /// snapshot that has it, HEAD's own included: what a first run is
+    /// written against. False when no snapshot has it.
+    fn export_reference(&self, entry: &str, to: &Path) -> Result<bool, String> {
+        let Some(hash) = self.ancestors.iter().find(|hash| {
+            self.snapshots
+                .get(*hash)
+                .is_some_and(|entries| entries.contains(entry))
+        }) else {
+            return Ok(false);
+        };
+        let kind = dump_kind(entry).ok_or_else(|| format!("{entry} is not a dump"))?;
+        lock(&self.store).export(&format!("{}:{entry}", snapshot_ref(hash)), kind, to)?;
+        Ok(true)
+    }
+
+    /// Adds `entries` to the pass's tree, when the pass records.
+    fn record(&self, what: &str, entries: Vec<(String, Content)>) -> Result<(), String> {
+        let Some(hash) = self.hash() else {
+            return Ok(());
+        };
+        let label = format!("record {what}");
+        let started = Instant::now();
+        let result = lock(&self.store).add(&pass_ref(hash), &label, entries);
+        lock(&self.timings).record(&label, started.elapsed().as_secs_f64(), result.is_ok());
+        result.map_err(|e| format!("{label}: {e}"))
+    }
+
+    /// The text of `dump`'s entity `index`: from the run's text, or, where
+    /// the run wrote it against a snapshot or its text is recorded and
+    /// gone, from the store.
+    fn entity_text(&self, dump: &mut Dump, index: usize) -> Result<Vec<u8>, String> {
+        dump.text(index)
+            .or_else(|_| lock(&self.store).blob(dump.manifest.entries[index].id))
+    }
+
+    /// Where the dump of the manifest `b` first differs from that of `a`:
+    /// the entity's path, then a diff of its texts.
+    fn dump_difference(&self, a: &Path, b: &Path) -> Result<Option<String>, String> {
+        let open = |path: &Path| Dump::open(path).map_err(|e| e.to_string());
+        let (mut a, mut b) = (open(a)?, open(b)?);
+        let Some(at) = dumps::first_difference(&a.manifest, &b.manifest) else {
+            return Ok(None);
+        };
+        let entity = |dump: &mut Dump, index: Option<usize>| -> Result<(String, Vec<u8>), String> {
+            match index {
+                None => Ok(("the end".to_string(), Vec::new())),
+                Some(index) => Ok((
+                    dump.manifest.entries[index].path.clone(),
+                    self.entity_text(dump, index)?,
+                )),
+            }
+        };
+        let (a_path, a_text) = entity(&mut a, at.a)?;
+        let (b_path, b_text) = entity(&mut b, at.b)?;
+        let place = if a_path == b_path {
+            a_path
+        } else {
+            format!("{a_path}, against {b_path}")
+        };
+        Ok(Some(format!(
+            "{place}\n{}",
+            shown(unified_diff(&a_text, &b_text)?.as_bytes())
+        )))
+    }
+
+    /// Where the run in `b` first differs from the run in `a`: a dump,
+    /// written as a text with its manifest beside it, or a directory of
+    /// them and of plain files, which a file only `a` has does not make
+    /// differ: a dump `b`'s state does not take.
+    fn run_difference(&self, a: &Path, b: &Path) -> Result<Option<String>, String> {
+        if !b.is_dir() {
+            return Ok(self
+                .dump_difference(&manifest_path(a), &manifest_path(b))?
+                .map(|found| format!("{}: {found}", b.display())));
+        }
+        let mut names: Vec<String> = std::fs::read_dir(b)
+            .map_err(|e| format!("{}: {e}", b.display()))?
+            .filter_map(|e| e.ok().map(|e| e.file_name().to_string_lossy().into_owned()))
+            .collect();
+        names.sort();
+        for name in names {
+            let (old, new) = (a.join(&name), b.join(&name));
+            if manifest_path(&new).exists() {
+                continue;
+            }
+            if !old.exists() {
+                return Ok(Some(format!("{}: only this run has it", new.display())));
+            }
+            let found = if name.ends_with(".manifest") {
+                self.dump_difference(&old, &new)?
+            } else {
+                let read = |path: &Path| {
+                    std::fs::read(path).map_err(|e| format!("{}: {e}", path.display()))
+                };
+                let (old, new) = (read(&old)?, read(&new)?);
+                (old != new)
+                    .then(|| unified_diff(&old, &new).map(|diff| shown(diff.as_bytes())))
+                    .transpose()?
+            };
+            if let Some(found) = found {
+                return Ok(Some(format!("{}: {found}", new.display())));
+            }
+        }
+        Ok(None)
+    }
+}
+
+/// What the store keeps of the run in `dir`: each dump by its manifest,
+/// each other file as a text, by name.
+fn dir_content(dir: &Path) -> Result<Content, String> {
+    let mut names: Vec<String> = std::fs::read_dir(dir)
+        .map_err(|e| format!("{}: {e}", dir.display()))?
+        .filter_map(|e| e.ok().map(|e| e.file_name().to_string_lossy().into_owned()))
+        .filter(|name| !name.ends_with(".manifest"))
+        .collect();
+    names.sort();
+    let mut entries = Vec::new();
+    for name in names {
+        let path = dir.join(&name);
+        let manifest = manifest_path(&path);
+        let content = if manifest.exists() {
+            Content::Dump(manifest)
+        } else {
+            text_content(&name, read_bytes(&path)?)
+        };
+        entries.push((name, content));
+    }
+    Ok(Content::Dir(entries))
+}
+
+fn read_bytes(path: &Path) -> Result<Vec<u8>, String> {
+    std::fs::read(path).map_err(|e| format!("{}: {e}", path.display()))
 }
 
 fn run_task(pass: &Pass, index: usize, task: Task) -> Result<(), String> {
@@ -553,8 +711,27 @@ fn run_task(pass: &Pass, index: usize, task: Task) -> Result<(), String> {
     }
 }
 
+/// The dumps a configuration's runs take: each file the runner writes,
+/// with the snapshot's entry for it.
+fn config_dumps(config: &str, stub_bases: bool) -> Vec<(&'static str, String)> {
+    let mut dumps = vec![
+        ("registry.txt", format!("registry-{config}.txt")),
+        ("expr-types.txt", format!("expr-types-{config}.txt")),
+        (
+            "doc-resolutions.txt",
+            format!("doc-resolutions-{config}.txt"),
+        ),
+        ("front-end.txt", format!("front-end-{config}")),
+    ];
+    if stub_bases {
+        dumps.push(("stub-bases.txt", "stub-bases.txt".to_string()));
+    }
+    dumps
+}
+
 /// Analyses `config` in each of `states`, each state's artifacts compared
-/// with the first's, and records the first's.
+/// with the first's, and records the first's as soon as it has run, its
+/// dumps' texts then gone from the scratch.
 #[allow(clippy::too_many_arguments)]
 fn config_task(
     pass: &Pass,
@@ -569,11 +746,20 @@ fn config_task(
     let dir = pass.scratch.join(config.name);
     let caches = dir.join("caches");
     let baseline = baseline_file(config.name);
+    let references = dir.join("references");
+    std::fs::create_dir_all(&references).map_err(|e| e.to_string())?;
+    if dumps {
+        for (file, entry) in config_dumps(config.name, stub_bases) {
+            pass.export_reference(&entry, &manifest_path(&references.join(file)))?;
+        }
+    }
     let mut first: Option<(PathBuf, &str)> = None;
     for (i, state) in states.iter().enumerate() {
         let out = dir.join(format!("state-{i}"));
         let mut cmd = pass.command(&pass.runner, state, &caches);
         cmd.args((config.args)()).arg("--out").arg(&out);
+        cmd.arg("--reference")
+            .arg(first.as_ref().map_or(&references, |(first, _)| first));
         if views {
             cmd.arg("--dump-types");
             if baseline.exists() {
@@ -597,14 +783,20 @@ fn config_task(
             run(&mut cmd)
         })?;
         match &first {
-            None => first = Some((out, state.name)),
+            None => {
+                if pass.hash().is_some() {
+                    record_config(pass, config, &out, views, dumps, stub_bases)?;
+                    for (file, _) in config_dumps(config.name, stub_bases) {
+                        let _ = std::fs::remove_file(out.join(file));
+                    }
+                }
+                first = Some((out, state.name));
+            }
             Some((reference, reference_name)) => {
-                if let Some(difference) = differing_artifact(reference, &out)? {
+                if let Some(difference) = pass.run_difference(reference, &out)? {
                     return Err(format!(
-                        "{}: the run with {} differs from the run with {reference_name} at {}",
-                        config.name,
-                        state.name,
-                        difference.display()
+                        "{}: the run with {} differs from the run with {reference_name} at {difference}",
+                        config.name, state.name
                     ));
                 }
                 lock(&pass.equalities).push((
@@ -623,30 +815,8 @@ fn config_task(
             emission_order_check(pass, config, state, &caches, &reference)
         })?;
     }
-    if let Some(hash) = pass.hash() {
-        record_config(config, &reference, hash, views, dumps, stub_bases)?;
-    }
     let _ = std::fs::remove_dir_all(&dir);
     Ok(())
-}
-
-/// The first file under `b` that differs from its counterpart under `a`;
-/// a file only `a` has is a dump `b`'s state does not take.
-fn differing_artifact(a: &Path, b: &Path) -> Result<Option<PathBuf>, String> {
-    let mut names: Vec<std::ffi::OsString> = std::fs::read_dir(b)
-        .map_err(|e| format!("{}: {e}", b.display()))?
-        .filter_map(|e| e.ok().map(|e| e.file_name()))
-        .collect();
-    names.sort();
-    for name in names {
-        if !a.join(&name).exists() {
-            return Ok(Some(b.join(&name)));
-        }
-        if let Some(found) = first_difference(&a.join(&name), &b.join(&name))? {
-            return Ok(Some(found));
-        }
-    }
-    Ok(None)
 }
 
 /// Requires the shipped binary's `--emission-order` output of `config` in
@@ -687,27 +857,27 @@ fn emission_order_check(
     Ok(())
 }
 
-/// Records the artifacts of `config`'s run in `out` for `hash`.
+/// Records the artifacts of `config`'s run in `out`.
 fn record_config(
+    pass: &Pass,
     config: Config,
     out: &Path,
-    hash: &str,
     views: bool,
     dumps: bool,
     stub_bases: bool,
 ) -> Result<(), String> {
     let artifact = config.name;
-    record_report(artifact, out, hash)?;
+    let mut entries = report_entries(artifact, out)?;
     if views {
-        let target = snapshot_path(&format!("types-{artifact}"), hash, "txt.zst");
-        compress(&out.join("types.txt"), &target)?;
+        let name = format!("types-{artifact}.txt");
+        entries.push((
+            name.clone(),
+            text_content(&name, read_bytes(&out.join("types.txt"))?),
+        ));
         let baseline = out.join("baseline.json");
         if baseline.exists() {
             let normalized = normalize(&read_text(&baseline)?)?;
             let stderr = read_text(&out.join("baseline.err"))?;
-            let name = format!("baseline-{artifact}");
-            write(&snapshot_path(&name, hash, "txt"), normalized.as_bytes())?;
-            write(&snapshot_path(&name, hash, "err"), stderr.as_bytes())?;
             // The Stage A snapshot is empty; `compare` holds every later one
             // to its parent's plus the commit's approved delta.
             let remaining = normalized.lines().filter(|l| !l.starts_with('#')).count();
@@ -720,60 +890,50 @@ fn record_config(
                     "baseline compatibility ({artifact}): {remaining} diagnostic(s) and {stale} stale entr(ies) with the reference baseline"
                 );
             }
+            let name = format!("baseline-{artifact}.txt");
+            entries.push((name.clone(), text_content(&name, normalized.into_bytes())));
+            entries.push((
+                format!("baseline-{artifact}.err"),
+                Content::Text(stderr.into_bytes()),
+            ));
         } else {
             eprintln!("no reference baseline for {artifact} yet; run `cargo xtask baseline`");
         }
     }
     if dumps {
-        for name in ["registry", "expr-types", "doc-resolutions"] {
-            move_into(
-                &out.join(format!("{name}.txt.gz")),
-                &snapshot_path(&format!("{name}-{artifact}"), hash, "txt.gz"),
-            )?;
+        for (file, entry) in config_dumps(artifact, stub_bases) {
+            entries.push((entry, Content::Dump(manifest_path(&out.join(file)))));
         }
-        pool_texts(&out.join("front-end").join("texts"))?;
-        move_into(
-            &out.join("front-end"),
-            &gate_dir().join(format!("front-end-{artifact}")).join(hash),
-        )?;
     }
-    if stub_bases {
-        move_into(
-            &out.join("stub-bases.txt.gz"),
-            &snapshot_path("stub-bases", hash, "txt.gz"),
-        )?;
-    }
-    Ok(())
+    pass.record(artifact, entries)
 }
 
-/// Records the report of the run in `out` as `artifact` for `hash`: the
-/// normalized report, its stderr, and every field of every diagnostic.
-fn record_report(artifact: &str, out: &Path, hash: &str) -> Result<(), String> {
-    write(
-        &snapshot_path(artifact, hash, "txt"),
-        normalize(&read_text(&out.join("report.json"))?)?.as_bytes(),
-    )?;
-    write(
-        &snapshot_path(artifact, hash, "err"),
-        read_text(&out.join("report.err"))?.as_bytes(),
-    )?;
-    compress(
-        &out.join("diagnostics.txt"),
-        &snapshot_path(&format!("diagnostics-{artifact}"), hash, "txt.zst"),
-    )
+/// The report of the run in `out` as `artifact`: the normalized report, its
+/// stderr, and every field of every diagnostic.
+fn report_entries(artifact: &str, out: &Path) -> Result<Vec<(String, Content)>, String> {
+    let report = format!("{artifact}.txt");
+    let diagnostics = format!("diagnostics-{artifact}.txt");
+    Ok(vec![
+        (
+            report.clone(),
+            text_content(
+                &report,
+                normalize(&read_text(&out.join("report.json"))?)?.into_bytes(),
+            ),
+        ),
+        (
+            format!("{artifact}.err"),
+            Content::Text(read_bytes(&out.join("report.err"))?),
+        ),
+        (
+            diagnostics.clone(),
+            text_content(&diagnostics, read_bytes(&out.join("diagnostics.txt"))?),
+        ),
+    ])
 }
 
 fn read_text(path: &Path) -> Result<String, String> {
     std::fs::read_to_string(path).map_err(|e| format!("{}: {e}", path.display()))
-}
-
-/// Moves `from` to `to`, replacing what is there.
-fn move_into(from: &Path, to: &Path) -> Result<(), String> {
-    let _ = std::fs::remove_dir_all(to);
-    let _ = std::fs::remove_file(to);
-    std::fs::create_dir_all(to.parent().expect("a snapshot has a directory"))
-        .map_err(|e| e.to_string())?;
-    std::fs::rename(from, to).map_err(|e| format!("{}: {e}", to.display()))
 }
 
 /// Analyses `config` at `level`, once, and records its report.
@@ -792,23 +952,28 @@ fn level_task(pass: &Pass, index: usize, config: Config, level: &str) -> Result<
         .args(["--level", level, "--out"])
         .arg(&out);
     pass.step(index, &format!("level {artifact}"), || run(&mut cmd))?;
-    if let Some(hash) = pass.hash() {
-        record_report(&artifact, &out, hash)?;
+    if pass.hash().is_some() {
+        pass.record(&artifact, report_entries(&artifact, &out)?)?;
     }
     let _ = std::fs::remove_dir_all(&out);
     Ok(())
 }
 
 /// Takes the server's session over `project` at each thread count, and
-/// requires them to be the same.
+/// requires them to be the same: the default's record written against the
+/// nearest snapshot's, the one thread's against the default's.
 fn session_task(pass: &Pass, index: usize, name: &str, project: &str) -> Result<(), String> {
     let artifact = format!("session-{name}");
+    let entry = format!("{artifact}.txt");
+    let snapshot = manifest_path(&pass.scratch.join(format!("{artifact}-snapshot.txt")));
+    let mut reference = pass
+        .export_reference(&entry, &snapshot)?
+        .then_some(snapshot);
     let mut taken = Vec::new();
     for threads in RUN_THREADS {
-        let out = pass.scratch.join(format!(
-            "{artifact}-{}.txt.gz",
-            threads.unwrap_or("default")
-        ));
+        let out = pass
+            .scratch
+            .join(format!("{artifact}-{}.txt", threads.unwrap_or("default")));
         let state = State {
             name: "session",
             cache: Some("sessions"),
@@ -817,15 +982,21 @@ fn session_task(pass: &Pass, index: usize, name: &str, project: &str) -> Result<
         };
         let mut cmd = pass.command(&pass.binary, &state, &pass.scratch);
         cmd.arg("record-session").arg(project).arg(&out);
+        if let Some(reference) = &reference {
+            cmd.arg("--reference").arg(reference);
+        }
         let label = format!("{artifact} at {} threads", threads.unwrap_or("default"));
         pass.step(index, &label, || run(&mut cmd))?;
+        reference = Some(manifest_path(&out));
         taken.push(out);
     }
-    record_pair(pass, &artifact, "txt.gz", &taken[0], &taken[1])
+    record_pair(pass, &entry, &taken[0], &taken[1])
 }
 
 /// Runs the edit replay in a fresh copy of `from` at each thread count, in
-/// the same place each time, and requires the two to be the same.
+/// the same place each time, and requires the two to be the same: the one
+/// thread's dumps written against the default's. The default's are written
+/// whole, since the replay reads its steps' texts back.
 fn replay_task(
     pass: &Pass,
     index: usize,
@@ -835,7 +1006,7 @@ fn replay_task(
 ) -> Result<(), String> {
     let artifact = format!("replay-{slug}");
     let copy = pass.scratch.join("replays").join(slug);
-    let mut taken = Vec::new();
+    let mut taken: Vec<PathBuf> = Vec::new();
     for threads in RUN_THREADS {
         let out = pass
             .scratch
@@ -857,40 +1028,38 @@ fn replay_task(
             .args(args)
             .arg("--edit-replay")
             .arg(&out);
+        if let Some(default) = taken.first() {
+            cmd.arg("--dump-reference").arg(default);
+        }
         let label = format!("{artifact} at {} threads", threads.unwrap_or("default"));
         pass.step(index, &label, || run(&mut cmd))?;
         taken.push(out);
     }
     let _ = std::fs::remove_dir_all(&copy);
-    record_pair(pass, &artifact, "", &taken[0], &taken[1])
+    record_pair(pass, &artifact, &taken[0], &taken[1])
 }
 
 /// Requires the runs at the default and at one thread to be the same and,
-/// when recording, records the default's: a directory when `ext` is empty.
-fn record_pair(
-    pass: &Pass,
-    artifact: &str,
-    ext: &str,
-    default: &Path,
-    one: &Path,
-) -> Result<(), String> {
-    if let Some(difference) = first_difference(default, one)? {
+/// when recording, records the default's as the snapshot's `entry`: a dump,
+/// or a directory of them.
+fn record_pair(pass: &Pass, entry: &str, default: &Path, one: &Path) -> Result<(), String> {
+    if let Some(difference) = pass.run_difference(default, one)? {
         return Err(format!(
-            "{artifact}: one thread differs from the default at {}",
-            difference.display()
+            "{entry}: one thread differs from the default at {difference}"
         ));
     }
-    if let Some(hash) = pass.hash() {
-        let target = if ext.is_empty() {
-            gate_dir().join(artifact).join(hash)
+    if pass.hash().is_some() {
+        let content = if default.is_dir() {
+            dir_content(default)?
         } else {
-            snapshot_path(artifact, hash, ext)
+            Content::Dump(manifest_path(default))
         };
-        move_into(default, &target)?;
+        pass.record(entry, vec![(entry.to_string(), content)])?;
     }
     for path in [one, default] {
         let _ = std::fs::remove_dir_all(path);
         let _ = std::fs::remove_file(path);
+        let _ = std::fs::remove_file(manifest_path(path));
     }
     Ok(())
 }
@@ -943,22 +1112,18 @@ fn fixtures_task(pass: &Pass, index: usize) -> Result<(), String> {
             .env("PHPSTAN_RS_DUMP_TYPES", &dir)
             .env("PHPSTAN_RS_DUMP_DIAGNOSTICS", &dir))
     })?;
-    if let Some(hash) = pass.hash() {
-        record_fixture_dumps(&dir, hash)?;
+    if pass.hash().is_some() {
+        pass.record("the fixtures", fixture_entries(&dir)?)?;
     }
     Ok(())
 }
 
 /// What a full pass records once every task has run: the vendor projects'
 /// reports joined in path order, and the equalities kept.
-fn record_pass_wide(
-    scratch: &Path,
-    hash: &str,
-    mut equalities: Vec<(usize, String)>,
-) -> Result<(), String> {
+fn record_pass_wide(pass: &Pass, mut equalities: Vec<(usize, String)>) -> Result<(), String> {
     let (mut report, mut err, mut diagnostics) = (String::new(), String::new(), String::new());
     for project in vendor_projects()? {
-        let out = vendor_out(scratch, &project);
+        let out = vendor_out(&pass.scratch, &project);
         let read = |name: &str| read_text(&out.join(name));
         for (text, name) in [
             (&mut err, "report.err"),
@@ -970,24 +1135,19 @@ fn record_pass_wide(
         writeln!(report, "# project {project}").unwrap();
         report.push_str(&normalize(&read("report.json")?)?);
     }
-    write(
-        &snapshot_path("vendor-projects", hash, "txt"),
-        report.as_bytes(),
-    )?;
-    write(
-        &snapshot_path("vendor-projects", hash, "err"),
-        err.as_bytes(),
-    )?;
-    let joined = scratch.join("vendor-projects-diagnostics.txt");
-    write(&joined, diagnostics.as_bytes())?;
-    compress(
-        &joined,
-        &snapshot_path("diagnostics-vendor-projects", hash, "txt.zst"),
-    )?;
     equalities.sort_by_key(|(task, _)| *task);
     let mut lines = String::new();
     for (_, line) in equalities {
         writeln!(lines, "{line}").unwrap();
     }
-    write(&snapshot_path("equalities", hash, "txt"), lines.as_bytes())
+    let entries = [
+        ("vendor-projects.txt", report),
+        ("vendor-projects.err", err),
+        ("diagnostics-vendor-projects.txt", diagnostics),
+        ("equalities.txt", lines),
+    ]
+    .into_iter()
+    .map(|(name, text)| (name.to_string(), text_content(name, text.into_bytes())))
+    .collect();
+    pass.record("the vendor projects and the equalities", entries)
 }

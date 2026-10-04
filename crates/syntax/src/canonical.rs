@@ -17,6 +17,7 @@
 #![deny(clippy::wildcard_enum_match_arm)]
 
 use std::fmt::Write as _;
+use std::io;
 use std::sync::Arc;
 
 use crate::name::Name;
@@ -61,17 +62,59 @@ pub fn print_line(value: &(impl Canonical + ?Sized)) -> String {
     out
 }
 
-/// Where a canonical print is written.
+/// Where a canonical print is written: into memory, or into a sink it is
+/// passed on to a line at a time once it has gathered `SINK_CHUNK` bytes.
 #[derive(Default)]
-pub struct Printer {
+pub struct Printer<'s> {
     out: String,
     depth: usize,
+    sink: Option<&'s mut dyn io::Write>,
+    /// The sink's first error; nothing is written to it after.
+    error: Option<io::Error>,
 }
 
-impl Printer {
-    /// What has been written.
+/// How much a printer writing into a sink gathers before passing it on.
+const SINK_CHUNK: usize = 1 << 16;
+
+impl<'s> Printer<'s> {
+    /// A printer writing into `sink`; `close` writes what is left.
+    pub fn to(sink: &'s mut dyn io::Write) -> Printer<'s> {
+        Printer {
+            out: String::with_capacity(SINK_CHUNK + 4096),
+            depth: 0,
+            sink: Some(sink),
+            error: None,
+        }
+    }
+
+    /// What has been written, of a printer writing into memory.
     pub fn finish(self) -> String {
+        debug_assert!(
+            self.sink.is_none(),
+            "a printer writing into a sink is closed"
+        );
         self.out
+    }
+
+    /// Writes what is left into the sink; its first error, if it had one.
+    pub fn close(mut self) -> io::Result<()> {
+        self.pass_on();
+        match self.error {
+            Some(error) => Err(error),
+            None => Ok(()),
+        }
+    }
+
+    fn pass_on(&mut self) {
+        let Some(sink) = &mut self.sink else {
+            return;
+        };
+        if self.error.is_none()
+            && let Err(error) = sink.write_all(self.out.as_bytes())
+        {
+            self.error = Some(error);
+        }
+        self.out.clear();
     }
 
     /// Starts a new line at the current depth.
@@ -203,11 +246,36 @@ impl Printer {
         self.out.push(']');
     }
 
+    /// Writes `entries`, each `key => value` on a line of its own, in the
+    /// order they come in: a map whose order the caller has fixed, written
+    /// as its entries are made.
+    pub fn map_in_order<K: Canonical, V: Canonical>(
+        &mut self,
+        entries: impl IntoIterator<Item = (K, V)>,
+    ) {
+        let mut entries = entries.into_iter().peekable();
+        if entries.peek().is_none() {
+            self.out.push_str("[]");
+            return;
+        }
+        self.out.push('[');
+        self.depth += 1;
+        for (key, value) in entries {
+            self.newline();
+            key.canonical(self);
+            self.out.push_str(" => ");
+            value.canonical(self);
+        }
+        self.depth -= 1;
+        self.newline();
+        self.out.push(']');
+    }
+
     /// `value` printed one level below the current line.
     fn nested(&self, value: &(impl Canonical + ?Sized)) -> String {
         let mut p = Printer {
-            out: String::new(),
             depth: self.depth + 1,
+            ..Printer::default()
         };
         value.canonical(&mut p);
         p.out
@@ -231,6 +299,9 @@ impl Printer {
 
     fn newline(&mut self) {
         self.out.push('\n');
+        if self.sink.is_some() && self.out.len() >= SINK_CHUNK {
+            self.pass_on();
+        }
         for _ in 0..self.depth {
             self.out.push_str("  ");
         }

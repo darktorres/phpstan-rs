@@ -1571,13 +1571,11 @@ name = "phpstan-rs"
 version = "0.1.0"
 dependencies = [
  "arrayvec",
- "blake3",
  "clap",
  "crc32fast",
  "criterion",
  "crossbeam-channel",
  "dhat",
- "flate2",
  "hashbrown 0.17.1",
  "hotpath",
  "imbl",
@@ -1590,6 +1588,7 @@ dependencies = [
  "phpstan-rs-composer",
  "phpstan-rs-config",
  "phpstan-rs-diagnostics",
+ "phpstan-rs-dumps",
  "phpstan-rs-phpdoc",
  "phpstan-rs-sql",
  "phpstan-rs-stub-sources",
@@ -1633,10 +1632,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "phpstan-rs-dumps"
+version = "0.1.0"
+dependencies = [
+ "memchr",
+ "rustc-hash 2.1.3",
+ "sha2 0.11.0",
+]
+
+[[package]]
 name = "phpstan-rs-gate-runner"
 version = "0.1.0"
 dependencies = [
  "phpstan-rs",
+ "phpstan-rs-dumps",
 ]
 
 [[package]]
@@ -3050,10 +3059,15 @@ checksum = "3ad82d2a33cdc9674dc7465672f271e096168fcdbe0f799d9e6db8c5892679dc"
 name = "xtask"
 version = "0.0.0"
 dependencies = [
+ "blake3",
+ "flate2",
+ "phpstan-rs-dumps",
  "phpstan-rs-stub-sources",
  "phpstan-rs-syntax",
  "proc-macro2",
+ "rustc-hash 2.1.3",
  "serde_json",
+ "sha2 0.11.0",
  "syn 3.0.6",
 ]
 

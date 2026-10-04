@@ -751,15 +751,21 @@ impl Session {
         }))
     }
 
-    /// Writes O1, the front end's dump (`front_end_dump`), into `out`: each
-    /// file PHP may be run from under the analysed paths, the context paths
-    /// and the stub paths, parsed as the load parses it, with the names a
-    /// job of the load shares; and each embedded stub, as the stub build
-    /// reads it. `out/index.tsv` has a line for each file and role - the
-    /// role, the path, its text's BLAKE3 digest and length - sorted, each
-    /// text is `out/texts/<digest>.gz`, and the unions built while the files
-    /// were read are `out/unions.gz`, one a line, sorted.
-    pub fn dump_front_end(&self, out: &Path) -> Result<FrontEndDump, String> {
+    /// Writes O1, the front end's dump (`front_end_dump`), to `out`, a dump
+    /// of files (`dumps`) with its manifest beside it: each file PHP may be
+    /// run from under the analysed paths, the context paths and the stub
+    /// paths, parsed as the load parses it, with the names a job of the
+    /// load shares, at `<role>/<path>`; each embedded stub, as the stub
+    /// build reads it, at `embedded/<path>`; a file that cannot be read,
+    /// empty, at `unread/<role>/<path>`; and the unions built while the
+    /// files were read, one a line, sorted, at `unions`. Given `reference`,
+    /// the manifest of another run, writes the text of a file only where it
+    /// differs from that run's.
+    pub fn dump_front_end(
+        &self,
+        out: &Path,
+        reference: Option<&Path>,
+    ) -> Result<FrontEndDump, String> {
         let mut analysed = Vec::new();
         for dir in &self.dirs {
             self.collect_files(dir, &mut analysed, super::collect_php_run_files);
@@ -779,23 +785,49 @@ impl Session {
             self.collect_files(dir, &mut stubs, super::collect_php_run_files);
         }
         let stubs: FxHashSet<PathBuf> = stubs.into_iter().collect();
-        let files: Vec<(&'static str, &PathBuf)> = context
+        // A file the paths reach twice is one file of the load.
+        let mut files: Vec<(&'static str, &PathBuf)> = context
             .iter()
             .map(|path| ("context", path))
             .chain(analysed.iter().map(|path| ("analysed", path)))
             .collect();
+        files.sort_unstable();
+        files.dedup();
 
         let mut project = Project::new();
         self.configure(&mut project, self.settings.built_once);
         let index_use_sites = project.check_settings().rules.check_dead_code;
         let retain_source = self.settings.retain_source;
+        let context_of = |e: std::io::Error| format!("{}: {e}", out.display());
+        let writer = std::sync::Mutex::new(
+            dumps::DumpWriter::create(out, dumps::Kind::Files, reference).map_err(context_of)?,
+        );
+        let write = |role: &str, path: &[u8], text: Option<&[u8]>| -> std::io::Result<()> {
+            let path = path.split(|&byte| byte == b'/');
+            let entity = match text {
+                Some(text) => {
+                    dumps::FileEntity::new(std::iter::once(role.as_bytes()).chain(path), text)
+                }
+                None => dumps::FileEntity::new(
+                    [b"unread".as_slice(), role.as_bytes()]
+                        .into_iter()
+                        .chain(path),
+                    b"",
+                ),
+            };
+            writer
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .file(entity)
+        };
+        let embedded = crate::registry::stubs::embedded_stub_files();
         types::record_unions();
-        let (dumped, embedded): (Vec<DumpedText>, Vec<DumpedText>) = self.pool.install(|| {
+        let (dumped, stubbed) = self.pool.install(|| {
             rayon::join(
                 || {
-                    files
-                        .par_iter()
-                        .map_init(syntax::name::NameCache::default, |names, (role, path)| {
+                    files.par_iter().try_for_each_init(
+                        syntax::name::NameCache::default,
+                        |names, (role, path)| {
                             let is_stub = stubs.contains(path.as_path());
                             let role = if is_stub {
                                 format!("{role} stub")
@@ -818,72 +850,60 @@ impl Session {
                                     &source,
                                 )
                             });
-                            (role, path.display().to_string(), text)
-                        })
-                        .collect()
+                            write(
+                                &role,
+                                path.as_os_str().as_encoded_bytes(),
+                                text.as_deref().map(str::as_bytes),
+                            )
+                        },
+                    )
                 },
                 || {
-                    crate::registry::stubs::embedded_stub_files()
-                        .par_iter()
-                        .map(|(path, source, origin)| {
-                            (
-                                "embedded".to_string(),
-                                path.clone(),
-                                Some(super::front_end_dump::dump_embedded_stub(source, origin)),
-                            )
-                        })
-                        .collect::<Vec<_>>()
+                    embedded.par_iter().try_for_each(|(path, source, origin)| {
+                        let text = super::front_end_dump::dump_embedded_stub(source, origin);
+                        write("embedded", path.as_bytes(), Some(text.as_bytes()))
+                    })
                 },
             )
         });
+        dumped.and(stubbed).map_err(context_of)?;
         let unions = types::recorded_unions();
-
-        let texts = out.join("texts");
-        std::fs::create_dir_all(&texts).map_err(|e| format!("{}: {e}", texts.display()))?;
-        let written: Vec<Result<String, String>> = self.pool.install(|| {
-            dumped
-                .into_par_iter()
-                .chain(embedded)
-                .map(|(role, path, text)| {
-                    let Some(text) = text else {
-                        return Ok(format!("{role}\t{path}\tunread\t0"));
-                    };
-                    let digest = blake3::hash(text.as_bytes()).to_hex().to_string();
-                    let file = texts.join(format!("{digest}.gz"));
-                    if !file.exists() {
-                        write_gzip(&file, text.as_bytes())?;
-                    }
-                    Ok(format!("{role}\t{path}\t{digest}\t{}", text.len()))
-                })
-                .collect()
-        });
-        let mut lines = written
-            .into_iter()
-            .collect::<Result<Vec<String>, String>>()?;
-        lines.sort_unstable();
-        let files = lines.len();
-        let index = out.join("index.tsv");
-        std::fs::write(&index, lines.join("\n") + "\n")
-            .map_err(|e| format!("{}: {e}", index.display()))?;
         let mut union_text = unions.join("\n");
         union_text.push('\n');
-        write_gzip(&out.join("unions.gz"), union_text.as_bytes())?;
+        let mut writer = writer
+            .into_inner()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        writer
+            .file(dumps::FileEntity::new(
+                [b"unions".as_slice()],
+                union_text.as_bytes(),
+            ))
+            .and_then(|()| writer.finish())
+            .map_err(context_of)?;
         Ok(FrontEndDump {
-            files,
+            files: files.len() + embedded.len(),
             unions: unions.len(),
         })
     }
 
     /// Runs the edit replay (`edit_replay`) over the analysed files, its
-    /// files drawn with `seed`, and writes into `out`, gzip-compressed, the
-    /// registry dump without the stub bases and the diagnostics held after
-    /// the load and after each step (`step-<n>.registry.gz`,
-    /// `step-<n>.diagnostics.gz`), and after a fresh load of the edited tree
-    /// (`fresh.*`); and `script.txt`, the steps, and `verdict.txt`, which
-    /// sections of the last step's dumps and the fresh load's are the
-    /// same. Edits the tree it reads: refuses one without the replay's
-    /// marker file at its root. Gives the verdict.
-    pub fn edit_replay(&self, out: &Path, seed: u64) -> Result<String, String> {
+    /// files drawn with `seed`, and writes into `out` the registry dump
+    /// without the stub bases and the diagnostics held after the load and
+    /// after each step (`step-<n>.registry.txt`, `step-<n>.diagnostics.txt`,
+    /// dumps with their manifests, `dumps`), and after a fresh load of the
+    /// edited tree (`fresh.*`); and `script.txt`, the steps, and
+    /// `verdict.txt`, which sections of the last step's dumps and the fresh
+    /// load's are the same. Each dump is written where it differs from the
+    /// same dump of `reference`, another replay's directory, when that has
+    /// it, and from this replay's step before otherwise. Edits the tree it
+    /// reads: refuses one without the replay's marker file at its root.
+    /// Gives the verdict.
+    pub fn edit_replay(
+        &self,
+        out: &Path,
+        seed: u64,
+        reference: Option<&Path>,
+    ) -> Result<String, String> {
         let marker = self.root.join(super::edit_replay::MARKER);
         if !marker.is_file() {
             return Err(format!(
@@ -894,17 +914,34 @@ impl Session {
         std::fs::create_dir_all(out).map_err(|e| format!("{}: {e}", out.display()))?;
         let mut project = self.load_editable()?.project;
         let mut held = super::edit_replay::check_all(&project, &self.pool);
-        let write_step =
-            |name: &str, project: &Project, held: &super::edit_replay::HeldDiagnostics| {
-                write_gzip(
-                    &out.join(format!("{name}.registry.gz")),
-                    project.registry_dump().as_bytes(),
-                )?;
-                write_gzip(
-                    &out.join(format!("{name}.diagnostics.gz")),
-                    super::edit_replay::print_held(held).as_bytes(),
-                )
-            };
+        let mut previous: Option<String> = None;
+        let mut write_step = |name: &str,
+                              project: &Project,
+                              held: &super::edit_replay::HeldDiagnostics|
+         -> Result<(), String> {
+            for dump in [REPLAY_REGISTRY, REPLAY_DIAGNOSTICS] {
+                let text = out.join(format!("{name}.{dump}.txt"));
+                let given = reference
+                    .map(|dir| dumps::manifest_path(&dir.join(format!("{name}.{dump}.txt"))))
+                    .filter(|given| given.is_file())
+                    .or_else(|| {
+                        previous.as_ref().map(|previous| {
+                            dumps::manifest_path(&out.join(format!("{previous}.{dump}.txt")))
+                        })
+                    });
+                if dump == REPLAY_REGISTRY {
+                    write_dump(&text, dumps::Kind::Tree, given.as_deref(), |w| {
+                        project.write_registry_dump(w)
+                    })?;
+                } else {
+                    write_dump(&text, dumps::Kind::ByPrefix(b'\t'), given.as_deref(), |w| {
+                        w.write_all(super::edit_replay::print_held(held).as_bytes())
+                    })?;
+                }
+            }
+            previous = Some(name.to_string());
+            Ok(())
+        };
         write_step("step-0", &project, &held)?;
         let mut script = String::from("0\tload\n");
         let mut number = 0;
@@ -919,65 +956,12 @@ impl Session {
                 write_step(&format!("step-{number}"), project, held)
             },
         )?;
-        let last = (
-            project.registry_dump(),
-            super::edit_replay::print_held(&held),
-        );
         drop(project);
         let fresh_project = self.load_editable()?.project;
         let fresh_held = super::edit_replay::check_all(&fresh_project, &self.pool);
         write_step("fresh", &fresh_project, &fresh_held)?;
-        let fresh = (
-            fresh_project.registry_dump(),
-            super::edit_replay::print_held(&fresh_held),
-        );
-        let sections = |text: &str| -> Vec<(String, String)> {
-            let mut out: Vec<(String, String)> = Vec::new();
-            for line in text.lines() {
-                match line.strip_prefix("== ") {
-                    Some(name) => out.push((name.to_string(), String::new())),
-                    None => {
-                        if let Some((_, body)) = out.last_mut() {
-                            body.push_str(line);
-                            body.push('\n');
-                        }
-                    }
-                }
-            }
-            out
-        };
-        // An edited file keeps its place in the load order and an added
-        // one comes last, where a fresh load numbers the files in the order
-        // it finds them: a section that differs in nothing else says so.
-        let without_load_order = |body: &str| -> String {
-            body.lines()
-                .filter(|line| {
-                    let line = line.trim_start();
-                    !line.starts_with("load_order: ") && !line.starts_with("next_load_order: ")
-                })
-                .collect::<Vec<_>>()
-                .join("\n")
-        };
-        let mut verdict = String::new();
-        let (last_sections, fresh_sections) = (sections(&last.0), sections(&fresh.0));
-        for (name, body) in &last_sections {
-            let fresh_body = fresh_sections
-                .iter()
-                .find(|(fresh_name, _)| fresh_name == name)
-                .map(|(_, fresh_body)| fresh_body);
-            let state = match fresh_body {
-                Some(fresh_body) if fresh_body == body => "same",
-                Some(fresh_body) if without_load_order(fresh_body) == without_load_order(body) => {
-                    "differs only in load order"
-                }
-                _ => "differs",
-            };
-            verdict.push_str(&format!("registry {name}: {state}\n"));
-        }
-        verdict.push_str(&format!(
-            "diagnostics: {}\n",
-            if last.1 == fresh.1 { "same" } else { "differs" }
-        ));
+        let verdict = replay_verdict(out, &format!("step-{number}"), "fresh")
+            .map_err(|e| format!("{}: {e}", out.display()))?;
         for (name, text) in [("script.txt", &script), ("verdict.txt", &verdict)] {
             std::fs::write(out.join(name), text).map_err(|e| format!("{name}: {e}"))?;
         }
@@ -985,17 +969,25 @@ impl Session {
     }
 
     /// Loads every file, runs the finishing passes, and writes the registry
-    /// dump (`registry_dump`) of what the load leaves to `out`,
-    /// gzip-compressed.
-    pub fn dump_registry(&self, out: &Path) -> Result<(), String> {
+    /// dump (`registry_dump`) of what the load leaves to `out`, a dump with
+    /// its manifest (`dumps`), where it differs from `reference`'s.
+    pub fn dump_registry(&self, out: &Path, reference: Option<&Path>) -> Result<(), String> {
         let loaded = self.load()?;
-        write_gzip(out, loaded.project.registry_dump().as_bytes())
+        write_dump(out, dumps::Kind::Tree, reference, |w| {
+            loaded.project.write_registry_dump(w)
+        })
     }
 
     /// Writes both stub bases whole (`Project::stub_bases_dump`), what a
-    /// registry dump prints its project over, gzip-compressed, to `out`.
-    pub fn dump_stub_bases(&self, out: &Path) -> Result<(), String> {
-        write_gzip(out, Project::stub_bases_dump().as_bytes())
+    /// registry dump prints its project over, to `out`, a dump with its
+    /// manifest (`dumps`), where it differs from `reference`'s.
+    pub fn dump_stub_bases(&self, out: &Path, reference: Option<&Path>) -> Result<(), String> {
+        write_dump(
+            out,
+            dumps::Kind::Tree,
+            reference,
+            Project::write_stub_bases_dump,
+        )
     }
 
     /// Loads and checks every analysed file, with the `--dump-types`
@@ -1340,29 +1332,122 @@ fn by_path(mut files: Vec<(PathBuf, Vec<String>)>) -> String {
     text
 }
 
-/// A file's role, its path and its dump; none when it cannot be read.
-type DumpedText = (String, String, Option<String>);
-
 /// What `Session::dump_front_end` wrote.
 pub struct FrontEndDump {
-    /// The lines of the index: one for each file and role.
+    /// One for each file and role.
     pub files: usize,
     /// The unions recorded.
     pub unions: usize,
 }
 
-/// Writes `bytes` gzip-compressed to `path`, with no name or time in the
-/// header, so equal bytes give an equal file.
-pub fn write_gzip(path: &Path, bytes: &[u8]) -> Result<(), String> {
-    use std::io::Write as _;
-    let file = std::fs::File::create(path).map_err(|e| format!("{}: {e}", path.display()))?;
-    let mut encoder = flate2::GzBuilder::new().mtime(0).write(
-        std::io::BufWriter::new(file),
-        flate2::Compression::default(),
+/// The edit replay's dump of the registry, and of the diagnostics held.
+const REPLAY_REGISTRY: &str = "registry";
+const REPLAY_DIAGNOSTICS: &str = "diagnostics";
+
+/// Writes the dump `kind` (`dumps`) to `text`, its manifest beside it, as
+/// `write` prints it; given `reference`, the manifest of another run of it,
+/// only the entities that differ from that run's.
+pub fn write_dump(
+    text: &Path,
+    kind: dumps::Kind,
+    reference: Option<&Path>,
+    write: impl FnOnce(&mut dyn std::io::Write) -> std::io::Result<()>,
+) -> Result<(), String> {
+    let context = |e: std::io::Error| format!("{}: {e}", text.display());
+    let mut writer = dumps::DumpWriter::create(text, kind, reference).map_err(context)?;
+    write(&mut writer).map_err(context)?;
+    writer.finish().map_err(context)?;
+    Ok(())
+}
+
+/// Which sections of the registry dumps of the replay's steps `last` and
+/// `fresh` in `out` are the same, and whether their diagnostics are: read
+/// from the manifests, and from the texts of the entities whose ids
+/// differ.
+fn replay_verdict(out: &Path, last: &str, fresh: &str) -> std::io::Result<String> {
+    let open = |name: &str, dump: &str| {
+        dumps::Dump::open(&dumps::manifest_path(
+            &out.join(format!("{name}.{dump}.txt")),
+        ))
+    };
+    let (mut last_registry, mut fresh_registry) =
+        (open(last, REPLAY_REGISTRY)?, open(fresh, REPLAY_REGISTRY)?);
+    let sections = |dump: &dumps::Dump| -> Vec<(String, Vec<usize>)> {
+        let mut sections: Vec<(String, Vec<usize>)> = Vec::new();
+        for (index, entry) in dump.manifest.entries.iter().enumerate() {
+            let name = entry.path.split('/').next().unwrap_or_default();
+            if name.starts_with('.') {
+                continue;
+            }
+            match sections.last_mut() {
+                Some((last, entries)) if last == name => entries.push(index),
+                _ => sections.push((name.to_string(), vec![index])),
+            }
+        }
+        sections
+    };
+    // An edited file keeps its place in the load order and an added one
+    // comes last, where a fresh load numbers the files in the order it
+    // finds them: a section that differs in nothing else says so.
+    let without_load_order = |text: &[u8]| -> Vec<u8> {
+        text.split_inclusive(|&byte| byte == b'\n')
+            .filter(|line| {
+                let line = line.trim_ascii_start();
+                !line.starts_with(b"load_order: ") && !line.starts_with(b"next_load_order: ")
+            })
+            .flatten()
+            .copied()
+            .collect()
+    };
+    let fresh_sections = sections(&fresh_registry);
+    let mut verdict = String::new();
+    for (name, entries) in sections(&last_registry) {
+        let fresh_entries = fresh_sections
+            .iter()
+            .find(|(fresh_name, _)| *fresh_name == name)
+            .map(|(_, entries)| entries.clone());
+        let alike = |a: usize, b: usize, last: &dumps::Dump, fresh: &dumps::Dump| {
+            let (a, b) = (&last.manifest.entries[a], &fresh.manifest.entries[b]);
+            (a.path == b.path, a.id == b.id)
+        };
+        let state = match fresh_entries {
+            Some(fresh_entries)
+                if fresh_entries.len() == entries.len()
+                    && entries
+                        .iter()
+                        .zip(&fresh_entries)
+                        .all(|(&a, &b)| alike(a, b, &last_registry, &fresh_registry).0) =>
+            {
+                let mut state = "same";
+                for (&a, &b) in entries.iter().zip(&fresh_entries) {
+                    if alike(a, b, &last_registry, &fresh_registry).1 {
+                        continue;
+                    }
+                    if without_load_order(&last_registry.text(a)?)
+                        != without_load_order(&fresh_registry.text(b)?)
+                    {
+                        state = "differs";
+                        break;
+                    }
+                    state = "differs only in load order";
+                }
+                state
+            }
+            _ => "differs",
+        };
+        verdict.push_str(&format!("registry {name}: {state}\n"));
+    }
+    let (last_held, fresh_held) = (
+        open(last, REPLAY_DIAGNOSTICS)?,
+        open(fresh, REPLAY_DIAGNOSTICS)?,
     );
-    encoder
-        .write_all(bytes)
-        .and_then(|()| encoder.finish())
-        .and_then(|mut writer| writer.flush())
-        .map_err(|e| format!("{}: {e}", path.display()))
+    verdict.push_str(&format!(
+        "diagnostics: {}\n",
+        if last_held.manifest.root == fresh_held.manifest.root {
+            "same"
+        } else {
+            "differs"
+        }
+    ));
+    Ok(verdict)
 }
