@@ -733,6 +733,10 @@ Twenty-one items, numbered in the order they are built. Each states what is ther
 
 **Oracle for the fix:** fixtures for each storage and binding kind (an inherited, a redeclared and a trait's static property; `static::`; a method's static variable on PHP 7.4 and 8.1), each call kind (a virtual call with two implementations, one writing; an interface call; a callback; a builtin calling an argument's method; a stream wrapper, registered and not), field sensitivity (a call writing another property keeps this one), an escaped and an unescaped new object, a capture written later by the outer function, and `array_reduce` over an empty, a non-empty and a possibly empty array, each checked against `php` (7.4 through `docker` for the static variables). In item 0's validation (0.11) the reports are compared with `5fb858c9`'s: the five false reports above go, and every other difference is read.
 
+**Found in step 2.** The oracle build's run (`.corpus-runs/gate/oracle-runs/`) reached every oracle in its 208 check runs but the two declaration rebuild checks, which only the edit path reaches, and failed twice:
+- **A union of more than 64 class-strings was `mixed`.** No fold past the union cap took `class-string<T>` members, so the 65 keys of php-parser's precedence map (`PrettyPrinterAbstract`) survived every fold, and the union's debug assertion that only extension types outlast them failed (`union.rs:319`). Distinct callable signatures would survive them too. Past the cap, class-strings now fold as instances do, to `class-string` of the classes' common supertype, or of `object` without the hierarchy (`string` when one names no class), and callables to `callable` (`21597ad7`).
+- **The edit replay changed a project built once.** It loaded through the batch session, which keeps no declarations as built and drops context trees, so editing the project failed `begin_declaration_changes`' assertion. It now loads the project as the server keeps it: declarations as built, every tree, no per-file cache (`cf03d4e7`).
+
 **Oracle.** None beyond §11 for the dumps and the deletions: they leave release behaviour as it is. The fixes found in step 1 are semantic, read in 0.11 against `5fb858c9`'s reports.
 
 ### 1. One session for the CLI, the language server and the tests
@@ -2183,7 +2187,7 @@ Exact, except the private-property judgment, listed in §11.
 **Platforms.** CI runs on `ubuntu-24.04` only (`rust-ci.yml:18`), while the release builds for `macos-26` and `windows-2025-vs2026` (`release.yml:33-53`). A CI matrix job on those two runs item 6's file-replacement test from item 6's validation on, and item 17's `stat` cases from item 17's, and each result is recorded.
 
 **The semantic changes, by item.** At an item's validation, every difference from the previous item's dumps must be one of its own:
-  - **item 0:** the fixes found in step 1: what a call may write, by storage, forgotten after it (object properties by field and type, static properties, globals, static variables, captures and references), calls bounded by the class hierarchy and builtins by what they call, captures by reference entered with every type written while shared, and `array_reduce` with its initial value;
+  - **item 0:** the fixes found in step 1: what a call may write, by storage, forgotten after it (object properties by field and type, static properties, globals, static variables, captures and references), calls bounded by the class hierarchy and builtins by what they call, captures by reference entered with every type written while shared, and `array_reduce` with its initial value; and the one found in step 2: past the union cap, class-strings fold to one class-string and callables to `callable`, where the union was `mixed`;
   - **item 1:**
     - a file reached through a link is loaded once and reported under its resolved path, with `__FILE__` and `__DIR__` resolved;
     - a file both analysed and context is analysed, once;
