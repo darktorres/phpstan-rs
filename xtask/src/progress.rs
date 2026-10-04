@@ -214,7 +214,8 @@ pub(crate) fn render(path: &Path, at: u64) -> Result<(String, bool), String> {
 
 /// `cargo xtask progress [--watch] [<command>]`: shows the progress of the
 /// last run of `command` (`dumps` by default) from `dir`; with `--watch`,
-/// again every two seconds until it is over.
+/// again every two seconds until it is over, waiting for a run to write
+/// its progress when none has.
 pub(crate) fn progress_command(dir: &Path, args: &[String]) -> Result<(), String> {
     let watch = args.iter().any(|a| a == "--watch");
     let command = args
@@ -223,7 +224,19 @@ pub(crate) fn progress_command(dir: &Path, args: &[String]) -> Result<(), String
         .map_or("dumps", String::as_str);
     let path = status_path(dir, command);
     loop {
-        let (view, over) = render(&path, now())?;
+        let (view, over) = if path.exists() {
+            render(&path, now())?
+        } else {
+            (
+                format!(
+                    "no `cargo xtask {command}` run has written its progress yet: a run \
+                     writes\n{} as it goes{}\n",
+                    path.display(),
+                    if watch { "; waiting for one" } else { "" }
+                ),
+                false,
+            )
+        };
         if watch {
             // Home, then clear the screen, so the view stays in place.
             print!("\x1b[H\x1b[2J{view}");

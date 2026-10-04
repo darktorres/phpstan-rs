@@ -146,3 +146,11 @@ fn the_progress_view_shows_counts_runs_under_way_and_failures() {
     assert!(view.contains("finished: failed"), "{view}");
     std::fs::remove_dir_all(&dir).unwrap();
 }
+
+#[test]
+fn the_progress_command_says_when_no_run_has_written_its_progress() {
+    let dir = scratch_dir("progress-none");
+    // Without `--watch` it shows the state once, so it returns.
+    assert!(super::progress::progress_command(&dir, &[]).is_ok());
+    std::fs::remove_dir_all(&dir).unwrap();
+}
