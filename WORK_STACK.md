@@ -15,9 +15,8 @@ that date.
 
 ## Where to resume
 
-1. Finish **level 8**: the item-by-item review of
-   `PROFILE_DRILL_PIWIGO_20G.md` (§13 left), then build it once told to,
-   item 0 first.
+1. **Level 8**: build `PROFILE_DRILL_PIWIGO_20G.md` once told to, item 0
+   first. Its review is finished.
 2. Then **level 6**: recreate master's 87 commits on `master2`, one row
    at a time (`MASTER_REIMPLEMENTATION_LEDGER.md`: 86 open, 1 skipped, none
    done).
@@ -223,12 +222,11 @@ from both: items 0-19, validated once, after item 19 (§11). The goal is
 beyond PHPStan and Psalm, not parity: semantics are judged by what PHP does
 when it runs, and the plan adds the checks found along the way.
 
-- **State: reviewed in part, nothing built.** The plan was committed at
+- **State: reviewed in full, nothing built.** The plan was committed at
   `d520c9fd`. A separate reviewer goes through it adversarially, one item at
   a time, in order; each finding is checked against the code, `php` 8.5 and
   the heap profile before it goes in, and §13's review table has a row per
-  item. Items 0-19, §11 and §12 are reviewed and committed one by one;
-  §13 is in review.
+  item. Items 0-19 and §11-§13 were reviewed and committed one by one.
 - **Passes outside the item order,** also in §13: a dependency pass (six
   crates taken: `la-arena`, `wide`, `triomphe`, `quick_cache`, `siphasher`
   and `blake3`; ten considered and not taken; item 15's review added
