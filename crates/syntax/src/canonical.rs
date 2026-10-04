@@ -355,6 +355,21 @@ impl<T: Canonical> Canonical for AsSet<'_, T> {
     }
 }
 
+/// A map of lists printed with each list as a set: for one whose lists'
+/// order is not part of its value.
+pub struct MapOfSets<'a, K, V>(pub &'a rustc_hash::FxHashMap<K, Vec<V>>);
+
+impl<K: Canonical, V: Canonical> Canonical for MapOfSets<'_, K, V> {
+    fn canonical(&self, p: &mut Printer) {
+        let MapOfSets(map) = self;
+        let sets: Vec<(&K, AsSet<'_, V>)> = map
+            .iter()
+            .map(|(key, values)| (key, AsSet(values.as_slice())))
+            .collect();
+        p.map(sets.iter().map(|(key, values)| (*key, values)));
+    }
+}
+
 /// A map prints sorted by its keys' prints: its order is the hasher's.
 impl<K: Canonical, V: Canonical> Canonical for rustc_hash::FxHashMap<K, V> {
     fn canonical(&self, p: &mut Printer) {

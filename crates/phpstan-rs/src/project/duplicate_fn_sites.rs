@@ -120,4 +120,14 @@ syntax::canonical_struct!(FnDeclSite {
     return_hint,
 });
 
-syntax::canonical_struct!(DuplicateFunctionSites { sites });
+/// Each name's sites as a set: they are in the order the files were loaded
+/// in.
+impl syntax::canonical::Canonical for DuplicateFunctionSites {
+    fn canonical(&self, p: &mut syntax::canonical::Printer) {
+        let DuplicateFunctionSites { sites } = self;
+        p.node(
+            "DuplicateFunctionSites",
+            &[("sites", &syntax::canonical::MapOfSets(sites))],
+        );
+    }
+}

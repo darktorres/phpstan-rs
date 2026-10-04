@@ -111,4 +111,14 @@ syntax::canonical_struct!(ClassDeclSite {
     is_stub,
 });
 
-syntax::canonical_struct!(DuplicateClassSites { sites });
+/// Each name's sites as a set: they are in the order the files were loaded
+/// in.
+impl syntax::canonical::Canonical for DuplicateClassSites {
+    fn canonical(&self, p: &mut syntax::canonical::Printer) {
+        let DuplicateClassSites { sites } = self;
+        p.node(
+            "DuplicateClassSites",
+            &[("sites", &syntax::canonical::MapOfSets(sites))],
+        );
+    }
+}
