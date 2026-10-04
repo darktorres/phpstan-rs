@@ -60,6 +60,8 @@ pub struct Parser<'a> {
     pub(crate) long_arrays: rustc_hash::FxHashSet<NodeId>,
     // Whether the parse has built an anonymous class (`new class`).
     pub(crate) saw_anonymous_class: bool,
+    // Where the parse first met each syntax only some PHP versions accept.
+    pub(crate) syntax_marks: crate::lexer::SyntaxMarks,
     // How many closure and anonymous class bodies the parse is inside, and
     // whether it has made a class, function or constant declaration in one:
     // a declaration a walk of the statements does not reach.
@@ -201,6 +203,7 @@ impl<'a> Parser<'a> {
             pattern_only: Vec::new(),
             long_arrays: rustc_hash::FxHashSet::default(),
             saw_anonymous_class: false,
+            syntax_marks: crate::lexer::SyntaxMarks::default(),
             nested_depth: std::cell::Cell::new(0),
             saw_nested_declaration: std::cell::Cell::new(false),
             goto_scopes: vec![GotoScope::default()],
@@ -313,6 +316,28 @@ impl Parser<'_> {
     /// declared in the body of a closure or an anonymous class.
     pub fn saw_nested_declaration(&self) -> bool {
         self.saw_nested_declaration.get()
+    }
+
+    /// Where the parse first met each syntax only some PHP versions accept.
+    pub fn syntax_marks(&self) -> crate::lexer::SyntaxMarks {
+        self.syntax_marks
+    }
+
+    /// Reads the `,` after an item of a list `closer` ends, noting `mark`
+    /// at it when it is the list's last: whether there was one.
+    pub(crate) fn eat_list_comma(
+        &mut self,
+        closer: &Token,
+        mark: crate::lexer::SyntaxMark,
+    ) -> bool {
+        let comma = self.current_span();
+        if !self.eat(&Token::Comma) {
+            return false;
+        }
+        if self.check(closer) {
+            self.syntax_marks.note(mark, comma);
+        }
+        true
     }
 
     /// The span of the token about to be read: the last one's when none

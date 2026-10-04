@@ -239,7 +239,10 @@ impl Parser<'_> {
                             alias,
                             kind,
                         });
-                        if !self.eat(&Token::Comma) {
+                        if !self.eat_list_comma(
+                            &Token::RBrace,
+                            crate::lexer::SyntaxMark::TrailingCommaInGroupedUse,
+                        ) {
                             break;
                         }
                     }

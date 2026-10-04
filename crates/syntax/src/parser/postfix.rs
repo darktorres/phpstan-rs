@@ -279,7 +279,10 @@ impl Parser<'_> {
                 spread,
                 value,
             });
-            if !self.eat(&Token::Comma) {
+            if !self.eat_list_comma(
+                &Token::RParen,
+                crate::lexer::SyntaxMark::TrailingCommaInArguments,
+            ) {
                 break;
             }
         }

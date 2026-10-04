@@ -259,6 +259,7 @@ impl<'a> Lexer<'a> {
     }
 
     pub(crate) fn lex_heredoc(&mut self) -> Token {
+        let opening = self.pos;
         self.pos += 3; // consume '<<<'
         while matches!(self.peek(), b' ' | b'\t') {
             self.pos += 1;
@@ -321,6 +322,20 @@ impl<'a> Lexer<'a> {
                     closing_indent = indent;
                     body_end = line_start;
                     self.pos = after;
+                    // Before PHP 7.3 the closing label starts its line and
+                    // only a `;` may follow it there.
+                    let rest = &self.src[after..];
+                    let rest = rest.strip_prefix(b";").unwrap_or(rest);
+                    if indent > 0
+                        || !(rest.is_empty()
+                            || rest.starts_with(b"\n")
+                            || rest.starts_with(b"\r\n"))
+                    {
+                        let span = self.span(opening, after);
+                        self.facts
+                            .syntax
+                            .note(super::SyntaxMark::FlexibleHeredoc, span);
+                    }
                     break;
                 }
             }

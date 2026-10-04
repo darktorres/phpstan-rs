@@ -227,6 +227,74 @@ pub struct FileFacts {
     /// the file names: an identifier, a whole name or one segment of a
     /// qualified one, in any case.
     pub mentions: u32,
+    /// Where the file first spells each syntax only some PHP versions
+    /// accept and its tree does not keep.
+    pub syntax: SyntaxMarks,
+}
+
+/// A spelling only some PHP versions accept, which the tree does not keep.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SyntaxMark {
+    /// `public`, `protected` or `private` on a class constant (PHP 7.1).
+    ClassConstVisibility,
+    /// A trailing comma in a grouped `use` (7.2).
+    TrailingCommaInGroupedUse,
+    /// A trailing comma in the arguments of a call, `isset` or `unset`
+    /// (7.3).
+    TrailingCommaInArguments,
+    /// A heredoc or nowdoc whose closing label is indented, or followed on
+    /// its line by more than a `;` (7.3).
+    FlexibleHeredoc,
+    /// `_` between the digits of a number (7.4).
+    NumericLiteralSeparator,
+    /// A trailing comma in a parameter list (8.0).
+    TrailingCommaInParameters,
+    /// A trailing comma in a closure's `use` list (8.0).
+    TrailingCommaInClosureUse,
+    /// `0o` before an octal number (8.1).
+    ExplicitOctal,
+}
+
+impl SyntaxMark {
+    pub const ALL: [SyntaxMark; 8] = [
+        SyntaxMark::ClassConstVisibility,
+        SyntaxMark::TrailingCommaInGroupedUse,
+        SyntaxMark::TrailingCommaInArguments,
+        SyntaxMark::FlexibleHeredoc,
+        SyntaxMark::NumericLiteralSeparator,
+        SyntaxMark::TrailingCommaInParameters,
+        SyntaxMark::TrailingCommaInClosureUse,
+        SyntaxMark::ExplicitOctal,
+    ];
+}
+
+/// The first place in a file of each `SyntaxMark`: PHP rejects a file at
+/// the first syntax its version lacks, so the first is all a report needs.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct SyntaxMarks([Option<Span>; SyntaxMark::ALL.len()]);
+
+impl SyntaxMarks {
+    /// Notes `mark` at `span`, unless an earlier place has it.
+    pub fn note(&mut self, mark: SyntaxMark, span: Span) {
+        let slot = &mut self.0[mark as usize];
+        if slot.is_none_or(|first| span.start < first.start) {
+            *slot = Some(span);
+        }
+    }
+
+    /// Where the file first spells `mark`.
+    pub fn first(&self, mark: SyntaxMark) -> Option<Span> {
+        self.0[mark as usize]
+    }
+
+    /// Takes in what `other` noted.
+    pub fn merge(&mut self, other: &SyntaxMarks) {
+        for mark in SyntaxMark::ALL {
+            if let Some(span) = other.first(mark) {
+                self.note(mark, span);
+            }
+        }
+    }
 }
 
 /// The identifier spellings a caller wants to know a file names, each
@@ -1045,7 +1113,25 @@ impl<'a> Lexer<'a> {
         self.slice(span)
     }
 
+    /// A number, its separators and explicit octal prefix noted in the
+    /// facts.
     fn lex_number(&mut self) -> Token {
+        let start = self.pos;
+        let token = self.lex_number_token();
+        let text = &self.src[start..self.pos];
+        let span = self.span(start, self.pos);
+        if text.contains(&b'_') {
+            self.facts
+                .syntax
+                .note(SyntaxMark::NumericLiteralSeparator, span);
+        }
+        if text.len() > 1 && text[0] == b'0' && matches!(text[1], b'o' | b'O') {
+            self.facts.syntax.note(SyntaxMark::ExplicitOctal, span);
+        }
+        token
+    }
+
+    fn lex_number_token(&mut self) -> Token {
         let start = self.pos;
         let mut is_float = false;
 

@@ -128,7 +128,10 @@ impl Parser<'_> {
                     end: self.previous_end(),
                 },
             });
-            if !self.eat(&Token::Comma) {
+            if !self.eat_list_comma(
+                &Token::RParen,
+                crate::lexer::SyntaxMark::TrailingCommaInParameters,
+            ) {
                 break;
             }
         }

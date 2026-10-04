@@ -5,7 +5,7 @@
 use crate::canonical::{Canonical, Printer};
 use crate::lexer::{FileFacts, IgnoreMark, LexWarning};
 use crate::parser::ParseError;
-use crate::span::{LineCol, Range};
+use crate::span::{LineCol, Range, Span};
 use crate::token::{Keyword, SimpleIndexKey, StringPart, Token};
 use crate::{canonical_enum, canonical_struct};
 
@@ -139,7 +139,19 @@ canonical_struct!(FileFacts {
     has_anonymous_class,
     has_nested_declaration,
     mentions,
+    syntax,
 });
+
+/// Each mark the file spells, with where it first does.
+impl Canonical for crate::lexer::SyntaxMarks {
+    fn canonical(&self, p: &mut Printer) {
+        let marks: Vec<(String, Span)> = crate::lexer::SyntaxMark::ALL
+            .into_iter()
+            .filter_map(|mark| Some((format!("{mark:?}"), self.first(mark)?)))
+            .collect();
+        p.map(marks.iter().map(|(mark, span)| (mark, span)));
+    }
+}
 
 canonical_struct!(ParseError { message, span });
 

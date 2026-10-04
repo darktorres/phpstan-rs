@@ -35,7 +35,10 @@ impl Parser<'_> {
                     },
                     by_ref: use_by_ref,
                 });
-                if !self.eat(&Token::Comma) {
+                if !self.eat_list_comma(
+                    &Token::RParen,
+                    crate::lexer::SyntaxMark::TrailingCommaInClosureUse,
+                ) {
                     break;
                 }
             }

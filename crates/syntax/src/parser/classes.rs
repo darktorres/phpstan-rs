@@ -189,6 +189,9 @@ impl Parser<'_> {
             }
 
             let mut visibility = Visibility::Public;
+            // Where a visibility modifier was written, which a constant
+            // takes only from PHP 7.1.
+            let mut written_visibility: Option<Span> = None;
             let mut write_visibility = None;
             let mut is_static = false;
             let mut is_abstract_member = false;
@@ -229,14 +232,17 @@ impl Parser<'_> {
                     }
                     Token::Keyword(Keyword::Public) => {
                         visibility = Visibility::Public;
+                        written_visibility.get_or_insert(self.current_span());
                         self.skip();
                     }
                     Token::Keyword(Keyword::Private) => {
                         visibility = Visibility::Private;
+                        written_visibility.get_or_insert(self.current_span());
                         self.skip();
                     }
                     Token::Keyword(Keyword::Protected) => {
                         visibility = Visibility::Protected;
+                        written_visibility.get_or_insert(self.current_span());
                         self.skip();
                     }
                     Token::Keyword(Keyword::Static) => {
@@ -268,6 +274,10 @@ impl Parser<'_> {
             }
 
             if self.eat(&Token::Keyword(Keyword::Const)) {
+                if let Some(span) = written_visibility {
+                    self.syntax_marks
+                        .note(crate::lexer::SyntaxMark::ClassConstVisibility, span);
+                }
                 // PHP 8.3 typed class constants: `const TYPE NAME = value;`.
                 // A type is present exactly when the name-like token here
                 // is followed by *another* identifier (the real name)
