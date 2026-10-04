@@ -234,8 +234,11 @@ impl Checker<'_> {
                 stale.push(key);
             }
         }
+        // A written place's fact goes, and with it every fact that rests on
+        // it; a read then gives what its declaration allows.
         for key in stale {
             purge_stale_narrowing_for(locals, key);
+            locals.remove(key);
         }
         for (name, shared) in
             self.shared_variables_written(&storages, anything, runs_written, &scope, locals)
