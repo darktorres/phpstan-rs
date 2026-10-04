@@ -516,7 +516,7 @@ Counted by M10's rule: a row naming a function counts what M10 charges to that f
 
 | item | allocations | share |
 |---|---|---|
-| 9, trees in typed vectors | 4.24 M | 21.8% |
+| 9, trees in typed vectors | 3.92 M | 20.2% |
 | 18, the check phase | 3.58 M | 18.4% |
 | 15, names as names | 2.76 M | 14.2% |
 | 14, PHPDoc | 2.66 M | 13.7% |
@@ -524,10 +524,10 @@ Counted by M10's rule: a row naming a function counts what M10 charges to that f
 | 13, a file's products | 1.31 M | 6.7% |
 | 16, interned values | 0.74 M | 3.8% |
 | 2, the walk and path data | 0.56 M | 2.9% |
+| 12, lexer details | 0.49 M | 2.5% |
 | 8, declarations | 0.48 M | 2.5% |
 | 6, stub records | 0.45 M | 2.3% |
 | 10, flat token arrays | 0.23 M | 1.2% |
-| 12, lexer details | 0.17 M | 0.9% |
 | 5, merge and indexes | 0.11 M | 0.6% |
 | 3, context files read into a worker's buffer | 0.06 M | 0.3% |
 | 11, line starts and ignore marks | 0.07 M | 0.3% |
@@ -1339,7 +1339,7 @@ Exact, except the semantic changes listed in §11: non-UTF-8 identifiers keep th
 - The result moves, ≈0.1-0.2 G.
 - The copies of source slices, and the second name resolution of a file the stub rules change.
 
-**Allocations: ≈4.24 M of the run's 19.4 M (M10).** Counted as M10 counts: each allocation goes to the innermost project function that is not a container, conversion or utility.
+**Allocations: ≈3.92 M of the run's 19.4 M (M10).** Counted as M10 counts: each allocation goes to the innermost project function that is not a container, conversion or utility, and to the item whose design removes it. `parse_qualified_name`'s 321,919, which a first matching by function had put here, are item 12's.
 - **What goes with the per-node allocations:**
   - every `Box<Expr>` and `Box<Stmt>`: `parse_postfix` 537,753, `parse_expr_bp_inner` 271,838, `parse_assignment_tail` 244,768, and so on;
   - every list: arguments 258,870, statements 166,525, array items 105,245, parameters 46,703, and so on;
@@ -1489,23 +1489,38 @@ Context files need line starts, for duplicate-declaration messages (`duplicate_c
    - the watch-list scan on each name new to the file;
    - the table's growth (64,311 rehashes).
    
-   The lookup is inlined into the identifier arm, and the table is item 10's scratch. A probe compares the length first. The watch list becomes a compile-time perfect-hash table of its spellings, as the keyword slots are: one probe, not a scan (`lexer.rs:240`).
-2. **Keywords by word.** The slot's spelling and the identifier (at most 16 bytes) are loaded as `u64` pairs and folded by OR with the slot's case mask, which leaves `_` and digits alone. One comparison answers both "is it the keyword" and "is it spelled in lower case", so `lex_word`'s second comparison (`lexer.rs:867`) goes. Today: 127.2 M, 73 Ir per call.
-3. **Blank runs by bitmask**, with item 11's `wide` blocks (`class_run` 100 M).
+   The lookup is inlined into the identifier arm, and the table is item 10's scratch. A probe compares the length first.
+   
+   **The watch bits are kept with the name** in the worker's cross-file name cache, computed once per distinct spelling per process. Today `WatchList::bits` scans every spelling for each name new to the file (`lexer.rs:238-250`). A scan of a dozen spellings once per distinct name costs nothing measurable, so no table is generated: a perfect hash built at compile time from four modules' lists buys nothing more, and `phf`'s SipHash would cost more (§13). The stub-attribute spellings and their `MENTIONS` bit go with item 9, which applies the stub rules while it parses a stub.
+2. **Keywords by word.** The slot's spelling and the identifier (at most 16 bytes; the longest keyword, `__halt_compiler`, is 15) are loaded as `u64` pairs. An exact comparison answers "is it the keyword, in lower case", the common case. Only when it fails, the identifier is folded by OR with the slot's case mask, which leaves `_` and digits alone, and compared again: "is it the keyword in another case". `lex_word`'s separate case comparison (`lexer.rs:867`) goes. Today: 127.2 M, 73 Ir per call.
+3. **Blank runs.** Most runs are one space, where a 16-byte block costs more than a byte test. So the byte after the first blank is tested on its own, and only a longer run, such as indentation, goes to item 11's `wide::u8x16` mask: four `cmp_eq`s against `[ \t\r\n]`, an OR, `move_mask`, `trailing_ones` (`class_run` 100 M, which tests eight bytes at a time through a table, `lexer.rs:1427-1442`). The blank class is PHP's: `\f` and `\v` are `T_BAD_CHARACTER`.
 4. **Operators without a call.** `lex_operator` costs 45 Ir per operator token over 3.7 M tokens, a third of it its own prologue and epilogue (`lexer.rs:1145`, `:1338`).
-   - A byte that is a whole operator nothing can extend (`(`, `)`, `;`, `,`, `{`, `}`, `[`, `]`, `~`, `@`) takes its kind from the byte-class table: `ByteClass::Single(TokenKind)`.
+   - A byte that is a whole operator nothing can extend (`)`, `;`, `,`, `{`, `}`, `[`, `]`, `~`, `@`) takes its kind from the byte-class table: `ByteClass::Single(TokenKind)`.
+   - **`(` can begin a cast, which PHP lexes as one token.**
+     - `( int )`, `(\tbinary)`, `(real)` and `(void)` (8.5) are `T_*_CAST` tokens: `(`, spaces and tabs only, a cast name in any case, spaces and tabs only, `)`. With a newline or a comment inside, `(\nint)$y` is not a cast, and PHP reports "syntax error, unexpected variable".
+     - Today the parser finds a cast by looking ahead over three tokens (`parser/expr.rs:522-535`), so it accepts a newline or a comment inside.
+     - The lexer makes cast tokens as PHP does, and `(` is a single-byte token only where no cast follows. The parser's lookahead goes.
+     - The checks of removed and non-canonical casts stay (`coercion.rs:49`, `:69`, `:115`). PHP 8.5 refuses `(real)` with a `ParseError` and `(unset)` with a fatal error, and deprecates `(double)`, `(integer)`, `(boolean)` and `(binary)`.
    - A byte that can begin a longer operator goes to a matcher that loads four bytes as one `u32` and compares against that byte's candidates, longest first, from a table generated with the token list.
 5. **`RefKey::Constant` keeps namespace and name apart**, so hashing and equality never search the text (`references.rs:110-132`).
 6. **`UseMap::get` stops re-validating UTF-8** (20.5 M).
 7. **Native type names are matched without a lowercase copy.** Today `NativeType::from_name` lowercases every type name to match it (`ast.rs:1068`, 135,859 allocations). It matches case-insensitively instead, by the word comparison of step 2.
-8. **A qualified name written without spaces is one token, as PHP 8 lexes it (`T_NAME_QUALIFIED`),** interned from its source slice.
+8. **A qualified name is one token, as PHP 8 lexes it** (`T_NAME_QUALIFIED`, `T_NAME_FULLY_QUALIFIED`, `T_NAME_RELATIVE` for `namespace\X`), interned from its source slice.
    - Today `parse_qualified_name` builds the name in a `String`, segment by segment, and then interns it (`tokens.rs:283-294`): 321,919 allocations.
-   - The spaced form, which PHP 7 allowed, keeps the parser's path.
+   - **The spaced form is a syntax error in PHP 8:** `new \A \ B` is "syntax error, unexpected token \"\\\"". It is accepted only where the configured versions include 7.x, and reported by item 10's versions check.
    - Item 15's round trip for qualified names is this.
 9. **Numbers with `_` separators are parsed skipping them.** Today the lexer makes a copy without the underscores (`lexer.rs:1022`).
 10. **`strip_leading_backslash` returns a slice,** not a new `String` (`name_resolution.rs:122`: 29,664).
+11. **A doc comment is what PHP calls one:** `/**` followed by a space, tab, `\r` or `\n`. `/**x*/` and `/***/` are plain comments in PHP (`token_get_all`), so `/**@var int $x*/` gives no types and reflection sees no doc. Today any `/**` not followed by `/` is a doc comment (`lexer.rs:990`). Item 10's doc rule depends on this.
+12. **Line breaks after `?>` and in heredocs are PHP's,** item 11's rule applied to two more places.
+    - `?>` takes one following line break: `\r\n`, `\n` or a lone `\r` (`?>\rX` gives `T_CLOSE_TAG("?>\r")`). Today a lone `\r` is left in the inline HTML (`lexer.rs:803-811`), which PHP does not output.
+    - A heredoc's lines end at `\n`, `\r\n` or a lone `\r`, and PHP opens and closes `<<<EOT\rhello\rEOT;` across them. Today the scanner splits body lines only at `\n` (`lexer/strings.rs:310-336`), so it misses the closing label and reads the rest of the file as the heredoc's body.
+13. **Heredoc indentation errors are reported, as PHP refuses to compile them.** A body line indented less than the closing marker is "Invalid body indentation level (expecting an indentation level of at least 2)", and tabs and spaces mixed in the indentation are "Invalid indentation - tabs and spaces cannot be mixed". `strip_heredoc_indent` (`strings.rs:784`) strips whatever it finds and reports neither.
+14. **Open tags are PHP's.**
+    - `<?php` opens PHP only before whitespace (a lone `\r` included) or the end of the file: `<?phpx echo 1;` is inline HTML. Today any case-insensitive `<?php` prefix opens it (`lexer.rs:887-897`).
+    - **`<?` is read by `short_open_tag`,** from the run-time configuration item 6 reads. PHP's default is on (`php -n`), and `php.ini-development` turns it off, so the setting decides whether `<? … ?>` is code. Today `<?` is never an open tag. When the setting is unknown, each short tag is reported as code whose meaning depends on it, and is analysed as code.
 
-**Oracle.** O1. Exact. **Saving.** ≈0.35 G. **Allocations:** ≈0.5 M (M10).
+**Oracle.** O1, and lexer tests over each of PHP's readings above, checked against `token_get_all`. Exact for steps 1-10 and the rest of step 4. Semantic for the casts, the spaced names, and steps 11-14, listed in §11. **Saving.** ≈0.35 G. **Allocations:** ≈0.49 M (M10): `parse_qualified_name` 321,919, `NativeType::from_name` 135,859, `strip_leading_backslash` 29,664, and the digit separators 582.
 
 ### 13. A file's products: the declaration list and one walk (R7; P12 steps 2-4)
 
@@ -1925,6 +1940,7 @@ Exact.
   - item 9: identifiers and docs read from a source that is not UTF-8 keep their bytes, so names that differ only in such bytes are distinct; the stub rules apply only to stub sources;
   - item 10: `__COMPILER_HALT_OFFSET__` as its file's offset, with the new check of its use elsewhere; `__halt_compiler` followed by anything but `( ) ;` or `( ) ?>` is a syntax error; a broken file's error is its first one; a declaration's doc is the one PHP gives it, with the new check of a doc given away; and the new check of source the configured versions lex differently;
   - item 11: lines end at a lone `\r` as at `\n`, and so does a `//` or `#` comment;
+  - item 12: casts as PHP's single tokens; spaced qualified names a syntax error on 8.x; doc comments only with whitespace after `/**`; `?>` and heredoc lines ending at a lone `\r`; heredoc indentation errors; `<?php` open only before whitespace, and `<?` by `short_open_tag`;
   - item 15: container-field keys canonical as PHP's array keys;
   - item 18: the rule families of §12.10.
   
@@ -1959,10 +1975,10 @@ Exact.
 | 6 | stub scope, records read on demand with per-record CRCs | ≈0.35 G, then more of `warm` | partly | ≈40 MB of heap; 0.45 M allocations | exact (1, 3, 5), semantic (2, with the stubs' versions) |
 | 7 | one relation memo, by content generation | up to ≈0.3 G | — | bounded as today; `KEEP_DECISIONS`' 1.3 MB goes | exact |
 | 8 | case references in the checker, declarations built lean | ≈0.1 G | — | both caches' entries; 0.48 M allocations | exact, except one `@property` case |
-| 9 | typed vectors, ids, `peeled` | ≈0.8-1.2 G | — | ≥53 MB of the analysed trees; 4.24 M allocations | exact, but semantic for non-UTF-8 names and the stub rules |
+| 9 | typed vectors, ids, `peeled` | ≈0.8-1.2 G | — | ≥53 MB of the analysed trees; 3.92 M allocations | exact, but semantic for non-UTF-8 names and the stub rules |
 | 10 | flat token arrays | ≈1.7 G | — | 0.23 M allocations | exact, but semantic for the halt offset, the first error, declarations' docs and the versions |
 | 11 | line starts, columns, offsets, ignore marks | ≈0.2 G | — | 0.07 M allocations | exact, but semantic for a lone `\r` |
-| 12 | lexer details, qualified names as one token | ≈0.35 G | — | 0.5 M allocations | exact |
+| 12 | lexer details, qualified names and casts as one token | ≈0.35 G | — | 0.49 M allocations | exact, but semantic for PHP's tokens (§11) |
 | 13 | declaration list, one walk, builders in scratch | ≈0.45 G | — | bodies as one slice per file; 1.31 M allocations | exact |
 | 14 | PHPDoc finished, two memos | ≈0.35 G | — | ≈50 MB; 2.66 M allocations | exact |
 | 15 | names as names | ≈0.6 G | partly | 2.76 M allocations | exact, except key corrections |
@@ -2124,6 +2140,7 @@ The rewrite made two more changes:
 | 9 | The arena's `Sync` came from an `unsafe impl`, which the workspace denies, and the name arena was not `Sync` either. The tree is changed after the parse (the stub rules, anonymous-class names, a second name resolution), and other code builds and keeps expressions. A non-UTF-8 source cannot give `&str` payloads, and its identifiers are decoded lossily today, so `class \xA9` and `class \xAA` are one class. Statement docs need only today's doc sites. The counts mixed rules: the expression clones included PHPDoc's, and M9 counted by a rule no item used. Checking the stub rules found that they apply to any file that mentions them, and for the newest PHP version only. | The tree as typed vectors addressed by `u32` ids: no `unsafe`, no lifetime, a few allocations per kept file. Chosen on merit over a safe reference arena (`bumpalo-herd` with `self_cell`): smaller nodes, exact sizes, no lifetime, dense side tables. The stub rules applied as a stub is parsed, to stubs only, recording versions that item 6's readers answer for the configured range. Anonymous-class names as a side table. Every holder of an expression listed, holding ids. Payloads as byte ranges; names as bytes (item 15) and docs lexed as bytes (item 14). Attributes kept in their node. M9 recounted by M10's rule, and item 9's counts stated by it. |
 | 10 | Lexing the whole file first would lex the data after `__halt_compiler` as PHP. Interpolated strings were to keep a sub-parser, where PHP's scanner emits their parts inline. A lexer error anywhere would still beat an earlier syntax error, where PHP reports the first. Docs attached by adjacency miss the docs PHP gives declarations. The token readers were incomplete. Allocations were counted twice, and the item's M10 row held the lexer's names and the line index's `Arc`. The lexer ignores the configured versions. | The lexer stops where PHP's does, records the offset, and `__COMPILER_HALT_OFFSET__` gets its value, with a check of its use elsewhere. String parts as inline tokens; the sub-parser, fragments and scratch streams go. Errors recorded with offsets, the first one reported. Declarations' docs by PHP's rule (only `}` clears a pending doc, as `php` showed, not `{`), with a check of a doc given away. A check of source the configured versions lex differently. Comments only on request. The row recounted to 0.23 M, with the names moved to item 16 (whose `Now` is corrected: three allocations per name, always) and the `Arc` to item 11. |
 | 11 | PHP and the editor end a line at a lone `\r`, and PHP ends a line comment there too; today neither does. Context files need columns for their lexer warnings and parse failures. The per-file cache stores the index. Open documents need their overlay. The count was 46,422, not 43,630, and fragment lexers build an empty index. | Lines and line comments end where PHP's do. Warnings and failures record their line and column on the worker. `LineStarts` in the cache, with a format bump. The overlay first. One allocation for `LineStarts`, none for fragments. |
+| 12 | Six places where our lexer reads source otherwise than PHP's: doc comments without whitespace after `/**`, a lone `\r` after `?>` and in heredocs, heredoc indentation PHP refuses, casts as one token with only spaces and tabs inside, the spaced qualified name that PHP 8 rejects, and open tags (`<?phpx`, and `<?` by `short_open_tag`). A perfect-hash watch list is not needed. Blank runs are mostly one byte. One comparison cannot answer both questions of step 2. | Each reading made PHP's, checked against `token_get_all`, and listed as semantic; the cast checks of `coercion.rs` kept. Watch bits cached with the name. Blank runs tested a byte first. The keyword comparison restated. `parse_qualified_name`'s allocations moved from item 9's row to this one. |
 
 # Appendix A. The allocation tail, every site
 
