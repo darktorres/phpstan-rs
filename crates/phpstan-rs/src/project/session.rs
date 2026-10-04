@@ -1114,9 +1114,14 @@ impl Session {
         {
             match parsed {
                 Read::Loaded(file) => {
-                    let ReadFile { source, parsed, .. } = *file;
+                    let ReadFile {
+                        len,
+                        source,
+                        parsed,
+                        cache_key: _,
+                    } = *file;
                     note_lex_warnings(path, &parsed);
-                    project.insert_numbered_file(id, path, parsed, source, false)
+                    project.insert_numbered_file(id, path, parsed, source, len, false)
                 }
                 Read::Unparsed(failure) => {
                     skipped_context += 1;
@@ -1151,7 +1156,7 @@ impl Session {
                     } = *file;
                     note_lex_warnings(path, &parsed);
                     analyze_sizes[index] = len;
-                    project.insert_numbered_file(id, path, parsed, source, true)
+                    project.insert_numbered_file(id, path, parsed, source, len, true)
                 }
                 Read::Unparsed(failure) => {
                     skipped_analyze += 1;

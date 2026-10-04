@@ -1017,7 +1017,8 @@ impl Project {
         analyzed: bool,
     ) {
         let id = self.files.id_for(&path);
-        self.insert_numbered_file(id, &path, parsed, source, analyzed);
+        let len = source.len();
+        self.insert_numbered_file(id, &path, parsed, source, len, analyzed);
     }
 
     /// Numbers `paths` before any is inserted, which a caller can do while
@@ -1038,13 +1039,15 @@ impl Project {
         numbers
     }
 
-    /// `insert_parsed_file`, for the file `id` numbers `path` as.
+    /// `insert_parsed_file`, for the file `id` numbers `path` as, `len`
+    /// bytes long: `source` is empty unless the project keeps the text.
     pub(crate) fn insert_numbered_file(
         &mut self,
         id: FileId,
         path: &Path,
         parsed: ParsedFile,
         source: String,
+        len: usize,
         analyzed: bool,
     ) {
         let ParsedFile {
@@ -1104,7 +1107,7 @@ impl Project {
             id,
             FileState {
                 kept_ast: ast.filter(|_| analyzed || !self.built_once),
-                source_len: source.len(),
+                source_len: len,
                 load_order,
                 mentions_phpstan: mentions_phpstan(&functions, &classes, &references),
                 functions,
