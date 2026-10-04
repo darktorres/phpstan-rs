@@ -35,6 +35,7 @@ mod parse_display;
 mod php_float_format;
 pub mod php_version;
 mod queries;
+mod record;
 mod relation;
 mod shape;
 mod subtype;
@@ -63,6 +64,7 @@ pub use php_version::{
     KNOWN_PHP_VERSIONS, PhpFeature, PhpVersion, PhpVersions, known_php_versions_where,
     parse_php_version,
 };
+pub use record::{record_unions, recorded_unions};
 pub use relation::{AcceptsResult, Relation};
 pub use shape::{AppendKey, NextArrayIndex, Shape, ShapeField, ShapeKey};
 pub use subtype::is_numeric_string_literal;

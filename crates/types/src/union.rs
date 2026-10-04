@@ -15,9 +15,15 @@ impl Type {
     /// The union of this type and `other`, normalized: nested unions
     /// flattened, subsumed members absorbed, `mixed` kept unknown.
     pub fn union(self, other: Type) -> Type {
-        crate::intern::memoized_owned(crate::intern::Operation::Union, self, other, |a, b| {
-            union_types_impl(a, b, None)
-        })
+        let recorded = crate::record::recording().then(|| (self.clone(), other.clone()));
+        let result =
+            crate::intern::memoized_owned(crate::intern::Operation::Union, self, other, |a, b| {
+                union_types_impl(a, b, None)
+            });
+        if let Some((a, b)) = recorded {
+            crate::record::note_union(&[&a, &b], false, &result);
+        }
+        result
     }
 }
 
@@ -30,7 +36,12 @@ impl crate::Relation<'_> {
         if a.union_members().len() + b.union_members().len() <= MAX_UNION_MEMBERS {
             return Type::union(a, b);
         }
-        union_types_impl(a, b, Some(self.hierarchy))
+        let recorded = crate::record::recording().then(|| (a.clone(), b.clone()));
+        let result = union_types_impl(a, b, Some(self.hierarchy));
+        if let Some((a, b)) = recorded {
+            crate::record::note_union(&[&a, &b], true, &result);
+        }
+        result
     }
 
     /// The union of `members`, in one normalization, with the class
@@ -40,7 +51,12 @@ impl crate::Relation<'_> {
         if width <= MAX_UNION_MEMBERS {
             return union_many(members, None);
         }
-        union_types_many(members, Some(self.hierarchy))
+        let recorded = crate::record::recording().then(|| members.clone());
+        let result = union_types_many(members, Some(self.hierarchy));
+        if let Some(operands) = recorded {
+            crate::record::note_union(&operands.iter().collect::<Vec<_>>(), true, &result);
+        }
+        result
     }
 }
 
@@ -77,11 +93,24 @@ pub(crate) fn union_many(members: Vec<Type>, hierarchy: Option<&dyn ClassHierarc
         }
         _ if hierarchy.is_none() => {
             let arguments = members.clone();
-            crate::intern::memoized_many(crate::intern::Operation::UnionMany, &arguments, || {
-                union_types_many(members, None)
-            })
+            let result = crate::intern::memoized_many(
+                crate::intern::Operation::UnionMany,
+                &arguments,
+                || union_types_many(members, None),
+            );
+            if crate::record::recording() {
+                crate::record::note_union(&arguments.iter().collect::<Vec<_>>(), false, &result);
+            }
+            result
         }
-        _ => union_types_many(members, hierarchy),
+        _ => {
+            let recorded = crate::record::recording().then(|| members.clone());
+            let result = union_types_many(members, hierarchy);
+            if let Some(operands) = recorded {
+                crate::record::note_union(&operands.iter().collect::<Vec<_>>(), true, &result);
+            }
+            result
+        }
     }
 }
 
