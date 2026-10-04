@@ -69,11 +69,10 @@ lto = false
 codegen-units = 16
 incremental = true
 
-# The debug oracles' build: `gate` with debug assertions and overflow
-# checks, so every `cfg(debug_assertions)` comparison and `debug_assert!`
-# runs over the corpus at release speed. Run with
-# `PHPSTAN_RS_NO_FILE_CACHE=1`: the per-file cache's entries carry no
-# statements for the comparisons to read.
+# The assertions' build: `gate` with debug assertions and overflow checks,
+# so every `debug_assert!` runs over the corpus at release speed. Run with
+# `PHPSTAN_RS_NO_FILE_CACHE=1`, so that every file goes through the parse
+# the assertions check, none read back from an entry.
 [profile.oracle]
 inherits = "gate"
 debug-assertions = true
