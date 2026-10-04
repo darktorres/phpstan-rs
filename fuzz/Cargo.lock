@@ -864,8 +864,6 @@ checksum = "cc4e190f5d26ca7051642629da2c52fc03bde85a03197c99408dcd291734c855"
 dependencies = [
  "equivalent",
  "hashbrown 0.17.1",
- "serde",
- "serde_core",
 ]
 
 [[package]]
@@ -1023,15 +1021,6 @@ name = "memchr"
 version = "2.8.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cf8baf1c55e62ffcace7a9f06f4bd9cd3f0c4beb022d3b367256b91b87513d98"
-
-[[package]]
-name = "mimalloc"
-version = "0.1.52"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2d4139bb28d14ad1facf21d5eb8825051b326e172d216b39f6d31df53cc97862"
-dependencies = [
- "libmimalloc-sys",
-]
 
 [[package]]
 name = "miniz_oxide"
@@ -1261,12 +1250,13 @@ dependencies = [
  "clap",
  "crc32fast",
  "crossbeam-channel",
+ "hashbrown 0.17.1",
  "hotpath",
  "imbl",
- "indexmap",
+ "libmimalloc-sys",
  "lsp-server",
  "lsp-types",
- "mimalloc",
+ "memchr",
  "pcre2-sys",
  "phpstan-rs-composer",
  "phpstan-rs-config",
@@ -1285,6 +1275,7 @@ dependencies = [
  "serde_json",
  "sqlparser",
  "toml",
+ "twox-hash",
 ]
 
 [[package]]
@@ -1328,6 +1319,7 @@ version = "0.1.0"
 dependencies = [
  "hotpath",
  "phpstan-rs-syntax",
+ "phpstan-rs-types",
  "rustc-hash",
  "serde",
 ]
@@ -1356,7 +1348,9 @@ name = "phpstan-rs-syntax"
 version = "0.1.0"
 dependencies = [
  "arbitrary",
+ "hashbrown 0.17.1",
  "hotpath",
+ "memchr",
  "rustc-hash",
  "serde",
  "stacker",
