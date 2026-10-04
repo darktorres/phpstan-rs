@@ -86,9 +86,10 @@ Each taken at one thread and at the default, which must give the same
 bytes, and recorded by commit:
 
 - `front-end-<config>/<commit>/` for the scoped, all-on, unscoped,
-  vendor-tree and arch configurations: `check-project --dump-front-end`,
-  each file's text under its BLAKE3 digest in `texts/`, gzip-compressed,
-  `index.tsv` by role and path, and `unions.gz`;
+  vendor-tree and arch configurations: `check-project --dump-front-end`'s
+  `index.tsv`, by role and path, and `unions.gz`; each file's text,
+  gzip-compressed under its BLAKE3 digest, is in `front-end-texts/`, which
+  every configuration and commit share;
 - `registry-<config>/<commit>.txt.gz`: `check-project --dump-registry`;
 - `expr-types-<config>`, `doc-resolutions-<config>`
   (`<commit>.txt.gz`): the checker's records;

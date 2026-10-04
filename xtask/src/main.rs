@@ -1266,6 +1266,9 @@ fn take_dumps(binary: &Path, hash: Option<&str>, timings: &mut Timings) -> Resul
             let _ = std::fs::remove_dir_all(&target);
             let _ = std::fs::remove_file(&target);
             std::fs::create_dir_all(target.parent().unwrap()).map_err(|e| e.to_string())?;
+            if dump.artifact.starts_with("front-end-") {
+                pool_texts(&default.join("texts"))?;
+            }
             std::fs::rename(default, &target).map_err(|e| format!("{}: {e}", target.display()))?;
         }
         let _ = std::fs::remove_dir_all(one);
@@ -1274,6 +1277,27 @@ fn take_dumps(binary: &Path, hash: Option<&str>, timings: &mut Timings) -> Resul
         let _ = std::fs::remove_file(default);
     }
     Ok(())
+}
+
+/// Moves the texts of a front-end dump into the pool every front-end dump
+/// shares (`front-end-texts/`): each is named by its digest, so a file whose
+/// text no configuration or commit changed is stored once.
+fn pool_texts(texts: &Path) -> Result<(), String> {
+    let pool = gate_dir().join("front-end-texts");
+    std::fs::create_dir_all(&pool).map_err(|e| format!("{}: {e}", pool.display()))?;
+    for entry in std::fs::read_dir(texts).map_err(|e| format!("{}: {e}", texts.display()))? {
+        let path = entry.map_err(|e| e.to_string())?.path();
+        let Some(name) = path.file_name() else {
+            continue;
+        };
+        let pooled = pool.join(name);
+        if pooled.exists() {
+            std::fs::remove_file(&path).map_err(|e| format!("{}: {e}", path.display()))?;
+        } else {
+            std::fs::rename(&path, &pooled).map_err(|e| format!("{}: {e}", pooled.display()))?;
+        }
+    }
+    std::fs::remove_dir(texts).map_err(|e| format!("{}: {e}", texts.display()))
 }
 
 /// The first file under `a` whose bytes differ from the one at the same
