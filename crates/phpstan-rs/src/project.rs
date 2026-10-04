@@ -43,6 +43,7 @@ mod duplicate_functions;
 mod file_cache;
 mod file_declarations;
 mod file_table;
+mod front_end_dump;
 mod mock_hygiene;
 pub mod session;
 pub(crate) mod use_sites;
@@ -2889,6 +2890,27 @@ fn parse_with_ignores<'a>(
     source: impl Into<syntax::Source<'a>>,
     names: Option<&mut syntax::name::NameCache>,
 ) -> Result<Parsed, ParseError> {
+    parse_recording(path, source, names, None)
+}
+
+/// What a file's parse gives that `ParsedFile` does not keep, recorded for
+/// the front-end dump.
+#[derive(Default)]
+pub(crate) struct ParseRecord {
+    pub(crate) ignore_marks: Vec<syntax::lexer::IgnoreMark>,
+    pub(crate) goto_labels: Box<[syntax::ast::GotoLabel]>,
+    // What the parse recorded of the file's references; none when a pass
+    // changed the tree after it.
+    pub(crate) references: Option<syntax::references::FileReferences>,
+}
+
+/// `parse_with_ignores`, filling `record` when given.
+fn parse_recording<'a>(
+    path: &Path,
+    source: impl Into<syntax::Source<'a>>,
+    names: Option<&mut syntax::name::NameCache>,
+    record: Option<&mut ParseRecord>,
+) -> Result<Parsed, ParseError> {
     let parsed = syntax::parse_watching(source, names, Some(&WATCHED))?;
     let ignores = ignore_comments::scan_parsed(&parsed);
     let mut ast = parsed.stmts;
@@ -2903,9 +2925,17 @@ fn parse_with_ignores<'a>(
             &parsed.line_index,
         );
     }
+    let references = (!changed).then_some(parsed.references);
+    if let Some(record) = record {
+        *record = ParseRecord {
+            ignore_marks: parsed.ignore_marks,
+            goto_labels: parsed.goto_labels,
+            references: references.clone(),
+        };
+    }
     Ok(Parsed {
         ast,
-        references: (!changed).then_some(parsed.references),
+        references,
         ignores,
         warnings: parsed.warnings,
         facts: parsed.facts,
@@ -3006,6 +3036,17 @@ pub fn parse_file_with_names<'a>(
     is_stub: bool,
     names: Option<&mut syntax::name::NameCache>,
 ) -> Result<ParsedFile, ParseError> {
+    parse_file_recording(path, source, is_stub, names, None)
+}
+
+/// `parse_file_with_names`, filling `record` when given.
+pub(crate) fn parse_file_recording<'a>(
+    path: &Path,
+    source: impl Into<syntax::Source<'a>>,
+    is_stub: bool,
+    names: Option<&mut syntax::name::NameCache>,
+    record: Option<&mut ParseRecord>,
+) -> Result<ParsedFile, ParseError> {
     let Parsed {
         ast,
         references,
@@ -3013,7 +3054,7 @@ pub fn parse_file_with_names<'a>(
         warnings: lex_warnings,
         facts,
         line_index,
-    } = parse_with_ignores(path, source, names)?;
+    } = parse_recording(path, source, names, record)?;
     let origin_path: Arc<Path> = Arc::from(path);
     let origin = Origin::File(Arc::clone(&origin_path));
     let file_declarations::FileDeclarations {
@@ -3097,6 +3138,61 @@ impl ParsedFile {
     }
 }
 
+/// Every product of the file; its lines are printed as the positions they
+/// give (`front_end_dump`).
+impl syntax::canonical::Canonical for ParsedFile {
+    fn canonical(&self, p: &mut syntax::canonical::Printer) {
+        let ParsedFile {
+            ast,
+            lex_warnings,
+            functions,
+            classes,
+            constants,
+            references,
+            declaration_references,
+            ignores,
+            built_decls,
+            pest_facts,
+            declared_classes,
+            duplicate_fn_sites,
+            anonymous_classes,
+            duplicate_class_sites,
+            bodies,
+            global_facts,
+            origin_path,
+            facts,
+            line_index: _,
+            class_fn_refs,
+            owner,
+        } = self;
+        p.node(
+            "ParsedFile",
+            &[
+                ("ast", ast),
+                ("lex_warnings", lex_warnings),
+                ("functions", functions),
+                ("classes", classes),
+                ("constants", constants),
+                ("references", references),
+                ("declaration_references", declaration_references),
+                ("ignores", ignores),
+                ("built_decls", built_decls),
+                ("pest_facts", pest_facts),
+                ("declared_classes", declared_classes),
+                ("duplicate_fn_sites", duplicate_fn_sites),
+                ("anonymous_classes", anonymous_classes),
+                ("duplicate_class_sites", duplicate_class_sites),
+                ("bodies", bodies),
+                ("global_facts", global_facts),
+                ("origin_path", origin_path),
+                ("facts", facts),
+                ("class_fn_refs", class_fn_refs),
+                ("owner", owner),
+            ],
+        );
+    }
+}
+
 /// Recursively collects every `.php` file under `path` - shared by the CLI
 /// (`main.rs`'s own subcommands) and the LSP's own workspace-loading path
 /// (`lsp.rs`'s `load_workspace`). Deliberately NOT `#[hotpath::measure]`d
@@ -3110,6 +3206,52 @@ impl ParsedFile {
 /// see that function's own doc comment for the real number this found.
 pub fn collect_php_files(path: &Path, out: &mut Vec<PathBuf>) {
     collect_php_files_excluding(path, &[], out);
+}
+
+/// Every file PHP may be run from under `path`, or `path` itself when it
+/// is one, in the order `collect_php_files` gives: one named with an
+/// extension PHP sources have (`.php`, `.inc`, `.module`, `.install`,
+/// `.theme`, `.engine`, `.profile`), or one that starts with `<?php` or
+/// `<?=`.
+pub(crate) fn collect_php_run_files(path: &Path, out: &mut Vec<PathBuf>) {
+    if path.is_dir() {
+        let Ok(entries) = fs::read_dir(path) else {
+            return;
+        };
+        let mut entries: Vec<_> = entries.flatten().map(|entry| entry.file_name()).collect();
+        entries.sort_unstable_by(|a, b| a.as_encoded_bytes().cmp(b.as_encoded_bytes()));
+        for entry in entries {
+            collect_php_run_files(&path.join(entry), out);
+        }
+    } else if is_php_run_file(path) {
+        out.push(path.to_path_buf());
+    }
+}
+
+/// See `collect_php_run_files`.
+fn is_php_run_file(path: &Path) -> bool {
+    const EXTENSIONS: [&str; 7] = [
+        "php", "inc", "module", "install", "theme", "engine", "profile",
+    ];
+    if path
+        .extension()
+        .and_then(|e| e.to_str())
+        .is_some_and(|e| EXTENSIONS.iter().any(|known| e.eq_ignore_ascii_case(known)))
+    {
+        return true;
+    }
+    let mut start = [0u8; 5];
+    let Ok(mut file) = fs::File::open(path) else {
+        return false;
+    };
+    let mut read = 0;
+    while read < start.len() {
+        match std::io::Read::read(&mut file, &mut start[read..]) {
+            Ok(0) | Err(_) => break,
+            Ok(n) => read += n,
+        }
+    }
+    start[..read].starts_with(b"<?=") || start[..read].eq_ignore_ascii_case(b"<?php")
 }
 
 /// Directory names a workspace-wide scan skips by default when no real

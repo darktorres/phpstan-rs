@@ -57,6 +57,10 @@ pub(crate) struct CheckProjectArgs {
     /// every analysed file to this path (a regression-gate snapshot).
     #[arg(long, hide = true)]
     pub(crate) dump_types: Option<PathBuf>,
+    /// Writes the front end's dump of every file and embedded stub into
+    /// this directory and stops (a regression-gate snapshot, O1).
+    #[arg(long, hide = true)]
+    pub(crate) dump_front_end: Option<PathBuf>,
     /// Prints each file's diagnostics in the order the checks emitted them
     /// (a determinism check), not the usual total order.
     #[arg(long, hide = true)]
@@ -125,6 +129,21 @@ pub(crate) fn run_check_project_command(args: CheckProjectArgs) {
     };
     for notice in run.notices() {
         eprintln!("{notice}");
+    }
+    if let Some(out) = &args.dump_front_end {
+        match run.session.dump_front_end(out) {
+            Ok(dump) => eprintln!(
+                "front end: {} files, {} unions, in {}",
+                dump.files,
+                dump.unions,
+                out.display()
+            ),
+            Err(e) => {
+                eprintln!("{e}");
+                std::process::exit(1);
+            }
+        }
+        return;
     }
     // A file whose parse or check panics is reported per file; don't also
     // print each caught panic's default message.

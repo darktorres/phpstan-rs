@@ -17,10 +17,12 @@ types.workspace = true
 postcard.workspace = true
 twox-hash.workspace = true
 arrayvec.workspace = true
+blake3 = "=1.8.7"
 crc32fast.workspace = true
 clap = { version = "=4.6.7", features = ["derive"] }
 crossbeam-channel = "=0.5.17"
 dhat = { version = "=0.3.3", optional = true }
+flate2 = "=1.1.10"
 hashbrown.workspace = true
 hotpath.workspace = true
 imbl.workspace = true

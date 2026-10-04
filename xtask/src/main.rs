@@ -19,7 +19,6 @@ use std::process::{Command, ExitCode, Stdio};
 use std::time::Instant;
 
 mod arch;
-mod front_end;
 mod modgraph;
 mod stub_index;
 #[cfg(test)]
@@ -41,7 +40,6 @@ fn main() -> ExitCode {
         Some("tests") => test_manifest(),
         Some("modgraph") => modgraph::modgraph(&root(), &args[1..]),
         Some("arch") => arch::arch(&root()),
-        Some("front-end-dump") => front_end::front_end_dump(&args[1..]),
         Some("stub-index") => write_stub_index(),
         Some("baseline") => baseline_generate(),
         Some("approve") => approve(&args[1..]),
@@ -73,10 +71,6 @@ const USAGE: &str = "usage: cargo xtask <command>
                          gates/module-graph.txt (--inventory lists every
                          crossing edge)
   arch                   check the architecture rules
-  front-end-dump <dir>... [--show <file>]
-                         one line for each PHP file under the directories:
-                         its path and a hash of what the lexer and the
-                         parser make of it (--show prints one file whole)
   stub-index             regenerate crates/stub-sources/index.tsv
   baseline               generate the reference baselines (Stage A only)
   approve <slug> [--full] [--against <commit>]

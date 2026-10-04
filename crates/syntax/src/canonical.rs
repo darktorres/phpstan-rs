@@ -21,6 +21,7 @@ use std::sync::Arc;
 
 use crate::name::Name;
 use crate::php_string::PhpString;
+use crate::references::{DocFrame, DocSite};
 use crate::span::Span;
 
 mod tokens;
@@ -49,6 +50,16 @@ pub struct Printer {
 }
 
 impl Printer {
+    /// What has been written.
+    pub fn finish(self) -> String {
+        self.out
+    }
+
+    /// Starts a new line at the current depth.
+    pub fn line(&mut self) {
+        self.newline();
+    }
+
     /// Writes `text` on the current line.
     pub fn atom(&mut self, text: &str) {
         self.out.push_str(text);
@@ -506,6 +517,15 @@ impl Canonical for crate::references::RefKey {
         p.tuple(kind, &[name]);
     }
 }
+
+crate::canonical_struct!(DocSite {
+    doc,
+    pos,
+    outside,
+    scope,
+});
+
+crate::canonical_struct!(DocFrame { doc, start, end });
 
 impl Canonical for Span {
     fn canonical(&self, p: &mut Printer) {

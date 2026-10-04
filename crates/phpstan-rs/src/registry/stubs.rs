@@ -53,8 +53,8 @@ use crate::registry::{
 use types::{self, AccessoryKind, Shape, TemplateParam, Type};
 
 use stub_sources::{
-    PHPSTAN_SRC_PATHS, PHPSTAN_SRC_SOURCES, PHPSTAN_STUB_SOURCES, PHPSTORM_STUBS_EXTENSIONS,
-    PHPSTORM_STUBS_PATHS, PHPSTORM_STUBS_SOURCES,
+    PHPSTAN_SRC_PATHS, PHPSTAN_SRC_SOURCES, PHPSTAN_STUB_PATHS, PHPSTAN_STUB_SOURCES,
+    PHPSTORM_STUBS_EXTENSIONS, PHPSTORM_STUBS_PATHS, PHPSTORM_STUBS_SOURCES,
 };
 
 /// phpstorm-stubs' own real (and, per real PHP's own C-level `arg_info`,
@@ -1366,7 +1366,7 @@ fn patch_datetime_fluent_returns(classes: &mut [(Name, ClassReflection)]) {
 }
 
 /// One stub file's declarations, in the order its registry yields them.
-struct StubFileDeclarations {
+pub(crate) struct StubFileDeclarations {
     functions: Vec<(Name, FunctionReflection)>,
     classes: Vec<(Name, ClassReflection)>,
     constants: Vec<(Name, Type)>,
@@ -1374,15 +1374,77 @@ struct StubFileDeclarations {
     references: rustc_hash::FxHashSet<String>,
 }
 
+syntax::canonical_struct!(StubFileDeclarations {
+    functions,
+    classes,
+    constants,
+    references,
+});
+
+/// Every embedded stub source the stub build reads, with the path it is
+/// known by and its origin: phpstorm-stubs, PHPStan's sources, and
+/// PHPStan's own stubs, whose classes patch the others'.
+pub(crate) fn embedded_stub_files() -> Vec<(String, &'static str, Origin)> {
+    let builtins = PHPSTORM_STUBS_SOURCES
+        .iter()
+        .zip(PHPSTORM_STUBS_PATHS)
+        .zip(PHPSTORM_STUBS_EXTENSIONS)
+        .map(|((source, file), extension)| {
+            (
+                format!("phpstorm-stubs/{file}"),
+                *source,
+                Origin::Builtin { file, extension },
+            )
+        });
+    let phpstan = PHPSTAN_SRC_SOURCES
+        .iter()
+        .zip(PHPSTAN_SRC_PATHS)
+        .map(|(source, file)| {
+            (
+                format!("phpstan-src/src/{file}"),
+                *source,
+                Origin::Phpstan { file },
+            )
+        });
+    let phpstan_stubs =
+        PHPSTAN_STUB_SOURCES
+            .iter()
+            .zip(PHPSTAN_STUB_PATHS)
+            .map(|(source, file)| {
+                (
+                    format!("phpstan-src/stubs/{file}"),
+                    *source,
+                    Origin::Unknown,
+                )
+            });
+    builtins.chain(phpstan).chain(phpstan_stubs).collect()
+}
+
+/// The tree of an embedded stub source as the stub build reads it: parsed,
+/// with the stub attributes applied.
+pub(crate) fn stub_program(
+    source: &str,
+) -> Result<Vec<syntax::ast::Stmt>, syntax::parser::ParseError> {
+    let mut program = syntax::parse(source.as_bytes())?.stmts;
+    crate::stub_attributes::apply_stub_attributes(&mut program);
+    Ok(program)
+}
+
 /// Parses and indexes one embedded stub file, from `origin`.
 fn index_stub_file(source: &str, origin: &Origin) -> StubFileDeclarations {
-    let mut program = syntax::parse(source.as_bytes())
-        .expect("vendored phpstorm-stubs source failed to parse")
-        .stmts;
-    crate::stub_attributes::apply_stub_attributes(&mut program);
-    let registry = Registry::index_and_flatten(&program, origin);
+    let program = stub_program(source).expect("vendored phpstorm-stubs source failed to parse");
+    index_stub_program(&program, origin)
+}
+
+/// What the stub build takes of an embedded stub file's tree, `program`,
+/// from `origin`.
+pub(crate) fn index_stub_program(
+    program: &[syntax::ast::Stmt],
+    origin: &Origin,
+) -> StubFileDeclarations {
+    let registry = Registry::index_and_flatten(program, origin);
     StubFileDeclarations {
-        references: crate::deps::referenced_names(&program)
+        references: crate::deps::referenced_names(program)
             .iter()
             .filter_map(crate::deps::RefKey::stub_key)
             .map(str::to_string)

@@ -686,3 +686,33 @@ impl VisitorMut for Resolver {
 
 #[cfg(test)]
 mod tests;
+
+/// The namespace and the imports; not the version, which only numbers the
+/// context within one run.
+impl crate::canonical::Canonical for NameContext {
+    fn canonical(&self, p: &mut crate::canonical::Printer) {
+        let NameContext {
+            version: _,
+            namespace,
+            use_map,
+        } = self;
+        p.node(
+            "NameContext",
+            &[("namespace", namespace), ("uses", use_map)],
+        );
+    }
+}
+
+crate::canonical_struct!(UseMap {
+    classes,
+    functions,
+    constants,
+});
+
+/// The name an import is known by.
+impl<const FOLDED: bool> crate::canonical::Canonical for ImportKey<FOLDED> {
+    fn canonical(&self, p: &mut crate::canonical::Printer) {
+        let ImportKey { name, from } = self;
+        p.name(&name[*from..]);
+    }
+}

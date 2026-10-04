@@ -46,19 +46,42 @@ pub fn referenced_names(stmts: &[Stmt]) -> FxHashSet<RefKey> {
 pub fn recorded_references(
     references: syntax::references::FileReferences,
 ) -> (FxHashSet<RefKey>, FxHashSet<RefKey>) {
+    let found: Vec<(bool, Vec<RefKey>)> = doc_site_references(&references)
+        .into_iter()
+        .map(|(site, keys)| (site.outside, keys))
+        .collect();
     let syntax::references::FileReferences {
         mut names,
         mut outside,
-        doc_sites,
-        doc_frames,
+        doc_sites: _,
+        doc_frames: _,
     } = references;
-    let mut sites: Vec<&syntax::references::DocSite> = doc_sites.iter().collect();
+    for (is_outside, keys) in found {
+        for key in keys {
+            if is_outside {
+                outside.insert(key.clone());
+            }
+            names.insert(key);
+        }
+    }
+    (names, outside)
+}
+
+/// Each doc site of `references`, in the order of the file, with what the
+/// names in its tags refer to: each name resolved where the site is and as
+/// written, the templates the site and its enclosing functions and classes
+/// declare left out.
+pub(crate) fn doc_site_references(
+    references: &syntax::references::FileReferences,
+) -> Vec<(&syntax::references::DocSite, Vec<RefKey>)> {
+    let mut sites: Vec<&syntax::references::DocSite> = references.doc_sites.iter().collect();
     sites.sort_by_key(|site| site.pos);
-    let mut frames: Vec<&syntax::references::DocFrame> = doc_frames.iter().collect();
+    let mut frames: Vec<&syntax::references::DocFrame> = references.doc_frames.iter().collect();
     frames.sort_by_key(|frame| frame.start);
     let mut frames = frames.into_iter().peekable();
     // The frames the site being read is within, outermost first.
     let mut enclosing: Vec<&syntax::references::DocFrame> = Vec::new();
+    let mut out = Vec::with_capacity(sites.len());
     for site in sites {
         while let Some(frame) = frames.next_if(|frame| frame.start < site.pos) {
             while enclosing.last().is_some_and(|last| last.end <= frame.start) {
@@ -70,6 +93,7 @@ pub fn recorded_references(
             enclosing.pop();
         }
         let parsed = doc_names_of(&site.doc);
+        let mut keys = Vec::new();
         for token in &parsed.tokens {
             if parsed.declared.contains(token)
                 || enclosing
@@ -78,18 +102,12 @@ pub fn recorded_references(
             {
                 continue;
             }
-            for key in [
-                RefKey::class_text(&site.scope.resolve(token)),
-                RefKey::class_text(token),
-            ] {
-                if site.outside {
-                    outside.insert(key.clone());
-                }
-                names.insert(key);
-            }
+            keys.push(RefKey::class_text(&site.scope.resolve(token)));
+            keys.push(RefKey::class_text(token));
         }
+        out.push((site, keys));
     }
-    (names, outside)
+    out
 }
 
 /// `referenced_names` and `declaration_referenced_names`, in one walk.

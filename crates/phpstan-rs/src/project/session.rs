@@ -603,9 +603,20 @@ impl Session {
     /// joined with its path below it - the same spelling the command line
     /// gave - while the walk itself happens under the root.
     fn collect_php_files(&self, dir: &Path, out: &mut Vec<PathBuf>) {
+        self.collect_files(dir, out, super::collect_php_files);
+    }
+
+    /// The files `walk` finds under `dir`, spelled as `collect_php_files`
+    /// spells them.
+    fn collect_files(
+        &self,
+        dir: &Path,
+        out: &mut Vec<PathBuf>,
+        walk: fn(&Path, &mut Vec<PathBuf>),
+    ) {
         let walked = self.root.join(dir);
         let mut found = Vec::new();
-        super::collect_php_files(&walked, &mut found);
+        walk(&walked, &mut found);
         out.extend(
             found
                 .into_iter()
@@ -693,6 +704,129 @@ impl Session {
             parsed,
             cache_key,
         }))
+    }
+
+    /// Writes O1, the front end's dump (`front_end_dump`), into `out`: each
+    /// file PHP may be run from under the analysed paths, the context paths
+    /// and the stub paths, parsed as the load parses it, with the names a
+    /// job of the load shares; and each embedded stub, as the stub build
+    /// reads it. `out/index.tsv` has a line for each file and role - the
+    /// role, the path, its text's BLAKE3 digest and length - sorted, each
+    /// text is `out/texts/<digest>.gz`, and the unions built while the files
+    /// were read are `out/unions.gz`, one a line, sorted.
+    pub fn dump_front_end(&self, out: &Path) -> Result<FrontEndDump, String> {
+        let mut analysed = Vec::new();
+        for dir in &self.dirs {
+            self.collect_files(dir, &mut analysed, super::collect_php_run_files);
+        }
+        let mut scan_dirs = self.scan_dirs.clone();
+        let mut context: Vec<PathBuf> = self.scan_files.clone();
+        for vendor in &self.vendors {
+            let found = vendor.get();
+            scan_dirs.extend(found.dirs.iter().filter(|d| !self.is_promoted(d)).cloned());
+            context.extend(found.files.iter().filter(|f| !self.is_promoted(f)).cloned());
+        }
+        for dir in &scan_dirs {
+            self.collect_files(dir, &mut context, super::collect_php_run_files);
+        }
+        let mut stubs = Vec::new();
+        for dir in &self.stub_dirs {
+            self.collect_files(dir, &mut stubs, super::collect_php_run_files);
+        }
+        let stubs: FxHashSet<PathBuf> = stubs.into_iter().collect();
+        let files: Vec<(&'static str, &PathBuf)> = context
+            .iter()
+            .map(|path| ("context", path))
+            .chain(analysed.iter().map(|path| ("analysed", path)))
+            .collect();
+
+        let mut project = Project::new();
+        self.configure(&mut project);
+        let index_use_sites = project.check_settings().rules.check_dead_code;
+        let retain_source = self.settings.retain_source;
+        types::record_unions();
+        let (dumped, embedded): (Vec<DumpedText>, Vec<DumpedText>) = self.pool.install(|| {
+            rayon::join(
+                || {
+                    files
+                        .par_iter()
+                        .map_init(syntax::name::NameCache::default, |names, (role, path)| {
+                            let is_stub = stubs.contains(path.as_path());
+                            let role = if is_stub {
+                                format!("{role} stub")
+                            } else {
+                                role.to_string()
+                            };
+                            let text = std::fs::read(self.root.join(path)).ok().map(|bytes| {
+                                let source = if retain_source {
+                                    String::from_utf8_lossy(&bytes).into_owned()
+                                } else {
+                                    String::new()
+                                };
+                                super::front_end_dump::dump_file(
+                                    path,
+                                    &bytes,
+                                    is_stub,
+                                    names,
+                                    &project,
+                                    index_use_sites,
+                                    &source,
+                                )
+                            });
+                            (role, path.display().to_string(), text)
+                        })
+                        .collect()
+                },
+                || {
+                    crate::registry::stubs::embedded_stub_files()
+                        .par_iter()
+                        .map(|(path, source, origin)| {
+                            (
+                                "embedded".to_string(),
+                                path.clone(),
+                                Some(super::front_end_dump::dump_embedded_stub(source, origin)),
+                            )
+                        })
+                        .collect::<Vec<_>>()
+                },
+            )
+        });
+        let unions = types::recorded_unions();
+
+        let texts = out.join("texts");
+        std::fs::create_dir_all(&texts).map_err(|e| format!("{}: {e}", texts.display()))?;
+        let written: Vec<Result<String, String>> = self.pool.install(|| {
+            dumped
+                .into_par_iter()
+                .chain(embedded)
+                .map(|(role, path, text)| {
+                    let Some(text) = text else {
+                        return Ok(format!("{role}\t{path}\tunread\t0"));
+                    };
+                    let digest = blake3::hash(text.as_bytes()).to_hex().to_string();
+                    let file = texts.join(format!("{digest}.gz"));
+                    if !file.exists() {
+                        write_gzip(&file, text.as_bytes())?;
+                    }
+                    Ok(format!("{role}\t{path}\t{digest}\t{}", text.len()))
+                })
+                .collect()
+        });
+        let mut lines = written
+            .into_iter()
+            .collect::<Result<Vec<String>, String>>()?;
+        lines.sort_unstable();
+        let files = lines.len();
+        let index = out.join("index.tsv");
+        std::fs::write(&index, lines.join("\n") + "\n")
+            .map_err(|e| format!("{}: {e}", index.display()))?;
+        let mut union_text = unions.join("\n");
+        union_text.push('\n');
+        write_gzip(&out.join("unions.gz"), union_text.as_bytes())?;
+        Ok(FrontEndDump {
+            files,
+            unions: unions.len(),
+        })
     }
 
     /// Loads and checks every analysed file, with the `--dump-types`
@@ -995,4 +1129,31 @@ impl Session {
             type_dump,
         }
     }
+}
+
+/// A file's role, its path and its dump; none when it cannot be read.
+type DumpedText = (String, String, Option<String>);
+
+/// What `Session::dump_front_end` wrote.
+pub struct FrontEndDump {
+    /// The lines of the index: one for each file and role.
+    pub files: usize,
+    /// The unions recorded.
+    pub unions: usize,
+}
+
+/// Writes `bytes` gzip-compressed to `path`, with no name or time in the
+/// header, so equal bytes give an equal file.
+fn write_gzip(path: &Path, bytes: &[u8]) -> Result<(), String> {
+    use std::io::Write as _;
+    let file = std::fs::File::create(path).map_err(|e| format!("{}: {e}", path.display()))?;
+    let mut encoder = flate2::GzBuilder::new().mtime(0).write(
+        std::io::BufWriter::new(file),
+        flate2::Compression::default(),
+    );
+    encoder
+        .write_all(bytes)
+        .and_then(|()| encoder.finish())
+        .and_then(|mut writer| writer.flush())
+        .map_err(|e| format!("{}: {e}", path.display()))
 }

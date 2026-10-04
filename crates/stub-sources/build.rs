@@ -136,6 +136,12 @@ fn main() {
         &vendor.join("phpstan-src/src"),
     );
     write_source_array(&mut generated, "PHPSTAN_STUB_SOURCES", &phpstan_stub_files);
+    write_path_array(
+        &mut generated,
+        "PHPSTAN_STUB_PATHS",
+        &phpstan_stub_files,
+        &vendor.join("phpstan-src/stubs"),
+    );
 
     let out_dir = std::env::var("OUT_DIR").unwrap();
     fs::write(Path::new(&out_dir).join("stub_sources.rs"), generated).unwrap();
