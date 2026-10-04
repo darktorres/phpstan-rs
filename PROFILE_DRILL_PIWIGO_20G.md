@@ -793,6 +793,32 @@ Running the validation showed its own overlap:
 
 Step 3's one pass replaces them. The dumps' runs also share the machine now: a worker per core from one queue (`df6a29ed`), and `cargo xtask progress` shows a pass as it runs (`cbd2a397`). Each checkout keeps its own `.corpus-runs/gate`, where a linked worktree wrote into the main checkout's and shared its scratch (`e58fadf4`).
 
+**Fast validation.** Most of the pass's runs are the 206 edit replays, two each, and the 205 vendor projects. Callgrind of one of each, `vendor/amphp/amp` (26 files), as the pass runs it, warm (`~/.cache/prs-profile/cl-pass-runs-dc4da9a2`, with its binaries, script and README):
+- **A vendor project's run: 393 M instructions, 0.53 s, 336 MB.** 283 M of the main thread's 300 M are the whole-program passes walking the stub base:
+  - `find_dead_functions` takes every function's name (`dead_code.rs:50-62`) and asks each unreferenced one for its declaration site, which decodes 5,256 stub functions to find none (`function_declaration`, 47 M; 11,519 function decodes, 121 M);
+  - `find_dead_classes`, dead members (`dead_members.rs:200`), dead enum cases (`dead_enum_cases.rs:54`), dead abstract classes (`dead_abstract_classes.rs:37`) and the namespace cycles (`circular_namespace_deps.rs:57`) iterate `registry.classes`, which decodes the 1,520 stub classes (49 M) and asks each for its ancestors (10,576 `all_ancestor_names`, 9,298 `is_subclass_of`);
+  - inside those decodes, 121,000 name internings (33 M) and 74,000 type internings (25 M).
+  
+  The effects take 45 M of a finish (below). The project's own parse and check are 40 M.
+- **A replay: 1.98 G instructions, 0.33 s, 129 MB.** The main thread's 1.66 G are mostly the dumps:
+  - the registry dumps, 871 M over ten: the difference from the base iterates every base entry of every table, set and map, which decodes the base once per table (3,058 class and 5,256 function decodes) and looks up each name (154,000 `find_by`);
+  - gzip at the default level, 628 M: eight 1.1 MB dumps, compressed in each run, the one-thread run's only to be compared and deleted;
+  - the canonical printer quotes and writes names a character at a time (`quote_bytes` 39.5 M, `write_name` 17.5 M);
+  - the work itself: rechecks 78 M, `update_file` 58 M, and five finishes of about 45 M each on other threads.
+- **Every finish resolves the effects through every stub subclass.** For a call of a builtin method, `builtin_runs` looks for overrides on the receiver and every subclass (`effects.rs:1033-1044`), stub classes included, which declare no body: 23,232 `lookup_method_with_owner` per finish (21 M of its 29 M of classification).
+- **Every process parses the builtin-runs table** (`builtin-runs-8.5.tsv`, `effects.rs:320-323`): 9.8 M, in each of the pass's ≈ 1,000 processes.
+
+The design, each step exact:
+1. **The whole-program passes read the project's declarations.** Each pass iterates the declarations the project's files make, the only ones a report is placed at: a stub declaration has no site, and none is reported today. Ancestry and member lookups still read the stub classes they reach, on demand.
+2. **A builtin method's overrides are found among the classes with bodies.** The finishing passes index, for each builtin class, the loaded classes with bodies that descend from it; `builtin_runs` reads that index instead of every subclass.
+3. **The builtin-runs table is built at compile time:** `build.rs` turns the TSV into static sorted tables, read with no parse and no allocation.
+4. **The registry dump's difference from the base costs the project's own entries.** When a table, map or set reads from the base's very storage, its difference is its own entries that differ from the base's and the hidden names it does not replace; the full comparison stays for one that does not. A test prints every table of a loaded project both ways and requires the same text.
+5. **No compression inside a run.** The replays and the runner write their dumps as text into the pass's scratch, where the pass compares them; only what it records is compressed, with `zstd`, which `compare` already reads. The binary's dump flags write text too.
+6. **The canonical printer copies runs of plain bytes** where it quotes text and writes names, instead of a character at a time.
+7. **Measured again** with the same script, and the whole pass's wall time recorded.
+
+Expected: a vendor project's run near 80 M instructions and a replay near 0.4 G, from 393 M and 1.98 G.
+
 **Oracle.** None beyond §11 for the dumps and the deletions: they leave release behaviour as it is. The fixes found in step 1 are semantic, read in 0.11 against `5fb858c9`'s reports.
 
 ### 1. One session for the CLI, the language server and the tests
