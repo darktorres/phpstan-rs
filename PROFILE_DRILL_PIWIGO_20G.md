@@ -493,7 +493,7 @@ Counted by M10's rule: a row naming a function counts what M10 charges to that f
 
 | sites | allocations | item |
 |---|---|---|
-| `Name::to_string` | 507,745 | 15 |
+| `Name::to_string` | 677,480 | 15 |
 | `bind_arguments`, `check_parameters`, `resolve_call_args` (39 MB: each rule binds the same call's arguments again) | 738,109 | 18 |
 | `class_template_bindings_rec`, its `HashMap<String, Type>`s (24 MB) | 328,384 | 15 |
 | `check_expr_impl`, `forwards_static_binding`, `type_check_call_outcome`, `identifier_unresolvable`, mostly lowercase copies | 593,987 | 15 |
@@ -1692,7 +1692,7 @@ Exact otherwise. **Saving.** ≈0.35 G, and the second parse of every doc (144.0
 **Now.**
 - `fold_hash` and `is_folded_eq` cost 701 M: lookups by `&str` whose callers hold text where a `Name` existed.
 - `Interner::name` runs 1.42 M times on text whose `Name` existed a moment before.
-- 1.33 M `String`s are cloned to carry identifiers.
+- 1.33 M `String`s are cloned: ≈0.6 M of them PHPDoc's (item 14) and 0.19 M `resolve_transitive_purity`'s (item 4). The ≈0.5 M left carry identifiers through the checker and the registry.
 
 **Design.**
 - **C3 step 7.** The checker's method memo (`checker.rs:271`, keyed by `String`) and `class_memo` are deleted.
@@ -1706,30 +1706,46 @@ Exact otherwise. **Saving.** ≈0.35 G, and the second parse of every doc (144.0
     - `statement_assigned_variable_names`, which turns each assigned variable's `Name` into a `String` for every statement (`stmt.rs:1656`);
     - `init_flow`'s property names (`Vec<(bool, String)>`);
     - `global_vars`' keys, which become `ArrayKey`s (`global_vars.rs:52`, `:109`, `:177`, `:201`);
-  - the round trips through the interner:
+  - the round trips through the interner (counts in parentheses are interning calls, not allocations):
     - the parser's `ident_from` re-interns a `Name` the lexer gave it (`parser/tokens.rs:194`);
-    - qualified names and `use` paths go through the global interner where P12 designed the lexer's tables (`parse_qualified_name` 94 K, `use_path` 63 K);
+    - qualified names are one token, interned from their source slice (item 12, step 8; `parse_qualified_name` 94 K calls today), and so are `use` paths (`use_path` 63 K). A group `use A\{B, C}`'s member, the one name still joined from parts, is found by the interner hashing the prefix and the member as one text, as `qualify` is below;
     - `resolve_name_expr` builds a `String` and interns it (96 K);
     - `bind_self` re-interns the class (65 K);
     - the key table resolves property names through text (37 K);
   - then `narrowing`, `calls`, member-usage tokens, `project`, `types` and `phpdoc` by module.
 - **The end state** deletes `TableKey for str` and `FoldKey for str` from the registry. The compiler then lists every caller still holding text. Text that enters from outside (configuration, a class named in a string literal) is interned once where it enters.
 - **A name is its bytes.** PHP's identifiers are bytes: the lexer takes any byte from `0x80` up, and `class \xA9` and `class \xAA` are two classes (item 9).
-  - `Name` holds `[u8]` and compares with PHP's ASCII-only case folding, as it does today (`name.rs:41`).
-  - It gives text only for display, where a byte outside valid UTF-8 prints as `\xA9`, in messages and in JSON alike.
-  - A string value used as a name (`class_exists`, `new $class`, a callable string) becomes a `Name` from its `PhpString` bytes, so it finds a class whatever its bytes.
-  - `Deref<Target = str>` goes, and the compiler lists every reader of a name as text.
-- **A short name is a slice** of the name, at the offset of its last segment, which item 16 stores in the name's header (the 50.9 M of `rsplit` in `check_expr_impl`).
+  - `Name` holds `[u8]` and compares with PHP's ASCII-only case folding, as it does today (`name.rs:41`). `Deref<Target = str>` goes, and the compiler lists every reader of a name as text.
+  - **Where a name's text is shown, a byte outside valid UTF-8 is `\x{A9}`.**
+    - `\xA9` would be ambiguous, since `\` is PHP's namespace separator: in `php` 8.5, `namespace Foo; class xA9 {} class \xA9 {}` declares two classes, `466f6f5c784139` and `466f6f5ca9`, and both would print as `Foo\xA9`.
+    - A `{` occurs in no PHP name, so `\x{A9}` maps back to exactly one name. A synthetic anonymous-class name, the one name that can hold a `{` through its path, spells it `\x{7B}`.
+    - One escape serves everything that shows a name as text: messages, the text and JSON formats, baselines (which match by message, `baseline.rs:111-159`), the type printer, item 0's dumps and the server's strings. `parse_display` decodes it, so the gate's type drift reads names back exactly (`gate/type_drift.rs:196-197`).
+  - **A fix holds bytes.** Today `DiagnosticFix` carries `replacement` and `within` as `String`s (`diagnostics/src/lib.rs:172-177`), built from canonical names (`name_case_fix`, `checker/resolve.rs:403-424`), and `apply_fixes` writes them into the file (`fix.rs:44`). An escaped name written there would be read by PHP as a namespace separator and other letters. So `replacement` and `within` are bytes, built from the name's bytes, and `apply_fixes` and `resolve_span` work on bytes, with PHP's word bytes `[A-Za-z0-9_\x80-\xff]`. Today `resolve_span` gives up on a region that is not UTF-8 and finds words with Unicode's `is_alphanumeric` (`fix.rs:13-14`). The JSON view shows a fix with the escape.
+  - **`Name` serializes its bytes** when the format is not human-readable (`serialize_bytes`, interned from the bytes), and the escape when it is. Today it writes and reads a `str` (`name.rs:186-206`), so a lossy decode would merge `\xA9` and `\xAA` on every warm load. Format bump for both caches.
+  - **A run-time string becomes a name as PHP reads one,** through one conversion, `syntax::name::from_runtime(&PhpString, Kind)`. `php` 8.5 shows the rules:
+    - exactly one leading `\` is stripped: `class_exists("\\NS\\C")` is true, and with two leading backslashes it is false;
+    - nothing is trimmed: a leading or trailing space finds nothing;
+    - a class or function name folds ASCII only: `class_exists("ns\\c")` is true, while a class `\xC9t\xE9` is not found as `\xE9t\xE9`;
+    - a constant's namespace folds and its name does not: `defined("ns\\C1")` is true, `defined("NS\\c1")` false (C3's `ConstName`);
+    - a callable string splits at the first `::`.
+    
+    Every reader of a string as a name goes through it: `class_exists`, `function_exists`, `defined`, `constant`, `new $s`, `$s::`, callable strings and arrays, and `is_a` and `is_subclass_of` with a string. Today `callable_values.rs:40`, `:89` and `visibility.rs:251` strip every leading backslash (`trim_start_matches('\\')`), and `as_str()?` (`callable_values.rs:34`, `:52`, `:66`, `visibility.rs:251`) drops a string that is not UTF-8.
+  - **Names fold ASCII only everywhere.** Unicode's `to_lowercase` folds names at `oop/attributes.rs:182` (repeated attributes), `restricted_symbol_usage.rs:197`, `:446`, `:629`, `:637` and `restricted_symbols.rs:390`, `:393`, `:398`, so `Été` and `éTé` match there, which PHP does not.
+  - **An open document keeps its file's bytes.** The editor sends a document's text as JSON strings, already decoded, and nothing in the server knows a file's encoding today. A file stored as Latin-1 with `class caf\xE9`, opened as Latin-1, arrives as `café`, which is `caf\xC3\xA9`, so the server alone would report the class as not found.
+    - At `didOpen`, when the file's bytes on disk are not UTF-8, the server tries the encodings `encoding_rs` decodes (0.8.42, WHATWG labels: windows-1252, ISO-8859-x, Shift_JIS, …). The document's encoding is one whose lossless decoding of the disk bytes equals the editor's text (`decode_without_bom_handling_and_without_replacement`).
+    - Every later version of the document is encoded back with it (`encode`), so names keep the bytes PHP will read. A fix is offered as an edit only when its bytes are text in that encoding; otherwise the diagnostic stands without the code action.
+    - When no encoding matches, the document is analysed as UTF-8, with a diagnostic saying its non-ASCII names may not match the file on disk.
+- **A short name is a slice** of the name, at the offset of its last segment (the 50.9 M of `rsplit` in `check_expr_impl`). `NameData` gains `last_segment: u32`, set when the name is made: the byte after its last `\`, which PHP's lexer takes as a separator in any encoding. Item 16 moves it into the header.
 
 The purity and property-write keys went by item 4, as ids.
 
-**Oracle.** O2, `registry-dump`, `--dump-types`, `--dump-expr-types`. Exact, except the container-field facts' keys becoming canonical array keys (C4 step 5: `'1'` and `1` one key), listed in §11. Static-property keys by resolved class are already built (`2d1e6c45`). **Saving.** ≈0.6 G.
+**Oracle.** O2, `registry-dump`, `--dump-types`, `--dump-expr-types`, every cache state, the server session, and a fixture checked against `php`: `class \xA9` beside `class \xAA`, `Foo\xA9` in ASCII beside `Foo\` followed by the byte `0xA9`, `Été` beside `éTé`, string names with zero, one and two leading backslashes, and a Latin-1 document opened in the server. Exact, except the changes listed in §11: names that differ only in bytes outside UTF-8 are distinct and print with `\x{NN}`; names fold ASCII only where Unicode's lowercasing was used; string values name classes, functions and constants by PHP's rules; and the container-field facts' keys become canonical array keys (C4 step 5: `'1'` and `1` one key). Static-property keys by resolved class are already built (`2d1e6c45`). **Saving.** ≈0.6 G.
 
 **Two sites need a word more:**
 - **Name resolution builds text to intern it.** `qualify` and `resolve_as` (`name_resolution.rs:382`, `:423-425`; ≈315 K) format the joined name into a `String`. Instead, the interner hashes the parts as one text and compares a candidate part by part, so an existing name is found without building its text. Only a new name allocates.
 - **A call's callee name is lowercased five times per call** (`expr.rs:499`, `:821`, `:871`, `:889`, `:918`: 47,957 each). Its resolved `Name` already holds its folded form (`Name::lower`).
 
-**Allocations: ≈2.76 M (M10).**
+**Allocations: ≈2.76 M (M10).** The rows below are M10's, ≈2.44 M of it; the rest are smaller callers of the same mechanisms. `Name::to_string` is not a row: it is a utility, and its 677,480 allocations are charged to its callers, here and in items 4 and 18.
 - **Lowercase copies:**
   - `check_expr_impl` 338,625 (with the five above);
   - `forwards_static_binding` 97,960 and `type_check_call_outcome` 86,141;
@@ -1737,14 +1753,13 @@ The purity and property-write keys went by item 4, as ids.
   - `check_castable_array_arguments` and `check_impossible_haystack_values`, 48 K each;
   - and others.
 - **Names turned into text:**
-  - `Name::to_string` 507,745;
   - `statement_assigned_variable_names` 214,698;
-  - `resolve_as` 178,381 and `qualify` 135,623;
+  - `resolve_as` 204,105 and `qualify` 146,264, with `parse_namespace_stmt` 26,045;
   - `canonical_class_name` 114,838 and `resolve_static_class_name` 113,087;
   - `declared_method_name` 83,737, `lookup_method_with_owner` 76,924 and `find_method_receiver` 64,351;
   - the canonical method names copied in `static_method_through_instance` and `check_static_call_context` (≈84 K);
-  - `literal_string_key` 41,632, and the PHPStan-API walker's class names (44,134).
-- **Template bindings by `String`:** `class_template_bindings_rec` 301,021, `substitute_class_templates` 80,734 and `class_template_params_for` 34,781.
+  - `literal_string_key` 44,746 (the checker's 41,632 and `global_vars`' 3,114), and the PHPStan-API walker's class names (44,134).
+- **Template bindings by `String`:** `class_template_bindings_rec` 328,384, `substitute_class_templates` 80,734 and `class_template_params_for` 34,781.
 - **The tail's text copies (M11, F5: 102,938 in 38 functions).** For example:
   - `check_internal_instantiation` 11,683, `instanceof_outcome` 8,472 and `static_member_of_class` 7,022;
   - the DQL tokenizer's `String` tokens (`dql.rs:172`), and the current class as a `String` in `Promotions` and `check_program`;
@@ -1767,6 +1782,8 @@ The purity and property-write keys went by item 4, as ids.
 - **The tables hold strong entries, as rust-analyzer's interner does** (`ra_ap_intern`'s `Interned`).
   - `triomphe` has no weak references, so the tables cannot hold `Weak`s as today's do.
   - A handle whose drop sees a count of two (itself and the table) takes the table's shard lock, checks the count again, and removes the entry. A lookup clones its entry under the same lock, so it cannot revive an entry being removed.
+  - **Two handles dropped at once can both see three,** so neither removes the entry, and only the table holds it. rust-analyzer's `Interned::drop` has the same window. So a shard also sweeps the entries whose count is one once it has grown to twice what its last sweep left, as `WeakTable::sweep` does today.
+  - **An entry is removed under the lock and dropped after it is released.** A type node's drop drops its children's handles, each of which may take a shard's lock, the same one included.
   - An entry is hashed by the hash in its header, so it is one pointer, with no stored hash. The type interner loses its per-hash `Vec`s.
   - The type interner's nodes become `triomphe::Arc`s on the same rule, which also removes the weak count from every node.
 - **Shape string keys are interned** in a table of byte strings, as names are. A key found in the table costs no allocation.
@@ -1996,13 +2013,13 @@ Exact.
   - item 6: guards decided by the stubs' availability, on run-time evidence; a stub's parameters and types by the configured versions; and the new polyfill-signature check;
   - item 7: constants on a cycle read as `never` and reported;
   - item 8: a `@property` tag shadowed by a declared property checked against the tag's own names;
-  - item 9: identifiers and docs read from a source that is not UTF-8 keep their bytes, so names that differ only in such bytes are distinct; the stub rules apply only to stub sources;
+  - item 9: the stub rules apply only to stub sources;
   - item 10: `__COMPILER_HALT_OFFSET__` as its file's offset, with the new check of its use elsewhere; `__halt_compiler` followed by anything but `( ) ;` or `( ) ?>` is a syntax error; a broken file's error is its first one; a declaration's doc is the one PHP gives it, with the new check of a doc given away; and the new check of source the configured versions lex differently;
   - item 11: lines end at a lone `\r` as at `\n`, and so does a `//` or `#` comment;
   - item 12: casts as PHP's single tokens; spaced qualified names a syntax error on 8.x; doc comments only with whitespace after `/**`; `?>` and heredoc lines ending at a lone `\r`; heredoc indentation errors; `<?php` open only before whitespace, and `<?` by `short_open_tag`;
   - item 13: declarations exist as PHP binds them: run-time-bound ones are guarded by every earlier exit (`exit`, `die` and `throw` included) and are dead after an unconditional one, and a class whose parent is in another file is possibly declared; `InitFlow` in PHP's order of evaluation;
   - item 14: the readings the lowering oracle lists (escaped quotes, `mentions_mixed` from the node, identifiers by their bytes, a `//` inside a literal type, `Integer::MAX`), and one winner rule for every tag (`@phan-real-return`, `@phan-param-out`);
-  - item 15: container-field keys canonical as PHP's array keys;
+  - item 15: names that differ only in bytes outside UTF-8 are distinct (the lexer keeps the bytes, item 9) and print with `\x{NN}`; names fold ASCII only where Unicode's lowercasing was used; string values name classes, functions and constants by PHP's rules (one leading backslash, no trimming); container-field keys canonical as PHP's array keys;
   - item 18: the rule families of §12.10.
   
   Each difference is listed with its file and read.
@@ -2042,7 +2059,7 @@ Exact.
 | 12 | lexer details, qualified names and casts as one token | ≈0.35 G | — | 0.49 M allocations | exact, but semantic for PHP's tokens (§11) |
 | 13 | declaration list, one walk, builders in scratch | ≈0.45 G | — | bodies as one slice per file; 1.31 M allocations | exact, but semantic for guards and `InitFlow`'s order |
 | 14 | PHPDoc finished, one parse, two memos | ≈0.5 G | — | ≈43 MB; 2.59 M allocations | exact, but semantic for the readings §11 lists |
-| 15 | names as names | ≈0.6 G | partly | 2.76 M allocations | exact, except key corrections |
+| 15 | names as names, as bytes | ≈0.6 G | partly | 2.76 M allocations | exact, except the changes §11 lists |
 | 16 | interned values in one allocation | ≈0.1 G | — | ≈15 MB; 0.74 M allocations | exact |
 | 17 | warm runs | decoding and reads ≈0.85 core-s, most of the finishing window | yes | only decoded records in the heap | exact |
 | 18 | check phase remainder, rule temporaries | ≈1.6-2.0 G | — | 3.65 M allocations | semantic (§12.10) |
@@ -2172,6 +2189,7 @@ The rewrite made two more changes:
 | `quick_cache` 0.7 | 14, 18, 19 | weighted, scan-resistant memos; the server's tree cache bounded by bytes |
 | `siphasher` 1.0.4, already in the lockfile through `phf` | 14, 18 | memo fingerprints keyed per process, so no collision can be crafted |
 | `blake3` 1.8.7 | 1, 11, 17 | every content hash a cache trusts |
+| `encoding_rs` 0.8.42 | 15 | an open document's encoding, so the server reads the bytes PHP reads |
 
 **Considered and not taken:**
 - `bumpalo-herd` with `self_cell` (9): a safe arena of references, but ids give smaller nodes, exact sizes, no lifetime and dense side tables.
@@ -2204,6 +2222,7 @@ The rewrite made two more changes:
 | 12 | Six places where our lexer reads source otherwise than PHP's: doc comments without whitespace after `/**`, a lone `\r` after `?>` and in heredocs, heredoc indentation PHP refuses, casts as one token with only spaces and tabs inside, the spaced qualified name that PHP 8 rejects, and open tags (`<?phpx`, and `<?` by `short_open_tag`). A perfect-hash watch list is not needed. Blank runs are mostly one byte. One comparison cannot answer both questions of step 2. | Each reading made PHP's, checked against `token_get_all`, and listed as semantic; the cast checks of `coercion.rs` kept. Watch bits cached with the name. Blank runs tested a byte first. The keyword comparison restated. `parse_qualified_name`'s allocations moved from item 9's row to this one. |
 | 13 | Guards did not follow PHP's binding: compile-time-bound declarations exist after an early exit, run-time-bound ones (trait users, implementers, enums, interfaces with parents, `const`, `define()`) do not, and `exit` was not an exit. Ids given at commit would put nested declarations first. `InitFlow` records a value before its target's operands, against PHP's order. Item 19's families had no host. A doc's scope, a body's lookup and dynamic `define()` were open. Several counts were off, and two sites do not occur in this run. | Guards by PHP's binding, tested with `php` (a parent from a file loaded earlier makes a class bound at compile time, so it is kept as possibly declared). Entries reserved in source order. The walk in PHP's order, destructuring included. Families hosted. Docs resolved in the entry's scope; bodies by declaration id; a marker for constants a file defines by a computed name. Counts by M10's data. |
 | 14 | Keying resolution by template names would hand one method's bound and scope to another's same-named template, and a node index is no key. The tag memo would freeze the spelling's decisions from whichever thread came first. Steps 4 and 8 described two structures for one memo. Shared effects cannot index one docblock's vector. Cached `DocType`s would lose their nodes and their types. A doc is parsed twice, split two ways (`//`), and three rules pick tag winners. The doc lexer uses Unicode's classes. Wrapped tags are not slices. The oracle could not be exact, and missed references and edits. The text grammar's callers were not sorted, and a class from code is parsed as PHPDoc (`Integer::MAX`). The `@var` memo already exists. Counts and memory were double-counted. | Resolution keyed by the written `Type` and a context holding whole `TemplateParam`s. `apply` decides by the spelling. One fingerprint-keyed `quick_cache` memo type for every `syntax::memo` user. Arenas per tag effect. A serialized `DocType` with its subtree and type. One parse, one winner rule, PHP's byte classes, logical tag text. A lowering oracle with its differences listed, plus O1, the edit replay and every cache state. Callers by kind, with static tables and `Type::object` for code. Counts by M10: 2.59 M, with 65 K moved to item 18; memory ≈43 MB, so the projected exit is ≈290 MB and the peak ≈375 MB. |
+| 15 | `\xA9` as an escape is ambiguous with a namespace separator. Fixes would write escaped names into source files. An open document arrives decoded by the editor. `Name` serializes a `str`. String values become names by rules that are not PHP's (every backslash stripped, non-UTF-8 dropped), and some sites fold with Unicode. The semantic changes were listed under item 9. The short-name header came from a later item. Item 16's freeing rule could leak an entry or deadlock. Counts were by several rules, `Name::to_string` double-counted its callers. | The `\x{NN}` escape everywhere text shows a name. Fixes as bytes, applied on bytes. Each open document's encoding found with `encoding_rs`. Bytes in the caches, with a format bump. One `from_runtime` conversion by PHP's rules (one backslash, no trimming, ASCII folding, constants' case), tested with `php`. ASCII folding at the eight sites. §11 moved to item 15, with a fixture. `last_segment` in `NameData` now. Item 16 sweeps and drops outside the lock. Counts by M10. |
 
 # Appendix A. The allocation tail, every site
 
