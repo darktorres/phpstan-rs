@@ -1,6 +1,8 @@
 //! `Type::union`: which members merge and which stay apart.
 
-use crate::{Repr, Shape, ShapeField, ShapeKey, Type};
+use crate::{
+    CallableSig, MAX_UNION_MEMBERS, Repr, Shape, ShapeField, ShapeKey, TemplateParam, Type,
+};
 
 fn shape(fields: &[(&str, Type, bool)]) -> Type {
     Type::array_shape(Shape::sealed(
@@ -324,4 +326,34 @@ mod past_the_cap {
         assert_eq!(shape.fields().len(), MAX_UNION_MEMBERS + 1);
         assert!(shape.fields().iter().all(|f| f.optional));
     }
+}
+
+#[test]
+fn class_strings_past_the_cap_fold_to_one_class_string() {
+    let class_strings: Vec<Type> = (0..MAX_UNION_MEMBERS + 1)
+        .map(|i| Type::class_string(Type::object(format!("C{i}").into(), Vec::new())))
+        .collect();
+    assert_eq!(
+        Type::union_of(class_strings.clone()),
+        Type::class_string(Type::object_without_class())
+    );
+    let mut with_template = class_strings;
+    with_template.push(Type::class_string(Type::template_param(
+        TemplateParam::unbounded("T".into()),
+    )));
+    assert_eq!(Type::union_of(with_template), Type::string());
+}
+
+#[test]
+fn callables_past_the_cap_fold_to_callable() {
+    let callables: Vec<Type> = (0..MAX_UNION_MEMBERS as i64 + 1)
+        .map(|i| {
+            Type::callable(Some(std::sync::Arc::new(CallableSig {
+                params: Vec::new(),
+                return_type: Box::new(Type::int_literal(i)),
+                templates: Vec::new(),
+            })))
+        })
+        .collect();
+    assert_eq!(Type::union_of(callables), Type::callable(None));
 }

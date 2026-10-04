@@ -313,6 +313,9 @@ fn union_types_many(operands: Vec<Type>, hierarchy: Option<&dyn ClassHierarchy>)
             members = fold_objects(members, hierarchy);
         }
         if members.len() > MAX_UNION_MEMBERS {
+            members = fold_class_strings(members, hierarchy);
+        }
+        if members.len() > MAX_UNION_MEMBERS {
             members = generalize_members(members);
         }
         if members.len() > MAX_UNION_MEMBERS {
@@ -492,8 +495,9 @@ pub(crate) fn cannot_contain(container: &Type, member: &Type) -> bool {
 
 /// Past the cap, each family of values as one member: ints and ranges
 /// as their hull, floats as `float`, strings as `string` with every
-/// refinement all of them have, and array shapes as one shape where a
-/// key some lack is optional (a general array past `MAX_SHAPE_FIELDS`).
+/// refinement all of them have, array shapes as one shape where a key
+/// some lack is optional (a general array past `MAX_SHAPE_FIELDS`), and
+/// callables of different signatures as `callable`.
 fn fold_value_families(members: Vec<Type>) -> Vec<Type> {
     let is_int = |m: &Type| {
         matches!(
@@ -506,6 +510,7 @@ fn fold_value_families(members: Vec<Type>) -> Vec<Type> {
         m.is_string().yes() && !matches!(m.repr(), Repr::ClassString(_) | Repr::ClassKindString(_))
     };
     let is_shape = |m: &Type| shape_parts(m).is_some();
+    let is_callable = |m: &Type| matches!(m.repr(), Repr::Callable(_));
     let mut out: Vec<Type> = Vec::new();
     let mut folded = |family: &dyn Fn(&Type) -> bool,
                       fold: &dyn Fn(Vec<Type>) -> Type,
@@ -524,6 +529,7 @@ fn fold_value_families(members: Vec<Type>) -> Vec<Type> {
     folded(&is_float, &|_| Type::float(), &mut members);
     folded(&is_string, &common_string, &mut members);
     folded(&is_shape, &one_shape, &mut members);
+    folded(&is_callable, &|_| Type::callable(None), &mut members);
     out.extend(members);
     out
 }
@@ -587,7 +593,32 @@ fn fold_objects(members: Vec<Type>, hierarchy: Option<&dyn ClassHierarchy>) -> V
         out.extend(objects);
         return out;
     }
-    // Each class once, its arguments joined across instantiations.
+    let (classes, others) = classes_of(objects);
+    let as_objects = |classes: Vec<(crate::Name, Vec<Type>)>| -> Vec<Type> {
+        classes
+            .into_iter()
+            .map(|(class, args)| Type::object(class, args))
+            .collect()
+    };
+    if classes.len() + others.len() + out.len() <= MAX_UNION_MEMBERS {
+        out.extend(as_objects(classes));
+        out.extend(others);
+        return out;
+    }
+    // An object that isn't one class's (`object`, an intersection, an
+    // object shape) shares no class with the rest to fold to.
+    out.push(match hierarchy {
+        Some(hierarchy) if others.is_empty() => common_supertype(&classes, hierarchy),
+        _ => Type::object_without_class(),
+    });
+    out
+}
+
+/// Each class `objects` are instances of once, its arguments joined across
+/// instantiations, and apart the objects that are no one class's (`object`,
+/// an intersection, an object shape).
+#[allow(clippy::type_complexity)]
+fn classes_of(objects: Vec<Type>) -> (Vec<(crate::Name, Vec<Type>)>, Vec<Type>) {
     let mut classes: Vec<(crate::Name, Vec<Type>)> = Vec::new();
     let mut others: Vec<Type> = Vec::new();
     for object in objects {
@@ -610,22 +641,36 @@ fn fold_objects(members: Vec<Type>, hierarchy: Option<&dyn ClassHierarchy>) -> V
             None => classes.push((class, args)),
         }
     }
-    let as_objects = |classes: Vec<(crate::Name, Vec<Type>)>| -> Vec<Type> {
-        classes
-            .into_iter()
-            .map(|(class, args)| Type::object(class, args))
-            .collect()
-    };
-    if classes.len() + others.len() + out.len() <= MAX_UNION_MEMBERS {
-        out.extend(as_objects(classes));
-        out.extend(others);
+    (classes, others)
+}
+
+/// Past the cap, the class-strings as one: `class-string<T>`, `T` the
+/// classes they name folded as `fold_objects` folds instances - with the
+/// hierarchy their common supertype, without it `object` - or `string`
+/// when one names no one class (`class-string<T>` of a template).
+fn fold_class_strings(members: Vec<Type>, hierarchy: Option<&dyn ClassHierarchy>) -> Vec<Type> {
+    let (strings, mut out): (Vec<Type>, Vec<Type>) = members
+        .into_iter()
+        .partition(|m| matches!(m.repr(), Repr::ClassString(_)));
+    if strings.len() < 2 {
+        out.extend(strings);
         return out;
     }
-    // An object that isn't one class's (`object`, an intersection, an
-    // object shape) shares no class with the rest to fold to.
-    out.push(match hierarchy {
-        Some(hierarchy) if others.is_empty() => common_supertype(&classes, hierarchy),
-        _ => Type::object_without_class(),
+    let named: Vec<Type> = strings
+        .iter()
+        .filter_map(|m| match m.repr() {
+            Repr::ClassString(inner) => Some(inner.clone()),
+            _ => None,
+        })
+        .collect();
+    let (classes, others) = classes_of(named);
+    out.push(if others.is_empty() {
+        Type::class_string(match hierarchy {
+            Some(hierarchy) => common_supertype(&classes, hierarchy),
+            None => Type::object_without_class(),
+        })
+    } else {
+        Type::string()
     });
     out
 }
