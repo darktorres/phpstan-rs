@@ -489,20 +489,22 @@ What is left, by kind:
 
 **M9. Churn: 19.4 M allocations, a third of them the checker's**, each living milliseconds. The largest sites (M10 maps them all):
 
+Counted by M10's rule: a row naming a function counts what M10 charges to that function. A row naming a utility (`Name::to_string`, `imbl`'s leaf copies) counts the allocations made inside it, whoever calls it, which M10 charges to the callers.
+
 | sites | allocations | item |
 |---|---|---|
-| `Name::to_string` | 471,666 | 15 |
-| `bind_arguments`, `check_parameters` (27 MB), `resolve_call_args` (each rule binds the same call's arguments again: 119,628 + 59,308 + 57,338) | 589,000 | 18 |
-| `class_template_bindings_rec`'s `HashMap<String, Type>` (16 MB) | 221,763 | 15 |
-| `to_ascii_lowercase` in `check_expr_impl`, `forwards_static_binding`, `type_check_call_outcome`, `identifier_unresolvable` | 447,190 | 15 |
-| `ShapeKey::from_bytes` | 128,140 | 16 |
+| `Name::to_string` | 507,745 | 15 |
+| `bind_arguments`, `check_parameters`, `resolve_call_args` (39 MB: each rule binds the same call's arguments again) | 738,109 | 18 |
+| `class_template_bindings_rec`, its `HashMap<String, Type>`s (24 MB) | 328,384 | 15 |
+| `check_expr_impl`, `forwards_static_binding`, `type_check_call_outcome`, `identifier_unresolvable`, mostly lowercase copies | 593,987 | 15 |
+| `ShapeKey::from_bytes` | 182,591 | 16 |
 | `imbl` leaf copies (31 MB) | 114,979 | 18 (radix arrays) |
-| `statement_assigned_variable_names` | 106,053 | 15 |
-| `TypeNode::to_source_string` | 62,900 | 14 |
-| `Expr` clones into scopes | 52,165 | 9 |
-| the lexer's interpolation scans and the parser's interpolated parts (78 MB) | 451,718 | 9, 10 |
-| `parse_type_hint`'s temporaries | 412,271 | 9 |
-| `parse_qualified_name`, `qualify`, `NativeType::from_name`'s lowercase | 427,315 | 12, 15 |
+| `statement_assigned_variable_names` | 214,698 | 15 |
+| `TypeNode::to_source_string` | 244,893 | 14 |
+| `Expr` clones (query-builder chains, `check_if`'s disjunctions, scope aliases) | 52,349 | 9 |
+| the lexer's interpolation scans and the parser's interpolated parts (84 MB) | 609,127 | 9, 10 |
+| `parse_type_hint`: 468,730 temporaries and 11,843 nullable boxes | 480,573 | 9 |
+| `parse_qualified_name`, `qualify`, `NativeType::from_name`, mostly lowercase and joined copies | 604,042 | 12, 15 |
 
 **M10. Every allocation site, by the item that removes it.**
 - **Method.** Each allocation was charged to its allocating function: the innermost project frame that is not a container, a conversion or a utility (`to_string`, `to_ascii_lowercase`, `clone`, map inserts). There are 1,591 such functions.
@@ -514,7 +516,7 @@ What is left, by kind:
 
 | item | allocations | share |
 |---|---|---|
-| 9, trees in an arena | 4.24 M | 21.8% |
+| 9, trees in typed vectors | 4.24 M | 21.8% |
 | 18, the check phase | 3.58 M | 18.4% |
 | 15, names as names | 2.76 M | 14.2% |
 | 14, PHPDoc | 2.66 M | 13.7% |
@@ -532,7 +534,7 @@ What is left, by kind:
 | unattributable: stacks that end inside the allocator | 0.01 M | 0.1% |
 | made once per process: argument and configuration parsing, the pool | 0.001 M | 0.0% |
 
-The rows sum to the run's 19,440,892. An item removes most of its row, not all of it: the arena still allocates its chunks, interning still allocates each new type, and the results are kept. The final heap profile (§11) counts what remains.
+The rows sum to the run's 19,440,892. An item removes most of its row, not all of it: a kept tree still allocates its few vectors, interning still allocates each new type, and the results are kept. The final heap profile (§11) counts what remains.
 
 **M11. The tail, site by site.** The 584 functions outside M10's first pass hold 1.02 M allocations (236 MB). Each was read at its allocating lines (Appendix A lists every one), and they fall into thirteen mechanisms:
 
@@ -540,7 +542,7 @@ The rows sum to the run's 19,440,892. An item removes most of its row, not all o
 |---|---|---|---|---|
 | F1. A message, subject or identifier is formatted for every element checked, not only when a diagnostic is reported (`check_property_phpdoc_types`, `phpdoc_type_compat.rs:377`; `check_property_declarations`, which also turns each native hint into a `String` to test for `callable`, `property_declarations.rs:133`, `:142`; identifiers built by `format!`, `probe_checks.rs:159`) | 37 | 101,164 | Subjects become values that display themselves, formatted by the report. Identifiers are `&'static str`: they are a closed set. | 18 |
 | F2. A constant type is built on every call (`union_of(vec![Type::int(), Type::float()])`, `strict_rules.rs:230`, `operators.rs:57`, `:672`, `:685`; `vec![ty, Type::null()]` for a nullable) | 41 | 33,938 | Named constant types are built once, as `types` already builds its `Constant` nodes (`intern.rs:43`). A two-member union or intersection takes its two operands, with no `Vec`. | 18 |
-| F3. An expression is cloned into an `Rc` (the Doctrine and DBAL query-builder chains, `query_builder.rs:161-163`, `sql_reflection/query_builder.rs:336-338`; scope aliases, `narrowing.rs:1313`, `:1399`) | 8 | 58,287 | `&'a Expr<'a>` | 9 |
+| F3. An expression is cloned into an `Rc` (the Doctrine and DBAL query-builder chains, `query_builder.rs:161-163`, `sql_reflection/query_builder.rs:336-338`; scope aliases, `narrowing.rs:1313`, `:1399`) | 8 | 58,287 | an `ExprId` into the file's tree | 9 |
 | F4. Third-party parsers: `sqlparser` (86.6 K, its tokenizer building a `String` per word and char run) and `regex` (7.7 K, a `Captures` per match) | 112 | 94,265 | A query's text is parsed once per distinct text in the run. Matches are read through one reused `Captures`. | 18 |
 | F5. Text where a `Name` exists (`check_internal_instantiation`, `instanceof_outcome`, `static_member_of_class`, the current class as a `String` in `Promotions` and `check_program`, `"Doctrine\ORM\Query".to_string()`, the DQL tokenizer's `String` tokens) | 38 | 102,938 | Item 15's rule; fixed names are interned once. | 15 |
 | F6a. A rule collects in order to iterate (`check_type_version_support`'s one-element `Vec`, `type_declarations.rs:182`; `offset_read_type`, `member_resolution.rs:298`; `instance_of_any`, `operators.rs:706`). It rebuilds a constant list per call (`declaration_level_rules`, `internal_rules.rs:56`; `default_include_dirs`, `includes.rs:380`), or keeps a `seen` vector per call (`check_array_literal_duplicate_keys`, `array_ops.rs:70`; `check_function_like_declaration`). | 36 | 143,007 | Borrow (`slice::from_ref`) or iterate. A constant list is a `static` slice, and a per-file one is made once per file. A per-call vector lives in the checker's scratch. | 18 |
@@ -872,7 +874,7 @@ Exact against item 1's results. Against the baseline, a link cycle's tree is lis
   It keeps no ignore comments; today a freshly parsed context file keeps them and a cached one does not (`file_cache.rs:137`). `ReadFile` carries no tree for such a file.
 - **The drop runs in parallel,** on the thread that allocated the tree.
 - **A context file is read into the worker's reusable read buffer.** Its products copy what they keep, so its source need not outlive the worker's job. Only a file whose tree is kept gets a source of its own.
-- **After item 9, a file whose tree is not kept is parsed into the worker's scratch arena,** which is reset once its products are copied out, as oxc reuses its `Allocator` across files with `reset`. A kept tree gets an arena of its own.
+- **After item 9, a file whose tree is not kept is parsed into the worker's scratch store,** whose vectors are cleared, keeping their capacity, once its products are copied out. A kept tree's vectors are moved out at their exact size.
 - **`ast_of` reads the overlay before the disk,** so an open file with unsaved edits is parsed from its editor text (`project.rs:900-904` reads the disk).
 
 **Oracle.** O2, item 0's server session and its edit replay, all run with the `oracle` build too, whose assertions fire on any read of a dropped tree. Exact.
@@ -1086,6 +1088,11 @@ Exact.
    - **The stub index records each declaration's PHP version range,** read when the stub cache is built:
      - phpstorm-stubs' `#[PhpStormStubsElementAvailable(from:, to:)]` (598 uses in `vendor/phpstorm-stubs`) and `@since`/`@removed` (249 files);
      - PHPStan's version deltas (`vendor/phpstan-src/resources/functionMap_php*delta.php`, `new` and `old`).
+   - **It records the versions of what is inside a declaration too,** as item 9's stub rules hand them over: a parameter's range, and each version's type from `#[LanguageLevelTypeAware]`. Today the stub rules apply the newest PHP version's types and drop what that version removed (`newest_type`, `stub_attributes.rs:74-100`), whatever versions the project is configured for.
+   - **A reader answers for the configured versions** (`Registry::php_versions`, `project.rs:491`).
+     - Where every configured version gives one signature, it is that signature.
+     - Where they differ, a call is checked against each version's signature, and a return or property type is the union of the versions' types. Every possibility PHP may run with stays.
+     - The stub cache records every version, so it stays independent of the configuration.
    - **It also records each declaration's extension.** phpstorm-stubs are laid out by extension, one directory each.
    - **An extension counts as loaded only on evidence that holds at run time:**
      - **PHP cannot be built without it:** Core, date, pcre, Reflection, SPL and standard; hash from 7.4, json from 8.0, random from 8.2.
@@ -1232,48 +1239,86 @@ Exact, except one case listed in §11: a `@property` tag shadowed by a declared 
 
 **Allocations: ≈0.48 M (M10).** This covers the case references' lists (`declared_type` 50,267, `collect_class_names` 43,874), `dedup_versioned_params`' map and order vector, `reconcile_with_native` (41,085) and `from_decl`'s name list.
 
-### 9. Trees in an arena, nodes as handles (R8; §3.2)
+### 9. Trees in typed vectors, nodes by index (R8; §3.2)
 
 **Now.**
 - Every `Expr` and `Stmt` is its own allocation, dropped under a stack guard (`ast.rs:1434-1446`; 131.7 M at `stack.rs:30`).
-- `Expr::peeled` unwraps `(` and `@` by recursion under that guard: 3.08 M calls, ≈160 M.
+- `Expr::peeled` unwraps `(` and `@` by recursion under that guard (`ast.rs:1412-1417`): 3.08 M calls, ≈160 M.
 - Source slices are copied into their own allocations: doc comments (`Arc<str>`), unescaped literals (`PhpString`) and inline HTML.
-- Scopes clone whole expressions into `Rc<Expr>` (`narrowing.rs:1313`, `:1399`).
+- **Text from a source that is not UTF-8 is decoded lossily** (`lexer.rs:146-151`, `:392-400`). The lexer takes any byte from `0x80` up as an identifier byte (`lexer.rs:1393`), as PHP does, but `slice` decodes the identifier's bytes lossily, on the false premise that "a range of identifier bytes always is" UTF-8.
+  - So `class \xA9` (`vendor/symfony/cache/Traits/ValueWrapper.php:19`, which Composer's class map names) and `class \xAA` both become the class `U+FFFD`.
+  - PHP keeps them apart. `php` 8.5 runs a file declaring both: `class_exists("\xA9")` and `class_exists("\xAA")` are both true, `get_class` gives back the byte `a9`, `class_exists("\u{FFFD}")` is false, and `getDocComment()` returns a doc's bytes unchanged.
+  - 3 of Piwigo's 20,200 PHP files are not UTF-8, and 2 of its `vendor/`'s 44,931.
+- **The tree is changed after the parse,** through `syntax::visit::VisitorMut`:
+  - `apply_stub_attributes` drops functions and parameters, sets parameter types, appends `@return`/`@param` lines to doc comments, and runs `resolve_names` again (`stub_attributes.rs:176-186`, `:305-323`). It runs on any file that mentions either attribute (`project.rs:2897-2898`), and on the stubs (`stubs.rs:741`, `:1382`).
+  - The rewritten docs are not in the parser's doc sites, so a changed file drops its recorded references and goes through the old collector (`project.rs:2906`; item 13).
+  - It applies the **newest** PHP version's types and removes what that version removed (`newest_type`, `stub_attributes.rs:74-100`), whatever versions the project is configured for (`Registry::php_versions`, `project.rs:491`).
+  - `name_anonymous_classes` writes each anonymous class's name into its node (`registry/anonymous_class.rs:45-73`, `:117-134`).
+- **Expressions are built and kept outside the parser:**
+  - the checker builds nodes: `static_call` and `constant_fetch` (`checker/expr.rs:6059-6093`), and a `Variable` (`var_tag_types.rs:538-542`);
+  - completion parses a standalone expression and builds statements (`lsp/completion.rs:169-172`, `:310-326`);
+  - the checker holds copies: `pending_or_disjunctions: Vec<(Expr, Expr)>` (`checker.rs:847`, filled at `stmt.rs:1440-1447`), `Initializers(FxHashMap<String, Option<Expr>>)` (`includes.rs:76`), the alias maps' `Rc<Expr>` (`checker.rs:63-144`, `locals.rs:382-391`), and both query-builder chains' `Owned(Rc<Expr>)` (`doctrine/query_builder.rs:108`, `sql_reflection/query_builder.rs:283`);
+  - Composer's autoload reader takes statements by value with `into_kind` (`composer/src/vendor.rs:137-159`).
 - Every parse function returns `Result<Expr, ParseError>` by value: the whole node, or an error carrying a `String`. The Pratt loop's `?` costs 55.5 M (`result.rs:2177`) and its moves 28.8 M, with the same pattern in `parse_primary`, `expect`, `parse_args` and `parse_array_items`.
 
 **Design.**
 1. **`peeled` becomes a loop**, with no guard. This step comes first, on its own.
-2. **The arena.** `ParsedFile` owns the file's source (`Box<str>`, or the bytes of a non-UTF-8 file), its names, a `bumpalo::Bump`, and the root, held together by `self_cell`. Access goes through `ParsedFile::with_ast(|program| ..)`.
-   - That is a kept tree. A tree that is not kept (item 3) is built in the worker's scratch arena, which is reset once its products have been copied out, so a context file costs no arena of its own.
-   - The names live in an append-only arena of their own (`typed_arena::Arena<Name>`), whose elements never move as it grows and which drops them with the file.
-   - The lexer puts each distinct name there once, and nodes and token payloads hold `&'a Name`.
-   - This holds whether the lexer still streams (before item 10) or lexes the whole file first (after it).
-3. **Nodes as handles.**
-   - `Expr<'a>` and `Stmt<'a>` are two-word enums whose variants hold arena references to their nodes, as oxc's `Expression<'a>` is.
-   - The parser builds each node in place and passes the handle.
-   - `ParseError` is boxed, so a `Result<Expr<'a>, ParseError>` is two or three words.
-   - Matching changes from `match &e.kind { ExprKind::Call(..) }` to `match e { Expr::Call(call) }`, compile-driven.
-4. **Payloads borrow the source.**
-   - A doc comment is a `&'a str` into it.
-   - An unescaped literal is a `&'a [u8]`; an escaped one is decoded into the arena.
-   - Inline HTML is a `&'a str`.
-   - A name is a `&'a Name` into the file's name arena.
-   - A body is `&'a [Stmt<'a>]`, and its holders (`Project`'s re-parse cache) hold the `ParsedFile`.
-   - Scope aliases are `&'a Expr<'a>`.
+2. **A file's tree is a handful of typed vectors, addressed by index.** `ParsedFile` has no lifetime and owns:
+   - `source: Box<[u8]>`, the file's bytes as read;
+   - `names: Box<[Name]>`, each distinct name of the file once, which a node refers to by `NameId(u32)`;
+   - `exprs: Box<[ExprNode]>` and `stmts: Box<[StmtNode]>`, with their spans in parallel vectors;
+   - the large variants that few nodes are, in vectors of their own that exist only when the file has one: functions and methods, classes, closures, parameters, `match` arms, attributes;
+   - `lists: Box<[u32]>`, which holds every child list as a range.
+   
+   `ParsedFile` is plain vectors, so it is `Send` and `Sync` with no `unsafe`. The workspace denies `unsafe_code` (`Cargo.toml:42`), and `UNSAFE_PLAN.md` confines it to one audited FFI crate. A bump arena of references would need it: `bumpalo::Bump` keeps its state in `Cell`s (`bumpalo-3.20.3/src/lib.rs:395-417`), so a tree in it is not `Sync`, while item 19 shares trees across threads. `bumpalo` is only in the lockfile for a build-time macro, and `self_cell` and `typed-arena` are not in it at all.
+   
+   This is the layout of rust-analyzer's `Body` (`la_arena::Arena<Expr>` with `Idx<Expr>`) and Zig's AST, and of item 4's `FileDecls`.
+   - **A kept tree** is a few exact-size allocations.
+   - **A tree that is not kept** (item 3) is built in the worker's scratch store, a set of the same vectors cleared between files, so a context file allocates nothing for its tree once the worker has warmed up.
+   - **The lexer puts each distinct name in `names` once.** This holds whether it still streams (before item 10) or lexes the whole file first (after it).
+3. **Nodes by index.**
+   - `ExprId(u32)` and `StmtId(u32)` are `Copy` and carry no lifetime. So no `'a` runs through the checker, through item 18's persistent scopes, or through the language server's caches.
+   - An id is meaningful only with its file. A holder that crosses files keeps the `Arc<ParsedFile>` with the ids, as the re-parse cache and the debug build's bodies do (`project.rs:175-217`, `registry/bodies.rs:51`).
+   - An id is its node's identity. `NodeId` numbers expressions and statements together today (`ast.rs:7-11`), and its one keyed table, the inference cache (`infer_cache.rs:47-108`), takes `ExprId`.
+   - The parser appends each node once its children are built, and passes the id. `ParseError` is boxed, so a `Result<ExprId, ParseError>` is two words.
+   - Matching changes from `match &e.kind { ExprKind::Call(..) }` to `match file.expr(id) { ExprNode::Call { .. } }`, compile-driven. `syntax::visit` takes the file and ids.
+4. **Payloads are byte ranges of the source.**
+   - A doc comment, an unescaped literal and inline HTML are ranges of `source`. An escaped literal is decoded once, into a byte vector of the file.
+   - A name is a `NameId`. A body is a range of `lists`.
+   - **Nothing is decoded to text for its own sake, and nothing lossily but for display.** An identifier becomes a `Name` with its bytes (item 15), so `class \xA9` and `class \xAA` are two classes, as PHP sees them. A doc is parsed from its bytes (item 14), so a doc naming `\xA9` names the class the code declares.
    - What outlives the file (interned types, memoized docblocks, reflections) copies what it keeps, as now.
-5. **Nothing in the bump arena needs dropping.** `bumpalo` runs no destructors, so no `Arc` may live in it. Names are references into the name arena, which drops them with the file, and lists are slices.
-6. **Reads from any thread.** A `Bump` is not `Sync`. Once the parse is done the arena moves into a `FrozenArena` newtype with no allocating method, whose one `unsafe impl Sync` carries its argument beside it: only reads of finished memory remain. `std::sync::Exclusive` would avoid the `unsafe`, but building the tree needs `&Bump`, which `Exclusive` does not give.
-7. **No growth inside the arena.** Children are gathered in the parser's reusable scratch stacks and moved into the arena once, as an exact-size slice. Today a list grows by `push` from empty and is never shrunk, so 53 MB of the analysed trees' 173 MB is capacity no element uses (M2).
-8. **Nodes are the size of their variant.**
-   - Today every `Expr` is 80 B, every `Stmt` 160 B, an `Arg` 104 B and an `ArrayItem` 168 B, whatever they hold. A handle is two words, and the node it points to is as large as its variant.
-   - A statement carries no doc fields. Today `doc_comment` and `doc_line` cost 24 B on every statement, though few statements have a doc. A statement's doc is found in the file's doc sites, which the parser records with their context (item 13), by the statement's start offset.
-   - The same holds for a parameter's doc and attributes.
+5. **Nothing changes a tree after its parse.** `VisitorMut`, `walk_*_mut` and `resolve_names`' second run go.
+   - **The stub rules are applied as the parser builds a stub's nodes.**
+     - The parser knows a file's role before it starts (item 2), and an attribute's class from the imports above it.
+     - The rules apply to stub sources only. Both attributes are user classes, which PHP gives no effect unless reflection reads them, so in code PHP runs, a declaration carrying `#[PhpStormStubsElementAvailable(to: ..)]` still exists.
+     - The rules record rather than choose. A declaration or parameter carries its version range, and a type-aware attribute carries each version's type. Item 6's readers then answer for the configured versions.
+     - The `@return` and `@param` lines the rules add are built into the file's doc vector and recorded in its doc sites like any other doc, so a stub's references are kept (item 13).
+   - **Anonymous-class names are a side table by node id,** filled on the worker from the line starts (item 11).
+   - **Nodes built outside the parser:**
+     - The checker's synthetic nodes go in a per-file scratch store, cleared with the file.
+     - Completion and Composer's autoload reader parse into a `ParsedFile` of their own. `into_kind` goes.
+6. **Holders keep ids.** `pending_or_disjunctions`, `Initializers`, the alias maps and both query-builder chains hold `ExprId`s into the file's tree.
+7. **No growth inside a kept tree.** Children are gathered in the parser's reusable scratch stacks and appended once to `lists`, and each vector of a kept tree is moved out of the scratch store at its exact size. Today a list grows by `push` from empty and is never shrunk, so 53 MB of the analysed trees' 173 MB is capacity no element uses (M2).
+8. **Nodes are small.**
+   - Today every `Expr` is 80 B, every `Stmt` 160 B, an `Arg` 104 B and an `ArrayItem` 168 B, whatever they hold.
+   - An `ExprNode` or `StmtNode` holds ids, ranges and flags, so a common node is 16-24 B: a binary operation is its operator and two ids, and a method call is an id, a name and a list range. A variant that would be larger, such as a closure, is an id into its own vector.
+   - The span is in the parallel vector, and the id is the index.
+   - A statement carries no doc fields. Today `doc_comment` and `doc_line` cost 24 B on every statement, though few statements have a doc. A statement's or a parameter's doc is found in the file's doc sites by its start offset.
+     - The parser records those sites today (`Parser::note_doc`, `parser.rs:490-495`; `DocSite`, `references.rs:138-148`).
+     - The readers of a statement's or a parameter's `.doc_comment` switch to that lookup. A declaration's own doc (function, class, property, constant) stays a range in its node, which is one of the large variants.
+   - Attributes stay in their node, as a usually empty range: they change what PHP does at run time (`#[\SensitiveParameter]`, `#[\Override]`, `#[\Deprecated]`, `#[\NoDiscard]`), and the walks visit them with the rest of the tree.
 
-**Oracle.** O1 (its canonical printer moves with the tree), O2. Exact.
+**Oracle.**
+- O1, printing the tree after the stub rules and the anonymous-class names. The printer moves with the tree.
+- O2, with the stub cache rebuilt.
+- Item 0's server session: open documents, edits, and completion's standalone parse.
+- The `oracle` build, and the dumps at one thread and at the default count.
+
+Exact, except the semantic changes listed in §11: non-UTF-8 identifiers keep their bytes, and the stub rules apply to stubs only, by the configured versions (item 6).
 
 **Memory (M2).**
 - **At least the 53 MB of unused capacity** in the analysed trees, 31% of their 173 MB.
-- **The 1.10 M per-node allocations become one arena per file,** so their allocator overhead goes too, along with the padding of every node to its largest variant.
+- **The 1.10 M per-node allocations become a few vectors per kept file,** about ten for each of the 2,793 analysed files, so their allocator overhead goes too, along with the padding of every node to its largest variant.
 - **The tree keeps its file's source alive** (19.1 MB for the analysed files) in place of the copies it holds today: doc comments and inline HTML through `Interner::str` (9.1 MB) and literals as `PhpString`s (4.4 MB). It costs a few MB more and saves those allocations.
 - **The final heap profile measures the total.** The trees on the workers shrink likewise, and with them the peak once item 3 is in.
 
@@ -1282,20 +1327,24 @@ Exact, except one case listed in §11: a `@property` tag shadowed by a declared 
 - The node frees, ≈0.3 G.
 - The drop guards, 0.13 G, and `peeled`, 0.16 G.
 - The result moves, ≈0.1-0.2 G.
-- The copies of source slices.
+- The copies of source slices, and the second name resolution of a file the stub rules change.
 
-**Allocations: ≈4.24 M of the run's 19.4 M (M10).**
+**Allocations: ≈4.24 M of the run's 19.4 M (M10).** Counted as M10 counts: each allocation goes to the innermost project function that is not a container, conversion or utility.
 - **What goes with the per-node allocations:**
   - every `Box<Expr>` and `Box<Stmt>`: `parse_postfix` 537,753, `parse_expr_bp_inner` 271,838, `parse_assignment_tail` 244,768, and so on;
   - every list: arguments 258,870, statements 166,525, array items 105,245, parameters 46,703, and so on;
   - the payloads: single-quoted literals 352,352 and doc comments 72,171.
 - **Three builders allocate where nothing is kept.** The scratch stacks of step 7 take them over:
-  - `parse_type_hint` builds a `Vec<Vec<TypeHint>>` for every type hint, `int` included (`type_hints.rs:102`, `:135`): 480,573 allocations;
-  - interpolated strings: the lexer's fragment scan (`scan_interpolated`, `strings.rs:383-396`, 454,535) and the parser's parts (`build_interpolated`, 154,592);
+  - `parse_type_hint` builds a `Vec<Vec<TypeHint>>` for every type hint, `int` included: 468,730 temporaries (`type_hints.rs:102`, `:105`, `:135`), beside the 11,843 boxes of nullable types (`:142`), which are nodes;
+  - interpolated strings: the lexer's fragment scan (`scan_interpolated`, `strings.rs:383-396`, 454,535 with the `PhpString` conversions it asks for) and the parser's parts (`build_interpolated`, 154,592);
   - each `use` import, in a box of its own (`stmt.rs:255`, 62,346).
-- **The checker's copies of expressions** become `&'a Expr<'a>` (step 4): into scopes (`clone_one` 61,145, and `record_condition_alias`'s `Rc<Expr>`), and into the Doctrine and DBAL query-builder chains (`query_builder.rs:161-163`, `sql_reflection/query_builder.rs:336-338`; M11 F3, 58,287).
+- **The checker's copies of expressions** become ids (step 6). M10 charges 52,349 allocations to the clones themselves (`Expr` and `ArrowFnExpr`), and 81,615 lie under a clone of the tree. By the function that asks for the copy:
+  - the Doctrine and DBAL query-builder chains (`doctrine/query_builder.rs:134`, `:161-163`; `sql_reflection/query_builder.rs:336-338`), 60,481;
+  - the disjunction pairs `check_if` keeps (`stmt.rs:1442`, `:1446`), 16,994;
+  - the scope aliases (`narrowing.rs:1313`, `:1399`), 3,931;
+  - `Initializers` (`includes.rs:83`), 209.
 - **Two more lexer payloads allocate where nothing is kept:**
-  - heredoc indentation stripping builds two vectors per heredoc (`strings.rs:785`, `:788`). It decodes into the arena in one pass.
+  - heredoc indentation stripping builds two vectors per heredoc (`strings.rs:785`, `:788`). It decodes into the file's byte vector in one pass.
   - a `\u{..}` escape builds a `Vec` of its UTF-8 bytes (`strings.rs:814`). It writes them in place.
 
 ### 10. Tokens in flat arrays (R2)
@@ -1304,11 +1353,11 @@ Exact, except one case listed in §11: a `@property` tag shadowed by a declared 
 
 **Design.** The lexer lexes the whole file in one loop into a `TokenStream`:
 ```rust
-pub struct TokenStream<'a> {
+pub struct TokenStream {
     pub kinds: Vec<TokenKind>,        // one byte: 73 token kinds and 62 keywords fit
     pub spans: Vec<Span>,
-    pub payloads: Vec<Payload<'a>>,   // one per payload-bearing token, in order:
-                                      // Name(&'a Name) | Int | Float | Str(&'a [u8] or decoded) | Parts | Html(&'a str)
+    pub payloads: Vec<Payload>,       // one per payload-bearing token, in order:
+                                      // Name(NameId) | Int | Float | Str(a source range, or a decoded one) | Parts | Html(a source range)
     pub docs: Vec<(u32, Span)>,       // each doc comment, with the index of the token it precedes
 }
 ```
@@ -1317,7 +1366,7 @@ pub struct TokenStream<'a> {
   - A payload moves out when its token is taken.
   - The doc group before the current token is the run of `docs` at `pos`, folded only when a declaration or statement asks for it.
   - A keyword's spelling, when it stands as a name, is the source slice at its span.
-- **Names.** The lexer's name table is scratch: it maps a spelling to its `&'a Name` in the file's name arena (item 9), which owns the names.
+- **Names.** The lexer's name table is scratch: it maps a spelling's bytes to its `NameId` in the file's `names` (item 9), which owns the names.
 - **Buffers.** The four vectors are per worker thread for the length of a load, as the cross-file name cache is. They are cleared, not freed, between files, and emptied when the load ends.
 - **Fragments.** Interpolation fragments are lexed by `Lexer::fragment` into streams taken from a small stack of scratch streams, because the file's own stream is still in use.
 - **Unchanged.** Ignore marks and file facts are recorded in the lexing loop, as now.
@@ -1404,14 +1453,14 @@ Context files need line starts, for duplicate-declaration messages (`duplicate_c
   - for the stub base (`stubs.rs:1385`).
 - **The incremental path** walks again (`declared_names`, `declared_constants`, `project.rs:3201-3225`).
 
-P12 step 3 was set aside because "it cannot hold references into a tree still being built". With item 9's arena it can: a node's address is fixed when it is built.
+P12 step 3 was set aside because "it cannot hold references into a tree still being built". With item 9's layout it can: a node's id is fixed when it is built.
 
 **Design.**
 1. **The parser lists the declarations** as it builds them: class-likes, functions, constants and `define()` calls. Each entry holds:
    - the name and kind;
    - the guard (the enclosing conditions and the earlier top-level early returns, from the parser's statement stack);
    - the `ImportScope`;
-   - `&'a` the node.
+   - the node's id.
    
    Declaration building iterates it, and so do the duplicate sites, the incremental path and the opt-in rules over analysed files. They all run while the tree exists. What outlives the tree is copied out on the worker, as item 3 says. The declarations walk, its facts-gated expression walks and the separate declared-classes collection go.
 2. **`ImportScope`s are published once**, at each `namespace` and `use`. Readers start from them.
@@ -1448,7 +1497,9 @@ P12 step 3 was set aside because "it cannot hold references into a tree still be
 2. **Resolution memoized as §11.7 designed.** The memo is per file, keyed by the type node and an interned resolution context: item 13's `ImportScope`, plus the template names, the type aliases and the class `self` names. It holds the whole resolved type, template marking and alias substitution included. Today's memo (`b081be75`) is sound but covers only the namespace-and-imports step, and `mark_template_params` and `substitute_type_aliases` still run on every use (`type_resolution.rs:74`, `class_info.rs:1129`, `:1220`).
 3. **P11 step 1:** `parse_tag -> Arc<TagEffect>` and `apply(&mut DocBlock, &TagEffect)`. There is no scratch block and no `merge_from` (56.2 M). Step 3's `Arc` fields follow.
 4. **The tag memo keyed in place,** by the borrowed pair `(tag, rest)` in a `hashbrown::HashTable`, not a `format!` (`docblock.rs:497`, 54.7 M).
-5. **Tag tokens borrow.** The tag parser reads a token slice by index. A `PhpDocToken`'s text is a `&'t str` into the tag (303 K string clones today), and `TypeNode`'s identifiers are `Name`s (item 15).
+5. **Tag tokens borrow.** The tag parser reads a token slice by index. A `PhpDocToken`'s text is a `&'t [u8]` into the tag (303 K string clones today), and `TypeNode`'s identifiers are `Name`s (item 15).
+   - A doc is lexed from its bytes, as the PHP lexer reads source (item 9). An identifier takes any byte from `0x80` up, as PHP's does, and keeps its bytes as a `Name`, so a doc naming `\xA9` names the class the code declares.
+   - A description is text only for display.
 6. **One product per doc text, one per tag line (M6).**
    - **Today one doc text feeds eight memos,** each keyed by its own copy of the text:
      - the grammar node (`grammar.rs:29`);
@@ -1519,6 +1570,11 @@ P12 step 3 was set aside because "it cannot hold references into a tree still be
     - the key table resolves property names through text (37 K);
   - then `narrowing`, `calls`, member-usage tokens, `project`, `types` and `phpdoc` by module.
 - **The end state** deletes `TableKey for str` and `FoldKey for str` from the registry. The compiler then lists every caller still holding text. Text that enters from outside (configuration, a class named in a string literal) is interned once where it enters.
+- **A name is its bytes.** PHP's identifiers are bytes: the lexer takes any byte from `0x80` up, and `class \xA9` and `class \xAA` are two classes (item 9).
+  - `Name` holds `[u8]` and compares with PHP's ASCII-only case folding, as it does today (`name.rs:41`).
+  - It gives text only for display, where a byte outside valid UTF-8 prints as `\xA9`, in messages and in JSON alike.
+  - A string value used as a name (`class_exists`, `new $class`, a callable string) becomes a `Name` from its `PhpString` bytes, so it finds a class whatever its bytes.
+  - `Deref<Target = str>` goes, and the compiler lists every reader of a name as text.
 - **A short name is a slice** of the name, at the offset of its last segment, which item 16 stores in the name's header (the 50.9 M of `rsplit` in `check_expr_impl`).
 
 The purity and property-write keys went by item 4, as ids.
@@ -1537,7 +1593,7 @@ The purity and property-write keys went by item 4, as ids.
   - `check_castable_array_arguments` and `check_impossible_haystack_values`, 48 K each;
   - and others.
 - **Names turned into text:**
-  - `Name::to_string` 471,666;
+  - `Name::to_string` 507,745;
   - `statement_assigned_variable_names` 214,698;
   - `resolve_as` 178,381 and `qualify` 135,623;
   - `canonical_class_name` 114,838 and `resolve_static_class_name` 113,087;
@@ -1641,7 +1697,7 @@ A cold run pays one more incremental finishing, over the analysed files' closure
    - So is `has_yield`.
    - `collect_throws` (`try_catch.rs:398`) gives way to the throw tails C1 keeps.
 3. **Variables as slots, scopes as radix arrays: ≈0.15-0.25 G.**
-   - The parser numbers each function-like body's variables. A variable node holds its `&'a Name` and its `VarSlot`, and a closure's `use` list and an arrow function's captures map to the enclosing body's slots.
+   - The parser numbers each function-like body's variables. A variable node holds its `NameId` and its `VarSlot`, and a closure's `use` list and an arrow function's captures map to the enclosing body's slots.
    - A variable's `LocalKey` is its slot: no name lookup (`KeyTable::find_var` 79.1 M).
    - **Variables PHP can reach by a computed name or a shared scope keep the name lookup:** `$$x`, `${expr}`, `extract`, `compact`, `get_defined_vars`, `parse_str` with no result, `$GLOBALS` in the global scope, and `include`/`require`/`eval`, whose code runs in the function's scope. The parser marks a body holding any of these.
    - **The scope's maps index the dense keys.** They become a persistent radix array: 32-way nodes indexed by the key's bits, `Arc`-shared and copied along the path on a write, in place of `imbl::OrdMap` (`get` 72.9 M, `Cursor::next` 34.6 M, `Leaf::insert` 29.8 M).
@@ -1781,9 +1837,10 @@ Exact.
     - the server publishes the whole-program diagnostics and parse errors;
   - item 2: a tree with a link cycle is listed once, not until `ELOOP`;
   - item 4: the order in which code iterating a class's methods meets them, where anything depends on it;
-  - item 6: guards decided by the stubs' availability, on run-time evidence, and the new polyfill-signature check;
+  - item 6: guards decided by the stubs' availability, on run-time evidence; a stub's parameters and types by the configured versions; and the new polyfill-signature check;
   - item 7: constants on a cycle read as `never` and reported;
   - item 8: a `@property` tag shadowed by a declared property checked against the tag's own names;
+  - item 9: identifiers and docs read from a source that is not UTF-8 keep their bytes, so names that differ only in such bytes are distinct; the stub rules apply only to stub sources;
   - item 15: container-field keys canonical as PHP's array keys;
   - item 18: the rule families of §12.10.
   
@@ -1815,10 +1872,10 @@ Exact.
 | 3 | context trees dropped on the worker | ≈0.3 G | 0.58 G off the serial path | peak −≤209 MB alone (the end of the parse −≈420 MB); context reads, 66 MB | exact |
 | 4 | registry by ids, declarations never changed after build | ≈0.9 G | ≈0.4 s serial | ≈90 MB at exit; ≈1.5 M allocations | exact, except member order |
 | 5 | parallel merge, stable ids, posting lists | ≈0.25 G | yes | ≈5 MB; 0.11 M allocations | exact |
-| 6 | stub scope, records read on demand with per-record CRCs | ≈0.35 G, then more of `warm` | partly | ≈40 MB of heap; 0.45 M allocations | exact (1, 3, 5), semantic (2) |
+| 6 | stub scope, records read on demand with per-record CRCs | ≈0.35 G, then more of `warm` | partly | ≈40 MB of heap; 0.45 M allocations | exact (1, 3, 5), semantic (2, with the stubs' versions) |
 | 7 | one relation memo, by content generation | up to ≈0.3 G | — | bounded as today; `KEEP_DECISIONS`' 1.3 MB goes | exact |
 | 8 | case references in the checker, declarations built lean | ≈0.1 G | — | both caches' entries; 0.48 M allocations | exact, except one `@property` case |
-| 9 | arena, handles, `peeled` | ≈0.8-1.2 G | — | ≥53 MB of the analysed trees; 4.24 M allocations | exact |
+| 9 | typed vectors, ids, `peeled` | ≈0.8-1.2 G | — | ≥53 MB of the analysed trees; 4.24 M allocations | exact, but semantic for non-UTF-8 names and the stub rules |
 | 10 | flat token arrays | ≈1.7 G | — | 0.52 M allocations | exact |
 | 11 | line starts, columns, offsets, ignore marks | ≈0.2 G | — | 0.05 M allocations | exact |
 | 12 | lexer details, qualified names as one token | ≈0.35 G | — | 0.5 M allocations | exact |
@@ -1852,7 +1909,7 @@ Exact.
   | 14, PHPDoc | a handful per distinct docblock and tag line | 2.66 M | ≈0.1 M |
   | 13, a file's products | a few vectors per file | 1.31 M | ≈0.05 M |
   | 16, 10 and 6 | one per new type node and new name; the stub records a run reads | 1.44 M | ≈0.4 M |
-  | 9, 15, 2, 8, 12, 5, 3, 11 and the rest | arena chunks, kept sources, per-file vectors | 8.43 M | ≈0.2 M |
+  | 9, 15, 2, 8, 12, 5, 3, 11 and the rest | kept trees' vectors, kept sources, per-file vectors | 8.43 M | ≈0.2 M |
   | **total** | | **19.4 M** | **≈1.35 M** |
   
   **What stays, and why:**
@@ -1866,7 +1923,7 @@ Exact.
     - `regex`, compiled once per pattern;
     - argument and configuration parsing, once per process.
 
-  The bytes allocated fall from 2.67 GB to roughly 0.5-0.7 GB. Most of what remains is the kept trees' arenas, the declarations, the docblocks and the check's transient types. Storing declarations, summaries and docblock nodes in per-file and per-docblock vectors also removes each object's allocation header and size-class rounding, which dhat does not count.
+  The bytes allocated fall from 2.67 GB to roughly 0.5-0.7 GB. Most of what remains is the kept trees' vectors, the declarations, the docblocks and the check's transient types. Storing declarations, summaries and docblock nodes in per-file and per-docblock vectors also removes each object's allocation header and size-class rounding, which dhat does not count.
 - **The language server** today holds the 657 MB, plus ≈420 MB of context trees and the sources: about 1.1 GB for this workspace. After items 1, 3 and 19 it holds about the batch run's end state: the trees of its open documents and its LRU instead of every analysed file's, with memos bounded by weight (item 14).
 - **These are estimates, and probably optimistic.** The review has so far found items 3, 4 and 5 overstated, and items 6-19 are not yet reviewed. dhat counts requested bytes; the resident size adds mimalloc's overhead. The final heap profile (§11) is the measure.
 - The final heap profile (§11) measures all of this.
@@ -1957,6 +2014,7 @@ The rewrite made two more changes:
 | 6 | The deferred set contradicted item 4's on-demand evaluation. The availability rule would have dropped polyfills for extensions that are not loaded. A mapped file needs `unsafe`, which the workspace denies, and is undefined behaviour under truncation or NFS. A lazy record could not reach its file through serde. A whole-file CRC does not cover lazy decodes. | Deferred types on demand. Availability decided on run-time evidence only (built in, Composer's platform check, the configured runtime). Unknown keeps both declarations. A new check of a polyfill against its native signature. Records read with `read_at` under a decode context, as rustc does, with per-record CRCs and recoverable failures. A test of replacing files in use on every release platform. The context base shares the container. |
 | 7 | A registry-backed memo already existed (`KEEP_DECISIONS`). The generation must cover every registry content the relation reads, not just the hierarchy. On-demand evaluation could freeze an answer computed under an open cycle guard. Clearing per generation does not bound a batch run. The settings in the key are not read. The oracle's switch was test-only. | A content generation, also for read-only pass levels. One memo absorbing both. Provisional answers under cycle guards, with each cycle resolved per component by what PHP does: a constant cycle throws, so its reads are `never` and are reported. A two-segment bound. A runtime off switch. |
 | 8 | Six case-reference fields with seven kinds of readers, not one. One reader checks the merged reflection, not what the tag writes. Overlap with item 4's `FileDecls`. A wrong reason given for duplicate parameters. `reconcile_with_native` still collected. | Every field listed with its readers. Case references computed at every checked position from what is written. Dedup done in the file's parameter vector. One semantic case listed. The saving restated as work. |
+| 9 | A reference arena needs `unsafe`, which the workspace denies, and its `Sync` wrapper would not have been the only one: the name arena is not `Sync` either, and `self_cell` and `typed-arena` are not dependencies. The tree is changed after the parse (the stub rules, anonymous-class names, a second name resolution), and other code builds and keeps expressions. A non-UTF-8 source cannot give `&str` payloads, and its identifiers are decoded lossily today, so `class \xA9` and `class \xAA` are one class. Statement docs need only today's doc sites. The counts mixed rules: the expression clones included PHPDoc's, and M9 counted by a rule no item used. Checking the stub rules found that they apply to any file that mentions them, and for the newest PHP version only. | The tree as typed vectors addressed by `u32` ids: no `unsafe`, no lifetime, a few allocations per kept file. The stub rules applied as a stub is parsed, to stubs only, recording versions that item 6's readers answer for the configured range. Anonymous-class names as a side table. Every holder of an expression listed, holding ids. Payloads as byte ranges; names as bytes (item 15) and docs lexed as bytes (item 14). Attributes kept in their node. M9 recounted by M10's rule, and item 9's counts stated by it. |
 
 # Appendix A. The allocation tail, every site
 
