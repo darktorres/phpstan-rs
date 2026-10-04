@@ -137,8 +137,10 @@ impl CallContext for TypedCall<'_, '_> {
 enum Shared {
     /// To what the global of this name may hold.
     Global(Name),
-    /// To anything: a static variable, or one bound by reference.
+    /// To anything: a static variable.
     Anything,
+    /// To what the place it refers to may hold, by its declaration.
+    Reference(Place),
     /// To what it holds and what a closure capturing it may have written.
     Captured,
 }
@@ -246,6 +248,7 @@ impl Checker<'_> {
                     .cloned()
                     .unwrap_or_else(Type::mixed),
                 Shared::Anything => Type::mixed(),
+                Shared::Reference(place) => self.place_type(&place),
                 Shared::Captured => match (locals.get_var(&name), self.captured_types.get(&name)) {
                     (Some(held), Some(written)) => self
                         .relation()
@@ -406,7 +409,7 @@ impl Checker<'_> {
         }
         for (name, place) in &scope.references {
             if anything || self.place_written(place, storages) {
-                out.push((name.clone(), Shared::Anything));
+                out.push((name.clone(), Shared::Reference(place.clone())));
             }
         }
         if runs_written {
@@ -415,6 +418,36 @@ impl Checker<'_> {
             }
         }
         out
+    }
+
+    /// What the place a reference was taken of may hold, by its
+    /// declaration: a global's, a static property's, a property of
+    /// `$this`'s; anything else's anything.
+    fn place_type(&self, place: &Place) -> Type {
+        let own = self.current_class.as_deref();
+        let declared = match (&place.root, &*place.steps) {
+            (Root::Global(Some(name)), []) => {
+                self.registry.global_variables.get(name.as_str()).cloned()
+            }
+            (Root::Static(class, Some(prop)), []) => {
+                let class = if class.is_keyword("self")
+                    || class.is_keyword("static")
+                    || class.is_keyword("parent")
+                {
+                    own.map(str::to_string)
+                } else {
+                    class.resolved_class().map(str::to_string)
+                };
+                class
+                    .and_then(|class| self.registry.lookup_property(&class, prop))
+                    .map(|p| p.ty().clone())
+            }
+            (Root::This, [Step::Property(Some(prop))]) => own
+                .and_then(|class| self.registry.lookup_property(class, prop))
+                .map(|p| p.ty().clone()),
+            _ => None,
+        };
+        declared.unwrap_or_else(Type::mixed)
     }
 
     /// Whether `storages` may write the place a reference was taken of.
