@@ -40,6 +40,7 @@ pub(crate) mod duplicate_class_sites;
 mod duplicate_classes;
 pub(crate) mod duplicate_fn_sites;
 mod duplicate_functions;
+mod edit_replay;
 mod file_cache;
 mod file_declarations;
 mod file_table;
@@ -564,6 +565,12 @@ impl Project {
                 ("stub-base-phpstan", Project::phpstan_base()),
             ],
         )
+    }
+
+    /// The registry dump (`registry_dump`) of the project, without the
+    /// stub bases.
+    pub(crate) fn registry_dump_of_project(&self) -> String {
+        registry_dump::registry_dump(self, &[])
     }
 
     /// The registry of the built-in stubs, resolved once per process.

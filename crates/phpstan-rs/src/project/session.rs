@@ -868,6 +868,99 @@ impl Session {
         })
     }
 
+    /// Runs the edit replay (`edit_replay`) over the analysed files, its
+    /// files drawn with `seed`, and writes into `out`, gzip-compressed, the
+    /// registry dump without the stub bases and the diagnostics held after
+    /// the load and after each step (`step-<n>.registry.gz`,
+    /// `step-<n>.diagnostics.gz`), and after a fresh load of the edited tree
+    /// (`fresh.*`); and `script.txt`, the steps, and `verdict.txt`, which
+    /// sections of the last step's dumps and the fresh load's are the
+    /// same. Edits the tree it reads: refuses one without the replay's
+    /// marker file at its root. Gives the verdict.
+    pub fn edit_replay(&self, out: &Path, seed: u64) -> Result<String, String> {
+        let marker = self.root.join(super::edit_replay::MARKER);
+        if !marker.is_file() {
+            return Err(format!(
+                "the edit replay edits the files it reads; run it on a copy, with {} in it",
+                marker.display()
+            ));
+        }
+        std::fs::create_dir_all(out).map_err(|e| format!("{}: {e}", out.display()))?;
+        let mut project = self.load()?.project;
+        let mut held = super::edit_replay::check_all(&project, &self.pool);
+        let write_step =
+            |name: &str, project: &Project, held: &super::edit_replay::HeldDiagnostics| {
+                write_gzip(
+                    &out.join(format!("{name}.registry.gz")),
+                    project.registry_dump_of_project().as_bytes(),
+                )?;
+                write_gzip(
+                    &out.join(format!("{name}.diagnostics.gz")),
+                    super::edit_replay::print_held(held).as_bytes(),
+                )
+            };
+        write_step("step-0", &project, &held)?;
+        let mut script = String::from("0\tload\n");
+        let mut number = 0;
+        super::edit_replay::replay(
+            &mut project,
+            &self.root,
+            seed,
+            &mut held,
+            |step, project, held| {
+                number += 1;
+                script.push_str(&format!("{number}\t{}\t{}\n", step.label, step.description));
+                write_step(&format!("step-{number}"), project, held)
+            },
+        )?;
+        let last = (
+            project.registry_dump_of_project(),
+            super::edit_replay::print_held(&held),
+        );
+        drop(project);
+        let fresh_project = self.load()?.project;
+        let fresh_held = super::edit_replay::check_all(&fresh_project, &self.pool);
+        write_step("fresh", &fresh_project, &fresh_held)?;
+        let fresh = (
+            fresh_project.registry_dump_of_project(),
+            super::edit_replay::print_held(&fresh_held),
+        );
+        let sections = |text: &str| -> Vec<(String, String)> {
+            let mut out: Vec<(String, String)> = Vec::new();
+            for line in text.lines() {
+                match line.strip_prefix("== ") {
+                    Some(name) => out.push((name.to_string(), String::new())),
+                    None => {
+                        if let Some((_, body)) = out.last_mut() {
+                            body.push_str(line);
+                            body.push('\n');
+                        }
+                    }
+                }
+            }
+            out
+        };
+        let mut verdict = String::new();
+        let (last_sections, fresh_sections) = (sections(&last.0), sections(&fresh.0));
+        for (name, body) in &last_sections {
+            let same = fresh_sections
+                .iter()
+                .any(|(fresh_name, fresh_body)| fresh_name == name && fresh_body == body);
+            verdict.push_str(&format!(
+                "registry {name}: {}\n",
+                if same { "same" } else { "differs" }
+            ));
+        }
+        verdict.push_str(&format!(
+            "diagnostics: {}\n",
+            if last.1 == fresh.1 { "same" } else { "differs" }
+        ));
+        for (name, text) in [("script.txt", &script), ("verdict.txt", &verdict)] {
+            std::fs::write(out.join(name), text).map_err(|e| format!("{name}: {e}"))?;
+        }
+        Ok(verdict)
+    }
+
     /// Loads every file, runs the finishing passes, and writes the registry
     /// dump (`registry_dump`) of what the load leaves to `out`,
     /// gzip-compressed.

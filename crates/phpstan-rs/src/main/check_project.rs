@@ -70,6 +70,14 @@ pub(crate) struct CheckProjectArgs {
     /// this directory and stops (a regression-gate snapshot, O1).
     #[arg(long, hide = true)]
     pub(crate) dump_front_end: Option<PathBuf>,
+    /// Runs the edit replay over the analysed files, writing its dumps and
+    /// verdict into this directory, and stops. Edits the files: the tree
+    /// must be a copy with a `.phpstan-rs-replay` file at its root.
+    #[arg(long, hide = true)]
+    pub(crate) edit_replay: Option<PathBuf>,
+    /// The seed the edit replay draws its files with.
+    #[arg(long, hide = true, default_value_t = 1)]
+    pub(crate) replay_seed: u64,
     /// Writes the registry dump of what the load leaves, gzip-compressed,
     /// to this file and stops (a regression-gate snapshot).
     #[arg(long, hide = true)]
@@ -151,6 +159,16 @@ pub(crate) fn run_check_project_command(args: CheckProjectArgs) {
                 dump.unions,
                 out.display()
             ),
+            Err(e) => {
+                eprintln!("{e}");
+                std::process::exit(1);
+            }
+        }
+        return;
+    }
+    if let Some(out) = &args.edit_replay {
+        match run.session.edit_replay(out, args.replay_seed) {
+            Ok(verdict) => eprint!("{verdict}"),
             Err(e) => {
                 eprintln!("{e}");
                 std::process::exit(1);
