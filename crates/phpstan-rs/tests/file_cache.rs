@@ -1,6 +1,6 @@
 //! The per-file cache, end to end: a run that reads context files back from
-//! it reports what a run that parsed them did, whether the entries are whole,
-//! truncated, damaged or stale.
+//! it reports what a run that parsed them did, and leaves the same registry,
+//! whether the entries are whole, truncated, damaged or stale.
 
 mod common;
 
@@ -34,6 +34,33 @@ fn run(dir: &TempDir, cache: &Path) -> String {
         .unwrap();
     assert!(output.status.success(), "{output:?}");
     String::from_utf8_lossy(&output.stdout).into_owned()
+}
+
+/// The registry dump of a run, with the cache in `cache`.
+fn registry(dir: &TempDir, cache: &Path) -> String {
+    let out = dir.path().join("registry.txt.gz");
+    let output = bin()
+        .current_dir(dir.path())
+        .env("PHPSTAN_RS_CACHE_DIR", cache)
+        .env_remove("PHPSTAN_RS_NO_FILE_CACHE")
+        .env_remove("PHPSTAN_RS_NO_STUB_CACHE")
+        .args([
+            "check-project",
+            "--config",
+            "phpstan-rs.toml",
+            "--dump-registry",
+        ])
+        .arg(&out)
+        .output()
+        .unwrap();
+    assert!(output.status.success(), "{output:?}");
+    let mut text = String::new();
+    std::io::Read::read_to_string(
+        &mut flate2::read::GzDecoder::new(std::fs::File::open(&out).unwrap()),
+        &mut text,
+    )
+    .unwrap();
+    text
 }
 
 /// The entries the per-file cache holds.
@@ -84,6 +111,22 @@ fn a_warm_run_reports_what_a_cold_run_does() {
         .map(|entry| std::fs::metadata(entry).unwrap().modified().unwrap())
         .collect();
     assert_eq!(written, rewritten);
+}
+
+#[test]
+fn a_warm_run_leaves_the_registry_a_cold_run_does() {
+    let dir = project();
+    dir.write(
+        "vendor/ignored.php",
+        "<?php\nnamespace Lib;\n\nfunction f(): int\n{\n    // @phpstan-ignore return.type\n    return 'x';\n}\n",
+    );
+    let cache = TempDir::new("file_cache_registry");
+    let cold = registry(&dir, cache.path());
+    assert!(
+        !entries(cache.path()).is_empty(),
+        "the cold run stored entries"
+    );
+    assert_eq!(registry(&dir, cache.path()), cold);
 }
 
 #[test]

@@ -115,7 +115,9 @@ pub(crate) struct FileState {
     // (`deps::declaration_referenced_names`).
     declaration_references: FxHashSet<deps::RefKey>,
     // Inline `@phpstan-ignore*` comments, read while the file was lexed
-    // (the AST carries no comment text).
+    // (the AST carries no comment text). Only an analysed file's are read,
+    // so they are kept with its tree, and a context file's of a batch run
+    // are not, as its cached entry holds none.
     ignores: ignore_comments::IgnoreComments,
     // The registry names of the file's anonymous classes.
     anonymous_classes: Vec<Name>,
@@ -1109,10 +1111,11 @@ impl Project {
         self.globals_stale.insert(id);
         let load_order = self.next_load_order;
         self.next_load_order += 1;
+        let keeps_tree = analyzed || !self.built_once;
         self.files.insert_at(
             id,
             FileState {
-                kept_ast: ast.filter(|_| analyzed || !self.built_once),
+                kept_ast: ast.filter(|_| keeps_tree),
                 source_len: len,
                 load_order,
                 mentions_phpstan: mentions_phpstan(&functions, &classes, &references),
@@ -1121,7 +1124,11 @@ impl Project {
                 constants,
                 references,
                 declaration_references,
-                ignores,
+                ignores: if keeps_tree {
+                    ignores
+                } else {
+                    Default::default()
+                },
                 anonymous_classes,
                 source: self.retain_source.then_some(source),
                 analyzed,
