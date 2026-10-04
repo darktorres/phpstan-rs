@@ -596,7 +596,7 @@ Twenty-one items, numbered in the order they are built. Each states what is ther
   - the declared classes against their own walk (`project.rs:3029-3036`);
   - the declaration rebuild checks (`project.rs:1248-1262`, `:1615-1636`), with `Keep` and the `keep` parameters of `build_declarations_where` and `built_declaration` (`index.rs:661-687`), which only the second uses;
   - the gated walk's declaration count (`file_declarations.rs:122-131`);
-  - and, as tests, `project/tests/fused_declarations.rs` (the five walks `parse_file` replaced) and `the_one_walk_for_both_sets_is_the_two_walks` (`deps/tests/dependency_collection.rs:228`).
+  - and, as a test, `the_one_walk_for_both_sets_is_the_two_walks` (`deps/tests/dependency_collection.rs:228`), with `deps::declaration_referenced_names`, which only the oracle and it use. `project/tests/fused_declarations.rs` (the five walks `parse_file` replaced) is no oracle: the edit path (`update_file`) runs those walks in release, so the test checks two live implementations against each other, and it goes with the walks in item 1.
   
   So `cargo test` runs two implementations and keeps every body's statements.
 - **These oracles have run over the fixtures only, and a debug run as things stand would skip many of them.**
