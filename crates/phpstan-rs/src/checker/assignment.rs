@@ -516,7 +516,11 @@ impl<'a> Checker<'a> {
                             }
                             // A string takes the write as a string does.
                             let written = if current.is_string().yes() {
-                                Some(current.string_offset_write(idx_ty.as_ref(), &ty))
+                                Some(current.string_offset_write(
+                                    idx_ty.as_ref(),
+                                    &ty,
+                                    self.negative_string_offsets(),
+                                ))
                             } else {
                                 current.set_offset_value_type(
                                     idx_ty.as_ref(),
@@ -771,7 +775,7 @@ impl<'a> Checker<'a> {
         let string_presence = (!strings.is_empty()).then(|| {
             self.relation()
                 .union_of(strings)
-                .string_offset_read(dim, self.negative_string_offsets_count_from_end())
+                .string_offset_read(dim, self.negative_string_offsets())
                 .1
         });
         if string_presence == Some(types::OffsetPresence::Absent) && arrays.is_empty() {

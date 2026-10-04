@@ -353,6 +353,10 @@ pub enum PhpFeature {
     /// A non-numeric string in arithmetic throws a `TypeError` ("saner
     /// numeric strings"); before, it is `0` with a warning.
     NonNumericStringArithmeticThrows,
+    /// A negative string offset counts from the end (`'abc'[-1]` is
+    /// `'c'`); before, it reads `''` with a notice and writes nothing with
+    /// a warning.
+    NegativeStringOffsets,
 }
 
 impl PhpFeature {
@@ -363,6 +367,7 @@ impl PhpFeature {
     pub fn threshold(self) -> PhpVersion {
         use PhpFeature::*;
         match self {
+            NegativeStringOffsets => PhpVersion::new(7, 1),
             NoncapturingCatch
             | ThrowExpression
             | PromotedProperties

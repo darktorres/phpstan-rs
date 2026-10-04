@@ -1,1 +1,4 @@
-no diagnostics
+10:27-10:29 offsetAccess.notFound L3 | Offset -1 does not exist on 'abc'.
+11:25-11:27 offsetAccess.notFound L3 | Offset -1 does not exist on string.
+12:26-12:28 offsetAccess.notFound L3 | Offset -1 does not exist on non-empty-string.
+19:5-19:11 offsetAssign.valueType L3 | Illegal string offset -1.

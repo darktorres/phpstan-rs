@@ -1,1 +1,2 @@
 php_version = "7.0"
+runtime_warnings = "exact"

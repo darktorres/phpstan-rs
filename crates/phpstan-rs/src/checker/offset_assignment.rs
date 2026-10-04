@@ -69,8 +69,9 @@ impl<'a> Checker<'a> {
 
     /// A write to a string offset PHP rejects or cuts short
     /// (`offsetAssign.valueType`): an empty value throws, a longer one
-    /// writes only its first byte, and a negative offset before the
-    /// start of the string writes nothing.
+    /// writes only its first byte, and a negative offset writes nothing
+    /// where it is before the start of the string, or on every version
+    /// the project runs on, before PHP 7.1.
     fn check_string_offset_write(
         &mut self,
         lhs: &Expr,
@@ -85,9 +86,10 @@ impl<'a> Checker<'a> {
             Some("Only the first byte will be assigned to the string offset.".to_string())
         } else if let Some(k) = dim.and_then(Type::int_literal_value)
             && k < 0
-            && let strings = container.constant_strings()
-            && !strings.is_empty()
-            && strings.iter().all(|s| (s.as_bytes().len() as i64) < -k)
+            && (self.negative_string_offsets() == types::NegativeStringOffsets::Absent || {
+                let strings = container.constant_strings();
+                !strings.is_empty() && strings.iter().all(|s| (s.as_bytes().len() as i64) < -k)
+            })
         {
             Some(format!("Illegal string offset {k}."))
         } else {
