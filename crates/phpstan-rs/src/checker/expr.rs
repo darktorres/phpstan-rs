@@ -3430,6 +3430,9 @@ impl<'a> Checker<'a> {
                 // is the one implicit exception: a non-static closure
                 // declared inside a method still auto-binds it, the same
                 // as real PHP.
+                // Each variable captured by reference, with what the closure is entered
+                // with in it.
+                let mut by_ref_entries: Vec<(Name, Type)> = Vec::new();
                 let mut closure_locals: Locals = locals.closure_scope();
                 for u in uses {
                     // Mirrors real PHPStan's
@@ -3502,10 +3505,17 @@ impl<'a> Checker<'a> {
                     // two probes (`probe_hit`/`probe_var_provenance`) are
                     // independent.
                     self.probe_hit_at(u.name.span, &ty);
-                    // A by-reference capture can still gain keys from
-                    // anything else holding the reference before the
-                    // closure runs.
-                    let ty = if u.by_ref { ty.unsealed_shapes() } else { ty };
+                    // A capture by reference is entered with what anything
+                    // sharing it may leave (`captures`); it can still gain
+                    // keys from anything else holding the reference before
+                    // the closure runs.
+                    let ty = if u.by_ref {
+                        let ty = self.capture_entry(e.span, &u.name.name, ty);
+                        by_ref_entries.push((u.name.name.clone(), ty.clone()));
+                        ty.unsealed_shapes()
+                    } else {
+                        ty
+                    };
                     closure_locals.insert_with_provenance_var(&u.name, ty, provenance);
                 }
                 if !*is_static && let Some(this_ty) = locals.get_var("this") {
@@ -3733,25 +3743,38 @@ impl<'a> Checker<'a> {
                 // to do by hand, so `closure_locals` already comes back
                 // correctly converged for that too.
                 let mut body_terminates = false;
-                let (converged, _) = self.converge_loop_body(
-                    &closure_locals,
-                    declared_return.as_ref(),
-                    &closure_label,
-                    LoopZeroIterations::Possible {
-                        subject_exempt: None,
-                        subject_key: None,
-                    },
-                    |this, pass_locals, declared_return, label, _pass| {
-                        // Only the kept (last) pass's return points count,
-                        // the same way only its diagnostics survive.
-                        this.current_function_return_points.clear();
-                        this.current_function_saw_explicit_return = false;
-                        body_terminates = this
-                            .check_block(body, pass_locals, declared_return, label)
-                            .completion
-                            .terminates;
-                    },
-                );
+                let by_ref_names: Vec<Name> = uses
+                    .iter()
+                    .filter(|u| u.by_ref)
+                    .map(|u| u.name.name.clone())
+                    .collect();
+                let mut entry_locals = closure_locals.clone();
+                let (converged, _) =
+                    self.check_capturing_scope(&mut entry_locals, |this, entry| {
+                        this.converge_loop_body(
+                            entry,
+                            declared_return.as_ref(),
+                            &closure_label,
+                            LoopZeroIterations::Possible {
+                                subject_exempt: None,
+                                subject_key: None,
+                            },
+                            |this, pass_locals, declared_return, label, _pass| {
+                                // Only the kept (last) pass's return points
+                                // count, the same way only its diagnostics
+                                // survive.
+                                this.current_function_return_points.clear();
+                                this.current_function_saw_explicit_return = false;
+                                body_terminates = this
+                                    .check_block(body, pass_locals, declared_return, label)
+                                    .completion
+                                    .terminates;
+                                // The next run starts from what each capture held where
+                                // the body returned, too.
+                                this.fold_returned_captures(&by_ref_names, pass_locals);
+                            },
+                        )
+                    });
                 closure_locals = converged;
                 let closure_return_points = std::mem::replace(
                     &mut self.current_function_return_points,
@@ -3826,53 +3849,14 @@ impl<'a> Checker<'a> {
                 // convergence snapshot above is unconditional - but this
                 // project's own "don't guess wrong" precedent prefers a
                 // graceful degrade here over an `unwrap()`).
-                for u in uses {
-                    if !u.by_ref {
-                        continue;
-                    }
-                    let mutated = closure_byref_exit_snapshots
-                        .get(&u.name.name)
-                        .and_then(|snapshots| {
-                            snapshots.iter().cloned().union_all_with(&self.relation())
-                        })
-                        .unwrap_or_else(|| {
-                            closure_locals
-                                .get_var(&u.name)
-                                .cloned()
-                                .unwrap_or(Type::mixed())
-                        });
-                    if !locals.contains_var(&u.name) {
-                        // Real PHP auto-vivifies `$x` in the outer/
-                        // declaring scope the moment `use (&$x)` captures
-                        // an as-yet-undefined variable - the same by-ref-
-                        // argument auto-vivification this project models
-                        // in `predefine_byref_or_unknown_args`, now given
-                        // a real, navigable declaration site.
-                        locals.declare_var(&u.name, mutated.clone(), u.name.span);
-                        // `locals.declare` above is this variable's only
-                        // provenance site in this case (it didn't exist
-                        // in the outer scope before), so the probe hook
-                        // above (fired before this variable existed in
-                        // `locals` at all) would have stashed an empty
-                        // set - correct it now that the real site is
-                        // known.
-                        if self.probe_span.get() == Some(u.name.span) {
-                            *self.probe_var_provenance.borrow_mut() =
-                                Some([u.name.span].into_iter().collect());
-                        }
-                    } else {
-                        locals.insert_var(&u.name, mutated.clone());
-                        // The closure may write anything to it.
-                        locals.clear_native_var(&u.name);
-                    }
-                    // What it may hold after any later call that runs the
-                    // closure (`forget_effect`).
-                    let written = match self.captured_types.remove(&u.name.name) {
-                        Some(earlier) => self.relation().union_of(vec![earlier, mutated]),
-                        None => mutated,
-                    };
-                    self.captured_types.insert(u.name.name.clone(), written);
-                }
+                self.write_back_captures(
+                    e.span,
+                    uses,
+                    &by_ref_entries,
+                    &closure_byref_exit_snapshots,
+                    &closure_locals,
+                    locals,
+                );
                 let inferred_return = (!closure_is_generator).then(|| {
                     closure_inferred_return_type(
                         &self.relation(),

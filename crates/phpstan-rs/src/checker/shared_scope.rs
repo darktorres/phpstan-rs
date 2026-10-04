@@ -10,6 +10,7 @@
 use rustc_hash::{FxHashMap, FxHashSet};
 use syntax::ast::*;
 use syntax::name::Name;
+use syntax::span::Span;
 use syntax::visit::{Visitor, walk_expr, walk_stmt};
 
 use crate::registry::summaries::{BodySummary, Place, Step};
@@ -41,6 +42,10 @@ pub(crate) struct SharedScope {
     /// `isset` or `empty`, or an assignment's target: no other code can
     /// reach those objects.
     pub(crate) unescaped: FxHashSet<Name>,
+    /// Where each variable is assigned, by offset, and the loops of the
+    /// scope, by span.
+    pub(crate) writes: FxHashMap<Name, Vec<u32>>,
+    pub(crate) loops: Vec<Span>,
 }
 
 impl SharedScope {
@@ -72,6 +77,22 @@ impl SharedScope {
         scan.finish(None, false)
     }
 
+    /// Whether the scope may assign `name` after the code at `at` runs: an
+    /// assignment after it, or one in a loop around it.
+    pub(crate) fn written_after(&self, name: &Name, at: Span) -> bool {
+        self.writes.get(name).is_some_and(|offsets| {
+            offsets.iter().any(|&offset| {
+                offset >= at.end
+                    || self.loops.iter().any(|l| {
+                        l.start <= at.start
+                            && at.end <= l.end
+                            && l.start <= offset
+                            && offset < l.end
+                    })
+            })
+        })
+    }
+
     /// Whether no variable of the scope is shared.
     pub(crate) fn binds_nothing(&self) -> bool {
         !self.top_level
@@ -95,6 +116,8 @@ enum Held {
 
 #[derive(Default)]
 struct Scan {
+    writes: FxHashMap<Name, Vec<u32>>,
+    loops: Vec<Span>,
     globals: FxHashSet<Name>,
     any_global: bool,
     statics: FxHashSet<Name>,
@@ -138,6 +161,8 @@ impl Scan {
             captured: self.captured,
             closures,
             unescaped,
+            writes: self.writes,
+            loops: self.loops,
         }
     }
 
@@ -166,7 +191,13 @@ impl Scan {
     /// An assignment to `target` of what `held` says.
     fn assign(&mut self, target: &Expr, held: Held) {
         match &target.peeled().kind {
-            ExprKind::Variable(name) => self.note(name, held),
+            ExprKind::Variable(name) => {
+                self.writes
+                    .entry(name.clone())
+                    .or_default()
+                    .push(target.span.start);
+                self.note(name, held);
+            }
             ExprKind::Destructure(items, _) => {
                 for item in items {
                     if let Some(key) = &item.key {
@@ -206,6 +237,15 @@ impl<'ast> Visitor<'ast> for Scan {
     fn visit_class_def(&mut self, _: &'ast ClassDef) {}
 
     fn visit_stmt(&mut self, stmt: &'ast Stmt) {
+        if matches!(
+            stmt.kind,
+            StmtKind::While { .. }
+                | StmtKind::DoWhile { .. }
+                | StmtKind::For { .. }
+                | StmtKind::Foreach { .. }
+        ) {
+            self.loops.push(stmt.span);
+        }
         syntax::stack::guard(|| match &stmt.kind {
             StmtKind::Global(vars) => {
                 for var in vars {
@@ -252,6 +292,10 @@ impl<'ast> Visitor<'ast> for Scan {
                             .unwrap_or_else(Place::value)
                             .then(Step::Element);
                         self.references.insert(name.clone(), place);
+                        self.writes
+                            .entry(name.clone())
+                            .or_default()
+                            .push(value.span.start);
                         self.note(name, Held::Other);
                     }
                     _ => self.assign(value, Held::Other),
@@ -281,6 +325,10 @@ impl<'ast> Visitor<'ast> for Scan {
                     ExprKind::Variable(name) => {
                         let place = Place::of(rhs).unwrap_or_else(Place::value);
                         self.references.insert(name.clone(), place);
+                        self.writes
+                            .entry(name.clone())
+                            .or_default()
+                            .push(lhs.span.start);
                         self.note(name, Held::Other);
                     }
                     _ => self.assign(lhs, Held::Other),

@@ -267,10 +267,11 @@ impl<'a> Checker<'a> {
                 }
             }
             PropertyHookBody::Block(stmts) => {
-                let body_terminates = self
-                    .check_block(stmts, &mut locals, declared_return.as_ref(), &label)
-                    .completion
-                    .terminates;
+                let body_terminates = self.check_capturing_scope(&mut locals, |this, locals| {
+                    this.check_block(stmts, locals, declared_return.as_ref(), &label)
+                        .completion
+                        .terminates
+                });
                 // Same fall-off-the-end completeness check `check_function`
                 // performs - real PHPStan runs `MissingReturnRule` against
                 // a hook the same as any other function-like node.
@@ -569,7 +570,9 @@ impl<'a> Checker<'a> {
                 self.check_expr(e, &mut locals, &label);
             }
             PropertyHookBody::Block(stmts) => {
-                self.check_block(stmts, &mut locals, declared_return.as_ref(), &label);
+                self.check_capturing_scope(&mut locals, |this, locals| {
+                    this.check_block(stmts, locals, declared_return.as_ref(), &label)
+                });
             }
             PropertyHookBody::Abstract => {}
         }

@@ -300,6 +300,7 @@ impl<'a> Checker<'a> {
                     self.check_stmt_impl(stmt, locals, declared_return, label)
                 });
             self.record_type_dump(stmt, locals);
+            self.note_captured_types(locals);
             if !self.external_rules.is_empty() {
                 self.dispatch_stmt_rules(stmt, locals);
             }

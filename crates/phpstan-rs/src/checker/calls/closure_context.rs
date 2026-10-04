@@ -183,6 +183,9 @@ impl<'a> Checker<'a> {
                     self.suggest_closure_native_params(params, param_overrides);
                 }
                 let mut closure_locals: Locals = locals.closure_scope();
+                // Each variable captured by reference, with what the closure
+                // is entered with in it.
+                let mut by_ref_entries: Vec<(syntax::name::Name, Type)> = Vec::new();
                 for u in uses {
                     // See the identical fix's own comment at
                     // `checker::expr`'s `ExprKind::Closure` arm.
@@ -238,7 +241,14 @@ impl<'a> Checker<'a> {
                         *self.probe_var_provenance.borrow_mut() =
                             Some(provenance.iter().copied().collect());
                     }
-                    let ty = if u.by_ref { ty.unsealed_shapes() } else { ty };
+                    // See `checker::expr`'s `ExprKind::Closure` arm.
+                    let ty = if u.by_ref {
+                        let ty = self.capture_entry(closure_expr.span, &u.name.name, ty);
+                        by_ref_entries.push((u.name.name.clone(), ty.clone()));
+                        ty.unsealed_shapes()
+                    } else {
+                        ty
+                    };
                     closure_locals.insert_with_provenance_var(&u.name, ty, provenance);
                 }
                 if !*is_static && let Some(this_ty) = locals.get_var("this") {
@@ -314,6 +324,22 @@ impl<'a> Checker<'a> {
                         )),
                         false,
                     ));
+                // The closure's own by-reference state, as `checker::expr`'s
+                // `ExprKind::Closure` arm keeps it: its captures by
+                // reference are snapshotted where its body returns.
+                let previous_by_ref_params =
+                    std::mem::take(&mut self.current_function_by_ref_params);
+                let previous_by_ref_exit_snapshots =
+                    std::mem::take(&mut self.current_function_by_ref_exit_snapshots);
+                let previous_by_ref_params_with_tag =
+                    std::mem::take(&mut self.current_function_by_ref_params_with_tag);
+                let previous_byref_snapshot_names = std::mem::replace(
+                    &mut self.current_function_byref_snapshot_names,
+                    uses.iter()
+                        .filter(|u| u.by_ref)
+                        .map(|u| u.name.name.clone())
+                        .collect(),
+                );
                 // See `checker/expr.rs`'s `Closure` arm's identical comment.
                 let previous_throw_points = std::mem::take(&mut self.current_function_throw_points);
                 let previous_try_throw_states = std::mem::take(&mut self.try_throw_states);
@@ -326,22 +352,40 @@ impl<'a> Checker<'a> {
                 // See `checker::expr`'s `ExprKind::Closure` arm's
                 // identical `converge_loop_body` fix and comment.
                 let mut body_terminates = false;
-                let (converged, _) = self.converge_loop_body(
-                    &closure_locals,
-                    declared_return.as_ref(),
-                    &closure_label,
-                    LoopZeroIterations::Possible {
-                        subject_exempt: None,
-                        subject_key: None,
-                    },
-                    |this, pass_locals, declared_return, label, _pass| {
-                        body_terminates = this
-                            .check_block(body, pass_locals, declared_return, label)
-                            .completion
-                            .terminates;
-                    },
-                );
+                let by_ref_names: Vec<syntax::name::Name> = uses
+                    .iter()
+                    .filter(|u| u.by_ref)
+                    .map(|u| u.name.name.clone())
+                    .collect();
+                let mut entry_locals = closure_locals.clone();
+                let (converged, _) =
+                    self.check_capturing_scope(&mut entry_locals, |this, entry| {
+                        this.converge_loop_body(
+                            entry,
+                            declared_return.as_ref(),
+                            &closure_label,
+                            LoopZeroIterations::Possible {
+                                subject_exempt: None,
+                                subject_key: None,
+                            },
+                            |this, pass_locals, declared_return, label, _pass| {
+                                body_terminates = this
+                                    .check_block(body, pass_locals, declared_return, label)
+                                    .completion
+                                    .terminates;
+                                this.fold_returned_captures(&by_ref_names, pass_locals);
+                            },
+                        )
+                    });
                 closure_locals = converged;
+                self.record_by_ref_exit_snapshot(&closure_locals);
+                let closure_byref_exit_snapshots = std::mem::replace(
+                    &mut self.current_function_by_ref_exit_snapshots,
+                    previous_by_ref_exit_snapshots,
+                );
+                self.current_function_by_ref_params = previous_by_ref_params;
+                self.current_function_by_ref_params_with_tag = previous_by_ref_params_with_tag;
+                self.current_function_byref_snapshot_names = previous_byref_snapshot_names;
                 self.check_closure_missing_return(
                     body_terminates,
                     return_type.is_some(),
@@ -359,32 +403,14 @@ impl<'a> Checker<'a> {
                 self.current_function_assigned_variables = previous_assigned_variables;
                 self.leave_shared_scope(enclosing_scope);
                 self.check_unused_closure_uses(uses, body, closure_expr.span);
-                for u in uses {
-                    if !u.by_ref {
-                        continue;
-                    }
-                    // Already the fixed-point-converged result unioned
-                    // with the pre-closure entry state - see the
-                    // identical fix's own comment at `checker::expr`'s
-                    // `ExprKind::Closure` arm.
-                    let mutated = closure_locals
-                        .get_var(&u.name)
-                        .cloned()
-                        .unwrap_or(Type::mixed());
-                    if !locals.contains_var(&u.name) {
-                        // See the identical fix's own comment at
-                        // `checker::expr`'s `ExprKind::Closure` arm.
-                        locals.declare_var(&u.name, mutated, u.name.span);
-                        if self.probe_span.get() == Some(u.name.span) {
-                            *self.probe_var_provenance.borrow_mut() =
-                                Some([u.name.span].into_iter().collect());
-                        }
-                    } else {
-                        locals.insert_var(&u.name, mutated);
-                        // The closure may write anything to it.
-                        locals.clear_native_var(&u.name);
-                    }
-                }
+                self.write_back_captures(
+                    closure_expr.span,
+                    uses,
+                    &by_ref_entries,
+                    &closure_byref_exit_snapshots,
+                    &closure_locals,
+                    locals,
+                );
                 true
             }
             _ => false,

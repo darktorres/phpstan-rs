@@ -728,6 +728,14 @@ pub struct Checker<'a> {
     // variables they capture by reference.
     pub(crate) shared_scope: std::rc::Rc<shared_scope::SharedScope>,
     pub(crate) captured_types: rustc_hash::FxHashMap<syntax::name::Name, Type>,
+    // For each closure of the scope capturing a variable by reference, by
+    // the closure's offset: what it was entered with on this pass, and what
+    // its next pass enters it with; and what each variable captured by
+    // reference held after any statement of the scope
+    // (`check_capturing_scope`).
+    pub(crate) capture_entries: Vec<(u32, syntax::name::Name, Type)>,
+    pub(crate) capture_widening: rustc_hash::FxHashMap<(u32, syntax::name::Name), Type>,
+    pub(crate) capture_seen: rustc_hash::FxHashMap<syntax::name::Name, Type>,
     // Every class named as the resolved `$scope` of a `Closure::
     // bind(...)`/`->bindTo(...)` call anywhere in the file being checked
     // (`unused::scan_program_for_rebind_targets`, built once per
@@ -902,6 +910,7 @@ mod by_ref_params;
 mod call_effects;
 mod callable_values;
 mod calls;
+mod captures;
 mod castable_arguments;
 mod coercion;
 mod comparisons;
@@ -1180,6 +1189,9 @@ impl<'a> Checker<'a> {
             static_var_names: NameSet::default(),
             shared_scope: Default::default(),
             captured_types: Default::default(),
+            capture_entries: Default::default(),
+            capture_widening: Default::default(),
+            capture_seen: Default::default(),
             rebind_target_classes: NameSet::default(),
             closure_rebind_possible: true,
             include_guards_possible: true,
@@ -1283,6 +1295,9 @@ impl<'a> Checker<'a> {
             shared: std::mem::replace(&mut self.shared_scope, std::rc::Rc::new(scope)),
             captured: std::mem::take(&mut self.captured_types),
             statics: std::mem::replace(&mut self.static_var_names, statics),
+            entries: std::mem::take(&mut self.capture_entries),
+            widening: std::mem::take(&mut self.capture_widening),
+            seen: std::mem::take(&mut self.capture_seen),
         }
     }
 
@@ -1290,6 +1305,76 @@ impl<'a> Checker<'a> {
         self.shared_scope = enclosing.shared;
         self.captured_types = enclosing.captured;
         self.static_var_names = enclosing.statics;
+        self.capture_entries = enclosing.entries;
+        self.capture_widening = enclosing.widening;
+        self.capture_seen = enclosing.seen;
+    }
+
+    /// Checks a scope's body with `check`, and again, from `locals` as it
+    /// came and with what the pass before recorded dropped, while a closure
+    /// of the scope captures by reference a variable the scope holds a type
+    /// in, after one of its statements, that the closure was not entered
+    /// with: the closure's next entry takes that type too. A variable still
+    /// growing after a few passes is entered as anything.
+    pub(crate) fn check_capturing_scope<R>(
+        &mut self,
+        locals: &mut Locals,
+        mut check: impl FnMut(&mut Self, &mut Locals) -> R,
+    ) -> R {
+        const MAX_PASSES: usize = 4;
+        if self.shared_scope.captured.is_empty() {
+            return check(self, locals);
+        }
+        let entry = locals.clone();
+        let mark = self.pass_mark();
+        let mut pass = 0;
+        loop {
+            self.capture_entries.clear();
+            self.capture_seen.clear();
+            let result = check(self, locals);
+            pass += 1;
+            let relation = self.relation();
+            let mut widened = false;
+            for (at, name, entered) in std::mem::take(&mut self.capture_entries) {
+                let Some(seen) = self.capture_seen.get(&name) else {
+                    continue;
+                };
+                if relation.is_super_type_of(&entered, seen).yes() {
+                    continue;
+                }
+                let wider = if pass >= MAX_PASSES {
+                    Type::mixed()
+                } else {
+                    relation.union_of(vec![entered, seen.clone()])
+                };
+                self.capture_widening.insert((at, name), wider);
+                widened = true;
+            }
+            if !widened {
+                return result;
+            }
+            self.rewind_to(mark);
+            *locals = entry.clone();
+        }
+    }
+
+    /// Records what each variable the scope's closures capture by reference
+    /// holds now (`check_capturing_scope`).
+    pub(crate) fn note_captured_types(&mut self, locals: &Locals) {
+        if self.shared_scope.captured.is_empty() {
+            return;
+        }
+        let scope = std::rc::Rc::clone(&self.shared_scope);
+        for name in &scope.captured {
+            let Some(held) = locals.get_var(name) else {
+                continue;
+            };
+            let seen = match self.capture_seen.remove(name) {
+                Some(earlier) => self.relation().union_of(vec![earlier, held.clone()]),
+                None => held.clone(),
+            };
+            self.capture_seen.insert(name.clone(), seen);
+        }
     }
 
     /// Drops what every record gained since `mark`.
@@ -1857,6 +1942,9 @@ pub(crate) struct EnclosingScope {
     shared: std::rc::Rc<shared_scope::SharedScope>,
     captured: rustc_hash::FxHashMap<syntax::name::Name, Type>,
     statics: NameSet,
+    entries: Vec<(u32, syntax::name::Name, Type)>,
+    widening: rustc_hash::FxHashMap<(u32, syntax::name::Name), Type>,
+    seen: rustc_hash::FxHashMap<syntax::name::Name, Type>,
 }
 
 #[cfg(test)]

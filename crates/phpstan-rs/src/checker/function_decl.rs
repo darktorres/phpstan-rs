@@ -966,15 +966,11 @@ impl<'a> Checker<'a> {
         // as any nested `{ ... }` block is - it just needs to be routed
         // through the one place that check lives.
         let previous_implicit_calls = std::mem::take(&mut self.implicit_calls);
-        let body_terminates = self
-            .check_block(
-                f.body_stmts(),
-                &mut locals,
-                declared_return.as_ref(),
-                &label,
-            )
-            .completion
-            .terminates;
+        let body_terminates = self.check_capturing_scope(&mut locals, |this, locals| {
+            this.check_block(f.body_stmts(), locals, declared_return.as_ref(), &label)
+                .completion
+                .terminates
+        });
         let implicit_calls = std::mem::replace(&mut self.implicit_calls, previous_implicit_calls);
         // Judged after the body, which finds the offsets that are calls.
         self.check_purity_impure_points(f, sig, class_name.is_some(), &label, &implicit_calls);
