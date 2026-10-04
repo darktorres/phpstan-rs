@@ -219,8 +219,8 @@ docblock is inherited across case-different names; union member order).
 The callgrind drill-down of the 20.57 G run at `5fb858c9` (level 7's end
 state), the dhat heap profile of the same run (`target/dhat-heap.json`; its
 2.67 GB and 19.4 M allocations each given to an item, §8), and the plan built
-from both: items 0-19, each validated at its end (§11), with O3 once after
-item 19. The goal is
+from both: items 0-20, each validated at its end (§11), with O3 once after
+item 20. The goal is
 beyond PHPStan and Psalm, not parity: semantics are judged by what PHP does
 when it runs, and the plan adds the checks found along the way.
 
@@ -239,8 +239,10 @@ when it runs, and the plan adds the checks found along the way.
   ≈350-385 MB peak (from 866) plus the checks in flight, ≈1.85 M allocations
   (from 19.4 M), and roughly 8 G of the 20.57 G instructions.
 - **Building it** started on 2026-10-03. Its tasks, in order, with their
-  state and commits, are in `PROFILE_DRILL_PIWIGO_20G_LEDGER.md` (185 rows:
-  items 0-19, each closed by its validation row, then O3). It starts at
+  state and commits, are in `PROFILE_DRILL_PIWIGO_20G_LEDGER.md` (196 rows:
+  items 0-20, each closed by its validation row, then O3). Reading the
+  starting state (0.1) found four false-report bugs, fixed in item 0
+  before the baseline (rows 0.1a-0.1f), and added item 20. It starts at
   item 0: the starting state read, the `oracle` profile's run, and the
   baseline dumps from item 0's own commit.
 

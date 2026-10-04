@@ -1,6 +1,6 @@
 # 20 G plan ledger
 
-Tracks building the plan of `PROFILE_DRILL_PIWIGO_20G.md`: items 0-19 (§10), each closed by its validation (§11), then O3. One row per task. The design of each row is in the plan, at the step or bullet the row names; this file holds only the order and the state. The plan was reviewed in full at `d6e43bf7` (§13's review table).
+Tracks building the plan of `PROFILE_DRILL_PIWIGO_20G.md`: items 0-20 (§10), each closed by its validation (§11), then O3. One row per task. The design of each row is in the plan, at the step or bullet the row names; this file holds only the order and the state. The plan was reviewed in full at `d6e43bf7` (§13's review table).
 
 Building started on 2026-10-03 (`WORK_STACK.md`, level 8).
 
@@ -17,7 +17,7 @@ Building started on 2026-10-03 (`WORK_STACK.md`, level 8).
 
 - **In order.** Item 0 comes first, and the rows run top to bottom; an item starts after the previous item's validation row; within an item they are in an order that builds, which is not always the plan's step order (the *plan* column gives the step). The *needs* column names a row in another item that must be done first. Within item 0, the dumps (0.4-0.10) come before the oracle run (0.2), whose edit replay records them, and the deletions (0.3) after it. A row that needs a later item's row sits right after it and is validated with that item: 3.4 after 9.2, and 6.2-6.4 after 9.5, all with 9.V, whose comparison then also admits item 6's step-2 changes.
 - **Per row:** `cargo fmt`, then `cargo check` and clippy, then a commit with an explicit pathspec, since another session may share the checkout. A row may take several commits; its status takes the last one's hash.
-- **Validation at the end of each item.** Each item's last row, *N*.V, runs §11: the builds, the tests, the fixtures, item 0's dumps with the `gate` and `oracle` builds, O2 and the equalities, compared with the previous item's, plus what the item adds. Nothing of it runs between an item's rows. Item 0's own rows also read the starting state and run the debug oracles; 0.11 is its validation and the baseline. O3 runs once, in the V rows, after 19.V.
+- **Validation at the end of each item.** Each item's last row, *N*.V, runs §11: the builds, the tests, the fixtures, item 0's dumps with the `gate` and `oracle` builds, O2 and the equalities, compared with the previous item's, plus what the item adds. Nothing of it runs between an item's rows. Item 0's own rows also read the starting state and run the debug oracles; 0.11 is its validation and the baseline. O3 runs once, in the V rows, after 20.V.
 - **A design that turns out wrong** is fixed in the plan first, in its own commit, and then built.
 - **A new dependency** is added in the row that first uses it (§13's table). `twox-hash` leaves in row 17.2.
 - **Heavy jobs** (builds of other profiles, the corpus, profilers) run one at a time, under `nice -n 19`, with no `timeout`.
@@ -29,6 +29,12 @@ Building started on 2026-10-03 (`WORK_STACK.md`, level 8).
 |---|---|---|---|---|---|
 | **0** | **item 0** | **Baselines; the debug oracles retired** | | | |
 | 0.1 | step 1 | Read the starting state: at HEAD, the vendor-tree report against `1892b477`'s, and the all-on and unscoped reports against `7a3f3f99`'s (where the six changes show), each difference read and recorded | — | val | OPEN |
+| 0.1a | Found in step 1, F4 | `array_reduce`: the callback's return type for a never-empty array, the initial value's for an always-empty one, their union otherwise; `$carry` bound to the initial value and the callback's return | 0.1 | sem | OPEN |
+| 0.1b | fix, steps 1-3 | The write verdict with shared slots (static properties, globals, static variables): the summary's walk records slot writes and references to slots; the fixed point settles objects and slots; overridable and interface calls reach every loaded implementation; callbacks by what is passed | 0.1 | sem | OPEN |
+| 0.1c | fix, step 3 | The stream functions, found by running each PHP function against a recording wrapper in `php` 8.5; they run the wrapper methods of every loaded class that has them | 0.1b | sem | OPEN |
+| 0.1d | fix, step 4 | The checker forgets by the verdict: every property narrowing for any object; values that may be the receiver for its own; written static properties, globals (all variables at a file's top level), static variables on re-entry, and references to written slots | 0.1b | sem | OPEN |
+| 0.1e | fix, step 5 | A capture by reference entered with every type written while shared: the closure body checked until its entry stops growing, and again after a later write by the outer function | 0.1 | sem | OPEN |
+| 0.1f | fix, oracle | Fixtures for each slot, binding, call and capture case and for `array_reduce`, each checked against `php` | 0.1a-0.1e | infra | OPEN |
 | 0.4 | step 3 | One canonical type printer in `types` over all of `Repr`, with no interning. Every printer destructures without `..` and matches without `_` | — | infra | OPEN |
 | 0.5 | step 3 | O1, `--dump-front-end` through `parse_file`. It covers: the tree after the stub rules and anonymous-class names; facts; ignore marks; warnings and errors; positions at every token boundary; doc sites with their `DocBlock`s; references; built declarations; duplicate sites; use sites. It also records every type node with the type today's round trip gives it, and every union built, with its operands and result | 0.4 | infra | OPEN |
 | 0.6 | step 3 | The full `registry-dump`, after the finishing passes | 0.4 | infra | OPEN |
@@ -38,7 +44,7 @@ Building started on 2026-10-03 (`WORK_STACK.md`, level 8).
 | 0.10 | step 3 | Memory: the dhat profile by holder, with the heap at the start of the check and at the check's own maximum, and a profile with untrimmed backtraces | — | infra | OPEN |
 | 0.2 | step 2 | The `oracle` profile (`gate` with `debug-assertions` and `overflow-checks`, per-file cache off). Run every debug oracle over Piwigo's three configurations, each vendor project with every rule on, and the edit replay; count coverage with an uncommitted counter; fix each failure in its own commit | 0.1, 0.9 | infra | OPEN |
 | 0.3 | step 2 | Delete the debug oracles: `FileBodies`' statements, `BodySource::body`, the debug-only re-exports, the test oracles whose second implementation exists only for them | 0.2 | infra | OPEN |
-| 0.11 | step 4, §11 | Item 0's validation and the baseline, from this item's commit: the tests and the fixtures; every dump with the `gate` build, identical at one thread and the default, and with the `oracle` build, with no assertion; the equalities; saved under `.corpus-runs/gate/<artifact>/<commit>.<ext>` with the starting binaries | 0.3-0.10 | val | OPEN |
+| 0.11 | step 4, §11 | Item 0's validation and the baseline, from this item's commit: the tests and the fixtures; the reports against `5fb858c9`'s, where only the fixes found in step 1 may differ, each difference read; every dump with the `gate` build, identical at one thread and the default, and with the `oracle` build, with no assertion; the equalities; saved under `.corpus-runs/gate/<artifact>/<commit>.<ext>` with the starting binaries | 0.3-0.10 | val | OPEN |
 | **1** | **item 1** | **One session** | | | |
 | 1.1 | One identity | A file is its resolved path: each link resolved once by `realpath`; cycles found against ancestors' identity; on Windows, identity through `same-file` (now a direct dependency); bind mounts and hard links stay distinct | — | sem | OPEN |
 | 1.2 | What the identity decides | Spelling, `__FILE__`, `__DIR__` and owner from the resolved path. The role is the strongest root that contains it. `Session::classify` serves the load and every edit entry point, with an alias table | 1.1 | sem | OPEN |
@@ -230,6 +236,12 @@ Building started on 2026-10-03 (`WORK_STACK.md`, level 8).
 | 19.5 | server | The tree cache: `quick_cache` weighted by bytes, keyed by (`FileId`, content hash); a hash mismatch is an edit | 14.1, 17.2 | perf | OPEN |
 | 19.6 | readers | `FileState::ast` goes; every reader asks `ast_of` | 19.2 | perf | OPEN |
 | 19.V | §11 | Validation against item 18's dumps; edit replays at a tree budget of zero; a disk change with no event | 19.6 | val | OPEN |
+| **20** | **item 20** | **Code PHP runs without a call written** | | | |
+| 20.1 | Design | Magic and interface methods PHP calls (`__get`, `__set`, `__isset`, `__unset`, `__toString`, `__clone`, `__invoke`, `ArrayAccess`, iteration, the serialization hooks) as calls, by the class hierarchy over the value's type | 0.1d | sem | OPEN |
+| 20.2 | Design | Destructors at every site where an object may lose its last reference | 20.1 | sem | OPEN |
+| 20.3 | Design | Autoloaders, the error handler, output-buffer callbacks and tick functions, by the program's registrations | 20.1 | sem | OPEN |
+| 20.4 | Oracle | Fixtures for each kind of site, checked against `php` 8.5 | 20.3 | infra | OPEN |
+| 20.V | §11 | Validation against item 19's dumps | 20.4 | val | OPEN |
 | **V** | **§11** | **O3, once** | | | |
-| V.1 | O3 | The frame-pointer `dhat` build; callgrind (`--separate-threads=yes`); `perf` of a warm run; `hyperfine` warm and cold against the starting commit; dhat by holder, the check's live and resident maxima, a second dhat run from the check's start; the server's heap | 19.V | val | OPEN |
+| V.1 | O3 | The frame-pointer `dhat` build; callgrind (`--separate-threads=yes`); `perf` of a warm run; `hyperfine` warm and cold against the starting commit; dhat by holder, the check's live and resident maxima, a second dhat run from the check's start; the server's heap | 20.V | val | OPEN |
 | V.2 | results | The measured figures into the plan's §12 and into `WORK_STACK.md` | V.1 | val | OPEN |

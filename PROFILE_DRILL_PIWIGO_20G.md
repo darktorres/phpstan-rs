@@ -556,11 +556,11 @@ The rows sum to the run's 19,440,892. An item removes most of its row, not all o
 
 # Part II. The plan
 
-Twenty items, numbered in the order they are built. Each states what is there now, the design, what its validation compares, and what the profiles say it saves, in instructions and in memory. "Exact" means the output cannot change; "semantic" means it can, and §11 lists where. Finding codes (R1-R8, R12 for instructions, M1-M9 for memory) and section numbers refer to Part I.
+Twenty-one items, numbered in the order they are built. Each states what is there now, the design, what its validation compares, and what the profiles say it saves, in instructions and in memory. "Exact" means the output cannot change; "semantic" means it can, and §11 lists where. Finding codes (R1-R8, R12 for instructions, M1-M9 for memory) and section numbers refer to Part I.
 
 ## 9. How the plan is built and checked
 
-- **Validation at the end of each item (§11).** An item's rows are committed one by one, with `cargo fmt`, `cargo check` and clippy, and nothing else runs between them. When its last row lands, the item is validated: the tests, the fixtures, item 0's dumps and O2, compared with the previous item's, and the equalities. The next item starts after that. O3 measures once, after item 19.
+- **Validation at the end of each item (§11).** An item's rows are committed one by one, with `cargo fmt`, `cargo check` and clippy, and nothing else runs between them. When its last row lands, the item is validated: the tests, the fixtures, item 0's dumps and O2, compared with the previous item's, and the equalities. The next item starts after that. O3 measures once, after item 20.
 - **Oracles are dumps.** Item 0 takes dumps of everything the items change, from the starting commit, in a form that does not depend on how the code represents it. §11 takes the same dumps at the end of each item and compares them with the previous item's, so each difference belongs to the item that made it. So no item keeps an old implementation alive to compare against, and each replaces what it replaces outright.
 - **Measuring.**
   - `cl-20g` is the callgrind baseline: the `dhat` profile with frame pointers, as `CLAUDE.md` prescribes, with `PHPSTAN_RS_NO_FILE_CACHE=1`. The final callgrind run uses the same profile and setting.
@@ -682,7 +682,43 @@ Twenty items, numbered in the order they are built. Each states what is there no
    - The ordered file list, with roles, is recorded for each configuration. A tree with a link cycle is recorded as it is today: listed until `ELOOP`.
    - Everything is stored with the starting binaries: the `gate` build, `cl-20g`'s and the `dhat` build. None stays in `target/`, which `cargo clean` empties, or in `/tmp`, a tmpfs: binaries go to `.corpus-runs/gate/bin/<commit>/<profile>/`, runs and dumps to `.corpus-runs/gate/<artifact>/`, profiles to `~/.cache/prs-profile/<run>/` with their binary and a `README` (`.corpus-runs/README.md`).
 
-**Oracle.** None beyond §11: release behaviour does not change. Exact.
+**Found in step 1.** Read at `5fb858c9`'s code, with each report saved under `.corpus-runs/gate/{vendor-tree,all-on,unscoped}/` for `1892b477`, `7a3f3f99` and `5fb858c9`.
+- **Against `1892b477`:** the all-on report is identical; the vendor tree and the unscoped report differ in one line each, the same one: `OrderedTraitsFixer.php:122` is no longer reported unreachable. Correct: PHP runs it. An `assert` in a loop failed on the first pass, while the variable was still `null`, and `1892b477` kept that span as failing; `b99855fd` deleted the set of failing spans.
+- **Against `7a3f3f99`,** the vendor tree and the unscoped report differ by the same 212 removed and 31 added lines, and the all-on report by 1 and 2:
+  - 187 `missingType.parameter` gone and 24 `missingType.iterableValue` added, all in Symfony's `RedisClusterProxy`: its methods, spelled in lower case, override the stub's (`zcount` over `zCount`), and PHP's method names ignore case, so they inherit the stub's parameter types now (`712cd30c`). Correct.
+  - 15 `return.missing` gone: each function ends in a loop with no `break` (`do { … } while (true)`), which never ends normally. Correct.
+  - three gone at `LogicalXor.php:64`: PHP reads `fn (…) => $a xor $b` with the `xor` inside the arrow function's body, as the Pratt parser now does. Correct; the one of the six changes that shows in these reports.
+  - `goto` (`8386baff`): `Http1Parser.php:207`'s `nullsafe.neverNull` and `DeepClone.php:794`, `:827`'s `variable.undefined` gone, since a label is reached with the scope of its `goto`s. Correct.
+  - `doctrine/orm` `Parser.php:840`'s `return.type` gone: the `switch`'s `default` calls a `never` method. Correct.
+  - three messages whose unions list the same members in another order (`8c309067`, a union's members in order of first occurrence): `AppReference.php:180`, `NoPhp4ConstructorFixer.php:269`, and in the all-on report `triggers_list.php:1094` (22 members each).
+  - `deadCode.unreachable` added at `LockRegistry.php:175`: correct, the outer `while (true)` has no `break`.
+  - four false reports: `Coverage.php:195` in `nunomaduro/collision` and in `pestphp/pest` (F3 below), `DriverSuspension.php:150` (F2), `LogicalXor.php:68`'s `function.alreadyNarrowedType` (F4), and in the all-on report `ThemesStandardPagesPageRendererTest.php:339`'s `return.neverCandidate` (F1), whose cause also gives the `deadCode.unreachable` at `:381` both states report.
+- **The six changes listed above:** only the Pratt parser's changes a diagnostic in these reports. `__halt_compiler`, kind-exact keys, hyphenated words and declarations ruled out by version change none, and the server's columns are not in a CLI report; item 0's dumps (O1, the server's) show them.
+
+**The four bugs,** each a fact kept across code that changes it, and each a false report:
+- **F1. Shared storage.** A narrowing of storage other code can write survives a call that writes it: a static property (`ThemesStandardPagesLogoStreamWrapper::$opens` narrowed to `0`, then `render()` increments it through the stream wrapper `fopen` runs), a variable bound by `global`, a function's `static` variable (written by a recursive call), and a variable bound by reference to any of these.
+- **F2. Calls that may write anything.** A call whose writes are not known forgets only its receiver's and its object arguments' property narrowings: `($this->run)()` leaves `$this->pending` at `true`. A call known to write its own object forgets the receiver's, though another variable may hold the same object.
+- **F3. Captures by reference.** Inside a closure, a variable captured by reference starts with its type at the capture, though the closure's earlier calls and the outer function may have written it since: `$shouldBeNewLine` is `true` at the capture, the closure sets it `false`, and its next call reads `false`.
+- **F4. `array_reduce`.** Its type is the callback's return type even when the array may be empty, where PHP returns the initial value; and `$carry` is bound to the initial value's type only, though from the second element on it holds the callback's return.
+
+**The fix: what a call may write, sound, bounded by the class hierarchy** (the user's decision, over keeping the receiver-and-arguments rule):
+1. **One verdict per declaration:** the objects it may write (nothing, its own, any) and the shared slots it may write, a set or any. A slot is a static property (its declaring class and name), a global variable by name, or a declaration's static variable.
+2. **The summary's one walk records slot writes:** every write form (assignment, compound, `++`/`--`, `unset`, a write into an element, `=&`, `foreach (… as &$v)`) to `X::$p`, `$GLOBALS['x']`, a variable the body binds by `global` or `static`, or a variable bound by reference to one of those; and a slot passed where a parameter is by reference. A dynamic form (`$c::$p`, `X::$$n`, `$GLOBALS[$k]`, `$$n`, `extract`, a one-argument `parse_str`) writes any slot of its kind where the body has such a binding. A closure's or arrow function's body counts for the declaration that holds it.
+3. **The fixed point settles both parts.**
+   - A call to an overridable method, or through an interface, reaches every implementation loaded (the receiver class's own and every descendant's, by `subtype_children`), and writes what they write together. Code not loaded is not assumed: the program is what the run loads.
+   - A callable whose origin is unknown writes anything; a callback that is a closure, an arrow function, a first-class callable or a function named by a literal writes what its body or its target writes.
+   - A builtin writes nothing, except through a parameter that runs code (`CODE_RUNNING_PARAMETER_TYPES`), where it writes what the code passed writes, and except a stream function, which runs the stream-wrapper methods (`stream_open`, `url_stat`, `dir_opendir`, …) of every loaded class that has them and writes what they write. The stream functions are found by running each of PHP's functions against a wrapper that records its calls, in `php` 8.5.
+4. **The checker forgets what the verdict says may change,** with every key that depends on it:
+   - any object written: every property narrowing;
+   - its own object written: the narrowings of every value that may be the receiver, its type not disjoint from the receiver's;
+   - slots: the written static properties' narrowings (the same name, on classes related by inheritance, or either class unknown); the variables bound to a written global, every variable at a file's top level counting as global; the function's static variables when the call may enter the function again; and the variables bound by reference to a written slot.
+5. **F3:** a variable captured by reference is entered with the union of its type at the capture and of every type a write gives it while the reference is shared. The closure's body is checked until that union stops growing, as a loop body is, and checked again when the outer function writes the variable after the capture.
+6. **F4:** `array_reduce` is the callback's return type for an array that is never empty, the initial value's for one that is always empty, and their union otherwise; `$carry` is bound to the initial value's type together with the callback's return type.
+7. **Code PHP runs without a call written:** magic methods, destructors, autoloaders, error and exception handlers, output-buffer callbacks. These are item 20.
+
+**Oracle for the fix:** fixtures for each slot and binding kind, each call kind (a virtual call with two implementations, one writing; a callback; a stream wrapper), a capture written later by the outer function, and `array_reduce` over an empty, a non-empty and a possibly empty array, each checked against `php`. In item 0's validation (0.11) the reports are compared with `5fb858c9`'s: the five false reports above go, and every other difference is read.
+
+**Oracle.** None beyond §11 for the dumps and the deletions: they leave release behaviour as it is. The fixes found in step 1 are semantic, read in 0.11 against `5fb858c9`'s reports.
 
 ### 1. One session for the CLI, the language server and the tests
 
@@ -2079,6 +2115,23 @@ Exact, except the private-property judgment, listed in §11.
 - **The peak** becomes the start of the check plus the checks in flight: the largest files' checks, which run first, while every tree is still alive. That load has not been measured: at today's maximum, during the parse, the checker holds almost nothing (§8, M1). Item 0's memory oracle records the heap at the start of the check and at the check's maximum, and §12's projection takes both.
 - **In the server,** the trees held are the open documents' and the LRU's, not the workspace's.
 
+### 20. Code PHP runs without a call written
+
+**Now.** After item 0's fix, a call written in the code forgets what the code it reaches may write. PHP also runs user code where no call is written, and nothing there is forgotten:
+- **magic methods:** `__get`, `__set`, `__isset` and `__unset` on a property the code cannot reach; `__toString` where a value becomes a string; `__clone`; `__invoke` when an object is called; `offsetGet`, `offsetSet`, `offsetExists` and `offsetUnset` on an `ArrayAccess` index; `getIterator`, `rewind`, `valid`, `current`, `key` and `next` in a `foreach`; `__serialize`, `__unserialize`, `__sleep`, `__wakeup`, `__set_state` and `__debugInfo` through the builtins that call them;
+- **destructors:** `__destruct` where the last reference to an object may go: an assignment over it, `unset`, the end of a scope;
+- **autoloaders:** every function `spl_autoload_register` registered, wherever a class not yet loaded may be named: `new`, a static access, a `class_exists`-family test that autoloads;
+- **handlers and callbacks:** the error handler wherever a warning or notice may be raised, output-buffer callbacks where output is written, tick functions under `declare(ticks)`.
+
+**Design.**
+- **Each such site is a call** to the union of what its possible targets write, applied by the checker as after a written call (item 0, fix steps 3-4):
+  - a magic or interface method: by the class hierarchy over the value's type, and over every loaded class that declares the method when the type is `mixed` or `object`;
+  - autoloaders, handlers and callbacks: the ones the program registers, found by their registration calls; a registration whose callable is not known writes anything.
+- **Destructors:** a site where an object may lose its last reference runs the `__destruct` of every class the value's type may be; the reference count itself is not tracked, so every such site counts.
+- **Where a site is decided** follows PHP's rules for each: a property is magic only where the declared properties do not cover it; a conversion to string only where an object may reach it; a warning only where the builtin's or the operation's documented failure can occur for the operand's type.
+
+**Oracle.** Fixtures for each kind of site, each checked against `php` 8.5; O2 read line by line. Semantic, listed in §11.
+
 ## 11. Validation at the end of each item
 
 **When.** An item is validated when its last row lands, before the next item's first row. Between rows only `cargo fmt`, `cargo check` and clippy run. A failure is fixed in its own commit, within the item, and only what failed runs again, from the saved binaries where they still apply. Item 0's validation is its baseline (item 0, step 4), with the tests and the fixtures. Two items have steps that wait for item 9: item 3's scratch store for item 9's step 2, and item 6's step 2 for the stub rules' versions (item 9, step 5). Each is built right after the step it waits for and validated with item 9, whose comparison then also admits item 6's step-2 changes.
@@ -2114,6 +2167,7 @@ Exact, except the private-property judgment, listed in §11.
 **Platforms.** CI runs on `ubuntu-24.04` only (`rust-ci.yml:18`), while the release builds for `macos-26` and `windows-2025-vs2026` (`release.yml:33-53`). A CI matrix job on those two runs item 6's file-replacement test from item 6's validation on, and item 17's `stat` cases from item 17's, and each result is recorded.
 
 **The semantic changes, by item.** At an item's validation, every difference from the previous item's dumps must be one of its own:
+  - **item 0:** the fixes found in step 1: shared storage forgotten after a call that may write it, calls that may write anything bounded by the class hierarchy, captures by reference entered with every type written while shared, and `array_reduce` with its initial value;
   - **item 1:**
     - a file reached through a link is loaded once and reported under its resolved path, with `__FILE__` and `__DIR__` resolved;
     - a file both analysed and context is analysed, once;
@@ -2135,7 +2189,8 @@ Exact, except the private-property judgment, listed in §11.
   - item 14: the readings the lowering oracle lists (escaped quotes, `mentions_mixed` from the node, identifiers by their bytes, a `//` inside a literal type, `Integer::MAX`), and one winner rule for every tag (`@phan-real-return`, `@phan-param-out`);
   - item 15: names that differ only in bytes outside UTF-8 are distinct (the lexer keeps the bytes, item 9) and print with `\x{NN}`; names fold ASCII only where Unicode's lowercasing was used; string values name classes, functions and constants by PHP's rules (one leading backslash, no trimming); container-field keys canonical as PHP's array keys; in the server, an open document read as the bytes its encoding gives, and one whose encoding is not found analysed as UTF-8, with a diagnostic; a fix writes a name's bytes;
   - item 18: the rule families of §12.10; the rules that read the statement result where it differs from today's side walks (`finally` overrides, `try`/`catch` and throws, no-op statements, loops' constant conditions); types in PHP's order of evaluation (an assignment's target operands before its value, a destructuring's value first); a member counted as used when any access may reach it; the union's single pass where it differs from the fold;
-  - item 19: the private-property judgment counting writes from bound closures and reflection, and leaving unjudged the properties an unnarrowed one may reach.
+  - item 19: the private-property judgment counting writes from bound closures and reflection, and leaving unjudged the properties an unnarrowed one may reach;
+  - item 20: what a magic method, a destructor, an autoloader, an error handler, an output-buffer callback or a tick function may write is forgotten where PHP may run it.
   
   Each difference is listed with its file and read.
 
@@ -2149,7 +2204,7 @@ Exact, except the private-property judgment, listed in §11.
 - each edit replay against a fresh load of the edited tree; from item 19, with the tree cache's budget as configured and at zero;
 - from item 19: a closed file changed on disk with no event before a dependent's recheck.
 
-**O3, once, after item 19's validation,** with the commands `CLAUDE.md` gives:
+**O3, once, after item 20's validation,** with the commands `CLAUDE.md` gives:
 - callgrind with `--separate-threads=yes` on the frame-pointer `dhat` build, over `cl-20g`'s workload;
 - `perf record -F 499 -g` on the same build, read with `--no-inline`, of a warm run (per-file cache and base), for the serial windows;
 - `hyperfine -N --warmup 2 --runs 10`, the starting commit's `gate` binary against the last commit's, alternating; warm with both caches warm, and cold with `--prepare` emptying both binaries' cache directories;
@@ -2184,6 +2239,7 @@ Exact, except the private-property judgment, listed in §11.
 | 17 | warm runs | warm: decoding and reads ≈0.85 core-s and most of the finishing window; a cold run pays one incremental finishing over the analysed files' closure, and every run one `stat` per context file | yes | only decoded records in the heap | exact |
 | 18 | check phase remainder, rule temporaries | ≈1.6-2.0 G | — | 3.61 M allocations | semantic (§12.10's families, the statement result, the order of evaluation, member usage, the union pass) |
 | 19 | each tree until its last reader | — | — | batch: the analysed trees freed during the check; server: open documents and a cache weighted by bytes | exact, except the private-property judgment |
+| 20 | code PHP runs without a call written | — | — | — | semantic: what implicit calls may write is forgotten (§11) |
 
 **Instructions.** The rows sum to ≈8.2-9.3 G of this run's 20.57 G (items 3 and 5 at their instruction savings, item 7 at none to ≈0.3 G, items 9 and 18 at the ends of their ranges). Some costs are counted by two rows, and this profile does not separate the shares:
 - 3 and 9, the tree drops;
