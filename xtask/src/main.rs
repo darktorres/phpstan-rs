@@ -141,17 +141,14 @@ fn corpus_dir() -> PathBuf {
         .unwrap_or_else(|| PathBuf::from("/home/torres/piwigo17-frozen"))
 }
 
-/// The main checkout's `.corpus-runs/gate`, also from a linked worktree,
-/// so every worktree records into and compares against one store.
+/// Where snapshots are recorded and compared, and where runs keep their
+/// scratch: this checkout's `.corpus-runs/gate`, so runs in two worktrees
+/// never share a scratch file, or the store `PHPSTAN_RS_GATE_DIR` names
+/// for one that reads another's.
 fn gate_dir() -> PathBuf {
-    let common = git(&["rev-parse", "--path-format=absolute", "--git-common-dir"])
+    std::env::var_os("PHPSTAN_RS_GATE_DIR")
         .map(PathBuf::from)
-        .unwrap_or_else(|_| root().join(".git"));
-    common
-        .parent()
-        .map(Path::to_path_buf)
-        .unwrap_or_else(root)
-        .join(".corpus-runs/gate")
+        .unwrap_or_else(|| root().join(".corpus-runs/gate"))
 }
 
 /// The `gate` profile's `phpstan-rs`: what the determinism check runs

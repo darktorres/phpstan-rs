@@ -8,7 +8,11 @@ rebuilding an old commit just to re-diff against it.
 
 The gates of `CRATE_SPLIT_PLAN.md` §4 record their snapshots under
 `.corpus-runs/gate/<artifact>/<commit>.<ext>`, keyed by the full hash of
-a committed tree (`xtask` refuses a dirty tree):
+a committed tree (`xtask` refuses a dirty tree). Each checkout, a linked
+worktree included, has its own `.corpus-runs/gate`, which holds the runs'
+scratch too, so runs in two worktrees never share a file;
+`PHPSTAN_RS_GATE_DIR=<dir>` makes a command record into, or compare
+against, another store:
 
     cargo xtask gates            # quick tier: build/test gates, scoped +
                                  # all-on corpus, type snapshots, baseline
