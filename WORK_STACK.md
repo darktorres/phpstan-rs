@@ -266,8 +266,9 @@ when it runs, and the plan adds the checks found along the way.
   runtime truth at a library's boundary (0.15a-0.15f); the runtime
   oracle reaching every asserting fixture (0.11r); the measurements and
   `cargo xtask validate` (0.11s-0.11u). Then the validation itself (0.11):
-  the pass with the `gate` and `oracle` builds, the reports against
-  `5fb858c9`'s, the memory baseline.
+  the pass with the `gate` and `oracle` builds, the memory baseline, and
+  the first snapshot, compared with no earlier commit; no row before it
+  runs the pass, and item 1's validation is the first comparison.
 - **Found along the way, done:** version gates for the syntax PHP 7.1 to 8.5
   added (`492ccf0e`, `50fa1e43`, `d8090e5e`), and `php_version` taking a
   range (`dfdfeeb4`). The runtime oracle calls each asserting function with
