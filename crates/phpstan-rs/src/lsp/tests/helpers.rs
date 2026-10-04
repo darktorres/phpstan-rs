@@ -150,6 +150,19 @@ pub(super) fn run_with_capabilities(
 /// edit fails to parse, a `window/logMessage`) once it has applied the
 /// edit, after the sentinel's response. Only then is `after` sent.
 pub(super) fn run_across_debounce(dir: &TempDir, before: &[Value], after: &[Value]) -> Vec<Value> {
+    run_across_debounce_with(dir, json!({}), before, || {}, after)
+}
+
+/// `run_across_debounce` with the client's `capabilities`, running
+/// `between` once `before` is applied and before `after` is sent: for a
+/// test changing the files on disk while the session is on.
+pub(super) fn run_across_debounce_with(
+    dir: &TempDir,
+    capabilities: Value,
+    before: &[Value],
+    between: impl FnOnce(),
+    after: &[Value],
+) -> Vec<Value> {
     const SENTINEL_ID: i64 = 999_999;
 
     let (tx, rx) = crossbeam_channel::unbounded();
@@ -167,7 +180,7 @@ pub(super) fn run_across_debounce(dir: &TempDir, before: &[Value], after: &[Valu
     tx.send(to_message(request(
         1,
         "initialize",
-        json!({"rootUri": dir.uri(), "capabilities": {}}),
+        json!({"rootUri": dir.uri(), "capabilities": capabilities}),
     )))
     .unwrap();
     tx.send(to_message(notification("initialized", json!({}))))
@@ -212,6 +225,7 @@ pub(super) fn run_across_debounce(dir: &TempDir, before: &[Value], after: &[Valu
         std::thread::sleep(Duration::from_millis(5));
     }
 
+    between();
     for m in after {
         tx.send(to_message(m.clone())).unwrap();
     }

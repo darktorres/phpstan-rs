@@ -1466,3 +1466,50 @@ fn the_other_declarations_of_a_duplicate_are_rechecked() {
         assert_held_diagnostics_match_a_fresh_load(settings, &files, edits);
     }
 }
+
+#[test]
+fn an_include_is_rechecked_when_the_file_it_names_appears_or_vanishes() {
+    let dir = super::helpers::TempDir::new("include_target");
+    let includer = dir.write(
+        "includer.php",
+        "<?php require __DIR__ . '/target.php'; require __DIR__ . '/data.inc'; require __DIR__ . '/sub/inner.inc';",
+    );
+    let target = dir.write("target.php", "<?php function target(): void {}");
+    let data = dir.write("data.inc", "<?php");
+    dir.write("sub/inner.inc", "<?php");
+    let mut project = Project::new();
+    for path in [&includer, &target] {
+        project
+            .load_analyzed_file(path.clone(), &fs::read_to_string(path).unwrap())
+            .unwrap();
+    }
+    project.finish_loading();
+    let not_found = |diagnostics: &[Diagnostic]| {
+        diagnostics
+            .iter()
+            .filter(|d| d.identifier == "require.fileNotFound")
+            .count()
+    };
+    assert_eq!(not_found(&project.check_file(&includer)), 0);
+
+    fs::remove_file(&target).unwrap();
+    let rechecked = project.remove_file(&target);
+    assert_eq!(not_found(&rechecked[&includer]), 1);
+    fs::write(&target, "<?php").unwrap();
+    let rechecked = project.update_file(&target, "<?php").unwrap();
+    assert_eq!(not_found(&rechecked[&includer]), 0);
+
+    fs::remove_file(&data).unwrap();
+    let rechecked = project.recheck_including(std::slice::from_ref(&data));
+    assert_eq!(not_found(&rechecked[&includer]), 1);
+    fs::write(&data, "<?php").unwrap();
+    let rechecked = project.recheck_including(std::slice::from_ref(&data));
+    assert_eq!(not_found(&rechecked[&includer]), 0);
+
+    fs::remove_dir_all(dir.0.join("sub")).unwrap();
+    let rechecked = project.recheck_including(&[dir.0.join("sub")]);
+    assert_eq!(not_found(&rechecked[&includer]), 1);
+
+    let rechecked = project.recheck_including(&[dir.0.join("unrelated.inc")]);
+    assert!(rechecked.is_empty(), "{rechecked:?}");
+}

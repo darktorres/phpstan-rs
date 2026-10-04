@@ -54,6 +54,7 @@ pub(crate) fn registry_dump(project: &Project, bases: &[(&str, &Registry)]) -> S
         member_index_built,
         // The trees last read again for checks.
         ast_cache: _,
+        include_probes,
         escaped_enum_cases,
         escaped_member_classes,
     } = project;
@@ -77,6 +78,11 @@ pub(crate) fn registry_dump(project: &Project, bases: &[(&str, &Registry)]) -> S
         duplicate_fn_sites.canonical(&mut p);
         section(&mut p, "duplicate class sites");
         duplicate_class_sites.canonical(&mut p);
+        section(&mut p, "include probes");
+        include_probes
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .canonical(&mut p);
         section(&mut p, "registry");
         registry.canonical(&mut p);
         for (name, base) in bases {

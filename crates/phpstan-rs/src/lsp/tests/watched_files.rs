@@ -42,8 +42,12 @@ fn registers_watched_files_when_client_supports_dynamic_registration() {
     let watchers = registrations[0]["registerOptions"]["watchers"]
         .as_array()
         .unwrap();
-    assert_eq!(watchers.len(), 1, "got: {watchers:?}");
+    assert_eq!(watchers.len(), 2, "got: {watchers:?}");
     assert_eq!(watchers[0]["globPattern"], "**/*.php");
+    assert_eq!(watchers[0].get("kind"), None);
+    // Of every other file, its creation (1) and deletion (4).
+    assert_eq!(watchers[1]["globPattern"], "**/*");
+    assert_eq!(watchers[1]["kind"], 5);
 }
 
 #[test]
@@ -259,5 +263,32 @@ fn registercapability_error_response_is_logged_not_fatal() {
         hover["contents"].is_string(),
         "a rejected registration must not wedge the session or any other pending-request \
          handling, got: {hover:?}"
+    );
+}
+
+#[test]
+fn a_deleted_file_the_project_does_not_load_rechecks_the_files_including_it() {
+    let dir = TempDir::new("watch_include");
+    let data_path = dir.write("data.inc", "<?php\n");
+    let data_uri = path_to_uri(&data_path).to_string();
+    let includer_path = dir.write("includer.php", "<?php\nrequire __DIR__ . '/data.inc';\n");
+    let includer_uri = path_to_uri(&includer_path).to_string();
+
+    let messages = run_across_debounce_with(
+        &dir,
+        watch_capabilities(),
+        &[],
+        || std::fs::remove_file(&data_path).unwrap(),
+        &[did_change_watched_files(vec![file_event(&data_uri, 3)])],
+    );
+
+    let last = last_publish_diagnostics_for(&messages, &includer_uri);
+    assert!(
+        last["params"]["diagnostics"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|d| d["code"] == "require.fileNotFound"),
+        "expected includer.php rechecked with data.inc gone, got: {last:?}"
     );
 }

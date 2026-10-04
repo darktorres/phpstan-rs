@@ -826,6 +826,11 @@ impl Server {
     /// one path in a single notification, and only the final state
     /// matters (this is intra-batch coalescing only, not a cross-
     /// notification debounce - see this item's own doc comment).
+    ///
+    /// A file the project does not load, or a directory, created or
+    /// deleted rechecks only the files whose includes looked for a file
+    /// there (`Project::recheck_including`), as does a new PHP file that
+    /// does not parse: either way, a file appeared or vanished.
     fn handle_watched_files_changed(&mut self, changes: Vec<lsp_types::FileEvent>) -> Vec<Message> {
         let mut last_by_path: FxHashMap<PathBuf, (Uri, lsp_types::FileChangeType)> =
             FxHashMap::default();
@@ -837,7 +842,14 @@ impl Server {
         }
 
         let mut messages = Vec::new();
+        let mut appeared_or_vanished = Vec::new();
         for (path, (uri, typ)) in last_by_path {
+            if !path.extension().is_some_and(|e| e == "php") && !self.project.is_loaded(&path) {
+                if typ != lsp_types::FileChangeType::CHANGED {
+                    appeared_or_vanished.push(path);
+                }
+                continue;
+            }
             if typ == lsp_types::FileChangeType::DELETED {
                 self.open_uris.remove(&path);
                 self.last_diagnostics.remove(&path);
@@ -861,6 +873,7 @@ impl Server {
             // matches load_workspace's own "never opened" default.
             self.open_uris.insert(path.clone(), (uri, None));
             self.latest_text.insert(path.clone(), text.clone());
+            let appeared = !self.project.is_loaded(&path);
             match self.project.update_file(&path, &text) {
                 Ok(results) => {
                     messages.extend(self.publish_diagnostics_for(self.apply_post_filters(results)));
@@ -870,8 +883,15 @@ impl Server {
                         "phpstan-rs lsp: skipping {} - failed to parse: {e}",
                         path.display()
                     );
+                    if appeared {
+                        appeared_or_vanished.push(path);
+                    }
                 }
             }
+        }
+        if !appeared_or_vanished.is_empty() {
+            let results = self.project.recheck_including(&appeared_or_vanished);
+            messages.extend(self.publish_diagnostics_for(self.apply_post_filters(results)));
         }
         messages
     }
@@ -1882,11 +1902,11 @@ impl Server {
     /// asking the client to watch every `.php` file and report changes
     /// via `workspace/didChangeWatchedFiles` - `None` if the client never
     /// advertised `workspace.didChangeWatchedFiles.dynamicRegistration`
-    /// support at `"initialize"`. Scoped to `**/*.php` only, not also
-    /// `composer.{json,lock}`: LSP mode has no composer-aware reload path
-    /// to route those through yet, so watching them today would just
-    /// misroute them into `update_file` as invalid PHP source for no
-    /// benefit.
+    /// support at `"initialize"`. Of every other file and directory, only
+    /// its creation and deletion are asked for: an `include` can name any
+    /// file, and whether it is there is all its check reads of it. Not a
+    /// change to `composer.{json,lock}`: LSP mode has no composer-aware
+    /// reload path to route one through yet.
     fn request_watched_files_registration(&mut self) -> Option<Message> {
         if !self.supports_watched_files {
             return None;
@@ -1899,12 +1919,23 @@ impl Server {
                         register_options: Some(
                             serde_json::to_value(
                                 lsp_types::DidChangeWatchedFilesRegistrationOptions {
-                                    watchers: vec![lsp_types::FileSystemWatcher {
-                                        glob_pattern: lsp_types::GlobPattern::String(
-                                            "**/*.php".to_string(),
-                                        ),
-                                        kind: None,
-                                    }],
+                                    watchers: vec![
+                                        lsp_types::FileSystemWatcher {
+                                            glob_pattern: lsp_types::GlobPattern::String(
+                                                "**/*.php".to_string(),
+                                            ),
+                                            kind: None,
+                                        },
+                                        lsp_types::FileSystemWatcher {
+                                            glob_pattern: lsp_types::GlobPattern::String(
+                                                "**/*".to_string(),
+                                            ),
+                                            kind: Some(
+                                                lsp_types::WatchKind::Create
+                                                    | lsp_types::WatchKind::Delete,
+                                            ),
+                                        },
+                                    ],
                                 },
                             )
                             .unwrap(),

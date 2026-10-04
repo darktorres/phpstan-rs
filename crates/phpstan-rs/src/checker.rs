@@ -610,6 +610,9 @@ pub struct Checker<'a> {
     pub(crate) working_dir: Option<std::path::PathBuf>,
     // `includes::file_constant_initializers` for the file being checked.
     pub(crate) include_constant_initializers: FxHashMap<String, Expr>,
+    // The places an `include` or `require` looked for a file, in the order
+    // looked at: what the file's report reads of the filesystem.
+    pub(crate) include_probes: Vec<std::path::PathBuf>,
     // `if` statements already reported as the tail of an enum `if`/`elseif`
     // chain (`strict_idioms`).
     pub(crate) enum_chain_tails: FxHashSet<Span>,
@@ -1183,6 +1186,7 @@ impl<'a> Checker<'a> {
             include_path_dirs: Vec::new(),
             working_dir: None,
             include_constant_initializers: FxHashMap::default(),
+            include_probes: Vec::new(),
             enum_chain_tails: FxHashSet::default(),
             constant_facts: Default::default(),
             by_ref_empty_dim_args: Default::default(),
@@ -1521,6 +1525,12 @@ impl<'a> Checker<'a> {
     }
 
     /// The PHPDoc resolution record's lines, sorted.
+    /// The places the file's includes looked for a file
+    /// (`Checker::include_probes`).
+    pub(crate) fn take_include_probes(&mut self) -> Vec<std::path::PathBuf> {
+        std::mem::take(&mut self.include_probes)
+    }
+
     pub(crate) fn take_doc_resolutions(&mut self) -> Vec<String> {
         self.doc_resolutions
             .take()

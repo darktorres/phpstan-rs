@@ -280,32 +280,45 @@ impl<'a> Checker<'a> {
         })
     }
 
-    fn include_target_exists(&self, path: &str) -> bool {
+    /// Where a file `path` names can be, in the order looked at: the path
+    /// itself when it is absolute; else from the working directory, from
+    /// the including file's directory, and from each `include_path`
+    /// directory, a relative one taken from the including file's.
+    fn include_candidates(&self, path: &str) -> Vec<PathBuf> {
         let path = Path::new(path);
         if path.is_absolute() {
-            return path.is_file();
+            return vec![path.to_path_buf()];
         }
+        let file_dir = self.current_dir_of_file();
         // Without a working directory, the relative path itself: the
         // filesystem resolves it against the process's.
-        let from_cwd = Some(match &self.working_dir {
+        let mut candidates = vec![match &self.working_dir {
             Some(dir) => dir.join(path),
             None => path.to_path_buf(),
-        });
-        let from_file = self.current_dir_of_file().map(|d| d.join(path));
-        from_cwd.is_some_and(|p| p.is_file())
-            || from_file.is_some_and(|p| p.is_file())
-            || self.include_path_dirs.iter().any(|dir| {
-                let dir = Path::new(dir);
-                let dir = if dir.is_absolute() {
-                    dir.to_path_buf()
-                } else {
-                    match self.current_dir_of_file() {
-                        Some(base) => base.join(dir),
-                        None => dir.to_path_buf(),
-                    }
-                };
-                dir.join(path).is_file()
-            })
+        }];
+        candidates.extend(file_dir.as_ref().map(|dir| dir.join(path)));
+        for dir in &self.include_path_dirs {
+            let dir = Path::new(dir);
+            let dir = match &file_dir {
+                Some(base) if !dir.is_absolute() => base.join(dir),
+                _ => dir.to_path_buf(),
+            };
+            candidates.push(dir.join(path));
+        }
+        candidates
+    }
+
+    /// Whether a file is at one of the places `path` names, each place
+    /// looked at, up to the first holding one, recorded as probed.
+    fn include_target_exists(&mut self, path: &str) -> bool {
+        for candidate in self.include_candidates(path) {
+            let found = candidate.is_file();
+            self.include_probes.push(candidate);
+            if found {
+                return true;
+            }
+        }
+        false
     }
 
     pub(crate) fn check_include_path(

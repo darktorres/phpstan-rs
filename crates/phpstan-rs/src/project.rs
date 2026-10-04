@@ -328,6 +328,11 @@ pub struct Project {
     member_index_built: bool,
     // The trees of context files re-parsed on demand, the latest few.
     ast_cache: Mutex<AstCache>,
+    // Each file's places its last check looked for a file an `include` or
+    // `require` names, made absolute (`absolute_path`), sorted: a file
+    // appearing or vanishing at one changes what the check reports. Kept
+    // only for a project that is changed after it is built.
+    include_probes: Mutex<FxHashMap<PathBuf, Vec<PathBuf>>>,
     // Every real `Enum` class's own canonically-declared FQN that
     // `Checker::escaped_enums` (see its own doc comment) recorded for
     // some file - populated/queried alongside `use_sites`/`member_
@@ -402,6 +407,9 @@ pub(crate) struct FileCheck {
     /// The file's private property types, until judged against the
     /// writes of every file (`Project::judge_property_types`).
     property_type_sites: Vec<checker::PropertyTypeSite>,
+    /// The places the file's includes looked for a file
+    /// (`Checker::include_probes`).
+    include_probes: Vec<PathBuf>,
 }
 
 impl FileCheck {
@@ -417,6 +425,7 @@ impl FileCheck {
             doc_resolutions: Vec::new(),
             property_assign_facts: NameMap::default(),
             property_type_sites: Vec::new(),
+            include_probes: Vec::new(),
         }
     }
 }
@@ -661,6 +670,7 @@ impl Project {
             use_sites: UseSiteIndex::default(),
             member_index_built: false,
             ast_cache: Mutex::default(),
+            include_probes: Mutex::default(),
             escaped_enum_cases: FxHashSet::default(),
             escaped_member_classes: FxHashSet::default(),
         }
@@ -1832,6 +1842,7 @@ impl Project {
             ..
         } = parse_with_ignores(path, new_source, None)?;
         let previous = self.unindex_file(path);
+        let appeared = previous.is_none();
         let (functions, classes) = declared_names(&ast);
         let constants = declared_constants(&ast);
         let (references, declaration_references) = file_references(&ast, references);
@@ -1924,6 +1935,9 @@ impl Project {
         let mut results = FxHashMap::default();
         affected.insert(path.to_path_buf());
         affected.extend(self.declaring_the_same(&rebuilt));
+        if appeared {
+            affected.extend(self.including(&[path.to_path_buf()]));
+        }
         self.unchecked.clear();
         let mut affected = affected.into_iter();
         while let Some(p) = affected.next() {
@@ -1996,25 +2010,14 @@ impl Project {
             }
         }
         let mut affected: FxHashSet<PathBuf> = paths.iter().cloned().collect();
+        affected.extend(self.including(paths));
         if any_removed {
             self.rebuild_declarations(&removed, None);
             affected.extend(self.finish_declarations());
             affected.extend(self.declaring_the_same(&removed));
         }
 
-        affected
-            .into_iter()
-            .map(|p| {
-                let (diagnostics, member_refs) = if self.member_index_built {
-                    let (d, m) = self.check_file_and_member_refs(&p);
-                    (d, Some(m))
-                } else {
-                    (self.check_file(&p), None)
-                };
-                self.reindex_use_sites_for_file(&p, member_refs);
-                (p, diagnostics)
-            })
-            .collect()
+        self.recheck(affected)
     }
 
     /// The files declaring a function or a class of `names`: what reports a
@@ -2195,6 +2198,7 @@ impl Project {
             },
         );
         self.judge_property_types(&mut checks, pool);
+        self.keep_include_probes(&mut checks);
         // Each file's diagnostics are finished from the project as it is,
         // which nothing here changes, so the files are finished side by
         // side; they stay where they are in `checks`.
@@ -2209,6 +2213,80 @@ impl Project {
             None => checks.iter_mut().for_each(finish),
         }
         checks
+    }
+
+    /// Keeps the places each of `checks` looked for an included file, for
+    /// a project that is changed after it is built. A file that panicked
+    /// keeps what its check before looked at.
+    fn keep_include_probes(&self, checks: &mut [(PathBuf, CheckOutcome)]) {
+        if self.built_once {
+            return;
+        }
+        let mut kept = self
+            .include_probes
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        for (path, outcome) in checks.iter_mut() {
+            let Ok(check) = outcome else { continue };
+            let mut probes: Vec<PathBuf> = std::mem::take(&mut check.include_probes)
+                .iter()
+                .map(|probe| self.absolute_path(probe))
+                .collect();
+            probes.sort_unstable();
+            probes.dedup();
+            if probes.is_empty() {
+                kept.remove(path);
+            } else {
+                kept.insert(path.clone(), probes);
+            }
+        }
+    }
+
+    /// The files whose last check looked for an included file at one of
+    /// `paths` or under one: a directory appearing or vanishing makes what
+    /// it holds appear or vanish.
+    fn including(&self, paths: &[PathBuf]) -> Vec<PathBuf> {
+        let paths: Vec<PathBuf> = paths.iter().map(|path| self.absolute_path(path)).collect();
+        let kept = self
+            .include_probes
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        kept.iter()
+            .filter(|(_, probes)| {
+                probes
+                    .iter()
+                    .any(|probe| paths.iter().any(|path| probe.starts_with(path)))
+            })
+            .map(|(file, _)| file.clone())
+            .collect()
+    }
+
+    /// Rechecks the files whose last check looked for an included file at
+    /// one of `paths` or under one, where a file or a directory the project
+    /// does not load appeared or vanished.
+    pub fn recheck_including(&mut self, paths: &[PathBuf]) -> FxHashMap<PathBuf, Vec<Diagnostic>> {
+        let including = self.including(paths);
+        self.recheck(including)
+    }
+
+    /// Checks each of `paths` again, its member references reindexed.
+    fn recheck(
+        &mut self,
+        paths: impl IntoIterator<Item = PathBuf>,
+    ) -> FxHashMap<PathBuf, Vec<Diagnostic>> {
+        paths
+            .into_iter()
+            .map(|p| {
+                let (diagnostics, member_refs) = if self.member_index_built {
+                    let (d, m) = self.check_file_and_member_refs(&p);
+                    (d, Some(m))
+                } else {
+                    (self.check_file(&p), None)
+                };
+                self.reindex_use_sites_for_file(&p, member_refs);
+                (p, diagnostics)
+            })
+            .collect()
     }
 
     /// Judges the private property types `checks` recorded against the
@@ -2370,6 +2448,7 @@ impl Project {
             doc_resolutions: checker.take_doc_resolutions(),
             property_assign_facts: checker.take_property_assign_facts(),
             property_type_sites: checker.take_property_type_sites(),
+            include_probes: checker.take_include_probes(),
             diagnostics: checker.into_diagnostics(),
         }
     }
@@ -2830,6 +2909,11 @@ impl Project {
             .collect();
         roles.sort();
         roles
+    }
+
+    /// Whether `path` is loaded, analysed or as context.
+    pub fn is_loaded(&self, path: &Path) -> bool {
+        self.files.get(path).is_some()
     }
 
     /// `true` if `path` is loaded and analyzed; `false` for an unloaded
