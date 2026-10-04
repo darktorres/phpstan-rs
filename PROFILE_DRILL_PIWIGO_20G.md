@@ -680,7 +680,7 @@ Twenty items, numbered in the order they are built. Each states what is there no
 4. **The baseline** comes from the commit that adds the printers and makes the deletions. Every deletion is under `cfg(debug_assertions)` or `cfg(test)`, so that commit's release behaviour is `5fb858c9`'s.
    - Each dump is taken with the `gate` build at `PHPSTAN_RS_THREADS=1` and at the default thread count, which must give byte-identical output. It is taken again with the `oracle` build, which must finish without an assertion.
    - The ordered file list, with roles, is recorded for each configuration. A tree with a link cycle is recorded as it is today: listed until `ELOOP`.
-   - Everything is stored with the starting binaries: the `gate` build, `cl-20g`'s and the `dhat` build.
+   - Everything is stored with the starting binaries: the `gate` build, `cl-20g`'s and the `dhat` build. None stays in `target/`, which `cargo clean` empties, or in `/tmp`, a tmpfs: binaries go to `.corpus-runs/gate/bin/<commit>/<profile>/`, runs and dumps to `.corpus-runs/gate/<artifact>/`, profiles to `~/.cache/prs-profile/<run>/` with their binary and a `README` (`.corpus-runs/README.md`).
 
 **Oracle.** None beyond §11: release behaviour does not change. Exact.
 

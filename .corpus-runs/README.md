@@ -64,6 +64,22 @@ A commit that intentionally changes an artifact adds
 renames tests adds `gates/test-renames/<slug>.txt` (`old -> new` or
 `old -> REMOVED: reason`).
 
+## Binaries and profiles kept beside the runs
+
+`cargo clean` empties `target/`, and `/tmp` is a tmpfs a reboot empties,
+so nothing a later comparison needs stays in either:
+
+- `gate/bin/<commit>/<profile>/phpstan-rs`: a binary built from a
+  committed tree, by its full hash and cargo profile (`gate`, `oracle`,
+  `dhat`), copied there as soon as it is built; ignored with the rest of
+  `gate/`.
+- `gate/<artifact>/<commit>.<ext>`: every run, as above. `vendor-tree` is
+  `check-project --no-composer vendor` in the corpus, normalized the
+  same way.
+- `~/.cache/prs-profile/<run>/`: callgrind and dhat profiles with the
+  binary that made them and a `README` naming the commit and the command
+  (`cl-20g`, `dhat-20g`: the 20 G plan's baselines).
+
 ## Older runs
 
 `.corpus-runs/scoped/<short-hash>.txt` and `unscoped/<short-hash>.txt`
