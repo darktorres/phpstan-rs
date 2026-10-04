@@ -2136,7 +2136,8 @@ Exact, except the private-property judgment, listed in §11.
 - **magic methods:** `__get`, `__set`, `__isset` and `__unset` on a property the code cannot reach; `__toString` where a value becomes a string; `__clone`; `__invoke` when an object is called; `offsetGet`, `offsetSet`, `offsetExists` and `offsetUnset` on an `ArrayAccess` index; `getIterator`, `rewind`, `valid`, `current`, `key` and `next` in a `foreach`; `__serialize`, `__unserialize`, `__sleep`, `__wakeup`, `__set_state` and `__debugInfo` through the builtins that call them;
 - **destructors:** `__destruct` where the last reference to an object may go: an assignment over it, `unset`, the end of a scope;
 - **autoloaders:** every function `spl_autoload_register` registered, wherever a class not yet loaded may be named: `new`, a static access, a `class_exists`-family test that autoloads;
-- **handlers and callbacks:** the error handler wherever a warning or notice may be raised, output-buffer callbacks where output is written, tick functions under `declare(ticks)`.
+- **handlers and callbacks:** the error handler wherever a warning or notice may be raised, output-buffer callbacks where output is written, tick functions under `declare(ticks)`;
+- **code a builtin keeps and runs later, from another builtin:** session handlers, the SQLite functions PDO and SQLite3 register, the PHP functions XSLT and XPath call, the callbacks curl and the XML parser hold, the classes PDO fetches into and DOM registers for nodes. Row 0.1c's table runs only what a call runs while it runs; an object made with a callable or an object, such as a `Fiber` or an iterator over a user's iterator, already counts as running anything.
 
 **Design.**
 - **Each such site is a call** to the union of what its possible targets write, applied by the checker as after a written call (item 0, fix steps 3-4):
