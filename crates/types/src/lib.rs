@@ -11,6 +11,7 @@ pub use syntax::name::Name;
 pub use syntax::php_string::PhpString;
 
 mod arithmetic;
+mod canonical;
 mod coercion;
 mod comparator;
 mod comparison;

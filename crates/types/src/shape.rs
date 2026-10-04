@@ -2,6 +2,7 @@
 //! `object{name: string}`.
 
 use std::fmt;
+use std::fmt::Write as _;
 
 use crate::{PhpString, Repr, TrinaryLogic, Type, parse::canonical_int_key};
 
@@ -471,5 +472,98 @@ impl Shape {
 impl<K: AsRef<str>> FromIterator<(K, Type, bool)> for Shape {
     fn from_iter<I: IntoIterator<Item = (K, Type, bool)>>(fields: I) -> Shape {
         Shape::from_named(fields)
+    }
+}
+
+impl ShapeKey {
+    /// The key's canonical print (`crate::canonical`): an int key's digits,
+    /// a string key quoted with its bytes.
+    pub(crate) fn write_canonical(&self, out: &mut String) {
+        match self {
+            ShapeKey::Int(n) => {
+                let _ = write!(out, "{n}");
+            }
+            ShapeKey::Str(s) => syntax::canonical::quote_bytes(s.as_bytes(), out),
+        }
+    }
+}
+
+impl Shape {
+    /// The shape's canonical print (`crate::canonical`), after `keyword`:
+    /// `array{a: int, 'b'?: string}` with each field in order, an unsealed
+    /// shape's tail as `...<K, V>` after its fields, and the key an append
+    /// takes, when the shape keeps one, as `next-index(...)`.
+    pub(crate) fn write_canonical(&self, keyword: &str, out: &mut String) {
+        let Shape {
+            fields,
+            unsealed,
+            next_index,
+            // What the fields and the tail give, kept.
+            positions: _,
+            summaries: _,
+        } = self;
+        out.push_str(keyword);
+        out.push('{');
+        let mut first = true;
+        let mut separate = |out: &mut String| {
+            if !std::mem::take(&mut first) {
+                out.push_str(", ");
+            }
+        };
+        for ShapeField { key, ty, optional } in fields {
+            separate(out);
+            key.write_canonical(out);
+            if *optional {
+                out.push('?');
+            }
+            out.push_str(": ");
+            crate::canonical::write_type(ty, out);
+        }
+        if let Some(tail) = unsealed {
+            let (key, value) = &**tail;
+            separate(out);
+            out.push_str("...<");
+            crate::canonical::write_type(key, out);
+            out.push_str(", ");
+            crate::canonical::write_type(value, out);
+            out.push('>');
+        }
+        if let Some(next_index) = next_index {
+            separate(out);
+            next_index.write_canonical(out);
+        }
+        out.push('}');
+    }
+}
+
+impl NextArrayIndex {
+    /// `next-index(N, before 8.0: K, since 8.0: K)`, `N` whether the PHP
+    /// 8.0 rule applies, each `K` the rule's next key (`throws` once there
+    /// is none) and, with `+int`, that the array has an int key.
+    fn write_canonical(&self, out: &mut String) {
+        let NextArrayIndex {
+            negative_keys_count,
+            before_8_0,
+            since_8_0,
+        } = self;
+        let write_rule = |rule: &NextKey, out: &mut String| {
+            let NextKey { next, has_int_key } = rule;
+            match next {
+                Some(next) => {
+                    let _ = write!(out, "{next}");
+                }
+                None => out.push_str("throws"),
+            }
+            if *has_int_key {
+                out.push_str(" +int");
+            }
+        };
+        out.push_str("next-index(");
+        out.push_str(crate::canonical::trinary_name(*negative_keys_count));
+        out.push_str(", before 8.0: ");
+        write_rule(before_8_0, out);
+        out.push_str(", since 8.0: ");
+        write_rule(since_8_0, out);
+        out.push(')');
     }
 }

@@ -24,6 +24,11 @@ pub trait ExtensionTypeData: fmt::Debug + Send + Sync {
 
     fn describe(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result;
 
+    /// Writes the payload's canonical print (`syntax::canonical`): every
+    /// field it has, on one line, so that two payloads `eq_data` tells
+    /// apart print apart.
+    fn write_canonical(&self, out: &mut String);
+
     /// Whether this payload is a super-type of `other`, when both are
     /// this extension's; `None` defers to the base types.
     fn is_super_type_of(

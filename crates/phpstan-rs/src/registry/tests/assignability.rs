@@ -418,6 +418,10 @@ impl types::ExtensionTypeData for Joins {
     fn describe(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "Builder<joins={}>", self.0)
     }
+    fn write_canonical(&self, out: &mut String) {
+        let Joins(joins) = self;
+        out.push_str(&format!("joins({joins})"));
+    }
     fn is_super_type_of(
         &self,
         other: &dyn types::ExtensionTypeData,
