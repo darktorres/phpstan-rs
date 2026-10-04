@@ -28,7 +28,7 @@ Building started on 2026-10-03 (`WORK_STACK.md`, level 8).
 | # | plan | task | needs | kind | status |
 |---|---|---|---|---|---|
 | **0** | **item 0** | **Baselines; the debug oracles retired** | | | |
-| 0.1 | step 1 | Read the starting state: at HEAD, the vendor-tree report against `1892b477`'s, and the all-on and unscoped reports against `7a3f3f99`'s (where the six changes show), each difference read and recorded | — | val | OPEN |
+| 0.1 | step 1 | Read the starting state: at HEAD, the vendor-tree report against `1892b477`'s, and the all-on and unscoped reports against `7a3f3f99`'s (where the six changes show), each difference read and recorded | — | val | DONE (003f308f) |
 | 0.1a | Found in step 1, F4 | `array_reduce`: the callback's return type for a never-empty array, the initial value's for an always-empty one, their union otherwise; `$carry` bound to the initial value and the callback's return | 0.1 | sem | OPEN |
 | 0.1b | fix, steps 1-3 | The write verdict with shared slots (static properties, globals, static variables): the summary's walk records slot writes and references to slots; the fixed point settles objects and slots; overridable and interface calls reach every loaded implementation; callbacks by what is passed | 0.1 | sem | OPEN |
 | 0.1c | fix, step 3 | The stream functions, found by running each PHP function against a recording wrapper in `php` 8.5; they run the wrapper methods of every loaded class that has them | 0.1b | sem | OPEN |
