@@ -1442,28 +1442,43 @@ pub struct TokenStream {
 - column tables for 1,876 non-ASCII files (`Utf8Chunks` 83.4 M);
 - 270.4 M in all.
 
-Context files need line starts, for duplicate-declaration messages (`duplicate_classes.rs:61`, `duplicate_functions.rs:78`), anonymous-class names and the server's navigation. Only analysed files need columns. The lexer reads the index for ignore marks (`lexer.rs:530`, `:560`), and the parser reads it for member removal spans and statement doc lines.
+Context files need line starts, for duplicate-declaration messages (`duplicate_classes.rs:61`, `duplicate_functions.rs:78`), anonymous-class names and the server's navigation. Columns are read for analysed files, and for the lexer warnings and parse failures of any file (`session.rs:674`, `:806-827`). The lexer reads the index for ignore marks (`lexer.rs:530`, `:560`), and the parser reads it for member removal spans and statement doc lines.
+
+**Lines are not PHP's.**
+- Only `\n` starts a line today (`span.rs:126-129`, `memchr_iter(b'\n', ..)`).
+- PHP also ends a line at a lone `\r`, and counts `\r\n` as one line break. In `php` 8.5, a file of `<?php\r$a = __LINE__;\r$b = __LINE__;\r\n$c = __LINE__;\n$d = __LINE__; // x\r$e = __LINE__;` gives 2, 3, 4, 5 and 6. A parse error after two lone `\r`s is reported on line 3.
+- The language server protocol counts `\r`, `\n` and `\r\n` as line ends too, so today's lines are wrong for PHP's error lines and for the editor alike.
+- **A `//` or `#` comment ends at a lone `\r` too:** in the probe, `$e` runs. The lexer ends one only at `\n` or `?>` (`lexer.rs:941-946`), so in such a file the code after a comment is read as comment.
+- None of the 65,131 PHP files in Piwigo and its `vendor/` has a lone `\r`. Classic Mac line endings still occur in older code.
 
 **Design.**
 1. **Two types, so the compiler enforces who may ask for a column.**
-   - `LineStarts` (`line`, `line_start`) for every file, built by one pass that turns each block's newline bitmask into offsets. The same pass's high-bit mask says whether the file is ASCII.
-   - `LineIndex` (`LineStarts` plus the column tables, `line_col`, `offset(LineCol)`) for analysed files only, built on the worker.
+   - `LineStarts` (`line`, `line_start`) for every file, built by one pass that turns each block's line-break bitmask into offsets. The same pass's high-bit mask says whether the file is ASCII.
+     - **Lines end where PHP's do:** at `\n`, and at a `\r` whose next byte (carried across blocks) is not `\n`. `\r\n` is one break.
+     - The offsets are gathered in per-worker scratch and copied out at their exact size, so `LineStarts` is one allocation.
+   - `LineIndex` (`LineStarts` plus the column tables, `line_col`, `offset(LineCol)`) for analysed files and open documents, built on the worker.
+   - **A lexer warning or a parse failure records its line and column on the worker,** while the source is at hand, by scanning its own line. So a context file keeps only `LineStarts`, and the failure path builds no second index (`session.rs:674` builds one today).
+   - A lexer for a fragment of PHP (completion, the stub rules' type strings) builds no index. Today each builds `LineIndex::default()` (`lexer.rs:367-371`).
+   - **The lexer's line comments end at a lone `\r`,** as PHP's do.
    
    `FileState` holds `enum Lines { Starts(LineStarts), Full(LineIndex) }`.
 2. **Blocks, through `wide`.** The release builds target baseline x86-64 (`.cargo/config.toml` sets no `target-cpu`) and aarch64.
    - The pass reads 16-byte blocks as `wide::u8x16` (`u8x16::new`, `cmp_eq`, `move_mask`). These compile to SSE2 on x86-64 and to NEON on aarch64, with a scalar form elsewhere (`wide-0.7.33/src/i8x16_.rs`, `move_mask`), and need no `unsafe` of ours. `wide` 0.7.33 is already in the lockfile, through `imbl`.
    - **Intrinsics written by hand would need `unsafe`** for their loads, which the workspace denies.
    - **No AVX2 path.** One behind run-time detection would also need `unsafe` to call, and `pulp`, the safe dispatching crate, documents no bitmask operation. At about half an instruction per byte over the under 70 MB of source a run reads (`read_and_parse_file` allocates 66.5 MB, reallocations included), the SSE2 pass costs ≈35 M. AVX2 would save about half of that, under 0.1% of the run.
-3. **The language server indexes context files on demand.** It reads the file and builds a `LineIndex`, but only when the hash of the bytes the project loaded, which item 1 keeps in `FileState`, still matches the file on disk. When the hash differs, the file is reloaded first.
-4. **Nothing in the front end reads lines.**
+3. **The language server indexes context files on demand.**
+   - An open document's index is built from its overlay text, as item 3's `ast_of` reads the overlay first.
+   - A file that is not open is read and indexed only when the hash of the bytes the project loaded, which item 1 keeps in `FileState`, still matches the file on disk. When the hash differs, the file is reloaded first.
+4. **The per-file cache stores `LineStarts`** for a context entry, where it stores an `Arc<LineIndex>` today (`file_cache.rs:94`), with a format bump. Item 17's context base stores line starts too.
+5. **Nothing in the front end reads lines.**
    - Ignore marks record offsets: the mark's start, the last and the next code token's start. `ignore_comments` resolves lines through the analysed file's index.
    - A class member records its start, the end of the token before it and the start of the token after it, and `removal_span` is computed from those when a fix asks.
    - A statement's leading doc records its offset.
    - Anonymous-class names take their line from `LineStarts` on the worker.
 
-**Oracle.** O1, O2 (every position, fix span, ignore result, anonymous-class name), the line-index tests over multi-byte and astral lines, the LSP tests. Exact.
+**Oracle.** O1, O2 (every position, fix span, ignore result, anonymous-class name), the line-index tests over multi-byte and astral lines and over `\r`, `\n` and `\r\n` breaks, the LSP tests. Exact, except the semantic change in §11: lines end at a lone `\r`, and so does a line comment.
 
-**Allocations.** `LineIndex::new` makes three allocations per file (43,630 in all). `LineStarts` makes one, and context files build no column tables. The lexer also wraps each index in an `Arc` (`lexer.rs:368`, 16,419); the file's state holds its `Lines` itself, and the checker borrows them. Ignore marks keep their text as a `String` today (`lexer.rs:535`), and ignore comments keep their identifiers that way too (`ignore_comments.rs:268`, `:334`). Both become offsets and slices, read through the analysed file's source.
+**Allocations.** `LineIndex::new` makes 46,422 allocations (20.7 MB): the line starts' capacity guess, its growths and its shrink (`span.rs:128`), then `surplus` (`:151`) and `astral` (`:147`). `LineStarts` makes one, and context files build no column tables. The lexer also wraps each index in an `Arc` (`lexer.rs:368`, 16,419); the file's state holds its `Lines` itself, and the checker borrows them. Ignore marks keep their text as a `String` today (`lexer.rs:535`), and ignore comments keep their identifiers that way too (`ignore_comments.rs:268`, `:334`). Both become offsets and slices, read through the analysed file's source.
 
 ### 12. Lexer details (R12)
 
@@ -1909,6 +1924,7 @@ Exact.
   - item 8: a `@property` tag shadowed by a declared property checked against the tag's own names;
   - item 9: identifiers and docs read from a source that is not UTF-8 keep their bytes, so names that differ only in such bytes are distinct; the stub rules apply only to stub sources;
   - item 10: `__COMPILER_HALT_OFFSET__` as its file's offset, with the new check of its use elsewhere; `__halt_compiler` followed by anything but `( ) ;` or `( ) ?>` is a syntax error; a broken file's error is its first one; a declaration's doc is the one PHP gives it, with the new check of a doc given away; and the new check of source the configured versions lex differently;
+  - item 11: lines end at a lone `\r` as at `\n`, and so does a `//` or `#` comment;
   - item 15: container-field keys canonical as PHP's array keys;
   - item 18: the rule families of §12.10.
   
@@ -1945,7 +1961,7 @@ Exact.
 | 8 | case references in the checker, declarations built lean | ≈0.1 G | — | both caches' entries; 0.48 M allocations | exact, except one `@property` case |
 | 9 | typed vectors, ids, `peeled` | ≈0.8-1.2 G | — | ≥53 MB of the analysed trees; 4.24 M allocations | exact, but semantic for non-UTF-8 names and the stub rules |
 | 10 | flat token arrays | ≈1.7 G | — | 0.23 M allocations | exact, but semantic for the halt offset, the first error, declarations' docs and the versions |
-| 11 | line starts, columns, offsets, ignore marks | ≈0.2 G | — | 0.07 M allocations | exact |
+| 11 | line starts, columns, offsets, ignore marks | ≈0.2 G | — | 0.07 M allocations | exact, but semantic for a lone `\r` |
 | 12 | lexer details, qualified names as one token | ≈0.35 G | — | 0.5 M allocations | exact |
 | 13 | declaration list, one walk, builders in scratch | ≈0.45 G | — | bodies as one slice per file; 1.31 M allocations | exact |
 | 14 | PHPDoc finished, two memos | ≈0.35 G | — | ≈50 MB; 2.66 M allocations | exact |
@@ -2107,6 +2123,7 @@ The rewrite made two more changes:
 | 8 | Six case-reference fields with seven kinds of readers, not one. One reader checks the merged reflection, not what the tag writes. Overlap with item 4's `FileDecls`. A wrong reason given for duplicate parameters. `reconcile_with_native` still collected. | Every field listed with its readers. Case references computed at every checked position from what is written. Dedup done in the file's parameter vector. One semantic case listed. The saving restated as work. |
 | 9 | The arena's `Sync` came from an `unsafe impl`, which the workspace denies, and the name arena was not `Sync` either. The tree is changed after the parse (the stub rules, anonymous-class names, a second name resolution), and other code builds and keeps expressions. A non-UTF-8 source cannot give `&str` payloads, and its identifiers are decoded lossily today, so `class \xA9` and `class \xAA` are one class. Statement docs need only today's doc sites. The counts mixed rules: the expression clones included PHPDoc's, and M9 counted by a rule no item used. Checking the stub rules found that they apply to any file that mentions them, and for the newest PHP version only. | The tree as typed vectors addressed by `u32` ids: no `unsafe`, no lifetime, a few allocations per kept file. Chosen on merit over a safe reference arena (`bumpalo-herd` with `self_cell`): smaller nodes, exact sizes, no lifetime, dense side tables. The stub rules applied as a stub is parsed, to stubs only, recording versions that item 6's readers answer for the configured range. Anonymous-class names as a side table. Every holder of an expression listed, holding ids. Payloads as byte ranges; names as bytes (item 15) and docs lexed as bytes (item 14). Attributes kept in their node. M9 recounted by M10's rule, and item 9's counts stated by it. |
 | 10 | Lexing the whole file first would lex the data after `__halt_compiler` as PHP. Interpolated strings were to keep a sub-parser, where PHP's scanner emits their parts inline. A lexer error anywhere would still beat an earlier syntax error, where PHP reports the first. Docs attached by adjacency miss the docs PHP gives declarations. The token readers were incomplete. Allocations were counted twice, and the item's M10 row held the lexer's names and the line index's `Arc`. The lexer ignores the configured versions. | The lexer stops where PHP's does, records the offset, and `__COMPILER_HALT_OFFSET__` gets its value, with a check of its use elsewhere. String parts as inline tokens; the sub-parser, fragments and scratch streams go. Errors recorded with offsets, the first one reported. Declarations' docs by PHP's rule (only `}` clears a pending doc, as `php` showed, not `{`), with a check of a doc given away. A check of source the configured versions lex differently. Comments only on request. The row recounted to 0.23 M, with the names moved to item 16 (whose `Now` is corrected: three allocations per name, always) and the `Arc` to item 11. |
+| 11 | PHP and the editor end a line at a lone `\r`, and PHP ends a line comment there too; today neither does. Context files need columns for their lexer warnings and parse failures. The per-file cache stores the index. Open documents need their overlay. The count was 46,422, not 43,630, and fragment lexers build an empty index. | Lines and line comments end where PHP's do. Warnings and failures record their line and column on the worker. `LineStarts` in the cache, with a format bump. The overlay first. One allocation for `LineStarts`, none for fragments. |
 
 # Appendix A. The allocation tail, every site
 
