@@ -1069,6 +1069,11 @@ const SESSION_PROJECTS: [&str; 2] = ["vendor/symfony/console", "vendor/doctrine/
 ///   configuration, and over a copy of each vendor project, every rule set
 ///   on (`replay-<name>/<commit>/`).
 ///
+/// The runs share the machine: one worker per core, each taking the next
+/// run from one queue, with at most `LARGE_AT_ONCE` of the corpus's at a
+/// time, and each pair compared as soon as both its runs are done. Every
+/// difference is reported once all have run.
+///
 /// With `--binary <path>`, every dump is taken with that build, its exit
 /// checked and nothing recorded: the oracle build's run, whose assertions
 /// must all hold.
@@ -1097,7 +1102,7 @@ fn dumps_command(args: &[String]) -> Result<(), String> {
 }
 
 /// The arguments of a dump's command, given the path it writes to.
-type DumpArgs = Box<dyn Fn(&Path) -> Vec<String>>;
+type DumpArgs = Box<dyn Fn(&Path) -> Vec<String> + Send + Sync>;
 
 /// One dump: its artifact, the extension of its snapshot (empty for a
 /// directory), where it runs, and the command that writes it to the path
@@ -1107,9 +1112,21 @@ struct Dump {
     ext: &'static str,
     dir: PathBuf,
     // A fresh copy of a tree to run in, made before each run: `(from, to)`.
+    // Both runs use the same place, which the dumps print, so they run one
+    // after the other.
     copy: Option<(PathBuf, PathBuf)>,
+    // Whether it runs over the corpus, which takes a few gigabytes of
+    // memory, rather than one vendor project.
+    large: bool,
     args: DumpArgs,
 }
+
+/// How many runs over the corpus take place at once: each holds the
+/// project and its dump, a few gigabytes, so more would exhaust memory.
+const LARGE_AT_ONCE: usize = 3;
+
+/// The thread counts each dump is taken at: the default, then one.
+const DUMP_THREADS: [Option<&str>; 2] = [None, Some("1")];
 
 fn take_dumps(binary: &Path, hash: Option<&str>, timings: &mut Timings) -> Result<(), String> {
     let mut dumps: Vec<Dump> = Vec::new();
@@ -1132,6 +1149,7 @@ fn take_dumps(binary: &Path, hash: Option<&str>, timings: &mut Timings) -> Resul
             ext: "",
             dir: corpus_dir(),
             copy: None,
+            large: true,
             args: with(vec!["--dump-front-end".into()]),
         });
         dumps.push(Dump {
@@ -1139,6 +1157,7 @@ fn take_dumps(binary: &Path, hash: Option<&str>, timings: &mut Timings) -> Resul
             ext: "txt.gz",
             dir: corpus_dir(),
             copy: None,
+            large: true,
             args: with(vec!["--dump-registry".into()]),
         });
         for (artifact, flag) in [
@@ -1150,6 +1169,7 @@ fn take_dumps(binary: &Path, hash: Option<&str>, timings: &mut Timings) -> Resul
                 ext: "txt.gz",
                 dir: corpus_dir(),
                 copy: None,
+                large: true,
                 args: with(vec![flag.into(), "--format".into(), "json".into()]),
             });
         }
@@ -1164,6 +1184,7 @@ fn take_dumps(binary: &Path, hash: Option<&str>, timings: &mut Timings) -> Resul
             ext: "txt.gz",
             dir: corpus_dir(),
             copy: None,
+            large: project == ".",
             args: Box::new(move |out: &Path| {
                 vec![
                     "record-session".into(),
@@ -1179,6 +1200,7 @@ fn take_dumps(binary: &Path, hash: Option<&str>, timings: &mut Timings) -> Resul
         ext: "",
         dir: replays.join("piwigo"),
         copy: Some((corpus_dir(), replays.join("piwigo"))),
+        large: true,
         args: Box::new(|out: &Path| {
             let mut args = vec!["check-project".to_string()];
             args.extend(scoped_args());
@@ -1194,6 +1216,7 @@ fn take_dumps(binary: &Path, hash: Option<&str>, timings: &mut Timings) -> Resul
             ext: "",
             dir: replays.join(&slug),
             copy: Some((corpus_dir().join(&project), replays.join(&slug))),
+            large: false,
             args: Box::new(|out: &Path| {
                 let mut args = vec!["check-project".to_string(), "--no-composer".to_string()];
                 for set in ALL_ON_SETS {
@@ -1208,10 +1231,121 @@ fn take_dumps(binary: &Path, hash: Option<&str>, timings: &mut Timings) -> Resul
         });
     }
 
+    run_dumps(binary, hash, &dumps, timings)
+}
+
+/// One worker's task: one dump's run at one thread count, or both runs of a
+/// dump that copies a tree, in turn.
+struct DumpJob {
+    dump: usize,
+    threads: Vec<usize>,
+}
+
+/// What the workers share: the runs not yet started, how many over the
+/// corpus are under way, each dump's finished runs, and what failed.
+struct DumpQueue {
+    jobs: std::collections::VecDeque<DumpJob>,
+    large_running: usize,
+    taken: Vec<[Option<PathBuf>; 2]>,
+    failures: Vec<String>,
+}
+
+/// Takes every dump of `dumps` at each of `DUMP_THREADS` on a worker per
+/// core, compares each pair once both are taken, and, with `hash`, records
+/// the default run's. Every failure is reported at the end; the runs of a
+/// dump that failed are left in `.dumps` to read.
+fn run_dumps(
+    binary: &Path,
+    hash: Option<&str>,
+    dumps: &[Dump],
+    timings: &mut Timings,
+) -> Result<(), String> {
     let scratch = gate_dir().join(".dumps");
-    for dump in &dumps {
-        let mut taken: Vec<PathBuf> = Vec::new();
-        for threads in [None, Some("1")] {
+    std::fs::create_dir_all(&scratch).map_err(|e| e.to_string())?;
+    // The longest start first: the corpus's runs, and of those the replay,
+    // whose two runs go one after the other.
+    let mut order: Vec<usize> = (0..dumps.len()).collect();
+    order.sort_by_key(|&i| (!dumps[i].large, dumps[i].copy.is_none()));
+    let mut jobs = std::collections::VecDeque::new();
+    for i in order {
+        if dumps[i].copy.is_some() {
+            jobs.push_back(DumpJob {
+                dump: i,
+                threads: vec![0, 1],
+            });
+        } else {
+            for t in 0..DUMP_THREADS.len() {
+                jobs.push_back(DumpJob {
+                    dump: i,
+                    threads: vec![t],
+                });
+            }
+        }
+    }
+    let queue = std::sync::Mutex::new(DumpQueue {
+        jobs,
+        large_running: 0,
+        taken: vec![[None, None]; dumps.len()],
+        failures: Vec::new(),
+    });
+    let ready = std::sync::Condvar::new();
+    let timings = std::sync::Mutex::new(timings);
+    let workers = std::thread::available_parallelism().map_or(1, usize::from);
+    std::thread::scope(|scope| {
+        for _ in 0..workers {
+            scope.spawn(|| dump_worker(binary, hash, dumps, &scratch, &queue, &ready, &timings));
+        }
+    });
+    let failures = queue
+        .into_inner()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .failures;
+    if failures.is_empty() {
+        Ok(())
+    } else {
+        Err(failures.join("\n"))
+    }
+}
+
+/// Runs jobs from `queue` until none is left.
+fn dump_worker(
+    binary: &Path,
+    hash: Option<&str>,
+    dumps: &[Dump],
+    scratch: &Path,
+    queue: &std::sync::Mutex<DumpQueue>,
+    ready: &std::sync::Condvar,
+    timings: &std::sync::Mutex<&mut Timings>,
+) {
+    let lock = || {
+        queue
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+    };
+    loop {
+        let job = {
+            let mut state = lock();
+            loop {
+                let room = state.large_running < LARGE_AT_ONCE;
+                if let Some(at) = state.jobs.iter().position(|j| room || !dumps[j.dump].large) {
+                    let job = state.jobs.remove(at).expect("found");
+                    if dumps[job.dump].large {
+                        state.large_running += 1;
+                    }
+                    break job;
+                }
+                if state.jobs.is_empty() {
+                    return;
+                }
+                state = ready
+                    .wait(state)
+                    .unwrap_or_else(std::sync::PoisonError::into_inner);
+            }
+        };
+        let dump = &dumps[job.dump];
+        let mut outcomes = Vec::new();
+        for &t in &job.threads {
+            let threads = DUMP_THREADS[t];
             let out = scratch.join(format!(
                 "{}-{}{}",
                 dump.artifact,
@@ -1222,59 +1356,97 @@ fn take_dumps(binary: &Path, hash: Option<&str>, timings: &mut Timings) -> Resul
                     format!(".{}", dump.ext)
                 }
             ));
-            let _ = std::fs::remove_dir_all(&out);
-            let _ = std::fs::remove_file(&out);
-            std::fs::create_dir_all(&scratch).map_err(|e| e.to_string())?;
-            if let Some((from, to)) = &dump.copy {
-                let _ = std::fs::remove_dir_all(to);
-                std::fs::create_dir_all(to.parent().unwrap()).map_err(|e| e.to_string())?;
-                run(Command::new("cp").arg("-a").arg(from).arg(to))?;
-                write(&to.join(".phpstan-rs-replay"), b"")?;
-            }
-            let mut cmd = Command::new(binary);
-            cmd.current_dir(&dump.dir)
-                .args((dump.args)(&out))
-                .stdout(Stdio::null());
-            if let Some(threads) = threads {
-                cmd.env("PHPSTAN_RS_THREADS", threads);
-            }
+            let started = Instant::now();
+            let result = take_dump(binary, dump, threads, &out);
             let label = format!(
                 "dump {} at {} threads",
                 dump.artifact,
                 threads.unwrap_or("default")
             );
-            timings.time(&label, |_| run(&mut cmd))?;
-            taken.push(out);
+            timings
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .record(&label, started.elapsed().as_secs_f64(), result.is_ok());
+            outcomes.push((t, result.map(|()| out)));
         }
         if let Some((_, to)) = &dump.copy {
             let _ = std::fs::remove_dir_all(to);
         }
-        let (default, one) = (&taken[0], &taken[1]);
-        if let Some(difference) = first_difference(default, one)? {
-            return Err(format!(
-                "{}: one thread differs from the default at {}",
-                dump.artifact,
-                difference.display()
-            ));
+        let mut state = lock();
+        if dump.large {
+            state.large_running -= 1;
         }
-        if let Some(hash) = hash {
-            let target = if dump.ext.is_empty() {
-                gate_dir().join(&dump.artifact).join(hash)
-            } else {
-                snapshot_path(&dump.artifact, hash, dump.ext)
-            };
-            let _ = std::fs::remove_dir_all(&target);
-            let _ = std::fs::remove_file(&target);
-            std::fs::create_dir_all(target.parent().unwrap()).map_err(|e| e.to_string())?;
-            if dump.artifact.starts_with("front-end-") {
-                pool_texts(&default.join("texts"))?;
+        let mut pair = None;
+        for (t, outcome) in outcomes {
+            match outcome {
+                Ok(out) => {
+                    let taken = &mut state.taken[job.dump];
+                    taken[t] = Some(out);
+                    if let [Some(_), Some(_)] = taken {
+                        pair = Some([taken[0].take().unwrap(), taken[1].take().unwrap()]);
+                    }
+                }
+                Err(error) => state.failures.push(format!("{}: {error}", dump.artifact)),
             }
-            std::fs::rename(default, &target).map_err(|e| format!("{}: {e}", target.display()))?;
         }
-        let _ = std::fs::remove_dir_all(one);
-        let _ = std::fs::remove_file(one);
-        let _ = std::fs::remove_dir_all(default);
-        let _ = std::fs::remove_file(default);
+        ready.notify_all();
+        drop(state);
+        if let Some([default, one]) = pair
+            && let Err(error) = record_dump(dump, hash, &default, &one)
+        {
+            lock().failures.push(error);
+        }
+    }
+}
+
+/// Takes `dump` at `threads` into `out`, in a fresh copy of its tree when
+/// it runs in one.
+fn take_dump(binary: &Path, dump: &Dump, threads: Option<&str>, out: &Path) -> Result<(), String> {
+    let _ = std::fs::remove_dir_all(out);
+    let _ = std::fs::remove_file(out);
+    if let Some((from, to)) = &dump.copy {
+        let _ = std::fs::remove_dir_all(to);
+        std::fs::create_dir_all(to.parent().unwrap()).map_err(|e| e.to_string())?;
+        run(Command::new("cp").arg("-a").arg(from).arg(to))?;
+        write(&to.join(".phpstan-rs-replay"), b"")?;
+    }
+    let mut cmd = Command::new(binary);
+    cmd.current_dir(&dump.dir)
+        .args((dump.args)(out))
+        .stdout(Stdio::null());
+    if let Some(threads) = threads {
+        cmd.env("PHPSTAN_RS_THREADS", threads);
+    }
+    run(&mut cmd)
+}
+
+/// Compares `dump`'s runs at the default and at one thread and, with
+/// `hash`, records the default's; the runs are removed unless they differ.
+fn record_dump(dump: &Dump, hash: Option<&str>, default: &Path, one: &Path) -> Result<(), String> {
+    if let Some(difference) = first_difference(default, one)? {
+        return Err(format!(
+            "{}: one thread differs from the default at {}",
+            dump.artifact,
+            difference.display()
+        ));
+    }
+    if let Some(hash) = hash {
+        let target = if dump.ext.is_empty() {
+            gate_dir().join(&dump.artifact).join(hash)
+        } else {
+            snapshot_path(&dump.artifact, hash, dump.ext)
+        };
+        let _ = std::fs::remove_dir_all(&target);
+        let _ = std::fs::remove_file(&target);
+        std::fs::create_dir_all(target.parent().unwrap()).map_err(|e| e.to_string())?;
+        if dump.artifact.starts_with("front-end-") {
+            pool_texts(&default.join("texts"))?;
+        }
+        std::fs::rename(default, &target).map_err(|e| format!("{}: {e}", target.display()))?;
+    }
+    for path in [one, default] {
+        let _ = std::fs::remove_dir_all(path);
+        let _ = std::fs::remove_file(path);
     }
     Ok(())
 }
