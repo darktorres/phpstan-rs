@@ -1485,6 +1485,19 @@ impl Project {
         let mut stale = std::mem::take(&mut self.globals_stale);
         let mut walk = AffectedWalk::default();
         self.walk_affected(&mut walk, changed_keys.iter().cloned());
+        // A trait is checked as each class using it: its file is checked
+        // again when one of them changed, came or went.
+        if let Some(before) = &before {
+            for name in self.registry.traits_of_changed_classes(before) {
+                let file = self
+                    .registry
+                    .classes
+                    .get(&name)
+                    .and_then(|info| info.provenance().file())
+                    .and_then(|origin| self.files.id_by_origin(origin));
+                walk.affected.extend(file);
+            }
+        }
         stale.extend(walk.affected.iter().cloned());
         let files: Vec<(FileId, &Path, &GlobalFacts)> = self
             .files

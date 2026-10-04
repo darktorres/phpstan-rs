@@ -113,6 +113,17 @@ impl<V> FileTable<V> {
         }
     }
 
+    /// The number of the file `origin` names, found as `get_by_origin`
+    /// finds it.
+    pub(crate) fn id_by_origin(&self, origin: &Path) -> Option<FileId> {
+        let address = std::ptr::from_ref(origin).cast::<u8>() as usize;
+        let id = match self.by_origin.get(&address) {
+            Some(id) => *id,
+            None => self.id_of(origin)?,
+        };
+        self.get_by_id(id).map(|_| id)
+    }
+
     pub(crate) fn get(&self, path: &Path) -> Option<&V> {
         self.get_by_id(self.id_of(path)?)
     }

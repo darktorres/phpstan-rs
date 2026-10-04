@@ -681,6 +681,28 @@ impl Registry {
         keys
     }
 
+    /// The traits the classes whose resolved form differs from `before`'s
+    /// use, before the change and after it: a trait is checked as each class
+    /// using it, so its file is checked again when one of them changes.
+    pub(crate) fn traits_of_changed_classes(&self, before: &ResolvedSnapshot) -> Vec<Name> {
+        let mut traits: Vec<Name> = Vec::new();
+        let class_keys = before.class_keys.iter().flat_map(|keys| keys.iter());
+        for (key, old) in class_keys.zip(&before.classes) {
+            let now = self.classes.get(&FoldedKey(key));
+            if !differs(now, old.as_ref()) {
+                continue;
+            }
+            for info in now.into_iter().chain(old.as_ref().map(Detached::get)) {
+                for used in &info.uses {
+                    if !traits.contains(used) {
+                        traits.push(used.clone());
+                    }
+                }
+            }
+        }
+        traits
+    }
+
     /// The keys of the global variables whose inferred type differs from
     /// `before`'s.
     pub(crate) fn changed_global_variables(
