@@ -647,7 +647,7 @@ Twenty-one items, numbered in the order they are built. Each states what is ther
      - at every token boundary, the line, the UTF-8 and UTF-16 columns, and the `offset_in` round trip;
      - doc sites, each with its `DocBlock`, every field printed canonically, and the references sorted;
      - every type node of every docblock, with the type today's round trip gives it (`parse_written_type(to_source_string())`), printed canonically and keyed by file, doc span, tag ordinal and node path, for item 14's lowering oracle;
-     - every union the run builds, with its operands and its result, printed canonically, for item 18's union pass;
+     - every union the run builds, with its operands and its result, printed canonically, for item 18's union pass: one set for the run, not per file, since a memo (a docblock's, a type's) builds a union in whichever file needs it first, and recorded where a union is asked for, above the union memo, so the set does not depend on which thread built it;
      - each built declaration in order, with its guard and full reflection;
      - duplicate sites, declared classes, Pest facts, anonymous-class names and use sites;
      - each body's summary and `InitFlow`, and the global facts.
