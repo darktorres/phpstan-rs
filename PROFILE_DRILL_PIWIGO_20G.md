@@ -654,7 +654,8 @@ Twenty-two items, numbered in the order they are built. Each states what is ther
      
      Its file set includes every extension PHP is run from (`.inc`, `.module`, `.install`, `.theme`, `.engine`, `.profile`, `.php.inc`) and any file that starts with `<?php` or `<?=`. Each file's text is stored gzip-compressed (`flate2`) under its BLAKE3 digest, with an index of digests by role and path.
    - **`registry-dump`**, taken after the finishing passes and before checking. It only reads: lazy records are decoded, but deferred values are printed as stored. It sorts by kind, folded name and load order, and prints:
-     - every project declaration, and every record of both stub bases, at the configured PHP range and at its two ends;
+     - every project declaration, at the configured PHP range and at its two ends. The registry prints as its difference from the stub base it stands on, which it names: for each table, map and set, the entries the project adds or changes and the names it drops. The difference depends only on what the two hold, not on how layers are stored, so item 4's ids leave it as it is; an entry read through to the base is the base's own, so most of the comparison is a pointer test;
+     - the stub bases, each whole, in a dump of their own (`stub-bases`), taken in every cache state of one configuration and compared across them, so a base built cold and one read back from the stub cache must print the same;
      - for each, its reflection, its guard and the guard's value, its purity dependencies and verdict, its effect (what it may write, by storage, which replaced the property-write classification in row 0.1b), its ancestors and owners, and the ancestry fact;
      - both scopes, the global constants and the global-variable facts;
      - both reverse indexes, the use-site index and the duplicate-site tables;
@@ -662,11 +663,16 @@ Twenty-two items, numbered in the order they are built. Each states what is ther
    - **The checker's records:**
      - every PHPDoc resolution, keyed by file, host class and function, the reader that resolves it (an inline `@var`, a hook's `@throws`, a `@template` bound, ...) and the written type: the checker reads a docblock's types as text, without the docblock's span or the tag's ordinal (`Stmt::doc_comment` and the declarations' doc comments are strings), so a resolution is known by what is resolved, where and by which reader;
      - every expression's inferred and native type in the final pass, keyed by file, span and host class (`--dump-expr-types`, beside today's `--dump-types`).
-   - **O2: the gate's full artifact set** (`cargo xtask corpus --full`: scoped, all-on, unscoped, levels 0-10, the type dumps, the baselines and the emission-order check).
+   - **O2: the gate's full artifact set** (`cargo xtask corpus --full`: scoped, all-on, unscoped, levels 0-10, the type dumps, the baselines and the emission-order check). It is one pass with the dumps above, not a run of its own beside them:
+     - **one analysis per configuration and state writes every artifact:** the runner (`tools/gate-runner`) loads once, writes the front end's dump, the registry dump and the stub bases, checks once with the records on, and writes the report and its views. So each artifact is compared across every state the configuration is run in, not the report alone;
+     - **the runs go on a worker per core** from one queue, the corpus's first and at most three of them at once for memory, a replay's two runs one after the other in its copy, and every difference is listed at the end;
+     - **the fixture suite runs once,** in this pass, with its type and diagnostic records; the tests step runs the rest;
+     - **the level runs stay:** a level changes the analysis, not only which reports print, so no level's report is a filter of another's;
+     - **the `oracle` build runs the same pass,** with the per-file cache off, recording nothing.
      - It adds a view of every field of every diagnostic: the end position, the UTF-16 columns and the whole fix.
      - It runs over the Piwigo configurations, the vendor tree as one project, each vendor project with every rule set, and the fixtures. A vendor project is each `vendor/<vendor>/<package>` of the corpus with a `composer.json` (205), analysed alone with `--no-composer`.
      - It adds a configuration with architecture rules and banned types, which the all-on configuration does not set (`xtask/src/main.rs:394-461`), so that item 19's passes have a corpus oracle from the baseline on.
-     - It runs with the stub cache cold and warm, and the per-file cache off, written and read, and at one thread, each from a cache directory of its own. Every state must give the same output.
+     - It runs the scoped, all-on and unscoped configurations with the stub cache cold and warm, the per-file cache off, written and read, and at one thread, each from a cache directory of its own, and the others at the default thread count and at one. Every state must give the same artifacts, all of them.
      - It is compared in output order with `xtask compare`.
    - **The server:** an in-process session over Piwigo and two vendor projects. It records:
      - the loaded files with their roles, and `registry-dump`;
@@ -678,7 +684,7 @@ Twenty-two items, numbered in the order they are built. Each states what is ther
      - at the end, a fresh load of the edited tree must give the same.
    - **Memory:** the dhat profile of §8, by holder, with the heap recorded at the start of the check and at the check's own maximum, beside the global peak. It is taken once more with untrimmed backtraces (`dhat::Profiler::builder().trim_backtraces(None)`), so that the 10,987 allocations whose stacks end inside the allocator (M10) are placed too.
 4. **The baseline** comes from the commit that adds the printers and makes the deletions. Every deletion is under `cfg(debug_assertions)` or `cfg(test)`, so that commit's release behaviour is `5fb858c9`'s.
-   - Each dump is taken with the `gate` build at `PHPSTAN_RS_THREADS=1` and at the default thread count, which must give byte-identical output. It is taken again with the `oracle` build, which must finish without an assertion.
+   - Each dump is taken with the `gate` build in every state of its configuration (above), at least at `PHPSTAN_RS_THREADS=1` and at the default thread count, which must give byte-identical output. The pass is taken again with the `oracle` build, which must finish without an assertion.
    - The ordered file list, with roles, is recorded for each configuration. A tree with a link cycle is recorded as it is today: listed until `ELOOP`.
    - Everything is stored with the starting binaries: the `gate` build, `cl-20g`'s and the `dhat` build. None stays in `target/`, which `cargo clean` empties, or in `/tmp`, a tmpfs: binaries go to `.corpus-runs/gate/bin/<commit>/<profile>/`, runs and dumps to `.corpus-runs/gate/<artifact>/`, profiles to `~/.cache/prs-profile/<run>/` with their binary and a `README` (`.corpus-runs/README.md`).
 
@@ -775,6 +781,17 @@ Two gaps turned up with it, each closed in item 0:
 - **The runtime oracle ran 81 fixtures.** An assertion in a function nothing calls never ran. The oracle now calls each function and method of an asserting fixture with values of its parameters' declared types: literals the relation admits, and objects, enum cases, class-strings, closures, object shapes and arrays built from the type (`gate::samples`, `3d8085f3`). That makes 353 fixtures run. A fixture whose assertions rest on what PHP never checks (inline `@var`, docs-only declarations, assertion functions with empty bodies) opts out with its reason.
 
 The calls found three places where a type assumes what PHP does not give: an int operation with an open end taken not to overflow, a general array's key taken to be there, and an iterator's `current()` taken to give a value. They are item 21; until it is built, their seven fixtures opt out of the calls. The 114 asserting fixtures the calls still do not reach are queued in `WORK_STACK.md`.
+
+The dumps at one thread and at the default found two states that depended on the caches, though no diagnostic did, since the first run filled the caches the second read:
+- **The stub cache lost which classes have PHPStan ancestry** (`f80df7a4`). The table was not among those it stores, so every warm run's base had none, and the rules gated on it saw no PHPStan class among the stubs'. The round-trip test now compares the whole print of a freshly built base, plain and with PHPStan's source, with what reads back.
+- **A context file kept its ignore comments only when parsed** (`00ac7137`), not when read from the per-file cache, whose entries hold none. Only an analysed file's are read, so a context file of a batch run now keeps none.
+
+Running the validation showed its own overlap:
+- **The registry dumps printed the stub base whole, every time.** Each table printed joined with its base, and the batch dump printed both bases again after it. A small vendor project's dump was 2.78 M lines, 18 K of them its own, taken eight times per replay and twice per project: the vendor replays were 65% of the dumps' time.
+- **The same analysis ran in many processes.** Each configuration was analysed once per dump kind, then again for the report and for each cache state of the equalities, which compared the report alone. So a state that changed a dump and not the report went unseen, as the two above did until the dumps' second run read the caches the first had filled.
+- **The fixture suite ran twice,** in the tests and in O2.
+
+Step 3's one pass replaces them. The dumps' runs also share the machine now: a worker per core from one queue (`df6a29ed`), and `cargo xtask progress` shows a pass as it runs (`cbd2a397`). Each checkout keeps its own `.corpus-runs/gate`, where a linked worktree wrote into the main checkout's and shared its scratch (`e58fadf4`).
 
 **Oracle.** None beyond §11 for the dumps and the deletions: they leave release behaviour as it is. The fixes found in step 1 are semantic, read in 0.11 against `5fb858c9`'s reports.
 
@@ -2303,13 +2320,13 @@ Exact, except the private-property judgment, listed in §11.
 
 **Against what.** Each item's dumps are compared with the previous item's validated ones, item 1's with item 0's baseline. So every difference belongs to the item being validated, and it must be one of the semantic changes that item names (below); an item that names none gives identical dumps. Each item's dumps are saved by its last commit's full hash, as `xtask` lays them out (`.corpus-runs/gate/<artifact>/<commit>.<ext>`, `.corpus-runs/README.md`). Contents are diffed after `LC_ALL=C sort`, and the order of emission is checked apart, by `xtask compare`.
 
-**How it runs.** One heavy job at a time, each under `nice -n 19` with `/proc/loadavg` noted, with no `timeout`, in this order:
+**How it runs.** One heavy job at a time, each under `nice -n 19` with `/proc/loadavg` noted, with no `timeout`, in this order; a job may use the whole machine (`cargo xtask progress --watch` shows the pass as it runs):
 1. the `gate` and `oracle` builds;
-2. the tests: `cargo test --workspace`, the fixtures (`--test fixtures`), and the tests the item wrote;
+2. the tests: `cargo test --workspace` and the tests the item wrote (the fixtures run in step 4);
 3. the fixtures against `php` 8.5, and, for an item with 7.x readings, against `php:7.4-cli` through `docker`;
-4. item 0's dumps with the `gate` build, then with the `oracle` build, which runs with the per-file cache off, since entries carry no statements for its assertions (item 6, step 6), and must finish without an assertion;
-5. O2 (`cargo xtask corpus --full`), one configuration and cache state after another, at one thread and at the default, its diff read line by line;
-6. the equalities that exist by then;
+4. the pass of item 0's step 3 with the `gate` build (`cargo xtask corpus --full`): every configuration in each of its states, every artifact compared across them and with the equalities that exist by then, the server's sessions, the edit replays, the vendor projects and the fixture suite, recorded by commit;
+5. the same pass with the `oracle` build, with the per-file cache off, since entries carry no statements for its assertions (item 6, step 6); it records nothing and must finish without an assertion;
+6. the differences from the previous item's snapshots, read line by line;
 7. the item's state in the ledger and its one-line state in `WORK_STACK.md`.
 
 **What an item adds to its own validation:**
