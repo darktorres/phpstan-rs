@@ -756,6 +756,16 @@ It also found the project's state after edits apart from a fresh load's, though 
 - **A loaded file's length** (`2648ab5e`). A file the session loads had the length of the text it kept, none unless the source was kept, so a recheck weighed every file as empty.
 - **Load order** (`1ff368c4`). An edited file keeps its place in the load order and an added one comes last, where a fresh load numbers files as it finds them. The dump now prints files by path with their load order, and the replay calls a section that differs in nothing else `differs only in load order`. Item 1 gives an added file the place a fresh load would.
 
+The replay over Piwigo and all 205 vendor projects then left every file's diagnostics as a fresh load's, and found eight registries apart from it:
+- **Lazy tables** (`48812e7b`). The Doctrine entity index and the builtin methods running code were filled when a check first asked, so a dump held them or not by which checks ran, and of two entities on one table the first inserted won. Both are now made in the finishing passes, the entity first by name winning.
+- **Duplicate sites** (`69e85680`) printed in load order; they print as sets, as both checks sort them.
+- **Effects read doc types PHP never enforces** (`aaad64ab`). Purity and the effects ran before the pass that drops a doc type the native type excludes, so a load resolved `$this->cache->get()` through `@param Cache` on a property declared `int`, and a later finish, with the class out of scope, through `int`. The declared types now settle first.
+- **A scoped class copied a finished trait** (`cdbf02a5`). A finish resets only the classes in scope, so a class in scope copied an unscoped trait's finished method, its `@return $this` already dropped to the native interface in the trait, and took the other trait's method of a name two traits declare. The scope now takes in every class a scoped class copies from: what it extends, implements and uses, its mixins and the classes it imports types from.
+- **Switching PHPStan's stubs off** (`03d99f6d`) kept the PHPStan base's built-in stub classes, stub-provided functions and names; the project now takes those of the base it stands on.
+- **An added file under `vendor/`** is context on the edit path, where the load analyses it: a new file's role comes from directory names, which item 1's `Session::classify` replaces.
+
+The runtime oracle, run with every PHP version's image, found the one PHP 7.0 fixture unrun: its assertion was in an uncalled function, and the shim threw on 7.0 (`void` returns, `JSON_INVALID_UTF8_SUBSTITUTE`). The shim now runs from 7.0 (`34e9fc48`), and running the fixture showed a negative string offset typed `string` before 7.1, where PHP 7.0 reads `''` with a notice and writes nothing with a warning. Before 7.1 such a read is now `''` and reported, such a write leaves the string and is reported illegal, and on a range across 7.1 either holds (`2fbacd93`).
+
 **Oracle.** None beyond §11 for the dumps and the deletions: they leave release behaviour as it is. The fixes found in step 1 are semantic, read in 0.11 against `5fb858c9`'s reports.
 
 ### 1. One session for the CLI, the language server and the tests
