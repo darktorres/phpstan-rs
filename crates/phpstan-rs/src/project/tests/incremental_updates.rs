@@ -1320,3 +1320,128 @@ fn a_batch_load_equals_a_load_file_by_file() {
         batch.registry().classes.len()
     );
 }
+
+/// One edit as the language server makes it.
+enum Edit<'a> {
+    Update(&'a str, &'a str),
+    Remove(&'a str),
+}
+
+/// Asserts that after `edits`, the diagnostics the language server holds
+/// for each file - its last check, until an edit rechecks it - are those a
+/// project loading the edited files from the start reports, with `settings`
+/// applied to both.
+fn assert_held_diagnostics_match_a_fresh_load(
+    settings: impl Fn() -> ProjectSettings,
+    files: &[(&str, &str)],
+    edits: &[Edit],
+) {
+    let load = |files: &[(String, String)]| {
+        let mut project = Project::new();
+        project.apply_settings(settings());
+        for (path, source) in files {
+            project
+                .load_analyzed_file(PathBuf::from(path), source)
+                .unwrap();
+        }
+        project.finish_loading();
+        project
+    };
+    let print = |diagnostics: &[Diagnostic]| -> Vec<String> {
+        diagnostics
+            .iter()
+            .map(|d| format!("{}:{} {}", d.span.start.line, d.span.start.col, d.message))
+            .collect()
+    };
+    let mut current: Vec<(String, String)> = files
+        .iter()
+        .map(|&(path, source)| (path.to_string(), source.to_string()))
+        .collect();
+    let mut project = load(&current);
+    let mut held: std::collections::BTreeMap<String, Vec<String>> = current
+        .iter()
+        .map(|(path, _)| (path.clone(), print(&project.check_file(Path::new(path)))))
+        .collect();
+    for edit in edits {
+        let rechecked = match *edit {
+            Edit::Update(path, source) => {
+                current.retain(|(p, _)| p != path);
+                current.push((path.to_string(), source.to_string()));
+                project.update_file(Path::new(path), source).unwrap()
+            }
+            Edit::Remove(path) => {
+                current.retain(|(p, _)| p != path);
+                held.remove(path);
+                project.remove_file(Path::new(path))
+            }
+        };
+        for (path, diagnostics) in rechecked {
+            let path = path.display().to_string();
+            if current.iter().any(|(p, _)| *p == path) {
+                held.insert(path, print(&diagnostics));
+            }
+        }
+    }
+    let fresh = load(&current);
+    for (path, _) in &current {
+        assert_eq!(
+            held.get(path).cloned().unwrap_or_default(),
+            print(&fresh.check_file(Path::new(path))),
+            "{path}"
+        );
+    }
+}
+
+#[test]
+fn a_trait_is_rechecked_when_a_class_using_it_changes() {
+    let files = [
+        (
+            "t.php",
+            "<?php trait T { public function m(): int { return $this->x; } }",
+        ),
+        ("c.php", "<?php class C { use T; public int $x = 1; }"),
+    ];
+    assert_held_diagnostics_match_a_fresh_load(
+        ProjectSettings::default,
+        &files,
+        &[Edit::Update("c.php", "<?php class C { use T; }")],
+    );
+    assert_held_diagnostics_match_a_fresh_load(
+        ProjectSettings::default,
+        &files,
+        &[Edit::Remove("c.php")],
+    );
+}
+
+#[test]
+fn the_other_declarations_of_a_duplicate_are_rechecked() {
+    let settings = || ProjectSettings {
+        rules: crate::rules_settings::RulesSettings {
+            check_duplicate_function_declarations: true,
+            check_duplicate_class_declarations: true,
+            ..Default::default()
+        },
+        ..ProjectSettings::default()
+    };
+    let files = [
+        ("a.php", "<?php function dup(): void {} class Dup {}"),
+        ("b.php", "<?php function dup(): void {} class Dup {}"),
+    ];
+    for edits in [
+        &[Edit::Update(
+            "a.php",
+            "<?php function other(): void {} class Other {}",
+        )][..],
+        &[Edit::Update(
+            "a.php",
+            "<?php\n\nfunction dup(): void {}\n\nclass Dup {}",
+        )],
+        &[Edit::Remove("a.php")],
+        &[Edit::Update(
+            "c.php",
+            "<?php function dup(): void {} class Dup {}",
+        )],
+    ] {
+        assert_held_diagnostics_match_a_fresh_load(settings, &files, edits);
+    }
+}
