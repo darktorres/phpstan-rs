@@ -1457,7 +1457,6 @@ impl Project {
         }
         self.registry.set_scope(scope.clone());
         self.finished = true;
-        self.registry.reset_lazy_tables();
         self.registry.canonicalize_class_name_case();
         self.registry.flatten_traits();
         self.registry.resolve_method_tags();
@@ -1495,6 +1494,7 @@ impl Project {
         self.registry.resolve_constant_named_types();
         self.registry.drop_doc_members_excluded_by_native();
         self.registry.index_assert_tagged_names();
+        self.registry.index_doctrine_entities();
         let changed_keys = match (&before, &changed) {
             (Some(before), Some(changed)) => self.registry.changed_since(before, changed),
             _ => FxHashSet::default(),

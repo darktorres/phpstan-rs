@@ -463,6 +463,9 @@ impl Registry {
     /// change.
     pub(crate) fn resolve_effects(&mut self, bodies: &dyn BodySource) {
         self.methods_by_name = Arc::new(methods_by_name(self));
+        let mut running_code = (*self.base_builtin_methods_running_code).clone();
+        running_code.extend(self.own_builtin_methods_running_code());
+        self.builtin_methods_running_code = Arc::new(running_code);
         let registry: &Registry = self;
         let functions: Vec<(&Name, &FunctionReflection)> = registry
             .functions
@@ -806,21 +809,31 @@ impl Registry {
     /// The names (lowercased) of the builtin methods that run code passed to
     /// them, found once: the stubs do not change.
     fn builtin_methods_running_code(&self) -> &FxHashSet<String> {
-        self.builtin_methods_running_code.get_or_init(|| {
-            let mut names = FxHashSet::default();
-            for (class, info) in self.classes.iter() {
-                for (method, sig) in info.methods.iter() {
-                    let Some((owner, _)) = self.lookup_method_with_owner(class, method) else {
-                        continue;
-                    };
-                    let key = method_key(&owner, method);
-                    if sig.is_stub && self.stub_effect(&key, sig).is_anything() {
-                        names.insert(method.to_ascii_lowercase());
-                    }
+        &self.builtin_methods_running_code
+    }
+
+    /// The names, lowercased, of the builtin methods of the classes the
+    /// registry holds itself that run code passed to them: a stub method
+    /// whose effect is anything.
+    pub(crate) fn own_builtin_methods_running_code(&self) -> FxHashSet<String> {
+        let mut names = FxHashSet::default();
+        for (class, info) in self.classes.own_iter() {
+            for (method, sig) in info.methods.iter() {
+                if !sig.is_stub {
+                    continue;
+                }
+                let Some((owner, _)) = self.lookup_method_with_owner(class, method) else {
+                    continue;
+                };
+                if self
+                    .stub_effect(&method_key(&owner, method), sig)
+                    .is_anything()
+                {
+                    names.insert(method.to_ascii_lowercase());
                 }
             }
-            names
-        })
+        }
+        names
     }
 
     /// The classification of the body of `sig`, the declaration `member` of

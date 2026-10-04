@@ -267,19 +267,15 @@ pub struct Registry {
     pub phpstan_class_files: NameMap<std::path::PathBuf>,
     // Real DB table name -> the one mapped `DoctrineEntity`'s own class
     // name (`checker::sql_reflection::resolve`'s own entity cross-
-    // reference, gap #9 of the live SQL reflection phase) - lazily
-    // built once from `classes` on first real use, mirroring `sql_
-    // reflector`'s own `OnceLock` shape, since it's a whole-program
-    // computation (every class must already be indexed) rather than
-    // something computable per-class as `classes` itself fills in.
-    // Two entities mapped to the same real table name is a genuine,
-    // if unusual, Doctrine possibility (e.g. a `readOnly` reporting
-    // entity mapped onto another entity's own table) - the first
-    // one found wins rather than picking arbitrarily on every lookup,
-    // since this project has no real corpus case to verify a "which
-    // one wins" rule against.
+    // reference), and repository -> the entities naming it, indexed from
+    // the resolved classes after the finishing passes
+    // (`index_doctrine_entities`). Two entities mapped to the same real
+    // table name is a genuine, if unusual, Doctrine possibility (e.g. a
+    // `readOnly` reporting entity mapped onto another entity's own table)
+    // - the one first by name wins, whatever order the classes were
+    // declared in.
     #[serde(skip)]
-    doctrine_entity_index: std::sync::OnceLock<DoctrineEntityIndex>,
+    doctrine_entity_index: Arc<DoctrineEntityIndex>,
     // `classes` and `functions` as indexing and the stub merges built
     // them, before the finishing passes resolved them - kept so the
     // passes can run again from scratch after declarations change
@@ -400,10 +396,14 @@ pub struct Registry {
     // What a call to each function and method with a body may write
     // (`registry::effects`), keyed by lowercased (class, name).
     pub(crate) effects: FxHashMap<effects::DeclKey, Effect>,
-    // The names of the builtin methods that run code passed to them, found
-    // once (`registry::effects`).
+    // The names of the builtin methods that run code passed to them
+    // (`registry::effects`): the base's, and those of the classes the
+    // registry holds itself, as the last finish found them.
     #[serde(skip)]
-    builtin_methods_running_code: Arc<std::sync::OnceLock<FxHashSet<String>>>,
+    builtin_methods_running_code: Arc<FxHashSet<String>>,
+    // `builtin_methods_running_code` of the base, found when it was frozen.
+    #[serde(skip)]
+    base_builtin_methods_running_code: Arc<FxHashSet<String>>,
     // The loaded classes declaring each method name with a body, lowercased,
     // as the last finish found them (`registry::effects`).
     #[serde(skip)]
@@ -507,6 +507,7 @@ impl Registry {
         registry.drop_doc_members_excluded_by_native();
         registry.precompute_member_owners_after_mixins();
         registry.index_assert_tagged_names();
+        registry.index_doctrine_entities();
         registry.infer_global_variables(&[(
             crate::file_id::FileId::new(0),
             std::path::Path::new("<flattened>"),
@@ -606,6 +607,10 @@ impl Registry {
     /// clones of the registry to share rather than copy.
     pub(crate) fn freeze(&mut self) {
         self.base_assert_tagged = Arc::new(self.names_with_assert_tags.clone());
+        let mut running_code = (*self.base_builtin_methods_running_code).clone();
+        running_code.extend(self.own_builtin_methods_running_code());
+        self.base_builtin_methods_running_code = Arc::new(running_code);
+        self.builtin_methods_running_code = Arc::clone(&self.base_builtin_methods_running_code);
         self.classes.freeze();
         self.functions.freeze();
         self.built_in_stub_classes.freeze();
@@ -807,45 +812,43 @@ impl Registry {
         *self = base;
     }
 
-    /// Drops what was computed lazily from the classes, for the next
-    /// lookup to compute again from the classes as they are now.
-    pub(crate) fn reset_lazy_tables(&mut self) {
-        self.doctrine_entity_index = std::sync::OnceLock::new();
+    /// Indexes the `DoctrineEntity`-mapped classes by table and by
+    /// repository, from one pass over the project's own classes (a
+    /// built-in stub declares no entity), in the order of their names.
+    pub(crate) fn index_doctrine_entities(&mut self) {
+        let mut entities: Vec<(&Name, &crate::registry::class_info::DoctrineEntity)> = self
+            .classes
+            .own_iter()
+            .filter_map(|(class_name, info)| Some((class_name, info.doctrine_entity.as_ref()?)))
+            .collect();
+        entities.sort_unstable_by(|(a, _), (b, _)| {
+            (a.lower(), a.as_str()).cmp(&(b.lower(), b.as_str()))
+        });
+        let mut index = DoctrineEntityIndex::default();
+        for (class_name, entity) in entities {
+            if let Some(table_name) = &entity.table_name {
+                index
+                    .by_table
+                    .entry(table_name.clone())
+                    .or_insert_with(|| class_name.clone());
+            }
+            if let Some(repository) = &entity.repository_class {
+                index
+                    .by_repository
+                    .entry(repository.clone())
+                    .or_default()
+                    .push(class_name.clone());
+            }
+        }
+        self.doctrine_entity_index = Arc::new(index);
     }
 
-    /// The `DoctrineEntity`-mapped classes by table and by repository, from
-    /// one pass over the project's own classes (a built-in stub declares no
-    /// entity), made when first asked for and dropped with the other lazy
-    /// tables.
     fn doctrine_entity_index(&self) -> &DoctrineEntityIndex {
-        self.doctrine_entity_index.get_or_init(|| {
-            let mut index = DoctrineEntityIndex::default();
-            for (class_name, info) in self.classes.own_iter() {
-                let Some(entity) = &info.doctrine_entity else {
-                    continue;
-                };
-                if let Some(table_name) = &entity.table_name {
-                    index
-                        .by_table
-                        .entry(table_name.clone())
-                        .or_insert_with(|| class_name.clone());
-                }
-                if let Some(repository) = &entity.repository_class {
-                    index
-                        .by_repository
-                        .entry(repository.clone())
-                        .or_default()
-                        .push(class_name.clone());
-                }
-            }
-            index
-        })
+        &self.doctrine_entity_index
     }
 
     /// The one `DoctrineEntity`-mapped class whose own `#[ORM\Table(name:
-    /// ...)]` matches `table` exactly, if any - see `doctrine_entity_
-    /// index`'s own doc comment for why this is lazily built rather than
-    /// maintained incrementally.
+    /// ...)]` matches `table` exactly, if any (`index_doctrine_entities`).
     pub fn doctrine_entity_for_table(
         &self,
         table: &str,

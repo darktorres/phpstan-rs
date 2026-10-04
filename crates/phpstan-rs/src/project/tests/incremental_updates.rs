@@ -841,6 +841,35 @@ fn an_edited_entity_table_name_is_found_after_the_edit() {
     );
 }
 
+#[test]
+fn of_two_entities_on_one_table_the_first_by_name_maps_it_whatever_the_order() {
+    let entity = |class: &str| {
+        format!(
+            "<?php use Doctrine\\ORM\\Mapping as ORM; #[ORM\\Entity(repositoryClass: {class}Repository::class)] #[ORM\\Table(name: 'shared')] class {class} {{ #[ORM\\Id] #[ORM\\Column] public int $id; }}"
+        )
+    };
+    let mapped = |project: &Project| {
+        project
+            .registry()
+            .doctrine_entity_for_table("shared")
+            .and_then(|entity| entity.repository_class.clone())
+            .map(|class| class.to_string())
+    };
+    let mut project = Project::new();
+    project
+        .load_analyzed_file(PathBuf::from("beta.php"), &entity("Beta"))
+        .unwrap();
+    project
+        .load_analyzed_file(PathBuf::from("alpha.php"), &entity("Alpha"))
+        .unwrap();
+    project.finish_loading();
+    assert_eq!(mapped(&project).as_deref(), Some("AlphaRepository"));
+    project
+        .update_file(&PathBuf::from("alpha.php"), &entity("Alpha"))
+        .unwrap();
+    assert_eq!(mapped(&project).as_deref(), Some("AlphaRepository"));
+}
+
 /// Asserts that editing `edited` to `new_source` leaves every file with the
 /// diagnostics a project loading the edited text from the start reports.
 fn assert_edit_matches_a_fresh_load(files: &[(&str, &str)], edited: &str, new_source: &str) {

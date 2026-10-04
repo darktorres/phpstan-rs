@@ -273,6 +273,7 @@ canonical_struct!(Registry {
     member_owners,
     effects,
     builtin_methods_running_code,
+    base_builtin_methods_running_code,
     methods_by_name,
     global_sites,
 } skip {
