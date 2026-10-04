@@ -3,8 +3,10 @@
 //! snapshots, through the same library calls `check-project` makes.
 //!
 //! `gate-runner [--config <file>] [--set <key=value>]... [--no-composer]
-//! [--level <n>] [--baseline <file>] [--dump-types] --out <dir> [<path>...]` writes to
-//! `<dir>`:
+//! [--level <n>] [--baseline <file>] [--dump-types] [--dump-front-end]
+//! [--dump-registry] [--dump-stub-bases] [--dump-expr-types]
+//! [--dump-doc-resolutions] --out <dir> [<path>...]` loads once, checks
+//! once and writes to `<dir>`:
 //! - `report.json`/`report.err`: `check-project --format json`'s stdout
 //!   and stderr;
 //! - `emission.json`/`emission.err`: the same with `--emission-order`;
@@ -13,7 +15,15 @@
 //! - `types.txt` with `--dump-types`: `--dump-types`' file;
 //! - `diagnostics.txt`: every field of every diagnostic of the report, one
 //!   line each, with the UTF-16 columns of its ends
-//!   (`AnalysisResult::diagnostic_view`).
+//!   (`AnalysisResult::diagnostic_view`);
+//! - `front-end/` with `--dump-front-end`: the front end's dump of every
+//!   file, from a parse of its own;
+//! - `registry.txt.gz` with `--dump-registry`: the registry dump of what
+//!   the load leaves, taken before the check;
+//! - `stub-bases.txt.gz` with `--dump-stub-bases`: the stub bases whole;
+//! - `expr-types.txt.gz` and `doc-resolutions.txt.gz` with
+//!   `--dump-expr-types` and `--dump-doc-resolutions`: the check's
+//!   records.
 //!
 //! `gate-runner --type-drift <old> <new> [--fixture-root <dir>] [<config
 //! arguments>] --out <dir>` relates two recorded type dumps instead of
@@ -33,6 +43,11 @@ struct Args {
     request: CheckRequest,
     baseline: Option<PathBuf>,
     dump_types: bool,
+    dump_front_end: bool,
+    dump_registry: bool,
+    dump_stub_bases: bool,
+    dump_expr_types: bool,
+    dump_doc_resolutions: bool,
     type_drift: Option<(PathBuf, PathBuf)>,
     fixture_root: Option<PathBuf>,
     out: PathBuf,
@@ -42,6 +57,8 @@ fn parse_args() -> Result<Args, String> {
     let mut request = CheckRequest::default();
     let mut baseline = None;
     let mut dump_types = false;
+    let (mut dump_front_end, mut dump_registry, mut dump_stub_bases) = (false, false, false);
+    let (mut dump_expr_types, mut dump_doc_resolutions) = (false, false);
     let mut type_drift = None;
     let mut fixture_root = None;
     let mut out = None;
@@ -58,6 +75,11 @@ fn parse_args() -> Result<Args, String> {
             }
             "--baseline" => baseline = Some(PathBuf::from(value()?)),
             "--dump-types" => dump_types = true,
+            "--dump-front-end" => dump_front_end = true,
+            "--dump-registry" => dump_registry = true,
+            "--dump-stub-bases" => dump_stub_bases = true,
+            "--dump-expr-types" => dump_expr_types = true,
+            "--dump-doc-resolutions" => dump_doc_resolutions = true,
             "--type-drift" => {
                 let old = PathBuf::from(value()?);
                 let new = PathBuf::from(args.next().ok_or("--type-drift needs two dumps")?);
@@ -73,6 +95,11 @@ fn parse_args() -> Result<Args, String> {
         request,
         baseline,
         dump_types,
+        dump_front_end,
+        dump_registry,
+        dump_stub_bases,
+        dump_expr_types,
+        dump_doc_resolutions,
         type_drift,
         fixture_root,
         out: out.ok_or("--out is required")?,
@@ -97,17 +124,45 @@ fn run() -> Result<(), String> {
     }
     let config = check_project::load_config(&args.request)?;
     let run = check_project::prepare(&args.request, &config, phpstan_rs::project::worker_pool())?;
+    if args.dump_front_end {
+        run.session.dump_front_end(&args.out.join("front-end"))?;
+    }
+    if args.dump_stub_bases {
+        run.session
+            .dump_stub_bases(&args.out.join("stub-bases.txt.gz"))?;
+    }
     let default_hook = std::panic::take_hook();
     std::panic::set_hook(Box::new(|_| {}));
-    let analysis = run.session.run(phpstan_rs::project::Records {
-        types: args.dump_types,
-        expr_types: false,
-        doc_resolutions: false,
-    });
+    let loaded = run.session.load();
     std::panic::set_hook(default_hook);
-    let analysis = analysis?;
+    let loaded = loaded?;
+    if args.dump_registry {
+        write_gzip(
+            &args.out.join("registry.txt.gz"),
+            &loaded.project.registry_dump(),
+        )?;
+    }
+    let default_hook = std::panic::take_hook();
+    std::panic::set_hook(Box::new(|_| {}));
+    let analysis = run.session.analyse(
+        loaded,
+        phpstan_rs::project::Records {
+            types: args.dump_types,
+            expr_types: args.dump_expr_types,
+            doc_resolutions: args.dump_doc_resolutions,
+        },
+    );
+    std::panic::set_hook(default_hook);
     if let Some(dump) = &analysis.type_dump {
         write(&args.out.join("types.txt"), dump)?;
+    }
+    for (name, dump) in [
+        ("expr-types.txt.gz", &analysis.expr_type_dump),
+        ("doc-resolutions.txt.gz", &analysis.doc_resolution_dump),
+    ] {
+        if let Some(dump) = dump {
+            write_gzip(&args.out.join(name), dump)?;
+        }
     }
     let notices: Vec<String> = run
         .notices()
@@ -199,4 +254,8 @@ fn write_view(
 
 fn write(path: &Path, text: &str) -> Result<(), String> {
     std::fs::write(path, text).map_err(|e| format!("writing {}: {e}", path.display()))
+}
+
+fn write_gzip(path: &Path, text: &str) -> Result<(), String> {
+    phpstan_rs::project::session::write_gzip(path, text.as_bytes())
 }

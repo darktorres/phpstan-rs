@@ -559,7 +559,7 @@ impl Project {
 
     /// The registry dump (`registry_dump`) of the project, its registry
     /// over the stub base it stands on.
-    pub(crate) fn registry_dump(&self) -> String {
+    pub fn registry_dump(&self) -> String {
         let base = Project::loaded_bases()
             .into_iter()
             .find(|(_, base)| self.registry.classes.shares_base(&base.classes));
@@ -567,7 +567,7 @@ impl Project {
     }
 
     /// Both stub bases whole, by name (`registry_dump::stub_bases_dump`).
-    pub(crate) fn stub_bases_dump() -> String {
+    pub fn stub_bases_dump() -> String {
         registry_dump::stub_bases_dump(&[
             (PLAIN_BASE_NAME, Project::plain_base()),
             (PHPSTAN_BASE_NAME, Project::phpstan_base()),
