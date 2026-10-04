@@ -673,7 +673,7 @@ Twenty items, numbered in the order they are built. Each states what is there no
      - a fixed script runs over a seeded sample of files: save one unchanged, delete a method, rename a class, change a parameter type, add a file declaring a class that is named but declared nowhere, delete a file;
      - each step goes through `update_file` or `remove_file`, and the project dump, `registry-dump` and every file's diagnostics are taken after it;
      - at the end, a fresh load of the edited tree must give the same.
-   - **Memory:** the dhat profile of §8, by holder. It is taken once more with untrimmed backtraces (`dhat::Profiler::builder().trim_backtraces(None)`), so that the 10,987 allocations whose stacks end inside the allocator (M10) are placed too.
+   - **Memory:** the dhat profile of §8, by holder, with the heap recorded at the start of the check and at the check's own maximum, beside the global peak. It is taken once more with untrimmed backtraces (`dhat::Profiler::builder().trim_backtraces(None)`), so that the 10,987 allocations whose stacks end inside the allocator (M10) are placed too.
 4. **The baseline** comes from the commit that adds the printers and makes the deletions. Every deletion is under `cfg(debug_assertions)` or `cfg(test)`, so that commit's release behaviour is `5fb858c9`'s.
    - Each dump is taken with the `gate` build at `PHPSTAN_RS_THREADS=1` and at the default thread count, which must give byte-identical output. It is taken again with the `oracle` build, which must finish without an assertion.
    - The ordered file list, with roles, is recorded for each configuration. A tree with a link cycle is recorded as it is today: listed until `ELOOP`.
@@ -2028,33 +2028,42 @@ The autoload thread (321.4 M, off the critical path) keeps the one parser, as P1
 
 **Design.**
 - **The project-wide passes read per-file facts, not trees.** Each pass's per-file part becomes a family of item 18's traversal, or of item 13's walk when it needs no types. It records its facts with the file's check result, and the pass's whole-program part reads those facts:
-  - architecture: the class and function references and the `new` sites;
-  - banned constructs: the banned constructs a file uses;
-  - class shapes: the declared classes, from the declaration list;
-  - Composer hygiene: its facts, references and declared classes;
-  - mock hygiene: what its walker records;
+  - architecture: the use sites within each class's span and the `new` sites; the rest it reads from the registry;
+  - **banned constructs** has no whole-program part: it reports per file, and its walker reads the registry (`banned.rs:359`), so it is a family of item 18's traversal, with the ignore lines from the file's ignore marks;
+  - **class shapes:** the declared classes and their members' spans, from the declaration list, and for each method with a body a parent-call fact made by item 13's walk: whether the body calls `parent::<own name>()`, whether its first and last statements are that call and whether it is the only one, and the fix's insertion point and indentation. Today `parent_call_rules` reads each method's body for these (`class_shape.rs:311-420`);
+  - **Composer hygiene:** per file, item 13's walk records the string literals (as `PhpString`s, for class names written as strings), the probed extensions and symbols, the use sites and the declared classes with their spans. The whole-program part reads them in path order, as today, since it depends on what earlier files used (`used_before`, `composer_hygiene.rs:285`, `:447`);
+  - **mock hygiene** is per file and syntactic (`mock_hygiene.rs:366-385`), so it is a family of item 13's walk that reports per file;
   - unmatched ignores: the trait declarations' line ranges, from the declaration list;
   - the use-site index: item 1's per-file product.
+- **Retention stays one function,** item 3's extended: `keeps_tree(role, open, mode, checked)`. Context files never keep their tree; analysed files keep it in a batch until their check ends; in the server, open documents keep it always and other files through the tree cache. The load, `update_file` and the check all ask it.
 - **A batch run frees each analysed tree when its file's check ends.**
   - The check takes the tree out of the file's state and owns it for the length of the job.
-  - Files are checked largest first, so the largest trees go first.
-  - The private-property judgment (`judge_property_types`) reads the writes recorded during the checks, and parses again only the files outside the batch, through `ast_of`.
+  - **Each worker takes the largest file left.** Today `map_on_pool_largest_first` sorts the files and then runs `par_iter().with_max_len(1)` (`project.rs:460-468`). rayon splits that in halves: the first worker starts at the largest, and a thief takes the oldest pending half, so the second worker starts at the middle of the list. That order is neither largest-first for freeing nor longest-first for wall time. Files are taken from a queue in descending cost instead: one `spawn_fifo` per file, in sorted order, within a `scope_fifo`, or a shared atomic cursor each worker advances.
+  - **The private-property judgment keeps every write PHP can make.** A private property is written from outside its class: in `php` 8.5, `Closure::bind(fn..., $o, C::class)()`, `(function () { $this->p = 7; })->call($o)` and `(new ReflectionProperty(C::class, 'p'))->setValue($o, null)` each set `C::$p` from another scope, and each works from any file. Today `judge_property_types` gathers writes only from the files declaring the class or a trait it uses (`project.rs:2185-2220`), on the premise that "only for those can every write be seen" (`property_type_too_wide.rs:8-9`), so a type only such a write assigns is reported as never assigned.
+    - The writes recorded during the checks include those made in closures bound or called with an object or scope that may be the class (`Closure::bind`, `bindTo`, `call`, `fromCallable` on a bound closure), and `ReflectionProperty::setValue` on a name that may be the property. A file whose facts mention rebinding or reflection (`MENTIONS_REBIND`, `project.rs:2289`) contributes them.
+    - Where such a write's class or property cannot be narrowed, the properties it may reach are not judged.
+    - Files outside the batch that declare a writer class or a used trait are parsed again through `ast_of` and run through item 18's traversal with only the property-write family registered, on those classes' declarations only. Today they get a full check, every rule, for their writes alone (`project.rs:2224-2228`).
 - **The server keeps the trees of open documents, plus a cache of recently checked files bounded by bytes.**
-  - The cache is `quick_cache`'s weighted cache, weighing each tree by its arenas' bytes. It replaces `AstCache`'s `VecDeque` (`project.rs:175-190`).
+  - The cache is `quick_cache`'s weighted cache, weighing each tree by its arenas' bytes. It replaces `AstCache`'s 32-entry `VecDeque` (`project.rs:170-192`).
   - rust-analyzer applies the same policy to its parse trees, but bounds them by count (`lru.capacity`, 128 files by default), whatever their size.
+  - **The cache is keyed by `(FileId, content hash)`,** so a file an edit changed never meets an older tree. Open documents' trees are held outside it, and their text comes from the overlay encoded with the document's encoding (item 15).
   - Any other tree is parsed again on demand through `ast_of`, from text read on demand and checked against the hash item 1 keeps.
+  - **A re-read whose hash differs from the recorded one is an edit.** A closed file can change on disk before its watched-file event arrives, or with none (an editor outside the workspace, `git checkout` under a slow watcher). Its new tree would disagree with its recorded declarations, references and node ids (item 13), and a recheck would mix the two. So the file goes through `update_file` first (declarations, references, dependents), and is then checked from the new tree.
   - An edit that rechecks a dependent file parses that file again if its tree was evicted.
 - **No reader gets an empty file.** `FileState::ast` goes, and every reader asks `ast_of`, which parses again when the tree is gone.
 
 **Oracle.**
-- O2's whole-program diagnostics.
-- The server session and its edit replay (item 0).
+- O2's whole-program diagnostics, and each moved pass's output compared with today's over the corpus, pass by pass.
+- The server session and its edit replay (item 0), once more with the tree cache's budget at zero, so that every recheck parses again and a reader that still depends on a kept tree shows.
+- A closed file changed on disk with no event before a dependent's recheck.
+- Fixtures of `Closure::bind`, `bindTo`, `call` and `ReflectionProperty::setValue` writes to private properties, checked against `php`.
 - The `oracle` build, whose assertions every dump must pass.
 
-Exact.
+Exact, except the private-property judgment, listed in §11.
 
 **Memory.**
-- **In a batch run,** the analysed trees are freed as the check proceeds rather than kept to the end: 173 MB at exit today, about half that after item 9. The run's peak becomes the start of the check.
+- **In a batch run,** the analysed trees are freed as the check proceeds rather than kept to the end: 173 MB at exit today, about half that after item 9.
+- **The peak** becomes the start of the check plus the checks in flight: the largest files' checks, which run first, while every tree is still alive. That load has not been measured: at today's maximum, during the parse, the checker holds almost nothing (§8, M1). Item 0's memory oracle records the heap at the start of the check and at the check's maximum, and §12's projection takes both.
 - **In the server,** the trees held are the open documents' and the LRU's, not the workspace's.
 
 ## 11. Validation, once, after item 19
@@ -2081,6 +2090,7 @@ Exact.
   - item 13: declarations exist as PHP binds them: run-time-bound ones are guarded by every earlier exit (`exit`, `die` and `throw` included) and are dead after an unconditional one, and a class whose parent is in another file is possibly declared; `InitFlow` in PHP's order of evaluation;
   - item 14: the readings the lowering oracle lists (escaped quotes, `mentions_mixed` from the node, identifiers by their bytes, a `//` inside a literal type, `Integer::MAX`), and one winner rule for every tag (`@phan-real-return`, `@phan-param-out`);
   - item 15: names that differ only in bytes outside UTF-8 are distinct (the lexer keeps the bytes, item 9) and print with `\x{NN}`; names fold ASCII only where Unicode's lowercasing was used; string values name classes, functions and constants by PHP's rules (one leading backslash, no trimming); container-field keys canonical as PHP's array keys;
+  - item 19: the private-property judgment counting writes from bound closures and reflection, and leaving unjudged the properties an unnarrowed one may reach;
   - item 18: the rule families of §12.10; types in PHP's order of evaluation (an assignment's target operands before its value, a destructuring's value first); a member counted as used when any access may reach it; the union's single pass where it differs from the fold.
   
   Each difference is listed with its file and read.
@@ -2124,7 +2134,7 @@ Exact.
 | 16 | interned values in one allocation | ≈0.1 G | — | ≈15 MB; 0.78 M allocations | exact |
 | 17 | warm runs | decoding and reads ≈0.85 core-s, most of the finishing window | yes | only decoded records in the heap | exact |
 | 18 | check phase remainder, rule temporaries | ≈1.6-2.0 G | — | 3.61 M allocations | semantic (§12.10, the order of evaluation, member usage) |
-| 19 | each tree until its last reader | — | — | batch: the analysed trees freed during the check; server: open documents and an LRU | exact |
+| 19 | each tree until its last reader | — | — | batch: the analysed trees freed during the check; server: open documents and a cache weighted by bytes | exact, except the private-property judgment |
 
 **Instructions.** The rows overlap little: 9 and 10 share the parser's allocation, and 4 and 15 the purity keys. Together they come to ≈8 G of this run's 20.57 G. Most of the serial time goes with them: the finishing window's 0.41 s, the insert's 0.58 G and the start's 0.15 s.
 
@@ -2138,7 +2148,7 @@ Exact.
   - the per-file tables' ≈7 MB (items 2 and 5).
   
   That leaves ≈290 MB.
-- **The peak** moves from the end of the parse (866 MB) to the start of the check. There, those ≈290 MB sit beside the analysed trees, about 85 MB after item 9: **≈375 MB**, plus the check's working set.
+- **The peak** moves from the end of the parse (866 MB) to the start of the check. There, those ≈290 MB sit beside the analysed trees, about 85 MB after item 9: **≈375 MB**, plus the checks in flight, the largest files' first, which item 0's memory oracle measures (item 19).
 - **Allocations.** M10 gives every one of the run's 19.4 M allocations to the item that removes it. What each row keeps, estimated from what its design still allocates:
 
   | item | what stays | today | after |
@@ -2289,6 +2299,7 @@ The rewrite made two more changes:
 | 16 | The type memos are emptied when full, and their answers depend on no hierarchy, so a generation protects nothing; their cost is the nodes they keep. A table of shape keys would repeat the type interner's, and most keys copy a literal's bytes. `Interner::str` was left out. A raw holder (`FRONT`) would escape the freeing rule. Tests on threads cannot find the protocol's races, and O2 cannot see a leak. The counts mixed removable and kept allocations, and a name's text count was off. | Memos bounded by two segments, no generation. `PhpString` interned as a `ThinArc`, shared by literal types and shape keys; `Interner::str` goes. Every holder holds the handle. `loom` for the protocol and a leak test after the edit replay. Counts restated by what goes and what stays; 39,140 moved from item 12's row. |
 | 17 | Content hashes in the base's key would make every changed context file a cold run. A parse now reads the configured versions and `short_open_tag`, which the per-file key lacked. The base's key missed most resolved inputs (Composer data, run-time evidence, stub and bootstrap files). `stat` has no stable inode on Windows, mtimes can be restored, git's racy rule assumes one filesystem, and some filesystems keep coarse or remote times. The server could write overlay bytes into the index. The build's hash is 64-bit `DefaultHasher`. The oracle compared two new paths with each other. | The base keyed by the build and a destructured hash of resolved settings (tracked or untracked), with its file list applied as edits. The per-file key adds the versions and `short_open_tag`. Stat fields per platform, ctime compared, the racy rule applied where the file was read, and `stat` trusted only on identified local filesystems (`rustix`, `sysinfo`). Disk-only index and base. BLAKE3 everywhere, full digests. An oracle against the baseline, an edit replay across runs, the `stat` cases on three platforms, and the server. |
 | 18 | The traversal would keep typing a value before its target's operands, against PHP's order. `call_user_func` with a literal `extract`, `compact` or `get_defined_vars` writes the caller's scope, and 7.x adds `parse_str`/`mb_parse_str` with one argument and string `assert`. Slots and file-wide keys would collide in one radix array, sparse over large ids. The throw states' cost is inline `Locals` structs, which persistent maps do not remove. The member-usage family would inherit PHPStan's skip of uncertain callables. The 25 G oracles were dropped. External rules name their own identifiers. `concat` builds bytes. Step 7 and 9's counts. | PHP's order in `process_expr`. The computed-name forms listed exactly, tested with `php`. Per-body key tables, dense; `IntMap`-style merges; locals listed by name. `Locals` behind one `Rc`, frames as scratch. Uses counted when any access may reach a member. The oracles restored. `Identifier` kept as `Cow`. `concat` through a byte scratch. Counts by M10, ≈38 K moved to item 8. |
+| 19 | Class shapes read method bodies, not just the declaration list. Private properties are written from outside their class, through bound closures and reflection, which the judgment never sees, and its outside files get a full check. A changed file on disk had no defined path, and the tree cache had no content key. The pool does not take files largest first, and the peak omits the checks in flight, which were never measured. Banned constructs read the registry, mock hygiene is per file, and Composer hygiene reads files in order. Retention gained inputs outside item 3's function. The oracle could not see a reader of a kept tree. | A parent-call fact per method from item 13's walk. Writes from bound closures and reflection recorded, unnarrowed ones blocking the judgment, outside files run with only the property-write family. A hash mismatch is an edit; the cache keyed by content. A largest-first queue, and the check's own maximum measured. Each pass placed by what it reads. `keeps_tree(role, open, mode, checked)`. Oracles with a zero-budget replay, disk changes and the write forms. |
 
 # Appendix A. The allocation tail, every site
 
