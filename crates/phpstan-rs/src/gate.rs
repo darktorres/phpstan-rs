@@ -14,6 +14,7 @@ use types::Type;
 use crate::Registry;
 use crate::project::session::Session;
 
+pub mod samples;
 mod type_drift;
 pub use type_drift::{Drift, Facet, Verdict, type_drift};
 
@@ -122,6 +123,11 @@ pub struct FixtureConfig {
     pub runtime_warnings_exact: bool,
     /// Libraries the fixture needs at runtime (`runtime_packages`).
     pub runtime_packages: Vec<String>,
+    /// Whether the runtime oracle calls the fixture's asserting functions
+    /// with values of their parameters' types (`runtime_calls = false`
+    /// when its assertions rest on what PHP never checks, an inline `@var`
+    /// or an assertion function with no body).
+    pub runtime_calls: bool,
 }
 
 impl FixtureConfig {
@@ -146,6 +152,7 @@ pub fn fixture_config(path: &Path) -> Result<FixtureConfig, String> {
             requires_feature: Vec::new(),
             runtime_warnings_exact: false,
             runtime_packages: Vec::new(),
+            runtime_calls: true,
         });
     }
     let schema = fixture_schema();
@@ -175,6 +182,16 @@ pub fn fixture_config(path: &Path) -> Result<FixtureConfig, String> {
             ));
         }
     };
+    let runtime_calls = match config.remove("runtime_calls") {
+        None => true,
+        Some(toml::Value::Boolean(calls)) => calls,
+        Some(other) => {
+            return Err(format!(
+                "{}: runtime_calls: expected a boolean, got {other}",
+                path.display()
+            ));
+        }
+    };
     config.validate(schema)?;
     if let Some(warning) = config.warnings().first() {
         return Err(format!("{}: {warning}", path.display()));
@@ -184,6 +201,7 @@ pub fn fixture_config(path: &Path) -> Result<FixtureConfig, String> {
         requires_feature,
         runtime_warnings_exact,
         runtime_packages,
+        runtime_calls,
     })
 }
 

@@ -1,0 +1,2 @@
+# The assertions rest on @method tags, whose __call answers null.
+runtime_calls = false

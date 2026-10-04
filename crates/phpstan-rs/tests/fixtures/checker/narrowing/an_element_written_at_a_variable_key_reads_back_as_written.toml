@@ -1,0 +1,3 @@
+# The analysis takes a general array's key to be there, where PHP reads null
+# with a warning for one that is not.
+runtime_calls = false

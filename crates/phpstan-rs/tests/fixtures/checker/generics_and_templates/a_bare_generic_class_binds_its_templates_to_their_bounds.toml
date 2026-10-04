@@ -1,0 +1,3 @@
+# The assertions rest on generic arguments, which exist only in docs, and on
+# methods whose bodies do not do what their docs say.
+runtime_calls = false

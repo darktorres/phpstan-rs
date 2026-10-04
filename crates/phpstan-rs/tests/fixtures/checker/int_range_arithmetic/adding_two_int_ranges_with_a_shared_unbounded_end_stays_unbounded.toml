@@ -1,0 +1,3 @@
+# The analysis takes unbounded int arithmetic not to overflow, where
+# PHP_INT_MAX + 1 is a float.
+runtime_calls = false

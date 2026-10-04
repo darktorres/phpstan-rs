@@ -1,0 +1,3 @@
+# The analysis takes ArrayIterator::current() to give a value, where it gives
+# null at an invalid position.
+runtime_calls = false

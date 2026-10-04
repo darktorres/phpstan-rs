@@ -1,0 +1,2 @@
+# The assertions rest on assertion functions whose bodies assert nothing.
+runtime_calls = false

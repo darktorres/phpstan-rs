@@ -1,0 +1,3 @@
+# The assertions rest on functions declared by their docs alone, whose bodies
+# do not do what the docs say.
+runtime_calls = false

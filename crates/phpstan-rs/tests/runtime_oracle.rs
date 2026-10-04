@@ -182,6 +182,38 @@ fn run(
         }
     };
     let (base, subjects) = subjects(stem, &config)?;
+    let sources: Vec<(String, String)> = subjects
+        .iter()
+        .map(|subject| {
+            let bytes = std::fs::read(base.join(subject)).unwrap_or_default();
+            (
+                subject.display().to_string(),
+                String::from_utf8_lossy(&bytes).into_owned(),
+            )
+        })
+        .collect();
+    let asserts_anywhere = sources.iter().any(|(_, source)| source.contains("assert"));
+    // The analysis: what the calls are made of, and what each assertion
+    // is judged against.
+    let loaded = if asserts_anywhere {
+        let (session, _) = gate::load_fixture(stem, &config, pool)?;
+        Some(session.load()?)
+    } else {
+        None
+    };
+    // Calls of the functions that assert, with values of their parameters'
+    // types; a fixture whose warnings must be exactly its diagnostics is
+    // run as written.
+    let calls = match &loaded {
+        Some(loaded) if config.runtime_calls && !config.runtime_warnings_exact => {
+            let files: Vec<(&str, &str)> = sources
+                .iter()
+                .map(|(path, source)| (path.as_str(), source.as_str()))
+                .collect();
+            gate::samples::runtime_calls(loaded.project.registry(), &files)
+        }
+        _ => String::new(),
+    };
     let mut failures = Vec::new();
     let mut not_executed = Vec::new();
     let mut runs = Vec::new();
@@ -211,6 +243,7 @@ fn run(
                     .replace('\'', "\\'")
             ));
         }
+        script.push_str(&calls);
         std::fs::write(&entry, script)?;
         let out = work.join("__oracle.jsonl");
         let finished = execute(runner, &work, autoload.as_deref())?;
@@ -237,8 +270,9 @@ fn run(
         }
         return Err(failures.join("\n").into());
     }
-    let (session, _) = gate::load_fixture(stem, &config, pool)?;
-    let loaded = session.load()?;
+    let Some(loaded) = &loaded else {
+        return Err("an assertion ran in a fixture with none written".into());
+    };
     let registry = loaded.project.registry();
     let relation = registry.relation();
     let mut scopes = TemplateScopes::new(registry);

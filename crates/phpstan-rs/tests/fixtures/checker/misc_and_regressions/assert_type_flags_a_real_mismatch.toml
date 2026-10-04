@@ -1,0 +1,2 @@
+# The assertion is wrong on purpose: its mismatch is the diagnostic expected.
+runtime_calls = false

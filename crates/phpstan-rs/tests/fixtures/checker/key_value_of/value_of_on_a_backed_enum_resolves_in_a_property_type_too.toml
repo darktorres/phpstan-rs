@@ -1,0 +1,2 @@
+# The assertion rests on a property's doc type, which PHP never checks or sets.
+runtime_calls = false

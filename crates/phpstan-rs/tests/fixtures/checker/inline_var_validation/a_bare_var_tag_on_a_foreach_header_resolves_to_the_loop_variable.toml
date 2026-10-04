@@ -1,0 +1,2 @@
+# The assertions rest on inline @var tags, which PHP never checks.
+runtime_calls = false
