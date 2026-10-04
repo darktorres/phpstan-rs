@@ -804,7 +804,7 @@ impl Server {
         uri: &Uri,
         text: &str,
         version: i32,
-        should_abort: impl FnMut() -> bool,
+        should_abort: impl Fn() -> bool + Sync,
     ) -> Vec<Message> {
         *self.file_versions.entry(path.to_path_buf()).or_insert(0) += 1;
         self.open_uris
@@ -2136,13 +2136,14 @@ const DEBOUNCE_IDLE_WAIT: Duration = Duration::from_millis(200);
 /// from the reader/main thread, via a `textDocument/didChange`
 /// notification) and the debounce worker thread (which owns the timer
 /// and drains it) both hold a reference to. Lock ordering is a single,
-/// cycle-free chain: the worker is the only role that ever holds both
-/// this and `Server`'s own lock at once, always in the order Server
-/// (held for the whole recheck) then this one (acquired-and-released
-/// once per file, inside `should_abort`, and once more afterward to
-/// confirm the generation still matches before publishing); the reader
-/// thread only ever holds one of the two at a time, never nested. No
-/// path exists for a deadlock.
+/// cycle-free chain: the one nesting is the worker's, always in the
+/// order Server (held for the whole recheck) then this one (acquired-
+/// and-released before each file's check, inside `should_abort`, by the
+/// worker pool's threads the recheck waits on, and once more afterward
+/// by the worker to confirm the generation still matches before
+/// publishing). No thread holding this one waits for Server: the pool's
+/// threads hold nothing else, and the reader thread only ever holds one
+/// of the two at a time. No path exists for a deadlock.
 struct DebounceHandle {
     queue: Mutex<debounce::DebounceQueue>,
     cv: Condvar,
@@ -2426,8 +2427,9 @@ fn flush_and_publish_all<W: Write>(
 /// small window between the cascade's own last per-file `should_abort`
 /// check and its actual return. A `should_abort` closure captures the
 /// edit's own generation and re-locks `debounce.queue` (never `server`)
-/// on each per-file check - the single point where this worker thread
-/// nests both locks, always in the same Server-then-Debounce order.
+/// before each file's check, on the worker pool's threads while this
+/// thread holds `server` - the single point where the two locks nest,
+/// always in the same Server-then-Debounce order.
 fn run_pending_edits<W: Write>(
     server: &Arc<Mutex<Server>>,
     debounce: &Arc<DebounceHandle>,

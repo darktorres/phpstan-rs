@@ -25,8 +25,9 @@
 //! Tier 2 (member reference sites - method/property/class-constant
 //! access) needs a real, checker-driven resolution of the receiver's
 //! declaring owner - built separately, in `checker.rs`/`checker/expr.rs`,
-//! and merged into this same index by `Project::ensure_member_index_built`/
-//! `Project::reindex_tier2_for_file`.
+//! and merged into this same index by `Project::ensure_member_index_built`,
+//! the analysis (`Project::keep_analysed_check`) and each recheck
+//! (`UseSiteIndex::replace_members`).
 
 use rustc_hash::FxHashMap;
 use std::path::{Path, PathBuf};
@@ -128,18 +129,43 @@ impl UseSiteIndex {
             return;
         };
         for (target, span) in entries {
-            if let Some(sites) = self.by_target.get_mut(&target) {
-                sites.retain(|(p, s)| !(p == path && *s == span));
-                if sites.is_empty() {
-                    self.by_target.remove(&target);
-                    if let RefTarget::UnqualifiedFunction(namespaced) = &target {
-                        let global = last_segment(namespaced);
-                        if let Some(names) = self.fallbacks.get_mut(global) {
-                            names.remove(namespaced);
-                            if names.is_empty() {
-                                self.fallbacks.remove(global);
-                            }
-                        }
+            self.unlink(path, &target, span);
+        }
+    }
+
+    /// Replaces the member sites `path` contributed with `members`, those
+    /// its last check found, keeping its class and function sites.
+    pub(crate) fn replace_members(&mut self, path: &Path, members: Vec<(Span, String, String)>) {
+        if let Some(entries) = self.by_file.get_mut(path) {
+            let dropped: Vec<(RefTarget, Span)> = entries
+                .extract_if(.., |(target, _)| matches!(target, RefTarget::Member(..)))
+                .collect();
+            if entries.is_empty() {
+                self.by_file.remove(path);
+            }
+            for (target, span) in dropped {
+                self.unlink(path, &target, span);
+            }
+        }
+        for (span, owner, member) in members {
+            self.insert(path, RefTarget::Member(owner, member), span);
+        }
+    }
+
+    /// Drops `path`'s site `span` from `target`'s.
+    fn unlink(&mut self, path: &Path, target: &RefTarget, span: Span) {
+        let Some(sites) = self.by_target.get_mut(target) else {
+            return;
+        };
+        sites.retain(|(p, s)| !(p == path && *s == span));
+        if sites.is_empty() {
+            self.by_target.remove(target);
+            if let RefTarget::UnqualifiedFunction(namespaced) = target {
+                let global = last_segment(namespaced);
+                if let Some(names) = self.fallbacks.get_mut(global) {
+                    names.remove(namespaced);
+                    if names.is_empty() {
+                        self.fallbacks.remove(global);
                     }
                 }
             }

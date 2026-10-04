@@ -1776,47 +1776,6 @@ impl Project {
         }
     }
 
-    /// Recomputes `path`'s own Tier-1 (class/function) use-sites from its
-    /// currently-loaded `FileState`, replacing whatever was previously
-    /// indexed for it, as its load indexes them (`class_fn_refs_of`) - a
-    /// no-op past the initial `use_sites.remove_file` when `path` isn't
-    /// currently loaded at all. Called for EVERY
-    /// file `update_file`'s own affected-file loop re-checks, not just
-    /// the one that was directly edited: a dependent file's own bare-
-    /// `Name`/`ClassConstFetch`/`StaticPropertyFetch` resolution can change (e.g. registry-wide
-    /// class-name-case canonicalization) even though its own source text
-    /// didn't, so re-deriving Tier 1 only for the edited file itself
-    /// would let a dependent's index silently go stale.
-    /// `member_refs`: `None` where the member index does not cover `path`
-    /// (nothing to reindex for Tier 2, since the path has no Member entry
-    /// to begin with), `Some(refs)` (`refs` freshly recomputed by the
-    /// caller's own check, `recheck_file`) where it does. A single
-    /// `use_sites.remove_file` covers both tiers at
-    /// once - Tier 1 and Tier 2 entries share the same underlying
-    /// `by_file`/`by_target` maps, so clearing and rebuilding them
-    /// separately (as two independent remove-then-insert calls) would
-    /// have each tier's own rebuild silently wipe out the other's
-    /// freshly-inserted entries for the same path.
-    fn reindex_use_sites_for_file(
-        &mut self,
-        path: &Path,
-        member_refs: Option<Vec<(Span, String, String)>>,
-    ) {
-        self.use_sites.remove_file(path);
-        let class_fn_refs = self.files.get(path).map_or_else(Vec::new, |file| {
-            self.class_fn_refs_of(file.ast(), file.source.as_deref())
-        });
-        for (span, target) in class_fn_refs {
-            self.use_sites.insert(path, target, span);
-        }
-        if let Some(member_refs) = member_refs {
-            for (span, owner, member) in member_refs {
-                self.use_sites
-                    .insert(path, use_sites::RefTarget::Member(owner, member), span);
-            }
-        }
-    }
-
     /// Builds Tier 2 (member-reference) of `use_sites` for every
     /// currently-loaded file, exactly once - idempotent, a no-op on every
     /// call after the first. Deliberately NOT run as part of
@@ -1827,8 +1786,9 @@ impl Project {
     /// need. `Server::references`/`Server::rename` call this first; every
     /// other request path (hover, definition, diagnostics, ...) never
     /// triggers it at all. The FIRST call after a workspace loads is
-    /// therefore the one place this cost is paid, synchronously, on
-    /// whatever thread calls it - see this item's own open-risks note.
+    /// therefore the one place this cost is paid, on the worker pool while
+    /// the caller waits. Each check keeps only what the index and the
+    /// whole-program checks read of it.
     pub(crate) fn ensure_member_index_built(&mut self) {
         if self.member_index != MemberIndex::Unbuilt {
             return;
@@ -1856,11 +1816,28 @@ impl Project {
                 }
             }
         }
-        let paths: Vec<PathBuf> = self.files.keys().cloned().collect();
-        for path in paths {
-            let mut check = self.run_checker(&path, true, Records::default());
-            self.seed_member_refs(&path, std::mem::take(&mut check.member_refs));
-            self.keep_check_facts(&path, &mut check, true);
+        let mut paths: Vec<PathBuf> = self.files.keys().cloned().collect();
+        paths.sort_unstable();
+        let pool = worker_pool();
+        let checks = map_on_pool_largest_first(
+            Some(&pool),
+            &paths,
+            |path| self.files.get(path).map_or(0, |file| file.source_len),
+            |path| {
+                let check = self.run_checker(path, true, Records::default());
+                FileCheck {
+                    member_refs: check.member_refs,
+                    escaped_enums: check.escaped_enums,
+                    escaped_member_classes: check.escaped_member_classes,
+                    named_argument_calls: check.named_argument_calls,
+                    ..FileCheck::empty()
+                }
+            },
+        );
+        for (path, mut check) in paths.iter().zip(checks) {
+            self.use_sites
+                .replace_members(path, std::mem::take(&mut check.member_refs));
+            self.keep_check_facts(path, &mut check, true);
         }
         self.member_index = MemberIndex::Every;
     }
@@ -1878,19 +1855,10 @@ impl Project {
         index_members: bool,
     ) {
         if index_members {
-            self.seed_member_refs(path, std::mem::take(&mut check.member_refs));
+            self.use_sites
+                .replace_members(path, std::mem::take(&mut check.member_refs));
         }
         self.keep_check_facts(path, check, index_members);
-    }
-
-    /// Adopts already-computed Tier-2 member references for `path` into
-    /// `use_sites` - the per-file work `ensure_member_index_built`'s own
-    /// loop body does above, and the analysis's (`keep_analysed_check`).
-    fn seed_member_refs(&mut self, path: &Path, member_refs: Vec<(Span, String, String)>) {
-        for (span, owner, member) in member_refs {
-            self.use_sites
-                .insert(path, use_sites::RefTarget::Member(owner, member), span);
-        }
     }
 
     /// Keeps what `check`, the last check of `path`, found for the
@@ -1933,17 +1901,6 @@ impl Project {
         }
     }
 
-    /// Checks `path` again, as an edit leaves the project: its use sites
-    /// reindexed and what the whole-program checks read of it kept.
-    fn recheck_file(&mut self, path: &Path) -> Vec<Diagnostic> {
-        let covered = self.member_index_covers(path);
-        let mut check = self.check_one(path, covered);
-        let member_refs = covered.then(|| std::mem::take(&mut check.member_refs));
-        self.reindex_use_sites_for_file(path, member_refs);
-        self.keep_check_facts(path, &mut check, covered);
-        check.diagnostics
-    }
-
     /// The always-run-to-completion convenience wrapper every existing
     /// caller uses - `update_file_cancellable` with a `should_abort`
     /// that never fires.
@@ -1955,11 +1912,12 @@ impl Project {
         self.update_file_cancellable(path, new_source, || false)
     }
 
-    /// The debounce worker's own entry point (VSCode plan item 2.2) -
-    /// identical to `update_file` except its final affected-files loop
-    /// checks `should_abort()` once per file, breaking (not erroring)
-    /// before the next `check_file` the moment it returns `true`, so a
-    /// generation bump made by a concurrently-running reader thread
+    /// The debounce worker's own entry point - identical to
+    /// `update_file` except that the recheck of the affected
+    /// files asks `should_abort()` before each file's check starts, from
+    /// the worker pool's threads, and leaves unchecked (`take_unchecked`)
+    /// every file whose check had not started when it answered `true`, so
+    /// a generation bump made by a concurrently-running reader thread
     /// (recorded via `lsp::debounce::DebounceQueue::record_edit`) can
     /// stop an in-flight cascade partway through rather than only ever
     /// being observable *between* separate `update_file` calls.
@@ -1967,7 +1925,7 @@ impl Project {
         &mut self,
         path: &Path,
         new_source: &str,
-        mut should_abort: impl FnMut() -> bool,
+        should_abort: impl Fn() -> bool + Sync,
     ) -> Result<FxHashMap<PathBuf, Vec<Diagnostic>>, ParseError> {
         // Parse BEFORE unindexing anything - on a parse failure (the
         // normal, common state while a file is mid-edit, not an edge
@@ -2052,6 +2010,9 @@ impl Project {
         let global_facts = Arc::new(GlobalFacts::of(&ast));
         let pest_facts = PestFacts::of(path, &ast);
         let declared_classes = declared_classes(&ast);
+        for (span, target) in self.class_fn_refs_of(&ast, Some(new_source)) {
+            self.use_sites.insert(path, target, span);
+        }
         let id = self.files.id_for(path);
         register_references(&mut self.dependents, id, &references);
         register_references(&mut self.signature_dependents, id, &declaration_references);
@@ -2084,24 +2045,13 @@ impl Project {
         );
         let mut affected = self.finish_declarations();
 
-        let mut results = FxHashMap::default();
         affected.insert(path.to_path_buf());
         affected.extend(self.declaring_the_same(&rebuilt));
         if appeared {
             affected.extend(self.including(&[path.to_path_buf()]));
         }
         self.unchecked.clear();
-        let mut affected = affected.into_iter();
-        while let Some(p) = affected.next() {
-            if should_abort() {
-                self.unchecked.push(p);
-                self.unchecked.extend(affected);
-                break;
-            }
-            let diagnostics = self.recheck_file(&p);
-            results.insert(p, diagnostics);
-        }
-        Ok(results)
+        Ok(self.recheck(affected, &should_abort))
     }
 
     /// The files the last cancelled `update_file_cancellable` affected but
@@ -2163,7 +2113,7 @@ impl Project {
             affected.extend(self.declaring_the_same(&removed));
         }
 
-        self.recheck(affected)
+        self.recheck(affected, &|| false)
     }
 
     /// The files declaring a function or a class of `names`: what reports a
@@ -2287,24 +2237,21 @@ impl Project {
     /// those declaring its classes' traits (`check_files`).
     #[hotpath::measure]
     pub fn check_file(&self, path: &Path) -> Vec<Diagnostic> {
-        self.check_one(path, false).diagnostics
-    }
-
-    /// `check_files` for one file, whose panic propagates.
-    fn check_one(&self, path: &Path, collect_member_refs: bool) -> FileCheck {
         let paths = [path.to_path_buf()];
-        let mut checks = self.check_files(&paths, None, collect_member_refs, Records::default());
-        match checks.pop() {
-            Some((_, Ok(check))) => check,
+        match self
+            .check_files(&paths, None, false, Records::default())
+            .pop()
+        {
+            Some((_, Ok(check))) => check.diagnostics,
             Some((_, Err(message))) => panic!("{message}"),
-            None => FileCheck::empty(),
+            None => Vec::new(),
         }
     }
 
     /// Checks `paths` (in parallel on `pool` when there is one), each
     /// file's panic caught as its outcome. With `collect_member_refs`, the
-    /// Tier-2 member-reference data too (fed to `seed_member_refs`); and
-    /// the records `records` asks for. The private property
+    /// Tier-2 member-reference data too (`UseSiteIndex::replace_members`);
+    /// and the records `records` asks for. The private property
     /// types each file declares are judged once every file is checked,
     /// against the writes all of them made plus those of any other file
     /// writing the same properties (`judge_property_types`).
@@ -2315,19 +2262,46 @@ impl Project {
         collect_member_refs: bool,
         records: Records,
     ) -> Vec<(PathBuf, CheckOutcome)> {
-        let mut checks = map_on_pool_largest_first(
+        self.check_files_until(paths, pool, &|_| collect_member_refs, records, &|| false)
+            .0
+    }
+
+    /// `check_files`, the member references collected for the files
+    /// `collect_member_refs` accepts, each file's check started only while
+    /// `should_abort` answers `false`; the files it stopped are returned
+    /// apart, unchecked, in `paths`' order.
+    fn check_files_until(
+        &self,
+        paths: &[PathBuf],
+        pool: Option<&rayon::ThreadPool>,
+        collect_member_refs: &(dyn Fn(&Path) -> bool + Sync),
+        records: Records,
+        should_abort: &(dyn Fn() -> bool + Sync),
+    ) -> (Vec<(PathBuf, CheckOutcome)>, Vec<PathBuf>) {
+        let outcomes = map_on_pool_largest_first(
             pool,
             paths,
             |path| self.files.get(path).map_or(0, |file| file.source_len),
             |path| {
+                if should_abort() {
+                    return None;
+                }
                 let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                    self.run_checker(path, collect_member_refs, records)
+                    self.run_checker(path, collect_member_refs(path), records)
                 }))
                 .map_err(panic_message);
                 crate::heap::file_checked();
-                (path.clone(), outcome)
+                Some(outcome)
             },
         );
+        let mut checks = Vec::with_capacity(paths.len());
+        let mut stopped = Vec::new();
+        for (path, outcome) in paths.iter().zip(outcomes) {
+            match outcome {
+                Some(outcome) => checks.push((path.clone(), outcome)),
+                None => stopped.push(path.clone()),
+            }
+        }
         self.judge_property_types(&mut checks, pool);
         self.keep_include_probes(&mut checks);
         // Each file's diagnostics are finished from the project as it is,
@@ -2343,7 +2317,7 @@ impl Project {
             Some(pool) => pool.install(|| checks.par_iter_mut().for_each(finish)),
             None => checks.iter_mut().for_each(finish),
         }
-        checks
+        (checks, stopped)
     }
 
     /// Keeps the places each of `checks` looked for an included file, for
@@ -2397,21 +2371,54 @@ impl Project {
     /// does not load appeared or vanished.
     pub fn recheck_including(&mut self, paths: &[PathBuf]) -> FxHashMap<PathBuf, Vec<Diagnostic>> {
         let including = self.including(paths);
-        self.recheck(including)
+        self.recheck(including, &|| false)
     }
 
-    /// Checks each of `paths` again (`recheck_file`).
+    /// Checks `paths` again as an edit leaves the project, in one
+    /// `check_files` over the worker pool, so their private property types
+    /// are judged once for all of them; then keeps what each check found
+    /// for the use-site index and the whole-program checks, the one part
+    /// that changes the project. A file whose check had not started when
+    /// `should_abort` answered `true` is left unchecked
+    /// (`take_unchecked`). A check's panic propagates, before anything is
+    /// kept.
     fn recheck(
         &mut self,
         paths: impl IntoIterator<Item = PathBuf>,
+        should_abort: &(dyn Fn() -> bool + Sync),
     ) -> FxHashMap<PathBuf, Vec<Diagnostic>> {
-        paths
+        let mut paths: Vec<PathBuf> = paths.into_iter().collect();
+        paths.sort_unstable();
+        paths.dedup();
+        let covered: FxHashSet<PathBuf> = paths
+            .iter()
+            .filter(|path| self.member_index_covers(path))
+            .cloned()
+            .collect();
+        let pool = worker_pool();
+        let (checks, stopped) = self.check_files_until(
+            &paths,
+            Some(&pool),
+            &|path| covered.contains(path),
+            Records::default(),
+            should_abort,
+        );
+        let checks: Vec<(PathBuf, FileCheck)> = checks
             .into_iter()
-            .map(|p| {
-                let diagnostics = self.recheck_file(&p);
-                (p, diagnostics)
+            .map(|(path, outcome)| match outcome {
+                Ok(check) => (path, check),
+                Err(message) => panic!("checking {} panicked: {message}", path.display()),
             })
-            .collect()
+            .collect();
+        self.unchecked.extend(stopped);
+        let mut results = FxHashMap::default();
+        for (path, mut check) in checks {
+            self.use_sites
+                .replace_members(&path, std::mem::take(&mut check.member_refs));
+            self.keep_check_facts(&path, &mut check, covered.contains(&path));
+            results.insert(path, check.diagnostics);
+        }
+        results
     }
 
     /// Judges the private property types `checks` recorded against the
@@ -2902,7 +2909,7 @@ impl Project {
     /// `ensure_member_index_built`'s own Tier-2 use-site index - a real
     /// cost when it has to build it itself (a second, redundant
     /// `Checker` pass per file), avoided entirely when the caller
-    /// already seeded it via `seed_member_refs`/`mark_member_index_
+    /// already seeded it via `keep_analysed_check`/`mark_member_index_
     /// built` (`check-project`'s own primary pass does exactly this,
     /// whenever either flag is on - see its own doc comment) before
     /// calling here, in which case `ensure_member_index_built` is a

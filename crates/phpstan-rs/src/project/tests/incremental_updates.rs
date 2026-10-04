@@ -388,13 +388,14 @@ fn a_failed_reparse_keeps_the_files_last_good_ast_and_registry_entries() {
     );
 }
 
-/// VSCode plan item 2.2's own load-bearing regression test: proves
-/// `update_file_cancellable`'s `should_abort` closure can observe a
-/// generation bump made by a genuinely different, concurrently-running
+/// Proves `update_file_cancellable`'s `should_abort` closure can observe
+/// a generation bump made by a genuinely different, concurrently-running
 /// thread strictly between two per-file checks of the SAME in-flight
 /// cascade - the property a single-threaded caller (and therefore every
 /// other test in this file) can never exercise, since nothing else could
-/// possibly run between two of its own sequential closure calls.
+/// possibly run between two of its own sequential closure calls. The
+/// pool's threads ask it one at a time, so exactly one file's check
+/// starts before the bump however many threads the pool has.
 #[test]
 fn update_file_cancellable_can_be_aborted_mid_cascade_by_a_concurrent_generation_bump() {
     use std::sync::mpsc;
@@ -426,16 +427,18 @@ fn update_file_cancellable_can_be_aborted_mid_cascade_by_a_concurrent_generation
     let worker_project = Arc::clone(&project);
     let worker_generation = Arc::clone(&generation);
     let handle = thread::spawn(move || {
-        let mut call_count = 0;
+        let calls = Mutex::new((0usize, checked_tx, bump_rx));
         let should_abort = move || {
-            call_count += 1;
-            // Rendezvous right before the SECOND per-file check - proves
-            // at least one file was already processed before the
-            // concurrent bump takes effect, not just "aborts before
-            // doing any work at all."
-            if call_count == 2 {
-                checked_tx.send(()).unwrap();
-                bump_rx.recv().unwrap();
+            let mut calls = calls.lock().unwrap();
+            calls.0 += 1;
+            // Rendezvous right before the SECOND per-file check, holding
+            // `calls` so no other thread asks meanwhile - proves at least
+            // one file was already processed before the concurrent bump
+            // takes effect, not just "aborts before doing any work at
+            // all."
+            if calls.0 == 2 {
+                calls.1.send(()).unwrap();
+                calls.2.recv().unwrap();
             }
             *worker_generation.lock().unwrap() != 1
         };
