@@ -253,12 +253,13 @@ when it runs, and the plan adds the checks found along the way.
   one pass, `cargo xtask corpus --full` on a worker per core (rows
   0.11a-0.11c, done), with `cargo xtask progress --watch`. Next, before the
   baseline, in this order: fast validation (0.11d-0.11j), from the profile
-  of a replay and a vendor project's run; the builtin catalog from php-src
-  per PHP version (0.11k-0.11m), which replaces the recorded builtin-runs
-  table; the implicit calls (0.12a-0.12e) and the assumed types
-  (0.13a-0.13i), moved in from the end of the plan; the runtime oracle
-  reaching every asserting fixture (0.11q); the measurements and
-  `cargo xtask validate` (0.11n-0.11p). Then the validation itself (0.11):
+  of a replay and a vendor project's run; the PHP catalog from php-src
+  per PHP version, every builtin and every engine operation with the
+  conditions the source tests (0.11k-0.11n), which replaces the recorded
+  builtin-runs table; the implicit calls (0.12a-0.12f) and the assumed
+  types (0.13a-0.13i), moved in from the end of the plan; the runtime
+  oracle reaching every asserting fixture (0.11o); the measurements and
+  `cargo xtask validate` (0.11p-0.11r). Then the validation itself (0.11):
   the pass with the `gate` and `oracle` builds, the reports against
   `5fb858c9`'s, the memory baseline.
 - **Found along the way, done:** version gates for the syntax PHP 7.1 to 8.5
@@ -267,15 +268,21 @@ when it runs, and the plan adds the checks found along the way.
   values of its parameters' types (`3d8085f3`): 353 fixtures run, from 81.
 - **Decided, in item 0 (rows 0.13a-0.13i):** three assumptions the
   oracle's calls showed against what PHP does are built as PHP's truth,
-  after the implicit calls (rows 0.12a-0.12e), both before the baseline.
+  after the implicit calls (rows 0.12a-0.12f), both before the baseline.
   Int operations get the float PHP gives past a limit, exact, with its
   consequences. A read at a key not proven present gives `null` and is
-  reported as PHP warns, with presence proven. Builtin iterators off a valid
-  position give and throw what the builtin catalog derives from php-src,
-  with `valid()` proving the position. Their seven fixtures opt out of the
+  reported as PHP warns, with presence proven, and so does a property read
+  where the type leaves the property's presence unknown. Every builtin
+  returns and throws what the PHP catalog derives from php-src where its
+  stub says less; builtin iterators off a valid position are the case
+  found, with `valid()` proving the position. Their seven fixtures opt out of the
   calls until then. The implicit calls also took generator bodies: a
-  generator's body runs at its resumptions, not at its call.
-- **Moved into item 0 (row 0.11q):** the 114 fixtures that assert and
+  generator's body runs at its resumptions, not at its call. An audit
+  against `php` 8.5 added property hooks, lazy objects' initializers, the
+  cycle collector (an `unset` of one `stdClass` ran 9,980 destructors of
+  earlier cyclic objects), a generator's `finally` at its release, signal
+  handlers, included files, and libxml2 reaching user stream wrappers.
+- **Moved into item 0 (row 0.11o):** the 114 fixtures that assert and
   never reach an assertion under the runtime oracle: assertions in closures
   nothing invokes, code that throws first with the values sampled,
   parameters no value can be made for, methods of traits.
