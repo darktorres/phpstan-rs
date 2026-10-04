@@ -15,9 +15,9 @@ that date.
 
 ## Where to resume
 
-1. **Level 8**: build `PROFILE_DRILL_PIWIGO_20G.md` once told to, row by
-   row from `PROFILE_DRILL_PIWIGO_20G_LEDGER.md`, item 0 first. Its review
-   is finished.
+1. **Level 8**: building `PROFILE_DRILL_PIWIGO_20G.md` row by row from
+   `PROFILE_DRILL_PIWIGO_20G_LEDGER.md`, item 0 first; each item is
+   validated at its end.
 2. Then **level 6**: recreate master's 87 commits on `master2`, one row
    at a time (`MASTER_REIMPLEMENTATION_LEDGER.md`: 86 open, 1 skipped, none
    done).
@@ -219,11 +219,12 @@ docblock is inherited across case-different names; union member order).
 The callgrind drill-down of the 20.57 G run at `5fb858c9` (level 7's end
 state), the dhat heap profile of the same run (`target/dhat-heap.json`; its
 2.67 GB and 19.4 M allocations each given to an item, §8), and the plan built
-from both: items 0-19, validated once, after item 19 (§11). The goal is
+from both: items 0-19, each validated at its end (§11), with O3 once after
+item 19. The goal is
 beyond PHPStan and Psalm, not parity: semantics are judged by what PHP does
 when it runs, and the plan adds the checks found along the way.
 
-- **State: reviewed in full, nothing built.** The plan was committed at
+- **State: building, item 0.** The plan was committed at
   `d520c9fd`. A separate reviewer goes through it adversarially, one item at
   a time, in order; each finding is checked against the code, `php` 8.5 and
   the heap profile before it goes in, and §13's review table has a row per
@@ -237,11 +238,11 @@ when it runs, and the plan adds the checks found along the way.
 - **The projection,** §12, estimated: ≈290 MB at exit (from 657), a
   ≈350-385 MB peak (from 866) plus the checks in flight, ≈1.85 M allocations
   (from 19.4 M), and roughly 8 G of the 20.57 G instructions.
-- **Building it** waits for an explicit go-ahead. Its tasks, in order, with
-  their state and commits, are in `PROFILE_DRILL_PIWIGO_20G_LEDGER.md` (173
-  rows: items 0-19, then §11's validation). It starts at item 0: the
-  starting state read, the `oracle` profile's run, and the baseline dumps
-  from item 0's own commit.
+- **Building it** started on 2026-10-03. Its tasks, in order, with their
+  state and commits, are in `PROFILE_DRILL_PIWIGO_20G_LEDGER.md` (185 rows:
+  items 0-19, each closed by its validation row, then O3). It starts at
+  item 0: the starting state read, the `oracle` profile's run, and the
+  baseline dumps from item 0's own commit.
 
 ## Documents with no place in the stack
 

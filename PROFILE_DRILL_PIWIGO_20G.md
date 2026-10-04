@@ -556,12 +556,12 @@ The rows sum to the run's 19,440,892. An item removes most of its row, not all o
 
 # Part II. The plan
 
-Twenty items, numbered in the order they are built. Each states what is there now, the design, what the final validation compares for it, and what the profiles say it saves, in instructions and in memory. "Exact" means the output cannot change; "semantic" means it can, and §11 lists where. Finding codes (R1-R8, R12 for instructions, M1-M9 for memory) and section numbers refer to Part I.
+Twenty items, numbered in the order they are built. Each states what is there now, the design, what its validation compares, and what the profiles say it saves, in instructions and in memory. "Exact" means the output cannot change; "semantic" means it can, and §11 lists where. Finding codes (R1-R8, R12 for instructions, M1-M9 for memory) and section numbers refer to Part I.
 
 ## 9. How the plan is built and checked
 
-- **One validation, at the end (§11).** Items are committed one by one, with `cargo fmt`, `cargo check` and clippy. Apart from item 0's runs (the starting state, the oracle run, the baseline), nothing else runs until the last item lands.
-- **Oracles are dumps.** Item 0 takes dumps of everything the items change, from the starting commit, in a form that does not depend on how the code represents it. §11 takes the same dumps from the last commit and compares. So no item keeps an old implementation alive to compare against, and each replaces what it replaces outright.
+- **Validation at the end of each item (§11).** An item's rows are committed one by one, with `cargo fmt`, `cargo check` and clippy, and nothing else runs between them. When its last row lands, the item is validated: the tests, the fixtures, item 0's dumps and O2, compared with the previous item's, and the equalities. The next item starts after that. O3 measures once, after item 19.
+- **Oracles are dumps.** Item 0 takes dumps of everything the items change, from the starting commit, in a form that does not depend on how the code represents it. §11 takes the same dumps at the end of each item and compares them with the previous item's, so each difference belongs to the item that made it. So no item keeps an old implementation alive to compare against, and each replaces what it replaces outright.
 - **Measuring.**
   - `cl-20g` is the callgrind baseline: the `dhat` profile with frame pointers, as `CLAUDE.md` prescribes, with `PHPSTAN_RS_NO_FILE_CACHE=1`. The final callgrind run uses the same profile and setting.
   - Wall time is read from a sampling profile's serial windows (§1, §5), not from callgrind's per-thread totals: valgrind runs one thread at a time, so those show nothing about parallelism.
@@ -665,6 +665,7 @@ Twenty items, numbered in the order they are built. Each states what is there no
    - **O2: the gate's full artifact set** (`cargo xtask corpus --full`: scoped, all-on, unscoped, levels 0-10, the type dumps, the baselines and the emission-order check).
      - It adds a view of every field of every diagnostic: the end position, the UTF-16 columns and the whole fix.
      - It runs over the Piwigo configurations, each vendor project with every rule set, and the fixtures.
+     - It adds a configuration with architecture rules and banned types, which the all-on configuration does not set (`xtask/src/main.rs:394-461`), so that item 19's passes have a corpus oracle from the baseline on.
      - It runs with the stub cache cold and warm, and the per-file cache off, written and read. Every state must give the same output.
      - It is compared in output order with `xtask compare`.
    - **The server:** an in-process session over Piwigo and two vendor projects. It records:
@@ -2078,37 +2079,41 @@ Exact, except the private-property judgment, listed in §11.
 - **The peak** becomes the start of the check plus the checks in flight: the largest files' checks, which run first, while every tree is still alive. That load has not been measured: at today's maximum, during the parse, the checker holds almost nothing (§8, M1). Item 0's memory oracle records the heap at the start of the check and at the check's maximum, and §12's projection takes both.
 - **In the server,** the trees held are the open documents' and the LRU's, not the workspace's.
 
-## 11. Validation, once, after item 19
+## 11. Validation at the end of each item
+
+**When.** An item is validated when its last row lands, before the next item's first row. Between rows only `cargo fmt`, `cargo check` and clippy run. A failure is fixed in its own commit, within the item, and only what failed runs again, from the saved binaries where they still apply. Item 0's validation is its baseline (item 0, step 4), with the tests and the fixtures. Two items have steps that wait for item 9: item 3's scratch store for item 9's step 2, and item 6's step 2 for the stub rules' versions (item 9, step 5). Each is built right after the step it waits for and validated with item 9, whose comparison then also admits item 6's step-2 changes.
+
+**Against what.** Each item's dumps are compared with the previous item's validated ones, item 1's with item 0's baseline. So every difference belongs to the item being validated, and it must be one of the semantic changes that item names (below); an item that names none gives identical dumps. Each item's dumps are saved by its last commit's full hash, as `xtask` lays them out (`.corpus-runs/gate/<artifact>/<commit>.<ext>`, `.corpus-runs/README.md`). Contents are diffed after `LC_ALL=C sort`, and the order of emission is checked apart, by `xtask compare`.
 
 **How it runs.** One heavy job at a time, each under `nice -n 19` with `/proc/loadavg` noted, with no `timeout`, in this order:
-1. the `gate`, `oracle` and frame-pointer `dhat` builds;
-2. the tests;
-3. the fixtures, against `php` 8.5, and against `php:7.4-cli` through `docker` for the 7.x readings (item 10's versions check, item 12's spaced names, item 18's one-argument `parse_str` and `mb_parse_str` and string `assert`);
-4. item 0's dumps, with the `gate` build and then the `oracle` build;
-5. O2, one configuration and cache state after another, at one thread and at the default;
-6. the equalities;
-7. O3.
+1. the `gate` and `oracle` builds;
+2. the tests: `cargo test --workspace`, the fixtures (`--test fixtures`), and the tests the item wrote;
+3. the fixtures against `php` 8.5, and, for an item with 7.x readings, against `php:7.4-cli` through `docker`;
+4. item 0's dumps with the `gate` build, then with the `oracle` build, which runs with the per-file cache off, since entries carry no statements for its assertions (item 6, step 6), and must finish without an assertion;
+5. O2 (`cargo xtask corpus --full`), one configuration and cache state after another, at one thread and at the default, its diff read line by line;
+6. the equalities that exist by then;
+7. the item's state in the ledger and its one-line state in `WORK_STACK.md`.
 
-Each corpus run is saved by the full commit hash, as `xtask` lays them out (`.corpus-runs/gate/<artifact>/<commit>.<ext>`, `.corpus-runs/README.md`), the starting commit's as the baseline. Contents are diffed after `LC_ALL=C sort`, and the order of emission is checked apart, by `xtask compare`.
+**What an item adds to its own validation:**
+- **item 1:** the server's first dumps against the CLI's join the equalities;
+- **item 6:** its tests (a file replaced while a reader holds it, a corrupt record, and `SOURCES_HASH` against the embedded files); the platforms job, below, with the file-replacement test;
+- **item 7:** the relation memo on against off joins the equalities;
+- **item 10:** the versions check's 7.x readings through `docker`;
+- **item 12:** the spaced names' 7.x readings through `docker`;
+- **item 14:** the lowering oracle, which compares with the text grammar the item deletes, so it reads what item 0 recorded: each type node is lowered again and compared with the type today's round trip gave it;
+- **item 15:** a Latin-1 document opened in the server session;
+- **item 16:** the `loom` tests of the interner's protocol, and the interner's leak test after the edit replay;
+- **item 17:** its `stat` cases, here and on the platforms job; the per-file cache written under one configuration (the versions, `short_open_tag`) and read under another, against that one's cache-off run (step 2); the base absent, written and read; its edits between two runs, as the item lists them; and a warm run, which leaves the cache directory byte for byte as it found it;
+- **item 18:**
+  - the union oracle, which compares with the fold the item deletes, so it reads what item 0 recorded: each union is built again from its operands and compared with today's result (§12.11's differential test);
+  - the `oracle` build carries the replay assertion and the merge-over-diff assertion;
+  - one-argument `parse_str` and `mb_parse_str`, and string `assert`, read on 7.x through `docker`;
+  - `--dump-types` and `--dump-expr-types` with locals listed by name, since §12.10's step-by-step identity cannot be checked within one item's validation;
+- **item 19:** each edit replay also at a tree-cache budget of zero; a closed file changed on disk with no event before a dependent's recheck.
 
-**Tests run once:**
-- `cargo test --workspace` and the fixtures (`--test fixtures`);
-- the `loom` tests of the interner's protocol (item 16);
-- the interner's leak test after the edit replay (item 16);
-- item 6's tests: a file replaced while a reader holds it, a corrupt record, and `SOURCES_HASH` against the embedded files;
-- item 17's `stat` cases;
-- a Latin-1 document opened in the server session (item 15).
+**Platforms.** CI runs on `ubuntu-24.04` only (`rust-ci.yml:18`), while the release builds for `macos-26` and `windows-2025-vs2026` (`release.yml:33-53`). A CI matrix job on those two runs item 6's file-replacement test from item 6's validation on, and item 17's `stat` cases from item 17's, and each result is recorded.
 
-**Platforms.** CI runs on `ubuntu-24.04` only (`rust-ci.yml:18`), while the release builds for `macos-26` and `windows-2025-vs2026` (`release.yml:33-53`). A CI matrix job on those two runs item 6's file-replacement test and item 17's `stat` cases, and its result is recorded.
-
-**The dumps of item 0, taken again** with the `gate` build and the `oracle` build. The `oracle` build runs with the per-file cache off, since entries carry no statements for its assertions (item 6, step 6). It carries item 18's replay assertion and merge-over-diff assertion, and must finish without an assertion.
-
-Three oracles compare with code the plan deletes, so they read what item 0 recorded:
-- **item 14's lowering:** each type node item 0 recorded is lowered again and compared with the type today's round trip gave it;
-- **item 18's union pass:** each union item 0 recorded is built again from its operands and compared with today's result (§12.11's differential test);
-- **`--dump-types` and `--dump-expr-types`:** compared with the baseline, with locals listed by name, since §12.10's step-by-step identity cannot be checked in one validation at the end.
-
-Every difference from the baseline must be one of the semantic changes the items name:
+**The semantic changes, by item.** At an item's validation, every difference from the previous item's dumps must be one of its own:
   - **item 1:**
     - a file reached through a link is loaded once and reported under its resolved path, with `__FILE__` and `__DIR__` resolved;
     - a file both analysed and context is analysed, once;
@@ -2134,19 +2139,17 @@ Every difference from the baseline must be one of the semantic changes the items
   
   Each difference is listed with its file and read.
 
-**O2 against the baseline's** (`cargo xtask corpus --full`), its diff read line by line. O2 adds a configuration with architecture rules and banned types, which the all-on configuration does not set (`xtask/src/main.rs:394-461`), so that item 19's passes have a corpus oracle.
-
-**Equalities that need no baseline:**
+**Equalities that need no baseline,** each run at every item's validation from the item that brings it on:
 - one thread against the default;
 - the stub cache cold against warm;
-- the per-file cache off against written and read; and written under one configuration (the versions, `short_open_tag`) and read under another, against that one's cache-off run (item 17, step 2);
-- item 17's base absent, written and read; its edits between two runs, as item 17 lists them; and a warm run, which leaves the cache directory byte for byte as it found it;
-- the relation memo on against off (item 7);
-- the server's first dumps against the CLI's (item 1), with no open document that differs from its file;
-- each edit replay against a fresh load of the edited tree, with the tree cache's budget as configured and at zero (item 19);
-- a closed file changed on disk with no event before a dependent's recheck (item 19).
+- the per-file cache off against written and read; from item 17, also written under one configuration and read under another, against that one's cache-off run;
+- from item 17: its base absent, written and read; its edits between two runs; and a warm run, which leaves the cache directory byte for byte as it found it;
+- from item 7: the relation memo on against off;
+- from item 1: the server's first dumps against the CLI's, with no open document that differs from its file;
+- each edit replay against a fresh load of the edited tree; from item 19, with the tree cache's budget as configured and at zero;
+- from item 19: a closed file changed on disk with no event before a dependent's recheck.
 
-**O3,** with the commands `CLAUDE.md` gives:
+**O3, once, after item 19's validation,** with the commands `CLAUDE.md` gives:
 - callgrind with `--separate-threads=yes` on the frame-pointer `dhat` build, over `cl-20g`'s workload;
 - `perf record -F 499 -g` on the same build, read with `--no-inline`, of a warm run (per-file cache and base), for the serial windows;
 - `hyperfine -N --warmup 2 --runs 10`, the starting commit's `gate` binary against the last commit's, alternating; warm with both caches warm, and cold with `--prepare` emptying both binaries' cache directories;
@@ -2155,7 +2158,7 @@ Every difference from the baseline must be one of the semantic changes the items
   - **the check's own maximum,** which one dhat profile cannot isolate: it keeps one global maximum, today's falls in the parse, and `HeapStats`' maximum cannot be reset. So the `dhat` build records `HeapStats::get().curr_bytes` at the start of the check and after each file's check, and writes `5` to `/proc/self/clear_refs` before the check and reads `VmHWM` after it, which give the check's live and resident maxima;
   - **the check's holders:** a second dhat run starts its profiler (`dhat::Profiler::new_heap()`) at the check's start, so its global maximum is the check's own, by holder;
   - the server's heap on item 0's session;
-- the results in `WORK_STACK.md`.
+- the results in §12 and in `WORK_STACK.md`.
 
 ## 12. Summary
 
@@ -2258,7 +2261,7 @@ All the corrections are in the designs above. The eleven passes, in outline:
 | 11 | late items against each other and the code | one load path (1); the walk's `stat`s and link cycles (2) | — |
 
 The rewrite made two more changes:
-- validation happens once, at the end (§9, §11), and oracles that needed an old implementation alive became dumps from the starting commit;
+- validation happens once, at the end (§9, §11), and oracles that needed an old implementation alive became dumps from the starting commit (later, when building started, validation moved to the end of each item, at the user's request);
 - the file's names live in an append-only arena of their own, so the tree can refer to them before item 10 changes how the lexer hands out tokens. (Later: item 9's `names` vector, by `NameId`.)
 
 **The heap profile (§8) added:**
