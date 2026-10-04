@@ -2828,6 +2828,17 @@ impl Project {
             .collect()
     }
 
+    /// Every loaded path, with whether it is analysed or context, sorted.
+    pub(crate) fn file_roles(&self) -> Vec<(PathBuf, bool)> {
+        let mut roles: Vec<(PathBuf, bool)> = self
+            .files
+            .iter()
+            .map(|(path, state)| (path.clone(), state.analyzed))
+            .collect();
+        roles.sort();
+        roles
+    }
+
     /// `true` if `path` is loaded and analyzed; `false` for an unloaded
     /// path or one loaded only as context.
     pub fn is_analyzed(&self, path: &Path) -> bool {

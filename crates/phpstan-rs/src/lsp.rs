@@ -59,6 +59,7 @@ mod inlay_hints;
 mod navigation;
 mod protocol;
 mod semantic_tokens;
+pub mod session_record;
 mod settings;
 mod signature_help;
 mod workspace_config;
@@ -2710,6 +2711,29 @@ fn handle_request<W: Write>(server: &mut Server, writer: &mut W, req: Request) {
                 .map(|response| serde_json::to_value(response).unwrap_or(serde_json::Value::Null))
                 .unwrap_or(serde_json::Value::Null);
             ok_response(&id, result)
+        }
+        // What the session holds: each loaded file with its role, and the
+        // registry dump (`project::registry_dump`), for the session record
+        // (`session_record`).
+        "phpstan-rs/sessionDump" => {
+            let files: Vec<serde_json::Value> = server
+                .project
+                .file_roles()
+                .into_iter()
+                .map(|(path, analysed)| {
+                    serde_json::json!([
+                        if analysed { "analysed" } else { "context" },
+                        path.display().to_string()
+                    ])
+                })
+                .collect();
+            ok_response(
+                &id,
+                serde_json::json!({
+                    "files": files,
+                    "registry": server.project.registry_dump(),
+                }),
+            )
         }
         "textDocument/rename" => {
             let result = serde_json::from_value::<lsp_types::RenameParams>(req.params)

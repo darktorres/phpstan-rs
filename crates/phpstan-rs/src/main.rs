@@ -53,6 +53,20 @@ enum Command {
     /// Rewrites a baseline file, and every file it includes, in the
     /// current baseline format.
     ConvertBaseline { path: PathBuf },
+    /// Runs a language-server session over the workspace `dir` in this
+    /// process and writes its record, gzip-compressed, to `out` (a
+    /// regression-gate snapshot).
+    #[command(hide = true)]
+    RecordSession {
+        dir: PathBuf,
+        out: PathBuf,
+        #[arg(long, default_value_t = 1)]
+        seed: u64,
+        #[arg(long, default_value_t = 40)]
+        files: usize,
+        #[arg(long, default_value_t = 8)]
+        positions: usize,
+    },
 }
 
 #[hotpath::main]
@@ -84,6 +98,20 @@ fn main() {
             }
         }
         Command::Demo { file } => demo::run_demo(file.as_deref()),
+        Command::RecordSession {
+            dir,
+            out,
+            seed,
+            files,
+            positions,
+        } => {
+            let dir = std::fs::canonicalize(&dir).unwrap_or(dir);
+            let record = lsp::session_record::record_session(&dir, seed, files, positions);
+            if let Err(e) = phpstan_rs::project::session::write_gzip(&out, record.as_bytes()) {
+                eprintln!("error: {e}");
+                std::process::exit(1);
+            }
+        }
         Command::ConvertBaseline { path } => match phpstan_rs::baseline::convert(&path) {
             Ok(files) => eprintln!("converted {files} baseline file(s)"),
             Err(e) => {
