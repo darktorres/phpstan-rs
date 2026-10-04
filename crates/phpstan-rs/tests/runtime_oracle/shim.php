@@ -5,7 +5,7 @@
 // deprecation PHP emits, one JSON object per line in the file
 // `PHPSTAN_RS_ORACLE_OUT` names; `PHPSTAN_RS_ORACLE_AUTOLOAD`, when set,
 // is the runtime packages' autoloader. Written for every PHP version a
-// fixture may run under, 7.4 up.
+// fixture may run under, 7.0 up: no `void`, no nullable types.
 
 namespace PHPStan\Testing {
     function assertType(string $expected, $value)
@@ -31,7 +31,7 @@ namespace {
         /** The deepest nesting that is recorded. */
         const MAX_DEPTH = 8;
 
-        public static function recordAssert(string $expected, $value): void
+        public static function recordAssert(string $expected, $value)
         {
             $call = debug_backtrace(DEBUG_BACKTRACE_IGNORE_ARGS, 3)[1] ?? [];
             self::write([
@@ -108,13 +108,18 @@ namespace {
             return ['t' => 'unknown'];
         }
 
-        private static function write(array $record): void
+        private static function write(array $record)
         {
             $out = getenv('PHPSTAN_RS_ORACLE_OUT');
             if ($out === false) {
                 return;
             }
-            $line = json_encode($record, JSON_UNESCAPED_SLASHES | JSON_INVALID_UTF8_SUBSTITUTE);
+            // Before PHP 7.2, a string that is not UTF-8 is written as null
+            // instead of with its bad bytes substituted.
+            $flags = JSON_UNESCAPED_SLASHES | (\defined('JSON_INVALID_UTF8_SUBSTITUTE')
+                ? JSON_INVALID_UTF8_SUBSTITUTE
+                : JSON_PARTIAL_OUTPUT_ON_ERROR);
+            $line = json_encode($record, $flags);
             if ($line !== false) {
                 file_put_contents($out, $line . "\n", FILE_APPEND);
             }
