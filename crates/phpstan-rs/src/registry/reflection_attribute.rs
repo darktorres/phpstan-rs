@@ -161,3 +161,21 @@ fn value(expr: &Expr) -> AttributeValue {
         _ => AttributeValue::Unsupported,
     })
 }
+
+syntax::canonical_struct!(ReflectionAttribute { name, arguments });
+
+syntax::canonical_struct!(AttributeArgument { name, value });
+
+syntax::canonical_enum!(AttributeValue {
+    Null,
+    Bool(value),
+    Int(value),
+    Float(value),
+    String(value),
+    ClassName(class),
+    ClassConstant { class, name },
+    Constant(name),
+    Array(entries),
+    BitOr(members),
+    Unsupported,
+});

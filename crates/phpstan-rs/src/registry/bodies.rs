@@ -198,3 +198,28 @@ impl BodySource for FileBodies {
         self.init_flow(provenance.declaration_span())
     }
 }
+
+/// A body's summary and flow; the statements kept for the debug build's
+/// comparisons are not printed.
+impl syntax::canonical::Canonical for Body {
+    fn canonical(&self, p: &mut syntax::canonical::Printer) {
+        let Body {
+            #[cfg(debug_assertions)]
+                stmts: _,
+            summary,
+            flow,
+        } = self;
+        p.node("Body", &[("summary", summary), ("flow", flow)]);
+    }
+}
+
+/// By the span of the declaration each body is of, in the order of the
+/// file.
+impl syntax::canonical::Canonical for FileBodies {
+    fn canonical(&self, p: &mut syntax::canonical::Printer) {
+        let FileBodies(bodies) = self;
+        let mut bodies: Vec<(&Span, &Body)> = bodies.iter().collect();
+        bodies.sort_unstable_by_key(|(span, _)| (span.start, span.end));
+        p.list(bodies.iter());
+    }
+}

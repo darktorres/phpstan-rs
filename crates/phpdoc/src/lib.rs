@@ -4,6 +4,7 @@
 
 #![cfg_attr(not(test), deny(clippy::print_stdout, clippy::print_stderr))]
 
+mod canonical;
 pub mod doc_type;
 pub mod docblock;
 pub mod grammar;

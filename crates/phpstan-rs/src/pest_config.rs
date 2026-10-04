@@ -339,3 +339,8 @@ impl PestConfig {
             .collect()
     }
 }
+
+syntax::canonical_struct!(PestFacts {
+    bindings,
+    hook_properties,
+});

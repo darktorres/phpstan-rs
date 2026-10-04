@@ -548,3 +548,52 @@ fn quiet_probe_events(e: &Expr, out: &mut Vec<Event>) {
         _ => events_of(e, out),
     })
 }
+
+syntax::canonical_struct!(InitFlow { nodes });
+
+syntax::canonical_enum!(Event {
+    Read(name, span),
+    Write(name),
+    Unset(name),
+    Call(call),
+});
+
+syntax::canonical_struct!(Call { receiver, name });
+
+syntax::canonical_enum!(CallReceiver {
+    This(chain),
+    SelfKeyword,
+    StaticKeyword,
+    ParentKeyword,
+});
+
+syntax::canonical_enum!(Flow {
+    Events(events),
+    If(chain),
+    While { cond, body },
+    For { before, body, step },
+    Foreach { subject, body },
+    Switch { subject, cases },
+    Try {
+        body,
+        catches,
+        finally,
+    },
+});
+
+syntax::canonical_struct!(IfChain {
+    branches,
+    else_body,
+});
+
+syntax::canonical_struct!(IfBranch {
+    cond,
+    body,
+    terminates,
+});
+
+syntax::canonical_struct!(Case {
+    test,
+    body,
+    completion,
+});

@@ -1261,6 +1261,13 @@ impl<V: Clone> FromIterator<(Name, V)> for NameTable<V> {
     }
 }
 
+/// A value kept encoded prints as what it decodes to.
+impl<V: syntax::canonical::Canonical> syntax::canonical::Canonical for Lazy<V> {
+    fn canonical(&self, p: &mut syntax::canonical::Printer) {
+        self.get().canonical(p);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

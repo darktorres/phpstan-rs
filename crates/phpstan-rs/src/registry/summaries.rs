@@ -937,3 +937,100 @@ fn collect_assigned(target: &Expr, out: &mut FxHashSet<Name>) {
         _ => {}
     }
 }
+
+syntax::canonical_enum!(PurityCall {
+    Function(name),
+    ThisMethod(method),
+    Static(class, method),
+    New(class),
+});
+
+syntax::canonical_struct!(Place { root, steps });
+
+syntax::canonical_enum!(Root {
+    This,
+    Variable(name),
+    Static(class, prop),
+    DynamicStatic(prop),
+    Global(name),
+    Value,
+});
+
+syntax::canonical_enum!(Step {
+    Property(prop),
+    Element,
+});
+
+syntax::canonical_enum!(Binding {
+    Global(name),
+    Static,
+    Reference(place),
+});
+
+syntax::canonical_enum!(Made {
+    Object(class),
+    Closure,
+});
+
+syntax::canonical_enum!(Receiver {
+    This,
+    ThisProperty(prop),
+    Variable(name),
+    Static(class, prop),
+    Unknown,
+});
+
+syntax::canonical_enum!(Callee {
+    Function(name),
+    Method { receiver, method },
+    Static { class, method },
+    New(class),
+    Anonymous(name),
+    Value(name),
+});
+
+syntax::canonical_enum!(ArgAt {
+    Position(at),
+    Named(name),
+    Spread,
+});
+
+syntax::canonical_enum!(Callable {
+    Text(name),
+    Pair(target, method),
+    Written,
+});
+
+syntax::canonical_enum!(PairTarget {
+    Object(receiver),
+    Class(class),
+});
+
+syntax::canonical_struct!(CallWrites {
+    callee,
+    arguments,
+    places,
+    callables,
+});
+
+syntax::canonical_struct!(WriteFacts {
+    reassigned,
+    writes,
+    bindings,
+    made,
+    anything,
+    calls,
+});
+
+syntax::canonical_struct!(BodySummary {
+    purity,
+    writes,
+    empty,
+    assigned,
+});
+
+syntax::canonical_struct!(AssignedProperties {
+    on_this,
+    on_variables,
+    new_instances,
+});

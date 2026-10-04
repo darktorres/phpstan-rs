@@ -94,6 +94,13 @@ where
     }
 }
 
+impl<M: syntax::canonical::Canonical> syntax::canonical::Canonical for Shared<M> {
+    fn canonical(&self, p: &mut syntax::canonical::Printer) {
+        let Shared(value) = self;
+        value.canonical(p);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

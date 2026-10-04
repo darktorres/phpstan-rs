@@ -399,3 +399,9 @@ impl Checker<'_> {
         self.loop_body_completion = self.check_stmt(body, locals, declared_return, label);
     }
 }
+
+syntax::canonical_struct!(Completion {
+    terminates,
+    exits,
+    jumps,
+});

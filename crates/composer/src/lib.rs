@@ -302,5 +302,10 @@ impl PackageIndex {
     }
 }
 
+syntax::canonical_enum!(PackageOwner {
+    Root(index),
+    Installed(package, index),
+});
+
 #[cfg(test)]
 mod tests;

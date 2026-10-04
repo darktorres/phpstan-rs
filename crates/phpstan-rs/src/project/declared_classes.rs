@@ -70,3 +70,13 @@ pub(crate) fn declared_classes(program: &[Stmt]) -> Vec<DeclaredClass> {
     });
     classes
 }
+
+syntax::canonical_struct!(DeclaredClass {
+    name,
+    name_span,
+    span,
+    attributes,
+    own_methods,
+    public_methods,
+    uses_traits,
+});

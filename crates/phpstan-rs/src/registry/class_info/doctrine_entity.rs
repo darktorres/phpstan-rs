@@ -296,3 +296,18 @@ pub(crate) fn compute_doctrine_entity(
         discriminator_map,
     })
 }
+
+syntax::canonical_struct!(DoctrineEntity {
+    id_field,
+    fields,
+    associations,
+    table_name,
+    column_names,
+    repository_class,
+    discriminator_map,
+});
+
+syntax::canonical_struct!(DoctrineAssociation {
+    target,
+    is_collection,
+});

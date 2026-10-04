@@ -280,6 +280,44 @@ impl<A: Canonical, B: Canonical, C: Canonical> Canonical for (A, B, C) {
     }
 }
 
+/// A map prints sorted by its keys' prints: its order is the hasher's.
+impl<K: Canonical, V: Canonical> Canonical for rustc_hash::FxHashMap<K, V> {
+    fn canonical(&self, p: &mut Printer) {
+        p.map(self.iter());
+    }
+}
+
+/// A set prints sorted: its order is the hasher's.
+impl<T: Canonical> Canonical for rustc_hash::FxHashSet<T> {
+    fn canonical(&self, p: &mut Printer) {
+        p.set(self.iter());
+    }
+}
+
+impl<K: Canonical, V: Canonical, S> Canonical for hashbrown::HashMap<K, V, S> {
+    fn canonical(&self, p: &mut Printer) {
+        p.map(self.iter());
+    }
+}
+
+impl<T: Canonical, S> Canonical for hashbrown::HashSet<T, S> {
+    fn canonical(&self, p: &mut Printer) {
+        p.set(self.iter());
+    }
+}
+
+impl<K: Canonical, V: Canonical> Canonical for std::collections::BTreeMap<K, V> {
+    fn canonical(&self, p: &mut Printer) {
+        p.map(self.iter());
+    }
+}
+
+impl<T: Canonical> Canonical for std::collections::BTreeSet<T> {
+    fn canonical(&self, p: &mut Printer) {
+        p.set(self.iter());
+    }
+}
+
 /// `{:?}` prints the shortest text that reads back as the same bits, `-0.0`
 /// and the infinities included; a NaN's payload only its bits show.
 impl Canonical for f64 {
@@ -408,6 +446,64 @@ impl Canonical for PhpString {
 impl Canonical for Name {
     fn canonical(&self, p: &mut Printer) {
         p.name(self.as_str());
+    }
+}
+
+/// A map by name prints sorted by name: its order is the table's.
+impl<V: Canonical> Canonical for crate::name::NameMap<V> {
+    fn canonical(&self, p: &mut Printer) {
+        p.map(self.iter());
+    }
+}
+
+/// In the order the names were first inserted, which is the map's own.
+impl<V: Canonical> Canonical for crate::name::OrderedNameMap<V> {
+    fn canonical(&self, p: &mut Printer) {
+        p.list(self.iter().collect::<Vec<_>>().iter());
+    }
+}
+
+impl<V: Canonical> Canonical for crate::name::FoldedMap<V> {
+    fn canonical(&self, p: &mut Printer) {
+        p.map(self.iter());
+    }
+}
+
+impl Canonical for crate::name::NameSet {
+    fn canonical(&self, p: &mut Printer) {
+        p.set(self.iter());
+    }
+}
+
+impl Canonical for crate::name::FoldedSet {
+    fn canonical(&self, p: &mut Printer) {
+        p.set(self.iter());
+    }
+}
+
+/// A path's bytes, quoted.
+impl Canonical for std::path::Path {
+    fn canonical(&self, p: &mut Printer) {
+        p.bytes(self.as_os_str().as_encoded_bytes());
+    }
+}
+
+impl Canonical for std::path::PathBuf {
+    fn canonical(&self, p: &mut Printer) {
+        self.as_path().canonical(p);
+    }
+}
+
+impl Canonical for crate::references::RefKey {
+    fn canonical(&self, p: &mut Printer) {
+        use crate::references::RefKey;
+        let (kind, name) = match self {
+            RefKey::Class(name) => ("Class", name),
+            RefKey::Function(name) => ("Function", name),
+            RefKey::Constant(name) => ("Constant", name),
+            RefKey::GlobalVar(name) => ("GlobalVar", name),
+        };
+        p.tuple(kind, &[name]);
     }
 }
 

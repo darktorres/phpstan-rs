@@ -103,3 +103,12 @@ impl DuplicateFunctionSites {
         }
     }
 }
+
+syntax::canonical_struct!(FnDeclSite {
+    path,
+    span,
+    param_hints,
+    return_hint,
+});
+
+syntax::canonical_struct!(DuplicateFunctionSites { sites });

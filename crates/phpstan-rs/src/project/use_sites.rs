@@ -247,3 +247,9 @@ impl<'ast> Visitor<'ast> for ClassFnRefWalker<'_> {
         })
     }
 }
+
+syntax::canonical_enum!(RefTarget {
+    Class(name),
+    Function(name),
+    Member(class, member),
+});

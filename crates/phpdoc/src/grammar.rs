@@ -14,8 +14,8 @@ mod lexer;
 mod parser;
 
 pub use ast::{
-    ArrayShapeField, CallableParam, CallableTemplate, MethodTagParam, PhpDocNode, PhpDocParseError,
-    PhpDocTag, PhpDocTagValue, ShapeKey, TypeNode,
+    ArgVariance, ArrayShapeField, CallableParam, CallableTemplate, MethodTagParam, PhpDocNode,
+    PhpDocParseError, PhpDocTag, PhpDocTagValue, ShapeKey, TypeNode,
 };
 
 /// Parses one `/** ... */` doc-comment's own text (`raw` includes the

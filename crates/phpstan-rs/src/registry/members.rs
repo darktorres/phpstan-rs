@@ -203,3 +203,11 @@ impl<V> FromIterator<(Name, V)> for Members<V> {
         }
     }
 }
+
+/// By name, each member decoded.
+impl<V: syntax::canonical::Canonical> syntax::canonical::Canonical for Members<V> {
+    fn canonical(&self, p: &mut syntax::canonical::Printer) {
+        let Members { map } = self;
+        map.canonical(p);
+    }
+}

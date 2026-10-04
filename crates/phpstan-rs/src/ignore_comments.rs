@@ -564,3 +564,9 @@ mod tests {
         assert!(scan(source).identifiers.is_empty());
     }
 }
+
+syntax::canonical_struct!(IgnoreComments {
+    lines,
+    identifiers,
+    parse_errors,
+});

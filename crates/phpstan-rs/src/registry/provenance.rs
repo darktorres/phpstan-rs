@@ -336,3 +336,16 @@ mod tests {
         assert!(decode::<Origin>(&past_the_end).is_err());
     }
 }
+
+syntax::canonical_struct!(Provenance {
+    origin,
+    span,
+    declaring_class,
+});
+
+syntax::canonical_enum!(Origin {
+    Unknown,
+    File(path),
+    Builtin { file, extension },
+    Phpstan { file },
+});

@@ -94,3 +94,12 @@ impl DuplicateClassSites {
         }
     }
 }
+
+syntax::canonical_struct!(ClassDeclSite {
+    path,
+    span,
+    kind,
+    is_stub,
+});
+
+syntax::canonical_struct!(DuplicateClassSites { sites });

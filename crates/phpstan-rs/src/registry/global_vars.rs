@@ -805,3 +805,37 @@ fn resolve_value(value: &StaticValue, registry: &Registry) -> Type {
             .unwrap_or(Type::mixed()),
     }
 }
+
+syntax::canonical_struct!(GlobalFacts {
+    sites,
+    include_sites,
+});
+
+syntax::canonical_struct!(SiteFact {
+    top_level,
+    name,
+    contribution,
+});
+
+syntax::canonical_struct!(IncludeSite { top_level, suffix });
+
+syntax::canonical_enum!(ContributionFact {
+    Mixed,
+    Whole(value),
+    ArrayMerge {
+        callee,
+        second,
+        whole,
+    },
+    Field(key, value),
+    FieldMixed(key),
+});
+
+syntax::canonical_enum!(StaticValue {
+    Known(ty),
+    Array(entries),
+    Call(callee),
+    StaticCall(class, method),
+    ClassConst(class, name),
+    MethodCall(base, method),
+});
