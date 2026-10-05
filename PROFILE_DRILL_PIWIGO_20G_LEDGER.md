@@ -126,7 +126,7 @@ Building started on 2026-10-03 (`WORK_STACK.md`, level 8).
 | 2.7 | Allocations | `installed.json` and manifests deserialized typed; `eval_concat` into one buffer; `ignore_errors` matched by the walk's text | — | perf | DONE (745401bb) |
 | 2.V | §11 | Validation: the builds, the tests and the fixtures | 2.7 | val | DONE (745401bb: `cargo test --workspace` passes; the fixtures give 3857 passed and 50 failed, checker fixtures whose expectations lack the `F7` fix marker or differ in a level, the count seen before item 2 and not checked at an earlier commit; no dumps compared) |
 | **3** | **item 3** | **Context trees dropped on the worker** | | | |
-| 3.1 | keep / drop | `keeps_tree(role, open)` in the load and in `update_file`; one state shape for a context file, the cached one | 1.4 | perf | OPEN |
+| 3.1 | keep / drop | `keeps_tree(role, open)` in the load and in `update_file`; one state shape for a context file, the cached one | 1.4 | perf | DONE (8e75ba79) |
 | 3.2 | drop, read buffer | The drop runs on the allocating worker. Context files are read into the worker's reusable buffer | 3.1 | perf | OPEN |
 | 3.3 | `ast_of` | `ast_of` reads the overlay before the disk | 1.4 | sem | DEFERRED (after O3, not optimization) |
 | 3.V | §11 | Validation: the builds, the tests and the fixtures; 3.4 is validated with item 9 | 3.2 | val | OPEN |
