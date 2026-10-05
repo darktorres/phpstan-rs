@@ -257,8 +257,15 @@ impl PackageIndex {
     /// The package owning the absolute `file`: the one whose directory
     /// containing it is deepest.
     pub fn owner(&self, file: &Path) -> Option<PackageOwner> {
-        // The directories `path_starts_with(file, dir)` holds for: an
-        // ancestor of `file` as written, or of it normalized. Of equally
+        self.owner_of_dir(file)
+    }
+
+    /// The package owning the absolute `dir`, and so every file in it: the
+    /// one whose directory containing it is deepest. A walk asks once for
+    /// each directory it lists.
+    pub fn owner_of_dir(&self, dir: &Path) -> Option<PackageOwner> {
+        // The directories `path_starts_with(dir, owned)` holds for: an
+        // ancestor of `dir` as written, or of it normalized. Of equally
         // deep ones the last listed wins.
         let mut best: Option<usize> = None;
         let mut consider = |index: usize| {
@@ -267,13 +274,12 @@ impl PackageIndex {
                 best = Some(index);
             }
         };
-        self.by_dir
-            .for_each_prefix(file.components(), &mut consider);
+        self.by_dir.for_each_prefix(dir.components(), &mut consider);
         // `lexically_normalized`, as the components it would have: a `.` is
         // dropped, and a `..` takes the last one off unless it is all that
         // is left of a root, in which case it stays.
         let mut normalized: Vec<Component<'_>> = Vec::new();
-        for component in file.components() {
+        for component in dir.components() {
             match component {
                 Component::CurDir => {}
                 Component::ParentDir => {

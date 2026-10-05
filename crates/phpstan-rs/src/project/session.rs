@@ -140,6 +140,21 @@ pub struct Session {
     pub warnings: Vec<String>,
 }
 
+/// What a thread of a load keeps while it parses one file after another:
+/// the names it meets, which are dropped with the load, and what it found
+/// out about each directory it has met.
+#[derive(Default)]
+struct LoadState {
+    names: syntax::name::NameCache,
+    dirs: rustc_hash::FxHashMap<Vec<u8>, Placed>,
+}
+
+/// A file's, or a directory's, absolute path and package owner.
+struct Placed {
+    absolute: PathBuf,
+    owner: Option<composer::PackageOwner>,
+}
+
 /// A configured `Project` with every file loaded, before any check ran.
 pub struct Loaded {
     pub project: Project,
@@ -921,11 +936,6 @@ impl Session {
         &self.root
     }
 
-    /// Whether the overlay holds the file at `path`.
-    fn overlay_holds(&self, path: &Path) -> bool {
-        self.overlay.get(&self.absolute(path)).is_some()
-    }
-
     /// The session reading `files` in place of what the disk has at their
     /// paths, which are spelled from the root: they exist whether or not
     /// the disk has them, and are listed where a walk of the paths would
@@ -952,7 +962,13 @@ impl Session {
     /// The bytes of the file at `path`, spelled from the root: the
     /// overlay's, or the disk's. Every read of a file goes through here.
     pub fn read(&self, path: &Path) -> std::io::Result<Vec<u8>> {
-        match self.overlay.get(&self.absolute(path)) {
+        self.read_at(path, &self.absolute(path))
+    }
+
+    /// `read` of the file at `path`, which is `absolute` as an absolute
+    /// path.
+    fn read_at(&self, path: &Path, absolute: &Path) -> std::io::Result<Vec<u8>> {
+        match self.overlay.get(absolute) {
             Some(bytes) => Ok(bytes.to_vec()),
             None => std::fs::read(self.root.join(path)),
         }
@@ -1028,7 +1044,36 @@ impl Session {
 
     /// Whether `path`, spelled from the root, is under a stub path.
     fn is_stub(&self, path: &Path) -> bool {
-        self.settings.roles.has_stubs() && self.settings.roles.is_stub(&self.absolute(path))
+        self.is_stub_at(&self.absolute(path))
+    }
+
+    /// `is_stub` of the file at `absolute`.
+    fn is_stub_at(&self, absolute: &Path) -> bool {
+        self.settings.roles.has_stubs() && self.settings.roles.is_stub(absolute)
+    }
+
+    /// What a load finds out about a file's place: its absolute path and
+    /// its package's owner. The directory's are found once for the files
+    /// `state` meets in it, and the file's are the directory's with its
+    /// name.
+    fn place(&self, state: &mut LoadState, path: &Path) -> Placed {
+        let (Some(dir), Some(name)) = (path.parent(), path.file_name()) else {
+            let absolute = self.absolute(path);
+            let owner = self.settings.packages.owner_of_dir(&absolute);
+            return Placed { absolute, owner };
+        };
+        let here = state
+            .dirs
+            .entry(dir.as_os_str().as_encoded_bytes().to_vec())
+            .or_insert_with(|| {
+                let absolute = self.absolute(dir);
+                let owner = self.settings.packages.owner_of_dir(&absolute);
+                Placed { absolute, owner }
+            });
+        Placed {
+            absolute: here.absolute.join(name),
+            owner: here.owner,
+        }
     }
 
     /// Whether `path` (relative to the root) is in a package promoted to an
@@ -1046,7 +1091,8 @@ impl Session {
     /// The files `listed` finds under `dir` (or `dir` itself), leaving out
     /// what is under a directory named in `pruned`, spelled as
     /// `dir` joined with its path below it - the same spelling the command
-    /// line gave - while the walk itself happens under the root.
+    /// line gave, built as the walk goes down - while the walk itself
+    /// happens under the root.
     fn collect_files(
         &self,
         table: &DirTable,
@@ -1058,9 +1104,9 @@ impl Session {
     ) {
         let walked = self.root.join(dir);
         let mut found = Vec::new();
-        let wanted = match listed {
-            Listed::Php => super::is_php_file,
-            Listed::Run => super::is_php_run_file,
+        let wanted = |dir: &Path, name: &std::ffi::OsStr| match listed {
+            Listed::Php => super::is_php_file(Path::new(name)),
+            Listed::Run => super::is_php_run_file(dir, name),
         };
         let skip = skip_dir.map(|skip| move |path: &Path| skip(&self.absolute(path)));
         self.pool.install(|| {
@@ -1072,15 +1118,10 @@ impl Session {
                     .as_ref()
                     .map(|skip| skip as &(dyn Fn(&Path) -> bool + Sync)),
             }
-            .files(&walked, &mut found)
+            .files(&walked, dir, &mut found)
         });
-        let spelled = |path: PathBuf| match path.strip_prefix(&walked) {
-            Ok(rest) if rest.as_os_str().is_empty() => dir.to_path_buf(),
-            Ok(rest) => dir.join(rest),
-            Err(_) => path,
-        };
         let start = out.len();
-        out.extend(found.into_iter().map(spelled));
+        out.append(&mut found);
         if self.overlay.is_empty() {
             return;
         }
@@ -1125,12 +1166,13 @@ impl Session {
     fn read_and_parse_file(
         &self,
         path: &Path,
+        absolute: &Path,
         is_stub: bool,
         names: &mut syntax::name::NameCache,
         cacheable: bool,
         index_use_sites: bool,
     ) -> Read {
-        let Ok(bytes) = self.read(path) else {
+        let Ok(bytes) = self.read_at(path, absolute) else {
             return Read::Unread;
         };
         let content_hash = ContentHash::of(&bytes);
@@ -1646,23 +1688,26 @@ impl Session {
                         .enumerate()
                         // The names a job meets are kept while it parses one
                         // file after another, and dropped with the load.
-                        .map_init(syntax::name::NameCache::default, |names, (index, p)| {
+                        .map_init(LoadState::default, |state, (index, p)| {
+                            let placed = self.place(state, p);
+                            let held = self.overlay.get(&placed.absolute).is_some();
                             let mut read = self.read_and_parse_file(
                                 p,
-                                self.is_stub(p),
-                                names,
+                                &placed.absolute,
+                                self.is_stub_at(&placed.absolute),
+                                &mut state.names,
                                 // The context files come first. A file the
                                 // overlay holds is an open document, whose
                                 // tree is kept, which no entry holds.
-                                index < context_files.len() && !self.overlay_holds(p),
+                                index < context_files.len() && !held,
                                 index_use_sites,
                             );
                             if let Read::Loaded(file) = &mut read {
                                 shared.index_use_sites(&mut file.parsed, &file.source);
-                                if !(retain_source && self.overlay_holds(p)) {
+                                if !(retain_source && held) {
                                     file.source = String::new();
                                 }
-                                shared.note_owner(&mut file.parsed, p);
+                                file.parsed.owner = Some(placed.owner);
                                 if let Some(key) = file.cache_key.take() {
                                     file_cache::store(
                                         &key,

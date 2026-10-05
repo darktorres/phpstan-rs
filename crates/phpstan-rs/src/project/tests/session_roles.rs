@@ -216,3 +216,48 @@ fn a_context_walk_does_not_go_into_an_analysed_root_below_it() {
     assert_eq!(analysed, paths(&["lib/own/O.php", "lib/own/deep/P.php"]));
     assert_eq!(context, paths(&["lib/C.php", "lib/other/Q.php"]));
 }
+
+#[test]
+fn a_loaded_file_has_the_owner_its_path_gives() {
+    let dir = TempDir::new("session_owners");
+    dir.write("composer.json", r#"{"name": "acme/app"}"#);
+    dir.write(
+        "vendor/composer/installed.json",
+        r#"{"packages": [{"name": "acme/lib", "type": "library", "install-path": "../acme/lib"}]}"#,
+    );
+    dir.write("src/A.php", "<?php class A {}");
+    dir.write("src/sub/B.php", "<?php class B {}");
+    dir.write("vendor/acme/lib/L.php", "<?php class L {}");
+    dir.write("vendor/acme/lib/src/M.php", "<?php class M {}");
+    dir.write(
+        "vendor/composer/autoload_psr4.php",
+        "<?php\n$vendorDir = dirname(__DIR__);\nreturn array(\n    'Acme\\\\' => array($vendorDir . '/acme/lib'),\n);\n",
+    );
+    let schema = crate::app::config_schema();
+    let config = config::ConfigFile::parse("", &schema).unwrap();
+    let session = Session::resolve(
+        &config,
+        None,
+        dir.0.clone(),
+        Overrides {
+            paths: paths(&["src"]),
+            ..Overrides::default()
+        },
+        Policy::Fail,
+        worker_pool(),
+    )
+    .unwrap();
+    let loaded = session.load().unwrap();
+    let mut seen = Vec::new();
+    for (path, state) in loaded.project.files.iter() {
+        let expected = loaded
+            .project
+            .packages
+            .owner(&loaded.project.absolute_path(path));
+        assert_eq!(state.owner, expected, "{}", path.display());
+        seen.push(state.owner.is_some());
+    }
+    // The root package's files and the installed package's both have one.
+    assert_eq!(seen.len(), 4);
+    assert!(seen.iter().all(|has| *has));
+}

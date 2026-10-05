@@ -142,3 +142,38 @@ fn the_owner_is_what_its_definition_gives_for_any_path() {
     // belong to a package nested in another's directory.
     assert!(owned > 500 && owned < checked, "{owned} of {checked}");
 }
+
+#[test]
+fn a_directory_has_the_owner_of_every_file_in_it() {
+    let dir = TempDir::new("owner_of_dir");
+    dir.write(
+        "composer.json",
+        r#"{"name": "acme/app", "require": {"acme/lib": "^1.0", "acme/deep": "^1.0"}}"#,
+    );
+    dir.write(
+        "vendor/composer/installed.json",
+        r#"{"packages": [
+            {"name": "acme/lib", "type": "library", "install-path": "../acme/lib"},
+            {"name": "acme/deep", "type": "library", "install-path": "../acme/lib/nested/deep"}
+        ]}"#,
+    );
+    let index = index(&dir);
+    let root = std::fs::canonicalize(dir.path()).unwrap();
+    for (directory, file) in [
+        ("src", "A.php"),
+        ("vendor/acme/lib", "L.php"),
+        ("vendor/acme/lib/src", "L.php"),
+        ("vendor/acme/lib/nested", "N.php"),
+        ("vendor/acme/lib/nested/deep/x", "D.php"),
+        ("vendor/other", "O.php"),
+    ] {
+        let dir = root.join(directory);
+        assert_eq!(
+            index.owner_of_dir(&dir),
+            index.owner(&dir.join(file)),
+            "{directory}"
+        );
+    }
+    let deep = index.owner_of_dir(&root.join("vendor/acme/lib/nested/deep/x"));
+    assert_eq!(index.name(deep.unwrap()), Some("acme/deep"));
+}
