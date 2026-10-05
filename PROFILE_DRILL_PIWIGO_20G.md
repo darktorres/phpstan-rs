@@ -560,6 +560,11 @@ Twenty items, numbered in the order they are built. Each states what is there no
 
 ## 9. How the plan is built and checked
 
+- **Only what optimizes (2026-10-05).** The plan is an optimization: fewer instructions, less wall time and less memory, with what measures and checks them (the dumps, the pass, the profiles, the validation command). What it gathered beyond that waits until after O3, its rows DEFERRED in the ledger, built then as a plan of their own and validated together (ledger row D.V):
+  - **in item 0:** the implicit calls, the assumed types, the claims and the open world (rows 0.12a-0.15f), beside the PHP catalog deferred before them, and the runtime oracle's reach (fast validation, step 12, row 0.11r);
+  - **in items 1-19:** every new check, and every change to what the analysis finds that the optimization does not need: PHP's identity of a file (item 1, with the walk's link rules of item 2), `ast_of` reading the overlay (item 3), the stubs' versions and extensions (item 6, step 2, with the stub rules' reach and versions of item 9, step 5), the report of constants on a cycle (item 7), the halt offset, PHP's grammar after `__halt_compiler`, the first error, PHP's doc rule and the configured versions' readings (item 10), lines ending at a lone `\r` (items 11 and 12), casts as tokens, doc comments, heredocs and open tags as PHP's (item 12), declarations bound as PHP binds them (item 13), the order of evaluation (items 13 and 18), `Integer::MAX` and `mentions_mixed` (item 14), names as bytes with their escape, fixes, run-time strings, folding and documents' encodings (item 15), the per-file key's versions (item 17), members counted used by any access that may reach them (item 18), and the private properties' writes from bound closures and reflection (item 19).
+  
+  **What stays semantic** is a change the optimized code cannot avoid without code written only to reproduce today's output: the server taking the CLI's load, configuration and analysis (item 1), an order a new representation gives (item 4's members), a second implementation deleted (item 14's winners, item 18's families and statement result), a round trip replaced (item 14's lowering), the classes a byte lexer reads (item 14's doc identifiers), a key with PHP's identity (item 15's array keys), the deterministic answer a memo needs (item 7's cycles, read as `never`), a check made where the code it reads is (item 8's `@property`), a fold made one pass (item 18). Where today's output costs no more to keep, the row keeps it and is exact. Each item marks its deferred parts where its design names them.
 - **Validation at the end of each item (§11).** An item's rows are committed one by one, with `cargo fmt`, `cargo check` and clippy, and nothing else runs between them. When its last row lands, the item is validated: the tests, the fixtures, item 0's dumps and O2, compared with the previous item's, and the equalities. The next item starts after that. O3 measures once, after item 19.
 - **Oracles are dumps.** Item 0 takes dumps of everything the items change, from the starting commit, in a form that does not depend on how the code represents it. §11 takes the same dumps at the end of each item and compares them with the previous item's, so each difference belongs to the item that made it. So no item keeps an old implementation alive to compare against, and each replaces what it replaces outright.
 - **Measuring.**
@@ -735,7 +740,7 @@ Twenty items, numbered in the order they are built. Each states what is there no
    - static properties by storage; variables bound to a written global, every variable at a file's top level counting as global; the function's static variables when the call may enter the function again; variables captured by reference that the call may write; and variables bound by reference to any written storage.
 6. **F3:** a variable captured by reference is entered with the union of its type at the capture and of every type a write gives it while the reference is shared. The closure's body is checked until that union stops growing, as a loop body is, each pass starting from what it held where the body returned as well as where it ended. The enclosing scope is checked again when it holds a type in the variable, after any statement, that the closure was not entered with. At a file's top level, where checking again would check every declaration again, a capture the scope assigns after the closure is made is entered as anything. The closures checked with a bound `$this` keep their own by-reference state, as the others do.
 7. **F4:** `array_reduce` follows its stub's generics: `$carry` is the initial value's type joined with the callback's return type, until that stops growing. The result is the callback's return type for an array that is never empty, the initial value's for one that is always empty, and their union otherwise.
-8. **Code PHP runs without a call written** (magic methods and property hooks on member access, lazy objects' initializers, destructors and the cycle collector, autoloaders, error handlers, output-buffer callbacks, tick and signal handlers, included files) is built in item 0 too, after the PHP catalog, with the same effects ("Code PHP runs without a call written", below).
+8. **Code PHP runs without a call written** (magic methods and property hooks on member access, lazy objects' initializers, destructors and the cycle collector, autoloaders, error handlers, output-buffer callbacks, tick and signal handlers, included files) is built in item 0 too, after the PHP catalog, with the same effects ("Code PHP runs without a call written", below). **Deferred** (after O3, not optimization), with its section, after the part built first.
 
 **Oracle for the fix:** fixtures for each storage and binding kind (an inherited, a redeclared and a trait's static property; `static::`; a method's static variable on PHP 7.4 and 8.1), each call kind (a virtual call with two implementations, one writing; an interface call; a callback; a builtin calling an argument's method; a stream wrapper, registered and not), field sensitivity (a call writing another property keeps this one), an escaped and an unescaped new object, a capture written later by the outer function, and `array_reduce` over an empty, a non-empty and a possibly empty array, each checked against `php` (7.4 through `docker` for the static variables). In item 0's validation (0.11) the baseline's reports are read for the five false reports above, which must be gone.
 
@@ -842,8 +847,8 @@ The design. Each step is exact unless it says otherwise:
 8. **The edit path rechecks its dependents in one check.** `recheck` checks the dependents one after another on the calling thread (`project.rs:2324-2341`; 52 M of `update_file`'s 58 M in the replay). Each check goes through `check_files` for its one file, which judges the private property types again for that file alone, checking once more the files declaring its classes for their writes. The dependents go to one `check_files` over the worker pool instead, as the load's check does, which judges the property types once for all of them; their use sites are then reindexed in one pass, which is what needs the project mutably. The server's latency gains as much.
 9. **Measured again:** instructions and peak memory, and the whole pass's wall time, and again once the deferred catalog below lands. The script becomes a command, `cargo xtask profile <kind> [<project>]`, which builds the frame-pointer `dhat` binaries, warms a cache of its own, runs callgrind the way `CLAUDE.md` prescribes and writes the profile with its binaries and a `README` to `~/.cache/prs-profile/`, so that step 10, O3 and every later measurement take the same runs the same way.
 10. **Every other kind of run the pass makes is profiled the same way,** a configuration's state, a level, a session and the fixture suite, and planned from what it shows, so the whole pass is fast, not only its two commonest runs.
-11. **An item's validation is one command.** `cargo xtask validate` runs §11 whole on the worker pool, with its progress: the `gate` and `oracle` builds, the workspace tests and the item's, the runtime oracle on every version image, the pass with each build, and the comparison with the previous item's snapshot. It writes the summary the ledger's V row records, where today each of these is started by hand, one after another.
-12. **The runtime oracle reaches every asserting fixture.** 114 still never reach an assertion (`WORK_STACK.md`), in four kinds, each closed:
+11. **An item's validation is one command.** `cargo xtask validate` runs §11 whole on the worker pool, with its progress: the `gate` and `oracle` builds, the workspace tests and the item's, the pass with each build, and the comparison with the previous item's snapshot. It writes the summary the ledger's V row records, where today each of these is started by hand, one after another. The runtime oracle on every version image waits with the deferred rows (row 0.11r).
+12. **The runtime oracle reaches every asserting fixture.** **Deferred** (after O3, not optimization): it holds the semantic fixtures, not the optimization. 114 still never reach an assertion (`WORK_STACK.md`), in four kinds, each closed:
     - **an assertion in a closure nothing invokes:** the generated calls invoke each closure and arrow function the fixture makes, with values of its parameters' types, as they call functions;
     - **code that throws first with the values sampled:** a call that throws is made again with the pool's other values until one reaches the assertion, and the fixture records which did;
     - **a parameter no value can be made for:** the sampler makes one for every type it meets, an interface with no implementation by an anonymous class implementing it, and a resource by opening one of its kind;
@@ -950,11 +955,11 @@ Semantic: a builtin runs and writes what its source may make it run and write on
 
 Semantic: fewer facts forgotten after a call that stores a closure, after a call of a declaration that calls a callable parameter, and at the top level's captures (§11, item 0).
 
-**Oracle.** None beyond §11 for the dumps and the deletions: they leave release behaviour as it is. The fixes found in step 1, fast validation's step 1, the catalog, the fix's precision, the implicit calls, the assumed types, the claims and the open world are semantic, each held by its fixtures and the runtime oracle; 0.11 compares with no earlier commit (step 4).
+**Oracle.** None beyond §11 for the dumps and the deletions: they leave release behaviour as it is. The fixes found in step 1, fast validation's step 1, the fix's precision and the implicit calls built before their deferral are semantic, each held by its fixtures and the runtime oracle, the implicit calls' fixtures waiting with row 0.12f; the catalog, the rest of the implicit calls, the assumed types, the claims and the open world are deferred; 0.11 compares with no earlier commit (step 4).
 
 #### Code PHP runs without a call written
 
-Found reading the starting state (row 0.1), first an item of its own at the end of the plan; built in item 0 after the PHP catalog, whose operations, sites and kept code it reads, so that the baseline holds it (rows 0.12a-0.12f).
+Found reading the starting state (row 0.1), first an item of its own at the end of the plan; built in item 0 after the PHP catalog, whose operations, sites and kept code it reads, so that the baseline holds it (rows 0.12a-0.12f). **Deferred** (2026-10-05, after O3, not optimization). Built before the deferral, from the language's rules without the catalog: magic and interface methods as calls (`e4923d51`), property hooks (`2786f1f2`), and a property's magic methods where the program may unset it (`c89c2e37`). Waiting: the rest of row 0.12a (lazy objects' initializers, `__invoke`, the pipe operator, a conversion to a string where types are not strict), destructors and the cycle collector, autoloaders, handlers and kept callbacks, generators and fibers, included files, and the fixtures (rows 0.12a-0.12f).
 
 **Now.** After item 0's fix, a call written in the code forgets what the code it reaches may write. PHP also runs user code where no call is written, and nothing there is forgotten:
 - **magic methods:** `__get`, `__set`, `__isset` and `__unset` on a property the code cannot reach; `__toString` where a value becomes a string; `__clone`; `__invoke` when an object is called; `offsetGet`, `offsetSet`, `offsetExists` and `offsetUnset` on an `ArrayAccess` index; `getIterator`, `rewind`, `valid`, `current`, `key` and `next` in a `foreach`; `__serialize`, `__unserialize`, `__sleep`, `__wakeup` and `__debugInfo` through the builtins that call them. No builtin calls `__set_state`: `var_export` writes a call to it as text, which runs where the program runs that text, as a written call;
@@ -994,7 +999,7 @@ Found reading the starting state (row 0.1), first an item of its own at the end 
 
 #### What PHP gives where a type assumed: int overflow, missing keys and properties, builtins' outcomes, what may be thrown
 
-Found by the runtime oracle's generated calls in item 0's validation, first an item of its own at the end of the plan; built in item 0 after the implicit calls above, so that the baseline holds it and every later item preserves it (rows 0.13a-0.13k).
+Found by the runtime oracle's generated calls in item 0's validation, first an item of its own at the end of the plan; built in item 0 after the implicit calls above, so that the baseline holds it and every later item preserves it (rows 0.13a-0.13k). **Deferred** (2026-10-05, after O3, not optimization); their seven fixtures keep opting out of the generated calls until then.
 
 **Now.** The runtime oracle's generated calls (`3d8085f3`, in item 0's validation) found three places where a type says less than what PHP gives. Seven fixtures show them; until these rows, they opt out of the calls, each with its reason. Reading the code beside them found the same assumption for properties, for every builtin's stub, and for what a call or an operation may throw.
 
@@ -1120,7 +1125,7 @@ Found by the runtime oracle's generated calls in item 0's validation, first an i
 
 #### PHPDoc types as claims, verified
 
-Decided after the assumed types: a PHPDoc type can be wrong or stale, and PHP enforces only native types, so a doc type is used where the analysis verifies it, and PHP's own guarantee holds elsewhere. Built in item 0 after the assumed types, so that the baseline holds it (rows 0.14a-0.14g).
+Decided after the assumed types: a PHPDoc type can be wrong or stale, and PHP enforces only native types, so a doc type is used where the analysis verifies it, and PHP's own guarantee holds elsewhere. Built in item 0 after the assumed types, so that the baseline holds it (rows 0.14a-0.14g). **Deferred** (2026-10-05, after O3, not optimization).
 
 **Now.** Every doc type is used as if PHP enforced it, as PHPStan does. That is sound as assume-guarantee only where each guarantee is checked, and many are not:
 
@@ -1154,7 +1159,7 @@ Semantic: a claim violated anywhere, or open to a site nothing checks, gives the
 
 #### An open world, by configuration
 
-Decided with the claims (rows 0.15a-0.15f): the fix's premise, the program is what the run loads, holds for an application analysed with its vendor tree, whose callers and subclasses are all loaded, but not for a library, which code the run never loads calls and extends. A project says which.
+Decided with the claims (rows 0.15a-0.15f): the fix's premise, the program is what the run loads, holds for an application analysed with its vendor tree, whose callers and subclasses are all loaded, but not for a library, which code the run never loads calls and extends. A project says which. **Deferred** (2026-10-05, after O3, not optimization).
 
 **Now.** Every run is closed. A library's template method that narrows `$this->state` and then calls an overridable hook keeps the narrowing, though a consumer's override may change it; its public API is reported dead where the library does not use it.
 
@@ -1218,7 +1223,7 @@ Semantic: none in a closed run; an open run as designed here (§11).
 - **Folders.** `add_workspace_folders` (`lsp.rs:547-571`) loads every root into one project, with the last root's configuration winning, inside the message loop (`lsp.rs:2770`).
 
 **Design.**
-- **One identity.** A file is its resolved path, as PHP's `include_once` and `__FILE__` see it.
+- **One identity.** A file is its resolved path, as PHP's `include_once` and `__FILE__` see it. **Deferred** (after O3, not optimization), with the resolved path's uses below and the walk's link rules of item 2: until then a file is its lexically normalized path, as the CLI takes it today, and the server takes the CLI's rule.
   - Every listed path is first normalized lexically.
   - **Each link is resolved once, by `realpath`.**
     - A target under a walked root is skipped, since that root's walk lists it.
@@ -1231,9 +1236,9 @@ Semantic: none in a closed run; an open run as designed here (§11).
   
   Item 1 brings the rule into today's walk; item 2 keeps it.
 - **What the identity decides.**
-  - A file's spelling, `__FILE__`, `__DIR__` and Composer owner come from its resolved path.
+  - A file's spelling, `__FILE__`, `__DIR__` and Composer owner come from its resolved path. Deferred with the identity: until then from the normalized path, as today.
   - **Its role is a function of its resolved path:** the strongest configured root that contains it, among analysed, stub and context. The roots' resolved paths are known once the session is resolved.
-    - A file reachable only through links to a target outside every root takes the strongest role among those links.
+    - A file reachable only through links to a target outside every root takes the strongest role among those links. Deferred with the identity: until then a path's role is that of the strongest root containing its normalized path.
   - One function, `Session::classify(path) -> (FileId, role, is_stub)`, serves the load and every edit entry point: `didOpen`, `didChange`, `didSave`, watched-file create, change and delete, and workspace-folder add and remove. An alias table from path to `FileId` keeps other spellings and deleted files resolving.
   - **Its place in the load order is its place in the session's walk:** the role, the configured root and the path, as the load finds it. A file an edit adds takes the place a fresh load would give it, so a rebuild of a name declared in several files follows the same order after edits as after a load.
 - **One configuration.** `Session::resolve` is the server's resolution too, with one error policy as a parameter: fail, or degrade and report through `window/showMessage`. `workspace_config::resolve` is deleted. A reload resolves again and applies the difference in file sets: removed files go through `remove_file`, added ones through the session's reader.
@@ -1262,13 +1267,13 @@ Semantic: none in a closed run; an open run as designed here (§11).
 **Oracle.**
 - **Without a baseline:** for the same workspace and configuration, the server's first project dump, `registry-dump` and published diagnostics equal the CLI's views of the same session.
 - **The edit replay of item 0, driven through the server's entry points,** with every section equal to a fresh load's, load order included. It adds:
-  - opening a document by a link's spelling;
+  - opening a document by a link's spelling; deferred with the identity;
   - a non-UTF-8 file;
   - a watched-file delete;
   - adding and removing a folder;
   - a configuration reload that changes the file set.
 - **Semantic, listed in §11:**
-  - a file reached through a link is loaded once and reported under its resolved path, with `__FILE__` and `__DIR__` resolved;
+  - a file reached through a link is loaded once and reported under its resolved path, with `__FILE__` and `__DIR__` resolved (deferred with the identity);
   - a file both analysed and context is analysed, once, in both;
   - overlapping configured paths are checked once;
   - non-UTF-8 files are read as bytes in the server;
@@ -1304,7 +1309,7 @@ Semantic: none in a closed run; an open run as designed here (§11).
   - The stub directories are walked once, with the role "stub".
 - **One task per directory on the pool.** A task lists its directory and sorts the entries by name bytes, then spawns its subdirectories.
   - An entry's kind comes from the dirent (`DirEntry::file_type`), with no `stat`.
-  - Links follow item 1's rules: each is resolved once, and cycles are found against the task's ancestors.
+  - Links follow item 1's rules: each is resolved once, and cycles are found against the task's ancestors. Deferred with item 1's identity: until then a link is followed as today.
   - A walk prunes the subtrees of stronger roots inside it, and of promoted packages (`is_promoted`). So each file is listed once, by the walk of its own role, and its role is final before it is parsed. Files reached only through links outside every root are the exception: they wait for the walk's end (item 1).
   - `collect_php_files_excluding`, `path_under_excluded_dir` and `DEFAULT_SCAN_EXCLUDED_DIR_NAMES` are deleted. No configured exclusions exist, and after item 1 no walk uses a list of directory names.
 - **Spellings are built, not respelled.** A task carries its directory's configured spelling, its resolved path and its path hash. A child's are its parent's plus its name.
@@ -1315,7 +1320,7 @@ Semantic: none in a closed run; an open run as designed here (§11).
   - An explicit file under no root is placed by one binary search.
   - Results are placed by key after the walk, and ids follow the placement: today's numbering by position, until item 5 assigns ids by prefix sum. A debug assertion checks the order.
 - **Path data from the walk, all resolved (item 1).**
-  - A root's absolute path comes from one `realpath`, and a link target's from that link's `realpath`. A child's is its parent's plus its name; a file link's is its target's.
+  - A root's absolute path comes from one `realpath`, and a link target's from that link's `realpath`. A child's is its parent's plus its name; a file link's is its target's. The `realpath`s are deferred with item 1's identity: until then a root's absolute path is normalized lexically, as today.
   - The package index stores each package directory once, under its resolved path, when the session is resolved. `owner_of_dir(d)` is a single trie lookup of `d`'s resolved path, made once per directory, with the index's tie rule (deepest, then last listed). The language server asks it for a single file's directory, so there is one implementation.
 - **A path is stored once.** `FileTable`'s map becomes a `hashbrown::HashTable<FileId>` hashing the slot's path, with the hash the walk computed.
 
@@ -1332,7 +1337,7 @@ Semantic: none in a closed run; an open run as designed here (§11).
     - a classmap entry under a PSR-4 directory.
 - **O2.**
 
-Exact against item 1's results. Against the baseline, a link cycle's tree is listed once instead of until `ELOOP` (§11).
+Exact. A link cycle's tree listed once instead of until `ELOOP` is deferred with item 1's identity.
 
 **Saving.** ≈0.3 G: `sort_paths` 66.9 M, the respelling 34.3 M, the owner 69.1 M, the absolute path 54.1 M, `id_for` 33.5 M and the vendor sort 45.5 M. Also the serial start, ≈0.15 s.
 
@@ -1371,7 +1376,7 @@ Exact against item 1's results. Against the baseline, a link cycle's tree is lis
 - **The drop runs in parallel,** on the thread that allocated the tree.
 - **A context file is read into the worker's reusable read buffer.** Its products copy what they keep, so its source need not outlive the worker's job. Only a file whose tree is kept gets a source of its own.
 - **After item 9, a file whose tree is not kept is parsed into the worker's scratch store,** whose vectors are cleared, keeping their capacity, once its products are copied out. A kept tree's vectors are moved out at their exact size.
-- **`ast_of` reads the overlay before the disk,** so an open file with unsaved edits is parsed from its editor text (`project.rs:900-904` reads the disk).
+- **`ast_of` reads the overlay before the disk,** so an open file with unsaved edits is parsed from its editor text (`project.rs:900-904` reads the disk). **Deferred** (after O3, not optimization).
 
 **Oracle.** O2, item 0's server session and its edit replay, all run with the `oracle` build too, whose assertions fire on any read of a dropped tree. Exact.
 
@@ -1584,7 +1589,7 @@ Exact.
    - That pass goes, and so do `class_has_deferred_type` and `function_has_deferred_type`.
    - The stub cache already stores the stubs resolved (`stub_cache.rs:1-3`). Building it asserts that no stub record holds a deferred type.
    - Exact.
-2. **Guards on the stubs' availability, decided by what is true at run time.**
+2. **Guards on the stubs' availability, decided by what is true at run time.** **Deferred** (after O3, not optimization), with the polyfill check: until then the guards on stubs are decided, and the readers answer, as today.
    - **The stub index records each declaration's PHP version range,** read when the stub cache is built:
      - phpstorm-stubs' `#[PhpStormStubsElementAvailable(from:, to:)]` (598 uses in `vendor/phpstorm-stubs`) and `@since`/`@removed` (249 files);
      - PHPStan's version deltas (`vendor/phpstan-src/resources/functionMap_php*delta.php`, `new` and `old`).
@@ -1641,7 +1646,7 @@ Exact.
 - A test that corrupts one record and expects a rebuild, not a panic.
 - A test that hashes the files `stub-sources` embeds, from its own list, and finds `SOURCES_HASH`.
 
-Exact for 1, 3, 5 and 6; semantic for 2, listed in §11.
+Exact for 1, 3, 5 and 6; step 2 is deferred.
 
 **Allocations: ≈0.45 M (M10).** Decoding a stub class (266,562 allocations) or function (136,911) allocates every member, parameter and name it holds, whether it is read or not. After steps 1, 3 and 5, a run decodes only the records it reads, and its names come from the table.
 
@@ -1681,7 +1686,7 @@ Exact for 1, 3, 5 and 6; semantic for 2, listed in §11.
 - **Answers are stored only when they are final.**
   - While an on-demand evaluation of items 4 or 6 has a cycle guard open on the thread, the relation's answers are provisional and are not stored.
   - On-demand evaluation resolves a cycle by its strongly connected component, by what PHP does, so a stored answer never depends on which member was asked first:
-    - Constants on a cycle throw when read, whichever is read first ("Cannot declare self-referencing constant", checked with `php -r`). Each member's read is `never`, and each gets a diagnostic, since reading it can never succeed.
+    - Constants on a cycle throw when read, whichever is read first ("Cannot declare self-referencing constant", checked with `php -r`). Each member's read is `never`, and each gets a diagnostic, since reading it can never succeed. The diagnostic is deferred (after O3, not optimization); the reads are `never` here, since the memo needs an answer that does not depend on which member was asked first.
     - A cycle among PHPDoc-only references, such as type-alias imports, has no run-time meaning. Each member keeps every possibility (`mixed`).
   - Answers are stored once the component is resolved.
 - **The memo is bounded within a generation.**
@@ -1803,13 +1808,13 @@ Exact, except one case listed in §11: a `@property` tag shadowed by a declared 
 4. **Payloads are byte ranges of the source.**
    - A doc comment, an unescaped literal and inline HTML are ranges of `source`. An escaped literal is decoded once, into a byte vector of the file.
    - A name is a `NameId`. A body is an `IdxRange<StmtNode>`.
-   - **Nothing is decoded to text for its own sake, and nothing lossily but for display.** An identifier becomes a `Name` with its bytes (item 15), so `class \xA9` and `class \xAA` are two classes, as PHP sees them. A doc is parsed from its bytes (item 14), so a doc naming `\xA9` names the class the code declares.
+   - **Nothing is decoded to text for its own sake, and nothing lossily but for display.** An identifier becomes a `Name` with its bytes (item 15), so `class \xA9` and `class \xAA` are two classes, as PHP sees them. A doc is parsed from its bytes (item 14), so a doc naming `\xA9` names the class the code declares. An identifier's bytes kept in its `Name` are deferred with item 15's names as bytes: until then the `Name` is made from its text, as today.
    - What outlives the file (interned types, memoized docblocks, reflections) copies what it keeps, as now.
 5. **Nothing changes a tree after its parse.** `VisitorMut`, `walk_*_mut` and `resolve_names`' second run go.
    - **The stub rules are applied as the parser builds a stub's nodes.**
      - The parser knows a file's role before it starts (item 2), and an attribute's class from the imports above it.
-     - The rules apply to stub sources only. Both attributes are user classes, which PHP gives no effect unless reflection reads them, so in code PHP runs, a declaration carrying `#[PhpStormStubsElementAvailable(to: ..)]` still exists.
-     - The rules record rather than choose. A declaration or parameter carries its version range, and a type-aware attribute carries each version's type. Item 6's readers then answer for the configured versions.
+     - The rules apply to stub sources only. Both attributes are user classes, which PHP gives no effect unless reflection reads them, so in code PHP runs, a declaration carrying `#[PhpStormStubsElementAvailable(to: ..)]` still exists. **Deferred** (after O3, not optimization), with item 6's step 2: until then the rules apply to the files they apply to today, any file that mentions either attribute.
+     - The rules record rather than choose. A declaration or parameter carries its version range, and a type-aware attribute carries each version's type. Item 6's readers then answer for the configured versions. Deferred with item 6's step 2: until then they choose the newest version, as today.
      - The `@return` and `@param` lines the rules add are built into the file's doc vector and recorded in its doc sites like any other doc, so a stub's references are kept (item 13).
    - **Anonymous-class names are a side table by node id,** filled on the worker from the line starts (item 11).
    - **Nodes built outside the parser:**
@@ -1832,7 +1837,7 @@ Exact, except one case listed in §11: a `@property` tag shadowed by a declared 
 - Item 0's server session: open documents, edits, and completion's standalone parse.
 - The `oracle` build, and the dumps at one thread and at the default count.
 
-Exact, except the semantic changes listed in §11: non-UTF-8 identifiers keep their bytes, and the stub rules apply to stubs only, by the configured versions (item 6).
+Exact. Non-UTF-8 identifiers keeping their bytes, and the stub rules applying to stubs only by the configured versions, are deferred (items 15 and 6).
 
 **Memory (M2).**
 - **At least the 53 MB of unused capacity** in the analysed trees, 31% of their 173 MB.
@@ -1890,18 +1895,18 @@ pub struct TokenStream {
 - **`__halt_compiler` ends the stream, as it ends PHP's lexing.**
   - PHP's lexer takes the three tokens after `__halt_compiler` (any case; whitespace and comments between them are skipped), then returns the rest of the file as one inline-HTML token, whatever it holds. Its grammar then requires `( ) ;` or `( ) ?>`. `php` 8.5 confirms: `__halt_compiler(1);` is a syntax error, and `__halt_compiler /* c */ ( ) ?>tail` lexes `tail` as inline HTML.
   - Today the parser stops the lexer at `__halt_compiler` followed by `(` (`parser/stmt.rs:389-400`, `parser.rs:351-362`), so the data after it, often a phar's binary payload, is never lexed. A lexer that ran over the whole file first would lex that data as PHP.
-  - So the lexer does as PHP's does: it emits those three tokens, records the offset where the data begins, and stops. The parser reports what PHP's grammar rejects there.
-  - **`__COMPILER_HALT_OFFSET__` gets its value.** In a file with `__halt_compiler`, it is that offset (just past the `;` or `?>`: 61 and 59 in the probes). In any other file, PHP throws `Error: Undefined constant "__COMPILER_HALT_OFFSET__"`, which a new check reports. Today it is `int<1, max>` everywhere (`predefined_constants.rs:67`).
+  - So the lexer stops where the parse stops today: after `__halt_compiler` and the three tokens after it, where the first is `(`, recording the offset where the data begins; the parser takes them and ends there, as today. Stopping whatever follows, as PHP's lexer does, and the parser reporting what PHP's grammar rejects there are deferred (after O3, not optimization).
+  - **`__COMPILER_HALT_OFFSET__` gets its value.** **Deferred** (after O3, not optimization), with its check. In a file with `__halt_compiler`, it is that offset (just past the `;` or `?>`: 61 and 59 in the probes). In any other file, PHP throws `Error: Undefined constant "__COMPILER_HALT_OFFSET__"`, which a new check reports. Today it is `int<1, max>` everywhere (`predefined_constants.rs:67`).
 - **Interpolated strings are lexed inline, as PHP's scanner emits them.**
   - `token_get_all` gives a string's parts as tokens of the one stream: literal parts, `{$` (`T_CURLY_OPEN`), `${` (`T_DOLLAR_OPEN_CURLY_BRACES`), a simple variable with its `[` or `->` offset, and the closing `}`.
   - Today a `{$…}` part is kept as text, and `build_interpolated` lexes and parses it again with `Lexer::fragment` and a parser of its own. That costs a clone of the `NameContext`, a fork of the reference recorder, and the node counter copied in and out (`parser/interpolation.rs:21-45`).
   - The lexer emits the parts inline, and the parser reads them from the same stream. A literal part is a range of the source or of the decoded bytes.
   - `Lexer::fragment`, the scratch streams, the sub-parser, the context clone, the recorder fork and the `Parts` payload all go. So do `scan_interpolated`'s buffers (item 9).
-- **The file's error is the first one in the file, as PHP reports it.**
+- **The file's error is the first one in the file, as PHP reports it.** **Deferred** (after O3, not optimization): until then a lexer error anywhere is the file's error, as today, from the stream's recorded errors.
   - Today a lexer error anywhere is the file's error, ahead of a syntax error found earlier in the file (`parse.rs:115-128`).
   - PHP's parser pulls its tokens from the lexer, so it reports whichever error it meets first. `eval("$a = ;\n$b = 08;")` reports the syntax error on line 1; `eval("$a = 1;\n$b = 08;\n$c = ;")` reports "Invalid numeric literal" on line 2.
   - The stream records each lexer error with its offset, and the parse stops at its first error. The file's error is whichever of the two comes first.
-- **A declaration's doc is the one PHP gives it.**
+- **A declaration's doc is the one PHP gives it.** **Deferred** (after O3, not optimization), with its check: until then a declaration takes the doc right before its first token, as today, from the `docs` array.
   - PHP keeps the last doc comment it lexed. A `}` clears it, and a declaration takes it: a function, method, class-like, closure, arrow function, anonymous class, property, class constant or enum case. Neither a `{`, a statement nor `?>` clears it.
   - `php` 8.5 confirms, through `getDocComment`:
     - `/** first */ /** second */ function f` gives `f` the second;
@@ -1913,7 +1918,7 @@ pub struct TokenStream {
   - Today a declaration takes the doc right before its first token (`parser.rs:608-611`), so `j` gets none.
   - From the `docs` array, the parser gives each declaration the doc by PHP's rule. A statement keeps the doc right before it, for an inline `@var`.
   - A new check reports a doc comment that PHP gives to a declaration it does not precede, where the declaration has no doc of its own: the declaration gets that doc's tags at run time.
-- **Reading by the configured versions.**
+- **Reading by the configured versions.** **Deferred** (after O3, not optimization), with its check: until then the lexer reads as today.
   - Some source lexes differently across the versions a project may run on:
     - `#[` starts a comment before 8.0, so `#[Attr] function f() {}` on one line is no function at all there;
     - `fn` is an identifier before 7.4, `match` before 8.0, and `enum` and `readonly` before 8.1;
@@ -1928,7 +1933,7 @@ pub struct TokenStream {
   - `Parser::new(TokenStream)` replaces the test constructors.
 - **What goes:** `Token`, `Tok`, `Supply`, `next_raw`/`next_tok`, the `VecDeque`, `fill`/`pop`, `raw_keyword`, and `LexEnd`'s second pass.
 
-**Oracle.** O1, O2, and phar stubs among the fixtures. Exact, except the semantic changes listed in §11: the halt offset and its check, the first error in the file, PHP's doc rule for declarations and its check, and the versions' check.
+**Oracle.** O1, O2, and phar stubs among the fixtures. Exact; the halt offset and its check, PHP's grammar after `__halt_compiler`, the first error in the file, PHP's doc rule for declarations and its check, and the versions' check are deferred.
 
 **Saving.** About two array writes per token in the lexer and an index per read in the parser, ≈20-30 Ir per token, in place of ≈1.95 G: ≈1.7 G.
 
@@ -1962,12 +1967,12 @@ Context files need line starts, for duplicate-declaration messages (`duplicate_c
 **Design.**
 1. **Two types, so the compiler enforces who may ask for a column.**
    - `LineStarts` (`line`, `line_start`) for every file, built by one pass that turns each block's line-break bitmask into offsets. The same pass's high-bit mask says whether the file is ASCII.
-     - **Lines end where PHP's do:** at `\n`, and at a `\r` whose next byte (carried across blocks) is not `\n`. `\r\n` is one break.
+     - **Lines end where PHP's do:** at `\n`, and at a `\r` whose next byte (carried across blocks) is not `\n`. `\r\n` is one break. **Deferred** (after O3, not optimization): until then at `\n` alone, as today.
      - The offsets are gathered in per-worker scratch and copied out at their exact size, so `LineStarts` is one allocation.
    - `LineIndex` (`LineStarts` plus the column tables, `line_col`, `offset(LineCol)`) for analysed files and open documents, built on the worker.
    - **A lexer warning or a parse failure records its line and column on the worker,** while the source is at hand, by scanning its own line. So a context file keeps only `LineStarts`, and the failure path builds no second index (`session.rs:674` builds one today).
    - A lexer for a fragment of PHP (completion, the stub rules' type strings) builds no index. Today each builds `LineIndex::default()` (`lexer.rs:367-371`).
-   - **The lexer's line comments end at a lone `\r`,** as PHP's do.
+   - **The lexer's line comments end at a lone `\r`,** as PHP's do. **Deferred** (after O3, not optimization), with the lines.
    
    `FileState` holds `enum Lines { Starts(LineStarts), Full(LineIndex) }`.
 2. **Blocks, through `wide`.** The release builds target baseline x86-64 (`.cargo/config.toml` sets no `target-cpu`) and aarch64.
@@ -1984,7 +1989,7 @@ Context files need line starts, for duplicate-declaration messages (`duplicate_c
    - A statement's leading doc records its offset.
    - Anonymous-class names take their line from `LineStarts` on the worker.
 
-**Oracle.** O1, O2 (every position, fix span, ignore result, anonymous-class name), the line-index tests over multi-byte and astral lines and over `\r`, `\n` and `\r\n` breaks, the LSP tests. Exact, except the semantic change in §11: lines end at a lone `\r`, and so does a line comment.
+**Oracle.** O1, O2 (every position, fix span, ignore result, anonymous-class name), the line-index tests over multi-byte and astral lines and over `\r`, `\n` and `\r\n` breaks, the LSP tests. Exact; lines and line comments ending at a lone `\r` are deferred.
 
 **Saving.** ≈0.2 G: the line index's 270.4 M, less the block pass (≈35 M, step 2) and the analysed files' column tables, which stay.
 
@@ -2001,12 +2006,12 @@ Context files need line starts, for duplicate-declaration messages (`duplicate_c
    
    The lookup is inlined into the identifier arm, and the table is item 10's scratch. A probe compares the length first.
    
-   **The watch bits are kept with the name** in the worker's cross-file name cache, computed once per distinct spelling per process. Today `WatchList::bits` scans every spelling for each name new to the file (`lexer.rs:238-250`). A scan of a dozen spellings once per distinct name costs nothing measurable, so no table is generated: a perfect hash built at compile time from four modules' lists buys nothing more, and `phf`'s SipHash would cost more (§13). The stub-attribute spellings and their `MENTIONS` bit go with item 9, which applies the stub rules while it parses a stub.
+   **The watch bits are kept with the name** in the worker's cross-file name cache, computed once per distinct spelling per process. Today `WatchList::bits` scans every spelling for each name new to the file (`lexer.rs:238-250`). A scan of a dozen spellings once per distinct name costs nothing measurable, so no table is generated: a perfect hash built at compile time from four modules' lists buys nothing more, and `phf`'s SipHash would cost more (§13). The stub-attribute spellings and their `MENTIONS` bit stay while the stub rules apply to every file that mentions the attributes (item 9; their reach to stubs only is deferred).
 2. **Keywords by word.** The slot's spelling and the identifier (at most 16 bytes; the longest keyword, `__halt_compiler`, is 15) are loaded as `u64` pairs. An exact comparison answers "is it the keyword, in lower case", the common case. Only when it fails, the identifier is folded by OR with the slot's case mask, which leaves `_` and digits alone, and compared again: "is it the keyword in another case". `lex_word`'s separate case comparison (`lexer.rs:867`) goes. Today: 127.2 M, 73 Ir per call.
 3. **Blank runs.** Most runs are one space, where a 16-byte block costs more than a byte test. So the byte after the first blank is tested on its own, and only a longer run, such as indentation, goes to item 11's `wide::u8x16` mask: four `cmp_eq`s against `[ \t\r\n]`, an OR, `move_mask`, `trailing_ones` (`class_run` 100 M, which tests eight bytes at a time through a table, `lexer.rs:1427-1442`). The blank class is PHP's: `\f` and `\v` are `T_BAD_CHARACTER`.
 4. **Operators without a call.** `lex_operator` costs 45 Ir per operator token over 3.7 M tokens, a third of it its own prologue and epilogue (`lexer.rs:1145`, `:1338`).
    - A byte that is a whole operator nothing can extend (`)`, `;`, `,`, `{`, `}`, `[`, `]`, `~`, `@`) takes its kind from the byte-class table: `ByteClass::Single(TokenKind)`.
-   - **`(` can begin a cast, which PHP lexes as one token.**
+   - **`(` can begin a cast, which PHP lexes as one token.** **Deferred** (after O3, not optimization): until then the parser finds a cast by looking ahead over the flat tokens, as today.
      - `( int )`, `(\tbinary)`, `(real)` and `(void)` (8.5) are `T_*_CAST` tokens: `(`, spaces and tabs only, a cast name in any case, spaces and tabs only, `)`. With a newline or a comment inside, `(\nint)$y` is not a cast, and PHP reports "syntax error, unexpected variable".
      - Today the parser finds a cast by looking ahead over three tokens (`parser/expr.rs:522-535`), so it accepts a newline or a comment inside.
      - The lexer makes cast tokens as PHP does, and `(` is a single-byte token only where no cast follows. The parser's lookahead goes.
@@ -2017,20 +2022,20 @@ Context files need line starts, for duplicate-declaration messages (`duplicate_c
 7. **Native type names are matched without a lowercase copy.** Today `NativeType::from_name` lowercases every type name to match it (`ast.rs:1068`, 135,859 allocations). It matches case-insensitively instead, by the word comparison of step 2.
 8. **A qualified name is one token, as PHP 8 lexes it** (`T_NAME_QUALIFIED`, `T_NAME_FULLY_QUALIFIED`, `T_NAME_RELATIVE` for `namespace\X`), interned from its source slice.
    - Today `parse_qualified_name` builds the name in a `String`, segment by segment, and then interns it (`tokens.rs:283-294`): 321,919 allocations.
-   - **The spaced form is a syntax error in PHP 8:** `new \A \ B` is "syntax error, unexpected token \"\\\"". It is accepted only where the configured versions include 7.x, and reported by item 10's versions check.
+   - **The spaced form is a syntax error in PHP 8:** `new \A \ B` is "syntax error, unexpected token \"\\\"". It is accepted only where the configured versions include 7.x, and reported by item 10's versions check: deferred with that check (after O3, not optimization). Until then the parser joins a name token followed by `\` and a name, so the spaced form is read as today.
    - Item 15's round trip for qualified names is this.
 9. **Numbers with `_` separators are parsed skipping them.** Today the lexer makes a copy without the underscores (`lexer.rs:1022`).
 10. **`strip_leading_backslash` returns a slice,** not a new `String` (`name_resolution.rs:122`: 29,664).
-11. **A doc comment is what PHP calls one:** `/**` followed by a space, tab, `\r` or `\n`. `/**x*/` and `/***/` are plain comments in PHP (`token_get_all`), so `/**@var int $x*/` gives no types and reflection sees no doc. Today any `/**` not followed by `/` is a doc comment (`lexer.rs:990`). Item 10's doc rule depends on this.
-12. **Line breaks after `?>` and in heredocs are PHP's,** item 11's rule applied to two more places.
+11. **A doc comment is what PHP calls one:** `/**` followed by a space, tab, `\r` or `\n`. `/**x*/` and `/***/` are plain comments in PHP (`token_get_all`), so `/**@var int $x*/` gives no types and reflection sees no doc. Today any `/**` not followed by `/` is a doc comment (`lexer.rs:990`). Item 10's doc rule depends on this. **Deferred** (after O3, not optimization), with that rule.
+12. **Line breaks after `?>` and in heredocs are PHP's,** item 11's rule applied to two more places. **Deferred** (after O3, not optimization), with item 11's rule.
     - `?>` takes one following line break: `\r\n`, `\n` or a lone `\r` (`?>\rX` gives `T_CLOSE_TAG("?>\r")`). Today a lone `\r` is left in the inline HTML (`lexer.rs:803-811`), which PHP does not output.
     - A heredoc's lines end at `\n`, `\r\n` or a lone `\r`, and PHP opens and closes `<<<EOT\rhello\rEOT;` across them. Today the scanner splits body lines only at `\n` (`lexer/strings.rs:310-336`), so it misses the closing label and reads the rest of the file as the heredoc's body.
-13. **Heredoc indentation errors are reported, as PHP refuses to compile them.** A body line indented less than the closing marker is "Invalid body indentation level (expecting an indentation level of at least 2)", and tabs and spaces mixed in the indentation are "Invalid indentation - tabs and spaces cannot be mixed". `strip_heredoc_indent` (`strings.rs:784`) strips whatever it finds and reports neither.
-14. **Open tags are PHP's.**
+13. **Heredoc indentation errors are reported, as PHP refuses to compile them.** A body line indented less than the closing marker is "Invalid body indentation level (expecting an indentation level of at least 2)", and tabs and spaces mixed in the indentation are "Invalid indentation - tabs and spaces cannot be mixed". `strip_heredoc_indent` (`strings.rs:784`) strips whatever it finds and reports neither. **Deferred** (after O3, not optimization).
+14. **Open tags are PHP's.** **Deferred** (after O3, not optimization), with item 6's run-time configuration.
     - `<?php` opens PHP only before whitespace (a lone `\r` included) or the end of the file: `<?phpx echo 1;` is inline HTML. Today any case-insensitive `<?php` prefix opens it (`lexer.rs:887-897`).
     - **`<?` is read by `short_open_tag`,** from the run-time configuration item 6 reads. PHP's default is on (`php -n`), and `php.ini-development` turns it off, so the setting decides whether `<? … ?>` is code. Today `<?` is never an open tag. When the setting is unknown, each short tag is reported as code whose meaning depends on it, and is analysed as code.
 
-**Oracle.** O1, and lexer tests over each of PHP's readings above, checked against `token_get_all`. Exact for steps 1-10 and the rest of step 4. Semantic for the casts, the spaced names, and steps 11-14, listed in §11. **Saving.** ≈0.35 G. **Allocations:** ≈0.45 M (M10): `parse_qualified_name` 282,779 (its 321,919 less the 39,140 name allocations item 16 removes; one per new name, 19,570, stays), `NativeType::from_name` 135,859, `strip_leading_backslash` 29,664, and the digit separators 582.
+**Oracle.** O1, and lexer tests over each of PHP's readings above, checked against `token_get_all`. Exact; the casts, the spaced names' versions and steps 11-14 are deferred. **Saving.** ≈0.35 G. **Allocations:** ≈0.45 M (M10): `parse_qualified_name` 282,779 (its 321,919 less the 39,140 name allocations item 16 removes; one per new name, 19,570, stays), `NativeType::from_name` 135,859, `strip_leading_backslash` 29,664, and the digit separators 582.
 
 ### 13. A file's products: the declaration list and one walk (R7; P12 steps 2-4)
 
@@ -2056,17 +2061,17 @@ P12 step 3 was set aside because "it cannot hold references into a tree still be
 **Design.**
 1. **The parser lists the declarations** as it builds them: class-likes, functions, constants and `define()` calls. Each entry holds:
    - the name and kind;
-   - the guard, from the parser's statement stack, following how PHP binds the declaration:
+   - the guard, from the parser's statement stack, following how PHP binds the declaration: **deferred** (after O3, not optimization), with the report of a declaration dead after an exit: until then the guard is today's (`syntax/src/declarations.rs`);
      - a declaration PHP binds at compile time (the first kind above) is guarded only by the conditions it is nested in;
      - any other is guarded by every earlier top-level exit too, conditional or not: `return`, `exit`, `die`, `throw` and `__halt_compiler`. After an unconditional exit it never exists, and is reported as dead code;
      - a class whose parent is declared in another file is bound at compile time only if that file was loaded first, which only the run decides. So it is guarded as possibly declared: both possibilities are kept;
    - the `ImportScope`;
-   - its doc, as item 10's rule picks it. The doc's names are resolved in the entry's own `ImportScope`, since a `use` may stand between the doc and the declaration;
+   - its doc, as item 10 picks it (today's rule while PHP's is deferred). The doc's names are resolved in the entry's own `ImportScope`, since a `use` may stand between the doc and the declaration;
    - the node's id.
    
    **The list is in source order,** which decides collisions: a second unconditional class of the same name merges into the first, and the first wins any conflict (`registry/index.rs:256-345`). Item 9 gives a node its id only when its list commits, after its children. So the parser reserves an entry when a declaration starts and fills in the id at the commit. Anonymous classes are entries of their own, named from item 9's side table, and stay after the named ones as today (`file_declarations.rs:31-32`).
    
-   **A file that defines constants it cannot name is marked so:** `define($name, ..)`, `define(__NAMESPACE__ . '\X', ..)`, `call_user_func('define', ..)`, `('define')(..)`. Today only a literal name is recorded. Readers then know some constant may be defined there.
+   **A file that defines constants it cannot name is marked so:** `define($name, ..)`, `define(__NAMESPACE__ . '\X', ..)`, `call_user_func('define', ..)`, `('define')(..)`. Today only a literal name is recorded. Readers then know some constant may be defined there. **Deferred** (after O3, not optimization).
    
    Declaration building iterates it, and so do the duplicate sites, the incremental path and the opt-in rules over analysed files. They all run while the tree exists. What outlives the tree is copied out on the worker, as item 3 says. The declarations walk, its facts-gated expression walks and the separate declared-classes collection go.
 2. **`ImportScope`s are published once**, at each `namespace` and `use`. Readers start from them.
@@ -2076,7 +2081,7 @@ P12 step 3 was set aside because "it cannot hold references into a tree still be
    - `FileSites` (`GlobalFacts`);
    - the per-file families item 19 moves here from the project-wide passes, registered like the rest.
    
-   **The walk visits in PHP's order of evaluation,** which `InitFlow` records and `BodySummary` ignores.
+   **The walk visits in PHP's order of evaluation,** which `InitFlow` records and `BodySummary` ignores. **Deferred** (after O3, not optimization), with the checker's (item 18): until then the walk visits an assignment's value before its target, as `InitFlow` records today.
    - In an assignment, PHP evaluates the target's operands first, then the value, then stores: `$a[f()] = g()` and `$o->{f()} = g()` print `fg`. A destructuring assignment evaluates the value first: `[$x[f()]] = [g()]` prints `gf`.
    - The short-circuit operators are visited as they run.
    - Today `events_of` records the value's events before the target's (`init_flow.rs:420-422`), so a read in a target's operands comes after reads in the value. That order is corrected, and the change is semantic.
@@ -2097,7 +2102,7 @@ P12 step 3 was set aside because "it cannot hold references into a tree still be
    - `recorded_references` reads the sites in their recorded order. Today it collects and sorts them, and the frames, per file (`deps.rs:55`: 33,273). What else runs under `file_references` is item 14's `DocNames` memo.
    - A declaration's name is its `Name`. Today `Declaration::name` formats it (`declarations.rs:45`: 30,159).
 
-**Oracle.** O1 (declaration lists, guards, contexts, summaries, flows, references), `registry-dump`, O2, and a fixture of the binding cases above, checked against `php`. Exact, except the semantic changes listed in §11: guards by PHP's binding, constants a file defines under names it cannot spell, and the order of evaluation in `InitFlow`.
+**Oracle.** O1 (declaration lists, guards, contexts, summaries, flows, references), `registry-dump`, O2, and a fixture of the binding cases above, checked against `php`. Exact; guards by PHP's binding with the report of dead declarations, constants a file defines under names it cannot spell, and the order of evaluation in `InitFlow` are deferred.
 
 **Saving.** ≈0.45 G, estimated: the declarations walk (≈140 M around its builders) and its eight callers' walks, and the traversal of two of the three body walks (`InitFlow::of` and `GlobalFacts::of`, 218.5 M each, of which their builders' own work stays). This profile does not separate a walk's traversal from its builders'.
 
@@ -2111,10 +2116,10 @@ P12 step 3 was set aside because "it cannot hold references into a tree still be
    - **The text grammar's callers, by kind:**
      - text from the configuration (`restricted_symbol_usage.rs`, `constant_resolver.rs:40`) goes through `phpdoc::parse_type`;
      - texts written in our Rust source (`stubs.rs`, `predefined_constants.rs`, `mysqli.rs`, `assertion_table.rs`, `probe_checks.rs`, `narrowing/*`, `result_shape.rs`, `native_type_hints.rs:197`) are built once into `static` tables (25 G §11.7). Today they are parsed again on every call once the memo is gone: `parse_type_string` runs 6,718 times;
-     - **a class name from code becomes `Type::object(name)`,** with `self`, `static` and `parent` as today. Today `infer_class_const_type` parses it as PHPDoc (`function_sig.rs:529`), whose keywords match `integer`, `double`, `boolean`, `resource`, `numeric` and `scalar` in any case. So `const A = Integer::MAX;` reads as an `int` constant, though `class Integer`, `class Resource` and `class Numeric` are valid PHP (`php` 8.5: `Integer::MAX` gives the class's 9);
+     - **a class name from code becomes `Type::object(name)`,** with `self`, `static` and `parent` as today. **Deferred** (after O3, not optimization): until then it goes through `phpdoc::parse_type`, read as today. Today `infer_class_const_type` parses it as PHPDoc (`function_sig.rs:529`), whose keywords match `integer`, `double`, `boolean`, `resource`, `numeric` and `scalar` in any case. So `const A = Integer::MAX;` reads as an `int` constant, though `class Integer`, `class Resource` and `class Numeric` are valid PHP (`php` 8.5: `Integer::MAX` gives the class's 9);
      - a test of whether one word is a type keyword (`phpdoc_unresolvable.rs:258`, `:347`) asks `types::type_keyword`.
    - **What stays of the text grammar:** `native_type`; `keyword_type`, built from the keyword table rather than by parsing (it calls `parse_type_string` today, `parse.rs:913`); `is_reserved_type_word`; `canonical_int_key`; `display_shape_key`; and `parse_display.rs`, the different grammar that reads displayed types for the gate and the tests (`gate/type_drift.rs:196-197`, `gate.rs:385`, `tests/runtime_oracle.rs:223`). The rest of `parse.rs` is deleted.
-   - **`mentions_mixed` is set by the lowering, from the node.** Today `text_mentions_mixed` finds the word `mixed` between non-identifier bytes (`parse.rs:1443-1458`), so `App\Mixed\Foo`, a valid class, counts as explicit `mixed`.
+   - **`mentions_mixed` is set by the lowering, from the node.** **Deferred** (after O3, not optimization): until then it is read from the text, as today (`text_mentions_mixed` stays). Today `text_mentions_mixed` finds the word `mixed` between non-identifier bytes (`parse.rs:1443-1458`), so `App\Mixed\Foo`, a valid class, counts as explicit `mixed`.
 2. **Resolution memoized as §11.7 designed.**
    - The memo is per file, keyed by `(written Type, context id)`.
      - The written `Type` is the interned node P7's lowering gives. The entry holds it, as `b081be75`'s memo does, so no address is reused while the entry lives. A `TypeNode` cannot be the key: after step 7 it is an index into one owner's arena.
@@ -2169,11 +2174,11 @@ P12 step 3 was set aside because "it cannot hold references into a tree still be
 **Oracle.**
 - **For every type node of the fixtures, the vendor tree and the corpus,** `lower(node)` against `parse_written_type(node.to_source_string())`, taken before the text grammar is deleted (25 G §11.7). Every difference is listed in §11 as semantic:
   - escaped quotes: the literal printer does not escape them (`grammar/ast.rs:435`), so `"don't"|"do"` prints as `'don't'|'do'`, which `split_top_level` reads as one literal (`parse.rs:300-317`); the lowering gives the two literals;
-  - `mentions_mixed` read from the node;
-  - identifiers by their bytes (`Price€`, non-UTF-8 names);
+  - `mentions_mixed` read from the node (deferred);
+  - identifiers by their bytes (`Price€`; non-UTF-8 names wait with item 15's names as bytes);
   - the unified winners (`@phan-real-return`, `@phan-param-out`);
   - a `//` inside a literal type;
-  - class constants of classes named like type keywords (`Integer::MAX`).
+  - class constants of classes named like type keywords (`Integer::MAX`, deferred).
 - `registry-dump` (every docblock's resolved types), the PHPDoc resolution record, O2 with every cache state (cold, warm, written, read).
 - **O1's references and doc sites, the edit replay and the server session.** `DocNames` feeds `recorded_references` (`deps.rs:63-75`), which feeds dependents and `walk_affected`; a name lost there shows only as a stale diagnostic after an edit, which no full run sees. Item 0's O1 prints each doc site's `DocBlock`, every field canonically, so the fields no reflection carries (closures' docs, `optional_params`, `invalid_tag_values`, `parse_errors`, flags) are compared too.
 
@@ -2226,7 +2231,7 @@ Exact otherwise. **Saving.** ≈0.35 G, and the second parse of every doc (144.0
     - the key table resolves property names through text (37 K);
   - then `narrowing`, `calls`, member-usage tokens, `project`, `types` and `phpdoc` by module.
 - **The end state** deletes `TableKey for str` and `FoldKey for str` from the registry. The compiler then lists every caller still holding text. Text that enters from outside (configuration, a class named in a string literal) is interned once where it enters.
-- **A name is its bytes.** PHP's identifiers are bytes: the lexer takes any byte from `0x80` up, and `class \xA9` and `class \xAA` are two classes (item 9).
+- **A name is its bytes.** PHP's identifiers are bytes: the lexer takes any byte from `0x80` up, and `class \xA9` and `class \xAA` are two classes (item 9). **Deferred** (after O3, not optimization), with everything under it: the escape, fixes as bytes, `Name`'s serialized bytes, run-time strings by PHP's rules, ASCII folding everywhere and open documents' encodings. Until then a `Name` holds its text, as today.
   - `Name` holds `[u8]` and compares with PHP's ASCII-only case folding, as it does today (`name.rs:41`). `Deref<Target = str>` goes, and the compiler lists every reader of a name as text.
   - **Where a name's text is shown, a byte outside valid UTF-8 is `\x{A9}`.**
     - `\xA9` would be ambiguous, since `\` is PHP's namespace separator: in `php` 8.5, `namespace Foo; class xA9 {} class \xA9 {}` declares two classes, `466f6f5c784139` and `466f6f5ca9`, and both would print as `Foo\xA9`.
@@ -2251,7 +2256,7 @@ Exact otherwise. **Saving.** ≈0.35 G, and the second parse of every doc (144.0
 
 The purity and property-write keys went by item 4, as ids.
 
-**Oracle.** O2, `registry-dump`, `--dump-types`, `--dump-expr-types`, every cache state, the server session, and a fixture checked against `php`: `class \xA9` beside `class \xAA`, `Foo\xA9` in ASCII beside `Foo\` followed by the byte `0xA9`, `Été` beside `éTé`, string names with zero, one and two leading backslashes, and a Latin-1 document opened in the server. Exact, except the changes listed in §11: names that differ only in bytes outside UTF-8 are distinct and print with `\x{NN}`; names fold ASCII only where Unicode's lowercasing was used; string values name classes, functions and constants by PHP's rules; and the container-field facts' keys become canonical array keys (C4 step 5: `'1'` and `1` one key). Static-property keys by resolved class are already built (`2d1e6c45`). **Saving.** ≈0.6 G.
+**Oracle.** O2, `registry-dump`, `--dump-types`, `--dump-expr-types`, every cache state, the server session, and a fixture checked against `php`: `class \xA9` beside `class \xAA`, `Foo\xA9` in ASCII beside `Foo\` followed by the byte `0xA9`, `Été` beside `éTé`, string names with zero, one and two leading backslashes, and a Latin-1 document opened in the server. Exact, except the change listed in §11: the container-field facts' keys become canonical array keys (C4 step 5: `'1'` and `1` one key). Names as bytes with their escape, ASCII folding everywhere, string values named by PHP's rules and documents' encodings are deferred, with their fixtures. Static-property keys by resolved class are already built (`2d1e6c45`). **Saving.** ≈0.6 G.
 
 **Two sites need a word more:**
 - **Name resolution builds text to intern it.** `qualify` and `resolve_as` (`name_resolution.rs:382`, `:423-425`; ≈315 K) format the joined name into a `String`. Instead, the interner hashes the parts as one text and compares a candidate part by part, so an existing name is found without building its text. Only a new name allocates.
@@ -2353,7 +2358,7 @@ Each cached file is read whole only to hash it for its entry's key (`session.rs:
      - BLAKE3 is cryptographic. It picks its SIMD at run time behind a safe API, NEON included, and builds its assembly with `cc`, which the release builds already run for `pcre2-sys`.
      - An estimated few tens of ms of CPU over the under 70 MB of source a cold run reads, spread over the workers. A warm run hashes only what `stat` cannot clear.
    - **The server writes neither the index nor the base from its overlays.** Under item 15, an open document's overlay can differ from the disk bytes (an unsaved edit, or a document analysed as UTF-8 because no encoding matched), so the next CLI run would find the disk file's stat unchanged and take the overlay's hash and declarations for it. The index and the base record only what was read from disk: the server writes the base at its initial load, before applying overlays, and updates index entries only for files it reads from disk (watched-file events, `didSave`). An overlay's products may go into the per-file cache, which is addressed by content.
-2. **The per-file cache's key covers everything a parse reads.**
+2. **The per-file cache's key covers everything a parse reads.** **Deferred** (after O3, not optimization), with what makes a parse read more (item 10's versions, item 12's `short_open_tag`): until then the key covers what a parse reads today.
    - Today it covers the bytes, the path, `is_stub`, `index_use_sites` and the build (`file_cache.rs:164-176`, `:69`).
    - Two items make a parse read more. Item 10 reads a file as the newest configured version reads it, which decides which declarations exist (`#[Attr] function f() {}` on one line is a comment before 8.0; `enum` and `readonly` are names before 8.1), and checks the constructs the configured versions read otherwise. Item 12 reads `<?` by `short_open_tag`.
    - So the key adds the configured version set and `short_open_tag` as resolved (on, off or unknown). An entry parsed for one configuration is never served to another.
@@ -2366,7 +2371,7 @@ Each cached file is read whole only to hash it for its entry's key (`session.rs:
      - **its file list,** in load order: each context file's role, path relative to its root, Composer owner and content hash. Absolute roots are joined at load, so one base serves every checkout of the same tree.
    - **Keyed by the build and the resolved inputs the load and the finishing passes read,** not by the context files' contents, which the file list holds. Were the contents in the key, a changed context file would change it, no base would match, and the path that applies changed files could never run. PHPStan's result cache keeps the same split: `getMeta()` decides whether the cache can be used at all, and per-file hashes inside it decide what to analyse again (`ResultCacheManager.php:2133-2148`).
      - **The key is a hash of the resolved `ProjectSettings`, made by destructuring it** (`project.rs:478-520`). A new field fails to compile until it is classed as tracked or untracked, as rustc classes its options `[TRACKED]` and `[UNTRACKED]` for its incremental hash.
-     - **Tracked:** the version set and its source (the configuration, or `composer.json`'s `config.platform.php` or `require.php`, `session.rs:232-243`, `:460-464`); `composer.json`'s platform and `require.php`, `installed.json` and the lock file; item 6's run-time evidence (`platform_check.php`'s content hash, the configured extension list, or the configured `php` binary's answers, `php -m`, its version and `short_open_tag`, asked once per run, or recorded with the binary's stat under step 1's rule); the user stub and bootstrap files with their hashes; the active extensions (`ActiveExtensions::resolve`, `session.rs:465-467`); and the rule settings the finishing passes read.
+     - **Tracked:** the version set and its source (the configuration, or `composer.json`'s `config.platform.php` or `require.php`, `session.rs:232-243`, `:460-464`); `composer.json`'s platform and `require.php`, `installed.json` and the lock file; item 6's run-time evidence, once its deferred step 2 lands (`platform_check.php`'s content hash, the configured extension list, or the configured `php` binary's answers, `php -m`, its version and `short_open_tag`, asked once per run, or recorded with the binary's stat under step 1's rule); the user stub and bootstrap files with their hashes; the active extensions (`ActiveExtensions::resolve`, `session.rs:465-467`); and the rule settings the finishing passes read.
      - **Untracked:** settings the checker alone reads, the level and most rules among them.
    - **Stored as the stub base is:** item 6's container, records read and decoded lazily, names in one table (item 6), ids by record index (item 4). Item 6's step 6 keys it with the build's inputs.
    - **A cold run** inserts the context files, runs the finishing passes, and writes the base. It then inserts the analysed files and finishes through the incremental path, over the changed names' closure.
@@ -2380,7 +2385,7 @@ Each cached file is read whole only to hash it for its entry's key (`session.rs:
 
 **Oracle.**
 - **Against the baseline:** item 0's dumps (O2 and `registry-dump`), with the base absent, written and read. Comparing a warm run with the new cold run alone cannot catch a closure that misses a dependency, since both would share the error.
-- **An edit replay across two runs:** a context file edited, added, deleted and renamed; `composer.json`'s PHP range changed (entries parsed again, step 2); `platform_check.php` or the extension list changed; a rule the checker alone reads changed (the base reused); the context order changed.
+- **An edit replay across two runs:** a context file edited, added, deleted and renamed; `composer.json`'s PHP range changed (entries parsed again once step 2 lands); `platform_check.php` or the extension list changed; a rule the checker alone reads changed (the base reused); the context order changed.
 - **`stat`'s cases:** a file rewritten within one mtime tick with the same size, and one whose mtime is restored, must both be read again; on Linux, macOS and Windows in CI.
 - **The server:** item 0's server session loading from the base, and an overlay that differs from the disk never reaching the index or the base.
 - The incremental tests.
@@ -2407,8 +2412,8 @@ A cold run pays one more incremental finishing, over the analysed files' closure
    - step 1 deletes C5's interim `statement_method_call` record (`calls/misc_rules.rs:49-58`), because the statement rules become the first observer family;
    - the PHPStan-API walker becomes its family, registered by `mentions_phpstan` or the ancestry fact;
    - a literal's type is computed once per node per pass (`string_literal_ref` 86.0 M);
-   - **`process_expr` evaluates in PHP's order,** the order item 13's walk follows, so a rule sees each operand's type in the scope it ran in. In an assignment (plain, compound, `??=`, by reference), first the target's operands (receiver, dims, property and static names), then the value (for `??=`, only on the branch where the target is null), then the store. In a destructuring, the value first, then each target's operands in order. `php` 8.5: `$a[$i++] = $i` gives `[0 => 1]`, and `[$c[$j++]] = [$j]` gives `[0 => 0]`. Today the checker types the value first (`expr.rs:2002-2008`) and the target after it (`:2047`), so it types `$a[$i++] = $i`'s value as `0`;
-   - **the member-usage family counts a member as used when any access may reach it:** a receiver whose type may be the class, a dynamic name whose type may be its name, an array or string callable whose type may name it however uncertain, and an access inside a closure the class may rebind. A member is reported only when no access can reach it. PHPStan's `UnusedPrivateMethodRule`, which §12.10 cites for the mechanism, skips an array callable that is not certainly callable (`UnusedPrivateMethodRule.php:154`), so `call_user_func([$this, $name])` with `$name` a `string` lets every private method be reported unused, though any of them may be the one called.
+   - **`process_expr` evaluates in PHP's order,** the order item 13's walk follows, so a rule sees each operand's type in the scope it ran in. In an assignment (plain, compound, `??=`, by reference), first the target's operands (receiver, dims, property and static names), then the value (for `??=`, only on the branch where the target is null), then the store. In a destructuring, the value first, then each target's operands in order. `php` 8.5: `$a[$i++] = $i` gives `[0 => 1]`, and `[$c[$j++]] = [$j]` gives `[0 => 0]`. Today the checker types the value first (`expr.rs:2002-2008`) and the target after it (`:2047`), so it types `$a[$i++] = $i`'s value as `0`. **Deferred** (after O3, not optimization), with item 13's order: until then the checker keeps today's;
+   - **the member-usage family counts a member as used when any access may reach it:** a receiver whose type may be the class, a dynamic name whose type may be its name, an array or string callable whose type may name it however uncertain, and an access inside a closure the class may rebind. A member is reported only when no access can reach it. PHPStan's `UnusedPrivateMethodRule`, which §12.10 cites for the mechanism, skips an array callable that is not certainly callable (`UnusedPrivateMethodRule.php:154`), so `call_user_func([$this, $name])` with `$name` a `string` lets every private method be reported unused, though any of them may be the one called. **Deferred** (after O3, not optimization): until then the family counts as today's walker does.
 2. **C1 step 5's tail.**
    - Effects are carried in the statement result, so `noop::expr_side_effects`' walk (`noop.rs:51`, 30.7 M) goes.
    - So is `has_yield`.
@@ -2505,9 +2510,9 @@ A cold run pays one more incremental finishing, over the analysed files' closure
 - The replay assertion: a test build runs an observed pass from each fixpoint entry and asserts that its reports equal the replay's (25 G §12.10).
 - §12.11's differential test over random member lists and every union the corpus run builds, comparing the n-ary result with the left fold; its differences are listed before step 5 lands, since a fold and one pass can differ.
 - A debug assertion that the radix arrays' merge over the diff equals the full merge (C4's, for the new structure).
-- Fixtures for the order of evaluation, the computed-name forms and the member-usage family, checked against `php`.
+- Fixtures for the computed-name forms, checked against `php`; the order of evaluation's and the member-usage rule's wait with them.
 
-Semantic, listed in §11: §12.10's families, the order of evaluation, the member-usage family, and §12.11's single pass where it differs from the fold. Exact otherwise.
+Semantic, listed in §11: §12.10's families and §12.11's single pass where it differs from the fold; the order of evaluation and the member-usage rule are deferred. Exact otherwise.
 
 **Memory and allocations.** The check phase makes 3.61 M allocations (M10), the `@var` messages F1 defers included and the case-reference copies of step 9 given to item 8. What they leave:
 - the results;
@@ -2545,7 +2550,7 @@ The autoload thread (321.4 M, off the critical path) keeps the one parser, as P1
 - **A batch run frees each analysed tree when its file's check ends.**
   - The check takes the tree out of the file's state and owns it for the length of the job.
   - **Each worker takes the largest file left.** Today `map_on_pool_largest_first` sorts the files and then runs `par_iter().with_max_len(1)` (`project.rs:460-468`). rayon splits that in halves: the first worker starts at the largest, and a thief takes the oldest pending half, so the second worker starts at the middle of the list. That order is neither largest-first for freeing nor longest-first for wall time. Files are taken from a queue in descending cost instead: one `spawn_fifo` per file, in sorted order, within a `scope_fifo`, or a shared atomic cursor each worker advances.
-  - **The private-property judgment keeps every write PHP can make.** A private property is written from outside its class: in `php` 8.5, `Closure::bind(fn..., $o, C::class)()`, `(function () { $this->p = 7; })->call($o)` and `(new ReflectionProperty(C::class, 'p'))->setValue($o, null)` each set `C::$p` from another scope, and each works from any file. Today `judge_property_types` gathers writes only from the files declaring the class or a trait it uses (`project.rs:2185-2220`), on the premise that "only for those can every write be seen" (`property_type_too_wide.rs:8-9`), so a type only such a write assigns is reported as never assigned.
+  - **The private-property judgment keeps every write PHP can make.** A private property is written from outside its class: in `php` 8.5, `Closure::bind(fn..., $o, C::class)()`, `(function () { $this->p = 7; })->call($o)` and `(new ReflectionProperty(C::class, 'p'))->setValue($o, null)` each set `C::$p` from another scope, and each works from any file. Today `judge_property_types` gathers writes only from the files declaring the class or a trait it uses (`project.rs:2185-2220`), on the premise that "only for those can every write be seen" (`property_type_too_wide.rs:8-9`), so a type only such a write assigns is reported as never assigned. **Deferred** (after O3, not optimization), with the two points below on bound closures and reflection; the third, outside files running only the property-write family over today's writes, stays.
     - The writes recorded during the checks include those made in closures bound or called with an object or scope that may be the class (`Closure::bind`, `bindTo`, `call`, `fromCallable` on a bound closure), and `ReflectionProperty::setValue` on a name that may be the property. A file whose facts mention rebinding or reflection (`MENTIONS_REBIND`, `project.rs:2289`) contributes them.
     - Where such a write's class or property cannot be narrowed, the properties it may reach are not judged.
     - Files outside the batch that declare a writer class or a used trait are parsed again through `ast_of` and run through item 18's traversal with only the property-write family registered, on those classes' declarations only. Today they get a full check, every rule, for their writes alone (`project.rs:2224-2228`).
@@ -2562,10 +2567,10 @@ The autoload thread (321.4 M, off the critical path) keeps the one parser, as P1
 - O2's whole-program diagnostics, and each moved pass's output compared with today's over the corpus, pass by pass.
 - The server session and its edit replay (item 0), once more with the tree cache's budget at zero, so that every recheck parses again and a reader that still depends on a kept tree shows.
 - A closed file changed on disk with no event before a dependent's recheck.
-- Fixtures of `Closure::bind`, `bindTo`, `call` and `ReflectionProperty::setValue` writes to private properties, checked against `php`.
+- Fixtures of `Closure::bind`, `bindTo`, `call` and `ReflectionProperty::setValue` writes to private properties, checked against `php`, deferred with them.
 - The `oracle` build, whose assertions every dump must pass.
 
-Exact, except the private-property judgment, listed in §11.
+Exact; the private-property judgment's writes from bound closures and reflection are deferred.
 
 **Memory.**
 - **In a batch run,** the analysed trees are freed as the check proceeds rather than kept to the end: 173 MB at exit today, about half that after item 9.
@@ -2574,7 +2579,7 @@ Exact, except the private-property judgment, listed in §11.
 
 ## 11. Validation at the end of each item
 
-**When.** An item is validated when its last row lands, before the next item's first row. Between rows only `cargo fmt`, `cargo check` and clippy run. A failure is fixed in its own commit, within the item, and only what failed runs again, from the saved binaries where they still apply. Item 0's validation is its baseline (item 0, step 4), with the tests and the fixtures, and is compared with no earlier commit. Two items have steps that wait for item 9: item 3's scratch store for item 9's step 2, and item 6's step 2 for the stub rules' versions (item 9, step 5). Each is built right after the step it waits for and validated with item 9, whose comparison then also admits item 6's step-2 changes.
+**When.** An item is validated when its last row lands, before the next item's first row. Between rows only `cargo fmt`, `cargo check` and clippy run. A failure is fixed in its own commit, within the item, and only what failed runs again, from the saved binaries where they still apply. Item 0's validation is its baseline (item 0, step 4), with the tests and the fixtures, and is compared with no earlier commit. Item 3's scratch store waits for item 9's step 2, and is built right after it and validated with item 9. Item 6's step 2, which waits for the stub rules (item 9, step 5), is deferred. The deferred rows are validated together after O3 (ledger row D.V), against V.2's snapshot.
 
 **Against what.** Each item's dumps are compared with the previous item's validated ones, item 1's with item 0's baseline. So every difference belongs to the item being validated, and it must be one of the semantic changes that item names (below); an item that names none gives identical dumps. Each item's dumps are its last commit's snapshot in the store, by the commit's full hash (`.corpus-runs/gate/store.git`, `refs/snapshots/<commit>`, `.corpus-runs/README.md`). `xtask compare` is the store's `git diff` between two snapshots: each entity against the one of the same path, wherever either stands, and the order of emission apart, in each directory's `.order`.
 
@@ -2588,16 +2593,16 @@ Exact, except the private-property judgment, listed in §11.
 7. the item's state in the ledger and its one-line state in `WORK_STACK.md`.
 
 **What an item adds to its own validation:**
-- **item 0:** the runtime oracle with generated calls on every version's image from 7.0 to 8.5, as the PHP catalog builds them with every extension, with no fixture opted out for an assumption the assumed types remove; the recorder on every image as the PHP catalog's oracle, the iterators' states and the construct forms included; the catalog's traced call graph and allocators' contract on every image, its reading against clang's LLVM IR, and PTABen; the catalog regenerated, giving the checked-in files.
+- **item 0:** nothing beyond the steps above. The runtime oracle on every version image, the deferred rows' fixtures and the PHP catalog's oracles wait with those rows (ledger row D.V).
 - **item 1:** the server's first dumps against the CLI's join the equalities;
 - **item 6:** its tests (a file replaced while a reader holds it, a corrupt record, and `SOURCES_HASH` against the embedded files); the platforms job, below, with the file-replacement test;
 - **item 7:** the relation memo on against off joins the equalities;
-- **item 10:** the versions check's 7.x readings through `docker`;
-- **item 12:** the spaced names' 7.x readings through `docker`;
+- **item 10:** none; the versions check's 7.x readings through `docker` wait with the check;
+- **item 12:** none; the spaced names' 7.x readings through `docker` wait with the versions check;
 - **item 14:** the lowering oracle, which compares with the text grammar the item deletes, so it reads what item 0 recorded: each type node is lowered again and compared with the type today's round trip gave it;
-- **item 15:** a Latin-1 document opened in the server session;
+- **item 15:** none; a Latin-1 document opened in the server session waits with documents' encodings;
 - **item 16:** the `loom` tests of the interner's protocol, and the interner's leak test after the edit replay;
-- **item 17:** its `stat` cases, here and on the platforms job; the per-file cache written under one configuration (the versions, `short_open_tag`) and read under another, against that one's cache-off run (step 2); the base absent, written and read; its edits between two runs, as the item lists them; and a warm run, which leaves the cache directory byte for byte as it found it;
+- **item 17:** its `stat` cases, here and on the platforms job; the base absent, written and read; its edits between two runs, as the item lists them; and a warm run, which leaves the cache directory byte for byte as it found it;
 - **item 18:**
   - the union oracle, which compares with the fold the item deletes, so it reads what item 0 recorded: each union is built again from its operands and compared with today's result (§12.11's differential test);
   - the `oracle` build carries the replay assertion and the merge-over-diff assertion;
@@ -2608,51 +2613,54 @@ Exact, except the private-property judgment, listed in §11.
 **Platforms.** CI runs on `ubuntu-24.04` only (`rust-ci.yml:18`), while the release builds for `macos-26` and `windows-2025-vs2026` (`release.yml:33-53`). A CI matrix job on those two runs item 6's file-replacement test from item 6's validation on, and item 17's `stat` cases from item 17's, and each result is recorded.
 
 **The semantic changes, by item.** At an item's validation, every difference from the previous item's dumps must be one of its own:
-  - **item 0:** a builtin runs and writes what its php-src implementation may make it run and write, on the configured versions (the PHP catalog), where it ran what a recording on 8.5 saw and every override of its own object's methods, and wrote only its by-reference parameters; a builtin no source covers writes anything; a declaration calling only builtins the catalog finds effect-free may be proven pure, where none could; a dead function or class declared twice is reported at each declaration; the whole-program checks match references as PHP resolves names (case, an unqualified call's fallback, attributes, constants apart), and so do references and rename in the server; a namespace cycle is reported at its first analysed declaration, where it went unreported when its first class was a context or stub one, edges to builtins go and an anonymous class's edges start from its namespace (fast validation, step 1); the fixes found in step 1: what a call may write, by storage, forgotten after it (object properties by field and type, static properties, globals, static variables, captures and references), calls bounded by the class hierarchy and builtins by what they call, captures by reference entered with every type written while shared, and `array_reduce` with its initial value; the one found in step 2: past the union cap, class-strings fold to one class-string and callables to `callable`, where the union was `mixed`; and the one found in item 0's validation: a stub no run of PHP has seen, declared pure and taking no code, writes nothing;
+  - **item 0:** a dead function or class declared twice is reported at each declaration; the whole-program checks match references as PHP resolves names (case, an unqualified call's fallback, attributes, constants apart), and so do references and rename in the server; a namespace cycle is reported at its first analysed declaration, where it went unreported when its first class was a context or stub one, edges to builtins go and an anonymous class's edges start from its namespace (fast validation, step 1); the fixes found in step 1: what a call may write, by storage, forgotten after it (object properties by field and type, static properties, globals, static variables, captures and references), calls bounded by the class hierarchy and builtins by what they call, captures by reference entered with every type written while shared, and `array_reduce` with its initial value; the one found in step 2: past the union cap, class-strings fold to one class-string and callables to `callable`, where the union was `mixed`; and the one found in item 0's validation: a stub no run of PHP has seen, declared pure and taking no code, writes nothing;
     - the fix's precision: a closure's writes count where it may run, not where it is made; a call through a parameter writes what each call's argument may write, not anything; a capture at a file's top level is entered as at any other scope, not as `mixed`;
-    - the claims: a PHPDoc type or marker is used where the analysis verifies it everywhere it can be broken, the native type elsewhere; a violation hidden by the level, ignored or baselined drops its claim; context bodies are checked, not reported, for the claims the analysed code relies on; inline `@var` narrows only what it proves, a narrower one reported (`varTag.unproven`); each dropped claim reported at its declaration (`phpDoc.unverified`);
-    - the open world: none in a closed run; under `open_paths`, outside callers, overrides, implementations, subclasses, writers and registrations are code not known, exact classes stay closed, and the whole-program checks take the open API as used;
-    - the implicit calls: what a magic method, a property hook, a lazy object's initializer, a destructor (at every release, and through the cycle collector at every release that may leave a value collectable), an autoloader, an error handler, an output-buffer callback, a tick or signal handler, a fiber's callable, or an included file may write is forgotten where PHP may run it, and a release proven not the last runs no destructor; a generator function's call writes nothing of its body, the generator's resumptions write what the body may write, and its release what its `finally` blocks write;
-    - the assumed types:
-      - int operations give the float PHP gives past `PHP_INT_MAX` or `PHP_INT_MIN`, as literals where its values are few, with what PHP does with the float;
-      - an open end of an int range is its limit, so `int<0, max>` and `int<0, PHP_INT_MAX>` are one type;
-      - comparisons narrow ints exactly;
-      - an array's count is bounded by the engine's maximum array size;
-      - an array read at a key not proven present gives `null` too, and is reported where PHP raises a warning (a notice before 8.0); the same holds for string offsets; `report_possibly_nonexistent_general_array_offset` goes;
-      - a nested write at such a key makes the element from nothing;
-      - a property read where the type leaves the property's presence unknown gives `null` too, and is reported where PHP warns;
-      - every builtin returns and throws what the catalog finds on a path its arguments may take, where its stub said less;
-      - a declaration throws what its body may throw, settled over the call graph, its `@throws` checked against that and no longer taken in its place; an operation throws what the catalog says for its operands' types; so a `catch` is entered from every point that may throw what it catches;
-      - a builtin iterator's `current()` and `key()` off a valid position give and throw what PHP does, and exactly the stub's types where `valid()` proved the position.
+    - the implicit calls built before their deferral: what a property's magic method, an `ArrayAccess` or `Countable` method, `__toString`, `__clone`, an iterator's methods or a property hook may write is forgotten where PHP may run it, over the class hierarchy of the operand's type, and a property's magic methods run also where the program may unset it;
+    - **deferred with their rows, and listed here for when they come back:**
+      - the PHP catalog: a builtin runs and writes what its php-src implementation may make it run and write, on the configured versions, where it ran what a recording on 8.5 saw and every override of its own object's methods, and wrote only its by-reference parameters; a builtin no source covers writes anything; a declaration calling only builtins the catalog finds effect-free may be proven pure, where none could;
+      - the claims: a PHPDoc type or marker is used where the analysis verifies it everywhere it can be broken, the native type elsewhere; a violation hidden by the level, ignored or baselined drops its claim; context bodies are checked, not reported, for the claims the analysed code relies on; inline `@var` narrows only what it proves, a narrower one reported (`varTag.unproven`); each dropped claim reported at its declaration (`phpDoc.unverified`);
+      - the open world: none in a closed run; under `open_paths`, outside callers, overrides, implementations, subclasses, writers and registrations are code not known, exact classes stay closed, and the whole-program checks take the open API as used;
+      - the implicit calls: what a magic method, a property hook, a lazy object's initializer, a destructor (at every release, and through the cycle collector at every release that may leave a value collectable), an autoloader, an error handler, an output-buffer callback, a tick or signal handler, a fiber's callable, or an included file may write is forgotten where PHP may run it, and a release proven not the last runs no destructor; a generator function's call writes nothing of its body, the generator's resumptions write what the body may write, and its release what its `finally` blocks write;
+      - the assumed types:
+        - int operations give the float PHP gives past `PHP_INT_MAX` or `PHP_INT_MIN`, as literals where its values are few, with what PHP does with the float;
+        - an open end of an int range is its limit, so `int<0, max>` and `int<0, PHP_INT_MAX>` are one type;
+        - comparisons narrow ints exactly;
+        - an array's count is bounded by the engine's maximum array size;
+        - an array read at a key not proven present gives `null` too, and is reported where PHP raises a warning (a notice before 8.0); the same holds for string offsets; `report_possibly_nonexistent_general_array_offset` goes;
+        - a nested write at such a key makes the element from nothing;
+        - a property read where the type leaves the property's presence unknown gives `null` too, and is reported where PHP warns;
+        - every builtin returns and throws what the catalog finds on a path its arguments may take, where its stub said less;
+        - a declaration throws what its body may throw, settled over the call graph, its `@throws` checked against that and no longer taken in its place; an operation throws what the catalog says for its operands' types; so a `catch` is entered from every point that may throw what it catches;
+        - a builtin iterator's `current()` and `key()` off a valid position give and throw what PHP does, and exactly the stub's types where `valid()` proved the position.
   - **item 1:**
-    - a file reached through a link is loaded once and reported under its resolved path, with `__FILE__` and `__DIR__` resolved;
+    - a file reached through a link is loaded once and reported under its resolved path, with `__FILE__` and `__DIR__` resolved (deferred);
     - a file both analysed and context is analysed, once;
     - overlapping configured paths are checked once;
     - the server reads non-UTF-8 files as bytes;
     - the server treats stub paths as stubs;
     - the server resolves its configuration as the CLI does;
     - the server publishes the whole-program diagnostics and parse errors;
-  - item 2: a tree with a link cycle is listed once, not until `ELOOP`;
+  - item 2: none; a tree with a link cycle listed once, not until `ELOOP`, is deferred with item 1's identity;
   - item 4: the order in which code iterating a class's methods meets them, where anything depends on it;
-  - item 6: guards decided by the stubs' availability, on run-time evidence; a stub's parameters and types by the configured versions; and the new polyfill-signature check;
-  - item 7: constants on a cycle read as `never` and reported;
+  - item 6: none; guards decided by the stubs' availability on run-time evidence, a stub's parameters and types by the configured versions, and the new polyfill-signature check are deferred;
+  - item 7: constants on a cycle read as `never`; their report is deferred;
   - item 8: a `@property` tag shadowed by a declared property checked against the tag's own names;
-  - item 9: the stub rules apply only to stub sources;
-  - item 10: `__COMPILER_HALT_OFFSET__` as its file's offset, with the new check of its use elsewhere; `__halt_compiler` followed by anything but `( ) ;` or `( ) ?>` is a syntax error; a broken file's error is its first one; a declaration's doc is the one PHP gives it, with the new check of a doc given away; and the new check of source the configured versions lex differently;
-  - item 11: lines end at a lone `\r` as at `\n`, and so does a `//` or `#` comment;
-  - item 12: casts as PHP's single tokens; spaced qualified names a syntax error on 8.x; doc comments only with whitespace after `/**`; `?>` and heredoc lines ending at a lone `\r`; heredoc indentation errors; `<?php` open only before whitespace, and `<?` by `short_open_tag`, with a report at each short tag when the setting is unknown;
-  - item 13: declarations exist as PHP binds them: run-time-bound ones are guarded by every earlier exit (`exit`, `die` and `throw` included) and are dead after an unconditional one, and a class whose parent is in another file is possibly declared; a file that defines constants it cannot name (`define($name, ..)`, a name built from the namespace, `call_user_func('define', ..)`, `('define')(..)`) may define any constant, so fewer constants are reported as not found; `InitFlow` in PHP's order of evaluation;
-  - item 14: the readings the lowering oracle lists (escaped quotes, `mentions_mixed` from the node, identifiers by their bytes, a `//` inside a literal type, `Integer::MAX`), and one winner rule for every tag (`@phan-real-return`, `@phan-param-out`);
-  - item 15: names that differ only in bytes outside UTF-8 are distinct (the lexer keeps the bytes, item 9) and print with `\x{NN}`; names fold ASCII only where Unicode's lowercasing was used; string values name classes, functions and constants by PHP's rules (one leading backslash, no trimming); container-field keys canonical as PHP's array keys; in the server, an open document read as the bytes its encoding gives, and one whose encoding is not found analysed as UTF-8, with a diagnostic; a fix writes a name's bytes;
-  - item 18: the rule families of §12.10; the rules that read the statement result where it differs from today's side walks (`finally` overrides, `try`/`catch` and throws, no-op statements, loops' constant conditions); types in PHP's order of evaluation (an assignment's target operands before its value, a destructuring's value first); a member counted as used when any access may reach it; the union's single pass where it differs from the fold;
-  - item 19: the private-property judgment counting writes from bound closures and reflection, and leaving unjudged the properties an unnarrowed one may reach;
+  - item 9: none; the stub rules applying only to stub sources is deferred;
+  - item 10: none; deferred: `__COMPILER_HALT_OFFSET__` as its file's offset, with the new check of its use elsewhere; `__halt_compiler` followed by anything but `( ) ;` or `( ) ?>` is a syntax error; a broken file's error is its first one; a declaration's doc is the one PHP gives it, with the new check of a doc given away; and the new check of source the configured versions lex differently;
+  - item 11: none; deferred: lines end at a lone `\r` as at `\n`, and so does a `//` or `#` comment;
+  - item 12: none; deferred: casts as PHP's single tokens; spaced qualified names a syntax error on 8.x; doc comments only with whitespace after `/**`; `?>` and heredoc lines ending at a lone `\r`; heredoc indentation errors; `<?php` open only before whitespace, and `<?` by `short_open_tag`, with a report at each short tag when the setting is unknown;
+  - item 13: none; deferred: declarations exist as PHP binds them: run-time-bound ones are guarded by every earlier exit (`exit`, `die` and `throw` included) and are dead after an unconditional one, and a class whose parent is in another file is possibly declared; a file that defines constants it cannot name (`define($name, ..)`, a name built from the namespace, `call_user_func('define', ..)`, `('define')(..)`) may define any constant, so fewer constants are reported as not found; `InitFlow` in PHP's order of evaluation;
+  - item 14: the readings the lowering oracle lists (escaped quotes, doc identifiers by PHP's byte classes, a `//` inside a literal type), and one winner rule for every tag (`@phan-real-return`, `@phan-param-out`); deferred: `mentions_mixed` from the node, `Integer::MAX`, and non-UTF-8 doc identifiers;
+  - item 15: container-field keys canonical as PHP's array keys; deferred: names that differ only in bytes outside UTF-8 are distinct (the lexer keeps the bytes, item 9) and print with `\x{NN}`; names fold ASCII only where Unicode's lowercasing was used; string values name classes, functions and constants by PHP's rules (one leading backslash, no trimming); in the server, an open document read as the bytes its encoding gives, and one whose encoding is not found analysed as UTF-8, with a diagnostic; a fix writes a name's bytes;
+  - item 18: the rule families of §12.10; the rules that read the statement result where it differs from today's side walks (`finally` overrides, `try`/`catch` and throws, no-op statements, loops' constant conditions); the union's single pass where it differs from the fold; deferred: types in PHP's order of evaluation (an assignment's target operands before its value, a destructuring's value first) and a member counted as used when any access may reach it;
+  - item 19: none; deferred: the private-property judgment counting writes from bound closures and reflection, and leaving unjudged the properties an unnarrowed one may reach;
   
   Each difference is listed with its file and read.
 
 **Equalities that need no baseline,** each run at every item's validation from the item that brings it on:
 - one thread against the default;
 - the stub cache cold against warm;
-- the per-file cache off against written and read; from item 17, also written under one configuration and read under another, against that one's cache-off run;
+- the per-file cache off against written and read;
 - from item 17: its base absent, written and read; its edits between two runs; and a warm run, which leaves the cache directory byte for byte as it found it;
 - from item 7: the relation memo on against off;
 - from item 1: the server's first dumps against the CLI's, with no open document that differs from its file;
@@ -2674,26 +2682,26 @@ Exact, except the private-property judgment, listed in §11.
 
 | # | item | saving (this profile) | serial / wall | memory (§8) | kind |
 |---|---|---|---|---|---|
-| 0 | baseline dumps, debug oracles retired; the PHP catalog, the fix's precision, the implicit calls, the assumed types, PHPDoc as verified claims, the open world | debug builds and tests | — | — | semantic: the fixes of step 1, the catalog, the fix's precision, the implicit calls, the assumed types, the claims, the open world (§11) |
-| 1 | one session: load, configuration, analysis, identity | the server and the tests get every load item | load off the server's message loop | server: the context trees (≈420 MB) and the unopened files' sources | semantic (§11) |
-| 2 | parallel walk, path data | ≈0.3 G | ≈0.15 s serial start | the second copy of each path; 0.56 M allocations | exact, except link cycles |
+| 0 | baseline dumps, debug oracles retired, the fix's precision, fast validation; the PHP catalog, the implicit calls, the assumed types, PHPDoc as verified claims and the open world deferred | debug builds and tests | — | — | semantic: the fixes of step 1, the fix's precision, the implicit calls built so far (§11); the catalog, the rest of the implicit calls, the assumed types, the claims and the open world deferred |
+| 1 | one session: load, configuration, analysis | the server and the tests get every load item | load off the server's message loop | server: the context trees (≈420 MB) and the unopened files' sources | semantic (§11) |
+| 2 | parallel walk, path data | ≈0.3 G | ≈0.15 s serial start | the second copy of each path; 0.56 M allocations | exact |
 | 3 | context trees dropped on the worker | ≈0.16 G | 0.58 G off the serial path | peak −≤209 MB alone (the end of the parse −≈420 MB); context reads, 66 MB | exact |
 | 4 | registry by ids, declarations never changed after build | ≈0.9 G | ≈0.4 s serial | ≈90 MB at exit; ≈1.5 M allocations | exact, except member order |
 | 5 | parallel merge, stable ids, posting lists | ≈0.06 G | 0.15 G off the serial path | ≈5 MB; 0.11 M allocations | exact |
-| 6 | stub scope, records read on demand with per-record CRCs | ≈0.35 G, then more of `warm` | partly | ≈40 MB of heap; 0.45 M allocations | exact (1, 3, 5), semantic (2, with the stubs' versions) |
-| 7 | one relation memo, by content generation | the registry-backed part of ≈0.47 G, not separated in this profile | — | bounded as today; `KEEP_DECISIONS`' 1.3 MB goes | semantic for constants on a cycle (§11) |
+| 6 | stub scope, records read on demand with per-record CRCs | ≈0.35 G, then more of `warm` | partly | ≈40 MB of heap; 0.45 M allocations | exact (1, 3, 5, 6); step 2 deferred |
+| 7 | one relation memo, by content generation | the registry-backed part of ≈0.47 G, not separated in this profile | — | bounded as today; `KEEP_DECISIONS`' 1.3 MB goes | semantic for constants on a cycle, read as `never` (§11) |
 | 8 | case references in the checker, declarations built lean | ≈0.1 G | — | both caches' entries; 0.52 M allocations | exact, except one `@property` case |
-| 9 | typed vectors, ids, `peeled` | ≈0.8-1.2 G | — | ≥53 MB of the analysed trees; 3.92 M allocations | exact, but semantic for the stub rules |
-| 10 | flat token arrays | ≈1.7 G, less the configured versions' check where they read a construct differently | — | 0.23 M allocations | exact, but semantic for the halt offset, the first error, declarations' docs and the versions |
-| 11 | line starts, columns, offsets, ignore marks | ≈0.2 G | — | 0.07 M allocations | exact, but semantic for a lone `\r` |
-| 12 | lexer details, qualified names and casts as one token | ≈0.35 G | — | 0.45 M allocations | exact, but semantic for PHP's tokens (§11) |
-| 13 | declaration list, one walk, builders in scratch | ≈0.45 G | — | bodies as one slice per file; 1.31 M allocations | exact, but semantic for guards, constants defined under names a file cannot spell, and `InitFlow`'s order |
+| 9 | typed vectors, ids, `peeled` | ≈0.8-1.2 G | — | ≥53 MB of the analysed trees; 3.92 M allocations | exact |
+| 10 | flat token arrays | ≈1.7 G | — | 0.23 M allocations | exact |
+| 11 | line starts, columns, offsets, ignore marks | ≈0.2 G | — | 0.07 M allocations | exact |
+| 12 | lexer details, qualified names as one token | ≈0.35 G | — | 0.45 M allocations | exact |
+| 13 | declaration list, one walk, builders in scratch | ≈0.45 G | — | bodies as one slice per file; 1.31 M allocations | exact |
 | 14 | PHPDoc finished, one parse, two memos | ≈0.5 G | — | ≈43 MB; 2.59 M allocations | exact, but semantic for the readings §11 lists |
-| 15 | names as names, as bytes | ≈0.6 G | partly | 2.76 M allocations | exact, except the changes §11 lists |
+| 15 | names as names | ≈0.6 G | partly | 2.76 M allocations | exact, except array keys (§11) |
 | 16 | interned values in one allocation | ≈0.1 G | — | ≈15 MB; 0.78 M allocations | exact |
 | 17 | warm runs | warm: decoding and reads ≈0.85 core-s and most of the finishing window; a cold run pays one incremental finishing over the analysed files' closure, and every run one `stat` per context file | yes | only decoded records in the heap | exact |
-| 18 | check phase remainder, rule temporaries | ≈1.6-2.0 G | — | 3.61 M allocations | semantic (§12.10's families, the statement result, the order of evaluation, member usage, the union pass) |
-| 19 | each tree until its last reader | — | — | batch: the analysed trees freed during the check; server: open documents and a cache weighted by bytes | exact, except the private-property judgment |
+| 18 | check phase remainder, rule temporaries | ≈1.6-2.0 G | — | 3.61 M allocations | semantic (§12.10's families, the statement result, the union pass) |
+| 19 | each tree until its last reader | — | — | batch: the analysed trees freed during the check; server: open documents and a cache weighted by bytes | exact |
 
 **Instructions.** The rows sum to ≈8.2-9.3 G of this run's 20.57 G (items 3 and 5 at their instruction savings, item 7 at none to ≈0.3 G, items 9 and 18 at the ends of their ranges). Some costs are counted by two rows, and this profile does not separate the shares:
 - 3 and 9, the tree drops;

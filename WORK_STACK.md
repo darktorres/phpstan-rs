@@ -17,11 +17,16 @@ that date.
 
 1. **Level 8**: building `PROFILE_DRILL_PIWIGO_20G.md` row by row from
    `PROFILE_DRILL_PIWIGO_20G_LEDGER.md`, item 0 first; each item is
-   validated at its end.
-2. Then **level 6**: recreate master's 87 commits on `master2`, one row
+   validated at its end, and O3 closes it. Only the rows that optimize are
+   built now; the rest are DEFERRED.
+2. Then **level 8's deferred rows**, as a plan of their own: the PHP
+   catalog, and every row of the 20 G plan that changes what the analysis
+   finds beyond what the optimization needs, validated together (the
+   ledger's row D.V).
+3. Then **level 6**: recreate master's 87 commits on `master2`, one row
    at a time (`MASTER_REIMPLEMENTATION_LEDGER.md`: 86 open, 1 skipped, none
    done).
-3. Then pop back, in this order: **level 3** (the 140 open review tasks, and
+4. Then pop back, in this order: **level 3** (the 140 open review tasks, and
    the A/B ledger's open steps 19 and 21 on `master`), then **level 2** (the
    crate split from Stage C on), then **level 1** (the lanes).
 
@@ -207,10 +212,11 @@ docblock is inherited across case-different names; union member order).
   - C3 step 6: item 15;
   - C1's effects and yields, and `collect_throws`: item 18, step 2;
   - P12 step 3 and the `InitFlow` fusion: item 13 (ids make the list
-    possible while the tree is built; the one walk visits in PHP's order of
-    evaluation);
+    possible while the tree is built; the one walk visiting in PHP's order
+    of evaluation is deferred until after O3);
   - the guards on `class_exists`-style tests: item 6, step 2 (availability
-    on run-time evidence only, from the stubs' version ranges);
+    on run-time evidence only, from the stubs' version ranges), deferred
+    until after O3;
   - pull parsing for the tag lexer: item 14, step 5 (a token slice read by
     index instead).
 
@@ -220,9 +226,10 @@ The callgrind drill-down of the 20.57 G run at `5fb858c9` (level 7's end
 state), the dhat heap profile of the same run (`target/dhat-heap.json`; its
 2.67 GB and 19.4 M allocations each given to an item, §8), and the plan built
 from both: items 0-19, each validated at its end (§11), with O3 once after
-item 19. The goal is
-beyond PHPStan and Psalm, not parity: semantics are judged by what PHP does
-when it runs, and the plan adds the checks found along the way.
+item 19. The plan optimizes: fewer instructions, less wall time and less
+memory. What it gathered beyond that, new checks and changes to what the
+analysis finds that the optimization does not need, is deferred until after
+O3 (2026-10-05; the plan's §9, "Only what optimizes").
 
 - **State: building, item 0.** The plan was committed at
   `d520c9fd`. A separate reviewer goes through it adversarially, one item at
@@ -251,22 +258,27 @@ when it runs, and the plan adds the checks found along the way.
   project found the stale diagnostics and registry state the plan's "Found
   in item 0's validation" block lists, each fixed. The dumps and O2 became
   one pass, `cargo xtask corpus --full` on a worker per core (rows
-  0.11a-0.11c, done), with `cargo xtask progress --watch`. Next, before the
-  baseline, in this order: fast validation (0.11d-0.11j), from the profile
-  of a replay and a vendor project's run, and every level's report from
-  one analysis (0.11v); the builtin-runs table built into static
-  arrays at compile time (0.11n1); the fix's precision (0.11o-0.11q): closures' writes
-  where they run, calls through a parameter resolved at each call, captures
-  at a file's top level; the implicit calls (0.12a-0.12f) and the assumed
-  types (0.13a-0.13k), moved in from the end of the plan; PHPDoc types as
-  claims verified by a fixed point, the native type where a claim cannot
-  be (0.14a-0.14g); an open world by configuration (`open_paths`), with
-  runtime truth at a library's boundary (0.15a-0.15f); the runtime
-  oracle reaching every asserting fixture (0.11r); the measurements and
+  0.11a-0.11c, done), with `cargo xtask progress --watch`. Done since:
+  fast validation (0.11d-0.11j), from the profile of a replay and a vendor
+  project's run, and every level's report from one analysis (0.11v); the
+  builtin-runs table built into static arrays at compile time (0.11n1);
+  the fix's precision (0.11o-0.11q): closures' writes where they run, calls
+  through a parameter resolved at each call, captures at a file's top
+  level. Next, before the baseline: the measurements and
   `cargo xtask validate` (0.11s-0.11u). Then the validation itself (0.11):
   the pass with the `gate` and `oracle` builds, the memory baseline, and
   the first snapshot, compared with no earlier commit; no row before it
   runs the pass, and item 1's validation is the first comparison.
+- **Deferred until after O3, not optimization** (2026-10-05): in item 0,
+  the implicit calls (0.12a-0.12f; magic and interface methods, property
+  hooks and a property's magic where it may be unset were built first,
+  `e4923d51`, `2786f1f2`, `c89c2e37`), the assumed types (0.13a-0.13k),
+  PHPDoc types as claims verified by a fixed point (0.14a-0.14g), an open
+  world by configuration (0.15a-0.15f), and the runtime oracle reaching
+  every asserting fixture (0.11r); in items 1-19, every new check and every
+  change to what the analysis finds that the optimization does not need,
+  each row marked in the ledger and each part marked where the plan
+  designs it.
 - **The PHP catalog is deferred until after O3** (2026-10-05): every
   builtin and engine operation read from php-src per PHP version, rows
   0.11k2-0.11m and 0.11n2, with 0.13f and 0.13g that read it. Its
@@ -278,7 +290,7 @@ when it runs, and the plan adds the checks found along the way.
   added (`492ccf0e`, `50fa1e43`, `d8090e5e`), and `php_version` taking a
   range (`dfdfeeb4`). The runtime oracle calls each asserting function with
   values of its parameters' types (`3d8085f3`): 353 fixtures run, from 81.
-- **Decided, in item 0 (rows 0.13a-0.13k):** three assumptions the
+- **Decided, in item 0 (rows 0.13a-0.13k), now deferred until after O3:** three assumptions the
   oracle's calls showed against what PHP does are built as PHP's truth,
   after the implicit calls (rows 0.12a-0.12f), both before the baseline.
   Int operations get the float PHP gives past a limit, exact, with its
@@ -305,7 +317,7 @@ when it runs, and the plan adds the checks found along the way.
   ones lack `pcntl`, `intl` and `xsl`), `phpdbg -p*` for the construct
   map (7.0 has no opcache listing), and strings' numericness as a
   condition (`"abc" * 1` throws on 8.x).
-- **Moved into item 0 (row 0.11r):** the 114 fixtures that assert and
+- **Moved into item 0 (row 0.11r), now deferred until after O3:** the 114 fixtures that assert and
   never reach an assertion under the runtime oracle: assertions in closures
   nothing invokes, code that throws first with the values sampled,
   parameters no value can be made for, methods of traits.
