@@ -3490,13 +3490,15 @@ impl syntax::canonical::Canonical for ParsedFile {
 /// top-level scan in one non-recursive, correctly-measured call instead -
 /// see that function's own doc comment for the real number this found.
 pub fn collect_php_files(path: &Path, out: &mut Vec<PathBuf>) {
-    Walk {
+    let found = Walk {
         table: &DirTable::default(),
         excluded_dir_names: &[],
         wanted: &|_, name| is_php_file(Path::new(name)),
         skip_dir: None,
+        make: &|_| (),
     }
-    .files(path, path, out);
+    .files(path, path);
+    out.extend(found.into_iter().map(|(file, ())| file));
 }
 
 /// Whether the file `name` in `dir` is one PHP may be run from: one named with an
@@ -3546,9 +3548,9 @@ pub(crate) fn is_php_file(path: &Path) -> bool {
     path.extension().is_some_and(|e| e == "php")
 }
 
-/// A walk for files: what it finds, where it reads directories, and what
-/// it leaves out.
-pub(crate) struct Walk<'a> {
+/// A walk for files: what it finds, where it reads directories, what it
+/// leaves out, and what it makes of each file it finds.
+pub(crate) struct Walk<'a, T> {
     pub(crate) table: &'a DirTable,
     /// A directory whose name is in it is left out.
     pub(crate) excluded_dir_names: &'a [&'a str],
@@ -3558,35 +3560,40 @@ pub(crate) struct Walk<'a> {
     /// Which directories below the one it starts from it does not go into,
     /// by their spelling.
     pub(crate) skip_dir: Option<&'a (dyn Fn(&Path) -> bool + Sync)>,
+    /// What each file found comes with, made by the task that lists its
+    /// directory, from the file's spelling.
+    pub(crate) make: &'a (dyn Fn(&Path) -> T + Sync),
 }
 
 /// One entry of a directory, as its walk settles it.
-enum Found {
-    File(PathBuf),
-    Files(Vec<PathBuf>),
+enum Found<T> {
+    File(PathBuf, T),
+    Files(Vec<(PathBuf, T)>),
 }
 
-impl Walk<'_> {
-    /// The files found under `disk`, or `disk` itself when it is one,
-    /// appended to `out`, spelled as `spelled` is for `disk` and each
-    /// name below it joined to it. They come in the order paths compare in:
-    /// each directory's entries are by name before the walk goes into them,
-    /// so a name is before the longer ones it begins, and what is in a
-    /// directory is before what comes after the directory's name. Each
-    /// directory is a task of the pool the caller runs in, and its
-    /// subdirectories' results join in its entries' order.
-    pub(crate) fn files(&self, disk: &Path, spelled: &Path, out: &mut Vec<PathBuf>) {
+impl<T: Send> Walk<'_, T> {
+    /// The files found under `disk`, or `disk` itself when it is one, with
+    /// what `make` made of each, spelled as `spelled` is for `disk` and
+    /// each name below it joined to it. They come in the order paths
+    /// compare in: each directory's entries are by name before the walk
+    /// goes into them, so a name is before the longer ones it begins, and
+    /// what is in a directory is before what comes after the directory's
+    /// name. Each directory is a task of the pool the caller runs in, and
+    /// its subdirectories' results join in its entries' order.
+    pub(crate) fn files(&self, disk: &Path, spelled: &Path) -> Vec<(PathBuf, T)> {
         if disk.is_dir() {
-            out.extend(self.directory(disk, spelled));
+            self.directory(disk, spelled)
         } else if (self.wanted)(
             disk.parent().unwrap_or(Path::new("")),
             disk.file_name().unwrap_or_default(),
         ) {
-            out.push(spelled.to_path_buf());
+            vec![(spelled.to_path_buf(), (self.make)(spelled))]
+        } else {
+            Vec::new()
         }
     }
 
-    fn directory(&self, disk: &Path, spelled: &Path) -> Vec<PathBuf> {
+    fn directory(&self, disk: &Path, spelled: &Path) -> Vec<(PathBuf, T)> {
         if disk
             .file_name()
             .and_then(|n| n.to_str())
@@ -3597,7 +3604,7 @@ impl Walk<'_> {
         let Some(listing) = self.table.list(disk) else {
             return Vec::new();
         };
-        let found: Vec<Found> = listing
+        let found: Vec<Found<T>> = listing
             .entries()
             .par_iter()
             .filter_map(|entry| {
@@ -3615,15 +3622,18 @@ impl Walk<'_> {
                     Some(Found::Files(
                         self.directory(&disk.join(&entry.name), &spelled),
                     ))
+                } else if (self.wanted)(disk, &entry.name) {
+                    let made = (self.make)(&spelled);
+                    Some(Found::File(spelled, made))
                 } else {
-                    (self.wanted)(disk, &entry.name).then_some(Found::File(spelled))
+                    None
                 }
             })
             .collect();
         let mut files = Vec::new();
         for found in found {
             match found {
-                Found::File(path) => files.push(path),
+                Found::File(path, made) => files.push((path, made)),
                 Found::Files(mut inner) => files.append(&mut inner),
             }
         }

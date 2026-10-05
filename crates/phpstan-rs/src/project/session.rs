@@ -149,6 +149,63 @@ struct LoadState {
     dirs: rustc_hash::FxHashMap<Vec<u8>, Placed>,
 }
 
+/// The states of a load's threads, one for each thread of the pool, kept
+/// by the load and dropped with it.
+struct LoadStates(Vec<Mutex<LoadState>>);
+
+impl LoadStates {
+    fn new(threads: usize) -> Self {
+        LoadStates((0..threads.max(1)).map(|_| Mutex::default()).collect())
+    }
+
+    /// Calls `f` with the state of the pool thread it runs on. A state that
+    /// is in use, which only a job that runs inside another could find,
+    /// gives way to one that is new.
+    fn with<R>(&self, f: impl FnOnce(&mut LoadState) -> R) -> R {
+        let slot = &self.0[rayon::current_thread_index().unwrap_or(0) % self.0.len()];
+        match slot.try_lock() {
+            Ok(mut state) => f(&mut state),
+            Err(_) => f(&mut LoadState::default()),
+        }
+    }
+}
+
+/// A file listed, with its parse where the walk that listed it made it.
+struct Walked {
+    path: PathBuf,
+    read: Option<Read>,
+}
+
+fn paths_of(walked: Vec<Walked>) -> Vec<PathBuf> {
+    walked.into_iter().map(|walked| walked.path).collect()
+}
+
+impl Walked {
+    fn bare(path: PathBuf) -> Self {
+        Walked { path, read: None }
+    }
+}
+
+/// What a walk that parses what it lists parses into, and with.
+#[derive(Clone, Copy)]
+struct Parse<'a> {
+    project: &'a Project,
+    states: &'a LoadStates,
+}
+
+/// What a walk of one directory for files is: where it lists, what it
+/// finds and leaves out, and whether it parses what it finds, as context
+/// files or as analysed ones.
+#[derive(Clone, Copy)]
+struct Scan<'a> {
+    table: &'a DirTable,
+    parse: Option<Parse<'a>>,
+    listed: Listed,
+    pruned: &'a [&'a str],
+    skip_dir: Option<&'a (dyn Fn(&Path) -> bool + Sync)>,
+    context: bool,
+}
+
 /// A file's, or a directory's, absolute path and package owner.
 struct Placed {
     absolute: PathBuf,
@@ -996,8 +1053,8 @@ impl Session {
     pub fn listing(&self) -> (Vec<PathBuf>, Vec<PathBuf>) {
         let table = self.listings();
         (
-            self.analysed_listing(&table, Listed::Php),
-            self.context_listing(&table, Listed::Php),
+            paths_of(self.analysed_listing(&table, Listed::Php, None)),
+            paths_of(self.context_listing(&table, Listed::Php, None)),
         )
     }
 
@@ -1093,23 +1150,33 @@ impl Session {
     /// `dir` joined with its path below it - the same spelling the command
     /// line gave, built as the walk goes down - while the walk itself
     /// happens under the root.
-    fn collect_files(
-        &self,
-        table: &DirTable,
-        dir: &Path,
-        out: &mut Vec<PathBuf>,
-        listed: Listed,
-        pruned: &[&str],
-        skip_dir: Option<&(dyn Fn(&Path) -> bool + Sync)>,
-    ) {
+    fn collect_files(&self, scan: Scan, dir: &Path, out: &mut Vec<Walked>) {
+        let Scan {
+            table,
+            parse,
+            listed,
+            pruned,
+            skip_dir,
+            context,
+        } = scan;
         let walked = self.root.join(dir);
-        let mut found = Vec::new();
         let wanted = |dir: &Path, name: &std::ffi::OsStr| match listed {
             Listed::Php => super::is_php_file(Path::new(name)),
             Listed::Run => super::is_php_run_file(dir, name),
         };
         let skip = skip_dir.map(|skip| move |path: &Path| skip(&self.absolute(path)));
-        self.pool.install(|| {
+        // A walk that goes into a root with analysed files below it finds
+        // them too, and parses only the files that are context.
+        let by_role = context && skip_dir.is_some();
+        let make = |path: &Path| {
+            let parse = parse.filter(|_| {
+                !by_role
+                    || self.settings.roles.classify(&self.absolute(path)).role
+                        == super::roles::Role::Context
+            })?;
+            Some(self.parse_listed(parse, path, context))
+        };
+        let found = self.pool.install(|| {
             super::Walk {
                 table,
                 excluded_dir_names: pruned,
@@ -1117,11 +1184,12 @@ impl Session {
                 skip_dir: skip
                     .as_ref()
                     .map(|skip| skip as &(dyn Fn(&Path) -> bool + Sync)),
+                make: &make,
             }
-            .files(&walked, dir, &mut found)
+            .files(&walked, dir)
         });
         let start = out.len();
-        out.append(&mut found);
+        out.extend(found.into_iter().map(|(path, read)| Walked { path, read }));
         if self.overlay.is_empty() {
             return;
         }
@@ -1154,10 +1222,43 @@ impl Session {
             })
             .collect();
         for path in held {
-            if !out[start..].contains(&path) {
-                out.push(path);
+            if !out[start..].iter().any(|walked| walked.path == path) {
+                out.push(Walked::bare(path));
             }
         }
+    }
+
+    /// Reads and parses the file at `path`, as a load does each file it
+    /// lists: a context file when `context`, which the per-file cache
+    /// serves, and everything its use sites, owner and cache entry need.
+    fn parse_listed(&self, parse: Parse, path: &Path, context: bool) -> Read {
+        let shared = parse.project;
+        let index_use_sites = shared.indexes_use_sites();
+        parse.states.with(|state| {
+            let placed = self.place(state, path);
+            // A file the overlay holds is an open document, whose tree is
+            // kept, which no cache entry holds.
+            let held = self.overlay.get(&placed.absolute).is_some();
+            let mut read = self.read_and_parse_file(
+                path,
+                &placed.absolute,
+                self.is_stub_at(&placed.absolute),
+                &mut state.names,
+                context && !held,
+                index_use_sites,
+            );
+            if let Read::Loaded(file) = &mut read {
+                shared.index_use_sites(&mut file.parsed, &file.source);
+                if !(self.settings.retain_source && held) {
+                    file.source = String::new();
+                }
+                file.parsed.owner = Some(placed.owner);
+                if let Some(key) = file.cache_key.take() {
+                    file_cache::store(&key, &file_cache::CachedFile::of(&file.parsed, file.len));
+                }
+            }
+            read
+        })
     }
 
     /// `cacheable` is whether the file may be read from and stored in the
@@ -1250,8 +1351,8 @@ impl Session {
         reference: Option<&Path>,
     ) -> Result<FrontEndDump, String> {
         let table = self.listings();
-        let analysed = self.analysed_listing(&table, Listed::Run);
-        let context = self.context_listing(&table, Listed::Run);
+        let analysed = paths_of(self.analysed_listing(&table, Listed::Run, None));
+        let context = paths_of(self.context_listing(&table, Listed::Run, None));
         let mut files: Vec<(&'static str, &PathBuf)> = context
             .iter()
             .map(|path| ("context", path))
@@ -1539,36 +1640,63 @@ impl Session {
 
     /// The files the load analyses, in path order.
     fn analysed_files(&self) -> Vec<PathBuf> {
-        self.analysed_listing(&self.listings(), Listed::Php)
+        paths_of(self.analysed_listing(&self.listings(), Listed::Php, None))
     }
 
     /// The files under the analysed paths that `listed` finds, in path order,
-    /// each once: a path another contains is not walked again.
-    fn analysed_listing(&self, table: &DirTable, listed: Listed) -> Vec<PathBuf> {
+    /// each once: a path another contains is not walked again. They come
+    /// parsed when `parse` is given.
+    fn analysed_listing(
+        &self,
+        table: &DirTable,
+        listed: Listed,
+        parse: Option<Parse>,
+    ) -> Vec<Walked> {
         let mut files = Vec::new();
         for dir in super::roles::outermost(&self.dirs, |dir| self.absolute(dir)) {
-            self.collect_files(table, dir, &mut files, listed, self.pruned, None);
+            let scan = Scan {
+                table,
+                parse,
+                listed,
+                pruned: self.pruned,
+                skip_dir: None,
+                context: false,
+            };
+            self.collect_files(scan, dir, &mut files);
         }
-        composer::path_order::sort_paths(&mut files);
+        composer::path_order::sort_by_path(&mut files, |walked| &walked.path);
         files
     }
 
     /// The files the context paths and the vendor context reach that `listed`
     /// finds, in path order, each once and none that an analysed path
     /// contains: such a file is analysed, and listed by `analysed_listing`.
-    fn context_listing(&self, table: &DirTable, listed: Listed) -> Vec<PathBuf> {
+    /// They come parsed when `parse` is given, those a walk found.
+    fn context_listing(
+        &self,
+        table: &DirTable,
+        listed: Listed,
+        parse: Option<Parse>,
+    ) -> Vec<Walked> {
         // The vendor context was being found while the analysed files were
         // listed.
         let mut scan_dirs = self.scan_dirs.clone();
-        let mut files: Vec<PathBuf> = self.scan_files.clone();
+        let mut files: Vec<Walked> = self.scan_files.iter().cloned().map(Walked::bare).collect();
         for vendor in &self.vendors {
             let found = vendor.get();
             scan_dirs.extend(found.dirs.iter().filter(|d| !self.is_promoted(d)).cloned());
-            files.extend(found.files.iter().filter(|f| !self.is_promoted(f)).cloned());
+            files.extend(
+                found
+                    .files
+                    .iter()
+                    .filter(|f| !self.is_promoted(f))
+                    .cloned()
+                    .map(Walked::bare),
+            );
         }
         let roles = &self.settings.roles;
-        let is_context = |path: &PathBuf| {
-            roles.classify(&self.absolute(path)).role == super::roles::Role::Context
+        let is_context = |walked: &Walked| {
+            roles.classify(&self.absolute(&walked.path)).role == super::roles::Role::Context
         };
         files.retain(is_context);
         for dir in super::roles::outermost(&scan_dirs, |dir| self.absolute(dir)) {
@@ -1582,39 +1710,56 @@ impl Session {
             // further into it.
             let holds_analysed = roles.holds_analysed(&absolute);
             let skip = |absolute: &Path| roles.holds_only_analysed(absolute);
-            self.collect_files(
+            let scan = Scan {
                 table,
-                dir,
-                &mut files,
+                parse,
                 listed,
-                &[],
-                holds_analysed.then_some(&skip),
-            );
+                pruned: &[],
+                skip_dir: holds_analysed.then_some(&skip),
+                context: true,
+            };
+            self.collect_files(scan, dir, &mut files);
             if holds_analysed {
                 let walked = files.split_off(start);
                 files.extend(walked.into_iter().filter(is_context));
             }
         }
-        composer::path_order::sort_paths(&mut files);
-        files.dedup();
+        composer::path_order::sort_by_path(&mut files, |walked| &walked.path);
+        // A file both listed and walked keeps the parse the walk made.
+        files.dedup_by(|later, earlier| {
+            let same = later.path == earlier.path;
+            if same && earlier.read.is_none() {
+                earlier.read = later.read.take();
+            }
+            same
+        });
         files
     }
 
     /// `load`, the project built once or kept for edits as `keeps_as_built`
-    /// says.
+    /// says. Each file is parsed as its directory is walked, in the pool
+    /// the walk runs in.
     fn load_project(&self, keeps_as_built: bool) -> Result<Loaded, String> {
         let table = self.listings();
-        let analyze_files = self.analysed_listing(&table, Listed::Php);
-        let context_files = self.context_listing(&table, Listed::Php);
+        let mut project = Project::new();
+        self.configure(&mut project, keeps_as_built);
+        let states = LoadStates::new(self.pool.current_num_threads());
+        let parse = Parse {
+            project: &project,
+            states: &states,
+        };
+        let analyze_files = self.analysed_listing(&table, Listed::Php, Some(parse));
+        let context_files = self.context_listing(&table, Listed::Php, Some(parse));
         if analyze_files.is_empty() {
             let dirs: Vec<String> = self.dirs.iter().map(|d| d.display().to_string()).collect();
             return Err(format!("no .php files found under {}", dirs.join(", ")));
         }
-        Ok(self.load_listed(keeps_as_built, &context_files, analyze_files))
+        Ok(self.load_walked(project, &states, context_files, analyze_files))
     }
 
     /// `load_project` of the files given, which are the listing's, and
     /// that may have no analysed one.
+    #[cfg(test)]
     pub(crate) fn load_listed(
         &self,
         keeps_as_built: bool,
@@ -1623,6 +1768,28 @@ impl Session {
     ) -> Loaded {
         let mut project = Project::new();
         self.configure(&mut project, keeps_as_built);
+        let states = LoadStates::new(self.pool.current_num_threads());
+        self.load_walked(
+            project,
+            &states,
+            context_files.iter().cloned().map(Walked::bare).collect(),
+            analyze_files.into_iter().map(Walked::bare).collect(),
+        )
+    }
+
+    /// The configured `project` with the files listed loaded into it.
+    fn load_walked(
+        &self,
+        mut project: Project,
+        states: &LoadStates,
+        context_files: Vec<Walked>,
+        analyze_files: Vec<Walked>,
+    ) -> Loaded {
+        let context_count = context_files.len();
+        let analyze_paths: Vec<PathBuf> = analyze_files
+            .iter()
+            .map(|walked| walked.path.clone())
+            .collect();
         let Added {
             analyze_sizes,
             skipped_analyze,
@@ -1630,7 +1797,7 @@ impl Session {
             parse_failures,
             context_failures,
             mut lex_warnings,
-        } = self.load_into(&mut project, context_files, &analyze_files);
+        } = self.add_walked(&mut project, states, context_files, analyze_files);
         project.finish_loading();
         lex_warnings.extend(context_failures.into_iter().map(|(path, failure)| {
             format!(
@@ -1644,18 +1811,19 @@ impl Session {
 
         // Largest files first, so the longest checks don't start last; of
         // equal ones, the first listed first.
-        let mut by_size: Vec<usize> = (0..analyze_files.len()).collect();
+        let mut by_size: Vec<usize> = (0..analyze_paths.len()).collect();
         by_size.sort_by_key(|&index| std::cmp::Reverse(analyze_sizes[index]));
+        let mut analyze_paths: Vec<Option<PathBuf>> = analyze_paths.into_iter().map(Some).collect();
         let analyze_files_by_size = by_size
             .into_iter()
-            .map(|index| analyze_files[index].clone())
+            .filter_map(|index| analyze_paths[index].take())
             .collect();
         Loaded {
             project,
             analyze_files_by_size,
             skipped_analyze,
             skipped_context,
-            context_loaded: context_files.len() - skipped_context,
+            context_loaded: context_count - skipped_context,
             parse_failures,
             lex_warnings,
         }
@@ -1673,49 +1841,50 @@ impl Session {
         context_files: &[PathBuf],
         analyze_files: &[PathBuf],
     ) -> Added {
+        let states = LoadStates::new(self.pool.current_num_threads());
+        self.add_walked(
+            project,
+            &states,
+            context_files.iter().cloned().map(Walked::bare).collect(),
+            analyze_files.iter().cloned().map(Walked::bare).collect(),
+        )
+    }
+
+    /// `load_into` of files that may come parsed, which are used as they
+    /// are.
+    fn add_walked(
+        &self,
+        project: &mut Project,
+        states: &LoadStates,
+        context: Vec<Walked>,
+        analyze: Vec<Walked>,
+    ) -> Added {
         let pool = &self.pool;
-        let retain_source = self.settings.retain_source;
         let shared: &Project = project;
-        let index_use_sites = shared.indexes_use_sites();
-        let combined_files: Vec<&PathBuf> =
-            context_files.iter().chain(analyze_files.iter()).collect();
+        let context_len = context.len();
+        let (combined_files, reads): (Vec<PathBuf>, Vec<Option<Read>>) = context
+            .into_iter()
+            .chain(analyze)
+            .map(|walked| (walked.path, walked.read))
+            .unzip();
+        let context_files = &combined_files[..context_len];
+        let analyze_files = &combined_files[context_len..];
+        let parse = Parse {
+            project: shared,
+            states,
+        };
         // The files are numbered while they parse.
         let (mut combined_parsed, numbering): (Vec<Read>, _) = pool.install(|| {
             rayon::join(
                 || {
                     combined_files
                         .par_iter()
+                        .zip(reads.into_par_iter())
                         .enumerate()
-                        // The names a job meets are kept while it parses one
-                        // file after another, and dropped with the load.
-                        .map_init(LoadState::default, |state, (index, p)| {
-                            let placed = self.place(state, p);
-                            let held = self.overlay.get(&placed.absolute).is_some();
-                            let mut read = self.read_and_parse_file(
-                                p,
-                                &placed.absolute,
-                                self.is_stub_at(&placed.absolute),
-                                &mut state.names,
-                                // The context files come first. A file the
-                                // overlay holds is an open document, whose
-                                // tree is kept, which no entry holds.
-                                index < context_files.len() && !held,
-                                index_use_sites,
-                            );
-                            if let Read::Loaded(file) = &mut read {
-                                shared.index_use_sites(&mut file.parsed, &file.source);
-                                if !(retain_source && held) {
-                                    file.source = String::new();
-                                }
-                                file.parsed.owner = Some(placed.owner);
-                                if let Some(key) = file.cache_key.take() {
-                                    file_cache::store(
-                                        &key,
-                                        &file_cache::CachedFile::of(&file.parsed, file.len),
-                                    );
-                                }
-                            }
-                            read
+                        .map(|(index, (path, read))| {
+                            read.unwrap_or_else(|| {
+                                self.parse_listed(parse, path, index < context_len)
+                            })
                         })
                         .collect()
                 },

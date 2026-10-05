@@ -1,6 +1,6 @@
 //! The files a session reads in place of the disk's: an overlay.
 
-use super::super::session::{Overrides, Policy, Session};
+use super::super::session::{Loaded, Overrides, Policy, Session};
 use super::super::source::ContentHash;
 use super::super::*;
 use super::helpers::TempDir;
@@ -196,4 +196,54 @@ fn a_classmap_file_in_a_psr4_directory_is_listed_once() {
         .filter_map(|path| path.file_name()?.to_str())
         .collect();
     assert_eq!(names, ["Top.php", "A.php"]);
+}
+
+#[test]
+fn a_load_that_parses_as_it_walks_loads_what_a_load_of_the_listing_does() {
+    let dir = TempDir::new("source_parsed_as_walked");
+    dir.write("src/A.php", "<?php class A {}");
+    dir.write("src/deep/B.php", "<?php class B {}");
+    dir.write("src/Broken.php", "<?php class {");
+    dir.write("lib/C.php", "<?php class C {}");
+    dir.write("lib/more/D.php", "<?php class D {}");
+    let session = session(
+        &dir,
+        Overrides {
+            paths: paths(&["src"]),
+            scan_paths: paths(&["lib", "."]),
+            ..Overrides::default()
+        },
+    );
+    let walked = session.load().unwrap();
+    let (analysed, context) = session.listing();
+    let listed = session.load_listed(false, &context, analysed.clone());
+
+    let classes = |loaded: &Loaded| {
+        let mut names: Vec<String> = loaded
+            .project
+            .registry()
+            .classes
+            .keys()
+            .map(|name| name.to_string())
+            .collect();
+        names.sort();
+        names
+    };
+    for name in ["A", "B", "C", "D"] {
+        assert!(classes(&walked).contains(&name.to_string()), "{name}");
+    }
+    assert_eq!(classes(&walked), classes(&listed));
+    for path in analysed.iter().chain(&context) {
+        assert_eq!(
+            walked.project.content_hash(path),
+            listed.project.content_hash(path),
+            "{}",
+            path.display()
+        );
+    }
+    assert_eq!(
+        walked.project.next_load_order,
+        listed.project.next_load_order
+    );
+    assert_eq!(walked.lex_warnings, listed.lex_warnings);
 }
