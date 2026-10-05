@@ -347,7 +347,13 @@ impl Parser<'_> {
                 self.skip();
                 let (args, _) = self.parse_args()?;
                 self.expect_semicolon()?;
-                let targets = args.into_iter().map(|a| a.value).collect();
+                let targets: Vec<Expr> = args.into_iter().map(|a| a.value).collect();
+                self.saw_property_unset |= targets.iter().any(|target| {
+                    matches!(
+                        target.peeled().kind,
+                        ExprKind::PropertyAccess(..) | ExprKind::DynamicPropertyAccess(..)
+                    )
+                });
                 self.stmt(StmtKind::Unset(targets), start)
             }
             // `declare(strict_types=1);` / `declare(ticks=1) { ... }` -

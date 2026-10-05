@@ -409,6 +409,10 @@ pub struct Registry {
     // as the last finish found them (`registry::effects`).
     #[serde(skip)]
     methods_by_name: Arc<FxHashMap<String, Vec<syntax::name::Name>>>,
+    // The properties the loaded files unset, as the last finish found them
+    // (`registry::effects`).
+    #[serde(skip)]
+    unset_properties: Arc<bodies::UnsetProperties>,
     // What each file's walk for global variables found, kept for the files
     // a later finish doesn't walk again (`infer_global_variables_of`).
     #[serde(skip)]

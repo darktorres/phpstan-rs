@@ -223,6 +223,8 @@ pub struct FileFacts {
     /// closure or an anonymous class, which a walk of its statements alone
     /// does not reach.
     pub has_nested_declaration: bool,
+    /// The file unsets a property (`unset($o->p)`, `unset($o->$name)`).
+    pub unsets_property: bool,
     /// The bits of the `WatchList` the lexer was given for the spellings
     /// the file names: an identifier, a whole name or one segment of a
     /// qualified one, in any case.

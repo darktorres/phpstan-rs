@@ -138,6 +138,7 @@ canonical_struct!(IgnoreMark {
 canonical_struct!(FileFacts {
     has_anonymous_class,
     has_nested_declaration,
+    unsets_property,
     mentions,
     syntax,
 });

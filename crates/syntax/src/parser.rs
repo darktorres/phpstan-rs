@@ -67,6 +67,8 @@ pub struct Parser<'a> {
     // a declaration a walk of the statements does not reach.
     pub(crate) nested_depth: std::cell::Cell<u32>,
     pub(crate) saw_nested_declaration: std::cell::Cell<bool>,
+    // Whether the parse has built an `unset` of a property.
+    pub(crate) saw_property_unset: bool,
     // The labels `goto` statements name, one entry per function-like body
     // being parsed, the file's own first.
     pub(crate) goto_scopes: Vec<GotoScope>,
@@ -206,6 +208,7 @@ impl<'a> Parser<'a> {
             syntax_marks: crate::lexer::SyntaxMarks::default(),
             nested_depth: std::cell::Cell::new(0),
             saw_nested_declaration: std::cell::Cell::new(false),
+            saw_property_unset: false,
             goto_scopes: vec![GotoScope::default()],
         };
         parser.fill(LOOKAHEAD);
@@ -316,6 +319,11 @@ impl Parser<'_> {
     /// declared in the body of a closure or an anonymous class.
     pub fn saw_nested_declaration(&self) -> bool {
         self.saw_nested_declaration.get()
+    }
+
+    /// Whether the tree built so far unsets a property.
+    pub fn saw_property_unset(&self) -> bool {
+        self.saw_property_unset
     }
 
     /// Where the parse first met each syntax only some PHP versions accept.

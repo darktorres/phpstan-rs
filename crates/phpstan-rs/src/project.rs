@@ -236,6 +236,12 @@ impl BodySource for file_table::FileTable<FileState> {
             .bodies
             .hook_summary(provenance.declaration_span(), set)
     }
+
+    fn unset_properties(&self, out: &mut crate::registry::bodies::UnsetProperties) {
+        for file in self.values() {
+            file.bodies.unset_properties(out);
+        }
+    }
 }
 
 /// A multi-file PHP project: every loaded file's own parse tree, one

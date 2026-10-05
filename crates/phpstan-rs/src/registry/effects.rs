@@ -714,6 +714,10 @@ impl Registry {
     /// change.
     pub(crate) fn resolve_effects(&mut self, bodies: &dyn BodySource) {
         self.methods_by_name = Arc::new(methods_by_name(self));
+        let mut unset = crate::registry::bodies::UnsetProperties::default();
+        bodies.unset_properties(&mut unset);
+        unset.settle();
+        self.unset_properties = Arc::new(unset);
         let mut running_code = (*self.base_builtin_methods_running_code).clone();
         for name in self.own_builtin_methods_running_code() {
             running_code.insert(name);
@@ -936,8 +940,10 @@ impl Registry {
     /// of an object of `class`, from code of the class `scope`, runs a
     /// magic method: no property of the name is declared, or only a
     /// `@property` tag, a static one or one the scope cannot see declares
-    /// it. A closure (`rebindable`) may be bound to any class's scope, so
-    /// it sees only a public one for certain.
+    /// it, or the program unsets a property of the name, which leaves the
+    /// declared one to the magic methods. A closure (`rebindable`) may be
+    /// bound to any class's scope, so it sees only a public one for
+    /// certain.
     fn property_magic(
         &self,
         class: &str,
@@ -951,7 +957,7 @@ impl Registry {
         let Some((owner, declared)) = self.lookup_property_with_owner(class, prop) else {
             return true;
         };
-        if declared.from_tag() || declared.is_static() {
+        if declared.from_tag() || declared.is_static() || self.unset_properties.may_unset(prop) {
             return true;
         }
         match declared.visibility() {

@@ -484,6 +484,7 @@ impl CanonicalOver for Registry {
             builtin_methods_running_code,
             base_builtin_methods_running_code,
             methods_by_name,
+            unset_properties,
             global_sites,
         } = self;
         p.node(
@@ -598,6 +599,7 @@ impl CanonicalOver for Registry {
                     ),
                 ),
                 ("methods_by_name", methods_by_name),
+                ("unset_properties", unset_properties),
                 ("global_sites", global_sites),
             ],
         );
@@ -636,6 +638,7 @@ canonical_struct!(Registry {
     builtin_methods_running_code,
     base_builtin_methods_running_code,
     methods_by_name,
+    unset_properties,
     global_sites,
 } skip {
     // What the last lookups of the names in scope made of `scope` and the

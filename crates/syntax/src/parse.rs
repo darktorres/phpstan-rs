@@ -111,6 +111,7 @@ pub fn parse_watching<'a>(
     let parsed = parser.parse_program();
     let has_anonymous_class = parser.saw_anonymous_class();
     let has_nested_declaration = parser.saw_nested_declaration();
+    let unsets_property = parser.saw_property_unset();
     let syntax_marks = parser.syntax_marks();
     let goto_labels = parser.file_goto_labels();
     let references = parser.take_references();
@@ -134,6 +135,7 @@ pub fn parse_watching<'a>(
     let stmts = parsed?;
     facts.has_anonymous_class = has_anonymous_class;
     facts.has_nested_declaration = has_nested_declaration;
+    facts.unsets_property = unsets_property;
     facts.syntax.merge(&syntax_marks);
     Ok(ParsedFile {
         stmts,
