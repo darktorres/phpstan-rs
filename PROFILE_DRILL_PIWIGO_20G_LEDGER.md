@@ -119,7 +119,7 @@ Building started on 2026-10-03 (`WORK_STACK.md`, level 8).
 | **2** | **item 2** | **The parallel walk and path data** | | | |
 | 2.1 | One listing per directory | The vendor resolver's listings become the walk's table. Classmap and `files` entries under PSR-4 directories are dropped. Stub directories are walked once | — | perf | DONE (42b713d0; the stub directories were already walked once, as scan directories, since item 1's roles) |
 | 2.2 | One task per directory | Entries sorted by name bytes; kinds from the dirent. Links followed as today. Stronger roots and promoted packages pruned. `collect_php_files_excluding` deleted; the names a defaulted root prunes stay | 1.2 | perf | DONE (d64266dc) |
-| 2.3 | Spellings, path data | Spellings built, not respelled. Path data from the walk; `owner_of_dir` once per directory, in one implementation | 2.2 | perf | OPEN |
+| 2.3 | Spellings, path data | Spellings built, not respelled. Path data from the walk; `owner_of_dir` once per directory, in one implementation | 2.2 | perf | DONE (42140a68; the load finds them once per directory on each thread, from the files' spellings, where the plan has the walk hand them down) |
 | 2.4 | Parsing as listed | Each directory's PHP files go to the pool as one task, with the thread's name cache owned by the load | 2.2 | perf | OPEN |
 | 2.5 | Order without comparisons | Keyed by root index and entry index path; explicit files placed by binary search | 2.2 | perf | OPEN |
 | 2.6 | A path stored once | `FileTable` as a `HashTable<FileId>` using the walk's hash | 2.3 | perf | OPEN |
