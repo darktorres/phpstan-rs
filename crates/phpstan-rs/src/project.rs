@@ -3490,7 +3490,13 @@ impl syntax::canonical::Canonical for ParsedFile {
 /// top-level scan in one non-recursive, correctly-measured call instead -
 /// see that function's own doc comment for the real number this found.
 pub fn collect_php_files(path: &Path, out: &mut Vec<PathBuf>) {
-    collect_php_files_excluding(path, &[], out);
+    Walk {
+        table: &DirTable::default(),
+        excluded_dir_names: &[],
+        wanted: &is_php_file,
+        skip_dir: None,
+    }
+    .files(path, out);
 }
 
 /// Whether `path` is a file PHP may be run from: one named with an
@@ -3534,6 +3540,88 @@ fn opens_php(start: &[u8]) -> bool {
             .is_some_and(|open| open.eq_ignore_ascii_case(b"<?php"))
 }
 
+/// Whether `path` is named as a `.php` file.
+pub(crate) fn is_php_file(path: &Path) -> bool {
+    path.extension().is_some_and(|e| e == "php")
+}
+
+/// A walk for files: what it finds, where it reads directories, and what
+/// it leaves out.
+pub(crate) struct Walk<'a> {
+    pub(crate) table: &'a DirTable,
+    /// A directory whose name is in it is left out.
+    pub(crate) excluded_dir_names: &'a [&'a str],
+    /// Which files it finds.
+    pub(crate) wanted: &'a (dyn Fn(&Path) -> bool + Sync),
+    /// Which directories below the one it starts from it does not go into.
+    pub(crate) skip_dir: Option<&'a (dyn Fn(&Path) -> bool + Sync)>,
+}
+
+/// One entry of a directory, as its walk settles it.
+enum Found {
+    File(PathBuf),
+    Files(Vec<PathBuf>),
+}
+
+impl Walk<'_> {
+    /// The files found under `path`, or `path` itself when it is one,
+    /// appended to `out` in the order paths compare in: each directory's
+    /// entries are by name before the walk goes into them, so a name is
+    /// before the longer ones it begins, and what is in a directory is
+    /// before what comes after the directory's name. Each directory is a
+    /// task of the pool the caller runs in, and its subdirectories' results
+    /// join in its entries' order.
+    pub(crate) fn files(&self, path: &Path, out: &mut Vec<PathBuf>) {
+        if path.is_dir() {
+            out.extend(self.directory(path));
+        } else if (self.wanted)(path) {
+            out.push(path.to_path_buf());
+        }
+    }
+
+    fn directory(&self, dir: &Path) -> Vec<PathBuf> {
+        if dir
+            .file_name()
+            .and_then(|n| n.to_str())
+            .is_some_and(|n| self.excluded_dir_names.contains(&n))
+        {
+            return Vec::new();
+        }
+        let Some(listing) = self.table.list(dir) else {
+            return Vec::new();
+        };
+        let found: Vec<Found> = listing
+            .entries()
+            .par_iter()
+            .filter_map(|entry| {
+                let path = dir.join(&entry.name);
+                // Only a link needs a `stat` to tell what it leads to.
+                let is_dir = match entry.kind {
+                    EntryKind::Dir => true,
+                    EntryKind::File => false,
+                    EntryKind::Link => path.is_dir(),
+                };
+                if is_dir {
+                    if self.skip_dir.is_some_and(|skip| skip(&path)) {
+                        return None;
+                    }
+                    Some(Found::Files(self.directory(&path)))
+                } else {
+                    (self.wanted)(&path).then_some(Found::File(path))
+                }
+            })
+            .collect();
+        let mut files = Vec::new();
+        for found in found {
+            match found {
+                Found::File(path) => files.push(path),
+                Found::Files(mut inner) => files.append(&mut inner),
+            }
+        }
+        files
+    }
+}
+
 /// Directory names a workspace-wide scan skips by default when no real
 /// config (1.1's own `phpstan-rs.toml` `paths`) says otherwise - a
 /// hardcoded floor, not a substitute for real exclusion config. Matches
@@ -3543,90 +3631,14 @@ pub const DEFAULT_SCAN_EXCLUDED_DIR_NAMES: &[&str] = &["vendor", ".git", "node_m
 
 /// `true` if any component of `path` is named exactly one of
 /// `excluded_dir_names` - a pure name check, no filesystem access. Used
-/// both to prune `collect_php_files_excluding`'s own walk and by
-/// `FileRoles::classify` for a project with no analysed root.
+/// both to prune a walk and by `FileRoles::classify` for a project with no
+/// analysed root.
 pub fn path_under_excluded_dir(path: &Path, excluded_dir_names: &[&str]) -> bool {
     path.components().any(|c| {
         c.as_os_str()
             .to_str()
             .is_some_and(|s| excluded_dir_names.contains(&s))
     })
-}
-
-/// Same as `collect_php_files`, but prunes any directory whose name
-/// appears in `excluded_dir_names` before recursing into it - see
-/// `DEFAULT_SCAN_EXCLUDED_DIR_NAMES`.
-pub fn collect_php_files_excluding(
-    path: &Path,
-    excluded_dir_names: &[&str],
-    out: &mut Vec<PathBuf>,
-) {
-    walk_files(
-        &DirTable::default(),
-        path,
-        excluded_dir_names,
-        &is_php_file,
-        out,
-    );
-}
-
-/// Whether `path` is named as a `.php` file.
-pub(crate) fn is_php_file(path: &Path) -> bool {
-    path.extension().is_some_and(|e| e == "php")
-}
-
-/// The files `wanted` finds under `path`, or `path` itself when it is
-/// one, read through `table`, in the order paths compare in: each
-/// directory's entries by name before the walk goes into them, so a name
-/// is before the longer ones it begins, and what is in a directory is
-/// before what comes after the directory's name. A directory whose name is
-/// in `excluded_dir_names` is left out.
-pub(crate) fn walk_files(
-    table: &DirTable,
-    path: &Path,
-    excluded_dir_names: &[&str],
-    wanted: &dyn Fn(&Path) -> bool,
-    out: &mut Vec<PathBuf>,
-) {
-    if path.is_dir() {
-        walk_dir(table, path, excluded_dir_names, wanted, out);
-    } else if wanted(path) {
-        out.push(path.to_path_buf());
-    }
-}
-
-/// `walk_files` of a directory.
-fn walk_dir(
-    table: &DirTable,
-    dir: &Path,
-    excluded_dir_names: &[&str],
-    wanted: &dyn Fn(&Path) -> bool,
-    out: &mut Vec<PathBuf>,
-) {
-    if dir
-        .file_name()
-        .and_then(|n| n.to_str())
-        .is_some_and(|n| excluded_dir_names.contains(&n))
-    {
-        return;
-    }
-    let Some(listing) = table.list(dir) else {
-        return;
-    };
-    for entry in listing.entries() {
-        let path = dir.join(&entry.name);
-        // Only a link needs a `stat` to tell what it leads to.
-        let is_dir = match entry.kind {
-            EntryKind::Dir => true,
-            EntryKind::File => false,
-            EntryKind::Link => path.is_dir(),
-        };
-        if is_dir {
-            walk_dir(table, &path, excluded_dir_names, wanted, out);
-        } else if wanted(&path) {
-            out.push(path);
-        }
-    }
 }
 
 /// `path`, spelled from `working_dir`, as an absolute path: `working_dir`

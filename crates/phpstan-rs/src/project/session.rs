@@ -1054,6 +1054,7 @@ impl Session {
         out: &mut Vec<PathBuf>,
         listed: Listed,
         pruned: &[&str],
+        skip_dir: Option<&(dyn Fn(&Path) -> bool + Sync)>,
     ) {
         let walked = self.root.join(dir);
         let mut found = Vec::new();
@@ -1061,7 +1062,18 @@ impl Session {
             Listed::Php => super::is_php_file,
             Listed::Run => super::is_php_run_file,
         };
-        super::walk_files(table, &walked, pruned, &wanted, &mut found);
+        let skip = skip_dir.map(|skip| move |path: &Path| skip(&self.absolute(path)));
+        self.pool.install(|| {
+            super::Walk {
+                table,
+                excluded_dir_names: pruned,
+                wanted: &wanted,
+                skip_dir: skip
+                    .as_ref()
+                    .map(|skip| skip as &(dyn Fn(&Path) -> bool + Sync)),
+            }
+            .files(&walked, &mut found)
+        });
         let spelled = |path: PathBuf| match path.strip_prefix(&walked) {
             Ok(rest) if rest.as_os_str().is_empty() => dir.to_path_buf(),
             Ok(rest) => dir.join(rest),
@@ -1493,7 +1505,7 @@ impl Session {
     fn analysed_listing(&self, table: &DirTable, listed: Listed) -> Vec<PathBuf> {
         let mut files = Vec::new();
         for dir in super::roles::outermost(&self.dirs, |dir| self.absolute(dir)) {
-            self.collect_files(table, dir, &mut files, listed, self.pruned);
+            self.collect_files(table, dir, &mut files, listed, self.pruned, None);
         }
         composer::path_order::sort_paths(&mut files);
         files
@@ -1523,8 +1535,20 @@ impl Session {
                 continue;
             }
             let start = files.len();
-            self.collect_files(table, dir, &mut files, listed, &[]);
-            if roles.holds_analysed(&absolute) {
+            // What an analysed root holds, in full, is analysed, and listed
+            // by the walk of that root: a walk of this directory goes no
+            // further into it.
+            let holds_analysed = roles.holds_analysed(&absolute);
+            let skip = |absolute: &Path| roles.holds_only_analysed(absolute);
+            self.collect_files(
+                table,
+                dir,
+                &mut files,
+                listed,
+                &[],
+                holds_analysed.then_some(&skip),
+            );
+            if holds_analysed {
                 let walked = files.split_off(start);
                 files.extend(walked.into_iter().filter(is_context));
             }

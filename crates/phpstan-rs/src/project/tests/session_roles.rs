@@ -196,3 +196,23 @@ fn an_invalid_setting_fails_one_policy_and_is_taken_as_unset_by_the_other() {
     let degraded = resolve(Policy::Degrade).unwrap();
     assert!(!degraded.warnings.is_empty());
 }
+
+#[test]
+fn a_context_walk_does_not_go_into_an_analysed_root_below_it() {
+    let dir = TempDir::new("session_roles_nested");
+    dir.write("lib/C.php", "<?php class C {}");
+    dir.write("lib/own/O.php", "<?php class O {}");
+    dir.write("lib/own/deep/P.php", "<?php class P {}");
+    dir.write("lib/other/Q.php", "<?php class Q {}");
+    let session = session(
+        &dir,
+        Overrides {
+            paths: paths(&["lib/own"]),
+            scan_paths: paths(&["lib"]),
+            ..Overrides::default()
+        },
+    );
+    let (analysed, context) = session.listing();
+    assert_eq!(analysed, paths(&["lib/own/O.php", "lib/own/deep/P.php"]));
+    assert_eq!(context, paths(&["lib/C.php", "lib/other/Q.php"]));
+}

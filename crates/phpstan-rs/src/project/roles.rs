@@ -98,6 +98,14 @@ impl FileRoles {
         !self.stubs.is_empty()
     }
 
+    /// Whether every file under `dir` is analysed: an analysed root with
+    /// no directory names left out is `dir` or holds it.
+    pub fn holds_only_analysed(&self, dir: &Path) -> bool {
+        self.analysed
+            .iter()
+            .any(|root| root.pruned.is_empty() && dir.starts_with(&root.dir))
+    }
+
     /// Whether an analysed root is `dir` or lies under it: a walk of `dir`
     /// may list files of that role.
     pub fn holds_analysed(&self, dir: &Path) -> bool {

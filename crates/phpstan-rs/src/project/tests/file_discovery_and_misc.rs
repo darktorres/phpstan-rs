@@ -20,6 +20,40 @@ fn collect_php_files_recurses_into_subdirectories_and_skips_non_php() {
 }
 
 #[test]
+fn the_walk_lists_in_path_order_whichever_directory_finishes_first() {
+    let dir = TempDir::new("collect_order");
+    for file in [
+        "a/x.php",
+        "a-b/y.php",
+        "a.php",
+        "b/c/z.php",
+        "b/c/d/w.php",
+        "b/e.php",
+        "b.php",
+    ] {
+        dir.write(file, "<?php");
+    }
+    let expected = [
+        "a/x.php",
+        "a-b/y.php",
+        "a.php",
+        "b/c/d/w.php",
+        "b/c/z.php",
+        "b/e.php",
+        "b.php",
+    ]
+    .map(|file| dir.0.join(file));
+    // The order is the same whatever the pool's schedule, and is the order
+    // paths compare in.
+    for _ in 0..20 {
+        let mut files = Vec::new();
+        worker_pool().install(|| collect_php_files(&dir.0, &mut files));
+        assert_eq!(files, expected);
+        assert!(files.windows(2).all(|pair| pair[0] < pair[1]));
+    }
+}
+
+#[test]
 fn default_is_equivalent_to_new() {
     let project = Project::default();
     assert_eq!(project.file_count(), 0);
