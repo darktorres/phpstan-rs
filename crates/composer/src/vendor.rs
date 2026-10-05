@@ -22,10 +22,13 @@
 //! for context, never reported" and its bugs would stop being reported
 //! with no warning.
 
-use rustc_hash::FxHashMap;
+use rustc_hash::{FxHashMap, FxHashSet};
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use syntax::ast::{BinOp, ClassDecl, Expr, ExprKind, Literal, Stmt, StmtKind};
+
+use crate::dir_table::{DirTable, EntryKind, Listing};
 
 #[derive(Debug, Default, Clone, PartialEq)]
 pub struct VendorContext {
@@ -40,6 +43,12 @@ pub struct VendorContext {
 /// Composer project (no `composer.json`) or hasn't been installed yet (no
 /// `vendor/composer/`).
 pub fn discover_vendor_context(project_dir: &Path) -> VendorContext {
+    discover_vendor_context_in(project_dir, &DirTable::default())
+}
+
+/// `discover_vendor_context`, listing each directory through `table`,
+/// which whoever walks the same directories reads too.
+pub fn discover_vendor_context_in(project_dir: &Path, table: &DirTable) -> VendorContext {
     if !project_dir.join("composer.json").is_file() {
         return VendorContext::default();
     }
@@ -63,7 +72,7 @@ pub fn discover_vendor_context(project_dir: &Path) -> VendorContext {
     // what should be a quiet "skip this source of context" degrade.
     let default_hook = std::panic::take_hook();
     std::panic::set_hook(Box::new(|_| {}));
-    let mut ctx = discover_inner(&composer_dir, &vendor_dir, &base_dir);
+    let mut ctx = discover_inner(&composer_dir, &vendor_dir, &base_dir, table);
     std::panic::set_hook(default_hook);
 
     // Composer's own bootstrap loader class - unlike every other file
@@ -81,23 +90,33 @@ pub fn discover_vendor_context(project_dir: &Path) -> VendorContext {
     ctx
 }
 
-fn discover_inner(composer_dir: &Path, vendor_dir: &Path, base_dir: &Path) -> VendorContext {
+fn discover_inner(
+    composer_dir: &Path,
+    vendor_dir: &Path,
+    base_dir: &Path,
+    table: &DirTable,
+) -> VendorContext {
     let static_path = composer_dir.join("autoload_static.php");
     if static_path.is_file()
-        && let Some(ctx) = parse_static_file(&static_path, vendor_dir, base_dir)
+        && let Some(ctx) = parse_static_file(&static_path, vendor_dir, base_dir, table)
     {
         return ctx;
     }
-    parse_separate_files(composer_dir, vendor_dir, base_dir)
+    parse_separate_files(composer_dir, vendor_dir, base_dir, table)
 }
 
-fn parse_static_file(path: &Path, vendor_dir: &Path, base_dir: &Path) -> Option<VendorContext> {
+fn parse_static_file(
+    path: &Path,
+    vendor_dir: &Path,
+    base_dir: &Path,
+    table: &DirTable,
+) -> Option<VendorContext> {
     let generated_dir = path.parent()?;
     let stmts = parse_generated_file(path)?;
     let class = find_class_decl(&stmts)?;
 
     let mut ctx = VendorContext::default();
-    let mut resolver = Resolver::new(vendor_dir, base_dir, generated_dir);
+    let mut resolver = Resolver::new(vendor_dir, base_dir, generated_dir, table);
     for prop in &class.def.properties {
         if !prop.is_static {
             continue;
@@ -111,13 +130,18 @@ fn parse_static_file(path: &Path, vendor_dir: &Path, base_dir: &Path) -> Option<
             _ => {}
         }
     }
-    dedup(&mut ctx);
+    resolver.settle(&mut ctx);
     Some(ctx)
 }
 
-fn parse_separate_files(composer_dir: &Path, vendor_dir: &Path, base_dir: &Path) -> VendorContext {
+fn parse_separate_files(
+    composer_dir: &Path,
+    vendor_dir: &Path,
+    base_dir: &Path,
+    table: &DirTable,
+) -> VendorContext {
     let mut ctx = VendorContext::default();
-    let mut resolver = Resolver::new(vendor_dir, base_dir, composer_dir);
+    let mut resolver = Resolver::new(vendor_dir, base_dir, composer_dir, table);
     for name in ["autoload_classmap.php", "autoload_files.php"] {
         let path = composer_dir.join(name);
         if let Some(arr) = parse_top_level_array(&path) {
@@ -130,7 +154,7 @@ fn parse_separate_files(composer_dir: &Path, vendor_dir: &Path, base_dir: &Path)
             resolver.collect_dirs(&arr, &mut ctx.dirs);
         }
     }
-    dedup(&mut ctx);
+    resolver.settle(&mut ctx);
     ctx
 }
 
@@ -159,19 +183,10 @@ fn parse_generated_file(path: &Path) -> Option<Vec<Stmt>> {
     syntax::parse(&bytes).ok().map(|parsed| parsed.stmts)
 }
 
-/// What a directory entry is, as its directory's listing says it:
-/// without following a link.
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum EntryKind {
-    Link,
-    Other,
-}
-
-/// A directory that was listed: its canonical form, and its entries by
-/// name.
+/// A directory that was listed: its canonical form, and its entries.
 struct Listed {
     canonical: PathBuf,
-    entries: FxHashMap<Vec<u8>, EntryKind>,
+    listing: Arc<Listing>,
 }
 
 /// Resolves a generated autoloader's path expressions against its vendor,
@@ -180,21 +195,29 @@ struct Resolver<'p> {
     vendor_dir: &'p Path,
     base_dir: &'p Path,
     generated_dir: &'p Path,
+    table: &'p DirTable,
     // Each directory's listing, made once: autoload entries share a few
     // thousand directories among tens of thousands of files, and a listing
     // tells whether an entry exists and whether it is a link, which a
     // `stat` of each file would. Keyed by the directory's text as written,
     // which hashes as bytes - a `Path` hashes component by component. None
-    // for a directory that has no canonical form or cannot be listed.
+    // for a directory that has no canonical form or cannot be listed. The
+    // listing itself is the table's.
     listings: FxHashMap<Vec<u8>, Option<Listed>>,
 }
 
 impl<'p> Resolver<'p> {
-    fn new(vendor_dir: &'p Path, base_dir: &'p Path, generated_dir: &'p Path) -> Self {
+    fn new(
+        vendor_dir: &'p Path,
+        base_dir: &'p Path,
+        generated_dir: &'p Path,
+        table: &'p DirTable,
+    ) -> Self {
         Resolver {
             vendor_dir,
             base_dir,
             generated_dir,
+            table,
             listings: FxHashMap::default(),
         }
     }
@@ -262,10 +285,10 @@ impl<'p> Resolver<'p> {
             // but to pass through it) is still resolved as the system does.
             return std::fs::canonicalize(path).ok();
         };
-        match listed.entries.get(name.as_encoded_bytes()) {
+        match listed.listing.kind_of(name) {
             None => None,
             Some(EntryKind::Link) => std::fs::canonicalize(path).ok(),
-            Some(EntryKind::Other) => Some(listed.canonical.join(name)),
+            Some(EntryKind::Dir | EntryKind::File) => Some(listed.canonical.join(name)),
         }
     }
 
@@ -284,19 +307,8 @@ impl<'p> Resolver<'p> {
 
     fn list(&mut self, dir: &Path) -> Option<Listed> {
         let canonical = self.canonical_dir(dir)?;
-        let mut entries = FxHashMap::default();
-        for entry in std::fs::read_dir(dir).ok()? {
-            let entry = entry.ok()?;
-            let kind = match entry.file_type() {
-                Ok(kind) if kind.is_symlink() => EntryKind::Link,
-                // A type the system does not give is a link until a
-                // `canonicalize` says otherwise.
-                Err(_) => EntryKind::Link,
-                Ok(_) => EntryKind::Other,
-            };
-            entries.insert(entry.file_name().as_encoded_bytes().to_vec(), kind);
-        }
-        Some(Listed { canonical, entries })
+        let listing = self.table.list(dir)?;
+        Some(Listed { canonical, listing })
     }
 
     /// The canonical form of `dir`: its parent's, joined with its name,
@@ -318,11 +330,81 @@ impl<'p> Resolver<'p> {
         let Some(parent_listed) = self.listed(parent) else {
             return std::fs::canonicalize(dir).ok();
         };
-        match parent_listed.entries.get(name.as_encoded_bytes()) {
+        match parent_listed.listing.kind_of(name) {
             None => None,
             Some(EntryKind::Link) => std::fs::canonicalize(dir).ok(),
-            Some(EntryKind::Other) => Some(parent_listed.canonical.join(name)),
+            Some(EntryKind::Dir | EntryKind::File) => Some(parent_listed.canonical.join(name)),
         }
+    }
+}
+
+impl Resolver<'_> {
+    /// Sorts and deduplicates what was found, and leaves out the files a
+    /// walk of the directories lists anyway: a `.php` file that is not a
+    /// link, under one of `ctx.dirs` through directories that are not
+    /// links, is listed by that directory's walk under this very spelling.
+    fn settle(&mut self, ctx: &mut VendorContext) {
+        crate::path_order::sort_paths(&mut ctx.dirs);
+        ctx.dirs.dedup();
+        let roots: FxHashSet<&[u8]> = ctx
+            .dirs
+            .iter()
+            .map(|dir| dir.as_os_str().as_encoded_bytes())
+            .collect();
+        let mut reached = FxHashMap::default();
+        let files = std::mem::take(&mut ctx.files);
+        ctx.files = files
+            .into_iter()
+            .filter(|file| !self.walked(file, &roots, &mut reached))
+            .collect();
+        crate::path_order::sort_paths(&mut ctx.files);
+        ctx.files.dedup();
+    }
+
+    /// Whether a walk of `roots` lists `file`.
+    fn walked(
+        &mut self,
+        file: &Path,
+        roots: &FxHashSet<&[u8]>,
+        reached: &mut FxHashMap<Vec<u8>, bool>,
+    ) -> bool {
+        let (Some(dir), Some(name)) = (file.parent(), file.file_name()) else {
+            return false;
+        };
+        file.extension().is_some_and(|e| e == "php")
+            && self
+                .listed(dir)
+                .is_some_and(|listed| listed.listing.kind_of(name) == Some(EntryKind::File))
+            && self.reached(dir, roots, reached)
+    }
+
+    /// Whether a walk of `roots` goes into `dir`: it is one of them, or in
+    /// one that is gone into, as a directory its parent lists as one.
+    fn reached(
+        &mut self,
+        dir: &Path,
+        roots: &FxHashSet<&[u8]>,
+        reached: &mut FxHashMap<Vec<u8>, bool>,
+    ) -> bool {
+        let key = dir.as_os_str().as_encoded_bytes();
+        if let Some(&known) = reached.get(key) {
+            return known;
+        }
+        let gone_into = if roots.contains(key) {
+            self.listed(dir).is_some()
+        } else {
+            match (dir.parent(), dir.file_name()) {
+                (Some(parent), Some(name)) if !parent.as_os_str().is_empty() => {
+                    self.reached(parent, roots, reached)
+                        && self.listed(parent).is_some_and(|listed| {
+                            listed.listing.kind_of(name) == Some(EntryKind::Dir)
+                        })
+                }
+                _ => false,
+            }
+        };
+        reached.insert(key.to_vec(), gone_into);
+        gone_into
     }
 }
 
@@ -388,11 +470,4 @@ fn eval_concat(
             _ => None,
         }
     })
-}
-
-fn dedup(ctx: &mut VendorContext) {
-    crate::path_order::sort_paths(&mut ctx.files);
-    ctx.files.dedup();
-    crate::path_order::sort_paths(&mut ctx.dirs);
-    ctx.dirs.dedup();
 }

@@ -8,7 +8,7 @@
 
 use rustc_hash::FxHashMap;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex, PoisonError};
 
 use syntax::span::Span;
 
@@ -33,6 +33,7 @@ use super::DEFAULT_SCAN_EXCLUDED_DIR_NAMES;
 use super::file_cache;
 use super::source::{ContentHash, Overlay};
 use super::{ParsedFile, Project, ProjectSettings};
+use composer::dir_table::DirTable;
 use diagnostics::{self, Diagnostic, DiagnosticBuilder, LevelCutoff};
 
 /// The level reported when neither the command line nor the config sets
@@ -119,6 +120,10 @@ pub struct Session {
     /// promoted to analysed paths, which are left out of them.
     vendors: Vec<composer::PendingVendor>,
     promoted: Vec<PathBuf>,
+    /// The directories the vendor discovery listed, which the first walk
+    /// reads too; each walk after it lists the directories again, which
+    /// may have changed.
+    discovery_listings: Mutex<Option<Arc<composer::dir_table::DirTable>>>,
     cutoff: LevelCutoff,
     emission_order: bool,
     banned_constructs: Vec<banned::BannedConstruct>,
@@ -693,6 +698,7 @@ impl Session {
         let absolute_root = std::fs::canonicalize(&root).unwrap_or_else(|_| root.clone());
         let mut composer_php_versions = None;
         let mut root_manifest = None;
+        let listings = Arc::new(composer::dir_table::DirTable::default());
         let mut dirs = dirs;
         if !no_composer {
             let canonical_root = absolute_root.clone();
@@ -705,7 +711,11 @@ impl Session {
                 } else {
                     composer_root.clone()
                 };
-                let package = composer::PackageContext::load(&composer_root, &manifest_root);
+                let package = composer::PackageContext::load_in(
+                    &composer_root,
+                    &manifest_root,
+                    Arc::clone(&listings),
+                );
                 if composer_root == canonical_root {
                     composer_php_versions = declared_php_versions(&package);
                     root_manifest = package.manifest.clone();
@@ -807,6 +817,7 @@ impl Session {
             scan_files,
             vendors,
             promoted,
+            discovery_listings: Mutex::new(Some(listings)),
             cutoff,
             emission_order: overrides.emission_order,
             banned_constructs,
@@ -967,9 +978,10 @@ impl Session {
     /// The files the session loads: those it analyses, then the context
     /// files, each in the order a load takes them.
     pub fn listing(&self) -> (Vec<PathBuf>, Vec<PathBuf>) {
+        let table = self.listings();
         (
-            self.analysed_listing(Listed::Php),
-            self.context_listing(Listed::Php),
+            self.analysed_listing(&table, Listed::Php),
+            self.context_listing(&table, Listed::Php),
         )
     }
 
@@ -985,6 +997,16 @@ impl Session {
         let mut settings = self.settings.clone();
         settings.keeps_as_built = keeps_as_built;
         project.apply_settings(settings);
+    }
+
+    /// The directory listings a walk of this session reads through: the
+    /// ones vendor discovery made, for the first walk, and none after it.
+    fn listings(&self) -> Arc<DirTable> {
+        self.discovery_listings
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .take()
+            .unwrap_or_default()
     }
 
     /// `path`, spelled from the root, as an absolute path.
@@ -1025,13 +1047,21 @@ impl Session {
     /// what is under a directory named in `pruned`, spelled as
     /// `dir` joined with its path below it - the same spelling the command
     /// line gave - while the walk itself happens under the root.
-    fn collect_files(&self, dir: &Path, out: &mut Vec<PathBuf>, listed: Listed, pruned: &[&str]) {
+    fn collect_files(
+        &self,
+        table: &DirTable,
+        dir: &Path,
+        out: &mut Vec<PathBuf>,
+        listed: Listed,
+        pruned: &[&str],
+    ) {
         let walked = self.root.join(dir);
         let mut found = Vec::new();
-        match listed {
-            Listed::Php => super::collect_php_files_excluding(&walked, pruned, &mut found),
-            Listed::Run => super::collect_php_run_files_excluding(&walked, pruned, &mut found),
-        }
+        let wanted = match listed {
+            Listed::Php => super::is_php_file,
+            Listed::Run => super::is_php_run_file,
+        };
+        super::walk_files(table, &walked, pruned, &wanted, &mut found);
         let spelled = |path: PathBuf| match path.strip_prefix(&walked) {
             Ok(rest) if rest.as_os_str().is_empty() => dir.to_path_buf(),
             Ok(rest) => dir.join(rest),
@@ -1165,8 +1195,9 @@ impl Session {
         out: &Path,
         reference: Option<&Path>,
     ) -> Result<FrontEndDump, String> {
-        let analysed = self.analysed_listing(Listed::Run);
-        let context = self.context_listing(Listed::Run);
+        let table = self.listings();
+        let analysed = self.analysed_listing(&table, Listed::Run);
+        let context = self.context_listing(&table, Listed::Run);
         let mut files: Vec<(&'static str, &PathBuf)> = context
             .iter()
             .map(|path| ("context", path))
@@ -1454,15 +1485,15 @@ impl Session {
 
     /// The files the load analyses, in path order.
     fn analysed_files(&self) -> Vec<PathBuf> {
-        self.analysed_listing(Listed::Php)
+        self.analysed_listing(&self.listings(), Listed::Php)
     }
 
     /// The files under the analysed paths that `listed` finds, in path order,
     /// each once: a path another contains is not walked again.
-    fn analysed_listing(&self, listed: Listed) -> Vec<PathBuf> {
+    fn analysed_listing(&self, table: &DirTable, listed: Listed) -> Vec<PathBuf> {
         let mut files = Vec::new();
         for dir in super::roles::outermost(&self.dirs, |dir| self.absolute(dir)) {
-            self.collect_files(dir, &mut files, listed, self.pruned);
+            self.collect_files(table, dir, &mut files, listed, self.pruned);
         }
         composer::path_order::sort_paths(&mut files);
         files
@@ -1471,7 +1502,7 @@ impl Session {
     /// The files the context paths and the vendor context reach that `listed`
     /// finds, in path order, each once and none that an analysed path
     /// contains: such a file is analysed, and listed by `analysed_listing`.
-    fn context_listing(&self, listed: Listed) -> Vec<PathBuf> {
+    fn context_listing(&self, table: &DirTable, listed: Listed) -> Vec<PathBuf> {
         // The vendor context was being found while the analysed files were
         // listed.
         let mut scan_dirs = self.scan_dirs.clone();
@@ -1492,7 +1523,7 @@ impl Session {
                 continue;
             }
             let start = files.len();
-            self.collect_files(dir, &mut files, listed, &[]);
+            self.collect_files(table, dir, &mut files, listed, &[]);
             if roles.holds_analysed(&absolute) {
                 let walked = files.split_off(start);
                 files.extend(walked.into_iter().filter(is_context));
@@ -1506,8 +1537,9 @@ impl Session {
     /// `load`, the project built once or kept for edits as `keeps_as_built`
     /// says.
     fn load_project(&self, keeps_as_built: bool) -> Result<Loaded, String> {
-        let analyze_files = self.analysed_files();
-        let context_files = self.context_listing(Listed::Php);
+        let table = self.listings();
+        let analyze_files = self.analysed_listing(&table, Listed::Php);
+        let context_files = self.context_listing(&table, Listed::Php);
         if analyze_files.is_empty() {
             let dirs: Vec<String> = self.dirs.iter().map(|d| d.display().to_string()).collect();
             return Err(format!("no .php files found under {}", dirs.join(", ")));

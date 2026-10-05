@@ -18,6 +18,7 @@ use crate::registry::stubs;
 use crate::registry::{
     BodySource, BuiltDecl, DeclKind, FileBodies, GlobalFacts, Origin, Provenance, Registry,
 };
+use composer::dir_table::{DirTable, EntryKind};
 use declared_classes::DeclaredClass;
 use diagnostics::{self, Diagnostic, DiagnosticBuilder};
 use syntax::FileFacts;
@@ -3492,42 +3493,11 @@ pub fn collect_php_files(path: &Path, out: &mut Vec<PathBuf>) {
     collect_php_files_excluding(path, &[], out);
 }
 
-/// Every file PHP may be run from under `path`, or `path` itself when it
-/// is one, in the order `collect_php_files` gives: one named with an
+/// Whether `path` is a file PHP may be run from: one named with an
 /// extension PHP sources have (`.php`, `.inc`, `.module`, `.install`,
 /// `.theme`, `.engine`, `.profile`), or one that starts with `<?php` or
 /// `<?=`.
-///
-/// Any directory whose name appears in `excluded_dir_names` is pruned, as
-/// `collect_php_files_excluding` does.
-pub(crate) fn collect_php_run_files_excluding(
-    path: &Path,
-    excluded_dir_names: &[&str],
-    out: &mut Vec<PathBuf>,
-) {
-    if path.is_dir() {
-        if path
-            .file_name()
-            .and_then(|n| n.to_str())
-            .is_some_and(|n| excluded_dir_names.contains(&n))
-        {
-            return;
-        }
-        let Ok(entries) = fs::read_dir(path) else {
-            return;
-        };
-        let mut entries: Vec<_> = entries.flatten().map(|entry| entry.file_name()).collect();
-        entries.sort_unstable_by(|a, b| a.as_encoded_bytes().cmp(b.as_encoded_bytes()));
-        for entry in entries {
-            collect_php_run_files_excluding(&path.join(entry), excluded_dir_names, out);
-        }
-    } else if is_php_run_file(path) {
-        out.push(path.to_path_buf());
-    }
-}
-
-/// See `collect_php_run_files_excluding`.
-fn is_php_run_file(path: &Path) -> bool {
+pub(crate) fn is_php_run_file(path: &Path) -> bool {
     if has_php_run_extension(path) {
         return true;
     }
@@ -3591,28 +3561,71 @@ pub fn collect_php_files_excluding(
     excluded_dir_names: &[&str],
     out: &mut Vec<PathBuf>,
 ) {
+    walk_files(
+        &DirTable::default(),
+        path,
+        excluded_dir_names,
+        &is_php_file,
+        out,
+    );
+}
+
+/// Whether `path` is named as a `.php` file.
+pub(crate) fn is_php_file(path: &Path) -> bool {
+    path.extension().is_some_and(|e| e == "php")
+}
+
+/// The files `wanted` finds under `path`, or `path` itself when it is
+/// one, read through `table`, in the order paths compare in: each
+/// directory's entries by name before the walk goes into them, so a name
+/// is before the longer ones it begins, and what is in a directory is
+/// before what comes after the directory's name. A directory whose name is
+/// in `excluded_dir_names` is left out.
+pub(crate) fn walk_files(
+    table: &DirTable,
+    path: &Path,
+    excluded_dir_names: &[&str],
+    wanted: &dyn Fn(&Path) -> bool,
+    out: &mut Vec<PathBuf>,
+) {
     if path.is_dir() {
-        if path
-            .file_name()
-            .and_then(|n| n.to_str())
-            .is_some_and(|n| excluded_dir_names.contains(&n))
-        {
-            return;
-        }
-        let Ok(entries) = fs::read_dir(path) else {
-            return;
-        };
-        // Each directory's entries by name before the walk goes into them,
-        // so the files come in the order paths compare in: a name is
-        // before the longer ones it begins, and what is in a directory is
-        // before what comes after the directory's name.
-        let mut entries: Vec<_> = entries.flatten().map(|entry| entry.file_name()).collect();
-        entries.sort_unstable_by(|a, b| a.as_encoded_bytes().cmp(b.as_encoded_bytes()));
-        for entry in entries {
-            collect_php_files_excluding(&path.join(entry), excluded_dir_names, out);
-        }
-    } else if path.extension().is_some_and(|e| e == "php") {
+        walk_dir(table, path, excluded_dir_names, wanted, out);
+    } else if wanted(path) {
         out.push(path.to_path_buf());
+    }
+}
+
+/// `walk_files` of a directory.
+fn walk_dir(
+    table: &DirTable,
+    dir: &Path,
+    excluded_dir_names: &[&str],
+    wanted: &dyn Fn(&Path) -> bool,
+    out: &mut Vec<PathBuf>,
+) {
+    if dir
+        .file_name()
+        .and_then(|n| n.to_str())
+        .is_some_and(|n| excluded_dir_names.contains(&n))
+    {
+        return;
+    }
+    let Some(listing) = table.list(dir) else {
+        return;
+    };
+    for entry in listing.entries() {
+        let path = dir.join(&entry.name);
+        // Only a link needs a `stat` to tell what it leads to.
+        let is_dir = match entry.kind {
+            EntryKind::Dir => true,
+            EntryKind::File => false,
+            EntryKind::Link => path.is_dir(),
+        };
+        if is_dir {
+            walk_dir(table, &path, excluded_dir_names, wanted, out);
+        } else if wanted(&path) {
+            out.push(path);
+        }
     }
 }
 

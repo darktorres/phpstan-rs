@@ -1,3 +1,4 @@
+mod dir_table;
 mod helpers;
 mod package_ownership;
 mod phpstan_dependency_detection;

@@ -101,6 +101,7 @@ fn resolves_the_real_autoload_static_shape_with_chained_dir_concat() {
     let dir = TempDir::new("static_shape");
     dir.write("composer.json", "{}");
     dir.write("vendor/acme/lib/Foo.php", "<?php class Foo {}");
+    dir.write("vendor/acme/other/Other.php", "<?php class Other {}");
     dir.write("app/FirstParty.php", "<?php class FirstParty {}");
     dir.write(
         "vendor/composer/autoload_static.php",
@@ -129,6 +130,7 @@ class ComposerStaticInitTest
 
     public static $classMap = array (
         'Acme\\Foo' => __DIR__ . '/..' . '/acme/lib/Foo.php',
+        'Acme\\Other' => __DIR__ . '/..' . '/acme/other/Other.php',
         'App\\FirstParty' => __DIR__ . '/../..' . '/app/FirstParty.php',
     );
 
@@ -142,11 +144,12 @@ class ComposerStaticInitTest
     );
 
     let ctx = discover_vendor_context(dir.path());
-    let foo = std::fs::canonicalize(dir.path().join("vendor/acme/lib/Foo.php")).unwrap();
+    let other = std::fs::canonicalize(dir.path().join("vendor/acme/other/Other.php")).unwrap();
     let acme_dir = std::fs::canonicalize(dir.path().join("vendor/acme/lib")).unwrap();
 
-    // The vendor-rooted entries resolve.
-    assert!(ctx.files.contains(&foo), "got: {:?}", ctx.files);
+    // The vendor-rooted entries resolve; `Foo.php` is left to the walk of
+    // its directory.
+    assert_eq!(ctx.files, vec![other], "got: {:?}", ctx.files);
     assert!(ctx.dirs.contains(&acme_dir), "got: {:?}", ctx.dirs);
 
     // The `__DIR__ . '/../..'`-rooted (first-party, `app/`) entries
@@ -205,4 +208,75 @@ return array(
     let ctx = discover_vendor_context(dir.path());
     assert_eq!(ctx.dirs.len(), 1, "{:?}", ctx.dirs);
     assert!(ctx.dirs[0].ends_with("vendor/acme/b/src"), "{:?}", ctx.dirs);
+}
+
+/// Writes the autoload maps of a project whose classmap lists `files`, under
+/// `vendor/acme/lib`, and whose PSR-4 map lists the directory
+/// `vendor/acme/lib/src`.
+fn write_classmap_over_psr4(dir: &TempDir, files: &[&str]) {
+    dir.write("composer.json", "{}");
+    let entries: String = files
+        .iter()
+        .map(|file| format!("    '{file}' => $vendorDir . '/acme/lib/{file}',\n"))
+        .collect();
+    dir.write(
+        "vendor/composer/autoload_classmap.php",
+        &format!("<?php\n$vendorDir = dirname(__DIR__);\nreturn array(\n{entries});\n"),
+    );
+    dir.write(
+        "vendor/composer/autoload_psr4.php",
+        "<?php\n$vendorDir = dirname(__DIR__);\nreturn array(\n    'Acme\\\\' => array($vendorDir . '/acme/lib/src'),\n);\n",
+    );
+}
+
+#[test]
+fn a_classmap_file_under_a_psr4_directory_is_left_to_that_directorys_walk() {
+    let dir = TempDir::new("psr4_covers");
+    let files = [
+        "src/Bar.php",
+        "src/deep/Baz.php",
+        "src/Old.inc",
+        "other/Qux.php",
+        "Top.php",
+    ];
+    for file in files {
+        dir.write(&format!("vendor/acme/lib/{file}"), "<?php");
+    }
+    write_classmap_over_psr4(&dir, &files);
+
+    let ctx = discover_vendor_context(dir.path());
+    let canonical = |path: &str| std::fs::canonicalize(dir.path().join(path)).unwrap();
+    // `Old.inc` is not a name the walk lists, and the other two are not
+    // under the directory.
+    let mut kept = vec![
+        canonical("vendor/acme/lib/other/Qux.php"),
+        canonical("vendor/acme/lib/src/Old.inc"),
+        canonical("vendor/acme/lib/Top.php"),
+    ];
+    crate::path_order::sort_paths(&mut kept);
+    assert_eq!(ctx.files, kept);
+    assert_eq!(ctx.dirs, vec![canonical("vendor/acme/lib/src")]);
+}
+
+#[cfg(unix)]
+#[test]
+fn a_classmap_file_reached_through_a_link_is_kept() {
+    let dir = TempDir::new("psr4_link");
+    dir.write("outside/Linked.php", "<?php");
+    dir.write("vendor/acme/lib/src/Bar.php", "<?php");
+    std::os::unix::fs::symlink(
+        dir.path().join("outside"),
+        dir.path().join("vendor/acme/lib/src/alias"),
+    )
+    .unwrap();
+    write_classmap_over_psr4(&dir, &["src/alias/Linked.php", "src/Bar.php"]);
+
+    let ctx = discover_vendor_context(dir.path());
+    // The path is the link's, spelled as the walk of `src` would spell it,
+    // but only a directory its parent lists as one is certainly walked.
+    let vendor = std::fs::canonicalize(dir.path().join("vendor")).unwrap();
+    assert_eq!(
+        ctx.files,
+        vec![vendor.join("acme/lib/src/alias/Linked.php")]
+    );
 }

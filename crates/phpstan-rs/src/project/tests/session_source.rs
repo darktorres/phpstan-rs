@@ -143,3 +143,57 @@ fn files_are_added_to_a_project_that_is_loaded_through_the_session() {
     );
     assert_eq!(loaded.project.next_load_order, 2);
 }
+
+#[test]
+fn a_listing_after_the_first_lists_the_directories_again() {
+    let dir = TempDir::new("source_relisted");
+    dir.write("src/A.php", "<?php class A {}");
+    let session = session(
+        &dir,
+        Overrides {
+            paths: paths(&["src"]),
+            ..Overrides::default()
+        },
+    );
+    assert_eq!(session.listing().0, paths(&["src/A.php"]));
+    dir.write("src/B.php", "<?php class B {}");
+    assert_eq!(session.listing().0, paths(&["src/A.php", "src/B.php"]));
+}
+
+#[test]
+fn a_classmap_file_in_a_psr4_directory_is_listed_once() {
+    let dir = TempDir::new("source_psr4_once");
+    dir.write("composer.json", "{}");
+    dir.write("src/App.php", "<?php class App {}");
+    dir.write("vendor/acme/lib/src/A.php", "<?php class A {}");
+    dir.write("vendor/acme/lib/Top.php", "<?php class Top {}");
+    dir.write(
+        "vendor/composer/autoload_classmap.php",
+        "<?php\n$vendorDir = dirname(__DIR__);\nreturn array(\n    'A' => $vendorDir . '/acme/lib/src/A.php',\n    'Top' => $vendorDir . '/acme/lib/Top.php',\n);\n",
+    );
+    dir.write(
+        "vendor/composer/autoload_psr4.php",
+        "<?php\n$vendorDir = dirname(__DIR__);\nreturn array(\n    'Acme\\\\' => array($vendorDir . '/acme/lib/src'),\n);\n",
+    );
+    let schema = crate::app::config_schema();
+    let config = config::ConfigFile::parse("", &schema).unwrap();
+    let session = Session::resolve(
+        &config,
+        None,
+        dir.0.clone(),
+        Overrides {
+            paths: paths(&["src"]),
+            ..Overrides::default()
+        },
+        Policy::Fail,
+        worker_pool(),
+    )
+    .unwrap();
+    let (analysed, context) = session.listing();
+    assert_eq!(analysed, paths(&["src/App.php"]));
+    let names: Vec<&str> = context
+        .iter()
+        .filter_map(|path| path.file_name()?.to_str())
+        .collect();
+    assert_eq!(names, ["Top.php", "A.php"]);
+}

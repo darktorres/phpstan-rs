@@ -6,6 +6,7 @@
 #![cfg_attr(not(test), deny(clippy::print_stdout, clippy::print_stderr))]
 
 pub mod constraint;
+pub mod dir_table;
 pub mod manifest;
 pub mod path_order;
 pub mod vendor;
@@ -15,6 +16,7 @@ use std::ffi::OsString;
 use std::path::{Component, Path, PathBuf};
 use std::sync::{Arc, Mutex, OnceLock};
 
+use dir_table::DirTable;
 use manifest::{ComposerManifest, lexically_normalized};
 use vendor::VendorContext;
 
@@ -43,8 +45,8 @@ struct PendingVendorInner {
 
 impl PendingVendor {
     /// Starts discovering the vendor context of the project at `root`.
-    pub fn spawn(root: PathBuf) -> PendingVendor {
-        let thread = std::thread::spawn(move || vendor::discover_vendor_context(&root));
+    pub fn spawn(root: PathBuf, table: Arc<DirTable>) -> PendingVendor {
+        let thread = std::thread::spawn(move || vendor::discover_vendor_context_in(&root, &table));
         PendingVendor(Arc::new(PendingVendorInner {
             found: OnceLock::new(),
             thread: Mutex::new(Some(thread)),
@@ -93,9 +95,14 @@ impl PackageContext {
     /// the root as analysed paths spell it, which the manifest's own paths
     /// follow.
     pub fn load(root: &Path, spelled_root: &Path) -> PackageContext {
+        PackageContext::load_in(root, spelled_root, Arc::default())
+    }
+
+    /// `load`, listing the vendor directories through `table`.
+    pub fn load_in(root: &Path, spelled_root: &Path, table: Arc<DirTable>) -> PackageContext {
         PackageContext {
             manifest: ComposerManifest::load(spelled_root, root),
-            vendor: PendingVendor::spawn(root.to_path_buf()),
+            vendor: PendingVendor::spawn(root.to_path_buf(), table),
         }
     }
 
