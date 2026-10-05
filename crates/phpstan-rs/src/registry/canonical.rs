@@ -103,6 +103,8 @@ canonical_struct!(PropertyReflection {
     is_abstract,
     has_get_hook,
     has_set_hook,
+    get_hook_body,
+    set_hook_body,
     ty_native,
     doc_ty,
     has_native_type,

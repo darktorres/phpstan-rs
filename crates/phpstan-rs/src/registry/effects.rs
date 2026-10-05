@@ -29,6 +29,14 @@
 //! a function or a method a literal names by theirs, a parameter of the
 //! caller's by a condition of its own, nothing for a required parameter not
 //! passed or a default of `null`, and anything otherwise.
+//!
+//! An operation PHP runs a value's code for is a call to that code: a
+//! property's hook, or a magic method where the scope sees no property, an
+//! `ArrayAccess` method for an element, `__toString` for a conversion,
+//! `__clone`, an iterator's methods. It reaches what the hierarchy over the
+//! value's classes declares, or every loaded declaration of it when the
+//! class is not known. A hook's body is a declaration of its own, named
+//! after its property (`hook_member`).
 
 use std::collections::BTreeSet;
 use std::sync::Arc;
@@ -43,7 +51,9 @@ use crate::registry::summaries::{
     Access, ArgAt, Binding, BodySummary, CallWrites, Callable, Callee, ClosureFacts, Made,
     Operation, Origin, PairTarget, Place, Receiver, Root, Step, WriteFacts,
 };
-use crate::registry::{ClassReflection, FunctionReflection, NameSet, Registry, is_non_overridable};
+use crate::registry::{
+    ClassReflection, FunctionReflection, NameSet, PropertyReflection, Registry, is_non_overridable,
+};
 use types::Type;
 
 /// Storage a write may change.
@@ -371,6 +381,46 @@ fn method_key(class: &str, method: &str) -> DeclKey {
     }
 }
 
+/// The name a hook of the property `property`, its `set` hook when `set`,
+/// is known by among methods: PHP's (`$property::get`), lowercased, with a
+/// `^` before each letter that was a capital, so that two properties whose
+/// names differ only in case keep apart. `None` for any property's, which
+/// only the index of names (`methods_by_name`) lists.
+fn hook_member(property: Option<&str>, set: bool) -> String {
+    let mut member = String::from("$");
+    for c in property.unwrap_or_default().chars() {
+        if c.is_ascii_uppercase() {
+            member.push('^');
+        }
+        member.push(c.to_ascii_lowercase());
+    }
+    member.push_str(if set { "::set" } else { "::get" });
+    member
+}
+
+/// The declaration of `class`'s hook of `property`, its `set` hook when
+/// `set`.
+fn hook_key(class: &str, property: &str, set: bool) -> DeclKey {
+    DeclKey {
+        class: Some(class.to_ascii_lowercase()),
+        member: hook_member(Some(property), set),
+    }
+}
+
+/// Whether code of the class `scope` sees a member `owner` declares with
+/// `visibility`.
+fn sees(registry: &Registry, owner: &str, visibility: Visibility, scope: Option<&str>) -> bool {
+    match visibility {
+        Visibility::Public => true,
+        Visibility::Protected => scope.is_some_and(|scope| {
+            scope.eq_ignore_ascii_case(owner)
+                || registry.is_subclass_of(scope, owner)
+                || registry.is_subclass_of(owner, scope)
+        }),
+        Visibility::Private => scope.is_some_and(|scope| scope.eq_ignore_ascii_case(owner)),
+    }
+}
+
 /// Where a builtin runs code: at a parameter, or through the elements of an
 /// array passed there.
 #[derive(Debug, Clone, Copy)]
@@ -461,8 +511,10 @@ const CODE_RUNNING_PARAMETER_TYPES: [&str; 11] = [
 
 /// The method declarations of every loaded class with a body, by name
 /// (lowercased): what a call on a value whose class is not known may reach.
-/// Each name's classes are sorted, so what is made of them does not depend
-/// on the order the classes were declared in.
+/// The hooks with a body are listed too, each by its name (`hook_member`)
+/// and by the name of any property's. Each name's classes are sorted, so
+/// what is made of them does not depend on the order the classes were
+/// declared in.
 fn methods_by_name(registry: &Registry) -> FxHashMap<String, Vec<Name>> {
     let mut by_name: FxHashMap<String, Vec<Name>> = FxHashMap::default();
     for (class, info) in registry.classes.own_iter() {
@@ -472,6 +524,22 @@ fn methods_by_name(registry: &Registry) -> FxHashMap<String, Vec<Name>> {
                     .entry(method.to_ascii_lowercase())
                     .or_default()
                     .push(class.clone());
+            }
+        }
+        for (property, declared) in info.properties.iter() {
+            for (set, body) in [
+                (false, declared.get_hook_body),
+                (true, declared.set_hook_body),
+            ] {
+                if !body {
+                    continue;
+                }
+                for member in [hook_member(Some(property), set), hook_member(None, set)] {
+                    let classes = by_name.entry(member).or_default();
+                    if classes.last() != Some(class) {
+                        classes.push(class.clone());
+                    }
+                }
             }
         }
     }
@@ -550,7 +618,7 @@ enum Passing<'c> {
 /// arguments as its own: `__call` and `__callStatic` take another method's
 /// as an array.
 fn passes_arguments(callee: &Callee, key: &DeclKey) -> bool {
-    if matches!(callee, Callee::Implicit { .. }) {
+    if matches!(callee, Callee::Implicit { .. } | Callee::ParentHook { .. }) {
         return false;
     }
     if key.member != "__call" && key.member != "__callstatic" {
@@ -585,6 +653,20 @@ fn property_magic_method(access: Access) -> &'static str {
         Access::Write => "__set",
         Access::Isset => "__isset",
         Access::Unset => "__unset",
+    }
+}
+
+/// The hooks PHP may run for `operation`: those of the property it names
+/// (any property when `None`), `set` hooks when `true`, and whether it
+/// iterates the object, which reads its properties only when it is not
+/// `Traversable`. An unset runs none: a hooked property cannot be unset.
+fn hook_access(operation: &Operation) -> Option<(Option<&Name>, bool, bool)> {
+    match operation {
+        Operation::Property(_, Access::Unset) => None,
+        Operation::Property(prop, access) => Some((prop.as_ref(), *access == Access::Write, false)),
+        Operation::Iterate { .. } => Some((None, false, true)),
+        Operation::Clone { with: true } => Some((None, true, false)),
+        Operation::Clone { with: false } | Operation::Element(_) | Operation::String => None,
     }
 }
 
@@ -667,6 +749,31 @@ impl Registry {
                 .flat_map_iter(|(class, method, sig)| {
                     let key = method_key(class, method);
                     registry.classify(bodies, Some(class), method, sig, key)
+                }),
+        );
+        let hooks: Vec<(&Name, &Name, &PropertyReflection, bool)> = registry
+            .classes
+            .own_iter()
+            .flat_map(|(class, info)| {
+                info.properties
+                    .iter()
+                    .flat_map(move |(property, declared)| {
+                        [
+                            (false, declared.get_hook_body),
+                            (true, declared.set_hook_body),
+                        ]
+                        .into_iter()
+                        .filter(|(_, body)| *body)
+                        .map(move |(set, _)| (class, property, &**declared, set))
+                    })
+            })
+            .collect();
+        classified.par_extend(
+            hooks
+                .par_iter()
+                .with_min_len(crate::registry::PASS_CHUNK)
+                .flat_map_iter(|(class, property, declared, set)| {
+                    registry.classify_hook(bodies, class, property, declared, *set)
                 }),
         );
         let mut effects = settle(registry, &classified, |key| {
@@ -850,10 +957,39 @@ impl Registry {
         match declared.visibility() {
             Visibility::Public => false,
             _ if rebindable => true,
-            Visibility::Protected => !scope.is_some_and(|scope| {
-                self.is_subclass_of(scope, &owner) || self.is_subclass_of(&owner, scope)
-            }),
-            Visibility::Private => !scope.is_some_and(|scope| scope.eq_ignore_ascii_case(&owner)),
+            visibility => !sees(self, &owner, visibility, scope),
+        }
+    }
+
+    /// The class whose hook runs for an access to `property` of an object
+    /// of `class`, its `get` hook, or its `set` hook when `set`: the nearest
+    /// declaration of the property, `class`'s own or an ancestor's, that
+    /// gives it a hook with a body, since a redeclaration that gives none
+    /// keeps its parent's; `None` when no hook with a body runs.
+    fn hook_owner(&self, class: &str, property: &str, set: bool) -> Option<Name> {
+        let (mut owner, mut declared) = self.lookup_property_with_owner(class, property)?;
+        let mut seen: Vec<Name> = Vec::new();
+        loop {
+            if declared.from_tag() || declared.is_static() {
+                return None;
+            }
+            let (body, hooked) = if set {
+                (declared.set_hook_body, declared.has_set_hook)
+            } else {
+                (declared.get_hook_body, declared.has_get_hook)
+            };
+            if body {
+                return Some(owner);
+            }
+            if !hooked || seen.iter().any(|class| class.eq_ignore_case(&owner)) {
+                return None;
+            }
+            let parent = self.classes.get(owner.as_str())?.extends().first()?.clone();
+            seen.push(owner);
+            (owner, declared) = self.lookup_property_with_owner(&parent, property)?;
+            if declared.visibility() == Visibility::Private {
+                return None;
+            }
         }
     }
 
@@ -1086,10 +1222,37 @@ impl Registry {
         let resolve = Resolve {
             registry: self,
             class: class.map(Name::as_str),
-            member,
+            member: member.clone(),
             summary,
+            value: None,
         };
         resolve.run(&key, Some(sig))
+    }
+
+    /// The classification of the body of `class`'s `get` hook of
+    /// `property`, declared as `declared`, or of its `set` hook when `set`,
+    /// and of each closure it wrote, under its own.
+    fn classify_hook<'r>(
+        &'r self,
+        bodies: &'r dyn BodySource,
+        class: &'r Name,
+        property: &'r Name,
+        declared: &'r PropertyReflection,
+        set: bool,
+    ) -> Vec<(DeclKey, Classification<'r>)> {
+        let key = hook_key(class, property, set);
+        let Some((summary, value)) = bodies.hook_summary(declared.provenance(), set) else {
+            return vec![(key, Classification::anything())];
+        };
+        let ty = declared.set_ty.as_ref().unwrap_or(&declared.ty);
+        let resolve = Resolve {
+            registry: self,
+            class: Some(class.as_str()),
+            member: Name::from(format!("${property}::{}", if set { "set" } else { "get" })),
+            summary,
+            value: value.map(|value| (value.as_str(), ty)),
+        };
+        resolve.run(&key, None)
     }
 }
 
@@ -1305,6 +1468,28 @@ fn sorted_classes(mut classes: Vec<Name>) -> Vec<Name> {
     classes.sort_unstable_by(|a, b| a.lower().cmp(b.lower()));
     classes.dedup_by(|a, b| a.eq_ignore_case(b));
     classes
+}
+
+/// What the `$this` of code PHP runs for `operation` on an object `holder`
+/// says may be, of `class` when one, is to the caller, whose own `$this`
+/// the object is when `same`.
+fn implicit_transfer(
+    holder: &Holder,
+    same: bool,
+    operation: &Operation,
+    class: Option<&Name>,
+) -> Transfer {
+    if matches!(operation, Operation::Clone { .. }) {
+        // `__clone` and the writes `clone` with properties makes run on the
+        // copy.
+        Transfer::Made
+    } else if same {
+        Transfer::Same
+    } else if matches!(holder, Holder::Made(_)) {
+        Transfer::Made
+    } else {
+        Transfer::Other(class.cloned())
+    }
 }
 
 /// The holder of a value of type `ty`.
@@ -1786,10 +1971,136 @@ impl Reach<'_> {
             Callee::Implicit { on, operation } => {
                 let (holder, same) = self.ctx.operand(on.as_deref());
                 let mut out = Vec::new();
+                if let Some((property, set, iterate)) = hook_access(operation) {
+                    self.hook_targets(&holder, same, operation, property, set, iterate, &mut out);
+                }
                 self.implicit_targets(&holder, same, operation, &mut out, &mut Vec::new())?;
                 out
             }
+            Callee::ParentHook { property, set } => {
+                let parent = registry.classes.get(self.ctx.class()?)?.extends().first()?;
+                registry
+                    .hook_owner(parent, property, *set)
+                    .map(|owner| (hook_key(&owner, property, *set), Transfer::Same))
+                    .into_iter()
+                    .collect()
+            }
         })
+    }
+
+    /// Adds to `out` the hooks PHP may run for an access to `property` (to
+    /// each property when `None`) of an object `holder` says may be, the
+    /// caller's own `$this` when `same`, made by `operation`: the `set`
+    /// hooks when `set`, and only on an object that is not `Traversable`
+    /// when it iterates the object. Each hook with a body runs when the
+    /// scope sees its property, and an object of the holder's classes may
+    /// have it as the property's hook: one of a class among them or below
+    /// them, the hook an object of one of them inherits, or a private
+    /// one of the scope's class an object of one of them is.
+    #[allow(clippy::too_many_arguments)]
+    fn hook_targets(
+        &self,
+        holder: &Holder,
+        same: bool,
+        operation: &Operation,
+        property: Option<&Name>,
+        set: bool,
+        iterate: bool,
+        out: &mut Vec<(DeclKey, Transfer)>,
+    ) {
+        let registry = self.registry;
+        let transfer = |class: Option<&Name>| implicit_transfer(holder, same, operation, class);
+        let (classes, exact) = match holder {
+            Holder::Classes(classes) => (Some(classes), false),
+            Holder::Made(Some(classes)) => (Some(classes), true),
+            Holder::Unknown | Holder::Made(None) => (None, false),
+        };
+        let member = hook_member(property.map(Name::as_str), set);
+        for declaring in registry.classes_declaring(&member) {
+            let Some(info) = registry.classes.get(declaring.as_str()) else {
+                continue;
+            };
+            // How an object of each of the holder's classes is one of the
+            // declaring class: `Some(true)` when it always is, `Some(false)`
+            // when it may be through a class below both.
+            let related: Vec<Option<bool>> = classes.map_or_else(Vec::new, |classes| {
+                classes
+                    .iter()
+                    .map(|class| {
+                        if iterate && registry.is_subclass_of(class, "Traversable") {
+                            None
+                        } else if registry.is_subclass_of(class, declaring) {
+                            Some(true)
+                        } else if !exact
+                            && (registry.is_subclass_of(declaring, class)
+                                || registry
+                                    .subclasses(declaring)
+                                    .iter()
+                                    .any(|below| registry.is_subclass_of(below, class)))
+                        {
+                            Some(false)
+                        } else {
+                            None
+                        }
+                    })
+                    .collect()
+            });
+            let declarations: Vec<(&Name, &PropertyReflection)> = match property {
+                Some(property) => info
+                    .properties
+                    .get(property)
+                    .map(|declared| (property, &**declared))
+                    .into_iter()
+                    .collect(),
+                None => info
+                    .properties
+                    .iter()
+                    .map(|(name, declared)| (name, &**declared))
+                    .collect(),
+            };
+            for (name, declared) in declarations {
+                let body = if set {
+                    declared.set_hook_body
+                } else {
+                    declared.get_hook_body
+                };
+                let visibility = if set {
+                    declared.write_visibility()
+                } else {
+                    declared.visibility()
+                };
+                if !body
+                    || !(self.ctx.rebindable()
+                        || sees(registry, declaring, visibility, self.ctx.class()))
+                {
+                    continue;
+                }
+                let key = hook_key(declaring, name, set);
+                let Some(classes) = classes else {
+                    push_target(out, key, transfer(None));
+                    continue;
+                };
+                for (class, related) in classes.iter().zip(&related) {
+                    // An object always of the declaring class runs its hook
+                    // when that is the nearest its class has, or when the
+                    // property is private, the scope's own; one that may be
+                    // of a class below both may run it.
+                    let reached = match related {
+                        Some(true) => {
+                            declared.visibility() == Visibility::Private
+                                || registry
+                                    .hook_owner(class, name, set)
+                                    .is_some_and(|owner| owner.eq_ignore_case(declaring))
+                        }
+                        Some(false) => true,
+                        None => false,
+                    };
+                    if reached {
+                        push_target(out, key.clone(), transfer(Some(class)));
+                    }
+                }
+            }
+        }
     }
 
     /// Adds to `out` the declarations PHP runs for `operation` on an object
@@ -1808,19 +2119,7 @@ impl Reach<'_> {
         iterators: &mut Vec<Holder>,
     ) -> Option<()> {
         let registry = self.registry;
-        let transfer = |class: Option<&Name>| {
-            if matches!(operation, Operation::Clone { .. }) {
-                // `__clone` and the writes `clone` with properties makes run
-                // on the copy.
-                Transfer::Made
-            } else if same {
-                Transfer::Same
-            } else if matches!(holder, Holder::Made(_)) {
-                Transfer::Made
-            } else {
-                Transfer::Other(class.cloned())
-            }
-        };
+        let transfer = |class: Option<&Name>| implicit_transfer(holder, same, operation, class);
         let (classes, exact) = match holder {
             Holder::Classes(classes) => (classes, false),
             Holder::Made(Some(classes)) => (classes, true),
@@ -2046,12 +2345,12 @@ impl Registry {
             class: class.map(str::to_ascii_lowercase),
             member: String::new(),
         };
-        let member = Name::from("{closure}");
         let resolve = Resolve {
             registry: self,
             class,
-            member: &member,
+            member: Name::from("{closure}"),
             summary,
+            value: None,
         };
         let classified: FxHashMap<DeclKey, Classification<'_>> =
             resolve.run(&holder, None).into_iter().collect();
@@ -2126,8 +2425,11 @@ impl Registry {
 struct Resolve<'r> {
     registry: &'r Registry,
     class: Option<&'r str>,
-    member: &'r Name,
+    member: Name,
     summary: &'r BodySummary,
+    // A `set` hook's parameter, by its name and the type of what it is
+    // passed.
+    value: Option<(&'r str, &'r Type)>,
 }
 
 /// What each of a scope's calls reaches, and the places its calls may write
@@ -2258,6 +2560,11 @@ impl<'r> Resolve<'r> {
                     (p.name.as_ref(), held)
                 })
                 .collect();
+            if let Some((name, ty)) = self.value
+                && !lost[0].contains(name)
+            {
+                level.base.insert(name, holder_of(ty));
+            }
         }
         let mut levels = vec![level];
         for (index, closure) in self.summary.closures.iter().enumerate() {
@@ -2400,7 +2707,7 @@ impl<'r> Resolve<'r> {
         Level {
             registry: self.registry,
             class: self.class,
-            member: self.member,
+            member: self.member.clone(),
             facts,
             params: FxHashMap::default(),
             made: FxHashMap::default(),
@@ -2431,7 +2738,7 @@ enum Declared<'r> {
 struct Level<'r> {
     registry: &'r Registry,
     class: Option<&'r str>,
-    member: &'r Name,
+    member: Name,
     facts: &'r WriteFacts,
     // The parameters whose declared type holds all through the scope:
     // neither assigned nor passed where a parameter is by reference. A
@@ -2938,6 +3245,26 @@ impl<'r> Level<'r> {
                     }
                 }
                 held
+            }
+            // A `set` hook returns nothing.
+            Callee::ParentHook { set: true, .. } => Holder::Classes(Vec::new()),
+            Callee::ParentHook {
+                property,
+                set: false,
+            } => {
+                let Some(parent) = self
+                    .class
+                    .and_then(|class| registry.classes.get(class))
+                    .and_then(|info| info.extends().first())
+                else {
+                    return Holder::Unknown;
+                };
+                match registry.lookup_property_with_owner(parent, property) {
+                    Some((owner, declared)) => {
+                        declared_holder(registry, declared.ty(), parent, &owner)
+                    }
+                    None => Holder::Unknown,
+                }
             }
             _ => Holder::Unknown,
         }

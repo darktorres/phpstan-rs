@@ -140,6 +140,11 @@ pub struct PropertyReflection {
     // answerable. `false` for every synthetic property.
     pub(in crate::registry) has_get_hook: bool,
     pub(in crate::registry) has_set_hook: bool,
+    // Whether this declaration itself gives the property a `get` or a `set`
+    // hook with a body, which an access to it runs; unlike `has_get_hook`
+    // and `has_set_hook`, a hook it inherits does not count.
+    pub(in crate::registry) get_hook_body: bool,
+    pub(in crate::registry) set_hook_body: bool,
     // The native, no-docblock-merge type this property alone declares -
     // the exact `ty`-vs-`ty_native` split `ParameterReflection` has, needed here for
     // `OverridingPropertyRule`'s `property.nativeType`/
@@ -876,6 +881,11 @@ fn collect_merged_methods(
     (out, redeclared)
 }
 
+/// Whether `hook` is declared with a body.
+fn hook_has_body(hook: Option<&syntax::ast::PropertyHook>) -> bool {
+    hook.is_some_and(|hook| !matches!(hook.body, syntax::ast::PropertyHookBody::Abstract))
+}
+
 fn name_site(f: &syntax::ast::FunctionDecl) -> u32 {
     f.name.span.start
 }
@@ -1194,6 +1204,8 @@ impl ClassReflection {
                         is_abstract: p.is_abstract,
                         has_get_hook: p.hooks.as_ref().is_some_and(|h| h.get.is_some()),
                         has_set_hook: p.hooks.as_ref().is_some_and(|h| h.set.is_some()),
+                        get_hook_body: hook_has_body(p.hooks.as_ref().and_then(|h| h.get.as_ref())),
+                        set_hook_body: hook_has_body(p.hooks.as_ref().and_then(|h| h.set.as_ref())),
                         case_refs,
                         set_case_refs,
                     },
@@ -1313,6 +1325,12 @@ impl ClassReflection {
                         // genuinely can carry inline hooks.
                         has_get_hook: p.hooks.as_ref().is_some_and(|h| h.get.is_some()),
                         has_set_hook: p.hooks.as_ref().is_some_and(|h| h.set.is_some()),
+                        get_hook_body: hook_has_body(
+                            p.hooks.as_deref().and_then(|h| h.get.as_ref()),
+                        ),
+                        set_hook_body: hook_has_body(
+                            p.hooks.as_deref().and_then(|h| h.set.as_ref()),
+                        ),
                         case_refs,
                         set_case_refs,
                     },
@@ -1369,6 +1387,8 @@ impl ClassReflection {
                         is_abstract: false,
                         has_get_hook: false,
                         has_set_hook: false,
+                        get_hook_body: false,
+                        set_hook_body: false,
                         case_refs,
                         set_case_refs: Vec::new(),
                     }
@@ -1958,6 +1978,8 @@ impl ClassReflection {
                 is_abstract: false,
                 has_get_hook: false,
                 has_set_hook: false,
+                get_hook_body: false,
+                set_hook_body: false,
                 // A language built-in, not textual - nothing to check
                 // the case of.
                 case_refs: Vec::new(),
@@ -2022,6 +2044,8 @@ impl ClassReflection {
                     is_abstract: false,
                     has_get_hook: false,
                     has_set_hook: false,
+                    get_hook_body: false,
+                    set_hook_body: false,
                     case_refs: Vec::new(),
                     set_case_refs: Vec::new(),
                 }),

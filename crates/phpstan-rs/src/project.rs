@@ -226,6 +226,16 @@ impl BodySource for file_table::FileTable<FileState> {
             .bodies
             .init_flow(provenance.declaration_span())
     }
+
+    fn hook_summary(
+        &self,
+        provenance: &Provenance,
+        set: bool,
+    ) -> Option<crate::registry::bodies::HookBody<'_>> {
+        self.get_by_origin(provenance.file()?)?
+            .bodies
+            .hook_summary(provenance.declaration_span(), set)
+    }
 }
 
 /// A multi-file PHP project: every loaded file's own parse tree, one

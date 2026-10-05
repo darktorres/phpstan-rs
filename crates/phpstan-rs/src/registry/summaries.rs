@@ -231,6 +231,12 @@ pub(crate) enum Callee {
         on: Option<Box<[Origin]>>,
         operation: Operation,
     },
+    /// `parent::$property::get()`, or `::set()` when `set`: the parent
+    /// class's hook of the property, on `$this`.
+    ParentHook {
+        property: Name,
+        set: bool,
+    },
 }
 
 /// An operation on a value through which PHP may run the value's code.
@@ -406,10 +412,9 @@ fn origins_of(e: &Expr) -> Option<Vec<Origin>> {
                 receiver: receiver(recv),
                 method: Some(method.name.clone()),
             })],
-            ExprKind::StaticCall(target, method, _) => vec![Origin::Returned(Callee::Static {
-                class: target.as_name().cloned(),
-                method: Some(method.name.clone()),
-            })],
+            ExprKind::StaticCall(target, method, _) => {
+                vec![Origin::Returned(static_callee(target, method))]
+            }
             ExprKind::New(callee, _) => vec![Origin::New(match &callee.kind {
                 ExprKind::Name(name) => Some(name.clone()),
                 _ => None,
@@ -738,11 +743,42 @@ impl BodySummary {
 
     /// The summary of the statements of one body.
     pub fn of(body: &[Stmt]) -> BodySummary {
+        BodySummary::of_function(&[], body)
+    }
+
+    /// The summary of the body of a function with the parameters `params`:
+    /// a constructor's assigns each property it promotes, first.
+    pub fn of_function(params: &[Param], body: &[Stmt]) -> BodySummary {
         let mut walk = Summarizer::default();
+        for param in params.iter().filter(|param| param.promotion.is_some()) {
+            walk.implicit_on(
+                Some(vec![Origin::Place(Place::root(Root::This))]),
+                Operation::Property(Some(param.name.name.clone()), Access::Write),
+            );
+            walk.write_this_property(&param.name.name);
+        }
         syntax::visit::walk_stmts(&mut walk, body);
         let mut summary = walk.finish();
         summary.empty = body.is_empty();
         summary
+    }
+
+    /// The summary of the body of `hook`, a hook of `property`, `set` when
+    /// it is its `set` hook; `None` when it has none. A `set` hook written
+    /// as an expression assigns its value to the property.
+    pub fn of_hook(hook: &PropertyHook, property: &Name, set: bool) -> Option<BodySummary> {
+        match &hook.body {
+            PropertyHookBody::Block(stmts) => Some(BodySummary::of(stmts)),
+            PropertyHookBody::Arrow(e) => {
+                let mut walk = Summarizer::default();
+                walk.visit_expr(e);
+                if set {
+                    walk.write_this_property(property);
+                }
+                Some(walk.finish())
+            }
+            PropertyHookBody::Abstract => None,
+        }
     }
 }
 
@@ -1168,6 +1204,13 @@ impl Summarizer {
             .or_default() |= access;
     }
 
+    /// A write to the property `property` of `$this`.
+    fn write_this_property(&mut self, property: &Name) {
+        self.scope
+            .writes
+            .push(Place::root(Root::This).then(Step::Property(Some(property.clone()))));
+    }
+
     /// An operation PHP may run code of the value `operand` for.
     fn implicit(&mut self, operand: &Expr, operation: Operation) {
         self.implicit_on(origins_of(operand), operation);
@@ -1346,13 +1389,7 @@ impl Summarizer {
                     }
                     None => self.impure_unless_in_closure(true),
                 }
-                self.call(
-                    Callee::Static {
-                        class: target.as_name().cloned(),
-                        method: Some(method.name.clone()),
-                    },
-                    args,
-                );
+                self.call(static_callee(target, method), args);
             }
             ExprKind::DynamicStaticCall(target, _, args) => self.call(
                 Callee::Static {
@@ -1425,6 +1462,25 @@ fn property_write_target(e: &Expr) -> bool {
         ExprKind::Index(base, _) => property_write_target(base),
         _ => false,
     })
+}
+
+/// What `target::method()` calls: a method, or the parent class's hook of a
+/// property (`parent::$property::get()`).
+fn static_callee(target: &StaticTarget, method: &Ident) -> Callee {
+    if let Some(property) = target.parent_hook_property() {
+        for (name, set) in [("get", false), ("set", true)] {
+            if method.name.eq_ignore_ascii_case(name) {
+                return Callee::ParentHook {
+                    property: Name::from(property),
+                    set,
+                };
+            }
+        }
+    }
+    Callee::Static {
+        class: target.as_name().cloned(),
+        method: Some(method.name.clone()),
+    }
 }
 
 /// The object `recv` is, as far as the body shows it.
@@ -1882,6 +1938,7 @@ syntax::canonical_enum!(Callee {
     Value(name),
     Written(ids),
     Implicit { on, operation },
+    ParentHook { property, set },
 });
 
 syntax::canonical_enum!(Operation {
