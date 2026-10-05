@@ -325,3 +325,60 @@ fn files_the_classmap_lists_are_placed_among_the_walked_ones() {
         ]
     );
 }
+
+#[test]
+fn a_load_keeps_the_tree_of_an_analysed_file_and_none_of_a_context_one() {
+    let dir = TempDir::new("source_trees_kept");
+    dir.write("src/A.php", "<?php class A {}");
+    dir.write("lib/C.php", "<?php class C {}");
+    let session = session(
+        &dir,
+        Overrides {
+            paths: paths(&["src"]),
+            scan_paths: paths(&["lib"]),
+            ..Overrides::default()
+        },
+    );
+    let loaded = session.load().unwrap();
+    let kept = |path: &str| {
+        loaded
+            .project
+            .files
+            .get(Path::new(path))
+            .unwrap()
+            .kept_ast
+            .is_some()
+    };
+    assert!(kept("src/A.php"));
+    assert!(!kept("lib/C.php"));
+}
+
+#[test]
+fn a_context_file_an_editor_has_open_keeps_its_tree_through_a_load() {
+    let dir = TempDir::new("source_open_tree_kept");
+    dir.write("src/A.php", "<?php class A {}");
+    dir.write("lib/C.php", "<?php class C {}");
+    let session = session(
+        &dir,
+        Overrides {
+            paths: paths(&["src"]),
+            scan_paths: paths(&["lib"]),
+            ..Overrides::default()
+        },
+    );
+    let (analysed, context) = session.listing();
+    session.load_into(&mut Project::new(), &context, &analysed);
+    let mut project = Project::new();
+    project.open_file(Path::new("lib/C.php"), "<?php class C {}");
+    let added = session.load_into(&mut project, &context, &analysed);
+    assert_eq!(added.skipped_context, 0);
+    let kept = |path: &str| {
+        project
+            .files
+            .get(Path::new(path))
+            .unwrap()
+            .kept_ast
+            .is_some()
+    };
+    assert!(kept("lib/C.php"));
+}

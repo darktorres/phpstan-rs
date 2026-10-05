@@ -1308,19 +1308,23 @@ impl Session {
         let index_use_sites = shared.indexes_use_sites();
         parse.states.with(|state| {
             let placed = self.place(state, path);
-            // A file the overlay holds is an open document, whose tree is
-            // kept, which no cache entry holds.
+            // A file the overlay holds or an editor has open keeps its
+            // tree, which no cache entry holds.
             let held = self.overlay.get(&placed.absolute).is_some();
+            let keeps_tree = shared.keeps_tree(path, !context);
             let mut read = self.read_and_parse_file(
                 path,
                 &placed.absolute,
                 self.is_stub_at(&placed.absolute),
                 &mut state.names,
-                context && !held,
+                context && !held && !keeps_tree,
                 index_use_sites,
             );
             if let Read::Loaded(file) = &mut read {
                 shared.index_use_sites(&mut file.parsed, &file.source);
+                if !keeps_tree {
+                    file.parsed.drop_tree();
+                }
                 if !(self.settings.retain_source && held) {
                     file.source = String::new();
                 }

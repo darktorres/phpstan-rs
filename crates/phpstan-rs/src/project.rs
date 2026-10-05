@@ -1262,8 +1262,9 @@ impl Project {
             owner,
             content_hash,
         } = parsed;
+        let keeps_tree = self.keeps_tree(path, analyzed);
         debug_assert!(
-            ast.is_some() || !(analyzed || self.open.contains(path)),
+            ast.is_some() || !keeps_tree,
             "a file whose tree is needed was read back from the cache"
         );
         let class_fn_refs = class_fn_refs.unwrap_or_else(|| {
@@ -1280,7 +1281,6 @@ impl Project {
         register_references(&mut self.signature_dependents, id, &declaration_references);
         let owner = owner.unwrap_or_else(|| self.packages.owner(&self.absolute_path(path)));
         self.globals_stale.insert(id);
-        let keeps_tree = analyzed || self.open.contains(path);
         self.files.insert_at(
             id,
             FileState {
@@ -1312,6 +1312,13 @@ impl Project {
                 content_hash,
             },
         );
+    }
+
+    /// Whether the tree of the file `path` is kept: an analysed file's is,
+    /// and so is any file's that an editor has open. The tree of any other
+    /// is dropped, on the thread that parsed it where a load parses it.
+    pub(crate) fn keeps_tree(&self, path: &Path, analyzed: bool) -> bool {
+        analyzed || self.open.contains(path)
     }
 
     /// Whether a file's class and function use sites are indexed as it
@@ -3416,6 +3423,13 @@ pub(crate) fn parse_file_recording<'a>(
 }
 
 impl ParsedFile {
+    /// Drops the tree and the ignore comments, which only a file whose tree
+    /// is kept has; a file read back from the per-file cache has neither.
+    pub(crate) fn drop_tree(&mut self) {
+        self.ast = None;
+        self.ignores = Default::default();
+    }
+
     /// What the lexer skipped over rather than failing on.
     pub fn lex_warnings(&self) -> &[LexWarning] {
         &self.lex_warnings
