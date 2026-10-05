@@ -254,10 +254,8 @@ when it runs, and the plan adds the checks found along the way.
   0.11a-0.11c, done), with `cargo xtask progress --watch`. Next, before the
   baseline, in this order: fast validation (0.11d-0.11j), from the profile
   of a replay and a vendor project's run, and every level's report from
-  one analysis (0.11v); the PHP catalog from php-src
-  per PHP version, every builtin and every engine operation with the
-  conditions the source tests (0.11k-0.11n), which replaces the recorded
-  builtin-runs table; the fix's precision (0.11o-0.11q): closures' writes
+  one analysis (0.11v); the builtin-runs table built into static
+  arrays at compile time (0.11n1); the fix's precision (0.11o-0.11q): closures' writes
   where they run, calls through a parameter resolved at each call, captures
   at a file's top level; the implicit calls (0.12a-0.12f) and the assumed
   types (0.13a-0.13k), moved in from the end of the plan; PHPDoc types as
@@ -269,6 +267,13 @@ when it runs, and the plan adds the checks found along the way.
   the pass with the `gate` and `oracle` builds, the memory baseline, and
   the first snapshot, compared with no earlier commit; no row before it
   runs the pass, and item 1's validation is the first comparison.
+- **The PHP catalog is deferred until after O3** (2026-10-05): every
+  builtin and engine operation read from php-src per PHP version, rows
+  0.11k2-0.11m and 0.11n2, with 0.13f and 0.13g that read it. Its
+  whole-program pass (`dbbddd8d`) did not fit in 10,000 MiB on 8.4; the
+  plan's deferral note, before "The PHP catalog, from PHP's source", says
+  why and what to settle before resuming. Until then the rows that read
+  it take today's sources, the builtin-runs table and the stubs.
 - **Found along the way, done:** version gates for the syntax PHP 7.1 to 8.5
   added (`492ccf0e`, `50fa1e43`, `d8090e5e`), and `php_version` taking a
   range (`dfdfeeb4`). The runtime oracle calls each asserting function with
