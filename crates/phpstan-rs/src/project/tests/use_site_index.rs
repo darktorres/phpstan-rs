@@ -1,20 +1,13 @@
 //! `Project::use_sites()`'s two-tier index: Tier 1 (class/function
-//! reference sites) - eager, syntactic - and Tier 2 (member reference
-//! sites) - lazy, checker-driven, built once by `ensure_member_index_
-//! built`. Tier 1 is populated when `retain_source` is on (the LSP; real,
-//! precise per-identifier spans via `use_sites::index_class_fn_refs`) at
-//! that same first `ensure_member_index_built`, and as files load once it
-//! has, OR `check_dead_code` is on (a batch
-//! `check-project` run with no retained source, via `index_class_fn_
-//! refs_without_source` - real references still, just scoped to a less
-//! narrow AST-node span - see that function's own doc comment); with
-//! neither on, Tier 1 stays empty - measured too expensive on a real
-//! corpus to populate unconditionally the way `decl_locations` is (see
-//! `Project::install_parsed_file`'s own doc comment). This is what
-//! `project::whole_program::dead_code` (`project::tests::dead_code`)
-//! relies on. The LSP wiring itself (`textDocument/references`/
-//! `textDocument/rename`) is exercised separately in `lsp::tests::
-//! references_and_rename`.
+//! reference sites) - a product of each file's parse, syntactic, and
+//! indexed as files load when `retain_source` (the LSP) or
+//! `check_dead_code` is on, which is what `project::whole_program::
+//! dead_code` (`project::tests::dead_code`) relies on - and Tier 2 (member
+//! reference sites) - lazy, checker-driven, built once by
+//! `ensure_member_index_built`. With neither flag on, Tier 1 stays empty:
+//! measured too expensive on a real corpus to populate unconditionally.
+//! The LSP wiring itself (`textDocument/references`/`textDocument/rename`)
+//! is exercised separately in `lsp::tests::references_and_rename`.
 
 use super::super::test_support::Files;
 use super::super::use_sites::RefTarget;
@@ -87,6 +80,7 @@ fn updating_a_file_drops_its_stale_use_sites() {
 #[test]
 fn tier_1_stays_empty_without_retain_source_or_check_dead_code() {
     let project = Files::new()
+        .settings(ProjectSettings::default())
         .context("a.php", "<?php function greet(): void {}\ngreet();\n")
         .load();
     assert_eq!(
@@ -326,19 +320,15 @@ fn member_reference_index_is_not_built_until_first_requested() {
 }
 
 #[test]
-fn nothing_is_indexed_as_files_load_with_retained_source_until_a_request_needs_it() {
+fn class_and_function_sites_are_indexed_as_files_load_with_retained_source() {
     let path = PathBuf::from("a.php");
     let mut session = retaining_source()
         .context(&path, "<?php function greet(): void {}\ngreet();\n")
         .session();
     let mut project = session.load_listed(false, &[path], Vec::new()).project;
     let greet = RefTarget::Function("greet".to_string());
-    assert!(project.use_sites().references(&greet).is_empty());
-
-    project.ensure_member_index_built();
     assert_eq!(project.use_sites().references(&greet).len(), 1);
 
-    // Files loaded after that are indexed as they load.
     session.set_overlay(Path::new("b.php"), b"<?php greet();\n".to_vec());
     session.load_into(&mut project, &[PathBuf::from("b.php")], &[]);
     project.finish_loading();

@@ -328,18 +328,11 @@ pub struct Project {
     duplicate_class_sites: DuplicateClassSites,
     // `textDocument/references`/`textDocument/rename`'s own whole-project
     // use-site index - see `use_sites`'s own module doc comment for the
-    // two-tier split. Tier 1 (class/function references) is indexed
-    // when `retain_source` is on (the LSP; real, narrow per-identifier
-    // spans) at the first `ensure_member_index_built`, or eagerly as files
-    // load when `check_dead_code` is on (a batch
-    // `check-project` run with no retained source; real but less
-    // narrowly-scoped AST-node spans instead - see `use_sites::
-    // index_class_fn_refs_without_source`'s own doc comment) - NOT
-    // unconditionally: measured on a real
-    // corpus, this walk is too expensive to run for every loaded file
-    // when nothing in batch mode consumes it. Tier 2 (member references)
-    // is NOT populated by ordinary indexing at all - see
-    // `member_index`.
+    // two-tier split. Tier 1 (class/function references) is one product of
+    // each file's parse, indexed as the files load when the project
+    // retains source or checks dead code (`indexes_use_sites`). Tier 2
+    // (member references) is NOT populated by ordinary indexing at all -
+    // see `member_index`.
     use_sites: UseSiteIndex,
     // Which files Tier 2 (member references) of `use_sites` and
     // `escapes` cover - none until the first `ensure_member_index_built`
@@ -1233,7 +1226,7 @@ impl Project {
         );
         let class_fn_refs = class_fn_refs.unwrap_or_else(|| {
             ast.as_deref()
-                .map_or_else(Vec::new, |ast| self.class_fn_refs_of(ast, Some(&source)))
+                .map_or_else(Vec::new, |ast| self.class_fn_refs_of(ast, &source))
         });
         for (span, target) in class_fn_refs {
             self.use_sites.insert(path, target, span);
@@ -1279,43 +1272,21 @@ impl Project {
         );
     }
 
-    /// The class and function use sites of a file being loaded.
-    ///
-    /// Real source text (`retain_source`) buys narrower per-identifier
-    /// spans (`use_sites::index_class_fn_refs`'s own doc comment) - a
-    /// batch run with no retained source can still get real, just less
-    /// precisely-scoped, entries via `index_class_fn_refs_without_
-    /// source`, which `whole_program::dead_code` (existence-
-    /// only, never reads a use-site's span) can't tell apart from the
-    /// precise version at all. But this
-    /// walk is NOT cheap enough to run unconditionally in batch mode -
-    /// measured on a real corpus (Piwigo, ~14k loaded files including
-    /// vendor context): running it for every loaded file regardless of
-    /// whether anything consumes it roughly doubled `check-project`'s
-    /// own wall time. Gated on `check_dead_code` (its only batch-mode
-    /// consumer) for exactly that reason - a run with the check left
-    /// off, the default, pays nothing extra here at all.
-    fn class_fn_refs_of(
-        &self,
-        ast: &[Stmt],
-        source: Option<&str>,
-    ) -> Vec<(Span, use_sites::RefTarget)> {
-        if self.retain_source {
-            // Until the first request that reads the index
-            // (`ensure_member_index_built`), a loaded workspace pays
-            // nothing for it, unless `check_dead_code` reads it of every
-            // file.
-            match source {
-                Some(source)
-                    if self.member_index != MemberIndex::Unbuilt
-                        || self.settings.rules.check_dead_code =>
-                {
-                    use_sites::index_class_fn_refs(ast, source)
-                }
-                _ => Vec::new(),
-            }
-        } else if self.settings.rules.check_dead_code {
-            use_sites::index_class_fn_refs_without_source(ast)
+    /// Whether a file's class and function use sites are indexed as it
+    /// is parsed: for the language server's references and rename, and for
+    /// the dead code check. The walk is too expensive to pay for every
+    /// loaded file (including every vendor/context one) when nothing
+    /// consumes it.
+    pub(crate) fn indexes_use_sites(&self) -> bool {
+        self.retain_source || self.settings.rules.check_dead_code
+    }
+
+    /// The class and function use sites of a file being loaded, from its
+    /// `source`: each at the span of the identifier itself
+    /// (`use_sites::index_class_fn_refs`).
+    fn class_fn_refs_of(&self, ast: &[Stmt], source: &str) -> Vec<(Span, use_sites::RefTarget)> {
+        if self.indexes_use_sites() {
+            use_sites::index_class_fn_refs(ast, source)
         } else {
             Vec::new()
         }
@@ -1325,7 +1296,7 @@ impl Project {
     /// caller parsing many files in parallel indexes them there too.
     pub(crate) fn index_use_sites(&self, parsed: &mut ParsedFile, source: &str) {
         if let Some(ast) = &parsed.ast {
-            parsed.class_fn_refs = Some(self.class_fn_refs_of(ast, Some(source)));
+            parsed.class_fn_refs = Some(self.class_fn_refs_of(ast, source));
         }
     }
 
@@ -1816,8 +1787,8 @@ impl Project {
     /// Builds Tier 2 (member-reference) of `use_sites` for every
     /// currently-loaded file, exactly once - idempotent, a no-op on every
     /// call after the first. Deliberately NOT run as part of
-    /// `finish_loading`/`load_workspace`: unlike Tier 1 (purely
-    /// syntactic, no `Checker` needed), Tier 2 needs one real `Checker`
+    /// `finish_loading`/`load_workspace`: unlike Tier 1 (a product of each
+    /// file's parse), Tier 2 needs one real `Checker`
     /// pass per file, which would make every workspace open pay a cost
     /// only `textDocument/references`/`textDocument/rename` actually
     /// need. `Server::references`/`Server::rename` call this first; every
@@ -1829,29 +1800,6 @@ impl Project {
     pub(crate) fn ensure_member_index_built(&mut self) {
         if self.member_index != MemberIndex::Unbuilt {
             return;
-        }
-        if self.retain_source && !self.settings.rules.check_dead_code {
-            // The class and function sites weren't indexed as the files
-            // loaded (`class_fn_refs_of`).
-            let indexed: Vec<(&PathBuf, Vec<(Span, use_sites::RefTarget)>)> = worker_pool()
-                .install(|| {
-                    self.files
-                        .par_iter()
-                        .filter_map(|(path, file)| {
-                            let source = file.source.as_ref()?;
-                            Some((path, use_sites::index_class_fn_refs(file.ast(), source)))
-                        })
-                        .collect()
-                });
-            let indexed: Vec<(PathBuf, Vec<(Span, use_sites::RefTarget)>)> = indexed
-                .into_iter()
-                .map(|(path, refs)| (path.clone(), refs))
-                .collect();
-            for (path, refs) in indexed {
-                for (span, target) in refs {
-                    self.use_sites.insert(&path, target, span);
-                }
-            }
         }
         let mut paths: Vec<PathBuf> = self.files.keys().cloned().collect();
         paths.sort_unstable();

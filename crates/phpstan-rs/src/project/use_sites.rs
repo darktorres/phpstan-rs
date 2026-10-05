@@ -6,21 +6,15 @@
 //! syntactic, name-resolution-only walk (`ClassFnRefWalker`), structured
 //! after (not sharing code with) `lsp::navigation::Walker` - the same
 //! proven traversal shape, reused for "record every match", never "find
-//! the one match at a cursor". Real caret-precision spans need the
-//! file's retained source text (`index_class_fn_refs`, LSP-only, gated
-//! behind `retain_source`); a
-//! batch `check-project` run has no retained source but, when `project::
-//! whole_program::dead_code` is enabled, still needs to know *whether* a
-//! class/function is referenced at all -
-//! `index_class_fn_refs_without_source` runs instead there, trading
-//! precise sub-spans (needs real source text to carve out of a combined
-//! multi-identifier span) for real, already-on-hand AST-node spans that
-//! are merely less narrowly scoped - see that function's own doc
-//! comment. Not run unconditionally, though: this walk is too
-//! expensive to pay
-//! for every loaded file (including every vendor/context one) when
-//! nothing consumes it - `Project::install_parsed_file` gates it on
-//! `check_dead_code` specifically, its only batch-mode consumer.
+//! the one match at a cursor". It is a product of each file's parse
+//! (`index_class_fn_refs`, from the file's text, with the span of each
+//! identifier itself), kept with the file's other products, and run only
+//! when something consumes it - the language server's references and
+//! rename, or the dead code check (`Project::indexes_use_sites`): the walk
+//! is too expensive to pay for every loaded file (including every
+//! vendor/context one) otherwise. `index_class_fn_refs_without_source`
+//! walks the tree of a file whose text is no longer at hand, for the
+//! whole-program checks that read only whether a name is referenced.
 //!
 //! Tier 2 (member reference sites - method/property/class-constant
 //! access) needs a real, checker-driven resolution of the receiver's

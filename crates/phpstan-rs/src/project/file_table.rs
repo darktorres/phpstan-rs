@@ -3,7 +3,6 @@
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use rayon::prelude::*;
 use rustc_hash::FxHashMap;
 
 use crate::file_id::FileId;
@@ -189,16 +188,6 @@ impl<V> FileTable<V> {
                 .as_ref()
                 .map(|value| (FileId::new(index), &slot.path, value))
         })
-    }
-
-    /// `iter`, side by side.
-    pub(crate) fn par_iter(&self) -> impl ParallelIterator<Item = (&PathBuf, &V)>
-    where
-        V: Sync,
-    {
-        self.slots
-            .par_iter()
-            .filter_map(|slot| slot.value.as_ref().map(|value| (&slot.path, value)))
     }
 
     pub(crate) fn keys(&self) -> impl Iterator<Item = &PathBuf> {

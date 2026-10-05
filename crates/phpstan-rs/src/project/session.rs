@@ -1126,10 +1126,11 @@ impl Session {
                 return Read::Unparsed(ParseFailure::of(error, bytes));
             }
         };
-        // The text of the file is kept only when the project keeps it.
+        // The text of the file is kept only while the project keeps it or
+        // indexes its use sites from it.
         let source = match text {
-            Ok(text) if self.settings.retain_source => text,
-            Err(bytes) if self.settings.retain_source => {
+            Ok(text) if self.settings.retain_source || index_use_sites => text,
+            Err(bytes) if self.settings.retain_source || index_use_sites => {
                 String::from_utf8_lossy(&bytes).into_owned()
             }
             _ => String::new(),
@@ -1168,7 +1169,7 @@ impl Session {
 
         let mut project = Project::new();
         self.configure(&mut project, self.settings.built_once);
-        let index_use_sites = project.check_settings().rules.check_dead_code;
+        let index_use_sites = project.indexes_use_sites();
         let retain_source = self.settings.retain_source;
         let context_of = |e: std::io::Error| format!("{}: {e}", out.display());
         let writer = std::sync::Mutex::new(
@@ -1207,7 +1208,7 @@ impl Session {
                                 role.to_string()
                             };
                             let text = self.read(path).ok().map(|bytes| {
-                                let source = if retain_source {
+                                let source = if retain_source || index_use_sites {
                                     String::from_utf8_lossy(&bytes).into_owned()
                                 } else {
                                     String::new()
@@ -1571,8 +1572,9 @@ impl Session {
     ) -> Added {
         let pool = &self.pool;
         let built_once = project.built_once;
+        let retain_source = self.settings.retain_source;
         let shared: &Project = project;
-        let index_use_sites = shared.check_settings().rules.check_dead_code;
+        let index_use_sites = shared.indexes_use_sites();
         let combined_files: Vec<&PathBuf> =
             context_files.iter().chain(analyze_files.iter()).collect();
         // The files are numbered while they parse.
@@ -1597,6 +1599,9 @@ impl Session {
                             );
                             if let Read::Loaded(file) = &mut read {
                                 shared.index_use_sites(&mut file.parsed, &file.source);
+                                if !retain_source {
+                                    file.source = String::new();
+                                }
                                 shared.note_owner(&mut file.parsed, p);
                                 if let Some(key) = file.cache_key.take() {
                                     file_cache::store(
