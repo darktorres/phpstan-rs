@@ -303,79 +303,38 @@ enum BuiltinRun {
     Wrapper(&'static str),
 }
 
-/// What each builtin runs, as `tools/builtin-runs/record.php` found it.
-struct BuiltinTable {
-    /// The builtins a call reached: functions and `class::method`,
-    /// lowercased.
-    probed: FxHashSet<&'static str>,
-    runs: FxHashMap<&'static str, Vec<(Position, BuiltinRun)>>,
-    /// The classes (lowercased) a method of which ran a callable or an
+/// What each builtin runs, as `tools/builtin-runs/record.php` found it:
+/// the arrays `build.rs` makes of its table, sorted by name, read with no
+/// parse.
+mod builtin_runs {
+    use super::{BuiltinRun, Position};
+
+    include!(concat!(env!("OUT_DIR"), "/builtin_runs.rs"));
+
+    /// Whether a call of the builtin (a function or `class::method`,
+    /// lowercased) was reached.
+    pub(super) fn probed(name: &str) -> bool {
+        PROBED.binary_search(&name).is_ok()
+    }
+
+    /// What the builtin was seen to run through its arguments.
+    pub(super) fn runs(name: &str) -> &'static [(Position, BuiltinRun)] {
+        RUNS.binary_search_by(|&(entry, _)| entry.cmp(name))
+            .map_or(&[], |at| RUNS[at].1)
+    }
+
+    /// Whether a method of the class (lowercased) ran a callable or an
     /// object's method its object was made with.
-    holding: FxHashSet<&'static str>,
-    /// The stream-wrapper methods (lowercased) a method of each class
+    pub(super) fn holding(class: &str) -> bool {
+        HOLDING.binary_search(&class).is_ok()
+    }
+
+    /// The stream-wrapper methods (lowercased) a method of the class
     /// (lowercased) ran through a URL its object was made with.
-    held_wrappers: FxHashMap<&'static str, Vec<&'static str>>,
-}
-
-fn builtin_table() -> &'static BuiltinTable {
-    static TABLE: std::sync::LazyLock<BuiltinTable> =
-        std::sync::LazyLock::new(|| BuiltinTable::parse(include_str!("data/builtin-runs-8.5.tsv")));
-    &TABLE
-}
-
-impl BuiltinTable {
-    fn parse(text: &'static str) -> BuiltinTable {
-        let mut table = BuiltinTable {
-            probed: FxHashSet::default(),
-            runs: FxHashMap::default(),
-            holding: FxHashSet::default(),
-            held_wrappers: FxHashMap::default(),
-        };
-        for line in text.lines() {
-            let mut fields = line.split('\t');
-            let (Some(builtin), Some(place), Some(kind)) =
-                (fields.next(), fields.next(), fields.next())
-            else {
-                continue;
-            };
-            let detail = fields.next().unwrap_or("");
-            if kind == "probed" {
-                table.probed.insert(builtin);
-                continue;
-            }
-            if place.starts_with("new:") {
-                if let Some((class, _)) = builtin.split_once("::") {
-                    if kind == "wrapper" {
-                        let held = table.held_wrappers.entry(class).or_default();
-                        if !held.contains(&detail) {
-                            held.push(detail);
-                        }
-                    } else {
-                        table.holding.insert(class);
-                    }
-                }
-                continue;
-            }
-            let (at, elements) = match place.strip_suffix("[]") {
-                Some(at) => (at, true),
-                None => (place, false),
-            };
-            let Ok(at) = at.parse() else {
-                continue;
-            };
-            let run = match kind {
-                "calls" => BuiltinRun::Calls,
-                "method" => BuiltinRun::Method(detail),
-                "wrapper" => BuiltinRun::Wrapper(detail),
-                _ => continue,
-            };
-            table
-                .runs
-                .entry(builtin)
-                .or_default()
-                .push((Position { at, elements }, run));
-        }
-        table
+    pub(super) fn held_wrappers(class: &str) -> &'static [&'static str] {
+        HELD_WRAPPERS
+            .binary_search_by(|&(entry, _)| entry.cmp(class))
+            .map_or(&[], |at| HELD_WRAPPERS[at].1)
     }
 }
 
@@ -644,15 +603,14 @@ impl Registry {
     /// for a method, its name on the first of its class's ancestors PHP
     /// declares it on; `None` when no call of it was reached.
     fn builtin_entry(&self, key: &DeclKey) -> Option<String> {
-        let table = builtin_table();
         let name = key.builtin_name();
-        if table.probed.contains(name.as_str()) {
+        if builtin_runs::probed(&name) {
             return Some(name);
         }
         let class = key.class.as_deref()?;
         self.all_ancestor_names(class).iter().find_map(|ancestor| {
             let name = format!("{}::{}", ancestor.to_ascii_lowercase(), key.member);
-            table.probed.contains(name.as_str()).then_some(name)
+            builtin_runs::probed(&name).then_some(name)
         })
     }
 
@@ -670,24 +628,17 @@ impl Registry {
     /// Whether an object of the builtin class `class` may run a callable or
     /// an object's method it was made with.
     fn builtin_holds_code(&self, class: &str) -> bool {
-        let table = builtin_table();
         self.builtin_lineage(class)
             .iter()
-            .any(|class| table.holding.contains(class.as_str()))
+            .any(|class| builtin_runs::holding(class))
     }
 
     /// The stream-wrapper methods an object of the builtin class `class` may
     /// run through a URL it was made with.
     fn builtin_held_wrappers(&self, class: &str) -> Vec<&'static str> {
-        let table = builtin_table();
         let mut out = Vec::new();
         for class in self.builtin_lineage(class) {
-            for method in table
-                .held_wrappers
-                .get(class.as_str())
-                .into_iter()
-                .flatten()
-            {
+            for method in builtin_runs::held_wrappers(&class) {
                 if !out.contains(method) {
                     out.push(*method);
                 }
@@ -709,7 +660,6 @@ impl Registry {
                 .params
                 .iter()
                 .any(|p| p.ty.mentions_any(&CODE_RUNNING_PARAMETER_TYPES));
-            let table = builtin_table();
             let Some(name) = self.builtin_entry(key) else {
                 // A stub no run of PHP has seen is taken at its word: one
                 // its doc declares pure writes nothing, unless it takes
@@ -718,7 +668,7 @@ impl Registry {
             };
             key.class.as_deref().is_some_and(|class| {
                 self.builtin_holds_code(class) || !self.builtin_held_wrappers(class).is_empty()
-            }) || table.runs.contains_key(name.as_str())
+            }) || !builtin_runs::runs(&name).is_empty()
                 || takes_code
         });
         if runs_code {
@@ -1023,7 +973,6 @@ impl Reach<'_> {
         call: &CallWrites,
     ) -> Option<Vec<(DeclKey, Transfer)>> {
         let registry = self.registry;
-        let table = builtin_table();
         let Some(name) = registry.builtin_entry(key) else {
             // A stub no run of PHP has seen runs nothing when it is taken at
             // its word (`Registry::stub_effect`), and anything otherwise.
@@ -1066,7 +1015,7 @@ impl Reach<'_> {
                 );
             }
         }
-        let runs = table.runs.get(name.as_str()).map_or(&[][..], Vec::as_slice);
+        let runs = builtin_runs::runs(&name);
         // Each parameter a callable is passed at runs it.
         for (at, param) in sig.params.iter().enumerate() {
             let at = at as u32;
