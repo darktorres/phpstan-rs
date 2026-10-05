@@ -140,12 +140,19 @@ pub struct Session {
     pub warnings: Vec<String>,
 }
 
+/// The most a worker keeps of its read buffer between files: a larger file's
+/// bytes are given back.
+const MAX_KEPT_BUFFER: usize = 1 << 20;
+
 /// What a thread of a load keeps while it parses one file after another:
-/// the names it meets, which are dropped with the load, and what it found
-/// out about each directory it has met.
+/// the names it meets, which are dropped with the load, the bytes of the
+/// file it is reading, and what it found out about each directory it has
+/// met.
 #[derive(Default)]
 struct LoadState {
     names: syntax::name::NameCache,
+    /// The bytes of the file the thread is parsing, kept for the next.
+    buf: Vec<u8>,
     dirs: rustc_hash::FxHashMap<Vec<u8>, Placed>,
 }
 
@@ -1089,10 +1096,26 @@ impl Session {
     /// `read` of the file at `path`, which is `absolute` as an absolute
     /// path.
     fn read_at(&self, path: &Path, absolute: &Path) -> std::io::Result<Vec<u8>> {
+        let mut bytes = Vec::new();
+        self.read_into(path, absolute, &mut bytes)?;
+        Ok(bytes)
+    }
+
+    /// `read_at` into `buf`, which holds the file's bytes alone afterwards.
+    fn read_into(&self, path: &Path, absolute: &Path, buf: &mut Vec<u8>) -> std::io::Result<()> {
+        use std::io::Read as _;
+        buf.clear();
         match self.overlay.get(absolute) {
-            Some(bytes) => Ok(bytes.to_vec()),
-            None => std::fs::read(self.root.join(path)),
+            Some(bytes) => buf.extend_from_slice(bytes),
+            None => {
+                let mut file = std::fs::File::open(self.root.join(path))?;
+                if let Ok(meta) = file.metadata() {
+                    buf.reserve(usize::try_from(meta.len()).unwrap_or(0));
+                }
+                file.read_to_end(buf)?;
+            }
         }
+        Ok(())
     }
 
     /// The settings of the session as a whole: the baseline, the level and
@@ -1316,7 +1339,7 @@ impl Session {
                 path,
                 &placed.absolute,
                 self.is_stub_at(&placed.absolute),
-                &mut state.names,
+                state,
                 context && !held && !keeps_tree,
                 index_use_sites,
             );
@@ -1333,6 +1356,9 @@ impl Session {
                     file_cache::store(&key, &file_cache::CachedFile::of(&file.parsed, file.len));
                 }
             }
+            if state.buf.capacity() > MAX_KEPT_BUFFER {
+                state.buf = Vec::new();
+            }
             read
         })
     }
@@ -1345,16 +1371,18 @@ impl Session {
         path: &Path,
         absolute: &Path,
         is_stub: bool,
-        names: &mut syntax::name::NameCache,
+        state: &mut LoadState,
         cacheable: bool,
         index_use_sites: bool,
     ) -> Read {
-        let Ok(bytes) = self.read_at(path, absolute) else {
+        let LoadState { names, buf, .. } = state;
+        if self.read_into(path, absolute, buf).is_err() {
             return Read::Unread;
-        };
-        let content_hash = ContentHash::of(&bytes);
+        }
+        let bytes: &[u8] = buf;
+        let content_hash = ContentHash::of(bytes);
         let cache_key = if cacheable {
-            file_cache::key(&bytes, path, is_stub, index_use_sites)
+            file_cache::key(bytes, path, is_stub, index_use_sites)
         } else {
             None
         };
@@ -1368,39 +1396,30 @@ impl Session {
                 cache_key: None,
             }));
         }
-        // Whether the file is UTF-8 is settled here, once: the text is the
-        // bytes, moved, and the lexer takes it as it is. What checking
-        // costs is told by the length of the text as a lossy reading of the
-        // bytes has it, which is the bytes' own for a file that is UTF-8.
-        let (len, text) = match String::from_utf8(bytes) {
-            Ok(text) => (text.len(), Ok(text)),
-            Err(error) => {
-                let bytes = error.into_bytes();
-                let len = String::from_utf8_lossy(&bytes).len();
-                (len, Err(bytes))
-            }
+        // Whether the file is UTF-8 is settled here, once, and the lexer
+        // takes the text as it is. What checking costs is told by the
+        // length of the text as a lossy reading of the bytes has it, which
+        // is the bytes' own for a file that is UTF-8.
+        let text = std::str::from_utf8(bytes);
+        let len = match text {
+            Ok(text) => text.len(),
+            Err(_) => String::from_utf8_lossy(bytes).len(),
         };
-        let Ok(parsed) = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| match &text {
+        let Ok(parsed) = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| match text {
             Ok(text) => super::parse_file_with_names(path, text, is_stub, Some(names)),
-            Err(bytes) => super::parse_file_with_names(path, bytes, is_stub, Some(names)),
+            Err(_) => super::parse_file_with_names(path, bytes, is_stub, Some(names)),
         })) else {
             return Read::Unread;
         };
         let parsed = match parsed {
             Ok(parsed) => parsed,
-            Err(error) => {
-                let bytes = match &text {
-                    Ok(text) => text.as_bytes(),
-                    Err(bytes) => bytes,
-                };
-                return Read::Unparsed(ParseFailure::of(error, bytes));
-            }
+            Err(error) => return Read::Unparsed(ParseFailure::of(error, bytes)),
         };
         // The text of the file is kept only while its use sites are
         // indexed from it.
         let source = match text {
-            Ok(text) if index_use_sites => text,
-            Err(bytes) if index_use_sites => String::from_utf8_lossy(&bytes).into_owned(),
+            Ok(text) if index_use_sites => text.to_owned(),
+            Err(_) if index_use_sites => String::from_utf8_lossy(bytes).into_owned(),
             _ => String::new(),
         };
         Read::Loaded(Box::new(ReadFile {
