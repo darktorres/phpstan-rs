@@ -180,7 +180,7 @@ pub(crate) struct ResolvedSnapshot {
     classes: Vec<Option<Detached<ClassReflection>>>,
     function_keys: Option<Arc<FxHashSet<String>>>,
     functions: Vec<Option<Detached<FunctionReflection>>>,
-    effects: FxHashMap<effects::DeclKey, Effect>,
+    effects: FxHashMap<effects::DeclKey, effects::Settled>,
     global_variables: syntax::name::NameMap<Type>,
 }
 
@@ -395,7 +395,7 @@ pub struct Registry {
     pub(crate) member_owners: NameTable<hierarchy::ClassOwners>,
     // What a call to each function and method with a body may write
     // (`registry::effects`), keyed by lowercased (class, name).
-    pub(crate) effects: FxHashMap<effects::DeclKey, Effect>,
+    pub(crate) effects: FxHashMap<effects::DeclKey, effects::Settled>,
     // The names, lowercased, of the builtin methods that run code passed
     // to them (`registry::effects`): the base's, and those of the classes
     // the registry holds itself, as the last finish found them. Stored
