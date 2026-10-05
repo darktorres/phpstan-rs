@@ -25,7 +25,7 @@ use std::thread;
 use std::time::{Duration, Instant};
 use types::Name;
 
-use crossbeam_channel::{Receiver, RecvTimeoutError};
+use crossbeam_channel::Receiver;
 use lsp_server::{
     ErrorCode, Message, Notification as LspNotification, Request, RequestId, Response,
 };
@@ -287,6 +287,15 @@ struct Server {
     // `PendingWorkspaceScan`'s own doc comment for why the scan itself
     // can't just run inline in `"initialize"`.
     pending_workspace_scan: Option<PendingWorkspaceScan>,
+    // The folders whose workspaces are being built on the pool, with what
+    // the client sent for them meanwhile.
+    loading: Vec<LoadingFolder>,
+    // The workspaces the pool has built, which the message loop installs.
+    loaded_tx: crossbeam_channel::Sender<LoadedFolder>,
+    loaded_rx: crossbeam_channel::Receiver<LoadedFolder>,
+    // The scan `"initialized"` started: the work-done token its progress
+    // reports on, and the roots still loading.
+    scan_progress: Option<(lsp_types::ProgressToken, FxHashSet<PathBuf>)>,
     // A `phpstan-rs.configPath` setting override, as the client spelled
     // it: applied on top of each folder's own default `phpstan-rs.toml`
     // lookup by every subsequent `configure`/`reload_configuration` call,
@@ -316,14 +325,61 @@ struct Server {
     // The version `initialize` reports, the binary's own.
     version: String,
     // Every section a workspace's `phpstan-rs.toml` may set.
-    config_schema: config::Schema,
+    config_schema: Arc<config::Schema>,
 }
 
-/// A document the client has open, as a workspace holds it.
+/// A folder whose workspace is being built on the pool. What the client
+/// sends for a document under it meanwhile waits here, to be applied to
+/// the workspace as it is installed.
+struct LoadingFolder {
+    root: PathBuf,
+    // The documents the client opened or edited, as they last were.
+    documents: FxHashMap<PathBuf, OpenDocument>,
+    // The watched-file events for paths under the folder, in order.
+    watched: Vec<lsp_types::FileEvent>,
+}
+
+impl LoadingFolder {
+    /// Notes the document at `path` as the client last sent it.
+    fn record_document(&mut self, path: &Path, uri: &Uri, text: &str, version: Option<i32>) {
+        self.documents.insert(
+            path.to_path_buf(),
+            OpenDocument {
+                uri: uri.clone(),
+                version,
+                text: text.to_string(),
+            },
+        );
+    }
+}
+
+/// What a pool task built for the folder at `root`: its workspace and the
+/// messages the load gave, or what made the task fail.
+struct LoadedFolder {
+    root: PathBuf,
+    outcome: Result<(Workspace, Vec<Message>), String>,
+}
+
+/// Who a path belongs to, the deepest of the folders and of those loading.
+enum Owner {
+    Folder(usize),
+    Loading(usize),
+    Unrooted,
+}
+
+/// The message that ends the progress report of the workspace scan.
+fn scan_progress_end(token: lsp_types::ProgressToken) -> Message {
+    progress_notification(
+        token,
+        WorkDoneProgress::End(WorkDoneProgressEnd { message: None }),
+    )
+}
+
+/// A document the client has open: its URI and version, and its text.
 struct OpenDocument {
-    uri: Option<(Uri, Option<i32>)>,
+    uri: Uri,
+    version: Option<i32>,
     text: String,
-    edits: Option<u64>,
 }
 
 /// What the client's settings and the process give each folder's
@@ -371,6 +427,16 @@ impl Workspace {
             inlay_hint_cache: FxHashMap::default(),
             unit,
         }
+    }
+
+    /// Builds the workspace of the folder at `root`: its configuration, its
+    /// files loaded, the registry's derived state computed.
+    fn load(root: PathBuf, unit: Unit, inputs: &ConfigInputs) -> (Workspace, Vec<Message>) {
+        let mut workspace = Workspace::new(Some(root), unit);
+        let mut messages = workspace.configure(inputs);
+        messages.extend(workspace.load_workspace_files());
+        workspace.project.finish_loading();
+        (workspace, messages)
     }
 
     /// Whether a document at `path` belongs to this workspace rather than
@@ -507,36 +573,16 @@ impl Workspace {
     }
 
     /// Takes the open document `path` out of this workspace, for another
-    /// to adopt: its text, its URI and version, and its edit count.
+    /// to open.
     fn take_document(&mut self, path: &Path) -> Option<OpenDocument> {
         if !self.open_documents.contains(path) {
             return None;
         }
-        let document = OpenDocument {
-            uri: self.open_uris.remove(path),
-            text: self.latest_text.remove(path).unwrap_or_default(),
-            edits: self.file_versions.remove(path),
-        };
+        let (uri, version) = self.open_uris.remove(path)?;
+        let text = self.latest_text.remove(path)?;
+        self.file_versions.remove(path);
         self.close_document(path);
-        Some(document)
-    }
-
-    /// Takes over the open document `path` from the workspace that held
-    /// it: the project is brought to the text the client has open.
-    fn adopt_document(&mut self, path: &Path, document: OpenDocument) {
-        if let Some(uri) = document.uri {
-            self.open_uris.insert(path.to_path_buf(), uri);
-        }
-        if let Some(edits) = document.edits {
-            self.file_versions.insert(path.to_path_buf(), edits);
-        }
-        self.open_document(path, &document.text);
-        if self.project.is_loaded(path)
-            && self.project.content_hash(path) != Some(ContentHash::of(document.text.as_bytes()))
-        {
-            let _ = self.project.update_file(path, document.text.as_str());
-        }
-        self.latest_text.insert(path.to_path_buf(), document.text);
+        Some(OpenDocument { uri, version, text })
     }
 
     /// The bytes of the file at `path`: an open document's text, or the
@@ -595,11 +641,11 @@ impl Workspace {
     /// left as it is), so the cross-file registry and dependency graph are
     /// populated from the very first diagnostic, not built up one
     /// `didOpen` at a time. Deliberately does NOT call
-    /// `Project::finish_loading` itself - `add_workspace_folders` calls
-    /// it once for a whole batch of roots, not once per root here; a
-    /// bare call to this method with no `finish_loading` afterward would
-    /// leave the registry's derived state (trait flattening, ancestor
-    /// names, ...) stale for whatever it just loaded.
+    /// `Project::finish_loading` itself - `Workspace::load` calls it once
+    /// for the whole load; a bare call to this method with no
+    /// `finish_loading` afterward would leave the registry's derived state
+    /// (trait flattening, ancestor names, ...) stale for whatever it just
+    /// loaded.
     ///
     /// **Context-before-analysed load order is a correctness invariant**:
     /// `Registry::insert_built_decl`'s handling of a second unconditional
@@ -2140,6 +2186,7 @@ impl Workspace {
 
 impl Server {
     fn new(version: &str, config_schema: config::Schema) -> Self {
+        let (loaded_tx, loaded_rx) = crossbeam_channel::unbounded();
         Server {
             folders: Vec::new(),
             unrooted: Workspace::new(None, Unit::default()),
@@ -2155,12 +2202,16 @@ impl Server {
             pending_incoming_requests: lsp_server::ReqQueue::<Arc<AtomicBool>, ()>::default()
                 .incoming,
             pending_workspace_scan: None,
+            loading: Vec::new(),
+            loaded_tx,
+            loaded_rx,
+            scan_progress: None,
             config_path_override: None,
             enabled: true,
             supports_configuration_pull: false,
             supports_watched_files: false,
             version: version.to_string(),
-            config_schema,
+            config_schema: Arc::new(config_schema),
         }
     }
 
@@ -2199,6 +2250,33 @@ impl Server {
             .map(|(_, index)| index)
     }
 
+    /// Who the document at `path` belongs to: the deepest of the folders
+    /// and of those loading that contains it.
+    fn owner_of(&self, path: &Path) -> Owner {
+        let depth = |root: &Path| root.components().count();
+        let folder = self.folder_of(path).map(|index| {
+            let root = self.folders[index].root.as_deref().unwrap_or(Path::new(""));
+            (depth(root), index)
+        });
+        let loading = self
+            .loading
+            .iter()
+            .enumerate()
+            .filter(|(_, loading)| path.starts_with(&loading.root))
+            .map(|(index, loading)| (depth(&loading.root), index))
+            .max();
+        match (folder, loading) {
+            (Some((folder_depth, _)), Some((loading_depth, index)))
+                if loading_depth > folder_depth =>
+            {
+                Owner::Loading(index)
+            }
+            (None, Some((_, index))) => Owner::Loading(index),
+            (Some((_, index)), _) => Owner::Folder(index),
+            (None, None) => Owner::Unrooted,
+        }
+    }
+
     /// The workspace the document at `path` belongs to.
     fn workspace_of(&mut self, path: &Path) -> &mut Workspace {
         match self.folder_of(path) {
@@ -2218,13 +2296,14 @@ impl Server {
         request(self.workspace_of(&path))
     }
 
-    /// Tells each workspace which folders are nested inside it, after the
-    /// folders changed.
+    /// Tells each workspace which folders, loading ones included, are
+    /// nested inside it, after the folders changed.
     fn refresh_nesting(&mut self) {
         let roots: Vec<PathBuf> = self
             .folders
             .iter()
             .filter_map(|workspace| workspace.root.clone())
+            .chain(self.loading.iter().map(|loading| loading.root.clone()))
             .collect();
         for workspace in self.workspaces_mut() {
             workspace.nested_roots = roots
@@ -2238,49 +2317,161 @@ impl Server {
         }
     }
 
-    /// Loads a workspace for each of `roots` that is not one yet, each with
-    /// its own session, project and configuration, and publishes what its
-    /// checks find once every one is loaded, so a folder nested in another
-    /// is known to be. A document the client has open under a new folder
-    /// moves into it. Called from both
-    /// `"initialized"` (the `pending_workspace_scan` roots resolved at
-    /// `"initialize"`) and `"workspace/didChangeWorkspaceFolders"`'s own
-    /// `added` array.
-    fn add_workspace_folders(&mut self, roots: &[PathBuf]) -> Vec<Message> {
-        let mut messages = Vec::new();
-        let first_added = self.folders.len();
+    /// Starts building a workspace on the pool for each of `roots` that is
+    /// not a folder or loading yet, each with its own session, project and
+    /// configuration. Called from `"initialized"` (the
+    /// `pending_workspace_scan` roots resolved at `"initialize"`) and from
+    /// `"workspace/didChangeWorkspaceFolders"`'s own `added` array; the
+    /// message loop installs each workspace as the pool finishes it
+    /// (`install_loaded`).
+    fn start_loading(&mut self, roots: &[PathBuf]) {
         for root in roots {
-            if self
-                .folders
-                .iter()
-                .any(|workspace| workspace.root.as_ref() == Some(root))
-            {
+            if self.is_folder_or_loading(root) {
                 continue;
             }
-            let mut workspace = Workspace::new(Some(root.clone()), self.unit);
-            let inputs = ConfigInputs {
-                path_override: self.config_path_override.as_deref(),
-                schema: &self.config_schema,
-                pool: &self.pool,
-            };
-            messages.extend(workspace.configure(&inputs));
-            messages.extend(workspace.load_workspace_files());
-            workspace.project.finish_loading();
-            self.folders.push(workspace);
+            self.loading.push(LoadingFolder {
+                root: root.clone(),
+                documents: FxHashMap::default(),
+                watched: Vec::new(),
+            });
+            let root = root.clone();
+            let unit = self.unit;
+            let path_override = self.config_path_override.clone();
+            let schema = Arc::clone(&self.config_schema);
+            let pool = Arc::clone(&self.pool);
+            let loaded_tx = self.loaded_tx.clone();
+            self.pool.spawn(move || {
+                let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    let inputs = ConfigInputs {
+                        path_override: path_override.as_deref(),
+                        schema: &schema,
+                        pool: &pool,
+                    };
+                    Workspace::load(root.clone(), unit, &inputs)
+                }))
+                .map_err(crate::project::panic_message);
+                let _ = loaded_tx.send(LoadedFolder { root, outcome });
+            });
         }
         self.refresh_nesting();
-        for added in first_added..self.folders.len() {
-            self.move_open_documents_into(added);
-        }
-        for added in first_added..self.folders.len() {
-            messages.extend(self.folders[added].publish_workspace_diagnostics());
+    }
+
+    fn is_folder_or_loading(&self, root: &Path) -> bool {
+        self.folders
+            .iter()
+            .any(|workspace| workspace.root.as_deref() == Some(root))
+            || self.loading.iter().any(|loading| loading.root == root)
+    }
+
+    /// Starts the scan of the workspace folders `"initialize"` named,
+    /// opening the progress report the client asked for, which ends with
+    /// the last of them installed.
+    fn start_scan(&mut self, scan: PendingWorkspaceScan) -> Vec<Message> {
+        let mut messages = Vec::new();
+        let Some(token) = scan.progress_token else {
+            self.start_loading(&scan.roots);
+            return messages;
+        };
+        messages.push(progress_notification(
+            token.clone(),
+            WorkDoneProgress::Begin(WorkDoneProgressBegin {
+                title: "phpstan-rs: scanning workspace".to_string(),
+                cancellable: Some(false),
+                message: None,
+                percentage: None,
+            }),
+        ));
+        self.start_loading(&scan.roots);
+        let roots: FxHashSet<PathBuf> = scan
+            .roots
+            .into_iter()
+            .filter(|root| self.loading.iter().any(|loading| &loading.root == root))
+            .collect();
+        if roots.is_empty() {
+            messages.push(scan_progress_end(token));
+        } else {
+            self.scan_progress = Some((token, roots));
         }
         messages
     }
 
-    /// Moves the documents open in another workspace that belong to the
-    /// folder `added` into it.
-    fn move_open_documents_into(&mut self, added: usize) {
+    /// Installs the workspace the pool built for a folder: the documents
+    /// the client opened or edited meanwhile are applied to it, the
+    /// watched-file events replayed, and what its checks find is
+    /// published.
+    fn install_loaded(&mut self, loaded: LoadedFolder) -> Vec<Message> {
+        let Some(position) = self
+            .loading
+            .iter()
+            .position(|loading| loading.root == loaded.root)
+        else {
+            return Vec::new();
+        };
+        let pending = self.loading.remove(position);
+        let mut messages = Vec::new();
+        match loaded.outcome {
+            Ok((workspace, load_messages)) => {
+                messages.extend(load_messages);
+                self.folders.push(workspace);
+                let added = self.folders.len() - 1;
+                self.refresh_nesting();
+                messages.extend(self.folders[added].publish_workspace_diagnostics());
+                messages.extend(self.folders[added].handle_watched_files_changed(pending.watched));
+                let mut documents = self.take_open_documents_for(added);
+                documents.extend(pending.documents.into_values());
+                for document in documents {
+                    messages.extend(self.folders[added].handle_open_or_change(
+                        &document.uri,
+                        &document.text,
+                        document.version,
+                    ));
+                }
+            }
+            Err(failure) => {
+                self.refresh_nesting();
+                messages.push(show_message_notification(
+                    MessageType::ERROR,
+                    format!(
+                        "phpstan-rs: loading {} failed: {failure}",
+                        loaded.root.display()
+                    ),
+                ));
+            }
+        }
+        if let Some((_, roots)) = &mut self.scan_progress {
+            roots.remove(&loaded.root);
+            if roots.is_empty()
+                && let Some((token, _)) = self.scan_progress.take()
+            {
+                messages.push(scan_progress_end(token));
+            }
+        }
+        messages
+    }
+
+    /// Installs every workspace still loading, waiting for the pool.
+    fn finish_loads(&mut self) -> Vec<Message> {
+        let mut messages = Vec::new();
+        while !self.loading.is_empty() {
+            let Ok(loaded) = self.loaded_rx.recv() else {
+                break;
+            };
+            messages.extend(self.install_loaded(loaded));
+        }
+        messages
+    }
+
+    /// Loads the workspaces of `roots` and installs them: `start_loading`,
+    /// then `finish_loads`.
+    #[cfg(test)]
+    fn add_workspace_folders(&mut self, roots: &[PathBuf]) -> Vec<Message> {
+        self.start_loading(roots);
+        self.finish_loads()
+    }
+
+    /// Takes the documents open in another workspace that belong to the
+    /// folder `added` out of it.
+    fn take_open_documents_for(&mut self, added: usize) -> Vec<OpenDocument> {
         let moving: Vec<PathBuf> = self
             .workspaces()
             .filter(|workspace| workspace.root != self.folders[added].root)
@@ -2288,15 +2479,13 @@ impl Server {
             .filter(|path| self.folder_of(path) == Some(added))
             .cloned()
             .collect();
-        for path in moving {
-            let Some(document) = self
-                .workspaces_mut()
-                .find_map(|workspace| workspace.take_document(&path))
-            else {
-                continue;
-            };
-            self.folders[added].adopt_document(&path, document);
-        }
+        moving
+            .iter()
+            .filter_map(|path| {
+                self.workspaces_mut()
+                    .find_map(|workspace| workspace.take_document(path))
+            })
+            .collect()
     }
 
     /// Drops the workspace of each of `roots`, with its project, and
@@ -2305,7 +2494,7 @@ impl Server {
     /// vanished would keep showing stale squiggles indefinitely, since
     /// removing a workspace folder is not itself a `textDocument/didClose`.
     fn remove_workspace_folders(&mut self, roots: &[PathBuf]) -> Vec<Message> {
-        let mut messages = Vec::new();
+        let mut messages = self.finish_loads();
         self.folders.retain(|workspace| {
             let removed = workspace
                 .root
@@ -2329,6 +2518,10 @@ impl Server {
         let Some(path) = uri_to_path(uri) else {
             return Vec::new();
         };
+        if let Owner::Loading(index) = self.owner_of(&path) {
+            self.loading[index].record_document(&path, uri, text, version);
+            return Vec::new();
+        }
         self.workspace_of(&path)
             .handle_open_or_change(uri, text, version)
     }
@@ -2341,8 +2534,22 @@ impl Server {
         version: i32,
         should_abort: impl Fn() -> bool + Sync,
     ) -> Vec<Message> {
+        if let Owner::Loading(index) = self.owner_of(path) {
+            self.loading[index].record_document(path, uri, text, Some(version));
+            return Vec::new();
+        }
         self.workspace_of(path)
             .handle_debounced_change(path, uri, text, version, should_abort)
+    }
+
+    /// Notes that the client closed the document at `path`.
+    fn close_document(&mut self, path: &Path) {
+        match self.owner_of(path) {
+            Owner::Loading(index) => {
+                self.loading[index].documents.remove(path);
+            }
+            _ => self.workspace_of(path).close_document(path),
+        }
     }
 
     /// Runs the whole-program checks of every workspace again.
@@ -2369,8 +2576,11 @@ impl Server {
             let Some(path) = uri_to_path(&change.uri) else {
                 continue;
             };
-            let index = self.folder_of(&path).unwrap_or(self.folders.len());
-            by_workspace[index].push(change);
+            match self.owner_of(&path) {
+                Owner::Loading(index) => self.loading[index].watched.push(change),
+                Owner::Folder(index) => by_workspace[index].push(change),
+                Owner::Unrooted => by_workspace[self.folders.len()].push(change),
+            }
         }
         self.workspaces_mut()
             .zip(by_workspace)
@@ -2496,8 +2706,9 @@ impl Server {
     /// `scan_paths`, `stub_paths`, `no_composer`) is applied as the
     /// difference between the file sets (`reload_file_set`).
     fn reload_configuration(&mut self, settings: settings::PhpstanRsSettings) -> Vec<Message> {
+        let mut messages = self.finish_loads();
         if self.folders.is_empty() {
-            return Vec::new();
+            return messages;
         }
         let was_enabled = self.enabled;
         let config_path_override = settings.config_path.as_deref().map(PathBuf::from);
@@ -2506,13 +2717,9 @@ impl Server {
             schema: &self.config_schema,
             pool: &self.pool,
         };
-        let messages = self
-            .folders
-            .iter_mut()
-            .flat_map(|workspace| {
-                workspace.reload_configuration(settings.enable, was_enabled, &inputs)
-            })
-            .collect();
+        messages.extend(self.folders.iter_mut().flat_map(|workspace| {
+            workspace.reload_configuration(settings.enable, was_enabled, &inputs)
+        }));
         self.enabled = settings.enable;
         self.config_path_override = config_path_override;
         messages
@@ -2716,11 +2923,24 @@ fn run_dispatch_loop<W: Write>(
     writer: &Arc<Mutex<W>>,
     debounce: &Arc<DebounceHandle>,
 ) -> i32 {
+    let loaded_rx = server.lock().unwrap().loaded_rx.clone();
     loop {
-        let message = match receiver.recv_timeout(RUN_LOOP_TICK) {
-            Ok(m) => m,
-            Err(RecvTimeoutError::Timeout) => continue,
-            Err(RecvTimeoutError::Disconnected) => return 0,
+        let message = crossbeam_channel::select! {
+            recv(receiver) -> message => match message {
+                Ok(message) => message,
+                Err(_) => return 0,
+            },
+            recv(loaded_rx) -> loaded => {
+                if let Ok(loaded) = loaded {
+                    let messages = server.lock().unwrap().install_loaded(loaded);
+                    let mut w = writer.lock().unwrap();
+                    for message in messages {
+                        let _ = write_message(&mut *w, &message);
+                    }
+                }
+                continue;
+            },
+            default(RUN_LOOP_TICK) => continue,
         };
 
         match message {
@@ -2958,6 +3178,12 @@ fn handle_request<W: Write>(server: &mut Server, writer: &mut W, req: Request) {
     server
         .pending_incoming_requests
         .register(id.clone(), Arc::clone(&cancel_flag));
+
+    if !matches!(req.method.as_str(), "initialize" | "shutdown") {
+        for message in server.finish_loads() {
+            let _ = write_message(writer, &message);
+        }
+    }
 
     let response = match req.method.as_str() {
         "initialize" => {
@@ -3394,31 +3620,8 @@ fn handle_notification<W: Write>(server: &mut Server, writer: &mut W, not: LspNo
     match not.method.as_str() {
         "initialized" => {
             if let Some(scan) = server.pending_workspace_scan.take() {
-                if let Some(token) = &scan.progress_token {
-                    let _ = write_message(
-                        writer,
-                        &progress_notification(
-                            token.clone(),
-                            WorkDoneProgress::Begin(WorkDoneProgressBegin {
-                                title: "phpstan-rs: scanning workspace".to_string(),
-                                cancellable: Some(false),
-                                message: None,
-                                percentage: None,
-                            }),
-                        ),
-                    );
-                }
-                for message in server.add_workspace_folders(&scan.roots) {
+                for message in server.start_scan(scan) {
                     let _ = write_message(writer, &message);
-                }
-                if let Some(token) = scan.progress_token {
-                    let _ = write_message(
-                        writer,
-                        &progress_notification(
-                            token,
-                            WorkDoneProgress::End(WorkDoneProgressEnd { message: None }),
-                        ),
-                    );
                 }
             }
             if let Some(request) = server.request_watched_files_registration() {
@@ -3475,9 +3678,7 @@ fn handle_notification<W: Write>(server: &mut Server, writer: &mut W, not: LspNo
                     .filter_map(|f| uri_to_path(&f.uri))
                     .collect();
                 if !added.is_empty() {
-                    for message in server.add_workspace_folders(&added) {
-                        let _ = write_message(writer, &message);
-                    }
+                    server.start_loading(&added);
                 }
             }
         }
@@ -3549,7 +3750,7 @@ fn handle_notification<W: Write>(server: &mut Server, writer: &mut W, not: LspNo
                 serde_json::from_value::<lsp_types::DidCloseTextDocumentParams>(not.params.clone())
                 && let Some(path) = uri_to_path(&params.text_document.uri)
             {
-                server.workspace_of(&path).close_document(&path);
+                server.close_document(&path);
             }
         }
         _ => {

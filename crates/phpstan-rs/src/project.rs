@@ -495,7 +495,7 @@ pub struct Records {
 pub(crate) type CheckOutcome = Result<FileCheck, String>;
 
 /// A panic payload's message.
-fn panic_message(payload: Box<dyn std::any::Any + Send>) -> String {
+pub(crate) fn panic_message(payload: Box<dyn std::any::Any + Send>) -> String {
     payload
         .downcast_ref::<String>()
         .cloned()

@@ -124,9 +124,14 @@ fn a_document_belongs_to_the_deepest_folder_that_contains_it() {
         .map(|m| serde_json::to_value(m).unwrap())
         .collect();
 
-    assert_eq!(server.folder_of(&outer_path), Some(0));
-    assert_eq!(server.folder_of(&inner_path), Some(1));
-    assert_eq!(server.folder_of(&outside_path), None);
+    let root_of = |path: &std::path::Path| {
+        server
+            .folder_of(path)
+            .and_then(|index| server.folders[index].root.clone())
+    };
+    assert_eq!(root_of(&outer_path), Some(outer.0.clone()));
+    assert_eq!(root_of(&inner_path), Some(outer.0.join("inner")));
+    assert_eq!(root_of(&outside_path), None);
     assert_eq!(
         publishes_for(&messages, &path_to_uri(&inner_path).to_string()).len(),
         1,
@@ -177,7 +182,7 @@ fn adding_a_folder_moves_the_documents_open_in_it_there() {
     server.add_workspace_folders(std::slice::from_ref(&b.0));
 
     assert!(!server.unrooted.open_documents.contains(&path));
-    let folder = &server.folders[1];
+    let folder = &server.folders[server.folder_of(&path).unwrap()];
     assert!(folder.open_documents.contains(&path));
     assert!(folder.project.registry().classes.contains_key("InEditor"));
     assert!(!folder.project.registry().classes.contains_key("OnDisk"));

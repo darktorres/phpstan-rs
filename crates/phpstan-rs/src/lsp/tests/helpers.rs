@@ -17,9 +17,27 @@ use std::io::Cursor;
 // etc.) unchanged while the real transport underneath now genuinely
 // goes through `lsp_server::Message::read`/`write`.
 
+/// The id of the request `encode` puts before an `exit` that follows
+/// `initialized`, and `decode_all` leaves out of what it reads back.
+const LOADS_BARRIER_ID: &str = "loads-barrier";
+
+/// The messages as the wire carries them. The workspace scan runs beside
+/// the message loop, so a stream that ends in `exit` right after
+/// `initialized` would end before its results: a request goes before the
+/// `exit`, which the loop answers once every load is installed, as a
+/// client that waits for the results would send one.
 pub(super) fn encode(msgs: &[Value]) -> Vec<u8> {
     let mut buf = Vec::new();
+    let mut initialized = false;
     for m in msgs {
+        initialized |= m["method"] == "initialized";
+        if initialized && m["method"] == "exit" {
+            let barrier = request(0, "workspace/symbol", json!({"query": ""}));
+            let mut barrier = barrier;
+            barrier["id"] = json!(LOADS_BARRIER_ID);
+            let message: Message = serde_json::from_value(barrier).unwrap();
+            write_message(&mut buf, &message).unwrap();
+        }
         let message: Message = serde_json::from_value(m.clone()).unwrap();
         write_message(&mut buf, &message).unwrap();
     }
@@ -31,7 +49,12 @@ pub(super) fn decode_all(bytes: &[u8]) -> Vec<Value> {
     let mut out = Vec::new();
     loop {
         match read_message(&mut cursor) {
-            ReadOutcome::Message(m) => out.push(serde_json::to_value(&m).unwrap()),
+            ReadOutcome::Message(m) => {
+                let value = serde_json::to_value(&m).unwrap();
+                if value["id"] != LOADS_BARRIER_ID {
+                    out.push(value);
+                }
+            }
             ReadOutcome::Eof => break,
             ReadOutcome::Disconnected(e) | ReadOutcome::MalformedBody(e) => {
                 panic!("unexpected read_message failure in test: {e}")
