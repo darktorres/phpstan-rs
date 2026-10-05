@@ -8,7 +8,6 @@ mod duplicate_classes;
 mod duplicate_functions;
 mod file_discovery_and_misc;
 mod file_removal;
-mod fused_declarations;
 mod incremental_updates;
 mod inline_ignore_comments;
 mod load_order;

@@ -2,8 +2,7 @@ use std::path::{Path, PathBuf};
 
 use rustc_hash::FxHashMap;
 
-use syntax::ast::{FunctionDecl, Stmt, TypeHint};
-use syntax::declarations::Declared;
+use syntax::ast::{FunctionDecl, TypeHint};
 use syntax::name::Name;
 use syntax::span::Span;
 
@@ -27,33 +26,23 @@ pub(crate) struct FnDeclSite {
 /// whole project - always populated, since `check_duplicate_function_
 /// declarations` needs to run by default for `check-project`, matching
 /// real PHPStan's own always-on `function.duplicate` rule. A conditional
-/// declaration is never tracked (see `index`).
+/// declaration is never tracked (see `record`).
 #[derive(Default, serde::Serialize, serde::Deserialize, Clone)]
 pub(crate) struct DuplicateFunctionSites {
     sites: FxHashMap<String, Vec<FnDeclSite>>,
 }
 
 impl DuplicateFunctionSites {
-    /// Records `stmts`' unconditional function declarations. Where
-    /// `registry::build_declarations` still records a conditional one
-    /// (with weaker "first unconditional wins" semantics), this drops it
-    /// entirely: real PHPStan's own rule has no such guard and is a known,
-    /// disclosed false-positive source for the common
+    /// Records an unconditional function declaration; the caller drops a
+    /// conditional one. `registry::built_declaration` still records a
+    /// conditional one (with weaker "first unconditional wins"
+    /// semantics), but real PHPStan's own rule has no such guard and is a
+    /// known, disclosed false-positive source for the common
     /// `symfony/polyfill-*`-style `if (!function_exists('foo')) { function
     /// foo() {} }` idiom (two unrelated packages independently guarding
     /// the identical polyfill name) - a deliberate, stricter departure
     /// from literal real-PHPStan behavior, matching this project's own
     /// "favor false negatives over false positives" precedent.
-    pub(crate) fn index(&mut self, stmts: &[Stmt], path: &Path) {
-        syntax::declarations::for_each_declaration(stmts, |declaration, _, _| {
-            if let Declared::Function(f) = declaration.declared
-                && !declaration.conditional
-            {
-                self.record(declaration.name(), path, f);
-            }
-        });
-    }
-
     pub(crate) fn record(&mut self, fqn: String, path: &Path, f: &FunctionDecl) {
         self.sites.entry(fqn).or_default().push(FnDeclSite {
             path: path.to_path_buf(),

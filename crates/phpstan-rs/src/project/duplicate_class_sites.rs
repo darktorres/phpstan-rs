@@ -2,8 +2,7 @@ use std::path::{Path, PathBuf};
 
 use rustc_hash::FxHashMap;
 
-use syntax::ast::{ClassKind, Stmt};
-use syntax::declarations::Declared;
+use syntax::ast::ClassKind;
 use syntax::name::Name;
 use syntax::span::Span;
 
@@ -37,22 +36,12 @@ pub(crate) struct DuplicateClassSites {
 }
 
 impl DuplicateClassSites {
-    /// Records `stmts`' unconditional class-like declarations, dropping
-    /// a conditional one as `DuplicateFunctionSites::index` does, for the
-    /// same false-negative-favoring reason (a real, if rarer, analogue of
-    /// the `function_exists`-guarded polyfill idiom: `if (!class_exists(
+    /// Records an unconditional class-like declaration; the caller drops
+    /// a conditional one, as `DuplicateFunctionSites::record` does, for
+    /// the same false-negative-favoring reason (a real, if rarer, analogue
+    /// of the `function_exists`-guarded polyfill idiom: `if (!class_exists(
     /// Foo::class)) { class Foo {} }`). `is_stub` is the file's
     /// provenance.
-    pub(crate) fn index(&mut self, stmts: &[Stmt], path: &Path, is_stub: bool) {
-        syntax::declarations::for_each_declaration(stmts, |declaration, _, _| {
-            if let Declared::Class(c) = declaration.declared
-                && !declaration.conditional
-            {
-                self.record(declaration.name(), path, c.name.span, c.def.kind, is_stub);
-            }
-        });
-    }
-
     pub(crate) fn record(
         &mut self,
         fqn: String,

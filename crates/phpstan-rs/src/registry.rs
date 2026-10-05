@@ -70,9 +70,7 @@ pub use summaries::BodySummary;
 pub type FunctionTable = NameTable<FunctionReflection>;
 pub(crate) use effects::{CallContext, Effect, Holder, Storage, Transfer, Written, holder_of};
 pub(crate) use guard::Guard;
-pub(crate) use index::{
-    BuiltDecl, DeclKind, build_declarations, built_declaration, register_global_constant,
-};
+pub(crate) use index::{BuiltDecl, DeclKind, built_declaration, register_global_constant};
 pub(crate) use name_context::{collect_class_name_case_refs, resolve_names_in_type};
 pub(crate) use name_table::{folded_key, function_key, with_function_key};
 pub use provenance::{Origin, Provenance};

@@ -138,6 +138,7 @@ impl<V> FileTable<V> {
     }
 
     /// Holds `value` for `path`, returning what it held for it.
+    #[cfg(test)]
     pub(crate) fn insert(&mut self, path: PathBuf, value: V) -> Option<V> {
         let id = self.id_for(&path);
         self.insert_at(id, value)
@@ -152,11 +153,19 @@ impl<V> FileTable<V> {
         previous
     }
 
+    /// Takes the file `path` out, with the origins bound to it: what its
+    /// declarations named it by is gone with it, and a file of the same
+    /// path that comes back binds its own.
     pub(crate) fn remove(&mut self, path: &Path) -> Option<V> {
         let id = self.id_of(path)?;
-        let removed = self.slots[id.index()].value.take();
+        let slot = &mut self.slots[id.index()];
+        let removed = slot.value.take();
         if removed.is_some() {
             self.len -= 1;
+            for origin in slot.origins.drain(..) {
+                self.by_origin
+                    .remove(&(Arc::as_ptr(&origin).cast::<u8>() as usize));
+            }
         }
         removed
     }

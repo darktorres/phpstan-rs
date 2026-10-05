@@ -18,7 +18,7 @@ use crate::registry::stubs;
 use crate::registry::{
     BodySource, BuiltDecl, DeclKind, FileBodies, GlobalFacts, Origin, Provenance, Registry,
 };
-use declared_classes::{DeclaredClass, declared_classes};
+use declared_classes::DeclaredClass;
 use diagnostics::{self, Diagnostic, DiagnosticBuilder};
 use syntax::FileFacts;
 use syntax::ast::{Stmt, StmtKind};
@@ -1227,6 +1227,44 @@ impl Project {
         len: usize,
         analyzed: bool,
     ) {
+        self.begin_declaration_changes();
+        for decl in &parsed.built_decls {
+            self.registry.insert_built_decl(decl.clone(), analyzed);
+        }
+        // `record_phpstan_class_file` no-ops unless the name is
+        // `PHPStan\*`-namespaced, so this is a zero-cost loop for every
+        // ordinary corpus.
+        for name in &parsed.classes {
+            self.registry.record_phpstan_class_file(name, path);
+        }
+        let load_order = self.next_load_order;
+        self.next_load_order += 1;
+        let placed = Placed {
+            id,
+            path,
+            analyzed,
+            load_order,
+        };
+        self.install_parsed_file(placed, parsed, source, len);
+    }
+
+    /// Holds `parsed`, the parse of the file `placed` says, and indexes
+    /// everything it gives but its declarations in the registry: its use
+    /// sites, its declaration sites, its references and its owner. Where
+    /// its declarations go is the caller's.
+    fn install_parsed_file(
+        &mut self,
+        placed: Placed<'_>,
+        parsed: ParsedFile,
+        source: String,
+        len: usize,
+    ) {
+        let Placed {
+            id,
+            path,
+            analyzed,
+            load_order,
+        } = placed;
         let ParsedFile {
             ast,
             lex_warnings: _,
@@ -1250,10 +1288,6 @@ impl Project {
             class_fn_refs,
             owner,
         } = parsed;
-        self.begin_declaration_changes();
-        for decl in &built_decls {
-            self.registry.insert_built_decl(decl.clone(), analyzed);
-        }
         debug_assert!(
             ast.is_some() || (!analyzed && self.built_once),
             "a file whose tree is needed was read back from the cache"
@@ -1265,12 +1299,6 @@ impl Project {
         for (span, target) in class_fn_refs {
             self.use_sites.insert(path, target, span);
         }
-        // `record_phpstan_class_file` no-ops unless the name is
-        // `PHPStan\*`-namespaced, so this is a zero-cost loop for every
-        // ordinary corpus.
-        for name in &classes {
-            self.registry.record_phpstan_class_file(name, path);
-        }
         self.duplicate_fn_sites.merge(duplicate_fn_sites);
         self.duplicate_class_sites.merge(duplicate_class_sites);
         self.files.bind_origin(id, &origin_path);
@@ -1278,8 +1306,6 @@ impl Project {
         register_references(&mut self.signature_dependents, id, &declaration_references);
         let owner = owner.unwrap_or_else(|| self.packages.owner(&self.absolute_path(path)));
         self.globals_stale.insert(id);
-        let load_order = self.next_load_order;
-        self.next_load_order += 1;
         let keeps_tree = analyzed || !self.built_once;
         self.files.insert_at(
             id,
@@ -2007,10 +2033,10 @@ impl Project {
     /// The always-run-to-completion convenience wrapper every existing
     /// caller uses - `update_file_cancellable` with a `should_abort`
     /// that never fires.
-    pub fn update_file(
+    pub fn update_file<'a>(
         &mut self,
         path: &Path,
-        new_source: &str,
+        new_source: impl Into<syntax::Source<'a>>,
     ) -> Result<FxHashMap<PathBuf, Vec<Diagnostic>>, ParseError> {
         self.update_file_cancellable(path, new_source, || false)
     }
@@ -2024,46 +2050,37 @@ impl Project {
     /// (recorded via `lsp::debounce::DebounceQueue::record_edit`) can
     /// stop an in-flight cascade partway through rather than only ever
     /// being observable *between* separate `update_file` calls.
-    pub fn update_file_cancellable(
+    pub fn update_file_cancellable<'a>(
         &mut self,
         path: &Path,
-        new_source: &str,
+        new_source: impl Into<syntax::Source<'a>>,
         should_abort: impl Fn() -> bool + Sync,
     ) -> Result<FxHashMap<PathBuf, Vec<Diagnostic>>, ParseError> {
+        let new_source = new_source.into();
+        let classified = self.classify(path);
         // Parse BEFORE unindexing anything - on a parse failure (the
         // normal, common state while a file is mid-edit, not an edge
         // case), this must leave every existing registry/
         // `self.files` entry for `path` completely untouched, not
-        // half-torn-down. `unindex_file` used to run first unconditionally,
-        // which meant any edit that failed to parse permanently discarded
-        // the file's own last-good `FileState` (AST + retained source)
-        // the moment this method returned `Err` - `Project::ast`/
-        // `Project::source` read straight from `self.files`, with no
-        // other place a "last known good" version could still be found.
-        // That silently broke every last-good-AST-dependent LSP feature
-        // (hover/definition/documentSymbol, and `lsp::completion`'s own
-        // member-completion probe, which specifically needs the AST from
-        // *before* the very edit that introduced its own trigger) for as
-        // long as the file kept failing to parse, not just for the one
-        // request that happened to race a genuinely-invalid save.
-        let Parsed {
-            ast,
-            references,
-            ignores,
-            facts,
-            line_index,
-            ..
-        } = parse_with_ignores(path, new_source, None)?;
+        // half-torn-down: `Project::ast`/`Project::source` read straight
+        // from `self.files`, with no other place a "last known good"
+        // version could still be found, and every last-good-AST-dependent
+        // LSP feature (hover/definition/documentSymbol, and
+        // `lsp::completion`'s own member-completion probe, which
+        // specifically needs the AST from *before* the very edit that
+        // introduced its own trigger) reads it for as long as the file
+        // keeps failing to parse.
+        let parsed = parse_file(path, new_source, classified.is_stub)?;
+        let text = match new_source {
+            syntax::Source::Text(text) => std::borrow::Cow::Borrowed(text),
+            syntax::Source::Bytes(bytes) => String::from_utf8_lossy(bytes),
+        };
         let previous = self.unindex_file(path);
         let appeared = previous.is_none();
-        let (functions, classes) = declared_names(&ast);
-        let constants = declared_constants(&ast);
-        let (references, declaration_references) = file_references(&ast, references);
 
         // A file already loaded keeps its role, which an edit does not
         // change; a new one takes the role its roots give it, as a load
         // would.
-        let classified = self.classify(path);
         let analyzed = previous.as_ref().map_or_else(
             || classified.role == roles::Role::Analysed,
             |previous| previous.analyzed,
@@ -2073,62 +2090,33 @@ impl Project {
             None => self.make_room_in_load_order(path, analyzed),
         };
         let mut rebuilt = DeclaredNames {
-            functions: functions.clone(),
-            classes: classes.clone(),
-            constants: constants.clone(),
+            functions: parsed.functions.clone(),
+            classes: parsed.classes.clone(),
+            constants: parsed.constants.clone(),
         };
         if let Some(previous) = previous {
             rebuilt.functions.extend(previous.functions);
             rebuilt.classes.extend(previous.classes);
             rebuilt.constants.extend(previous.constants);
         }
-        let built_decls = crate::registry::build_declarations(&ast, &Origin::File(Arc::from(path)));
-        self.rebuild_declarations(&rebuilt, Some((path, &built_decls, analyzed, load_order)));
-        let anonymous_classes = if facts.has_anonymous_class {
-            anonymous_class_names(&ast)
-        } else {
-            Vec::new()
-        };
-        self.duplicate_fn_sites.index(&ast, path);
-        self.duplicate_class_sites
-            .index(&ast, path, classified.is_stub);
-        let bodies = FileBodies::of(&ast);
-        let global_facts = Arc::new(GlobalFacts::of(&ast));
-        let pest_facts = PestFacts::of(path, &ast);
-        let declared_classes = declared_classes(&ast);
-        for (span, target) in self.class_fn_refs_of(&ast, Some(new_source)) {
-            self.use_sites.insert(path, target, span);
-        }
-        let id = self.files.id_for(path);
-        register_references(&mut self.dependents, id, &references);
-        register_references(&mut self.signature_dependents, id, &declaration_references);
-        self.globals_stale.insert(id);
-        self.files.insert(
-            path.to_path_buf(),
-            FileState {
-                kept_ast: Some(ast),
-                source_len: new_source.len(),
-                load_order,
-                mentions_phpstan: mentions_phpstan(&functions, &classes, &references),
-                functions,
-                classes,
-                constants,
-                references,
-                declaration_references,
-                ignores,
-                anonymous_classes,
-                source: self.retain_source.then(|| new_source.to_string()),
-                analyzed,
-                owner: self.packages.owner(&self.absolute_path(path)),
-                bodies,
-                global_facts,
-                built_decls,
-                pest_facts,
-                declared_classes,
-                facts,
-                line_index,
-            },
+        self.rebuild_declarations(
+            &rebuilt,
+            Some((path, &parsed.built_decls, analyzed, load_order)),
         );
+        let id = self.files.id_for(path);
+        let len = text.len();
+        let source = if self.retain_source {
+            text.into_owned()
+        } else {
+            String::new()
+        };
+        let placed = Placed {
+            id,
+            path,
+            analyzed,
+            load_order,
+        };
+        self.install_parsed_file(placed, parsed, source, len);
         let mut affected = self.finish_declarations();
 
         affected.insert(path.to_path_buf());
@@ -3565,26 +3553,6 @@ pub(crate) fn parse_file_recording<'a>(
     })
 }
 
-/// The registry names of the anonymous classes in `ast`.
-fn anonymous_class_names(ast: &[Stmt]) -> Vec<Name> {
-    struct Names(Vec<Name>);
-    impl<'a> syntax::visit::Visitor<'a> for Names {
-        fn visit_expr(&mut self, expr: &'a syntax::ast::Expr) {
-            if let syntax::ast::ExprKind::NewAnonymousClass(class) = &expr.kind
-                && let Some(name) = &class.name
-            {
-                self.0.push(name.clone());
-            }
-            syntax::visit::walk_expr(self, expr);
-        }
-    }
-    let mut names = Names(Vec::new());
-    for stmt in ast {
-        syntax::visit::Visitor::visit_stmt(&mut names, stmt);
-    }
-    names.0
-}
-
 impl ParsedFile {
     /// What the lexer skipped over rather than failing on.
     pub fn lex_warnings(&self) -> &[LexWarning] {
@@ -3793,6 +3761,14 @@ pub(crate) fn absolute_spelling(
     composer::manifest::lexically_normalized(&joined)
 }
 
+/// Where a file is among the files a project holds.
+struct Placed<'a> {
+    id: FileId,
+    path: &'a Path,
+    analyzed: bool,
+    load_order: u64,
+}
+
 /// What `Project::unindex_file` removed.
 struct UnindexedFile {
     analyzed: bool,
@@ -3820,18 +3796,6 @@ struct DeclaredNames {
     functions: Vec<Name>,
     classes: Vec<Name>,
     constants: Vec<Name>,
-}
-
-/// The global constants one file's parse tree declares, by the names
-/// `Registry::global_constants` holds them under.
-fn declared_constants(stmts: &[Stmt]) -> Vec<Name> {
-    let mut constants = Vec::new();
-    syntax::declarations::for_each_declaration(stmts, |declaration, _, _| {
-        if let Declared::Constant(_) | Declared::Define { .. } = declaration.declared {
-            constants.push(Name::from(declaration.name().trim_start_matches('\\')));
-        }
-    });
-    constants
 }
 
 /// The function and class names one file's parse tree declares - exactly

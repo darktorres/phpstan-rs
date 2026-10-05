@@ -2,8 +2,7 @@
 //! checks read of their declarations; made once when the file is parsed, so
 //! the checks need not keep its tree.
 
-use syntax::ast::{ClassDecl, Stmt, Visibility};
-use syntax::declarations::{Declared, for_each_declaration};
+use syntax::ast::{ClassDecl, Visibility};
 use syntax::span::Span;
 use types::Name;
 
@@ -56,19 +55,6 @@ impl DeclaredClass {
             uses_traits: !c.def.trait_uses.is_empty(),
         }
     }
-}
-
-/// The classes `program` declares unconditionally.
-pub(crate) fn declared_classes(program: &[Stmt]) -> Vec<DeclaredClass> {
-    let mut classes = Vec::new();
-    for_each_declaration(program, |declaration, _, _| {
-        if let Declared::Class(c) = declaration.declared
-            && !declaration.conditional
-        {
-            classes.push(DeclaredClass::of(declaration.name(), declaration.span, c));
-        }
-    });
-    classes
 }
 
 syntax::canonical_struct!(DeclaredClass {
