@@ -122,7 +122,7 @@ Building started on 2026-10-03 (`WORK_STACK.md`, level 8).
 | 2.3 | Spellings, path data | Spellings built, not respelled. Path data from the walk; `owner_of_dir` once per directory, in one implementation | 2.2 | perf | DONE (42140a68; the load finds them once per directory on each thread, from the files' spellings, where the plan has the walk hand them down) |
 | 2.4 | Parsing as listed | Each directory's PHP files go to the pool as one task, with the thread's name cache owned by the load | 2.2 | perf | DONE (61eb2aea) |
 | 2.5 | Order without comparisons | Keyed by root index and entry index path; explicit files placed by binary search | 2.2 | perf | DONE (8d6a828d) |
-| 2.6 | A path stored once | `FileTable` as a `HashTable<FileId>` using the walk's hash | 2.3 | perf | OPEN |
+| 2.6 | A path stored once | `FileTable` as a `HashTable<FileId>` using the walk's hash | 2.3 | perf | DONE (553c1ddc) |
 | 2.7 | Allocations | `installed.json` and manifests deserialized typed; `eval_concat` into one buffer; `ignore_errors` matched by the walk's text | — | perf | OPEN |
 | 2.V | §11 | Validation against item 1's dumps | 2.7 | val | OPEN |
 | **3** | **item 3** | **Context trees dropped on the worker** | | | |
