@@ -31,6 +31,8 @@ pub(super) struct DebounceQueue {
     pending: FxHashMap<PathBuf, PendingEdit>,
     generations: FxHashMap<PathBuf, u64>,
     debounce: Duration,
+    /// When the whole-program checks are due, set by a save.
+    whole_program: Option<Instant>,
 }
 
 impl DebounceQueue {
@@ -39,6 +41,7 @@ impl DebounceQueue {
             pending: FxHashMap::default(),
             generations: FxHashMap::default(),
             debounce,
+            whole_program: None,
         }
     }
 
@@ -76,8 +79,39 @@ impl DebounceQueue {
     /// The earliest deadline among every still-pending edit - `None`
     /// when nothing is pending at all, letting the worker wait
     /// indefinitely (up to its own idle cap) rather than busy-poll.
+    ///
+    /// The whole-program checks' deadline counts only while no edit is
+    /// pending: they run when the typing has stopped.
     pub(super) fn next_deadline(&self) -> Option<Instant> {
-        self.pending.values().map(|p| p.deadline).min()
+        match self.pending.values().map(|p| p.deadline).min() {
+            Some(deadline) => Some(deadline),
+            None => self.whole_program,
+        }
+    }
+
+    /// Asks for the whole-program checks to run once no edit is pending,
+    /// a debounce window after the last such request.
+    pub(super) fn request_whole_program(&mut self, now: Instant) {
+        self.whole_program = Some(now + self.debounce);
+    }
+
+    /// Whether the whole-program checks were requested, due or not; clears
+    /// the request.
+    pub(super) fn take_whole_program_now(&mut self) -> bool {
+        self.whole_program.take().is_some()
+    }
+
+    /// Whether the whole-program checks are due at `now`, which they are
+    /// once requested, with no edit pending and the window elapsed;
+    /// clears the request.
+    pub(super) fn take_whole_program(&mut self, now: Instant) -> bool {
+        match self.whole_program {
+            Some(deadline) if deadline <= now && self.pending.is_empty() => {
+                self.whole_program = None;
+                true
+            }
+            _ => false,
+        }
     }
 
     /// Drains and returns every entry whose deadline is at or before

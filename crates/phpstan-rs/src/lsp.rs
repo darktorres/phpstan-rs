@@ -44,10 +44,10 @@ use lsp_types::{
 };
 
 use crate::checker::Checker;
-use crate::project::session::Session;
+use crate::project::session::{ParseFailure, Session};
 use crate::project::source::ContentHash;
 use crate::project::use_sites;
-use crate::project::{Project, ProjectSettings};
+use crate::project::{Project, ProjectSettings, Records};
 use crate::registry::{FunctionReflection, format_signature, param_label};
 use syntax::ast::ClassKind;
 use syntax::span::{LineIndex, Span, Unit};
@@ -180,7 +180,7 @@ struct Server {
     // checker pass per request (a real editor's lightbulb fires
     // `textDocument/codeAction` far more often than actual edits, e.g. on
     // cursor movement). Kept in sync by every diagnostic-producing path
-    // (`check_all_analyzed_paths`, `publish_diagnostics_for`), cleared
+    // (`check_workspace`, `publish_diagnostics_for`), cleared
     // for a path `remove_workspace_folders`/
     // `handle_watched_files_changed`'s Deleted branch drop. Safe under
     // today's fully synchronous, one-message-at-a-time `run_loop`: a
@@ -188,6 +188,14 @@ struct Server {
     // processed `didChange`/scan already committed, never a torn or
     // stale-relative-to-an-earlier-unprocessed-edit state.
     last_diagnostics: FxHashMap<PathBuf, Vec<diagnostics::Diagnostic>>,
+    // What the whole-program checks last found, by path, shown beside
+    // `last_diagnostics`: a file's edit does not change them, a save does
+    // (`recheck_whole_program`).
+    whole_program: FxHashMap<PathBuf, Vec<diagnostics::Diagnostic>>,
+    // The analysed files that do not parse as last loaded or edited, each
+    // reported where it fails; a file leaves when it parses again or is
+    // removed.
+    parse_failures: FxHashMap<PathBuf, ParseFailure>,
     // The exact current text `didOpen`/`didChange` last sent for a path,
     // regardless of whether it parses - `Project::source`/`Project::ast`
     // only ever reflect the last *successfully parsed* version, but
@@ -315,6 +323,8 @@ impl Server {
             pool: crate::project::worker_pool(),
             open_uris: FxHashMap::default(),
             last_diagnostics: FxHashMap::default(),
+            whole_program: FxHashMap::default(),
+            parse_failures: FxHashMap::default(),
             latest_text: FxHashMap::default(),
             open_documents: FxHashSet::default(),
             unit: Unit::default(),
@@ -415,18 +425,39 @@ impl Server {
     /// it's run against the whole project's diagnostics at once, and
     /// treating every other baselined file as "no longer matches" on every
     /// keystroke would be a constant false-positive warning storm.
-    fn apply_post_filters<'d>(
+    fn apply_post_filters(
         &self,
-        findings: impl IntoIterator<Item = (&'d PathBuf, &'d Vec<diagnostics::Diagnostic>)>,
+        mut results: FxHashMap<PathBuf, Vec<diagnostics::Diagnostic>>,
     ) -> FxHashMap<PathBuf, Vec<diagnostics::Diagnostic>> {
-        let mut results: FxHashMap<PathBuf, Vec<diagnostics::Diagnostic>> = findings
-            .into_iter()
-            .map(|(path, found)| (path.clone(), found.clone()))
-            .collect();
         if let Some(applied) = &self.last_applied_config {
             applied.finalize.apply(&self.project, &mut results);
         }
         results
+    }
+
+    /// What is held of each of `paths` that has anything: the findings of
+    /// its checks, then the whole-program checks'.
+    fn held_findings<'p>(
+        &self,
+        paths: impl IntoIterator<Item = &'p PathBuf>,
+    ) -> FxHashMap<PathBuf, Vec<diagnostics::Diagnostic>> {
+        paths
+            .into_iter()
+            .filter_map(|path| {
+                let own = self.last_diagnostics.get(path);
+                let whole_program = self.whole_program.get(path);
+                if own.is_none() && whole_program.is_none() {
+                    return None;
+                }
+                let found = own
+                    .into_iter()
+                    .chain(whole_program)
+                    .flatten()
+                    .cloned()
+                    .collect();
+                Some((path.clone(), found))
+            })
+            .collect()
     }
 
     /// Takes `session` as the workspace's, reading the open documents in
@@ -483,6 +514,9 @@ impl Server {
                 .collect()
         };
         let added = session.load_into(&mut self.project, &role_of(false), &role_of(true));
+        for (path, failure) in &added.parse_failures {
+            self.parse_failures.insert(path.clone(), failure.clone());
+        }
         for (path, failure) in added
             .context_failures
             .into_iter()
@@ -602,7 +636,7 @@ impl Server {
             .map(|(uri, _version)| publish_diagnostics_notification(uri, None, &[], None, unit))
             .collect();
         for p in &paths {
-            self.last_diagnostics.remove(p);
+            self.forget_findings(p);
             self.latest_text.remove(p);
             self.close_document(p);
         }
@@ -612,37 +646,110 @@ impl Server {
         messages
     }
 
-    /// Runs the checker over every analyzed (first-party) file currently
-    /// loaded, keeping what it finds in `last_diagnostics`, and returns
-    /// the paths checked, in order. Runs on the worker pool, and through
-    /// `Project::check_paths_isolating_panics` (not `check_paths`) so one
-    /// file's latent checker bug can't take down the whole push. Shared by `publish_workspace_diagnostics`
-    /// (which then drops empty results) and `republish_known_files`
-    /// (which must not, so a file previously flagged and now clean gets
-    /// an explicit clearing notification).
-    fn check_all_analyzed_paths(&mut self) -> Vec<PathBuf> {
-        let mut paths = self.project.analyzed_paths();
-        if paths.is_empty() {
+    /// Checks every analysed (first-party) file loaded and runs the
+    /// whole-program checks, as `Session::analyse` does, keeping what they
+    /// find in `last_diagnostics` and `whole_program` and returning the
+    /// paths with findings now or before, in order: the workspace session
+    /// runs the checks on the worker pool, one file's panic not taking
+    /// down the push. Shared by `publish_workspace_diagnostics` (which
+    /// then drops empty results) and `republish_known_files` (which must
+    /// not, so a file previously flagged and now clean gets an explicit
+    /// clearing notification).
+    fn check_workspace(&mut self) -> Vec<PathBuf> {
+        let Some(session) = &self.workspace_session else {
+            return Vec::new();
+        };
+        let mut files = self.project.analyzed_paths();
+        if files.is_empty() && self.parse_failures.is_empty() {
             return Vec::new();
         }
         // Deterministic order (matches load_workspace's own `files.sort()`
         // rationale) - HashMap/HashSet iteration order would otherwise
         // make repeated runs against an unchanged workspace look like a
         // spurious diff to anyone comparing published-message order.
-        paths.sort();
-        let (results, panics) = self
-            .project
-            .check_paths_isolating_panics(&paths, &self.pool);
-        for (path, msg) in &panics {
+        files.sort();
+        let failures = self
+            .parse_failures
+            .iter()
+            .map(|(path, failure)| (path.clone(), failure.clone()));
+        let checked = session.check_loaded(&mut self.project, &files, failures, Records::default());
+        for (path, msg) in &checked.check_panics {
             eprintln!(
                 "phpstan-rs lsp: checking {} panicked: {msg}",
                 path.display()
             );
         }
-        let mut checked: Vec<PathBuf> = results.keys().cloned().collect();
-        checked.sort();
-        self.last_diagnostics.extend(results);
-        checked
+        let mut paths: Vec<PathBuf> = checked
+            .results
+            .keys()
+            .chain(checked.whole_program.keys())
+            .chain(self.whole_program.keys())
+            .cloned()
+            .collect();
+        paths.sort();
+        paths.dedup();
+        self.last_diagnostics.extend(checked.results);
+        self.whole_program = checked.whole_program;
+        paths
+    }
+
+    /// Runs the whole-program checks again, which an edit does not: what
+    /// they found is published for every file with findings now or before,
+    /// a file now clean cleared.
+    fn recheck_whole_program(&mut self) -> Vec<Message> {
+        if !self.enabled {
+            return Vec::new();
+        }
+        let Some(session) = &self.workspace_session else {
+            return Vec::new();
+        };
+        let found = session.whole_program(&mut self.project);
+        let mut paths: Vec<PathBuf> = found
+            .keys()
+            .chain(self.whole_program.keys())
+            .cloned()
+            .collect();
+        paths.sort();
+        paths.dedup();
+        self.whole_program = found;
+        self.publish_shown(&paths, true)
+    }
+
+    /// Drops everything held of the findings in `path`.
+    fn forget_findings(&mut self, path: &Path) {
+        self.last_diagnostics.remove(path);
+        self.whole_program.remove(path);
+        self.parse_failures.remove(path);
+    }
+
+    /// Reports `error`, which the parse of `source` gave for `path`, as the
+    /// loaders do: logged, and where `path` is an analysed file, published
+    /// as its one finding until it parses again.
+    fn parse_failed(
+        &mut self,
+        path: &Path,
+        error: syntax::parser::ParseError,
+        source: &[u8],
+    ) -> Vec<Message> {
+        eprintln!(
+            "phpstan-rs lsp: skipping {} - failed to parse: {error}",
+            path.display()
+        );
+        let mut messages = vec![log_message_notification(
+            MessageType::WARNING,
+            format!(
+                "phpstan-rs: skipping {} - failed to parse: {error}",
+                path.display()
+            ),
+        )];
+        if self.project.is_analyzed(path) || self.parse_failures.contains_key(path) {
+            let failure = ParseFailure::of(error, source);
+            self.last_diagnostics
+                .insert(path.to_path_buf(), vec![failure.diagnostic()]);
+            self.parse_failures.insert(path.to_path_buf(), failure);
+            messages.extend(self.publish_shown(&[path.to_path_buf()], true));
+        }
+        messages
     }
 
     /// Looks up the last known `(Uri, document version)` for `path` -
@@ -688,7 +795,7 @@ impl Server {
     /// initial load nothing has been published for these paths yet, so
     /// there is nothing to clear.
     fn publish_workspace_diagnostics(&mut self) -> Vec<Message> {
-        let checked = self.check_all_analyzed_paths();
+        let checked = self.check_workspace();
         self.publish_shown(&checked, false)
     }
 
@@ -704,7 +811,7 @@ impl Server {
         if !self.enabled {
             return self.clear_open_files();
         }
-        let checked = self.check_all_analyzed_paths();
+        let checked = self.check_workspace();
         self.publish_shown(&checked, true)
     }
 
@@ -736,11 +843,7 @@ impl Server {
     /// a path showing nothing is published too, clearing what it showed
     /// before.
     fn publish_shown(&self, paths: &[PathBuf], with_empty: bool) -> Vec<Message> {
-        let mut shown = self.apply_post_filters(
-            paths
-                .iter()
-                .filter_map(|path| self.last_diagnostics.get_key_value(path)),
-        );
+        let mut shown = self.apply_post_filters(self.held_findings(paths));
         paths
             .iter()
             .filter_map(|path| {
@@ -784,20 +887,9 @@ impl Server {
         // whole LSP server process.
         let results = match self.project.update_file(&path, text) {
             Ok(results) => results,
-            Err(e) => {
-                eprintln!(
-                    "phpstan-rs lsp: skipping {} - failed to parse: {e}",
-                    path.display()
-                );
-                return vec![log_message_notification(
-                    MessageType::WARNING,
-                    format!(
-                        "phpstan-rs: skipping {} - failed to parse: {e}",
-                        path.display()
-                    ),
-                )];
-            }
+            Err(e) => return self.parse_failed(&path, e, text.as_bytes()),
         };
+        self.parse_failures.remove(&path);
         self.publish_diagnostics_for(results)
     }
 
@@ -828,20 +920,9 @@ impl Server {
             .update_file_cancellable(path, text, should_abort)
         {
             Ok(results) => results,
-            Err(e) => {
-                eprintln!(
-                    "phpstan-rs lsp: skipping {} - failed to parse: {e}",
-                    path.display()
-                );
-                return vec![log_message_notification(
-                    MessageType::WARNING,
-                    format!(
-                        "phpstan-rs: skipping {} - failed to parse: {e}",
-                        path.display()
-                    ),
-                )];
-            }
+            Err(e) => return self.parse_failed(path, e, text.as_bytes()),
         };
+        self.parse_failures.remove(path);
         for stale in self.project.take_unchecked() {
             self.last_diagnostics.remove(&stale);
         }
@@ -894,7 +975,7 @@ impl Server {
                 }
                 for path in &gone {
                     self.open_uris.remove(path);
-                    self.last_diagnostics.remove(path);
+                    self.forget_findings(path);
                     self.latest_text.remove(path);
                     self.close_document(path);
                 }
@@ -927,13 +1008,11 @@ impl Server {
             let appeared = !self.project.is_loaded(&path);
             match self.project.update_file(&path, bytes.as_slice()) {
                 Ok(results) => {
+                    self.parse_failures.remove(&path);
                     messages.extend(self.publish_diagnostics_for(results));
                 }
                 Err(e) => {
-                    eprintln!(
-                        "phpstan-rs lsp: skipping {} - failed to parse: {e}",
-                        path.display()
-                    );
+                    messages.extend(self.parse_failed(&path, e, &bytes));
                     if appeared {
                         appeared_or_vanished.push(path);
                     }
@@ -1898,7 +1977,7 @@ impl Server {
             self.last_diagnostics.insert(path.clone(), found);
         }
         let diagnostics = self
-            .apply_post_filters(self.last_diagnostics.get_key_value(&path))
+            .apply_post_filters(self.held_findings([&path]))
             .remove(&path)?;
         let source = self.project.source(&path);
         let positions = self.positions(&path)?;
@@ -2166,7 +2245,7 @@ impl Server {
         if !gone.is_empty() {
             for path in &gone {
                 self.open_uris.remove(path);
-                self.last_diagnostics.remove(path);
+                self.forget_findings(path);
                 self.latest_text.remove(path);
                 self.close_document(path);
             }
@@ -2432,6 +2511,17 @@ fn run_dispatch_loop<W: Write>(
                     }
                     continue;
                 }
+                // A save asks for the whole-program checks, which run once
+                // the typing has stopped.
+                if not.method == "textDocument/didSave" {
+                    debounce
+                        .queue
+                        .lock()
+                        .unwrap()
+                        .request_whole_program(Instant::now());
+                    debounce.cv.notify_one();
+                    continue;
+                }
                 // A pending or in-flight debounced edit for a now-closed
                 // file must not fire/publish - `cancel` drops both its
                 // pending entry and its generation, so an in-flight
@@ -2498,6 +2588,18 @@ fn spawn_debounce_worker<W: Write + Send + 'static>(
                 if !expired.is_empty() {
                     run_pending_edits(&server, &debounce, &writer, expired);
                 }
+                let due = debounce
+                    .queue
+                    .lock()
+                    .unwrap()
+                    .take_whole_program(Instant::now());
+                if due {
+                    let messages = server.lock().unwrap().recheck_whole_program();
+                    let mut w = writer.lock().unwrap();
+                    for message in messages {
+                        let _ = write_message(&mut *w, &message);
+                    }
+                }
             }
         })
         .expect("spawning the LSP debounce worker thread")
@@ -2514,9 +2616,17 @@ fn flush_and_publish_all<W: Write>(
     mut guard: std::sync::MutexGuard<'_, debounce::DebounceQueue>,
 ) {
     let flushed = guard.drain_all();
+    let whole_program = guard.take_whole_program_now();
     drop(guard);
     if !flushed.is_empty() {
         run_pending_edits(server, debounce, writer, flushed);
+    }
+    if whole_program {
+        let messages = server.lock().unwrap().recheck_whole_program();
+        let mut w = writer.lock().unwrap();
+        for message in messages {
+            let _ = write_message(&mut *w, &message);
+        }
     }
 }
 
@@ -2687,9 +2797,15 @@ fn handle_request<W: Write>(server: &mut Server, writer: &mut W, req: Request) {
                     // Full sync: didChange always carries the whole new
                     // document text, not incremental ranges - simplest
                     // correct choice, and update_file already takes a
-                    // full source string anyway.
-                    text_document_sync: Some(TextDocumentSyncCapability::Kind(
-                        TextDocumentSyncKind::FULL,
+                    // full source string anyway. A save, without the text,
+                    // asks for the whole-program checks.
+                    text_document_sync: Some(TextDocumentSyncCapability::Options(
+                        lsp_types::TextDocumentSyncOptions {
+                            open_close: Some(true),
+                            change: Some(TextDocumentSyncKind::FULL),
+                            save: Some(lsp_types::TextDocumentSyncSaveOptions::Supported(true)),
+                            ..Default::default()
+                        },
                     )),
                     hover_provider: Some(HoverProviderCapability::Simple(true)),
                     definition_provider: Some(OneOf::Left(true)),

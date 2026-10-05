@@ -6,6 +6,7 @@ mod document_highlight;
 mod helpers;
 mod inlay_hints;
 mod navigation;
+mod one_analysis;
 mod protocol_and_session;
 mod references_and_rename;
 mod semantic_tokens;

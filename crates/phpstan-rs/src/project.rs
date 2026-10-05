@@ -1303,9 +1303,13 @@ impl Project {
         if self.retain_source {
             // Until the first request that reads the index
             // (`ensure_member_index_built`), a loaded workspace pays
-            // nothing for it.
+            // nothing for it, unless `check_dead_code` reads it of every
+            // file.
             match source {
-                Some(source) if self.member_index != MemberIndex::Unbuilt => {
+                Some(source)
+                    if self.member_index != MemberIndex::Unbuilt
+                        || self.settings.rules.check_dead_code =>
+                {
                     use_sites::index_class_fn_refs(ast, source)
                 }
                 _ => Vec::new(),
@@ -1826,7 +1830,7 @@ impl Project {
         if self.member_index != MemberIndex::Unbuilt {
             return;
         }
-        if self.retain_source {
+        if self.retain_source && !self.settings.rules.check_dead_code {
             // The class and function sites weren't indexed as the files
             // loaded (`class_fn_refs_of`).
             let indexed: Vec<(&PathBuf, Vec<(Span, use_sites::RefTarget)>)> = worker_pool()

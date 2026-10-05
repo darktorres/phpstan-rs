@@ -120,3 +120,40 @@ fn drain_all_returns_an_unexpired_entry_that_drain_expired_would_not_have() {
     assert_eq!(drained.len(), 1);
     assert_eq!(drained[0].1.text, "a");
 }
+
+#[test]
+fn the_whole_program_checks_wait_for_the_edits_pending_and_the_window_after_a_save() {
+    let mut q = DebounceQueue::new(Duration::from_millis(200));
+    let now = Instant::now();
+    assert!(!q.take_whole_program(now));
+
+    q.request_whole_program(now);
+    assert_eq!(q.next_deadline(), Some(now + Duration::from_millis(200)));
+    assert!(!q.take_whole_program(now + Duration::from_millis(100)));
+
+    // An edit pending holds them back, and its deadline is the one waited
+    // for.
+    q.record_edit(
+        PathBuf::from("a.php"),
+        uri(),
+        "a".to_string(),
+        1,
+        now + Duration::from_millis(150),
+    );
+    assert_eq!(q.next_deadline(), Some(now + Duration::from_millis(350)));
+    assert!(!q.take_whole_program(now + Duration::from_millis(300)));
+
+    q.drain_expired(now + Duration::from_millis(400));
+    assert!(q.take_whole_program(now + Duration::from_millis(400)));
+    assert!(!q.take_whole_program(now + Duration::from_millis(500)));
+    assert_eq!(q.next_deadline(), None);
+}
+
+#[test]
+fn a_flush_takes_the_whole_program_checks_requested_whatever_their_deadline() {
+    let mut q = DebounceQueue::new(Duration::from_millis(200));
+    assert!(!q.take_whole_program_now());
+    q.request_whole_program(Instant::now());
+    assert!(q.take_whole_program_now());
+    assert!(!q.take_whole_program_now());
+}

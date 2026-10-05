@@ -199,6 +199,20 @@ pub struct AnalysisResult {
     pub doc_resolution_dump: Option<String>,
 }
 
+/// What `Session::check_loaded` found.
+pub(crate) struct Checked {
+    /// Per-file diagnostics as the checks emitted them, and a parse error
+    /// for each analysed file that does not parse.
+    pub(crate) results: FxHashMap<PathBuf, Vec<Diagnostic>>,
+    /// The whole-program checks' diagnostics (`Session::whole_program`).
+    pub(crate) whole_program: FxHashMap<PathBuf, Vec<Diagnostic>>,
+    /// Files whose check panicked, with the panic message, sorted.
+    pub(crate) check_panics: Vec<(PathBuf, String)>,
+    pub(crate) type_dump: Option<String>,
+    pub(crate) expr_type_dump: Option<String>,
+    pub(crate) doc_resolution_dump: Option<String>,
+}
+
 /// The post-processing a finalized report gets, in this order: the level
 /// cutoff, inline ignores, `ignore_errors`, the baseline, then the order.
 #[derive(Clone, PartialEq)]
@@ -482,10 +496,35 @@ fn section<S: config::Section>(
 }
 
 /// A file that was not loaded because it does not parse, where, and why.
+#[derive(Clone)]
 pub(crate) struct ParseFailure {
     pub(crate) line: u32,
     pub(crate) col: u32,
     pub(crate) message: String,
+}
+
+impl ParseFailure {
+    /// `error`, which the parse of `source` gave.
+    pub(crate) fn of(error: super::ParseError, source: &[u8]) -> ParseFailure {
+        let at = syntax::LineIndex::new(source).line_col(error.span.start);
+        ParseFailure {
+            line: at.line,
+            col: at.col,
+            message: error.message,
+        }
+    }
+
+    /// The report of the failure: a file that does not parse is reported
+    /// where it fails, as PHP refuses to run it.
+    pub(crate) fn diagnostic(&self) -> Diagnostic {
+        let at = syntax::span::LineCol {
+            line: self.line,
+            col: self.col,
+        };
+        DiagnosticBuilder::new(self.message.clone(), Span::default(), 0, "parse.error")
+            .non_ignorable()
+            .build_at(syntax::span::Range { start: at, end: at })
+    }
 }
 
 /// What reading a file came to.
@@ -1084,12 +1123,7 @@ impl Session {
                     Ok(text) => text.as_bytes(),
                     Err(bytes) => bytes,
                 };
-                let at = syntax::LineIndex::new(bytes).line_col(error.span.start);
-                return Read::Unparsed(ParseFailure {
-                    line: at.line,
-                    col: at.col,
-                    message: error.message,
-                });
+                return Read::Unparsed(ParseFailure::of(error, bytes));
             }
         };
         // The text of the file is kept only when the project keeps it.
@@ -1688,15 +1722,51 @@ impl Session {
             lex_warnings,
         } = loaded;
 
-        let needs_tier_2 =
-            self.settings.rules.check_dead_enum_cases || self.settings.rules.check_dead_members;
         crate::heap::check_started();
-        let checked_results = project.check_files(
+        let Checked {
+            results,
+            whole_program,
+            check_panics,
+            type_dump,
+            expr_type_dump,
+            doc_resolution_dump,
+        } = self.check_loaded(
+            &mut project,
             &analyze_files_by_size,
-            Some(&self.pool),
-            needs_tier_2,
+            parse_failures,
             records,
         );
+        crate::heap::check_finished();
+        AnalysisResult {
+            project,
+            finalized: false,
+            results,
+            whole_program,
+            checked: analyze_files_by_size.len() - skipped_analyze - check_panics.len(),
+            skipped_analyze,
+            skipped_context,
+            context_loaded,
+            check_panics,
+            lex_warnings,
+            type_dump,
+            expr_type_dump,
+            doc_resolution_dump,
+        }
+    }
+
+    /// Checks the analysed `files` of `project`, which keeps what its
+    /// whole-program checks read of them, reports the `parse_failures` and
+    /// runs the project-wide passes.
+    pub(crate) fn check_loaded(
+        &self,
+        project: &mut Project,
+        files: &[PathBuf],
+        parse_failures: impl IntoIterator<Item = (PathBuf, ParseFailure)>,
+        records: super::Records,
+    ) -> Checked {
+        let needs_tier_2 =
+            self.settings.rules.check_dead_enum_cases || self.settings.rules.check_dead_members;
+        let checked_results = project.check_files(files, Some(&self.pool), needs_tier_2, records);
 
         let mut results: FxHashMap<PathBuf, Vec<Diagnostic>> = FxHashMap::default();
         let mut check_panics: Vec<(PathBuf, String)> = Vec::new();
@@ -1731,33 +1801,14 @@ impl Session {
             project.mark_member_index_built();
         }
 
-        // A file that does not parse is reported where it fails: PHP
-        // refuses to run it.
         for (path, failure) in parse_failures {
-            let at = syntax::span::LineCol {
-                line: failure.line,
-                col: failure.col,
-            };
-            results.entry(path).or_default().push(
-                DiagnosticBuilder::new(failure.message, Span::default(), 0, "parse.error")
-                    .non_ignorable()
-                    .build_at(syntax::span::Range { start: at, end: at }),
-            );
+            results.entry(path).or_default().push(failure.diagnostic());
         }
-        let whole_program = self.whole_program(&mut project);
-
-        crate::heap::check_finished();
-        AnalysisResult {
-            project,
-            finalized: false,
+        let whole_program = self.whole_program(project);
+        Checked {
             results,
             whole_program,
-            checked: analyze_files_by_size.len() - skipped_analyze - check_panics.len(),
-            skipped_analyze,
-            skipped_context,
-            context_loaded,
             check_panics,
-            lex_warnings,
             type_dump,
             expr_type_dump,
             doc_resolution_dump,
