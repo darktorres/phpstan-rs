@@ -769,7 +769,7 @@ impl Session {
             php_versions,
             phpstan_api_check_enabled,
             retain_source: false,
-            built_once: true,
+            keeps_as_built: false,
             rules,
             extensions,
             extras: section::<ext::extras::ExtrasSettings>(config, policy, &mut warnings)?,
@@ -885,14 +885,18 @@ impl Session {
     /// keeps it: with each file's source, and every file's tree.
     pub fn for_editing(mut self) -> Self {
         self.settings.retain_source = true;
-        self.settings.built_once = false;
+        self.settings.keeps_as_built = true;
         self
     }
 
-    /// The session, configuring its project with `settings` instead.
+    /// The session, configuring its project with `settings` instead, kept
+    /// for edits.
     #[cfg(test)]
     pub(crate) fn with_settings(mut self, settings: ProjectSettings) -> Session {
-        self.settings = settings;
+        self.settings = ProjectSettings {
+            keeps_as_built: true,
+            ..settings
+        };
         self
     }
 
@@ -904,6 +908,11 @@ impl Session {
     /// The directory the session's relative paths are relative to.
     pub fn root(&self) -> &Path {
         &self.root
+    }
+
+    /// Whether the overlay holds the file at `path`.
+    fn overlay_holds(&self, path: &Path) -> bool {
+        self.overlay.get(&self.absolute(path)).is_some()
     }
 
     /// The session reading `files` in place of what the disk has at their
@@ -971,10 +980,10 @@ impl Session {
     }
 
     /// Configures `project` with the session's settings, built once or
-    /// kept for edits as `built_once` says.
-    fn configure(&self, project: &mut Project, built_once: bool) {
+    /// kept for edits as `keeps_as_built` says.
+    fn configure(&self, project: &mut Project, keeps_as_built: bool) {
         let mut settings = self.settings.clone();
-        settings.built_once = built_once;
+        settings.keeps_as_built = keeps_as_built;
         project.apply_settings(settings);
     }
 
@@ -1126,13 +1135,11 @@ impl Session {
                 return Read::Unparsed(ParseFailure::of(error, bytes));
             }
         };
-        // The text of the file is kept only while the project keeps it or
-        // indexes its use sites from it.
+        // The text of the file is kept only while its use sites are
+        // indexed from it.
         let source = match text {
-            Ok(text) if self.settings.retain_source || index_use_sites => text,
-            Err(bytes) if self.settings.retain_source || index_use_sites => {
-                String::from_utf8_lossy(&bytes).into_owned()
-            }
+            Ok(text) if index_use_sites => text,
+            Err(bytes) if index_use_sites => String::from_utf8_lossy(&bytes).into_owned(),
             _ => String::new(),
         };
         Read::Loaded(Box::new(ReadFile {
@@ -1168,9 +1175,8 @@ impl Session {
         files.sort_unstable();
 
         let mut project = Project::new();
-        self.configure(&mut project, self.settings.built_once);
+        self.configure(&mut project, self.settings.keeps_as_built);
         let index_use_sites = project.indexes_use_sites();
-        let retain_source = self.settings.retain_source;
         let context_of = |e: std::io::Error| format!("{}: {e}", out.display());
         let writer = std::sync::Mutex::new(
             dumps::DumpWriter::create(out, dumps::Kind::Files, reference).map_err(context_of)?,
@@ -1208,7 +1214,7 @@ impl Session {
                                 role.to_string()
                             };
                             let text = self.read(path).ok().map(|bytes| {
-                                let source = if retain_source || index_use_sites {
+                                let source = if index_use_sites {
                                     String::from_utf8_lossy(&bytes).into_owned()
                                 } else {
                                     String::new()
@@ -1437,14 +1443,13 @@ impl Session {
     /// Parses every context and analysed file into a configured,
     /// finished `Project`, ready for `analyse`.
     pub fn load(&self) -> Result<Loaded, String> {
-        self.load_project(self.settings.built_once)
+        self.load_project(self.settings.keeps_as_built)
     }
 
-    /// `load`, the project kept for edits as the language server keeps it:
-    /// with its declarations as built, and every file's tree, so no file is
-    /// read back from the per-file cache.
+    /// `load`, the project kept for edits as the language server keeps it,
+    /// with its declarations as built.
     fn load_editable(&self) -> Result<Loaded, String> {
-        self.load_project(false)
+        self.load_project(true)
     }
 
     /// The files the load analyses, in path order.
@@ -1498,28 +1503,28 @@ impl Session {
         files
     }
 
-    /// `load`, the project built once or kept for edits as `built_once`
+    /// `load`, the project built once or kept for edits as `keeps_as_built`
     /// says.
-    fn load_project(&self, built_once: bool) -> Result<Loaded, String> {
+    fn load_project(&self, keeps_as_built: bool) -> Result<Loaded, String> {
         let analyze_files = self.analysed_files();
         let context_files = self.context_listing(Listed::Php);
         if analyze_files.is_empty() {
             let dirs: Vec<String> = self.dirs.iter().map(|d| d.display().to_string()).collect();
             return Err(format!("no .php files found under {}", dirs.join(", ")));
         }
-        Ok(self.load_listed(built_once, &context_files, analyze_files))
+        Ok(self.load_listed(keeps_as_built, &context_files, analyze_files))
     }
 
     /// `load_project` of the files given, which are the listing's, and
     /// that may have no analysed one.
     pub(crate) fn load_listed(
         &self,
-        built_once: bool,
+        keeps_as_built: bool,
         context_files: &[PathBuf],
         analyze_files: Vec<PathBuf>,
     ) -> Loaded {
         let mut project = Project::new();
-        self.configure(&mut project, built_once);
+        self.configure(&mut project, keeps_as_built);
         let Added {
             analyze_sizes,
             skipped_analyze,
@@ -1571,7 +1576,6 @@ impl Session {
         analyze_files: &[PathBuf],
     ) -> Added {
         let pool = &self.pool;
-        let built_once = project.built_once;
         let retain_source = self.settings.retain_source;
         let shared: &Project = project;
         let index_use_sites = shared.indexes_use_sites();
@@ -1591,15 +1595,15 @@ impl Session {
                                 p,
                                 self.is_stub(p),
                                 names,
-                                // The context files come first; a project kept
-                                // for edits keeps their trees, which no entry
-                                // holds.
-                                built_once && index < context_files.len(),
+                                // The context files come first. A file the
+                                // overlay holds is an open document, whose
+                                // tree is kept, which no entry holds.
+                                index < context_files.len() && !self.overlay_holds(p),
                                 index_use_sites,
                             );
                             if let Read::Loaded(file) = &mut read {
                                 shared.index_use_sites(&mut file.parsed, &file.source);
-                                if !retain_source {
+                                if !(retain_source && self.overlay_holds(p)) {
                                     file.source = String::new();
                                 }
                                 shared.note_owner(&mut file.parsed, p);

@@ -74,13 +74,22 @@ impl Files {
         )
     }
 
-    /// The project the files load into, with loading finished.
+    /// The project the files load into, with loading finished, and each
+    /// file open as an editor has it, so that the tree of a context file is
+    /// kept: the files are in memory, where a tree read again would find
+    /// nothing.
     pub(crate) fn load(self) -> Project {
         let paths = |files: &[(PathBuf, String)]| -> Vec<PathBuf> {
             files.iter().map(|(path, _)| path.clone()).collect()
         };
         let (analysed, context) = (paths(&self.analysed), paths(&self.context));
+        let texts: Vec<(PathBuf, String)> =
+            self.context.iter().chain(&self.analysed).cloned().collect();
         let session = self.session();
-        session.load_listed(false, &context, analysed).project
+        let mut project = session.load_listed(true, &context, analysed).project;
+        for (path, text) in &texts {
+            project.open_file(path, text);
+        }
+        project
     }
 }

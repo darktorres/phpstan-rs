@@ -266,21 +266,15 @@ pub(crate) fn index_class_fn_refs(stmts: &[Stmt], source: &str) -> Vec<(Span, Re
     w.out
 }
 
-/// Same walk, for a caller with no retained source text at all (a batch
-/// `check-project` run - `FileState.source` is `None` there, see
-/// `Project::retain_source`'s own doc comment). Each of the 3 spots below
-/// that would otherwise need `split_identifier_spans` to carve a precise
-/// sub-span out of a combined multi-identifier text span instead records
-/// the whole already-real AST span it has on hand - still a correct
-/// reference *site* (this project's own convention for "the identifier's
-/// own span, when its owning node doesn't carve out a narrower one"), just
-/// not narrowed to the exact identifier's own characters. Existence-only
-/// callers (a whole-program "was this ever referenced" check, e.g.
-/// `project::whole_program::dead_code`) never read a use-site's span at
-/// all, so the imprecision is invisible to them; a real caret-precision
-/// consumer (`textDocument/references`/`rename`) only ever runs with
-/// `retain_source` on, so it always gets `index_class_fn_refs`'s own exact
-/// version above, never this one.
+/// Same walk, for a caller with no source text at hand: the whole-program
+/// checks, which walk the tree of an analysed file after it is loaded. Each
+/// of the 3 spots below that would otherwise need `split_identifier_spans`
+/// to carve a precise sub-span out of a combined multi-identifier text span
+/// instead records the whole already-real AST span it has on hand - still a
+/// correct reference *site*, just not narrowed to the exact identifier's own
+/// characters. A caller that reads only whether a name is referenced never
+/// reads a span; the index `textDocument/references`/`rename` read is built
+/// with `index_class_fn_refs`.
 pub(crate) fn index_class_fn_refs_without_source(stmts: &[Stmt]) -> Vec<(Span, RefTarget)> {
     let mut w = ClassFnRefWalker {
         source: None,

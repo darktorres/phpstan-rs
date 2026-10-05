@@ -20,3 +20,4 @@ mod registry_dump;
 mod session_roles;
 mod session_source;
 mod use_site_index;
+mod what_a_project_keeps;

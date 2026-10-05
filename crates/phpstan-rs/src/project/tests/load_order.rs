@@ -9,6 +9,7 @@ fn project() -> Project {
     let mut project = Project::new();
     project.apply_settings(ProjectSettings {
         roles: FileRoles::default().with_analysed(Path::new("/w/src")),
+        keeps_as_built: true,
         ..ProjectSettings::default()
     });
     project
@@ -29,6 +30,7 @@ fn places(project: &Project) -> Vec<(String, u64)> {
 fn loaded(context: &[&str], analysed: &[&str]) -> Project {
     let mut files = Files::new().settings(ProjectSettings {
         roles: FileRoles::default().with_analysed(Path::new("/w/src")),
+        keeps_as_built: true,
         ..ProjectSettings::default()
     });
     for path in context {
@@ -134,6 +136,7 @@ fn a_file_added_by_a_spelling_from_the_working_directory_takes_the_absolute_root
         working_dir: Some(PathBuf::from(".")),
         absolute_root: Some(PathBuf::from("/w")),
         roles: FileRoles::default().with_analysed(Path::new("/w/src")),
+        keeps_as_built: true,
         ..ProjectSettings::default()
     });
     for (path, analysed) in [

@@ -316,6 +316,7 @@ impl Server {
         // comment for why this is opt-in and off elsewhere.
         project.apply_settings(ProjectSettings {
             retain_source: true,
+            keeps_as_built: true,
             ..ProjectSettings::default()
         });
         Server {
@@ -475,6 +476,7 @@ impl Server {
     /// reads from now on.
     fn open_document(&mut self, path: &Path, text: &str) {
         self.open_documents.insert(path.to_path_buf());
+        self.project.open_file(path, text);
         if let Some(session) = &mut self.workspace_session {
             session.set_overlay(path, text.as_bytes().to_vec());
         }
@@ -483,6 +485,7 @@ impl Server {
     /// Notes that `path` is no longer open: the disk's file is read again.
     fn close_document(&mut self, path: &Path) {
         self.open_documents.remove(path);
+        self.project.close_file(path);
         if let Some(session) = &mut self.workspace_session {
             session.clear_overlay(path);
         }
@@ -1417,7 +1420,8 @@ impl Server {
 
     fn document_symbol(&self, uri: &Uri) -> Option<DocumentSymbolResponse> {
         let path = uri_to_path(uri)?;
-        let stmts = self.project.ast(&path)?;
+        let stmts = self.project.ast_of(&path)?;
+        let stmts = &*stmts;
         let index = self.positions(&path)?;
         Some(DocumentSymbolResponse::Nested(
             document_symbol::document_symbols(stmts, index),
@@ -1911,7 +1915,8 @@ impl Server {
             .get(&path)
             .cloned()
             .or_else(|| self.project.source(&path).map(str::to_string))?;
-        let stmts = self.project.ast(&path)?;
+        let stmts = self.project.ast_of(&path)?;
+        let stmts = &*stmts;
         let tokens = completion::tokenize(&text);
         let live_index = LineIndex::new(text.as_bytes());
         let stale_index = self.project.line_index(&path)?;

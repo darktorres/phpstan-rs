@@ -74,7 +74,8 @@ pub(crate) struct SigHelp {
 }
 
 pub(crate) fn resolve_at(project: &Project, path: &Path, pos: u32) -> Option<SigHelp> {
-    let stmts = project.ast(path)?;
+    let stmts = project.ast_of(path)?;
+    let stmts = &*stmts;
     let mut w = Walker {
         registry: project.registry(),
         pos,

@@ -325,7 +325,7 @@ fn class_and_function_sites_are_indexed_as_files_load_with_retained_source() {
     let mut session = retaining_source()
         .context(&path, "<?php function greet(): void {}\ngreet();\n")
         .session();
-    let mut project = session.load_listed(false, &[path], Vec::new()).project;
+    let mut project = session.load_listed(true, &[path], Vec::new()).project;
     let greet = RefTarget::Function("greet".to_string());
     assert_eq!(project.use_sites().references(&greet).len(), 1);
 

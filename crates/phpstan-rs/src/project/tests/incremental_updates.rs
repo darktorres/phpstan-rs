@@ -297,7 +297,7 @@ fn a_failed_reparse_keeps_the_files_last_good_ast_and_registry_entries() {
     );
 
     assert!(
-        project.ast(&path).is_some(),
+        project.ast_of(&path).is_some(),
         "the last-good AST must survive a failed reparse"
     );
     assert!(

@@ -98,9 +98,10 @@ impl StubFileSet {
 /// That undo/redo pair is the difference between an incremental update and
 /// a full reload.
 pub(crate) struct FileState {
-    // Its tree. An analysed file's is kept, as is any file's of a project
-    // that is not built once; a context file's of a batch run is not: what
-    // the passes and the checks read of it was taken when it was parsed.
+    // Its tree. An analysed file's is kept, as is the tree of a document
+    // an editor has open; a context file's is not: what the passes and the
+    // checks read of it was taken when it was parsed, and `ast_of` parses
+    // it again for a reader of the rest.
     kept_ast: Option<Vec<Stmt>>,
     // The source's length in bytes: what checking the file costs, roughly.
     source_len: usize,
@@ -124,10 +125,10 @@ pub(crate) struct FileState {
     ignores: ignore_comments::IgnoreComments,
     // The registry names of the file's anonymous classes.
     anonymous_classes: Vec<Name>,
-    // This file's own raw source text, kept only when
-    // `Project::retain_source` is on (see that field's own doc comment) -
-    // `None` for every ordinary `check-project` batch run, which never
-    // needs it again once this file's own diagnostics are computed.
+    // The text of the file as an editor has it, kept only while the file
+    // is open and `Project::retain_source` is on (see that field's own doc
+    // comment) - `None` for every other file, and in every ordinary
+    // `check-project` batch run.
     source: Option<String>,
     // Whether the file is checked:
     // `true` for a real, first-party file being checked, `false` for
@@ -288,16 +289,19 @@ pub struct Project {
     packages: composer::PackageIndex,
     // What the checks are configured with (`apply_settings`).
     settings: CheckSettings,
-    // Whether a load and `update_file` keep each file's own raw source
-    // text around in its `FileState` (see that field's own doc comment) -
-    // off by default. Only `lsp.rs`'s `Server` turns this on:
-    // hover/definition's own text-split technique (`lsp::text_split`)
-    // needs a known span's exact source text, including whatever an
-    // editor's `didChange` most recently sent - not necessarily what's on
-    // disk.
+    // Whether the project serves an editor: the text of each open document
+    // is kept in its `FileState` (see that field's own doc comment) and
+    // every file's use sites are indexed as it is parsed - off by default.
+    // Only `lsp.rs`'s `Server` turns this on: hover/definition's own
+    // text-split technique (`lsp::text_split`) needs a known span's exact
+    // source text, including whatever an editor's `didChange` most
+    // recently sent - not necessarily what's on disk.
     retain_source: bool,
-    // `ProjectSettings::built_once`.
-    built_once: bool,
+    // `ProjectSettings::keeps_as_built`.
+    keeps_as_built: bool,
+    // The documents an editor has open, whose trees and text are kept
+    // whatever the role of the file (`open_file`).
+    open: FxHashSet<PathBuf>,
     // Whether the finishing passes have run.
     finished: bool,
     // Whether PHPStan's source stays merged in whatever the loaded files
@@ -561,13 +565,14 @@ pub struct ProjectSettings {
     /// Whether the project consumes PHPStan as a library, which the
     /// PHPStan-API rules apply to.
     pub phpstan_api_check_enabled: bool,
-    /// Keeps each file's source text (the language server's hover and
-    /// definition need it).
+    /// Keeps the text of each open document (the language server's hover
+    /// and definition need it) and indexes every file's use sites as it is
+    /// parsed.
     pub retain_source: bool,
-    /// Whether the project is built once and never changed afterwards (a
-    /// batch run), so it keeps no copy of its declarations as built for
-    /// recomputing them after a change.
-    pub built_once: bool,
+    /// Whether the project keeps a copy of its declarations as built, for
+    /// recomputing them after a change: the language server's, not a batch
+    /// run's, which is built once and never changed.
+    pub keeps_as_built: bool,
     pub rules: crate::rules_settings::RulesSettings,
     /// Which extensions are active; each extension's checks default to it.
     pub extensions: crate::ext::ActiveExtensions,
@@ -745,7 +750,8 @@ impl Project {
             packages: composer::PackageIndex::default(),
             settings: CheckSettings::default(),
             retain_source: false,
-            built_once: false,
+            keeps_as_built: true,
+            open: FxHashSet::default(),
             finished: false,
             unchecked: Vec::new(),
             phpstan_pinned: false,
@@ -773,7 +779,7 @@ impl Project {
             php_versions,
             phpstan_api_check_enabled,
             retain_source,
-            built_once,
+            keeps_as_built,
             rules,
             extensions: active,
             extras,
@@ -795,7 +801,7 @@ impl Project {
         self.absolute_root = absolute_root;
         self.roles = roles;
         self.retain_source = retain_source;
-        self.built_once = built_once;
+        self.keeps_as_built = keeps_as_built;
 
         self.registry.php_versions = php_versions;
         self.registry
@@ -1083,15 +1089,15 @@ impl Project {
         self.packages.name(owner)
     }
 
-    /// A loaded file's own retained raw source text, when `retain_source`
-    /// is on and this exact path is currently loaded - `None` otherwise
-    /// (including for a real, loaded file, if retention isn't enabled).
+    /// The text of a loaded file as an editor has it, when `retain_source`
+    /// is on and the file is open - `None` otherwise.
     pub fn source(&self, path: &Path) -> Option<&str> {
         self.files.get(path)?.source.as_deref()
     }
 
-    /// The tree of a loaded file: the one it kept, or, for a context file
-    /// of a batch run, one parsed from the file again.
+    /// The tree of a loaded file: the one it kept, or, for a file that kept
+    /// none, one parsed again from the file as it was read: `None` when
+    /// the file has changed since.
     pub(crate) fn ast_of(&self, path: &Path) -> Option<AstRef<'_>> {
         let file = self.files.get(path)?;
         if let Some(ast) = file.tree() {
@@ -1105,6 +1111,9 @@ impl Project {
             None => path.to_path_buf(),
         };
         let bytes = std::fs::read(full).ok()?;
+        if source::ContentHash::of(&bytes) != file.content_hash {
+            return None;
+        }
         let parsed = match String::from_utf8(bytes) {
             Ok(text) => parse_with_ignores(path, &text, None),
             Err(error) => parse_with_ignores(path, &error.into_bytes(), None),
@@ -1123,10 +1132,42 @@ impl Project {
         Some(self.files.get(path)?.content_hash)
     }
 
-    /// The AST of a currently-loaded file, if any - the position-walker's
-    /// (`lsp::navigation`) own entry point.
-    pub(crate) fn ast(&self, path: &Path) -> Option<&[Stmt]> {
-        self.files.get(path)?.tree()
+    /// Notes that an editor has `path` open with `text`: the file's tree
+    /// and text are kept from now on, whatever its role, and read from the
+    /// editor's text rather than the disk's. A loaded file that has not
+    /// changed since is parsed here; an edit's own `update_file` keeps its
+    /// own.
+    pub(crate) fn open_file(&mut self, path: &Path, text: &str) {
+        self.open.insert(path.to_path_buf());
+        let retain_source = self.retain_source;
+        let Some(file) = self.files.get_mut(path) else {
+            return;
+        };
+        if file.content_hash != source::ContentHash::of(text.as_bytes()) {
+            return;
+        }
+        if retain_source {
+            file.source = Some(text.to_string());
+        }
+        if file.kept_ast.is_none()
+            && let Ok(parsed) = parse_with_ignores(path, text, None)
+        {
+            file.kept_ast = Some(parsed.ast);
+            file.ignores = parsed.ignores;
+        }
+    }
+
+    /// Notes that the editor no longer has `path` open: its text is
+    /// dropped, and a context file's tree.
+    pub(crate) fn close_file(&mut self, path: &Path) {
+        self.open.remove(path);
+        if let Some(file) = self.files.get_mut(path) {
+            file.source = None;
+            if !file.analyzed {
+                file.kept_ast = None;
+                file.ignores = Default::default();
+            }
+        }
     }
 
     /// Numbers `paths` before any is inserted, which a caller can do while
@@ -1221,7 +1262,7 @@ impl Project {
             content_hash,
         } = parsed;
         debug_assert!(
-            ast.is_some() || (!analyzed && self.built_once),
+            ast.is_some() || !(analyzed || self.open.contains(path)),
             "a file whose tree is needed was read back from the cache"
         );
         let class_fn_refs = class_fn_refs.unwrap_or_else(|| {
@@ -1238,7 +1279,7 @@ impl Project {
         register_references(&mut self.signature_dependents, id, &declaration_references);
         let owner = owner.unwrap_or_else(|| self.packages.owner(&self.absolute_path(path)));
         self.globals_stale.insert(id);
-        let keeps_tree = analyzed || !self.built_once;
+        let keeps_tree = analyzed || self.open.contains(path);
         self.files.insert_at(
             id,
             FileState {
@@ -1257,7 +1298,7 @@ impl Project {
                     Default::default()
                 },
                 anonymous_classes,
-                source: self.retain_source.then_some(source),
+                source: (self.retain_source && self.open.contains(path)).then_some(source),
                 analyzed,
                 owner,
                 bodies,
@@ -1398,7 +1439,7 @@ impl Project {
     /// resolve again whatever the changes can have affected.
     fn begin_declaration_changes(&mut self) {
         debug_assert!(
-            !(self.built_once && self.finished),
+            self.keeps_as_built || !self.finished,
             "a project built once can't change after its finishing passes ran"
         );
         self.registry.begin_declaration_changes();
@@ -1557,7 +1598,7 @@ impl Project {
         let before = self.registry.end_declaration_changes(
             &scope,
             changed.as_ref().map(|_| &body_scope),
-            !self.built_once,
+            self.keeps_as_built,
         );
         if !body_scope.is_all() {
             self.registry.clear_purity(&body_scope.minus(&scope));
@@ -1961,7 +2002,7 @@ impl Project {
         );
         let id = self.files.id_for(path);
         let len = text.len();
-        let source = if self.retain_source {
+        let source = if self.retain_source && self.open.contains(path) {
             text.into_owned()
         } else {
             String::new()
@@ -2256,7 +2297,7 @@ impl Project {
     /// a project that is changed after it is built. A file that panicked
     /// keeps what its check before looked at.
     fn keep_include_probes(&self, checks: &mut [(PathBuf, CheckOutcome)]) {
-        if self.built_once {
+        if !self.keeps_as_built {
             return;
         }
         let mut kept = self
