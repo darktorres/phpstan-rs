@@ -25,6 +25,7 @@ use store::{Content, Snapshots, Store, snapshot_ref, text_content};
 mod arch;
 mod modgraph;
 mod pass;
+mod profile;
 mod progress;
 mod store;
 mod stub_index;
@@ -41,6 +42,7 @@ fn main() -> ExitCode {
         Some("gates") => gates(&args[1..]),
         Some("corpus") => corpus_command(&args[1..]),
         Some("progress") => progress::progress_command(&gate_dir(), &args[1..]),
+        Some("profile") => profile::profile_command(&args[1..]),
         Some("compare") => compare(&args[1..]),
         Some("type-drift") => type_drift(&args[1..]),
         Some("perf") => perf(),
@@ -81,6 +83,12 @@ const USAGE: &str = "usage: cargo xtask <command>
                          show how far the running or last `corpus` (or
                          <command>) is: runs done by group, runs under
                          way, failures; --watch refreshes it until it ends
+  profile <vendor|replay> [<project>]
+                         the frame-pointer `dhat` build of HEAD, a warm
+                         run's time and peak memory and callgrind of one
+                         run the pass makes (a vendor project's, default
+                         vendor/amphp/amp, or its edit replay), with a
+                         README, in ~/.cache/prs-profile
   compare [--full] [--against <hash>]
                          diff HEAD's snapshot against its parent's (or
                          the nearest ancestor that has one) in the store
