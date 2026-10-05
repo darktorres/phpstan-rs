@@ -17,7 +17,7 @@ Building started on 2026-10-03 (`WORK_STACK.md`, level 8).
 
 - **In order.** Item 0 comes first, and the rows run top to bottom; an item starts after the previous item's validation row; within an item they are in an order that builds, which is not always the plan's step order (the *plan* column gives the step). The *needs* column names a row in another item that must be done first. Within item 0, the dumps (0.4-0.10) come before the oracle run (0.2), whose edit replay records them, and the deletions (0.3) after it. A row that needs a later item's row sits right after it and is validated with that item: 3.4 after 9.2, with 9.V. The deferred 6.2-6.4 sit after 9.5, which they need. A deferred row is skipped where it sits, and a row left open never needs one.
 - **Per row:** `cargo fmt`, then `cargo check` and clippy, then a commit with an explicit pathspec, since another session may share the checkout. A row may take several commits; its status takes the last one's hash.
-- **Validation at the end of each item.** Each item's last row, *N*.V, runs §11: the builds, the tests, the fixtures, item 0's dumps with the `gate` and `oracle` builds, O2 and the equalities, compared with the previous item's, plus what the item adds. Nothing of it runs between an item's rows. Item 0's own rows also read the starting state and run the debug oracles; 0.11 is its validation and the baseline. O3 runs once, in the V rows, after 19.V.
+- **Validation at the end of each item.** Each item's last row, *N*.V, runs §11: the builds, the tests and the fixtures, plus what the item adds. No dumps are compared, and no snapshot is recorded. Nothing of it runs between an item's rows. Item 0's own rows also read the starting state and run the debug oracles. O3 runs once, in the V rows, after 19.V.
 - **A design that turns out wrong** is fixed in the plan first, in its own commit, and then built.
 - **A new dependency** is added in the row that first uses it (§13's table). `twox-hash` leaves in row 17.2.
 - **Heavy jobs** (builds of other profiles, the corpus, profilers) run one at a time, under `nice -n 19`, with no `timeout`.
@@ -124,12 +124,12 @@ Building started on 2026-10-03 (`WORK_STACK.md`, level 8).
 | 2.5 | Order without comparisons | Keyed by root index and entry index path; explicit files placed by binary search | 2.2 | perf | DONE (8d6a828d) |
 | 2.6 | A path stored once | `FileTable` as a `HashTable<FileId>` using the walk's hash | 2.3 | perf | DONE (553c1ddc) |
 | 2.7 | Allocations | `installed.json` and manifests deserialized typed; `eval_concat` into one buffer; `ignore_errors` matched by the walk's text | — | perf | DONE (745401bb) |
-| 2.V | §11 | Validation against item 1's dumps | 2.7 | val | OPEN |
+| 2.V | §11 | Validation: the builds, the tests and the fixtures | 2.7 | val | OPEN |
 | **3** | **item 3** | **Context trees dropped on the worker** | | | |
 | 3.1 | keep / drop | `keeps_tree(role, open)` in the load and in `update_file`; one state shape for a context file, the cached one | 1.4 | perf | OPEN |
 | 3.2 | drop, read buffer | The drop runs on the allocating worker. Context files are read into the worker's reusable buffer | 3.1 | perf | OPEN |
 | 3.3 | `ast_of` | `ast_of` reads the overlay before the disk | 1.4 | sem | DEFERRED (after O3, not optimization) |
-| 3.V | §11 | Validation against item 2's dumps; 3.4 is validated with item 9 | 3.2 | val | OPEN |
+| 3.V | §11 | Validation: the builds, the tests and the fixtures; 3.4 is validated with item 9 | 3.2 | val | OPEN |
 | **4** | **item 4** | **The registry by declaration ids** | | | |
 | 4.1 | review row 4 | Make the registry's fields private first, so readers go through its API | — | perf | OPEN |
 | 4.2 | Three ranges | Each store's ids fall in three ranges, one per source; accessors dispatch by range | 4.1 | perf | OPEN |
@@ -139,7 +139,7 @@ Building started on 2026-10-03 (`WORK_STACK.md`, level 8).
 | 4.6 | Never changed | Declarations never change after they are built; every pass result is a table by id | 4.3 | perf | OPEN |
 | 4.7 | Parallel passes | Each pass is a parallel map by its relation: hierarchy levels, references between classes, the global-variable include graph, and the purity and property-write worklists | 4.6 | perf | OPEN |
 | 4.8 | Scope, snapshots | The scope is a bitset over ids; snapshots and change detection are by id | 4.6 | perf | OPEN |
-| 4.V | §11 | Validation against item 3's dumps | 4.8 | val | OPEN |
+| 4.V | §11 | Validation: the builds, the tests and the fixtures | 4.8 | val | OPEN |
 | **5** | **item 5** | **The merge in parallel; files by id** | | | |
 | 5.1 | Ids before the merge | Contiguous ranges by prefix sum of per-file counts, in load order | 4.2 | perf | OPEN |
 | 5.2 | Stable ids | A file parsed again on the edit path keeps its ids | 5.1 | perf | OPEN |
@@ -148,7 +148,7 @@ Building started on 2026-10-03 (`WORK_STACK.md`, level 8).
 | 5.5 | Keys stay keys | Duplicate sites and origins by `FileId` | 5.3 | perf | OPEN |
 | 5.6 | Frontier from ids | `closure_scope`'s frontier starts from item 4's changed ids | 4.8 | perf | OPEN |
 | 5.7 | Posting lists | Reverse indexes hold posting lists; a file's references are slices in content order; the per-file cache stores them sorted | 5.3 | perf | OPEN |
-| 5.V | §11 | Validation against item 4's dumps | 5.7 | val | OPEN |
+| 5.V | §11 | Validation: the builds, the tests and the fixtures | 5.7 | val | OPEN |
 | **6** | **item 6** | **The stub scope and the caches' container** | | | |
 | 6.1 | step 1 | Deferred types resolved on demand; the eager pass and `class_has_deferred_type`/`function_has_deferred_type` go | 4.6 | perf | OPEN |
 | 6.5 | step 3 | Names stored once per cache file; records refer to them by index | — | perf | OPEN |
@@ -156,7 +156,7 @@ Building started on 2026-10-03 (`WORK_STACK.md`, level 8).
 | 6.7 | step 5 | Records read with `read_at` under a decode context; per-record CRCs; recoverable failures; eager sections; stub index keys read in place; `u64` offsets | 6.5 | perf | OPEN |
 | 6.8 | step 6 | The caches' key covers every embedded input: `stub_sources::SOURCES_HASH` from the same list as the embeds; `container.rs`'s `VERSION` goes | — | perf | OPEN |
 | 6.9 | Oracle | Tests written: a file replaced while read, a corrupt record, `SOURCES_HASH` against the embedded files | 6.7, 6.8 | infra | OPEN |
-| 6.V | §11 | Validation against item 5's dumps; item 6's tests (6.9); the platforms job with the file-replacement test | 6.9 | val | OPEN |
+| 6.V | §11 | Validation: the builds, the tests and the fixtures; item 6's tests (6.9); the platforms job with the file-replacement test | 6.9 | val | OPEN |
 | **7** | **item 7** | **One memo for the type relation** | | | |
 | 7.1 | read first | The relation's code read for any input beyond the registry's content (thread-locals, the current class, contextual statics) | — | perf | OPEN |
 | 7.2 | generation | `ClassHierarchy::generation()`, the content generation; bumped by every finishing run and base switch; read-only levels get one of their own | 4.6 | perf | OPEN |
@@ -164,13 +164,13 @@ Building started on 2026-10-03 (`WORK_STACK.md`, level 8).
 | 7.4 | final answers | Answers are stored only when final; cycles are resolved per component; constants on a cycle read `never` | 7.3 | sem | OPEN |
 | 7.4b | final answers | Constants on a cycle reported | 7.4 | check | DEFERRED (after O3, not optimization) |
 | 7.5 | bound, switch | Two segments per thread; a runtime off switch (`PHPSTAN_RS_NO_RELATION_MEMO`) | 7.3 | perf | OPEN |
-| 7.V | §11 | Validation against item 6's dumps; the relation memo on against off | 7.5 | val | OPEN |
+| 7.V | §11 | Validation: the builds, the tests and the fixtures | 7.5 | val | OPEN |
 | **8** | **item 8** | **Declarations carry only what every reader needs** | | | |
 | 8.1 | fields and readers | Every declaration field listed with its readers | 4.3 | perf | OPEN |
 | 8.2 | case references | Computed by the checker from what it checks; the six fields leave the declarations | 8.1 | sem | OPEN |
 | 8.3 | duplicate params | Resolved as parameters are pushed into the file's parameter vector | 4.3 | perf | OPEN |
 | 8.4 | `from_decl`, `reconcile_with_native` | Parameters passed on; a lone member refined and returned with no `Vec` | — | perf | OPEN |
-| 8.V | §11 | Validation against item 7's dumps | 8.4 | val | OPEN |
+| 8.V | §11 | Validation: the builds, the tests and the fixtures | 8.4 | val | OPEN |
 | **9** | **item 9** | **Trees in typed vectors, nodes by index** | | | |
 | 9.1 | step 1 | `Expr::peeled` becomes a loop, with no guard, alone | — | perf | OPEN |
 | 9.2 | step 2 | `ParsedFile` of typed arenas (`la-arena`): source bytes, `names`, `exprs`/`stmts` with spans, large variants and list elements in their own arenas; per-worker scratch store | 4.3 | perf | OPEN |
@@ -184,7 +184,7 @@ Building started on 2026-10-03 (`WORK_STACK.md`, level 8).
 | 9.6 | step 6 | Holders keep ids: disjunction pairs, `Initializers`, alias maps, both query-builder chains | 9.3 | perf | OPEN |
 | 9.7 | step 7 | Lists committed together from scratch as `IdxRange`s; kept trees' arenas moved out at exact size | 9.3 | perf | OPEN |
 | 9.8 | step 8 | Small nodes; statements and parameters without doc fields (doc sites by offset); attributes stay in their node | 9.3 | perf | OPEN |
-| 9.V | §11 | Validation against item 8's dumps, with 3.4 | 9.8 | val | OPEN |
+| 9.V | §11 | Validation: the builds, the tests and the fixtures, with 3.4 | 9.8 | val | OPEN |
 | **10** | **item 10** | **Tokens in flat arrays** | | | |
 | 10.1 | Design | Whole-file lexing into a `TokenStream`: three cursors; per-worker buffers; `Token`, `Tok`, `Supply`, the `VecDeque` and `LexEnd`'s second pass go | 9.2 | perf | OPEN |
 | 10.2 | Names, literals | The lexer's name table maps bytes to `NameId`; escaped literals go into the file's byte vector | 10.1 | perf | OPEN |
@@ -195,7 +195,7 @@ Building started on 2026-10-03 (`WORK_STACK.md`, level 8).
 | 10.7 | docs | A declaration's doc by PHP's rule (only `}` clears it); statements keep adjacency; new check of a doc given away | 10.1 | check | DEFERRED (after O3, not optimization) |
 | 10.8 | versions | The lexer reads the configured versions; new check of constructs they lex differently, the spaced qualified names on 7.x among them, read through `docker` | 10.1 | check | DEFERRED (after O3, not optimization) |
 | 10.9 | token readers | Comments recorded only when asked; the stub rules' type strings use a scratch stream; completion uses its own stream; `Parser::new(TokenStream)` | 10.1 | perf | OPEN |
-| 10.V | §11 | Validation against item 9's dumps | 10.9 | val | OPEN |
+| 10.V | §11 | Validation: the builds, the tests and the fixtures | 10.9 | val | OPEN |
 | **11** | **item 11** | **Line starts, columns, offsets** | | | |
 | 11.1 | step 1 | `LineStarts` for every file, `LineIndex` for analysed files and open documents; `enum Lines` in `FileState` | — | perf | OPEN |
 | 11.2 | step 1 | Lines end at `\n` and at a lone `\r`; line comments end at a lone `\r` | 11.1 | sem | DEFERRED (after O3, not optimization) |
@@ -204,7 +204,7 @@ Building started on 2026-10-03 (`WORK_STACK.md`, level 8).
 | 11.5 | step 3 | The server indexes context files on demand: the overlay first, the hash check otherwise | 1.4 | perf | OPEN |
 | 11.6 | step 4 | The per-file cache stores `LineStarts`; no `Arc<LineIndex>` | 11.1 | perf | OPEN |
 | 11.7 | step 5 | Nothing in the front end reads lines: ignore marks, member spans and doc lines as offsets; anonymous-class lines from `LineStarts` | 11.1 | perf | OPEN |
-| 11.V | §11 | Validation against item 10's dumps | 11.7 | val | OPEN |
+| 11.V | §11 | Validation: the builds, the tests and the fixtures | 11.7 | val | OPEN |
 | **12** | **item 12** | **Lexer details** | | | |
 | 12.1 | step 1 | The identifier lookup inlined; watch bits cached with each name in the cross-file cache | 10.2 | perf | OPEN |
 | 12.2 | step 2 | Keywords compared by word | — | perf | OPEN |
@@ -220,7 +220,7 @@ Building started on 2026-10-03 (`WORK_STACK.md`, level 8).
 | 12.11 | step 12 | `?>` and heredoc lines end at a lone `\r` too | 11.2 | sem | DEFERRED (after O3, not optimization) |
 | 12.12 | step 13 | Heredoc indentation errors reported as PHP's | — | check | DEFERRED (after O3, not optimization) |
 | 12.13 | step 14 | Open tags as PHP's: `<?php` only before whitespace; `<?` by `short_open_tag`, reported where the setting is unknown | 6.3 | sem | DEFERRED (after O3, not optimization) |
-| 12.V | §11 | Validation against item 11's dumps | 12.9 | val | OPEN |
+| 12.V | §11 | Validation: the builds, the tests and the fixtures | 12.9 | val | OPEN |
 | **13** | **item 13** | **A file's products: the declaration list and one walk** | | | |
 | 13.1 | step 1 | The parser lists declarations, with today's guards. Entries are reserved in source order. Docs by today's rule, resolved in the entry's scope | 9.7, 10.1 | perf | OPEN |
 | 13.2 | step 1 | Guards follow PHP's binding: exits include `exit`, `die`, `throw` and `__halt_compiler`; a parent from another file means possibly declared; a marker records constants a file defines by a computed name; new check: a run-time-bound declaration after an unconditional exit is dead | 13.1 | check | DEFERRED (after O3, not optimization) |
@@ -230,7 +230,7 @@ Building started on 2026-10-03 (`WORK_STACK.md`, level 8).
 | 13.6 | step 5 | A file's bodies as one slice, reached through the declaration's id | 13.4, 4.3 | perf | OPEN |
 | 13.7 | step 6 | Builders gather in scratch and emit exact-size slices | 13.4 | perf | OPEN |
 | 13.8 | step 7 | References in one vector per file, sorted once; doc sites hold the interned `ImportScope`; `Declaration::name` is a `Name` | 13.3, 5.7 | perf | OPEN |
-| 13.V | §11 | Validation against item 12's dumps | 13.8 | val | OPEN |
+| 13.V | §11 | Validation: the builds, the tests and the fixtures | 13.8 | val | OPEN |
 | **14** | **item 14** | **PHPDoc finished** | | | |
 | 14.1 | step 8 | `syntax::memo::Memo` becomes the fingerprint-keyed memo: keyed SipHash-1-3-128 (`siphasher`, now direct) bounded by `quick_cache`'s weighted cache (new dependency); shard clearing goes | — | perf | OPEN |
 | 14.2 | step 3 | `parse_tag(tag, rest) -> Arc<TagEffect>`; `apply(block, written, effect)` makes the decisions that depend on the spelling | — | perf | OPEN |
@@ -242,7 +242,7 @@ Building started on 2026-10-03 (`WORK_STACK.md`, level 8).
 | 14.7 | step 5 | Tag tokens borrow byte ranges; the doc lexed as bytes with PHP's classes; wrapped tags read as logical text | 9.4 | sem | OPEN |
 | 14.8 | step 6 | One parse per doc (the grammar's own splitter deleted); one winner rule per tag (`tag_type_nodes`, `select_var_tag_nodes` and `var_type`/`var_name` go); two memos; `DocNames` goes | 14.2, 14.7 | sem | OPEN |
 | 14.9 | step 7 | Nodes in their owner's `la-arena`; `DocType` as (owner, `Idx`, `Type`); a serialized `DocType` holds its subtree and type | 14.8 | perf | OPEN |
-| 14.V | §11 | Validation against item 13's dumps; the lowering oracle from item 0's recorded type nodes | 14.9 | val | OPEN |
+| 14.V | §11 | Validation: the builds, the tests and the fixtures | 14.9 | val | OPEN |
 | **15** | **item 15** | **Names held as names, as bytes** | | | |
 | 15.1 | C3 step 7 | The checker's method memo and `class_memo` deleted | — | perf | OPEN |
 | 15.2 | C3 step 6 | Every `String`-keyed map and identifier value takes PHP's identity (`FoldedName`, `Name`, `ConstName`, `ArrayKey`), in the plan's order of cost, then by module | 15.1 | sem | OPEN |
@@ -255,7 +255,7 @@ Building started on 2026-10-03 (`WORK_STACK.md`, level 8).
 | 15.9 | documents | Each open document's encoding found with `encoding_rs` (new dependency); overlays encoded back; fixes offered only when encodable | 15.4, 1.4 | sem | DEFERRED (after O3, not optimization) |
 | 15.10 | short names | `NameData.last_segment`; a short name is a slice | 15.3 | perf | OPEN |
 | 15.11 | two sites | Name resolution hashes the parts without building text; a callee's folded name reused | 15.3 | perf | OPEN |
-| 15.V | §11 | Validation against item 14's dumps | 15.11 | val | OPEN |
+| 15.V | §11 | Validation: the builds, the tests and the fixtures | 15.11 | val | OPEN |
 | **16** | **item 16** | **Interned values** | | | |
 | 16.1 | name | `Name` as `triomphe::ThinArc<Header, u8>` (new dependency), one allocation, with `last_segment` in the header | 15.10 | perf | OPEN |
 | 16.2 | tables | Strong tables: removal at a count of two, re-checked under the shard lock; a sweep at twice the last size; drop after unlock. Type nodes become `triomphe::Arc` | 16.1 | perf | OPEN |
@@ -263,7 +263,7 @@ Building started on 2026-10-03 (`WORK_STACK.md`, level 8).
 | 16.4 | holders | Every holder holds the handle: `FRONT`, memos' kept arguments, the lexer's tables | 16.2 | perf | OPEN |
 | 16.5 | memos | The type memos bounded by two segments; no generation | 7.5 | perf | OPEN |
 | 16.6 | Oracle | The `loom` model of drop, lookup and sweep (`loom`, test-only); the leak test after the edit replay | 16.2 | infra | OPEN |
-| 16.V | §11 | Validation against item 15's dumps; the `loom` tests and the leak test (16.6) | 16.6 | val | OPEN |
+| 16.V | §11 | Validation: the builds, the tests and the fixtures; the `loom` tests and the leak test (16.6) | 16.6 | val | OPEN |
 | **17** | **item 17** | **Warm runs** | | | |
 | 17.1 | step 1 | The stat index: per-platform fields; the racy rule applied where the file was read; `stat` trusted only on filesystems identified as local and fine (`rustix` direct, `sysinfo` new) | 1.4 | perf | OPEN |
 | 17.2 | step 1 | Every content hash is BLAKE3 with full digests (`blake3`, new), the build's hash and `SOURCES_HASH` included; `twox-hash` removed | 6.8 | perf | OPEN |
@@ -271,7 +271,7 @@ Building started on 2026-10-03 (`WORK_STACK.md`, level 8).
 | 17.4 | step 2 | The per-file key adds the configured versions and `short_open_tag` | 10.8, 12.13 | perf | DEFERRED (after O3, not optimization) |
 | 17.5 | step 3 | The context base: its contents and file list; keyed by a destructured hash of the tracked settings; stored in item 6's container; the cold and warm paths; the server loads from it | 6.7, 17.2 | perf | OPEN |
 | 17.6 | Oracle | Tests written: the `stat` cases, the edit replay across two runs, the server loading from the base | 17.5 | infra | OPEN |
-| 17.V | §11 | Validation against item 16's dumps; the `stat` cases here and on the platforms job; the base absent, written and read; edits across two runs; a warm run leaves the cache directory unchanged | 17.6 | val | OPEN |
+| 17.V | §11 | Validation: the builds, the tests and the fixtures; the `stat` cases here and on the platforms job; a warm run leaves the cache directory unchanged | 17.6 | val | OPEN |
 | **18** | **item 18** | **The check phase's remainder** | | | |
 | 18.1 | step 1 | §12.10: observers and one inference per node; the PHPStan-API walker as a family; literal types once per node | 13.4 | sem | OPEN |
 | 18.1b | step 1 | `process_expr` and item 13's walk in PHP's order of evaluation | 18.1 | sem | DEFERRED (after O3, not optimization) |
@@ -292,7 +292,7 @@ Building started on 2026-10-03 (`WORK_STACK.md`, level 8).
 | 18.16 | step 10, F6d-F6e | Narrowing facts in the radix arrays; the separate walks' vectors go with them | 18.5, 18.1 | perf | OPEN |
 | 18.17 | step 10, F6f, F4 | Per-text analyses once per distinct text (item 14's memo); SQL parsed once per text; one reused regex `Captures` | 14.1 | perf | OPEN |
 | 18.18 | step 10 | One checker per worker | — | perf | OPEN |
-| 18.V | §11 | Validation against item 17's dumps; the union oracle from item 0's recorded unions; the replay and merge-over-diff assertions; the 7.x readings through `docker`; types with locals by name | 18.18 | val | OPEN |
+| 18.V | §11 | Validation: the builds, the tests and the fixtures; the 7.x readings through `docker` | 18.18 | val | OPEN |
 | **19** | **item 19** | **Each tree until its last reader** | | | |
 | 19.1 | passes | The project-wide passes as families: architecture, banned constructs, class shapes (with parent-call facts), Composer hygiene, mock hygiene, unmatched ignores, the use-site index | 13.4, 18.1 | perf | OPEN |
 | 19.2 | retention | `keeps_tree(role, open, mode, checked)`; a batch frees each tree when its check ends | 3.1 | perf | OPEN |
@@ -301,9 +301,9 @@ Building started on 2026-10-03 (`WORK_STACK.md`, level 8).
 | 19.4b | judgment | The private-property judgment keeps writes from bound closures and reflection | 19.4 | sem | DEFERRED (after O3, not optimization) |
 | 19.5 | server | The tree cache: `quick_cache` weighted by bytes, keyed by (`FileId`, content hash); a hash mismatch is an edit | 14.1, 17.2 | perf | OPEN |
 | 19.6 | readers | `FileState::ast` goes; every reader asks `ast_of` | 19.2 | perf | OPEN |
-| 19.V | §11 | Validation against item 18's dumps; edit replays at a tree budget of zero; a disk change with no event | 19.6 | val | OPEN |
+| 19.V | §11 | Validation: the builds, the tests and the fixtures; a disk change with no event | 19.6 | val | OPEN |
 | **V** | **§11** | **O3, once** | | | |
 | V.1 | O3 | The frame-pointer `dhat` build; callgrind (`--separate-threads=yes`); `perf` of a warm run; `hyperfine` warm and cold against the starting commit; dhat by holder, the check's live and resident maxima, a second dhat run from the check's start; the server's heap | 19.V | val | OPEN |
 | V.2 | results | The measured figures into the plan's §12 and into `WORK_STACK.md` | V.1 | val | OPEN |
 | **D** | | | | | |
-| D.V | deferred rows | After the deferred rows, the PHP catalog's with them, are built as a plan of their own: their fixtures, the runtime oracle with generated calls on every version image, the recorder and the construct runs as the PHP catalog's oracle, and §11 against V.2's snapshot, each difference one the deferred rows list | V.2 | val | DEFERRED (after O3) |
+| D.V | deferred rows | After the deferred rows, the PHP catalog's with them, are built as a plan of their own: their fixtures, the runtime oracle with generated calls on every version image, the recorder and the construct runs as the PHP catalog's oracle, and §11 | V.2 | val | DEFERRED (after O3) |

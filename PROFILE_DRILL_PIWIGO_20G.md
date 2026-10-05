@@ -565,7 +565,7 @@ Twenty items, numbered in the order they are built. Each states what is there no
   - **in items 1-19:** every new check, and every change to what the analysis finds that the optimization does not need: PHP's identity of a file (item 1, with the walk's link rules of item 2), `ast_of` reading the overlay (item 3), the stubs' versions and extensions (item 6, step 2, with the stub rules' reach and versions of item 9, step 5), the report of constants on a cycle (item 7), the halt offset, PHP's grammar after `__halt_compiler`, the first error, PHP's doc rule and the configured versions' readings (item 10), lines ending at a lone `\r` (items 11 and 12), casts as tokens, doc comments, heredocs and open tags as PHP's (item 12), declarations bound as PHP binds them (item 13), the order of evaluation (items 13 and 18), `Integer::MAX` and `mentions_mixed` (item 14), names as bytes with their escape, fixes, run-time strings, folding and documents' encodings (item 15), the per-file key's versions (item 17), members counted used by any access that may reach them (item 18), and the private properties' writes from bound closures and reflection (item 19).
   
   **What stays semantic** is a change the optimized code cannot avoid without code written only to reproduce today's output: the server taking the CLI's load, configuration and analysis (item 1), an order a new representation gives (item 4's members), a second implementation deleted (item 14's winners, item 18's families and statement result), a round trip replaced (item 14's lowering), the classes a byte lexer reads (item 14's doc identifiers), a key with PHP's identity (item 15's array keys), the deterministic answer a memo needs (item 7's cycles, read as `never`), a check made where the code it reads is (item 8's `@property`), a fold made one pass (item 18). Where today's output costs no more to keep, the row keeps it and is exact. Each item marks its deferred parts where its design names them.
-- **Validation at the end of each item (§11).** An item's rows are committed one by one, with `cargo fmt`, `cargo check` and clippy, and nothing else runs between them. When its last row lands, the item is validated: the tests, the fixtures, item 0's dumps and O2, compared with the previous item's, and the equalities. The next item starts after that. O3 measures once, after item 19.
+- **Validation at the end of each item (§11).** An item's rows are committed one by one, with `cargo fmt`, `cargo check` and clippy, and nothing else runs between them. When its last row lands, the item is validated: the builds, the tests and the fixtures, with what the item adds. No dumps are compared. The next item starts after that. O3 measures once, after item 19.
 - **Oracles are dumps.** Item 0 takes dumps of everything the items change, from the starting commit, in a form that does not depend on how the code represents it. §11 takes the same dumps at the end of each item and compares them with the previous item's, so each difference belongs to the item that made it. So no item keeps an old implementation alive to compare against, and each replaces what it replaces outright.
 - **Measuring.**
   - `cl-20g` is the callgrind baseline: the `dhat` profile with frame pointers, as `CLAUDE.md` prescribes, with `PHPSTAN_RS_NO_FILE_CACHE=1`. The final callgrind run uses the same profile and setting.
@@ -688,7 +688,7 @@ Twenty items, numbered in the order they are built. Each states what is there no
      - each step goes through `update_file` or `remove_file`, and the project dump, `registry-dump` and every file's diagnostics are taken after it;
      - at the end, a fresh load of the edited tree must give the same.
    - **Memory:** the dhat profile of §8, by holder, with the heap recorded at the start of the check and at the check's own maximum, beside the global peak. It is taken once more with untrimmed backtraces (`dhat::Profiler::builder().trim_backtraces(None)`), so that the 10,987 allocations whose stacks end inside the allocator (M10) are placed too.
-4. **The baseline** comes from item 0's last commit, once its validation (0.11) passes: the store's first snapshot, which item 1's validation is compared with. Item 0 is compared with no earlier commit, and no row before its validation runs the pass. Its semantic changes (§11) are held by their fixtures and the runtime oracle. The snapshots made before the store, in formats item 0 itself changed, were discarded with their binaries.
+4. **No baseline is kept.** A validation compares no dumps, so no snapshot of any commit is recorded, and no row runs the pass for one. Item 0's semantic changes (§11) are held by their fixtures and the runtime oracle. The snapshots made before the store, in formats item 0 itself changed, were discarded with their binaries.
    - Each dump is taken with the `gate` build in every state of its configuration (above), at least at `PHPSTAN_RS_THREADS=1` and at the default thread count, which must give byte-identical output. The pass is taken again with the `oracle` build, which must finish without an assertion.
    - The ordered file list, with roles, is recorded for each configuration. A tree with a link cycle is recorded as it is today: listed until `ELOOP`.
    - Nothing is kept in `target/`, which `cargo clean` empties, or in `/tmp`, a tmpfs: a binary a later measurement compares against goes to `.corpus-runs/gate/bin/<commit>/<profile>/`, runs and dumps to the store, `.corpus-runs/gate/store.git`, profiles to `~/.cache/prs-profile/<run>/` with their binary and a `README` (`.corpus-runs/README.md`).
@@ -835,7 +835,7 @@ The design. Each step is exact unless it says otherwise:
 3. **The builtin facts are built at compile time.** Every process parses the builtin-runs table today. `build.rs` turns the builtin facts into static sorted arrays, read with no parse and no allocation: the table's while the PHP catalog (below) is deferred, the catalog's once it lands. A malformed entry fails the build, where the table's parse skips a malformed line today (`effects.rs:336-340`, `:362-365`, `:371`).
 4. **The registry dump's difference from the base costs the project's own entries.** When a table, map or set reads from the base's very storage, its difference is its own entries that differ from the base's, and the hidden names it does not replace. The full comparison stays for one that does not. A test prints every table of a loaded project both ways and requires the same text.
 5. **Dumps are streamed as text, and only the pass compresses.** The canonical printer writes into an `io::Write` sink, where today it builds the whole text first; the scoped registry dump passed 1.2 GB. A run writes its dumps as text with each entity's digest computed while it writes (the store's object id, below), and the replay compares the digests, then the texts only where they differ. No run compresses anything, the front end's texts included, which its dump gzips one by one today. Each run writes a manifest of digests per entity: each file, class, function and table entry of a dump, and each dump whole. The pass compares the manifests of a configuration's states and of a replay's two runs, and reads texts only where digests differ, so a difference is located at its entity before any text is read.
-   - **The store is a git repository of its own** (`.corpus-runs/gate/store.git`), fed by `git fast-import`: each entity's text is a blob, a dump is a tree of them, and a validated commit's snapshot is a commit of the store under a ref named by its hash. Git holds each text once, deltas and compresses what is alike, and diffs trees by their entries, so an exact item's validation adds a commit and almost no objects, where today each validation would store gigabytes again. `compare` is `git diff` between two snapshots: the entities that differ, then their texts, which is how §11 reads an item's differences. The front end's texts are entities of its dump.
+   - **The store is a git repository of its own** (`.corpus-runs/gate/store.git`), fed by `git fast-import`: each entity's text is a blob, a dump is a tree of them, and a validated commit's snapshot is a commit of the store under a ref named by its hash. Git holds each text once, deltas and compresses what is alike, and diffs trees by their entries, so an exact item's validation adds a commit and almost no objects, where today each validation would store gigabytes again. `compare` is `git diff` between two snapshots: the entities that differ, then their texts, which no validation reads now. The front end's texts are entities of its dump.
    - **One digest: the store's own object id.** The store uses git's SHA-256 object format, and a run computes each entity's blob id itself (SHA-256 over git's blob header and the text) as it writes. A manifest is then a tree's entries, and the import writes only the blobs the store lacks, where a separate digest would hash every text twice.
    - **Only what can differ is written.** The first state of a configuration, and the default run of a replay, write every entity's text. A later state's run, and the one-thread run, are given that manifest and write the text of an entity only where its id differs, which is all a difference needs. The pass's scratch then holds one copy of each dump, where every state would write its own: the scoped registry dump alone passed a gigabyte.
    - **Nothing made before the store is imported.** Those snapshots predate item 0's own changes to the dumps, and item 0 is compared with no earlier commit (step 4), so they went, with the binaries kept for them.
@@ -847,7 +847,7 @@ The design. Each step is exact unless it says otherwise:
 8. **The edit path rechecks its dependents in one check.** `recheck` checks the dependents one after another on the calling thread (`project.rs:2324-2341`; 52 M of `update_file`'s 58 M in the replay). Each check goes through `check_files` for its one file, which judges the private property types again for that file alone, checking once more the files declaring its classes for their writes. The dependents go to one `check_files` over the worker pool instead, as the load's check does, which judges the property types once for all of them; their use sites are then reindexed in one pass, which is what needs the project mutably. The server's latency gains as much.
 9. **Measured again:** instructions and peak memory, and the whole pass's wall time, and again once the deferred catalog below lands. The script becomes a command, `cargo xtask profile <kind> [<project>]`, which builds the frame-pointer `dhat` binaries, warms a cache of its own, runs callgrind the way `CLAUDE.md` prescribes and writes the profile with its binaries and a `README` to `~/.cache/prs-profile/`, so that step 10, O3 and every later measurement take the same runs the same way.
 10. **Every other kind of run the pass makes is profiled the same way,** a configuration's state, a level, a session and the fixture suite, and planned from what it shows, so the whole pass is fast, not only its two commonest runs.
-11. **An item's validation is one command.** `cargo xtask validate` runs §11 whole on the worker pool, with its progress: the `gate` and `oracle` builds, the workspace tests and the item's, the pass with each build, and the comparison with the previous item's snapshot. It writes the summary the ledger's V row records, where today each of these is started by hand, one after another. The runtime oracle on every version image waits with the deferred rows (row 0.11r).
+11. **An item's validation is one command.** `cargo xtask validate` runs §11 whole on the worker pool, with its progress: the `gate` build, the workspace tests and the item's, and the fixtures. It writes the summary the ledger's V row records, where today each of these is started by hand, one after another. The runtime oracle on every version image waits with the deferred rows (row 0.11r).
 12. **The runtime oracle reaches every asserting fixture.** **Deferred** (after O3, not optimization): it holds the semantic fixtures, not the optimization. 114 still never reach an assertion (`WORK_STACK.md`), in four kinds, each closed:
     - **an assertion in a closure nothing invokes:** the generated calls invoke each closure and arrow function the fixture makes, with values of its parameters' types, as they call functions;
     - **code that throws first with the values sampled:** a call that throws is made again with the pool's other values until one reaches the assertion, and the fixture records which did;
@@ -1120,7 +1120,6 @@ Found by the runtime oracle's generated calls in item 0's validation, first an i
 - **How they run.** The runtime oracle runs them with generated calls on every version image.
 - **The seven fixtures** now opted out take the calls again. Their expectations become what PHP gives, and they are renamed where a name says otherwise (`a_dynamic_key_read_after_a_foreach_populated_array_is_not_spuriously_nullable`).
 - **The recorder** runs the iterators' states on each image as the catalog's oracle.
-- O2 is read line by line.
 - Semantic, listed in §11.
 
 #### PHPDoc types as claims, verified
@@ -1335,7 +1334,6 @@ Semantic: none in a closed run; an open run as designed here (§11).
     - a file link, a dangling link and a link to a non-PHP file;
     - an unreadable directory;
     - a classmap entry under a PSR-4 directory.
-- **O2.**
 
 Exact. A link cycle's tree listed once instead of until `ELOOP` is deferred with item 1's identity.
 
@@ -1364,7 +1362,7 @@ Exact. A link cycle's tree listed once instead of until `ELOOP` is deferred with
   - It holds in the load and in `update_file` alike. Today `update_file` keeps every tree whatever the file's role (`project.rs:1890`), so a `composer update` seen by the server leaves each changed vendor file's tree behind.
   - It is known before parsing, because item 2 gives each file its final role before its parse. The insert's assertion that an analysed file has its tree (`project.rs:1036-1039`) stays, and runs in the `oracle` build.
   - Item 19 refines the analysed case.
-- **A context file's state has one shape, the cached one.** The worker builds it, so a parsed and a cached context file give the same state, and item 0's check that every cache state gives the same output covers both. It holds:
+- **A context file's state has one shape, the cached one.** The worker builds it, so a parsed and a cached context file give the same state. It holds:
   - declarations and duplicate sites;
   - declared names, constants and classes, and anonymous-class names;
   - both kinds of references, and use sites when the session indexes them;
@@ -1378,7 +1376,7 @@ Exact. A link cycle's tree listed once instead of until `ELOOP` is deferred with
 - **After item 9, a file whose tree is not kept is parsed into the worker's scratch store,** whose vectors are cleared, keeping their capacity, once its products are copied out. A kept tree's vectors are moved out at their exact size.
 - **`ast_of` reads the overlay before the disk,** so an open file with unsaved edits is parsed from its editor text (`project.rs:900-904` reads the disk). **Deferred** (after O3, not optimization).
 
-**Oracle.** O2, item 0's server session and its edit replay, all run with the `oracle` build too, whose assertions fire on any read of a dropped tree. Exact.
+**Oracle.** The tests and the fixtures, with the assertions that fire on any read of a dropped tree. Exact.
 
 **Saving.** In instructions, the cross-thread frees' premium: 343.4 M of frees at 42.5 Ir a call, against 23 on the allocating thread, ≈0.16 G. The 575.5 M of drops leave the serial loop, which is wall time, not instructions. Most of the drops themselves go with item 9, whose row counts them.
 
@@ -1467,9 +1465,7 @@ purity: PurityTable, property_writes: WriteTable, phpstan_ancestry: BitVec,
   - The checker resolves a call to a signature through that API and asks `registry.purity(id)` and `registry.property_writes(id)`.
 
 **Oracle.**
-- `registry-dump`, which prints each class's member list in its order beside the sorted view.
-- O2.
-- Item 0's server session and edit replay, with one step in which a file starts naming `PHPStan\`, so the base switches mid-session.
+- A test in which a file starts naming `PHPStan\`, so the base switches mid-session.
 
 Exact, except the member-order effects listed in §11.
 
@@ -1558,10 +1554,7 @@ Exact, except the member-order effects listed in §11.
   - **The per-file cache** stores the slices in that order (`file_cache.rs:85`), and a debug build checks the order when it decodes them.
 
 **Oracle.**
-- `registry-dump`: the reverse indexes, the use-site index and the duplicate-site tables.
-- O2, including the messages of `judge_property_types` and the renamed-named-argument rule, whose type order follows the merge order.
-- Item 0's dumps at one thread and at the default count, for the sharded merge.
-- Item 0's server session and edit replay, for posting-list edits and stable ids.
+- Tests of the slices' order and deduplication, of the sharded merge, and of posting-list edits with stable ids; the messages of `judge_property_types` and the renamed-named-argument rule, whose type order follows the merge order, in fixtures.
 
 Exact.
 
@@ -1640,8 +1633,6 @@ Exact.
    - So no item has to bump anything when it changes a cached layout: the key changes with its code.
 
 **Oracle.**
-- `registry-dump`: the scope, the guards, the extensions, and every stub record decoded.
-- O2 with the stub cache cold and warm.
 - A test that loads the cache, then stores, prunes and reloads it while a reader still holds the old file. It runs on every platform the release builds; today CI runs on Ubuntu only (`rust-ci.yml:18`).
 - A test that corrupts one record and expects a rebuild, not a panic.
 - A test that hashes the files `stub-sources` embeds, from its own list, and finds `SOURCES_HASH`.
@@ -1697,10 +1688,7 @@ Exact for 1, 3, 5 and 6; step 2 is deferred.
 
 **Oracle.**
 - **A runtime switch** (`PHPSTAN_RS_NO_RELATION_MEMO`, read once into a static) turns the memo off in any build. Today's `disable_shortcuts` exists only under `#[cfg(test)]` (`types/src/lib.rs:176-200`), so the `gate` build cannot reach it.
-- **Compared with the memo on and off:**
-  - O2 and `--dump-expr-types`;
-  - item 0's server session and edit replay, which cross generations;
-  - each at one thread and at the default count.
+- **The tests and the fixtures run with the memo on and off,** at one thread and at the default count.
 
 Exact, except constants on a cycle, listed in §11.
 
@@ -1743,7 +1731,6 @@ Exact, except constants on a cycle, listed in §11.
 - **`reconcile_with_native` refines a lone member and returns it,** with no `Vec`. Today it builds `vec![self]` (`decide.rs:22`) and collects the result again (`:25-29`). A native union whose other members must be kept takes the general path.
 
 **Oracle.**
-- O2 with every rule set on (`class.nameCase`, internal usage).
 - Fixtures with a case mismatch at each position listed above.
 
 Exact, except one case listed in §11: a `@property` tag shadowed by a declared property is checked against the tag's own names.
@@ -1832,10 +1819,7 @@ Exact, except one case listed in §11: a `@property` tag shadowed by a declared 
    - Attributes stay in their node, as a usually empty range: they change what PHP does at run time (`#[\SensitiveParameter]`, `#[\Override]`, `#[\Deprecated]`, `#[\NoDiscard]`), and the walks visit them with the rest of the tree.
 
 **Oracle.**
-- O1, printing the tree after the stub rules and the anonymous-class names. The printer moves with the tree.
-- O2, with the stub cache rebuilt.
-- Item 0's server session: open documents, edits, and completion's standalone parse.
-- The `oracle` build, and the dumps at one thread and at the default count.
+- A server session test: open documents, edits, and completion's standalone parse.
 
 Exact. Non-UTF-8 identifiers keeping their bytes, and the stub rules applying to stubs only by the configured versions, are deferred (items 15 and 6).
 
@@ -1927,13 +1911,13 @@ pub struct TokenStream {
   - The lexer reads the configured versions (`Registry::php_versions`). Where they lex a construct differently, a check reports it, with the versions that read it otherwise. The file is read as the newest configured version reads it.
 - **Unchanged.** Ignore marks and file facts are recorded in the lexing loop, as now.
 - **Readers of tokens.**
-  - Comments are recorded only when asked (`keep_comments` today), for the code frame (`output/codeframe.rs:49-63`) and O1.
+  - Comments are recorded only when asked (`keep_comments` today), for the code frame (`output/codeframe.rs:49-63`).
   - The stub rules, which item 9 moves into the parse, lex an attribute's type string into a scratch stream (`stub_attributes.rs:121-133` today).
   - Completion lexes the editor's text into a stream of its own.
   - `Parser::new(TokenStream)` replaces the test constructors.
 - **What goes:** `Token`, `Tok`, `Supply`, `next_raw`/`next_tok`, the `VecDeque`, `fill`/`pop`, `raw_keyword`, and `LexEnd`'s second pass.
 
-**Oracle.** O1, O2, and phar stubs among the fixtures. Exact; the halt offset and its check, PHP's grammar after `__halt_compiler`, the first error in the file, PHP's doc rule for declarations and its check, and the versions' check are deferred.
+**Oracle.** Phar stubs among the fixtures. Exact; the halt offset and its check, PHP's grammar after `__halt_compiler`, the first error in the file, PHP's doc rule for declarations and its check, and the versions' check are deferred.
 
 **Saving.** About two array writes per token in the lexer and an index per read in the parser, ≈20-30 Ir per token, in place of ≈1.95 G: ≈1.7 G.
 
@@ -1989,7 +1973,7 @@ Context files need line starts, for duplicate-declaration messages (`duplicate_c
    - A statement's leading doc records its offset.
    - Anonymous-class names take their line from `LineStarts` on the worker.
 
-**Oracle.** O1, O2 (every position, fix span, ignore result, anonymous-class name), the line-index tests over multi-byte and astral lines and over `\r`, `\n` and `\r\n` breaks, the LSP tests. Exact; lines and line comments ending at a lone `\r` are deferred.
+**Oracle.** The line-index tests over multi-byte and astral lines and over `\r`, `\n` and `\r\n` breaks, the LSP tests. Exact; lines and line comments ending at a lone `\r` are deferred.
 
 **Saving.** ≈0.2 G: the line index's 270.4 M, less the block pass (≈35 M, step 2) and the analysed files' column tables, which stay.
 
@@ -2035,7 +2019,7 @@ Context files need line starts, for duplicate-declaration messages (`duplicate_c
     - `<?php` opens PHP only before whitespace (a lone `\r` included) or the end of the file: `<?phpx echo 1;` is inline HTML. Today any case-insensitive `<?php` prefix opens it (`lexer.rs:887-897`).
     - **`<?` is read by `short_open_tag`,** from the run-time configuration item 6 reads. PHP's default is on (`php -n`), and `php.ini-development` turns it off, so the setting decides whether `<? … ?>` is code. Today `<?` is never an open tag. When the setting is unknown, each short tag is reported as code whose meaning depends on it, and is analysed as code.
 
-**Oracle.** O1, and lexer tests over each of PHP's readings above, checked against `token_get_all`. Exact; the casts, the spaced names' versions and steps 11-14 are deferred. **Saving.** ≈0.35 G. **Allocations:** ≈0.45 M (M10): `parse_qualified_name` 282,779 (its 321,919 less the 39,140 name allocations item 16 removes; one per new name, 19,570, stays), `NativeType::from_name` 135,859, `strip_leading_backslash` 29,664, and the digit separators 582.
+**Oracle.** Lexer tests over each of PHP's readings above, checked against `token_get_all`. Exact; the casts, the spaced names' versions and steps 11-14 are deferred. **Saving.** ≈0.35 G. **Allocations:** ≈0.45 M (M10): `parse_qualified_name` 282,779 (its 321,919 less the 39,140 name allocations item 16 removes; one per new name, 19,570, stays), `NativeType::from_name` 135,859, `strip_leading_backslash` 29,664, and the digit separators 582.
 
 ### 13. A file's products: the declaration list and one walk (R7; P12 steps 2-4)
 
@@ -2102,7 +2086,7 @@ P12 step 3 was set aside because "it cannot hold references into a tree still be
    - `recorded_references` reads the sites in their recorded order. Today it collects and sorts them, and the frames, per file (`deps.rs:55`: 33,273). What else runs under `file_references` is item 14's `DocNames` memo.
    - A declaration's name is its `Name`. Today `Declaration::name` formats it (`declarations.rs:45`: 30,159).
 
-**Oracle.** O1 (declaration lists, guards, contexts, summaries, flows, references), `registry-dump`, O2, and a fixture of the binding cases above, checked against `php`. Exact; guards by PHP's binding with the report of dead declarations, constants a file defines under names it cannot spell, and the order of evaluation in `InitFlow` are deferred.
+**Oracle.** A fixture of the binding cases above, checked against `php`. Exact; guards by PHP's binding with the report of dead declarations, constants a file defines under names it cannot spell, and the order of evaluation in `InitFlow` are deferred.
 
 **Saving.** ≈0.45 G, estimated: the declarations walk (≈140 M around its builders) and its eight callers' walks, and the traversal of two of the three body walks (`InitFlow::of` and `GlobalFacts::of`, 218.5 M each, of which their builders' own work stays). This profile does not separate a walk's traversal from its builders'.
 
@@ -2179,8 +2163,7 @@ P12 step 3 was set aside because "it cannot hold references into a tree still be
   - the unified winners (`@phan-real-return`, `@phan-param-out`);
   - a `//` inside a literal type;
   - class constants of classes named like type keywords (`Integer::MAX`, deferred).
-- `registry-dump` (every docblock's resolved types), the PHPDoc resolution record, O2 with every cache state (cold, warm, written, read).
-- **O1's references and doc sites, the edit replay and the server session.** `DocNames` feeds `recorded_references` (`deps.rs:63-75`), which feeds dependents and `walk_affected`; a name lost there shows only as a stale diagnostic after an edit, which no full run sees. Item 0's O1 prints each doc site's `DocBlock`, every field canonically, so the fields no reflection carries (closures' docs, `optional_params`, `invalid_tag_values`, `parse_errors`, flags) are compared too.
+- **References and doc sites in the edit path.** `DocNames` feeds `recorded_references` (`deps.rs:63-75`), which feeds dependents and `walk_affected`; a name lost there shows only as a stale diagnostic after an edit, which no full run sees. A test edits a file after each kind of doc site and expects the dependents rechecked.
 
 Exact otherwise. **Saving.** ≈0.35 G, and the second parse of every doc (144.0 M).
 
@@ -2236,7 +2219,7 @@ Exact otherwise. **Saving.** ≈0.35 G, and the second parse of every doc (144.0
   - **Where a name's text is shown, a byte outside valid UTF-8 is `\x{A9}`.**
     - `\xA9` would be ambiguous, since `\` is PHP's namespace separator: in `php` 8.5, `namespace Foo; class xA9 {} class \xA9 {}` declares two classes, `466f6f5c784139` and `466f6f5ca9`, and both would print as `Foo\xA9`.
     - A `{` occurs in no PHP name, so `\x{A9}` maps back to exactly one name. A synthetic anonymous-class name, the one name that can hold a `{` through its path, spells it `\x{7B}`.
-    - One escape serves everything that shows a name as text: messages, the text and JSON formats, baselines (which match by message, `baseline.rs:111-159`), the type printer, item 0's dumps and the server's strings. `parse_display` decodes it, so the gate's type drift reads names back exactly (`gate/type_drift.rs:196-197`).
+    - One escape serves everything that shows a name as text: messages, the text and JSON formats, baselines (which match by message, `baseline.rs:111-159`), the type printer, the dumps and the server's strings. `parse_display` decodes it, so the gate's type drift reads names back exactly (`gate/type_drift.rs:196-197`).
   - **A fix holds bytes.** Today `DiagnosticFix` carries `replacement` and `within` as `String`s (`diagnostics/src/lib.rs:172-177`), built from canonical names (`name_case_fix`, `checker/resolve.rs:403-424`), and `apply_fixes` writes them into the file (`fix.rs:44`). An escaped name written there would be read by PHP as a namespace separator and other letters. So `replacement` and `within` are bytes, built from the name's bytes, and `apply_fixes` and `resolve_span` work on bytes, with PHP's word bytes `[A-Za-z0-9_\x80-\xff]`. Today `resolve_span` gives up on a region that is not UTF-8 and finds words with Unicode's `is_alphanumeric` (`fix.rs:13-14`). The JSON view shows a fix with the escape.
   - **`Name` serializes its bytes** when the format is not human-readable (`serialize_bytes`, interned from the bytes), and the escape when it is. Today it writes and reads a `str` (`name.rs:186-206`), so a lossy decode would merge `\xA9` and `\xAA` on every warm load. Both caches' layout changes, and their key with it (item 6, step 6).
   - **A run-time string becomes a name as PHP reads one,** through one conversion, `syntax::name::from_runtime(&PhpString, Kind)`. `php` 8.5 shows the rules:
@@ -2256,7 +2239,7 @@ Exact otherwise. **Saving.** ≈0.35 G, and the second parse of every doc (144.0
 
 The purity and property-write keys went by item 4, as ids.
 
-**Oracle.** O2, `registry-dump`, `--dump-types`, `--dump-expr-types`, every cache state, the server session, and a fixture checked against `php`: `class \xA9` beside `class \xAA`, `Foo\xA9` in ASCII beside `Foo\` followed by the byte `0xA9`, `Été` beside `éTé`, string names with zero, one and two leading backslashes, and a Latin-1 document opened in the server. Exact, except the change listed in §11: the container-field facts' keys become canonical array keys (C4 step 5: `'1'` and `1` one key). Names as bytes with their escape, ASCII folding everywhere, string values named by PHP's rules and documents' encodings are deferred, with their fixtures. Static-property keys by resolved class are already built (`2d1e6c45`). **Saving.** ≈0.6 G.
+**Oracle.** A fixture checked against `php`: `class \xA9` beside `class \xAA`, `Foo\xA9` in ASCII beside `Foo\` followed by the byte `0xA9`, `Été` beside `éTé`, string names with zero, one and two leading backslashes, and a Latin-1 document opened in the server. Exact, except the change listed in §11: the container-field facts' keys become canonical array keys (C4 step 5: `'1'` and `1` one key). Names as bytes with their escape, ASCII folding everywhere, string values named by PHP's rules and documents' encodings are deferred, with their fixtures. Static-property keys by resolved class are already built (`2d1e6c45`). **Saving.** ≈0.6 G.
 
 **Two sites need a word more:**
 - **Name resolution builds text to intern it.** `qualify` and `resolve_as` (`name_resolution.rs:382`, `:423-425`; ≈315 K) format the joined name into a `String`. Instead, the interner hashes the parts as one text and compares a candidate part by part, so an existing name is found without building its text. Only a new name allocates.
@@ -2314,9 +2297,8 @@ The purity and property-write keys went by item 4, as ids.
 - **The type memos keep their answers, bounded as item 7's memo is.** Their answers depend on the interned types alone: `memoized_pair` is "only for an operation that asks nothing but the types (no class hierarchy)" (`intern.rs:715-717`), and the shape memo answers over the structural relation. So no generation enters them. They take two segments of 2^15 pairs per thread, the older dropped when the current one fills, in place of emptying the whole table. The bound is also what limits the dead nodes they keep from the interner.
 
 **Oracle.**
-- O2, `--dump-types`, `registry-dump`.
 - **The drop, lookup and sweep protocol is model-checked with `loom`** (0.7.2, a test dependency), which tries every interleaving, over a model of a shard and its counts: the count read before the lock, the re-check under it, and the sweep's count-of-one test are windows a few instructions wide that tests on real threads seldom land in. crossbeam and tokio check their protocols this way.
-- **A leak test after item 0's edit replay:** the session is dropped, every shard must hold only the constant nodes and what `FRONT` keeps, and a second replay must end with the same shard sizes. O2 shows output, not freeing, so a leak in a long session would pass it.
+- **A leak test over a session of edits:** the session is dropped, every shard must hold only the constant nodes and what `FRONT` keeps, and a second round of the same edits must end with the same shard sizes. A test of the output shows no freeing, so a leak in a long session would pass it.
 
 Exact.
 
@@ -2384,7 +2366,6 @@ Each cached file is read whole only to hash it for its entry's key (`session.rs:
      When a tracked input changes, the base is rebuilt from the entries whose keys still match, and the rest are parsed.
 
 **Oracle.**
-- **Against the baseline:** item 0's dumps (O2 and `registry-dump`), with the base absent, written and read. Comparing a warm run with the new cold run alone cannot catch a closure that misses a dependency, since both would share the error.
 - **An edit replay across two runs:** a context file edited, added, deleted and renamed; `composer.json`'s PHP range changed (entries parsed again once step 2 lands); `platform_check.php` or the extension list changed; a rule the checker alone reads changed (the base reused); the context order changed.
 - **`stat`'s cases:** a file rewritten within one mtime tick with the same size, and one whose mtime is restored, must both be read again; on Linux, macOS and Windows in CI.
 - **The server:** item 0's server session loading from the base, and an overlay that differs from the disk never reaching the index or the base.
@@ -2505,8 +2486,6 @@ A cold run pays one more incremental finishing, over the analysed files' closure
     - **One checker per worker.** Today `Checker::new` allocates a default `Arc<LineIndex>` and a key table for each file and then replaces them (`checker.rs:1155`, `:1175`), and `set_current_file` and `checker_for` copy paths. A worker's checker is reset for each file instead.
 
 **Oracle.**
-- O2, its diff read family by family.
-- `--dump-types` and `--dump-expr-types` byte-identical through §12.10's steps 1, 3 and 4, and through step 3 here, with locals listed by name (25 G §12.10).
 - The replay assertion: a test build runs an observed pass from each fixpoint entry and asserts that its reports equal the replay's (25 G §12.10).
 - §12.11's differential test over random member lists and every union the corpus run builds, comparing the n-ary result with the left fold; its differences are listed before step 5 lands, since a fold and one pass can differ.
 - A debug assertion that the radix arrays' merge over the diff equals the full merge (C4's, for the new structure).
@@ -2564,8 +2543,6 @@ The autoload thread (321.4 M, off the critical path) keeps the one parser, as P1
 - **No reader gets an empty file.** `FileState::ast` goes, and every reader asks `ast_of`, which parses again when the tree is gone.
 
 **Oracle.**
-- O2's whole-program diagnostics, and each moved pass's output compared with today's over the corpus, pass by pass.
-- The server session and its edit replay (item 0), once more with the tree cache's budget at zero, so that every recheck parses again and a reader that still depends on a kept tree shows.
 - A closed file changed on disk with no event before a dependent's recheck.
 - Fixtures of `Closure::bind`, `bindTo`, `call` and `ReflectionProperty::setValue` writes to private properties, checked against `php`, deferred with them.
 - The `oracle` build, whose assertions every dump must pass.
@@ -2579,40 +2556,30 @@ Exact; the private-property judgment's writes from bound closures and reflection
 
 ## 11. Validation at the end of each item
 
-**When.** An item is validated when its last row lands, before the next item's first row. Between rows only `cargo fmt`, `cargo check` and clippy run. A failure is fixed in its own commit, within the item, and only what failed runs again, from the saved binaries where they still apply. Item 0's validation is its baseline (item 0, step 4), with the tests and the fixtures, and is compared with no earlier commit. Item 3's scratch store waits for item 9's step 2, and is built right after it and validated with item 9. Item 6's step 2, which waits for the stub rules (item 9, step 5), is deferred. The deferred rows are validated together after O3 (ledger row D.V), against V.2's snapshot.
+**When.** An item is validated when its last row lands, before the next item's first row. Between rows only `cargo fmt`, `cargo check` and clippy run. A failure is fixed in its own commit, within the item, and only what failed runs again, from the saved binaries where they still apply. Item 0's validation is the tests and the fixtures. Item 3's scratch store waits for item 9's step 2, and is built right after it and validated with item 9. Item 6's step 2, which waits for the stub rules (item 9, step 5), is deferred. The deferred rows are validated together after O3 (ledger row D.V).
 
-**Against what.** Each item's dumps are compared with the previous item's validated ones, item 1's with item 0's baseline. So every difference belongs to the item being validated, and it must be one of the semantic changes that item names (below); an item that names none gives identical dumps. Each item's dumps are its last commit's snapshot in the store, by the commit's full hash (`.corpus-runs/gate/store.git`, `refs/snapshots/<commit>`, `.corpus-runs/README.md`). `xtask compare` is the store's `git diff` between two snapshots: each entity against the one of the same path, wherever either stands, and the order of emission apart, in each directory's `.order`.
+**No dump is compared.** An item's validation runs its builds, its tests and the fixtures. What a change does to the reports is held by the fixtures and the tests the item wrote. `xtask compare`, the store's snapshots, the pass's artifact comparisons and the equalities between runs are not part of a validation.
 
-**How it runs.** One heavy job at a time, each under `nice -n 19` with `/proc/loadavg` noted, with no `timeout`, in this order; a job may use the whole machine (`cargo xtask progress --watch` shows the pass as it runs):
-1. the `gate` and `oracle` builds;
-2. the tests: `cargo test --workspace` and the tests the item wrote (the fixtures run in step 4);
+**How it runs.** One heavy job at a time, each under `nice -n 19` with `/proc/loadavg` noted, with no `timeout`, in this order; a job may use the whole machine:
+1. the `gate` build;
+2. the tests: `cargo test --workspace` and the tests the item wrote (the fixtures run in step 3);
 3. the fixtures against `php` 8.5, and, for an item with 7.x readings, against `php:7.4-cli` through `docker`;
-4. the pass of item 0's step 3 with the `gate` build (`cargo xtask corpus --full`): every configuration in each of its states, every artifact compared across them and with the equalities that exist by then, the server's sessions, the edit replays, the vendor projects and the fixture suite, recorded by commit;
-5. the same pass with the `oracle` build, in every state, the per-file cache written and read included; it records nothing and must finish without an assertion;
-6. the differences from the previous item's snapshots, read line by line;
-7. the item's state in the ledger and its one-line state in `WORK_STACK.md`.
+4. the item's state in the ledger and its one-line state in `WORK_STACK.md`.
 
 **What an item adds to its own validation:**
 - **item 0:** nothing beyond the steps above. The runtime oracle on every version image, the deferred rows' fixtures and the PHP catalog's oracles wait with those rows (ledger row D.V).
-- **item 1:** the server's first dumps against the CLI's join the equalities;
 - **item 6:** its tests (a file replaced while a reader holds it, a corrupt record, and `SOURCES_HASH` against the embedded files); the platforms job, below, with the file-replacement test;
-- **item 7:** the relation memo on against off joins the equalities;
 - **item 10:** none; the versions check's 7.x readings through `docker` wait with the check;
 - **item 12:** none; the spaced names' 7.x readings through `docker` wait with the versions check;
-- **item 14:** the lowering oracle, which compares with the text grammar the item deletes, so it reads what item 0 recorded: each type node is lowered again and compared with the type today's round trip gave it;
 - **item 15:** none; a Latin-1 document opened in the server session waits with documents' encodings;
-- **item 16:** the `loom` tests of the interner's protocol, and the interner's leak test after the edit replay;
-- **item 17:** its `stat` cases, here and on the platforms job; the base absent, written and read; its edits between two runs, as the item lists them; and a warm run, which leaves the cache directory byte for byte as it found it;
-- **item 18:**
-  - the union oracle, which compares with the fold the item deletes, so it reads what item 0 recorded: each union is built again from its operands and compared with today's result (§12.11's differential test);
-  - the `oracle` build carries the replay assertion and the merge-over-diff assertion;
-  - one-argument `parse_str` and `mb_parse_str`, and string `assert`, read on 7.x through `docker`;
-  - `--dump-types` and `--dump-expr-types` with locals listed by name, since §12.10's step-by-step identity cannot be checked within one item's validation;
-- **item 19:** each edit replay also at a tree-cache budget of zero; a closed file changed on disk with no event before a dependent's recheck.
+- **item 16:** the `loom` tests of the interner's protocol, and the interner's leak test;
+- **item 17:** its `stat` cases, here and on the platforms job; and a warm run, which leaves the cache directory byte for byte as it found it;
+- **item 18:** one-argument `parse_str` and `mb_parse_str`, and string `assert`, read on 7.x through `docker`;
+- **item 19:** a closed file changed on disk with no event before a dependent's recheck.
 
 **Platforms.** CI runs on `ubuntu-24.04` only (`rust-ci.yml:18`), while the release builds for `macos-26` and `windows-2025-vs2026` (`release.yml:33-53`). A CI matrix job on those two runs item 6's file-replacement test from item 6's validation on, and item 17's `stat` cases from item 17's, and each result is recorded.
 
-**The semantic changes, by item.** At an item's validation, every difference from the previous item's dumps must be one of its own:
+**The semantic changes, by item.** What each item changes in the reports, for the record; no comparison checks it:
   - **item 0:** a dead function or class declared twice is reported at each declaration; the whole-program checks match references as PHP resolves names (case, an unqualified call's fallback, attributes, constants apart), and so do references and rename in the server; a namespace cycle is reported at its first analysed declaration, where it went unreported when its first class was a context or stub one, edges to builtins go and an anonymous class's edges start from its namespace (fast validation, step 1); the fixes found in step 1: what a call may write, by storage, forgotten after it (object properties by field and type, static properties, globals, static variables, captures and references), calls bounded by the class hierarchy and builtins by what they call, captures by reference entered with every type written while shared, and `array_reduce` with its initial value; the one found in step 2: past the union cap, class-strings fold to one class-string and callables to `callable`, where the union was `mixed`; and the one found in item 0's validation: a stub no run of PHP has seen, declared pure and taking no code, writes nothing;
     - the fix's precision: a closure's writes count where it may run, not where it is made; a call through a parameter writes what each call's argument may write, not anything; a capture at a file's top level is entered as at any other scope, not as `mixed`;
     - the implicit calls built before their deferral: what a property's magic method, an `ArrayAccess` or `Countable` method, `__toString`, `__clone`, an iterator's methods or a property hook may write is forgotten where PHP may run it, over the class hierarchy of the operand's type, and a property's magic methods run also where the program may unset it;
@@ -2654,18 +2621,6 @@ Exact; the private-property judgment's writes from bound closures and reflection
   - item 15: container-field keys canonical as PHP's array keys; deferred: names that differ only in bytes outside UTF-8 are distinct (the lexer keeps the bytes, item 9) and print with `\x{NN}`; names fold ASCII only where Unicode's lowercasing was used; string values name classes, functions and constants by PHP's rules (one leading backslash, no trimming); in the server, an open document read as the bytes its encoding gives, and one whose encoding is not found analysed as UTF-8, with a diagnostic; a fix writes a name's bytes;
   - item 18: the rule families of §12.10; the rules that read the statement result where it differs from today's side walks (`finally` overrides, `try`/`catch` and throws, no-op statements, loops' constant conditions); the union's single pass where it differs from the fold; deferred: types in PHP's order of evaluation (an assignment's target operands before its value, a destructuring's value first) and a member counted as used when any access may reach it;
   - item 19: none; deferred: the private-property judgment counting writes from bound closures and reflection, and leaving unjudged the properties an unnarrowed one may reach;
-  
-  Each difference is listed with its file and read.
-
-**Equalities that need no baseline,** each run at every item's validation from the item that brings it on:
-- one thread against the default;
-- the stub cache cold against warm;
-- the per-file cache off against written and read;
-- from item 17: its base absent, written and read; its edits between two runs; and a warm run, which leaves the cache directory byte for byte as it found it;
-- from item 7: the relation memo on against off;
-- from item 1: the server's first dumps against the CLI's, with no open document that differs from its file;
-- each edit replay against a fresh load of the edited tree; from item 19, with the tree cache's budget as configured and at zero;
-- from item 19: a closed file changed on disk with no event before a dependent's recheck.
 
 **O3, once, after item 19's validation,** with the commands `CLAUDE.md` gives:
 - callgrind with `--separate-threads=yes` on the frame-pointer `dhat` build, over `cl-20g`'s workload;

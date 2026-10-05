@@ -274,7 +274,10 @@ O3 (2026-10-05; the plan's §9, "Only what optimizes").
   tests passed): no snapshot of item 0 is recorded, so item 1's validation
   has nothing to compare with until one is.
   Item 1 (rows 1.2-1.8) is done and its validation (1.V) skipped by the
-  user, with no run and no snapshot; item 2 is next.
+  user, with no run and no snapshot. Item 2 (rows 2.1-2.7) is built; its
+  validation (2.V) is the tests. The plan's validation (§11) compares no
+  dumps from here on: no snapshot, no baseline, no equalities between runs,
+  and the items' Oracle bullets name tests and fixtures only.
 - **Deferred until after O3, not optimization** (2026-10-05): in item 0,
   the implicit calls (0.12a-0.12f; magic and interface methods, property
   hooks and a property's magic where it may be unset were built first,
