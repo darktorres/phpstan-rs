@@ -16,12 +16,8 @@ impl Checker<'_> {
     /// What a closure made at `at` is entered with in the variable `name` it
     /// captures by reference, which holds `outer` where it is made: that,
     /// what the scope holds in it later, as a pass over the scope found
-    /// (`check_capturing_scope`), and anything at a file's top level when the
-    /// scope assigns it after the closure is made.
+    /// (`check_capturing_scope`).
     pub(crate) fn capture_entry(&self, at: Span, name: &Name, outer: Type) -> Type {
-        if self.shared_scope.top_level && self.shared_scope.written_after(name, at) {
-            return Type::mixed();
-        }
         match self.capture_widening.get(&(at.start, name.clone())) {
             Some(wider) => self.relation().union_of(vec![outer, wider.clone()]),
             None => outer,

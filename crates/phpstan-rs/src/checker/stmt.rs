@@ -5,6 +5,7 @@ use crate::checker::{
     generator_template_param, is_truthy_literal, merge_scopes, purge_stale_narrowing_for_var,
 };
 use syntax::ast::*;
+use syntax::visit::{Visitor, walk_stmt};
 use types::Name;
 use types::Type;
 
@@ -1112,85 +1113,14 @@ impl<'a> Checker<'a> {
                     self.static_var_names.insert(name.name.clone());
                 }
             }
-            // `check_program`'s own top-level loop already handles a
-            // top-level FunctionDecl/ClassDecl by checking its
-            // body - but either declared nested inside a
-            // block (the common `if (!function_exists('foo')) { function
-            // foo() {} }` polyfill idiom, or a class conditionally
-            // declared inside an if) also needs its body checked here,
-            // mirroring check_program's handling, or it would be indexed
-            // into the registry (so calls to it resolve) but silently
-            // exempt from every diagnostic, undefined-variable detection
-            // included.
-            StmtKind::FunctionDecl(f) => self.check_function(f, None, false, true),
-            StmtKind::ClassDecl(c) => {
-                let fqn = c.fq_name().to_string();
-                self.check_nested_class_declaration(&fqn, c);
-                if self.settings.sidz.check_magic_numbers {
-                    self.check_magic_numbers_in_properties(&c.def.properties);
-                }
-                self.check_attributes(&c.def.attrs, &fqn);
-                self.check_attribute_targets(&c.def.attrs, ATTRIBUTE_TARGET_CLASS, "class");
-                self.check_self_attribute_class_declaration(
-                    &c.def.attrs,
-                    &fqn,
-                    c.def.kind,
-                    c.def.is_abstract,
-                );
-                self.check_class_like_marker_attributes(
-                    &c.def.attrs,
-                    c.def.kind,
-                    c.def.is_readonly,
-                    &fqn,
-                );
-                if c.def.kind != ClassKind::Enum {
-                    self.check_enum_cases_outside_enum(&c.def.enum_cases);
-                }
-                for case in &c.def.enum_cases {
-                    self.check_attributes(&case.attrs, &fqn);
-                    self.check_attribute_targets(
-                        &case.attrs,
-                        ATTRIBUTE_TARGET_CLASS_CONSTANT,
-                        "class constant",
-                    );
-                }
-                for p in &c.def.properties {
-                    self.check_attributes(&p.attrs, &fqn);
-                    self.check_attribute_targets(&p.attrs, ATTRIBUTE_TARGET_PROPERTY, "property");
-                }
-                for cc in &c.def.consts {
-                    self.check_attributes(&cc.attrs, &fqn);
-                    self.check_attribute_targets(
-                        &cc.attrs,
-                        ATTRIBUTE_TARGET_CLASS_CONSTANT,
-                        "class constant",
-                    );
-                }
-                // A conditionally-declared trait (the common `if
-                // (version_compare(...)) { trait Foo {...} }`/`if
-                // (PHP_VERSION_ID ...) { trait Foo {...} }` shape)
-                // reaching this nested arm needs the same
-                // `check_trait_methods` dispatch `check_program`'s
-                // top-level walk uses, so its `$this->hostOnlyMethod()`
-                // calls are checked against a real using class, not
-                // standalone - an unconditional per-method loop here
-                // would instead check every trait method with
-                // `current_class` set to the trait's own name, wrongly
-                // flagging a method provided only by a sibling trait on
-                // the real host class.
-                if c.def.kind == ClassKind::Trait {
-                    self.check_trait_methods(&fqn, c);
-                } else {
-                    for m in &c.def.methods {
-                        self.check_function(
-                            &m.function,
-                            Some(&fqn),
-                            m.is_static,
-                            !m.is_abstract && c.def.kind != ClassKind::Interface,
-                        );
-                    }
-                    self.record_property_type_site(&fqn, vec![Name::from(&fqn)], &c.def);
-                }
+            // A declaration nested in a block, as in the `if
+            // (!function_exists('foo')) { function foo() {} }` polyfill
+            // idiom or a class declared conditionally, has a scope of its
+            // own. At a file's top level, `check_program` checks it once,
+            // after the passes over the top level's statements.
+            StmtKind::FunctionDecl(_) | StmtKind::ClassDecl(_) if self.shared_scope.top_level => {}
+            StmtKind::FunctionDecl(_) | StmtKind::ClassDecl(_) => {
+                self.check_nested_declaration(stmt)
             }
             // A bare `break;` (`None`, level 1) or an explicit `break N;`
             // targets the Nth-innermost open loop/switch frame -
@@ -1563,6 +1493,111 @@ impl<'a> Checker<'a> {
         }
         self.statement_var_tags(doc)
     }
+
+    /// Checks a function or class declared in a block, as `check_program`
+    /// checks one declared at a file's top level; otherwise it would be
+    /// indexed into the registry, so calls to it resolve, but exempt from
+    /// every diagnostic.
+    pub(crate) fn check_nested_declaration(&mut self, stmt: &Stmt) {
+        match &stmt.kind {
+            StmtKind::FunctionDecl(f) => self.check_function(f, None, false, true),
+            StmtKind::ClassDecl(c) => {
+                let fqn = c.fq_name().to_string();
+                self.check_nested_class_declaration(&fqn, c);
+                if self.settings.sidz.check_magic_numbers {
+                    self.check_magic_numbers_in_properties(&c.def.properties);
+                }
+                self.check_attributes(&c.def.attrs, &fqn);
+                self.check_attribute_targets(&c.def.attrs, ATTRIBUTE_TARGET_CLASS, "class");
+                self.check_self_attribute_class_declaration(
+                    &c.def.attrs,
+                    &fqn,
+                    c.def.kind,
+                    c.def.is_abstract,
+                );
+                self.check_class_like_marker_attributes(
+                    &c.def.attrs,
+                    c.def.kind,
+                    c.def.is_readonly,
+                    &fqn,
+                );
+                if c.def.kind != ClassKind::Enum {
+                    self.check_enum_cases_outside_enum(&c.def.enum_cases);
+                }
+                for case in &c.def.enum_cases {
+                    self.check_attributes(&case.attrs, &fqn);
+                    self.check_attribute_targets(
+                        &case.attrs,
+                        ATTRIBUTE_TARGET_CLASS_CONSTANT,
+                        "class constant",
+                    );
+                }
+                for p in &c.def.properties {
+                    self.check_attributes(&p.attrs, &fqn);
+                    self.check_attribute_targets(&p.attrs, ATTRIBUTE_TARGET_PROPERTY, "property");
+                }
+                for cc in &c.def.consts {
+                    self.check_attributes(&cc.attrs, &fqn);
+                    self.check_attribute_targets(
+                        &cc.attrs,
+                        ATTRIBUTE_TARGET_CLASS_CONSTANT,
+                        "class constant",
+                    );
+                }
+                // A conditionally-declared trait (the common `if
+                // (version_compare(...)) { trait Foo {...} }`/`if
+                // (PHP_VERSION_ID ...) { trait Foo {...} }` shape)
+                // needs the same
+                // `check_trait_methods` dispatch `check_program`'s
+                // top-level walk uses, so its `$this->hostOnlyMethod()`
+                // calls are checked against a real using class, not
+                // standalone - an unconditional per-method loop here
+                // would instead check every trait method with
+                // `current_class` set to the trait's own name, wrongly
+                // flagging a method provided only by a sibling trait on
+                // the real host class.
+                if c.def.kind == ClassKind::Trait {
+                    self.check_trait_methods(&fqn, c);
+                } else {
+                    for m in &c.def.methods {
+                        self.check_function(
+                            &m.function,
+                            Some(&fqn),
+                            m.is_static,
+                            !m.is_abstract && c.def.kind != ClassKind::Interface,
+                        );
+                    }
+                    self.record_property_type_site(&fqn, vec![Name::from(&fqn)], &c.def);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    /// Checks the declarations `stmt` holds in its blocks
+    /// (`check_nested_declaration`); not those in its expressions, which
+    /// belong to a closure or an anonymous class and are checked with it.
+    pub(crate) fn check_nested_declarations(&mut self, stmt: &Stmt) {
+        NestedDeclarations { checker: self }.visit_stmt(stmt);
+    }
+}
+
+/// See `Checker::check_nested_declarations`.
+struct NestedDeclarations<'c, 'a> {
+    checker: &'c mut Checker<'a>,
+}
+
+impl<'ast> Visitor<'ast> for NestedDeclarations<'_, '_> {
+    fn visit_stmt(&mut self, stmt: &'ast Stmt) {
+        match &stmt.kind {
+            StmtKind::FunctionDecl(_) | StmtKind::ClassDecl(_) => {
+                self.checker.check_nested_declaration(stmt);
+            }
+            _ => walk_stmt(self, stmt),
+        }
+    }
+
+    fn visit_expr(&mut self, _: &'ast Expr) {}
 }
 
 /// The `(name, type)` assertions a statement's `@var` tags make: each

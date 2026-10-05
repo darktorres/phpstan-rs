@@ -1394,7 +1394,6 @@ impl<'a> Checker<'a> {
         }
     }
 
-    /// Drops what every record gained since `mark`.
     /// An empty scope of this checker's, made by its table of keys.
     pub(crate) fn new_locals(&self) -> Locals {
         Locals::new(
@@ -1403,6 +1402,7 @@ impl<'a> Checker<'a> {
         )
     }
 
+    /// Drops what every record gained since `mark`.
     pub(crate) fn rewind_to(&mut self, mark: PassMark) {
         self.diagnostics.truncate(mark.diagnostics);
         self.semantic_tokens.truncate(mark.semantic_tokens);
@@ -1846,6 +1846,24 @@ impl<'a> Checker<'a> {
         // own position - not merely the last one anywhere in the file,
         // which would wrongly resolve a declaration under an earlier
         // namespace against a later one.
+        //
+        // The top level's own statements share one scope across the whole
+        // file, checked in passes while a closure capturing by reference
+        // widens (`check_capturing_scope`); the declarations, whose scopes
+        // do not read its variables, are checked after, once.
+        self.check_capturing_scope(&mut top_locals, |this, locals| {
+            this.name_ctx = NameContext::default();
+            for stmt in program {
+                match &stmt.kind {
+                    StmtKind::Namespace(name) => this.name_ctx.set_namespace(name),
+                    StmtKind::Use(imports) => this.name_ctx.add_uses(imports),
+                    StmtKind::FunctionDecl(_) | StmtKind::ClassDecl(_) => {}
+                    _ => {
+                        this.check_stmt(stmt, locals, None, "<main>");
+                    }
+                }
+            }
+        });
         self.name_ctx = NameContext::default();
         for stmt in program {
             self.check_function_like_declarations_in_stmt(stmt);
@@ -2029,15 +2047,12 @@ impl<'a> Checker<'a> {
                         self.check_promoted_property_candidate(&fqn, &c.def);
                     }
                 }
-                // Top-level script statements share one scope across the
-                // whole file, so the extract()/eval() guard spans the
-                // entire loop rather than resetting per statement.
-                _ => {
-                    self.check_stmt(stmt, &mut top_locals, None, "<main>");
-                }
+                _ => self.check_nested_declarations(stmt),
             }
         }
         self.leave_shared_scope(enclosing_scope);
+        // The top level's statements share one scope, so an `extract()` or
+        // `eval()` anywhere in them drops what the whole file found.
         if self.saw_dynamic_var_construct {
             self.diagnostics.truncate(diagnostics_before);
             self.property_type_sites.clear();
