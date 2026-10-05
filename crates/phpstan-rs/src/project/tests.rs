@@ -18,4 +18,5 @@ mod property_assign_facts;
 mod reflection_rule;
 mod registry_dump;
 mod session_roles;
+mod session_source;
 mod use_site_index;

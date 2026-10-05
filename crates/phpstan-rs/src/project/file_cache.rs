@@ -33,6 +33,7 @@ use syntax::span::{LineIndex, Span};
 use super::declared_classes::DeclaredClass;
 use super::duplicate_class_sites::DuplicateClassSites;
 use super::duplicate_fn_sites::DuplicateFunctionSites;
+use super::source::ContentHash;
 use super::use_sites::RefTarget;
 use super::{Arc, ParsedFile};
 use crate::deps::RefKey;
@@ -122,7 +123,7 @@ impl CachedFile {
 
     /// The parse of the file at `path` this was stored from, without its
     /// tree and its ignore comments, which only an analysed file reads.
-    pub(super) fn into_parsed(self, path: &Path) -> ParsedFile {
+    pub(super) fn into_parsed(self, path: &Path, content_hash: ContentHash) -> ParsedFile {
         let references: FxHashSet<RefKey> = self.references.into_iter().collect();
         let declaration_references: FxHashSet<RefKey> =
             self.declaration_references.into_iter().collect();
@@ -148,6 +149,7 @@ impl CachedFile {
             line_index: self.line_index,
             class_fn_refs: self.class_fn_refs,
             owner: None,
+            content_hash,
         }
     }
 }

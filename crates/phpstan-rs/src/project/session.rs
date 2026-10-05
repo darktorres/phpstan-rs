@@ -31,6 +31,7 @@ use crate::{ext, ignore_errors};
 
 use super::DEFAULT_SCAN_EXCLUDED_DIR_NAMES;
 use super::file_cache;
+use super::source::{ContentHash, Overlay};
 use super::{ParsedFile, Project, ProjectSettings};
 use diagnostics::{self, Diagnostic, DiagnosticBuilder, LevelCutoff};
 
@@ -127,6 +128,8 @@ pub struct Session {
     architecture_rules: Vec<architecture::ArchitectureRule>,
     check_mock_hygiene: bool,
     mock_banned_classes: Vec<String>,
+    /// The files read in place of the disk's.
+    overlay: Overlay,
     /// Non-fatal problems found while resolving (e.g. SQL schema drift,
     /// an old config key).
     pub warnings: Vec<String>,
@@ -144,6 +147,19 @@ pub struct Loaded {
     /// What the lexer skipped over in the loaded files, and the context
     /// files that do not parse, one line each.
     pub lex_warnings: Vec<String>,
+}
+
+/// What `Session::load_into` found in the files it was given.
+pub(crate) struct Added {
+    /// How long each analysed file is, by its place in the list given.
+    pub(crate) analyze_sizes: Vec<usize>,
+    pub(crate) skipped_analyze: usize,
+    pub(crate) skipped_context: usize,
+    /// The analysed files that do not parse, which are reported.
+    pub(crate) parse_failures: Vec<(PathBuf, ParseFailure)>,
+    /// What the lexer skipped over in the loaded files, and the context
+    /// files that do not parse, one line each.
+    pub(crate) lex_warnings: Vec<String>,
 }
 
 /// What one run's analysis produced, before post-processing: every
@@ -397,10 +413,10 @@ fn section<S: config::Section>(
 }
 
 /// A file that was not loaded because it does not parse, where, and why.
-struct ParseFailure {
-    line: u32,
-    col: u32,
-    message: String,
+pub(crate) struct ParseFailure {
+    pub(crate) line: u32,
+    pub(crate) col: u32,
+    pub(crate) message: String,
 }
 
 /// What reading a file came to.
@@ -693,6 +709,7 @@ impl Session {
             architecture_rules,
             check_mock_hygiene: mockstan.check_mock_hygiene.unwrap_or(extensions.mockstan),
             mock_banned_classes: mockstan.mock_banned_classes,
+            overlay: Overlay::default(),
             warnings,
         })
     }
@@ -773,6 +790,38 @@ impl Session {
     /// The directory the session's relative paths are relative to.
     pub fn root(&self) -> &Path {
         &self.root
+    }
+
+    /// The session reading `files` in place of what the disk has at their
+    /// paths, which are spelled from the root: they exist whether or not
+    /// the disk has them, and are listed where a walk of the paths would
+    /// find them.
+    pub fn with_overlay(mut self, files: impl IntoIterator<Item = (PathBuf, Vec<u8>)>) -> Session {
+        for (path, bytes) in files {
+            self.set_overlay(&path, bytes);
+        }
+        self
+    }
+
+    /// Reads `bytes` as the file at `path`, spelled from the root, from
+    /// now on.
+    pub fn set_overlay(&mut self, path: &Path, bytes: Vec<u8>) {
+        self.overlay.set(self.absolute(path), bytes);
+    }
+
+    /// Reads the file at `path`, spelled from the root, from the disk
+    /// again.
+    pub fn clear_overlay(&mut self, path: &Path) {
+        self.overlay.remove(&self.absolute(path));
+    }
+
+    /// The bytes of the file at `path`, spelled from the root: the
+    /// overlay's, or the disk's. Every read of a file goes through here.
+    pub fn read(&self, path: &Path) -> std::io::Result<Vec<u8>> {
+        match self.overlay.get(&self.absolute(path)) {
+            Some(bytes) => Ok(bytes.to_vec()),
+            None => std::fs::read(self.root.join(path)),
+        }
     }
 
     /// The settings of the session as a whole: the baseline, the level and
@@ -860,15 +909,49 @@ impl Session {
             Listed::Php => super::collect_php_files_excluding(&walked, pruned, &mut found),
             Listed::Run => super::collect_php_run_files_excluding(&walked, pruned, &mut found),
         }
-        out.extend(
-            found
-                .into_iter()
-                .map(|path| match path.strip_prefix(&walked) {
-                    Ok(rest) if rest.as_os_str().is_empty() => dir.to_path_buf(),
-                    Ok(rest) => dir.join(rest),
-                    Err(_) => path,
-                }),
-        );
+        let spelled = |path: PathBuf| match path.strip_prefix(&walked) {
+            Ok(rest) if rest.as_os_str().is_empty() => dir.to_path_buf(),
+            Ok(rest) => dir.join(rest),
+            Err(_) => path,
+        };
+        let start = out.len();
+        out.extend(found.into_iter().map(spelled));
+        if self.overlay.is_empty() {
+            return;
+        }
+        // The overlay's files the walk did not find.
+        let absolute = self.absolute(dir);
+        let held: Vec<PathBuf> = self
+            .overlay
+            .under(&absolute)
+            .filter(|path| {
+                let below = path.strip_prefix(&absolute).unwrap_or(path);
+                !super::path_under_excluded_dir(below, pruned)
+                    && match listed {
+                        Listed::Php => path.extension().is_some_and(|e| e == "php"),
+                        Listed::Run => {
+                            super::has_php_run_extension(path)
+                                || self
+                                    .overlay
+                                    .get(path)
+                                    .is_some_and(|bytes| super::opens_php(bytes))
+                        }
+                    }
+            })
+            .map(|path| {
+                let below = path.strip_prefix(&absolute).unwrap_or(path);
+                if below.as_os_str().is_empty() {
+                    dir.to_path_buf()
+                } else {
+                    dir.join(below)
+                }
+            })
+            .collect();
+        for path in held {
+            if !out[start..].contains(&path) {
+                out.push(path);
+            }
+        }
     }
 
     /// `cacheable` is whether the file may be read from and stored in the
@@ -882,9 +965,10 @@ impl Session {
         cacheable: bool,
         index_use_sites: bool,
     ) -> Read {
-        let Ok(bytes) = std::fs::read(self.root.join(path)) else {
+        let Ok(bytes) = self.read(path) else {
             return Read::Unread;
         };
+        let content_hash = ContentHash::of(&bytes);
         let cache_key = if cacheable {
             file_cache::key(&bytes, path, is_stub, index_use_sites)
         } else {
@@ -896,7 +980,7 @@ impl Session {
             return Read::Loaded(Box::new(ReadFile {
                 len: cached.len,
                 source: String::new(),
-                parsed: cached.into_parsed(path),
+                parsed: cached.into_parsed(path, content_hash),
                 cache_key: None,
             }));
         }
@@ -1013,7 +1097,7 @@ impl Session {
                             } else {
                                 role.to_string()
                             };
-                            let text = std::fs::read(self.root.join(path)).ok().map(|bytes| {
+                            let text = self.read(path).ok().map(|bytes| {
                                 let source = if retain_source {
                                     String::from_utf8_lossy(&bytes).into_owned()
                                 } else {
@@ -1316,10 +1400,50 @@ impl Session {
 
         let mut project = Project::new();
         self.configure(&mut project, built_once);
+        let Added {
+            analyze_sizes,
+            skipped_analyze,
+            skipped_context,
+            parse_failures,
+            lex_warnings,
+        } = self.load_into(&mut project, &context_files, &analyze_files);
+        project.finish_loading();
 
+        // Largest files first, so the longest checks don't start last; of
+        // equal ones, the first listed first.
+        let mut by_size: Vec<usize> = (0..analyze_files.len()).collect();
+        by_size.sort_by_key(|&index| std::cmp::Reverse(analyze_sizes[index]));
+        let analyze_files_by_size = by_size
+            .into_iter()
+            .map(|index| analyze_files[index].clone())
+            .collect();
+        Ok(Loaded {
+            project,
+            analyze_files_by_size,
+            skipped_analyze,
+            skipped_context,
+            context_loaded: context_files.len() - skipped_context,
+            parse_failures,
+            lex_warnings,
+        })
+    }
+
+    /// Reads, parses and inserts into `project` the files `context_files`
+    /// and `analyze_files`, which are spelled from the root: the context
+    /// files first, so an analysed file's declaration wins a name
+    /// collision, each group in the order given. The load of a whole
+    /// session and the files an edit of the configuration adds are loaded
+    /// by this. The caller finishes loading.
+    pub(crate) fn load_into(
+        &self,
+        project: &mut Project,
+        context_files: &[PathBuf],
+        analyze_files: &[PathBuf],
+    ) -> Added {
         let pool = &self.pool;
-
-        let index_use_sites = project.check_settings().rules.check_dead_code;
+        let built_once = project.built_once;
+        let shared: &Project = project;
+        let index_use_sites = shared.check_settings().rules.check_dead_code;
         let combined_files: Vec<&PathBuf> =
             context_files.iter().chain(analyze_files.iter()).collect();
         // The files are numbered while they parse.
@@ -1343,8 +1467,8 @@ impl Session {
                                 index_use_sites,
                             );
                             if let Read::Loaded(file) = &mut read {
-                                project.index_use_sites(&mut file.parsed, &file.source);
-                                project.note_owner(&mut file.parsed, p);
+                                shared.index_use_sites(&mut file.parsed, &file.source);
+                                shared.note_owner(&mut file.parsed, p);
                                 if let Some(key) = file.cache_key.take() {
                                     file_cache::store(
                                         &key,
@@ -1453,25 +1577,13 @@ impl Session {
             }
         }
         lex_warnings.extend(parse_failure_lines);
-        project.finish_loading();
-
-        // Largest files first, so the longest checks don't start last; of
-        // equal ones, the first listed first.
-        let mut by_size: Vec<usize> = (0..analyze_files.len()).collect();
-        by_size.sort_by_key(|&index| std::cmp::Reverse(analyze_sizes[index]));
-        let analyze_files_by_size = by_size
-            .into_iter()
-            .map(|index| analyze_files[index].clone())
-            .collect();
-        Ok(Loaded {
-            project,
-            analyze_files_by_size,
+        Added {
+            analyze_sizes,
             skipped_analyze,
             skipped_context,
-            context_loaded: context_files.len() - skipped_context,
             parse_failures,
             lex_warnings,
-        })
+        }
     }
 
     /// Checks every analysed file of `loaded` and runs the project-wide

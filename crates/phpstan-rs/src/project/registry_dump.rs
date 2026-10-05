@@ -210,6 +210,7 @@ fn write_file(
         facts,
         // Printed as the positions it gives by the front end's dump.
         line_index: _,
+        content_hash: _,
     } = state;
     let role = if *analyzed { "analysed" } else { "context" };
     let package = owner.map(|owner| packages.name(owner).map(str::to_string));

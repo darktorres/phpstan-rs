@@ -46,6 +46,7 @@ mod mock_hygiene;
 mod registry_dump;
 pub mod roles;
 pub mod session;
+pub mod source;
 pub(crate) mod use_sites;
 mod whole_program;
 
@@ -152,6 +153,8 @@ pub(crate) struct FileState {
     facts: FileFacts,
     // Its lines, which the lines and columns of its spans are found by.
     line_index: Arc<LineIndex>,
+    // What the bytes it was parsed from are.
+    content_hash: source::ContentHash,
 }
 
 /// A file's tree: the one it kept, or one parsed again.
@@ -1131,6 +1134,11 @@ impl Project {
         Some(AstRef::Parsed(ast))
     }
 
+    /// What the bytes `path` was loaded or last edited from are.
+    pub fn content_hash(&self, path: &Path) -> Option<source::ContentHash> {
+        Some(self.files.get(path)?.content_hash)
+    }
+
     /// The AST of a currently-loaded file, if any - the position-walker's
     /// (`lsp::navigation`) own entry point.
     pub(crate) fn ast(&self, path: &Path) -> Option<&[Stmt]> {
@@ -1287,6 +1295,7 @@ impl Project {
             line_index,
             class_fn_refs,
             owner,
+            content_hash,
         } = parsed;
         debug_assert!(
             ast.is_some() || (!analyzed && self.built_once),
@@ -1335,6 +1344,7 @@ impl Project {
                 declared_classes,
                 facts,
                 line_index,
+                content_hash,
             },
         );
     }
@@ -3459,6 +3469,8 @@ pub struct ParsedFile {
     // parse (`Project::note_owner`); `insert_parsed_file` finds it itself
     // otherwise.
     owner: Option<Option<composer::PackageOwner>>,
+    // What the bytes the file was parsed from are.
+    content_hash: source::ContentHash,
 }
 
 /// Computes a `ParsedFile` from `source` - see that type's own doc
@@ -3496,6 +3508,8 @@ pub(crate) fn parse_file_recording<'a>(
     names: Option<&mut syntax::name::NameCache>,
     record: Option<&mut ParseRecord>,
 ) -> Result<ParsedFile, ParseError> {
+    let source = source.into();
+    let content_hash = source::ContentHash::of_source(source);
     let Parsed {
         ast,
         references,
@@ -3550,6 +3564,7 @@ pub(crate) fn parse_file_recording<'a>(
         line_index,
         class_fn_refs: None,
         owner: None,
+        content_hash,
     })
 }
 
@@ -3586,6 +3601,7 @@ impl syntax::canonical::Canonical for ParsedFile {
             line_index: _,
             class_fn_refs,
             owner,
+            content_hash: _,
         } = self;
         p.node(
             "ParsedFile",
@@ -3666,14 +3682,7 @@ pub(crate) fn collect_php_run_files_excluding(
 
 /// See `collect_php_run_files_excluding`.
 fn is_php_run_file(path: &Path) -> bool {
-    const EXTENSIONS: [&str; 7] = [
-        "php", "inc", "module", "install", "theme", "engine", "profile",
-    ];
-    if path
-        .extension()
-        .and_then(|e| e.to_str())
-        .is_some_and(|e| EXTENSIONS.iter().any(|known| e.eq_ignore_ascii_case(known)))
-    {
+    if has_php_run_extension(path) {
         return true;
     }
     let mut start = [0u8; 5];
@@ -3687,7 +3696,26 @@ fn is_php_run_file(path: &Path) -> bool {
             Ok(n) => read += n,
         }
     }
-    start[..read].starts_with(b"<?=") || start[..read].eq_ignore_ascii_case(b"<?php")
+    opens_php(&start[..read])
+}
+
+/// Whether `path` has an extension PHP sources have.
+fn has_php_run_extension(path: &Path) -> bool {
+    const EXTENSIONS: [&str; 7] = [
+        "php", "inc", "module", "install", "theme", "engine", "profile",
+    ];
+    path.extension()
+        .and_then(|e| e.to_str())
+        .is_some_and(|e| EXTENSIONS.iter().any(|known| e.eq_ignore_ascii_case(known)))
+}
+
+/// Whether a file that starts with `start` is PHP: it opens with `<?php`
+/// or `<?=`.
+fn opens_php(start: &[u8]) -> bool {
+    start.starts_with(b"<?=")
+        || start
+            .get(..5)
+            .is_some_and(|open| open.eq_ignore_ascii_case(b"<?php"))
 }
 
 /// Directory names a workspace-wide scan skips by default when no real
