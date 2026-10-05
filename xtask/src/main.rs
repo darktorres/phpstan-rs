@@ -83,12 +83,15 @@ const USAGE: &str = "usage: cargo xtask <command>
                          show how far the running or last `corpus` (or
                          <command>) is: runs done by group, runs under
                          way, failures; --watch refreshes it until it ends
-  profile <vendor|replay> [<project>]
+  profile <kind> [<subject>] [--threads <n>] [--file-cache]
                          the frame-pointer `dhat` build of HEAD, a warm
                          run's time and peak memory and callgrind of one
-                         run the pass makes (a vendor project's, default
-                         vendor/amphp/amp, or its edit replay), with a
-                         README, in ~/.cache/prs-profile
+                         run the pass makes, with a README, in
+                         ~/.cache/prs-profile; the kinds are vendor and
+                         replay (a vendor project, default
+                         vendor/amphp/amp), config (scoped, all-on,
+                         unscoped, vendor-tree or arch), session (`.` or a
+                         vendor project) and fixtures (a filter)
   compare [--full] [--against <hash>]
                          diff HEAD's snapshot against its parent's (or
                          the nearest ancestor that has one) in the store
