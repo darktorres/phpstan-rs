@@ -31,6 +31,7 @@ mod store;
 mod stub_index;
 #[cfg(test)]
 mod tests;
+mod validate;
 
 const LEVELS: [&str; 12] = [
     "unset", "0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "10",
@@ -43,6 +44,7 @@ fn main() -> ExitCode {
         Some("corpus") => corpus_command(&args[1..]),
         Some("progress") => progress::progress_command(&gate_dir(), &args[1..]),
         Some("profile") => profile::profile_command(&args[1..]),
+        Some("validate") => validate::validate_command(&args[1..]),
         Some("compare") => compare(&args[1..]),
         Some("type-drift") => type_drift(&args[1..]),
         Some("perf") => perf(),
@@ -92,6 +94,14 @@ const USAGE: &str = "usage: cargo xtask <command>
                          vendor/amphp/amp), config (scoped, all-on,
                          unscoped, vendor-tree or arch), session (`.` or a
                          vendor project) and fixtures (a filter)
+  validate [--step <name>]...
+                         an item's validation: the gate and oracle builds,
+                         the workspace tests, the runtime oracle, the pass
+                         with each build and the comparison with the
+                         previous snapshot, each step's outcome in
+                         .corpus-runs/gate/validate/<commit>.tsv; --step
+                         runs only the steps it names (build, tests,
+                         runtime-oracle, gate-pass, oracle-pass, compare)
   compare [--full] [--against <hash>]
                          diff HEAD's snapshot against its parent's (or
                          the nearest ancestor that has one) in the store
@@ -245,10 +255,15 @@ fn require_clean_tree() -> Result<(), String> {
 }
 
 fn build_gate() -> Result<(), String> {
+    build_profile("gate")
+}
+
+/// Builds `phpstan-rs` and the gate runner in `profile`.
+fn build_profile(profile: &str) -> Result<(), String> {
     run(cargo().args([
         "build",
         "--profile",
-        "gate",
+        profile,
         "-p",
         "phpstan-rs",
         "--bin",

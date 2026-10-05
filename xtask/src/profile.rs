@@ -657,7 +657,7 @@ fn cache_files(dir: &Path) -> Result<Vec<(String, u64, std::time::SystemTime)>, 
 }
 
 /// `/proc/loadavg`'s first three numbers, or `unknown`.
-fn loadavg() -> String {
+pub(crate) fn loadavg() -> String {
     std::fs::read_to_string("/proc/loadavg")
         .ok()
         .map(|text| {
