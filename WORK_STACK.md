@@ -267,8 +267,9 @@ O3 (2026-10-05; the plan's §9, "Only what optimizes").
   level; `cargo xtask profile` (0.11s), whose first profiles of amphp/amp
   are a vendor run of 286 M instructions, 0.06 s, 80 MB and a replay of
   16.8 G, 2.32 s, 111 MB (`~/.cache/prs-profile/*-91537c79`). Next, before
-  the baseline: the other kinds' profiles and `cargo xtask validate`
-  (0.11t, 0.11u). Then the validation itself (0.11):
+  the baseline: the other kinds' profiles (0.11t: `config scoped` 202 G, 33.8 s,
+  1.75 GB; the corpus session warm 29.4 s, 7 GB; callgrind stopped, the
+  rest skipped) and `cargo xtask validate` (0.11u). Then the validation itself (0.11):
   the pass with the `gate` and `oracle` builds, the memory baseline, and
   the first snapshot, compared with no earlier commit; no row before it
   runs the pass, and item 1's validation is the first comparison.
