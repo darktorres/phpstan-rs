@@ -3498,7 +3498,7 @@ pub fn collect_php_files(path: &Path, out: &mut Vec<PathBuf>) {
         make: &|_| (),
     }
     .files(path, path);
-    out.extend(found.into_iter().map(|(file, ())| file));
+    out.extend(found.into_iter().map(|(file, _, ())| file));
 }
 
 /// Whether the file `name` in `dir` is one PHP may be run from: one named with an
@@ -3565,35 +3565,46 @@ pub(crate) struct Walk<'a, T> {
     pub(crate) make: &'a (dyn Fn(&Path) -> T + Sync),
 }
 
+/// A file a walk found: its spelling, the hash of that spelling in a
+/// `FileTable`, and what the walk made of it.
+pub(crate) type WalkedFile<T> = (PathBuf, u64, T);
+
 /// One entry of a directory, as its walk settles it.
 enum Found<T> {
-    File(PathBuf, T),
-    Files(Vec<(PathBuf, T)>),
+    File(WalkedFile<T>),
+    Files(Vec<WalkedFile<T>>),
 }
 
 impl<T: Send> Walk<'_, T> {
     /// The files found under `disk`, or `disk` itself when it is one, with
     /// what `make` made of each, spelled as `spelled` is for `disk` and
-    /// each name below it joined to it. They come in the order paths
+    /// each name below it joined to it, and the hash of each spelling,
+    /// built as the walk goes down. They come in the order paths
     /// compare in: each directory's entries are by name before the walk
     /// goes into them, so a name is before the longer ones it begins, and
     /// what is in a directory is before what comes after the directory's
     /// name. Each directory is a task of the pool the caller runs in, and
     /// its subdirectories' results join in its entries' order.
-    pub(crate) fn files(&self, disk: &Path, spelled: &Path) -> Vec<(PathBuf, T)> {
+    pub(crate) fn files(&self, disk: &Path, spelled: &Path) -> Vec<WalkedFile<T>> {
+        let hasher = file_table::PathHasher::of(spelled);
         if disk.is_dir() {
-            self.directory(disk, spelled)
+            self.directory(disk, spelled, &hasher)
         } else if (self.wanted)(
             disk.parent().unwrap_or(Path::new("")),
             disk.file_name().unwrap_or_default(),
         ) {
-            vec![(spelled.to_path_buf(), (self.make)(spelled))]
+            vec![(spelled.to_path_buf(), hasher.finish(), (self.make)(spelled))]
         } else {
             Vec::new()
         }
     }
 
-    fn directory(&self, disk: &Path, spelled: &Path) -> Vec<(PathBuf, T)> {
+    fn directory(
+        &self,
+        disk: &Path,
+        spelled: &Path,
+        hasher: &file_table::PathHasher,
+    ) -> Vec<WalkedFile<T>> {
         if disk
             .file_name()
             .and_then(|n| n.to_str())
@@ -3615,16 +3626,19 @@ impl<T: Send> Walk<'_, T> {
                     EntryKind::Link => disk.join(&entry.name).is_dir(),
                 };
                 let spelled = spelled.join(&entry.name);
+                let hasher = hasher.child(&entry.name);
                 if is_dir {
                     if self.skip_dir.is_some_and(|skip| skip(&spelled)) {
                         return None;
                     }
-                    Some(Found::Files(
-                        self.directory(&disk.join(&entry.name), &spelled),
-                    ))
+                    Some(Found::Files(self.directory(
+                        &disk.join(&entry.name),
+                        &spelled,
+                        &hasher,
+                    )))
                 } else if (self.wanted)(disk, &entry.name) {
                     let made = (self.make)(&spelled);
-                    Some(Found::File(spelled, made))
+                    Some(Found::File((spelled, hasher.finish(), made)))
                 } else {
                     None
                 }
@@ -3633,7 +3647,7 @@ impl<T: Send> Walk<'_, T> {
         let mut files = Vec::new();
         for found in found {
             match found {
-                Found::File(path, made) => files.push((path, made)),
+                Found::File(file) => files.push(file),
                 Found::Files(mut inner) => files.append(&mut inner),
             }
         }

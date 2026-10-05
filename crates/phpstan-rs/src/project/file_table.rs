@@ -1,21 +1,68 @@
 //! The files a project holds, by path and by `FileId`.
 
-use std::path::{Path, PathBuf};
+use std::ffi::OsStr;
+use std::hash::Hasher;
+use std::path::{Component, Path, PathBuf};
 use std::sync::Arc;
 
-use rustc_hash::FxHashMap;
+use rustc_hash::{FxHashMap, FxHasher};
 
 use crate::file_id::FileId;
 
+/// The hash a path has in a `FileTable`, kept as a state that a file name
+/// extends: it is made of the path's components, as `Path`'s equality is, so
+/// paths that compare equal hash alike, and the hash of a file is its
+/// directory's with the file's name, which a walk builds as it goes down.
+#[derive(Clone, Default)]
+pub(crate) struct PathHasher(FxHasher);
+
+impl PathHasher {
+    /// The state of `path`.
+    pub(crate) fn of(path: &Path) -> PathHasher {
+        let mut hasher = PathHasher::default();
+        for component in path.components() {
+            hasher.component(match component {
+                Component::Prefix(_) => 1,
+                Component::RootDir => 2,
+                Component::CurDir => 3,
+                Component::ParentDir => 4,
+                Component::Normal(_) => 5,
+            });
+            hasher.0.write(component.as_os_str().as_encoded_bytes());
+            hasher.0.write_u8(0);
+        }
+        hasher
+    }
+
+    /// The state of the file or directory `name` in the directory this is
+    /// the state of.
+    pub(crate) fn child(&self, name: &OsStr) -> PathHasher {
+        let mut hasher = self.clone();
+        hasher.component(5);
+        hasher.0.write(name.as_encoded_bytes());
+        hasher.0.write_u8(0);
+        hasher
+    }
+
+    fn component(&mut self, kind: u8) {
+        self.0.write_u8(kind);
+    }
+
+    pub(crate) fn finish(&self) -> u64 {
+        self.0.finish()
+    }
+}
+
 /// A map from path to what is known of that file, which also numbers the
 /// paths it has seen. Looking a file up by `FileId` hashes nothing; looking
-/// it up by path hashes the path once.
+/// it up by path hashes the path once. A path is stored once, in its slot,
+/// and the map holds the numbers.
 ///
 /// A slot keeps its path after its file is removed, and a path that comes
 /// back has the slot it had: a number is never given to two paths, and a
 /// table keyed by `FileId` can hold the number of a file removed meanwhile.
 pub(crate) struct FileTable<V> {
-    ids: FxHashMap<PathBuf, FileId>,
+    ids: hashbrown::HashTable<FileId>,
     slots: Vec<Slot<V>>,
     len: usize,
     // The file by the address of the `Arc<Path>` its declarations name it
@@ -26,6 +73,7 @@ pub(crate) struct FileTable<V> {
 
 struct Slot<V> {
     path: PathBuf,
+    hash: u64,
     value: Option<V>,
     origins: Vec<Arc<Path>>,
 }
@@ -33,7 +81,7 @@ struct Slot<V> {
 impl<V> Default for FileTable<V> {
     fn default() -> Self {
         FileTable {
-            ids: FxHashMap::default(),
+            ids: hashbrown::HashTable::new(),
             slots: Vec::new(),
             len: 0,
             by_origin: FxHashMap::default(),
@@ -43,14 +91,18 @@ impl<V> Default for FileTable<V> {
 
 impl<V> FileTable<V> {
     /// A table that has numbered `paths`, each by its first place in the
-    /// list, and the number each place got. Nothing is held yet.
+    /// list, and the number each place got. Nothing is held yet. A path
+    /// comes with its hash where the walk that listed it built it.
     pub(crate) fn with_paths<'a>(
-        paths: impl ExactSizeIterator<Item = &'a Path>,
+        paths: impl ExactSizeIterator<Item = (&'a Path, Option<u64>)>,
     ) -> (FileTable<V>, Vec<FileId>) {
         let mut table = FileTable::default();
-        table.ids.reserve(paths.len());
+        let slots = &table.slots;
+        table.ids.reserve(paths.len(), |id| slots[id.index()].hash);
         table.slots.reserve(paths.len());
-        let numbers = paths.map(|path| table.id_for(path)).collect();
+        let numbers = paths
+            .map(|(path, hash)| table.id_for_hashed(path, hash.unwrap_or_else(|| hash_of(path))))
+            .collect();
         (table, numbers)
     }
 
@@ -70,21 +122,36 @@ impl<V> FileTable<V> {
 
     /// The number of `path`, if it has one.
     pub(crate) fn id_of(&self, path: &Path) -> Option<FileId> {
-        self.ids.get(path).copied()
+        self.find(path, hash_of(path))
+    }
+
+    fn find(&self, path: &Path, hash: u64) -> Option<FileId> {
+        self.ids
+            .find(hash, |id| self.slots[id.index()].path == path)
+            .copied()
     }
 
     /// The number of `path`, given now if it has none.
     pub(crate) fn id_for(&mut self, path: &Path) -> FileId {
-        if let Some(id) = self.ids.get(path) {
-            return *id;
+        self.id_for_hashed(path, hash_of(path))
+    }
+
+    /// `id_for` of a path whose hash is `hash`, which `PathHasher` made.
+    pub(crate) fn id_for_hashed(&mut self, path: &Path, hash: u64) -> FileId {
+        debug_assert_eq!(hash, hash_of(path));
+        if let Some(id) = self.find(path, hash) {
+            return id;
         }
         let id = FileId::new(self.slots.len());
-        self.ids.insert(path.to_path_buf(), id);
         self.slots.push(Slot {
             path: path.to_path_buf(),
+            hash,
             value: None,
             origins: Vec::new(),
         });
+        let slots = &self.slots;
+        self.ids
+            .insert_unique(hash, id, |id| slots[id.index()].hash);
         id
     }
 
@@ -203,6 +270,10 @@ impl<V> FileTable<V> {
     }
 }
 
+fn hash_of(path: &Path) -> u64 {
+    PathHasher::of(path).finish()
+}
+
 /// `table[&path]`, for a file that is held.
 impl<V> std::ops::Index<&PathBuf> for FileTable<V> {
     type Output = V;
@@ -297,7 +368,8 @@ mod tests {
             Path::new("/c"),
             Path::new("/b"),
         ];
-        let (mut table, numbers): (FileTable<u32>, _) = FileTable::with_paths(paths.into_iter());
+        let (mut table, numbers): (FileTable<u32>, _) =
+            FileTable::with_paths(paths.into_iter().map(|path| (path, None)));
         assert_eq!(numbers[0], numbers[2]);
         assert_ne!(numbers[0], numbers[1]);
         assert_ne!(numbers[1], numbers[3]);
@@ -309,5 +381,47 @@ mod tests {
         assert_eq!(table.insert_at(numbers[1], 7), None);
         assert_eq!(table.get(Path::new("/a")), Some(&7));
         assert_eq!(table.id_for(Path::new("/b")), numbers[3]);
+    }
+
+    #[test]
+    fn a_path_spelled_another_way_that_compares_equal_has_the_same_number() {
+        let mut table: FileTable<u32> = FileTable::default();
+        let id = table.id_for(Path::new("a/b/c.php"));
+        assert_eq!(table.id_for(Path::new("a//b/./c.php")), id);
+        assert_eq!(table.id_of(Path::new("a/b/c.php/")), Some(id));
+        assert_ne!(table.id_for(Path::new("./a/b/c.php")), id);
+        assert_ne!(table.id_for(Path::new("a/b/../b/c.php")), id);
+    }
+
+    #[test]
+    fn a_hash_built_down_a_walk_is_the_hash_of_the_path() {
+        let hash = |path: &str| PathHasher::of(Path::new(path)).finish();
+        let built = |root: &str, names: &[&str]| {
+            let mut hasher = PathHasher::of(Path::new(root));
+            for name in names {
+                hasher = hasher.child(OsStr::new(name));
+            }
+            hasher.finish()
+        };
+        assert_eq!(built("src", &["a", "b.php"]), hash("src/a/b.php"));
+        assert_eq!(built(".", &["a.php"]), hash("./a.php"));
+        assert_eq!(built("", &["a.php"]), hash("a.php"));
+        assert_eq!(built("/w", &["x", "y"]), hash("/w/x/y"));
+        assert_eq!(built("a/../b", &["c"]), hash("a/../b/c"));
+        assert_ne!(hash("a/b"), hash("ab"));
+        assert_ne!(hash("a/b"), hash("a/../b"));
+    }
+
+    #[test]
+    fn a_table_that_grows_finds_every_path_it_numbered() {
+        let mut table: FileTable<u32> = FileTable::default();
+        let paths: Vec<PathBuf> = (0..500)
+            .map(|i| PathBuf::from(format!("/d{}/f{i}.php", i % 7)))
+            .collect();
+        let ids: Vec<FileId> = paths.iter().map(|path| table.id_for(path)).collect();
+        for (path, id) in paths.iter().zip(&ids) {
+            assert_eq!(table.id_of(path), Some(*id));
+            assert_eq!(table.path(*id), path);
+        }
     }
 }

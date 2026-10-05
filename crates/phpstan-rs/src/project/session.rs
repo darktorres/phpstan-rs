@@ -173,6 +173,8 @@ impl LoadStates {
 /// A file listed, with its parse where the walk that listed it made it.
 struct Walked {
     path: PathBuf,
+    /// The hash of the path in a `FileTable`, where the walk built it.
+    hash: Option<u64>,
     read: Option<Read>,
 }
 
@@ -240,7 +242,11 @@ fn paths_of(walked: Vec<Walked>) -> Vec<PathBuf> {
 
 impl Walked {
     fn bare(path: PathBuf) -> Self {
-        Walked { path, read: None }
+        Walked {
+            path,
+            hash: None,
+            read: None,
+        }
     }
 }
 
@@ -1247,7 +1253,11 @@ impl Session {
             .files(&walked, dir)
         });
         let start = out.len();
-        out.extend(found.into_iter().map(|(path, read)| Walked { path, read }));
+        out.extend(found.into_iter().map(|(path, hash, read)| Walked {
+            path,
+            hash: Some(hash),
+            read,
+        }));
         if self.overlay.is_empty() {
             return;
         }
@@ -1926,11 +1936,15 @@ impl Session {
         let pool = &self.pool;
         let shared: &Project = project;
         let context_len = context.len();
-        let (combined_files, reads): (Vec<PathBuf>, Vec<Option<Read>>) = context
-            .into_iter()
-            .chain(analyze)
-            .map(|walked| (walked.path, walked.read))
-            .unzip();
+        let total = context_len + analyze.len();
+        let mut combined_files = Vec::with_capacity(total);
+        let mut hashes = Vec::with_capacity(total);
+        let mut reads = Vec::with_capacity(total);
+        for walked in context.into_iter().chain(analyze) {
+            combined_files.push(walked.path);
+            hashes.push(walked.hash);
+            reads.push(walked.read);
+        }
         let context_files = &combined_files[..context_len];
         let analyze_files = &combined_files[context_len..];
         let parse = Parse {
@@ -1954,7 +1968,10 @@ impl Session {
                 },
                 || {
                     super::file_table::FileTable::with_paths(
-                        combined_files.iter().map(|p| p.as_path()),
+                        combined_files
+                            .iter()
+                            .zip(&hashes)
+                            .map(|(path, hash)| (path.as_path(), *hash)),
                     )
                 },
             )
