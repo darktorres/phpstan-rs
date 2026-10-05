@@ -1,0 +1,5 @@
+# The configure options a version cannot take, from-version to
+# to-version inclusive, with why. A bundled extension left out here is
+# read by no catalog on those versions, so its builtins run anything.
+#from	to	option	why
+7.0	7.3	--with-recode	configure refuses it beside --with-imap

@@ -2,7 +2,7 @@
 resolver = "3"
 members = ["crates/*", "tools/*", "xtask"]
 default-members = ["crates/phpstan-rs"]
-exclude = ["fuzz", "tools/builtin-runs", "tools/php-comparison-matrix", "tools/phpunit-comparator-matrix"]
+exclude = ["fuzz", "tools/builtin-runs", "tools/php-comparison-matrix", "tools/php-images", "tools/phpunit-comparator-matrix"]
 
 [workspace.package]
 version = "0.1.0"

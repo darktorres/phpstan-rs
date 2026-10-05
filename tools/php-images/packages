@@ -1,0 +1,91 @@
+# The Debian packages the build installs: every one the image's release
+# has, the rest listed in the build's report. Names differ between
+# releases, so a library may appear under each of its names.
+
+# tools
+bison
+file
+flex
+
+# libxml, dom, simplexml, xml, xmlreader, xmlwriter, soap, wddx, xmlrpc
+libxml2-dev
+# openssl, ftp
+libssl-dev
+# curl
+libcurl4-openssl-dev
+# zlib
+zlib1g-dev
+# bz2
+libbz2-dev
+# gd
+libavif-dev
+libfreetype-dev
+libfreetype6-dev
+libjpeg-dev
+libpng-dev
+libwebp-dev
+libxpm-dev
+# gmp
+libgmp-dev
+# intl
+libicu-dev
+# ldap
+libldap-dev
+libldap2-dev
+libsasl2-dev
+# mbstring
+libonig-dev
+# pgsql, pdo_pgsql
+libpq-dev
+# pdo_firebird, interbase
+firebird-dev
+# pdo_dblib
+freetds-dev
+# odbc, pdo_odbc
+unixodbc-dev
+# snmp
+libsnmp-dev
+# tidy
+libtidy-dev
+# xsl
+libxslt1-dev
+# zip
+libzip-dev
+# imap
+libc-client2007e-dev
+libkrb5-dev
+# pspell
+libpspell-dev
+# enchant
+libenchant-2-dev
+libenchant-dev
+# sodium
+libsodium-dev
+# password_hash's argon2
+libargon2-0-dev
+libargon2-dev
+# ffi
+libffi-dev
+# readline
+libreadline-dev
+# sqlite3, pdo_sqlite
+libsqlite3-dev
+# dba
+libdb-dev
+libgdbm-dev
+liblmdb-dev
+libtokyocabinet-dev
+# session's mm handler
+libmm-dev
+# fpm
+libacl1-dev
+libapparmor-dev
+libselinux1-dev
+libsystemd-dev
+# apache2handler
+apache2-bin
+apache2-dev
+# mcrypt
+libmcrypt-dev
+# recode
+librecode-dev

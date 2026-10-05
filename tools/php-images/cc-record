@@ -1,0 +1,26 @@
+#!/bin/bash
+# Runs gcc (g++ when called as c++-record), first recording the command in
+# /var/lib/compile-commands when it compiles a source file: the working
+# directory, the compiler, then each argument, each ended by a NUL. Configure's test
+# programs are not recorded.
+case "$0" in
+    *c++-record) compiler=g++ ;;
+    *) compiler=gcc ;;
+esac
+
+compiles=
+for arg; do
+    case "$arg" in
+        conftest.* | */conftest.*) exec "$compiler" "$@" ;;
+        -c) compiles=1 ;;
+    esac
+done
+
+if [ -n "$compiles" ]; then
+    record=$(mktemp /var/lib/compile-commands/XXXXXXXXXX)
+    {
+        printf '%s\0' "$PWD" "$compiler"
+        for arg; do printf '%s\0' "$arg"; done
+    } > "$record"
+fi
+exec "$compiler" "$@"
