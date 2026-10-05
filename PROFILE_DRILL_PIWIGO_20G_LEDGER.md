@@ -123,7 +123,7 @@ Building started on 2026-10-03 (`WORK_STACK.md`, level 8).
 | 2.4 | Parsing as listed | Each directory's PHP files go to the pool as one task, with the thread's name cache owned by the load | 2.2 | perf | DONE (61eb2aea) |
 | 2.5 | Order without comparisons | Keyed by root index and entry index path; explicit files placed by binary search | 2.2 | perf | DONE (8d6a828d) |
 | 2.6 | A path stored once | `FileTable` as a `HashTable<FileId>` using the walk's hash | 2.3 | perf | DONE (553c1ddc) |
-| 2.7 | Allocations | `installed.json` and manifests deserialized typed; `eval_concat` into one buffer; `ignore_errors` matched by the walk's text | — | perf | OPEN |
+| 2.7 | Allocations | `installed.json` and manifests deserialized typed; `eval_concat` into one buffer; `ignore_errors` matched by the walk's text | — | perf | DONE (745401bb) |
 | 2.V | §11 | Validation against item 1's dumps | 2.7 | val | OPEN |
 | **3** | **item 3** | **Context trees dropped on the worker** | | | |
 | 3.1 | keep / drop | `keeps_tree(role, open)` in the load and in `update_file`; one state shape for a context file, the cached one | 1.4 | perf | OPEN |
