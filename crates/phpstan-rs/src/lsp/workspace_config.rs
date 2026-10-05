@@ -9,7 +9,7 @@ use config::{ConfigFile, Schema};
 
 use crate::project::ProjectSettings;
 use crate::project::session::{
-    FileSet, Overrides, Policy, Session, SessionSettings, configured_cutoff,
+    FileSet, Finalize, Overrides, Policy, Session, SessionSettings, configured_cutoff,
 };
 
 /// Everything a workspace's configuration resolves into that the server
@@ -24,11 +24,9 @@ pub(crate) struct ResolvedWorkspaceConfig {
     pub(crate) settings: ProjectSettings,
     /// What decides which files the workspace loads.
     pub(crate) file_set: FileSet,
-    /// Which findings are published: every rule's, with no level
+    /// Which findings are published, and how: every rule's, with no level
     /// configured.
-    pub(crate) level_cutoff: diagnostics::LevelCutoff,
-    pub(crate) baseline: Option<crate::baseline::Baseline>,
-    pub(crate) ignore_error_entries: Vec<crate::ignore_errors::IgnoreErrorEntry>,
+    pub(crate) finalize: Finalize,
     /// What was wrong in the configuration and was taken as unset.
     pub(crate) problems: Vec<String>,
 }
@@ -106,9 +104,11 @@ pub(crate) fn open(
     let config = ResolvedWorkspaceConfig {
         settings: session.settings().clone(),
         file_set: session.file_set(),
-        level_cutoff: configured_cutoff(settings.level, u8::MAX),
-        baseline,
-        ignore_error_entries: settings.ignore_errors.clone(),
+        finalize: Finalize {
+            cutoff: configured_cutoff(settings.level, u8::MAX),
+            baseline,
+            ..session.finalize_options()
+        },
         problems,
     };
     Workspace { session, config }

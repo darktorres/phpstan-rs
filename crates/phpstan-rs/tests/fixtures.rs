@@ -141,7 +141,7 @@ fn run_fixture(name: &str, expect_file: &Path, pool: Arc<rayon::ThreadPool>) -> 
     let single_file = stem.with_extension("php").is_file();
     let dump = std::env::var_os("PHPSTAN_RS_DUMP_TYPES")
         .map(|dir| PathBuf::from(dir).join(name.replace('/', "__")));
-    let analysis = session.run(phpstan_rs::project::Records {
+    let mut analysis = session.run(phpstan_rs::project::Records {
         types: dump.is_some(),
         expr_types: false,
         doc_resolutions: false,

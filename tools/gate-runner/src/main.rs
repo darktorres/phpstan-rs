@@ -297,7 +297,7 @@ fn write_view(
         phpstan_rs::project::session::Finalize,
     ) -> phpstan_rs::project::session::Finalize,
 ) -> Result<phpstan_rs::project::session::Report, String> {
-    let report = analysis.finalize(&adjust(run.finalize_options(None)));
+    let report = analysis.finalize_copy(&adjust(run.finalize_options(None)));
     let mut err = String::new();
     for line in notices.iter().chain(&report.notices()) {
         err.push_str(line);

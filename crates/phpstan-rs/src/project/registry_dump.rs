@@ -72,7 +72,6 @@ fn print_registry_dump(
         working_dir,
         absolute_root,
         packages,
-        defer_inline_ignores,
         retain_source,
         built_once,
         finished,
@@ -138,7 +137,6 @@ fn print_registry_dump(
             &[
                 ("working_dir", working_dir),
                 ("absolute_root", absolute_root),
-                ("defer_inline_ignores", defer_inline_ignores),
                 ("retain_source", retain_source),
                 ("built_once", built_once),
                 ("finished", finished),

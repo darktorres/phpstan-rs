@@ -165,10 +165,11 @@ pub(crate) struct Added {
 
 /// What one run's analysis produced, before post-processing: every
 /// check's diagnostics, and the project they came from, which
-/// `finalize` needs for inline ignores. Finalizing doesn't consume it,
-/// so one analysis can be finalized several ways.
+/// `finalize` needs for inline ignores. Finalizing moves the findings into
+/// the report, so an analysis is finalized once.
 pub struct AnalysisResult {
     project: Project,
+    finalized: bool,
     /// Per-file diagnostics as the checks emitted them, and a parse error
     /// for each analysed file that does not parse.
     results: FxHashMap<PathBuf, Vec<Diagnostic>>,
@@ -200,13 +201,77 @@ pub struct AnalysisResult {
 
 /// The post-processing a finalized report gets, in this order: the level
 /// cutoff, inline ignores, `ignore_errors`, the baseline, then the order.
-#[derive(Clone)]
+#[derive(Clone, PartialEq)]
 pub struct Finalize {
     pub cutoff: LevelCutoff,
     pub report_unmatched_ignores: bool,
     pub ignore_errors: Vec<ignore_errors::IgnoreErrorEntry>,
     pub baseline: Option<crate::baseline::Baseline>,
     pub order: DiagnosticOrder,
+    /// The directory `ignore_errors` and the baseline match a path from.
+    pub root: PathBuf,
+}
+
+impl Finalize {
+    /// Post-processes `results` in place, the diagnostics of the files of
+    /// `project`: the cutoff, inline ignores, `ignore_errors`, the baseline,
+    /// then the order. Gives the baseline's entries that matched no
+    /// diagnostic, which are the whole report's only when `results` is.
+    pub fn apply(
+        &self,
+        project: &Project,
+        results: &mut FxHashMap<PathBuf, Vec<Diagnostic>>,
+    ) -> Vec<String> {
+        for diagnostics in results.values_mut() {
+            diagnostics.retain(|d| self.cutoff.reports(d));
+        }
+        project.apply_inline_ignores(results, self.report_unmatched_ignores);
+        let stale = self.filter_by_path(results);
+        if self.order == DiagnosticOrder::Sorted {
+            for diagnostics in results.values_mut() {
+                diagnostics::sort_diagnostics(diagnostics);
+            }
+        }
+        stale
+    }
+
+    /// `ignore_errors` and the baseline, which match a path from the root:
+    /// a path under the root, spelled absolutely, is matched as spelled
+    /// from it.
+    fn filter_by_path(&self, results: &mut FxHashMap<PathBuf, Vec<Diagnostic>>) -> Vec<String> {
+        if self.ignore_errors.is_empty() && self.baseline.is_none() {
+            return Vec::new();
+        }
+        let from_root = |path: &Path| {
+            path.strip_prefix(&self.root)
+                .map_or_else(|_| path.to_path_buf(), Path::to_path_buf)
+        };
+        let rooted = results
+            .keys()
+            .any(|path| path.is_absolute() && path.starts_with(&self.root));
+        let mut spelled: FxHashMap<PathBuf, PathBuf> = FxHashMap::default();
+        if rooted {
+            let mut relative = FxHashMap::default();
+            for (path, diagnostics) in results.drain() {
+                let key = from_root(&path);
+                spelled.insert(key.clone(), path);
+                relative.insert(key, diagnostics);
+            }
+            *results = relative;
+        }
+        ignore_errors::filter(results, &self.ignore_errors);
+        let stale = match &self.baseline {
+            Some(baseline) => crate::baseline::filter(results, baseline),
+            None => Vec::new(),
+        };
+        if rooted {
+            *results = results
+                .drain()
+                .map(|(key, diagnostics)| (spelled.remove(&key).unwrap_or(key), diagnostics))
+                .collect();
+        }
+        stale
+    }
 }
 
 /// How each file's diagnostics are ordered in a report.
@@ -273,30 +338,33 @@ impl AnalysisResult {
     }
 
     /// The report `options` make of this analysis: each file's diagnostics
-    /// followed by the whole-program checks' about it.
-    pub fn finalize(&self, options: &Finalize) -> Report {
-        let mut results = self.results.clone();
-        for (path, diagnostics) in &self.whole_program {
-            results
-                .entry(path.clone())
-                .or_default()
-                .extend(diagnostics.iter().cloned());
+    /// followed by the whole-program checks' about it. The findings move
+    /// into the report.
+    pub fn finalize(&mut self, options: &Finalize) -> Report {
+        assert!(!self.finalized, "an analysis is finalized once");
+        self.finalized = true;
+        let results = std::mem::take(&mut self.results);
+        let whole_program = std::mem::take(&mut self.whole_program);
+        self.report(results, whole_program, options)
+    }
+
+    /// `finalize` that keeps the findings, for the views of one analysis
+    /// that are more than one.
+    pub fn finalize_copy(&self, options: &Finalize) -> Report {
+        assert!(!self.finalized, "an analysis is finalized once");
+        self.report(self.results.clone(), self.whole_program.clone(), options)
+    }
+
+    fn report(
+        &self,
+        mut results: FxHashMap<PathBuf, Vec<Diagnostic>>,
+        whole_program: FxHashMap<PathBuf, Vec<Diagnostic>>,
+        options: &Finalize,
+    ) -> Report {
+        for (path, diagnostics) in whole_program {
+            results.entry(path).or_default().extend(diagnostics);
         }
-        for diagnostics in results.values_mut() {
-            diagnostics.retain(|d| options.cutoff.reports(d));
-        }
-        self.project
-            .apply_inline_ignores(&mut results, options.report_unmatched_ignores);
-        ignore_errors::filter(&mut results, &options.ignore_errors);
-        let stale_baseline_entries = match &options.baseline {
-            Some(baseline) => crate::baseline::filter(&mut results, baseline),
-            None => Vec::new(),
-        };
-        if options.order == DiagnosticOrder::Sorted {
-            for diagnostics in results.values_mut() {
-                diagnostics::sort_diagnostics(diagnostics);
-            }
-        }
+        let stale_baseline_entries = options.apply(&self.project, &mut results);
         Report {
             results,
             stale_baseline_entries,
@@ -661,7 +729,6 @@ impl Session {
             packages: composer::PackageIndex::new(composer_manifests),
             php_versions,
             phpstan_api_check_enabled,
-            defer_inline_ignores: true,
             retain_source: false,
             built_once: true,
             rules,
@@ -771,6 +838,7 @@ impl Session {
             } else {
                 DiagnosticOrder::Sorted
             },
+            root: self.root.clone(),
         }
     }
 
@@ -779,7 +847,6 @@ impl Session {
     pub fn for_editing(mut self) -> Self {
         self.settings.retain_source = true;
         self.settings.built_once = false;
-        self.settings.defer_inline_ignores = false;
         self
     }
 
@@ -1682,6 +1749,7 @@ impl Session {
         crate::heap::check_finished();
         AnalysisResult {
             project,
+            finalized: false,
             results,
             whole_program,
             checked: analyze_files_by_size.len() - skipped_analyze - check_panics.len(),

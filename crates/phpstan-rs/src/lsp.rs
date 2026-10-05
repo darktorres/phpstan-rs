@@ -49,7 +49,6 @@ use crate::project::source::ContentHash;
 use crate::project::use_sites;
 use crate::project::{Project, ProjectSettings};
 use crate::registry::{FunctionReflection, format_signature, param_label};
-use crate::{baseline, ignore_errors};
 use syntax::ast::ClassKind;
 use syntax::span::{LineIndex, Span, Unit};
 use types::Type;
@@ -238,20 +237,14 @@ struct Server {
     // Every workspace folder root already loaded - `add_workspace_folders`/
     // `remove_workspace_folders` dedup/filter against this.
     workspace_roots: Vec<PathBuf>,
-    // The most recently configured workspace root, kept around so
-    // `apply_post_filters` can rewrite a diagnostic's path to root-
-    // relative before consulting `ignore_error_entries`/`baseline` - see
+    // The most recently configured workspace root - see
     // `configure_from_workspace`. With more than one workspace folder,
-    // this (and `baseline`/`ignore_error_entries`/`level_cutoff` below)
-    // are last-root-wins: `Project`/`Registry` have no per-root config
+    // this and the configuration applied (`last_applied_config`) are
+    // last-root-wins: `Project`/`Registry` have no per-root config
     // scoping today, matching 1.1's own already-accepted single-
     // workspace-config limitation, generalized rather than newly
     // introduced here.
     root: Option<PathBuf>,
-    baseline: Option<crate::baseline::Baseline>,
-    ignore_error_entries: Vec<crate::ignore_errors::IgnoreErrorEntry>,
-    // Which levels' findings are published.
-    level_cutoff: diagnostics::LevelCutoff,
     // A `phpstan-rs.configPath` setting override, applied on top of
     // `root`'s own default `phpstan-rs.toml` lookup by every subsequent
     // `configure_from_workspace`/`reload_configuration` call. `None`
@@ -337,9 +330,6 @@ impl Server {
             pending_workspace_scan: None,
             workspace_roots: Vec::new(),
             root: None,
-            baseline: None,
-            ignore_error_entries: Vec::new(),
-            level_cutoff: crate::project::session::configured_cutoff(None, u8::MAX),
             config_path_override: None,
             enabled: true,
             supports_configuration_pull: false,
@@ -415,65 +405,28 @@ impl Server {
         resolved: workspace_config::ResolvedWorkspaceConfig,
     ) {
         self.root = Some(root.to_path_buf());
-        self.level_cutoff = resolved.level_cutoff;
-        self.baseline.clone_from(&resolved.baseline);
-        self.ignore_error_entries
-            .clone_from(&resolved.ignore_error_entries);
         self.last_applied_config = Some(resolved);
     }
 
-    /// Applies the same level cutoff / `ignore_errors` / baseline
-    /// post-filters `check-project` applies (in that order) to `findings`,
-    /// but scoped to whatever partial result set `update_file`'s own
-    /// transitive-dependents pass just produced. Never surfaces
-    /// `baseline::filter`'s stale-entry report here: its staleness
-    /// detection assumes it's run against the whole project's
-    /// diagnostics at once, and treating every other baselined file as
-    /// "no longer matches" on every keystroke would be a constant
-    /// false-positive warning storm. `ignore_errors`/`baseline` both
-    /// match against a root-relative path string, so results are
-    /// rewritten to root-relative and back around each - a reasonable
-    /// default, not a provable-correct one, for either.
+    /// Finalizes `findings` as `check-project` finalizes its own (`Finalize`),
+    /// scoped to whatever partial result set `update_file`'s own
+    /// transitive-dependents pass just produced. Never surfaces the
+    /// baseline's stale-entry report here: its staleness detection assumes
+    /// it's run against the whole project's diagnostics at once, and
+    /// treating every other baselined file as "no longer matches" on every
+    /// keystroke would be a constant false-positive warning storm.
     fn apply_post_filters<'d>(
         &self,
         findings: impl IntoIterator<Item = (&'d PathBuf, &'d Vec<diagnostics::Diagnostic>)>,
     ) -> FxHashMap<PathBuf, Vec<diagnostics::Diagnostic>> {
-        let results: FxHashMap<PathBuf, Vec<diagnostics::Diagnostic>> = findings
+        let mut results: FxHashMap<PathBuf, Vec<diagnostics::Diagnostic>> = findings
             .into_iter()
-            .map(|(path, found)| {
-                let shown = found
-                    .iter()
-                    .filter(|d| self.level_cutoff.reports(d))
-                    .cloned()
-                    .collect();
-                (path.clone(), shown)
-            })
+            .map(|(path, found)| (path.clone(), found.clone()))
             .collect();
-        if self.ignore_error_entries.is_empty() && self.baseline.is_none() {
-            return results;
+        if let Some(applied) = &self.last_applied_config {
+            applied.finalize.apply(&self.project, &mut results);
         }
-        let Some(root) = &self.root else {
-            return results;
-        };
-        let to_relative = |path: PathBuf| -> PathBuf {
-            path.strip_prefix(root)
-                .map(Path::to_path_buf)
-                .unwrap_or(path)
-        };
-        let mut relative: FxHashMap<PathBuf, Vec<diagnostics::Diagnostic>> = results
-            .into_iter()
-            .map(|(path, diags)| (to_relative(path), diags))
-            .collect();
-        if !self.ignore_error_entries.is_empty() {
-            ignore_errors::filter(&mut relative, &self.ignore_error_entries);
-        }
-        if let Some(baseline) = &self.baseline {
-            let _stale = baseline::filter(&mut relative, baseline);
-        }
-        relative
-            .into_iter()
-            .map(|(path, diags)| (root.join(path), diags))
-            .collect()
+        results
     }
 
     /// Takes `session` as the workspace's, reading the open documents in

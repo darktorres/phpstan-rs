@@ -226,7 +226,7 @@ pub(crate) fn run_check_project_command(args: CheckProjectArgs) {
         doc_resolutions: args.dump_doc_resolutions.is_some(),
     });
     std::panic::set_hook(default_hook);
-    let analysis = match analysis {
+    let mut analysis = match analysis {
         Ok(analysis) => analysis,
         Err(e) => {
             eprintln!("{e}");
@@ -258,7 +258,7 @@ pub(crate) fn run_check_project_command(args: CheckProjectArgs) {
     }
     report(
         &run,
-        &analysis,
+        &mut analysis,
         args.generate_baseline.as_deref(),
         args.fix,
         args.format.unwrap_or_default(),
@@ -271,7 +271,7 @@ pub(crate) fn run_check_project_command(args: CheckProjectArgs) {
 
 fn report(
     run: &CheckRun,
-    analysis: &AnalysisResult,
+    analysis: &mut AnalysisResult,
     generate_baseline_path: Option<&Path>,
     apply_fixes: bool,
     format: OutputFormat,
@@ -283,13 +283,14 @@ fn report(
         context_loaded,
         check_panics,
         ..
-    } = analysis;
+    } = &*analysis;
     let (checked, skipped_analyze, skipped_context, context_loaded) = (
         *checked,
         *skipped_analyze,
         *skipped_context,
         *context_loaded,
     );
+    let check_panics = check_panics.clone();
     let baseline_per_identifier = run.baseline_per_identifier;
     if let Some(generate_baseline_path) = generate_baseline_path {
         let results = analysis.finalize(&run.finalize_options(None)).results;
@@ -389,7 +390,7 @@ fn report(
                     }
                 }
             }
-            for (path, msg) in check_panics {
+            for (path, msg) in &check_panics {
                 println!("{}: internal error while checking: {msg}", path.display());
             }
             let mut summary = format!("\n{checked} file(s) checked, {total} diagnostic(s)");

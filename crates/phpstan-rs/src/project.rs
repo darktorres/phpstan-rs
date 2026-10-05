@@ -288,9 +288,6 @@ pub struct Project {
     packages: composer::PackageIndex,
     // What the checks are configured with (`apply_settings`).
     settings: CheckSettings,
-    // When set, per-file and whole-program checks leave inline
-    // `@phpstan-ignore*` suppression to `apply_inline_ignores`.
-    defer_inline_ignores: bool,
     // Whether a load and `update_file` keep each file's own raw source
     // text around in its `FileState` (see that field's own doc comment) -
     // off by default. Only `lsp.rs`'s `Server` turns this on:
@@ -571,9 +568,6 @@ pub struct ProjectSettings {
     /// Whether the project consumes PHPStan as a library, which the
     /// PHPStan-API rules apply to.
     pub phpstan_api_check_enabled: bool,
-    /// Leaves inline `@phpstan-ignore*` suppression to
-    /// `apply_inline_ignores`.
-    pub defer_inline_ignores: bool,
     /// Keeps each file's source text (the language server's hover and
     /// definition need it).
     pub retain_source: bool,
@@ -757,7 +751,6 @@ impl Project {
             roles: roles::FileRoles::default(),
             packages: composer::PackageIndex::default(),
             settings: CheckSettings::default(),
-            defer_inline_ignores: false,
             retain_source: false,
             built_once: false,
             finished: false,
@@ -786,7 +779,6 @@ impl Project {
             packages,
             php_versions,
             phpstan_api_check_enabled,
-            defer_inline_ignores,
             retain_source,
             built_once,
             rules,
@@ -809,7 +801,6 @@ impl Project {
         self.working_dir = working_dir;
         self.absolute_root = absolute_root;
         self.roles = roles;
-        self.defer_inline_ignores = defer_inline_ignores;
         self.retain_source = retain_source;
         self.built_once = built_once;
 
@@ -913,41 +904,40 @@ impl Project {
             .map_or(1, |file| file.line_index.line(offset))
     }
 
-    /// Applies every analyzed file's inline ignore comments to `results`
-    /// and, with `report_unmatched`, reports each ignore that suppressed
-    /// nothing (`ignore.unmatchedLine`/`ignore.unmatchedIdentifier`),
-    /// except inside a trait, whose diagnostics depend on its users.
+    /// Applies the inline ignore comments of every analysed file `results`
+    /// holds to its diagnostics and, with `report_unmatched`, reports each
+    /// ignore that suppressed nothing (`ignore.unmatchedLine`/
+    /// `ignore.unmatchedIdentifier`), except inside a trait, whose
+    /// diagnostics depend on its users.
     pub fn apply_inline_ignores(
         &self,
         results: &mut FxHashMap<PathBuf, Vec<Diagnostic>>,
         report_unmatched: bool,
     ) {
-        for (path, file) in &self.files {
-            if !file.analyzed {
+        for (path, diagnostics) in results.iter_mut() {
+            let Some(file) = self.files.get(path).filter(|file| file.analyzed) else {
                 continue;
-            }
+            };
             let ignores = &file.ignores;
             let mut matched_lines: FxHashSet<u32> = FxHashSet::default();
             let mut matched_ids: FxHashSet<(u32, &str)> = FxHashSet::default();
-            if let Some(diagnostics) = results.get_mut(path) {
-                diagnostics.retain(|d| {
-                    if d.non_ignorable {
-                        return true;
-                    }
-                    let line = d.span.start.line;
-                    if ignores.lines.contains(&line) {
-                        matched_lines.insert(line);
-                        return false;
-                    }
-                    if let Some(ids) = ignores.identifiers.get(&line)
-                        && let Some(id) = ids.iter().find(|id| ***id == *d.identifier)
-                    {
-                        matched_ids.insert((line, id.as_str()));
-                        return false;
-                    }
-                    true
-                });
-            }
+            diagnostics.retain(|d| {
+                if d.non_ignorable {
+                    return true;
+                }
+                let line = d.span.start.line;
+                if ignores.lines.contains(&line) {
+                    matched_lines.insert(line);
+                    return false;
+                }
+                if let Some(ids) = ignores.identifiers.get(&line)
+                    && let Some(id) = ids.iter().find(|id| ***id == *d.identifier)
+                {
+                    matched_ids.insert((line, id.as_str()));
+                    return false;
+                }
+                true
+            });
             if !report_unmatched {
                 continue;
             }
@@ -985,9 +975,8 @@ impl Project {
                 }
             }
             if !unmatched.is_empty() {
-                let entry = results.entry(path.clone()).or_default();
-                entry.extend(unmatched);
-                entry.sort_by(|a, b| {
+                diagnostics.extend(unmatched);
+                diagnostics.sort_by(|a, b| {
                     (a.span.start.line, a.span.start.col, &a.message).cmp(&(
                         b.span.start.line,
                         b.span.start.col,
@@ -2578,7 +2567,7 @@ impl Project {
     }
 
     /// `path`'s checker `diagnostics` with the project-level ones added,
-    /// sorted, and its inline ignore comments applied.
+    /// sorted.
     fn finish_diagnostics(&self, path: &Path, mut diagnostics: Vec<Diagnostic>) -> Vec<Diagnostic> {
         let Some(file) = self.files.get(path) else {
             return diagnostics;
@@ -2627,29 +2616,6 @@ impl Project {
             // consistent, fully span-ordered list regardless of whether
             // this gate is on.
             diagnostics.sort_by_key(|d| (d.span.start.line, d.span.start.col));
-        }
-        // `@phpstan-ignore-line`/`-next-line` - `non_ignorable`
-        // diagnostics are exempt, mirroring real PHPStan's own identical
-        // exemption (reserved for a handful of its own rules, e.g.
-        // flagging a malformed `@phpstan-ignore` comment itself -
-        // nonsensical to let another ignore comment suppress).
-        if !self.defer_inline_ignores && !file.ignores.lines.is_empty() {
-            diagnostics
-                .retain(|d| d.non_ignorable || !file.ignores.lines.contains(&d.span.start.line));
-        }
-        // The fuller bare `@phpstan-ignore <identifier list>` form -
-        // unlike the two line markers above, this only suppresses a
-        // diagnostic whose own `identifier` exactly matches one named on
-        // that line.
-        if !self.defer_inline_ignores && !file.ignores.identifiers.is_empty() {
-            diagnostics.retain(|d| {
-                d.non_ignorable
-                    || !file
-                        .ignores
-                        .identifiers
-                        .get(&d.span.start.line)
-                        .is_some_and(|ids| ids.iter().any(|id| **id == *d.identifier))
-            });
         }
         diagnostics
     }
@@ -2752,19 +2718,12 @@ impl Project {
         self.check_paths(&self.files.keys().cloned().collect::<Vec<_>>(), pool)
     }
 
-    /// Resolves one whole-program finding's own reportable location and
-    /// applies the same two things every per-file diagnostic already
-    /// gets for free, that a diagnostic built entirely outside
-    /// `check_files` would otherwise never see at all: "only report
-    /// first-party files, never vendor/context ones swept in only
-    /// because the registry records every loaded file's declarations, analyzed or
-    /// not" (a real bug on an earlier pass of this exact method - a
-    /// vendor-only dead enum case used to create a brand new, never-
-    /// otherwise-checked entry in `check-project`'s own `results` map),
-    /// and `@phpstan-ignore-line`/`-next-line`/`@phpstan-ignore
-    /// <identifiers>` suppression (`finish_diagnostics`' own identical
-    /// `retain` calls only ever see the per-file diagnostics). `None` for an unloaded/context path, or one whose own
-    /// ignore-comment already covers `identifier` on `span`'s line.
+    /// Resolves one whole-program finding's own reportable location: only
+    /// first-party files report, never vendor/context ones swept in only
+    /// because the registry records every loaded file's declarations,
+    /// analysed or not (a vendor-only dead enum case used to create a brand
+    /// new, never-otherwise-checked entry in `check-project`'s own `results`
+    /// map). `None` for an unloaded or context path.
     fn whole_program_diagnostic(
         &self,
         path: &Path,
@@ -2774,17 +2733,6 @@ impl Project {
     ) -> Option<Diagnostic> {
         let file = self.files.get(path)?;
         if !file.analyzed {
-            return None;
-        }
-        let line = file.line_index.line(span.start);
-        if !self.defer_inline_ignores && file.ignores.lines.contains(&line)
-            || !self.defer_inline_ignores
-                && file
-                    .ignores
-                    .identifiers
-                    .get(&line)
-                    .is_some_and(|ids| ids.iter().any(|id| id == identifier))
-        {
             return None;
         }
         Some(DiagnosticBuilder::new(message, span, 5, identifier).build(&file.line_index))
