@@ -5,12 +5,17 @@
 mod ast;
 mod cfg;
 mod clang;
+mod externals;
 mod ir;
 mod layout;
+mod libraries;
 mod lower;
 mod print;
 mod program;
+mod pta;
 mod registry;
+mod store;
+mod types;
 
 use std::collections::BTreeMap;
 use std::path::PathBuf;
@@ -26,8 +31,10 @@ use crate::clang::{Dump, Export, Platform, Unit};
 use crate::ir::Function;
 use crate::lower::{TuIndex, catalog_path, has_body, is_static, lower_function, lower_global};
 use crate::program::{Program, UnitPart};
+use crate::store::Store;
 
-/// Each worker's stack: the dump's trees are read and lowered recursively.
+/// Each thread's stack: the dump's trees are read and lowered, and the
+/// functions' code walked, recursively.
 const STACK_SIZE: usize = 1 << 30;
 
 struct Options {
@@ -42,11 +49,26 @@ struct Options {
     commands: bool,
     /// Where the catalog's files are written.
     out: Option<PathBuf>,
+    /// The store's directory: by default `store` beside the export.
+    store: Option<PathBuf>,
+    /// The name the program the units make is stored under, once read.
+    save_program: Option<String>,
+    /// The name of a program stored before, read in place of the units:
+    /// one the same build of the tool stored from the same export.
+    load_program: Option<String>,
+    /// The most memory the analysis may take, in bytes, past which it
+    /// stops; none for no limit.
+    memory_cap: Option<u64>,
+    /// The objects whose paths to the nodes holding them the report
+    /// traces, and the nodes it follows them into.
+    why: pta::Asked,
 }
 
 fn usage() -> String {
     "usage: php-catalog <export dir> [--jobs <n>] [--windows] [--only <file part>]... \
-     [--print <function>]... [--command] [--out <dir>]"
+     [--print <function>]... [--command] [--out <dir>] [--store <dir>] \
+     [--save-program <name>] [--load-program <name>] [--memory-cap <MiB>] [--why <object>]... [--why-into <call>]... \
+     [--why-at <node>]... [--blame <file>]"
         .to_owned()
 }
 
@@ -59,6 +81,11 @@ fn options() -> Result<Options, String> {
     let mut print = Vec::new();
     let mut commands = false;
     let mut out = None;
+    let mut store = None;
+    let mut save_program = None;
+    let mut load_program = None;
+    let mut memory_cap = None;
+    let mut why = pta::Asked::default();
     while let Some(arg) = args.next() {
         match arg.as_str() {
             "--jobs" => {
@@ -69,6 +96,17 @@ fn options() -> Result<Options, String> {
             "--print" => print.push(args.next().ok_or_else(usage)?),
             "--command" => commands = true,
             "--out" => out = Some(PathBuf::from(args.next().ok_or_else(usage)?)),
+            "--store" => store = Some(PathBuf::from(args.next().ok_or_else(usage)?)),
+            "--save-program" => save_program = Some(args.next().ok_or_else(usage)?),
+            "--load-program" => load_program = Some(args.next().ok_or_else(usage)?),
+            "--memory-cap" => {
+                let mib: u64 = args.next().and_then(|n| n.parse().ok()).ok_or_else(usage)?;
+                memory_cap = Some(mib << 20);
+            }
+            "--why" => why.objects.push(args.next().ok_or_else(usage)?),
+            "--why-into" => why.into.push(args.next().ok_or_else(usage)?),
+            "--why-at" => why.at.push(args.next().ok_or_else(usage)?),
+            "--blame" => why.blame = Some(PathBuf::from(args.next().ok_or_else(usage)?)),
             _ if arg.starts_with('-') => return Err(usage()),
             _ => export = Some(PathBuf::from(arg)),
         }
@@ -81,22 +119,31 @@ fn options() -> Result<Options, String> {
         print,
         commands,
         out,
+        store,
+        save_program,
+        load_program,
+        memory_cap,
+        why,
     })
 }
 
-/// The top-level declarations already read, by where they are: a
-/// declaration a header gives every unit is read from one.
+/// The top-level declarations already read, by where they are and their
+/// names: a declaration a header gives every unit is read from one, and
+/// the declarations one macro expansion makes are each read.
 #[derive(Default)]
 struct Claims {
-    taken: Mutex<FxHashSet<(Arc<str>, u32)>>,
+    taken: Mutex<FxHashSet<Claim>>,
 }
 
+/// A declaration's file, offset and name.
+type Claim = (Arc<str>, u32, Box<str>);
+
 impl Claims {
-    fn claim(&self, file: Arc<str>, offset: u32) -> bool {
+    fn claim(&self, file: Arc<str>, offset: u32, name: &str) -> bool {
         self.taken
             .lock()
             .expect("no worker panics holding it")
-            .insert((file, offset))
+            .insert((file, offset, name.into()))
     }
 }
 
@@ -125,7 +172,8 @@ impl TopLevel for Collector<'_> {
                         path
                     }
                 };
-                self.claims.claim(path, node.loc.offset)
+                self.claims
+                    .claim(path, node.loc.offset, node.name.as_deref().unwrap_or(""))
             }
             Kind::RecordDecl | Kind::EnumDecl => true,
             _ => false,
@@ -244,11 +292,29 @@ fn read_unit(export: &Export, unit: &Unit, claims: &Claims, platform: Platform) 
                     .globals
                     .push(lower_global(&mut index, node, name));
             }
+            Kind::VarDecl if node.storage_class.as_deref() == Some("extern") => {
+                let Some(name) = index.globals.get(&node.id).cloned() else {
+                    continue;
+                };
+                let file = index.node_path(node);
+                let ty = node.canonical_type().unwrap_or("int").to_owned();
+                let ty = index.ty(&ty);
+                result.part.declared_globals.push((name, file, ty));
+            }
+            Kind::VarDecl => {
+                if let Some(name) = index.globals.get(&node.id).cloned() {
+                    result.part.tentative.push(name);
+                }
+            }
             _ => {}
         }
     }
+    index.finish_layouts();
     result.part.layouts = std::mem::take(&mut index.layouts);
+    result.part.aliases = std::mem::take(&mut index.aliases);
+    result.part.record_files = std::mem::take(&mut index.record_files);
     result.part.typedefs = std::mem::take(&mut index.typedefs);
+    result.part.enums = std::mem::take(&mut index.enum_sizes);
     result.seconds = start.elapsed().as_secs_f64();
     result
 }
@@ -284,16 +350,48 @@ fn run(options: &Options) -> Result<(), String> {
         }
         return Ok(());
     }
+    let store_dir = match &options.store {
+        Some(dir) => dir.clone(),
+        None => options
+            .export
+            .parent()
+            .unwrap_or(std::path::Path::new("."))
+            .join("store"),
+    };
+    let store = Store::open(&store_dir)?;
+    let program = match &options.load_program {
+        Some(name) => {
+            let program: Program = store.load_named(name)?;
+            println!("program {name} read from {}", store_dir.display());
+            program
+        }
+        None => read_program(options, &export, &units, &store)?,
+    };
+    if let Some(name) = &options.save_program {
+        store.save_named(name, &program)?;
+    }
+    analyse(options, &program, &store)
+}
+
+/// Reads each unit and links the program, its functions' code in the
+/// store, printing what was read.
+fn read_program(
+    options: &Options,
+    export: &Export,
+    units: &[Unit],
+    store: &Store,
+) -> Result<Program, String> {
     let claims = Claims::default();
     let next = AtomicUsize::new(0);
     let start = Instant::now();
     let mut report = Report::default();
     let mut program = Program::default();
+    let mut stored = Ok(());
     std::thread::scope(|scope| {
         let (send, receive) = mpsc::channel();
         for _ in 0..options.jobs.min(units.len().max(1)) {
             let send = send.clone();
-            let (units, export, claims, next) = (&units, &export, &claims, &next);
+            let (claims, next) = (&claims, &next);
             std::thread::Builder::new()
                 .stack_size(STACK_SIZE)
                 .spawn_scoped(scope, move || {
@@ -311,12 +409,21 @@ fn run(options: &Options) -> Result<(), String> {
         drop(send);
         for result in receive {
             report.observe(&result, options);
-            program.add(result.part);
+            if stored.is_ok() {
+                stored = program.add(result.part, store);
+            }
         }
     });
+    stored?;
     program.finish();
-    report.print(&units, &program, start.elapsed().as_secs_f64());
-    let registry = registry::find(&program);
+    report.print(units, &program, start.elapsed().as_secs_f64());
+    Ok(program)
+}
+
+/// Finds what the program registers and where its pointers point, and
+/// writes the catalog's files.
+fn analyse(options: &Options, program: &Program, store: &Store) -> Result<(), String> {
+    let registry = registry::find(program, store)?;
     let methods: usize = registry.classes.values().map(|c| c.methods.len()).sum();
     println!(
         "registry: {} functions, {} classes, {methods} methods, {} arrays unregistered",
@@ -324,6 +431,19 @@ fn run(options: &Options) -> Result<(), String> {
         registry.classes.len(),
         registry.unregistered.len()
     );
+    let header_packages = options.export.join("header-packages.tsv");
+    let header_packages = std::fs::read_to_string(&header_packages)
+        .map_err(|e| format!("{}: {e}", header_packages.display()))?;
+    let libraries = libraries::Libraries::find(program, &header_packages);
+    let analysis = pta::analyse(
+        program,
+        store,
+        &libraries,
+        options.platform,
+        options.memory_cap,
+        options.why.clone(),
+    )?;
+    print!("{}", analysis.report);
     if let Some(out) = &options.out {
         std::fs::create_dir_all(out).map_err(|e| format!("{}: {e}", out.display()))?;
         let path = out.join("registrations.tsv");
@@ -529,7 +649,13 @@ fn main() -> ExitCode {
             return ExitCode::from(2);
         }
     };
-    match run(&options) {
+    let result = std::thread::Builder::new()
+        .stack_size(STACK_SIZE)
+        .spawn(move || run(&options))
+        .expect("spawning the main worker")
+        .join()
+        .unwrap_or_else(|_| Err("the main worker panicked".to_owned()));
+    match result {
         Ok(()) => ExitCode::SUCCESS,
         Err(e) => {
             eprintln!("{e}");

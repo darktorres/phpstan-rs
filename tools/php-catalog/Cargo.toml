@@ -10,9 +10,12 @@ name = "php-catalog"
 path = "src/main.rs"
 
 [dependencies]
+hashbrown.workspace = true
+postcard.workspace = true
 rustc-hash.workspace = true
 serde.workspace = true
 serde_json = { workspace = true, features = ["unbounded_depth"] }
+twox-hash.workspace = true
 
 [lints]
 workspace = true

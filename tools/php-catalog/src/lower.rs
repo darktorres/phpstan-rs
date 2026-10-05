@@ -42,10 +42,15 @@ pub(crate) struct TuIndex {
     record_counts: FxHashMap<Arc<str>, u32>,
     /// Each member's record and name, by its declaration.
     members: FxHashMap<u64, (Arc<str>, Arc<str>)>,
+    /// Each unnamed record's name by the typedef declared with it, for
+    /// the name the catalog gives the record (`alias_record`).
+    pub(crate) aliases: FxHashMap<Arc<str>, Arc<str>>,
+    /// The file defining each record the unit defines.
+    pub(crate) record_files: FxHashMap<Arc<str>, Arc<str>>,
     /// Each record's layout, as clang computed it for the unit.
     pub(crate) layouts: Layouts,
     /// Each enumeration's size, by its tag.
-    enum_sizes: FxHashMap<Arc<str>, u64>,
+    pub(crate) enum_sizes: FxHashMap<Arc<str>, u64>,
     platform: Platform,
 }
 
@@ -67,6 +72,8 @@ impl TuIndex {
             decl_records: FxHashMap::default(),
             record_counts: FxHashMap::default(),
             members: FxHashMap::default(),
+            aliases: FxHashMap::default(),
+            record_files: FxHashMap::default(),
         }
     }
 
@@ -243,6 +250,7 @@ impl TuIndex {
     /// X;` is `struct X`).
     fn alias_record(&mut self, anonymous: &Arc<str>, name: &str) {
         let name: Arc<str> = Arc::from(name);
+        self.aliases.insert(name.clone(), anonymous.clone());
         if let Some(layout) = self.layouts.get(anonymous).cloned() {
             self.layouts.entry(name.clone()).or_insert(layout);
         }
@@ -347,6 +355,8 @@ impl TuIndex {
         }
         if node.is_definition {
             let name = self.defined_record(node);
+            let file = self.node_path(node);
+            self.record_files.entry(name.clone()).or_insert(file);
             for (decl, member) in decls {
                 self.members.insert(decl, (name.clone(), member));
             }
@@ -374,6 +384,65 @@ impl TuIndex {
                 field.name = member.name.clone();
             }
         }
+    }
+
+    /// Gives each layout's members their sizes and the records they hold,
+    /// once the unit's records are named.
+    pub(crate) fn finish_layouts(&mut self) {
+        let names: Vec<Arc<str>> = self.layouts.keys().cloned().collect();
+        for name in names {
+            let members = self.records.get(&name).cloned().unwrap_or_default();
+            let fields = self.layouts[&name].fields.clone();
+            let mut filled = Vec::with_capacity(fields.len());
+            for mut field in fields {
+                field.size = self.size_of(&field.ty);
+                field.calls = function_pointer(&field.ty, &self.typedefs);
+                field.holds = if field.name.starts_with("anon@") {
+                    Some(field.name.clone())
+                } else {
+                    members
+                        .iter()
+                        .find(|m| m.name == field.name)
+                        .and_then(|m| m.record.clone())
+                        .or_else(|| self.held_record(&field.ty))
+                };
+                filled.push(field);
+            }
+            if let Some(layout) = self.layouts.get_mut(&name) {
+                layout.fields = filled;
+            }
+        }
+    }
+
+    /// The record a type is, or its elements are for an array, by the
+    /// catalog's name for it; none for a pointer, a function or a scalar.
+    fn held_record(&mut self, text: &str) -> Option<Arc<str>> {
+        let mut text: String = self.ty(text).to_string();
+        for _ in 0..32 {
+            let mut stripped = strip_qualifiers(&text).trim_end();
+            if stripped.contains('*')
+                || (stripped.contains('(') && anonymous_record(stripped).is_none())
+            {
+                return None;
+            }
+            while let Some(element) = stripped.strip_suffix(']').and_then(|t| t.rsplit_once('[')) {
+                stripped = strip_qualifiers(element.0.trim_end());
+            }
+            if let Some(name) = anonymous_record(stripped) {
+                return Some(name);
+            }
+            for keyword in ["struct ", "union "] {
+                if let Some(tag) = stripped.strip_prefix(keyword) {
+                    let tag: Arc<str> = Arc::from(tag.trim());
+                    return Some(self.aliases.get(&tag).cloned().unwrap_or(tag));
+                }
+            }
+            match self.typedefs.get(stripped) {
+                Some(under) if **under != *stripped => text = under.to_string(),
+                _ => return None,
+            }
+        }
+        None
     }
 
     fn index_enum(&mut self, node: &Node) {
@@ -695,7 +764,7 @@ impl TuIndex {
 
 /// An integer type's width in bits and signedness, by the target; `None`
 /// for any other type.
-fn integer_type(ty: &str, platform: Platform) -> Option<(u32, bool)> {
+pub(crate) fn integer_type(ty: &str, platform: Platform) -> Option<(u32, bool)> {
     let long = match platform {
         Platform::Linux => 64,
         Platform::Windows => 32,
@@ -721,9 +790,14 @@ fn integer_type(ty: &str, platform: Platform) -> Option<(u32, bool)> {
 /// A value converted to an integer type, by its width and signedness; as
 /// it is for any other type.
 fn convert(value: i128, ty: &str, platform: Platform) -> i128 {
-    let Some((bits, signed)) = integer_type(ty, platform) else {
-        return value;
-    };
+    match integer_type(ty, platform) {
+        Some((bits, signed)) => convert_to(value, bits, signed),
+        None => value,
+    }
+}
+
+/// A value converted to an integer of `bits` bits, signed or not.
+pub(crate) fn convert_to(value: i128, bits: u32, signed: bool) -> i128 {
     if bits == 1 {
         return i128::from(value != 0);
     }
@@ -742,7 +816,13 @@ fn convert(value: i128, ty: &str, platform: Platform) -> i128 {
 /// An integer operation on two values, in the result's type; `None` where
 /// C leaves it undefined.
 fn int_binary(op: BinOp, left: i128, right: i128, ty: &str, platform: Platform) -> Option<i128> {
-    let value = match op {
+    Some(convert(int_op(op, left, right)?, ty, platform))
+}
+
+/// An integer operation on two values, before its conversion to the
+/// result's type; `None` where C leaves it undefined.
+pub(crate) fn int_op(op: BinOp, left: i128, right: i128) -> Option<i128> {
+    Some(match op {
         BinOp::Add => left.wrapping_add(right),
         BinOp::Sub => left.wrapping_sub(right),
         BinOp::Mul => left.wrapping_mul(right),
@@ -759,8 +839,7 @@ fn int_binary(op: BinOp, left: i128, right: i128, ty: &str, platform: Platform) 
         BinOp::Le => i128::from(left <= right),
         BinOp::Gt => i128::from(left > right),
         BinOp::Ge => i128::from(left >= right),
-    };
-    Some(convert(value, ty, platform))
+    })
 }
 
 /// A path in the image, lexically resolved, its source-tree files named
@@ -816,8 +895,49 @@ pub(crate) fn clean_type(root: &str, text: &str) -> String {
     out
 }
 
+/// Whether a type is a pointer to a function, or an array of them, through
+/// its typedefs.
+pub(crate) fn function_pointer(text: &str, typedefs: &FxHashMap<Box<str>, Ty>) -> bool {
+    let mut text = text.to_owned();
+    for _ in 0..32 {
+        let mut stripped = strip_qualifiers(&text);
+        while let Some((element, _)) = stripped.strip_suffix(']').and_then(|t| t.rsplit_once('[')) {
+            stripped = strip_qualifiers(element);
+        }
+        if let Some(open) = stripped.find("(*") {
+            // The declarator's group, then a function's parameters.
+            return matching_paren(stripped, open)
+                .is_some_and(|close| stripped[close + 1..].trim_start().starts_with('('));
+        }
+        if let Some(pointee) = stripped.strip_suffix('*') {
+            return function_type(pointee, typedefs);
+        }
+        match typedefs.get(stripped) {
+            Some(under) if **under != *stripped => text = under.to_string(),
+            _ => return false,
+        }
+    }
+    false
+}
+
+/// Whether a type is a function's, through its typedefs.
+fn function_type(text: &str, typedefs: &FxHashMap<Box<str>, Ty>) -> bool {
+    let mut text = text.to_owned();
+    for _ in 0..32 {
+        let stripped = strip_qualifiers(&text);
+        if stripped.ends_with(')') && !stripped.starts_with("__attribute__") {
+            return true;
+        }
+        match typedefs.get(stripped) {
+            Some(under) if **under != *stripped => text = under.to_string(),
+            _ => return false,
+        }
+    }
+    false
+}
+
 /// A type's text without its outermost qualifiers.
-fn strip_qualifiers(text: &str) -> &str {
+pub(crate) fn strip_qualifiers(text: &str) -> &str {
     let mut text = text.trim();
     loop {
         let before = text;
@@ -845,7 +965,7 @@ fn strip_qualifiers(text: &str) -> &str {
 }
 
 /// Where the parenthesis opened at `open` closes.
-fn matching_paren(text: &str, open: usize) -> Option<usize> {
+pub(crate) fn matching_paren(text: &str, open: usize) -> Option<usize> {
     let mut depth = 0;
     for (i, c) in text[open..].char_indices() {
         match c {
@@ -910,7 +1030,7 @@ fn array_element(text: &str) -> String {
 
 /// The bounds of a declarator's arrays (`[3][4]`), none where it has none;
 /// `None` where one is not a number.
-fn array_bounds(text: &str) -> Option<Vec<u64>> {
+pub(crate) fn array_bounds(text: &str) -> Option<Vec<u64>> {
     let mut bounds = Vec::new();
     let mut rest = text;
     while let Some(open) = rest.find('[') {
@@ -922,7 +1042,7 @@ fn array_bounds(text: &str) -> Option<Vec<u64>> {
 }
 
 /// The size and alignment of a scalar type, by the target.
-fn scalar_size(text: &str, platform: Platform) -> Option<(u64, u64)> {
+pub(crate) fn scalar_size(text: &str, platform: Platform) -> Option<(u64, u64)> {
     let long = match platform {
         Platform::Linux => 8,
         Platform::Windows => 4,
@@ -1619,14 +1739,19 @@ impl<'i> Lowerer<'i> {
             }
             Kind::GccAsmStmt => {
                 let mut writes = Vec::new();
+                let mut reads = Vec::new();
                 for operand in &node.inner {
                     if operand.is_lvalue {
                         writes.push(self.place(operand));
                     } else {
-                        self.discard(operand);
+                        reads.push(self.expr(operand));
                     }
                 }
-                self.push(Stmt::Asm { writes, line });
+                self.push(Stmt::Asm {
+                    writes,
+                    reads,
+                    line,
+                });
             }
             Kind::Other(name) if !(name.ends_with("Expr") || name.ends_with("Operator")) => {
                 let name = name.to_string();

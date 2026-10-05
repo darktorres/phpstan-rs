@@ -58,6 +58,14 @@ pub(crate) fn global(global: &Global) -> String {
     out
 }
 
+/// An expression of a function's, as the printed lowering writes it.
+pub(crate) fn expr(function: &Function, expr: &Expr) -> String {
+    let printer = Printer {
+        function: Some(function),
+    };
+    printer.expr(expr)
+}
+
 struct Printer<'f> {
     /// The function whose variables the printed code names.
     function: Option<&'f Function>,
@@ -132,9 +140,18 @@ impl Printer<'_> {
                     None => format!("call {callee}({})  @{line}", args.join(", ")),
                 }
             }
-            Stmt::Asm { writes, line } => {
+            Stmt::Asm {
+                writes,
+                reads,
+                line,
+            } => {
                 let writes: Vec<String> = writes.iter().map(|place| self.place(place)).collect();
-                format!("asm writes [{}]  @{line}", writes.join(", "))
+                let reads: Vec<String> = reads.iter().map(|expr| self.expr(expr)).collect();
+                format!(
+                    "asm writes [{}] reads [{}]  @{line}",
+                    writes.join(", "),
+                    reads.join(", ")
+                )
             }
         }
     }

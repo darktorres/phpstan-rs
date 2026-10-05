@@ -6,6 +6,8 @@
 
 use std::sync::Arc;
 
+use serde::{Deserialize, Serialize};
+
 /// A C type, as clang prints it with its typedefs resolved.
 pub(crate) type Ty = Arc<str>;
 
@@ -19,7 +21,7 @@ pub(crate) type GlobalName = Arc<str>;
 pub(crate) type VarId = u32;
 pub(crate) type BlockId = u32;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub(crate) struct Var {
     pub(crate) name: Arc<str>,
     pub(crate) ty: Ty,
@@ -28,7 +30,7 @@ pub(crate) struct Var {
 /// A struct or union member: the record's name, then the member's.
 /// An unnamed record is named by where it is declared
 /// (`anon@Zend/zend_types.h:330:2`).
-#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 pub(crate) struct Field {
     pub(crate) record: Arc<str>,
     pub(crate) name: Arc<str>,
@@ -37,7 +39,7 @@ pub(crate) struct Field {
     pub(crate) offset: Option<u64>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub(crate) enum Place {
     Var(VarId),
     Global(GlobalName),
@@ -49,14 +51,14 @@ pub(crate) enum Place {
     Index(Box<Place>, Box<Expr>),
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub(crate) enum UnOp {
     Neg,
     Not,
     BitNot,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub(crate) enum BinOp {
     Add,
     Sub,
@@ -100,13 +102,13 @@ impl BinOp {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub(crate) struct Expr {
     pub(crate) kind: ExprKind,
     pub(crate) ty: Ty,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub(crate) enum ExprKind {
     /// The value a place holds.
     Use(Place),
@@ -134,14 +136,14 @@ pub(crate) enum ExprKind {
     Unknown(Arc<str>),
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub(crate) enum Callee {
     Direct(FnName),
     /// Through a function pointer.
     Indirect(Expr),
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub(crate) enum Stmt {
     Assign {
         dst: Place,
@@ -154,14 +156,16 @@ pub(crate) enum Stmt {
         args: Vec<Expr>,
         line: u32,
     },
-    /// Inline assembly: may write the objects its operands name.
+    /// Inline assembly: may write the objects its output operands name,
+    /// from the values of its operands.
     Asm {
         writes: Vec<Place>,
+        reads: Vec<Expr>,
         line: u32,
     },
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub(crate) enum Term {
     Goto(BlockId),
     Branch {
@@ -183,13 +187,13 @@ pub(crate) enum Term {
     IndirectGoto(Vec<BlockId>),
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub(crate) struct Block {
     pub(crate) stmts: Vec<Stmt>,
     pub(crate) term: Term,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub(crate) struct Function {
     pub(crate) name: FnName,
     pub(crate) file: Arc<str>,
@@ -209,7 +213,7 @@ pub(crate) struct Function {
 }
 
 /// A global variable's initializer.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub(crate) enum Init {
     Expr(Expr),
     /// A record's or an array's initializer list: each member or element
@@ -225,7 +229,7 @@ pub(crate) enum Init {
 }
 
 /// A member or an element an initializer list gives.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub(crate) struct InitItem {
     /// The member; none for an array's element.
     pub(crate) field: Option<Field>,
@@ -235,7 +239,7 @@ pub(crate) struct InitItem {
     pub(crate) init: Init,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub(crate) struct Global {
     pub(crate) name: GlobalName,
     pub(crate) ty: Ty,

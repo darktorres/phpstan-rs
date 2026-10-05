@@ -5,11 +5,13 @@
 use std::io::BufRead;
 use std::sync::Arc;
 
+use serde::{Deserialize, Serialize};
+
 use rustc_hash::FxHashMap;
 
 use crate::lower::{anonymous_record, clean_type, numbered};
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub(crate) struct Layout {
     pub(crate) size: u64,
     pub(crate) align: u64,
@@ -20,12 +22,19 @@ pub(crate) struct Layout {
     pub(crate) fields: Vec<LayoutField>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub(crate) struct LayoutField {
     pub(crate) name: Arc<str>,
     pub(crate) offset: u64,
     /// The member's type, as the catalog writes types.
     pub(crate) ty: Arc<str>,
+    /// The member's size in bytes, where its type's is known.
+    pub(crate) size: Option<u64>,
+    /// The record the member is, or each of its elements is for an
+    /// array, by the catalog's name for it.
+    pub(crate) holds: Option<Arc<str>>,
+    /// Whether the member is a pointer to a function, or an array of them.
+    pub(crate) calls: bool,
 }
 
 /// The layouts, by the catalog's name for each record.
@@ -100,7 +109,14 @@ pub(crate) fn read_layouts(reader: &mut impl BufRead, root: &str) -> std::io::Re
                 } else {
                     Arc::from(name)
                 };
-                layout.fields.push(LayoutField { name, offset, ty });
+                layout.fields.push(LayoutField {
+                    name,
+                    offset,
+                    ty,
+                    size: None,
+                    holds: None,
+                    calls: false,
+                });
             }
             _ => {}
         }

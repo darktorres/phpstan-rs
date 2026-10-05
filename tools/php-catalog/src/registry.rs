@@ -12,6 +12,7 @@ use crate::ir::{
     Stmt, Term, UnOp, VarId,
 };
 use crate::program::Program;
+use crate::store::Store;
 
 /// A function entry (`ZEND_FE`, `ZEND_ME` and their kin).
 #[derive(Debug, Clone)]
@@ -55,9 +56,19 @@ pub(crate) struct Registry {
 /// A class a value is the entry of, by its name.
 type ClassName = Arc<str>;
 
-pub(crate) fn find(program: &Program) -> Registry {
+pub(crate) fn find(program: &Program, store: &Store) -> Result<Registry, String> {
     let arrays = entry_arrays(program);
-    let classes = class_registrations(program);
+    let mut registered_functions = function_array_references(program);
+    // One pass over the functions' code: the function arrays they pass
+    // on, and the ones that may register a class or give one's entry.
+    let mut registering = Vec::new();
+    program.each_function(store, |function| {
+        function_array_assignments(function, &mut registered_functions);
+        if may_register_class(function) {
+            registering.push(function.clone());
+        }
+    })?;
+    let classes = class_registrations(&registering);
     let mut registry = Registry::default();
     let mut method_arrays: FxHashMap<&GlobalName, &str> = FxHashMap::default();
     for (name, registration) in &classes.classes {
@@ -76,7 +87,7 @@ pub(crate) fn find(program: &Program) -> Registry {
         }
     }
     let mut driver_arrays: FxHashSet<&GlobalName> = FxHashSet::default();
-    let driver_methods = pdo_driver_methods(program);
+    let driver_methods = pdo_driver_methods(program, store)?;
     for (class, driver, array) in &driver_methods {
         let Some(entries) = arrays.get(array) else {
             continue;
@@ -96,7 +107,6 @@ pub(crate) fn find(program: &Program) -> Registry {
             }
         }
     }
-    let registered_functions = function_array_references(program);
     let mut names: Vec<&GlobalName> = arrays.keys().collect();
     names.sort_unstable();
     for array in names {
@@ -129,7 +139,7 @@ pub(crate) fn find(program: &Program) -> Registry {
             registry.unregistered.push(array.clone());
         }
     }
-    registry
+    Ok(registry)
 }
 
 /// Each array of function entries, its entries by name.
@@ -191,10 +201,6 @@ fn frameless_variants(program: &Program, infos: &GlobalName) -> Vec<FnName> {
 /// functions, each with what names it.
 fn function_array_references(program: &Program) -> FxHashMap<GlobalName, Vec<Arc<str>>> {
     let mut references: FxHashMap<GlobalName, Vec<Arc<str>>> = FxHashMap::default();
-    let module_fields = [
-        ("_zend_module_entry", "functions"),
-        ("_sapi_module_struct", "additional_functions"),
-    ];
     for (name, definitions) in &program.globals {
         for global in definitions {
             let Some(Init::List { items, .. }) = &global.init else {
@@ -202,7 +208,7 @@ fn function_array_references(program: &Program) -> FxHashMap<GlobalName, Vec<Arc
             };
             for item in items {
                 if let Some(field) = &item.field
-                    && module_fields
+                    && MODULE_FIELDS
                         .iter()
                         .any(|(r, f)| *field.record == **r && *field.name == **f)
                     && let Some(array) = init_global(&item.init)
@@ -212,47 +218,73 @@ fn function_array_references(program: &Program) -> FxHashMap<GlobalName, Vec<Arc
             }
         }
     }
-    // Assignments to those fields, and arrays passed to the engine's own
-    // registration.
-    for definitions in program.functions.values() {
-        for function in definitions {
-            for block in &function.blocks {
-                for stmt in &block.stmts {
-                    match stmt {
-                        Stmt::Assign {
-                            dst: Place::Field(_, field),
-                            src,
-                            ..
-                        } if module_fields
-                            .iter()
-                            .any(|(r, f)| *field.record == **r && *field.name == **f) =>
-                        {
-                            if let Some(array) = expr_global(src) {
-                                references
-                                    .entry(array)
-                                    .or_default()
-                                    .push(function.name.clone());
-                            }
-                        }
-                        Stmt::Call {
-                            callee: Callee::Direct(callee),
-                            args,
-                            ..
-                        } if &**callee == "zend_register_functions" => {
-                            if let Some(array) = args.get(1).and_then(expr_global) {
-                                references
-                                    .entry(array)
-                                    .or_default()
-                                    .push(function.name.clone());
-                            }
-                        }
-                        _ => {}
+    references
+}
+
+/// The members of the module and SAPI records holding a function array.
+const MODULE_FIELDS: [(&str, &str); 2] = [
+    ("_zend_module_entry", "functions"),
+    ("_sapi_module_struct", "additional_functions"),
+];
+
+/// A function's assignments of function arrays to the members that hold
+/// one, and the arrays it passes to the engine's own registration.
+fn function_array_assignments(
+    function: &Function,
+    references: &mut FxHashMap<GlobalName, Vec<Arc<str>>>,
+) {
+    for block in &function.blocks {
+        for stmt in &block.stmts {
+            match stmt {
+                Stmt::Assign {
+                    dst: Place::Field(_, field),
+                    src,
+                    ..
+                } if MODULE_FIELDS
+                    .iter()
+                    .any(|(r, f)| *field.record == **r && *field.name == **f) =>
+                {
+                    if let Some(array) = expr_global(src) {
+                        references
+                            .entry(array)
+                            .or_default()
+                            .push(function.name.clone());
                     }
                 }
+                Stmt::Call {
+                    callee: Callee::Direct(callee),
+                    args,
+                    ..
+                } if &**callee == "zend_register_functions" => {
+                    if let Some(array) = args.get(1).and_then(expr_global) {
+                        references
+                            .entry(array)
+                            .or_default()
+                            .push(function.name.clone());
+                    }
+                }
+                _ => {}
             }
         }
     }
-    references
+}
+
+/// Whether a function may register a class or give a class's entry: it
+/// calls a registration, or a function whose result it keeps as a class
+/// entry.
+fn may_register_class(function: &Function) -> bool {
+    function.blocks.iter().flat_map(|b| &b.stmts).any(|stmt| {
+        let Stmt::Call {
+            dst, callee: Callee::Direct(callee), ..
+        } = stmt
+        else {
+            return false;
+        };
+        REGISTER_FROM_ENTRY.contains(&&**callee)
+            || &**callee == "zend_register_internal_enum"
+            || matches!(dst, Some(Place::Var(var))
+                if function.vars.get(*var as usize).is_some_and(|v| v.ty.contains("zend_class_entry")))
+    })
 }
 
 /// The classes whose objects take the methods a PDO driver's
@@ -264,7 +296,10 @@ const PDO_DRIVER_METHOD_CLASSES: [&str; 2] = ["PDO", "PDOStatement"];
 /// class, the driver's name and the array: the driver's handle factory
 /// sets the handle's methods, whose `get_driver_methods` hook returns an
 /// array for each kind of method.
-fn pdo_driver_methods(program: &Program) -> Vec<(&'static str, String, GlobalName)> {
+fn pdo_driver_methods(
+    program: &Program,
+    store: &Store,
+) -> Result<Vec<(&'static str, String, GlobalName)>, String> {
     let mut found = Vec::new();
     let mut drivers: Vec<(&GlobalName, &Vec<_>)> = program.globals.iter().collect();
     drivers.sort_unstable_by_key(|(name, _)| *name);
@@ -279,8 +314,8 @@ fn pdo_driver_methods(program: &Program) -> Vec<(&'static str, String, GlobalNam
             continue;
         };
         let driver_name = String::from_utf8_lossy(&name).into_owned();
-        for factory in program.functions.get(&factory).into_iter().flatten() {
-            for table in assigned_globals(factory, "_pdo_dbh_t", "methods") {
+        for factory in program.load(store, &factory)? {
+            for table in assigned_globals(&factory, "_pdo_dbh_t", "methods") {
                 for table in program.globals.get(&table).into_iter().flatten() {
                     let Some(Init::List { items, .. }) = &table.init else {
                         continue;
@@ -291,8 +326,9 @@ fn pdo_driver_methods(program: &Program) -> Vec<(&'static str, String, GlobalNam
                     else {
                         continue;
                     };
-                    for hook in program.functions.get(&hook).into_iter().flatten() {
-                        for (kinds, array) in returned_arrays(hook, PDO_DRIVER_METHOD_CLASSES.len())
+                    for hook in program.load(store, &hook)? {
+                        for (kinds, array) in
+                            returned_arrays(&hook, PDO_DRIVER_METHOD_CLASSES.len())
                         {
                             for (kind, class) in PDO_DRIVER_METHOD_CLASSES.iter().enumerate() {
                                 let entry = (*class, driver_name.clone(), array.clone());
@@ -306,7 +342,7 @@ fn pdo_driver_methods(program: &Program) -> Vec<(&'static str, String, GlobalNam
             }
         }
     }
-    found
+    Ok(found)
 }
 
 /// The globals whose address a function stores in a record's member.
@@ -459,18 +495,14 @@ const REGISTER_FROM_ENTRY: &[&str] = &[
 /// name and methods and registers it gives the registered class, and a
 /// global that a registered class's entry is stored in holds it, through
 /// the functions returning one.
-fn class_registrations(program: &Program) -> ClassRegistrations {
+fn class_registrations(functions: &[Function]) -> ClassRegistrations {
     let mut found = ClassRegistrations::default();
     let mut returns: FxHashMap<FnName, ClassName> = FxHashMap::default();
     loop {
         let before = (returns.len(), found.globals.len());
-        let mut names: Vec<&FnName> = program.functions.keys().collect();
-        names.sort_unstable();
-        for name in names {
-            for function in &program.functions[name] {
-                if let Some(class) = registrations_in(function, &returns, &mut found) {
-                    returns.insert(function.name.clone(), class);
-                }
+        for function in functions {
+            if let Some(class) = registrations_in(function, &returns, &mut found) {
+                returns.insert(function.name.clone(), class);
             }
         }
         if (returns.len(), found.globals.len()) == before {
