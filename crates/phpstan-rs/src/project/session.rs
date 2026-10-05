@@ -157,8 +157,9 @@ pub(crate) struct Added {
     pub(crate) skipped_context: usize,
     /// The analysed files that do not parse, which are reported.
     pub(crate) parse_failures: Vec<(PathBuf, ParseFailure)>,
-    /// What the lexer skipped over in the loaded files, and the context
-    /// files that do not parse, one line each.
+    /// The context files that do not parse, which are not.
+    pub(crate) context_failures: Vec<(PathBuf, ParseFailure)>,
+    /// What the lexer skipped over in the loaded files, one line each.
     pub(crate) lex_warnings: Vec<String>,
 }
 
@@ -1405,9 +1406,19 @@ impl Session {
             skipped_analyze,
             skipped_context,
             parse_failures,
-            lex_warnings,
+            context_failures,
+            mut lex_warnings,
         } = self.load_into(&mut project, &context_files, &analyze_files);
         project.finish_loading();
+        lex_warnings.extend(context_failures.into_iter().map(|(path, failure)| {
+            format!(
+                "warning: {}:{}:{}: {}",
+                path.display(),
+                failure.line,
+                failure.col,
+                failure.message
+            )
+        }));
 
         // Largest files first, so the longest checks don't start last; of
         // equal ones, the first listed first.
@@ -1517,7 +1528,7 @@ impl Session {
             }));
         };
         let mut skipped_context = 0usize;
-        let mut parse_failure_lines = Vec::new();
+        let mut context_failures = Vec::new();
         for ((path, &id), parsed) in context_files
             .iter()
             .zip(context_numbers)
@@ -1536,13 +1547,7 @@ impl Session {
                 }
                 Read::Unparsed(failure) => {
                     skipped_context += 1;
-                    parse_failure_lines.push(format!(
-                        "warning: {}:{}:{}: {}",
-                        path.display(),
-                        failure.line,
-                        failure.col,
-                        failure.message
-                    ));
+                    context_failures.push((path.clone(), failure));
                 }
                 Read::Unread => skipped_context += 1,
             }
@@ -1576,12 +1581,12 @@ impl Session {
                 Read::Unread => skipped_analyze += 1,
             }
         }
-        lex_warnings.extend(parse_failure_lines);
         Added {
             analyze_sizes,
             skipped_analyze,
             skipped_context,
             parse_failures,
+            context_failures,
             lex_warnings,
         }
     }

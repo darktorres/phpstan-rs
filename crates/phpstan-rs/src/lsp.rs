@@ -45,6 +45,7 @@ use lsp_types::{
 
 use crate::checker::Checker;
 use crate::project::session::Session;
+use crate::project::source::ContentHash;
 use crate::project::use_sites;
 use crate::project::{Project, ProjectSettings};
 use crate::registry::{FunctionReflection, format_signature, param_label};
@@ -197,6 +198,9 @@ struct Server {
     // expression's own text from. See `completion`'s own module doc
     // comment for the full mechanism this feeds.
     latest_text: FxHashMap<PathBuf, String>,
+    // The documents the client has open, which the workspace session reads
+    // in place of the disk's files (`Session::set_overlay`).
+    open_documents: FxHashSet<PathBuf>,
     // What a column of a position counts: UTF-16 code units unless the
     // client offered UTF-8 and `initialize` agreed to it.
     unit: Unit,
@@ -319,6 +323,7 @@ impl Server {
             open_uris: FxHashMap::default(),
             last_diagnostics: FxHashMap::default(),
             latest_text: FxHashMap::default(),
+            open_documents: FxHashSet::default(),
             unit: Unit::default(),
             shutdown_received: false,
             pending_requests: lsp_server::ReqQueue::default(),
@@ -362,7 +367,7 @@ impl Server {
             self.pool.clone(),
         );
         let messages = self.configuration_problems(&workspace.config);
-        self.workspace_session = Some(workspace.session);
+        self.adopt_session(workspace.session);
         self.apply_resolved_config(root, workspace.config);
         messages
     }
@@ -471,22 +476,76 @@ impl Server {
             .collect()
     }
 
+    /// Takes `session` as the workspace's, reading the open documents in
+    /// place of the disk's files, and gives back the one it replaces.
+    fn adopt_session(&mut self, mut session: Session) -> Option<Session> {
+        for path in &self.open_documents {
+            if let Some(text) = self.latest_text.get(path) {
+                session.set_overlay(path, text.as_bytes().to_vec());
+            }
+        }
+        self.workspace_session.replace(session)
+    }
+
+    /// Notes that `path` is open with `text`, which the workspace session
+    /// reads from now on.
+    fn open_document(&mut self, path: &Path, text: &str) {
+        self.open_documents.insert(path.to_path_buf());
+        if let Some(session) = &mut self.workspace_session {
+            session.set_overlay(path, text.as_bytes().to_vec());
+        }
+    }
+
+    /// Notes that `path` is no longer open: the disk's file is read again.
+    fn close_document(&mut self, path: &Path) {
+        self.open_documents.remove(path);
+        if let Some(session) = &mut self.workspace_session {
+            session.clear_overlay(path);
+        }
+    }
+
+    /// The bytes of the file at `path`: an open document's text, or the
+    /// disk's.
+    fn read_file(&self, path: &Path) -> std::io::Result<Vec<u8>> {
+        match &self.workspace_session {
+            Some(session) => session.read(path),
+            None => std::fs::read(path),
+        }
+    }
+
     /// Reads and parses `files` in parallel on the worker pool, inserting
     /// each as context (vendor/scan/stub, never analyzed or reported) or
     /// analyzed (a real, first-party file under `root`) in order. A parse
     /// failure is logged (both to stderr and as a `window/logMessage`
     /// notification) and skipped, not fatal to the rest of the scan.
     fn load_files(&mut self, files: &[(PathBuf, bool)], messages: &mut Vec<Message>) {
-        for (path, e) in self.project.load_files(files, Some(&self.pool)) {
+        let Some(session) = &self.workspace_session else {
+            return;
+        };
+        let role_of = |analysed: bool| -> Vec<PathBuf> {
+            files
+                .iter()
+                .filter(|(_, is_analysed)| *is_analysed == analysed)
+                .map(|(path, _)| path.clone())
+                .collect()
+        };
+        let added = session.load_into(&mut self.project, &role_of(false), &role_of(true));
+        for (path, failure) in added
+            .context_failures
+            .into_iter()
+            .chain(added.parse_failures)
+        {
             eprintln!(
-                "phpstan-rs lsp: skipping {} - failed to parse: {e}",
-                path.display()
+                "phpstan-rs lsp: skipping {} - failed to parse: {}",
+                path.display(),
+                failure.message
             );
             messages.push(log_message_notification(
                 MessageType::WARNING,
                 format!(
-                    "phpstan-rs: skipping {} - failed to parse: {e}",
-                    path.display()
+                    "phpstan-rs: skipping {} - failed to parse: {}",
+                    path.display(),
+                    failure.message
                 ),
             ));
         }
@@ -592,6 +651,7 @@ impl Server {
         for p in &paths {
             self.last_diagnostics.remove(p);
             self.latest_text.remove(p);
+            self.close_document(p);
         }
 
         let results = self.project.remove_files(&paths);
@@ -753,9 +813,10 @@ impl Server {
         *self.file_versions.entry(path.clone()).or_insert(0) += 1;
         self.open_uris.insert(path.clone(), (uri.clone(), version));
         self.latest_text.insert(path.clone(), text.to_string());
+        self.open_document(&path, text);
         // Opening a file exactly as it was loaded changes nothing in the
         // project, so only its own diagnostics need publishing.
-        if self.project.source(&path) == Some(text) {
+        if self.project.content_hash(&path) == Some(ContentHash::of(text.as_bytes())) {
             if !self.last_diagnostics.contains_key(&path) {
                 let found = self.project.check_file(&path);
                 self.last_diagnostics.insert(path.clone(), found);
@@ -808,6 +869,7 @@ impl Server {
             .insert(path.to_path_buf(), (uri.clone(), Some(version)));
         self.latest_text
             .insert(path.to_path_buf(), text.to_string());
+        self.open_document(path, text);
         let results = match self
             .project
             .update_file_cancellable(path, text, should_abort)
@@ -881,6 +943,7 @@ impl Server {
                     self.open_uris.remove(path);
                     self.last_diagnostics.remove(path);
                     self.latest_text.remove(path);
+                    self.close_document(path);
                 }
                 let results = self.project.remove_files(&gone);
                 messages.extend(self.publish_diagnostics_for(results));
@@ -899,16 +962,17 @@ impl Server {
             // failure (raced with a subsequent delete before this ran, a
             // transient permission error, ...) is skipped silently: a
             // later Deleted event, if any, cleans it up properly.
-            let Ok(text) = std::fs::read_to_string(&path) else {
+            let Ok(bytes) = self.read_file(&path) else {
                 continue;
             };
+            let text = String::from_utf8_lossy(&bytes).into_owned();
             // No document version exists for an externally-observed
             // change (there is no didOpen/didChange behind it) - `None`
             // matches load_workspace's own "never opened" default.
             self.open_uris.insert(path.clone(), (uri, None));
             self.latest_text.insert(path.clone(), text.clone());
             let appeared = !self.project.is_loaded(&path);
-            match self.project.update_file(&path, &text) {
+            match self.project.update_file(&path, bytes.as_slice()) {
                 Ok(results) => {
                     messages.extend(self.publish_diagnostics_for(results));
                 }
@@ -2085,7 +2149,7 @@ impl Server {
         } else {
             self.apply_resolved_config(&root, resolved);
         }
-        let previous = self.workspace_session.replace(workspace.session);
+        let previous = self.adopt_session(workspace.session);
         if file_set_changed {
             messages.extend(self.reload_file_set(previous));
         }
@@ -2151,6 +2215,7 @@ impl Server {
                 self.open_uris.remove(path);
                 self.last_diagnostics.remove(path);
                 self.latest_text.remove(path);
+                self.close_document(path);
             }
             let results = self.project.remove_files(&gone);
             messages.extend(self.publish_diagnostics_for(results));
@@ -3098,11 +3163,16 @@ fn handle_notification<W: Write>(server: &mut Server, writer: &mut W, not: LspNo
         // therefore a no-op, matching this arm's own absence rather than
         // silently double-applying the edit through two different paths.
         "textDocument/didClose" => {
-            // Deliberately a no-op: the file stays in the project (its
-            // registry entries and dependency edges are still real and
-            // other open files may depend on them), it's just no longer
-            // tracked as "currently open" for the purposes of picking a
-            // URI to publish under later.
+            // The file stays in the project (its registry entries and
+            // dependency edges are still real and other open files may
+            // depend on them), it's just no longer an open document: the
+            // disk's file is what the session reads of it from now on.
+            if let Ok(params) =
+                serde_json::from_value::<lsp_types::DidCloseTextDocumentParams>(not.params.clone())
+                && let Some(path) = uri_to_path(&params.text_document.uri)
+            {
+                server.close_document(&path);
+            }
         }
         _ => {
             // An unrecognized notification is just ignored, per the spec.

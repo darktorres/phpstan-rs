@@ -326,3 +326,57 @@ fn a_deleted_file_the_project_does_not_load_rechecks_the_files_including_it() {
         "expected includer.php rechecked with data.inc gone, got: {last:?}"
     );
 }
+
+fn changed(server: &mut Server, path: &std::path::Path, kind: lsp_types::FileChangeType) {
+    server.handle_watched_files_changed(vec![lsp_types::FileEvent::new(path_to_uri(path), kind)]);
+}
+
+#[test]
+fn a_created_file_that_is_not_utf8_is_loaded_from_its_bytes() {
+    let dir = TempDir::new("watch_non_utf8");
+    dir.write("a.php", "<?php class A {}\n");
+    let mut server = Server::new(env!("CARGO_PKG_VERSION"), crate::app::config_schema());
+    server.add_workspace_folders(std::slice::from_ref(&dir.0));
+
+    let path = dir.0.join("odd.php");
+    std::fs::write(&path, b"<?php\n// \xff\nclass Odd {}\n").unwrap();
+    changed(&mut server, &path, lsp_types::FileChangeType::CREATED);
+
+    assert!(server.project.is_loaded(&path));
+    assert!(server.project.registry().classes.contains_key("Odd"));
+}
+
+#[test]
+fn a_change_on_disk_leaves_an_open_document_as_the_editor_has_it() {
+    let dir = TempDir::new("watch_open_document");
+    let path = dir.write("a.php", "<?php class OnDisk {}\n");
+    let mut server = Server::new(env!("CARGO_PKG_VERSION"), crate::app::config_schema());
+    server.add_workspace_folders(std::slice::from_ref(&dir.0));
+    let uri = path_to_uri(&path);
+
+    server.handle_open_or_change(&uri, "<?php class InEditor {}\n", Some(1));
+    std::fs::write(&path, "<?php class Changed {}\n").unwrap();
+    changed(&mut server, &path, lsp_types::FileChangeType::CHANGED);
+    assert!(server.project.registry().classes.contains_key("InEditor"));
+    assert!(!server.project.registry().classes.contains_key("Changed"));
+
+    server.close_document(&path);
+    changed(&mut server, &path, lsp_types::FileChangeType::CHANGED);
+    assert!(server.project.registry().classes.contains_key("Changed"));
+    assert!(!server.project.registry().classes.contains_key("InEditor"));
+}
+
+#[test]
+fn opening_a_document_as_it_was_loaded_is_told_by_its_bytes() {
+    let dir = TempDir::new("watch_open_as_loaded");
+    let path = dir.write("a.php", "<?php class A {}\n");
+    let mut server = Server::new(env!("CARGO_PKG_VERSION"), crate::app::config_schema());
+    server.add_workspace_folders(std::slice::from_ref(&dir.0));
+    let hash = server.project.content_hash(&path);
+    assert!(hash.is_some());
+
+    server.handle_open_or_change(&path_to_uri(&path), "<?php class A {}\n", Some(1));
+    assert_eq!(server.project.content_hash(&path), hash);
+    server.handle_open_or_change(&path_to_uri(&path), "<?php class B {}\n", Some(2));
+    assert_ne!(server.project.content_hash(&path), hash);
+}

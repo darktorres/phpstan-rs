@@ -1402,42 +1402,6 @@ impl Project {
         parsed.owner = Some(self.packages.owner(&self.absolute_path(path)));
     }
 
-    /// Reads, parses and indexes `files` in parallel on `pool`, then
-    /// inserts them in order - context and analyzed alike (`analyzed`
-    /// as `load_analyzed_file`'s). A file that can't be read is skipped;
-    /// one that fails to parse is skipped and returned with its error.
-    pub fn load_files(
-        &mut self,
-        files: &[(PathBuf, bool)],
-        pool: Option<&rayon::ThreadPool>,
-    ) -> Vec<(PathBuf, ParseError)> {
-        let this = &*self;
-        let parsed = map_on_pool(pool, files, |(path, _)| {
-            let bytes = fs::read(path).ok()?;
-            let source = String::from_utf8_lossy(&bytes).into_owned();
-            Some(parse_file(path, source.as_str(), false).map(|mut parsed| {
-                this.index_use_sites(&mut parsed, &source);
-                this.note_owner(&mut parsed, path);
-                (source, parsed)
-            }))
-        });
-        self.expect_files(parsed.iter().filter_map(|p| match p {
-            Some(Ok((_, parsed))) => Some(parsed),
-            _ => None,
-        }));
-        let mut failed = Vec::new();
-        for ((path, analyzed), parsed) in files.iter().zip(parsed) {
-            match parsed {
-                Some(Ok((source, parsed))) => {
-                    self.insert_parsed_file(path.clone(), parsed, source, *analyzed)
-                }
-                Some(Err(e)) => failed.push((path.clone(), e)),
-                None => {}
-            }
-        }
-        failed
-    }
-
     /// Merges PHPStan's own source in with the built-in stubs while some
     /// loaded file mentions a `PHPStan\` name, and takes it out again once
     /// none does: most projects never name it, and it is over half of the
