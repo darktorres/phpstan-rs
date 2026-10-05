@@ -291,6 +291,90 @@ fn reload_configuration_rereads_an_on_disk_config_change() {
     );
 }
 
+/// A reload that changes the files the configuration lists loads the added
+/// ones and drops the removed ones, as a fresh load of the new configuration
+/// would.
+#[test]
+fn reload_configuration_applies_the_difference_between_the_file_sets() {
+    let dir = TempDir::new("dcc_file_set_difference");
+    dir.write("phpstan-rs.toml", "paths = [\"src\"]\n");
+    let ghost = dir.write(
+        "other/Ghost.php",
+        "<?php class GhostClass { public function ghostMethod(): int { return 1; } }",
+    );
+    let user = dir.write(
+        "src/Use.php",
+        "<?php function use_it(GhostClass $g) { $g->ghostMethod(); }",
+    );
+    let uri = path_to_uri(&user).to_string();
+    let not_found = |messages: &[Value]| {
+        messages
+            .iter()
+            .rfind(|m| {
+                m["method"] == "textDocument/publishDiagnostics" && m["params"]["uri"] == uri
+            })
+            .unwrap_or_else(|| panic!("expected a publish for {uri}, got: {messages:?}"))["params"]
+            ["diagnostics"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|d| d["code"] == "class.notFound")
+    };
+    let reload = |server: &mut Server| -> Vec<Value> {
+        server
+            .reload_configuration(settings::PhpstanRsSettings {
+                enable: true,
+                config_path: None,
+            })
+            .iter()
+            .map(|m| serde_json::to_value(m).unwrap())
+            .collect()
+    };
+
+    let mut server = Server::new(env!("CARGO_PKG_VERSION"), crate::app::config_schema());
+    server.add_workspace_folders(std::slice::from_ref(&dir.0));
+    assert!(!server.project.is_loaded(&ghost));
+
+    dir.write("phpstan-rs.toml", "paths = [\"src\", \"other\"]\n");
+    let added = reload(&mut server);
+    assert!(server.project.is_loaded(&ghost));
+    assert!(!not_found(&added), "got: {added:?}");
+
+    dir.write("phpstan-rs.toml", "paths = [\"src\"]\n");
+    let removed = reload(&mut server);
+    assert!(!server.project.is_loaded(&ghost));
+    assert!(not_found(&removed), "got: {removed:?}");
+}
+
+/// A configuration the reload cannot read is reported once, as a message to
+/// the editor, and the session keeps the defaults.
+#[test]
+fn reload_configuration_reports_a_malformed_config_file() {
+    let dir = TempDir::new("dcc_malformed_reload");
+    dir.write("a.php", DEPRECATED_FIXTURE);
+    let mut server = Server::new(env!("CARGO_PKG_VERSION"), crate::app::config_schema());
+    server.add_workspace_folders(std::slice::from_ref(&dir.0));
+
+    dir.write("phpstan-rs.toml", "this is not valid toml {{{");
+    let reload = |server: &mut Server| -> Vec<Value> {
+        server
+            .reload_configuration(settings::PhpstanRsSettings {
+                enable: true,
+                config_path: None,
+            })
+            .iter()
+            .map(|m| serde_json::to_value(m).unwrap())
+            .collect()
+    };
+    let first = reload(&mut server);
+    assert!(
+        first.iter().any(|m| m["method"] == "window/showMessage"),
+        "got: {first:?}"
+    );
+    let again = reload(&mut server);
+    assert!(again.is_empty(), "got: {again:?}");
+}
+
 #[test]
 fn resolved_config_equality_is_not_fooled_by_sql_reflection_password_redaction() {
     use sql::config::{SqlDriver, SqlReflectionConfig};

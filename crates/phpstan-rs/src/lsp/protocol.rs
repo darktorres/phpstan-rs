@@ -8,7 +8,7 @@ use lsp_types::{
     CodeAction, CodeActionKind, CodeActionOrCommand, Diagnostic as LspDiagnostic,
     DiagnosticSeverity, LogMessageParams, MessageType, NumberOrString, Position as LspPosition,
     ProgressParams, ProgressParamsValue, ProgressToken, PublishDiagnosticsParams,
-    Range as LspRange, TextEdit, Uri, WorkDoneProgress, WorkspaceEdit,
+    Range as LspRange, ShowMessageParams, TextEdit, Uri, WorkDoneProgress, WorkspaceEdit,
 };
 
 use diagnostics::{Diagnostic, diagnostic_order};
@@ -443,6 +443,15 @@ pub(crate) fn log_message_notification(typ: MessageType, message: String) -> Mes
     Message::Notification(LspNotification::new(
         "window/logMessage".to_string(),
         LogMessageParams { typ, message },
+    ))
+}
+
+/// `window/showMessage`: what the user is to be told, rather than what is
+/// only logged.
+pub(crate) fn show_message_notification(typ: MessageType, message: String) -> Message {
+    Message::Notification(LspNotification::new(
+        "window/showMessage".to_string(),
+        ShowMessageParams { typ, message },
     ))
 }
 

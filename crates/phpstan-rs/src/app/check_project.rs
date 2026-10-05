@@ -7,7 +7,7 @@ use std::sync::Arc;
 use config::ConfigFile;
 
 use crate::baseline::{self, Baseline};
-use crate::project::session::{Finalize, Overrides, Session, SessionSettings};
+use crate::project::session::{Finalize, Overrides, Policy, Session, SessionSettings};
 
 /// What a `check-project` run asks for, after its command line is parsed.
 #[derive(Default, Clone)]
@@ -88,7 +88,14 @@ pub fn prepare(
         no_composer: request.no_composer,
         emission_order: request.emission_order,
     };
-    let session = Session::resolve(config, config_dir, PathBuf::from("."), overrides, pool)?;
+    let session = Session::resolve(
+        config,
+        config_dir,
+        PathBuf::from("."),
+        overrides,
+        Policy::Fail,
+        pool,
+    )?;
     Ok(CheckRun {
         session,
         baseline_path,

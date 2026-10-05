@@ -29,6 +29,7 @@ use crate::registry::settings::ReflectionSettings;
 use crate::rules_settings::RulesSettings;
 use crate::{ext, ignore_errors};
 
+use super::DEFAULT_SCAN_EXCLUDED_DIR_NAMES;
 use super::file_cache;
 use super::{ParsedFile, Project, ProjectSettings};
 use diagnostics::{self, Diagnostic, DiagnosticBuilder, LevelCutoff};
@@ -108,6 +109,8 @@ pub struct Session {
     /// What the project is configured with.
     settings: ProjectSettings,
     dirs: Vec<PathBuf>,
+    /// The directory names the analysed paths leave out.
+    pruned: &'static [&'static str],
     scan_dirs: Vec<PathBuf>,
     scan_files: Vec<PathBuf>,
     /// The vendor files and directories of the composer roots, still being
@@ -337,6 +340,62 @@ struct ReadFile {
     cache_key: Option<file_cache::Key>,
 }
 
+/// Which files a listing holds: those a `.php` name gives, or every file
+/// PHP may be run from (`collect_php_run_files_excluding`).
+#[derive(Clone, Copy)]
+enum Listed {
+    Php,
+    Run,
+}
+
+/// What decides which files a session loads, to tell whether a
+/// configuration changes the set.
+#[derive(Clone, Debug, PartialEq)]
+pub struct FileSet {
+    roles: super::roles::FileRoles,
+    pruned: &'static [&'static str],
+    scan_dirs: Vec<PathBuf>,
+    scan_files: Vec<PathBuf>,
+    vendor: Vec<composer::vendor::VendorContext>,
+}
+
+/// What resolving does with a configuration that is wrong.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Policy {
+    /// Fails with the first problem, as a command line run does.
+    Fail,
+    /// Takes what is wrong as unset and reports it in `Session::warnings`,
+    /// as an editor does, which a malformed configuration must not stop.
+    /// Without paths, the whole root is analysed, less the directories
+    /// `DEFAULT_SCAN_EXCLUDED_DIR_NAMES` names.
+    Degrade,
+}
+
+/// `result`, or under `Policy::Degrade` the default for what it would have
+/// given, with the problem added to `warnings`.
+fn recovered<T: Default>(
+    result: Result<T, String>,
+    policy: Policy,
+    warnings: &mut Vec<String>,
+) -> Result<T, String> {
+    match result {
+        Err(problem) if policy == Policy::Degrade => {
+            warnings.push(problem);
+            Ok(T::default())
+        }
+        other => other,
+    }
+}
+
+/// The configuration's section `S`, read under `policy`.
+fn section<S: config::Section>(
+    config: &ConfigFile,
+    policy: Policy,
+    warnings: &mut Vec<String>,
+) -> Result<S, String> {
+    recovered(config.section::<S>(), policy, warnings)
+}
+
 /// A file that was not loaded because it does not parse, where, and why.
 struct ParseFailure {
     line: u32,
@@ -363,20 +422,22 @@ impl Session {
         config_dir: Option<PathBuf>,
         root: PathBuf,
         overrides: Overrides,
+        policy: Policy,
         pool: Arc<rayon::ThreadPool>,
     ) -> Result<Session, String> {
-        let session = config.section::<SessionSettings>()?;
-        let reflection = config.section::<ReflectionSettings>()?;
-        let engine = config.section::<EngineSettings>()?;
-        let overlays = config.section::<OverlaySettings>()?;
-        let rules = config.section::<RulesSettings>()?;
-        let banned_settings = config.section::<BannedSettings>()?;
-        let architecture = config.section::<ArchitectureSettings>()?;
-        let class_shape = config.section::<ClassShapeSettings>()?;
-        let disallowed_calls = config.section::<DisallowedCallsSettings>()?;
-        let sql_settings = config.section::<SqlSettings>()?;
-        let mockstan = config.section::<MockstanSettings>()?;
-        let psr3 = config.section::<ext::psr3::Psr3Settings>()?;
+        let mut warnings: Vec<String> = config.warnings().to_vec();
+        let session = section::<SessionSettings>(config, policy, &mut warnings)?;
+        let reflection = section::<ReflectionSettings>(config, policy, &mut warnings)?;
+        let engine = section::<EngineSettings>(config, policy, &mut warnings)?;
+        let overlays = section::<OverlaySettings>(config, policy, &mut warnings)?;
+        let rules = section::<RulesSettings>(config, policy, &mut warnings)?;
+        let banned_settings = section::<BannedSettings>(config, policy, &mut warnings)?;
+        let architecture = section::<ArchitectureSettings>(config, policy, &mut warnings)?;
+        let class_shape = section::<ClassShapeSettings>(config, policy, &mut warnings)?;
+        let disallowed_calls = section::<DisallowedCallsSettings>(config, policy, &mut warnings)?;
+        let sql_settings = section::<SqlSettings>(config, policy, &mut warnings)?;
+        let mockstan = section::<MockstanSettings>(config, policy, &mut warnings)?;
+        let psr3 = section::<ext::psr3::Psr3Settings>(config, policy, &mut warnings)?;
 
         let resolve_against_config = |p: PathBuf| match &config_dir {
             Some(dir) => dir.join(p),
@@ -393,35 +454,61 @@ impl Session {
                 .map(resolve_against_config)
                 .collect()
         };
-        if dirs.is_empty() {
-            return Err("no paths given on the command line or in the config file".to_string());
-        }
+        let (dirs, defaulted_dirs) = if dirs.is_empty() {
+            match policy {
+                Policy::Fail => {
+                    return Err(
+                        "no paths given on the command line or in the config file".to_string()
+                    );
+                }
+                // Everything under the root, less what no analysed file is
+                // in.
+                Policy::Degrade => (vec![root.clone()], true),
+            }
+        } else {
+            (dirs, false)
+        };
         let mut cutoff = configured_cutoff(overrides.level.or(session.level), DEFAULT_REPORT_LEVEL);
         if let Some(rule) = overrides.report_level {
             cutoff.rule = rule;
         }
-        psr3.context_key_pattern()?;
-        let php_version = match &overrides.php_version {
-            Some(version) => Some(types::PhpVersions::exactly(types::parse_php_version(
-                version,
-            )?)),
-            None => reflection
-                .php_version
-                .as_ref()
-                .map(crate::registry::settings::PhpVersionSetting::versions)
-                .transpose()?,
-        };
-        let restricted_symbols = disallowed_calls.entries()?;
-        let banned_constructs = banned_settings
-            .constructs
-            .iter()
-            .map(|name| banned::BannedConstruct::parse(name))
-            .collect::<Result<Vec<_>, _>>()?;
-        overlays.validate()?;
+        recovered(psr3.context_key_pattern().map(drop), policy, &mut warnings)?;
+        let php_version = recovered(
+            match &overrides.php_version {
+                Some(version) => types::parse_php_version(version)
+                    .map(|version| Some(types::PhpVersions::exactly(version))),
+                None => reflection
+                    .php_version
+                    .as_ref()
+                    .map(crate::registry::settings::PhpVersionSetting::versions)
+                    .transpose(),
+            },
+            policy,
+            &mut warnings,
+        )?;
+        let restricted_symbols = recovered(disallowed_calls.entries(), policy, &mut warnings)?;
+        let banned_constructs = recovered(
+            banned_settings
+                .constructs
+                .iter()
+                .map(|name| banned::BannedConstruct::parse(name))
+                .collect::<Result<Vec<_>, _>>(),
+            policy,
+            &mut warnings,
+        )?;
+        recovered(overlays.validate(), policy, &mut warnings)?;
         let parent_call_rules = class_shape.rules();
-        let architecture_rules = architecture.0;
-        for rule in &architecture_rules {
-            rule.validate()?;
+        let mut architecture_rules = architecture.0;
+        let rules_valid = recovered(
+            architecture_rules
+                .iter()
+                .try_for_each(|rule| rule.validate())
+                .map(|()| true),
+            policy,
+            &mut warnings,
+        )?;
+        if !rules_valid {
+            architecture_rules.clear();
         }
         let sql_reflection = sql_settings.reflection;
         let sql_schema = match sql_reflection
@@ -430,11 +517,14 @@ impl Session {
         {
             Some((path, driver)) => {
                 let path = resolve_against_config(path);
-                Some(sql::schema::parse_ddl_file(&root.join(path), driver)?)
+                recovered(
+                    sql::schema::parse_ddl_file(&root.join(path), driver).map(Some),
+                    policy,
+                    &mut warnings,
+                )?
             }
             None => None,
         };
-        let mut warnings: Vec<String> = config.warnings().to_vec();
         if let Some(schema) = &sql_schema
             && let Some(sql_config) = &sql_reflection
         {
@@ -523,16 +613,24 @@ impl Session {
         }
 
         let php_versions = php_version.or(composer_php_versions);
-        let extensions = ext::ActiveExtensions::resolve(config, &|p| {
-            ext::installed_in(root_manifest.as_ref(), p)
-        })?;
+        let extensions = recovered(
+            ext::ActiveExtensions::resolve(config, &|p| {
+                ext::installed_in(root_manifest.as_ref(), p)
+            }),
+            policy,
+            &mut warnings,
+        )?;
 
         let roles = {
             let absolute =
                 |path: &Path| super::absolute_spelling(Some(&absolute_root), Some(&root), path);
             let mut roles = super::roles::FileRoles::default();
             for dir in &dirs {
-                roles = roles.with_analysed(&absolute(dir));
+                roles = if defaulted_dirs {
+                    roles.with_pruned_analysed(&absolute(dir), DEFAULT_SCAN_EXCLUDED_DIR_NAMES)
+                } else {
+                    roles.with_analysed(&absolute(dir))
+                };
             }
             for dir in &stub_dirs {
                 roles = roles.with_stubs(&absolute(dir));
@@ -551,16 +649,20 @@ impl Session {
             built_once: true,
             rules,
             extensions,
-            extras: config.section::<ext::extras::ExtrasSettings>()?,
-            strict_rules: config.section::<ext::strict_rules::StrictRulesSettings>()?,
-            shipmonk: config.section::<ext::shipmonk::ShipmonkSettings>()?,
-            voku: config.section::<ext::voku::VokuSettings>()?,
-            slam: config.section::<ext::slam::SlamSettings>()?,
+            extras: section::<ext::extras::ExtrasSettings>(config, policy, &mut warnings)?,
+            strict_rules: section::<ext::strict_rules::StrictRulesSettings>(
+                config,
+                policy,
+                &mut warnings,
+            )?,
+            shipmonk: section::<ext::shipmonk::ShipmonkSettings>(config, policy, &mut warnings)?,
+            voku: section::<ext::voku::VokuSettings>(config, policy, &mut warnings)?,
+            slam: section::<ext::slam::SlamSettings>(config, policy, &mut warnings)?,
             psr3,
-            sidz: config.section::<ext::sidz::SidzSettings>()?,
-            phpunit: config.section::<ext::phpunit::PhpunitSettings>()?,
+            sidz: section::<ext::sidz::SidzSettings>(config, policy, &mut warnings)?,
+            phpunit: section::<ext::phpunit::PhpunitSettings>(config, policy, &mut warnings)?,
             restricted_symbols,
-            doctrine: config.section::<ext::doctrine::DoctrineSettings>()?,
+            doctrine: section::<ext::doctrine::DoctrineSettings>(config, policy, &mut warnings)?,
             dynamic_constant_names: engine.dynamic_constant_entries(),
             overlays,
             sql_reflection,
@@ -573,6 +675,11 @@ impl Session {
             session,
             settings,
             dirs,
+            pruned: if defaulted_dirs {
+                DEFAULT_SCAN_EXCLUDED_DIR_NAMES
+            } else {
+                &[]
+            },
             scan_dirs,
             scan_files,
             vendors,
@@ -629,7 +736,7 @@ impl Session {
         // Paths stay relative to the fixture's own directory, so where the
         // fixture suite lives (under `tests/`) never shows in the analysed
         // paths - path-sensitive checks see only the fixture's own layout.
-        let session = Session::resolve(config, None, base.clone(), overrides, pool)?;
+        let session = Session::resolve(config, None, base.clone(), overrides, Policy::Fail, pool)?;
         Ok((session, base))
     }
 
@@ -647,6 +754,51 @@ impl Session {
                 DiagnosticOrder::Sorted
             },
         }
+    }
+
+    /// The session for a project kept for edits, as the language server
+    /// keeps it: with each file's source, and every file's tree.
+    pub fn for_editing(mut self) -> Self {
+        self.settings.retain_source = true;
+        self.settings.built_once = false;
+        self.settings.defer_inline_ignores = false;
+        self
+    }
+
+    /// What the session configures its project with.
+    pub fn settings(&self) -> &ProjectSettings {
+        &self.settings
+    }
+
+    /// The directory the session's relative paths are relative to.
+    pub fn root(&self) -> &Path {
+        &self.root
+    }
+
+    /// The settings of the session as a whole: the baseline, the level and
+    /// the ignored errors.
+    pub fn session_settings(&self) -> &SessionSettings {
+        &self.session
+    }
+
+    /// What decides which files the session loads.
+    pub fn file_set(&self) -> FileSet {
+        FileSet {
+            roles: self.settings.roles.clone(),
+            pruned: self.pruned,
+            scan_dirs: self.scan_dirs.clone(),
+            scan_files: self.scan_files.clone(),
+            vendor: self.vendors.iter().map(|v| v.get().clone()).collect(),
+        }
+    }
+
+    /// The files the session loads: those it analyses, then the context
+    /// files, each in the order a load takes them.
+    pub fn listing(&self) -> (Vec<PathBuf>, Vec<PathBuf>) {
+        (
+            self.analysed_listing(Listed::Php),
+            self.context_listing(Listed::Php),
+        )
     }
 
     /// The directories analysed (after composer path-repository
@@ -697,18 +849,17 @@ impl Session {
             .any(|dir| composer::manifest::path_starts_with(&path, dir))
     }
 
-    /// The files `walk` finds under `dir` (or `dir` itself), spelled as
+    /// The files `listed` finds under `dir` (or `dir` itself), leaving out
+    /// what is under a directory named in `pruned`, spelled as
     /// `dir` joined with its path below it - the same spelling the command
     /// line gave - while the walk itself happens under the root.
-    fn collect_files(
-        &self,
-        dir: &Path,
-        out: &mut Vec<PathBuf>,
-        walk: fn(&Path, &mut Vec<PathBuf>),
-    ) {
+    fn collect_files(&self, dir: &Path, out: &mut Vec<PathBuf>, listed: Listed, pruned: &[&str]) {
         let walked = self.root.join(dir);
         let mut found = Vec::new();
-        walk(&walked, &mut found);
+        match listed {
+            Listed::Php => super::collect_php_files_excluding(&walked, pruned, &mut found),
+            Listed::Run => super::collect_php_run_files_excluding(&walked, pruned, &mut found),
+        }
         out.extend(
             found
                 .into_iter()
@@ -813,8 +964,8 @@ impl Session {
         out: &Path,
         reference: Option<&Path>,
     ) -> Result<FrontEndDump, String> {
-        let analysed = self.analysed_listing(super::collect_php_run_files);
-        let context = self.context_listing(super::collect_php_run_files);
+        let analysed = self.analysed_listing(Listed::Run);
+        let context = self.context_listing(Listed::Run);
         let mut files: Vec<(&'static str, &PathBuf)> = context
             .iter()
             .map(|path| ("context", path))
@@ -1104,24 +1255,24 @@ impl Session {
 
     /// The files the load analyses, in path order.
     fn analysed_files(&self) -> Vec<PathBuf> {
-        self.analysed_listing(super::collect_php_files)
+        self.analysed_listing(Listed::Php)
     }
 
-    /// The files under the analysed paths that `walk` finds, in path order,
+    /// The files under the analysed paths that `listed` finds, in path order,
     /// each once: a path another contains is not walked again.
-    fn analysed_listing(&self, walk: fn(&Path, &mut Vec<PathBuf>)) -> Vec<PathBuf> {
+    fn analysed_listing(&self, listed: Listed) -> Vec<PathBuf> {
         let mut files = Vec::new();
         for dir in super::roles::outermost(&self.dirs, |dir| self.absolute(dir)) {
-            self.collect_files(dir, &mut files, walk);
+            self.collect_files(dir, &mut files, listed, self.pruned);
         }
         composer::path_order::sort_paths(&mut files);
         files
     }
 
-    /// The files the context paths and the vendor context reach that `walk`
+    /// The files the context paths and the vendor context reach that `listed`
     /// finds, in path order, each once and none that an analysed path
     /// contains: such a file is analysed, and listed by `analysed_listing`.
-    fn context_listing(&self, walk: fn(&Path, &mut Vec<PathBuf>)) -> Vec<PathBuf> {
+    fn context_listing(&self, listed: Listed) -> Vec<PathBuf> {
         // The vendor context was being found while the analysed files were
         // listed.
         let mut scan_dirs = self.scan_dirs.clone();
@@ -1142,7 +1293,7 @@ impl Session {
                 continue;
             }
             let start = files.len();
-            self.collect_files(dir, &mut files, walk);
+            self.collect_files(dir, &mut files, listed, &[]);
             if roles.holds_analysed(&absolute) {
                 let walked = files.split_off(start);
                 files.extend(walked.into_iter().filter(is_context));
@@ -1157,7 +1308,7 @@ impl Session {
     /// says.
     fn load_project(&self, built_once: bool) -> Result<Loaded, String> {
         let analyze_files = self.analysed_files();
-        let context_files = self.context_listing(super::collect_php_files);
+        let context_files = self.context_listing(Listed::Php);
         if analyze_files.is_empty() {
             let dirs: Vec<String> = self.dirs.iter().map(|d| d.display().to_string()).collect();
             return Err(format!("no .php files found under {}", dirs.join(", ")));

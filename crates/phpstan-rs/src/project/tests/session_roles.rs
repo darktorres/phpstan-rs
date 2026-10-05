@@ -1,7 +1,7 @@
 //! The roles a session's load gives its files: each file once, by the
 //! strongest root that contains it.
 
-use super::super::session::{Overrides, Session};
+use super::super::session::{Overrides, Policy, Session};
 use super::super::*;
 use super::helpers::TempDir;
 
@@ -16,6 +16,7 @@ fn session(dir: &TempDir, overrides: Overrides) -> Session {
             no_composer: true,
             ..overrides
         },
+        Policy::Fail,
         worker_pool(),
     )
     .unwrap()
@@ -134,4 +135,64 @@ fn the_session_classifies_a_file_the_load_never_listed() {
         analysed
     );
     assert_eq!(loaded.project.classify(Path::new("stubs/G.php")), stub);
+}
+
+#[test]
+fn the_listing_is_the_set_of_files_the_load_reads() {
+    let dir = tree();
+    let session = session(
+        &dir,
+        Overrides {
+            paths: paths(&["src"]),
+            scan_paths: paths(&["lib"]),
+            stub_paths: paths(&["stubs"]),
+            ..Overrides::default()
+        },
+    );
+    let (analysed, context) = session.listing();
+    let loaded = session.load().unwrap();
+    let mut listed: Vec<String> = analysed
+        .iter()
+        .chain(&context)
+        .map(|path| path.display().to_string())
+        .collect();
+    listed.sort();
+    let loaded_paths: Vec<String> = roles_of(&loaded.project)
+        .into_iter()
+        .map(|(path, _)| path)
+        .collect();
+    assert_eq!(listed, loaded_paths);
+    assert!(
+        analysed
+            .iter()
+            .all(|path| loaded.project.files[path].analyzed)
+    );
+    assert!(
+        context
+            .iter()
+            .all(|path| !loaded.project.files[path].analyzed)
+    );
+}
+
+#[test]
+fn an_invalid_setting_fails_one_policy_and_is_taken_as_unset_by_the_other() {
+    let dir = tree();
+    let schema = crate::app::config_schema();
+    let config = config::ConfigFile::parse("php_version = \"not-a-version\"\n", &schema).unwrap();
+    let resolve = |policy| {
+        Session::resolve(
+            &config,
+            None,
+            dir.0.clone(),
+            Overrides {
+                no_composer: true,
+                ..Overrides::default()
+            },
+            policy,
+            worker_pool(),
+        )
+    };
+    assert!(resolve(Policy::Fail).is_err());
+    let degraded = resolve(Policy::Degrade).unwrap();
+    assert!(!degraded.warnings.is_empty());
 }

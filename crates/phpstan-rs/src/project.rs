@@ -1030,6 +1030,56 @@ impl Project {
         place
     }
 
+    /// Gives every loaded file the place a load would: the context files
+    /// first, each group in path order. The names more than one file
+    /// declares are rebuilt, which the registry builds in that order.
+    pub fn restore_load_order(&mut self) {
+        let mut order: Vec<(bool, PathBuf)> = self
+            .files
+            .iter()
+            .map(|(path, state)| (state.analyzed, path.clone()))
+            .collect();
+        order.sort();
+        let mut changed = false;
+        for (place, (_, path)) in order.iter().enumerate() {
+            let state = self.files.get_mut(path).expect("the file is held");
+            changed |= state.load_order != place as u64;
+            state.load_order = place as u64;
+        }
+        self.next_load_order = order.len() as u64;
+        if !changed {
+            return;
+        }
+        let mut declared: FxHashMap<String, (usize, Name)> = FxHashMap::default();
+        let mut shared = DeclaredNames::default();
+        let mut note = |kind: u8, name: &Name, key: String, list: &mut Vec<Name>| {
+            let entry = declared
+                .entry(format!("{kind}{key}"))
+                .or_insert((0, name.clone()));
+            entry.0 += 1;
+            if entry.0 == 2 {
+                list.push(entry.1.clone());
+            }
+        };
+        for state in self.files.values() {
+            for name in &state.functions {
+                note(0, name, name.to_ascii_lowercase(), &mut shared.functions);
+            }
+            for name in &state.classes {
+                note(1, name, name.to_ascii_lowercase(), &mut shared.classes);
+            }
+            for name in &state.constants {
+                note(2, name, name.as_str().to_string(), &mut shared.constants);
+            }
+        }
+        if !(shared.functions.is_empty()
+            && shared.classes.is_empty()
+            && shared.constants.is_empty())
+        {
+            self.rebuild_declarations(&shared, None);
+        }
+    }
+
     /// Closes the places in the load order that `removed` held, which are
     /// in no file now.
     fn close_load_order(&mut self, mut removed: Vec<u64>) {
@@ -3617,22 +3667,36 @@ pub fn collect_php_files(path: &Path, out: &mut Vec<PathBuf>) {
 /// extension PHP sources have (`.php`, `.inc`, `.module`, `.install`,
 /// `.theme`, `.engine`, `.profile`), or one that starts with `<?php` or
 /// `<?=`.
-pub(crate) fn collect_php_run_files(path: &Path, out: &mut Vec<PathBuf>) {
+///
+/// Any directory whose name appears in `excluded_dir_names` is pruned, as
+/// `collect_php_files_excluding` does.
+pub(crate) fn collect_php_run_files_excluding(
+    path: &Path,
+    excluded_dir_names: &[&str],
+    out: &mut Vec<PathBuf>,
+) {
     if path.is_dir() {
+        if path
+            .file_name()
+            .and_then(|n| n.to_str())
+            .is_some_and(|n| excluded_dir_names.contains(&n))
+        {
+            return;
+        }
         let Ok(entries) = fs::read_dir(path) else {
             return;
         };
         let mut entries: Vec<_> = entries.flatten().map(|entry| entry.file_name()).collect();
         entries.sort_unstable_by(|a, b| a.as_encoded_bytes().cmp(b.as_encoded_bytes()));
         for entry in entries {
-            collect_php_run_files(&path.join(entry), out);
+            collect_php_run_files_excluding(&path.join(entry), excluded_dir_names, out);
         }
     } else if is_php_run_file(path) {
         out.push(path.to_path_buf());
     }
 }
 
-/// See `collect_php_run_files`.
+/// See `collect_php_run_files_excluding`.
 fn is_php_run_file(path: &Path) -> bool {
     const EXTENSIONS: [&str; 7] = [
         "php", "inc", "module", "install", "theme", "engine", "profile",
