@@ -264,8 +264,11 @@ O3 (2026-10-05; the plan's §9, "Only what optimizes").
   builtin-runs table built into static arrays at compile time (0.11n1);
   the fix's precision (0.11o-0.11q): closures' writes where they run, calls
   through a parameter resolved at each call, captures at a file's top
-  level. Next, before the baseline: the measurements and
-  `cargo xtask validate` (0.11s-0.11u). Then the validation itself (0.11):
+  level; `cargo xtask profile` (0.11s), whose first profiles of amphp/amp
+  are a vendor run of 286 M instructions, 0.06 s, 80 MB and a replay of
+  16.8 G, 2.32 s, 111 MB (`~/.cache/prs-profile/*-91537c79`). Next, before
+  the baseline: the other kinds' profiles and `cargo xtask validate`
+  (0.11t, 0.11u). Then the validation itself (0.11):
   the pass with the `gate` and `oracle` builds, the memory baseline, and
   the first snapshot, compared with no earlier commit; no row before it
   runs the pass, and item 1's validation is the first comparison.
