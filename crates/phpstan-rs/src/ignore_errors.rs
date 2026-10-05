@@ -136,7 +136,9 @@ pub fn filter(results: &mut FxHashMap<PathBuf, Vec<Diagnostic>>, entries: &[Igno
         return;
     }
     for (file, diagnostics) in results.iter_mut() {
-        let path = file.display().to_string();
+        // The path's own text, which only a path that is not UTF-8 is copied
+        // to give.
+        let path = file.to_string_lossy();
         diagnostics
             .retain(|d| d.non_ignorable || !entries.iter().any(|entry| entry.matches(&path, d)));
     }

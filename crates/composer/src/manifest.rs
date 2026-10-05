@@ -4,10 +4,77 @@
 //! `config.platform.php`, path repositories, and which installed package
 //! owns a given file.
 
+use std::borrow::Cow;
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
-use serde_json::Value;
+use serde::de::IgnoredAny;
+use serde_json::value::RawValue;
+
+/// An object's key, borrowed from the text it is in unless an escape in it
+/// has to be resolved.
+#[derive(PartialEq, Eq, PartialOrd, Ord)]
+struct Key<'t>(Cow<'t, str>);
+
+impl<'de: 't, 't> serde::Deserialize<'de> for Key<'t> {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        struct KeyVisitor;
+        impl<'de> serde::de::Visitor<'de> for KeyVisitor {
+            type Value = Key<'de>;
+
+            fn expecting(&self, out: &mut std::fmt::Formatter) -> std::fmt::Result {
+                out.write_str("a string")
+            }
+
+            fn visit_borrowed_str<E>(self, text: &'de str) -> Result<Key<'de>, E> {
+                Ok(Key(Cow::Borrowed(text)))
+            }
+
+            fn visit_str<E>(self, text: &str) -> Result<Key<'de>, E> {
+                Ok(Key(Cow::Owned(text.to_string())))
+            }
+        }
+        deserializer.deserialize_str(KeyVisitor)
+    }
+}
+
+/// The members of the JSON object `text`, each as the text of its value,
+/// with a repeated key taking its last value and the keys in order, as a
+/// parsed object has them. `None` for anything that is not an object.
+type Members<'t> = BTreeMap<Key<'t>, &'t RawValue>;
+
+fn members(text: &str) -> Option<Members<'_>> {
+    serde_json::from_str(text).ok()
+}
+
+fn member<'t>(members: &Members<'t>, name: &str) -> Option<&'t RawValue> {
+    members.get(&Key(Cow::Borrowed(name))).copied()
+}
+
+/// The text `raw` holds, read as a `T`, or nothing when it is not one.
+fn read<'t, T: serde::Deserialize<'t>>(raw: Option<&'t RawValue>) -> Option<T> {
+    serde_json::from_str(raw?.get()).ok()
+}
+
+/// The strings of `raw`: the one it is, or those of the list it is that are
+/// strings.
+fn strings(raw: &RawValue) -> Vec<String> {
+    if let Ok(one) = serde_json::from_str::<String>(raw.get()) {
+        return vec![one];
+    }
+    serde_json::from_str::<Vec<&RawValue>>(raw.get())
+        .unwrap_or_default()
+        .into_iter()
+        .filter_map(|item| serde_json::from_str(item.get()).ok())
+        .collect()
+}
+
+/// The keys of the object `raw` is, in order, or none.
+fn keys(raw: Option<&RawValue>) -> Vec<String> {
+    read::<BTreeMap<String, IgnoredAny>>(raw)
+        .map(|object| object.into_keys().collect())
+        .unwrap_or_default()
+}
 
 /// One `composer.json` entry and the 1-based line it's written on.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -28,42 +95,34 @@ pub struct Autoload {
 }
 
 impl Autoload {
-    fn read(section: Option<&Value>, root: &Path) -> Autoload {
-        let Some(section) = section else {
+    fn read(section: Option<&RawValue>, root: &Path) -> Autoload {
+        let Some(section) = section.and_then(|raw| members(raw.get())) else {
             return Autoload::default();
         };
-        let paths = |v: &Value| -> Vec<PathBuf> {
-            match v {
-                Value::String(s) => vec![root.join(s)],
-                Value::Array(items) => items
-                    .iter()
-                    .filter_map(Value::as_str)
-                    .map(|s| root.join(s))
-                    .collect(),
-                _ => Vec::new(),
-            }
+        let paths = |raw: Option<&RawValue>| -> Vec<PathBuf> {
+            raw.map(strings)
+                .unwrap_or_default()
+                .into_iter()
+                .map(|path| root.join(path))
+                .collect()
         };
-        let psr4 = section
-            .get("psr-4")
-            .and_then(Value::as_object)
+        let psr4 = read::<BTreeMap<String, &RawValue>>(member(&section, "psr-4"))
             .map(|map| {
-                map.iter()
-                    .map(|(prefix, dirs)| (prefix.clone(), paths(dirs)))
+                map.into_iter()
+                    .map(|(prefix, dirs)| (prefix, paths(Some(dirs))))
                     .collect()
             })
             .unwrap_or_default();
-        let excluded = match section.get("exclude-from-classmap") {
-            Some(Value::String(s)) => vec![s.as_str()],
-            Some(Value::Array(items)) => items.iter().filter_map(Value::as_str).collect(),
-            _ => Vec::new(),
-        }
-        .into_iter()
-        .map(|p| root.join(p.trim_start_matches('/').trim_end_matches(['/', '*'])))
-        .collect();
+        let excluded = member(&section, "exclude-from-classmap")
+            .map(strings)
+            .unwrap_or_default()
+            .into_iter()
+            .map(|p| root.join(p.trim_start_matches('/').trim_end_matches(['/', '*'])))
+            .collect();
         Autoload {
             psr4,
-            classmap: section.get("classmap").map(paths).unwrap_or_default(),
-            files: section.get("files").map(paths).unwrap_or_default(),
+            classmap: paths(member(&section, "classmap")),
+            files: paths(member(&section, "files")),
             excluded,
         }
     }
@@ -129,88 +188,85 @@ impl ComposerManifest {
     pub fn load(root: &Path, absolute_root: &Path) -> Option<ComposerManifest> {
         let path = root.join("composer.json");
         let text = std::fs::read_to_string(&path).ok()?;
-        let json: Value = serde_json::from_str(&text).ok()?;
+        let json: Members = match serde_json::from_str::<&RawValue>(&text) {
+            Ok(_) => members(&text).unwrap_or_default(),
+            Err(_) => return None,
+        };
         let lines = LineFinder::new(&text);
         let mut manifest = ComposerManifest {
             root: root.to_path_buf(),
             absolute_root: absolute_root.to_path_buf(),
             path,
-            name: json.get("name").and_then(Value::as_str).map(str::to_string),
+            name: read(member(&json, "name")),
             ..ComposerManifest::default()
         };
         for (section, out) in [
             ("require", &mut manifest.require),
             ("require-dev", &mut manifest.require_dev),
         ] {
-            if let Some(map) = json.get(section).and_then(Value::as_object) {
+            if let Some(map) = read::<BTreeMap<String, &RawValue>>(member(&json, section)) {
                 for (package, constraint) in map {
-                    out.push(Located {
-                        value: package.clone(),
-                        line: lines.key_in_section(section, package),
-                    });
-                    if let Some(c) = constraint.as_str() {
-                        manifest
-                            .constraints
-                            .insert(package.to_ascii_lowercase(), c.to_string());
+                    let line = lines.key_in_section(section, &package);
+                    if let Ok(c) = serde_json::from_str::<String>(constraint.get()) {
+                        manifest.constraints.insert(package.to_ascii_lowercase(), c);
                     }
-                }
-            }
-        }
-        manifest.autoload = Autoload::read(json.get("autoload"), root);
-        manifest.autoload_dev = Autoload::read(json.get("autoload-dev"), root);
-        if let Some(map) = json.get("provide").and_then(Value::as_object) {
-            for package in map.keys() {
-                manifest.provide.push(Located {
-                    value: package.clone(),
-                    line: lines.key_in_section("provide", package),
-                });
-            }
-        }
-        if let Some(map) = json.get("suggest").and_then(Value::as_object) {
-            manifest.suggest = map.keys().cloned().collect();
-        }
-        if let Some(map) = json.get("scripts").and_then(Value::as_object) {
-            for (name, commands) in map {
-                let line = lines.key_in_section("scripts", name);
-                let commands: Vec<&str> = match commands {
-                    Value::String(s) => vec![s.as_str()],
-                    Value::Array(items) => items.iter().filter_map(Value::as_str).collect(),
-                    _ => Vec::new(),
-                };
-                for command in commands {
-                    manifest.scripts.push(Located {
-                        value: (name.clone(), command.to_string()),
-                        line: lines.line_of_string_after(command, line),
+                    out.push(Located {
+                        value: package,
+                        line,
                     });
                 }
             }
         }
-        if let Some(php) = json
-            .get("config")
-            .and_then(|c| c.get("platform"))
-            .and_then(|p| p.get("php"))
-            .and_then(Value::as_str)
-        {
+        manifest.autoload = Autoload::read(member(&json, "autoload"), root);
+        manifest.autoload_dev = Autoload::read(member(&json, "autoload-dev"), root);
+        for package in keys(member(&json, "provide")) {
+            let line = lines.key_in_section("provide", &package);
+            manifest.provide.push(Located {
+                value: package,
+                line,
+            });
+        }
+        manifest.suggest = keys(member(&json, "suggest"));
+        if let Some(map) = read::<BTreeMap<String, &RawValue>>(member(&json, "scripts")) {
+            for (name, commands) in map {
+                let line = lines.key_in_section("scripts", &name);
+                for command in strings(commands) {
+                    let command_line = lines.line_of_string_after(&command, line);
+                    manifest.scripts.push(Located {
+                        value: (name.clone(), command),
+                        line: command_line,
+                    });
+                }
+            }
+        }
+        let platform = member(&json, "config")
+            .and_then(|config| members(config.get()))
+            .and_then(|config| member(&config, "platform"))
+            .and_then(|platform| members(platform.get()))
+            .and_then(|platform| read::<String>(member(&platform, "php")));
+        if let Some(php) = platform {
             manifest.platform_php = Some(Located {
-                value: php.to_string(),
+                value: php,
                 line: lines.key_in_section("platform", "php"),
             });
         }
-        if let Some(repos) = json.get("repositories") {
-            let entries: Vec<&Value> = match repos {
-                Value::Array(items) => items.iter().collect(),
-                Value::Object(map) => map.values().collect(),
+        if let Some(repos) = member(&json, "repositories") {
+            let entries: Vec<&RawValue> = match repos.get().trim_start().as_bytes().first() {
+                Some(b'[') => read::<Vec<&RawValue>>(Some(repos)).unwrap_or_default(),
+                Some(b'{') => read::<BTreeMap<String, &RawValue>>(Some(repos))
+                    .map(|map| map.into_values().collect())
+                    .unwrap_or_default(),
                 _ => Vec::new(),
             };
             for repo in entries {
+                let Some(repo) = members(repo.get()) else {
+                    continue;
+                };
                 if let (Some(kind), Some(url)) = (
-                    repo.get("type").and_then(Value::as_str),
-                    repo.get("url").and_then(Value::as_str),
+                    read::<String>(member(&repo, "type")),
+                    read::<String>(member(&repo, "url")),
                 ) {
-                    manifest.repositories.push(Repository {
-                        kind: kind.to_string(),
-                        url: url.to_string(),
-                    });
+                    manifest.repositories.push(Repository { kind, url });
                 }
             }
         }
@@ -303,54 +359,38 @@ fn read_installed(root: &Path) -> Vec<InstalledPackage> {
     let Ok(text) = std::fs::read_to_string(composer_dir.join("installed.json")) else {
         return Vec::new();
     };
-    let Ok(json) = serde_json::from_str::<Value>(&text) else {
+    // The packages are a list, or the list a `packages` member of an
+    // object is.
+    let list = match text.trim_start().as_bytes().first() {
+        Some(b'[') => serde_json::from_str::<&RawValue>(&text).ok(),
+        Some(b'{') => members(&text).and_then(|json| member(&json, "packages")),
+        _ => None,
+    };
+    let Some(items) = read::<Vec<&RawValue>>(list) else {
         return Vec::new();
     };
-    let packages: Vec<&Value> = match &json {
-        Value::Array(items) => items.iter().collect(),
-        Value::Object(map) => map
-            .get("packages")
-            .and_then(Value::as_array)
-            .map(|items| items.iter().collect())
-            .unwrap_or_default(),
-        _ => Vec::new(),
-    };
-    let names = |v: Option<&Value>| -> Vec<String> {
-        v.and_then(Value::as_object)
-            .map(|m| m.keys().cloned().collect())
-            .unwrap_or_default()
-    };
-    packages
+    items
         .into_iter()
-        .filter_map(|p| {
-            let name = p.get("name")?.as_str()?.to_string();
+        .filter_map(|item| {
+            let p = members(item.get())?;
+            let name: String = read(member(&p, "name"))?;
             let vendor_dir = root.join("vendor").join(&name);
-            let install_dir = p
-                .get("install-path")
-                .and_then(Value::as_str)
+            let install_dir = read::<String>(member(&p, "install-path"))
                 .map(|rel| composer_dir.join(rel))
                 .unwrap_or_else(|| vendor_dir.clone());
             let install_dir = std::fs::canonicalize(&install_dir).unwrap_or(install_dir);
             Some(InstalledPackage {
-                kind: p
-                    .get("type")
-                    .and_then(Value::as_str)
-                    .unwrap_or("library")
-                    .to_string(),
-                auto_discovered: p
-                    .get("extra")
-                    .and_then(Value::as_object)
+                kind: read(member(&p, "type")).unwrap_or_else(|| "library".to_string()),
+                auto_discovered: read::<BTreeMap<Key, IgnoredAny>>(member(&p, "extra"))
                     .is_some_and(|extra| {
                         ["pest", "laravel", "phpstan", "psalm"]
                             .iter()
-                            .any(|key| extra.contains_key(*key))
+                            .any(|key| extra.contains_key(&Key(Cow::Borrowed(key))))
                     }),
-                has_bin: p
-                    .get("bin")
-                    .and_then(Value::as_array)
-                    .is_some_and(|b| !b.is_empty()),
-                provide: names(p.get("provide")),
-                replace: names(p.get("replace")),
+                has_bin: read::<Vec<IgnoredAny>>(member(&p, "bin"))
+                    .is_some_and(|bin| !bin.is_empty()),
+                provide: keys(member(&p, "provide")),
+                replace: keys(member(&p, "replace")),
                 name,
                 install_dir,
                 vendor_dir,
