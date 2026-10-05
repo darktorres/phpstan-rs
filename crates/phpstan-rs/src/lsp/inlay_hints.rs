@@ -3,7 +3,7 @@
 //! argument) and inferred-type hints for an unannotated local-variable
 //! assignment, both collected in one `Checker::check_program` pass via
 //! the `collect_inlay_hints` gate. Split into `collect` (the expensive,
-//! whole-file part, cached by `Server` on a per-file version counter)
+//! whole-file part, cached by `Workspace` on a per-file version counter)
 //! and `filter_to_range` (the cheap per-request mapping/filtering), so a
 //! repeated request against an unchanged document costs no extra pass.
 

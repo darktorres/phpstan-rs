@@ -137,7 +137,7 @@ fn resolve_member_owners(
 }
 
 /// The member name a `Member`/`Instance` `Resolved` carries, or `None`
-/// for every other variant - `Server::same_symbol`'s own quick pre-
+/// for every other variant - `Workspace::same_symbol`'s own quick pre-
 /// filter before the more expensive owner-normalization/probe work in
 /// `member_owners_of`.
 fn member_name_hint(r: &navigation::Resolved) -> Option<&str> {
@@ -157,14 +157,33 @@ struct PendingWorkspaceScan {
     progress_token: Option<lsp_types::ProgressToken>,
 }
 
-struct Server {
+/// One workspace folder's analysis: the project and session its
+/// configuration resolved to, what its checks found, and the documents
+/// the client has open in it. A document belongs to the deepest folder
+/// that contains it (`Server::workspace_of`); a document outside every
+/// folder belongs to the workspace without a root.
+struct Workspace {
+    // The folder this workspace analyses, `None` for the workspace of the
+    // documents no folder contains.
+    root: Option<PathBuf>,
+    // The folders nested inside this one, whose documents belong to them:
+    // nothing found in a path under one is published from here. For the
+    // workspace without a root, every folder.
+    nested_roots: Vec<PathBuf>,
     project: Project,
-    // The process's worker pool (`project::worker_pool`), which every
-    // workspace check runs on.
-    pool: Arc<rayon::ThreadPool>,
+    // The session `root`'s configuration resolved to, which lists the
+    // files `root` loads.
+    session: Option<Session>,
+    // The last `ResolvedWorkspaceConfig` actually applied to `project` -
+    // `reload_configuration`'s no-op fast path compares a freshly resolved
+    // value against this via real `PartialEq` (never a `Debug`-formatted
+    // fingerprint - `SqlReflectionConfig`'s own `Debug` impl always prints
+    // its `password` field as a constant redacted token, which would make
+    // a password-only edit invisible to a string-based comparison).
+    last_applied_config: Option<workspace_config::ResolvedWorkspaceConfig>,
     // Every URI the client currently has open or has otherwise seen, so
-    // the (now-deferred) workspace scan and `didOpen`/`didChange` share
-    // one path->diagnostics story instead of the workspace scan being
+    // the workspace scan and `didOpen`/`didChange` share one
+    // path->diagnostics story instead of the workspace scan being
     // invisible to later incremental updates. Also carries the last
     // known LSP document version for that path (`None` if only ever seen
     // via the workspace scan or a `workspace/didChangeWatchedFiles`
@@ -172,7 +191,7 @@ struct Server {
     // `didChange` do), so `publishDiagnostics` can be stamped with it -
     // see `uri_and_version_for`.
     open_uris: FxHashMap<PathBuf, (Uri, Option<i32>)>,
-    // What the checks last found in every path this server has ever
+    // What the checks last found in every path this workspace has ever
     // checked, before `apply_post_filters` - every level's findings, so a
     // configuration change that only changes which are shown publishes
     // them again without checking anything (`reload_configuration`).
@@ -180,10 +199,9 @@ struct Server {
     // checker pass per request (a real editor's lightbulb fires
     // `textDocument/codeAction` far more often than actual edits, e.g. on
     // cursor movement). Kept in sync by every diagnostic-producing path
-    // (`check_workspace`, `publish_diagnostics_for`), cleared
-    // for a path `remove_workspace_folders`/
-    // `handle_watched_files_changed`'s Deleted branch drop. Safe under
-    // today's fully synchronous, one-message-at-a-time `run_loop`: a
+    // (`check_workspace`, `publish_diagnostics_for`), cleared for a path
+    // a removed folder or `handle_watched_files_changed`'s Deleted branch
+    // drops. Safe under the one-message-at-a-time `run_loop`: a
     // `codeAction` request can only ever see whatever the most recently
     // processed `didChange`/scan already committed, never a torn or
     // stale-relative-to-an-earlier-unprocessed-edit state.
@@ -197,17 +215,44 @@ struct Server {
     // removed.
     parse_failures: FxHashMap<PathBuf, ParseFailure>,
     // The exact current text `didOpen`/`didChange` last sent for a path,
-    // regardless of whether it parses - `Project::source`/`Project::ast`
-    // only ever reflect the last *successfully parsed* version, but
+    // regardless of whether it parses - the project's source and syntax
+    // tree only ever reflect the last *successfully parsed* version, but
     // `textDocument/completion`'s member-completion path needs the LIVE
     // (very often mid-edit and unparseable - `$x->` alone is a syntax
     // error) buffer text to tokenize and to extract a receiver
     // expression's own text from. See `completion`'s own module doc
     // comment for the full mechanism this feeds.
     latest_text: FxHashMap<PathBuf, String>,
-    // The documents the client has open, which the workspace session reads
-    // in place of the disk's files (`Session::set_overlay`).
+    // The documents the client has open, which the session reads in place
+    // of the disk's files (`Session::set_overlay`).
     open_documents: FxHashSet<PathBuf>,
+    // Bumped by `handle_open_or_change` on every `didOpen`/`didChange` for
+    // a path - `inlay_hints`'s cache-invalidation key. A path never opened/
+    // changed this session (only ever seen via the workspace scan) has an
+    // implicit version of 0, consistent with its first request computing
+    // and caching at that same version.
+    file_versions: FxHashMap<PathBuf, u64>,
+    // `textDocument/inlayHint`'s version-keyed whole-file hint cache - see
+    // `inlay_hints`'s own doc comment for why a cache is needed at all
+    // (VS Code re-pulls inlay hints on edits, not just scroll/viewport
+    // changes, so serving a request against an unchanged document from
+    // cache is what actually saves a repeated `check_program` pass).
+    #[allow(clippy::type_complexity)]
+    inlay_hint_cache: FxHashMap<PathBuf, (u64, Vec<(Span, Name)>, Vec<(Span, Type)>)>,
+    // What a column of a position counts: UTF-16 code units unless the
+    // client offered UTF-8 and `initialize` agreed to it.
+    unit: Unit,
+}
+
+struct Server {
+    // The workspace of each folder the client has open, in the order
+    // they were added.
+    folders: Vec<Workspace>,
+    // The workspace of the documents no folder contains.
+    unrooted: Workspace,
+    // The process's worker pool (`project::worker_pool`), which every
+    // workspace check runs on.
+    pool: Arc<rayon::ThreadPool>,
     // What a column of a position counts: UTF-16 code units unless the
     // client offered UTF-8 and `initialize` agreed to it.
     unit: Unit,
@@ -242,21 +287,11 @@ struct Server {
     // `PendingWorkspaceScan`'s own doc comment for why the scan itself
     // can't just run inline in `"initialize"`.
     pending_workspace_scan: Option<PendingWorkspaceScan>,
-    // Every workspace folder root already loaded - `add_workspace_folders`/
-    // `remove_workspace_folders` dedup/filter against this.
-    workspace_roots: Vec<PathBuf>,
-    // The most recently configured workspace root - see
-    // `configure_from_workspace`. With more than one workspace folder,
-    // this and the configuration applied (`last_applied_config`) are
-    // last-root-wins: `Project`/`Registry` have no per-root config
-    // scoping today, matching 1.1's own already-accepted single-
-    // workspace-config limitation, generalized rather than newly
-    // introduced here.
-    root: Option<PathBuf>,
-    // A `phpstan-rs.configPath` setting override, applied on top of
-    // `root`'s own default `phpstan-rs.toml` lookup by every subsequent
-    // `configure_from_workspace`/`reload_configuration` call. `None`
-    // until a `workspace/didChangeConfiguration` notification sets one.
+    // A `phpstan-rs.configPath` setting override, as the client spelled
+    // it: applied on top of each folder's own default `phpstan-rs.toml`
+    // lookup by every subsequent `configure`/`reload_configuration` call,
+    // a relative path against that folder. `None` until a
+    // `workspace/didChangeConfiguration` notification sets one.
     config_path_override: Option<PathBuf>,
     // `phpstan-rs.enable` - "stop showing squiggles", not "stop the
     // language server": hover/definition/documentSymbol keep working
@@ -270,17 +305,6 @@ struct Server {
     // `settings` value, so the pushed-settings path alone would never see
     // an actual `phpstan-rs.*` value from it.
     supports_configuration_pull: bool,
-    // The last `ResolvedWorkspaceConfig` actually applied to
-    // `self.project`/`self` - `reload_configuration`'s no-op fast path
-    // compares a freshly resolved value against this via real `PartialEq`
-    // (never a `Debug`-formatted fingerprint - `SqlReflectionConfig`'s own
-    // `Debug` impl always prints its `password` field as a constant
-    // redacted token, which would make a password-only edit invisible to
-    // a string-based comparison).
-    last_applied_config: Option<workspace_config::ResolvedWorkspaceConfig>,
-    // The session the most recently configured workspace root resolved
-    // to, which lists the files that root loads.
-    workspace_session: Option<Session>,
     // Captured once at `"initialize"` from
     // `capabilities.workspace.didChangeWatchedFiles.dynamicRegistration` -
     // whether this client can even be asked to watch files for this
@@ -289,27 +313,39 @@ struct Server {
     // mechanism, so unlike `hover_provider`/etc. this can't be
     // advertised in `"initialize"`'s own response.
     supports_watched_files: bool,
-    // Bumped by `handle_open_or_change` on every `didOpen`/`didChange` for
-    // a path - `inlay_hints`'s cache-invalidation key. A path never opened/
-    // changed this session (only ever seen via the workspace scan) has an
-    // implicit version of 0, consistent with its first request computing
-    // and caching at that same version.
-    file_versions: FxHashMap<PathBuf, u64>,
-    // `textDocument/inlayHint`'s version-keyed whole-file hint cache - see
-    // `inlay_hints`'s own doc comment for why a cache is needed at all
-    // (VS Code re-pulls inlay hints on edits, not just scroll/viewport
-    // changes, so serving a request against an unchanged document from
-    // cache is what actually saves a repeated `check_program` pass).
-    #[allow(clippy::type_complexity)]
-    inlay_hint_cache: FxHashMap<PathBuf, (u64, Vec<(Span, Name)>, Vec<(Span, Type)>)>,
     // The version `initialize` reports, the binary's own.
     version: String,
     // Every section a workspace's `phpstan-rs.toml` may set.
     config_schema: config::Schema,
 }
 
-impl Server {
-    fn new(version: &str, config_schema: config::Schema) -> Self {
+/// A document the client has open, as a workspace holds it.
+struct OpenDocument {
+    uri: Option<(Uri, Option<i32>)>,
+    text: String,
+    edits: Option<u64>,
+}
+
+/// What the client's settings and the process give each folder's
+/// configuration.
+struct ConfigInputs<'a> {
+    // The `phpstan-rs.configPath` setting, a relative path against the
+    // folder.
+    path_override: Option<&'a Path>,
+    schema: &'a config::Schema,
+    pool: &'a Arc<rayon::ThreadPool>,
+}
+
+impl ConfigInputs<'_> {
+    /// Resolves the configuration of the folder at `root`.
+    fn open(&self, root: &Path) -> workspace_config::OpenedWorkspace {
+        let config_path = self.path_override.map(|path| root.join(path));
+        workspace_config::open(root, config_path.as_deref(), self.schema, self.pool.clone())
+    }
+}
+
+impl Workspace {
+    fn new(root: Option<PathBuf>, unit: Unit) -> Self {
         let mut project = Project::new();
         // hover/definition's own text-split technique needs each file's
         // exact source text - see `Project::retain_source`'s own doc
@@ -319,57 +355,45 @@ impl Server {
             keeps_as_built: true,
             ..ProjectSettings::default()
         });
-        Server {
+        Workspace {
+            root,
+            nested_roots: Vec::new(),
             project,
-            pool: crate::project::worker_pool(),
+            session: None,
+            last_applied_config: None,
             open_uris: FxHashMap::default(),
             last_diagnostics: FxHashMap::default(),
             whole_program: FxHashMap::default(),
             parse_failures: FxHashMap::default(),
             latest_text: FxHashMap::default(),
             open_documents: FxHashSet::default(),
-            unit: Unit::default(),
-            shutdown_received: false,
-            pending_requests: lsp_server::ReqQueue::default(),
-            // `Incoming<I>` has no public constructor or `Default` impl
-            // of its own (its one field is private to `lsp-server`; only
-            // `ReqQueue`'s manual `Default` impl can see it) - built via
-            // a throwaway `ReqQueue` whose `.outgoing` half (typed `()`,
-            // never touched) is immediately dropped.
-            pending_incoming_requests: lsp_server::ReqQueue::<Arc<AtomicBool>, ()>::default()
-                .incoming,
-            pending_workspace_scan: None,
-            workspace_roots: Vec::new(),
-            root: None,
-            config_path_override: None,
-            enabled: true,
-            supports_configuration_pull: false,
-            last_applied_config: None,
-            workspace_session: None,
-            supports_watched_files: false,
             file_versions: FxHashMap::default(),
             inlay_hint_cache: FxHashMap::default(),
-            version: version.to_string(),
-            config_schema,
+            unit,
         }
     }
 
-    /// Resolves `root`'s own `phpstan-rs.toml` as `check-project` resolves
-    /// it and applies it to `self.project`/`self`, so a workspace's config
-    /// produces the same `Project` state (and the same published-diagnostic
-    /// set) `check-project` would build/report for the identical tree. The
-    /// session it resolved lists the files `load_workspace_files` loads.
-    /// Tells the user what the configuration holds that is wrong.
-    fn configure_from_workspace(&mut self, root: &Path) -> Vec<Message> {
-        let workspace = workspace_config::open(
-            root,
-            self.config_path_override.as_deref(),
-            &self.config_schema,
-            self.pool.clone(),
-        );
+    /// Whether a document at `path` belongs to this workspace rather than
+    /// to a folder nested inside it.
+    fn owns(&self, path: &Path) -> bool {
+        !self.nested_roots.iter().any(|root| path.starts_with(root))
+    }
+
+    /// Resolves the folder's own `phpstan-rs.toml` as `check-project`
+    /// resolves it and applies it to `self.project`, so the folder's
+    /// config produces the same `Project` state (and the same
+    /// published-diagnostic set) `check-project` would build/report for
+    /// the identical tree. The session it resolved lists the files
+    /// `load_workspace_files` loads. Tells the user what the
+    /// configuration holds that is wrong.
+    fn configure(&mut self, inputs: &ConfigInputs) -> Vec<Message> {
+        let Some(root) = self.root.clone() else {
+            return Vec::new();
+        };
+        let workspace = inputs.open(&root);
         let messages = self.configuration_problems(&workspace.config);
         self.adopt_session(workspace.session);
-        self.apply_resolved_config(root, workspace.config);
+        self.apply_resolved_config(workspace.config);
         messages
     }
 
@@ -393,29 +417,20 @@ impl Server {
             .collect()
     }
 
-    /// The apply half of `configure_from_workspace`, factored out so
-    /// `reload_configuration` can apply an already-resolved value (its own
-    /// no-op fast path needs the resolved value in hand *before* deciding
-    /// whether to apply it, which `configure_from_workspace`'s
-    /// resolve-then-apply-in-one-call shape doesn't allow).
-    fn apply_resolved_config(
-        &mut self,
-        root: &Path,
-        resolved: workspace_config::ResolvedWorkspaceConfig,
-    ) {
+    /// The apply half of `configure`, factored out so `reload_configuration`
+    /// can apply an already-resolved value (its own no-op fast path needs
+    /// the resolved value in hand *before* deciding whether to apply it,
+    /// which `configure`'s resolve-then-apply-in-one-call shape doesn't
+    /// allow).
+    fn apply_resolved_config(&mut self, resolved: workspace_config::ResolvedWorkspaceConfig) {
         self.project.apply_settings(resolved.settings.clone());
-        self.apply_report_config(root, resolved);
+        self.apply_report_config(resolved);
     }
 
     /// The part of `apply_resolved_config` that decides which findings
     /// are published, not what the checks find, keeping `resolved` as
     /// `self.last_applied_config`.
-    fn apply_report_config(
-        &mut self,
-        root: &Path,
-        resolved: workspace_config::ResolvedWorkspaceConfig,
-    ) {
-        self.root = Some(root.to_path_buf());
+    fn apply_report_config(&mut self, resolved: workspace_config::ResolvedWorkspaceConfig) {
         self.last_applied_config = Some(resolved);
     }
 
@@ -469,7 +484,7 @@ impl Server {
                 session.set_overlay(path, text.as_bytes().to_vec());
             }
         }
-        self.workspace_session.replace(session)
+        self.session.replace(session)
     }
 
     /// Notes that `path` is open with `text`, which the workspace session
@@ -477,7 +492,7 @@ impl Server {
     fn open_document(&mut self, path: &Path, text: &str) {
         self.open_documents.insert(path.to_path_buf());
         self.project.open_file(path, text);
-        if let Some(session) = &mut self.workspace_session {
+        if let Some(session) = &mut self.session {
             session.set_overlay(path, text.as_bytes().to_vec());
         }
     }
@@ -486,15 +501,48 @@ impl Server {
     fn close_document(&mut self, path: &Path) {
         self.open_documents.remove(path);
         self.project.close_file(path);
-        if let Some(session) = &mut self.workspace_session {
+        if let Some(session) = &mut self.session {
             session.clear_overlay(path);
         }
+    }
+
+    /// Takes the open document `path` out of this workspace, for another
+    /// to adopt: its text, its URI and version, and its edit count.
+    fn take_document(&mut self, path: &Path) -> Option<OpenDocument> {
+        if !self.open_documents.contains(path) {
+            return None;
+        }
+        let document = OpenDocument {
+            uri: self.open_uris.remove(path),
+            text: self.latest_text.remove(path).unwrap_or_default(),
+            edits: self.file_versions.remove(path),
+        };
+        self.close_document(path);
+        Some(document)
+    }
+
+    /// Takes over the open document `path` from the workspace that held
+    /// it: the project is brought to the text the client has open.
+    fn adopt_document(&mut self, path: &Path, document: OpenDocument) {
+        if let Some(uri) = document.uri {
+            self.open_uris.insert(path.to_path_buf(), uri);
+        }
+        if let Some(edits) = document.edits {
+            self.file_versions.insert(path.to_path_buf(), edits);
+        }
+        self.open_document(path, &document.text);
+        if self.project.is_loaded(path)
+            && self.project.content_hash(path) != Some(ContentHash::of(document.text.as_bytes()))
+        {
+            let _ = self.project.update_file(path, document.text.as_str());
+        }
+        self.latest_text.insert(path.to_path_buf(), document.text);
     }
 
     /// The bytes of the file at `path`: an open document's text, or the
     /// disk's.
     fn read_file(&self, path: &Path) -> std::io::Result<Vec<u8>> {
-        match &self.workspace_session {
+        match &self.session {
             Some(session) => session.read(path),
             None => std::fs::read(path),
         }
@@ -506,7 +554,7 @@ impl Server {
     /// failure is logged (both to stderr and as a `window/logMessage`
     /// notification) and skipped, not fatal to the rest of the scan.
     fn load_files(&mut self, files: &[(PathBuf, bool)], messages: &mut Vec<Message>) {
-        let Some(session) = &self.workspace_session else {
+        let Some(session) = &self.session else {
             return;
         };
         let role_of = |analysed: bool| -> Vec<PathBuf> {
@@ -563,7 +611,7 @@ impl Server {
     /// different `Project` state for the identical tree.
     fn load_workspace_files(&mut self) -> Vec<Message> {
         let mut messages = Vec::new();
-        let Some(session) = &self.workspace_session else {
+        let Some(session) = &self.session else {
             return messages;
         };
         let (analysed, context) = session.listing();
@@ -577,78 +625,6 @@ impl Server {
         messages
     }
 
-    /// Loads every not-yet-tracked root in `roots` (deduped against
-    /// `self.workspace_roots`) via `configure_from_workspace` +
-    /// `load_workspace_files`, then runs `Project::finish_loading` at
-    /// most ONCE for the whole batch - not once per root, which would
-    /// pay N whole-registry recomputes for N roots (each re-scanning
-    /// every previously-loaded root's own files again) instead of one.
-    /// Called from both `"initialized"` (the `pending_workspace_scan`
-    /// roots resolved at `"initialize"`) and
-    /// `"workspace/didChangeWorkspaceFolders"`'s own `added` array -
-    /// every load path goes through this one method, even for a single
-    /// root, so there is exactly one place this batching discipline can
-    /// be violated.
-    fn add_workspace_folders(&mut self, roots: &[PathBuf]) -> Vec<Message> {
-        let mut messages = Vec::new();
-        let mut any_new = false;
-        for root in roots {
-            if self.workspace_roots.contains(root) {
-                continue;
-            }
-            // Config resolution (a workspace's own phpstan-rs.toml,
-            // Composer vendor discovery) is genuinely per-root - but its
-            // *effect* on `self`/`self.project` (opt-in checks, php
-            // version, the post-filter fields `apply_post_filters`
-            // reads) is last-root-wins for now: `Project`/`Registry`
-            // have no per-root config scoping, only one shared instance
-            // for however many folders are open. Matches 1.1's own
-            // already-accepted single-workspace-config limitation,
-            // generalized rather than newly introduced here.
-            messages.extend(self.configure_from_workspace(root));
-            messages.extend(self.load_workspace_files());
-            self.workspace_roots.push(root.clone());
-            any_new = true;
-        }
-        if any_new {
-            self.project.finish_loading();
-        }
-        messages
-    }
-
-    /// Batch counterpart to `add_workspace_folders`: drops every loaded
-    /// path under any of `roots` (`Project::remove_files`, one recompute
-    /// for the whole batch) and clears `open_uris`/publishes an empty
-    /// `publishDiagnostics` for any of them that was open in the editor -
-    /// otherwise a document whose backing folder just vanished would
-    /// keep showing stale squiggles indefinitely, since removing a
-    /// workspace folder is not itself a `textDocument/didClose`.
-    fn remove_workspace_folders(&mut self, roots: &[PathBuf]) -> Vec<Message> {
-        self.workspace_roots.retain(|r| !roots.contains(r));
-        let paths: Vec<PathBuf> = self
-            .project
-            .loaded_paths()
-            .filter(|p| roots.iter().any(|root| p.starts_with(root)))
-            .map(Path::to_path_buf)
-            .collect();
-
-        let unit = self.unit;
-        let mut messages: Vec<Message> = paths
-            .iter()
-            .filter_map(|p| self.open_uris.remove(p))
-            .map(|(uri, _version)| publish_diagnostics_notification(uri, None, &[], None, unit))
-            .collect();
-        for p in &paths {
-            self.forget_findings(p);
-            self.latest_text.remove(p);
-            self.close_document(p);
-        }
-
-        let results = self.project.remove_files(&paths);
-        messages.extend(self.publish_diagnostics_for(results));
-        messages
-    }
-
     /// Checks every analysed (first-party) file loaded and runs the
     /// whole-program checks, as `Session::analyse` does, keeping what they
     /// find in `last_diagnostics` and `whole_program` and returning the
@@ -659,7 +635,7 @@ impl Server {
     /// not, so a file previously flagged and now clean gets an explicit
     /// clearing notification).
     fn check_workspace(&mut self) -> Vec<PathBuf> {
-        let Some(session) = &self.workspace_session else {
+        let Some(session) = &self.session else {
             return Vec::new();
         };
         let mut files = self.project.analyzed_paths();
@@ -699,11 +675,11 @@ impl Server {
     /// Runs the whole-program checks again, which an edit does not: what
     /// they found is published for every file with findings now or before,
     /// a file now clean cleared.
-    fn recheck_whole_program(&mut self) -> Vec<Message> {
-        if !self.enabled {
+    fn recheck_whole_program(&mut self, enabled: bool) -> Vec<Message> {
+        if !enabled {
             return Vec::new();
         }
-        let Some(session) = &self.workspace_session else {
+        let Some(session) = &self.session else {
             return Vec::new();
         };
         let found = session.whole_program(&mut self.project);
@@ -810,8 +786,8 @@ impl Server {
     /// silence. While `!self.enabled`, skips rechecking entirely and just
     /// clears every currently-open file - phpstan-rs.enable means "stop
     /// showing squiggles", not "stop the language server".
-    fn republish_known_files(&mut self) -> Vec<Message> {
-        if !self.enabled {
+    fn republish_known_files(&mut self, enabled: bool) -> Vec<Message> {
+        if !enabled {
             return self.clear_open_files();
         }
         let checked = self.check_workspace();
@@ -822,13 +798,35 @@ impl Server {
     /// which findings are shown: the last findings of every checked path
     /// published again through the new post-filters, without checking
     /// anything.
-    fn republish_last_diagnostics(&mut self) -> Vec<Message> {
-        if !self.enabled {
+    fn republish_last_diagnostics(&mut self, enabled: bool) -> Vec<Message> {
+        if !enabled {
             return self.clear_open_files();
         }
         let mut paths: Vec<PathBuf> = self.last_diagnostics.keys().cloned().collect();
         paths.sort();
         self.publish_shown(&paths, true)
+    }
+
+    /// An empty `publishDiagnostics` for every file of this workspace that
+    /// has had findings or a document open, which are dropped with it.
+    fn clear_published(&self) -> Vec<Message> {
+        let mut paths: Vec<&PathBuf> = self
+            .last_diagnostics
+            .keys()
+            .chain(self.whole_program.keys())
+            .chain(self.parse_failures.keys())
+            .chain(self.open_uris.keys())
+            .filter(|path| self.owns(path))
+            .collect();
+        paths.sort();
+        paths.dedup();
+        paths
+            .into_iter()
+            .map(|path| {
+                let (uri, version) = self.uri_and_version_for(path);
+                self.diagnostics_message(path, uri, version, &[])
+            })
+            .collect()
     }
 
     /// An empty `publishDiagnostics` for every open file.
@@ -849,6 +847,7 @@ impl Server {
         let mut shown = self.apply_post_filters(self.held_findings(paths));
         paths
             .iter()
+            .filter(|path| self.owns(path))
             .filter_map(|path| {
                 let diags = shown.remove(path).unwrap_or_default();
                 if diags.is_empty() && !with_empty {
@@ -2028,6 +2027,357 @@ impl Server {
             })
     }
 
+    /// `Server::reload_configuration` for this folder: re-resolves its
+    /// configuration, `enable` being the client's setting now and
+    /// `was_enabled` what it was, and applies and republishes what changed.
+    fn reload_configuration(
+        &mut self,
+        enable: bool,
+        was_enabled: bool,
+        inputs: &ConfigInputs,
+    ) -> Vec<Message> {
+        let Some(root) = self.root.clone() else {
+            return Vec::new();
+        };
+        let workspace = inputs.open(&root);
+        let resolved = workspace.config;
+        if enable == was_enabled && self.last_applied_config.as_ref() == Some(&resolved) {
+            return Vec::new();
+        }
+
+        let file_set_changed = self
+            .last_applied_config
+            .as_ref()
+            .is_some_and(|prev| prev.file_set != resolved.file_set);
+        let checks_unchanged = self
+            .last_applied_config
+            .as_ref()
+            .is_some_and(|prev| prev.settings == resolved.settings);
+
+        let mut messages = self.configuration_problems(&resolved);
+        if checks_unchanged {
+            self.apply_report_config(resolved);
+        } else {
+            self.apply_resolved_config(resolved);
+        }
+        let previous = self.adopt_session(workspace.session);
+        if file_set_changed {
+            messages.extend(self.reload_file_set(previous));
+        }
+
+        messages.extend(if checks_unchanged && !file_set_changed {
+            self.republish_last_diagnostics(enable)
+        } else {
+            self.republish_known_files(enable)
+        });
+        messages
+    }
+
+    /// Makes the loaded files what the workspace session lists now: the
+    /// files the `previous` session listed and this one does not are
+    /// removed, those it lists that are not loaded are loaded, and those
+    /// whose role is another are loaded again. A file the client has opened
+    /// stays loaded.
+    fn reload_file_set(&mut self, previous: Option<Session>) -> Vec<Message> {
+        let mut messages = Vec::new();
+        let Some(session) = &self.session else {
+            return messages;
+        };
+        let (analysed, context) = session.listing();
+        let wanted: FxHashMap<&PathBuf, bool> = context
+            .iter()
+            .map(|path| (path, false))
+            .chain(analysed.iter().map(|path| (path, true)))
+            .collect();
+        let analysed_loaded: FxHashSet<PathBuf> =
+            self.project.analyzed_paths().into_iter().collect();
+        let previously_listed: FxHashSet<PathBuf> = previous
+            .map(|previous| {
+                let (analysed, context) = previous.listing();
+                analysed.into_iter().chain(context).collect()
+            })
+            .unwrap_or_default();
+        let mut gone: Vec<PathBuf> = Vec::new();
+        let mut again: FxHashSet<PathBuf> = FxHashSet::default();
+        for path in self.project.loaded_paths() {
+            match wanted.get(&path.to_path_buf()) {
+                Some(&is_analysed) => {
+                    if is_analysed != analysed_loaded.contains(path) {
+                        gone.push(path.to_path_buf());
+                        again.insert(path.to_path_buf());
+                    }
+                }
+                None => {
+                    if previously_listed.contains(path) && !self.file_versions.contains_key(path) {
+                        gone.push(path.to_path_buf());
+                    }
+                }
+            }
+        }
+        let to_load: Vec<(PathBuf, bool)> = context
+            .iter()
+            .map(|path| (path, false))
+            .chain(analysed.iter().map(|path| (path, true)))
+            .filter(|(path, _)| !self.project.is_loaded(path) || again.contains(*path))
+            .map(|(path, is_analysed)| (path.clone(), is_analysed))
+            .collect();
+        if !gone.is_empty() {
+            for path in &gone {
+                self.open_uris.remove(path);
+                self.forget_findings(path);
+                self.latest_text.remove(path);
+                self.close_document(path);
+            }
+            let results = self.project.remove_files(&gone);
+            messages.extend(self.publish_diagnostics_for(results));
+        }
+        self.load_files(&to_load, &mut messages);
+        self.project.restore_load_order();
+        self.project.finish_loading();
+        messages
+    }
+}
+
+impl Server {
+    fn new(version: &str, config_schema: config::Schema) -> Self {
+        Server {
+            folders: Vec::new(),
+            unrooted: Workspace::new(None, Unit::default()),
+            pool: crate::project::worker_pool(),
+            unit: Unit::default(),
+            shutdown_received: false,
+            pending_requests: lsp_server::ReqQueue::default(),
+            // `Incoming<I>` has no public constructor or `Default` impl
+            // of its own (its one field is private to `lsp-server`; only
+            // `ReqQueue`'s manual `Default` impl can see it) - built via
+            // a throwaway `ReqQueue` whose `.outgoing` half (typed `()`,
+            // never touched) is immediately dropped.
+            pending_incoming_requests: lsp_server::ReqQueue::<Arc<AtomicBool>, ()>::default()
+                .incoming,
+            pending_workspace_scan: None,
+            config_path_override: None,
+            enabled: true,
+            supports_configuration_pull: false,
+            supports_watched_files: false,
+            version: version.to_string(),
+            config_schema,
+        }
+    }
+
+    /// Sets what a column of a position counts, in every workspace.
+    fn set_unit(&mut self, unit: Unit) {
+        self.unit = unit;
+        for workspace in self.workspaces_mut() {
+            workspace.unit = unit;
+        }
+    }
+
+    /// Every workspace: the folders', then the one of the documents no
+    /// folder contains.
+    fn workspaces(&self) -> impl Iterator<Item = &Workspace> {
+        self.folders.iter().chain(std::iter::once(&self.unrooted))
+    }
+
+    fn workspaces_mut(&mut self) -> impl Iterator<Item = &mut Workspace> {
+        self.folders
+            .iter_mut()
+            .chain(std::iter::once(&mut self.unrooted))
+    }
+
+    /// The folder `path` belongs to: the deepest that contains it, `None`
+    /// when no folder does.
+    fn folder_of(&self, path: &Path) -> Option<usize> {
+        self.folders
+            .iter()
+            .enumerate()
+            .filter_map(|(index, workspace)| {
+                let root = workspace.root.as_deref()?;
+                path.starts_with(root)
+                    .then(|| (root.components().count(), index))
+            })
+            .max()
+            .map(|(_, index)| index)
+    }
+
+    /// The workspace the document at `path` belongs to.
+    fn workspace_of(&mut self, path: &Path) -> &mut Workspace {
+        match self.folder_of(path) {
+            Some(index) => &mut self.folders[index],
+            None => &mut self.unrooted,
+        }
+    }
+
+    /// Runs `request` on the workspace the document at `uri` belongs to;
+    /// `None` when `uri` names no file.
+    fn on_document<T>(
+        &mut self,
+        uri: &Uri,
+        request: impl FnOnce(&mut Workspace) -> Option<T>,
+    ) -> Option<T> {
+        let path = uri_to_path(uri)?;
+        request(self.workspace_of(&path))
+    }
+
+    /// Tells each workspace which folders are nested inside it, after the
+    /// folders changed.
+    fn refresh_nesting(&mut self) {
+        let roots: Vec<PathBuf> = self
+            .folders
+            .iter()
+            .filter_map(|workspace| workspace.root.clone())
+            .collect();
+        for workspace in self.workspaces_mut() {
+            workspace.nested_roots = roots
+                .iter()
+                .filter(|root| match &workspace.root {
+                    Some(own) => root.starts_with(own) && *root != own,
+                    None => true,
+                })
+                .cloned()
+                .collect();
+        }
+    }
+
+    /// Loads a workspace for each of `roots` that is not one yet, each with
+    /// its own session, project and configuration, and publishes what its
+    /// checks find once every one is loaded, so a folder nested in another
+    /// is known to be. A document the client has open under a new folder
+    /// moves into it. Called from both
+    /// `"initialized"` (the `pending_workspace_scan` roots resolved at
+    /// `"initialize"`) and `"workspace/didChangeWorkspaceFolders"`'s own
+    /// `added` array.
+    fn add_workspace_folders(&mut self, roots: &[PathBuf]) -> Vec<Message> {
+        let mut messages = Vec::new();
+        let first_added = self.folders.len();
+        for root in roots {
+            if self
+                .folders
+                .iter()
+                .any(|workspace| workspace.root.as_ref() == Some(root))
+            {
+                continue;
+            }
+            let mut workspace = Workspace::new(Some(root.clone()), self.unit);
+            let inputs = ConfigInputs {
+                path_override: self.config_path_override.as_deref(),
+                schema: &self.config_schema,
+                pool: &self.pool,
+            };
+            messages.extend(workspace.configure(&inputs));
+            messages.extend(workspace.load_workspace_files());
+            workspace.project.finish_loading();
+            self.folders.push(workspace);
+        }
+        self.refresh_nesting();
+        for added in first_added..self.folders.len() {
+            self.move_open_documents_into(added);
+        }
+        for added in first_added..self.folders.len() {
+            messages.extend(self.folders[added].publish_workspace_diagnostics());
+        }
+        messages
+    }
+
+    /// Moves the documents open in another workspace that belong to the
+    /// folder `added` into it.
+    fn move_open_documents_into(&mut self, added: usize) {
+        let moving: Vec<PathBuf> = self
+            .workspaces()
+            .filter(|workspace| workspace.root != self.folders[added].root)
+            .flat_map(|workspace| workspace.open_documents.iter())
+            .filter(|path| self.folder_of(path) == Some(added))
+            .cloned()
+            .collect();
+        for path in moving {
+            let Some(document) = self
+                .workspaces_mut()
+                .find_map(|workspace| workspace.take_document(&path))
+            else {
+                continue;
+            };
+            self.folders[added].adopt_document(&path, document);
+        }
+    }
+
+    /// Drops the workspace of each of `roots`, with its project, and
+    /// publishes an empty `publishDiagnostics` for each file it had
+    /// published for - otherwise a document whose backing folder just
+    /// vanished would keep showing stale squiggles indefinitely, since
+    /// removing a workspace folder is not itself a `textDocument/didClose`.
+    fn remove_workspace_folders(&mut self, roots: &[PathBuf]) -> Vec<Message> {
+        let mut messages = Vec::new();
+        self.folders.retain(|workspace| {
+            let removed = workspace
+                .root
+                .as_ref()
+                .is_some_and(|root| roots.contains(root));
+            if removed {
+                messages.extend(workspace.clear_published());
+            }
+            !removed
+        });
+        self.refresh_nesting();
+        messages
+    }
+
+    fn handle_open_or_change(
+        &mut self,
+        uri: &Uri,
+        text: &str,
+        version: Option<i32>,
+    ) -> Vec<Message> {
+        let Some(path) = uri_to_path(uri) else {
+            return Vec::new();
+        };
+        self.workspace_of(&path)
+            .handle_open_or_change(uri, text, version)
+    }
+
+    fn handle_debounced_change(
+        &mut self,
+        path: &Path,
+        uri: &Uri,
+        text: &str,
+        version: i32,
+        should_abort: impl Fn() -> bool + Sync,
+    ) -> Vec<Message> {
+        self.workspace_of(path)
+            .handle_debounced_change(path, uri, text, version, should_abort)
+    }
+
+    /// Runs the whole-program checks of every workspace again.
+    fn recheck_whole_program(&mut self) -> Vec<Message> {
+        let enabled = self.enabled;
+        self.workspaces_mut()
+            .flat_map(|workspace| workspace.recheck_whole_program(enabled))
+            .collect()
+    }
+
+    /// Project-wide fuzzy symbol search, over every workspace.
+    fn workspace_symbol(&self, query: &str) -> Vec<SymbolInformation> {
+        self.workspaces()
+            .flat_map(|workspace| workspace.workspace_symbol(query))
+            .collect()
+    }
+
+    /// Routes a `workspace/didChangeWatchedFiles` batch to the workspace
+    /// each changed path belongs to.
+    fn handle_watched_files_changed(&mut self, changes: Vec<lsp_types::FileEvent>) -> Vec<Message> {
+        let mut by_workspace: Vec<Vec<lsp_types::FileEvent>> =
+            (0..=self.folders.len()).map(|_| Vec::new()).collect();
+        for change in changes {
+            let Some(path) = uri_to_path(&change.uri) else {
+                continue;
+            };
+            let index = self.folder_of(&path).unwrap_or(self.folders.len());
+            by_workspace[index].push(change);
+        }
+        self.workspaces_mut()
+            .zip(by_workspace)
+            .flat_map(|(workspace, changes)| workspace.handle_watched_files_changed(changes))
+            .collect()
+    }
+
     /// Sends a server-initiated JSON-RPC request and registers its id
     /// for later correlation with the client's reply in
     /// `handle_response`. `R` fixes `params` to the shape `R::METHOD`
@@ -2127,9 +2477,9 @@ impl Server {
     }
 
     /// The actual `workspace/didChangeConfiguration` work, shared by both
-    /// the direct-push and pull-response paths: re-resolves `self.root`'s
-    /// config (honoring `settings.config_path`, resolved against `root`
-    /// when relative) and republishes whatever changed.
+    /// the direct-push and pull-response paths: re-resolves each
+    /// folder's config (honoring `settings.config_path`, resolved against
+    /// the folder when relative) and republishes whatever changed.
     ///
     /// A true no-op - the freshly resolved config and `enable` flag both
     /// match what's already applied - returns `Vec::new()` without
@@ -2146,120 +2496,25 @@ impl Server {
     /// `scan_paths`, `stub_paths`, `no_composer`) is applied as the
     /// difference between the file sets (`reload_file_set`).
     fn reload_configuration(&mut self, settings: settings::PhpstanRsSettings) -> Vec<Message> {
-        let Some(root) = self.root.clone() else {
-            return Vec::new();
-        };
-        let was_enabled = self.enabled;
-        let config_path_override = settings.config_path.as_deref().map(|p| {
-            let candidate = PathBuf::from(p);
-            if candidate.is_absolute() {
-                candidate
-            } else {
-                root.join(candidate)
-            }
-        });
-        let workspace = workspace_config::open(
-            &root,
-            config_path_override.as_deref(),
-            &self.config_schema,
-            self.pool.clone(),
-        );
-        let resolved = workspace.config;
-        if settings.enable == was_enabled && self.last_applied_config.as_ref() == Some(&resolved) {
+        if self.folders.is_empty() {
             return Vec::new();
         }
-
-        let file_set_changed = self
-            .last_applied_config
-            .as_ref()
-            .is_some_and(|prev| prev.file_set != resolved.file_set);
-        let checks_unchanged = self
-            .last_applied_config
-            .as_ref()
-            .is_some_and(|prev| prev.settings == resolved.settings);
-
-        let mut messages = self.configuration_problems(&resolved);
+        let was_enabled = self.enabled;
+        let config_path_override = settings.config_path.as_deref().map(PathBuf::from);
+        let inputs = ConfigInputs {
+            path_override: config_path_override.as_deref(),
+            schema: &self.config_schema,
+            pool: &self.pool,
+        };
+        let messages = self
+            .folders
+            .iter_mut()
+            .flat_map(|workspace| {
+                workspace.reload_configuration(settings.enable, was_enabled, &inputs)
+            })
+            .collect();
         self.enabled = settings.enable;
         self.config_path_override = config_path_override;
-        if checks_unchanged {
-            self.apply_report_config(&root, resolved);
-        } else {
-            self.apply_resolved_config(&root, resolved);
-        }
-        let previous = self.adopt_session(workspace.session);
-        if file_set_changed {
-            messages.extend(self.reload_file_set(previous));
-        }
-
-        messages.extend(if checks_unchanged && !file_set_changed {
-            self.republish_last_diagnostics()
-        } else {
-            self.republish_known_files()
-        });
-        messages
-    }
-
-    /// Makes the loaded files what the workspace session lists now: the
-    /// files the `previous` session listed and this one does not are
-    /// removed, those it lists that are not loaded are loaded, and those
-    /// whose role is another are loaded again. A file the client has opened
-    /// stays loaded.
-    fn reload_file_set(&mut self, previous: Option<Session>) -> Vec<Message> {
-        let mut messages = Vec::new();
-        let Some(session) = &self.workspace_session else {
-            return messages;
-        };
-        let (analysed, context) = session.listing();
-        let wanted: FxHashMap<&PathBuf, bool> = context
-            .iter()
-            .map(|path| (path, false))
-            .chain(analysed.iter().map(|path| (path, true)))
-            .collect();
-        let analysed_loaded: FxHashSet<PathBuf> =
-            self.project.analyzed_paths().into_iter().collect();
-        let previously_listed: FxHashSet<PathBuf> = previous
-            .map(|previous| {
-                let (analysed, context) = previous.listing();
-                analysed.into_iter().chain(context).collect()
-            })
-            .unwrap_or_default();
-        let mut gone: Vec<PathBuf> = Vec::new();
-        let mut again: FxHashSet<PathBuf> = FxHashSet::default();
-        for path in self.project.loaded_paths() {
-            match wanted.get(&path.to_path_buf()) {
-                Some(&is_analysed) => {
-                    if is_analysed != analysed_loaded.contains(path) {
-                        gone.push(path.to_path_buf());
-                        again.insert(path.to_path_buf());
-                    }
-                }
-                None => {
-                    if previously_listed.contains(path) && !self.file_versions.contains_key(path) {
-                        gone.push(path.to_path_buf());
-                    }
-                }
-            }
-        }
-        let to_load: Vec<(PathBuf, bool)> = context
-            .iter()
-            .map(|path| (path, false))
-            .chain(analysed.iter().map(|path| (path, true)))
-            .filter(|(path, _)| !self.project.is_loaded(path) || again.contains(*path))
-            .map(|(path, is_analysed)| (path.clone(), is_analysed))
-            .collect();
-        if !gone.is_empty() {
-            for path in &gone {
-                self.open_uris.remove(path);
-                self.forget_findings(path);
-                self.latest_text.remove(path);
-                self.close_document(path);
-            }
-            let results = self.project.remove_files(&gone);
-            messages.extend(self.publish_diagnostics_for(results));
-        }
-        self.load_files(&to_load, &mut messages);
-        self.project.restore_load_order();
-        self.project.finish_loading();
         messages
     }
 }
@@ -2780,11 +3035,11 @@ fn handle_request<W: Write>(server: &mut Server, writer: &mut W, req: Request) {
                 }
                 None => (Vec::new(), None, None, false, false),
             };
-            server.unit = if position_encoding.is_some() {
+            server.set_unit(if position_encoding.is_some() {
                 Unit::Utf8
             } else {
                 Unit::Utf16
-            };
+            });
             server.supports_configuration_pull = supports_configuration_pull;
             server.supports_watched_files = supports_watched_files;
             // The scan itself (config resolution + parsing) runs from
@@ -2871,9 +3126,14 @@ fn handle_request<W: Write>(server: &mut Server, writer: &mut W, req: Request) {
             let result = serde_json::from_value::<HoverParams>(req.params)
                 .ok()
                 .and_then(|params| {
-                    server.hover(
+                    server.on_document(
                         &params.text_document_position_params.text_document.uri,
-                        params.text_document_position_params.position,
+                        |workspace| {
+                            workspace.hover(
+                                &params.text_document_position_params.text_document.uri,
+                                params.text_document_position_params.position,
+                            )
+                        },
                     )
                 })
                 .map(|hover| serde_json::to_value(hover).unwrap_or(serde_json::Value::Null))
@@ -2884,9 +3144,14 @@ fn handle_request<W: Write>(server: &mut Server, writer: &mut W, req: Request) {
             let result = serde_json::from_value::<GotoDefinitionParams>(req.params)
                 .ok()
                 .and_then(|params| {
-                    server.definition(
+                    server.on_document(
                         &params.text_document_position_params.text_document.uri,
-                        params.text_document_position_params.position,
+                        |workspace| {
+                            workspace.definition(
+                                &params.text_document_position_params.text_document.uri,
+                                params.text_document_position_params.position,
+                            )
+                        },
                     )
                 })
                 .map(|loc| serde_json::to_value(loc).unwrap_or(serde_json::Value::Null))
@@ -2897,9 +3162,14 @@ fn handle_request<W: Write>(server: &mut Server, writer: &mut W, req: Request) {
             let result = serde_json::from_value::<GotoDefinitionParams>(req.params)
                 .ok()
                 .and_then(|params| {
-                    server.type_definition(
+                    server.on_document(
                         &params.text_document_position_params.text_document.uri,
-                        params.text_document_position_params.position,
+                        |workspace| {
+                            workspace.type_definition(
+                                &params.text_document_position_params.text_document.uri,
+                                params.text_document_position_params.position,
+                            )
+                        },
                     )
                 })
                 .map(|loc| serde_json::to_value(loc).unwrap_or(serde_json::Value::Null))
@@ -2909,7 +3179,11 @@ fn handle_request<W: Write>(server: &mut Server, writer: &mut W, req: Request) {
         "textDocument/documentSymbol" => {
             let result = serde_json::from_value::<DocumentSymbolParams>(req.params)
                 .ok()
-                .and_then(|params| server.document_symbol(&params.text_document.uri))
+                .and_then(|params| {
+                    server.on_document(&params.text_document.uri, |workspace| {
+                        workspace.document_symbol(&params.text_document.uri)
+                    })
+                })
                 .map(|symbols| serde_json::to_value(symbols).unwrap_or(serde_json::Value::Null))
                 .unwrap_or(serde_json::Value::Null);
             ok_response(&id, result)
@@ -2933,7 +3207,9 @@ fn handle_request<W: Write>(server: &mut Server, writer: &mut W, req: Request) {
                     if !offers_quickfix {
                         return Some(CodeActionResponse::new());
                     }
-                    server.code_actions(&params.text_document.uri, params.range)
+                    server.on_document(&params.text_document.uri, |workspace| {
+                        workspace.code_actions(&params.text_document.uri, params.range)
+                    })
                 })
                 .map(|actions| serde_json::to_value(actions).unwrap_or(serde_json::Value::Null))
                 .unwrap_or(serde_json::Value::Null);
@@ -2954,9 +3230,14 @@ fn handle_request<W: Write>(server: &mut Server, writer: &mut W, req: Request) {
             let result = serde_json::from_value::<CompletionParams>(req.params)
                 .ok()
                 .and_then(|params| {
-                    server.completion(
+                    server.on_document(
                         &params.text_document_position.text_document.uri,
-                        params.text_document_position.position,
+                        |workspace| {
+                            workspace.completion(
+                                &params.text_document_position.text_document.uri,
+                                params.text_document_position.position,
+                            )
+                        },
                     )
                 })
                 .map(|response| serde_json::to_value(response).unwrap_or(serde_json::Value::Null))
@@ -2967,9 +3248,14 @@ fn handle_request<W: Write>(server: &mut Server, writer: &mut W, req: Request) {
             let result = serde_json::from_value::<SignatureHelpParams>(req.params)
                 .ok()
                 .and_then(|params| {
-                    server.signature_help(
+                    server.on_document(
                         &params.text_document_position_params.text_document.uri,
-                        params.text_document_position_params.position,
+                        |workspace| {
+                            workspace.signature_help(
+                                &params.text_document_position_params.text_document.uri,
+                                params.text_document_position_params.position,
+                            )
+                        },
                     )
                 })
                 .map(|response| serde_json::to_value(response).unwrap_or(serde_json::Value::Null))
@@ -2980,9 +3266,14 @@ fn handle_request<W: Write>(server: &mut Server, writer: &mut W, req: Request) {
             let result = serde_json::from_value::<DocumentHighlightParams>(req.params)
                 .ok()
                 .and_then(|params| {
-                    server.document_highlight(
+                    server.on_document(
                         &params.text_document_position_params.text_document.uri,
-                        params.text_document_position_params.position,
+                        |workspace| {
+                            workspace.document_highlight(
+                                &params.text_document_position_params.text_document.uri,
+                                params.text_document_position_params.position,
+                            )
+                        },
                     )
                 })
                 .map(|response| serde_json::to_value(response).unwrap_or(serde_json::Value::Null))
@@ -2992,7 +3283,11 @@ fn handle_request<W: Write>(server: &mut Server, writer: &mut W, req: Request) {
         "textDocument/semanticTokens/full" => {
             let result = serde_json::from_value::<lsp_types::SemanticTokensParams>(req.params)
                 .ok()
-                .and_then(|params| server.semantic_tokens_full(&params.text_document.uri))
+                .and_then(|params| {
+                    server.on_document(&params.text_document.uri, |workspace| {
+                        workspace.semantic_tokens_full(&params.text_document.uri)
+                    })
+                })
                 .map(|response| serde_json::to_value(response).unwrap_or(serde_json::Value::Null))
                 .unwrap_or(serde_json::Value::Null);
             ok_response(&id, result)
@@ -3000,7 +3295,11 @@ fn handle_request<W: Write>(server: &mut Server, writer: &mut W, req: Request) {
         "textDocument/inlayHint" => {
             let result = serde_json::from_value::<InlayHintParams>(req.params)
                 .ok()
-                .and_then(|params| server.inlay_hints(&params.text_document.uri, params.range))
+                .and_then(|params| {
+                    server.on_document(&params.text_document.uri, |workspace| {
+                        workspace.inlay_hints(&params.text_document.uri, params.range)
+                    })
+                })
                 .map(|response| serde_json::to_value(response).unwrap_or(serde_json::Value::Null))
                 .unwrap_or(serde_json::Value::Null);
             ok_response(&id, result)
@@ -3009,10 +3308,15 @@ fn handle_request<W: Write>(server: &mut Server, writer: &mut W, req: Request) {
             let result = serde_json::from_value::<lsp_types::ReferenceParams>(req.params)
                 .ok()
                 .and_then(|params| {
-                    server.references(
+                    server.on_document(
                         &params.text_document_position.text_document.uri,
-                        params.text_document_position.position,
-                        params.context.include_declaration,
+                        |workspace| {
+                            workspace.references(
+                                &params.text_document_position.text_document.uri,
+                                params.text_document_position.position,
+                                params.context.include_declaration,
+                            )
+                        },
                     )
                 })
                 .map(|response| serde_json::to_value(response).unwrap_or(serde_json::Value::Null))
@@ -3023,7 +3327,8 @@ fn handle_request<W: Write>(server: &mut Server, writer: &mut W, req: Request) {
         // registry dump (`project::registry_dump`), for the session record
         // (`session_record`).
         "phpstan-rs/sessionDump" => {
-            let files: Vec<serde_json::Value> = server
+            let workspace = server.folders.first().unwrap_or(&server.unrooted);
+            let files: Vec<serde_json::Value> = workspace
                 .project
                 .file_roles()
                 .into_iter()
@@ -3038,7 +3343,7 @@ fn handle_request<W: Write>(server: &mut Server, writer: &mut W, req: Request) {
                 &id,
                 serde_json::json!({
                     "files": files,
-                    "registry": server.project.registry_dump(),
+                    "registry": workspace.project.registry_dump(),
                 }),
             )
         }
@@ -3046,10 +3351,15 @@ fn handle_request<W: Write>(server: &mut Server, writer: &mut W, req: Request) {
             let result = serde_json::from_value::<lsp_types::RenameParams>(req.params)
                 .ok()
                 .and_then(|params| {
-                    server.rename(
+                    server.on_document(
                         &params.text_document_position.text_document.uri,
-                        params.text_document_position.position,
-                        &params.new_name,
+                        |workspace| {
+                            workspace.rename(
+                                &params.text_document_position.text_document.uri,
+                                params.text_document_position.position,
+                                &params.new_name,
+                            )
+                        },
                     )
                 })
                 .map(|response| serde_json::to_value(response).unwrap_or(serde_json::Value::Null))
@@ -3099,9 +3409,6 @@ fn handle_notification<W: Write>(server: &mut Server, writer: &mut W, not: LspNo
                     );
                 }
                 for message in server.add_workspace_folders(&scan.roots) {
-                    let _ = write_message(writer, &message);
-                }
-                for message in server.publish_workspace_diagnostics() {
                     let _ = write_message(writer, &message);
                 }
                 if let Some(token) = scan.progress_token {
@@ -3169,9 +3476,6 @@ fn handle_notification<W: Write>(server: &mut Server, writer: &mut W, not: LspNo
                     .collect();
                 if !added.is_empty() {
                     for message in server.add_workspace_folders(&added) {
-                        let _ = write_message(writer, &message);
-                    }
-                    for message in server.publish_workspace_diagnostics() {
                         let _ = write_message(writer, &message);
                     }
                 }
@@ -3245,7 +3549,7 @@ fn handle_notification<W: Write>(server: &mut Server, writer: &mut W, not: LspNo
                 serde_json::from_value::<lsp_types::DidCloseTextDocumentParams>(not.params.clone())
                 && let Some(path) = uri_to_path(&params.text_document.uri)
             {
-                server.close_document(&path);
+                server.workspace_of(&path).close_document(&path);
             }
         }
         _ => {

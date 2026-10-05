@@ -13,8 +13,8 @@ use crate::project::session::{
 };
 
 /// Everything a workspace's configuration resolves into that the server
-/// applies, once per `Server::configure_from_workspace` call.
-/// `PartialEq` backs `Server::reload_configuration`'s no-op fast path -
+/// applies, once per `Workspace::configure` call.
+/// `PartialEq` backs `Workspace::reload_configuration`'s no-op fast path -
 /// comparing the real resolved value (not a `Debug`-formatted fingerprint)
 /// so a change to a field a hand-written `Debug` impl deliberately
 /// redacts (`SqlReflectionConfig`'s `password`) is never silently missed.
@@ -32,7 +32,7 @@ pub(crate) struct ResolvedWorkspaceConfig {
 }
 
 /// A workspace's session, and what the server applies of it.
-pub(crate) struct Workspace {
+pub(crate) struct OpenedWorkspace {
     pub(crate) session: Session,
     pub(crate) config: ResolvedWorkspaceConfig,
 }
@@ -49,7 +49,7 @@ pub(crate) fn open(
     config_path_override: Option<&Path>,
     schema: &Schema,
     pool: Arc<rayon::ThreadPool>,
-) -> Workspace {
+) -> OpenedWorkspace {
     let config_path = config_path_override
         .map(Path::to_path_buf)
         .unwrap_or_else(|| root.join("phpstan-rs.toml"));
@@ -111,5 +111,5 @@ pub(crate) fn open(
         },
         problems,
     };
-    Workspace { session, config }
+    OpenedWorkspace { session, config }
 }

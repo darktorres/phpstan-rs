@@ -248,9 +248,8 @@ fn reload_configuration_rereads_an_on_disk_config_change() {
     let uri = path_to_uri(&path).to_string();
 
     let mut server = Server::new(env!("CARGO_PKG_VERSION"), crate::app::config_schema());
-    server.add_workspace_folders(std::slice::from_ref(&dir.0));
     let initial: Vec<Value> = server
-        .publish_workspace_diagnostics()
+        .add_workspace_folders(std::slice::from_ref(&dir.0))
         .iter()
         .map(|m| serde_json::to_value(m).unwrap())
         .collect();
@@ -333,16 +332,16 @@ fn reload_configuration_applies_the_difference_between_the_file_sets() {
 
     let mut server = Server::new(env!("CARGO_PKG_VERSION"), crate::app::config_schema());
     server.add_workspace_folders(std::slice::from_ref(&dir.0));
-    assert!(!server.project.is_loaded(&ghost));
+    assert!(!server.folders[0].project.is_loaded(&ghost));
 
     dir.write("phpstan-rs.toml", "paths = [\"src\", \"other\"]\n");
     let added = reload(&mut server);
-    assert!(server.project.is_loaded(&ghost));
+    assert!(server.folders[0].project.is_loaded(&ghost));
     assert!(!not_found(&added), "got: {added:?}");
 
     dir.write("phpstan-rs.toml", "paths = [\"src\"]\n");
     let removed = reload(&mut server);
-    assert!(!server.project.is_loaded(&ghost));
+    assert!(!server.folders[0].project.is_loaded(&ghost));
     assert!(not_found(&removed), "got: {removed:?}");
 }
 

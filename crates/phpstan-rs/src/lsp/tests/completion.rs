@@ -47,7 +47,7 @@ fn run_edit(
 }
 
 /// Same as `run_edit`, but for a test whose own probe specifically needs
-/// `Server::latest_text` to already reflect `edited_src` - `didChange` is
+/// `Workspace::latest_text` to already reflect `edited_src` - `didChange` is
 /// debounced (VSCode plan item 2.2), so `run_edit`'s own single-batch
 /// shape no longer guarantees that by the time `extra`'s own request
 /// runs. See `helpers::run_across_debounce`'s own doc comment.

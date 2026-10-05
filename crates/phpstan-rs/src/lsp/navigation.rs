@@ -8,7 +8,7 @@
 //! reference (`Foo::CONST`, `?Foo|Bar`) has its own span in the AST.
 //!
 //! Also the traversal `textDocument/documentHighlight` (`lsp::document_
-//! highlight`... no such module - see `Server::document_highlight` in
+//! highlight`... no such module - see `Workspace::document_highlight` in
 //! `lsp.rs`) reuses wholesale via `collect_all`: the same walker, run
 //! with `Anchor::All` instead of `Anchor::Position(pos)`, collects every
 //! `(Span, Resolved)` pair in the file instead of stopping at the single

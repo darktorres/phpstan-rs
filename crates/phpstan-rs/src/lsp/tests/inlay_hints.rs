@@ -24,7 +24,7 @@ fn did_change(uri: &str, version: i64, text: &str) -> Value {
     )
 }
 
-/// `Null` (no hints at all - `Server::inlay_hints`'s own empty-response
+/// `Null` (no hints at all - `Workspace::inlay_hints`'s own empty-response
 /// convention, matching hover/definition/documentHighlight) becomes an
 /// empty `Vec` here, so a test asserting "no hint of kind X" doesn't need
 /// to special-case the all-skipped case separately from a real array

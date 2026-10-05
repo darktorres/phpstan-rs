@@ -24,7 +24,7 @@
 //! clone it, drop every statement reaching at or past the edit line
 //! (`truncate_before`), and append two synthetic statements: `$__phpstan_
 //! rs_completion_probe = <receiver>;` then a bare read of that same
-//! variable. Reusing `Server::probe_receiver_type` (originally built for
+//! variable. Reusing `Workspace::probe_receiver_type` (originally built for
 //! hover) to run this through the checker recovers the receiver's real,
 //! flow-sensitive inferred type via the *already-shipped*
 //! `ExprKind::Variable` probe hook (`checker/expr.rs`'s `self.probe_hit_
@@ -658,7 +658,7 @@ pub(super) fn enumerate_bare(
 /// has no *value* of its own the general splice-and-probe mechanism
 /// below could read a type off; it's a name reference, resolved the same
 /// way `navigation::resolve_class_ref` already resolves one for hover),
-/// or it needs the general probe (`Server::probe_receiver_type`).
+/// or it needs the general probe (`Workspace::probe_receiver_type`).
 pub(super) enum MemberProbe {
     Resolved {
         ty: Type,
@@ -674,7 +674,7 @@ pub(super) enum MemberProbe {
     },
 }
 
-/// Everything `Server::completion` needs, factored out so it's directly
+/// Everything `Workspace::completion` needs, factored out so it's directly
 /// unit-testable without a `Server`: given the live buffer's full text
 /// and tokens, the cursor position, and the last-good AST for `path`,
 /// returns what's needed to answer a member-completion trigger, or

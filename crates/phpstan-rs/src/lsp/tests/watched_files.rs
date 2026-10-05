@@ -342,8 +342,14 @@ fn a_created_file_that_is_not_utf8_is_loaded_from_its_bytes() {
     std::fs::write(&path, b"<?php\n// \xff\nclass Odd {}\n").unwrap();
     changed(&mut server, &path, lsp_types::FileChangeType::CREATED);
 
-    assert!(server.project.is_loaded(&path));
-    assert!(server.project.registry().classes.contains_key("Odd"));
+    assert!(server.folders[0].project.is_loaded(&path));
+    assert!(
+        server.folders[0]
+            .project
+            .registry()
+            .classes
+            .contains_key("Odd")
+    );
 }
 
 #[test]
@@ -357,13 +363,37 @@ fn a_change_on_disk_leaves_an_open_document_as_the_editor_has_it() {
     server.handle_open_or_change(&uri, "<?php class InEditor {}\n", Some(1));
     std::fs::write(&path, "<?php class Changed {}\n").unwrap();
     changed(&mut server, &path, lsp_types::FileChangeType::CHANGED);
-    assert!(server.project.registry().classes.contains_key("InEditor"));
-    assert!(!server.project.registry().classes.contains_key("Changed"));
+    assert!(
+        server.folders[0]
+            .project
+            .registry()
+            .classes
+            .contains_key("InEditor")
+    );
+    assert!(
+        !server.folders[0]
+            .project
+            .registry()
+            .classes
+            .contains_key("Changed")
+    );
 
-    server.close_document(&path);
+    server.workspace_of(&path).close_document(&path);
     changed(&mut server, &path, lsp_types::FileChangeType::CHANGED);
-    assert!(server.project.registry().classes.contains_key("Changed"));
-    assert!(!server.project.registry().classes.contains_key("InEditor"));
+    assert!(
+        server.folders[0]
+            .project
+            .registry()
+            .classes
+            .contains_key("Changed")
+    );
+    assert!(
+        !server.folders[0]
+            .project
+            .registry()
+            .classes
+            .contains_key("InEditor")
+    );
 }
 
 #[test]
@@ -372,11 +402,11 @@ fn opening_a_document_as_it_was_loaded_is_told_by_its_bytes() {
     let path = dir.write("a.php", "<?php class A {}\n");
     let mut server = Server::new(env!("CARGO_PKG_VERSION"), crate::app::config_schema());
     server.add_workspace_folders(std::slice::from_ref(&dir.0));
-    let hash = server.project.content_hash(&path);
+    let hash = server.folders[0].project.content_hash(&path);
     assert!(hash.is_some());
 
     server.handle_open_or_change(&path_to_uri(&path), "<?php class A {}\n", Some(1));
-    assert_eq!(server.project.content_hash(&path), hash);
+    assert_eq!(server.folders[0].project.content_hash(&path), hash);
     server.handle_open_or_change(&path_to_uri(&path), "<?php class B {}\n", Some(2));
-    assert_ne!(server.project.content_hash(&path), hash);
+    assert_ne!(server.folders[0].project.content_hash(&path), hash);
 }
