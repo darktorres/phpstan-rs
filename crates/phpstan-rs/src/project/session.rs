@@ -6,7 +6,7 @@
 //! reports. The CLI and the fixture harness both drive it, so a fixture
 //! exercises exactly what `check-project` runs.
 
-use rustc_hash::{FxHashMap, FxHashSet};
+use rustc_hash::FxHashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -115,7 +115,6 @@ pub struct Session {
     /// promoted to analysed paths, which are left out of them.
     vendors: Vec<composer::PendingVendor>,
     promoted: Vec<PathBuf>,
-    stub_dirs: Vec<PathBuf>,
     cutoff: LevelCutoff,
     emission_order: bool,
     banned_constructs: Vec<banned::BannedConstruct>,
@@ -528,9 +527,22 @@ impl Session {
             ext::installed_in(root_manifest.as_ref(), p)
         })?;
 
+        let roles = {
+            let absolute =
+                |path: &Path| super::absolute_spelling(Some(&absolute_root), Some(&root), path);
+            let mut roles = super::roles::FileRoles::default();
+            for dir in &dirs {
+                roles = roles.with_analysed(&absolute(dir));
+            }
+            for dir in &stub_dirs {
+                roles = roles.with_stubs(&absolute(dir));
+            }
+            roles
+        };
         let settings = ProjectSettings {
             working_dir: Some(root.clone()),
             absolute_root: Some(absolute_root),
+            roles,
             packages: composer::PackageIndex::new(composer_manifests),
             php_versions,
             phpstan_api_check_enabled,
@@ -565,7 +577,6 @@ impl Session {
             scan_files,
             vendors,
             promoted,
-            stub_dirs,
             cutoff,
             emission_order: overrides.emission_order,
             banned_constructs,
@@ -652,6 +663,28 @@ impl Session {
         project.apply_settings(settings);
     }
 
+    /// `path`, spelled from the root, as an absolute path.
+    fn absolute(&self, path: &Path) -> PathBuf {
+        super::absolute_spelling(
+            self.settings.absolute_root.as_deref(),
+            self.settings.working_dir.as_deref(),
+            path,
+        )
+    }
+
+    /// What `path`, spelled from the root, is to the session: analysed when
+    /// an analysed path contains it, context otherwise, and a stub when a
+    /// stub path does. The load and every edit take a file's role from
+    /// here.
+    pub fn classify(&self, path: &Path) -> super::roles::Classified {
+        self.settings.roles.classify(&self.absolute(path))
+    }
+
+    /// Whether `path`, spelled from the root, is under a stub path.
+    fn is_stub(&self, path: &Path) -> bool {
+        self.settings.roles.has_stubs() && self.settings.roles.is_stub(&self.absolute(path))
+    }
+
     /// Whether `path` (relative to the root) is in a package promoted to an
     /// analysed path.
     fn is_promoted(&self, path: &Path) -> bool {
@@ -664,15 +697,9 @@ impl Session {
             .any(|dir| composer::manifest::path_starts_with(&path, dir))
     }
 
-    /// Every `.php` file under `dir` (or `dir` itself), spelled as `dir`
-    /// joined with its path below it - the same spelling the command line
-    /// gave - while the walk itself happens under the root.
-    fn collect_php_files(&self, dir: &Path, out: &mut Vec<PathBuf>) {
-        self.collect_files(dir, out, super::collect_php_files);
-    }
-
-    /// The files `walk` finds under `dir`, spelled as `collect_php_files`
-    /// spells them.
+    /// The files `walk` finds under `dir` (or `dir` itself), spelled as
+    /// `dir` joined with its path below it - the same spelling the command
+    /// line gave - while the walk itself happens under the root.
     fn collect_files(
         &self,
         dir: &Path,
@@ -786,33 +813,14 @@ impl Session {
         out: &Path,
         reference: Option<&Path>,
     ) -> Result<FrontEndDump, String> {
-        let mut analysed = Vec::new();
-        for dir in &self.dirs {
-            self.collect_files(dir, &mut analysed, super::collect_php_run_files);
-        }
-        let mut scan_dirs = self.scan_dirs.clone();
-        let mut context: Vec<PathBuf> = self.scan_files.clone();
-        for vendor in &self.vendors {
-            let found = vendor.get();
-            scan_dirs.extend(found.dirs.iter().filter(|d| !self.is_promoted(d)).cloned());
-            context.extend(found.files.iter().filter(|f| !self.is_promoted(f)).cloned());
-        }
-        for dir in &scan_dirs {
-            self.collect_files(dir, &mut context, super::collect_php_run_files);
-        }
-        let mut stubs = Vec::new();
-        for dir in &self.stub_dirs {
-            self.collect_files(dir, &mut stubs, super::collect_php_run_files);
-        }
-        let stubs: FxHashSet<PathBuf> = stubs.into_iter().collect();
-        // A file the paths reach twice is one file of the load.
+        let analysed = self.analysed_listing(super::collect_php_run_files);
+        let context = self.context_listing(super::collect_php_run_files);
         let mut files: Vec<(&'static str, &PathBuf)> = context
             .iter()
             .map(|path| ("context", path))
             .chain(analysed.iter().map(|path| ("analysed", path)))
             .collect();
         files.sort_unstable();
-        files.dedup();
 
         let mut project = Project::new();
         self.configure(&mut project, self.settings.built_once);
@@ -848,7 +856,7 @@ impl Session {
                     files.par_iter().try_for_each_init(
                         syntax::name::NameCache::default,
                         |names, (role, path)| {
-                            let is_stub = stubs.contains(path.as_path());
+                            let is_stub = self.is_stub(path);
                             let role = if is_stub {
                                 format!("{role} stub")
                             } else {
@@ -920,8 +928,7 @@ impl Session {
     /// directory, when that has it, and otherwise from this replay's step
     /// before, or for a fresh analysis from its step. Edits the tree it
     /// reads: refuses one without the replay's marker file at its root.
-    /// Gives the verdict, or an error with it when a step differs in more
-    /// than its load order.
+    /// Gives the verdict, or an error with it when a step differs.
     pub fn edit_replay(
         &self,
         out: &Path,
@@ -1097,11 +1104,52 @@ impl Session {
 
     /// The files the load analyses, in path order.
     fn analysed_files(&self) -> Vec<PathBuf> {
+        self.analysed_listing(super::collect_php_files)
+    }
+
+    /// The files under the analysed paths that `walk` finds, in path order,
+    /// each once: a path another contains is not walked again.
+    fn analysed_listing(&self, walk: fn(&Path, &mut Vec<PathBuf>)) -> Vec<PathBuf> {
         let mut files = Vec::new();
-        for dir in &self.dirs {
-            self.collect_php_files(dir, &mut files);
+        for dir in super::roles::outermost(&self.dirs, |dir| self.absolute(dir)) {
+            self.collect_files(dir, &mut files, walk);
         }
         composer::path_order::sort_paths(&mut files);
+        files
+    }
+
+    /// The files the context paths and the vendor context reach that `walk`
+    /// finds, in path order, each once and none that an analysed path
+    /// contains: such a file is analysed, and listed by `analysed_listing`.
+    fn context_listing(&self, walk: fn(&Path, &mut Vec<PathBuf>)) -> Vec<PathBuf> {
+        // The vendor context was being found while the analysed files were
+        // listed.
+        let mut scan_dirs = self.scan_dirs.clone();
+        let mut files: Vec<PathBuf> = self.scan_files.clone();
+        for vendor in &self.vendors {
+            let found = vendor.get();
+            scan_dirs.extend(found.dirs.iter().filter(|d| !self.is_promoted(d)).cloned());
+            files.extend(found.files.iter().filter(|f| !self.is_promoted(f)).cloned());
+        }
+        let roles = &self.settings.roles;
+        let is_context = |path: &PathBuf| {
+            roles.classify(&self.absolute(path)).role == super::roles::Role::Context
+        };
+        files.retain(is_context);
+        for dir in super::roles::outermost(&scan_dirs, |dir| self.absolute(dir)) {
+            let absolute = self.absolute(dir);
+            if roles.classify(&absolute).role == super::roles::Role::Analysed {
+                continue;
+            }
+            let start = files.len();
+            self.collect_files(dir, &mut files, walk);
+            if roles.holds_analysed(&absolute) {
+                let walked = files.split_off(start);
+                files.extend(walked.into_iter().filter(is_context));
+            }
+        }
+        composer::path_order::sort_paths(&mut files);
+        files.dedup();
         files
     }
 
@@ -1109,20 +1157,7 @@ impl Session {
     /// says.
     fn load_project(&self, built_once: bool) -> Result<Loaded, String> {
         let analyze_files = self.analysed_files();
-        // The vendor context was being found while the analysed files were
-        // listed.
-        let mut scan_dirs = self.scan_dirs.clone();
-        let mut context_files: Vec<PathBuf> = self.scan_files.clone();
-        for vendor in &self.vendors {
-            let found = vendor.get();
-            scan_dirs.extend(found.dirs.iter().filter(|d| !self.is_promoted(d)).cloned());
-            context_files.extend(found.files.iter().filter(|f| !self.is_promoted(f)).cloned());
-        }
-        for dir in &scan_dirs {
-            self.collect_php_files(dir, &mut context_files);
-        }
-        composer::path_order::sort_paths(&mut context_files);
-        context_files.dedup();
+        let context_files = self.context_listing(super::collect_php_files);
         if analyze_files.is_empty() {
             let dirs: Vec<String> = self.dirs.iter().map(|d| d.display().to_string()).collect();
             return Err(format!("no .php files found under {}", dirs.join(", ")));
@@ -1132,12 +1167,6 @@ impl Session {
         self.configure(&mut project, built_once);
 
         let pool = &self.pool;
-
-        let mut stub_files_vec = Vec::new();
-        for dir in &self.stub_dirs {
-            self.collect_php_files(dir, &mut stub_files_vec);
-        }
-        let stub_files: FxHashSet<PathBuf> = stub_files_vec.into_iter().collect();
 
         let index_use_sites = project.check_settings().rules.check_dead_code;
         let combined_files: Vec<&PathBuf> =
@@ -1154,7 +1183,7 @@ impl Session {
                         .map_init(syntax::name::NameCache::default, |names, (index, p)| {
                             let mut read = self.read_and_parse_file(
                                 p,
-                                stub_files.contains(p.as_path()),
+                                self.is_stub(p),
                                 names,
                                 // The context files come first; a project kept
                                 // for edits keeps their trees, which no entry
@@ -1444,7 +1473,6 @@ const REPLAY_WHOLE_PROGRAM: &str = "whole-program";
 /// with.
 const SAME: &str = "same";
 const DIFFERS: &str = "differs";
-const DIFFERS_IN_LOAD_ORDER: &str = "differs only in load order";
 
 /// Writes the dump `kind` (`dumps`) to `text`, its manifest beside it, as
 /// `write` prints it; given `reference`, the manifest of another run of it,
@@ -1464,9 +1492,8 @@ pub fn write_dump(
 
 /// What each section of the dumps `step` in `out` is beside the same dumps
 /// of `against`: each section of the registry dump, the diagnostics held
-/// and the whole-program checks' (`SAME`, `DIFFERS`,
-/// `DIFFERS_IN_LOAD_ORDER`). Read from the manifests, and from the texts
-/// of the entities whose ids differ.
+/// and the whole-program checks' (`SAME`, `DIFFERS`). Read from the
+/// manifests.
 fn replay_verdict(
     out: &Path,
     step: &str,
@@ -1477,7 +1504,7 @@ fn replay_verdict(
             &out.join(format!("{name}.{dump}.txt")),
         ))
     };
-    let (mut step_registry, mut against_registry) = (
+    let (step_registry, against_registry) = (
         open(step, REPLAY_REGISTRY)?,
         open(against, REPLAY_REGISTRY)?,
     );
@@ -1494,19 +1521,6 @@ fn replay_verdict(
             }
         }
         sections
-    };
-    // An edited file keeps its place in the load order and an added one
-    // comes last, where a fresh load numbers the files in the order it
-    // finds them: a section that differs in nothing else says so.
-    let without_load_order = |text: &[u8]| -> Vec<u8> {
-        text.split_inclusive(|&byte| byte == b'\n')
-            .filter(|line| {
-                let line = line.trim_ascii_start();
-                !line.starts_with(b"load_order: ") && !line.starts_with(b"next_load_order: ")
-            })
-            .flatten()
-            .copied()
-            .collect()
     };
     let against_sections = sections(&against_registry);
     let mut states = Vec::new();
@@ -1527,20 +1541,15 @@ fn replay_verdict(
                         .zip(&against_entries)
                         .all(|(&a, &b)| alike(a, b, &step_registry, &against_registry).0) =>
             {
-                let mut state = SAME;
-                for (&a, &b) in entries.iter().zip(&against_entries) {
-                    if alike(a, b, &step_registry, &against_registry).1 {
-                        continue;
-                    }
-                    if without_load_order(&step_registry.text(a)?)
-                        != without_load_order(&against_registry.text(b)?)
-                    {
-                        state = DIFFERS;
-                        break;
-                    }
-                    state = DIFFERS_IN_LOAD_ORDER;
+                if entries
+                    .iter()
+                    .zip(&against_entries)
+                    .all(|(&a, &b)| alike(a, b, &step_registry, &against_registry).1)
+                {
+                    SAME
+                } else {
+                    DIFFERS
                 }
-                state
             }
             _ => DIFFERS,
         };

@@ -68,6 +68,7 @@ fn print_registry_dump(
         sql: _,
         pest_config: _,
         settings: _,
+        roles: _,
         working_dir,
         absolute_root,
         packages,

@@ -97,6 +97,40 @@ fn deleted_event_clears_diagnostics_and_rechecks_dependents() {
 }
 
 #[test]
+fn a_deleted_directory_removes_the_files_loaded_under_it() {
+    let dir = TempDir::new("watch_delete_dir");
+    let greeter_path = dir.write("src/Greeter.php", GREETER_SRC);
+    let greeter_uri = path_to_uri(&greeter_path).to_string();
+    let use_path = dir.write("Use.php", USE_GREETER_SRC);
+    let use_uri = path_to_uri(&use_path).to_string();
+    let src_uri = path_to_uri(&dir.0.join("src")).to_string();
+
+    let messages = run_with_capabilities(
+        &dir,
+        watch_capabilities(),
+        &[did_change_watched_files(vec![file_event(&src_uri, 3)])],
+    );
+
+    assert!(
+        messages
+            .iter()
+            .any(|m| m["method"] == "textDocument/publishDiagnostics"
+                && m["params"]["uri"] == greeter_uri
+                && m["params"]["diagnostics"] == json!([])),
+        "expected an empty publish for the file under the deleted directory, got: {messages:?}"
+    );
+    let last_use = messages
+        .iter()
+        .rev()
+        .find(|m| m["method"] == "textDocument/publishDiagnostics" && m["params"]["uri"] == use_uri)
+        .unwrap_or_else(|| panic!("expected a publish for {use_uri}, got: {messages:?}"));
+    assert!(
+        mentions_greeter(last_use["params"]["diagnostics"].as_array().unwrap()),
+        "expected Use.php to be rechecked with Greeter now undefined, got: {last_use:?}"
+    );
+}
+
+#[test]
 fn created_event_loads_a_never_scanned_file_and_resolves_pending_references() {
     let dir = TempDir::new("watch_create");
     let use_path = dir.write("Use.php", USE_GREETER_SRC);

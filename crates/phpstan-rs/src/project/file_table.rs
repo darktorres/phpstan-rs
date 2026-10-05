@@ -199,6 +199,10 @@ impl<V> FileTable<V> {
     pub(crate) fn values(&self) -> impl Iterator<Item = &V> {
         self.iter().map(|(_, value)| value)
     }
+
+    pub(crate) fn values_mut(&mut self) -> impl Iterator<Item = &mut V> {
+        self.slots.iter_mut().filter_map(|slot| slot.value.as_mut())
+    }
 }
 
 /// `table[&path]`, for a file that is held.

@@ -899,18 +899,36 @@ impl Server {
         let mut messages = Vec::new();
         let mut appeared_or_vanished = Vec::new();
         for (path, (uri, typ)) in last_by_path {
+            if typ == lsp_types::FileChangeType::DELETED {
+                // A directory that was deleted takes every file loaded
+                // under it, which the client reports no event for.
+                let mut gone: Vec<PathBuf> = self
+                    .project
+                    .loaded_paths()
+                    .filter(|loaded| loaded.starts_with(&path) && **loaded != path)
+                    .map(Path::to_path_buf)
+                    .collect();
+                if path.extension().is_some_and(|e| e == "php") || self.project.is_loaded(&path) {
+                    gone.push(path);
+                } else {
+                    appeared_or_vanished.push(path);
+                }
+                if gone.is_empty() {
+                    continue;
+                }
+                for path in &gone {
+                    self.open_uris.remove(path);
+                    self.last_diagnostics.remove(path);
+                    self.latest_text.remove(path);
+                }
+                let results = self.project.remove_files(&gone);
+                messages.extend(self.publish_diagnostics_for(results));
+                continue;
+            }
             if !path.extension().is_some_and(|e| e == "php") && !self.project.is_loaded(&path) {
                 if typ != lsp_types::FileChangeType::CHANGED {
                     appeared_or_vanished.push(path);
                 }
-                continue;
-            }
-            if typ == lsp_types::FileChangeType::DELETED {
-                self.open_uris.remove(&path);
-                self.last_diagnostics.remove(&path);
-                self.latest_text.remove(&path);
-                let results = self.project.remove_file(&path);
-                messages.extend(self.publish_diagnostics_for(results));
                 continue;
             }
             // Created and Changed both just need the path's current

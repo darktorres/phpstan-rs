@@ -19,8 +19,8 @@
 //! and a file deleted. Then the same edits in a seeded random order, so
 //! that orders the script does not try are tried too.
 //!
-//! A file the replay adds is named to come after every analysed file, as
-//! the server's load order puts it. The edits are made to the files on
+//! A file the replay adds is named to come in the middle of the analysed
+//! files, where a fresh load puts it. The edits are made to the files on
 //! disk too, so the tree must be a copy: the replay refuses a tree without
 //! a `.phpstan-rs-replay` file at its root.
 
@@ -403,21 +403,22 @@ where
         (self.list)().iter().any(|listed| listed == path)
     }
 
-    /// A path for a new file that a fresh load lists after every analysed
-    /// file: beside the last of them, its name begun by that file's.
-    fn appended(&mut self) -> Option<PathBuf> {
+    /// A path for a new file that a fresh load lists among the analysed
+    /// files: beside the middle one in path order, its name begun by that
+    /// file's.
+    fn placed(&mut self) -> Option<PathBuf> {
         let mut paths = self.project.analyzed_paths();
         paths.sort();
-        let last = paths.pop()?;
-        let name = last.file_name()?.to_string_lossy().into_owned();
+        let middle = paths.get(paths.len() / 2)?;
+        let name = middle.file_name()?.to_string_lossy().into_owned();
         self.added += 1;
-        Some(last.with_file_name(format!("{name}-replay{}.php", self.added)))
+        Some(middle.with_file_name(format!("{name}-replay{}.php", self.added)))
     }
 
-    /// Adds the file `text` at a path `appended` gives, when a fresh load
+    /// Adds the file `text` at a path `placed` gives, when a fresh load
     /// lists it there; the path, or `None` when it would not.
     fn add(&mut self, text: &str) -> Result<Option<PathBuf>, String> {
-        let Some(path) = self.appended() else {
+        let Some(path) = self.placed() else {
             return Ok(None);
         };
         std::fs::write(self.root.join(&path), text)
@@ -686,13 +687,13 @@ where
         )
     }
 
-    /// An analysed file moved to a path `appended` gives, as the server
+    /// An analysed file moved to a path `placed` gives, as the server
     /// sees a rename: the file deleted, and a file added.
     fn rename_file(&mut self, label: &'static str) -> Result<(), String> {
         let Some(picked) = self.pick(&|_, _| Some((Span::new(0, 0), String::new())))? else {
             return self.nothing(label, "no file left to rename");
         };
-        let Some(to) = self.appended() else {
+        let Some(to) = self.placed() else {
             return self.nothing(label, "no file left to rename");
         };
         std::fs::rename(self.root.join(&picked.path), self.root.join(&to))

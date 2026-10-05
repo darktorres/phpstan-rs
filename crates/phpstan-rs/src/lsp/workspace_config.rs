@@ -12,6 +12,7 @@ use crate::checker::settings::EngineSettings;
 use crate::ext::disallowed_calls::DisallowedCallsSettings;
 use crate::ext::sql::SqlSettings;
 use crate::project::ProjectSettings;
+use crate::project::roles::FileRoles;
 use crate::project::session::SessionSettings;
 use crate::registry::settings::ReflectionSettings;
 
@@ -191,9 +192,25 @@ pub(crate) fn resolve(
             .map(resolve_against_root),
     );
 
+    let roles = {
+        let absolute =
+            |path: &Path| crate::project::absolute_spelling(Some(&absolute_root), Some(root), path);
+        let mut roles = FileRoles::default();
+        if analyze_paths.is_empty() {
+            roles = roles.with_pruned_analysed(
+                &absolute(root),
+                crate::project::DEFAULT_SCAN_EXCLUDED_DIR_NAMES,
+            );
+        }
+        for path in &analyze_paths {
+            roles = roles.with_analysed(&absolute(path));
+        }
+        roles
+    };
     let settings = ProjectSettings {
         working_dir: Some(root.to_path_buf()),
         absolute_root: Some(absolute_root),
+        roles,
         packages,
         php_versions,
         phpstan_api_check_enabled,

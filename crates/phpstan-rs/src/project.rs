@@ -44,6 +44,7 @@ mod file_table;
 mod front_end_dump;
 mod mock_hygiene;
 mod registry_dump;
+pub mod roles;
 pub mod session;
 pub(crate) mod use_sites;
 mod whole_program;
@@ -275,6 +276,8 @@ pub struct Project {
     // `working_dir` canonicalized, which
     // `absolute_path` resolves analysed paths against.
     absolute_root: Option<PathBuf>,
+    // What a file is, by the roots it is under (`classify`).
+    roles: roles::FileRoles,
     // The composer packages and which directories they own; each file's
     // owner is kept in its `FileState`.
     packages: composer::PackageIndex,
@@ -298,7 +301,8 @@ pub struct Project {
     // Whether PHPStan's source stays merged in whatever the loaded files
     // mention: for the project building the registry that has it.
     phpstan_pinned: bool,
-    // The `FileState::load_order` the next new file gets.
+    // How many files hold a place in the load order, which is dense: the
+    // places are `0..next_load_order`, the context files' first.
     next_load_order: u64,
     // The files loaded or edited since the finishing passes last walked
     // them for global variables.
@@ -554,6 +558,8 @@ pub struct ProjectSettings {
     pub working_dir: Option<PathBuf>,
     /// `working_dir` canonicalized, which analysed paths resolve against.
     pub absolute_root: Option<PathBuf>,
+    /// The roots that decide each file's role.
+    pub roles: roles::FileRoles,
     /// The composer packages, and which directories each owns.
     pub packages: composer::PackageIndex,
     pub php_versions: Option<types::PhpVersions>,
@@ -743,6 +749,7 @@ impl Project {
             pest_config: PestConfig::default(),
             working_dir: None,
             absolute_root: None,
+            roles: roles::FileRoles::default(),
             packages: composer::PackageIndex::default(),
             settings: CheckSettings::default(),
             defer_inline_ignores: false,
@@ -770,6 +777,7 @@ impl Project {
         let ProjectSettings {
             working_dir,
             absolute_root,
+            roles,
             packages,
             php_versions,
             phpstan_api_check_enabled,
@@ -795,6 +803,7 @@ impl Project {
         } = settings;
         self.working_dir = working_dir;
         self.absolute_root = absolute_root;
+        self.roles = roles;
         self.defer_inline_ignores = defer_inline_ignores;
         self.retain_source = retain_source;
         self.built_once = built_once;
@@ -988,15 +997,47 @@ impl Project {
     /// the working directory swapped for `absolute_root`, then `.` and
     /// `..` resolved lexically. Without an absolute root, only the latter.
     pub(crate) fn absolute_path(&self, path: &Path) -> PathBuf {
-        let joined = match (&self.absolute_root, &self.working_dir) {
-            (Some(absolute_root), Some(working_dir)) => match path.strip_prefix(working_dir) {
-                Ok(rest) => absolute_root.join(rest),
-                Err(_) => absolute_root.join(path),
-            },
-            (Some(absolute_root), None) => absolute_root.join(path),
-            (None, _) => path.to_path_buf(),
-        };
-        composer::manifest::lexically_normalized(&joined)
+        absolute_spelling(
+            self.absolute_root.as_deref(),
+            self.working_dir.as_deref(),
+            path,
+        )
+    }
+
+    /// What `path`, spelled from the working directory, is to the project:
+    /// the role and stub status its roots give it.
+    pub fn classify(&self, path: &Path) -> roles::Classified {
+        self.roles.classify(&self.absolute_path(path))
+    }
+
+    /// Gives a file not yet loaded the place in the load order a load would
+    /// give it, and moves the places after it down by one: the context
+    /// files come first and each group is in path order. Returns the place.
+    fn make_room_in_load_order(&mut self, path: &Path, analyzed: bool) -> u64 {
+        let mut context = 0;
+        let mut before = 0;
+        for (other, state) in self.files.iter() {
+            context += u64::from(!state.analyzed);
+            before += u64::from(state.analyzed == analyzed && other.as_path() < path);
+        }
+        let place = before + if analyzed { context } else { 0 };
+        for state in self.files.values_mut() {
+            if state.load_order >= place {
+                state.load_order += 1;
+            }
+        }
+        self.next_load_order += 1;
+        place
+    }
+
+    /// Closes the places in the load order that `removed` held, which are
+    /// in no file now.
+    fn close_load_order(&mut self, mut removed: Vec<u64>) {
+        removed.sort_unstable();
+        for state in self.files.values_mut() {
+            state.load_order -= removed.partition_point(|&place| place < state.load_order) as u64;
+        }
+        self.next_load_order -= removed.len() as u64;
     }
 
     /// The name of the composer package `path` belongs to.
@@ -1969,33 +2010,18 @@ impl Project {
         let constants = declared_constants(&ast);
         let (references, declaration_references) = file_references(&ast, references);
 
-        // A file `update_file` has already seen keeps its own recorded
-        // `analyzed` flag (an edit doesn't change what kind of file it
-        // is). A never-before-seen path - reachable via `textDocument/
-        // didOpen` for ANY URI the editor opens, including one
-        // `discover_vendor_context`/`load_workspace`'s own excluded-
-        // dir walk never touched (a vendor file outside any discovered
-        // autoload entry, or with no composer.json at all) - defaults
-        // to context (`analyzed: false`) when it's under a directory
-        // name `DEFAULT_SCAN_EXCLUDED_DIR_NAMES` lists, matching
-        // `load_workspace`'s own walk; otherwise `true`, the same "a
-        // brand-new first-party file is analyzed by default" behavior
-        // this had before this distinction existed. Without this, a
-        // same-name collision (`insert_built_decl`'s own doc comment)
-        // would let an opened-but-never-discovered vendor file outright
-        // overwrite a real declaration instead of merging into it.
+        // A file already loaded keeps its role, which an edit does not
+        // change; a new one takes the role its roots give it, as a load
+        // would.
+        let classified = self.classify(path);
         let analyzed = previous.as_ref().map_or_else(
-            || !path_under_excluded_dir(path, DEFAULT_SCAN_EXCLUDED_DIR_NAMES),
+            || classified.role == roles::Role::Analysed,
             |previous| previous.analyzed,
         );
-        let load_order = previous.as_ref().map_or_else(
-            || {
-                let order = self.next_load_order;
-                self.next_load_order += 1;
-                order
-            },
-            |previous| previous.load_order,
-        );
+        let load_order = match previous.as_ref() {
+            Some(previous) => previous.load_order,
+            None => self.make_room_in_load_order(path, analyzed),
+        };
         let mut rebuilt = DeclaredNames {
             functions: functions.clone(),
             classes: classes.clone(),
@@ -2014,10 +2040,8 @@ impl Project {
             Vec::new()
         };
         self.duplicate_fn_sites.index(&ast, path);
-        // `is_stub: false` - same reasoning as `load_file_impl`'s own
-        // identical note: `update_file` is the LSP/incremental-edit path,
-        // which has no `stub_paths` concept.
-        self.duplicate_class_sites.index(&ast, path, false);
+        self.duplicate_class_sites
+            .index(&ast, path, classified.is_stub);
         let bodies = FileBodies::of(&ast);
         let global_facts = Arc::new(GlobalFacts::of(&ast));
         let pest_facts = PestFacts::of(path, &ast);
@@ -2108,15 +2132,17 @@ impl Project {
     /// case, since there is nothing for it to discover.
     pub fn remove_files(&mut self, paths: &[PathBuf]) -> FxHashMap<PathBuf, Vec<Diagnostic>> {
         let mut removed = DeclaredNames::default();
-        let mut any_removed = false;
+        let mut places = Vec::new();
         for path in paths {
             if let Some(file) = self.unindex_file(path) {
                 removed.functions.extend(file.functions);
                 removed.classes.extend(file.classes);
                 removed.constants.extend(file.constants);
-                any_removed = true;
+                places.push(file.load_order);
             }
         }
+        let any_removed = !places.is_empty();
+        self.close_load_order(places);
         let mut affected: FxHashSet<PathBuf> = paths.iter().cloned().collect();
         affected.extend(self.including(paths));
         if any_removed {
@@ -3641,9 +3667,8 @@ pub const DEFAULT_SCAN_EXCLUDED_DIR_NAMES: &[&str] = &["vendor", ".git", "node_m
 
 /// `true` if any component of `path` is named exactly one of
 /// `excluded_dir_names` - a pure name check, no filesystem access. Used
-/// both to prune `collect_php_files_excluding`'s own walk and, in
-/// `Project::update_file`, as a never-before-seen path's default
-/// `analyzed` classification (see that call site's own doc comment).
+/// both to prune `collect_php_files_excluding`'s own walk and by
+/// `FileRoles::classify` for a project with no analysed root.
 pub fn path_under_excluded_dir(path: &Path, excluded_dir_names: &[&str]) -> bool {
     path.components().any(|c| {
         c.as_os_str()
@@ -3683,6 +3708,25 @@ pub fn collect_php_files_excluding(
     } else if path.extension().is_some_and(|e| e == "php") {
         out.push(path.to_path_buf());
     }
+}
+
+/// `path`, spelled from `working_dir`, as an absolute path: `working_dir`
+/// swapped for `absolute_root`, then `.` and `..` resolved lexically.
+/// Without an absolute root, only the latter.
+pub(crate) fn absolute_spelling(
+    absolute_root: Option<&Path>,
+    working_dir: Option<&Path>,
+    path: &Path,
+) -> PathBuf {
+    let joined = match (absolute_root, working_dir) {
+        (Some(absolute_root), Some(working_dir)) => match path.strip_prefix(working_dir) {
+            Ok(rest) => absolute_root.join(rest),
+            Err(_) => absolute_root.join(path),
+        },
+        (Some(absolute_root), None) => absolute_root.join(path),
+        (None, _) => path.to_path_buf(),
+    };
+    composer::manifest::lexically_normalized(&joined)
 }
 
 /// What `Project::unindex_file` removed.
