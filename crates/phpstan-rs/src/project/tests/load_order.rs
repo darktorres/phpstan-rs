@@ -2,6 +2,7 @@
 //! what a load gives each file.
 
 use super::super::roles::FileRoles;
+use super::super::test_support::Files;
 use super::super::*;
 
 fn project() -> Project {
@@ -24,21 +25,19 @@ fn places(project: &Project) -> Vec<(String, u64)> {
     places
 }
 
-/// A project that loads `context`, then `analysed`, in the order given.
+/// A project that loads `context`, then `analysed`.
 fn loaded(context: &[&str], analysed: &[&str]) -> Project {
-    let mut project = project();
+    let mut files = Files::new().settings(ProjectSettings {
+        roles: FileRoles::default().with_analysed(Path::new("/w/src")),
+        ..ProjectSettings::default()
+    });
     for path in context {
-        project
-            .load_file(PathBuf::from(path), "<?php function f() {}")
-            .unwrap();
+        files = files.context(path, "<?php function f() {}");
     }
     for path in analysed {
-        project
-            .load_analyzed_file(PathBuf::from(path), "<?php function g() {}")
-            .unwrap();
+        files = files.analysed(path, "<?php function g() {}");
     }
-    project.finish_loading();
-    project
+    files.load()
 }
 
 #[test]

@@ -4,7 +4,7 @@
 
 use std::path::PathBuf;
 
-use super::super::*;
+use super::super::test_support::Files;
 
 #[test]
 fn update_file_recomputes_ignore_lines_too() {
@@ -13,14 +13,12 @@ fn update_file_recomputes_ignore_lines_too() {
     // file's previous version - the same "must not go stale" concern
     // every other per-file cached fact in `FileState` already has to
     // handle on an edit.
-    let mut project = Project::new();
-    project
-        .load_file(
-            PathBuf::from("f.php"),
+    let mut project = Files::new()
+        .context(
+            "f.php",
             "<?php\nfunction f() {\n    totallyUndefinedFunction();\n}\n",
         )
-        .unwrap();
-    project.finish_loading();
+        .load();
     let before = project.check_file(&PathBuf::from("f.php"));
     assert!(
         before

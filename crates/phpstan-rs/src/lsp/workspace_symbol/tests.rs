@@ -1,20 +1,15 @@
 //! Unit tests for `workspace_symbols`, built against a real multi-file
-//! `Project` via `Project::new()` + `load_file` + `finish_loading()`
-//! (the same pattern `src/project/tests/incremental_updates.rs` already
-//! uses).
+//! `Project` loaded through a `Session` (`project::test_support::Files`).
 
 use super::*;
 use lsp_types::SymbolKind;
 
 fn project(files: &[(&str, &str)]) -> Project {
-    let mut project = Project::new();
+    let mut loaded = crate::project::test_support::Files::new();
     for (name, src) in files {
-        project
-            .load_file(std::path::PathBuf::from(*name), src)
-            .unwrap();
+        loaded = loaded.context(name, src);
     }
-    project.finish_loading();
-    project
+    loaded.load()
 }
 
 fn names<'a>(matches: &'a [Match<'a>]) -> Vec<&'a str> {

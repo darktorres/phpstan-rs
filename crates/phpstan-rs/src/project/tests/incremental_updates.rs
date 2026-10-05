@@ -1,24 +1,18 @@
 //! Incremental `update_file` behavior: registry updates, re-check scoping,
 //! and dependency invalidation (including transitive cases) across files.
 
+use super::super::test_support::Files;
 use super::super::*;
 
 #[test]
 fn updating_one_file_does_not_disturb_another_files_registry_entries() {
-    let mut project = Project::new();
-    project
-        .load_file(
-            PathBuf::from("a.php"),
-            "<?php function helperA(): int { return 1; }",
-        )
-        .unwrap();
-    project
-        .load_file(
-            PathBuf::from("b.php"),
+    let mut project = Files::new()
+        .context("a.php", "<?php function helperA(): int { return 1; }")
+        .context(
+            "b.php",
             "<?php function helperB(): int { return helperA(); }",
         )
-        .unwrap();
-    project.finish_loading();
+        .load();
 
     assert!(project.registry().functions.contains_key("helperA"));
     assert!(project.registry().functions.contains_key("helperB"));
@@ -39,14 +33,12 @@ fn updating_one_file_does_not_disturb_another_files_registry_entries() {
 
 #[test]
 fn removing_a_declaration_on_update_drops_it_from_the_registry() {
-    let mut project = Project::new();
-    project
-        .load_file(
-            PathBuf::from("a.php"),
+    let mut project = Files::new()
+        .context(
+            "a.php",
             "<?php function helperA(): int { return 1; } class Foo {}",
         )
-        .unwrap();
-    project.finish_loading();
+        .load();
     assert!(project.registry().classes.contains_key("Foo"));
 
     // The new version of the file no longer declares Foo at all.
@@ -62,20 +54,10 @@ fn removing_a_declaration_on_update_drops_it_from_the_registry() {
 
 #[test]
 fn incremental_update_still_resolves_cross_file_inheritance() {
-    let mut project = Project::new();
-    project
-        .load_file(
-            PathBuf::from("base.php"),
-            "<?php class Base { public int $x = 1; }",
-        )
-        .unwrap();
-    project
-        .load_file(
-            PathBuf::from("child.php"),
-            "<?php class Child extends Base {}",
-        )
-        .unwrap();
-    project.finish_loading();
+    let mut project = Files::new()
+        .context("base.php", "<?php class Base { public int $x = 1; }")
+        .context("child.php", "<?php class Child extends Base {}")
+        .load();
     assert!(project.registry().is_subclass_of("Child", "Base"));
 
     // Touching an unrelated file shouldn't break that cross-file
@@ -91,26 +73,17 @@ fn incremental_update_still_resolves_cross_file_inheritance() {
 
 #[test]
 fn changing_a_declaration_re_checks_files_that_reference_it() {
-    let mut project = Project::new();
-    project
-        .load_file(
-            PathBuf::from("base.php"),
-            "<?php class Base { public int $x = 1; }",
-        )
-        .unwrap();
-    project
-        .load_file(
-            PathBuf::from("caller.php"),
+    let mut project = Files::new()
+        .context("base.php", "<?php class Base { public int $x = 1; }")
+        .context(
+            "caller.php",
             "<?php function useIt(Base $b) { return $b->x + 1; }",
         )
-        .unwrap();
-    project
-        .load_file(
-            PathBuf::from("unrelated.php"),
+        .context(
+            "unrelated.php",
             "<?php function unrelated(): int { return 1; }",
         )
-        .unwrap();
-    project.finish_loading();
+        .load();
 
     // Base.php's own edit doesn't itself introduce a diagnostic here,
     // but caller.php (which references Base by name in a type hint)
@@ -129,20 +102,13 @@ fn changing_a_declaration_re_checks_files_that_reference_it() {
 
 #[test]
 fn removing_a_referenced_declaration_still_flags_its_old_dependents() {
-    let mut project = Project::new();
-    project
-        .load_file(
-            PathBuf::from("thing.php"),
-            "<?php function thing(): int { return 1; }",
-        )
-        .unwrap();
-    project
-        .load_file(
-            PathBuf::from("caller.php"),
+    let mut project = Files::new()
+        .context("thing.php", "<?php function thing(): int { return 1; }")
+        .context(
+            "caller.php",
             "<?php function useThing() { return thing(); }",
         )
-        .unwrap();
-    project.finish_loading();
+        .load();
 
     // thing.php no longer declares `thing` at all - caller.php, which
     // calls it by name, still needs to be re-checked (it'll now see
@@ -159,26 +125,11 @@ fn removing_a_referenced_declaration_still_flags_its_old_dependents() {
 
 #[test]
 fn invalidation_is_transitive_across_an_inheritance_chain() {
-    let mut project = Project::new();
-    // C declares $x. B extends C (so B's *effective* shape includes
-    // $x, without B's own source ever mentioning it). A references B
-    // by name (a type hint) but never mentions C at all.
-    project
-        .load_file(
-            PathBuf::from("c.php"),
-            "<?php class C { public int $x = 1; }",
-        )
-        .unwrap();
-    project
-        .load_file(PathBuf::from("b.php"), "<?php class B extends C {}")
-        .unwrap();
-    project
-        .load_file(
-            PathBuf::from("a.php"),
-            "<?php function useB(B $b) { return $b->x; }",
-        )
-        .unwrap();
-    project.finish_loading();
+    let mut project = Files::new()
+        .context("c.php", "<?php class C { public int $x = 1; }")
+        .context("b.php", "<?php class B extends C {}")
+        .context("a.php", "<?php function useB(B $b) { return $b->x; }")
+        .load();
 
     // Changing C ripples through B into A, even though a.php's own
     // parse tree never references "C" - a one-hop lookup from C's
@@ -200,26 +151,17 @@ fn invalidation_still_works_for_namespaced_classes() {
     // Same shape as invalidation_is_transitive_across_an_inheritance_chain,
     // but every class lives in a namespace: the declared names and the
     // references must reach the same keys.
-    let mut project = Project::new();
-    project
-        .load_file(
-            PathBuf::from("c.php"),
+    let mut project = Files::new()
+        .context(
+            "c.php",
             "<?php namespace App; class C { public int $x = 1; }",
         )
-        .unwrap();
-    project
-        .load_file(
-            PathBuf::from("b.php"),
-            "<?php namespace App; class B extends C {}",
-        )
-        .unwrap();
-    project
-        .load_file(
-            PathBuf::from("a.php"),
+        .context("b.php", "<?php namespace App; class B extends C {}")
+        .context(
+            "a.php",
             "<?php namespace App; function useB(B $b) { return $b->x; }",
         )
-        .unwrap();
-    project.finish_loading();
+        .load();
 
     let result = project
         .update_file(
@@ -248,24 +190,20 @@ fn a_class_referenced_only_inside_a_property_hook_body_is_a_real_dependency() {
     // method) - PHP 8.4 property hooks are newer syntax, and a class
     // mentioned only there is exactly the kind of reference this
     // codebase can otherwise silently miss.
-    let mut project = Project::new();
-    project
-        .load_file(
-            PathBuf::from("dep.php"),
+    let mut project = Files::new()
+        .context(
+            "dep.php",
             "<?php class Dep { public static function make(): Dep { return new Dep(); } }",
         )
-        .unwrap();
-    project
-        .load_file(
-            PathBuf::from("holder.php"),
+        .context(
+            "holder.php",
             r#"<?php class Holder {
             public $prop {
                 get => Dep::make();
             }
         }"#,
         )
-        .unwrap();
-    project.finish_loading();
+        .load();
 
     let result = project
         .update_file(
@@ -286,17 +224,13 @@ fn a_class_referenced_only_via_an_enum_is_a_real_dependency() {
     // and its methods' bodies are real references that must feed the
     // same invalidation graph a class's `implements`/methods already
     // do - untested before this.
-    let mut project = Project::new();
-    project
-        .load_file(PathBuf::from("dep.php"), "<?php interface Dep {}")
-        .unwrap();
-    project
-        .load_file(
-            PathBuf::from("status.php"),
+    let mut project = Files::new()
+        .context("dep.php", "<?php interface Dep {}")
+        .context(
+            "status.php",
             "<?php enum Status implements Dep { case Active; }",
         )
-        .unwrap();
-    project.finish_loading();
+        .load();
 
     let result = project
         .update_file(
@@ -313,29 +247,15 @@ fn a_class_referenced_only_via_an_enum_is_a_real_dependency() {
 
 #[test]
 fn unrelated_files_are_not_swept_into_transitive_invalidation() {
-    let mut project = Project::new();
-    project
-        .load_file(
-            PathBuf::from("c.php"),
-            "<?php class C { public int $x = 1; }",
-        )
-        .unwrap();
-    project
-        .load_file(PathBuf::from("b.php"), "<?php class B extends C {}")
-        .unwrap();
-    project
-        .load_file(
-            PathBuf::from("a.php"),
-            "<?php function useB(B $b) { return $b->x; }",
-        )
-        .unwrap();
-    project
-        .load_file(
-            PathBuf::from("unrelated.php"),
+    let mut project = Files::new()
+        .context("c.php", "<?php class C { public int $x = 1; }")
+        .context("b.php", "<?php class B extends C {}")
+        .context("a.php", "<?php function useB(B $b) { return $b->x; }")
+        .context(
+            "unrelated.php",
             "<?php function unrelated(): int { return 1; }",
         )
-        .unwrap();
-    project.finish_loading();
+        .load();
 
     let result = project
         .update_file(
@@ -361,16 +281,14 @@ fn a_failed_reparse_keeps_the_files_last_good_ast_and_registry_entries() {
     // (hover, definition, documentSymbol, `lsp::completion`'s own
     // member-completion probe) would see nothing at all until the file
     // parsed cleanly again.
-    let mut project = Project::new();
-    project.apply_settings(ProjectSettings {
-        retain_source: true,
-        ..ProjectSettings::default()
-    });
     let path = PathBuf::from("a.php");
-    project
-        .load_file(path.clone(), "<?php function helperA(): int { return 1; }")
-        .unwrap();
-    project.finish_loading();
+    let mut project = Files::new()
+        .settings(ProjectSettings {
+            retain_source: true,
+            ..ProjectSettings::default()
+        })
+        .context(&path, "<?php function helperA(): int { return 1; }")
+        .load();
 
     let err = project.update_file(&path, "<?php function helperA(): int {");
     assert!(
@@ -402,22 +320,14 @@ fn update_file_cancellable_can_be_aborted_mid_cascade_by_a_concurrent_generation
     use std::sync::{Arc, Mutex};
     use std::thread;
 
-    let mut project = Project::new();
-    project
-        .load_file(
-            PathBuf::from("base.php"),
-            "<?php function base(): int { return 1; }",
-        )
-        .unwrap();
+    let mut files = Files::new().context("base.php", "<?php function base(): int { return 1; }");
     for i in 1..=3 {
-        project
-            .load_file(
-                PathBuf::from(format!("dep{i}.php")),
-                &format!("<?php function dep{i}(): int {{ return base(); }}"),
-            )
-            .unwrap();
+        files = files.context(
+            format!("dep{i}.php"),
+            &format!("<?php function dep{i}(): int {{ return base(); }}"),
+        );
     }
-    project.finish_loading();
+    let project = files.load();
 
     let project = Arc::new(Mutex::new(project));
     let generation = Arc::new(Mutex::new(1u64));
@@ -471,17 +381,13 @@ fn update_file_cancellable_can_be_aborted_mid_cascade_by_a_concurrent_generation
 
 #[test]
 fn update_file_refreshes_inferred_global_variable_types() {
-    let mut project = Project::new();
-    project
-        .load_file(PathBuf::from("a.php"), "<?php class Template {}")
-        .unwrap();
-    project
-        .load_file(
-            PathBuf::from("b.php"),
+    let mut project = Files::new()
+        .context("a.php", "<?php class Template {}")
+        .context(
+            "b.php",
             "<?php function f() { global $template; $template = new Template(); }",
         )
-        .unwrap();
-    project.finish_loading();
+        .load();
 
     assert_eq!(
         project.registry().global_variables.get("template"),
@@ -512,12 +418,10 @@ fn update_file_refreshes_inferred_global_variable_types() {
 
 #[test]
 fn an_edited_context_file_stays_context() {
-    let mut project = Project::new();
     let path = PathBuf::from("lib/helper.php");
-    project
-        .load_file(path.clone(), "<?php function helper(): int { return 1; }")
-        .unwrap();
-    project.finish_loading();
+    let mut project = Files::new()
+        .context(&path, "<?php function helper(): int { return 1; }")
+        .load();
     assert!(!project.files[&path].analyzed);
 
     project
@@ -528,12 +432,10 @@ fn an_edited_context_file_stays_context() {
 
 #[test]
 fn an_edited_analyzed_file_stays_analyzed() {
-    let mut project = Project::new();
     let path = PathBuf::from("vendor/acme/helper.php");
-    project
-        .load_analyzed_file(path.clone(), "<?php function helper(): int { return 1; }")
-        .unwrap();
-    project.finish_loading();
+    let mut project = Files::new()
+        .analysed(&path, "<?php function helper(): int { return 1; }")
+        .load();
     assert!(project.files[&path].analyzed);
 
     project
@@ -558,14 +460,14 @@ fn editing_a_file_merged_into_a_built_in_class_keeps_the_built_in_members() {
     ];
     for source in sources {
         for analyzed in [false, true] {
-            let mut project = Project::new();
             let path = PathBuf::from("polyfill.php");
-            if analyzed {
-                project.load_analyzed_file(path.clone(), source).unwrap();
+            let files = Files::new();
+            let mut project = if analyzed {
+                files.analysed(&path, source)
             } else {
-                project.load_file(path.clone(), source).unwrap();
+                files.context(&path, source)
             }
-            project.finish_loading();
+            .load();
             assert!(class_has_method(&project, "ArrayObject", "count"));
             assert!(class_has_method(&project, "ArrayObject", "polyOnly"));
 
@@ -582,10 +484,8 @@ fn editing_a_file_merged_into_a_built_in_class_keeps_the_built_in_members() {
 #[test]
 fn editing_a_polyfill_a_built_in_function_beat_keeps_the_built_in() {
     let source = "<?php if (!function_exists('mb_str_pad')) { function mb_str_pad($string, $length) { return $string; } }";
-    let mut project = Project::new();
     let path = PathBuf::from("polyfill.php");
-    project.load_file(path.clone(), source).unwrap();
-    project.finish_loading();
+    let mut project = Files::new().context(&path, source).load();
     let params = |project: &Project| project.registry().functions["mb_str_pad"].params().len();
     assert_eq!(params(&project), 5);
 
@@ -595,15 +495,13 @@ fn editing_a_polyfill_a_built_in_function_beat_keeps_the_built_in() {
 
 #[test]
 fn removing_a_file_merged_into_a_built_in_class_restores_the_built_in() {
-    let mut project = Project::new();
     let path = PathBuf::from("polyfill.php");
-    project
-        .load_file(
-            path.clone(),
+    let mut project = Files::new()
+        .context(
+            &path,
             "<?php if (!class_exists('ArrayObject')) { class ArrayObject { public function polyOnly(): int { return 1; } } }",
         )
-        .unwrap();
-    project.finish_loading();
+        .load();
 
     project.remove_file(&path);
     assert!(class_has_method(&project, "ArrayObject", "count"));
@@ -612,22 +510,18 @@ fn removing_a_file_merged_into_a_built_in_class_restores_the_built_in() {
 
 #[test]
 fn editing_one_of_two_merged_declarations_keeps_the_other() {
-    let mut project = Project::new();
     let first = PathBuf::from("lib/a.php");
     let second = PathBuf::from("lib/b.php");
-    project
-        .load_file(
-            first.clone(),
+    let mut project = Files::new()
+        .context(
+            &first,
             "<?php class Shared { public function fromA(): int { return 1; } }",
         )
-        .unwrap();
-    project
-        .load_file(
-            second.clone(),
+        .context(
+            &second,
             "<?php class Shared { public function fromB(): int { return 1; } }",
         )
-        .unwrap();
-    project.finish_loading();
+        .load();
     assert!(class_has_method(&project, "Shared", "fromA"));
     assert!(class_has_method(&project, "Shared", "fromB"));
 
@@ -649,13 +543,11 @@ fn editing_one_of_two_merged_declarations_keeps_the_other() {
 /// Loads `files`, then edits `edited` to `new_source`, returning which
 /// files the edit rechecked.
 fn rechecked_by_edit(files: &[(&str, &str)], edited: &str, new_source: &str) -> Vec<String> {
-    let mut project = Project::new();
+    let mut loaded = Files::new();
     for (path, source) in files {
-        project
-            .load_analyzed_file(PathBuf::from(path), source)
-            .unwrap();
+        loaded = loaded.analysed(path, source);
     }
-    project.finish_loading();
+    let mut project = loaded.load();
     let result = project
         .update_file(&PathBuf::from(edited), new_source)
         .unwrap();
@@ -726,11 +618,9 @@ fn a_same_named_class_in_another_namespace_is_not_rechecked() {
 
 #[test]
 fn editing_a_constant_takes_its_new_value() {
-    let mut project = Project::new();
-    project
-        .load_analyzed_file(PathBuf::from("c.php"), "<?php const VERSION = 1;")
-        .unwrap();
-    project.finish_loading();
+    let mut project = Files::new()
+        .analysed("c.php", "<?php const VERSION = 1;")
+        .load();
     project
         .update_file(&PathBuf::from("c.php"), "<?php const VERSION = 2;")
         .unwrap();
@@ -742,14 +632,9 @@ fn editing_a_constant_takes_its_new_value() {
 
 #[test]
 fn a_constant_deleted_from_its_file_is_undefined() {
-    let mut project = Project::new();
-    project
-        .load_analyzed_file(
-            PathBuf::from("c.php"),
-            "<?php const GONE = 1; const KEPT = 1;",
-        )
-        .unwrap();
-    project.finish_loading();
+    let mut project = Files::new()
+        .analysed("c.php", "<?php const GONE = 1; const KEPT = 1;")
+        .load();
     project
         .update_file(&PathBuf::from("c.php"), "<?php const KEPT = 1;")
         .unwrap();
@@ -759,14 +644,10 @@ fn a_constant_deleted_from_its_file_is_undefined() {
 
 #[test]
 fn removing_a_file_keeps_another_files_definition_of_its_constant() {
-    let mut project = Project::new();
-    project
-        .load_analyzed_file(PathBuf::from("a.php"), "<?php define('SHARED', 1);")
-        .unwrap();
-    project
-        .load_analyzed_file(PathBuf::from("b.php"), "<?php define('SHARED', 2);")
-        .unwrap();
-    project.finish_loading();
+    let mut project = Files::new()
+        .analysed("a.php", "<?php define('SHARED', 1);")
+        .analysed("b.php", "<?php define('SHARED', 2);")
+        .load();
     assert!(project.registry().global_constants["SHARED"].is_mixed());
     project.remove_files(&[PathBuf::from("b.php")]);
     assert_eq!(
@@ -777,12 +658,10 @@ fn removing_a_file_keeps_another_files_definition_of_its_constant() {
 
 #[test]
 fn editing_a_file_defining_a_built_in_constant_keeps_the_built_in() {
-    let mut project = Project::new();
+    let mut project = Files::new()
+        .analysed("c.php", "<?php const UNRELATED = 1;")
+        .load();
     let built_in = project.registry().global_constants["PHP_EOL"].clone();
-    project
-        .load_analyzed_file(PathBuf::from("c.php"), "<?php const UNRELATED = 1;")
-        .unwrap();
-    project.finish_loading();
     project
         .update_file(
             &PathBuf::from("c.php"),
@@ -816,11 +695,7 @@ fn an_edited_entity_table_name_is_found_after_the_edit() {
             "<?php use Doctrine\\ORM\\Mapping as ORM; #[ORM\\Entity] #[ORM\\Table(name: '{table}')] class Tag {{ #[ORM\\Id] #[ORM\\Column] public int $id; }}"
         )
     };
-    let mut project = Project::new();
-    project
-        .load_analyzed_file(PathBuf::from("tag.php"), &entity("tags"))
-        .unwrap();
-    project.finish_loading();
+    let mut project = Files::new().analysed("tag.php", &entity("tags")).load();
     assert!(
         project
             .registry()
@@ -858,14 +733,10 @@ fn of_two_entities_on_one_table_the_first_by_name_maps_it_whatever_the_order() {
             .and_then(|entity| entity.repository_class.clone())
             .map(|class| class.to_string())
     };
-    let mut project = Project::new();
-    project
-        .load_analyzed_file(PathBuf::from("beta.php"), &entity("Beta"))
-        .unwrap();
-    project
-        .load_analyzed_file(PathBuf::from("alpha.php"), &entity("Alpha"))
-        .unwrap();
-    project.finish_loading();
+    let mut project = Files::new()
+        .analysed("beta.php", &entity("Beta"))
+        .analysed("alpha.php", &entity("Alpha"))
+        .load();
     assert_eq!(mapped(&project).as_deref(), Some("AlphaRepository"));
     project
         .update_file(&PathBuf::from("alpha.php"), &entity("Alpha"))
@@ -886,13 +757,11 @@ fn effects_read_a_property_by_the_type_php_enforces_before_and_after_an_edit() {
         ),
         ("other.php", "<?php echo 1;"),
     ];
-    let mut project = Project::new();
+    let mut loaded = Files::new();
     for (path, source) in files {
-        project
-            .load_analyzed_file(PathBuf::from(path), source)
-            .unwrap();
+        loaded = loaded.analysed(path, source);
     }
-    project.finish_loading();
+    let mut project = loaded.load();
     assert!(
         project
             .registry()
@@ -921,13 +790,11 @@ fn a_class_in_scope_copies_a_trait_member_as_a_load_does() {
             "<?php class Comment implements Positionable { use Position; public function render(Format $f): string { return ''; } }",
         ),
     ];
-    let mut project = Project::new();
+    let mut loaded = Files::new();
     for (path, source) in files {
-        project
-            .load_analyzed_file(PathBuf::from(path), source)
-            .unwrap();
+        loaded = loaded.analysed(path, source);
     }
-    project.finish_loading();
+    let mut project = loaded.load();
     let return_type = |project: &Project| {
         project
             .registry()
@@ -946,14 +813,11 @@ fn a_class_in_scope_copies_a_trait_member_as_a_load_does() {
 /// diagnostics a project loading the edited text from the start reports.
 fn assert_edit_matches_a_fresh_load(files: &[(&str, &str)], edited: &str, new_source: &str) {
     let load = |files: &[(&str, &str)]| {
-        let mut project = Project::new();
+        let mut loaded = Files::new();
         for (path, source) in files {
-            project
-                .load_analyzed_file(PathBuf::from(path), source)
-                .unwrap();
+            loaded = loaded.analysed(path, source);
         }
-        project.finish_loading();
-        project
+        loaded.load()
     };
     let mut edited_project = load(files);
     edited_project
@@ -1039,17 +903,10 @@ fn value_of_an_edited_enum_takes_its_new_cases() {
 
 #[test]
 fn removing_a_trait_file_drops_its_members_from_its_users() {
-    let mut project = Project::new();
-    project
-        .load_analyzed_file(
-            PathBuf::from("t.php"),
-            "<?php trait T { public function m(): void {} }",
-        )
-        .unwrap();
-    project
-        .load_analyzed_file(PathBuf::from("c.php"), "<?php class C { use T; }")
-        .unwrap();
-    project.finish_loading();
+    let mut project = Files::new()
+        .analysed("t.php", "<?php trait T { public function m(): void {} }")
+        .analysed("c.php", "<?php class C { use T; }")
+        .load();
     assert!(project.registry().classes["C"].methods().contains_key("m"));
     project.remove_files(&[PathBuf::from("t.php")]);
     assert!(!project.registry().classes["C"].methods().contains_key("m"));
@@ -1058,11 +915,7 @@ fn removing_a_trait_file_drops_its_members_from_its_users() {
 #[test]
 fn phpstans_own_classes_are_loaded_only_while_a_file_names_them() {
     let rule = "PHPStan\\Rules\\Rule";
-    let mut project = Project::new();
-    project
-        .load_analyzed_file(PathBuf::from("a.php"), "<?php class A {}")
-        .unwrap();
-    project.finish_loading();
+    let mut project = Files::new().analysed("a.php", "<?php class A {}").load();
     assert!(!project.registry().classes.contains_key(rule));
     project
         .update_file(
@@ -1082,14 +935,12 @@ fn phpstans_own_classes_are_loaded_only_while_a_file_names_them() {
 
 #[test]
 fn a_project_declaring_a_phpstan_class_merges_its_declaration_into_the_stub() {
-    let mut project = Project::new();
-    project
-        .load_analyzed_file(
-            PathBuf::from("rule.php"),
+    let project = Files::new()
+        .analysed(
+            "rule.php",
             "<?php namespace PHPStan\\Rules; interface Rule { public function ownMethod(): void; }",
         )
-        .unwrap();
-    project.finish_loading();
+        .load();
     let rule = &project.registry().classes["PHPStan\\Rules\\Rule"];
     assert!(rule.methods().contains_key("ownMethod"));
     assert!(rule.methods().contains_key("processNode"));
@@ -1097,15 +948,13 @@ fn a_project_declaring_a_phpstan_class_merges_its_declaration_into_the_stub() {
 
 #[test]
 fn a_class_respelled_by_an_edit_leaves_the_subtype_index_once() {
-    let mut project = Project::new();
     let path = PathBuf::from("a.php");
-    project
-        .load_analyzed_file(
-            path.clone(),
+    let mut project = Files::new()
+        .analysed(
+            &path,
             "<?php class Base {} class Child extends Base {} trait T {} class User { use T; }",
         )
-        .unwrap();
-    project.finish_loading();
+        .load();
     let subclasses = |project: &Project| -> Vec<String> {
         project
             .registry()
@@ -1162,39 +1011,12 @@ fn assert_edits_match_fresh_loads(
         .enumerate()
         .map(|(i, source)| (format!("f{i:03}.php"), source.clone()))
         .collect();
-    // Each fresh load parses every text again, though all but the edited
-    // one are the ones the load before parsed: the parse of a file is a
-    // function of its path and text, and a fresh load takes a copy of it. A
-    // text that does not parse is ignored, as `load_analyzed_file`'s error
-    // is.
-    let parsed: std::cell::RefCell<
-        rustc_hash::FxHashMap<(String, String), Option<crate::project::ParsedFile>>,
-    > = Default::default();
     let load = |texts: &[(String, String)]| {
-        let mut project = Project::new();
-        let files: Vec<Option<crate::project::ParsedFile>> = texts
-            .iter()
-            .map(|(path, source)| {
-                parsed
-                    .borrow_mut()
-                    .entry((path.clone(), source.clone()))
-                    .or_insert_with(|| {
-                        crate::project::parse_file(Path::new(path), source.as_bytes(), false).ok()
-                    })
-                    .clone()
-            })
-            .collect();
-        // As `load_files` loads a batch: a project that is to have PHPStan's
-        // source in it starts from the registry that has it, and does not
-        // switch to it when it finishes.
-        project.expect_files(files.iter().flatten());
-        for ((path, source), file) in texts.iter().zip(files) {
-            if let Some(file) = file {
-                project.insert_parsed_file(PathBuf::from(path), file, source.to_string(), true);
-            }
+        let mut loaded = Files::new();
+        for (path, source) in texts {
+            loaded = loaded.analysed(path, source);
         }
-        project.finish_loading();
-        project
+        loaded.load()
     };
     let diagnostics = |project: &Project| -> Vec<String> {
         let mut all: Vec<String> = project
@@ -1301,28 +1123,17 @@ proptest::proptest! {
 
 #[test]
 fn a_changed_global_variable_type_rechecks_the_files_declaring_it_global() {
-    let mut project = Project::new();
-    let load = |project: &mut Project, path: &str, source: &str| {
-        project
-            .load_file(PathBuf::from(path), source)
-            .expect("parses");
-    };
-    load(
-        &mut project,
-        "classes.php",
-        "<?php class A { function m() {} } class B {}",
-    );
-    load(
-        &mut project,
-        "writer.php",
-        "<?php function w() { global $t; $t = new A(); }",
-    );
-    load(
-        &mut project,
-        "reader.php",
-        "<?php function r() { global $t; $t->m(); }",
-    );
-    project.finish_loading();
+    let mut project = Files::new()
+        .context(
+            "classes.php",
+            "<?php class A { function m() {} } class B {}",
+        )
+        .context(
+            "writer.php",
+            "<?php function w() { global $t; $t = new A(); }",
+        )
+        .context("reader.php", "<?php function r() { global $t; $t->m(); }")
+        .load();
 
     let results = project
         .update_file(
@@ -1341,21 +1152,17 @@ fn a_changed_global_variable_type_rechecks_the_files_declaring_it_global() {
 
 #[test]
 fn a_rebuild_follows_the_order_files_were_loaded_not_their_paths() {
-    // `z.php` loads before `a.php`; both declare `Dup`, the second replacing
-    // what the first gave, so the result depends on the order.
+    // The context file `z.php` loads before the analysed `a.php`; both
+    // declare `Dup`, the second replacing what the first gave, so the result
+    // depends on the order.
     let z = "<?php class Dup { function fromZ() {} }";
     let a_before = "<?php class Dup { function fromA() {} }";
     let a_after = "<?php class Dup { function fromA() {} function edited() {} }";
     let load = |first: &str, second: &str| {
-        let mut project = Project::new();
-        project
-            .load_analyzed_file(PathBuf::from("z.php"), first)
-            .unwrap();
-        project
-            .load_analyzed_file(PathBuf::from("a.php"), second)
-            .unwrap();
-        project.finish_loading();
-        project
+        Files::new()
+            .context("z.php", first)
+            .analysed("a.php", second)
+            .load()
     };
     let methods = |project: &Project| -> Vec<String> {
         let mut names: Vec<String> = project.registry().classes["Dup"]
@@ -1374,56 +1181,6 @@ fn a_rebuild_follows_the_order_files_were_loaded_not_their_paths() {
     assert_eq!(methods(&edited), methods(&fresh));
 }
 
-/// The route the edit tests' fresh loads take, a batch, gives what a load
-/// file by file does, which switches to the registry with PHPStan's source
-/// when the project finishes.
-#[test]
-fn a_batch_load_equals_a_load_file_by_file() {
-    let sources = [
-        "<?php function helper(int $a): int { return $a; }",
-        "<?php use PHPStan\\Type\\Type; function takes(Type $t): void { $t->describe(); }",
-        "<?php class Plain { public function run(): string { return helper(1); } }",
-    ];
-    let paths = ["a.php", "b.php", "c.php"];
-    let diagnostics = |project: &Project| -> Vec<String> {
-        let mut all: Vec<String> = project
-            .analyzed_paths()
-            .iter()
-            .flat_map(|path| {
-                project
-                    .check_file(path)
-                    .into_iter()
-                    .map(move |d| format!("{} {}", path.display(), d.message))
-            })
-            .collect();
-        all.sort();
-        all
-    };
-    let mut one_by_one = Project::new();
-    for (path, source) in paths.iter().zip(sources) {
-        let _ = one_by_one.load_analyzed_file(PathBuf::from(path), source);
-    }
-    one_by_one.finish_loading();
-    let mut batch = Project::new();
-    let files: Vec<crate::project::ParsedFile> = paths
-        .iter()
-        .zip(sources)
-        .map(|(path, source)| {
-            crate::project::parse_file(Path::new(path), source.as_bytes(), false).expect("parses")
-        })
-        .collect();
-    batch.expect_files(files.iter());
-    for ((path, source), file) in paths.iter().zip(sources).zip(files) {
-        batch.insert_parsed_file(PathBuf::from(path), file, source.to_string(), true);
-    }
-    batch.finish_loading();
-    assert_eq!(diagnostics(&one_by_one), diagnostics(&batch));
-    assert_eq!(
-        one_by_one.registry().classes.len(),
-        batch.registry().classes.len()
-    );
-}
-
 /// One edit as the language server makes it.
 enum Edit<'a> {
     Update(&'a str, &'a str),
@@ -1440,15 +1197,11 @@ fn assert_held_diagnostics_match_a_fresh_load(
     edits: &[Edit],
 ) {
     let load = |files: &[(String, String)]| {
-        let mut project = Project::new();
-        project.apply_settings(settings());
+        let mut loaded = Files::new().settings(settings());
         for (path, source) in files {
-            project
-                .load_analyzed_file(PathBuf::from(path), source)
-                .unwrap();
+            loaded = loaded.analysed(path, source);
         }
-        project.finish_loading();
-        project
+        loaded.load()
     };
     let print = |diagnostics: &[Diagnostic]| -> Vec<String> {
         diagnostics
@@ -1580,13 +1333,11 @@ fn an_include_is_rechecked_when_the_file_it_names_appears_or_vanishes() {
     let target = dir.write("target.php", "<?php function target(): void {}");
     let data = dir.write("data.inc", "<?php");
     dir.write("sub/inner.inc", "<?php");
-    let mut project = Project::new();
+    let mut loaded = Files::new();
     for path in [&includer, &target] {
-        project
-            .load_analyzed_file(path.clone(), &fs::read_to_string(path).unwrap())
-            .unwrap();
+        loaded = loaded.analysed(path, &fs::read_to_string(path).unwrap());
     }
-    project.finish_loading();
+    let mut project = loaded.load();
     let not_found = |diagnostics: &[Diagnostic]| {
         diagnostics
             .iter()
@@ -1622,11 +1373,7 @@ fn a_name_leaves_the_assert_tagged_names_with_its_last_assert_tag() {
     let tagged =
         "<?php class A { /** @phpstan-assert int $x */ public function check($x): void {} }";
     let untagged = "<?php class A { public function check($x): void {} }";
-    let mut project = Project::new();
-    project
-        .load_analyzed_file(PathBuf::from("a.php"), tagged)
-        .unwrap();
-    project.finish_loading();
+    let mut project = Files::new().analysed("a.php", tagged).load();
     assert!(project.registry().names_with_assert_tags.contains("check"));
     project
         .update_file(&PathBuf::from("a.php"), untagged)
@@ -1640,21 +1387,17 @@ fn a_name_leaves_the_assert_tagged_names_with_its_last_assert_tag() {
 
 #[test]
 fn an_edit_keeps_the_use_sites_of_the_files_it_rechecks() {
-    let mut project = Project::new();
-    project.apply_settings(ProjectSettings {
-        rules: crate::rules_settings::RulesSettings {
-            check_dead_code: true,
-            ..Default::default()
-        },
-        ..ProjectSettings::default()
-    });
-    project
-        .load_analyzed_file(PathBuf::from("base.php"), "<?php class Base {}")
-        .unwrap();
-    project
-        .load_analyzed_file(PathBuf::from("user.php"), "<?php new Base();")
-        .unwrap();
-    project.finish_loading();
+    let mut project = Files::new()
+        .settings(ProjectSettings {
+            rules: crate::rules_settings::RulesSettings {
+                check_dead_code: true,
+                ..Default::default()
+            },
+            ..ProjectSettings::default()
+        })
+        .analysed("base.php", "<?php class Base {}")
+        .analysed("user.php", "<?php new Base();")
+        .load();
     let target = use_sites::RefTarget::Class("Base".to_string());
     assert_eq!(project.use_sites().references(&target).len(), 1);
     let rechecked = project
@@ -1679,15 +1422,18 @@ fn an_edit_takes_away_the_escapes_and_named_argument_calls_it_removes() {
     let before = "<?php function f($name, Base $b) { $b->m(old: 1); return Suit::{$name}; }";
     let after = "<?php function f($name, Base $b) { $b->m(1); return $name; }";
     let analysed = |user: &str| -> Project {
-        let mut project = Project::new();
-        project.settings.rules.check_dead_enum_cases = true;
-        project.settings.rules.check_renamed_named_arguments = true;
-        for (path, source) in [("declarations.php", declarations), ("user.php", user)] {
-            project
-                .load_analyzed_file(PathBuf::from(path), source)
-                .unwrap();
-        }
-        project.finish_loading();
+        let mut project = Files::new()
+            .settings(ProjectSettings {
+                rules: crate::rules_settings::RulesSettings {
+                    check_dead_enum_cases: true,
+                    check_renamed_named_arguments: true,
+                    ..Default::default()
+                },
+                ..ProjectSettings::default()
+            })
+            .analysed("declarations.php", declarations)
+            .analysed("user.php", user)
+            .load();
         let mut paths = project.analyzed_paths();
         paths.sort();
         for (path, outcome) in project.check_files(&paths, None, true, Records::default()) {

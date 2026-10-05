@@ -6,6 +6,7 @@
 //! corpus shape (an anonymous-class instance placed into a typed array
 //! shape/argument whose declared type names an interface it implements).
 
+use super::super::test_support::Files;
 use super::super::*;
 use super::helpers::*;
 
@@ -16,16 +17,13 @@ fn anonymous_class_return_type_satisfies_its_own_implemented_interface() {
     // `Mixed`, which doesn't satisfy a declared `array{0: Handler, ...}`
     // return shape's own `Handler`-typed slot - a real, confirmed corpus
     // false positive (`return.type`).
-    let mut project = Project::new();
-    project
-        .load_file(
-            PathBuf::from("src/Handler.php"),
+    let project = Files::new()
+        .context(
+            "src/Handler.php",
             "<?php interface Handler { public function handle(): int; }",
         )
-        .unwrap();
-    project
-        .load_file(
-            PathBuf::from("src/build.php"),
+        .context(
+            "src/build.php",
             "<?php
             /** @return array{0: Handler, 1: callable(): int} */
             function build(): array {
@@ -35,8 +33,7 @@ fn anonymous_class_return_type_satisfies_its_own_implemented_interface() {
                 return [$handler, function (): int { return 2; }];
             }",
         )
-        .unwrap();
-    project.finish_loading();
+        .load();
 
     let d =
         without_missing_typehint_diagnostics(project.check_file(&PathBuf::from("src/build.php")));
@@ -48,16 +45,13 @@ fn anonymous_class_not_implementing_the_required_interface_still_flags_return_ty
     // Negative control for the test above: proves the fix is real type
     // resolution, not blanket leniency toward every anonymous class
     // instance regardless of shape.
-    let mut project = Project::new();
-    project
-        .load_file(
-            PathBuf::from("src/Handler.php"),
+    let project = Files::new()
+        .context(
+            "src/Handler.php",
             "<?php interface Handler { public function handle(): int; }",
         )
-        .unwrap();
-    project
-        .load_file(
-            PathBuf::from("src/build.php"),
+        .context(
+            "src/build.php",
             "<?php
             /** @return array{0: Handler, 1: callable(): int} */
             function build(): array {
@@ -65,8 +59,7 @@ fn anonymous_class_not_implementing_the_required_interface_still_flags_return_ty
                 return [$notAHandler, function (): int { return 2; }];
             }",
         )
-        .unwrap();
-    project.finish_loading();
+        .load();
 
     let d =
         without_missing_typehint_diagnostics(project.check_file(&PathBuf::from("src/build.php")));
@@ -84,16 +77,13 @@ fn an_anonymous_class_instances_own_extra_method_is_resolved_alongside_its_inter
     // declaration (not just aliasing to the interface it implements) means
     // both a real interface method call AND the class's own extra method
     // call resolve, while a genuinely undefined method is still flagged.
-    let mut project = Project::new();
-    project
-        .load_file(
-            PathBuf::from("src/Handler.php"),
+    let project = Files::new()
+        .context(
+            "src/Handler.php",
             "<?php interface Handler { public function handle(): int; }",
         )
-        .unwrap();
-    project
-        .load_file(
-            PathBuf::from("src/build.php"),
+        .context(
+            "src/build.php",
             "<?php
             function build(): int {
                 $spy = new class implements Handler {
@@ -103,8 +93,7 @@ fn an_anonymous_class_instances_own_extra_method_is_resolved_alongside_its_inter
                 return $spy->handle() + $spy->callCount();
             }",
         )
-        .unwrap();
-    project.finish_loading();
+        .load();
 
     let d =
         without_missing_typehint_diagnostics(project.check_file(&PathBuf::from("src/build.php")));
@@ -113,18 +102,16 @@ fn an_anonymous_class_instances_own_extra_method_is_resolved_alongside_its_inter
 
 #[test]
 fn calling_a_genuinely_undefined_method_on_an_anonymous_class_instance_is_still_flagged() {
-    let mut project = Project::new();
-    project
-        .load_file(
-            PathBuf::from("src/build.php"),
+    let project = Files::new()
+        .context(
+            "src/build.php",
             "<?php
             function build(): int {
                 $obj = new class { public function handle(): int { return 1; } };
                 return $obj->doesNotExist();
             }",
         )
-        .unwrap();
-    project.finish_loading();
+        .load();
 
     let d =
         without_missing_typehint_diagnostics(project.check_file(&PathBuf::from("src/build.php")));
@@ -136,16 +123,13 @@ fn calling_a_genuinely_undefined_method_on_an_anonymous_class_instance_is_still_
 
 #[test]
 fn anonymous_class_constructor_dictated_by_an_interface_is_not_flagged_unused() {
-    let mut project = Project::new();
-    project
-        .load_file(
-            PathBuf::from("src/Makeable.php"),
+    let project = Files::new()
+        .context(
+            "src/Makeable.php",
             "<?php interface Makeable { public function __construct(int $seed); }",
         )
-        .unwrap();
-    project
-        .load_file(
-            PathBuf::from("src/build.php"),
+        .context(
+            "src/build.php",
             "<?php
             function build(): Makeable {
                 return new class(1) implements Makeable {
@@ -153,8 +137,7 @@ fn anonymous_class_constructor_dictated_by_an_interface_is_not_flagged_unused() 
                 };
             }",
         )
-        .unwrap();
-    project.finish_loading();
+        .load();
 
     let d = project.check_file(&PathBuf::from("src/build.php"));
     assert!(
@@ -166,24 +149,20 @@ fn anonymous_class_constructor_dictated_by_an_interface_is_not_flagged_unused() 
 
 #[test]
 fn anonymous_class_extending_an_interface_is_flagged_by_target_kind() {
-    let mut project = Project::new();
-    project
-        .load_file(
-            PathBuf::from("src/Handler.php"),
+    let project = Files::new()
+        .context(
+            "src/Handler.php",
             "<?php interface Handler {} final class Sealed {}",
         )
-        .unwrap();
-    project
-        .load_file(
-            PathBuf::from("src/build.php"),
+        .context(
+            "src/build.php",
             "<?php
             function build(): object {
                 $a = new class extends Handler {};
                 return new class extends Sealed {};
             }",
         )
-        .unwrap();
-    project.finish_loading();
+        .load();
 
     let d = project.check_file(&PathBuf::from("src/build.php"));
     assert!(

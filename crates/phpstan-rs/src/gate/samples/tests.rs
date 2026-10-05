@@ -2,13 +2,11 @@
 
 use super::*;
 use crate::project::Project;
-use std::path::PathBuf;
 
 fn project() -> Project {
-    let mut project = Project::new();
-    project
-        .load_analyzed_file(
-            PathBuf::from("a.php"),
+    crate::project::test_support::Files::new()
+        .analysed(
+            "a.php",
             r#"<?php
 interface Shape {}
 final class Circle implements Shape { public function __construct(public int $r) {} }
@@ -17,9 +15,7 @@ final class Leaf extends Base {}
 enum Suit: string { case Hearts = 'h'; case Spades = 's'; }
 "#,
         )
-        .unwrap();
-    project.finish_loading();
-    project
+        .load()
 }
 
 /// The PHP of each value sampled for the type `written` reads as.

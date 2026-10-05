@@ -1,6 +1,7 @@
 //! File discovery on disk, `Project` defaults, and other checks that don't
 //! fit the incremental-update or Pest directory-scoping categories.
 
+use super::super::test_support::Files;
 use super::super::*;
 use super::helpers::*;
 
@@ -28,20 +29,10 @@ fn default_is_equivalent_to_new() {
 fn check_all_covers_every_loaded_file_not_just_one() {
     // check_all is a thin fold over the already-well-tested check_file,
     // and is what --check-project actually calls.
-    let mut project = Project::new();
-    project
-        .load_file(
-            PathBuf::from("good.php"),
-            "<?php function f(): int { return 1; }",
-        )
-        .unwrap();
-    project
-        .load_file(
-            PathBuf::from("bad.php"),
-            "<?php function g() { return $undefinedVar; }",
-        )
-        .unwrap();
-    project.finish_loading();
+    let project = Files::new()
+        .context("good.php", "<?php function f(): int { return 1; }")
+        .context("bad.php", "<?php function g() { return $undefinedVar; }")
+        .load();
 
     let all = project.check_all(&crate::project::worker_pool());
     assert_eq!(project.file_count(), 2);
@@ -56,20 +47,10 @@ fn check_all_covers_every_loaded_file_not_just_one() {
 
 #[test]
 fn check_paths_restricts_output_but_keeps_whole_project_facts() {
-    let mut project = Project::new();
-    project
-        .load_file(
-            PathBuf::from("good.php"),
-            "<?php function f(): int { return 1; }",
-        )
-        .unwrap();
-    project
-        .load_file(
-            PathBuf::from("bad.php"),
-            "<?php function g() { return $undefinedVar; }",
-        )
-        .unwrap();
-    project.finish_loading();
+    let project = Files::new()
+        .context("good.php", "<?php function f(): int { return 1; }")
+        .context("bad.php", "<?php function g() { return $undefinedVar; }")
+        .load();
 
     let result = project.check_paths(&[PathBuf::from("bad.php")], &crate::project::worker_pool());
 
@@ -83,20 +64,10 @@ fn check_paths_restricts_output_but_keeps_whole_project_facts() {
 
 #[test]
 fn check_paths_isolating_panics_behaves_like_check_paths_when_nothing_panics() {
-    let mut project = Project::new();
-    project
-        .load_file(
-            PathBuf::from("good.php"),
-            "<?php function f(): int { return 1; }",
-        )
-        .unwrap();
-    project
-        .load_file(
-            PathBuf::from("bad.php"),
-            "<?php function g() { return $undefinedVar; }",
-        )
-        .unwrap();
-    project.finish_loading();
+    let project = Files::new()
+        .context("good.php", "<?php function f(): int { return 1; }")
+        .context("bad.php", "<?php function g() { return $undefinedVar; }")
+        .load();
     let paths = vec![PathBuf::from("good.php"), PathBuf::from("bad.php")];
 
     let expected = project.check_paths(&paths, &crate::project::worker_pool());
@@ -124,16 +95,10 @@ fn cross_file_use_import_and_method_calls_resolve_correctly() {
     // regression in NameContext resolution, FQN-keyed lookups, or
     // undefined-method detection could plausibly break without any
     // existing test noticing.
-    let mut project = Project::new();
-    project.load_file(
-        PathBuf::from("user.php"),
-        "<?php namespace App\\Models; class User { public function getName(): string { return 'x'; } }",
-    ).unwrap();
-    project.load_file(
-        PathBuf::from("greeter.php"),
-        "<?php namespace App\\Services;\nuse App\\Models\\User;\nfunction greet(User $u): string { return $u->getName(); }",
-    ).unwrap();
-    project.finish_loading();
+    let project = Files::new()
+        .context("user.php", "<?php namespace App\\Models; class User { public function getName(): string { return 'x'; } }")
+        .context("greeter.php", "<?php namespace App\\Services;\nuse App\\Models\\User;\nfunction greet(User $u): string { return $u->getName(); }")
+        .load();
 
     let diagnostics = project.check_file(&PathBuf::from("greeter.php"));
     assert!(
@@ -144,16 +109,10 @@ fn cross_file_use_import_and_method_calls_resolve_correctly() {
     // Same setup, but calling a method User genuinely doesn't have -
     // proves undefined-method detection also works through this same
     // cross-file, use-imported path, not just same-file/same-namespace.
-    let mut bad_project = Project::new();
-    bad_project.load_file(
-        PathBuf::from("user.php"),
-        "<?php namespace App\\Models; class User { public function getName(): string { return 'x'; } }",
-    ).unwrap();
-    bad_project.load_file(
-        PathBuf::from("greeter.php"),
-        "<?php namespace App\\Services;\nuse App\\Models\\User;\nfunction greet(User $u): string { return $u->totallyMadeUp(); }",
-    ).unwrap();
-    bad_project.finish_loading();
+    let bad_project = Files::new()
+        .context("user.php", "<?php namespace App\\Models; class User { public function getName(): string { return 'x'; } }")
+        .context("greeter.php", "<?php namespace App\\Services;\nuse App\\Models\\User;\nfunction greet(User $u): string { return $u->totallyMadeUp(); }")
+        .load();
     let bad_diagnostics = bad_project.check_file(&PathBuf::from("greeter.php"));
     assert!(
         bad_diagnostics
@@ -174,17 +133,9 @@ fn deferred_registry_passes_all_run_through_the_real_project_path() {
     // working through the real CLI. One project, exercising all three
     // at once, through `check_all` - exactly what `--check-project`
     // itself calls.
-    let mut project = Project::new();
-    project
-        .load_file(
-            PathBuf::from("source.php"),
-            "<?php /** @phpstan-type ValueType string */ class Types {} class Collection { public function count(): int { return 0; } }",
-        )
-        .unwrap();
-    project
-        .load_file(
-            PathBuf::from("consumer.php"),
-            concat!(
+    let project = Files::new()
+        .context("source.php", "<?php /** @phpstan-type ValueType string */ class Types {} class Collection { public function count(): int { return 0; } }")
+        .context("consumer.php", concat!(
                 "<?php\n",
                 "/**\n",
                 " * @phpstan-import-type ValueType from Types as ImportedValueType\n",
@@ -201,10 +152,8 @@ fn deferred_registry_passes_all_run_through_the_real_project_path() {
                 "        $this->needsInt($this->getX());\n",
                 "    }\n",
                 "}\n",
-            ),
-        )
-        .unwrap();
-    project.finish_loading();
+            ))
+        .load();
 
     let all = project.check_all(&crate::project::worker_pool());
     let consumer_diagnostics = &all[&PathBuf::from("consumer.php")];
@@ -225,20 +174,16 @@ fn deferred_registry_passes_all_run_through_the_real_project_path() {
 
 #[test]
 fn analyzed_paths_and_is_analyzed_reflect_how_each_file_was_loaded() {
-    let mut project = Project::new();
-    project
-        .load_file(
-            PathBuf::from("vendor/lib.php"),
+    let project = Files::new()
+        .context(
+            "vendor/lib.php",
             "<?php function libHelper(): int { return 1; }",
         )
-        .unwrap();
-    project
-        .load_analyzed_file(
-            PathBuf::from("src/app.php"),
+        .analysed(
+            "src/app.php",
             "<?php function appHelper(): int { return 1; }",
         )
-        .unwrap();
-    project.finish_loading();
+        .load();
 
     assert!(!project.is_analyzed(&PathBuf::from("vendor/lib.php")));
     assert!(project.is_analyzed(&PathBuf::from("src/app.php")));

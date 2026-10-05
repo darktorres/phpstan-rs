@@ -111,7 +111,7 @@ impl Registry {
     /// `BuiltDecl`, in depth-first order; this just feeds each one to
     /// `insert_built_decl` in that same order. Kept as one function
     /// (rather than inlining this loop at every call site) so `Project::
-    /// load_file`'s and `update_file`'s existing single-file callers need
+    /// update_file`'s existing single-file caller needs
     /// no changes at all - `check_project.rs`'s parallel batch path calls
     /// `build_declarations` directly instead (once per file, concurrently,
     /// no `&mut self`/registry access needed for that half at all), then
@@ -130,7 +130,7 @@ impl Registry {
     /// Applies one already-built declaration (see `BuiltDecl`/
     /// `build_declarations`) to the registry - factored out so both the
     /// sequential single-file path above and the parallel-parse batch
-    /// path in `check_project.rs`'s `insert_parsed_file` call site share
+    /// path in `check_project.rs`'s `install_parsed_file` call site share
     /// one implementation of every FQN-collision decision below, rather
     /// than risking two independently maintained copies of this dense
     /// logic (documented per-branch below) silently drifting apart from
@@ -645,7 +645,7 @@ impl Registry {
 /// (single-file callers get that for free from `Registry::index`'s own
 /// loop; the parallel batch path must preserve per-file order too,
 /// though it may interleave whole files in any order relative to each
-/// other - see `insert_parsed_file`'s doc comment).
+/// other - see `install_parsed_file`'s doc comment).
 ///
 /// Each declaration's PHPDoc resolves in the name context in effect where
 /// it sits (`for_each_declaration`).

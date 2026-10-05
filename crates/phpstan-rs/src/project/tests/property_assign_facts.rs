@@ -2,15 +2,15 @@
 //! makes them. The `property.unusedType` check itself is covered by the
 //! fixtures under `tests/fixtures/project/property_assign_facts`.
 
+use super::super::test_support::Files;
 use super::super::*;
 
 fn load(files: &[(&str, &str)]) -> Project {
-    let mut project = Project::new();
+    let mut loaded = Files::new();
     for (path, source) in files {
-        project.load_file(PathBuf::from(path), source).unwrap();
+        loaded = loaded.context(path, source);
     }
-    project.finish_loading();
-    project
+    loaded.load()
 }
 
 /// The `property.unusedType` messages among `diagnostics`.

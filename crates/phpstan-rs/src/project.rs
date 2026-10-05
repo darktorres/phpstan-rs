@@ -47,6 +47,8 @@ mod registry_dump;
 pub mod roles;
 pub mod session;
 pub mod source;
+#[cfg(test)]
+pub(crate) mod test_support;
 pub(crate) mod use_sites;
 mod whole_program;
 
@@ -127,7 +129,7 @@ pub(crate) struct FileState {
     // `None` for every ordinary `check-project` batch run, which never
     // needs it again once this file's own diagnostics are computed.
     source: Option<String>,
-    // Same meaning as `load_analyzed_file`'s own `analyzed` parameter -
+    // Whether the file is checked:
     // `true` for a real, first-party file being checked, `false` for
     // context (vendor/scan/stub, never analyzed or reported). Recorded
     // per-file so `Project::is_analyzed`/`analyzed_paths` can answer
@@ -254,7 +256,7 @@ impl BodySource for file_table::FileTable<FileState> {
 /// every file that *references* `name` - used to find which other files
 /// need re-checking when a file's declarations change.
 ///
-/// `load_file` is for the initial, full load of a codebase; `update_file`
+/// `Session::load_into` is for the initial, full load of a codebase; `update_file`
 /// is the incremental path: re-parsing and re-checking only the file that
 /// changed, plus the files reading a declaration whose resolved form the
 /// change altered (see `affected_files`) - every other file's parse tree
@@ -289,7 +291,7 @@ pub struct Project {
     // When set, per-file and whole-program checks leave inline
     // `@phpstan-ignore*` suppression to `apply_inline_ignores`.
     defer_inline_ignores: bool,
-    // Whether `load_file`/`update_file` keep each file's own raw source
+    // Whether a load and `update_file` keep each file's own raw source
     // text around in its `FileState` (see that field's own doc comment) -
     // off by default. Only `lsp.rs`'s `Server` turns this on:
     // hover/definition's own text-split technique (`lsp::text_split`)
@@ -345,7 +347,7 @@ pub struct Project {
     // Which files Tier 2 (member references) of `use_sites` and
     // `escapes` cover - none until the first `ensure_member_index_built`
     // call or the analysis seeds them. Deliberately NOT built as part
-    // of `finish_loading`/`load_file`: Tier 2 needs one real `Checker`
+    // of `finish_loading` or a load: Tier 2 needs one real `Checker`
     // pass per file, which would make every workspace load pay a cost
     // only `textDocument/references`/`textDocument/rename` actually
     // need - see `ensure_member_index_built`'s own doc comment.
@@ -1145,67 +1147,6 @@ impl Project {
         self.files.get(path)?.tree()
     }
 
-    /// Parses one file and indexes its declarations into the shared
-    /// registry. Call `finish_loading` once after the initial batch of
-    /// `load_file` calls - trait flattening is a global pass over every
-    /// class, so it's wasteful to re-run it after each individual file
-    /// during a bulk load the way `update_file` has to for a single
-    /// incremental change.
-    #[hotpath::measure]
-    pub fn load_file(&mut self, path: PathBuf, source: &str) -> Result<(), ParseError> {
-        self.load_file_impl(path, source, false)
-    }
-
-    /// Same as `load_file`, but marks the file as a first-party,
-    /// actually-analyzed one rather than context (`--scan-dir`/composer
-    /// vendor) - see `Registry::insert_built_decl`'s own `analyzed`
-    /// parameter doc comment for why this distinction has to reach all
-    /// the way down to class indexing: an analyzed file's own declaration
-    /// must always win a same-name collision outright, never merge with a
-    /// pre-existing context/stub entry.
-    pub fn load_analyzed_file(&mut self, path: PathBuf, source: &str) -> Result<(), ParseError> {
-        self.load_file_impl(path, source, true)
-    }
-
-    fn load_file_impl(
-        &mut self,
-        path: PathBuf,
-        source: &str,
-        analyzed: bool,
-    ) -> Result<(), ParseError> {
-        // `is_stub: false` - `load_file`/`load_analyzed_file` are the
-        // LSP/test-harness convenience path, which has no `stub_paths`
-        // concept at all (that's a batch `check-project`-only config key,
-        // wired through `read_and_parse_file` instead) and no way to
-        // enable `check_duplicate_class_declarations` in the first place.
-        let parsed = parse_file(&path, source, false)?;
-        self.insert_parsed_file(path, parsed, source.to_string(), analyzed);
-        Ok(())
-    }
-
-    /// The order-sensitive second half of `load_file`, taking an
-    /// already-computed `ParsedFile` (see that type's own doc comment) -
-    /// the split exists so a caller loading many files at once (batch
-    /// `check-project`) can compute every file's `ParsedFile` in parallel
-    /// (pure, no `&self`/registry dependency at all) and then feed them
-    /// into this method one at a time, sequentially, in whatever order
-    /// its own collision-resolution policy needs - exactly the loop
-    /// `load_file` above already ran, just no longer coupled to also
-    /// doing the parse itself synchronously. `analyzed` has the same
-    /// meaning as `load_analyzed_file`'s own - see that method's doc
-    /// comment.
-    pub fn insert_parsed_file(
-        &mut self,
-        path: PathBuf,
-        parsed: ParsedFile,
-        source: String,
-        analyzed: bool,
-    ) {
-        let id = self.files.id_for(&path);
-        let len = source.len();
-        self.insert_numbered_file(id, &path, parsed, source, len, analyzed);
-    }
-
     /// Numbers `paths` before any is inserted, which a caller can do while
     /// it parses them. The number of each place in the list, for
     /// `insert_numbered_file`.
@@ -1224,7 +1165,7 @@ impl Project {
         numbers
     }
 
-    /// `insert_parsed_file`, for the file `id` numbers `path` as, `len`
+    /// `install_parsed_file`, for the file `id` numbers `path` as, `len`
     /// bytes long: `source` is empty unless the project keeps the text.
     pub(crate) fn insert_numbered_file(
         &mut self,
@@ -1387,7 +1328,7 @@ impl Project {
         }
     }
 
-    /// Indexes `parsed`'s use sites ahead of `insert_parsed_file`, so a
+    /// Indexes `parsed`'s use sites ahead of `install_parsed_file`, so a
     /// caller parsing many files in parallel indexes them there too.
     pub(crate) fn index_use_sites(&self, parsed: &mut ParsedFile, source: &str) {
         if let Some(ast) = &parsed.ast {
@@ -1396,7 +1337,7 @@ impl Project {
     }
 
     /// Finds the composer package `parsed`, the file at `path`, belongs to
-    /// ahead of `insert_parsed_file`, so a caller parsing many files in
+    /// ahead of `install_parsed_file`, so a caller parsing many files in
     /// parallel does the path work there too.
     pub(crate) fn note_owner(&self, parsed: &mut ParsedFile, path: &Path) {
         parsed.owner = Some(self.packages.owner(&self.absolute_path(path)));
@@ -1618,7 +1559,7 @@ impl Project {
         Scope::from_keys(classes, functions)
     }
 
-    /// Finalizes an initial batch of `load_file` calls (trait flattening).
+    /// Finalizes an initial load (trait flattening).
     #[hotpath::measure]
     pub fn finish_loading(&mut self) {
         self.finish_declarations();
@@ -2966,7 +2907,7 @@ impl Project {
     /// complete no-op. `check_dead_code` needs only Tier 1 (`use_sites`'s
     /// class/function reference sites) - cheaper than Tier 2 (a plain
     /// syntactic walk, not a real `Checker` pass), but still real per-
-    /// loaded-file cost, so `Project::insert_parsed_file` itself gates
+    /// loaded-file cost, so `Project::install_parsed_file` itself gates
     /// populating it in batch mode on this exact flag - see that call
     /// site's own doc comment. `check_circular_dependencies` and
     /// `check_dead_abstract_classes` need neither Tier - both read
@@ -3369,7 +3310,7 @@ fn parse_recording<'a>(
 /// Everything about loading one file that's pure - parsing, plus every
 /// fact derived only from the parsed AST or the raw source text, with no
 /// dependency on (or mutation of) a `Project`'s shared registry. Computing
-/// this for many files is embarrassingly parallel - `insert_parsed_file`
+/// this for many files is embarrassingly parallel - `install_parsed_file`
 /// below does the remaining, order-sensitive registry-mutating half,
 /// meant to stay sequential and run in whatever order a caller's own
 /// collision-resolution policy needs (see that method's own doc comment).
@@ -3390,7 +3331,7 @@ pub struct ParsedFile {
     // registry-independent `ClassReflection`/`FunctionReflection`/`Type` values (see
     // `registry::build_declarations`'s own doc comment for why that
     // split is pure and safe to compute here, alongside everything else
-    // in this struct) - `insert_parsed_file` feeds these into
+    // in this struct) - `install_parsed_file` feeds these into
     // `Registry::insert_built_decl` one at a time instead of re-deriving
     // them from `ast` via `Registry::index`, so the expensive "turn an
     // AST node into a ClassReflection/FunctionReflection" work runs here, in
@@ -3402,7 +3343,7 @@ pub struct ParsedFile {
     declared_classes: Vec<DeclaredClass>,
     // This file's own top-level function declaration sites, already
     // built (see `DuplicateFunctionSites::merge`'s own doc comment) -
-    // `insert_parsed_file` merges these into the project-wide table
+    // `install_parsed_file` merges these into the project-wide table
     // instead of re-walking `ast` via `DuplicateFunctionSites::index`,
     // moving the per-function type-hint cloning `record` does into this
     // already-parallel step. Unlike `built_decls`, this needs `path`
@@ -3426,11 +3367,11 @@ pub struct ParsedFile {
     // Its lines, which the lines and columns of its spans are found by.
     line_index: Arc<LineIndex>,
     // The file's class and function use sites, when indexed alongside the
-    // parse (`Project::index_use_sites`); `insert_parsed_file` indexes
+    // parse (`Project::index_use_sites`); `install_parsed_file` indexes
     // them itself otherwise.
     class_fn_refs: Option<Vec<(Span, use_sites::RefTarget)>>,
     // The composer package that owns the file, when found alongside the
-    // parse (`Project::note_owner`); `insert_parsed_file` finds it itself
+    // parse (`Project::note_owner`); `install_parsed_file` finds it itself
     // otherwise.
     owner: Option<Option<composer::PackageOwner>>,
     // What the bytes the file was parsed from are.

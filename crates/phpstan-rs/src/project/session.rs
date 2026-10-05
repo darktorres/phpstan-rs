@@ -783,6 +783,13 @@ impl Session {
         self
     }
 
+    /// The session, configuring its project with `settings` instead.
+    #[cfg(test)]
+    pub(crate) fn with_settings(mut self, settings: ProjectSettings) -> Session {
+        self.settings = settings;
+        self
+    }
+
     /// What the session configures its project with.
     pub fn settings(&self) -> &ProjectSettings {
         &self.settings
@@ -1398,7 +1405,17 @@ impl Session {
             let dirs: Vec<String> = self.dirs.iter().map(|d| d.display().to_string()).collect();
             return Err(format!("no .php files found under {}", dirs.join(", ")));
         }
+        Ok(self.load_listed(built_once, &context_files, analyze_files))
+    }
 
+    /// `load_project` of the files given, which are the listing's, and
+    /// that may have no analysed one.
+    pub(crate) fn load_listed(
+        &self,
+        built_once: bool,
+        context_files: &[PathBuf],
+        analyze_files: Vec<PathBuf>,
+    ) -> Loaded {
         let mut project = Project::new();
         self.configure(&mut project, built_once);
         let Added {
@@ -1408,7 +1425,7 @@ impl Session {
             parse_failures,
             context_failures,
             mut lex_warnings,
-        } = self.load_into(&mut project, &context_files, &analyze_files);
+        } = self.load_into(&mut project, context_files, &analyze_files);
         project.finish_loading();
         lex_warnings.extend(context_failures.into_iter().map(|(path, failure)| {
             format!(
@@ -1428,7 +1445,7 @@ impl Session {
             .into_iter()
             .map(|index| analyze_files[index].clone())
             .collect();
-        Ok(Loaded {
+        Loaded {
             project,
             analyze_files_by_size,
             skipped_analyze,
@@ -1436,7 +1453,7 @@ impl Session {
             context_loaded: context_files.len() - skipped_context,
             parse_failures,
             lex_warnings,
-        })
+        }
     }
 
     /// Reads, parses and inserts into `project` the files `context_files`

@@ -51,9 +51,9 @@ impl Rule for FlagsEchoStatements {
 
 fn diagnostics_with(src: &str, rules: &[Box<dyn Rule>]) -> Vec<Diagnostic> {
     let path = std::path::Path::new("test.php");
-    let mut project = crate::project::Project::new();
-    project.load_analyzed_file(path.to_path_buf(), src).unwrap();
-    project.finish_loading();
+    let project = crate::project::test_support::Files::new()
+        .analysed(path, src)
+        .load();
     let program = project.ast(path).unwrap();
     let mut checker = Checker::new(project.registry());
     checker.set_external_rules(rules);

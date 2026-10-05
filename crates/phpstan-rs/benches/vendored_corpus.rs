@@ -12,9 +12,9 @@
 //! guaranteed to be present wherever this repo is checked out (modulo
 //! the submodule-init guard `build.rs` itself enforces).
 //!
-//! Source files are read once, up front, outside the benchmarked
-//! closure - each `Criterion::bench_function` iteration re-runs only the
-//! `Project::load_file`/`finish_loading`/`check_all` work, not disk I/O,
+//! Source files are read once, up front, into the session's overlay -
+//! each `Criterion::bench_function` iteration re-runs only the
+//! `Session::load`/`check_all` work, not disk I/O,
 //! which would otherwise dominate the measurement and mask the actual
 //! parse/index/check throughput this benchmark exists to track.
 //!
@@ -25,49 +25,50 @@
 
 use std::path::{Path, PathBuf};
 
+use config::ConfigFile;
 use criterion::{Criterion, criterion_group, criterion_main};
-use phpstan_rs::project::{self, Project};
-
-fn load_sources(dirs: &[&str]) -> Vec<(PathBuf, String)> {
-    let mut files = Vec::new();
-    // `dirs` are relative to the workspace root, two levels above this
-    // package.
-    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-    for dir in dirs {
-        project::collect_php_files(&root.join(dir), &mut files);
-    }
-    files.sort();
-    files
-        .into_iter()
-        .map(|path| {
-            // Real PHP source isn't required to be UTF-8 (see main.rs's
-            // own try_load_file for the same reasoning) - lossy decoding
-            // is fine here too, since this benchmark only cares about
-            // parse/check throughput, not correctness.
-            let bytes = std::fs::read(&path).unwrap_or_default();
-            let source = String::from_utf8_lossy(&bytes).into_owned();
-            (path, source)
-        })
-        .collect()
-}
+use phpstan_rs::project;
+use phpstan_rs::project::session::{Overrides, Policy, Session};
 
 fn bench_vendored_corpus(c: &mut Criterion) {
-    let sources = load_sources(&["vendor/phpstorm-stubs", "vendor/phpstan-src/src"]);
+    // The directories are relative to the workspace root, two levels above
+    // this package.
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let session = Session::resolve(
+        &ConfigFile::empty(),
+        None,
+        root,
+        Overrides {
+            paths: vec![
+                PathBuf::from("vendor/phpstorm-stubs"),
+                PathBuf::from("vendor/phpstan-src/src"),
+            ],
+            no_composer: true,
+            ..Overrides::default()
+        },
+        Policy::Fail,
+        project::worker_pool(),
+    )
+    .expect("the corpus paths resolve");
+    let files = session.listing().0;
     assert!(
-        !sources.is_empty(),
+        !files.is_empty(),
         "no .php files found under vendor/phpstorm-stubs or vendor/phpstan-src/src - \
          check vendor/phpstan-src's git submodule is initialized \
          (git submodule update --init)"
     );
 
+    // Real PHP source isn't required to be UTF-8; the bytes are read as
+    // they are, once, so an iteration reads no disk.
+    let root = session.root().to_path_buf();
+    let session = session.with_overlay(files.into_iter().map(|path| {
+        let bytes = std::fs::read(root.join(&path)).unwrap_or_default();
+        (path, bytes)
+    }));
     let pool = project::worker_pool();
     c.bench_function("load_and_check_vendored_corpus", |b| {
         b.iter(|| {
-            let mut project = Project::new();
-            for (path, source) in &sources {
-                let _ = project.load_file(path.clone(), source);
-            }
-            project.finish_loading();
+            let project = session.load().expect("the corpus loads").project;
             std::hint::black_box(project.check_all(&pool));
         });
     });

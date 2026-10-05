@@ -1,21 +1,18 @@
 //! The registry dump of a project: its registry over the stub base it
 //! stands on, which it names, and the bases whole in a dump of their own.
 
-use std::path::PathBuf;
-
 use crate::project::Project;
+use crate::project::test_support::Files;
 use crate::registry::canonical::CompareAt;
 
 #[test]
 fn a_project_s_registry_prints_over_its_base_with_its_own_declarations_only() {
-    let mut project = Project::new();
-    project
-        .load_analyzed_file(
-            PathBuf::from("a.php"),
+    let project = Files::new()
+        .analysed(
+            "a.php",
             "<?php\nclass Own extends \\ArrayIterator {}\nfunction own_function(): void {}\n",
         )
-        .unwrap();
-    project.finish_loading();
+        .load();
     let dump = project.registry_dump();
     assert!(dump.contains("\n== registry over stub-base\n"), "{dump}");
     assert!(dump.contains("    Own => "), "the project's class: {dump}");
@@ -41,7 +38,7 @@ fn the_stub_bases_dump_holds_each_base_whole() {
 
 #[test]
 fn the_registry_compared_from_its_layers_prints_as_compared_whole() {
-    let mut project = Project::new();
+    let mut files = Files::new();
     for (path, source) in [
         (
             "a.php",
@@ -55,11 +52,9 @@ fn the_registry_compared_from_its_layers_prints_as_compared_whole() {
              class ArrayIterator {}\nclass Own extends \\Exception {}\n",
         ),
     ] {
-        project
-            .load_analyzed_file(PathBuf::from(path), source)
-            .unwrap();
+        files = files.analysed(path, source);
     }
-    project.finish_loading();
+    let project = files.load();
     let layers = project.registry_dump_comparing(CompareAt::Layers);
     assert!(
         layers.contains("\n== registry over stub-base\n"),

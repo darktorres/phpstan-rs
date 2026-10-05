@@ -1,22 +1,41 @@
-use std::fs;
 use std::path::{Path, PathBuf};
 
+use config::ConfigFile;
+use phpstan_rs::project::session::{Overrides, Policy, Session};
 use phpstan_rs::{output, project};
 
 /// `phpstan-rs incremental-bench <dir> [<file-to-touch>]` - loads every
-/// .php file under `dir` into a `Project` (a full load, timed), then
+/// .php file under `dir` into a `Project` through a `Session` (a full
+/// load, timed), then
 /// re-parses and re-checks just one file via `Project::update_file` (the
 /// incremental path, also timed) and reports both, to make concrete that
 /// an edit to one file costs O(that file), not O(the project). Picks the
 /// first file in directory-walk order when none is named explicitly.
 pub(crate) fn run_incremental_bench(dir: &Path, file_to_touch: Option<&Path>) {
-    let mut files = Vec::new();
-    project::collect_php_files(dir, &mut files);
+    let root = std::env::current_dir().expect("the working directory exists");
+    let session = match Session::resolve(
+        &ConfigFile::empty(),
+        None,
+        root,
+        Overrides {
+            paths: vec![dir.to_path_buf()],
+            no_composer: true,
+            ..Overrides::default()
+        },
+        Policy::Fail,
+        project::worker_pool(),
+    ) {
+        Ok(session) => session.for_editing(),
+        Err(e) => {
+            eprintln!("{e}");
+            return;
+        }
+    };
+    let (files, _) = session.listing();
     if files.is_empty() {
         eprintln!("no .php files found under {}", dir.display());
         return;
     }
-    files.sort();
 
     let target = match file_to_touch {
         Some(f) => f.to_path_buf(),
@@ -31,27 +50,22 @@ pub(crate) fn run_incremental_bench(dir: &Path, file_to_touch: Option<&Path>) {
         return;
     }
 
-    let sources: Vec<(PathBuf, String)> = files
-        .iter()
-        .map(|p| {
-            let bytes = fs::read(p).unwrap_or_else(|e| panic!("failed to read {p:?}: {e}"));
-            (p.clone(), String::from_utf8_lossy(&bytes).into_owned())
-        })
-        .collect();
-
     let full_load_start = std::time::Instant::now();
-    let mut project = project::Project::new();
-    for (path, source) in &sources {
-        project.load_file(path.clone(), source).unwrap();
-    }
-    project.finish_loading();
+    let mut project = match session.load() {
+        Ok(loaded) => loaded.project,
+        Err(e) => {
+            eprintln!("{e}");
+            return;
+        }
+    };
     let full_load = full_load_start.elapsed();
 
-    let target_source = sources
-        .iter()
-        .find(|(p, _)| p == &target)
-        .map(|(_, s)| s.clone())
-        .unwrap();
+    let target_source = String::from_utf8_lossy(
+        &session
+            .read(&target)
+            .unwrap_or_else(|e| panic!("failed to read {target:?}: {e}")),
+    )
+    .into_owned();
 
     let incremental_start = std::time::Instant::now();
     let results = project.update_file(&target, &target_source).unwrap();

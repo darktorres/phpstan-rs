@@ -2,18 +2,17 @@
 //! with no retained source needed, kept current as files are removed and
 //! updated.
 
+use super::super::test_support::Files;
 use super::super::*;
 
 #[test]
 fn classes_and_members_are_recorded_without_retain_source() {
-    let mut project = Project::new();
-    project
-        .load_file(
-            PathBuf::from("a.php"),
+    let project = Files::new()
+        .context(
+            "a.php",
             "<?php class Foo { public function bar(): void {} }",
         )
-        .unwrap();
-    project.finish_loading();
+        .load();
 
     let registry = project.registry();
     let (path, span) = registry.class_declaration("Foo").expect("Foo");
@@ -31,14 +30,12 @@ fn classes_and_members_are_recorded_without_retain_source() {
 
 #[test]
 fn an_inherited_member_keeps_its_declaring_class() {
-    let mut project = Project::new();
-    project
-        .load_file(
-            PathBuf::from("a.php"),
+    let project = Files::new()
+        .context(
+            "a.php",
             "<?php class P { public function run(): void {} }\nclass C extends P {}",
         )
-        .unwrap();
-    project.finish_loading();
+        .load();
 
     let (_, sig) = project
         .registry()
@@ -58,12 +55,8 @@ fn a_builtin_records_its_extension_and_no_file() {
 
 #[test]
 fn removing_a_file_drops_its_declarations() {
-    let mut project = Project::new();
     let path = PathBuf::from("a.php");
-    project
-        .load_file(path.clone(), "<?php class Foo {}")
-        .unwrap();
-    project.finish_loading();
+    let mut project = Files::new().context(&path, "<?php class Foo {}").load();
     assert!(project.registry().class_declaration("Foo").is_some());
 
     project.remove_files(&[path]);
@@ -72,12 +65,8 @@ fn removing_a_file_drops_its_declarations() {
 
 #[test]
 fn updating_a_file_records_its_new_declarations() {
-    let mut project = Project::new();
     let path = PathBuf::from("a.php");
-    project
-        .load_file(path.clone(), "<?php class Foo {}")
-        .unwrap();
-    project.finish_loading();
+    let mut project = Files::new().context(&path, "<?php class Foo {}").load();
     assert!(project.registry().class_declaration("Foo").is_some());
 
     project

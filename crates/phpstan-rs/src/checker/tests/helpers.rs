@@ -8,11 +8,9 @@ pub(super) fn all_diagnostics_for(src: &str) -> Vec<Diagnostic> {
 /// `src` loaded as the one analysed file of a project, finished the way
 /// every production path finishes one.
 fn project_for(src: &str, configure: impl FnOnce(&mut CheckSettings)) -> crate::project::Project {
-    let mut project = crate::project::Project::new();
-    project
-        .load_analyzed_file(std::path::PathBuf::from("test.php"), src)
-        .unwrap();
-    project.finish_loading();
+    let mut project = crate::project::test_support::Files::new()
+        .analysed("test.php", src)
+        .load();
     configure(project.check_settings_mut());
     project
 }

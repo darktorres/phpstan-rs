@@ -10,34 +10,31 @@
 //! narrow AST-node span - see that function's own doc comment); with
 //! neither on, Tier 1 stays empty - measured too expensive on a real
 //! corpus to populate unconditionally the way `decl_locations` is (see
-//! `Project::insert_parsed_file`'s own doc comment). This is what
+//! `Project::install_parsed_file`'s own doc comment). This is what
 //! `project::whole_program::dead_code` (`project::tests::dead_code`)
 //! relies on. The LSP wiring itself (`textDocument/references`/
 //! `textDocument/rename`) is exercised separately in `lsp::tests::
 //! references_and_rename`.
 
+use super::super::test_support::Files;
 use super::super::use_sites::RefTarget;
 use super::super::*;
 
-fn project_with_retained_source() -> Project {
-    let mut project = Project::new();
-    project.apply_settings(ProjectSettings {
+fn retaining_source() -> Files {
+    Files::new().settings(ProjectSettings {
         retain_source: true,
         ..ProjectSettings::default()
-    });
-    project
+    })
 }
 
 #[test]
 fn class_and_function_reference_sites_are_indexed_after_finish_loading() {
-    let mut project = project_with_retained_source();
-    project
-        .load_file(
-            PathBuf::from("a.php"),
+    let mut project = retaining_source()
+        .context(
+            "a.php",
             "<?php function greet(): void {}\nclass Foo {}\ngreet();\nnew Foo();\n",
         )
-        .unwrap();
-    project.finish_loading();
+        .load();
     project.ensure_member_index_built();
 
     let refs = project
@@ -61,12 +58,10 @@ fn class_and_function_reference_sites_are_indexed_after_finish_loading() {
 
 #[test]
 fn updating_a_file_drops_its_stale_use_sites() {
-    let mut project = project_with_retained_source();
     let path = PathBuf::from("a.php");
-    project
-        .load_file(path.clone(), "<?php function greet(): void {}\ngreet();\n")
-        .unwrap();
-    project.finish_loading();
+    let mut project = retaining_source()
+        .context(&path, "<?php function greet(): void {}\ngreet();\n")
+        .load();
     project.ensure_member_index_built();
     assert_eq!(
         project
@@ -91,14 +86,9 @@ fn updating_a_file_drops_its_stale_use_sites() {
 
 #[test]
 fn tier_1_stays_empty_without_retain_source_or_check_dead_code() {
-    let mut project = Project::new();
-    project
-        .load_file(
-            PathBuf::from("a.php"),
-            "<?php function greet(): void {}\ngreet();\n",
-        )
-        .unwrap();
-    project.finish_loading();
+    let project = Files::new()
+        .context("a.php", "<?php function greet(): void {}\ngreet();\n")
+        .load();
     assert_eq!(
         project
             .use_sites()
@@ -113,21 +103,16 @@ fn tier_1_stays_empty_without_retain_source_or_check_dead_code() {
 
 #[test]
 fn tier_1_is_indexed_without_retain_source_when_check_dead_code_is_on() {
-    let mut project = Project::new();
-    project.apply_settings(ProjectSettings {
-        rules: crate::rules_settings::RulesSettings {
-            check_dead_code: true,
-            ..Default::default()
-        },
-        ..ProjectSettings::default()
-    });
-    project
-        .load_file(
-            PathBuf::from("a.php"),
-            "<?php function greet(): void {}\ngreet();\n",
-        )
-        .unwrap();
-    project.finish_loading();
+    let project = Files::new()
+        .settings(ProjectSettings {
+            rules: crate::rules_settings::RulesSettings {
+                check_dead_code: true,
+                ..Default::default()
+            },
+            ..ProjectSettings::default()
+        })
+        .context("a.php", "<?php function greet(): void {}\ngreet();\n")
+        .load();
     assert_eq!(
         project
             .use_sites()
@@ -143,14 +128,12 @@ fn tier_1_is_indexed_without_retain_source_when_check_dead_code_is_on() {
 
 #[test]
 fn a_type_hint_reference_and_a_static_access_class_half_are_both_indexed() {
-    let mut project = project_with_retained_source();
-    project
-        .load_file(
-            PathBuf::from("a.php"),
+    let mut project = retaining_source()
+        .context(
+            "a.php",
             "<?php class Foo { const BAR = 1; }\nfunction f(Foo $x): void { echo Foo::BAR; }\n",
         )
-        .unwrap();
-    project.finish_loading();
+        .load();
     project.ensure_member_index_built();
 
     let refs = project
@@ -168,14 +151,12 @@ fn a_self_reference_inside_its_own_class_is_not_indexed_as_a_rename_site() {
     // resolves to the current class for real PHP semantics, but its own
     // span covers the literal text "self", never the class's own name -
     // recording it here would corrupt a future rename of this class.
-    let mut project = project_with_retained_source();
-    project
-        .load_file(
-            PathBuf::from("a.php"),
+    let mut project = retaining_source()
+        .context(
+            "a.php",
             "<?php class Foo { const BAR = 1; function f(): int { return self::BAR; } }\n",
         )
-        .unwrap();
-    project.finish_loading();
+        .load();
     project.ensure_member_index_built();
 
     let refs = project
@@ -190,14 +171,12 @@ fn a_self_reference_inside_its_own_class_is_not_indexed_as_a_rename_site() {
 
 #[test]
 fn parameter_default_value_reference_is_indexed() {
-    let mut project = project_with_retained_source();
-    project
-        .load_file(
-            PathBuf::from("a.php"),
+    let mut project = retaining_source()
+        .context(
+            "a.php",
             "<?php class Def {}\nfunction f($x = Def::class) {}\n",
         )
-        .unwrap();
-    project.finish_loading();
+        .load();
     project.ensure_member_index_built();
 
     let refs = project
@@ -212,14 +191,12 @@ fn parameter_default_value_reference_is_indexed() {
 
 #[test]
 fn class_constant_value_reference_is_indexed() {
-    let mut project = project_with_retained_source();
-    project
-        .load_file(
-            PathBuf::from("a.php"),
+    let mut project = retaining_source()
+        .context(
+            "a.php",
             "<?php class Other { const X = 1; }\nclass Foo { const Y = Other::X; }\n",
         )
-        .unwrap();
-    project.finish_loading();
+        .load();
     project.ensure_member_index_built();
 
     let refs = project
@@ -234,14 +211,12 @@ fn class_constant_value_reference_is_indexed() {
 
 #[test]
 fn property_default_value_reference_is_indexed() {
-    let mut project = project_with_retained_source();
-    project
-        .load_file(
-            PathBuf::from("a.php"),
+    let mut project = retaining_source()
+        .context(
+            "a.php",
             "<?php class Def {}\nclass Foo { public $x = Def::class; }\n",
         )
-        .unwrap();
-    project.finish_loading();
+        .load();
     project.ensure_member_index_built();
 
     let refs = project
@@ -261,14 +236,7 @@ fn untyped_class_constant_value_reference_is_indexed() {
     // class whose consts are all untyped entirely, so this reference is
     // only ever found by the new `collect_default_and_const_value_
     // member_refs` enumeration, never by the pre-existing call.
-    let mut project = project_with_retained_source();
-    project
-        .load_file(
-            PathBuf::from("a.php"),
-            "<?php class LogLevel { const INFO = 1; }\nclass Foo { const LEVEL = LogLevel::INFO; }\n",
-        )
-        .unwrap();
-    project.finish_loading();
+    let mut project = retaining_source().context("a.php", "<?php class LogLevel { const INFO = 1; }\nclass Foo { const LEVEL = LogLevel::INFO; }\n").load();
     project.ensure_member_index_built();
     project.ensure_member_index_built();
 
@@ -286,14 +254,7 @@ fn typed_class_constant_value_reference_is_indexed_and_not_duplicated() {
     // this exact same `LogLevel::INFO` expression - the HashSet-based
     // dedup in `Checker::member_ref_sites` must collapse the two
     // independent visits into exactly one recorded site, not two.
-    let mut project = project_with_retained_source();
-    project
-        .load_file(
-            PathBuf::from("a.php"),
-            "<?php class LogLevel { const INFO = 1; }\nclass Foo { const int LEVEL = LogLevel::INFO; }\n",
-        )
-        .unwrap();
-    project.finish_loading();
+    let mut project = retaining_source().context("a.php", "<?php class LogLevel { const INFO = 1; }\nclass Foo { const int LEVEL = LogLevel::INFO; }\n").load();
     project.ensure_member_index_built();
     project.ensure_member_index_built();
 
@@ -313,14 +274,7 @@ fn parameter_default_value_member_reference_is_indexed() {
     // No existing Checker path visits a parameter's own default value at
     // all (confirmed by direct trace) - this is a real gap only
     // `collect_default_and_const_value_member_refs` closes.
-    let mut project = project_with_retained_source();
-    project
-        .load_file(
-            PathBuf::from("a.php"),
-            "<?php class SomeClass { const DEFAULT_VALUE = 1; }\nfunction f($x = SomeClass::DEFAULT_VALUE) {}\n",
-        )
-        .unwrap();
-    project.finish_loading();
+    let mut project = retaining_source().context("a.php", "<?php class SomeClass { const DEFAULT_VALUE = 1; }\nfunction f($x = SomeClass::DEFAULT_VALUE) {}\n").load();
     project.ensure_member_index_built();
     project.ensure_member_index_built();
 
@@ -333,14 +287,12 @@ fn parameter_default_value_member_reference_is_indexed() {
 
 #[test]
 fn property_default_value_member_reference_is_indexed() {
-    let mut project = project_with_retained_source();
-    project
-        .load_file(
-            PathBuf::from("a.php"),
+    let mut project = retaining_source()
+        .context(
+            "a.php",
             "<?php class Bar { const BAZ = 1; }\nclass Foo { public $x = Bar::BAZ; }\n",
         )
-        .unwrap();
-    project.finish_loading();
+        .load();
     project.ensure_member_index_built();
     project.ensure_member_index_built();
 
@@ -352,14 +304,12 @@ fn property_default_value_member_reference_is_indexed() {
 
 #[test]
 fn member_reference_index_is_not_built_until_first_requested() {
-    let mut project = project_with_retained_source();
-    project
-        .load_file(
-            PathBuf::from("a.php"),
+    let mut project = retaining_source()
+        .context(
+            "a.php",
             "<?php class Bar { const BAZ = 1; }\nclass Foo { public $x = Bar::BAZ; }\n",
         )
-        .unwrap();
-    project.finish_loading();
+        .load();
 
     let target = RefTarget::Member("Bar".to_string(), "BAZ".to_string());
     assert_eq!(
@@ -377,12 +327,11 @@ fn member_reference_index_is_not_built_until_first_requested() {
 
 #[test]
 fn nothing_is_indexed_as_files_load_with_retained_source_until_a_request_needs_it() {
-    let mut project = project_with_retained_source();
     let path = PathBuf::from("a.php");
-    project
-        .load_file(path.clone(), "<?php function greet(): void {}\ngreet();\n")
-        .unwrap();
-    project.finish_loading();
+    let mut session = retaining_source()
+        .context(&path, "<?php function greet(): void {}\ngreet();\n")
+        .session();
+    let mut project = session.load_listed(false, &[path], Vec::new()).project;
     let greet = RefTarget::Function("greet".to_string());
     assert!(project.use_sites().references(&greet).is_empty());
 
@@ -390,9 +339,8 @@ fn nothing_is_indexed_as_files_load_with_retained_source_until_a_request_needs_i
     assert_eq!(project.use_sites().references(&greet).len(), 1);
 
     // Files loaded after that are indexed as they load.
-    project
-        .load_file(PathBuf::from("b.php"), "<?php greet();\n")
-        .unwrap();
+    session.set_overlay(Path::new("b.php"), b"<?php greet();\n".to_vec());
+    session.load_into(&mut project, &[PathBuf::from("b.php")], &[]);
     project.finish_loading();
     assert_eq!(project.use_sites().references(&greet).len(), 2);
 }
